@@ -12,16 +12,16 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
   - **predicates**/**filters**:
     - are **mechanical** change detection (no **I/O**, no **domain/business** decisions),
     - live in **`predicates.go`**,
-    - **MUST NOT** be implemented in **`controller.go`**.
+    - MUST NOT be implemented in **`controller.go`**.
   - All **Reconciliation business logic** = **`reconciler.go`**.
   - **controller name** string values are `kebab-case` (see **Controller terminology**).
 
-- **`controller.go`** purpose (**MUST**):
+- **`controller.go`** purpose (MUST):
   - **`controller.go`** is the **Wiring-only** **Entrypoint** of a **controller package**.
   - It owns controller-runtime **builder chain** configuration, **watch** registration, and reconciler construction.
   - If the controller needs event filtering, **`controller.go`** wires predicates by calling
     `builder.WithPredicates(<kind>Predicates()...)` at the `.For(...)`/`.Owns(...)`/`.Watches(...)` call site.
-  - It **MUST NOT** contain **Reconciliation business logic** (that belongs to **`reconciler.go`**).
+  - It MUST NOT contain **Reconciliation business logic** (that belongs to **`reconciler.go`**).
 
 - ALLOW (in **`controller.go`**):
   - controller-runtime builder wiring:
@@ -37,25 +37,25 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
 - DENY (in **`controller.go`**):
   - any functions that **compute/ensure/apply/reconcile** domain logic (must live in `reconciler.go`).
   - implementing controller-runtime **predicates**/**filters**:
-    - **`controller.go`** **MUST NOT** define `predicate.Funcs{...}` (or any other predicate implementation) inline.
-    - All predicate implementations **MUST** live in **`predicates.go`** (see: `controller-predicate.mdc`).
+    - **`controller.go`** MUST NOT define `predicate.Funcs{...}` (or any other predicate implementation) inline.
+    - All predicate implementations MUST live in **`predicates.go`** (see: `controller-predicate.mdc`).
   - reading/modifying `.Spec` / `.Status` (except **mechanical** access in wiring callbacks):
-    - **`controller.go`** **MUST NOT** read or write `.Spec` / `.Status` as part of business logic.
+    - **`controller.go`** MUST NOT read or write `.Spec` / `.Status` as part of business logic.
     - **mechanical** reads are allowed only inside **watch** mapping functions whose only job is pure request mapping (`obj -> []reconcile.Request`).
-    - **`controller.go`** **MUST NOT** write `.Spec` / `.Status` anywhere.
+    - **`controller.go`** MUST NOT write `.Spec` / `.Status` anywhere.
   - any multi-step decisions (state machines, placement, scheduling, condition computation).
   - any **Kubernetes API I/O** beyond **manager** wiring (`Get/List/Create/Update/Patch/Delete`).
 
-- **`controller.go`** layout (**MUST**):
+- **`controller.go`** layout (MUST):
   - `const <ControllerName> = "<name>"` (stable **controller name**).
-    - The `<name>` value **MUST** follow **Controller terminology** (**controller name** conventions): `kebab-case`, no `.`, no `_`, stable, unique.
-    - The suffix "-controller" **MAY** be appended; it **SHOULD** be appended only when needed to avoid ambiguity/collisions (see **Controller terminology**).
+    - The `<name>` value MUST follow **Controller terminology** (**controller name** conventions): `kebab-case`, no `.`, no `_`, stable, unique.
+    - The suffix "-controller" MAY be appended; it SHOULD be appended only when needed to avoid ambiguity/collisions (see **Controller terminology**).
   - **Entrypoint**: `BuildController(mgr manager.Manager) error`.
   - **predicates**/**filters** are optional.
-    - If the controller uses any **predicates**/**filters**, the **controller package** **MUST** include **`predicates.go`**.
+    - If the controller uses any **predicates**/**filters**, the **controller package** MUST include **`predicates.go`**.
     - Predicate implementation is done in **`predicates.go`**; **`controller.go`** wires it via `builder.WithPredicates(...)`.
 
-- What belongs in `BuildController` (**MUST**):
+- What belongs in `BuildController` (MUST):
   - Take **Manager-owned dependencies** from the **manager**:
     - `cl := mgr.GetClient()`
     - other manager-owned deps when needed (scheme, cache, recorder, etc.).
@@ -105,8 +105,8 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
   ```
 
 - Predicate implementation rules:
-  - **predicates**/**filters** **MUST** be implemented in **`predicates.go`**.
-  - **`controller.go`** **MUST NOT** contain predicate implementation code.
+  - **predicates**/**filters** MUST be implemented in **`predicates.go`**.
+  - **`controller.go`** MUST NOT contain predicate implementation code.
   - **`controller.go`** wires predicates by calling `builder.WithPredicates(<kind>Predicates()...)`.
   - See: `controller-predicate.mdc`.
 

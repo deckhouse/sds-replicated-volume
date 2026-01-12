@@ -19,12 +19,12 @@ Summary only; if anything differs, follow normative sections below.
 
 - **GetReconcileHelpers** (`get*`) are **single-call I/O helper categories** for reads: they perform **at most one** **Kubernetes API I/O** read call (`Get(...)` **or** `List(...)`) via the controller-runtime client.
 - They are **mechanical** read wrappers:
-  - **MUST NOT** perform any **Kubernetes API I/O** writes (`Create/Update/Patch/Delete`, including `Status().Patch/Update`),
-  - **MUST NOT** call **DeepCopy**,
-  - **MUST NOT** execute patches or make **Patch ordering** decisions.
-- They **MAY** implement deterministic, clearly documented “optional” semantics (for example, returning `(nil, nil)` when the object is not found).
-- If they return an ordered slice and the order is meaningful to callers, it **MUST** be **deterministic** (explicit sort with a tie-breaker).
-- They **MUST NOT** create a **phase** and **MUST NOT** return **Outcome**.
+  - MUST NOT perform any **Kubernetes API I/O** writes (`Create/Update/Patch/Delete`, including `Status().Patch/Update`),
+  - MUST NOT call **DeepCopy**,
+  - MUST NOT execute patches or make **Patch ordering** decisions.
+- They MAY implement deterministic, clearly documented “optional” semantics (for example, returning `(nil, nil)` when the object is not found).
+- If they return an ordered slice and the order is meaningful to callers, it MUST be **deterministic** (explicit sort with a tie-breaker).
+- They MUST NOT create a **phase** and MUST NOT return **Outcome**.
   - Any **Outcome control flow** decisions (done/requeue/error) belong to the calling **Reconcile method**.
 
 ---
@@ -48,19 +48,19 @@ Typical get helpers:
 
 ## Naming
 
-- A **GetReconcileHelper** name **MUST** start with `get` / `Get`.
-- Get helpers **SHOULD** communicate which read call they wrap via the name:
+- A **GetReconcileHelper** name MUST start with `get` / `Get`.
+- Get helpers SHOULD communicate which read call they wrap via the name:
   - Single object fetch (`Get(...)`): `get<Kind>` / `get<Artifact>`.
   - Multi-object fetch (`List(...)`): `get<PluralKind>` / `get<Kind>List` / `get<KindPluralByX>`.
-- If the helper guarantees ordering, the name **MUST** include an ordering signal:
+- If the helper guarantees ordering, the name MUST include an ordering signal:
   - `getSorted*`, `getOrdered*`, `getFIFO*`, or an equivalent explicit term.
-- If ordering is **not** guaranteed, the helper **MUST NOT** imply ordering in its name.
-  - If callers must not rely on order, the helper’s GoDoc **MUST** state that the returned slice is unordered.
-- A get helper that treats “not found” as a non-error **MUST** document that behavior in GoDoc.
-  - If the output shape does not make the “not found” case obvious, the name **SHOULD** include an explicit signal (for example, `Optional`, `Maybe`, `OrNil`).
+- If ordering is **not** guaranteed, the helper MUST NOT imply ordering in its name.
+  - If callers must not rely on order, the helper’s GoDoc MUST state that the returned slice is unordered.
+- A get helper that treats “not found” as a non-error MUST document that behavior in GoDoc.
+  - If the output shape does not make the “not found” case obvious, the name SHOULD include an explicit signal (for example, `Optional`, `Maybe`, `OrNil`).
 
-Get helpers **MUST NOT** imply orchestration or policy:
-- **MUST NOT** use names like `ensure*`, `reconcile*`, `getOrCreate*`, `getAndPatch*`, `getWithRetry*`.
+Get helpers MUST NOT imply orchestration or policy:
+- MUST NOT use names like `ensure*`, `reconcile*`, `getOrCreate*`, `getAndPatch*`, `getWithRetry*`.
 - Any higher-level sequencing belongs to **Reconcile method** code.
 
 ---
@@ -103,7 +103,7 @@ func (r *Reconciler) getSKNs(
 ) ([]v1alpha1.SomeKindName, error)
 ```
 
-If no objects match, return `([]v1alpha1.SomeKindName{}, nil)` (empty slice, not `nil`) **SHOULD** be preferred for ergonomics.
+If no objects match, return `([]v1alpha1.SomeKindName{}, nil)` (empty slice, not `nil`) SHOULD be preferred for ergonomics.
 
 ### List (ordered)
 
@@ -118,19 +118,19 @@ func (r *Reconciler) getSortedSKNs(
 
 ## Receivers
 
-- **GetReconcileHelpers** **MUST** be methods on `Reconciler` (they perform **Kubernetes API I/O** via the controller-runtime client owned by `Reconciler`).
+- **GetReconcileHelpers** MUST be methods on `Reconciler` (they perform **Kubernetes API I/O** via the controller-runtime client owned by `Reconciler`).
 
 ---
 
 ## I/O boundaries
 
-**GetReconcileHelpers** **MAY** do the following:
+**GetReconcileHelpers** MAY do the following:
 
 - controller-runtime client usage to execute **at most one** **Kubernetes API I/O** read call:
   - `Get(...)`, or
   - `List(...)`.
 
-**GetReconcileHelpers** **MUST NOT** do any of the following:
+**GetReconcileHelpers** MUST NOT do any of the following:
 
 - any **Kubernetes API I/O** writes:
   - `Create/Update/Patch/Delete`,
@@ -142,7 +142,7 @@ func (r *Reconciler) getSortedSKNs(
 - executing patches or making **Patch ordering** / **patch type decision** decisions;
 - any other external **I/O**.
 
-**GetReconcileHelpers** **MUST NOT** do **Hidden I/O** either:
+**GetReconcileHelpers** MUST NOT do **Hidden I/O** either:
 
 - `time.Now()` / `time.Since(...)`,
 - random number generation (`rand.*`),
@@ -153,12 +153,12 @@ func (r *Reconciler) getSortedSKNs(
 
 ## Determinism contract
 
-A **GetReconcileHelper** **MUST** be **deterministic** in everything it controls.
+A **GetReconcileHelper** MUST be **deterministic** in everything it controls.
 
 In particular:
 
-- Inputs to the read call (key / list options) **MUST** be derived only from explicit inputs (no **Hidden I/O**).
-- If the helper returns a slice whose order is meaningful, it **MUST** enforce **stable ordering**:
+- Inputs to the read call (key / list options) MUST be derived only from explicit inputs (no **Hidden I/O**).
+- If the helper returns a slice whose order is meaningful, it MUST enforce **stable ordering**:
   - sort explicitly, and
   - include a deterministic tie-breaker when the primary sort key may collide.
 
@@ -167,41 +167,41 @@ Recommended tie-breakers:
 - for cluster-scoped objects: `name`.
 
 If the helper returns an unordered slice:
-- its GoDoc **MUST** state the order is unspecified, and
-- callers **MUST** treat the result as a set (do not rely on ordering).
+- its GoDoc MUST state the order is unspecified, and
+- callers MUST treat the result as a set (do not rely on ordering).
 
 ---
 
 ## Read-only contract
 
-`get*` / `Get*` **MUST** treat all inputs as **read-only inputs**:
+`get*` / `Get*` MUST treat all inputs as **read-only inputs**:
 
-- it **MUST NOT** mutate input values (including filters/options passed in, or caller-owned templates);
-- it **MUST NOT** perform in-place modifications through **Aliasing**.
+- it MUST NOT mutate input values (including filters/options passed in, or caller-owned templates);
+- it MUST NOT perform in-place modifications through **Aliasing**.
 
-If a helper needs to normalize/transform a `map` / `[]T` derived from an input option structure, it **MUST** **Clone** first.
+If a helper needs to normalize/transform a `map` / `[]T` derived from an input option structure, it MUST **Clone** first.
 
 ---
 
 ## Composition
 
-- A **GetReconcileHelper** **MUST** perform **at most one** controller-runtime client read call (`Get` **or** `List`).
-- A **GetReconcileHelper** **MUST NOT** call any other **ReconcileHelper** methods/functions (from any **Helper categories**),
+- A **GetReconcileHelper** MUST perform **at most one** controller-runtime client read call (`Get` **or** `List`).
+- A **GetReconcileHelper** MUST NOT call any other **ReconcileHelper** methods/functions (from any **Helper categories**),
   because that would hide additional logic and policy behind a read wrapper.
-- A **GetReconcileHelper** **MAY** do small, local, **deterministic** in-memory post-processing of the fetched result
-  (for example, filtering and/or sorting), but that post-processing **MUST** be implemented inline in the get helper
+- A **GetReconcileHelper** MAY do small, local, **deterministic** in-memory post-processing of the fetched result
+  (for example, filtering and/or sorting), but that post-processing MUST be implemented inline in the get helper
   (no calls to other **ReconcileHelper** helpers).
 
 If multiple reads are needed:
-- they **MUST** be expressed explicitly in the calling **Reconcile method** as multiple separate steps, or
+- they MUST be expressed explicitly in the calling **Reconcile method** as multiple separate steps, or
 - split into multiple **GetReconcileHelper** calls from the **Reconcile method** (one call per helper).
 
 ---
 
 ## Flow phases and Outcome
 
-- **GetReconcileHelpers** **MUST NOT** create a **phase**.
-- **GetReconcileHelpers** **MUST NOT** return **Outcome**.
+- **GetReconcileHelpers** MUST NOT create a **phase**.
+- **GetReconcileHelpers** MUST NOT return **Outcome**.
 
 > Rationale: get helpers do not mutate a **patch domain**; they only read.
 
@@ -209,15 +209,15 @@ If multiple reads are needed:
 
 ## Error handling
 
-- A **GetReconcileHelper** **SHOULD** be mechanically thin:
+- A **GetReconcileHelper** SHOULD be mechanically thin:
   - return read errors as-is (no wrapping),
   - apply a deterministic NotFound policy (either propagate it, or convert it to “absent”).
-- A **GetReconcileHelper** error **MUST NOT** include **object identity** (for example, `namespace/name`, UID, object key).
+- A **GetReconcileHelper** error MUST NOT include **object identity** (for example, `namespace/name`, UID, object key).
   - Error enrichment (action + **object identity** + **phase**) is owned by the calling **Reconcile method**.
 
 ---
 
-## Common anti-patterns (**MUST NOT**)
+## Common anti-patterns (MUST NOT)
 
 ❌ Returning **Outcome** from a get helper:
 ```go

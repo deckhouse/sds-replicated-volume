@@ -28,21 +28,21 @@ This document complements `controller-reconcile-helper*.mdc` and defines rules t
 
 ### Phases for Reconcile methods (MUST)
 
-- Any **non-root Reconcile method** **MUST** start a **phase** (`flow.BeginPhase` / `flow.EndPhase`) and return **Outcome**.
-- The **root Reconcile** is the only exception: it **MUST** use `flow.Begin(ctx)` (no phases) and return via `outcome.ToCtrl()`.
+- Any **non-root Reconcile method** MUST start a **phase** (`flow.BeginPhase` / `flow.EndPhase`) and return **Outcome**.
+- The **root Reconcile** is the only exception: it MUST use `flow.Begin(ctx)` (no phases) and return via `outcome.ToCtrl()`.
 - See: `controller-reconciliation-flow.mdc`.
 
 ### One Reconcile method = one reconciliation pattern (MUST)
 
-- A single Reconcile method **MUST** choose exactly **one** pattern from **“Reconciliation patterns”** below
+- A single Reconcile method MUST choose exactly **one** pattern from **“Reconciliation patterns”** below
   and apply it consistently for all changes it performs (across any domains it touches).
-- A single Reconcile method **MUST NOT** mix patterns within itself.
+- A single Reconcile method MUST NOT mix patterns within itself.
 - If different parts of reconciliation naturally need different patterns, split the logic into **multiple**
   Reconcile methods (e.g., `reconcileMain(...)` and `reconcileStatus(...)`), each with its own pattern.
 
 ### Pattern documentation is mandatory (MUST)
 
-- The selected pattern **MUST** be documented in the GoDoc comment of the Reconcile method entrypoint using
+- The selected pattern MUST be documented in the GoDoc comment of the Reconcile method entrypoint using
   a single stable style with exact key and order:
 
   - `Reconcile pattern:` `<PatternName>`
@@ -54,7 +54,7 @@ This document complements `controller-reconcile-helper*.mdc` and defines rules t
 
 ## Patch sequencing policy
 
-Reconcile methods **MUST** be the only place that decides:
+Reconcile methods MUST be the only place that decides:
 - whether a patch request is needed;
 - the order of multiple patch requests (including main vs status sequencing);
 - how outcomes/errors from multiple sub-steps are aggregated;
@@ -68,15 +68,15 @@ Single-call API writes may be delegated to helpers, but **the sequencing policy 
 
 ### DeepCopy is per patch request
 
-- For every patch request, the Reconcile method **MUST** create **exactly one**
+- For every patch request, the Reconcile method MUST create **exactly one**
   patch base via `obj.DeepCopy()` **immediately before** the object is mutated in that **patch domain** (and then used for the subsequent patch request).
-- The patch base variable name **MUST** be `base`.
+- The patch base variable name MUST be `base`.
 
 If a Reconcile method performs multiple patch requests:
 
-- it **MUST** create multiple `base` objects (one per patch request);
-- each `base` **MUST** be taken from the object state **immediately before** that **patch domain** is mutated for that specific patch request;
-- after patch #1 updates the object, patch #2 **MUST** take `base` from the updated object
+- it MUST create multiple `base` objects (one per patch request);
+- each `base` MUST be taken from the object state **immediately before** that **patch domain** is mutated for that specific patch request;
+- after patch #1 updates the object, patch #2 MUST take `base` from the updated object
   to preserve correct diff and `resourceVersion`.
 
 Go note (no extra lexical scopes required):
@@ -108,7 +108,7 @@ if err := patchObjStatus(ctx, obj, base); err != nil {
 
 ### `base` is a read-only diff reference (MUST)
 
-- Reconcile methods **MUST NOT** mutate `base`
+- Reconcile methods MUST NOT mutate `base`
   (directly or through map/slice aliasing).
 
 ---
@@ -117,7 +117,7 @@ if err := patchObjStatus(ctx, obj, base); err != nil {
 
 ### Lists MUST be reconciled via pointers to list items (MUST)
 
-When reconciling objects from a `List`, you **MUST** take pointers to the actual list elements.
+When reconciling objects from a `List`, you MUST take pointers to the actual list elements.
 
 GOOD:
 ```go
@@ -135,7 +135,7 @@ for _, obj := range list.Items {
 ### Local slices after Create/Patch (MUST)
 
 If a Reconcile method creates objects and keeps a local slice/list for subsequent logic,
-it **MUST** append/insert the created objects in their final in-memory state
+it MUST append/insert the created objects in their final in-memory state
 (including updated `resourceVersion`, defaults, and generated fields).
 
 ---
@@ -144,8 +144,8 @@ it **MUST** append/insert the created objects in their final in-memory state
 
 ### Pattern selection rule (MUST)
 
-- Each **Reconcile method** **MUST** choose exactly one pattern.
-- The choice **MUST** be documented in GoDoc.
+- Each **Reconcile method** MUST choose exactly one pattern.
+- The choice MUST be documented in GoDoc.
 
 ### Pattern 1: In-place reconciliation
 
@@ -189,7 +189,7 @@ Allowed:
 
 ## Child resources and decomposition (MUST)
 
-- Child resources **SHOULD** be reconciled in separate Reconcile methods:
+- Child resources SHOULD be reconciled in separate Reconcile methods:
   - group reconciler (list + ordering);
   - per-object reconciler.
 - Prefer passing already loaded objects.
@@ -200,7 +200,7 @@ Allowed:
 
 ## Business logic failures & requeue policy (MUST)
 
-- Business-logic blocking conditions **MUST** return an error.
+- Business-logic blocking conditions MUST return an error.
 - Exception: if unblocked by watched resources, returning “done / no-op” is acceptable.
 - If unblocked by **unwatched** events:
   - return an error, or
@@ -218,6 +218,6 @@ All work with:
 - owner references,
 - conditions
 
-**MUST** go through `objutilv1`, imported as `obju`.
+MUST go through `objutilv1`, imported as `obju`.
 
 Manual manipulation is forbidden unless `objutilv1` is extended.

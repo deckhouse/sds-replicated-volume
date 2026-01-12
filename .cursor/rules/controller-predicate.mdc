@@ -14,65 +14,65 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
   - **`controller.go`** wires predicates into the **builder chain**:
     - by calling `builder.WithPredicates(<kind>Predicates()...)` at the `.For(...)`/`.Owns(...)`/`.Watches(...)` call site.
     - Predicate implementation still lives in **`predicates.go`**.
-  - **`reconciler.go`** **MUST NOT** contain **predicates**/**filters**.
+  - **`reconciler.go`** MUST NOT contain **predicates**/**filters**.
 
-- Scope (**MUST**):
+- Scope (MUST):
   - This document applies only to **`predicates.go`**.
   - It defines what is allowed inside controller-runtime **predicates**/**filters** and how to structure them.
 
-- What is allowed in **`predicates.go`** (**MUST**):
+- What is allowed in **`predicates.go`** (MUST):
   - Definitions of predicate sets as **functions** (no package-level `var` predicates).
-    Predicate-set function naming (**MUST**) follows this convention:
+    Predicate-set function naming (MUST) follows this convention:
     - `func <Kind>Predicates() []predicate.Predicate { ... }`
-    - `<Kind>` **MUST** either correspond to the Kubernetes object **Kind** being filtered, or be a short kind name that is already established in this codebase (do not invent new abbreviations ad-hoc).
+    - `<Kind>` MUST either correspond to the Kubernetes object **Kind** being filtered, or be a short kind name that is already established in this codebase (do not invent new abbreviations ad-hoc).
     - Each such function returns **all** predicates needed for that `<Kind>` at the watch site where it is used.
   - Pure, **mechanical** comparisons of object fields to decide whether to enqueue a **reconcile request**.
   - Typed events (preferred): `event.TypedUpdateEvent[client.Object]`, etc.
-  - **`predicates.go`** **MUST NOT** define controller-runtime builder wiring helpers:
+  - **`predicates.go`** MUST NOT define controller-runtime builder wiring helpers:
     - no `*ForOptions` / `*OwnsOptions` / `*WatchesOptions` functions,
     - no `builder.*` imports.
 
-- What is forbidden in **`predicates.go`** (**MUST NOT**):
+- What is forbidden in **`predicates.go`** (MUST NOT):
   - any **Kubernetes API I/O** (`Get/List/Create/Update/Patch/Delete`) or controller-runtime client usage;
   - any multi-step **domain/business** logic (validation rules, placement/scheduling decisions, state machines);
   - any mutation of the event objects (no writes to `.Spec`, `.Status`, metadata, conditions, maps/slices);
   - any “hidden I/O” (time/random/env/network);
   - direct `.Status.Conditions` access (use **`obju`** for condition comparisons).
 
-- Naming and shape (**SHOULD**):
-  - Predicate symbols **SHOULD** be unexported unless another package must reuse them.
+- Naming and shape (SHOULD):
+  - Predicate symbols SHOULD be unexported unless another package must reuse them.
   - Use names that reflect the filtered object kind:
     - `<Kind>Predicates` (returns `[]predicate.Predicate`)
   - Avoid generic prefixes like `primary*` in concrete controllers; prefer naming by the actual watched kind.
 
-- Multiple predicate sets for the same kind (**MAY**):
-  - If you need distinct predicate sets for the same `<Kind>` (for example, different watches), you **MAY** add a short suffix **before** `Predicates`:
+- Multiple predicate sets for the same kind (MAY):
+  - If you need distinct predicate sets for the same `<Kind>` (for example, different watches), you MAY add a short suffix **before** `Predicates`:
     - `<Kind><Scope>Predicates`
-  - `<Scope>` **MUST** be a short, stable identifier in `PascalCase` and **MUST NOT** repeat `<Kind>`.
+  - `<Scope>` MUST be a short, stable identifier in `PascalCase` and MUST NOT repeat `<Kind>`.
   - Typical scopes (illustrative): `Status`, `Spec`, `Child`, `Owner`, `Cast`.
   - Prefer one canonical set per kind; introduce multiple sets only when it improves clarity at the watch site.
 
-- Rules for predicate behavior (**MUST**):
+- Rules for predicate behavior (MUST):
   - Keep predicates lightweight and **mechanical** (no multi-step reasoning).
   - If a handler would only `return true`, omit it (do not generate noop handlers).
   - Performance matters: predicates are hot-path; avoid allocations, reflection, and heavy comparisons.
   - Be conservative on uncertainty:
     - if a type assertion fails or the event is not classifiable, return `true` (allow reconcile).
 
-- Change detection guidance (**MUST**):
+- Change detection guidance (MUST):
   - If **Reconciliation business logic** uses `.status.conditions` (or any condition-driven logic),
-    **predicate** **MUST** react to **`metadata.generation`** (**Generation**) changes.
+    **predicate** MUST react to **`metadata.generation`** (**Generation**) changes.
     - For CRDs, **Generation** usually bumps on spec changes.
     - **Metadata-only changes** (labels/annotations/finalizers/ownerRefs) may not bump **Generation**.
       If the controller must react to them, compare them explicitly via `client.Object` getters.
 
-- **object** access in **predicates** (**MUST**):
+- **object** access in **predicates** (MUST):
   - Priority order:
     - `client.Object` getters
     - **`obju`** for conditions
     - API **mechanical** helper methods
     - direct field reads (last resort)
-  - If a field is available via `client.Object` methods, you **MUST** use those methods:
+  - If a field is available via `client.Object` methods, you MUST use those methods:
     - `GetGeneration()`, `GetLabels()`, `GetAnnotations()`, `GetFinalizers()`, `GetOwnerReferences()`, etc.
 
   Example: functions returning predicate sets (predicates.go style)
@@ -119,8 +119,8 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
   }
   ```
 
-- Condition comparisons (**MUST**):
-  - If you need to compare **condition**(s) in **predicates**, you **MUST** use **`obju`** (do not open-code `.status.conditions` access).
+- Condition comparisons (MUST):
+  - If you need to compare **condition**(s) in **predicates**, you MUST use **`obju`** (do not open-code `.status.conditions` access).
   - Prefer:
     - `obju.AreConditionsSemanticallyEqual(...)` when you need Type/Status/Reason/Message/ObservedGeneration semantics.
     - `obju.AreConditionsEqualByStatus(...)` when only Type+Status matter.
@@ -156,7 +156,7 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
   }
   ```
 
-- Type assertions/casts (**MUST**):
+- Type assertions/casts (MUST):
   - Cast to a concrete API type only when `client.Object` methods are not enough.
   - If you cast and the assertion fails / is nil, return `true` (allow reconcile).
 

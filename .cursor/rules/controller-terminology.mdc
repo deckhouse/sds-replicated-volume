@@ -8,7 +8,7 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
 # Controller terminology
 
 This document defines shared terminology used across controller rule files in this repository.
-All other controller `.mdc` documents **SHOULD** reference this file instead of re-defining the same terms.
+All other controller `.mdc` documents SHOULD reference this file instead of re-defining the same terms.
 
 ---
 
@@ -60,16 +60,16 @@ It is the only wiring entrypoint that registers the controller with the **manage
 A **controller name** is the stable string used in `.Named(...)` for controller-runtime builder.
 In this codebase it is defined as a package-level `const <XControllerName> = "<name>"`.
 
-**controller name** conventions (this repository) (**MUST**):
+**controller name** conventions (this repository) (MUST):
 
-- The `<name>` value **MUST** be `kebab-case` and **MUST** match:
+- The `<name>` value MUST be `kebab-case` and MUST match:
   - `^[a-z0-9]+(-[a-z0-9]+)*$`
-- The `<name>` value **MUST NOT** contain `.` (dot), `_` (underscore), or whitespace.
-- The `<name>` value **MUST** be stable over time (treat it as a public identifier used in logs/metrics).
-- The `<name>` value **MUST** be unique among all controllers registered on the same **manager**.
-- The suffix "-controller" **MAY** be appended.
-  - It **SHOULD** be appended when omitting it would create ambiguity (e.g., name collision risk with another **controller name**, or confusion with a non-controller component).
-  - It **SHOULD NOT** be appended when the shorter name is already unambiguous and collision-free in the same binary.
+- The `<name>` value MUST NOT contain `.` (dot), `_` (underscore), or whitespace.
+- The `<name>` value MUST be stable over time (treat it as a public identifier used in logs/metrics).
+- The `<name>` value MUST be unique among all controllers registered on the same **manager**.
+- The suffix "-controller" MAY be appended.
+  - It SHOULD be appended when omitting it would create ambiguity (e.g., name collision risk with another **controller name**, or confusion with a non-controller component).
+  - It SHOULD NOT be appended when the shorter name is already unambiguous and collision-free in the same binary.
 
 ### **manager**
 The **manager** is the controller-runtime **`manager.Manager`** instance.
@@ -245,7 +245,7 @@ Within this codebase we distinguish two roles that may both live under `.status`
   These fields are **output-only** and should **not** be used as “intent inputs”.
 
 > Rule of thumb: **Only controller-owned state may be fed back** as commitment/intent inputs into **intended**/**target**.
-> **report/observations** **MAY** be read as observations/constraints (i.e., as **actual**) when deciding **target**, but they **MUST NOT** silently become a source of **desired state**.
+> **report/observations** MAY be read as observations/constraints (i.e., as **actual**) when deciding **target**, but they MUST NOT silently become a source of **desired state**.
 
 #### Terms
 
@@ -317,7 +317,7 @@ A typical reconciliation step follows this conceptual flow:
 
 ### **target main** vs **target status**
 
-When **target** values are used for later `is*InSync` and/or `apply*`, **target** **MUST** be separated by **patch domain**:
+When **target** values are used for later `is*InSync` and/or `apply*`, **target** MUST be separated by **patch domain**:
 
 - **target main**: **target** values for the **main patch domain** (metadata/spec/non-status)
 - **target status**: **target** values for the **status patch domain** that represent **controller-owned state** to persist
@@ -587,7 +587,7 @@ This section applies to **.mdc** rules that describe how to write controllers in
 
 ### Common requirements
 
-- All other controller `.mdc` documents **SHOULD** reference this file instead of re-defining the same terms.
+- All other controller `.mdc` documents SHOULD reference this file instead of re-defining the same terms.
 
 ### Writing conventions
 

@@ -21,13 +21,13 @@ Summary only; if anything differs, follow normative sections below.
 
 - **ConstructionReconcileHelpers** (`new*`/`build*`/`make*`/`compose*`) are **pure**, **deterministic**, strictly **non-I/O** helpers that construct in-memory values/objects (or groups of them) from **explicit inputs**.
 - Inputs are **read-only**:
-  - **MUST NOT** mutate inputs (including via Go **aliasing** of maps/slices).
+  - MUST NOT mutate inputs (including via Go **aliasing** of maps/slices).
   - Clone maps/slices before editing; avoid returning references that alias caller-owned storage unless explicitly documented and safe.
-- **MUST NOT**:
+- MUST NOT:
   - do Kubernetes API I/O, filesystem/network/env reads, or use time/random sources,
   - log/print, accept `context.Context`, start `reconcile/flow` phases, or call `DeepCopy`,
   - return `flow.Outcome` or make flow/patch orchestration decisions (patch ordering/strategy/execution).
-- **MUST** be plain functions (no `Reconciler` receiver) and may only call other **construction** helpers.
+- MUST be plain functions (no `Reconciler` receiver) and may only call other **construction** helpers.
 - If the primary goal is a reconciliation pipeline artifact (**intended/actual/target/report**) or domain decision-making, prefer **ComputeReconcileHelper** (`compute*`) and use construction helpers only as sub-steps.
 
 Naming family selection (pick exactly one, by return shape + meaning):
@@ -60,7 +60,7 @@ Rule of thumb:
 - If the primary purpose is deterministic construction from clearly defined inputs → use **ConstructionReconcileHelper** (`new*`/`build*`/`make*`/`compose*`).
 - If the primary purpose is computing state (usually “state from state”) → use **ComputeReconcileHelper** (`compute*`).
 
-IMPORTANT!!! **MUST NOT** be used for domain decisions or pipeline artifacts (use **ComputeReconcileHelper** for **intended**/**actual**/**target**/**report** computations).
+IMPORTANT!!! MUST NOT be used for domain decisions or pipeline artifacts (use **ComputeReconcileHelper** for **intended**/**actual**/**target**/**report** computations).
 
 In this codebase, **ConstructionReconcileHelper** uses four naming families (`new*`, `build*`, `make*`, `compose*`), described below as separate sections.
 
@@ -135,30 +135,30 @@ func composeStatusWithConditions(base FooStatus, conds []metav1.Condition) FooSt
 
 ## Naming
 
-- A **ConstructionReconcileHelper** name **MUST** start with one of:
+- A **ConstructionReconcileHelper** name MUST start with one of:
   `new` / `New` / `build` / `Build` / `make` / `Make` / `compose` / `Compose`.
-- A **ConstructionReconcileHelper** **MUST** choose exactly one naming family by the *shape and meaning* of the return value:
+- A **ConstructionReconcileHelper** MUST choose exactly one naming family by the *shape and meaning* of the return value:
   - **`new*`**:
-    - **MUST** be used when the result is **one logical domain whole** (even if built from many internal parts).
-    - **MUST NOT** be used when the function returns a set of independently meaningful results (use `build*` instead).
+    - MUST be used when the result is **one logical domain whole** (even if built from many internal parts).
+    - MUST NOT be used when the function returns a set of independently meaningful results (use `build*` instead).
   - **`build*`**:
-    - **MUST** be used when the function returns a **set of independently meaningful results** (`[]T`, `map[...]T`, tuples).
-    - **MUST NOT** be used when the function returns one domain whole (use `new*` instead).
+    - MUST be used when the function returns a **set of independently meaningful results** (`[]T`, `map[...]T`, tuples).
+    - MUST NOT be used when the function returns one domain whole (use `new*` instead).
   - **`make*`**:
-    - **MUST** be used for **mechanical glue**: simple assembly/packing/formatting of inputs with minimal/no domain semantics.
+    - MUST be used for **mechanical glue**: simple assembly/packing/formatting of inputs with minimal/no domain semantics.
   - **`compose*`**:
-    - **MUST** be used when the function only **binds already-built parts** (grouping/tying together) and does not create new meaning/invariants.
-    - **MUST NOT** be used for domain decisions or pipeline artifacts (use **ComputeReconcileHelper** for **intended**/**actual**/**target**/**report** computations).
+    - MUST be used when the function only **binds already-built parts** (grouping/tying together) and does not create new meaning/invariants.
+    - MUST NOT be used for domain decisions or pipeline artifacts (use **ComputeReconcileHelper** for **intended**/**actual**/**target**/**report** computations).
 
 ---
 
 ## Preferred signatures
 
-- For **ConstructionReconcileHelpers**, the simplest signature that preserves determinism and read-only inputs **SHOULD** be chosen.
-- **ConstructionReconcileHelpers** **MUST NOT** accept `ctx context.Context`.
+- For **ConstructionReconcileHelpers**, the simplest signature that preserves determinism and read-only inputs SHOULD be chosen.
+- **ConstructionReconcileHelpers** MUST NOT accept `ctx context.Context`.
   - If you need logging/phases/flow control, use **ComputeReconcileHelpers** / **EnsureReconcileHelpers** or keep it in the caller.
-- `new*` / `build*` helpers **MAY** return `(T, error)` when construction can fail.
-- `make*` / `compose*` helpers **SHOULD** be non-failing (prefer returning a value only).
+- `new*` / `build*` helpers MAY return `(T, error)` when construction can fail.
+- `make*` / `compose*` helpers SHOULD be non-failing (prefer returning a value only).
 
 Examples:
 
@@ -182,25 +182,25 @@ func composeServiceSpecWithPorts(spec corev1.ServiceSpec, ports []corev1.Service
 
 ## Receivers
 
-- **ConstructionReconcileHelpers** **MUST** be plain functions (no `Reconciler` receiver).
+- **ConstructionReconcileHelpers** MUST be plain functions (no `Reconciler` receiver).
 
 ---
 
 ## I/O boundaries
 
-**ConstructionReconcileHelpers** **MUST NOT** perform **I/O** of any kind:
+**ConstructionReconcileHelpers** MUST NOT perform **I/O** of any kind:
 
 - **Kubernetes API I/O** (no client usage),
 - filesystem/network/env reads,
 - time/random sources,
 - logging/printing,
-- and **MUST NOT** call **DeepCopy**.
+- and MUST NOT call **DeepCopy**.
 
 ---
 
 ## Determinism contract
 
-**ConstructionReconcileHelpers** **MUST** be **deterministic** for the same explicit inputs:
+**ConstructionReconcileHelpers** MUST be **deterministic** for the same explicit inputs:
 
 - stable ordering (sort when building ordered slices from maps/sets),
 - no map-iteration-order leakage.
@@ -211,7 +211,7 @@ See the common determinism contract in `controller-reconcile-helper.mdc`.
 
 ## Read-only contract
 
-**ConstructionReconcileHelpers** **MUST** treat all inputs as **read-only inputs**:
+**ConstructionReconcileHelpers** MUST treat all inputs as **read-only inputs**:
 
 - no mutation of inputs (including through **Aliasing**),
 - clone maps/slices before editing,
@@ -223,7 +223,7 @@ See the common read-only contract in `controller-reconcile-helper.mdc`.
 
 ## Patch-domain separation
 
-- **ConstructionReconcileHelpers** **MUST NOT** execute patches, make **Patch ordering** decisions, or mutate a Kubernetes **patch domain** as part of their work.
+- **ConstructionReconcileHelpers** MUST NOT execute patches, make **Patch ordering** decisions, or mutate a Kubernetes **patch domain** as part of their work.
 
 ---
 
@@ -231,10 +231,10 @@ See the common read-only contract in `controller-reconcile-helper.mdc`.
 
 - **ConstructionReconcileHelpers** are “building blocks”.
 - **ConstructionReconcileHelpers** are typically used inside **ComputeReconcileHelpers** and **EnsureReconcileHelpers**.
-- A **ConstructionReconcileHelper** **MAY** call other **ConstructionReconcileHelpers** (`new*`, `build*`, `make*`, `compose*`) as pure sub-steps.
-- A **ConstructionReconcileHelper** **MUST NOT** call **ReconcileHelpers** from other helper categories (`compute*`, `apply*`, `ensure*`, `patch*`, `create*`, `delete*`, `is*InSync`).
+- A **ConstructionReconcileHelper** MAY call other **ConstructionReconcileHelpers** (`new*`, `build*`, `make*`, `compose*`) as pure sub-steps.
+- A **ConstructionReconcileHelper** MUST NOT call **ReconcileHelpers** from other helper categories (`compute*`, `apply*`, `ensure*`, `patch*`, `create*`, `delete*`, `is*InSync`).
   - If you need those semantics, move the orchestration to the caller (typically a compute/ensure helper or a Reconcile method).
-- If a function’s primary purpose is to produce **intended**/**actual**/**target**/**report** as part of reconciliation, you **SHOULD** prefer `compute*` naming and use **ConstructionReconcileHelpers** internally for sub-steps.
+- If a function’s primary purpose is to produce **intended**/**actual**/**target**/**report** as part of reconciliation, you SHOULD prefer `compute*` naming and use **ConstructionReconcileHelpers** internally for sub-steps.
 
 Important distinctions:
 
@@ -245,27 +245,27 @@ Important distinctions:
 
 ## Flow phases and **Outcome**
 
-- **ConstructionReconcileHelpers** **MUST NOT** create a `reconcile/flow` **phase**.
-- **ConstructionReconcileHelpers** **MUST NOT** return **Outcome** (in code: `flow.Outcome`).
-- **ConstructionReconcileHelpers** **MUST NOT** log (they do not accept `ctx context.Context`).
+- **ConstructionReconcileHelpers** MUST NOT create a `reconcile/flow` **phase**.
+- **ConstructionReconcileHelpers** MUST NOT return **Outcome** (in code: `flow.Outcome`).
+- **ConstructionReconcileHelpers** MUST NOT log (they do not accept `ctx context.Context`).
 
 ---
 
 ## Error handling
 
-- Like any **ReconcileHelper**, an error from a **ConstructionReconcileHelper** **MUST NOT** include **object identity** (see `controller-reconcile-helper.mdc`).
-- Construction helpers **SHOULD** be non-failing where possible.
+- Like any **ReconcileHelper**, an error from a **ConstructionReconcileHelper** MUST NOT include **object identity** (see `controller-reconcile-helper.mdc`).
+- Construction helpers SHOULD be non-failing where possible.
 - If a **ConstructionReconcileHelper** returns an `error`, it:
-  - **MUST NOT** include **object identity** (e.g. `namespace/name`, UID, object key),
-  - **MUST NOT** wrap/enrich errors with “outside world” context (that belongs to the caller),
-  - **SHOULD** be used only for local validation / impossible-shape failures / pure parsing failures.
-- **Allowed (rare):** when propagating a non-local pure error and additional context is necessary to disambiguate multiple error sources in the same caller, a helper **MAY** wrap with small, local action context:
+  - MUST NOT include **object identity** (e.g. `namespace/name`, UID, object key),
+  - MUST NOT wrap/enrich errors with “outside world” context (that belongs to the caller),
+  - SHOULD be used only for local validation / impossible-shape failures / pure parsing failures.
+- **Allowed (rare):** when propagating a non-local pure error and additional context is necessary to disambiguate multiple error sources in the same caller, a helper MAY wrap with small, local action context:
   - prefer `fmt.Errorf("<local-action>: %w", err)`
   - keep `<local-action>` specific to the helper responsibility.
 
 ---
 
-## Common anti-patterns (**MUST NOT**)
+## Common anti-patterns (MUST NOT)
 
 ❌ Doing any Kubernetes API I/O:
 

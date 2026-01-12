@@ -19,8 +19,8 @@ Summary only; if anything differs, follow normative sections below.
 
 - **IsInSyncReconcileHelpers** (`is*InSync`) are tiny, **pure**, **deterministic**, strictly **non-I/O** boolean checks.
 - They compare the current `obj` state to a single **target** (and/or **report**) value for **exactly one** **patch domain** (**main patch domain** or **status patch domain**) and return `true/false`.
-- For status **report/observations**, the compared “**report**” value **MAY** be directly reused from selected **actual** observations (including being the same value/type as an **actual** snapshot) when publishing observations verbatim to `.status`.
-- They **SHOULD NOT** return errors, **MUST NOT** do **Outcome control flow**, and **MUST NOT** log.
+- For status **report/observations**, the compared “**report**” value MAY be directly reused from selected **actual** observations (including being the same value/type as an **actual** snapshot) when publishing observations verbatim to `.status`.
+- They SHOULD NOT return errors, MUST NOT do **Outcome control flow**, and MUST NOT log.
 - They treat `obj` and `target` / `report` as **read-only inputs** (no mutations, including via map/slice **Aliasing**; **Clone** before any normalization).
 
 ---
@@ -39,25 +39,25 @@ Typical in-sync helpers gate patch execution by answering “do we need to patch
 
 ## Naming
 
-- An **IsInSyncReconcileHelper** name **MUST** start with `is` / `Is` and **MUST** contain `InSync`.
-- **IsInSyncReconcileHelpers** **MUST** be domain-explicit in the name when ambiguity is possible (ambiguity is possible when the checked “thing” name refers to a field/group that exists in both `.spec` (**main patch domain**) and `.status` (**status patch domain**) of the same **object**):
+- An **IsInSyncReconcileHelper** name MUST start with `is` / `Is` and MUST contain `InSync`.
+- **IsInSyncReconcileHelpers** MUST be domain-explicit in the name when ambiguity is possible (ambiguity is possible when the checked “thing” name refers to a field/group that exists in both `.spec` (**main patch domain**) and `.status` (**status patch domain**) of the same **object**):
   - `isMain*InSync` / `IsMain*InSync` / `is*MainInSync` / `Is*MainInSync`
   - `isStatus*InSync` / `IsStatus*InSync` / `is*StatusInSync` / `Is*StatusInSync`
-- **IsInSyncReconcileHelpers** **SHOULD NOT** include `Main` / `Status` in the name when there is no such ambiguity.
-- **IsInSyncReconcileHelpers** names **MUST NOT** include `Desired` / `Actual` / `Intended` / `Target` / `Report` unless the checked “thing” name in the **object** API includes those words.
-- **IsInSyncReconcileHelpers** names **SHOULD** name the “thing” being checked for drift:
+- **IsInSyncReconcileHelpers** SHOULD NOT include `Main` / `Status` in the name when there is no such ambiguity.
+- **IsInSyncReconcileHelpers** names MUST NOT include `Desired` / `Actual` / `Intended` / `Target` / `Report` unless the checked “thing” name in the **object** API includes those words.
+- **IsInSyncReconcileHelpers** names SHOULD name the “thing” being checked for drift:
   - `isLabelsInSync(obj, targetLabels)`
   - `isSpecFooInSync(obj, targetFoo)`
   - `isStatusInSync(obj, targetStatus)` (ok when status is small; otherwise prefer artifact-specific checks)
   - `isConditionsInSync(obj, reportConditions)` (when checking published **report** conditions)
-- **IsInSyncReconcileHelpers** names **SHOULD NOT** be generic (`isInSync`, `isEverythingInSync`) — the name should communicate the **patch domain** + artifact being compared.
+- **IsInSyncReconcileHelpers** names SHOULD NOT be generic (`isInSync`, `isEverythingInSync`) — the name should communicate the **patch domain** + artifact being compared.
 
 ---
 
 ## Preferred signatures
 
-- For **IsInSyncReconcileHelpers** (`is*InSync`), the simplest signature from the variants below that preserves explicit dependencies and purity **SHOULD** be chosen.
-- If additional signature variants are explicitly permitted elsewhere in this document, they **MAY** also be used.
+- For **IsInSyncReconcileHelpers** (`is*InSync`), the simplest signature from the variants below that preserves explicit dependencies and purity SHOULD be chosen.
+- If additional signature variants are explicitly permitted elsewhere in this document, they MAY also be used.
 
 ### Simple check (no flow, no logging)
 ```go
@@ -68,13 +68,13 @@ func isFooInSync(obj *v1alpha1.Foo, target TargetFoo) bool
 
 ## Receivers
 
-- **IsInSyncReconcileHelpers** **MUST** be plain functions (no `Reconciler` receiver).
+- **IsInSyncReconcileHelpers** MUST be plain functions (no `Reconciler` receiver).
 
 ---
 
 ## I/O boundaries
 
-**IsInSyncReconcileHelpers** **MUST NOT** do any of the following:
+**IsInSyncReconcileHelpers** MUST NOT do any of the following:
 
 - controller-runtime client usage (`client.Client`, `r.client`, etc.);
 - Kubernetes API calls (`Get/List/Create/Update/Patch/Delete`);
@@ -82,7 +82,7 @@ func isFooInSync(obj *v1alpha1.Foo, target TargetFoo) bool
 - executing patches (`Patch` / `Status().Patch`) or making any patch ordering / patch type decisions;
 - creating/updating Kubernetes objects in the API server in any form.
 
-**IsInSyncReconcileHelpers** **MUST NOT** do “hidden I/O” either:
+**IsInSyncReconcileHelpers** MUST NOT do “hidden I/O” either:
 
 - `time.Now()` / `time.Since(...)` (nondeterministic wall-clock reads);
 - random number generation (`rand.*`);
@@ -95,7 +95,7 @@ func isFooInSync(obj *v1alpha1.Foo, target TargetFoo) bool
 
 ## Determinism contract
 
-An **IsInSyncReconcileHelper** **MUST** be **deterministic** given its explicit inputs and read-only dependencies.
+An **IsInSyncReconcileHelper** MUST be **deterministic** given its explicit inputs and read-only dependencies.
 
 See the common determinism contract in `controller-reconcile-helper.mdc`.
 
@@ -107,10 +107,10 @@ In particular, avoid producing “equivalent but different” intermediate repre
 
 ## Read-only contract
 
-`is*InSync` / `Is*InSync` **MUST** treat all inputs as read-only:
+`is*InSync` / `Is*InSync` MUST treat all inputs as read-only:
 
-- it **MUST NOT** mutate any input values (including `obj`, `target` / `report`, and any other args);
-- it **MUST NOT** perform in-place modifications through aliases.
+- it MUST NOT mutate any input values (including `obj`, `target` / `report`, and any other args);
+- it MUST NOT perform in-place modifications through aliases.
 
 See the common read-only contract in `controller-reconcile-helper.mdc` (especially the Go aliasing rule for `map` / `[]T`).
 
@@ -118,10 +118,10 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ## Patch-domain separation
 
-- `is*InSync` / `Is*InSync` **MUST** check **exactly one** patch domain:
+- `is*InSync` / `Is*InSync` MUST check **exactly one** patch domain:
   - **main resource** (**metadata + spec + non-status fields**), **or**
   - **status subresource** (`.status`).
-- If you need to check both domains, you **MUST** use **two** separate helpers (one per **patch domain**), and combine the results in **Reconcile methods**.
+- If you need to check both domains, you MUST use **two** separate helpers (one per **patch domain**), and combine the results in **Reconcile methods**.
 
 ✅ Main-only / status-only (GOOD)
 ```go
@@ -142,35 +142,35 @@ func isFooInSync(
 
 ## Composition
 
-- An **IsInSyncReconcileHelper** **MUST** stay a single, simple check: it returns exactly one boolean for one **target**/**report** input.
-- If multiple “pieces” must be checked together for the same domain, they **SHOULD** be bundled into a single `target` / `report` value (small struct) and checked in one helper.
-- An **IsInSyncReconcileHelper** **MAY** call other `is*InSync` helpers for reuse (pure composition).
-  - It **SHOULD NOT** use such calls to compose independent checks; independent checks should be composed in Reconcile methods.
-- If checks are meaningfully independent and will be used separately, they **SHOULD** be split into separate `is*InSync` helpers and composed in Reconcile methods (not inside the helper).
-- An **IsInSyncReconcileHelper** **MUST NOT** call **ReconcileHelpers** from other **Helper categories**.
+- An **IsInSyncReconcileHelper** MUST stay a single, simple check: it returns exactly one boolean for one **target**/**report** input.
+- If multiple “pieces” must be checked together for the same domain, they SHOULD be bundled into a single `target` / `report` value (small struct) and checked in one helper.
+- An **IsInSyncReconcileHelper** MAY call other `is*InSync` helpers for reuse (pure composition).
+  - It SHOULD NOT use such calls to compose independent checks; independent checks should be composed in Reconcile methods.
+- If checks are meaningfully independent and will be used separately, they SHOULD be split into separate `is*InSync` helpers and composed in Reconcile methods (not inside the helper).
+- An **IsInSyncReconcileHelper** MUST NOT call **ReconcileHelpers** from other **Helper categories**.
 
 ---
 
 ## Flow phases and **Outcome**
 
-- **IsInSyncReconcileHelpers** **MUST NOT** create a `reconcile/flow` **phase** (they do not accept `ctx context.Context`; see `controller-reconcile-helper.mdc`).
-- **IsInSyncReconcileHelpers** **MUST NOT** return **Outcome** (in code: `flow.Outcome`) (they are pure checks).
+- **IsInSyncReconcileHelpers** MUST NOT create a `reconcile/flow` **phase** (they do not accept `ctx context.Context`; see `controller-reconcile-helper.mdc`).
+- **IsInSyncReconcileHelpers** MUST NOT return **Outcome** (in code: `flow.Outcome`) (they are pure checks).
   - If you need flow control (requeue, done, fail), keep it in the caller and/or use other helper categories (e.g., compute/ensure/patch).
-- **IsInSyncReconcileHelpers** **MUST NOT** log.
+- **IsInSyncReconcileHelpers** MUST NOT log.
 
 ---
 
 ## Error handling
 
 - See the common error handling rules in `controller-reconcile-helper.mdc`.
-- **IsInSyncReconcileHelpers** **SHOULD** be designed to be non-failing (pure checks).
+- **IsInSyncReconcileHelpers** SHOULD be designed to be non-failing (pure checks).
   - If an error is realistically possible, prefer handling it in a **ComputeReconcileHelper** (or in the caller) and pass only validated/normalized inputs to `is*InSync`.
-- **IsInSyncReconcileHelpers** **MUST NOT** create/wrap/enrich errors, and **MUST NOT** include **object identity** (e.g. `namespace/name`, UID, object key).
+- **IsInSyncReconcileHelpers** MUST NOT create/wrap/enrich errors, and MUST NOT include **object identity** (e.g. `namespace/name`, UID, object key).
 - Do **not** log and also return a “failure signal” for the same condition unless the surrounding reconcile style explicitly requires it (avoid duplicate logs).
 
 ---
 
-## Common anti-patterns (**MUST NOT**)
+## Common anti-patterns (MUST NOT)
 
 ❌ Doing any Kubernetes API I/O (directly or indirectly):
 ```go
