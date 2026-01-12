@@ -19,12 +19,13 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 Summary only; if anything differs, follow normative sections below.
 
 - **Reconcile methods** (`Reconcile*` / `reconcile*`) own reconciliation orchestration and I/O sequencing; **ReconcileHelpers** are category-named helpers used by them.
-- All **ReconcileHelpers** follow strict **naming-by-category** (some categories have multiple allowed prefixes, e.g. **ConstructionReconcileHelper** uses `new*`/`build*`/`make*`/`compose*`): `compute*`, `new*`/`build*`/`make*`/`compose*`, `is*InSync*`, `apply*`, `ensure*`, `create*`, `delete*`, `patch*` — to make intent and allowed behavior reviewable.
+- All **ReconcileHelpers** follow strict **naming-by-category** (some categories have multiple allowed prefixes, e.g. **ConstructionReconcileHelper** uses `new*`/`build*`/`make*`/`compose*`): `compute*`, `new*`/`build*`/`make*`/`compose*`, `is*InSync*`, `apply*`, `ensure*`, `get*`, `create*`, `delete*`, `patch*` — to make intent and allowed behavior reviewable.
 - Every ReconcileHelper has explicit dependencies: if it takes `ctx`, it is first; if it operates on a Kubernetes object, `obj` is the first arg after `ctx`; all other inputs come **after `obj`**.
 - ReconcileHelpers are **deterministic**: never rely on map iteration order; sort when order matters; avoid “equivalent but different” outputs/states that cause patch churn.
 - ReconcileHelpers treat inputs as **read-only** except for the explicitly allowed mutation target(s); never mutate through map/slice aliasing — **clone before editing**.
 - **I/O** is **explicitly bounded by category**:
   - **Compute / Construction / IsInSync / Apply / Ensure**: strictly **non-I/O**.
+  - **Get**: allowed **I/O**, but **at most one API read** per helper (`Get` or `List`).
   - **Create / Delete / Patch**: allowed **I/O**, but **exactly one API write** per helper (`Create` / `Delete` / `Patch` or `Status().Patch`).
 
 ---
@@ -45,6 +46,7 @@ These categories are naming categories/patterns (see also `controller-file-struc
 - **IsInSyncReconcileHelper**: `is*InSync*` / `Is*InSync*` (starts with `is`/`Is` and contains `InSync`) (see `controller-reconcile-helper-is-in-sync.mdc`).
 - **ApplyReconcileHelper**: `apply*` / `Apply*` (see `controller-reconcile-helper-apply.mdc`).
 - **EnsureReconcileHelper**: `ensure*` / `Ensure*` (see `controller-reconcile-helper-ensure.mdc`).
+- **GetReconcileHelper**: `get*` / `Get*` (see `controller-reconcile-helper-get.mdc`).
 - **CreateReconcileHelper**: `create*` / `Create*` (see `controller-reconcile-helper-create.mdc`).
 - **DeleteReconcileHelper**: `delete*` / `Delete*` (see `controller-reconcile-helper-delete.mdc`).
 - **PatchReconcileHelper**: `patch*` / `Patch*` (see `controller-reconcile-helper-patch.mdc`).
@@ -78,7 +80,7 @@ Category-specific conventions are defined in dedicated documents referenced in *
   - **Large `ensure*`**: **MUST** create a **phase**.
     - “Large” includes: many sub-steps, loops over items, and/or non-trivial error handling.
   - **Large `compute*`**: **MAY** create a **phase** **only when it improves structure or diagnostics**.
-  - **All other Helper categories** (`apply*`, `is*InSync*`, `create*`, `delete*`, `patch*`) **MUST NOT** create **phases**.
+  - **All other Helper categories** (`apply*`, `is*InSync*`, `get*`, `create*`, `delete*`, `patch*`) **MUST NOT** create **phases**.
 - If a helper uses **phases**, it **MUST** follow `internal/reconciliation/flow` rules (one **phase** per function; **phase** on first line; no **phases** inside loops).
 
 ### Visibility and receivers

@@ -9,6 +9,7 @@ alwaysApply: true
 - **controller package** structure (**MUST**):
   - Each **controller package** **MUST** have these files:
     - **`controller.go`**
+    - **`predicate.go`** (required only when the controller uses controller-runtime **predicate**/**filter**s)
     - **`reconciler.go`**
     - **`reconciler_test.go`**
 
@@ -33,6 +34,7 @@ alwaysApply: true
         - **IsInSyncReconcileHelper**: `is*InSync*` / `Is*InSync*` (starts with `is`/`Is` and contains `InSync`) (see `controller-reconcile-helper-is-in-sync.mdc`)
         - **ApplyReconcileHelper**: `apply*` / `Apply*` (see `controller-reconcile-helper-apply.mdc`)
         - **EnsureReconcileHelper**: `ensure*` / `Ensure*` (see `controller-reconcile-helper-ensure.mdc`)
+        - **GetReconcileHelper**: `get*` / `Get*` (see `controller-reconcile-helper-get.mdc`)
         - **CreateReconcileHelper**: `create*` / `Create*` (see `controller-reconcile-helper-create.mdc`)
         - **DeleteReconcileHelper**: `delete*` / `Delete*` (see `controller-reconcile-helper-delete.mdc`)
         - **PatchReconcileHelper**: `patch*` / `Patch*` (see `controller-reconcile-helper-patch.mdc`)

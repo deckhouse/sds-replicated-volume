@@ -32,6 +32,7 @@ The keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY** are to 
 A **controller package** is a Go package under `images/controller/internal/controllers/<name>/...` that defines one controller-runtime controller, and contains:
 
 - **`controller.go`** (**Wiring-only** setup)
+- **`predicate.go`** (predicate/**filter** implementations; required only when the package uses controller-runtime **predicate**/**filter**s)
 - **`reconciler.go`** (**Reconciliation business logic**)
 - **`reconciler_test.go`** (tests) and/or other `*_test.go` files
 
@@ -41,6 +42,13 @@ A **controller package** is a Go package under `images/controller/internal/contr
 - It owns controller-runtime builder configuration (**watches**, options, **predicates**).
 - It constructs the reconciler, registers **runnables** on the **manager** (`mgr.Add(...)`),
   configures **watches** via the **builder chain**, and registers field indexes via the **manager**’s field indexer.
+
+### **`predicate.go`**
+**`predicate.go`** is the file that owns controller-runtime **predicate**/**filter** implementations for a **controller package**.
+
+- It contains only **mechanical** change detection (no **I/O**, no **domain/business** decisions).
+- It is referenced from the **builder chain** in **`controller.go`** via `builder.WithPredicates(<kind>Predicates()...)`.
+- It is optional, but when the controller uses any controller-runtime **predicate**/**filter**, **`predicate.go`** is required.
 
 ### **`reconciler.go`**
 **`reconciler.go`** is the file that owns all **Reconciliation business logic** for the **controller package**, including:
@@ -65,6 +73,17 @@ It is the only wiring entrypoint that registers the controller with the **manage
 ### **controller name**
 A **controller name** is the stable string used in `.Named(...)` for controller-runtime builder.
 In this codebase it is defined as a package-level `const <XControllerName> = "<name>"`.
+
+**controller name** conventions (this repository) (**MUST**):
+
+- The `<name>` value **MUST** be `kebab-case` and **MUST** match:
+  - `^[a-z0-9]+(-[a-z0-9]+)*$`
+- The `<name>` value **MUST NOT** contain `.` (dot), `_` (underscore), or whitespace.
+- The `<name>` value **MUST** be stable over time (treat it as a public identifier used in logs/metrics).
+- The `<name>` value **MUST** be unique among all controllers registered on the same **manager**.
+- The suffix "-controller" **MAY** be appended.
+  - It **SHOULD** be appended when omitting it would create ambiguity (e.g., name collision risk with another **controller name**, or confusion with a non-controller component).
+  - It **SHOULD NOT** be appended when the shorter name is already unambiguous and collision-free in the same binary.
 
 ### **manager**
 The **manager** is the controller-runtime **`manager.Manager`** instance.
@@ -167,6 +186,7 @@ A **ReconcileHelper** is a helper function/method used by **Reconcile methods** 
 - **IsInSyncReconcileHelper**: `is*InSync*` / `Is*InSync*`
 - **ApplyReconcileHelper**: `apply*` / `Apply*`
 - **EnsureReconcileHelper**: `ensure*` / `Ensure*`
+- **GetReconcileHelper**: `get*` / `Get*`
 - **CreateReconcileHelper**: `create*` / `Create*`
 - **DeleteReconcileHelper**: `delete*` / `Delete*`
 - **PatchReconcileHelper**: `patch*` / `Patch*` (including `patch*Status` variants)
@@ -183,9 +203,10 @@ In this codebase, these **Helper categories** are **non-I/O** by definition:
 - **EnsureReconcileHelper**
 
 ### **Single-call I/O helper categories**
-A helper is a **single-call I/O helper** when it performs **exactly one** Kubernetes API write request.
+A helper is a **single-call I/O helper** when it performs **at most one** **Kubernetes API I/O** request (read or write).
 In this codebase, these **Helper categories** are single-call **I/O** helpers by definition:
 
+- **GetReconcileHelper** → at most one `Get(...)` or `List(...)`
 - **CreateReconcileHelper** → exactly one `Create(...)`
 - **DeleteReconcileHelper** → exactly one `Delete(...)`
 - **PatchReconcileHelper** → exactly one **patch request** (`Patch(...)` OR `Status().Patch(...)`)
@@ -599,6 +620,7 @@ Below is the list of terms (without definitions) that in controller rules **MUST
 
 - **controller package**
 - **`controller.go`**
+- **`predicate.go`**
 - **`reconciler.go`**
 - **`reconciler_test.go`**
 - **Entrypoint**
@@ -629,6 +651,7 @@ Below is the list of terms (without definitions) that in controller rules **MUST
 - **IsInSyncReconcileHelper**
 - **ApplyReconcileHelper**
 - **EnsureReconcileHelper**
+- **GetReconcileHelper**
 - **CreateReconcileHelper**
 - **DeleteReconcileHelper**
 - **PatchReconcileHelper**

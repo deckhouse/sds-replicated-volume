@@ -9,12 +9,18 @@ alwaysApply: true
   - **`controller.go`** = **Wiring-only** **Entrypoint**.
   - **Entrypoint** = `BuildController(mgr manager.Manager) error`.
   - **builder chain** = single fluent chain, ends with `.Complete(rec)`.
-  - **predicates** = **mechanical** change detection (no **I/O**, no **domain/business** decisions).
+  - **predicates**/**filters**:
+    - are **mechanical** change detection (no **I/O**, no **domain/business** decisions),
+    - live in **`predicate.go`**,
+    - **MUST NOT** be implemented in **`controller.go`**.
   - All **Reconciliation business logic** = **`reconciler.go`**.
+  - **controller name** string values are `kebab-case` (see **Controller terminology**).
 
 - **`controller.go`** purpose (**MUST**):
   - **`controller.go`** is the **Wiring-only** **Entrypoint** of a **controller package**.
   - It owns controller-runtime **builder chain** configuration, **watch** registration, and reconciler construction.
+  - If the controller needs event filtering, **`controller.go`** wires predicates by calling
+    `builder.WithPredicates(<kind>Predicates()...)` at the `.For(...)`/`.Owns(...)`/`.Watches(...)` call site.
   - It **MUST NOT** contain **Reconciliation business logic** (that belongs to **`reconciler.go`**).
 
 - ALLOW (in **`controller.go`**):
@@ -22,23 +28,32 @@ alwaysApply: true
     - `.ControllerManagedBy(mgr).Named(...)`
     - `.For(...)`, `.Owns(...)`, `.Watches(...)`
     - `.WithOptions(...)`, `.Complete(...)`
-  - **predicates**/**filters** (lightweight, **mechanical** change detection).
+  - wiring **predicates**/**filters** by calling `builder.WithPredicates(<kind>Predicates()...)`
+    (where `<kind>Predicates()` is implemented in **`predicate.go`**).
   - **Manager-owned dependencies** (wiring-only) from the **manager**:
     - `mgr.GetClient()`, `mgr.GetScheme()`, `mgr.GetCache()`, `mgr.GetEventRecorderFor(...)`
   - registering **runnables**/**sources** on the **manager** (wiring-only), e.g. `mgr.Add(...)`, indexes, **sources**.
 
 - DENY (in **`controller.go`**):
   - any functions that **compute/ensure/apply/reconcile** domain logic (must live in `reconciler.go`).
-  - reading/modifying `.Spec` / `.Status`:
-    - allowed only inside **predicates** and only for **field comparisons** (no multi-step logic; no mutations).
-    - direct `.Status.Conditions` access is forbidden in predicates — use `obju` only.
+  - implementing controller-runtime **predicates**/**filters**:
+    - **`controller.go`** **MUST NOT** define `predicate.Funcs{...}` (or any other predicate implementation) inline.
+    - All predicate implementations **MUST** live in **`predicate.go`** (see: `controller-predicate.mdc`).
+  - reading/modifying `.Spec` / `.Status` (except **mechanical** access in wiring callbacks):
+    - **`controller.go`** **MUST NOT** read or write `.Spec` / `.Status` as part of business logic.
+    - **mechanical** reads are allowed only inside **watch** mapping functions whose only job is pure request mapping (`obj -> []reconcile.Request`).
+    - **`controller.go`** **MUST NOT** write `.Spec` / `.Status` anywhere.
   - any multi-step decisions (state machines, placement, scheduling, condition computation).
   - any **Kubernetes API I/O** beyond **manager** wiring (`Get/List/Create/Update/Patch/Delete`).
 
 - **`controller.go`** layout (**MUST**):
   - `const <ControllerName> = "<name>"` (stable **controller name**).
+    - The `<name>` value **MUST** follow **Controller terminology** (**controller name** conventions): `kebab-case`, no `.`, no `_`, stable, unique.
+    - The suffix "-controller" **MAY** be appended; it **SHOULD** be appended only when needed to avoid ambiguity/collisions (see **Controller terminology**).
   - **Entrypoint**: `BuildController(mgr manager.Manager) error`.
-  - **predicates**/**filters** **MUST** be present to reduce **reconcile loop** noise.
+  - **predicates**/**filters** are optional.
+    - If the controller uses any **predicates**/**filters**, the **controller package** **MUST** include **`predicate.go`**.
+    - Predicate implementation is done in **`predicate.go`**; **`controller.go`** wires it via `builder.WithPredicates(...)`.
 
 - What belongs in `BuildController` (**MUST**):
   - Take **Manager-owned dependencies** from the **manager**:
@@ -50,7 +65,7 @@ alwaysApply: true
     - `rec := NewReconciler(cl, <otherDeps...>)`
   - Wire controller-runtime builder in a single fluent chain:
     - `.ControllerManagedBy(mgr).Named(<ControllerName>)`
-    - `.For(&<apiObject>{}, builder.WithPredicates(...))`
+    - `.For(&<apiObject>{} /*, <forOptions>... */)`
     - `.Watches(...)` when the controller reacts to additional objects/events
     - `.WithOptions(controller.Options{MaxConcurrentReconciles: 10})` by default
     - `.Complete(rec)`
@@ -62,16 +77,13 @@ alwaysApply: true
 
   import (
       "sigs.k8s.io/controller-runtime/pkg/builder"
-      "sigs.k8s.io/controller-runtime/pkg/client"
       "sigs.k8s.io/controller-runtime/pkg/controller"
-      "sigs.k8s.io/controller-runtime/pkg/event"
       "sigs.k8s.io/controller-runtime/pkg/manager"
-      "sigs.k8s.io/controller-runtime/pkg/predicate"
 
       "example.com/api/v1alpha1"
   )
 
-  const ExampleControllerName = "example_controller"
+  const ExampleControllerName = "example-controller"
 
   func BuildController(mgr manager.Manager) error {
       cl := mgr.GetClient()
@@ -85,226 +97,18 @@ alwaysApply: true
       return builder.ControllerManagedBy(mgr).
           Named(ExampleControllerName).
           For(&v1alpha1.Example{}, builder.WithPredicates(
-              predicate.Funcs{
-                  UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
-                      if e.ObjectNew.GetGeneration() != e.ObjectOld.GetGeneration() {
-                          return true
-                      }
-                      return false
-                  },
-              },
+              examplePredicates()...,
           )).
           WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
           Complete(rec)
   }
   ```
 
-- **predicates**/**filters** in **`controller.go`** (**MUST**):
-  - Keep them lightweight and **mechanical** (no **I/O**, no multi-step **domain/business** reasoning).
-  - Prefer typed events (`event.TypedUpdateEvent[client.Object]`).
-  - **predicates** **MUST NOT** contain **domain/business** logic — only detect changes in fields.
-    - Example of business logic (forbidden in predicates): “check presence/validity of required labels”.
-  - If **Reconciliation business logic** uses `.status.conditions` (or any condition-driven logic), **predicate** **MUST** react to **`metadata.generation`** (**Generation**) changes.
-    - Note: if you only need to react to **spec changes**, filtering by `generation` is usually sufficient (for CRDs, `generation` is  bumped on spec changes).
-    - Important: **metadata-only changes** (labels/annotations/finalizers/ownerRefs) may **NOT** bump `generation`. If your controller must react to them, compare them explicitly (e.g. `GetLabels()`, `GetAnnotations()`, `GetFinalizers()`, `GetOwnerReferences()`).
-  - **MUST NOT** generate noop handlers:
-    - if a **predicate** handler (`CreateFunc`/`UpdateFunc`/`DeleteFunc`/`GenericFunc`) would only `return true`, omit it.
-    - **MUST NOT** block `GenericFunc` unless there is a very explicit reason (prefer allowing reconcile).
-  - Performance (**MUST**):
-    - **predicates** are hot-path: minimize allocations and CPU (no **DeepCopy**, no reflection, avoid heavy comparisons).
-    - still ensure they filter enough so that **reconcile loop** runs only when needed (otherwise the **reconcile loop** becomes the hotspot).
-  - Typical use-cases:
-    - reconcile only when a single field/label you own is out of sync and needs a quick correction;
-    - reconcile on `generation` changes when status/conditions logic depends on spec changes.
-
-
-  - **object** access in **predicates** (**MUST**):
-    - Priority order:
-      - `client.Object` getters
-      - `obju` for conditions
-      - API mechanical helpers
-      - direct fields (last resort)
-    - If a field is available via `client.Object` methods, you MUST use those methods.
-      - Examples: `GetGeneration()`, `GetName()`, `GetNamespace()`, `GetLabels()`, `GetAnnotations()`, `GetFinalizers()`, `GetOwnerReferences()`.
-
-      Example: use `client.Object` methods (no cast) — react to `generation` (inline style)
-      (requires Go 1.21+ for `maps`/`slices`; and `k8s.io/apimachinery/pkg/api/equality` for `apiequality`)
-      ```go
-      builder.WithPredicates(
-          predicate.Funcs{
-              UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
-                  // If reconciliation uses status.conditions (or any generation-driven logic),
-                  // react to generation changes for spec-driven updates; if you also need to react
-                  // to metadata-only changes (labels/annotations/finalizers/ownerRefs), compare them explicitly.
-                  if e.ObjectNew.GetGeneration() != e.ObjectOld.GetGeneration() {
-                      return true
-                  }
-
-                  // If your reconciliation uses labels, reconcile on label changes (metadata-only updates don't bump generation).
-                  if !maps.Equal(e.ObjectNew.GetLabels(), e.ObjectOld.GetLabels()) {
-                      return true
-                  }
-
-                  // If your reconciliation uses finalizers, reconcile on finalizer changes (metadata-only updates don't bump generation).
-                  if !slices.Equal(e.ObjectNew.GetFinalizers(), e.ObjectOld.GetFinalizers()) {
-                      return true
-                  }
-
-                  // If your reconciliation uses ownerRefs, reconcile on ownerRef changes (metadata-only updates don't bump generation).
-                  // Note: this is order-sensitive; if order changes, we reconcile (safe/conservative).
-                  if !apiequality.Semantic.DeepEqual(e.ObjectNew.GetOwnerReferences(), e.ObjectOld.GetOwnerReferences()) {
-                      return true
-                  }
-
-                  // Ignore pure status updates to avoid reconcile loops.
-                  return false
-              },
-              // No CreateFunc/DeleteFunc/GenericFunc: omit handlers that would only "return true".
-          },
-      )
-      ```
-
-    - If you need to compare **conditions** in **predicates** (**MUST**):
-      - Use `objutilv1` imported as `obju` (do NOT open-code `.status.conditions` comparison).
-      - Prefer:
-        - `obju.AreConditionsSemanticallyEqual(...)` when you need the whole condition meaning (Type/Status/Reason/Message/ObservedGeneration).
-        - `obju.AreConditionsEqualByStatus(...)` when only Status matters (Type+Status).
-
-      Example: compare condition(s) via `obju` (mechanical checks only)
-      ```go
-      import obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
-
-      predicate.Funcs{
-          UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
-              newObj, okNew := e.ObjectNew.(obju.StatusConditionObject)
-              oldObj, okOld := e.ObjectOld.(obju.StatusConditionObject)
-              if !okNew || !okOld || newObj == nil || oldObj == nil {
-                  // Be conservative if we cannot type-assert.
-                  return true
-              }
-
-              // Compare full condition meaning:
-              if !obju.AreConditionsSemanticallyEqual(newObj, oldObj, ExampleCondReadyType) {
-                  return true
-              }
-
-              // Or compare only Type+Status:
-              // if !obju.AreConditionsEqualByStatus(newObj, oldObj, ExampleCondReadyType) { return true }
-              //
-              // Or compare several condition types:
-              // if !obju.AreConditionsSemanticallyEqual(newObj, oldObj, ExampleCondReadyType, ExampleCondOnlineType) { return true }
-              // if !obju.AreConditionsEqualByStatus(newObj, oldObj, ExampleCondReadyType, ExampleCondOnlineType) { return true }
-              //
-              // Or compare all condition types present in either object:
-              // if !obju.AreConditionsSemanticallyEqual(newObj, oldObj) { return true }
-              // if !obju.AreConditionsEqualByStatus(newObj, oldObj) { return true }
-
-              return false
-          },
-      }
-      ```
-
-    - If `client.Object` methods are not enough for the fields you need, use `Get*`/`Has*`/`Equals*` helpers from the API type of the object.
-      - If the object is from this repo API and such mechanical helpers are missing, prefer adding them to the API (still no business logic) and document the decision in code (short comment) before introducing ad-hoc direct field access in the controller.
-
-      Example: use API helpers when `client.Object` methods are not enough (cast only to call helpers, inline style)
-      ```go
-      builder.WithPredicates(
-          predicate.Funcs{
-              UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
-                  // We need API helper methods → cast is justified.
-                  oldObj, okOld := e.ObjectOld.(*v1alpha1.Example)
-                  newObj, okNew := e.ObjectNew.(*v1alpha1.Example)
-                  if !okOld || !okNew || oldObj == nil || newObj == nil {
-                      return true
-                  }
-
-                  // Mechanical change detection via API helpers (no business logic here).
-                  if !newObj.HasFoo() {
-                      return true
-                  }
-                  if !newObj.FooEquals(oldObj.GetFoo()) {
-                      return true
-                  }
-
-                  return false
-              },
-          },
-      )
-      ```
-
-
-    - If there are no `client.Object` methods and no API helpers, read object fields directly.
-
-      Example: direct field access when there are no `client.Object` methods and no API helpers (inline style)
-      ```go
-      builder.WithPredicates(
-          predicate.Funcs{
-              UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
-                  // We need direct field reads → cast is justified.
-                  oldObj, okOld := e.ObjectOld.(*v1alpha1.Example)
-                  newObj, okNew := e.ObjectNew.(*v1alpha1.Example)
-                  if !okOld || !okNew || oldObj == nil || newObj == nil {
-                      return true
-                  }
-
-                  // Field-level change detection (keep it small and explicit).
-                  if newObj.Spec.Replicas != oldObj.Spec.Replicas {
-                      return true
-                  }
-                  if newObj.Spec.Mode != oldObj.Spec.Mode {
-                      return true
-                  }
-
-                  return false
-              },
-          },
-      )
-      ```
-
-- Type assertions/casts in **predicates** (**MUST**):
-  - If you do cast and can't safely classify the event (type-assert fails / nil), be conservative: return `true` (allow reconcile).
-
-    Example: safe cast in predicates (inline style)
-    ```go
-    builder.WithPredicates(
-        predicate.Funcs{
-            UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
-                // We need API helper methods or direct field reads → cast is justified.
-                oldObj, okOld := e.ObjectOld.(*v1alpha1.Example)
-                newObj, okNew := e.ObjectNew.(*v1alpha1.Example)
-                if !okOld || !okNew || oldObj == nil || newObj == nil {
-                    // Be conservative: if we can't type-assert, allow reconcile.
-                    return true
-                }
-
-                // predicate logic goes here
-                return false
-            },
-        },
-    )
-    ```
-
-  - Type-assert/cast to a concrete API type ONLY when `client.Object` methods are not enough for what you need.
-
-    Example: do NOT cast when `client.Object` methods are sufficient (inline style)
-    ```go
-    builder.WithPredicates(
-        predicate.Funcs{
-            UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
-                // ✅ GOOD: no type cast needed for name/namespace.
-                keyChanged := e.ObjectNew.GetNamespace() != e.ObjectOld.GetNamespace() ||
-                    e.ObjectNew.GetName() != e.ObjectOld.GetName()
-
-                // ❌ BAD: pointless cast just to read metadata fields.
-                // newObj := e.ObjectNew.(*v1alpha1.Example)
-                // _ = newObj.Name
-
-                return keyChanged
-            },
-        },
-    )
-    ```
+- Predicate implementation rules:
+  - **predicates**/**filters** **MUST** be implemented in **`predicate.go`**.
+  - **`controller.go`** **MUST NOT** contain predicate implementation code.
+  - **`controller.go`** wires predicates by calling `builder.WithPredicates(<kind>Predicates()...)`.
+  - See: `controller-predicate.mdc`.
 
 - MaxConcurrentReconciles (MUST):
   - Configure `.WithOptions(controller.Options{MaxConcurrentReconciles: 10})` unless there is a strong, explicit reason not to.
@@ -322,18 +126,10 @@ alwaysApply: true
   ```go
   builder.ControllerManagedBy(mgr).
       Named(ExampleControllerName).
-      For(&v1alpha1.Example{}, builder.WithPredicates(
-          predicate.Funcs{
-              // predicate logic goes here
-          },
-      )).
+      For(&v1alpha1.Example{}, builder.WithPredicates(examplePredicates()...)).
       Owns(
           &v1alpha1.ExampleChild{},
-          builder.WithPredicates(
-              predicate.Funcs{
-                  // child predicate logic goes here
-              },
-          ),
+          builder.WithPredicates(exampleChildPredicates()...),
       ). // ownerRef-based mapping
       WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
       Complete(rec)
@@ -343,11 +139,7 @@ alwaysApply: true
   ```go
   builder.ControllerManagedBy(mgr).
       Named(ExampleControllerName).
-      For(&v1alpha1.Example{}, builder.WithPredicates(
-          predicate.Funcs{
-              // predicate logic goes here
-          },
-      )).
+      For(&v1alpha1.Example{}, builder.WithPredicates(examplePredicates()...)).
       Watches(
           &v1alpha1.ExampleChild{},
           handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
@@ -360,11 +152,7 @@ alwaysApply: true
                   Name:      ch.Spec.ParentName,
               }}}
           }),
-          builder.WithPredicates(
-              predicate.Funcs{
-                  // child predicate logic goes here
-              },
-          ),
+          builder.WithPredicates(exampleChildPredicates()...),
       ).
       WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
       Complete(rec)

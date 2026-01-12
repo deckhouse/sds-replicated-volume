@@ -27,9 +27,13 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
   (typically executed by a `patch*` / `patch*Status` helper).
 - **Patch base (`base`)**: the `DeepCopy()` snapshot used as a diff reference for **one** patch request.
 
----
-
 ## Core invariants for Reconcile methods (MUST)
+
+### Phases for Reconcile methods (MUST)
+
+- Any **non-root Reconcile method** **MUST** start a **phase** (`flow.BeginPhase` / `flow.EndPhase`) and return **Outcome**.
+- The **root Reconcile** is the only exception: it **MUST** use `flow.Begin(ctx)` (no phases) and return via `outcome.ToCtrl()`.
+- See: `controller-reconciliation-flow.mdc`.
 
 ### One Reconcile method = one reconciliation pattern (MUST)
 

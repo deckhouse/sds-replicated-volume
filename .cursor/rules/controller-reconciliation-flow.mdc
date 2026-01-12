@@ -25,7 +25,7 @@ Summary only; if anything differs, follow normative sections below.
 ## TL;DR
 
 - **Phases**: if used → **exactly one** per function (`BeginPhase` + `EndPhase`), no nesting/sequencing. In a phased function: `BeginPhase` is **1st line**, `defer EndPhase(ctx, &outcome)` is **2nd**; named return **MUST** be `outcome flow.Outcome`; no bare `return`. Use only derived `ctx` and (if logging) only the logger returned by `BeginPhase`.
-- **Phase name/metadata**: name is a stable `WithName` segment (non-empty, no spaces; **SHOULD** be lowercase ASCII); **MUST NOT** include dynamic values. Variable identity goes into `BeginPhase` key/values (required for loops/repeated calls; don’t duplicate request/parent metadata).
+- **Phase name/metadata**: name **MUST** be `kebab-case`, dots forbidden, no duplication of controller or parent phase names. **MUST NOT** include dynamic values. Variable identity goes into `BeginPhase` key/values (required for loops/repeated calls; don’t duplicate request/parent metadata).
 - **root Reconcile**: **MUST** use `flow.Begin(ctx)` (no phases) and return via `outcome.ToCtrl()`; don’t manually log Outcome errors.
 - **Outcome**: build only with `flow.Continue/Done/RequeueAfter/Fail/Failf` (no struct/field edits). At each call-site: either check `ShouldReturn()` immediately, return immediately, or merge/accumulate then check/return. Best-effort overrides are rare: comment + log dropped errors. Enrich errors only via `Failf` / `Enrichf` (no re-wrapping from `outcome.Error()`).
 
