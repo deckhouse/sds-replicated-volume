@@ -126,6 +126,7 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 	v.log.Debug("attached nodes", "nodes", attachNodes)
 
 	// Create RV and RVAs
+	// We are waiting for the RVA to be ready, so it may take a long time.
 	createDuration, err := v.createRV(ctx, attachNodes)
 	if err != nil {
 		v.log.Error("failed to create RV and RVAs", "error", err)
