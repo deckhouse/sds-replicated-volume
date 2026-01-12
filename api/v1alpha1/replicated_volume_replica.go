@@ -335,4 +335,5 @@ type PeerDeviceStatus struct {
 	OutOfSync              int              `json:"outOfSync"`
 	HasSyncDetails         bool             `json:"hasSyncDetails"`
 	HasOnlineVerifyDetails bool             `json:"hasOnlineVerifyDetails"`
+	PercentInSync          string           `json:"percentInSync"`
 }

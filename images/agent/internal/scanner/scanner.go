@@ -435,7 +435,7 @@ func copyStatusFields(
 				// removed (verbose): Unacked:                pd.Unacked,
 				HasSyncDetails:         pd.HasSyncDetails,
 				HasOnlineVerifyDetails: pd.HasOnlineVerifyDetails,
-				// removed (verbose): PercentInSync:          fmt.Sprintf("%.2f", pd.PercentInSync),
+				PercentInSync:          fmt.Sprintf("%.2f", pd.PercentInSync),
 			})
 		}
 

@@ -346,6 +346,8 @@ spec:
                                     type: boolean
                                   peerDiskState:
                                     type: string
+                                  percentInSync:
+                                    type: string
                                   replicationState:
                                     type: string
                                   resyncSuspended:
@@ -358,6 +360,7 @@ spec:
                                 - outOfSync
                                 - peerClient
                                 - peerDiskState
+                                - percentInSync
                                 - replicationState
                                 - resyncSuspended
                                 - volume
