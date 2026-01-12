@@ -92,6 +92,11 @@ alwaysApply: false
   - Structural type name (e.g. `Spec`, `Status`) MUST be prefixed by the full object name:
     - Examples: `ReplicatedVolumeSpec`, `ReplicatedVolumeStatus`, `ReplicatedStorageClassSpec`, `ReplicatedStorageClassStatus`
 
+- Optional scalar fields (optional `*T`) (MUST):
+  - This section applies to Kubernetes API fields that are semantically optional (tagged `json:",omitempty"`), but whose underlying value type is a scalar `T` (non-nil-able, e.g. `bool`, numbers, `string`, structs).
+  - To preserve the distinction between "unset" and "set to the zero value", such API fields MUST be represented as pointers (`*T`) in Go API types.
+  - Example (illustrative): if `TimeoutSeconds` is optional, use `*int32` (not `int32`) and tag it with `json:"timeoutSeconds,omitempty"`.
+
 ## Helpers vs custom_logic_that_should_not_be_here (MUST)
 
 Write helpers in `*_types.go`. If a function does **not** fit the rules below, it MUST go to `*_custom_logic_that_should_not_be_here.go`.

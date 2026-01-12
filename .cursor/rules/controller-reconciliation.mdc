@@ -94,37 +94,36 @@ Notes:
      2. then other kinds from this repository API (types under `api/v*/`) in **alphabetical order** by established kind name (short kind name when applicable),
      3. then kinds from other APIs in **alphabetical order** by kind name.
 
-## Optional scalar fields (`omitempty` + non-nil-able) (MUST)
+## Optional scalar fields (optional `*T`) (MUST)
 
-Kubernetes API types sometimes mark fields as optional via `json:",omitempty"`, while the Go type itself cannot be `nil`
-(e.g., `bool`, numbers, `string`, structs). Such fields are semantically optional, but the API type cannot express
-“unset” vs “set to the zero value”.
+Kubernetes APIs sometimes encode optionality via `json:",omitempty"` for fields whose underlying value is a scalar `T`
+(non-nil-able, e.g. `bool`, numbers, `string`, small structs).
 
-To preserve optionality across the reconciliation pipeline, controller code MUST represent such values as pointers when
-they are stored/passed/returned outside of the raw Kubernetes object.
-
-- If a Kubernetes API field is tagged `omitempty` and its Go type is **non-nil-able**, reconciliation code MUST:
-  - store it as `*T` in any controller POV state artifacts (**intended**, **actual**, **target**, **report**, and derived structs),
+If the API represents such a field as `*T` to preserve the distinction between "unset" and "set to the zero value",
+controller code MUST keep the same representation across the reconciliation pipeline:
+  - store it as `*T` in controller POV state artifacts (**intended**, **actual**, **target**, **report**, and derived structs),
   - pass it between functions as `*T`,
   - return it from functions as `*T`.
-- Exception: if a function parameter is an explicitly **required** input (the function cannot be called without a value),
-  that parameter MAY be `T` by value.
-- This rule applies to any functions in `reconciler.go` (**Reconcile methods**, **ReconcileHelpers**, and any other local helpers).
+- Comparisons SHOULD use `ptr.Equal(a, b)`.
+- Writes SHOULD assign the pointer directly; assigning `nil` MUST represent "unset".
+- Exception: if a function parameter is an explicitly required input (the function cannot be called without a value), that parameter MAY be `T` by value.
 
 Definitions:
-- **non-nil-able** types include: `bool`, numeric types, `string`, structs, arrays, `time.Duration`, `metav1.Duration`, `resource.Quantity`, etc.
+- **non-nil-able** scalar types include: `bool`, numeric types, `string`, structs, arrays, `time.Duration`, `metav1.Duration`, `resource.Quantity`, etc.
 - **nil-able** types include: pointers, maps, slices, interfaces, channels, functions.
 
 Example (illustrative):
 ```go
-// Foo.Spec.TimeoutSeconds is `int32` with `json:",omitempty"`.
+import "k8s.io/utils/ptr"
+
+// Foo.Spec.TimeoutSeconds is `*int32` with `json:",omitempty"`.
 type TargetFooSpec struct {
     TimeoutSeconds *int32
 }
 
-func applyFooSpec(obj *v1alpha1.Foo, target TargetFooSpec) {
-    if target.TimeoutSeconds != nil {
-        obj.Spec.TimeoutSeconds = *target.TimeoutSeconds
+func applyFooSpec(obj *v1alpha1.Foo, target *int32) {
+    if !ptr.Equal(obj.Spec.TimeoutSeconds, target) {
+        obj.Spec.TimeoutSeconds = target
     }
 }
 ```
