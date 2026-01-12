@@ -178,6 +178,43 @@ Published status output SHOULD be named as `report...` (it SHOULD NOT be stored 
 When declaring several pipeline variables together, the order SHOULD follow the pipeline:
 `intended` → `actual` → `target` → `report`.
 
+## controller-runtime split client & determinism (MUST)
+
+### Background
+
+For performance, controllers SHOULD use the default `client.Client` provided by controller-runtime.
+That default client behaves like a **split client**:
+
+- reads (`Get`/`List`) are served from a local cache;
+- writes (`Create`/`Patch`/`Update`/`Delete`) go directly to the API server;
+- the cache is **eventually consistent** and is not guaranteed to be invalidated immediately after a write.
+
+You can mentally model this as having a local, slightly delayed copy of the cluster state.
+
+### Consequences for reconciliation code (MUST)
+
+- Reconcile code MUST assume cache reads can be stale relative to our own recent writes.
+- Reconcile code MUST NOT rely on read-after-write consistency through the cached client for correctness.
+- Reconcile code MUST be deterministic:
+  - if the same Reconcile method re-runs before the cache catches up, it MUST compute the same intended result and produce
+    the same idempotent writes (or harmless repeats).
+
+### Non-determinism hazards & required protections (MUST)
+
+If you need to perform something non-deterministic (random IDs, timestamps, unstable naming, etc.), you MUST introduce a
+stabilizing mechanism so retries do not diverge.
+
+Examples of required protections:
+
+1. **Updating an object with a deterministic identity**
+   - Prefer a patch strategy with an **optimistic lock** and re-run reconciliation on conflict.
+2. **Creating an object**
+   - If the name is deterministic, repeated `Create` is safe: retries converge via `AlreadyExists`.
+   - If the name is not deterministic, retries can create duplicates (BAD).
+     - You MUST make naming deterministic, or
+     - persist the chosen name (or parameters required to compute it deterministically) in a stable place
+       (commonly: parent status) before creating.
+
 ## Core invariants for Reconcile methods (MUST)
 
 ### Phases for Reconcile methods (MUST)
