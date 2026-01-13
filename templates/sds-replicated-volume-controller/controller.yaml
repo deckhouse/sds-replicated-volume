@@ -16,7 +16,6 @@
 {{- $config := dict
   "fullname" "sds-replicated-volume-controller"
   "valuesKey" "sdsReplicatedVolume"
-  "controllerImageName" "sdsReplicatedVolumeController"
   "webhookEnabled" true
   "webhookCertPath" "internal.customWebhookCert"
   "onMasterNode" true

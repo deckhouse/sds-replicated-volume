@@ -1,6 +1,5 @@
 {{- /* RBAC */ -}}
 {{- $rbacConfig := dict
-  "fullname" "sds-replicated-volume-controller"
   "roleRules" (list
     (dict "apiGroups" (list "") "resources" (list "configmaps") "verbs" (list "get" "list" "watch" "update"))
     (dict "apiGroups" (list "") "resources" (list "secrets") "verbs" (list "get" "list" "watch"))
