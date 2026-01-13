@@ -175,6 +175,12 @@ spec:
                       allowTwoPrimaries:
                         default: false
                         type: boolean
+                      deviceUUID:
+                        description: |-
+                          DeviceUUID is the unique identifier from DRBD metadata.
+                          Used to verify disk identity and protect against swapped disks.
+                        pattern: ^(0x[0-9A-Fa-f]+)?$
+                        type: string
                       disk:
                         maxLength: 256
                         pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
@@ -250,6 +256,20 @@ spec:
                             maxLength: 1024
                             type: string
                         type: object
+                      deviceUUIDMismatchError:
+                        description: |-
+                          DeviceUUIDMismatchError indicates that the disk device-uuid doesn't match the stored value.
+                          This is a fatal error suggesting the disk may have been swapped.
+                        properties:
+                          actual:
+                            description: Actual device-uuid read from DRBD metadata.
+                            maxLength: 32
+                            type: string
+                          expected:
+                            description: Expected device-uuid stored in RVR status.
+                            maxLength: 32
+                            type: string
+                        type: object
                       fileSystemOperationError:
                         properties:
                           message:
@@ -277,6 +297,19 @@ spec:
                           output:
                             maxLength: 1024
                             type: string
+                        type: object
+                      nodeIDMismatchError:
+                        description: NodeIDMismatchError indicates that the node-id
+                          in DRBD metadata doesn't match expected value.
+                        properties:
+                          actual:
+                            description: |-
+                              Actual node-id read from DRBD metadata.
+                              Can be -1 for uninitialized metadata (resource was never up'd).
+                            type: integer
+                          expected:
+                            description: Expected node-id from RVR name.
+                            type: integer
                         type: object
                       sharedSecretAlgSelectionError:
                         properties:

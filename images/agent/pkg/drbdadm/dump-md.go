@@ -17,38 +17,91 @@ limitations under the License.
 package drbdadm
 
 import (
-	"bytes"
 	"context"
+	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
-// ExecuteDumpMD executes a command and returns:
-// - (true, nil) if it exits with code 0
-// - (false, nil) if it exits with code 1 and contains "No valid meta data found"
-// - (false, error) for any other case
-func ExecuteDumpMDMetadataExists(ctx context.Context, resource string) (bool, CommandError) {
+// Metadata contains parsed DRBD metadata fields.
+type Metadata struct {
+	DeviceUUID string
+	NodeID     int
+}
+
+// ExecuteDumpMDParsed runs drbdadm dump-md and parses output.
+// Returns:
+// - (*Metadata, true, nil) if metadata exists and was parsed successfully
+// - (nil, false, nil) if it exits with code 1 and contains "No valid meta data found"
+// - (nil, false/true, error) for any other case (command error or parse error)
+// Should only be called when device is DOWN.
+func ExecuteDumpMDParsed(ctx context.Context, resource string) (*Metadata, bool, CommandError) {
 	args := DumpMDArgs(resource)
 	cmd := ExecCommandContext(ctx, Command, args...)
 
-	var stderr bytes.Buffer
-	cmd.SetStderr(&stderr)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		exitCode := errToExitCode(err)
+		outputStr := string(output)
 
-	err := cmd.Run()
-	if err == nil {
-		return true, nil
+		if exitCode == 1 && strings.Contains(outputStr, "No valid meta data found") {
+			return nil, false, nil // metadata doesn't exist
+		}
+
+		return nil, false, &commandError{
+			error:           err,
+			commandWithArgs: append([]string{Command}, args...),
+			output:          outputStr,
+			exitCode:        exitCode,
+		}
 	}
 
-	exitCode := errToExitCode(err)
-	output := stderr.String()
-
-	if exitCode == 1 && strings.Contains(output, "No valid meta data found") {
-		return false, nil
+	md, parseErr := parseMetadata(string(output))
+	if parseErr != nil {
+		return nil, true, &commandError{
+			error:           parseErr,
+			commandWithArgs: append([]string{Command}, args...),
+			output:          string(output),
+			exitCode:        0,
+		}
 	}
 
-	return false, &commandError{
-		error:           err,
-		commandWithArgs: append([]string{Command}, args...),
-		output:          output,
-		exitCode:        exitCode,
+	return md, true, nil
+}
+
+var (
+	deviceUUIDRegex = regexp.MustCompile(`device-uuid\s+(0x[0-9A-Fa-f]+)`)
+	// node-id can be -1 for freshly created metadata (before first "up")
+	nodeIDRegex = regexp.MustCompile(`node-id\s+(-?\d+)`)
+)
+
+// NodeIDUninitialized indicates metadata exists but resource was never up'd.
+// DRBD writes node-id from config to metadata only during first "up".
+const NodeIDUninitialized = -1
+
+func parseMetadata(output string) (*Metadata, error) {
+	md := &Metadata{
+		NodeID: NodeIDUninitialized, // default if not found
 	}
+
+	// Parse: device-uuid 0xABCDEF123456789A;
+	if match := deviceUUIDRegex.FindStringSubmatch(output); len(match) > 1 {
+		md.DeviceUUID = match[1]
+	}
+
+	// Parse: node-id 0; (can be -1 for uninitialized metadata)
+	if match := nodeIDRegex.FindStringSubmatch(output); len(match) > 1 {
+		var err error
+		md.NodeID, err = strconv.Atoi(match[1])
+		if err != nil {
+			return nil, fmt.Errorf("parsing node-id: %w", err)
+		}
+	}
+
+	if md.DeviceUUID == "" {
+		return nil, fmt.Errorf("device-uuid not found in metadata output")
+	}
+
+	return md, nil
 }

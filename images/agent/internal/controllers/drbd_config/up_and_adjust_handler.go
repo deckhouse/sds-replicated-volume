@@ -166,32 +166,29 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 		return fmt.Errorf("renaming %s -> %s: %w", tmpFilePath, regularFilePath, fileSystemOperationError{err})
 	}
 
-	//
-	if h.rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
-		exists, err := drbdadm.ExecuteDumpMDMetadataExists(ctx, rvName)
-		if err != nil {
-			return fmt.Errorf("dumping metadata: %w", configurationCommandError{err})
-		}
-
-		if !exists {
-			if err := drbdadm.ExecuteCreateMD(ctx, rvName); err != nil {
-				return fmt.Errorf("creating metadata: %w", configurationCommandError{err})
-			}
-		}
-	}
-
-	// up & adjust - must be done before initial sync
+	// Check if device is UP first - this determines whether we can safely work with metadata.
+	// When device is UP, the disk cannot be swapped, so we skip metadata verification.
 	isUp, err := drbdadm.ExecuteStatusIsUp(ctx, rvName)
 	if err != nil {
 		return fmt.Errorf("checking if resource '%s' is up: %w", rvName, configurationCommandError{err})
 	}
 
+	// For Diskful replicas: handle metadata creation and device-uuid verification.
+	// Only do this when device is NOT up - when device is up, disk cannot be swapped.
+	if h.rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && !isUp {
+		if err := h.handleMetadataAndUUID(ctx, rvName); err != nil {
+			return err
+		}
+	}
+
+	// up & adjust - must be done before initial sync
 	if !isUp {
 		if err := drbdadm.ExecuteUp(ctx, rvName); err != nil {
 			return fmt.Errorf("upping the resource '%s': %w", rvName, configurationCommandError{err})
 		}
 	}
 
+	// adjust
 	if err := drbdadm.ExecuteAdjust(ctx, rvName); err != nil {
 		return fmt.Errorf("adjusting the resource '%s': %w", rvName, configurationCommandError{err})
 	}
@@ -202,7 +199,7 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 	// - Disk is not already UpToDate
 	// - RV was never initialized (rv.conditions.Initialized=False)
 	// The rv.Initialized check protects against split-brain when peers info is not yet populated.
-	if h.rvr.Spec.Type == "Diskful" {
+	if h.rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
 		noDiskfulPeers := h.rvr.Status.DRBD.Config.PeersInitialized &&
 			!hasDiskfulPeer(h.rvr.Status.DRBD.Config.Peers)
 
@@ -221,7 +218,7 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 			}
 
 			if err := drbdadm.ExecuteSecondary(ctx, rvName); err != nil {
-				return fmt.Errorf("demoting resource '%s' after initil sync: %w", rvName, configurationCommandError{err})
+				return fmt.Errorf("demoting resource '%s' after initial sync: %w", rvName, configurationCommandError{err})
 			}
 		}
 	}
@@ -240,6 +237,71 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 	}
 
 	h.rvr.Status.ActualType = h.rvr.Spec.Type
+
+	return nil
+}
+
+// handleMetadataAndUUID checks for DRBD metadata existence, creates it if needed,
+// and verifies or stores the device-uuid. This protects against swapped disks.
+// Should only be called when device is DOWN.
+func (h *UpAndAdjustHandler) handleMetadataAndUUID(ctx context.Context, rvName string) error {
+	// Read metadata and check if it exists
+	md, exists, err := drbdadm.ExecuteDumpMDParsed(ctx, rvName)
+	if err != nil {
+		return fmt.Errorf("reading metadata: %w", configurationCommandError{err})
+	}
+
+	if !exists {
+		// Create metadata
+		if err := drbdadm.ExecuteCreateMD(ctx, rvName); err != nil {
+			return fmt.Errorf("creating metadata: %w", configurationCommandError{err})
+		}
+		// Read newly created metadata
+		md, _, err = drbdadm.ExecuteDumpMDParsed(ctx, rvName)
+		if err != nil {
+			return fmt.Errorf("reading created metadata: %w", configurationCommandError{err})
+		}
+	}
+
+	// Initialize actual struct if needed
+	if h.rvr.Status.DRBD.Actual == nil {
+		h.rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
+	}
+
+	// Verify or store device-uuid
+	storedUUID := h.rvr.Status.DRBD.Actual.DeviceUUID
+	if storedUUID == "" {
+		// First time seeing this disk - store the UUID
+		h.rvr.Status.DRBD.Actual.DeviceUUID = md.DeviceUUID
+	} else if storedUUID != md.DeviceUUID {
+		// UUID mismatch - disk may have been swapped!
+		return deviceUUIDMismatchError{expected: storedUUID, actual: md.DeviceUUID}
+	}
+
+	// Verify node-id for disk integrity.
+	// node-id = -1 means DRBD metadata exists but resource was never up'd
+	// (DRBD writes node-id from config to metadata only during first "up").
+	expectedNodeID, _ := h.rvr.NodeID()
+	wasEverUp := h.rvr.Status.DRBD.Actual.InitialSyncCompleted
+
+	switch {
+	case md.NodeID == drbdadm.NodeIDUninitialized:
+		if wasEverUp {
+			// Resource was successfully up'd before (InitialSyncCompleted=true),
+			// but metadata shows uninitialized node-id. This indicates metadata
+			// was recreated or corrupted after the resource was running.
+			return nodeIDMismatchError{expected: expectedNodeID, actual: md.NodeID}
+		}
+		// Never was up - node-id = -1 is expected for freshly created metadata
+		h.log.Debug("DRBD metadata has uninitialized node-id (resource never up'd yet)",
+			"resource", rvName, "expectedNodeID", expectedNodeID)
+	case md.NodeID < 0:
+		// Unexpected negative node-id (not -1) - should never happen, treat as error
+		return nodeIDMismatchError{expected: expectedNodeID, actual: md.NodeID}
+	case uint(md.NodeID) != expectedNodeID:
+		// node-id mismatch - disk might have been physically moved between nodes
+		return nodeIDMismatchError{expected: expectedNodeID, actual: md.NodeID}
+	}
 
 	return nil
 }

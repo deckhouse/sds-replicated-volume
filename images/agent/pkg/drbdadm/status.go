@@ -19,12 +19,10 @@ package drbdadm
 import (
 	"bytes"
 	"context"
-	"errors"
-	"os/exec"
 	"strings"
 )
 
-// ExecuteDumpMD executes a command and returns:
+// ExecuteStatusIsUp executes drbdadm status and returns:
 // - (true, nil) if it exits with code 0
 // - (false, nil) if it exits with code 10 and contains "No such resource"
 // - (false, error) for any other case
@@ -40,20 +38,17 @@ func ExecuteStatusIsUp(ctx context.Context, resource string) (bool, CommandError
 		return true, nil
 	}
 
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		exitCode := exitErr.ExitCode()
-		output := stderr.String()
+	exitCode := errToExitCode(err)
+	output := stderr.String()
 
-		if exitCode == 10 && strings.Contains(output, "No such resource") {
-			return false, nil
-		}
+	if exitCode == 10 && strings.Contains(output, "No such resource") {
+		return false, nil
 	}
 
 	return false, &commandError{
 		error:           err,
 		commandWithArgs: append([]string{Command}, args...),
-		output:          stderr.String(),
-		exitCode:        errToExitCode(err),
+		output:          output,
+		exitCode:        exitCode,
 	}
 }

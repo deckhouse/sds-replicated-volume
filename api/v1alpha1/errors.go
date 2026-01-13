@@ -36,3 +36,22 @@ type SharedSecretUnsupportedAlgError struct {
 	// +kubebuilder:validation:MaxLength=1024
 	UnsupportedAlg string `json:"unsupportedAlg,omitempty"`
 }
+
+// +k8s:deepcopy-gen=true
+type DeviceUUIDMismatchError struct {
+	// Expected device-uuid stored in RVR status.
+	// +kubebuilder:validation:MaxLength=32
+	Expected string `json:"expected,omitempty"`
+	// Actual device-uuid read from DRBD metadata.
+	// +kubebuilder:validation:MaxLength=32
+	Actual string `json:"actual,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
+type NodeIDMismatchError struct {
+	// Expected node-id from RVR name.
+	Expected uint `json:"expected,omitempty"`
+	// Actual node-id read from DRBD metadata.
+	// Can be -1 for uninitialized metadata (resource was never up'd).
+	Actual int `json:"actual,omitempty"`
+}

@@ -19,7 +19,7 @@ package drbdadm
 var Command = "drbdadm"
 
 var DumpMDArgs = func(resource string) []string {
-	return []string{"dump-md", "--force", resource}
+	return []string{"dump-md", resource}
 }
 
 var StatusArgs = func(resource string) []string {
