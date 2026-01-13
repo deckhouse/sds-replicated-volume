@@ -23,7 +23,7 @@ spec:
     kind: Deployment
     name: linstor-scheduler-extender
   updatePolicy:
-    updateMode: "Auto"
+    updateMode: "Initial"
   resourcePolicy:
     containerPolicies:
     - containerName: linstor-scheduler-extender

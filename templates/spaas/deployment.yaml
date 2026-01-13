@@ -17,7 +17,7 @@ spec:
     kind: Deployment
     name: spaas
   updatePolicy:
-    updateMode: "Auto"
+    updateMode: "Initial"
   resourcePolicy:
     containerPolicies:
     - containerName: spaas
