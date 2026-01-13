@@ -17,6 +17,7 @@ limitations under the License.
 package drbdconfig
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -41,12 +42,44 @@ type sharedSecretAlgUnsupportedError struct {
 	unsupportedAlg string
 }
 
+type deviceUUIDMismatchError struct {
+	expected string
+	actual   string
+}
+
+func (e deviceUUIDMismatchError) Error() string {
+	return fmt.Sprintf(
+		"device-uuid mismatch: expected %s, got %s (disk may have been swapped)",
+		e.expected, e.actual,
+	)
+}
+
+type nodeIDMismatchError struct {
+	expected uint
+	actual   int // can be -1 for uninitialized metadata
+}
+
+func (e nodeIDMismatchError) Error() string {
+	if e.actual == drbdadm.NodeIDUninitialized {
+		return fmt.Sprintf(
+			"node-id mismatch in metadata: expected %d, got %d (uninitialized - metadata may have been recreated)",
+			e.expected, e.actual,
+		)
+	}
+	return fmt.Sprintf(
+		"node-id mismatch in metadata: expected %d, got %d",
+		e.expected, e.actual,
+	)
+}
+
 // [drbdAPIError]
 
 var allDRBDAPIErrors = []drbdAPIError{
 	configurationCommandError{},
 	fileSystemOperationError{},
 	sharedSecretAlgUnsupportedError{},
+	deviceUUIDMismatchError{},
+	nodeIDMismatchError{},
 }
 
 func resetAllDRBDAPIErrors(apiErrors *v1alpha1.DRBDErrors) {
@@ -77,6 +110,20 @@ func (s sharedSecretAlgUnsupportedError) WriteDRBDError(apiErrors *v1alpha1.DRBD
 	}
 }
 
+func (e deviceUUIDMismatchError) WriteDRBDError(apiErrors *v1alpha1.DRBDErrors) {
+	apiErrors.DeviceUUIDMismatchError = &v1alpha1.DeviceUUIDMismatchError{
+		Expected: e.expected,
+		Actual:   e.actual,
+	}
+}
+
+func (e nodeIDMismatchError) WriteDRBDError(apiErrors *v1alpha1.DRBDErrors) {
+	apiErrors.NodeIDMismatchError = &v1alpha1.NodeIDMismatchError{
+		Expected: e.expected,
+		Actual:   e.actual,
+	}
+}
+
 // [drbdAPIError.ResetDRBDError]
 
 func (configurationCommandError) ResetDRBDError(apiErrors *v1alpha1.DRBDErrors) {
@@ -89,6 +136,14 @@ func (fileSystemOperationError) ResetDRBDError(apiErrors *v1alpha1.DRBDErrors) {
 
 func (sharedSecretAlgUnsupportedError) ResetDRBDError(apiErrors *v1alpha1.DRBDErrors) {
 	apiErrors.SharedSecretAlgSelectionError = nil
+}
+
+func (deviceUUIDMismatchError) ResetDRBDError(apiErrors *v1alpha1.DRBDErrors) {
+	apiErrors.DeviceUUIDMismatchError = nil
+}
+
+func (nodeIDMismatchError) ResetDRBDError(apiErrors *v1alpha1.DRBDErrors) {
+	apiErrors.NodeIDMismatchError = nil
 }
 
 // utils

@@ -271,7 +271,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			needsResourcesDir:    true,
 			cryptoAlgs:           []string{testAlgSHA256},
 			expectedCommands:     createMDFailureCommands(testRVRAltName),
-			expectedReconcileErr: errors.New("dumping metadata: ExitErr"),
+			expectedReconcileErr: errors.New("reading metadata: ExitErr"),
 		},
 		{
 			name:              "diskful with peers skips createMD and still adjusts",
@@ -313,6 +313,43 @@ func TestReconciler_Reconcile(t *testing.T) {
 				rvr := fetchRVR(t, cl, testRVRName)
 				expectFinalizers(t, rvr.Finalizers, v1alpha1.AgentAppFinalizer, v1alpha1.ControllerAppFinalizer)
 				expectNoDRBDErrors(t, rvr.Status.DRBD.Errors)
+			},
+		},
+		{
+			name:                 "device-uuid mismatch returns fatal error",
+			rv:                   readyRVWithConfig(testRVSecret, testAlgSHA256, 8, true),
+			rvr:                  diskfulRVRWithStoredUUID(testRVRAltName, addr(testNodeIPv4, port(300)), testLLVName, "0xOLDUUID123456789"),
+			llv:                  newLLV(testLLVName, testLVGName, testDiskName),
+			lvg:                  newLVG(testLVGName),
+			needsResourcesDir:    true,
+			cryptoAlgs:           []string{testAlgSHA256},
+			expectedCommands:     deviceUUIDMismatchCommands(testRVRAltName),
+			expectedReconcileErr: errors.New("device-uuid mismatch: expected 0xOLDUUID123456789, got 0x1234567890ABCDEF (disk may have been swapped)"),
+			postCheck: func(t *testing.T, cl client.Client) {
+				rvr := fetchRVR(t, cl, testRVRAltName)
+				if rvr.Status.DRBD.Errors == nil || rvr.Status.DRBD.Errors.DeviceUUIDMismatchError == nil {
+					t.Fatalf("expected device-uuid mismatch error recorded")
+				}
+				if rvr.Status.DRBD.Errors.DeviceUUIDMismatchError.Expected != "0xOLDUUID123456789" {
+					t.Fatalf("expected error to contain expected UUID")
+				}
+			},
+		},
+		{
+			name:                 "node-id mismatch returns fatal error",
+			rv:                   readyRVWithConfig(testRVSecret, testAlgSHA256, 9, true),
+			rvr:                  diskfulRVR(testRVRAltName, addr(testNodeIPv4, port(301)), testLLVName),
+			llv:                  newLLV(testLLVName, testLVGName, testDiskName),
+			lvg:                  newLVG(testLVGName),
+			needsResourcesDir:    true,
+			cryptoAlgs:           []string{testAlgSHA256},
+			expectedCommands:     nodeIDMismatchCommands(testRVRAltName),
+			expectedReconcileErr: errors.New("node-id mismatch in metadata: expected 0, got 5"),
+			postCheck: func(t *testing.T, cl client.Client) {
+				rvr := fetchRVR(t, cl, testRVRAltName)
+				if rvr.Status.DRBD.Errors == nil || rvr.Status.DRBD.Errors.NodeIDMismatchError == nil {
+					t.Fatalf("expected node-id mismatch error recorded")
+				}
 			},
 		},
 	}
@@ -485,6 +522,21 @@ func rvrWithErrors(rvr *v1alpha1.ReplicatedVolumeReplica) *v1alpha1.ReplicatedVo
 	return r
 }
 
+func diskfulRVRWithStoredUUID(name string, address v1alpha1.Address, llvName string, storedUUID string) *v1alpha1.ReplicatedVolumeReplica {
+	rvr := diskfulRVR(name, address, llvName)
+	if rvr.Status == nil {
+		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
+	}
+	if rvr.Status.DRBD == nil {
+		rvr.Status.DRBD = &v1alpha1.DRBD{}
+	}
+	if rvr.Status.DRBD.Actual == nil {
+		rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
+	}
+	rvr.Status.DRBD.Actual.DeviceUUID = storedUUID
+	return rvr
+}
+
 func resetMemFS(t *testing.T) {
 	t.Helper()
 	drbdconfig.FS = &afero.Afero{Fs: afero.NewMemMapFs()}
@@ -617,6 +669,7 @@ func newLLV(name, lvgName, lvName string) *snc.LVMLogicalVolume {
 	}
 }
 
+//nolint:unparam // test helper, parameter kept for clarity and potential future expansion
 func newLVG(name string) *snc.LVMVolumeGroup {
 	return &snc.LVMVolumeGroup{
 		ObjectMeta: v1.ObjectMeta{
@@ -646,8 +699,22 @@ func disklessExpectedCommands(rvrName string) []*fakedrbdadm.ExpectedCmd {
 
 	return []*fakedrbdadm.ExpectedCmd{
 		newExpectedCmd(drbdadm.Command, drbdadm.ShNopArgs(tmp, regular), "ok", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.StatusArgs(testRVName), "", nil),
+		// Status check - device is not up (exit code 10 with "No such resource")
+		statusNotUpCmd(),
+		// up the device
+		newExpectedCmd(drbdadm.Command, drbdadm.UpArgs(testRVName), "", nil),
+		// adjust
 		newExpectedCmd(drbdadm.Command, drbdadm.AdjustArgs(testRVName), "", nil),
+	}
+}
+
+// statusNotUpCmd returns a command that indicates the device is not up
+func statusNotUpCmd() *fakedrbdadm.ExpectedCmd {
+	return &fakedrbdadm.ExpectedCmd{
+		Name:         drbdadm.Command,
+		Args:         drbdadm.StatusArgs(testRVName),
+		ResultOutput: []byte("No such resource"),
+		ResultErr:    fakedrbdadm.ExitErr{Code: 10},
 	}
 }
 
@@ -656,18 +723,44 @@ func diskfulExpectedCommands(rvrName string) []*fakedrbdadm.ExpectedCmd {
 
 	return []*fakedrbdadm.ExpectedCmd{
 		newExpectedCmd(drbdadm.Command, drbdadm.ShNopArgs(tmp, regular), "", nil),
+		// Status check - device is not up
+		statusNotUpCmd(),
+		// dump-md returns "No valid meta data found" - metadata doesn't exist
 		{
 			Name:         drbdadm.Command,
 			Args:         drbdadm.DumpMDArgs(testRVName),
 			ResultOutput: []byte("No valid meta data found"),
 			ResultErr:    fakedrbdadm.ExitErr{Code: 1},
 		},
+		// create-md creates metadata
 		newExpectedCmd(drbdadm.Command, drbdadm.CreateMDArgs(testRVName), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.StatusArgs(testRVName), "", nil),
+		// dump-md again to read created metadata (node-id = -1 for fresh metadata)
+		newExpectedCmd(drbdadm.Command, drbdadm.DumpMDArgs(testRVName), testMetadataNewlyCreated, nil),
+		// up & adjust
+		newExpectedCmd(drbdadm.Command, drbdadm.UpArgs(testRVName), "", nil),
 		newExpectedCmd(drbdadm.Command, drbdadm.AdjustArgs(testRVName), "", nil),
+		// initial sync
 		newExpectedCmd(drbdadm.Command, drbdadm.PrimaryForceArgs(testRVName), "", nil),
 		newExpectedCmd(drbdadm.Command, drbdadm.SecondaryArgs(testRVName), "", nil),
 	}
+}
+
+// testMetadataNewlyCreated is the output of dump-md right after create-md.
+// node-id = -1 because DRBD writes node-id only during first "up".
+const testMetadataNewlyCreated = `# DRBD meta data dump
+device-uuid 0x1234567890ABCDEF;
+node-id -1;
+`
+
+// testMetadataAfterUp is the output of dump-md after the resource was up'd at least once.
+// node-id is set to the actual value from config.
+const testMetadataAfterUp = `# DRBD meta data dump
+device-uuid 0x1234567890ABCDEF;
+node-id 0;
+`
+
+func ptrUint(v uint) *uint {
+	return &v
 }
 
 func addr(ip string, port uint) v1alpha1.Address {
@@ -706,8 +799,12 @@ func diskfulExpectedCommandsWithExistingMetadata(rvrName string) []*fakedrbdadm.
 
 	return []*fakedrbdadm.ExpectedCmd{
 		newExpectedCmd(drbdadm.Command, drbdadm.ShNopArgs(tmp, regular), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.DumpMDArgs(testRVName), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.StatusArgs(testRVName), "", nil),
+		// Status check - device is not up
+		statusNotUpCmd(),
+		// dump-md returns metadata from previously up'd resource
+		newExpectedCmd(drbdadm.Command, drbdadm.DumpMDArgs(testRVName), testMetadataAfterUp, nil),
+		// up & adjust
+		newExpectedCmd(drbdadm.Command, drbdadm.UpArgs(testRVName), "", nil),
 		newExpectedCmd(drbdadm.Command, drbdadm.AdjustArgs(testRVName), "", nil),
 	}
 }
@@ -788,7 +885,9 @@ func expectNoDRBDErrors(t *testing.T, errs *v1alpha1.DRBDErrors) {
 		errs.ConfigurationCommandError != nil ||
 		errs.SharedSecretAlgSelectionError != nil ||
 		errs.LastPrimaryError != nil ||
-		errs.LastSecondaryError != nil {
+		errs.LastSecondaryError != nil ||
+		errs.DeviceUUIDMismatchError != nil ||
+		errs.NodeIDMismatchError != nil {
 		t.Fatalf("expected no drbd errors, got %+v", errs)
 	}
 }
@@ -819,7 +918,11 @@ func adjustFailureCommands(rvrName string) []*fakedrbdadm.ExpectedCmd {
 	regular, tmp := drbdconfig.FilePaths(rvrName)
 	return []*fakedrbdadm.ExpectedCmd{
 		newExpectedCmd(drbdadm.Command, drbdadm.ShNopArgs(tmp, regular), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.StatusArgs(testRVName), "", nil),
+		// Status check - device is not up
+		statusNotUpCmd(),
+		// up the device
+		newExpectedCmd(drbdadm.Command, drbdadm.UpArgs(testRVName), "", nil),
+		// adjust fails
 		newExpectedCmd(drbdadm.Command, drbdadm.AdjustArgs(testRVName), "", fakedrbdadm.ExitErr{Code: 1}),
 	}
 }
@@ -828,6 +931,36 @@ func createMDFailureCommands(rvrName string) []*fakedrbdadm.ExpectedCmd {
 	regular, tmp := drbdconfig.FilePaths(rvrName)
 	return []*fakedrbdadm.ExpectedCmd{
 		newExpectedCmd(drbdadm.Command, drbdadm.ShNopArgs(tmp, regular), "", nil),
+		// Status check - device is not up
+		statusNotUpCmd(),
+		// dump-md fails with exit code 2
 		newExpectedCmd(drbdadm.Command, drbdadm.DumpMDArgs(testRVName), "", fakedrbdadm.ExitErr{Code: 2}),
+	}
+}
+
+func deviceUUIDMismatchCommands(rvrName string) []*fakedrbdadm.ExpectedCmd {
+	regular, tmp := drbdconfig.FilePaths(rvrName)
+	return []*fakedrbdadm.ExpectedCmd{
+		newExpectedCmd(drbdadm.Command, drbdadm.ShNopArgs(tmp, regular), "", nil),
+		// Status check - device is not up
+		statusNotUpCmd(),
+		// dump-md returns metadata with different UUID than stored
+		newExpectedCmd(drbdadm.Command, drbdadm.DumpMDArgs(testRVName), testMetadataAfterUp, nil),
+	}
+}
+
+const testMetadataWithWrongNodeID = `# DRBD meta data dump
+device-uuid 0x1234567890ABCDEF;
+node-id 5;
+`
+
+func nodeIDMismatchCommands(rvrName string) []*fakedrbdadm.ExpectedCmd {
+	regular, tmp := drbdconfig.FilePaths(rvrName)
+	return []*fakedrbdadm.ExpectedCmd{
+		newExpectedCmd(drbdadm.Command, drbdadm.ShNopArgs(tmp, regular), "", nil),
+		// Status check - device is not up
+		statusNotUpCmd(),
+		// dump-md returns metadata with wrong node-id
+		newExpectedCmd(drbdadm.Command, drbdadm.DumpMDArgs(testRVName), testMetadataWithWrongNodeID, nil),
 	}
 }

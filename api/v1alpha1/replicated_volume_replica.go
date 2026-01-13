@@ -235,6 +235,13 @@ type DRBDErrors struct {
 	LastPrimaryError *CmdError `json:"lastPrimaryError,omitempty" patchStrategy:"merge"`
 	// +patchStrategy=merge
 	LastSecondaryError *CmdError `json:"lastSecondaryError,omitempty" patchStrategy:"merge"`
+	// DeviceUUIDMismatchError indicates that the disk device-uuid doesn't match the stored value.
+	// This is a fatal error suggesting the disk may have been swapped.
+	// +patchStrategy=merge
+	DeviceUUIDMismatchError *DeviceUUIDMismatchError `json:"deviceUUIDMismatchError,omitempty" patchStrategy:"merge"`
+	// NodeIDMismatchError indicates that the node-id in DRBD metadata doesn't match expected value.
+	// +patchStrategy=merge
+	NodeIDMismatchError *NodeIDMismatchError `json:"nodeIDMismatchError,omitempty" patchStrategy:"merge"`
 }
 
 // +kubebuilder:object:generate=true
@@ -251,6 +258,12 @@ type DRBDActual struct {
 	// +optional
 	// +kubebuilder:default=false
 	InitialSyncCompleted bool `json:"initialSyncCompleted,omitempty"`
+
+	// DeviceUUID is the unique identifier from DRBD metadata.
+	// Used to verify disk identity and protect against swapped disks.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^(0x[0-9A-Fa-f]+)?$`
+	DeviceUUID string `json:"deviceUUID,omitempty"`
 }
 
 func SprintDRBDDisk(actualVGNameOnTheNode, actualLVNameOnTheNode string) string {
