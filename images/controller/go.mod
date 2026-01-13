@@ -1,4 +1,4 @@
-module github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller
+module github.com/deckhouse/sds-replicated-volume/images/controller
 
 go 1.24.11
 

@@ -20,7 +20,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/pkg/logger"
 )
 
 // ScanInterval Scan block device interval seconds
@@ -36,7 +36,7 @@ const (
 	MetricsPortEnv                       = "METRICS_PORT"
 	ControllerNamespaceEnv               = "CONTROLLER_NAMESPACE"
 	HardcodedControllerNS                = "d8-sds-replicated-volume"
-	ControllerName                       = "sds-replicated-volume-controller"
+	ControllerName                       = "d8-controller"
 	LogLevel                             = "LOG_LEVEL"
 )
 

@@ -32,12 +32,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/pkg/logger"
 )
 
 const (
 	StorageClassAnnotationsCtrlName = "storage-class-annotations-controller"
-	ControllerConfigMapName         = "sds-replicated-volume-controller-config"
+	ControllerConfigMapName         = "d8-sds-replicated-volume-controller-config"
 	VirtualizationModuleEnabledKey  = "virtualizationEnabled"
 )
 

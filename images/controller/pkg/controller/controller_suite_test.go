@@ -34,7 +34,7 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/controller"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/pkg/controller"
 )
 
 const (
@@ -254,7 +254,7 @@ func getSC(ctx context.Context, cl client.Client, name, namespace string) (*stor
 }
 
 func createConfigMap(ctx context.Context, cl client.Client, namespace string, data map[string]string) error {
-	name := "sds-replicated-volume-controller-config"
+	name := "d8-sds-replicated-volume-controller-config"
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -267,7 +267,7 @@ func createConfigMap(ctx context.Context, cl client.Client, namespace string, da
 }
 
 func getConfigMap(ctx context.Context, cl client.Client, namespace string) (*corev1.ConfigMap, error) {
-	name := "sds-replicated-volume-controller-config"
+	name := "d8-sds-replicated-volume-controller-config"
 	configMap := &corev1.ConfigMap{}
 	err := cl.Get(ctx, client.ObjectKey{
 		Name:      name,
