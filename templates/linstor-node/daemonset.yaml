@@ -32,7 +32,7 @@ spec:
     kind: DaemonSet
     name: linstor-node
   updatePolicy:
-    updateMode: "Auto"
+    updateMode: "Initial"
   resourcePolicy:
     containerPolicies:
     - containerName: linstor-satellite
