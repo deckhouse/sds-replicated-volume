@@ -22,7 +22,6 @@ FROM debian:bullseye-slim
 
 # Build-time DRBD source settings
 ARG DRBD_REPO="https://github.com/LINBIT/drbd.git"
-ARG DRBD_VERSION="9.2.13"
 
 # Install build tools and dependencies
 RUN export DEBIAN_FRONTEND=noninteractive && \
