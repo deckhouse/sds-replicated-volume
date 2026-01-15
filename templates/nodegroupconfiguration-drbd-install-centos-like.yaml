@@ -178,6 +178,7 @@ spec:
     # Find kernel headers directories
     # In CentOS/RHEL, archive all /usr/src/kernels/* directories (all versions)
     KERNEL_VERSION_FOR_API="${kernel_version_in_use}"
+    DRBD_VERSION="{{ $.Values.sdsReplicatedVolume.internal.drbdVersion }}"
     MODULES_TAR="/tmp/drbd-modules-${kernel_version_in_use}.tar.gz"
     
     # Archive kernel headers and send build request
@@ -199,9 +200,10 @@ spec:
       HTTP_CODE=$(curl -s -w '%{http_code}' -X POST \
         -H "Content-Type: application/gzip" \
         -H "X-Kernel-Version: ${KERNEL_VERSION_FOR_API}" \
+        -H "X-DRBD-Version: ${DRBD_VERSION}" \
         --data-binary @/tmp/headers.tar.gz \
         -o "$MODULES_TAR" \
-        "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}")
+        "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}&drbd_version=${DRBD_VERSION}")
       
       # Cleanup temporary headers archive
       rm -f /tmp/headers.tar.gz
@@ -218,9 +220,10 @@ spec:
       HTTP_CODE=$(curl -s -w '%{http_code}' -X POST \
         -H "Content-Type: application/gzip" \
         -H "X-Kernel-Version: ${KERNEL_VERSION_FOR_API}" \
+        -H "X-DRBD-Version: ${DRBD_VERSION}" \
         --data-binary @/tmp/headers.tar.gz \
         -o "$MODULES_TAR" \
-        "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}")
+        "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}&drbd_version=${DRBD_VERSION}")
       
       # Cleanup temporary headers archive
       rm -f /tmp/headers.tar.gz

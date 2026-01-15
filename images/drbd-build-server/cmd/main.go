@@ -45,8 +45,6 @@ var GitCommit string
 var (
 	flagAddr         = flag.String("addr", ":2021", "Server address")
 	flagDRBDDir      = flag.String("drbd-dir", "/drbd", "Path to DRBD source directory")
-	flagDRBDVersion  = flag.String("drbd-version", "", "DRBD version to clone (e.g., 9.2.12). If empty, will try to use existing drbd-dir")
-	flagDRBDRepo     = flag.String("drbd-repo", "https://github.com/LINBIT/drbd.git", "DRBD repository URL")
 	flagCacheDir     = flag.String("cache-dir", "/var/cache/drbd-build-server", "Path to cache directory for built modules")
 	flagMaxBytesBody = flag.Int64("maxbytesbody", 100*1024*1024, "Maximum number of bytes in the body (100MB)")
 	flagKeepTmpDir   = flag.Bool("keeptmpdir", false, "Do not delete the temporary directory, useful for debugging")
@@ -69,6 +67,7 @@ const (
 type BuildJob struct {
 	Key           string
 	KernelVersion string
+	DRBDVersion   string
 	Status        BuildStatus
 	Error         string
 	CreatedAt     time.Time
@@ -99,8 +98,6 @@ type server struct {
 	jmu  sync.RWMutex
 
 	// DRBD source configuration
-	drbdVersion string // DRBD version to clone (if needed)
-	drbdRepo    string // DRBD repository URL
 }
 
 func main() {
@@ -114,18 +111,6 @@ func main() {
 	spaasURL := os.Getenv("SPAAS_URL")
 	if spaasURL == "" {
 		spaasURL = "https://spaas.drbd.io"
-	}
-
-	// Get DRBD version from environment or flag
-	drbdVersion := *flagDRBDVersion
-	if drbdVersion == "" {
-		drbdVersion = os.Getenv("DRBD_VERSION")
-	}
-
-	// Get DRBD repo from environment or flag
-	drbdRepo := *flagDRBDRepo
-	if envRepo := os.Getenv("DRBD_REPO"); envRepo != "" {
-		drbdRepo = envRepo
 	}
 
 	// Initialize logger
@@ -146,11 +131,8 @@ func main() {
 		}
 	}
 
-	// If no base DRBD directory and version specified, we'll clone per build
-	if !hasDRBD && drbdVersion == "" {
-		logger.Warn("No DRBD source found and no version specified. Builds will fail.")
-		logger.Info("Either provide -drbd-dir with existing source or -drbd-version to clone.")
-		return
+	if !hasDRBD {
+		logger.Warn("No DRBD source found in drbd-dir; builds will fail")
 	}
 
 	s := &server{
@@ -163,8 +145,6 @@ func main() {
 		spaasURL:     spaasURL,
 		logger:       logger,
 		jobs:         make(map[string]*BuildJob),
-		drbdVersion:  drbdVersion,
-		drbdRepo:     drbdRepo,
 	}
 
 	s.routes()
@@ -233,10 +213,11 @@ func (s *server) hello() http.HandlerFunc {
 	}
 }
 
-// generateCacheKey creates a unique key for caching based on kernel version and headers hash
-func generateCacheKey(kernelVersion string, headersData []byte) string {
+// generateCacheKey creates a unique key for caching based on kernel version, DRBD version, and headers hash
+func generateCacheKey(kernelVersion, drbdVersion string, headersData []byte) string {
 	h := sha256.New()
 	h.Write([]byte(kernelVersion))
+	h.Write([]byte(drbdVersion))
 	h.Write(headersData)
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -260,6 +241,20 @@ func (s *server) buildModuleHandler() http.HandlerFunc {
 			return
 		}
 
+		// Get DRBD version from query parameter or header
+		drbdVersion := r.URL.Query().Get("drbd_version")
+		if drbdVersion == "" {
+			drbdVersion = r.Header.Get("X-DRBD-Version")
+			s.logger.Debug("Got DRBD version from header", "remote_addr", remoteAddr, "drbd_version", drbdVersion)
+		} else {
+			s.logger.Debug("Got DRBD version from query", "remote_addr", remoteAddr, "drbd_version", drbdVersion)
+		}
+		if drbdVersion == "" {
+			s.logger.Error("drbd_version not provided", "remote_addr", remoteAddr)
+			s.errorf(http.StatusBadRequest, remoteAddr, w, "drbd_version parameter or X-DRBD-Version header is required")
+			return
+		}
+
 		// Validate kernel version format
 		// Kernel version format: X.Y.Z[-flavor] where flavor can contain dots, dashes, underscores, and alphanumeric characters
 		// Examples: 5.15.0, 5.15.0-generic, 5.15.0-86-generic, 6.6.26-1.red80.x86_64, 6.1.0-37-cloud-amd64
@@ -267,6 +262,14 @@ func (s *server) buildModuleHandler() http.HandlerFunc {
 		if !kernelVersionRegex.MatchString(kernelVersion) {
 			s.logger.Error("Invalid kernel version format", "remote_addr", remoteAddr, "kernel_version", kernelVersion)
 			s.errorf(http.StatusBadRequest, remoteAddr, w, "Invalid kernel version format. Expected format: X.Y.Z[-flavor]")
+			return
+		}
+
+		// Validate DRBD version format (e.g., 9.2.12)
+		drbdVersionRegex := regexp.MustCompile(`^\d+\.\d+\.\d+(-[a-zA-Z0-9_.-]+)?$`)
+		if !drbdVersionRegex.MatchString(drbdVersion) {
+			s.logger.Error("Invalid DRBD version format", "remote_addr", remoteAddr, "drbd_version", drbdVersion)
+			s.errorf(http.StatusBadRequest, remoteAddr, w, "Invalid DRBD version format. Expected format: X.Y.Z[-suffix]")
 			return
 		}
 
@@ -284,7 +287,7 @@ func (s *server) buildModuleHandler() http.HandlerFunc {
 		s.logger.Debug("Read kernel headers data", "remote_addr", remoteAddr, "bytes", len(headersData))
 
 		// Generate cache key
-		cacheKey := generateCacheKey(kernelVersion, headersData)
+		cacheKey := generateCacheKey(kernelVersion, drbdVersion, headersData)
 		s.logger.Debug("Generated cache key", "remote_addr", remoteAddr, "cache_key", cacheKey)
 
 		// Check if already in cache
@@ -372,6 +375,7 @@ func (s *server) buildModuleHandler() http.HandlerFunc {
 		job = &BuildJob{
 			Key:           cacheKey,
 			KernelVersion: kernelVersion,
+			DRBDVersion:   drbdVersion,
 			Status:        StatusPending,
 			CreatedAt:     time.Now(),
 			CachePath:     cachePath,
@@ -381,9 +385,9 @@ func (s *server) buildModuleHandler() http.HandlerFunc {
 		s.jobs[cacheKey] = job
 		activeJobsCount = len(s.jobs)
 		s.jmu.Unlock()
-		s.logger.Info("Created new build job", "remote_addr", remoteAddr, "job_id", cacheKey[:16], "kernel_version", kernelVersion, "cache_path", cachePath, "total_jobs", activeJobsCount)
+		s.logger.Info("Created new build job", "remote_addr", remoteAddr, "job_id", cacheKey[:16], "kernel_version", kernelVersion, "drbd_version", drbdVersion, "cache_path", cachePath, "total_jobs", activeJobsCount)
 
-		s.logger.Info("Starting DRBD build", "remote_addr", remoteAddr, "kernel_version", kernelVersion, "job_id", cacheKey[:16])
+		s.logger.Info("Starting DRBD build", "remote_addr", remoteAddr, "kernel_version", kernelVersion, "drbd_version", drbdVersion, "job_id", cacheKey[:16])
 
 		// Start build in background
 		s.logger.Debug("Launching async build goroutine", "remote_addr", remoteAddr, "job_id", cacheKey[:16])
@@ -405,7 +409,7 @@ func (s *server) buildModuleHandler() http.HandlerFunc {
 
 func (s *server) buildModule(job *BuildJob, headersData []byte) {
 	jobID := job.Key[:16]
-	s.logger.Debug("Async build started", "job_id", jobID, "kernel_version", job.KernelVersion)
+	s.logger.Debug("Async build started", "job_id", jobID, "kernel_version", job.KernelVersion, "drbd_version", job.DRBDVersion)
 
 	job.mu.Lock()
 	job.Status = StatusBuilding
@@ -494,9 +498,9 @@ func (s *server) buildModule(job *BuildJob, headersData []byte) {
 	s.logger.Info("Using kernel build directory", "job_id", jobID, "build_dir", buildDir)
 
 	// Prepare DRBD source for this build (create isolated copy)
-	s.logger.Info("Preparing DRBD source (isolated copy for this build)", "job_id", jobID)
+	s.logger.Info("Preparing DRBD source (isolated copy for this build)", "job_id", jobID, "drbd_version", job.DRBDVersion)
 	drbdBuildDir := filepath.Join(tmpDir, "drbd")
-	if err := s.prepareDRBDForBuild(drbdBuildDir, jobID); err != nil {
+	if err := s.prepareDRBDForBuild(drbdBuildDir, jobID, job.DRBDVersion); err != nil {
 		job.mu.Lock()
 		job.Status = StatusFailed
 		job.Error = fmt.Sprintf("Failed to prepare DRBD source: %v", err)
@@ -624,6 +628,7 @@ func (s *server) getStatus() http.HandlerFunc {
 		status := job.Status
 		errorMsg := job.Error
 		kernelVersion := job.KernelVersion
+		drbdVersion := job.DRBDVersion
 		createdAt := job.CreatedAt
 		completedAt := job.CompletedAt
 		cachePath := job.CachePath
@@ -635,7 +640,7 @@ func (s *server) getStatus() http.HandlerFunc {
 		} else {
 			duration = time.Since(createdAt).String()
 		}
-		s.logger.Debug("Job status", "remote_addr", remoteAddr, "status", status, "kernel_version", kernelVersion, "duration", duration, "has_error", errorMsg != "")
+		s.logger.Debug("Job status", "remote_addr", remoteAddr, "status", status, "kernel_version", kernelVersion, "drbd_version", drbdVersion, "duration", duration, "has_error", errorMsg != "")
 
 		resp := BuildResponse{
 			Status: status,
@@ -659,6 +664,7 @@ func (s *server) getStatus() http.HandlerFunc {
 			"status":         status,
 			"job_id":         jobID,
 			"kernel_version": kernelVersion,
+			"drbd_version":   drbdVersion,
 			"created_at":     createdAt.Format(time.RFC3339),
 			"error":          errorMsg,
 			"cache_path":     cachePath,
@@ -983,8 +989,8 @@ func (s *server) findKernelBuildDir(kernelHeadersDir, kernelVersion, jobID strin
 }
 
 // prepareDRBDForBuild prepares an isolated DRBD source directory for a build.
-// It either copies from base drbdDir or clones from repository if version is specified.
-func (s *server) prepareDRBDForBuild(destDir, jobID string) error {
+// It copies from base drbdDir.
+func (s *server) prepareDRBDForBuild(destDir, jobID, drbdVersion string) error {
 	s.logger.Debug("Preparing DRBD source", "job_id", jobID, "dest_dir", destDir)
 
 	// Create destination directory
@@ -1007,17 +1013,7 @@ func (s *server) prepareDRBDForBuild(destDir, jobID string) error {
 		}
 	}
 
-	// If no base directory or version specified, clone from repository
-	if s.drbdVersion == "" {
-		return fmt.Errorf("no DRBD source available: neither drbd-dir exists nor drbd-version specified")
-	}
-
-	s.logger.Info("Cloning DRBD repository", "job_id", jobID, "version", s.drbdVersion)
-	if err := s.cloneDRBDRepoToDir(s.drbdVersion, s.drbdRepo, destDir, jobID); err != nil {
-		return fmt.Errorf("failed to clone DRBD repository: %w", err)
-	}
-	s.logger.Debug("DRBD repository cloned successfully", "job_id", jobID)
-	return nil
+	return fmt.Errorf("no DRBD source available in drbd-dir for requested version %s", drbdVersion)
 }
 
 // copyDirectory recursively copies a directory from src to dst.
@@ -1034,66 +1030,6 @@ func copyDirectory(src, dst, jobID string, logger *slog.Logger) error {
 	}
 
 	logger.Debug("Directory copied successfully", "job_id", jobID)
-	return nil
-}
-
-// cloneDRBDRepoToDir clones the DRBD repository to the specified directory
-func (s *server) cloneDRBDRepoToDir(version, repoURL, destDir, jobID string) error {
-	s.logger.Debug("Cloning DRBD repository", "job_id", jobID, "version", version, "repo", repoURL, "dest", destDir)
-
-	// Determine branch name (format: drbd-9.2.12)
-	branch := fmt.Sprintf("drbd-%s", version)
-	s.logger.Debug("Cloning branch", "job_id", jobID, "branch", branch)
-
-	// Clone repository directly to destination
-	s.logger.Debug("Running git clone", "job_id", jobID, "branch", branch, "repo", repoURL, "dest", destDir)
-	cmd := exec.Command("git", "clone", "--depth", "1", "--branch", branch, repoURL, destDir)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git clone failed: %w", err)
-	}
-
-	// Get git hash before removing .git directory
-	gitHash := "unknown"
-	hashCmd := exec.Command("git", "rev-parse", "HEAD")
-	hashCmd.Dir = destDir
-	if output, err := hashCmd.Output(); err == nil {
-		gitHash = strings.TrimSpace(string(output))
-		s.logger.Debug("Got git hash", "job_id", jobID, "git_hash", gitHash)
-	} else {
-		s.logger.Warn("Failed to get git hash", "job_id", jobID, "error", err)
-	}
-
-	// Update submodules
-	s.logger.Debug("Updating submodules", "job_id", jobID)
-	cmd = exec.Command("git", "submodule", "update", "--init", "--recursive")
-	cmd.Dir = destDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git submodule update failed: %w", err)
-	}
-
-	// Remove .git directory
-	s.logger.Debug("Removing .git directory", "job_id", jobID)
-	if err := os.RemoveAll(filepath.Join(destDir, ".git")); err != nil {
-		s.logger.Warn("Failed to remove .git directory", "job_id", jobID, "error", err)
-	}
-
-	// Create drbd/.drbd_git_revision file
-	gitRevisionPath := filepath.Join(destDir, "drbd", ".drbd_git_revision")
-	gitRevisionDir := filepath.Dir(gitRevisionPath)
-	if err := os.MkdirAll(gitRevisionDir, 0755); err != nil {
-		return fmt.Errorf("failed to create drbd directory: %w", err)
-	}
-
-	gitRevisionContent := fmt.Sprintf("GIT-hash:%s\n", gitHash)
-	if err := os.WriteFile(gitRevisionPath, []byte(gitRevisionContent), 0644); err != nil {
-		return fmt.Errorf("failed to create .drbd_git_revision file: %w", err)
-	}
-	s.logger.Debug("Created drbd/.drbd_git_revision", "job_id", jobID, "git_hash", gitHash)
-
 	return nil
 }
 

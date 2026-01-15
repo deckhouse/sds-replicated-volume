@@ -73,7 +73,6 @@ spec:
         - -addr=:2021
         - -cache-dir=/var/cache/drbd-build-server
         - -drbd-dir=/drbd
-        - -drbd-version={{ .Values.sdsReplicatedVolume.internal.drbdVersion }}
         - -log-level
 {{- if eq .Values.sdsReplicatedVolume.logLevel "ERROR" }}
         - error
@@ -124,12 +123,8 @@ spec:
           mountPath: /var/cache/drbd-build-server
         - name: tmp-dir
           mountPath: /tmp
-        - name: drbd-dir
-          mountPath: /drbd
       volumes:
       - name: cache-dir
         emptyDir: {}
       - name: tmp-dir
-        emptyDir: {}
-      - name: drbd-dir
         emptyDir: {}

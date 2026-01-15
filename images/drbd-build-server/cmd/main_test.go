@@ -45,12 +45,13 @@ func newTestServer() *server {
 
 func TestGenerateCacheKey(t *testing.T) {
 	kernelVersion := "5.15.0-86-generic"
+	drbdVersion := "9.2.12"
 	headersData1 := []byte("test headers data 1")
 	headersData2 := []byte("test headers data 2")
 
-	key1 := generateCacheKey(kernelVersion, headersData1)
-	key2 := generateCacheKey(kernelVersion, headersData2)
-	key3 := generateCacheKey(kernelVersion, headersData1)
+	key1 := generateCacheKey(kernelVersion, drbdVersion, headersData1)
+	key2 := generateCacheKey(kernelVersion, drbdVersion, headersData2)
+	key3 := generateCacheKey(kernelVersion, drbdVersion, headersData1)
 
 	if len(key1) != 64 {
 		t.Errorf("Expected cache key length 64, got %d", len(key1))
@@ -242,6 +243,7 @@ func TestBuildModuleEndpoint_CacheHit(t *testing.T) {
 	s.routes()
 
 	kernelVersion := "5.15.0-86-generic"
+	drbdVersion := "9.2.12"
 	headersData := []byte("test headers")
 
 	// Create a minimal tar.gz archive for headers FIRST
@@ -265,7 +267,7 @@ func TestBuildModuleEndpoint_CacheHit(t *testing.T) {
 
 	// Now generate cache key from the actual archive bytes
 	archiveBytes := headersArchive.Bytes()
-	cacheKey := generateCacheKey(kernelVersion, archiveBytes)
+	cacheKey := generateCacheKey(kernelVersion, drbdVersion, archiveBytes)
 	cachePath := filepath.Join(cacheDir, cacheKey+".tar.gz")
 
 	// Create a cached file
@@ -287,7 +289,7 @@ func TestBuildModuleEndpoint_CacheHit(t *testing.T) {
 	tarWriter.Close()
 	gzWriter.Close()
 
-	req := httptest.NewRequest("POST", "/api/v1/build?kernel_version="+kernelVersion, &headersArchive)
+	req := httptest.NewRequest("POST", "/api/v1/build?kernel_version="+kernelVersion+"&drbd_version="+drbdVersion, &headersArchive)
 	req.Header.Set("Content-Type", "application/gzip")
 	w := httptest.NewRecorder()
 	s.router.ServeHTTP(w, req)
@@ -412,6 +414,7 @@ func TestBuildModuleEndpoint_RaceCondition(t *testing.T) {
 	s.routes()
 
 	kernelVersion := "5.15.0-86-generic"
+	drbdVersion := "9.2.12"
 	headersData := []byte("test headers")
 
 	// Create minimal tar.gz FIRST
@@ -435,12 +438,13 @@ func TestBuildModuleEndpoint_RaceCondition(t *testing.T) {
 
 	// Generate cache key from actual archive bytes
 	archiveBytes := headersArchive.Bytes()
-	cacheKey := generateCacheKey(kernelVersion, archiveBytes)
+	cacheKey := generateCacheKey(kernelVersion, drbdVersion, archiveBytes)
 
 	// Create a job that's already building
 	job := &BuildJob{
 		Key:           cacheKey,
 		KernelVersion: kernelVersion,
+		DRBDVersion:   drbdVersion,
 		Status:        StatusBuilding,
 		CreatedAt:     time.Now(),
 	}
@@ -460,7 +464,7 @@ func TestBuildModuleEndpoint_RaceCondition(t *testing.T) {
 	gzWriter.Close()
 
 	// Make request - should get job ID back
-	req := httptest.NewRequest("POST", "/api/v1/build?kernel_version="+kernelVersion, &headersArchive)
+	req := httptest.NewRequest("POST", "/api/v1/build?kernel_version="+kernelVersion+"&drbd_version="+drbdVersion, &headersArchive)
 	req.Header.Set("Content-Type", "application/gzip")
 	w := httptest.NewRecorder()
 	s.router.ServeHTTP(w, req)
