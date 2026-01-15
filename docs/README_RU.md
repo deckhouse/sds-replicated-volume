@@ -15,12 +15,18 @@ moduleStatus: preview
 
 Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVMVolumeGroup`. Настройка `LVM` осуществляется модулем [sds-node-configurator](/modules/sds-node-configurator/).
 
-> **Внимание.** Перед включением модуля `sds-replicated-volume` необходимо включить модуль `sds-node-configurator`.
->
-> **Внимание.** Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
->
-> **Внимание.** Если в кластере используется только одна нода, то вместо `sds-replicated-volume` рекомендуется использовать `sds-local-volume`.
-> Для использования `sds-replicated-volume` необходимо иметь минимально 3 ноды. Рекомендуется использовать 4 и более на случай выхода нод из строя.
+{{< alert level="warning" >}}
+Перед включением модуля `sds-replicated-volume` необходимо включить модуль `sds-node-configurator`.
+
+Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
+
+Если в кластере используется только один узел, то вместо `sds-replicated-volume` рекомендуется использовать `sds-local-volume`.
+Для использования `sds-replicated-volume` необходимо иметь минимум 3 узла. Рекомендуется использовать 4 и более на случай выхода узлов из строя.
+{{< /alert >}}
+
+{{< alert level="info" >}}
+Доступные режимы работы для модуля: RWO; RWX — только в DVP.
+{{< /alert >}}
 
 После включения модуля `sds-replicated-volume` в конфигурации Deckhouse, останется только создать [ReplicatedStoragePool и ReplicatedStorageClass](./usage.html#конфигурация-бэкенда-linstor).
 
@@ -35,11 +41,7 @@ moduleStatus: preview
 {{< /alert >}}
 
 {{< alert level="info" >}}
-Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
-{{< /alert >}}
-
-{{< alert level="info" >}}
-Для работы с снапшотами требуется подключенный модуль [snapshot-controller](/modules/snapshot-controller/).
+Для работы со снимками требуется подключенный модуль [snapshot-controller](/modules/snapshot-controller/).
 {{< /alert >}}
 
 - Настройте LVMVolumeGroup.
@@ -77,15 +79,15 @@ moduleStatus: preview
    EOF
    ```
 
-2. Дождитесь, пока модуль `sds-node-configurator` перейдёт в состояние `Ready`:
+1. Дождитесь, пока модуль `sds-node-configurator` перейдёт в состояние `Ready`:
 
    ```shell
    kubectl get module sds-node-configurator -w
    ```
 
-3. Активируйте модуль `sds-replicated-volume`. Перед включением рекомендуется ознакомиться [с доступными настройками](./configuration.html).
+1. Активируйте модуль `sds-replicated-volume`. Перед включением рекомендуется ознакомиться [с доступными настройками](./configuration.html).
 
-  Пример ниже запускает модуль с настройками по умолчанию, что приведет к созданию служебных подов компонента `sds-replicated-volume` на всех узлах кластера, установит модуль ядра DRBD и зарегестрирует CSI драйвер:
+   Пример ниже запускает модуль с настройками по умолчанию, что приведет к созданию служебных подов компонента `sds-replicated-volume` на всех узлах кластера, установит модуль ядра DRBD и зарегистрирует CSI драйвер:
 
    ```yaml
    kubectl apply -f - <<EOF
@@ -98,14 +100,34 @@ moduleStatus: preview
      version: 1
    EOF
    ```
-
-4. Дождитесь пока модуль `sds-replicated-volume` перейдёт в состояние `Ready`:
+  
+   {{< alert level="warning" >}}
+   Параметр [settings.dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) рекомендуется указывать в момент включения модуля.
+   
+   Уже добавленные лейблы `storage.deckhouse.io/sds-replicated-volume-*` не удаляются автоматически, так как в текущей версии control-plane нет механизма автоматической эвакуации данных с узлов кластера.
+   
+   Если требуется убрать ресурсы модуля с узла не удаляя сам узел из кластера, то необходимо:
+   
+   1. Вручную на любом из master-узлов запустить [скрипт эвакуации данных](./faq.html#%D0%BF%D1%80%D0%B8%D0%BC%D0%B5%D1%80-%D1%83%D0%B4%D0%B0%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F-%D1%80%D0%B5%D1%81%D1%83%D1%80%D1%81%D0%BE%D0%B2-%D1%81-%D1%83%D0%B7%D0%BB%D0%B0-%D0%B1%D0%B5%D0%B7-%D1%83%D0%B4%D0%B0%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F-%D1%81%D0%B0%D0%BC%D0%BE%D0%B3%D0%BE-%D1%83%D0%B7%D0%BB%D0%B0) `/opt/deckhouse/sbin/evict.sh` с параметром `--delete-resources-only`.
+   1. После эвакуации даных удалить с узла лейблы и удалить ноду из LINSTOR:
+      ```shell
+      export NODE_NAME=<node-name>
+      
+      kubectl get node $NODE_NAME -o jsonpath='{.metadata.labels}' | jq -r 'keys[] | select(startswith("storage.deckhouse.io/sds-replicated-volume-"))' | while read label; do
+        kubectl label node $NODE_NAME "$label"-
+      done
+      
+      kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor node lost $NODE_NAME
+      ```
+   {{< /alert >}}
+  
+1. Дождитесь пока модуль `sds-replicated-volume` перейдёт в состояние `Ready`:
 
    ```shell
    kubectl get module sds-replicated-volume -w
    ```
 
-5. Убедитесь, что в пространствах имен `d8-sds-replicated-volume` и `d8-sds-node-configurator` все поды находятся в статусе `Running` или `Completed` и запущены на всех узлах, где планируется использовать ресурсы DRBD.
+1. Убедитесь, что в пространствах имен `d8-sds-replicated-volume` и `d8-sds-node-configurator` все поды находятся в статусе `Running` или `Completed` и запущены на всех узлах, где планируется использовать ресурсы DRBD.
 
    ```shell
    kubectl -n d8-sds-replicated-volume get pod -o wide -w
@@ -310,4 +332,5 @@ kubectl get sc replicated-storage-class
 
 - Не используйте RAID. Подробнее [в FAQ](./faq.html#почему-не-рекомендуется-использовать-raid-для-дисков-которые-используются-модулем-sds-replicated-volume).
 - Используйте локальные физические диски. Подробнее [в FAQ](./faq.html#почему-вы-рекомендуете-использовать-локальные-диски-не-nas).
-- Для стабильной работы кластера, но с ухудшением производительности, допустимая сетевая задержка между узлами не должна превышать 20 мс.
+- Для стабильной работы кластера, но с ухудшением производительности, допустимая сетевая задержка между узлами не должна превышать 10 мс.
+- Для гарантированной консистентности данных используйте `ReplicatedStorageClass` с режимом репликации `ConsistencyAndAvailability` (spec.replication) — этот режим используется по умолчанию. **Важно:** изменение режима на `Availability` может привести к split brain и потере данных при проблемах с сетевой связностью.

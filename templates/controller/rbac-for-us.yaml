@@ -1,0 +1,18 @@
+{{- /* RBAC */ -}}
+{{- $rbacConfig := dict
+  "roleRules" (list
+    (dict "apiGroups" (list "") "resources" (list "configmaps") "verbs" (list "get" "list" "watch" "update"))
+    (dict "apiGroups" (list "") "resources" (list "secrets") "verbs" (list "get" "list" "watch"))
+    (dict "apiGroups" (list "") "resources" (list "pods") "verbs" (list "get" "list" "watch" "update"))
+    (dict "apiGroups" (list "coordination.k8s.io") "resources" (list "leases") "verbs" (list "get" "watch" "list" "delete" "update" "create"))
+  )
+  "clusterRoleRules" (list
+    (dict "apiGroups" (list "") "resources" (list "nodes" "persistentvolumes") "verbs" (list "get" "list" "watch" "patch" "update"))
+    (dict "apiGroups" (list "") "resources" (list "events") "verbs" (list "create" "list"))
+    (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "replicatedstorageclasses" "lvmvolumegroups" "replicatedstoragepools") "verbs" (list "get" "list" "create" "delete" "watch" "update"))
+    (dict "apiGroups" (list "storage.k8s.io") "resources" (list "storageclasses" "csinodes") "verbs" (list "create" "delete" "list" "get" "watch" "update"))
+    (dict "apiGroups" (list "internal.linstor.linbit.com") "resources" (list "propscontainers") "verbs" (list "list" "get" "update" "watch"))
+    (dict "apiGroups" (list "deckhouse.io") "resources" (list "moduleconfigs") "verbs" (list "get" "watch" "update" "list" "patch"))
+  )
+}}
+{{ include "helm_lib_module_controller_rbac" (list . $rbacConfig) }}

@@ -31,7 +31,7 @@ import (
 
 const (
 	replicatedCSIProvisioner = "replicated.csi.storage.deckhouse.io"
-	allowedUserName          = "system:serviceaccount:d8-sds-replicated-volume:sds-replicated-volume-controller"
+	allowedUserName          = "system:serviceaccount:d8-sds-replicated-volume:controller"
 )
 
 func SCValidate(_ context.Context, arReview *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {

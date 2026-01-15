@@ -1,0 +1,2 @@
+Changes:
+  - Fixed satellite bind address to avoid potential external access to the cluster

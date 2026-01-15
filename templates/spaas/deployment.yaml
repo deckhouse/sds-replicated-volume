@@ -17,7 +17,7 @@ spec:
     kind: Deployment
     name: spaas
   updatePolicy:
-    updateMode: "Auto"
+    updateMode: "Initial"
   resourcePolicy:
     containerPolicies:
     - containerName: spaas
@@ -66,7 +66,7 @@ spec:
       - name: {{ .Chart.Name }}-module-registry
       containers:
       - name: spaas
-        {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 8 }}
+        {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" (dict "ro" true "seccompProfile" true) | nindent 8 }}
         image: {{ include "helm_lib_module_image" (list . "spaas") }}
         imagePullPolicy: IfNotPresent
         args:

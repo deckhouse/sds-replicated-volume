@@ -18,7 +18,7 @@ spec:
     kind: Deployment
     name: linstor-controller
   updatePolicy:
-    updateMode: "Auto"
+    updateMode: "Initial"
   resourcePolicy:
     containerPolicies:
     - containerName: linstor-controller
@@ -149,7 +149,7 @@ spec:
           failureThreshold: 3
           periodSeconds: 10
           successThreshold: 1
-          timeoutSeconds: 15
+          timeoutSeconds: 60
         ports:
           - containerPort: 3376
             protocol: TCP
@@ -169,10 +169,12 @@ spec:
 {{- end }}
         securityContext: 
           readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          seccompProfile:
+            type: RuntimeDefault
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:
-
           - mountPath: /etc/linstor
             name: linstor-conf
           - mountPath: /etc/linstor/https
@@ -235,7 +237,7 @@ spec:
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "helm_lib_container_kube_rbac_proxy_resources" . | nindent 12 }}
 {{- end }}
-        {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 8 }}
+        {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" (dict "ro" true "seccompProfile" true) | nindent 8 }}
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
       dnsPolicy: ClusterFirst

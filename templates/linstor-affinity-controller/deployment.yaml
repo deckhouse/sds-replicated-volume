@@ -17,7 +17,7 @@ spec:
     kind: Deployment
     name: linstor-affinity-controller
   updatePolicy:
-    updateMode: "Auto"
+    updateMode: "Initial"
   resourcePolicy:
     containerPolicies:
     - containerName: linstor-affinity-controller
@@ -67,7 +67,7 @@ spec:
       serviceAccountName: linstor-affinity-controller
       initContainers:
         - name: wait-for-linstor
-          {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 10 }}
+          {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" (dict "ro" true "seccompProfile" true) | nindent 10 }}
           image: {{ include "helm_lib_module_image" (list . "linstorWaitUntil") }}
           imagePullPolicy: "IfNotPresent"
           command:
@@ -100,7 +100,7 @@ spec:
 
       containers:
         - name: linstor-affinity-controller
-          {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 10 }}
+          {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" (dict "ro" true "seccompProfile" true) | nindent 10 }}
           image: {{ include "helm_lib_module_image" (list . "linstorAffinityController") }}
           imagePullPolicy: "IfNotPresent"
           args:

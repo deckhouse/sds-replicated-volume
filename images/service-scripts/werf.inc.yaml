@@ -10,8 +10,8 @@ git:
     - werf.inc.yaml
     stageDependencies:
       setup:
-        - images/{{ $.ImageName }}/scripts
-        - images/{{ $.ImageName }}/tools
+        - scripts
+        - tools
 
 shell:
   setup:

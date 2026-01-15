@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/images/webhooks
 
-go 1.24.2
+go 1.24.11
 
 require (
 	github.com/deckhouse/sds-common-lib v0.5.0
@@ -9,10 +9,10 @@ require (
 	github.com/go-logr/logr v1.4.2
 	github.com/sirupsen/logrus v1.9.3
 	github.com/slok/kubewebhook/v2 v2.6.0
-	k8s.io/api v0.32.1
-	k8s.io/apiextensions-apiserver v0.32.1
+	k8s.io/api v0.32.3
+	k8s.io/apiextensions-apiserver v0.32.3
 	k8s.io/apimachinery v0.32.3
-	k8s.io/client-go v0.32.1
+	k8s.io/client-go v0.32.3
 	k8s.io/klog/v2 v2.130.1
 	sigs.k8s.io/controller-runtime v0.20.4
 )
@@ -49,10 +49,11 @@ require (
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.61.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
+	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/net v0.40.0 // indirect
-	golang.org/x/oauth2 v0.25.0 // indirect
+	golang.org/x/oauth2 v0.27.0 // indirect
 	golang.org/x/sync v0.14.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/term v0.32.0 // indirect

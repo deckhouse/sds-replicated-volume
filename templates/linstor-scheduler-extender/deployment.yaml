@@ -9,8 +9,6 @@ cpu: 10m
 memory: 25Mi
 {{- end }}
 
-{{- $dhVersionIsDev := or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) }}
-{{- $kubeVersion := semver .Values.global.discovery.kubernetesVersion -}}
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
 apiVersion: autoscaling.k8s.io/v1
@@ -25,17 +23,9 @@ spec:
     kind: Deployment
     name: linstor-scheduler-extender
   updatePolicy:
-    updateMode: "Auto"
+    updateMode: "Initial"
   resourcePolicy:
     containerPolicies:
-{{- if and (not $dhVersionIsDev) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
-    - containerName: kube-scheduler
-      minAllowed:
-        {{- include "kube_scheduler_resources" . | nindent 8 }}
-      maxAllowed:
-        memory: 60Mi
-        cpu: 20m
-{{- end }}
     - containerName: linstor-scheduler-extender
       minAllowed:
         {{- include "linstor_scheduler_extender_resources" . | nindent 8 }}
@@ -81,63 +71,8 @@ spec:
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
       containers:
-{{- if and (not $dhVersionIsDev) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
-        - name: kube-scheduler
-          {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 10 }}
-          command:
-          - kube-scheduler
-          {{- if semverCompare ">= 1.22" .Values.global.discovery.kubernetesVersion }}
-          - --config=/etc/kubernetes/scheduler-config.yaml
-          {{- else }}
-          - --scheduler-name=linstor
-          - --policy-configmap=linstor-scheduler
-          - --policy-configmap-namespace=d8-{{ .Chart.Name }}
-          {{- end }}
-          - --leader-elect=true
-          - --leader-elect-resource-name=linstor-scheduler
-          - --leader-elect-resource-namespace=$(NAMESPACE)
-          env:
-          - name: NAMESPACE
-            valueFrom:
-              fieldRef:
-                fieldPath: metadata.namespace
-          {{- /* Here we use kube-scheduler image from control-plane-manager module */}}
-          image: {{ include "helm_lib_module_image" (list (dict "Chart" (dict "Name" "control-plane-manager") "Values" .Values) (list "kubeScheduler" $kubeVersion.Major $kubeVersion.Minor | join "")) }}
-          imagePullPolicy: IfNotPresent
-          startupProbe:
-            failureThreshold: 24
-            httpGet:
-              path: /healthz
-              port: 10259
-              scheme: HTTPS
-          livenessProbe:
-            failureThreshold: 8
-            httpGet:
-              path: /healthz
-              port: 10259
-              scheme: HTTPS
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 15
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: 10259
-              scheme: HTTPS
-          {{- if semverCompare ">= 1.22" .Values.global.discovery.kubernetesVersion }}
-          volumeMounts:
-          - mountPath: /etc/kubernetes
-            name: scheduler-config
-          {{- end }}
-          resources:
-            requests:
-              {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
-              {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
-              {{- include "kube_scheduler_resources" . | nindent 14 }}
-              {{- end }}
-{{- end }}
         - name: linstor-scheduler-extender
-          {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 10 }}
+          {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" (dict "ro" true "seccompProfile" true) | nindent 10 }}
           image: {{ include "helm_lib_module_image" (list . "linstorSchedulerExtender") }}
           imagePullPolicy: IfNotPresent
           args:
@@ -170,24 +105,13 @@ spec:
               {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
               {{- include "linstor_scheduler_extender_resources" . | nindent 14 }}
               {{- end }}
-          {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.64" .Values.global.deckhouseVersion) }}
           ports:
            - containerPort: 8099
              protocol: TCP
              name: scheduler
-          {{- end }}
 
-{{- if semverCompare ">= 1.22" .Values.global.discovery.kubernetesVersion }}
       volumes:
       - name: scheduler-extender-certs
         secret:
             secretName: linstor-scheduler-extender-https-certs
-     {{- $dhVersionIsDev := or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) }}
-     {{- if and (not $dhVersionIsDev) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
-      - configMap:
-          defaultMode: 420
-          name: linstor-scheduler
-        name: scheduler-config
-      {{- end }}
-{{- end }}
       serviceAccountName: linstor-scheduler-extender

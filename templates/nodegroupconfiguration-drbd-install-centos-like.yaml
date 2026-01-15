@@ -95,12 +95,12 @@ spec:
     #   kernel-lt             --> kernel-lt-devel
     #   kernel-lt-core        --> kernel-lt-devel
     package_name="$(rpm -qf --qf "%{NAME}\t" "/lib/modules/${kernel_version_in_use}" | awk '{printf "%s", $1}' | sed 's/\(-modules-core\)\?$//g; s/\(-core\)\?$/-devel/g')"
-    bb-yum-install "${package_name}-${kernel_version_in_use}"
+    bb-dnf-install "${package_name}-${kernel_version_in_use}"
 
     # Remove unused kernel-headers
     packages_to_remove="$(rpm -q "$package_name" | grep -Ev "^${package_name}-${kernel_version_in_use}$" || true)"
     if [ -n "$packages_to_remove" ]; then
-      bb-yum-remove $packages_to_remove
+      bb-dnf-remove $packages_to_remove
     fi
 
     if [ -e "/proc/drbd" ]; then
@@ -140,8 +140,18 @@ spec:
       fi
     fi
 
-    # Install curl for API calls
-    bb-yum-install curl bind-utils
+    bb-dnf-install make gcc bind-utils patch mokutil
+    check_sb_state="$(mokutil --sb-state || echo "Not supported")"
+    if [[ "$check_sb_state" == "SecureBoot enabled" ]]; then
+      bb-log-info "SecureBoot is enabled. Please manually install DRBD version  {{ $.Values.sdsReplicatedVolume.internal.drbdVersion }} or higher."
+      exit 0
+    fi
+
+    {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
+    bb-package-module-install "drbd:{{ include "helm_lib_module_image_digest" (list . "drbd" "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
+    {{- else }}
+    bb-rp-from-module-image-install "drbd:{{ include "helm_lib_module_image_digest" (list . "drbd" "sdsReplicatedVolume") }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
+    {{- end }}
 
     attempt=0
     until DRBD_BUILD_SERVER_IP="$(host -t A "$DRBD_BUILD_SERVER_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"

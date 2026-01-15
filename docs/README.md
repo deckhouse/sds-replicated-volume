@@ -15,12 +15,18 @@ The module allows you to create a `Storage Pool` as well as a `StorageClass` by 
 
 To create a `Storage Pool`, you will need the `LVMVolumeGroup` configured on the cluster nodes. The `LVM` configuration is done by the [sds-node-configurator](/modules/sds-node-configurator/) module.
 
-> **Caution.** Before enabling the `sds-replicated-volume` module, you must enable the `sds-node-configurator` module.
->
-> **Caution.** Data synchronization during volume replication is carried out in synchronous mode only, asynchronous mode is not supported.
+{{< alert level="warning" >}}
+Before enabling the `sds-replicated-volume` module, you must enable the `sds-node-configurator` module.
 
-> **Caution.** If your cluster has only a single node, use `sds-local-volume` instead of `sds-replicated-volume`.
-> To use `sds-replicated-volume`, a minimum of 3 nodes is required. It is advisable to have 4 or more nodes to mitigate the impact of potential node failures.
+Data synchronization during volume replication is carried out in synchronous mode only, asynchronous mode is not supported.
+
+If your cluster has only a single node, use `sds-local-volume` instead of `sds-replicated-volume`.
+To use `sds-replicated-volume`, a minimum of 3 nodes is required. It is advisable to have 4 or more nodes to mitigate the impact of potential node failures.
+{{< /alert >}}
+
+{{< alert level="info" >}}
+Supported access modes: RWO; RWX — only in DVP;
+{{< /alert >}}
 
 After you enable the `sds-replicated-volume` module in the Deckhouse configuration, you will only have to create [ReplicatedStoragePool and ReplicatedStorageClass](./usage.html#configuring-the-linstor-backend).
 
@@ -31,10 +37,6 @@ To ensure the proper functioning of the `sds-replicated-volume` module, follow t
 
 {{< alert level="warning" >}}
 Direct configuration of the LINSTOR backend by the user is prohibited.
-{{< /alert >}}
-
-{{< alert level="info" >}}
-Data synchronization during volume replication occurs only in synchronous mode. Asynchronous mode is not supported.
 {{< /alert >}}
 
 {{< alert level="info" >}}
@@ -75,15 +77,15 @@ Enabling the `sds-node-configurator` module:
    EOF
    ```
 
-   2. Wait for the `sds-node-configurator` module to reaches the `Ready` state.
+1. Wait for the `sds-node-configurator` module to reaches the `Ready` state.
 
-      ```shell
-      kubectl get module sds-node-configurator -w
-      ```
+   ```shell
+   kubectl get module sds-node-configurator -w
+   ```
 
-   3. Activate the `sds-replicated-volume` module. Before enabling, it is recommended to review the [available settings](./configuration.html).
+1. Activate the `sds-replicated-volume` module. Before enabling, it is recommended to review the [available settings](./configuration.html).
 
-  The example below launches the module with default settings, which will result in creating service pods for the `sds-replicated-volume` component on all cluster nodes, installing the DRBD kernel module, and registering the CSI driver:
+   The example below launches the module with default settings, which will result in creating service pods for the `sds-replicated-volume` component on all cluster nodes, installing the DRBD kernel module, and registering the CSI driver:
 
    ```yaml
    kubectl apply -f - <<EOF
@@ -96,19 +98,39 @@ Enabling the `sds-node-configurator` module:
      version: 1
    EOF
    ```
-
-4. Wait for the `sds-replicated-volume` module to reach the `Ready` state.
+   
+   {{< alert level="warning" >}}
+   The [settings.dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) parameter is recommended to be specified when enabling the module.
+   
+   Already added labels `storage.deckhouse.io/sds-replicated-volume-*` are not removed automatically, as the current version of the control-plane does not have an automatic data eviction mechanism from cluster nodes.
+   
+   If you need to remove module resources from a node without removing the node itself from the cluster, you must:
+   
+   1. Manually run the [data eviction script](./faq.html#example-of-removing-resources-from-a-node-without-removing-the-node-itself) `/opt/deckhouse/sbin/evict.sh` with the `--delete-resources-only` parameter on any of the master nodes.
+   1. After data eviction, remove the labels from the node and remove the node from LINSTOR:
+      ```shell
+      export NODE_NAME=<node-name>
+      
+      kubectl get node $NODE_NAME -o jsonpath='{.metadata.labels}' | jq -r 'keys[] | select(startswith("storage.deckhouse.io/sds-replicated-volume-"))' | while read label; do
+        kubectl label node $NODE_NAME "$label"-
+      done
+      
+      kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor node lost $NODE_NAME
+      ```
+   {{< /alert >}}
+   
+1. Wait for the `sds-replicated-volume` module to reach the `Ready` state.
 
    ```shell
    kubectl get module sds-replicated-volume -w
    ```
 
-   5. Make sure that all pods in `d8-sds-replicated-volume` and `d8-sds-node-configurator` namespaces are `Running` or `Completed` and are running on all nodes where DRBD resources are intended to be used:
+1. Make sure that all pods in `d8-sds-replicated-volume` and `d8-sds-node-configurator` namespaces are `Running` or `Completed` and are running on all nodes where DRBD resources are intended to be used:
   
-      ```shell
-      kubectl -n d8-sds-replicated-volume get pod -o wide -w
-      kubectl -n d8-sds-node-configurator get pod -o wide -w
-      ```
+   ```shell
+   kubectl -n d8-sds-replicated-volume get pod -o wide -w
+   kubectl -n d8-sds-node-configurator get pod -o wide -w
+   ```
 
 ### Configuring storage on nodes
 
@@ -309,4 +331,5 @@ Applicable to both single-zone clusters and clusters using multiple availability
 
 - Avoid using RAID. The reasons are detailed [in the FAQ](./faq.html#why-is-it-not-recommended-to-use-raid-for-disks-that-are-used-by-the-sds-replicated-volume-module).
   - Use local physical disks. The reasons are detailed [in the FAQ](./faq.html#why-do-you-recommend-using-local-disks-and-not-nas).
-  - In order for cluster to be operational, but with performance degradation, network latency should not be higher than 20ms between nodes
+  - In order for cluster to be operational, but with performance degradation, network latency should not be higher than 10ms between nodes
+  - For guaranteed data consistency, use `ReplicatedStorageClass` with the `ConsistencyAndAvailability` replication mode (spec.replication) — this mode is used by default. **Important:** changing the mode to `Availability` may lead to split brain and data loss in case of network connectivity issues.
