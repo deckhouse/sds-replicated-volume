@@ -9,7 +9,7 @@ alwaysApply: false
 See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
 
 This document complements `controller-reconcile-helper*.mdc` and defines rules that are **owned by Reconcile methods**
-(the orchestration layer), not by helper categories and not by `internal/reconciliation/flow` usage.
+(the orchestration layer), not by helper categories and not by `lib/go/common/reconciliation/flow` usage.
 
 ---
 

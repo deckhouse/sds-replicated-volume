@@ -1,14 +1,14 @@
 ---
-description: Rules for using internal/reconciliation/flow in controller reconciliation code: phases (BeginPhase/EndPhase) and Outcome composition/propagation. Apply when writing reconciliation code that uses flow.* in reconciler*.go, and when reasoning about reconciliation control flow and error handling. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+description: Rules for using lib/go/common/reconciliation/flow in controller reconciliation code: phases (BeginPhase/EndPhase) and Outcome composition/propagation. Apply when writing reconciliation code that uses flow.* in reconciler*.go, and when reasoning about reconciliation control flow and error handling. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
 globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go
 alwaysApply: false
 ---
 
 See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
 
-# Using flow (`internal/reconciliation/flow`)
+# Using flow (`lib/go/common/reconciliation/flow`)
 
-This document defines the **usage contract** for `internal/reconciliation/flow` in controller reconciliation code:
+This document defines the **usage contract** for `lib/go/common/reconciliation/flow` in controller reconciliation code:
 how to structure work into **phase scopes** and how to compose/propagate/enrich reconciliation results.
 
 Scope: any function that calls `flow.BeginRootReconcile`, `flow.BeginReconcile`, `flow.BeginEnsure`, `flow.BeginStep`,
