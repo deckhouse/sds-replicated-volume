@@ -1,0 +1,436 @@
+---
+description: Contracts for EnsureReconcileHelper (ensure*) functions: pure/deterministic non-I/O in-place reconciliation for one patch domain with Outcome change/optimistic-lock reporting. Apply when writing ensure* helpers in reconciler*.go, and when deciding how to structure imperative in-place reconciliation steps. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go
+alwaysApply: false
+---
+
+See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
+
+# EnsureReconcileHelper
+
+This document defines naming and contracts for **EnsureReconcileHelper** functions/methods.
+
+Common terminology and rules for any **ReconcileHelper** live in `controller-reconcile-helper.mdc`.
+
+---
+
+## TL;DR
+
+Summary only; if anything differs, follow normative sections below.
+
+- **EnsureReconcileHelpers** (`ensure*`) are **pure**, **deterministic**, strictly **non-I/O** in-place steps for **exactly one** **patch domain** (**main patch domain** or **status patch domain**) that compute/enforce the per-step **target** (and/or status **report**) and immediately bring `obj` to it.
+- They mutate the caller-owned `obj` to the computed **target** / **report** and return **EnsureOutcome** (in code: `flow.EnsureOutcome`) that encodes:
+  - whether `obj` was changed,
+  - whether the subsequent save requires **Optimistic locking**,
+  - and whether an error occurred.
+- **EnsureReconcileHelpers MUST always start an ensure phase scope** (`ef := flow.BeginEnsure(...)` + `defer ef.OnEnd(&outcome)`).
+  - Therefore, every ensure helper MUST accept `ctx context.Context` and MUST use a named return `outcome flow.EnsureOutcome`.
+- **EnsureReconcileHelpers** are the **single source of truth** for **Change reporting** and **optimistic lock requirement** for their **patch domain**.
+- **Reconcile methods** MUST implement patch execution according to **EnsureOutcome** (in code: `flow.EnsureOutcome`) (`DidChange` / `OptimisticLockRequired`) and MUST NOT override these decisions with ad-hoc logic.
+- They MUST NOT perform **Kubernetes API I/O**, call **DeepCopy**, or execute patches / make **patch ordering** decisions.
+- If both **main patch domain** and **status patch domain** need changes, split into **two** **EnsureReconcileHelpers** (one per **patch domain**) and patch them separately in **Reconcile methods**.
+
+---
+
+## Definition
+
+An **EnsureReconcileHelper** (“ensure helper”) is a **ReconcileHelper** that is:
+
+- **strictly non-I/O**, and
+- computes/enforces the per-step **target** (and/or status **report**) and immediately performs in-place mutations on the object to bring it to that state for **exactly one patch domain** (**main resource** or **status subresource**), and
+ returns a `flow.EnsureOutcome` that reports whether it changed the object, whether optimistic locking is required for the save operation (if any), and whether an error occurred.
+
+Typical ensure helpers implement step-by-step in-place reconciliation and return `flow.EnsureOutcome` (e.g., via `ef.Ok().ReportChangedIf(...)`, `ef.Err(err)`, `ef.Merge(...)`) to drive patching decisions in **Reconcile methods**.
+
+Notes on `.status` (role vs location):
+- A status-domain ensure helper may write both:
+  - **controller-owned state** (persisted decisions/memory derived from **target**), and/or
+  - the published **report** (conditions/progress/selected observations).
+- The published **report** MAY directly reuse selected **actual** observations (including being the same value/type as an **actual** snapshot). Persisting such observations into `.status` is OK and they remain **report/observations** (output-only).
+- Status-domain ensure helpers MUST NOT treat existing **report/observations** as “intent/config inputs” for new **target** decisions.
+  - However, they MAY use existing **report/observations** (including previously published report fields in `.status`) as observation/constraint inputs (i.e., as a cached/stale form of **actual**) when deriving a new **target**.
+  - If prior decisions must be stable across reconciles, that input MUST come from explicit **controller-owned state** fields (by design), not from arbitrary report fields.
+
+---
+
+## Naming
+
+- An **EnsureReconcileHelper** name MUST start with `ensure` / `Ensure`.
+- **EnsureReconcileHelpers** MUST be domain-explicit in the name when ambiguity is possible (ambiguity is possible when the ensured invariant/property name refers to a field/group that exists in both `.spec` (**main patch domain**) and `.status` (**status patch domain**) of the same **object**):
+  - `ensureMain*` / `EnsureMain*` (**main patch domain**)
+  - `ensureStatus*` / `EnsureStatus*` (**status patch domain**)
+- **EnsureReconcileHelpers** SHOULD NOT include `Main` / `Status` in the name when there is no such ambiguity.
+- **EnsureReconcileHelpers** names SHOULD name the invariant or property being ensured:
+  - `ensureFinalizer(...)`
+  - `ensureOwnerRefs(...)`
+  - `ensureLabels(...)`
+  - `ensureStatusConditions(...)` (conditions are typically part of the published **report**)
+- **EnsureReconcileHelpers** names MUST NOT include `Desired` / `Actual` / `Intended` / `Target` / `Report` unless the applied “thing” name in the **object** API includes those words.
+  - Exception: helpers that explicitly build/publish a status **report** artifact MAY end with `Report` when it improves clarity (e.g., `ensureStatusReport`, `ensureConditionsReport`).
+- **EnsureReconcileHelpers** names MUST NOT sound like orchestration (`ensureAll`, `ensureEverything`, `ensureAndPatch`) — ensure helpers do not execute **I/O**; they only mutate and return **EnsureOutcome** (in code: `flow.EnsureOutcome`).
+
+---
+
+## Preferred signatures
+
+- For **EnsureReconcileHelpers** (`ensure*`), the simplest signature from the variants below that preserves explicit dependencies and flow semantics SHOULD be chosen.
+- If additional signature variants are explicitly permitted elsewhere in this document, they MAY also be used.
+
+### Ensure (always scoped)
+```go
+func ensureFoo(
+    ctx context.Context,
+    obj *v1alpha1.Foo,
+) (outcome flow.EnsureOutcome)
+```
+
+Or, if an ensure helper needs data from `Reconciler`:
+```go
+func (r *Reconciler) ensureFoo(
+    ctx context.Context,
+    obj *v1alpha1.Foo,
+) (outcome flow.EnsureOutcome)
+```
+
+### Dependent ensure
+Dependencies MUST be explicit and come **after `obj`**:
+```go
+func ensureBar(
+    ctx context.Context,
+    obj *v1alpha1.Foo,
+    targetFoo TargetFoo,
+) (outcome flow.EnsureOutcome)
+```
+
+Or, if an ensure helper needs data from `Reconciler`:
+```go
+func (r *Reconciler) ensureBar(
+    ctx context.Context,
+    obj *v1alpha1.Foo,
+    targetFoo TargetFoo,
+) (outcome flow.EnsureOutcome)
+```
+
+---
+
+## Receivers
+
+- **EnsureReconcileHelpers** SHOULD be plain functions when they do not need any data from `Reconciler`.
+- If an **EnsureReconcileHelper** needs data from `Reconciler`, it MUST be a method on `Reconciler`.
+
+---
+
+## I/O boundaries
+
+**EnsureReconcileHelpers** MUST NOT do any of the following:
+
+- controller-runtime client usage (`client.Client`, `r.client`, etc.);
+- Kubernetes API calls (`Get/List/Create/Update/Patch/Delete`);
+- `DeepCopy` (including `obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.);
+- executing patches (`Patch` / `Status().Patch`) or making any patch ordering decisions;
+- creating/updating/deleting Kubernetes objects in the API server in any form.
+
+**EnsureReconcileHelpers** MUST NOT do “hidden I/O” either:
+
+- `time.Now()` / `time.Since(...)` (nondeterministic wall-clock reads) (except setting `metav1.Condition.LastTransitionTime`, typically indirectly via `obju.SetStatusCondition`);
+- random number generation (`rand.*`);
+- environment reads (`os.Getenv`, reading files);
+- network calls of any kind.
+
+**EnsureReconcileHelpers** MAY request **Optimistic locking** by encoding it in the returned `flow.EnsureOutcome`, but they MUST NOT perform the save operation themselves.
+
+> Rationale: ensure helpers should be **deterministic** and unit-testable; they describe the in-memory mutations required to reach the chosen **target** and/or publish the status **report** (and any save-mode requirements), while the actual persistence belongs to **Reconcile methods**.
+
+---
+
+## Determinism contract
+
+An **EnsureReconcileHelper** MUST be **deterministic** given its explicit inputs and allowed in-place mutations.
+
+See the common determinism contract in `controller-reconcile-helper.mdc`.
+
+In particular:
+- **EnsureReconcileHelpers** MAY use extracted computation/caching components owned by the reconciler (e.g. “world view” / “planner” / “topology scorer”, caches), as described in `controller-file-structure.mdc` (“Additional components”), as long as they do not violate the I/O boundaries above.
+  - Note: cache population is a side effect and an additional source of state; therefore, the helper is deterministic only relative to that state. For the same explicit inputs and the same state of these components, the result MUST be the same.
+- Returned `flow.EnsureOutcome` flags (changed / optimisticLock / error) MUST be stable for the same inputs and object state.
+
+> Practical reason: nondeterminism creates patch churn and flaky tests.
+
+---
+
+## Read-only contract
+
+`ensure*` / `Ensure*` MUST treat all inputs except the intended in-place mutation on `obj` as read-only:
+
+- it MUST NOT mutate any input other than `obj` (including computed dependencies passed after `obj`, templates, shared defaults, global variables);
+- it MUST mutate only the intended patch domain on `obj` (main resource **or** status subresource), treating the other domain as read-only;
+- it MUST NOT perform in-place modifications through aliases to non-`obj` data.
+
+Note: reconciler-owned deterministic components (e.g. caches) are allowed mutation targets in `ensure*` helpers **only** under the constraints defined above (non-I/O, explicit dependency, deterministic relative to the component state).
+If an `ensure*` helper mutates such a component, its GoDoc comment MUST explicitly state that this helper mutates reconciler-owned deterministic state and why this is acceptable (rare-case exception).
+
+See the common read-only contract in `controller-reconcile-helper.mdc` (especially the Go aliasing rule for `map` / `[]T`).
+
+---
+
+## Patch-domain separation
+
+- `ensure*` / `Ensure*` MUST mutate `obj` in-place for **exactly one** patch domain:
+  - main resource (**metadata + spec + non-status fields**), **or**
+  - status subresource (`.status`).
+- An **EnsureReconcileHelper** MUST NOT mutate both domains in the same function.
+- If you need “ensure” logic for both domains, you MUST split it into **two** ensure helpers and call them separately from **Reconcile methods** (with separate patch requests).
+
+✅ Separate ensure helpers (GOOD)
+```go
+func ensureMainFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome)
+func ensureStatusFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome)
+```
+
+❌ Mixed ensure (BAD)
+```go
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
+
+    obj.Spec.Replicas = 3            // main domain
+    obj.Status.Phase = "Reconciling" // status domain
+    // forbidden: ensure must touch exactly one patch domain
+    return ef.Ok().ReportChanged()
+}
+```
+
+---
+
+## Composition
+
+- An **EnsureReconcileHelper** MAY implement multiple related “ensure” steps in one pass **within a single** **patch domain**.
+  - If these steps represent one conceptual invariant set, they SHOULD remain in one ensure helper.
+  - If steps are distinguishable and reused independently, they SHOULD be extracted into smaller ensure helpers.
+- An **EnsureReconcileHelper** MAY call other ensure helpers (compose “sub-ensures”).
+- An **EnsureReconcileHelper** MAY call **ConstructionReconcileHelpers** (`new*`, `build*`, `make*`, `compose*`) as pure building blocks, as long as it stays strictly **non-I/O** and **deterministic**.
+- An **EnsureReconcileHelper** MAY depend on outputs of previous compute helpers:
+  - the dependency MUST be explicit in the signature as additional args **after `obj`**.
+- If an **EnsureReconcileHelper** composes multiple sub-ensures, it MUST combine their results deterministically:
+  - “changed” information MUST be preserved (no dropping);
+  - optimistic-locking requirement MUST be preserved;
+  - errors MUST be preserved (no dropping), using a deterministic aggregation strategy (e.g., `ef.Merge(...)`).
+
+---
+
+## Ensure phases and **EnsureOutcome**
+
+- **Every** **EnsureReconcileHelper** MUST create an ensure phase scope (`flow.BeginEnsure` + deferred `ef.OnEnd(&outcome)`).
+  - The phase scope MUST cover the whole function (exactly one scope per function).
+  - Phase scopes MUST NOT be started inside loops.
+  - Scope placement rules are defined in `controller-reconciliation-flow.mdc`.
+- Therefore, **EnsureReconcileHelpers** MUST accept `ctx context.Context` and MUST use a named return `outcome flow.EnsureOutcome`.
+- **EnsureReconcileHelpers** MUST return **EnsureOutcome** (in code: `flow.EnsureOutcome`) using:
+  - `EnsureFlow` constructors (`Ok`, `Err`, `Errf`) and `EnsureFlow.Merge(...)` (when aggregating),
+  - and `EnsureOutcome` helpers (`ReportChanged*`, `RequireOptimisticLock`, `Enrichf`).
+
+### Recommended pattern: change + optimistic-lock reporting (SHOULD)
+
+```go
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
+    ctx = ef.Ctx()
+
+    changed := false
+    needLock := false
+
+    // ... deterministically mutate obj ...
+
+    outcome = ef.Ok().ReportChangedIf(changed)
+    if needLock {
+        outcome = outcome.RequireOptimisticLock()
+    }
+    return outcome
+}
+```
+
+```go
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
+    ctx = ef.Ctx()
+
+    changed := false
+
+    // ... deterministically mutate obj ...
+
+    return ef.Ok().
+        ReportChangedIf(changed).
+        RequireOptimisticLock()
+}
+```
+
+---
+
+## Error handling
+
+- See the common error handling rules in `controller-reconcile-helper.mdc`.
+- **EnsureReconcileHelpers** SHOULD generally return errors as-is (e.g., via `ef.Err(err)`).
+
+  **Allowed (rare)**: when propagating a **non-local** error (e.g., from validation utilities or injected pure components) and additional context is necessary to **disambiguate multiple different error sources** within the same calling **Reconcile method**, an **EnsureReconcileHelper** MAY wrap with small, local context:
+  - prefer `ef.Err(err).Enrichf("<local-action>")` (or `ef.Errf(...)` for local validation errors)
+  - keep `<local-action>` specific to the helper responsibility (e.g., `ensureOwnerRefs`, `ensureStatusConditions`, `normalizeSpec`)
+
+  **Forbidden (MUST NOT)**:
+  - do not add **object identity** (e.g. `namespace/name`, UID, object key)
+  - do not add generic “outside world” context (that belongs to the **Reconcile method**)
+
+---
+
+## Common anti-patterns (MUST NOT)
+
+❌ Doing any Kubernetes API I/O (directly or indirectly):
+```go
+func (r *Reconciler) ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
+
+    // forbidden: I/O in ensure
+    var cm corev1.ConfigMap
+    key := client.ObjectKey{Namespace: obj.Namespace, Name: "some-cm"}
+    if err := r.client.Get(ctx, key, &cm); err != nil {
+        return ef.Err(err)
+    }
+    return ef.Ok()
+}
+```
+
+❌ Executing patches / updates / deletes (or hiding them behind helpers):
+```go
+func (r *Reconciler) ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
+
+    // forbidden: patch execution belongs to Reconcile methods / PatchReconcileHelpers
+    base := obj.DeepCopy() // also forbidden: DeepCopy in ensure
+    obj.Spec.Replicas = 3
+    _ = r.client.Patch(ctx, obj, client.MergeFrom(base))
+    return ef.Ok().ReportChanged()
+}
+```
+
+❌ Calling `DeepCopy` inside ensure helpers:
+```go
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
+
+    _ = obj.DeepCopy() // forbidden: DeepCopy belongs to Reconcile methods
+    return ef.Ok()
+}
+```
+
+❌ Mutating both patch domains (main + status) in one ensure helper:
+```go
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
+
+    obj.Spec.Replicas = 3            // main domain
+    obj.Status.Phase = "Reconciling" // status domain (typically published **report**)
+    // forbidden: ensure must touch exactly one patch domain
+    return ef.Ok().ReportChanged()
+}
+```
+
+❌ Returning "changed" inconsistently (mutated object but outcome does not report it):
+```go
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
+
+    obj.Spec.Replicas = 3
+    // forbidden: mutation happened, but outcome does not report change
+    return ef.Ok()
+}
+```
+
+❌ Reporting "changed" without actually changing the object:
+```go
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
+
+    // forbidden: reports change but did not mutate anything
+    return ef.Ok().ReportChanged()
+}
+```
+
+❌ Requesting optimistic locking "sometimes" without determinism (same inputs -> different outcome):
+```go
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
+
+    if rand.Int()%2 == 0 { // forbidden: nondeterministic
+        obj.Spec.Replicas = 3
+        return ef.Ok().ReportChanged().RequireOptimisticLock()
+    }
+    obj.Spec.Replicas = 3
+    return ef.Ok().ReportChanged()
+}
+```
+
+❌ Hidden I/O / nondeterminism (time/random/env/network):
+```go
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
+
+    _ = time.Now()        // forbidden (except condition timestamps via obju)
+    _ = rand.Int()        // forbidden
+    _ = os.Getenv("FLAG") // forbidden
+    return ef.Ok()
+}
+```
+
+❌ Depending on map iteration order when building ordered slices (patch churn):
+```go
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
+
+    out := make([]string, 0, len(obj.Spec.Flags))
+    for k := range obj.Spec.Flags { // map iteration order is random
+        out = append(out, k)
+    }
+    // missing sort => nondeterministic object state
+    obj.Spec.FlagKeys = out
+    return ef.Ok().ReportChanged()
+}
+```
+
+❌ Mutating shared templates/defaults through aliasing:
+```go
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo, template *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
+
+    // forbidden: template labels map is shared; mutating it mutates the template
+    labels := template.GetLabels()
+    labels["owned"] = "true"
+    obj.SetLabels(labels)
+    return ef.Ok().ReportChanged()
+}
+```
+
+❌ Manual metadata/conditions manipulation when `objutilv1` (`obju`) must be used:
+```go
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
+
+    // forbidden in this codebase: do not open-code label/finalizer/condition edits
+    if obj.Labels == nil {
+        obj.Labels = map[string]string{}
+    }
+    obj.Labels["a"] = "b"
+    return ef.Ok().ReportChanged()
+}
+```

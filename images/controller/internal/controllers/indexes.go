@@ -67,7 +67,6 @@ func RegisterIndexes(mgr manager.Manager) error {
 	); err != nil {
 		return fmt.Errorf("index ReplicatedVolumeReplica by spec.nodeName: %w", err)
 	}
-
 	// Index ReplicatedVolumeReplica by spec.replicatedVolumeName for efficient lookups per RV.
 	if err := mgr.GetFieldIndexer().IndexField(
 		context.Background(),

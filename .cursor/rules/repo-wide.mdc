@@ -1,0 +1,31 @@
+---
+description: Repository-wide Cursor/agent rules for this repo (formatting, change hygiene, git hygiene, and commit-message conventions). Apply when working in this repository (any task), especially when making or explaining changes, planning a sequence of edits, or preparing commits. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+alwaysApply: true
+---
+
+- Formatting & style (MUST):
+  - Match existing formatting and indentation exactly.
+
+- Change hygiene / cleanup (MUST):
+  - If I create a file and later replace it with a correct alternative, I MUST remove the now-invalid file(s) in the same change.
+
+- Dialogue adherence (MUST):
+  - User answers are authoritative context.
+  - If I ask a question and receive an answer, subsequent actions MUST align with that answer and MUST NOT contradict or ignore it.
+
+- File moves/renames (MUST):
+  - When moving or renaming files, preserve Git history by using `git mv` (or an equivalent Git-aware rename).
+  - Do NOT implement a move as "create new file + delete old file".
+
+- Git commit messages (MUST):
+  - When the user asks you to generate a commit message, ALWAYS output the commit message in a copy-friendly code block.
+  - When the user asks you to generate a commit message, ALWAYS remind about sign-off as plain text AFTER the commit message (do NOT put the reminder inside the commit message body). Prefer: `Don't forget to sign off` and suggest `git commit -s`.
+  - Use English for commit messages.
+  - Prefer prefixing the subject with a component in square brackets, e.g. `[controller] Fix ...`, `[api] Add ...`.
+  - If the change is non-trivial, add a short body listing the key changes; for small changes, the subject alone is enough.
+  - When generating a commit message, consider the full diff (don’t skimp on context), including:
+    - Staged/cached changes (index)
+    - Contents of deleted files
+
+- When making a commit (MUST):
+  - ALWAYS sign off (prefer `git commit -s`).

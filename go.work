@@ -1,0 +1,17 @@
+go 1.24.11
+
+use (
+	./api
+	./images/agent
+	./images/controller
+	./images/csi-driver
+	./images/linstor-drbd-wait
+	./images/megatest
+	./images/sds-replicated-volume-controller
+	./images/webhooks
+	./internal
+	./lib/go/common
+)
+
+
+

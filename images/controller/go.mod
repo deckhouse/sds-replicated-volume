@@ -4,12 +4,15 @@ go 1.24.11
 
 replace github.com/deckhouse/sds-replicated-volume/api => ../../api
 
+replace github.com/deckhouse/sds-replicated-volume/internal => ../../internal
+
 replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go/common
 
 require (
 	github.com/deckhouse/sds-common-lib v0.6.3
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20251112082451-591b11c7b2da
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20251121101523-5ed5ba65d062
+	github.com/deckhouse/sds-replicated-volume/internal v0.0.0-00010101000000-000000000000
 	github.com/go-logr/logr v1.4.3
 	github.com/google/uuid v1.6.0
 	github.com/onsi/ginkgo/v2 v2.27.2

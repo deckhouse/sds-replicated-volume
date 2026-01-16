@@ -521,7 +521,7 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 	}
 
 	// Add topology parameter
-	storageClassParameters[StorageClassParamTopologyKey] = replicatedSC.Spec.Topology
+	storageClassParameters[StorageClassParamTopologyKey] = string(replicatedSC.Spec.Topology)
 
 	// Add zones parameter (serialize array to YAML list format)
 	if len(replicatedSC.Spec.Zones) > 0 {
@@ -816,7 +816,7 @@ func updateReplicatedStorageClassStatus(
 	phase string,
 	reason string,
 ) error {
-	replicatedSC.Status.Phase = phase
+	replicatedSC.Status.Phase = srv.ReplicatedStorageClassPhase(phase)
 	replicatedSC.Status.Reason = reason
 	log.Trace(fmt.Sprintf("[updateReplicatedStorageClassStatus] update ReplicatedStorageClass %+v", replicatedSC))
 	return UpdateReplicatedStorageClass(ctx, cl, replicatedSC)

@@ -196,7 +196,7 @@ func ReconcileReplicatedStoragePoolEvent(ctx context.Context, cl client.Client, 
 }
 
 func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *lapi.Client, log logger.Logger, replicatedSP *srv.ReplicatedStoragePool) error { // TODO: add shouldRequeue as returned value
-	ok, msg, lvmVolumeGroups := GetAndValidateVolumeGroups(ctx, cl, replicatedSP.Spec.Type, replicatedSP.Spec.LVMVolumeGroups)
+	ok, msg, lvmVolumeGroups := GetAndValidateVolumeGroups(ctx, cl, string(replicatedSP.Spec.Type), replicatedSP.Spec.LVMVolumeGroups)
 	if !ok {
 		replicatedSP.Status.Phase = "Failed"
 		replicatedSP.Status.Reason = msg

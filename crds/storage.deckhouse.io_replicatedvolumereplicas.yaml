@@ -55,6 +55,8 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
+        description: ReplicatedVolumeReplica is a Kubernetes Custom Resource that
+          represents a replica of a ReplicatedVolume.
         properties:
           apiVersion:
             description: |-

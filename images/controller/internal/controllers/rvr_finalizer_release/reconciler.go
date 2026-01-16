@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
@@ -114,6 +115,17 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
+	// If this RVR is the last one for the RV, remove controller finalizer from RV as well.
+	// This allows RV to be deleted / managed without being blocked by an orphaned finalizer.
+	if isLastReplicaForRV(replicasForRV, rvr.Name) {
+		if err := removeRVControllerFinalizer(ctx, r.cl, rv); err != nil {
+			if apierrors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
+			return reconcile.Result{}, err
+		}
+	}
+
 	return reconcile.Result{}, nil
 }
 
@@ -151,7 +163,7 @@ func isThisReplicaCountEnoughForQuorum(
 	deletingRVRName string,
 ) bool {
 	quorum := 0
-	if rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil {
+	if rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil {
 		quorum = int(rv.Status.DRBD.Config.Quorum)
 	}
 	if quorum == 0 {
@@ -163,10 +175,7 @@ func isThisReplicaCountEnoughForQuorum(
 		if rvr.Name == deletingRVRName {
 			continue
 		}
-		if rvr.Status == nil {
-			continue
-		}
-		if meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.ConditionTypeOnline) {
+		if meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondOnlineType) {
 			onlineReplicaCount++
 		}
 	}
@@ -178,9 +187,6 @@ func isDeletingReplicaAttached(
 	rv *v1alpha1.ReplicatedVolume,
 	deletingRVRNodeName string,
 ) bool {
-	if rv.Status == nil {
-		return false
-	}
 	if deletingRVRNodeName == "" {
 		return false
 	}
@@ -211,9 +217,6 @@ func hasEnoughDiskfulReplicasForReplication(
 		if !rvr.DeletionTimestamp.IsZero() {
 			continue
 		}
-		if rvr.Status == nil {
-			continue
-		}
 		if rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful {
 			continue
 		}
@@ -221,7 +224,7 @@ func hasEnoughDiskfulReplicasForReplication(
 			continue
 		}
 
-		if !meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.ConditionTypeIOReady) {
+		if !meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondIOReadyType) {
 			continue
 		}
 
@@ -250,7 +253,7 @@ func (r *Reconciler) removeControllerFinalizer(
 	}
 
 	oldFinalizersLen := len(current.Finalizers)
-	current.Finalizers = slices.DeleteFunc(current.Finalizers, func(f string) bool { return f == v1alpha1.ControllerAppFinalizer })
+	current.Finalizers = slices.DeleteFunc(current.Finalizers, func(f string) bool { return f == v1alpha1.ControllerFinalizer })
 
 	if oldFinalizersLen == len(current.Finalizers) {
 		return nil
@@ -265,4 +268,26 @@ func (r *Reconciler) removeControllerFinalizer(
 	}
 
 	return nil
+}
+
+func isLastReplicaForRV(replicasForRV []v1alpha1.ReplicatedVolumeReplica, deletingRVRName string) bool {
+	for i := range replicasForRV {
+		if replicasForRV[i].Name != deletingRVRName {
+			return false
+		}
+	}
+	return true
+}
+
+func removeRVControllerFinalizer(ctx context.Context, cl client.Client, rv *v1alpha1.ReplicatedVolume) error {
+	if rv == nil {
+		panic("removeRVControllerFinalizer: nil rv (programmer error)")
+	}
+	if !obju.HasFinalizer(rv, v1alpha1.ControllerFinalizer) {
+		return nil
+	}
+
+	original := rv.DeepCopy()
+	rv.Finalizers = slices.DeleteFunc(rv.Finalizers, func(f string) bool { return f == v1alpha1.ControllerFinalizer })
+	return cl.Patch(ctx, rv, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{}))
 }

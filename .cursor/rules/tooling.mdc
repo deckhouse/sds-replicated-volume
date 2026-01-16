@@ -1,0 +1,43 @@
+---
+description: Project tooling commands and safety policy: what the agent may run automatically vs what requires confirmation (lint/tests/build/codegen, git, werf/kubectl). Apply when asking the agent to run commands or when deciding which checks to run for a change. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+alwaysApply: true
+---
+
+## Canonical development commands (prefer these)
+
+- **Lint**: `bash hack/run-linter.sh`
+  - Default tags: `ee fe`
+  - Options:
+    - `--tags "ee"` (or `"fe"`)
+    - `--new-from-base <sha>` (incremental)
+    - `--fix` (modifies files)
+- **Tests**: `bash hack/run-tests.sh`
+- **Build sanity (linux/amd64, CGO=0)**: `bash hack/build_prototype.sh`
+- **Codegen / CRDs / go:generate**: `bash hack/generate_code.sh`
+  - Runs `controller-gen` and updates `crds/`, generated Go files, and may change `go.mod/go.sum`
+
+## Safe to run WITHOUT asking (agent may run automatically)
+
+Only local/read-only checks:
+
+- `bash hack/run-linter.sh` **without** `--fix`
+- `bash hack/run-tests.sh`
+- `bash hack/build_prototype.sh`
+- Plain `go test ...` and `go tool golangci-lint run ...` **when they do not modify repo files**
+
+## MUST ask for confirmation BEFORE running
+
+Anything that may change the working tree, git history, or touches external systems:
+
+- `bash hack/generate_code.sh` (writes CRDs/generated files; may edit `go.mod/go.sum`)
+- `bash hack/go-mod-tidy` / `bash hack/go-mod-upgrade` (edits `go.mod/go.sum`)
+- `bash hack/run-linter.sh --fix` (edits source files)
+- Any `git` operations that change history or remote state:
+  - `git commit`, `git tag`, `git push`, `git checkout/switch`, `git reset`, `git fetch` (including scripts that do them)
+- `hack/local_build.sh` and any commands using **werf / kubectl / curl to internal services / registry login**
+
+## When making changes
+
+- If edits touch CRD types (`api/v1alpha1`), run `bash hack/generate_code.sh` **only after confirmation**.
+- Prefer tasks/commands above over ad-hoc custom pipelines to keep CI parity.
+

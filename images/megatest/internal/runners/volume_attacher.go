@@ -223,7 +223,7 @@ func (v *VolumeAttacher) migrationCycle(ctx context.Context, otherNodeName, node
 			return err
 		}
 
-		if rv.Status != nil && len(rv.Status.ActuallyAttachedTo) == 2 {
+		if len(rv.Status.ActuallyAttachedTo) == 2 {
 			break
 		}
 
@@ -286,11 +286,6 @@ func (v *VolumeAttacher) detachCycle(ctx context.Context, nodeName string) error
 		rv, err := v.client.GetRV(ctx, v.rvName)
 		if err != nil {
 			return err
-		}
-
-		if rv.Status == nil {
-			// If status is nil, consider it as detached
-			return nil
 		}
 
 		if nodeName == "" {

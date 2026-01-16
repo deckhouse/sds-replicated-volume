@@ -1,0 +1,282 @@
+---
+description: Contracts for CreateReconcileHelper (create<Kind>) functions: exactly one Kubernetes API Create call for one object, deterministic payload, and no status writes. Apply when writing create* helpers in reconciler*.go, and when deciding how to create child resources safely. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go
+alwaysApply: false
+---
+
+See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
+
+# CreateReconcileHelper
+
+This document defines naming and contracts for **CreateReconcileHelper** functions/methods.
+
+Common terminology and rules for any **ReconcileHelper** live in `controller-reconcile-helper.mdc`.
+
+---
+
+## TL;DR
+
+Summary only; if anything differs, follow normative sections below.
+
+- **CreateReconcileHelpers** (`create<Kind>`) are **single-call I/O helpers**: they perform exactly **one** **Kubernetes API I/O** write — `Create(...)` — for exactly one **object**.
+- They MUST create using the **caller-owned object instance** (`obj`) and, on success, the same instance MUST be updated with **API-server-assigned fields/defaults** (e.g. `uid`, `resourceVersion`, defaulted fields).
+- They MUST NOT perform any other **Kubernetes API I/O** calls (`Get/List/Update/Patch/Delete`), MUST NOT call **DeepCopy**, and MUST NOT execute patches or make **patch ordering** / **patch type decision** decisions.
+- They MUST NOT write the **status subresource** as part of create (no `Status().Patch/Update`); any status write (publishing **report** and/or persisting **controller-owned state**) is a **separate request** done by **Reconcile methods**.
+- Everything they control (the create request payload) MUST be deterministic (no time/random/env-driven values; stable ordering where relevant).
+
+---
+
+## Definition
+
+A **CreateReconcileHelper** (“create helper”) is a **ReconcileHelper** that is:
+
+- **allowed to perform I/O**, and
+- creates exactly **one** Kubernetes object via the API, and
+- returns the created object in its final state (and optionally an error).
+
+Typical create helpers are used for child resources to encapsulate the mechanical create call and ensure the caller-visible object instance reflects server-assigned fields (e.g., `resourceVersion`, defaults).
+
+---
+
+## Naming
+
+- A **CreateReconcileHelper** name MUST start with `create` / `Create`.
+- **CreateReconcileHelpers** for Kubernetes **objects** MUST use the form: `create<Kind>` / `Create<Kind>`. `<Kind>` MUST either correspond to the Kubernetes **object** kind being created or be a short kind name that is already established in the codebase.
+  When `<Kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<Kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
+  Examples:
+  - `createCM(...)` (or `createConfigMap(...)`)
+  - `createSVC(...)` (or `createService(...)`)
+  - `createEK(...)` (or `createExampleKind(...)`)
+- **CreateReconcileHelpers** names MUST NOT imply orchestration or existence checks (`ensureCreated`, `reconcileCreate`, `createIfNeeded`) — branching and policy belong to **Reconcile methods**.
+
+---
+
+## Preferred signatures
+
+- For **CreateReconcileHelpers** (`create*`), the simplest signature from the variants below that preserves explicit dependencies and a single-API-call scope SHOULD be chosen.
+- If additional signature variants are explicitly permitted elsewhere in this document, they MAY also be used.
+
+### Simple create
+```go
+func (r *Reconciler) createEK(
+    ctx context.Context,
+    obj *v1alpha1.ExampleKind,
+) error
+```
+
+---
+
+## Receivers
+
+- **CreateReconcileHelpers** MUST be methods on `Reconciler` (they perform I/O via controller-runtime client owned by `Reconciler`).
+
+---
+
+## I/O boundaries
+
+**CreateReconcileHelpers** MAY do the following:
+
+- controller-runtime client usage to execute exactly **one** Kubernetes API call: `Create(...)`.
+
+**CreateReconcileHelpers** MUST NOT do any of the following:
+
+- Kubernetes API calls other than that single `Create(...)` (no `Get/List/Update/Patch/Delete`);
+- `DeepCopy` (including `obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.);
+- executing patches (`Patch` / `Status().Patch`) or making any patch ordering / patch type decisions;
+- performing any other I/O besides the single Kubernetes API request they own.
+
+**CreateReconcileHelpers** MUST NOT do “hidden I/O” either:
+
+- `time.Now()` / `time.Since(...)` (nondeterministic wall-clock reads);
+- random number generation (`rand.*`);
+- environment reads (`os.Getenv`, reading files);
+- network calls of any kind **other than** the single Kubernetes API request they own.
+
+> Rationale: create helpers are mechanical wrappers around exactly one create operation; ordering, retries, and higher-level policy remain explicit in **Reconcile methods**.
+
+---
+
+## Determinism contract
+
+A **CreateReconcileHelper** MUST be **deterministic** in everything it controls.
+
+In particular:
+- The request payload it sends MUST be deterministic given explicit inputs (no random names, UUIDs, timestamps, or unstable ordering).
+- See the common determinism contract in `controller-reconcile-helper.mdc` (ordering stability, no map iteration order reliance).
+- **CreateReconcileHelpers** MUST NOT introduce “hidden I/O” (time, random, env, extra network calls) beyond the single Kubernetes API `Create(...)` request they own.
+
+> Practical reason: nondeterminism creates hard-to-debug drift and flaky tests; create should be a mechanical operation.
+
+---
+
+## Read-only contract
+
+`create<Kind>` / `Create<Kind>` MUST treat all inputs except the created object as read-only:
+
+- it MUST NOT mutate any input objects other than the object being created;
+- it MUST NOT mutate shared templates/defaults through aliasing (clone before editing);
+- it MUST NOT perform in-place modifications through aliases to non-created-object data.
+
+See the common read-only contract in `controller-reconcile-helper.mdc` (especially the Go aliasing rule for `map` / `[]T`).
+
+---
+
+## Patch-domain separation
+
+- A **CreateReconcileHelper** MUST perform exactly one API write: `Create(...)` for the **main resource**.
+- It MUST NOT write the status subresource as part of creation:
+  - it MUST NOT issue `Status().Patch(...)` / `Status().Update(...)`;
+  - it MUST NOT rely on setting `.status` in the create request.
+- If initial `.status` must be set (e.g., persisting **controller-owned state** and/or publishing an initial **report**), it MUST be done by **Reconcile methods** as a **separate** status write (separate request).
+
+---
+
+## Composition
+
+- A **CreateReconcileHelper** MUST perform exactly one API write (`Create(...)`) for exactly one object.
+- A **CreateReconcileHelper** MAY rely on pure helpers (**ComputeReconcileHelpers** / **ApplyReconcileHelpers** / **EnsureReconcileHelpers**) and/or **ConstructionReconcileHelpers** to prepare the object **in-memory** before calling `Create(...)`, but it MUST NOT perform any additional API calls.
+- If creating an object requires multiple API writes (e.g., create main resource and then write status), those writes MUST be composed in **Reconcile methods** as separate operations, not hidden inside the create helper.
+- If multiple objects must be created (loops, groups, fan-out), that orchestration MUST live in **Reconcile methods**; create helpers must remain single-object.
+
+---
+
+## Flow phase scopes and outcomes
+
+- **CreateReconcileHelpers** MUST NOT create a `reconcile/flow` **phase scope** — they should stay mechanical and short.
+- **CreateReconcileHelpers** MUST return `error` and MUST NOT return **ReconcileOutcome** (`flow.ReconcileOutcome`) or **EnsureOutcome** (`flow.EnsureOutcome`).
+  - Any retry/requeue policy belongs to the calling **Reconcile method** (use `ReconcileFlow` there).
+
+---
+
+## Error handling
+
+- See the common error handling rules in `controller-reconcile-helper.mdc`.
+- A **CreateReconcileHelper** SHOULD be mechanically thin: if the single `Create(...)` call fails, return the error **without wrapping**.
+- A **CreateReconcileHelper** MUST NOT enrich errors with additional context (including **object identity** such as `namespace/name`, UID, object key).
+  - Error enrichment (action + **object identity** + **phase**) is the calling **Reconcile method**’s responsibility.
+
+---
+
+## Common anti-patterns (MUST NOT)
+
+❌ Doing existence checks (`Get/List`) or any extra Kubernetes API calls:
+```go
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK) error {
+    // forbidden: extra API call
+    var existing v1alpha1.EK
+    if err := r.client.Get(ctx, client.ObjectKeyFromObject(obj), &existing); err == nil {
+        return nil // "already exists" decision belongs to Reconcile methods
+    }
+
+    // forbidden: second API call in the same helper if create proceeds
+    if err := r.client.Create(ctx, obj); err != nil {
+        return err
+    }
+    return nil
+}
+```
+
+❌ Performing more than one write (`Create` + `Update/Patch/Delete`, retries-as-extra-calls, fallback logic):
+```go
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK) error {
+    if err := r.client.Create(ctx, obj); err != nil {
+        // forbidden: "fallback" write makes it >1 API call
+        return r.client.Update(ctx, obj)
+    }
+    return nil
+}
+```
+
+❌ Creating on a temporary object and dropping it (caller-owned `obj` is not updated with UID/RV/defaults):
+```go
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK) error {
+    tmp := &v1alpha1.EK{
+        ObjectMeta: metav1.ObjectMeta{
+            Namespace: obj.Namespace,
+            Name:      obj.Name,
+        },
+        Spec: obj.Spec,
+    }
+    if err := r.client.Create(ctx, tmp); err != nil {
+        return err
+    }
+
+    // obj is still stale: uid/resourceVersion/defaults are on tmp, not on obj
+    return nil
+}
+```
+
+❌ Using `DeepCopy` in create helpers:
+```go
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK) error {
+    base := obj.DeepCopy() // forbidden: DeepCopy belongs to Reconcile methods, not create helpers
+    _ = base
+    return r.client.Create(ctx, obj)
+}
+```
+
+❌ Writing status as part of create (or “relying on status in the create request”):
+```go
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK) error {
+    obj.Status.Phase = "Ready" // forbidden: status writes (report/controller-owned state) are a separate request
+    if err := r.client.Create(ctx, obj); err != nil {
+        return err
+    }
+    // forbidden: second write and status subresource write inside create helper
+    return r.client.Status().Update(ctx, obj)
+}
+```
+
+❌ Executing patches inside create helpers:
+```go
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK, base *v1alpha1.EK) error {
+    // forbidden: patch execution belongs to PatchReconcileHelpers / Reconcile methods
+    if err := r.client.Create(ctx, obj); err != nil {
+        return err
+    }
+    return r.client.Patch(ctx, obj, client.MergeFrom(base))
+}
+```
+
+❌ Creating multiple objects in a single create helper:
+```go
+func (r *Reconciler) createEKs(ctx context.Context, objs []*v1alpha1.EK) error {
+    for _, obj := range objs {
+        if err := r.client.Create(ctx, obj); err != nil { // forbidden: multiple API calls
+            return err
+        }
+    }
+    return nil
+}
+```
+
+❌ Hidden I/O / nondeterministic request payload (time/random/env, nondeterministic ordering):
+```go
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK) error {
+    obj.Annotations["createdAt"] = time.Now().Format(time.RFC3339) // forbidden
+    obj.Labels["nonce"] = uuid.NewString()                         // forbidden
+    obj.Spec.Seed = rand.Int()                                     // forbidden
+    return r.client.Create(ctx, obj)
+}
+```
+
+❌ Using `GenerateName` / random naming for resources that must be stable in reconciliation:
+```go
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK) error {
+    obj.Name = ""
+    obj.GenerateName = "eon-" // anti-pattern: server adds a random suffix => nondeterministic identity
+    return r.client.Create(ctx, obj)
+}
+```
+
+❌ Mutating shared templates/defaults through aliasing while preparing `obj`:
+```go
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK, template *v1alpha1.EK) error {
+    // forbidden: template labels map is shared; mutating it mutates the template
+    labels := template.GetLabels()
+    labels["app"] = "eon"
+    obj.SetLabels(labels)
+
+    return r.client.Create(ctx, obj)
+}
+```
