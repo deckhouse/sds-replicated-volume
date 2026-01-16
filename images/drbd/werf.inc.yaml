@@ -8,6 +8,11 @@ git:
     stageDependencies:
       beforeSetup:
         - "**/*"
+  - add: /images/{{ $.ImageName }}/patches
+    to: /patches
+    stageDependencies:
+      beforeSetup:
+        - "**/*"
 shell:
   beforeInstall:
     - export DEBIAN_FRONTEND=noninteractive
@@ -29,6 +34,7 @@ shell:
   setup:
     - git clone --depth 1 --branch drbd-{{ $.Versions.DRBD }} {{ $.Root.SOURCE_REPO }}/LINBIT/drbd.git  /drbd
     - cd /drbd
+    - for patchfile in /patches/*.patch; do echo "Apply ${patchfile} ... "; git apply ${patchfile} --verbose; done
     - git submodule update --init --recursive
     - sed -e "s/\<curl\>/d8-curl -k/g" -i /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh
     - git commit -am 'd8-curl'
