@@ -325,7 +325,7 @@ func computeIntendedFoo(ctx context.Context, obj *v1alpha1.Foo, out *IntendedFoo
 
 ✅ Separate **target** values (GOOD)
 ```go
-func (r *Reconciler) computeTargetX(obj *v1alpha1.X, intended IntendedX, actual ActualX) (targetMain TargetLabels, targetStatus TargetXStatus, err error)
+func (r *Reconciler) computeTargetX(obj *v1alpha1.X, intended IntendedX, actual ActualX) (targetMain TargetLabels, targetStatus TargetEKStatus, err error)
 ```
 
 ❌ Mixed **target** main+status (BAD)
@@ -334,14 +334,14 @@ func (r *Reconciler) computeTargetX(obj *v1alpha1.X, intended IntendedX, actual 
 ```
 
 Notes (SHOULD):
-- “Main” typically includes metadata/spec of the root object and/or child objects (desired or actual, depending on the helper).
-- “Status” typically includes conditions, observed generation, and other status-only values (desired or actual, depending on the helper).
+- “Main” typically includes metadata/spec of the root object and/or child objects (intended/target or actual, depending on the helper).
+- “Status” typically includes conditions, observed generation, and other status-only values (intended/target or actual, depending on the helper).
 
 ---
 
 ## Composition
 
-- A **ComputeReconcileHelper** MAY compute multiple related outputs (desired and/or actual) in one pass.
+- A **ComputeReconcileHelper** MAY compute multiple related outputs (intended/target and/or actual) in one pass.
   - If these outputs are **not distinguishable for external code** (they represent one conceptual “state”), it SHOULD return them as **one object** (small struct, anonymous struct, slice/map).
   - If these outputs **are distinguishable for external code** (they are meaningfully different and will be used independently), it SHOULD return them as **separate objects**.
 - A `computeIntended*` / `ComputeIntended*` helper MAY call other `computeIntended*` helpers (pure composition).
@@ -375,7 +375,8 @@ Notes (SHOULD):
 ```go
 func (r *Reconciler) computeActualFoo(ctx context.Context, obj *v1alpha1.Foo) (ActualFoo, error) {
     var cm corev1.ConfigMap
-    if err := r.client.Get(ctx, nn, &cm); err != nil { // forbidden: I/O in compute
+    key := client.ObjectKey{Namespace: obj.Namespace, Name: "some-cm"}
+    if err := r.client.Get(ctx, key, &cm); err != nil { // forbidden: I/O in compute
         return ActualFoo{}, err
     }
     return ActualFoo{}, nil

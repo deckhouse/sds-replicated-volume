@@ -175,10 +175,13 @@ func isFooInSync(
 
 ❌ Doing any Kubernetes API I/O (directly or indirectly):
 ```go
-func isFooInSync(ctx context.Context, obj *v1alpha1.Foo, target TargetFoo) bool {
+// forbidden shape: IsInSync helpers MUST NOT accept ctx (no I/O allowed)
+// forbidden: IsInSync helpers MUST be plain functions (no Reconciler receiver)
+func (r *Reconciler) isFooInSync(ctx context.Context, obj *v1alpha1.Foo, target TargetFoo) bool {
     // forbidden: I/O in IsInSync helper
     var cm corev1.ConfigMap
-    _ = r.client.Get(ctx, nn, &cm)
+    key := client.ObjectKey{Namespace: obj.Namespace, Name: "some-cm"}
+    _ = r.client.Get(ctx, key, &cm)
     return true
 }
 ```
@@ -200,9 +203,10 @@ func isFooInSync(obj *v1alpha1.Foo, target TargetFoo) flow.ReconcileOutcome { //
 
 ❌ Logging or creating phases (no `ctx`, no logs):
 ```go
-func isFooInSync(ctx context.Context, obj *v1alpha1.Foo, target TargetFoo) bool { // forbidden shape
+// forbidden: IsInSync helpers MUST NOT accept ctx (they must stay pure and non-logging)
+func isFooInSync(ctx context.Context, obj *v1alpha1.Foo, target TargetFoo) bool {
     l := log.FromContext(ctx)
-    l.Info("checking in-sync") // forbidden: no logging
+    l.Info("checking in-sync") // forbidden: no logging in IsInSync helpers
     return true
 }
 ```

@@ -190,6 +190,8 @@ func applyFoo(
 
 ❌ Doing any Kubernetes API I/O (client usage / API calls in apply):
 ```go
+// forbidden: apply helpers MUST NOT accept ctx (they are non-I/O)
+// forbidden: apply helpers MUST NOT accept client.Client
 func applyFoo(ctx context.Context, c client.Client, obj *v1alpha1.Foo, target TargetFoo) error {
     // forbidden: apply helpers are non-I/O
     return c.Update(ctx, obj)
@@ -198,6 +200,7 @@ func applyFoo(ctx context.Context, c client.Client, obj *v1alpha1.Foo, target Ta
 
 ❌ Executing patches or making patch decisions inside apply:
 ```go
+// forbidden: apply helpers MUST NOT accept ctx or client.Client
 func applyFoo(ctx context.Context, c client.Client, obj, base *v1alpha1.Foo, target TargetFoo) error {
     // forbidden: patch execution belongs to Reconcile methods / PatchReconcileHelpers
     obj.Spec = target.Spec
@@ -224,9 +227,10 @@ func applyFoo(obj *v1alpha1.Foo, target TargetFoo) flow.ReconcileOutcome {
 
 ❌ Adding logging/phases to apply helpers (they must stay tiny and have no `ctx`):
 ```go
+// forbidden: apply helpers MUST NOT accept ctx
 func applyFoo(ctx context.Context, obj *v1alpha1.Foo, target TargetFoo) error {
     l := log.FromContext(ctx)
-    l.Info("applying target foo") // forbidden: apply helpers do not log / do not accept ctx
+    l.Info("applying target foo") // forbidden: apply helpers do not log
     obj.Spec = target.Spec
     return nil
 }

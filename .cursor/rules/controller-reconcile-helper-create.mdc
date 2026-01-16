@@ -46,7 +46,7 @@ Typical create helpers are used for child resources to encapsulate the mechanica
   Examples:
   - `createCM(...)` (or `createConfigMap(...)`)
   - `createSVC(...)` (or `createService(...)`)
-  - `createSKN(...)` (or `createSomeKindName(...)`)
+  - `createEK(...)` (or `createExampleKind(...)`)
 - **CreateReconcileHelpers** names MUST NOT imply orchestration or existence checks (`ensureCreated`, `reconcileCreate`, `createIfNeeded`) — branching and policy belong to **Reconcile methods**.
 
 ---
@@ -58,9 +58,9 @@ Typical create helpers are used for child resources to encapsulate the mechanica
 
 ### Simple create
 ```go
-func (r *Reconciler) createSKN(
+func (r *Reconciler) createEK(
     ctx context.Context,
-    obj *v1alpha1.SomeKindName,
+    obj *v1alpha1.ExampleKind,
 ) error
 ```
 
@@ -161,9 +161,9 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ❌ Doing existence checks (`Get/List`) or any extra Kubernetes API calls:
 ```go
-func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK) error {
     // forbidden: extra API call
-    var existing v1alpha1.EON
+    var existing v1alpha1.EK
     if err := r.client.Get(ctx, client.ObjectKeyFromObject(obj), &existing); err == nil {
         return nil // "already exists" decision belongs to Reconcile methods
     }
@@ -178,7 +178,7 @@ func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
 
 ❌ Performing more than one write (`Create` + `Update/Patch/Delete`, retries-as-extra-calls, fallback logic):
 ```go
-func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK) error {
     if err := r.client.Create(ctx, obj); err != nil {
         // forbidden: "fallback" write makes it >1 API call
         return r.client.Update(ctx, obj)
@@ -189,8 +189,8 @@ func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
 
 ❌ Creating on a temporary object and dropping it (caller-owned `obj` is not updated with UID/RV/defaults):
 ```go
-func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
-    tmp := &v1alpha1.EON{
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK) error {
+    tmp := &v1alpha1.EK{
         ObjectMeta: metav1.ObjectMeta{
             Namespace: obj.Namespace,
             Name:      obj.Name,
@@ -208,7 +208,7 @@ func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
 
 ❌ Using `DeepCopy` in create helpers:
 ```go
-func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK) error {
     base := obj.DeepCopy() // forbidden: DeepCopy belongs to Reconcile methods, not create helpers
     _ = base
     return r.client.Create(ctx, obj)
@@ -217,7 +217,7 @@ func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
 
 ❌ Writing status as part of create (or “relying on status in the create request”):
 ```go
-func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK) error {
     obj.Status.Phase = "Ready" // forbidden: status writes (report/controller-owned state) are a separate request
     if err := r.client.Create(ctx, obj); err != nil {
         return err
@@ -229,7 +229,7 @@ func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
 
 ❌ Executing patches inside create helpers:
 ```go
-func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON, base *v1alpha1.EON) error {
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK, base *v1alpha1.EK) error {
     // forbidden: patch execution belongs to PatchReconcileHelpers / Reconcile methods
     if err := r.client.Create(ctx, obj); err != nil {
         return err
@@ -240,7 +240,7 @@ func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON, base *v1a
 
 ❌ Creating multiple objects in a single create helper:
 ```go
-func (r *Reconciler) createEONs(ctx context.Context, objs []*v1alpha1.EON) error {
+func (r *Reconciler) createEKs(ctx context.Context, objs []*v1alpha1.EK) error {
     for _, obj := range objs {
         if err := r.client.Create(ctx, obj); err != nil { // forbidden: multiple API calls
             return err
@@ -252,7 +252,7 @@ func (r *Reconciler) createEONs(ctx context.Context, objs []*v1alpha1.EON) error
 
 ❌ Hidden I/O / nondeterministic request payload (time/random/env, nondeterministic ordering):
 ```go
-func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK) error {
     obj.Annotations["createdAt"] = time.Now().Format(time.RFC3339) // forbidden
     obj.Labels["nonce"] = uuid.NewString()                         // forbidden
     obj.Spec.Seed = rand.Int()                                     // forbidden
@@ -262,7 +262,7 @@ func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
 
 ❌ Using `GenerateName` / random naming for resources that must be stable in reconciliation:
 ```go
-func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK) error {
     obj.Name = ""
     obj.GenerateName = "eon-" // anti-pattern: server adds a random suffix => nondeterministic identity
     return r.client.Create(ctx, obj)
@@ -271,7 +271,7 @@ func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
 
 ❌ Mutating shared templates/defaults through aliasing while preparing `obj`:
 ```go
-func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON, template *v1alpha1.EON) error {
+func (r *Reconciler) createEK(ctx context.Context, obj *v1alpha1.EK, template *v1alpha1.EK) error {
     // forbidden: template labels map is shared; mutating it mutates the template
     labels := template.GetLabels()
     labels["app"] = "eon"

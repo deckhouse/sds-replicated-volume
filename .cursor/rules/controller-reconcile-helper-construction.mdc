@@ -271,6 +271,8 @@ Important distinctions:
 ❌ Doing any Kubernetes API I/O:
 
 ```go
+// forbidden: construction helpers MUST NOT accept ctx
+// forbidden: construction helpers MUST NOT accept client.Client
 func newFoo(ctx context.Context, c client.Client, obj *v1alpha1.Foo) (FooOut, error) {
     // forbidden: I/O in ConstructionReconcileHelper
     _ = c.Get(ctx, client.ObjectKeyFromObject(obj), &corev1.ConfigMap{})

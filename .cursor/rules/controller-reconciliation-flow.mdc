@@ -325,13 +325,16 @@ Any step function that uses phase logging MUST follow the scope placement rules 
 Example (illustrative):
 
 ```go
-func computeBar(ctx context.Context) (err error) {
+func computeBar(ctx context.Context, input string) (err error) {
     sf := flow.BeginStep(ctx, "compute-bar")
     defer sf.OnEnd(&err)
     ctx = sf.Ctx()
 
+    if input == "" {
+        return sf.Errf("bad input: %s", input)
+    }
     // ...
-    return sf.Errf("bad input: %s", x)
+    return nil
 }
 ```
 

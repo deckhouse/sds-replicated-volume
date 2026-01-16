@@ -67,8 +67,7 @@ Notes on `.status` (role vs location):
   - `ensureStatusConditions(...)` (conditions are typically part of the published **report**)
 - **EnsureReconcileHelpers** names MUST NOT include `Desired` / `Actual` / `Intended` / `Target` / `Report` unless the applied “thing” name in the **object** API includes those words.
   - Exception: helpers that explicitly build/publish a status **report** artifact MAY end with `Report` when it improves clarity (e.g., `ensureStatusReport`, `ensureConditionsReport`).
-- **EnsureReconcileHelpers** names MUST NOT sound like orchestration (`ensureAll`, `ensureEverything`, `ensureAndPatch`) — ensure helpers do not execute **I/O**; they only mutate and return **Outcome** (in code, the type is `flow.Outcome`).
-  - They only mutate and return **EnsureOutcome** (in code, the type is `flow.EnsureOutcome`).
+- **EnsureReconcileHelpers** names MUST NOT sound like orchestration (`ensureAll`, `ensureEverything`, `ensureAndPatch`) — ensure helpers do not execute **I/O**; they only mutate and return **EnsureOutcome** (in code: `flow.EnsureOutcome`).
 
 ---
 
@@ -153,7 +152,7 @@ See the common determinism contract in `controller-reconcile-helper.mdc`.
 In particular:
 - **EnsureReconcileHelpers** MAY use extracted computation/caching components owned by the reconciler (e.g. “world view” / “planner” / “topology scorer”, caches), as described in `controller-file-structure.mdc` (“Additional components”), as long as they do not violate the I/O boundaries above.
   - Note: cache population is a side effect and an additional source of state; therefore, the helper is deterministic only relative to that state. For the same explicit inputs and the same state of these components, the result MUST be the same.
-- Returned `flow.Outcome` flags (changed / optimisticLock / error) MUST be stable for the same inputs and object state.
+- Returned `flow.EnsureOutcome` flags (changed / optimisticLock / error) MUST be stable for the same inputs and object state.
 
 > Practical reason: nondeterminism creates patch churn and flaky tests.
 
@@ -184,15 +183,20 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ✅ Separate ensure helpers (GOOD)
 ```go
-func ensureMainFoo(obj *v1alpha1.Foo) flow.Outcome
-func ensureStatusFoo(obj *v1alpha1.Foo) flow.Outcome
+func ensureMainFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome)
+func ensureStatusFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome)
 ```
 
 ❌ Mixed ensure (BAD)
 ```go
-func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
-    // mutates spec/metadata AND status in one helper
-    return flow.Continue()
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
+
+    obj.Spec.Replicas = 3            // main domain
+    obj.Status.Phase = "Reconciling" // status domain
+    // forbidden: ensure must touch exactly one patch domain
+    return ef.Ok().ReportChanged()
 }
 ```
 
@@ -238,10 +242,11 @@ func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutco
 
     // ... deterministically mutate obj ...
 
-    return ef.Ok().ReportChangedIf(changed)
+    outcome = ef.Ok().ReportChangedIf(changed)
     if needLock {
         outcome = outcome.RequireOptimisticLock()
     }
+    return outcome
 }
 ```
 
@@ -282,12 +287,14 @@ func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutco
 
 ❌ Doing any Kubernetes API I/O (directly or indirectly):
 ```go
-func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) flow.EnsureOutcome {
-    var ef flow.EnsureFlow
+func (r *Reconciler) ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
 
     // forbidden: I/O in ensure
     var cm corev1.ConfigMap
-    if err := r.client.Get(ctx, nn, &cm); err != nil {
+    key := client.ObjectKey{Namespace: obj.Namespace, Name: "some-cm"}
+    if err := r.client.Get(ctx, key, &cm); err != nil {
         return ef.Err(err)
     }
     return ef.Ok()
@@ -296,8 +303,9 @@ func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) flow.EnsureOutcome {
 
 ❌ Executing patches / updates / deletes (or hiding them behind helpers):
 ```go
-func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) flow.EnsureOutcome {
-    var ef flow.EnsureFlow
+func (r *Reconciler) ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
 
     // forbidden: patch execution belongs to Reconcile methods / PatchReconcileHelpers
     base := obj.DeepCopy() // also forbidden: DeepCopy in ensure
@@ -309,8 +317,9 @@ func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) flow.EnsureOutcome {
 
 ❌ Calling `DeepCopy` inside ensure helpers:
 ```go
-func ensureFoo(obj *v1alpha1.Foo) flow.EnsureOutcome {
-    var ef flow.EnsureFlow
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
 
     _ = obj.DeepCopy() // forbidden: DeepCopy belongs to Reconcile methods
     return ef.Ok()
@@ -319,8 +328,9 @@ func ensureFoo(obj *v1alpha1.Foo) flow.EnsureOutcome {
 
 ❌ Mutating both patch domains (main + status) in one ensure helper:
 ```go
-func ensureFoo(obj *v1alpha1.Foo) flow.EnsureOutcome {
-    var ef flow.EnsureFlow
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
 
     obj.Spec.Replicas = 3            // main domain
     obj.Status.Phase = "Reconciling" // status domain (typically published **report**)
@@ -329,10 +339,11 @@ func ensureFoo(obj *v1alpha1.Foo) flow.EnsureOutcome {
 }
 ```
 
-❌ Returning “changed” inconsistently (mutated object but outcome does not report it):
+❌ Returning "changed" inconsistently (mutated object but outcome does not report it):
 ```go
-func ensureFoo(obj *v1alpha1.Foo) flow.EnsureOutcome {
-    var ef flow.EnsureFlow
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
 
     obj.Spec.Replicas = 3
     // forbidden: mutation happened, but outcome does not report change
@@ -340,20 +351,22 @@ func ensureFoo(obj *v1alpha1.Foo) flow.EnsureOutcome {
 }
 ```
 
-❌ Reporting “changed” without actually changing the object:
+❌ Reporting "changed" without actually changing the object:
 ```go
-func ensureFoo(obj *v1alpha1.Foo) flow.EnsureOutcome {
-    var ef flow.EnsureFlow
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
 
     // forbidden: reports change but did not mutate anything
     return ef.Ok().ReportChanged()
 }
 ```
 
-❌ Requesting optimistic locking “sometimes” without determinism (same inputs -> different outcome):
+❌ Requesting optimistic locking "sometimes" without determinism (same inputs -> different outcome):
 ```go
-func ensureFoo(obj *v1alpha1.Foo) flow.EnsureOutcome {
-    var ef flow.EnsureFlow
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
 
     if rand.Int()%2 == 0 { // forbidden: nondeterministic
         obj.Spec.Replicas = 3
@@ -366,8 +379,9 @@ func ensureFoo(obj *v1alpha1.Foo) flow.EnsureOutcome {
 
 ❌ Hidden I/O / nondeterminism (time/random/env/network):
 ```go
-func ensureFoo(obj *v1alpha1.Foo) flow.EnsureOutcome {
-    var ef flow.EnsureFlow
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
 
     _ = time.Now()        // forbidden (except condition timestamps via obju)
     _ = rand.Int()        // forbidden
@@ -378,8 +392,9 @@ func ensureFoo(obj *v1alpha1.Foo) flow.EnsureOutcome {
 
 ❌ Depending on map iteration order when building ordered slices (patch churn):
 ```go
-func ensureFoo(obj *v1alpha1.Foo) flow.EnsureOutcome {
-    var ef flow.EnsureFlow
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
 
     out := make([]string, 0, len(obj.Spec.Flags))
     for k := range obj.Spec.Flags { // map iteration order is random
@@ -393,8 +408,9 @@ func ensureFoo(obj *v1alpha1.Foo) flow.EnsureOutcome {
 
 ❌ Mutating shared templates/defaults through aliasing:
 ```go
-func ensureFoo(obj *v1alpha1.Foo, template *v1alpha1.Foo) flow.EnsureOutcome {
-    var ef flow.EnsureFlow
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo, template *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
 
     // forbidden: template labels map is shared; mutating it mutates the template
     labels := template.GetLabels()
@@ -406,8 +422,9 @@ func ensureFoo(obj *v1alpha1.Foo, template *v1alpha1.Foo) flow.EnsureOutcome {
 
 ❌ Manual metadata/conditions manipulation when `objutilv1` (`obju`) must be used:
 ```go
-func ensureFoo(obj *v1alpha1.Foo) flow.EnsureOutcome {
-    var ef flow.EnsureFlow
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
 
     // forbidden in this codebase: do not open-code label/finalizer/condition edits
     if obj.Labels == nil {

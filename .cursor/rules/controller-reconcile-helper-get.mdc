@@ -74,10 +74,10 @@ Get helpers MUST NOT imply orchestration or policy:
 ### Single object (optional by NotFound)
 
 ```go
-func (r *Reconciler) getSKN(
+func (r *Reconciler) getEK(
     ctx context.Context,
     key client.ObjectKey,
-) (*v1alpha1.SomeKindName, error)
+) (*v1alpha1.ExampleKind, error)
 ```
 
 Recommended “optional by NotFound” rule for this shape:
@@ -90,30 +90,30 @@ If NotFound is an error at this call site, either:
 - use an explicit required variant name:
 
 ```go
-func (r *Reconciler) getRequiredSKN(
+func (r *Reconciler) getRequiredEK(
     ctx context.Context,
     key client.ObjectKey,
-) (*v1alpha1.SomeKindName, error)
+) (*v1alpha1.ExampleKind, error)
 ```
 
 ### List (unordered)
 
 ```go
-func (r *Reconciler) getSKNs(
+func (r *Reconciler) getEKs(
     ctx context.Context,
     opts ...client.ListOption,
-) ([]v1alpha1.SomeKindName, error)
+) ([]v1alpha1.ExampleKind, error)
 ```
 
-If no objects match, return `([]v1alpha1.SomeKindName{}, nil)` (empty slice, not `nil`) SHOULD be preferred for ergonomics.
+If no objects match, return `([]v1alpha1.ExampleKind{}, nil)` (empty slice, not `nil`) SHOULD be preferred for ergonomics.
 
 ### List (ordered)
 
 ```go
-func (r *Reconciler) getSortedSKNs(
+func (r *Reconciler) getSortedEKs(
     ctx context.Context,
     opts ...client.ListOption,
-) ([]v1alpha1.SomeKindName, error)
+) ([]v1alpha1.ExampleKind, error)
 ```
 
 ---
@@ -223,7 +223,7 @@ If multiple reads are needed:
 
 ❌ Returning **Outcome** from a get helper:
 ```go
-func (r *Reconciler) getSKN(ctx context.Context, key client.ObjectKey) flow.ReconcileOutcome {
+func (r *Reconciler) getEK(ctx context.Context, key client.ObjectKey) flow.ReconcileOutcome {
     var rf flow.ReconcileFlow
     return rf.Continue() // forbidden: get helpers must not return reconcile outcomes
 }
@@ -231,8 +231,8 @@ func (r *Reconciler) getSKN(ctx context.Context, key client.ObjectKey) flow.Reco
 
 ❌ Doing multiple reads (more than one `Get`/`List`) in the same helper:
 ```go
-func (r *Reconciler) getSKNAndFriends(ctx context.Context, key client.ObjectKey) (*v1alpha1.SKN, error) {
-    var a v1alpha1.SKN
+func (r *Reconciler) getEKAndFriends(ctx context.Context, key client.ObjectKey) (*v1alpha1.EK, error) {
+    var a v1alpha1.EK
     _ = r.client.Get(ctx, key, &a) // first read
 
     var b v1alpha1.Other
@@ -244,20 +244,22 @@ func (r *Reconciler) getSKNAndFriends(ctx context.Context, key client.ObjectKey)
 
 ❌ Doing any write (`Patch/Create/Delete/Status().Patch`) from a get helper:
 ```go
-func (r *Reconciler) getSKN(ctx context.Context, key client.ObjectKey) (*v1alpha1.SKN, error) {
-    var obj v1alpha1.SKN
+func (r *Reconciler) getEK(ctx context.Context, key client.ObjectKey) (*v1alpha1.EK, error) {
+    var obj v1alpha1.EK
     if err := r.client.Get(ctx, key, &obj); err != nil {
         return nil, err
     }
-    _ = r.client.Patch(ctx, &obj, client.MergeFrom(&obj)) // forbidden write
+    obj.Labels["fetched"] = "true"
+    // forbidden: any write operation in a get helper
+    _ = r.client.Update(ctx, &obj)
     return &obj, nil
 }
 ```
 
 ❌ Calling **DeepCopy** inside a get helper:
 ```go
-func (r *Reconciler) getSKN(ctx context.Context, key client.ObjectKey) (*v1alpha1.SKN, error) {
-    var obj v1alpha1.SKN
+func (r *Reconciler) getEK(ctx context.Context, key client.ObjectKey) (*v1alpha1.EK, error) {
+    var obj v1alpha1.EK
     _ = obj.DeepCopy() // forbidden
     if err := r.client.Get(ctx, key, &obj); err != nil {
         return nil, err
@@ -268,8 +270,8 @@ func (r *Reconciler) getSKN(ctx context.Context, key client.ObjectKey) (*v1alpha
 
 ❌ Returning “sorted” results without deterministic tie-breakers:
 ```go
-func (r *Reconciler) getSortedSKNs(ctx context.Context) ([]v1alpha1.SKN, error) {
-    var list v1alpha1.SKNList
+func (r *Reconciler) getSortedEKs(ctx context.Context) ([]v1alpha1.EK, error) {
+    var list v1alpha1.EKList
     if err := r.client.List(ctx, &list); err != nil {
         return nil, err
     }

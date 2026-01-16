@@ -199,7 +199,6 @@ This section is **not** about what helpers are *allowed* to do (see the category
 
 - SHOULD NOT split trivial logic into **ComputeReconcileHelper** (`compute*`) + **EnsureReconcileHelper** (`ensure*`) just to “follow patterns”. If one small helper can do it clearly (and within category rules), keep it in one place.
 - MAY create an **EnsureReconcileHelper** (`ensure*`) that is only an orchestrator for **ComputeReconcileHelper** (`compute*`) → **IsInSyncReconcileHelper** (`is*InSync*`) → **ApplyReconcileHelper** (`apply*`) **only** when it significantly improves readability at the call site and does not hide orchestration decisions (ordering/retries/patch policy) that must remain explicit in a **Reconcile method**.
-  - In general, the purpose of **EnsureReconcileHelper** (`ensure*`) is to perform in-place, step-by-step corrections on `obj` (for a single **patch domain**), not to wrap a **desired state** driven pipeline.
   - In general, the purpose of **EnsureReconcileHelper** (`ensure*`) is to perform in-place, step-by-step corrections on `obj` (for a single **patch domain**), not to wrap a **target**/**report**-driven pipeline.
 - If an **EnsureReconcileHelper** (`ensure*`) is small and readable, keep it monolithic:
   - SHOULD NOT extract a separate **ComputeReconcileHelper** (`compute*`) just to compute a couple of booleans or a tiny struct.
