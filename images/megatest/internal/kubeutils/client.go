@@ -456,7 +456,7 @@ func buildRVAName(rvName, nodeName string) string {
 	return "rva-" + rvPart + "-" + nodePart + "-" + hash
 }
 
-// EnsureRVA creates a ReplicatedVolumeAttachment for (rvName,nodeName) if it does not exist.
+// EnsureRVA creates a ReplicatedVolumeAttachment for (rvName, nodeName) if it does not exist.
 func (c *Client) EnsureRVA(ctx context.Context, rvName, nodeName string) (*v1alpha1.ReplicatedVolumeAttachment, error) {
 	rvaName := buildRVAName(rvName, nodeName)
 	existing := &v1alpha1.ReplicatedVolumeAttachment{}
@@ -481,7 +481,7 @@ func (c *Client) EnsureRVA(ctx context.Context, rvName, nodeName string) (*v1alp
 	return rva, nil
 }
 
-// DeleteRVA deletes a ReplicatedVolumeAttachment for (rvName,nodeName). It is idempotent.
+// DeleteRVA deletes a ReplicatedVolumeAttachment for (rvName, nodeName). It is idempotent.
 func (c *Client) DeleteRVA(ctx context.Context, rvName, nodeName string) error {
 	rvaName := buildRVAName(rvName, nodeName)
 	rva := &v1alpha1.ReplicatedVolumeAttachment{}
@@ -514,15 +514,14 @@ func (c *Client) ListRVAsByRVName(ctx context.Context, rvName string) ([]v1alpha
 func (c *Client) WaitForRVAReady(ctx context.Context, rvName, nodeName string) error {
 	rvaName := buildRVAName(rvName, nodeName)
 	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
 		rva := &v1alpha1.ReplicatedVolumeAttachment{}
 		if err := c.cl.Get(ctx, client.ObjectKey{Name: rvaName}, rva); err != nil {
 			if client.IgnoreNotFound(err) != nil {
 				return err
 			}
-			time.Sleep(500 * time.Millisecond)
+			if err := waitWithContext(ctx, 500*time.Millisecond); err != nil {
+				return err
+			}
 			continue
 		}
 		cond := meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondReadyType)
@@ -537,7 +536,9 @@ func (c *Client) WaitForRVAReady(ctx context.Context, rvName, nodeName string) e
 			return fmt.Errorf("RVA %s for volume=%s node=%s not attachable: Attached=%s reason=%s message=%q",
 				rvaName, rvName, nodeName, attachedCond.Status, attachedCond.Reason, attachedCond.Message)
 		}
-		time.Sleep(500 * time.Millisecond)
+		if err := waitWithContext(ctx, 500*time.Millisecond); err != nil {
+			return err
+		}
 	}
 }
 
@@ -590,4 +591,14 @@ func (c *Client) ListPods(ctx context.Context, namespace, labelSelector string) 
 // DeletePod deletes a pod (does not wait for deletion)
 func (c *Client) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 	return c.cl.Delete(ctx, pod)
+}
+
+// waitWithContext waits for the specified duration or until context is cancelled
+func waitWithContext(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
 }

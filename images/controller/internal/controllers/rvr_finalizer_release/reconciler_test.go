@@ -33,21 +33,8 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvrfinalizerrelease "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_finalizer_release"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
+	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
-
-func withRVRIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
-	return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRByReplicatedVolumeName, func(obj client.Object) []string {
-		rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
-		if !ok {
-			return nil
-		}
-		if rvr.Spec.ReplicatedVolumeName == "" {
-			return nil
-		}
-		return []string{rvr.Spec.ReplicatedVolumeName}
-	})
-}
 
 var _ = Describe("Reconcile", func() {
 	var (
@@ -59,14 +46,13 @@ var _ = Describe("Reconcile", func() {
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
-		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 
 		cl = nil
 		rec = nil
 	})
 
 	JustBeforeEach(func() {
-		builder := withRVRIndex(fake.NewClientBuilder().
+		builder := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 			WithScheme(scheme))
 
 		cl = builder.Build()
@@ -392,8 +378,8 @@ var _ = Describe("Reconcile", func() {
 			})
 
 			It("returns error when getting ReplicatedVolume fails with non-NotFound error", func(ctx SpecContext) {
-				builder := withRVRIndex(fake.NewClientBuilder().
-					WithScheme(scheme).
+				builder := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+					WithScheme(scheme)).
 					WithObjects(rvr).
 					WithInterceptorFuncs(interceptor.Funcs{
 						Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
@@ -402,7 +388,7 @@ var _ = Describe("Reconcile", func() {
 						List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList, _ ...client.ListOption) error {
 							return expectedErr
 						},
-					}))
+					})
 
 				cl = builder.Build()
 				rec = rvrfinalizerrelease.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
@@ -412,8 +398,8 @@ var _ = Describe("Reconcile", func() {
 			})
 
 			It("returns error when listing ReplicatedVolumeReplica fails", func(ctx SpecContext) {
-				builder := withRVRIndex(fake.NewClientBuilder().
-					WithScheme(scheme).
+				builder := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+					WithScheme(scheme)).
 					WithObjects(rsc, rv, rvr).
 					WithInterceptorFuncs(interceptor.Funcs{
 						Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
@@ -422,7 +408,7 @@ var _ = Describe("Reconcile", func() {
 						List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList, _ ...client.ListOption) error {
 							return expectedErr
 						},
-					}))
+					})
 
 				cl = builder.Build()
 				rec = rvrfinalizerrelease.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)

@@ -26,6 +26,10 @@ const (
 	// - fake.ClientBuilder.WithIndex(...)
 	IndexFieldRVAByReplicatedVolumeName = "spec.replicatedVolumeName"
 
+	// IndexFieldRVRByNodeName is a controller-runtime cache index field name
+	// used to quickly list ReplicatedVolumeReplica objects on a specific node.
+	IndexFieldRVRByNodeName = "spec.nodeName"
+
 	// IndexFieldRVRByReplicatedVolumeName is a controller-runtime cache index field name
 	// used to quickly list ReplicatedVolumeReplica objects belonging to a specific RV.
 	//

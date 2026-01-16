@@ -35,7 +35,7 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
+	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 // TODO: replace with direct in place assignment for clarity. Code duplication will be resolved by grouping tests together and having initialisation in BeforeEach blocks once for multiple cases
@@ -80,25 +80,11 @@ func createReplicatedVolumeReplicaWithType(nodeID uint, rv *v1alpha1.ReplicatedV
 var _ = Describe("Reconciler", func() {
 	scheme := runtime.NewScheme()
 	Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
-	Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 
 	// Available in BeforeEach
 	var (
 		clientBuilder *fake.ClientBuilder
 	)
-
-	withRVRIndex := func(b *fake.ClientBuilder) *fake.ClientBuilder {
-		return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRByReplicatedVolumeName, func(obj client.Object) []string {
-			rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
-			if !ok {
-				return nil
-			}
-			if rvr.Spec.ReplicatedVolumeName == "" {
-				return nil
-			}
-			return []string{rvr.Spec.ReplicatedVolumeName}
-		})
-	}
 
 	// Available in JustBeforeEach
 	var (
@@ -107,11 +93,11 @@ var _ = Describe("Reconciler", func() {
 	)
 
 	BeforeEach(func() {
-		clientBuilder = withRVRIndex(fake.NewClientBuilder().
-			WithScheme(scheme).
+		clientBuilder = indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+			WithScheme(scheme)).
 			WithStatusSubresource(
 				&v1alpha1.ReplicatedVolumeReplica{},
-				&v1alpha1.ReplicatedVolume{}))
+				&v1alpha1.ReplicatedVolume{})
 
 		// To be safe. To make sure we don't use client from previous iterations
 		cl = nil

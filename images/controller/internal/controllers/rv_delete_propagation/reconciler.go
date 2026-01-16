@@ -71,7 +71,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	for i := range rvrList.Items {
 		rvr := &rvrList.Items[i]
-		if rvr.Spec.ReplicatedVolumeName == rv.Name && rvr.DeletionTimestamp == nil {
+		if rvr.DeletionTimestamp == nil {
 			if err := r.cl.Delete(ctx, rvr); err != nil {
 				if client.IgnoreNotFound(err) != nil {
 					return reconcile.Result{}, fmt.Errorf("deleting rvr: %w", err)

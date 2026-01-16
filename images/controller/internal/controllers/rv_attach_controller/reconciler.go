@@ -167,7 +167,7 @@ func (r *Reconciler) getReplicatedVolumeStorageClass(ctx context.Context, rv v1a
 	return sc, nil
 }
 
-// getReplicatedVolumeReplicas lists all ReplicatedVolumeReplica objects and returns those belonging to the given RV.
+// getReplicatedVolumeReplicas lists all ReplicatedVolumeReplica objects belonging to the given RV.
 func (r *Reconciler) getReplicatedVolumeReplicas(ctx context.Context, rvName string) ([]v1alpha1.ReplicatedVolumeReplica, error) {
 	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList, client.MatchingFields{

@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 // BuildController creates and registers the rvr-status-conditions controller with the manager.
@@ -73,18 +74,18 @@ func AgentPodToRVRMapper(cl client.Client, log logr.Logger) handler.MapFunc {
 
 		// Find all RVRs on this node
 		var rvrList v1alpha1.ReplicatedVolumeReplicaList
-		if err := cl.List(ctx, &rvrList); err != nil {
+		if err := cl.List(ctx, &rvrList, client.MatchingFields{
+			indexes.IndexFieldRVRByNodeName: nodeName,
+		}); err != nil {
 			log.Error(err, "Failed to list RVRs")
 			return nil
 		}
 
-		var requests []reconcile.Request
+		requests := make([]reconcile.Request, 0, len(rvrList.Items))
 		for _, rvr := range rvrList.Items {
-			if rvr.Spec.NodeName == nodeName {
-				requests = append(requests, reconcile.Request{
-					NamespacedName: client.ObjectKeyFromObject(&rvr),
-				})
-			}
+			requests = append(requests, reconcile.Request{
+				NamespacedName: client.ObjectKeyFromObject(&rvr),
+			})
 		}
 
 		return requests

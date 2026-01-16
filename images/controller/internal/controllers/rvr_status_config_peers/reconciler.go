@@ -23,7 +23,6 @@ import (
 	"slices"
 
 	"github.com/go-logr/logr"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -79,13 +78,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 		return reconcile.Result{}, err
 	}
 
-	log.V(2).Info("Removing unrelated items")
+	log.V(2).Info("Removing items without required status fields")
 	list.Items = slices.DeleteFunc(list.Items, func(rvr v1alpha1.ReplicatedVolumeReplica) bool {
-		if !metav1.IsControlledBy(&rvr, &rv) {
-			log.V(4).Info("Not controlled by this ReplicatedVolume")
-			return true
-		}
-
 		log := log.WithValues("rvr", rvr)
 
 		if rvr.Spec.NodeName == "" {

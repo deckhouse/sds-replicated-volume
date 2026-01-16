@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
+	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 func setupScheme(t *testing.T) *runtime.Scheme {
@@ -39,27 +39,11 @@ func setupScheme(t *testing.T) *runtime.Scheme {
 	if err := v1alpha1.AddToScheme(s); err != nil {
 		t.Fatalf("failed to add v1alpha1 to scheme: %v", err)
 	}
-	if err := v1alpha1.AddToScheme(s); err != nil {
-		t.Fatalf("failed to add v1alpha1 to scheme: %v", err)
-	}
 	return s
 }
 
 func newTestReconciler(cl client.Client) *Reconciler {
 	return NewReconciler(cl, logr.Discard())
-}
-
-func withRVRIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
-	return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRByReplicatedVolumeName, func(obj client.Object) []string {
-		rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
-		if !ok {
-			return nil
-		}
-		if rvr.Spec.ReplicatedVolumeName == "" {
-			return nil
-		}
-		return []string{rvr.Spec.ReplicatedVolumeName}
-	})
 }
 
 // conditionTestCase represents a single test case for condition calculation
@@ -120,9 +104,9 @@ func TestReconciler_RVNotFound(t *testing.T) {
 	ctx := t.Context()
 	s := setupScheme(t)
 
-	cl := withRVRIndex(fake.NewClientBuilder().
-		WithScheme(s).
-		WithStatusSubresource(&v1alpha1.ReplicatedVolume{})).
+	cl := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+		WithScheme(s)).
+		WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
 		Build()
 
 	rec := newTestReconciler(cl)
@@ -152,10 +136,10 @@ func TestReconciler_RSCNotFound(t *testing.T) {
 		},
 	}
 
-	cl := withRVRIndex(fake.NewClientBuilder().
-		WithScheme(s).
+	cl := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+		WithScheme(s)).
 		WithObjects(rv).
-		WithStatusSubresource(&v1alpha1.ReplicatedVolume{})).
+		WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
 		Build()
 
 	rec := newTestReconciler(cl)
@@ -492,10 +476,10 @@ func runConditionTestCase(t *testing.T, tc conditionTestCase) {
 	}
 
 	// Build client
-	builder := withRVRIndex(fake.NewClientBuilder().
-		WithScheme(s).
+	builder := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+		WithScheme(s)).
 		WithObjects(rv, rsc).
-		WithStatusSubresource(&v1alpha1.ReplicatedVolume{}, &v1alpha1.ReplicatedVolumeReplica{}))
+		WithStatusSubresource(&v1alpha1.ReplicatedVolume{}, &v1alpha1.ReplicatedVolumeReplica{})
 
 	for _, rvr := range rvrs {
 		builder = builder.WithObjects(rvr)

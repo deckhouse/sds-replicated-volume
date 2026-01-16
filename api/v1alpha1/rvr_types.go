@@ -295,6 +295,24 @@ func ParseReplicationState(s string) ReplicationState {
 	}
 }
 
+// IsSyncingState returns true if the replication state indicates active synchronization.
+func (r ReplicationState) IsSyncingState() bool {
+	switch r {
+	case ReplicationStateSyncSource,
+		ReplicationStateSyncTarget,
+		ReplicationStateStartingSyncSource,
+		ReplicationStateStartingSyncTarget,
+		ReplicationStatePausedSyncSource,
+		ReplicationStatePausedSyncTarget,
+		ReplicationStateWFBitMapSource,
+		ReplicationStateWFBitMapTarget,
+		ReplicationStateWFSyncUUID:
+		return true
+	default:
+		return false
+	}
+}
+
 type ConnectionState string
 
 const (
@@ -336,19 +354,13 @@ func ParseConnectionState(s string) ConnectionState {
 
 // +kubebuilder:object:generate=true
 type DeviceStatus struct {
-	Volume       int       `json:"volume"`
-	Minor        int       `json:"minor"`
-	DiskState    DiskState `json:"diskState"`
-	Client       bool      `json:"client"`
-	Open         bool      `json:"open"`
-	Quorum       bool      `json:"quorum"`
-	Size         int       `json:"size"`
-	Read         int       `json:"read"`
-	Written      int       `json:"written"`
-	ALWrites     int       `json:"alWrites"`
-	BMWrites     int       `json:"bmWrites"`
-	UpperPending int       `json:"upperPending"`
-	LowerPending int       `json:"lowerPending"`
+	Volume    int       `json:"volume"`
+	Minor     int       `json:"minor"`
+	DiskState DiskState `json:"diskState"`
+	Client    bool      `json:"client"`
+	Open      bool      `json:"open"`
+	Quorum    bool      `json:"quorum"`
+	Size      int       `json:"size"`
 }
 
 // +kubebuilder:object:generate=true
@@ -360,8 +372,6 @@ type ConnectionStatus struct {
 	Congested       bool               `json:"congested"`
 	Peerrole        string             `json:"peerRole"`
 	TLS             bool               `json:"tls"`
-	APInFlight      int                `json:"apInFlight"`
-	RSInFlight      int                `json:"rsInFlight"`
 	Paths           []PathStatus       `json:"paths"`
 	PeerDevices     []PeerDeviceStatus `json:"peerDevices"`
 }
@@ -388,8 +398,6 @@ type PeerDeviceStatus struct {
 	PeerClient             bool             `json:"peerClient"`
 	ResyncSuspended        string           `json:"resyncSuspended"`
 	OutOfSync              int              `json:"outOfSync"`
-	Pending                int              `json:"pending"`
-	Unacked                int              `json:"unacked"`
 	HasSyncDetails         bool             `json:"hasSyncDetails"`
 	HasOnlineVerifyDetails bool             `json:"hasOnlineVerifyDetails"`
 	PercentInSync          string           `json:"percentInSync"`

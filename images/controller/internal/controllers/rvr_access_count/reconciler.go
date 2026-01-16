@@ -92,7 +92,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, nil
 	}
 
-	// Get all RVRs
+	// Get all RVRs for this RV
 	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList, client.MatchingFields{
 		indexes.IndexFieldRVRByReplicatedVolumeName: rv.Name,

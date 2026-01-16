@@ -36,6 +36,7 @@ import (
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	interrors "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 type Reconciler struct {
@@ -89,13 +90,11 @@ func (r *Reconciler) Reconcile(
 	}
 
 	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err = r.cl.List(ctx, rvrList); err != nil {
+	if err = r.cl.List(ctx, rvrList, client.MatchingFields{
+		indexes.IndexFieldRVRByReplicatedVolumeName: rv.Name,
+	}); err != nil {
 		return reconcile.Result{}, logError(log, fmt.Errorf("listing rvrs: %w", err))
 	}
-	rvrList.Items = slices.DeleteFunc(
-		rvrList.Items,
-		func(rvr v1alpha1.ReplicatedVolumeReplica) bool { return rvr.Spec.ReplicatedVolumeName != rv.Name },
-	)
 
 	fds, tbs, nonFDtbs, err := r.loadFailureDomains(ctx, log, rv.Name, rvrList.Items, rsc)
 	if err != nil {

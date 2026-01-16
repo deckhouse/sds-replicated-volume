@@ -26,10 +26,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	u "github.com/deckhouse/sds-common-lib/utils"
-	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
 )
 
 type Reconciler struct {
@@ -122,22 +122,23 @@ func (r *Reconciler) selectRVR(
 	}
 
 	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err := r.cl.List(ctx, rvrList); err != nil {
+	if err := r.cl.List(ctx, rvrList, client.MatchingFields{
+		indexes.RVRByRVNameAndNodeName: indexes.RVRByRVNameAndNodeNameKey(req.Name, r.nodeName),
+	}); err != nil {
 		return nil, nil, u.LogError(log, fmt.Errorf("listing rvr: %w", err))
 	}
 
+	if len(rvrList.Items) > 1 {
+		return nil, nil,
+			u.LogError(
+				log.With("firstRVR", rvrList.Items[0].Name).With("secondRVR", rvrList.Items[1].Name),
+				errors.New("selecting rvr: more then one rvr exists"),
+			)
+	}
+
 	var rvr *v1alpha1.ReplicatedVolumeReplica
-	for rvrItem := range uslices.Ptrs(rvrList.Items) {
-		if rvrItem.Spec.NodeName == r.nodeName && rvrItem.Spec.ReplicatedVolumeName == req.Name {
-			if rvr != nil {
-				return nil, nil,
-					u.LogError(
-						log.With("firstRVR", rvr.Name).With("secondRVR", rvrItem.Name),
-						errors.New("selecting rvr: more then one rvr exists"),
-					)
-			}
-			rvr = rvrItem
-		}
+	if len(rvrList.Items) == 1 {
+		rvr = &rvrList.Items[0]
 	}
 
 	return rv, rvr, nil

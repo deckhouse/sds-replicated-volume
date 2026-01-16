@@ -292,8 +292,6 @@ spec:
                       connections:
                         items:
                           properties:
-                            apInFlight:
-                              type: integer
                             congested:
                               type: boolean
                             connectionState:
@@ -350,16 +348,12 @@ spec:
                                     type: boolean
                                   peerDiskState:
                                     type: string
-                                  pending:
-                                    type: integer
                                   percentInSync:
                                     type: string
                                   replicationState:
                                     type: string
                                   resyncSuspended:
                                     type: string
-                                  unacked:
-                                    type: integer
                                   volume:
                                     type: integer
                                 required:
@@ -368,11 +362,9 @@ spec:
                                 - outOfSync
                                 - peerClient
                                 - peerDiskState
-                                - pending
                                 - percentInSync
                                 - replicationState
                                 - resyncSuspended
-                                - unacked
                                 - volume
                                 type: object
                               type: array
@@ -380,12 +372,9 @@ spec:
                               type: integer
                             peerRole:
                               type: string
-                            rsInFlight:
-                              type: integer
                             tls:
                               type: boolean
                           required:
-                          - apInFlight
                           - congested
                           - connectionState
                           - name
@@ -393,53 +382,34 @@ spec:
                           - peerDevices
                           - peerNodeId
                           - peerRole
-                          - rsInFlight
                           - tls
                           type: object
                         type: array
                       devices:
                         items:
                           properties:
-                            alWrites:
-                              type: integer
-                            bmWrites:
-                              type: integer
                             client:
                               type: boolean
                             diskState:
                               type: string
-                            lowerPending:
-                              type: integer
                             minor:
                               type: integer
                             open:
                               type: boolean
                             quorum:
                               type: boolean
-                            read:
-                              type: integer
                             size:
-                              type: integer
-                            upperPending:
                               type: integer
                             volume:
                               type: integer
-                            written:
-                              type: integer
                           required:
-                          - alWrites
-                          - bmWrites
                           - client
                           - diskState
-                          - lowerPending
                           - minor
                           - open
                           - quorum
-                          - read
                           - size
-                          - upperPending
                           - volume
-                          - written
                           type: object
                         type: array
                       forceIOFailures:
