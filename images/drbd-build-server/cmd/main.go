@@ -604,7 +604,7 @@ func (s *server) buildModule(job *BuildJob, headersData []byte) {
 	job.mu.Lock()
 	job.Status = StatusCompleted
 	job.mu.Unlock()
-	s.logger.Info("Successfully built DRBD modules", "job_id", jobID, "kernel_version", job.KernelVersion, "cache_path", cachePath, "size_bytes", cacheInfo.Size())
+	s.logger.Info("Successfully built DRBD modules", "job_id", jobID, "kernel_version", job.KernelVersion, "drbd_version", job.DRBDVersion, "cache_path", cachePath, "size_bytes", cacheInfo.Size())
 }
 
 func (s *server) getStatus() http.HandlerFunc {
