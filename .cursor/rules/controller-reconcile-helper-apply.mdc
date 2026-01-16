@@ -1,6 +1,6 @@
 ---
 globs: images/controller/internal/controllers/rv_controller/reconciler*.go, images/controller/internal/controllers/rv_attach_controller/reconciler*.go
-alwaysApply: false
+alwaysApply: true
 ---
 
 See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.

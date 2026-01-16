@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-
-	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 func mustPanicInternal(t *testing.T, fn func()) {
@@ -18,23 +16,54 @@ func mustPanicInternal(t *testing.T, fn func()) {
 	fn()
 }
 
-func TestMerge_RequeueTruePanics_InternalGuard(t *testing.T) {
-	// This is an internal guard: ctrl.Result{Requeue:true} is not constructible via flow's public API.
-	// We keep this test to ensure Merge keeps rejecting the unsupported Requeue=true mode.
-	mustPanicInternal(t, func() {
-		_ = Merge(Outcome{result: &ctrl.Result{Requeue: true}})
-	})
-}
-
-func TestOutcome_ErrWithoutResult_IsClassifiedAsInvalidKind(t *testing.T) {
-	kind, _ := outcomeKind(&Outcome{err: errors.New("e")})
+func TestReconcileOutcome_ErrWithoutResult_IsClassifiedAsInvalidKind(t *testing.T) {
+	kind, _ := reconcileOutcomeKind(&ReconcileOutcome{err: errors.New("e")})
 	if kind != "invalid" {
 		t.Fatalf("expected kind=invalid, got %q", kind)
 	}
 }
 
-func TestEndPhase_ErrWithoutResult_DoesNotPanic(t *testing.T) {
-	ctx, _ := BeginPhase(context.Background(), "p")
-	o := Outcome{err: errors.New("e")}
-	EndPhase(ctx, &o)
+func TestReconcileFlow_OnEnd_ErrWithoutResult_DoesNotPanic(t *testing.T) {
+	rf := BeginReconcile(context.Background(), "p")
+	o := ReconcileOutcome{err: errors.New("e")}
+	rf.OnEnd(&o)
+}
+
+func TestReconcileFlow_Merge_RequeueIsSupported(t *testing.T) {
+	rf := BeginRootReconcile(context.Background())
+	outcome := rf.Merge(rf.Requeue(), rf.Continue())
+
+	if !outcome.ShouldReturn() {
+		t.Fatalf("expected ShouldReturn() == true")
+	}
+
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected err to be nil, got %v", err)
+	}
+	if !res.Requeue {
+		t.Fatalf("expected Requeue to be true")
+	}
+}
+
+func TestReconcileFlow_Merge_RequeueWinsOverRequeueAfter(t *testing.T) {
+	rf := BeginRootReconcile(context.Background())
+	// Requeue() = delay 0, RequeueAfter(5) = delay 5.
+	// Minimum delay wins, so Requeue() wins.
+	outcome := rf.Merge(rf.Requeue(), rf.RequeueAfter(5))
+
+	if !outcome.ShouldReturn() {
+		t.Fatalf("expected ShouldReturn() == true")
+	}
+
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected err to be nil, got %v", err)
+	}
+	if !res.Requeue {
+		t.Fatalf("expected Requeue to be true (delay=0 wins)")
+	}
+	if res.RequeueAfter != 0 {
+		t.Fatalf("expected RequeueAfter to be 0 when Requeue is set, got %v", res.RequeueAfter)
+	}
 }

@@ -1,7 +1,5 @@
 ---
-description: Go rules
-globs: **/*.go
-alwaysApply: false
+alwaysApply: true
 ---
 
 - Formatting (MUST):

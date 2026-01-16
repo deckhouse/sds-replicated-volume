@@ -1,5 +1,5 @@
 ---
-description: Repository-wide Cursor Context Rules for sds-replicated-volume-2
+description: Repository-wide Cursor Context Rules
 alwaysApply: true
 ---
 

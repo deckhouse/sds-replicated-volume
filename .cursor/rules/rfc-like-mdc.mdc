@@ -1,5 +1,5 @@
 ---
-globs: .cursor/rules/*.mdc
+description: RFC-style writing conventions for .mdc rule files: normative keywords (MUST/SHOULD/MAY per BCP 14), term emphasis, Cursor frontmatter modes, language and style guidelines (CMOS-based), literals, examples, and section drafting checklist. Apply when writing, editing, or reviewing .cursor/rules/*.mdc files.
 alwaysApply: false
 ---
 
@@ -116,7 +116,7 @@ Cursor supports exactly four frontmatter modes. Every `.mdc` file MUST match exa
 
 - Follow The Chicago Manual of Style (CMOS) for English grammar, punctuation, capitalization, and general editorial decisions, unless overridden by an explicit requirement in the current document.
 - If a stylistic convention conflicts with an explicit requirement, the requirement takes precedence.
-- Do not make “stylistic” edits that change technical meaning, scope, or applicability.
+- Do not make "stylistic" edits that change technical meaning, scope, or applicability.
 
 ### 4.2. Literals and exactness
 
@@ -137,7 +137,7 @@ Cursor supports exactly four frontmatter modes. Every `.mdc` file MUST match exa
 
 - Use American English spelling by default; keep spelling consistent within the document.
 - Use the serial (Oxford) comma where it improves clarity.
-- Avoid ambiguous pronouns (“it/this/that”) when the referent could be unclear; prefer explicit subjects.
+- Avoid ambiguous pronouns ("it/this/that") when the referent could be unclear; prefer explicit subjects.
 - Prefer short, declarative sentences for requirements; make conditions explicit (split sentences or use structured lists).
 - Use parallel structure in lists and sublists; avoid burying critical conditions in parenthetical asides.
 - Keep capitalization consistent within the document and, when applicable, across closely related documents.
@@ -151,14 +151,14 @@ Cursor supports exactly four frontmatter modes. Every `.mdc` file MUST match exa
 
 #### 4.4.2 Examples and placeholder safety
 
-- Prefer fenced code blocks for multi-line literals and examples. Do not “pretty up” examples if that risks breaking reproducibility.
-- Use reserved example domains (e.g., example.com / example.net / example.org) for generic DNS/URI examples; avoid real production domains as “generic examples”.
+- Prefer fenced code blocks for multi-line literals and examples. Do not "pretty up" examples if that risks breaking reproducibility.
+- Use reserved example domains (e.g., example.com / example.net / example.org) for generic DNS/URI examples; avoid real production domains as "generic examples".
 - Clearly distinguish placeholders (e.g., <placeholder>) from literal values.
 - Keep examples minimal, accurate, and resilient to staleness.
 
 #### 4.4.3 Abbreviations
 
-- Expand abbreviations in titles and on first use: “full expansion (ABBR)”.
+- Expand abbreviations in titles and on first use: "full expansion (ABBR)".
 - Use one expansion consistently when multiple expansions are possible.
 
 ## 5. Section drafting checklist (apply to any heading level)

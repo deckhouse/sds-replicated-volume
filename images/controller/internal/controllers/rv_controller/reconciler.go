@@ -43,13 +43,13 @@ func NewReconciler(cl client.Client, poolSource DeviceMinorPoolSource) *Reconcil
 
 // Reconcile pattern: Pure orchestration
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx, _ = flow.Begin(ctx)
+	rf := flow.BeginRootReconcile(ctx)
 
 	// Get the ReplicatedVolume
 	rv := &v1alpha1.ReplicatedVolume{}
-	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
+	if err := r.cl.Get(rf.Ctx(), req.NamespacedName, rv); err != nil {
 		if client.IgnoreNotFound(err) != nil {
-			return flow.Failf(err, "getting ReplicatedVolume").ToCtrl()
+			return rf.Failf(err, "getting ReplicatedVolume").ToCtrl()
 		}
 
 		// NotFound: treat object as deleted so that reconciliation can run cleanup (e.g. release device minor).
@@ -57,51 +57,51 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Reconcile main
-	outcome := r.reconcileMain(ctx, rv)
+	outcome := r.reconcileMain(rf.Ctx(), rv)
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
 	}
 
 	// Reconcile status subresource
-	outcome = r.reconcileStatus(ctx, req.Name, rv)
+	outcome = r.reconcileStatus(rf.Ctx(), req.Name, rv)
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
 	}
 
-	return flow.Done().ToCtrl()
+	return rf.Done().ToCtrl()
 }
 
 // Reconcile pattern: Conditional desired evaluation
-func (r *Reconciler) reconcileMain(ctx context.Context, rv *v1alpha1.ReplicatedVolume) (outcome flow.Outcome) {
-	ctx, _ = flow.BeginPhase(ctx, "main")
-	defer flow.EndPhase(ctx, &outcome)
+func (r *Reconciler) reconcileMain(ctx context.Context, rv *v1alpha1.ReplicatedVolume) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "main")
+	defer rf.OnEnd(&outcome)
 
 	if rv == nil {
-		return flow.Continue()
+		return rf.Continue()
 	}
 
 	if obju.HasLabelValue(rv, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName) {
-		return flow.Continue()
+		return rf.Continue()
 	}
 
 	base := rv.DeepCopy()
 
 	obju.SetLabel(rv, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName)
 
-	if err := r.cl.Patch(ctx, rv, client.MergeFrom(base)); err != nil {
-		return flow.Fail(err).Enrichf("patching ReplicatedVolume")
+	if err := r.cl.Patch(rf.Ctx(), rv, client.MergeFrom(base)); err != nil {
+		return rf.Fail(err).Enrichf("patching ReplicatedVolume")
 	}
 
-	return flow.Continue()
+	return rf.Continue()
 }
 
 // Reconcile pattern: Target-state driven
-func (r *Reconciler) reconcileStatus(ctx context.Context, rvName string, rv *v1alpha1.ReplicatedVolume) (outcome flow.Outcome) {
-	ctx, _ = flow.BeginPhase(ctx, "status")
-	defer flow.EndPhase(ctx, &outcome)
+func (r *Reconciler) reconcileStatus(ctx context.Context, rvName string, rv *v1alpha1.ReplicatedVolume) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "status")
+	defer rf.OnEnd(&outcome)
 
 	// Allocate device minor and compute target condition
-	outcome, targetDM, targetDMCond := r.allocateDM(ctx, rv, rvName)
+	outcome, targetDM, targetDMCond := r.allocateDM(rf.Ctx(), rv, rvName)
 	if rv == nil {
 		return outcome
 	}
@@ -117,9 +117,10 @@ func (r *Reconciler) reconcileStatus(ctx context.Context, rvName string, rv *v1a
 	applyDM(rv, targetDM, targetDMCond)
 
 	// Patch status with optimistic lock
-	if err := r.cl.Status().Patch(ctx, rv, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
-		return outcome.Merge(
-			flow.Fail(err).Enrichf("patching ReplicatedVolume"),
+	if err := r.cl.Status().Patch(rf.Ctx(), rv, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
+		return rf.Merge(
+			outcome,
+			rf.Fail(err).Enrichf("patching ReplicatedVolume"),
 		)
 	}
 
@@ -140,22 +141,22 @@ func (r *Reconciler) allocateDM(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
 	rvName string,
-) (outcome flow.Outcome, targetDM *v1alpha1.DeviceMinor, targetDMCond metav1.Condition) {
-	ctx, log := flow.BeginPhase(ctx, "device-minor")
-	defer flow.EndPhase(ctx, &outcome)
+) (outcome flow.ReconcileOutcome, targetDM *v1alpha1.DeviceMinor, targetDMCond metav1.Condition) {
+	rf := flow.BeginReconcile(ctx, "device-minor")
+	defer rf.OnEnd(&outcome)
 
 	// Wait for pool to be ready (blocks until initialized after leader election).
-	pool, err := r.deviceMinorPoolSource.DeviceMinorPool(ctx)
+	pool, err := r.deviceMinorPoolSource.DeviceMinorPool(rf.Ctx())
 	if err != nil {
-		return flow.Failf(err, "getting device minor idpool"), nil, metav1.Condition{}
+		return rf.Failf(err, "getting device minor idpool"), nil, metav1.Condition{}
 	}
 
 	if rv == nil {
 		// Release device minor from pool only when object is NotFound.
-		log.Info("ReplicatedVolume deleted, releasing device minor from pool")
+		rf.Log().Info("ReplicatedVolume deleted, releasing device minor from pool")
 		pool.Release(rvName)
 
-		return flow.Continue(), nil, metav1.Condition{}
+		return rf.Continue(), nil, metav1.Condition{}
 	}
 
 	// Allocate device minor and compute condition
@@ -175,10 +176,10 @@ func (r *Reconciler) allocateDM(
 			targetDM = rv.Status.DeviceMinor
 		}
 
-		return flow.Fail(dmErr).Enrichf("allocating device minor"), targetDM, targetDMCond
+		return rf.Fail(dmErr).Enrichf("allocating device minor"), targetDM, targetDMCond
 	}
 
-	return flow.Continue(), targetDM, targetDMCond
+	return rf.Continue(), targetDM, targetDMCond
 }
 
 // newDeviceMinorAssignedCondition computes the condition value for

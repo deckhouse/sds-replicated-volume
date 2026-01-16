@@ -1,5 +1,5 @@
 ---
-description: Go test rules
+description: Rules for writing Go tests: embedding fixtures with go:embed, test payload minimalism, struct tags in test types, and topology/YAML test specifics. Apply when creating, editing, or reviewing *_test.go files.
 globs: **/*_test.go
 alwaysApply: false
 ---
