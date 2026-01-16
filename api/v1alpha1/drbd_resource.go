@@ -24,7 +24,7 @@ import (
 // +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster,shortName=dr
+// +kubebuilder:resource:scope=Cluster,shortName=drbdr
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=".spec.state"
@@ -59,16 +59,17 @@ type DRBDResourceSpec struct {
 	SystemNetworks []string `json:"systemNetworks"`
 
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=31
+	// +kubebuilder:validation:Maximum=32
 	// +optional
 	Quorum byte `json:"quorum,omitempty"`
 
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=31
+	// +kubebuilder:validation:Maximum=32
 	// +optional
 	QuorumMinimumRedundancy byte `json:"quorumMinimumRedundancy,omitempty"`
 
 	// +kubebuilder:validation:Enum=Up;Down
+	// +kubebuilder:default=Up
 	// +optional
 	State DRBDResourceState `json:"state,omitempty"`
 
@@ -77,6 +78,7 @@ type DRBDResourceSpec struct {
 
 	// +kubebuilder:validation:Enum=Primary;Secondary
 	// +optional
+	// +kubebuilder:default=Secondary
 	Role DRBDRole `json:"role,omitempty"`
 
 	// +kubebuilder:default=false
@@ -306,14 +308,15 @@ type DRBDResourcePeerStatus struct {
 // +kubebuilder:object:generate=true
 type DRBDResourcePathStatus struct {
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=64
 	SystemNetworkName string `json:"systemNetworkName"`
 
 	// +kubebuilder:validation:Required
 	Address DRBDAddress `json:"address"`
 
-	// +optional
-	Established bool `json:"established,omitempty"`
+	// +kubebuilder:validation:Required
+	Established bool `json:"established"`
 }
 
 // +kubebuilder:object:generate=true

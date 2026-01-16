@@ -14,7 +14,7 @@ spec:
     listKind: DRBDResourceList
     plural: drbdresources
     shortNames:
-    - dr
+    - drbdr
     singular: drbdresource
   scope: Cluster
   versions:
@@ -182,14 +182,15 @@ spec:
                 - name
                 x-kubernetes-list-type: map
               quorum:
-                maximum: 31
+                maximum: 32
                 minimum: 0
                 type: integer
               quorumMinimumRedundancy:
-                maximum: 31
+                maximum: 32
                 minimum: 0
                 type: integer
               role:
+                default: Secondary
                 description: DRBDRole represents the role of a DRBD resource.
                 enum:
                 - Primary
@@ -202,6 +203,7 @@ spec:
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
               state:
+                default: Up
                 description: DRBDResourceState represents the desired state of a DRBD
                   resource.
                 enum:
@@ -336,9 +338,11 @@ spec:
                             type: boolean
                           systemNetworkName:
                             maxLength: 64
+                            minLength: 1
                             type: string
                         required:
                         - address
+                        - established
                         - systemNetworkName
                         type: object
                       maxItems: 16
