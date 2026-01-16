@@ -27,7 +27,7 @@ import (
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/idpool"
-	"github.com/deckhouse/sds-replicated-volume/internal/reconciliation/flow"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/flow"
 )
 
 type Reconciler struct {

@@ -6,16 +6,6 @@ import (
 	"testing"
 )
 
-func mustPanicInternal(t *testing.T, fn func()) {
-	t.Helper()
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("expected panic")
-		}
-	}()
-	fn()
-}
-
 func TestReconcileOutcome_ErrWithoutResult_IsClassifiedAsInvalidKind(t *testing.T) {
 	kind, _ := reconcileOutcomeKind(&ReconcileOutcome{err: errors.New("e")})
 	if kind != "invalid" {

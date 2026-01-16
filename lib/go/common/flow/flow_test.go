@@ -13,7 +13,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/deckhouse/sds-replicated-volume/internal/reconciliation/flow"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/flow"
 )
 
 func mustPanic(t *testing.T, fn func()) {
@@ -550,7 +550,7 @@ func TestMustBeValidPhaseName_Valid(t *testing.T) {
 		"A1/B2",
 	}
 	for _, name := range valid {
-		name := name
+
 		t.Run(name, func(t *testing.T) {
 			mustNotPanic(t, func() { _ = flow.BeginReconcile(context.Background(), name) })
 		})
@@ -568,7 +568,7 @@ func TestMustBeValidPhaseName_Invalid(t *testing.T) {
 		"a:b",
 	}
 	for _, name := range invalid {
-		name := name
+
 		t.Run(strings.ReplaceAll(name, "\t", "\\t"), func(t *testing.T) {
 			mustPanic(t, func() { _ = flow.BeginReconcile(context.Background(), name) })
 		})
@@ -576,14 +576,17 @@ func TestMustBeValidPhaseName_Invalid(t *testing.T) {
 }
 
 func TestBeginReconcile_KVOddLengthPanics(t *testing.T) {
+	//lint:ignore SA5012 we are testing panic here
 	mustPanic(t, func() { _ = flow.BeginReconcile(context.Background(), "p", "k") })
 }
 
 func TestBeginEnsure_KVOddLengthPanics(t *testing.T) {
+	//lint:ignore SA5012 we are testing panic here
 	mustPanic(t, func() { _ = flow.BeginEnsure(context.Background(), "p", "k") })
 }
 
 func TestBeginStep_KVOddLengthPanics(t *testing.T) {
+	//lint:ignore SA5012 we are testing panic here
 	mustPanic(t, func() { _ = flow.BeginStep(context.Background(), "p", "k") })
 }
 
@@ -766,9 +769,10 @@ func TestReconcileFlow_OnEnd_NestedPhases_SecondOnEndLogsAtDebugLevel(t *testing
 	debugCount := 0
 	for _, e := range observed.All() {
 		if e.Message == "phase end" {
-			if e.Level == zapcore.ErrorLevel {
+			switch e.Level {
+			case zapcore.ErrorLevel:
 				errorCount++
-			} else if e.Level == zapcore.DebugLevel {
+			case zapcore.DebugLevel:
 				debugCount++
 			}
 		}
