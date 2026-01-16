@@ -1,3 +1,19 @@
+/*
+Copyright 2026 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package flow_test
 
 import (
@@ -13,7 +29,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/deckhouse/sds-replicated-volume/internal/reconciliation/flow"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
 func mustPanic(t *testing.T, fn func()) {
@@ -113,7 +129,7 @@ func TestReconcileFlow_Requeue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected err to be nil, got %v", err)
 	}
-	if !res.Requeue {
+	if !res.Requeue { //nolint:staticcheck // testing deprecated Requeue field
 		t.Fatalf("expected Requeue to be true")
 	}
 }
@@ -550,7 +566,6 @@ func TestMustBeValidPhaseName_Valid(t *testing.T) {
 		"A1/B2",
 	}
 	for _, name := range valid {
-		name := name
 		t.Run(name, func(t *testing.T) {
 			mustNotPanic(t, func() { _ = flow.BeginReconcile(context.Background(), name) })
 		})
@@ -568,7 +583,6 @@ func TestMustBeValidPhaseName_Invalid(t *testing.T) {
 		"a:b",
 	}
 	for _, name := range invalid {
-		name := name
 		t.Run(strings.ReplaceAll(name, "\t", "\\t"), func(t *testing.T) {
 			mustPanic(t, func() { _ = flow.BeginReconcile(context.Background(), name) })
 		})
@@ -576,14 +590,17 @@ func TestMustBeValidPhaseName_Invalid(t *testing.T) {
 }
 
 func TestBeginReconcile_KVOddLengthPanics(t *testing.T) {
+	//nolint:staticcheck // testing panic for odd kv length
 	mustPanic(t, func() { _ = flow.BeginReconcile(context.Background(), "p", "k") })
 }
 
 func TestBeginEnsure_KVOddLengthPanics(t *testing.T) {
+	//nolint:staticcheck // testing panic for odd kv length
 	mustPanic(t, func() { _ = flow.BeginEnsure(context.Background(), "p", "k") })
 }
 
 func TestBeginStep_KVOddLengthPanics(t *testing.T) {
+	//nolint:staticcheck // testing panic for odd kv length
 	mustPanic(t, func() { _ = flow.BeginStep(context.Background(), "p", "k") })
 }
 
@@ -766,9 +783,10 @@ func TestReconcileFlow_OnEnd_NestedPhases_SecondOnEndLogsAtDebugLevel(t *testing
 	debugCount := 0
 	for _, e := range observed.All() {
 		if e.Message == "phase end" {
-			if e.Level == zapcore.ErrorLevel {
+			switch e.Level {
+			case zapcore.ErrorLevel:
 				errorCount++
-			} else if e.Level == zapcore.DebugLevel {
+			case zapcore.DebugLevel:
 				debugCount++
 			}
 		}

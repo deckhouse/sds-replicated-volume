@@ -1,3 +1,19 @@
+/*
+Copyright 2026 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package flow
 
 import (
@@ -404,8 +420,8 @@ func (rf ReconcileFlow) Merge(outcomes ...ReconcileOutcome) ReconcileOutcome {
 		hasReconcileResult = true
 
 		// Compute delay for this outcome: Requeue → 0, RequeueAfter(d) → d
-		var delay time.Duration = noDelay
-		if o.result.Requeue {
+		delay := noDelay
+		if o.result.Requeue { //nolint:staticcheck // handling deprecated Requeue field for backward compatibility
 			delay = immediateDelay
 		} else if o.result.RequeueAfter > 0 {
 			delay = o.result.RequeueAfter
@@ -460,7 +476,7 @@ func reconcileOutcomeKind(o *ReconcileOutcome) (kind string, requeueAfter time.D
 		return "continue", 0
 	}
 
-	if o.result.Requeue {
+	if o.result.Requeue { //nolint:staticcheck // handling deprecated Requeue field for backward compatibility
 		return "requeue", 0
 	}
 

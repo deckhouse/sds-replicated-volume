@@ -1,3 +1,19 @@
+/*
+Copyright 2026 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package flow
 
 import (
@@ -6,16 +22,6 @@ import (
 	"testing"
 )
 
-func mustPanicInternal(t *testing.T, fn func()) {
-	t.Helper()
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("expected panic")
-		}
-	}()
-	fn()
-}
-
 func TestReconcileOutcome_ErrWithoutResult_IsClassifiedAsInvalidKind(t *testing.T) {
 	kind, _ := reconcileOutcomeKind(&ReconcileOutcome{err: errors.New("e")})
 	if kind != "invalid" {
@@ -23,7 +29,7 @@ func TestReconcileOutcome_ErrWithoutResult_IsClassifiedAsInvalidKind(t *testing.
 	}
 }
 
-func TestReconcileFlow_OnEnd_ErrWithoutResult_DoesNotPanic(t *testing.T) {
+func TestReconcileFlow_OnEnd_ErrWithoutResult_DoesNotPanic(_ *testing.T) {
 	rf := BeginReconcile(context.Background(), "p")
 	o := ReconcileOutcome{err: errors.New("e")}
 	rf.OnEnd(&o)
@@ -41,7 +47,7 @@ func TestReconcileFlow_Merge_RequeueIsSupported(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected err to be nil, got %v", err)
 	}
-	if !res.Requeue {
+	if !res.Requeue { //nolint:staticcheck // testing deprecated Requeue field
 		t.Fatalf("expected Requeue to be true")
 	}
 }
@@ -60,7 +66,7 @@ func TestReconcileFlow_Merge_RequeueWinsOverRequeueAfter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected err to be nil, got %v", err)
 	}
-	if !res.Requeue {
+	if !res.Requeue { //nolint:staticcheck // testing deprecated Requeue field
 		t.Fatalf("expected Requeue to be true (delay=0 wins)")
 	}
 	if res.RequeueAfter != 0 {
