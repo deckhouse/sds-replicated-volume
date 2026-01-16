@@ -1055,6 +1055,12 @@ func (s *server) checkoutDRBDVersion(destDir, jobID, drbdVersion string) error {
 		return fmt.Errorf("git checkout failed: %w, output: %s", err, string(output))
 	}
 
+	cmd = exec.Command("git", "-C", destDir, "submodule", "update", "--init", "--recursive")
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git submodule update failed: %w, output: %s", err, string(output))
+	}
+
 	hashCmd := exec.Command("git", "-C", destDir, "rev-parse", "HEAD")
 	output, err = hashCmd.Output()
 	if err != nil {
