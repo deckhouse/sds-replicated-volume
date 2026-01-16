@@ -1,0 +1,388 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  labels:
+    module: sds-replicated-volume
+  name: drbdresources.storage.deckhouse.io
+spec:
+  group: storage.deckhouse.io
+  names:
+    kind: DRBDResource
+    listKind: DRBDResourceList
+    plural: drbdresources
+    shortNames:
+    - dr
+    singular: drbdresource
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.nodeName
+      name: Node
+      type: string
+    - jsonPath: .spec.state
+      name: State
+      type: string
+    - jsonPath: .status.role
+      name: Role
+      type: string
+    - jsonPath: .spec.type
+      name: Type
+      type: string
+    - jsonPath: .status.diskState
+      name: DiskState
+      type: string
+    - jsonPath: .status.quorum
+      name: Quorum
+      type: boolean
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              allowTwoPrimaries:
+                default: false
+                type: boolean
+              lvmLogicalVolumeName:
+                description: Required when type is Diskful, must be empty when type
+                  is Diskless.
+                maxLength: 128
+                minLength: 1
+                type: string
+              maintenance:
+                description: Maintenance mode - when set, reconciliation is paused
+                  but status is still updated
+                enum:
+                - NoResourceReconciliation
+                type: string
+              nodeID:
+                maximum: 31
+                minimum: 0
+                type: integer
+                x-kubernetes-validations:
+                - message: nodeID is immutable
+                  rule: self == oldSelf
+              nodeName:
+                maxLength: 253
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: nodeName is immutable
+                  rule: self == oldSelf
+              peers:
+                items:
+                  properties:
+                    allowRemoteRead:
+                      default: true
+                      type: boolean
+                    name:
+                      description: Peer node name. Immutable, used as list map key.
+                      maxLength: 253
+                      minLength: 1
+                      pattern: ^[0-9A-Za-z.+_-]*$
+                      type: string
+                    nodeID:
+                      maximum: 31
+                      minimum: 0
+                      type: integer
+                    paths:
+                      items:
+                        properties:
+                          address:
+                            properties:
+                              ipv4:
+                                pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
+                                type: string
+                              port:
+                                maximum: 65535
+                                minimum: 1025
+                                type: integer
+                            required:
+                            - ipv4
+                            - port
+                            type: object
+                          systemNetworkName:
+                            description: System network name. Immutable, used as list
+                              map key.
+                            maxLength: 64
+                            minLength: 1
+                            type: string
+                        required:
+                        - address
+                        - systemNetworkName
+                        type: object
+                      maxItems: 16
+                      minItems: 1
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - systemNetworkName
+                      x-kubernetes-list-type: map
+                    pauseSync:
+                      default: false
+                      type: boolean
+                    protocol:
+                      default: C
+                      description: DRBDProtocol represents the DRBD replication protocol.
+                      enum:
+                      - A
+                      - B
+                      - C
+                      type: string
+                      x-kubernetes-validations:
+                      - message: protocol is immutable
+                        rule: self == oldSelf
+                    sharedSecret:
+                      maxLength: 256
+                      type: string
+                    sharedSecretAlg:
+                      enum:
+                      - SHA256
+                      - SHA1
+                      - DummyForTest
+                      type: string
+                    type:
+                      default: Diskful
+                      description: DRBDResourceType represents the type of a DRBD
+                        resource.
+                      enum:
+                      - Diskful
+                      - Diskless
+                      type: string
+                  required:
+                  - name
+                  - nodeID
+                  - paths
+                  type: object
+                maxItems: 31
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              quorum:
+                maximum: 31
+                minimum: 0
+                type: integer
+              quorumMinimumRedundancy:
+                maximum: 31
+                minimum: 0
+                type: integer
+              role:
+                description: DRBDRole represents the role of a DRBD resource.
+                enum:
+                - Primary
+                - Secondary
+                type: string
+              size:
+                anyOf:
+                - type: integer
+                - type: string
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
+              state:
+                description: DRBDResourceState represents the desired state of a DRBD
+                  resource.
+                enum:
+                - Up
+                - Down
+                type: string
+              systemNetworks:
+                items:
+                  maxLength: 63
+                  type: string
+                maxItems: 16
+                minItems: 1
+                type: array
+              type:
+                default: Diskful
+                description: DRBDResourceType represents the type of a DRBD resource.
+                enum:
+                - Diskful
+                - Diskless
+                type: string
+            required:
+            - nodeID
+            - nodeName
+            - size
+            - systemNetworks
+            type: object
+          status:
+            properties:
+              activeConfiguration:
+                properties:
+                  allowTwoPrimaries:
+                    type: boolean
+                  disk:
+                    description: Disk path, e.g. /dev/...
+                    maxLength: 256
+                    type: string
+                  quorum:
+                    type: integer
+                  quorumMinimumRedundancy:
+                    type: integer
+                  role:
+                    description: DRBDRole represents the role of a DRBD resource.
+                    enum:
+                    - Primary
+                    - Secondary
+                    type: string
+                  size:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  state:
+                    description: DRBDResourceState represents the desired state of
+                      a DRBD resource.
+                    enum:
+                    - Up
+                    - Down
+                    type: string
+                  type:
+                    description: DRBDResourceType represents the type of a DRBD resource.
+                    enum:
+                    - Diskful
+                    - Diskless
+                    type: string
+                type: object
+              addresses:
+                items:
+                  properties:
+                    address:
+                      properties:
+                        ipv4:
+                          pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
+                          type: string
+                        port:
+                          maximum: 65535
+                          minimum: 1025
+                          type: integer
+                      required:
+                      - ipv4
+                      - port
+                      type: object
+                    systemNetworkName:
+                      maxLength: 64
+                      type: string
+                  required:
+                  - address
+                  - systemNetworkName
+                  type: object
+                maxItems: 32
+                type: array
+              device:
+                description: |-
+                  Device path, e.g. /dev/drbd10012 or /dev/sds-replicated/<rvrName>
+                  Only present on primary
+                maxLength: 256
+                type: string
+              diskState:
+                type: string
+              peers:
+                items:
+                  properties:
+                    connectionState:
+                      type: string
+                    diskState:
+                      type: string
+                    name:
+                      maxLength: 253
+                      minLength: 1
+                      type: string
+                    nodeID:
+                      maximum: 31
+                      minimum: 0
+                      type: integer
+                    paths:
+                      items:
+                        properties:
+                          address:
+                            properties:
+                              ipv4:
+                                pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
+                                type: string
+                              port:
+                                maximum: 65535
+                                minimum: 1025
+                                type: integer
+                            required:
+                            - ipv4
+                            - port
+                            type: object
+                          established:
+                            type: boolean
+                          systemNetworkName:
+                            maxLength: 64
+                            type: string
+                        required:
+                        - address
+                        - systemNetworkName
+                        type: object
+                      maxItems: 16
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - systemNetworkName
+                      x-kubernetes-list-type: map
+                    type:
+                      description: DRBDResourceType represents the type of a DRBD
+                        resource.
+                      enum:
+                      - Diskful
+                      - Diskless
+                      type: string
+                  required:
+                  - name
+                  type: object
+                maxItems: 31
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              quorum:
+                type: boolean
+              role:
+                description: DRBDRole represents the role of a DRBD resource.
+                enum:
+                - Primary
+                - Secondary
+                type: string
+            type: object
+        required:
+        - metadata
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: lvmLogicalVolumeName is required when type is Diskful and must
+            be empty when type is Diskless
+          rule: 'self.spec.type == ''Diskful'' ? has(self.spec.lvmLogicalVolumeName)
+            && self.spec.lvmLogicalVolumeName != ” : !has(self.spec.lvmLogicalVolumeName)
+            || self.spec.lvmLogicalVolumeName == ”'
+        - message: spec.size cannot be decreased
+          rule: '!has(oldSelf.spec.size) || self.spec.size >= oldSelf.spec.size'
+    served: true
+    storage: true
+    subresources:
+      status: {}

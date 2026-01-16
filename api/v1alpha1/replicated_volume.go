@@ -62,7 +62,7 @@ type ReplicatedVolumeStatus struct {
 
 	// +patchStrategy=merge
 	// +optional
-	DRBD *DRBDResource `json:"drbd,omitempty" patchStrategy:"merge"`
+	DRBD *DRBDResourceTODO `json:"drbd,omitempty" patchStrategy:"merge"`
 
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
@@ -117,7 +117,7 @@ func (s *ReplicatedVolumeStatus) SetConditions(conditions []metav1.Condition) {
 }
 
 // +kubebuilder:object:generate=true
-type DRBDResource struct {
+type DRBDResourceTODO struct {
 	// +patchStrategy=merge
 	// +optional
 	Config *DRBDResourceConfig `json:"config,omitempty" patchStrategy:"merge"`
