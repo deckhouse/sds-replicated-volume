@@ -1,6 +1,6 @@
 ---
-description: API naming rules for label keys and finalizers (sds-replicated-volume)
-globs: api/v*/**/finalizers.go,api/v*/**/labels.go,
+description: API naming rules for label keys (labels.go) and finalizer constants (finalizers.go): naming, value formats, and stability. Apply when editing api/v*/**/labels.go or api/v*/**/finalizers.go, and when deciding label/finalizer names/values. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+globs: api/v*/**/finalizers.go,api/v*/**/labels.go
 alwaysApply: false
 ---
 

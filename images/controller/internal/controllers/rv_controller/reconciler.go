@@ -56,7 +56,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		rv = nil
 	}
 
-	// Reconcile main
+	// Reconcile main resource
 	outcome := r.reconcileMain(rf.Ctx(), rv)
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
@@ -100,13 +100,17 @@ func (r *Reconciler) reconcileStatus(ctx context.Context, rvName string, rv *v1a
 	rf := flow.BeginReconcile(ctx, "status")
 	defer rf.OnEnd(&outcome)
 
-	// Allocate device minor and compute target condition
+	// Allocate device minor and compute target condition.
+	//
+	// Best-effort: we intentionally skip outcome.ShouldReturn() check here because we want to
+	// persist the error condition to status even when allocation fails. The error is still
+	// propagated via outcome after the patch (or returned as-is if already in sync).
 	outcome, targetDM, targetDMCond := r.allocateDM(rf.Ctx(), rv, rvName)
 	if rv == nil {
 		return outcome
 	}
 
-	// If status is in sync, return
+	// If status is in sync, return (preserving any error from allocateDM)
 	if isDMInSync(rv, targetDM, targetDMCond) {
 		return outcome
 	}
@@ -148,7 +152,14 @@ func (r *Reconciler) allocateDM(
 	// Wait for pool to be ready (blocks until initialized after leader election).
 	pool, err := r.deviceMinorPoolSource.DeviceMinorPool(rf.Ctx())
 	if err != nil {
-		return rf.Failf(err, "getting device minor idpool"), nil, metav1.Condition{}
+		// IMPORTANT: if pool is unavailable we do NOT change rv.Status.DeviceMinor.
+		// If it was previously assigned, it must remain as-is to avoid creating conflicts.
+		// We still want to expose the failure via a proper status condition.
+		if rv != nil {
+			targetDM = rv.Status.DeviceMinor
+		}
+		targetDMCond = newDeviceMinorAssignedCondition(err)
+		return rf.Failf(err, "getting device minor idpool"), targetDM, targetDMCond
 	}
 
 	if rv == nil {

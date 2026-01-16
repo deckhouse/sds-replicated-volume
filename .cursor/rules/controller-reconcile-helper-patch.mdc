@@ -1,6 +1,7 @@
 ---
+description: Contracts for PatchReconcileHelper (patch<Kind>) functions: exactly one patch request for one patch domain (main or status), explicit base + optimistic-lock flag, and no other I/O. Apply when writing patch* helpers in reconciler*.go, and when deciding patch mechanics for main vs status. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
 globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go
-alwaysApply: true
+alwaysApply: false
 ---
 
 See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.

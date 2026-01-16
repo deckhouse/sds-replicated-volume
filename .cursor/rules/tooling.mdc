@@ -1,5 +1,5 @@
 ---
-description: Project tooling commands + when the agent may run them automatically vs must ask for confirmation.
+description: Project tooling commands and safety policy: what the agent may run automatically vs what requires confirmation (lint/tests/build/codegen, git, werf/kubectl). Apply when asking the agent to run commands or when deciding which checks to run for a change. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
 alwaysApply: true
 ---
 

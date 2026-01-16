@@ -1,5 +1,5 @@
 ---
-description: API file structure and conventions (sds-replicated-volume)
+description: API package conventions: object prefixes and per-object/common file naming rules under api/. Apply when creating/renaming/editing Go files under api/v*/, and when deciding where API code should live. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
 globs: api/v*/**/*.go
 alwaysApply: false
 ---

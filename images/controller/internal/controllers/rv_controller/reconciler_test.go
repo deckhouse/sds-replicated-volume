@@ -28,6 +28,7 @@ import (
 	. "github.com/onsi/gomega/gstruct"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -110,6 +111,16 @@ func (s *testPoolSource) DeviceMinorPool(_ context.Context) (*idpool.IDPool[v1al
 func (s *testPoolSource) DeviceMinorPoolOrNil() *idpool.IDPool[v1alpha1.DeviceMinor] {
 	return s.pool
 }
+
+type failingPoolSource struct {
+	err error
+}
+
+func (s failingPoolSource) DeviceMinorPool(_ context.Context) (*idpool.IDPool[v1alpha1.DeviceMinor], error) {
+	return nil, s.err
+}
+
+func (s failingPoolSource) DeviceMinorPoolOrNil() *idpool.IDPool[v1alpha1.DeviceMinor] { return nil }
 
 // initReconcilerFromClient creates a new reconciler with pool initialized from existing volumes in the client.
 // This simulates the production behavior where pool is initialized at controller startup.
@@ -259,6 +270,10 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "volume-1",
 				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("1Gi"),
+					ReplicatedStorageClassName: "my-storage-class",
+				},
 			}
 		})
 
@@ -284,6 +299,35 @@ var _ = Describe("Reconciler", func() {
 				_, err := rec.Reconcile(ctx, RequestFor(rv))
 				Expect(err).To(HaveOccurred(), "should return error when Get fails")
 				Expect(errors.Is(err, testError)).To(BeTrue(), "returned error should wrap the original Get error")
+			})
+		})
+
+		When("device minor pool source returns error", func() {
+			var testError error
+
+			BeforeEach(func() {
+				testError = errors.New("pool not ready")
+				rv.Status.DeviceMinor = u.Ptr(v1alpha1.DeviceMinor(42))
+			})
+
+			JustBeforeEach(func() {
+				rec = rvcontroller.NewReconciler(cl, failingPoolSource{err: testError})
+			})
+
+			It("keeps status.deviceMinor and reports failure via DeviceMinorAssigned condition", func(ctx SpecContext) {
+				_, err := rec.Reconcile(ctx, RequestFor(rv))
+				Expect(err).To(HaveOccurred(), "should return error when pool is unavailable")
+				Expect(errors.Is(err, testError)).To(BeTrue(), "returned error should wrap the original pool error")
+
+				updatedRV := &v1alpha1.ReplicatedVolume{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
+				Expect(updatedRV).To(HaveField("Status.DeviceMinor", PointTo(BeNumerically("==", 42))), "deviceMinor must not be reset on pool errors")
+
+				cond := apimeta.FindStatusCondition(updatedRV.Status.Conditions, v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedType)
+				Expect(cond).NotTo(BeNil(), "DeviceMinorAssigned condition must exist")
+				Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+				Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedReasonAssignmentFailed))
+				Expect(cond.Message).To(ContainSubstring(testError.Error()))
 			})
 		})
 

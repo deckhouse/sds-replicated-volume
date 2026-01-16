@@ -1,5 +1,5 @@
 ---
-description: Repository-wide Cursor Context Rules
+description: Repository-wide Cursor/agent rules for this repo (formatting, change hygiene, git hygiene, and commit-message conventions). Apply when working in this repository (any task), especially when making or explaining changes, planning a sequence of edits, or preparing commits. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
 alwaysApply: true
 ---
 

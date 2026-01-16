@@ -1,5 +1,5 @@
 ---
-description: API codegen rules (kubebuilder/controller-gen)
+description: API codegen rules for kubebuilder/controller-gen and generated files hygiene. Apply when adding/modifying API types or kubebuilder markers under api/v*/, and when deciding whether regeneration is required. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
 globs: api/v*/**/*.go
 alwaysApply: false
 ---
