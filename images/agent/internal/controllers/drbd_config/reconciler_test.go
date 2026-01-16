@@ -426,7 +426,7 @@ func rvWithoutSecret() *v1alpha1.ReplicatedVolume {
 			Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 		},
 		Status: &v1alpha1.ReplicatedVolumeStatus{
-			DRBD: &v1alpha1.DRBDResource{
+			DRBD: &v1alpha1.DRBDResourceDetails{
 				Config: &v1alpha1.DRBDResourceConfig{},
 			},
 		},
@@ -522,7 +522,7 @@ func readyRVWithConfig(secret, alg string, deviceMinor uint, allowTwoPrimaries b
 			Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 		},
 		Status: &v1alpha1.ReplicatedVolumeStatus{
-			DRBD: &v1alpha1.DRBDResource{
+			DRBD: &v1alpha1.DRBDResourceDetails{
 				Config: &v1alpha1.DRBDResourceConfig{
 					SharedSecret:            secret,
 					SharedSecretAlg:         v1alpha1.SharedSecretAlg(alg),

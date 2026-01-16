@@ -210,7 +210,7 @@ spec:
                 type: string
               systemNetworks:
                 items:
-                  maxLength: 63
+                  maxLength: 64
                   type: string
                 maxItems: 16
                 minItems: 1

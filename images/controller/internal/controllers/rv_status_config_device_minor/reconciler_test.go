@@ -163,7 +163,7 @@ var _ = Describe("Reconciler", func() {
 			}),
 			Entry("nil Status.DRBD.Config", func() {
 				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
-					DRBD: &v1alpha1.DRBDResource{Config: nil},
+					DRBD: &v1alpha1.DRBDResourceDetails{Config: nil},
 				}
 			}),
 			func(setup func()) {
@@ -204,7 +204,7 @@ var _ = Describe("Reconciler", func() {
 								Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 							},
 							Status: &v1alpha1.ReplicatedVolumeStatus{
-								DRBD: &v1alpha1.DRBDResource{
+								DRBD: &v1alpha1.DRBDResourceDetails{
 									Config: &v1alpha1.DRBDResourceConfig{
 										DeviceMinor: u.Ptr(uint(i)),
 									},
@@ -225,7 +225,7 @@ var _ = Describe("Reconciler", func() {
 							Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 						},
 						Status: &v1alpha1.ReplicatedVolumeStatus{
-							DRBD: &v1alpha1.DRBDResource{
+							DRBD: &v1alpha1.DRBDResourceDetails{
 								Config: &v1alpha1.DRBDResourceConfig{
 									DeviceMinor: u.Ptr(uint(6)),
 								},
@@ -238,7 +238,7 @@ var _ = Describe("Reconciler", func() {
 							Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 						},
 						Status: &v1alpha1.ReplicatedVolumeStatus{
-							DRBD: &v1alpha1.DRBDResource{
+							DRBD: &v1alpha1.DRBDResourceDetails{
 								Config: &v1alpha1.DRBDResourceConfig{
 									DeviceMinor: u.Ptr(uint(8)),
 								},
@@ -251,7 +251,7 @@ var _ = Describe("Reconciler", func() {
 							Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 						},
 						Status: &v1alpha1.ReplicatedVolumeStatus{
-							DRBD: &v1alpha1.DRBDResource{
+							DRBD: &v1alpha1.DRBDResourceDetails{
 								Config: &v1alpha1.DRBDResourceConfig{
 									DeviceMinor: u.Ptr(uint(9)),
 								},
@@ -304,7 +304,7 @@ var _ = Describe("Reconciler", func() {
 				rv = &v1alpha1.ReplicatedVolume{
 					ObjectMeta: metav1.ObjectMeta{Name: "volume-1"},
 					Status: &v1alpha1.ReplicatedVolumeStatus{
-						DRBD: &v1alpha1.DRBDResource{
+						DRBD: &v1alpha1.DRBDResourceDetails{
 							Config: &v1alpha1.DRBDResourceConfig{
 								DeviceMinor: u.Ptr(uint(42)),
 							},
@@ -340,7 +340,7 @@ var _ = Describe("Reconciler", func() {
 			rvExisting = &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "volume-zero-used"},
 				Status: &v1alpha1.ReplicatedVolumeStatus{
-					DRBD: &v1alpha1.DRBDResource{
+					DRBD: &v1alpha1.DRBDResourceDetails{
 						Config: &v1alpha1.DRBDResourceConfig{
 							DeviceMinor: u.Ptr(v1alpha1.RVMinDeviceMinor), // 0
 						},
@@ -358,7 +358,7 @@ var _ = Describe("Reconciler", func() {
 					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 				},
 				Status: &v1alpha1.ReplicatedVolumeStatus{
-					DRBD: &v1alpha1.DRBDResource{
+					DRBD: &v1alpha1.DRBDResourceDetails{
 						Config: &v1alpha1.DRBDResourceConfig{
 							SharedSecret:    "test-secret",
 							SharedSecretAlg: "alg",

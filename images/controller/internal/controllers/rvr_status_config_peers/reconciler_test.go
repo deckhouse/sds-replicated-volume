@@ -132,7 +132,7 @@ var _ = Describe("Reconciler", func() {
 		DescribeTableSubtree("when rv does not have config because",
 			Entry("nil Status", func() { rv.Status = nil }),
 			Entry("nil Status.DRBD", func() { rv.Status = &v1alpha1.ReplicatedVolumeStatus{DRBD: nil} }),
-			Entry("nil Status.DRBD.Config", func() { rv.Status = &v1alpha1.ReplicatedVolumeStatus{DRBD: &v1alpha1.DRBDResource{Config: nil}} }),
+			Entry("nil Status.DRBD.Config", func() { rv.Status = &v1alpha1.ReplicatedVolumeStatus{DRBD: &v1alpha1.DRBDResourceDetails{Config: nil}} }),
 			func(setup func()) {
 				BeforeEach(func() {
 					setup()
