@@ -1,8 +1,5 @@
 type: object
 properties:
-  drbdVersion:
-    type: string
-    default: "9.2.14"
   registryScheme:
     type: string
     description: Deprecated parameter. Remove it from ModuleConfig for Deckhouse with version greater than 1.57.
