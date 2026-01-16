@@ -175,8 +175,7 @@ spec:
     # Find kernel headers directories
     # In Ubuntu/Debian, archive all /usr/src/linux-headers-* directories (all versions)
     KERNEL_VERSION_FOR_API="${kernel_version_in_use}"
-    # DRBD_VERSION="{{ $.Values.sdsReplicatedVolume.internal.drbdVersion }}"
-    DRBD_VERSION="9.2.14"
+    DRBD_VERSION="{{ $.Values.sdsReplicatedVolume.internal.drbdVersion }}"
     MODULES_TAR="/tmp/drbd-modules-${kernel_version_in_use}.tar.gz"
     
     # Archive kernel headers and send build request

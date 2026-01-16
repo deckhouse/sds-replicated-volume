@@ -10,12 +10,8 @@ properties:
     - httpsControllerCert
     - sslControllerCert
     - sslNodeCert
-    - drbdVersion
     - dataNodesChecksum
     properties:
-      drbdVersion:
-        type: string
-        default: "9.2.13"
       dataNodesChecksum:
         type: string
         default: "default_data_nodes_checksum"
