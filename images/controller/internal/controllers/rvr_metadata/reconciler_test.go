@@ -119,8 +119,8 @@ var _ = Describe("Reconciler", func() {
 			got := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 
-			Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.LabelReplicatedVolume, rv.Name))
-			Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.LabelReplicatedStorageClass, rv.Spec.ReplicatedStorageClassName))
+			Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.ReplicatedVolumeLabelKey, rv.Name))
+			Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName))
 		})
 
 		// Note: node-name label is tested in rvr_scheduling_controller tests
@@ -129,8 +129,8 @@ var _ = Describe("Reconciler", func() {
 		When("labels are already set correctly", func() {
 			BeforeEach(func() {
 				rvr.Labels = map[string]string{
-					v1alpha1.LabelReplicatedVolume:       rv.Name,
-					v1alpha1.LabelReplicatedStorageClass: rv.Spec.ReplicatedStorageClassName,
+					v1alpha1.ReplicatedVolumeLabelKey:       rv.Name,
+					v1alpha1.ReplicatedStorageClassLabelKey: rv.Spec.ReplicatedStorageClassName,
 				}
 				rvr.OwnerReferences = []metav1.OwnerReference{
 					{
@@ -156,8 +156,8 @@ var _ = Describe("Reconciler", func() {
 
 				got := &v1alpha1.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
-				Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.LabelReplicatedVolume, rv.Name))
-				Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.LabelReplicatedStorageClass, rv.Spec.ReplicatedStorageClassName))
+				Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.ReplicatedVolumeLabelKey, rv.Name))
+				Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName))
 			})
 		})
 
@@ -166,7 +166,7 @@ var _ = Describe("Reconciler", func() {
 
 			When("has only controller finalizer", func() {
 				BeforeEach(func() {
-					rvr.Finalizers = []string{v1alpha1.ControllerAppFinalizer}
+					rvr.Finalizers = []string{v1alpha1.ControllerFinalizer}
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
@@ -174,7 +174,7 @@ var _ = Describe("Reconciler", func() {
 					got := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 					Expect(got.DeletionTimestamp).NotTo(BeNil())
-					Expect(got.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+					Expect(got.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
 					Expect(got.OwnerReferences).To(BeEmpty())
 				})
 
@@ -185,14 +185,14 @@ var _ = Describe("Reconciler", func() {
 					got := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 					Expect(got.DeletionTimestamp).NotTo(BeNil())
-					Expect(got.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+					Expect(got.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
 					Expect(got.OwnerReferences).To(BeEmpty())
 				})
 			})
 
 			When("has external finalizer in addition to controller finalizer", func() {
 				BeforeEach(func() {
-					rvr.Finalizers = []string{v1alpha1.ControllerAppFinalizer, externalFinalizer}
+					rvr.Finalizers = []string{v1alpha1.ControllerFinalizer, externalFinalizer}
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
@@ -323,8 +323,8 @@ var _ = Describe("Reconciler", func() {
 					},
 				}
 				rvr.Labels = map[string]string{
-					v1alpha1.LabelReplicatedVolume:       rv.Name,
-					v1alpha1.LabelReplicatedStorageClass: rv.Spec.ReplicatedStorageClassName,
+					v1alpha1.ReplicatedVolumeLabelKey:       rv.Name,
+					v1alpha1.ReplicatedStorageClassLabelKey: rv.Spec.ReplicatedStorageClassName,
 				}
 
 				clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
@@ -342,8 +342,8 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 				Expect(got.OwnerReferences).To(HaveLen(1))
 				Expect(got.OwnerReferences).To(ContainElement(HaveField("Name", Equal("rv1"))))
-				Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.LabelReplicatedVolume, rv.Name))
-				Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.LabelReplicatedStorageClass, rv.Spec.ReplicatedStorageClassName))
+				Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.ReplicatedVolumeLabelKey, rv.Name))
+				Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName))
 			})
 		})
 

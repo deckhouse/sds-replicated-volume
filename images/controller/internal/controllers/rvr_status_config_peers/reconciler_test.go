@@ -103,7 +103,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-rv",
 					UID:        "test-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("1Gi"),
@@ -115,7 +115,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "other-rv",
 					UID:        "other-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("1Gi"),
@@ -130,9 +130,9 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		DescribeTableSubtree("when rv does not have config because",
-			Entry("nil Status", func() { rv.Status = nil }),
-			Entry("nil Status.DRBD", func() { rv.Status = &v1alpha1.ReplicatedVolumeStatus{DRBD: nil} }),
-			Entry("nil Status.DRBD.Config", func() { rv.Status = &v1alpha1.ReplicatedVolumeStatus{DRBD: &v1alpha1.DRBDResource{Config: nil}} }),
+			Entry("empty Status", func() { rv.Status = v1alpha1.ReplicatedVolumeStatus{} }),
+			Entry("nil Status.DRBD", func() { rv.Status = v1alpha1.ReplicatedVolumeStatus{DRBD: nil} }),
+			Entry("nil Status.DRBD.Config", func() { rv.Status = v1alpha1.ReplicatedVolumeStatus{DRBD: &v1alpha1.DRBDResource{Config: nil}} }),
 			func(setup func()) {
 				BeforeEach(func() {
 					setup()
@@ -150,7 +150,7 @@ var _ = Describe("Reconciler", func() {
 				firstReplica = v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
-						ReplicatedVolumeName: "test-rv",
+						ReplicatedVolumeName: rv.Name,
 						NodeName:             "node-1",
 					},
 				}
@@ -299,9 +299,9 @@ var _ = Describe("Reconciler", func() {
 						})
 
 						DescribeTableSubtree("if rvr-2 is not ready because",
-							Entry("without status", func() { secondRvr.Status = nil }),
-							Entry("without status.drbd", func() { secondRvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: nil} }),
-							Entry("without status.drbd.config", func() { secondRvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha1.DRBD{Config: nil}} }),
+							Entry("with empty status", func() { secondRvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{} }),
+							Entry("without status.drbd", func() { secondRvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: nil} }),
+							Entry("without status.drbd.config", func() { secondRvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha1.DRBD{Config: nil}} }),
 							Entry("without address", func() { secondRvr.Status.DRBD.Config.Address = nil }),
 							Entry("without nodeName", func() { secondRvr.Spec.NodeName = "" }),
 							Entry("without replicatedVolumeName", func() { secondRvr.Spec.ReplicatedVolumeName = "" }),
@@ -344,15 +344,15 @@ var _ = Describe("Reconciler", func() {
 				rvrList = []v1alpha1.ReplicatedVolumeReplica{
 					{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "test-rv", NodeName: "node-1"},
+						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: rv.Name, NodeName: "node-1"},
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
-						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "test-rv", NodeName: "node-2"},
+						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: rv.Name, NodeName: "node-2"},
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-3"},
-						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "test-rv", NodeName: "node-3"},
+						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: rv.Name, NodeName: "node-3"},
 					},
 				}
 
@@ -446,9 +446,6 @@ var _ = Describe("Reconciler", func() {
 							{IPv4: "192.168.1.2", Port: 7000},
 						}
 						for i := range rvrList {
-							if rvrList[i].Status == nil {
-								rvrList[i].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-							}
 							if rvrList[i].Status.DRBD == nil {
 								rvrList[i].Status.DRBD = &v1alpha1.DRBD{}
 							}

@@ -211,7 +211,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			expectedCommands:  disklessExpectedCommands(testRVRName),
 			postCheck: func(t *testing.T, cl client.Client) {
 				rvr := fetchRVR(t, cl, testRVRName)
-				expectFinalizers(t, rvr.Finalizers, v1alpha1.AgentAppFinalizer, v1alpha1.ControllerAppFinalizer)
+				expectFinalizers(t, rvr.Finalizers, v1alpha1.AgentFinalizer, v1alpha1.ControllerFinalizer)
 				expectTrue(t, rvr.Status.DRBD.Actual.InitialSyncCompleted, "initial sync completed")
 				expectNoDRBDErrors(t, rvr.Status.DRBD.Errors)
 			},
@@ -239,7 +239,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			expectedCommands:  diskfulExpectedCommands(testRVRAltName),
 			postCheck: func(t *testing.T, cl client.Client) {
 				rvr := fetchRVR(t, cl, testRVRAltName)
-				expectFinalizers(t, rvr.Finalizers, v1alpha1.AgentAppFinalizer, v1alpha1.ControllerAppFinalizer)
+				expectFinalizers(t, rvr.Finalizers, v1alpha1.AgentFinalizer, v1alpha1.ControllerFinalizer)
 				expectString(t, rvr.Status.DRBD.Actual.Disk, "/dev/"+testLVGName+"/"+testDiskName, "actual disk")
 				expectTrue(t, rvr.Status.DRBD.Actual.InitialSyncCompleted, "initial sync completed")
 			},
@@ -311,7 +311,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			expectedCommands:  disklessExpectedCommands(testRVRName),
 			postCheck: func(t *testing.T, cl client.Client) {
 				rvr := fetchRVR(t, cl, testRVRName)
-				expectFinalizers(t, rvr.Finalizers, v1alpha1.AgentAppFinalizer, v1alpha1.ControllerAppFinalizer)
+				expectFinalizers(t, rvr.Finalizers, v1alpha1.AgentFinalizer, v1alpha1.ControllerFinalizer)
 				expectNoDRBDErrors(t, rvr.Status.DRBD.Errors)
 			},
 		},
@@ -414,7 +414,7 @@ func testRV() *v1alpha1.ReplicatedVolume {
 	return &v1alpha1.ReplicatedVolume{
 		ObjectMeta: v1.ObjectMeta{
 			Name:       testRVName,
-			Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+			Finalizers: []string{v1alpha1.ControllerFinalizer},
 		},
 	}
 }
@@ -423,9 +423,9 @@ func rvWithoutSecret() *v1alpha1.ReplicatedVolume {
 	return &v1alpha1.ReplicatedVolume{
 		ObjectMeta: v1.ObjectMeta{
 			Name:       testRVName,
-			Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+			Finalizers: []string{v1alpha1.ControllerFinalizer},
 		},
-		Status: &v1alpha1.ReplicatedVolumeStatus{
+		Status: v1alpha1.ReplicatedVolumeStatus{
 			DRBD: &v1alpha1.DRBDResource{
 				Config: &v1alpha1.DRBDResourceConfig{},
 			},
@@ -468,15 +468,12 @@ func firstMapOrNil(ms []map[string]v1alpha1.Peer) map[string]v1alpha1.Peer {
 
 func rvrWithErrors(rvr *v1alpha1.ReplicatedVolumeReplica) *v1alpha1.ReplicatedVolumeReplica {
 	r := rvr.DeepCopy()
-	if r.Status == nil {
-		r.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-	}
 	if r.Status.DRBD == nil {
 		r.Status.DRBD = &v1alpha1.DRBD{}
 	}
 	r.Status.DRBD.Errors = &v1alpha1.DRBDErrors{
-		FileSystemOperationError: &v1alpha1.MessageError{Message: "old-fs-error"},
-		ConfigurationCommandError: &v1alpha1.CmdError{
+		FileSystemOperationError: &v1alpha1.DRBDMessageError{Message: "old-fs-error"},
+		ConfigurationCommandError: &v1alpha1.DRBDCmdError{
 			Command:  "old-cmd",
 			Output:   "old-output",
 			ExitCode: 1,
@@ -515,19 +512,19 @@ func writeCryptoFile(t *testing.T, algs ...string) {
 }
 
 //nolint:unparam // keep secret configurable for future scenarios
-func readyRVWithConfig(secret, alg string, deviceMinor uint, allowTwoPrimaries bool) *v1alpha1.ReplicatedVolume {
+func readyRVWithConfig(secret, alg string, deviceMinor v1alpha1.DeviceMinor, allowTwoPrimaries bool) *v1alpha1.ReplicatedVolume {
 	return &v1alpha1.ReplicatedVolume{
 		ObjectMeta: v1.ObjectMeta{
 			Name:       testRVName,
-			Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+			Finalizers: []string{v1alpha1.ControllerFinalizer},
 		},
-		Status: &v1alpha1.ReplicatedVolumeStatus{
+		Status: v1alpha1.ReplicatedVolumeStatus{
+			DeviceMinor: &deviceMinor,
 			DRBD: &v1alpha1.DRBDResource{
 				Config: &v1alpha1.DRBDResourceConfig{
 					SharedSecret:            secret,
 					SharedSecretAlg:         v1alpha1.SharedSecretAlg(alg),
 					AllowTwoPrimaries:       allowTwoPrimaries,
-					DeviceMinor:             &deviceMinor,
 					Quorum:                  1,
 					QuorumMinimumRedundancy: 1,
 				},
@@ -553,7 +550,7 @@ func readyRVR(
 			NodeName:             testNodeName,
 			Type:                 rvrType,
 		},
-		Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+		Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 			LVMLogicalVolumeName: lvmLogicalVolumeName,
 			DRBD: &v1alpha1.DRBD{
 				Config: &v1alpha1.DRBDConfig{
@@ -573,7 +570,7 @@ func deletingRVR(name, llvName string) *v1alpha1.ReplicatedVolumeReplica {
 	return &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: v1.ObjectMeta{
 			Name:              name,
-			Finalizers:        []string{v1alpha1.AgentAppFinalizer},
+			Finalizers:        []string{v1alpha1.AgentFinalizer},
 			DeletionTimestamp: &now,
 		},
 		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
@@ -581,7 +578,7 @@ func deletingRVR(name, llvName string) *v1alpha1.ReplicatedVolumeReplica {
 			NodeName:             testNodeName,
 			Type:                 rvrTypeDiskful,
 		},
-		Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+		Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 			LVMLogicalVolumeName: llvName,
 			DRBD: &v1alpha1.DRBD{
 				Config: &v1alpha1.DRBDConfig{
@@ -599,7 +596,7 @@ func newLLV(name, lvgName, lvName string) *snc.LVMLogicalVolume {
 	return &snc.LVMLogicalVolume{
 		ObjectMeta: v1.ObjectMeta{
 			Name:       name,
-			Finalizers: []string{v1alpha1.AgentAppFinalizer},
+			Finalizers: []string{v1alpha1.AgentFinalizer},
 		},
 		Spec: snc.LVMLogicalVolumeSpec{
 			ActualLVNameOnTheNode: lvName,

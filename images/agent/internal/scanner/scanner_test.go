@@ -42,10 +42,10 @@ func TestCalculateSyncProgress_PercentFormat(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			rvr := &v1alpha1.ReplicatedVolumeReplica{
-				Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.ConditionTypeInSync,
+							Type:   v1alpha1.ReplicatedVolumeReplicaCondInSyncType,
 							Status: metav1.ConditionFalse,
 						},
 					},
@@ -80,10 +80,10 @@ func TestCalculateSyncProgress_PercentFormat(t *testing.T) {
 
 func TestCalculateSyncProgress_InSyncTrue(t *testing.T) {
 	rvr := &v1alpha1.ReplicatedVolumeReplica{
-		Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+		Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 			Conditions: []metav1.Condition{
 				{
-					Type:   v1alpha1.ConditionTypeInSync,
+					Type:   v1alpha1.ReplicatedVolumeReplicaCondInSyncType,
 					Status: metav1.ConditionTrue,
 				},
 			},
@@ -99,7 +99,7 @@ func TestCalculateSyncProgress_InSyncTrue(t *testing.T) {
 func TestCalculateSyncProgress_Unknown(t *testing.T) {
 	// No conditions set - Status initialized but empty (as in real usage)
 	rvr := &v1alpha1.ReplicatedVolumeReplica{
-		Status: &v1alpha1.ReplicatedVolumeReplicaStatus{},
+		Status: v1alpha1.ReplicatedVolumeReplicaStatus{},
 	}
 
 	result := calculateSyncProgress(rvr)
@@ -111,10 +111,10 @@ func TestCalculateSyncProgress_Unknown(t *testing.T) {
 func TestCalculateSyncProgress_DiskState(t *testing.T) {
 	// InSync=False, no active sync -> return DiskState
 	rvr := &v1alpha1.ReplicatedVolumeReplica{
-		Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+		Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 			Conditions: []metav1.Condition{
 				{
-					Type:   v1alpha1.ConditionTypeInSync,
+					Type:   v1alpha1.ReplicatedVolumeReplicaCondInSyncType,
 					Status: metav1.ConditionFalse,
 				},
 			},

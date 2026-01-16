@@ -1,0 +1,415 @@
+---
+description: Rules for Reconcile method orchestration in reconciler.go: file layout, call-graph ordering, patch sequencing, determinism, and reconciliation patterns. Apply when editing reconciler*.go Reconcile/reconcile* methods, and when planning reconciliation structure or patch ordering. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go
+alwaysApply: false
+---
+
+# Controller reconciliation orchestration (Reconcile methods)
+
+See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
+
+This document complements `controller-reconcile-helper*.mdc` and defines rules that are **owned by Reconcile methods**
+(the orchestration layer), not by helper categories and not by `internal/reconciliation/flow` usage.
+
+---
+
+## Terminology
+
+> Terms like “main resource”, “status subresource”, and patch-domain boundaries are defined in
+> `controller-reconcile-helper*.mdc`.
+> This document defines only orchestration-specific terminology.
+
+- **Reconcile method**: any function/method named `Reconcile*` / `reconcile*` that orchestrates reconciliation
+  (root entrypoint, group reconciler, per-object reconciler, etc.).
+- **Patch request**: one API write that persists drift for a single patch domain
+  (typically executed by a `patch*` / `patch*Status` helper).
+- **Patch base (`base`)**: the `DeepCopy()` snapshot used as a diff reference for **one** patch request.
+
+## `reconciler.go` layout and sorting (MUST)
+
+This section defines the canonical ordering inside **`reconciler.go`** to keep the file readable and reviewable.
+It is a *layout* convention (not a behavioral contract), but it MUST be followed for consistency.
+
+### High-level rule (MUST)
+
+- **`reconciler.go`** MUST be organized top-to-bottom in **call-graph order**, keeping helpers from **Non-I/O helper categories** close to
+  the **Reconcile method** that primarily uses/owns them.
+- The file SHOULD use explicit section comments to make boundaries obvious, e.g.:
+  - `// --- Reconcile: <name>`
+  - `// --- Helpers: <name> (Non-I/O helper categories)`
+  - `// --- Single-call I/O helper categories`
+
+### 1. Wiring / construction (MUST)
+
+- `type Reconciler { ... }` MUST be first (top of file).
+- `NewReconciler(...)` MUST be immediately after `type Reconciler { ... }`.
+- `NewReconciler` MUST remain wiring/DI only (no Kubernetes API I/O).
+
+### 2. Reconcile methods in call-graph order (MUST)
+
+- The controller-runtime `Reconcile(ctx, req)` MUST appear before any other `reconcile*` / `Reconcile*` methods.
+- Other **Reconcile methods** MUST be declared in the order they are called.
+  - If `Reconcile` calls `reconcileA(...)` and then `reconcileB(...)`, `reconcileA` MUST appear before `reconcileB`.
+  - Sibling reconciles (called from the same parent) SHOULD appear in the same order as they appear at the call site.
+
+### 3. Per-reconcile helper blocks (non-I/O) (MUST)
+
+Immediately after each **Reconcile method**, **`reconciler.go`** MUST place the helpers from **Non-I/O helper categories** that are used by
+that method (excluding helpers from **Single-call I/O helper categories**), in this order:
+
+1) **EnsureReconcileHelper** helpers (`ensure*`)
+2) **ComputeReconcileHelper** + **IsInSyncReconcileHelper** + **ApplyReconcileHelper** (grouped per entity/artifact; see below)
+3) **ConstructionReconcileHelper** helpers (`new*` / `build*` / `make*` / `compose*`)
+
+#### ComputeReconcileHelper + IsInSyncReconcileHelper + ApplyReconcileHelper grouping rule (MUST)
+
+- For one logical entity/artifact, `compute*`, `is*InSync*`, and `apply*` helpers MUST be kept adjacent as a group.
+- Inside such a group, the order MUST be:
+  1. `computeIntended*` (if any)
+  2. `computeActual*` (if any)
+  3. `computeTarget*` and/or `compute*Report`
+  4. `is*InSync*`
+  5. `apply*`
+
+Notes:
+- Use `is*InSync*` naming (not “up-to-date”) per `controller-reconcile-helper-is-in-sync.mdc`.
+- “Construction” helpers in this per-reconcile block MUST be local to the same reconcile step; if they become shared,
+  move them to the nearest owning reconcile step (see next section) or a shared block.
+
+#### Shared helper placement (SHOULD)
+
+- If a non-I/O helper is used by more than one **Reconcile method**, it SHOULD be placed under the nearest
+  **owning** reconcile step (the closest common parent in the call graph that conceptually owns the helper).
+- If there is no clear owner, it MAY be placed into a small `// Shared non-I/O helpers` block immediately above
+  the I/O helpers section.
+- Helpers MUST NOT be duplicated to satisfy locality.
+
+### 4. I/O helpers at the end (MUST)
+
+- All helpers from **Single-call I/O helper categories** (**GetReconcileHelper**, **CreateReconcileHelper**, **PatchReconcileHelper**, **DeleteReconcileHelper**) MUST be the last section in **`reconciler.go`**.
+- These helpers MUST be grouped and sorted as follows:
+  1) **Group by object kind/type** (one group per kind).
+  2) Inside a kind group, order MUST be: **GetReconcileHelper → CreateReconcileHelper → PatchReconcileHelper → DeleteReconcileHelper**.
+  3) Kind-group ordering MUST be:
+     1. the **primary reconciled kind** first,
+     2. then other kinds from this repository API (types under `api/v*/`) in **alphabetical order** by established kind name (short kind name when applicable),
+     3. then kinds from other APIs in **alphabetical order** by kind name.
+
+## Optional scalar fields (optional `*T`) (MUST)
+
+Kubernetes APIs sometimes encode optionality via `json:",omitempty"` for fields whose underlying value is a scalar `T`
+(non-nil-able, e.g. `bool`, numbers, `string`, small structs).
+
+If the API represents such a field as `*T` to preserve the distinction between "unset" and "set to the zero value",
+controller code MUST keep the same representation across the reconciliation pipeline:
+  - store it as `*T` in controller POV state artifacts (**intended**, **actual**, **target**, **report**, and derived structs),
+  - pass it between functions as `*T`,
+  - return it from functions as `*T`.
+- Comparisons SHOULD use `ptr.Equal(a, b)`.
+- Writes SHOULD assign the pointer directly; assigning `nil` MUST represent "unset".
+- Exception: if a function parameter is an explicitly required input (the function cannot be called without a value), that parameter MAY be `T` by value.
+
+Definitions:
+- **non-nil-able** scalar types include: `bool`, numeric types, `string`, structs, arrays, `time.Duration`, `metav1.Duration`, `resource.Quantity`, etc.
+- **nil-able** types include: pointers, maps, slices, interfaces, channels, functions.
+
+Example (illustrative):
+```go
+import "k8s.io/utils/ptr"
+
+// Foo.Spec.TimeoutSeconds is `*int32` with `json:",omitempty"`.
+type TargetFooSpec struct {
+    TimeoutSeconds *int32
+}
+
+func applyFooSpec(obj *v1alpha1.Foo, target *int32) {
+    if !ptr.Equal(obj.Spec.TimeoutSeconds, target) {
+        obj.Spec.TimeoutSeconds = target
+    }
+}
+```
+
+## State variable naming conventions (MUST)
+
+Variables that hold controller POV state artifacts MUST be named after the state they contain
+(`intended`, `actual`, `target`, `report`, etc.).
+
+### Canonical convention (MUST)
+
+The canonical naming style for state variables is **state-prefix**:
+
+- `<state><Artifact>` (lowerCamelCase)
+  - examples: `intendedLabels`, `actualPods`, `targetMain`, `targetStatus`, `reportConditions`
+
+This rule applies even when the variable type already contains the state word (types like `ActualFoo`, `TargetBar`, etc.):
+the *variable* name MUST still carry the state word for readability.
+
+### Alternative convention (MAY)
+
+The **state-suffix** style MAY be used in legacy code or when it reads strictly better in a very small scope:
+
+- `<artifact><State>`
+  - examples: `labelsIntended`, `podsActual`, `conditionsReport`
+
+Constraints (MUST):
+- A function MUST NOT mix state-prefix and state-suffix styles in the same scope.
+- Regardless of style, a state variable name MUST contain the state word (`intended` / `actual` / `target` / `report`).
+
+### Terminology guardrails (MUST NOT)
+
+- New code MUST NOT use `desired` as a controller POV state name (use `intended` / `target` / `report`).
+
+### Default shortening (MAY)
+
+When there is exactly one artifact of a given state in a tight scope, the artifact part MAY be omitted:
+`intended`, `actual`, `target`, `report`.
+
+### Target split naming (SHOULD)
+
+This rule applies only when the same target artifact (same conceptual value, same name) exists in both patch domains.
+
+When such a **target** artifact is split by patch domain, variables SHOULD be named:
+- `targetMain` for the **main patch domain**,
+- `targetStatus` for the **status patch domain** (**controller-owned state** to persist).
+
+Published status output SHOULD be named as `report...` (it SHOULD NOT be stored in a `targetStatus...` variable).
+
+### Suggested declaration order (SHOULD)
+
+When declaring several pipeline variables together, the order SHOULD follow the pipeline:
+`intended` → `actual` → `target` → `report`.
+
+## controller-runtime split client & determinism (MUST)
+
+### Background
+
+For performance, controllers SHOULD use the default `client.Client` provided by controller-runtime.
+That default client behaves like a **split client**:
+
+- reads (`Get`/`List`) are served from a local cache;
+- writes (`Create`/`Patch`/`Update`/`Delete`) go directly to the API server;
+- the cache is **eventually consistent** and is not guaranteed to be invalidated immediately after a write.
+
+You can mentally model this as having a local, slightly delayed copy of the cluster state.
+
+### Consequences for reconciliation code (MUST)
+
+- Reconcile code MUST assume cache reads can be stale relative to our own recent writes.
+- Reconcile code MUST NOT rely on read-after-write consistency through the cached client for correctness.
+- Reconcile code MUST be deterministic:
+  - if the same Reconcile method re-runs before the cache catches up, it MUST compute the same intended result and produce
+    the same idempotent writes (or harmless repeats).
+
+### Non-determinism hazards & required protections (MUST)
+
+If you need to perform something non-deterministic (random IDs, timestamps, unstable naming, etc.), you MUST introduce a
+stabilizing mechanism so retries do not diverge.
+
+Examples of required protections:
+
+1. **Updating an object with a deterministic identity**
+   - Prefer a patch strategy with an **optimistic lock** and re-run reconciliation on conflict.
+2. **Creating an object**
+   - If the name is deterministic, repeated `Create` is safe: retries converge via `AlreadyExists`.
+   - If the name is not deterministic, retries can create duplicates (BAD).
+     - You MUST make naming deterministic, or
+     - persist the chosen name (or parameters required to compute it deterministically) in a stable place
+       (commonly: parent status) before creating.
+
+## Core invariants for Reconcile methods (MUST)
+
+### Phases for Reconcile methods (MUST)
+
+- Any **non-root Reconcile method** MUST start a **reconcile phase scope** (`flow.BeginReconcile`) and return **ReconcileOutcome** (in code: `flow.ReconcileOutcome`).
+- The **root Reconcile** MUST use `flow.BeginRootReconcile(ctx)` (no phase scope) and return via `outcome.ToCtrl()`.
+- See: `controller-reconciliation-flow.mdc`.
+
+### One Reconcile method = one reconciliation pattern (MUST)
+
+- A single Reconcile method MUST choose exactly **one** pattern from **“Reconciliation patterns”** below
+  and apply it consistently for all changes it performs (across any domains it touches).
+- A single Reconcile method MUST NOT mix patterns within itself.
+- If different parts of reconciliation naturally need different patterns, split the logic into **multiple**
+  Reconcile methods (e.g., `reconcileMain(...)` and `reconcileStatus(...)`), each with its own pattern.
+
+### Pattern documentation is mandatory (MUST)
+
+- The selected pattern MUST be documented in the GoDoc comment of the Reconcile method entrypoint using
+  a single stable style with exact key and order:
+
+  - `Reconcile pattern:` `<PatternName>`
+
+  Example (required format):
+  - `// Reconcile pattern: Conditional desired evaluation`
+
+---
+
+## Patch sequencing policy
+
+Reconcile methods MUST be the only place that decides:
+- whether a patch request is needed;
+- the order of multiple patch requests (including main vs status sequencing);
+- how outcomes/errors from multiple sub-steps are aggregated;
+- where child reconciliation calls are placed relative to patching.
+
+Single-call API writes may be delegated to helpers, but **the sequencing policy lives here**.
+
+---
+
+## DeepCopy & patch-base rules
+
+### DeepCopy is per patch request
+
+- For every patch request, the Reconcile method MUST create **exactly one**
+  patch base via `obj.DeepCopy()` **immediately before** the object is mutated in that **patch domain** (and then used for the subsequent patch request).
+- The patch base variable name MUST be `base`.
+
+If a Reconcile method performs multiple patch requests:
+
+- it MUST create multiple `base` objects (one per patch request);
+- each `base` MUST be taken from the object state **immediately before** that **patch domain** is mutated for that specific patch request;
+- after patch #1 updates the object, patch #2 MUST take `base` from the updated object
+  to preserve correct diff and `resourceVersion`.
+
+Go note (no extra lexical scopes required):
+
+```go
+var base *ObjT
+
+
+base = obj.DeepCopy()
+
+// ApplyReconcileHelpers (or EnsureReconcileHelpers) bring `obj` to the intended in-memory state for this patch domain.
+applyMainLabels(obj, targetLabels)
+applyMainSpec(obj, targetSpec)
+
+if err := patchObj(ctx, obj, base); err != nil {
+    return err
+}
+
+base = obj.DeepCopy()
+
+// ApplyReconcileHelpers (or EnsureReconcileHelpers) bring `obj` to the intended in-memory state for this patch domain.
+applyStatusReport(obj, report)
+applyStatusConditions(obj, reportConditions)
+
+if err := patchObjStatus(ctx, obj, base); err != nil {
+    return err
+}
+```
+
+### `base` is a read-only diff reference (MUST)
+
+- Reconcile methods MUST NOT mutate `base`
+  (directly or through map/slice aliasing).
+
+---
+
+## Object identity & list reconciliation (MUST)
+
+### Lists MUST be reconciled via pointers to list items (MUST)
+
+When reconciling objects from a `List`, you MUST take pointers to the actual list elements.
+
+GOOD:
+```go
+for i := range list.Items {
+    obj := &list.Items[i]
+}
+```
+
+BAD:
+```go
+for _, obj := range list.Items {
+}
+```
+
+### Local slices after Create/Patch (MUST)
+
+If a Reconcile method creates objects and keeps a local slice/list for subsequent logic,
+it MUST append/insert the created objects in their final in-memory state
+(including updated `resourceVersion`, defaults, and generated fields).
+
+---
+
+## Reconciliation patterns (MUST)
+
+### Pattern selection rule (MUST)
+
+- Each **Reconcile method** MUST choose exactly one pattern.
+- The choice MUST be documented in GoDoc.
+
+### Pattern 1: In-place reconciliation
+
+ObjCopy → Ensure #1 → Ensure #2 → ... → if changed → Patch
+
+Use when reconciliation is naturally step-by-step and imperative.
+
+### Pattern 2 (default): Target-state driven
+
+ComputeTarget #1 → ComputeTarget #2 → ... → if !all isInSync → ObjCopy → Apply those not InSync → Patch
+
+Use when computing the target is cheap/necessary and the up-to-date check naturally depends on the computed target.
+
+### Pattern 3: Conditional desired evaluation
+
+if ! isInSync → ObjCopy → Ensure OR (ComputeTarget + Apply) → Patch
+
+Use when it is easy to check up-to-date equality without computing state.
+
+### Pattern 4: Pure orchestration
+
+reconcile #1 → reconcile #2 → ... → reconcile #N
+
+Use when the **Reconcile method** is a thin orchestrator that delegates all work to other **Reconcile methods**, and does not implement **domain/business** logic itself (except basic object loading and delegation).
+
+---
+
+## Mixing patterns (FORBIDDEN) (MUST)
+
+Forbidden within one Reconcile method:
+
+- main uses Pattern 3, status uses Pattern 1;
+- main uses Pattern 2, status uses Pattern 3.
+
+Allowed:
+
+- same pattern for all domains;
+- split into multiple Reconcile methods, each with its own pattern.
+
+---
+
+## Child resources and decomposition (MUST)
+
+- Child resources SHOULD be reconciled in separate Reconcile methods:
+  - group reconciler (list + ordering);
+  - per-object reconciler.
+- Prefer passing already loaded objects.
+- Always pass pointers from list iteration.
+- Caller owns ordering relative to patching.
+
+---
+
+## Business logic failures & requeue policy (MUST)
+
+- Business-logic blocking conditions MUST return an error.
+- Exception: if unblocked by watched resources, returning “done / no-op” is acceptable.
+- If unblocked by **unwatched** events:
+  - return an error, or
+  - requeue only with clear justification and visible status signal.
+
+---
+
+## objutilv1 usage (MUST)
+
+All work with:
+
+- labels,
+- annotations,
+- finalizers,
+- owner references,
+- conditions
+
+MUST go through `objutilv1`, imported as `obju`.
+
+Manual manipulation is forbidden unless `objutilv1` is extended.

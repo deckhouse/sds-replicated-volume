@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
@@ -63,13 +64,13 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
-	if !v1alpha1.HasControllerFinalizer(rv) {
+	if !obju.HasFinalizer(rv, v1alpha1.ControllerFinalizer) {
 		log.Info("ReplicatedVolume does not have controller finalizer, skipping")
 		return reconcile.Result{}, nil
 	}
 
 	// Check if sharedSecret is not set - generate new one
-	if rv.Status == nil || rv.Status.DRBD == nil || rv.Status.DRBD.Config == nil || rv.Status.DRBD.Config.SharedSecret == "" {
+	if rv.Status.DRBD == nil || rv.Status.DRBD.Config == nil || rv.Status.DRBD.Config.SharedSecret == "" {
 		return r.reconcileGenerateSharedSecret(ctx, rv, log)
 	}
 
@@ -84,7 +85,7 @@ func (r *Reconciler) reconcileGenerateSharedSecret(
 	log logr.Logger,
 ) (reconcile.Result, error) {
 	// Check if sharedSecret is already set (idempotent check on original)
-	if rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil && rv.Status.DRBD.Config.SharedSecret != "" {
+	if rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil && rv.Status.DRBD.Config.SharedSecret != "" {
 		log.V(1).Info("sharedSecret already set and valid", "algorithm", rv.Status.DRBD.Config.SharedSecretAlg)
 		return reconcile.Result{}, nil // Already set, nothing to do (idempotent)
 	}
@@ -197,7 +198,7 @@ func (r *Reconciler) reconcileSwitchAlgorithm(
 	for _, rvr := range rvrsWithErrors {
 		// Access UnsupportedAlg directly, checking for nil
 		var unsupportedAlg string
-		if rvr.Status != nil && rvr.Status.DRBD != nil && rvr.Status.DRBD.Errors != nil &&
+		if rvr.Status.DRBD != nil && rvr.Status.DRBD.Errors != nil &&
 			rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError != nil {
 			unsupportedAlg = rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError.UnsupportedAlg
 		}
@@ -288,7 +289,7 @@ func (r *Reconciler) reconcileSwitchAlgorithm(
 
 // hasUnsupportedAlgorithmError checks if RVR has SharedSecretAlgSelectionError in drbd.errors
 func hasUnsupportedAlgorithmError(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Errors == nil {
+	if rvr.Status.DRBD == nil || rvr.Status.DRBD.Errors == nil {
 		return false
 	}
 	return rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError != nil
@@ -296,9 +297,6 @@ func hasUnsupportedAlgorithmError(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 
 // ensureRVStatusInitialized ensures that RV status structure is initialized
 func ensureRVStatusInitialized(rv *v1alpha1.ReplicatedVolume) {
-	if rv.Status == nil {
-		rv.Status = &v1alpha1.ReplicatedVolumeStatus{}
-	}
 	if rv.Status.DRBD == nil {
 		rv.Status.DRBD = &v1alpha1.DRBDResource{}
 	}

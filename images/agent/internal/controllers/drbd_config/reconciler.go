@@ -27,6 +27,7 @@ import (
 
 	u "github.com/deckhouse/sds-common-lib/utils"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
 )
@@ -58,7 +59,7 @@ func (r *Reconciler) Reconcile(
 	log = log.With("rvrName", rvr.Name)
 
 	var llv *snc.LVMLogicalVolume
-	if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.Status != nil && rvr.Status.LVMLogicalVolumeName != "" {
+	if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.Status.LVMLogicalVolumeName != "" {
 		if llv, err = r.selectLLV(ctx, log, rvr.Status.LVMLogicalVolumeName); err != nil {
 			return reconcile.Result{}, err
 		}
@@ -69,7 +70,7 @@ func (r *Reconciler) Reconcile(
 	case rvr.DeletionTimestamp != nil:
 		log.Info("deletionTimestamp on rvr, check finalizers")
 
-		if v1alpha1.HasExternalFinalizers(rvr) {
+		if obju.HasFinalizersOtherThan(rvr, v1alpha1.ControllerFinalizer, v1alpha1.AgentFinalizer) {
 			log.Info("non-agent finalizer found, ignore")
 			return reconcile.Result{}, nil
 		}
@@ -115,7 +116,7 @@ func (r *Reconciler) selectRVR(
 		return nil, nil, u.LogError(log, fmt.Errorf("getting rv: %w", err))
 	}
 
-	if !v1alpha1.HasControllerFinalizer(rv) {
+	if !obju.HasFinalizer(rv, v1alpha1.ControllerFinalizer) {
 		log.Info("no controller finalizer on rv, skipping")
 		return rv, nil, nil
 	}
@@ -192,7 +193,7 @@ func rvrFullyInitialized(log *slog.Logger, rv *v1alpha1.ReplicatedVolume, rvr *v
 		logNotInitializedField("spec.replicatedVolumeName")
 		return false
 	}
-	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil {
+	if rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil {
 		logNotInitializedField("status.drbd.config")
 		return false
 	}
@@ -208,7 +209,7 @@ func rvrFullyInitialized(log *slog.Logger, rv *v1alpha1.ReplicatedVolume, rvr *v
 		logNotInitializedField("status.lvmLogicalVolumeName")
 		return false
 	}
-	if rv.Status == nil || rv.Status.DRBD == nil || rv.Status.DRBD.Config == nil {
+	if rv.Status.DRBD == nil || rv.Status.DRBD.Config == nil {
 		logNotInitializedField("rv.status.drbd.config")
 		return false
 	}

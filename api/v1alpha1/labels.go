@@ -16,40 +16,19 @@ limitations under the License.
 
 package v1alpha1
 
-// LabelPrefix uses module name in prefix (not in key) for consistency with finalizers.
-// Pattern: if key is short/generic -> module name in prefix (like finalizers)
-//
-//	if key contains module name -> short prefix (like node label storage.deckhouse.io/sds-replicated-volume-node)
-const LabelPrefix = "sds-replicated-volume.deckhouse.io/"
+const labelPrefix = "sds-replicated-volume.deckhouse.io/"
 
 const (
-	// LabelReplicatedStorageClass is the label key for ReplicatedStorageClass name on RV and RVR
-	LabelReplicatedStorageClass = LabelPrefix + "replicated-storage-class"
+	// ReplicatedStorageClassLabelKey is the label key for ReplicatedStorageClass name on RV and RVR.
+	ReplicatedStorageClassLabelKey = labelPrefix + "replicated-storage-class"
 
-	// LabelReplicatedVolume is the label key for ReplicatedVolume name on RVR
-	LabelReplicatedVolume = LabelPrefix + "replicated-volume"
+	// ReplicatedVolumeLabelKey is the label key for ReplicatedVolume name on RVR.
+	ReplicatedVolumeLabelKey = labelPrefix + "replicated-volume"
 
-	// LabelLVMVolumeGroup is the label key for LVMVolumeGroup name on RVR
-	LabelLVMVolumeGroup = LabelPrefix + "lvm-volume-group"
+	// LVMVolumeGroupLabelKey is the label key for LVMVolumeGroup name on RVR.
+	LVMVolumeGroupLabelKey = labelPrefix + "lvm-volume-group"
 
-	// LabelThinPool will be used when thin pools are extracted to separate objects
-	// LabelThinPool = LabelPrefix + "thin-pool"
+	// NodeNameLabelKey is the label key for the Kubernetes node name where the RVR is scheduled.
+	// Note: This stores node.metadata.name, not the OS hostname (kubernetes.io/hostname).
+	NodeNameLabelKey = labelPrefix + "node-name"
 )
-
-// LabelNodeName is the label key for the Kubernetes node name where the RVR is scheduled.
-// Note: This stores node.metadata.name, not the OS hostname (kubernetes.io/hostname).
-const LabelNodeName = LabelPrefix + "node-name"
-
-// EnsureLabel sets a label on the given labels map if it's not already set to the expected value.
-// Returns the updated labels map and a boolean indicating if a change was made.
-// This function is used across controllers for idempotent label updates.
-func EnsureLabel(labels map[string]string, key, value string) (map[string]string, bool) {
-	if labels == nil {
-		labels = make(map[string]string)
-	}
-	if labels[key] == value {
-		return labels, false // no change needed
-	}
-	labels[key] = value
-	return labels, true
-}

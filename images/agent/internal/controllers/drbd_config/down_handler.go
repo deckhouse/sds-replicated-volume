@@ -41,7 +41,7 @@ type DownHandler struct {
 
 func (h *DownHandler) Handle(ctx context.Context) error {
 	for _, f := range h.rvr.Finalizers {
-		if f != v1alpha1.AgentAppFinalizer {
+		if f != v1alpha1.AgentFinalizer {
 			h.log.Info("non-agent finalizer found, ignore", "rvrName", h.rvr.Name)
 			return nil
 		}
@@ -89,12 +89,12 @@ func (h *DownHandler) Handle(ctx context.Context) error {
 }
 
 func (h *DownHandler) removeFinalizerFromRVR(ctx context.Context) error {
-	if !slices.Contains(h.rvr.Finalizers, v1alpha1.AgentAppFinalizer) {
+	if !slices.Contains(h.rvr.Finalizers, v1alpha1.AgentFinalizer) {
 		return nil
 	}
 	patch := client.MergeFrom(h.rvr.DeepCopy())
 	h.rvr.Finalizers = slices.DeleteFunc(h.rvr.Finalizers, func(f string) bool {
-		return f == v1alpha1.AgentAppFinalizer
+		return f == v1alpha1.AgentFinalizer
 	})
 	if err := h.cl.Patch(ctx, h.rvr, patch); err != nil {
 		return fmt.Errorf("patching rvr finalizers: %w", err)
@@ -106,12 +106,12 @@ func (h *DownHandler) removeFinalizerFromLLV(ctx context.Context) error {
 	if h.llv == nil {
 		return nil
 	}
-	if !slices.Contains(h.llv.Finalizers, v1alpha1.AgentAppFinalizer) {
+	if !slices.Contains(h.llv.Finalizers, v1alpha1.AgentFinalizer) {
 		return nil
 	}
 	patch := client.MergeFrom(h.llv.DeepCopy())
 	h.llv.Finalizers = slices.DeleteFunc(h.llv.Finalizers, func(f string) bool {
-		return f == v1alpha1.AgentAppFinalizer
+		return f == v1alpha1.AgentFinalizer
 	})
 	if err := h.cl.Patch(ctx, h.llv, patch); err != nil {
 		return fmt.Errorf("patching llv finalizers: %w", err)

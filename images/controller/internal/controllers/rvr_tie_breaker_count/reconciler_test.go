@@ -79,7 +79,7 @@ var _ = Describe("Reconcile", func() {
 			rv = v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv1",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "rsc1",
@@ -191,12 +191,39 @@ var _ = Describe("Reconcile", func() {
 
 			})
 
+			When("RV has no controller finalizer but tie-breaker creation is needed", func() {
+				BeforeEach(func() {
+					rv.Finalizers = nil
+					builder.WithInterceptorFuncs(interceptor.Funcs{
+						Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+							if rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok && rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
+								currentRV := &v1alpha1.ReplicatedVolume{}
+								Expect(c.Get(ctx, client.ObjectKeyFromObject(&rv), currentRV)).To(Succeed())
+								Expect(currentRV.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
+							}
+							return c.Create(ctx, obj, opts...)
+						},
+					})
+				})
+
+				It("adds controller finalizer and creates TieBreaker", func(ctx SpecContext) {
+					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
+
+					currentRV := &v1alpha1.ReplicatedVolume{}
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rv), currentRV)).To(Succeed())
+					Expect(currentRV.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
+
+					Expect(cl.List(ctx, &rvrList)).To(Succeed())
+					Expect(rvrList.Items).To(HaveTieBreakerCount(Equal(1)))
+				})
+			})
+
 			When("Access replicas", func() {
 				BeforeEach(func() {
 					rv = v1alpha1.ReplicatedVolume{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:       "rv1",
-							Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+							Finalizers: []string{v1alpha1.ControllerFinalizer},
 						},
 						Spec: v1alpha1.ReplicatedVolumeSpec{
 							ReplicatedStorageClassName: "rsc1",
@@ -250,7 +277,7 @@ var _ = Describe("Reconcile", func() {
 					rv = v1alpha1.ReplicatedVolume{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:       "rv1",
-							Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+							Finalizers: []string{v1alpha1.ControllerFinalizer},
 						},
 						Spec: v1alpha1.ReplicatedVolumeSpec{
 							ReplicatedStorageClassName: "rsc1",
@@ -555,7 +582,7 @@ type FDReplicaCounts struct {
 // EntryConfig allows overriding default test configuration per entry
 type EntryConfig struct {
 	// Topology overrides RSC topology. Defaults to "TransZonal" if empty.
-	Topology string
+	Topology v1alpha1.ReplicatedStorageClassTopology
 	// Zones overrides RSC zones. If nil, uses all FD keys. If empty slice, uses no zones.
 	Zones *[]string
 
@@ -563,9 +590,9 @@ type EntryConfig struct {
 }
 
 func setRVInitializedCondition(rv *v1alpha1.ReplicatedVolume, status metav1.ConditionStatus) {
-	rv.Status = &v1alpha1.ReplicatedVolumeStatus{
+	rv.Status = v1alpha1.ReplicatedVolumeStatus{
 		Conditions: []metav1.Condition{{
-			Type:               v1alpha1.ConditionTypeRVInitialized,
+			Type:               v1alpha1.ReplicatedVolumeCondInitializedType,
 			Status:             status,
 			LastTransitionTime: metav1.Now(),
 			Reason:             "test",
@@ -609,7 +636,7 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 					rv = &v1alpha1.ReplicatedVolume{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:       "rv1",
-							Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+							Finalizers: []string{v1alpha1.ControllerFinalizer},
 						},
 						Spec: v1alpha1.ReplicatedVolumeSpec{
 							ReplicatedStorageClassName: "rsc1",
