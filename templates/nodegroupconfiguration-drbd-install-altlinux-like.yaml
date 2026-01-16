@@ -103,7 +103,7 @@ spec:
       # DRBD check version
 
       current_version="$(cat /proc/drbd | grep 'version:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
-      desired_version="{{ $.Values.sdsReplicatedVolume.internal.drbdVersion }}"
+      desired_version="$DRBD_VERSION"
 
       # We expect the loaded DRBD module to be version 9.
       # If version 8 is loaded, it means that for some reason, the in-tree kernel module has been automatically loaded.
@@ -174,7 +174,7 @@ spec:
     # Find kernel headers directories
     # In AltLinux, archive all /usr/src/linux-headers-* directories (all versions)
     KERNEL_VERSION_FOR_API="${kernel_version_in_use}"
-    DRBD_VERSION="{{ $.Values.sdsReplicatedVolume.internal.drbdVersion }}"
+    DRBD_VERSION="{{ $.Values.sdsReplicatedVolume.drbdVersion }}"
     MODULES_TAR="/tmp/drbd-modules-${kernel_version_in_use}.tar.gz"
     
     # Archive kernel headers and send build request
@@ -336,7 +336,7 @@ spec:
 
     if [ -e "/proc/drbd" ]; then
       current_version="$(cat /proc/drbd | grep 'version:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
-      desired_version="{{ $.Values.sdsReplicatedVolume.internal.drbdVersion }}"
+      desired_version="$DRBD_VERSION"
 
       {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
       bb-package-module-install "semver:{{ include "helm_lib_module_image_digest" (list . "semver" "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
