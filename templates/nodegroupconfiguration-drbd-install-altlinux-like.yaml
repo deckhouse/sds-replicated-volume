@@ -25,6 +25,8 @@ spec:
     # data nodes checksum to force bashible execution on nodes list change
     # {{ $.Values.sdsReplicatedVolume.internal.dataNodesChecksum }}
 
+    DESIRED_DRBD_VERSION="{{ $.Values.sdsReplicatedVolume.drbdVersion }}"
+
     # Unpack package from module image and run install script
     # bb-rp-from-module-image-install package:digest registry_auth scheme registry_address registry_path
     bb-rp-from-module-image-install() {
@@ -103,7 +105,7 @@ spec:
       # DRBD check version
 
       current_version="$(cat /proc/drbd | grep 'version:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
-      desired_version="$DRBD_VERSION"
+      desired_version="$DESIRED_DRBD_VERSION"
 
       # We expect the loaded DRBD module to be version 9.
       # If version 8 is loaded, it means that for some reason, the in-tree kernel module has been automatically loaded.
@@ -174,7 +176,6 @@ spec:
     # Find kernel headers directories
     # In AltLinux, archive all /usr/src/linux-headers-* directories (all versions)
     KERNEL_VERSION_FOR_API="${kernel_version_in_use}"
-    DRBD_VERSION="{{ $.Values.sdsReplicatedVolume.drbdVersion }}"
     MODULES_TAR="/tmp/drbd-modules-${kernel_version_in_use}.tar.gz"
     
     # Archive kernel headers and send build request
@@ -201,10 +202,10 @@ spec:
       HTTP_CODE=$(curl -s -w '%{http_code}' -X POST \
         -H "Content-Type: application/gzip" \
         -H "X-Kernel-Version: ${KERNEL_VERSION_FOR_API}" \
-        -H "X-DRBD-Version: ${DRBD_VERSION}" \
+        -H "X-DRBD-Version: ${DESIRED_DRBD_VERSION}" \
         --data-binary @/tmp/headers.tar.gz \
         -o "$MODULES_TAR" \
-        "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}&drbd_version=${DRBD_VERSION}")
+        "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}&drbd_version=${DESIRED_DRBD_VERSION}")
       
       # Cleanup temporary headers archive
       rm -f /tmp/headers.tar.gz
@@ -221,10 +222,10 @@ spec:
       HTTP_CODE=$(curl -s -w '%{http_code}' -X POST \
         -H "Content-Type: application/gzip" \
         -H "X-Kernel-Version: ${KERNEL_VERSION_FOR_API}" \
-        -H "X-DRBD-Version: ${DRBD_VERSION}" \
+        -H "X-DRBD-Version: ${DESIRED_DRBD_VERSION}" \
         --data-binary @/tmp/headers.tar.gz \
         -o "$MODULES_TAR" \
-        "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}&drbd_version=${DRBD_VERSION}")
+        "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}&drbd_version=${DESIRED_DRBD_VERSION}")
       
       # Cleanup temporary headers archive
       rm -f /tmp/headers.tar.gz
@@ -336,7 +337,7 @@ spec:
 
     if [ -e "/proc/drbd" ]; then
       current_version="$(cat /proc/drbd | grep 'version:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
-      desired_version="$DRBD_VERSION"
+      desired_version="$DESIRED_DRBD_VERSION"
 
       {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
       bb-package-module-install "semver:{{ include "helm_lib_module_image_digest" (list . "semver" "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
