@@ -4,7 +4,6 @@ go 1.24.11
 
 require (
 	github.com/cloudflare/cfssl v1.6.5
-	github.com/deckhouse/deckhouse/pkg/log v0.0.0-20250909165437-ef0b7f73d870
 	github.com/deckhouse/module-sdk v0.4.0
 	k8s.io/api v0.34.0
 	k8s.io/apimachinery v0.34.0
@@ -53,6 +52,7 @@ require (
 	github.com/curioswitch/go-reassign v0.3.0 // indirect
 	github.com/daixiang0/gci v0.13.5 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/deckhouse/deckhouse/pkg/log v0.0.0-20250909165437-ef0b7f73d870 // indirect
 	github.com/denis-tingaikin/go-header v0.5.0 // indirect
 	github.com/docker/cli v28.4.0+incompatible // indirect
 	github.com/docker/distribution v2.8.3+incompatible // indirect
