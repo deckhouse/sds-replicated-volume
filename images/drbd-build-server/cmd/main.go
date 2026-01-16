@@ -989,7 +989,7 @@ func (s *server) findKernelBuildDir(kernelHeadersDir, kernelVersion, jobID strin
 }
 
 // prepareDRBDForBuild prepares an isolated DRBD source directory for a build.
-// It copies from base drbdDir.
+// It copies from base drbdDir and switches to the requested DRBD version.
 func (s *server) prepareDRBDForBuild(destDir, jobID, drbdVersion string) error {
 	s.logger.Debug("Preparing DRBD source", "job_id", jobID, "dest_dir", destDir)
 
@@ -1008,6 +1008,9 @@ func (s *server) prepareDRBDForBuild(destDir, jobID, drbdVersion string) error {
 					return fmt.Errorf("failed to copy DRBD directory: %w", err)
 				}
 				s.logger.Debug("DRBD source copied successfully", "job_id", jobID)
+				if err := s.checkoutDRBDVersion(destDir, jobID, drbdVersion); err != nil {
+					return err
+				}
 				return nil
 			}
 		}
@@ -1030,6 +1033,44 @@ func copyDirectory(src, dst, jobID string, logger *slog.Logger) error {
 	}
 
 	logger.Debug("Directory copied successfully", "job_id", jobID)
+	return nil
+}
+
+// checkoutDRBDVersion switches the copied repository to the requested DRBD version and updates submodules.
+func (s *server) checkoutDRBDVersion(destDir, jobID, drbdVersion string) error {
+	if drbdVersion == "" {
+		return fmt.Errorf("drbd version is required for checkout")
+	}
+
+	if _, err := os.Stat(filepath.Join(destDir, ".git")); err != nil {
+		return fmt.Errorf("drbd repository is not available in drbd-dir (missing .git): %w", err)
+	}
+
+	branch := fmt.Sprintf("drbd-%s", drbdVersion)
+	s.logger.Info("Switching DRBD version", "job_id", jobID, "branch", branch)
+
+	cmd := exec.Command("git", "-C", destDir, "checkout", "-f", branch)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git checkout failed: %w, output: %s", err, string(output))
+	}
+
+	hashCmd := exec.Command("git", "-C", destDir, "rev-parse", "HEAD")
+	output, err = hashCmd.Output()
+	if err != nil {
+		return fmt.Errorf("git rev-parse failed: %w", err)
+	}
+	gitHash := strings.TrimSpace(string(output))
+
+	gitRevisionPath := filepath.Join(destDir, "drbd", ".drbd_git_revision")
+	if err := os.MkdirAll(filepath.Dir(gitRevisionPath), 0755); err != nil {
+		return fmt.Errorf("failed to create drbd directory: %w", err)
+	}
+	gitRevisionContent := fmt.Sprintf("GIT-hash:%s\n", gitHash)
+	if err := os.WriteFile(gitRevisionPath, []byte(gitRevisionContent), 0644); err != nil {
+		return fmt.Errorf("failed to create .drbd_git_revision file: %w", err)
+	}
+
 	return nil
 }
 

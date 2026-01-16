@@ -83,14 +83,15 @@ shell:
       && ln -sf /usr/bin/python3 /usr/bin/python \
       && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
   setup:
-    - git clone --depth 1 {{ $.Root.SOURCE_REPO }}/LINBIT/drbd.git /drbd
+    - git clone --depth 1 --no-single-branch --recurse-submodules {{ $.Root.SOURCE_REPO }}/LINBIT/drbd.git /drbd
     - cd /drbd && git submodule update --init --recursive
+    - cd /drbd && git submodule foreach --recursive 'git fetch --all --tags'
     - |
       cd /drbd
       git rev-parse HEAD > /tmp/drbd_git_hash
       mkdir -p /drbd/drbd
       printf "GIT-hash:%s\n" "$(cat /tmp/drbd_git_hash)" > /drbd/drbd/.drbd_git_revision
-      rm -rf /drbd/.git /tmp/drbd_git_hash
+      rm -rf /tmp/drbd_git_hash
     - mkdir -p /var/cache/drbd-build-server /tmp/drbd-builds
 
 docker:
