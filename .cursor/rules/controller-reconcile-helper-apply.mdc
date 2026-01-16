@@ -1,0 +1,299 @@
+---
+description: Contracts for ApplyReconcileHelper (apply*) functions: pure/deterministic non-I/O in-memory mutations for exactly one patch domain. Apply when writing apply* helpers in reconciler*.go, and when deciding how to apply target/report artifacts to objects. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go
+alwaysApply: false
+---
+
+See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
+
+# ApplyReconcileHelper
+
+This document defines naming and contracts for **ApplyReconcileHelper** functions/methods.
+
+Common terminology and rules for any **ReconcileHelper** live in `controller-reconcile-helper.mdc`.
+
+---
+
+## TL;DR
+
+Summary only; if anything differs, follow normative sections below.
+
+- **ApplyReconcileHelpers** (`apply*`) are **pure**, **deterministic**, strictly **non-I/O** “in-memory write” steps.
+- They take a previously computed **target** (and/or **report**) and mutate `obj` in place for **exactly one** **patch domain** (**main patch domain** or **status patch domain**).
+- A status **report** MAY directly reuse selected **actual** observations (including being the same value/type as an **actual** snapshot); persisting such observations into `.status` is OK and they remain **report/observations** (output-only).
+- They MUST NOT perform **Kubernetes API I/O**, use the controller-runtime client, call **DeepCopy**, or execute patches / make **patch ordering** or **patch type decision** decisions.
+- They MUST treat `target` / `report` (and any other inputs) as **read-only inputs** and MUST NOT mutate them (including via **Aliasing**); when copying maps/slices from `target` / `report` into `obj`, **Clone** to avoid sharing.
+- If both **main patch domain** and **status patch domain** need changes, use two **ApplyReconcileHelpers** (one per **patch domain**) and compose them in **Reconcile methods**.
+
+---
+
+## Definition
+
+An **ApplyReconcileHelper** (“apply helper”) is a **ReconcileHelper** that is:
+
+- **strictly non-I/O**, and
+- applies a previously computed **target** (and/or **report**) to the in-memory object, and
+- mutates **exactly one patch domain** in place (**main resource** or **status subresource**), without executing any **patch request**.
+
+Typical apply helpers perform the “mechanical write” step right after **Reconcile methods** create a **patch base** and right before they patch that domain.
+
+Notes on **status patch domain**:
+- Values in `.status` may include both **controller-owned state** (persisted decisions/memory) and **report/observations** (the published **report**).
+- The published **report** MAY include a direct projection of **actual** observations. In some cases the same value/type may be used for both **actual** and published output; once written to `.status` it is still **report/observations** (output-only).
+- Apply helpers that mutate `.status` MUST keep this distinction clear in naming and data flow:
+  - applying persisted decisions should be driven by **target** (often “**target status**” / controller-owned fields),
+  - applying published status output should be driven by **report** (often from a dedicated `compute*Report` helper, or returned alongside **target** from `computeTarget*` as a separate output).
+
+---
+
+## Naming
+
+- An **ApplyReconcileHelper** name MUST start with `apply` / `Apply`.
+- **ApplyReconcileHelpers** MUST be domain-explicit in the name when ambiguity is possible (ambiguity is possible when the applied artifact name refers to a field/group that exists in both `.spec` (**main patch domain**) and `.status` (**status patch domain**) of the same **object**):
+  - `applyMain*` / `ApplyMain*` (**main patch domain**)
+  - `applyStatus*` / `ApplyStatus*` (**status patch domain**)
+- **ApplyReconcileHelpers** SHOULD NOT include `Main` / `Status` in the name when there is no such ambiguity.
+- For main-domain **ApplyReconcileHelpers**, the name MUST also include the concrete artifact being applied (e.g. labels, annotations, or a specific spec field/group) — avoid names that imply “the whole main”.
+- **ApplyReconcileHelpers** names MUST NOT sound like persistence (`applyPatch`, `applyUpdate`, `applyToAPI`) — apply helpers only mutate in-memory state.
+- **ApplyReconcileHelpers** names MUST NOT include `Desired` / `Actual` / `Intended` / `Target` / `Report` unless the applied “thing” name in the **object** API includes those words.
+  - Exception: helpers that apply published status artifacts MAY end with `Report` (e.g., `applyStatusReport`, `applyConditionsReport`) to make the `report`-driven write explicit.
+- **ApplyReconcileHelpers** names SHOULD name the “thing” being applied:
+  - `applyLabels(obj, targetLabels)`
+  - `applySpecFoo(obj, targetFoo)`
+  - `applyStatus(obj, targetStatus)` (when applying controller-owned state)
+  - `applyStatusReport(obj, report)` / `applyConditionsReport(obj, reportConditions)` (when applying published **report**)
+
+---
+
+## Preferred signatures
+
+- For **ApplyReconcileHelpers** (`apply*`), the simplest signature from the variants below that preserves explicit dependencies and purity SHOULD be chosen.
+- If additional signature variants are explicitly permitted elsewhere in this document, they MAY also be used.
+
+### Simple apply
+```go
+func applyFoo(obj *v1alpha1.Foo, target TargetFoo)
+```
+
+Or, if an error is realistically possible:
+```go
+func applyFoo(obj *v1alpha1.Foo, target TargetFoo) error
+```
+
+---
+
+## Receivers
+
+- **ApplyReconcileHelpers** MUST be plain functions (no `Reconciler` receiver).
+
+---
+
+## I/O boundaries
+
+**ApplyReconcileHelpers** MUST NOT do any of the following:
+
+- controller-runtime client usage (`client.Client`, `r.client`, etc.);
+- Kubernetes API calls (`Get/List/Create/Update/Patch/Delete`);
+- `DeepCopy` (including `obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.);
+- executing patches (`Patch` / `Status().Patch`) or making any patch ordering / patch type decisions;
+- creating/updating Kubernetes objects in the API server in any form.
+
+**ApplyReconcileHelpers** MUST NOT do “hidden I/O” either:
+
+- `time.Now()` / `time.Since(...)` (nondeterministic wall-clock reads) (except setting `metav1.Condition.LastTransitionTime`, typically indirectly via `obju.SetStatusCondition`);
+- random number generation (`rand.*`);
+- environment reads (`os.Getenv`, reading files);
+- network calls of any kind.
+
+> Rationale: apply helpers should be **deterministic** “in-memory write” steps; all API interactions and patch execution belong to **Reconcile methods**.
+
+---
+
+## Determinism contract
+
+An **ApplyReconcileHelper** MUST be **deterministic** given its explicit inputs and intended mutation domain.
+
+See the common determinism contract in `controller-reconcile-helper.mdc`.
+
+> Practical reason: nondeterminism creates patch churn and flaky tests.
+
+---
+
+## Read-only contract
+
+`apply*` / `Apply*` MUST treat all inputs except the target mutation on `obj` as read-only:
+
+- it MUST NOT mutate inputs other than `obj` (e.g., `target`, `report`, templates, computed structs);
+- it MUST mutate only the intended **patch domain** on `obj` (**main resource** **or** **status subresource**), treating the other domain as read-only;
+- it MUST NOT perform in-place modifications through aliases to non-`obj` data.
+
+See the common read-only contract in `controller-reconcile-helper.mdc` (especially the Go aliasing rule for `map` / `[]T`).
+
+---
+
+## Patch-domain separation
+
+- `apply*` / `Apply*` MUST mutate `obj` in-place for **exactly one** patch domain:
+  - **main resource** (**metadata + spec + non-status fields**), **or**
+  - **status subresource** (`.status`).
+- An **ApplyReconcileHelper** MUST NOT mutate both domains in the same function.
+- If you need to apply **target**/**report** values to both domains, you MUST implement **two** apply helpers and call them separately from **Reconcile methods**.
+
+✅ Separate apply helpers (GOOD)
+```go
+func applyFoo(obj *v1alpha1.Foo, target TargetFooMain)
+func applyFooStatusReport(obj *v1alpha1.Foo, report FooReport)
+```
+
+❌ Mixed apply (BAD)
+```go
+func applyFoo(
+    obj *v1alpha1.Foo,
+    targetMain TargetFooMain,
+    report FooReport,
+) {
+    // mutates both spec/metadata and status in one helper
+}
+```
+
+---
+
+## Composition
+
+- An **ApplyReconcileHelper** MAY apply multiple related fields in one pass **within a single** **patch domain**.
+- If applied fields represent one conceptual **target** (or one conceptual **report** artifact), they SHOULD be passed as one value (small struct) rather than a long parameter list.
+- If applied changes are distinguishable and used independently, they SHOULD be split into separate `apply*` helpers and composed in **Reconcile methods** (not by making apply helpers depend on each other).
+- An **ApplyReconcileHelper** MAY call **ConstructionReconcileHelpers** (`make*`, `compose*`, `new*`, `build*`) as pure in-memory building blocks, as long as it stays **non-I/O** and **deterministic**.
+
+---
+
+## Flow phase scopes and outcomes
+
+- **ApplyReconcileHelpers** MUST NOT create a `reconcile/flow` **phase scope** (they do not accept `ctx context.Context`; see `controller-reconcile-helper.mdc`).
+- **ApplyReconcileHelpers** MUST NOT return **ReconcileOutcome** (`flow.ReconcileOutcome`) or **EnsureOutcome** (`flow.EnsureOutcome`) (they are “in-memory write” steps).
+  - If a failure is possible, return `error` and let the caller convert it into a flow result in its own scope
+    (for example, `rf.Fail(err)` in a reconcile scope or `ef.Err(err)` in an ensure scope).
+
+---
+
+## Error handling
+
+- See the common error handling rules in `controller-reconcile-helper.mdc`.
+- ApplyReconcileHelpers (`apply*`) SHOULD be non-failing.
+  - If an **ApplyReconcileHelper** returns `error`, it MUST be only for **local validation** failures (e.g., nil pointers, impossible desired shape).
+  - It MUST NOT wrap/enrich errors (external errors should not exist in `apply*`), and MUST NOT include **object identity** (e.g. `namespace/name`, UID, object key).
+  - Any action/**object identity** context belongs to the calling function.
+
+---
+
+## Common anti-patterns (MUST NOT)
+
+❌ Doing any Kubernetes API I/O (client usage / API calls in apply):
+```go
+// forbidden: apply helpers MUST NOT accept ctx (they are non-I/O)
+// forbidden: apply helpers MUST NOT accept client.Client
+func applyFoo(ctx context.Context, c client.Client, obj *v1alpha1.Foo, target TargetFoo) error {
+    // forbidden: apply helpers are non-I/O
+    return c.Update(ctx, obj)
+}
+```
+
+❌ Executing patches or making patch decisions inside apply:
+```go
+// forbidden: apply helpers MUST NOT accept ctx or client.Client
+func applyFoo(ctx context.Context, c client.Client, obj, base *v1alpha1.Foo, target TargetFoo) error {
+    // forbidden: patch execution belongs to Reconcile methods / PatchReconcileHelpers
+    obj.Spec = target.Spec
+    return c.Patch(ctx, obj, client.MergeFrom(base))
+}
+```
+
+❌ Calling `DeepCopy` inside apply:
+```go
+func applyFoo(obj *v1alpha1.Foo, target TargetFoo) {
+    _ = obj.DeepCopy() // forbidden: DeepCopy belongs to Reconcile methods
+    obj.Spec = target.Spec
+}
+```
+
+❌ Returning a reconcile/ensure outcome / doing flow control inside apply:
+```go
+func applyFoo(obj *v1alpha1.Foo, target TargetFoo) flow.ReconcileOutcome {
+    var rf flow.ReconcileFlow
+    obj.Spec = target.Spec
+    return rf.Continue() // forbidden: apply helpers do not return flow control
+}
+```
+
+❌ Adding logging/phases to apply helpers (they must stay tiny and have no `ctx`):
+```go
+// forbidden: apply helpers MUST NOT accept ctx
+func applyFoo(ctx context.Context, obj *v1alpha1.Foo, target TargetFoo) error {
+    l := log.FromContext(ctx)
+    l.Info("applying target foo") // forbidden: apply helpers do not log
+    obj.Spec = target.Spec
+    return nil
+}
+```
+
+❌ Mutating both patch domains in one apply helper:
+```go
+func applyFoo(obj *v1alpha1.Foo, targetMain TargetFooMain, report FooReport) {
+    obj.Spec = targetMain.Spec // main domain
+    // publishing report belongs to status domain
+    obj.Status = report.Status
+    // forbidden: apply must touch exactly one patch domain
+}
+```
+
+❌ Implementing business logic inside apply (deciding desired state while applying it):
+```go
+func applyFoo(obj *v1alpha1.Foo, target TargetFoo) {
+    // forbidden: decisions belong to compute/ensure; apply is mechanical
+    if obj.Spec.Mode == "special" {
+        target.Replicas = 5 // also mutates target (see below)
+    }
+    obj.Spec.Replicas = target.Replicas
+}
+```
+
+❌ Mutating `target` / `report` (or any other non-`obj` input):
+```go
+func applyLabels(obj *v1alpha1.Foo, target TargetLabels) {
+    target.Labels["x"] = "y" // forbidden: target is read-only
+    obju.SetLabels(obj, target.Labels)
+}
+```
+
+❌ Sharing maps/slices from `target` / `report` into `obj` (aliasing):
+```go
+func applyLabels(obj *v1alpha1.Foo, target TargetLabels) {
+    obj.SetLabels(target.Labels) // forbidden: shares map backing storage
+
+    // later mutation now also mutates `target.Labels` through aliasing
+    obj.GetLabels()["owned"] = "true"
+}
+```
+
+❌ Writing nondeterministic ordered fields (map iteration order leaks into slices):
+```go
+func applyFinalizers(obj *v1alpha1.Foo, target TargetFinalizers) {
+    finals := make([]string, 0, len(target.Set))
+    for f := range target.Set { // map iteration order is random
+        finals = append(finals, f)
+    }
+    // missing sort => nondeterministic object state => patch churn
+    obj.SetFinalizers(finals)
+}
+```
+
+❌ Manual metadata/conditions manipulation when `objutilv1` must be used:
+```go
+func applyLabels(obj *v1alpha1.Foo, target TargetLabels) {
+    // forbidden in this codebase: do not open-code label map edits
+    if obj.Labels == nil {
+        obj.Labels = map[string]string{}
+    }
+    obj.Labels["a"] = "b"
+}
+```

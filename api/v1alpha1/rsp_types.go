@@ -36,6 +36,25 @@ type ReplicatedStoragePool struct {
 	Status            ReplicatedStoragePoolStatus `json:"status,omitempty"`
 }
 
+// ReplicatedStoragePoolList contains a list of ReplicatedStoragePool
+// +kubebuilder:object:generate=true
+// +kubebuilder:object:root=true
+type ReplicatedStoragePoolList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+	Items           []ReplicatedStoragePool `json:"items"`
+}
+
+// GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
+// It returns the root object's `.status.conditions`.
+func (o *ReplicatedStoragePool) GetStatusConditions() []metav1.Condition { return o.Status.Conditions }
+
+// SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
+// It sets the root object's `.status.conditions`.
+func (o *ReplicatedStoragePool) SetStatusConditions(conditions []metav1.Condition) {
+	o.Status.Conditions = conditions
+}
+
 // Defines desired rules for Linstor's Storage-pools.
 // +kubebuilder:object:generate=true
 type ReplicatedStoragePoolSpec struct {
@@ -44,13 +63,29 @@ type ReplicatedStoragePoolSpec struct {
 	// - LVMThin (for Thin)
 	// +kubebuilder:validation:Enum=LVM;LVMThin
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
-	Type string `json:"type"`
+	Type ReplicatedStoragePoolType `json:"type"`
 	// An array of names of LVMVolumeGroup resources, whose Volume Groups/Thin-pools will be used to allocate
 	// the required space.
 	//
 	// > Note that every LVMVolumeGroup resource has to have the same type Thin/Thick
 	// as it is in current resource's 'Spec.Type' field.
 	LVMVolumeGroups []ReplicatedStoragePoolLVMVolumeGroups `json:"lvmVolumeGroups"`
+}
+
+// ReplicatedStoragePoolType enumerates possible values for ReplicatedStoragePool spec.type field.
+type ReplicatedStoragePoolType string
+
+// ReplicatedStoragePool spec.type possible values.
+// Keep these in sync with `ReplicatedStoragePoolSpec.Type` validation enum.
+const (
+	// RSPTypeLVM means Thick volumes backed by LVM.
+	RSPTypeLVM ReplicatedStoragePoolType = "LVM"
+	// RSPTypeLVMThin means Thin volumes backed by LVM Thin pools.
+	RSPTypeLVMThin ReplicatedStoragePoolType = "LVMThin"
+)
+
+func (t ReplicatedStoragePoolType) String() string {
+	return string(t)
 }
 
 type ReplicatedStoragePoolLVMVolumeGroups struct {
@@ -65,21 +100,37 @@ type ReplicatedStoragePoolLVMVolumeGroups struct {
 // Displays current information about the state of the LINSTOR storage pool.
 // +kubebuilder:object:generate=true
 type ReplicatedStoragePoolStatus struct {
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+
 	// The actual ReplicatedStoragePool resource's state. Might be:
 	// - Completed (if the controller received correct resource configuration and Linstor Storage-pools configuration is up-to-date)
 	// - Updating (if the controller received correct resource configuration and Linstor Storage-pools configuration needs to be updated)
 	// - Failed (if the controller received incorrect resource configuration or an error occurs during the operation)
 	// +kubebuilder:validation:Enum=Updating;Failed;Completed
-	Phase string `json:"phase,omitempty"`
+	Phase ReplicatedStoragePoolPhase `json:"phase,omitempty"`
 	// The additional information about the resource's current state.
 	Reason string `json:"reason,omitempty"`
 }
 
-// ReplicatedStoragePoolList contains a list of ReplicatedStoragePool
-// +kubebuilder:object:generate=true
-// +kubebuilder:object:root=true
-type ReplicatedStoragePoolList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata"`
-	Items           []ReplicatedStoragePool `json:"items"`
+// ReplicatedStoragePoolPhase enumerates possible values for ReplicatedStoragePool status.phase field.
+type ReplicatedStoragePoolPhase string
+
+// ReplicatedStoragePool status.phase possible values.
+// Keep these in sync with `ReplicatedStoragePoolStatus.Phase` validation enum.
+const (
+	// RSPPhaseUpdating means the resource is being reconciled and needs updates.
+	RSPPhaseUpdating ReplicatedStoragePoolPhase = "Updating"
+	// RSPPhaseFailed means the resource is in an error state.
+	RSPPhaseFailed ReplicatedStoragePoolPhase = "Failed"
+	// RSPPhaseCompleted means the resource is reconciled and up-to-date.
+	RSPPhaseCompleted ReplicatedStoragePoolPhase = "Completed"
+)
+
+func (p ReplicatedStoragePoolPhase) String() string {
+	return string(p)
 }

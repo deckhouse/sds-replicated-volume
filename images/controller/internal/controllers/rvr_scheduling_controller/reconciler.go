@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
@@ -155,14 +156,14 @@ func (r *Reconciler) handlePhaseError(
 
 // schedulingErrorToReason converts a scheduling error to rvrNotReadyReason.
 func schedulingErrorToReason(err error) *rvrNotReadyReason {
-	reason := v1alpha1.ReasonSchedulingFailed
+	reason := v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed
 	switch {
 	case errors.Is(err, errSchedulingTopologyConflict):
-		reason = v1alpha1.ReasonSchedulingTopologyConflict
+		reason = v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonTopologyConstraintsFailed
 	case errors.Is(err, errSchedulingNoCandidateNodes):
-		reason = v1alpha1.ReasonSchedulingNoCandidateNodes
+		reason = v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonNoAvailableNodes
 	case errors.Is(err, errSchedulingPending):
-		reason = v1alpha1.ReasonSchedulingPending
+		reason = v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingPending
 	}
 	return &rvrNotReadyReason{
 		reason:  reason,
@@ -191,7 +192,7 @@ func (r *Reconciler) patchScheduledReplicas(
 		// Set node-name label together with NodeName.
 		// Note: if label is removed manually, it won't be restored until next condition check
 		// in ensureScheduledConditionOnExistingReplicas (which runs on each reconcile).
-		rvr.Labels, _ = v1alpha1.EnsureLabel(rvr.Labels, v1alpha1.LabelNodeName, rvr.Spec.NodeName)
+		_ = obju.SetLabel(rvr, v1alpha1.NodeNameLabelKey, rvr.Spec.NodeName)
 
 		// Apply the patch; ignore NotFound errors because the replica may have been deleted meanwhile.
 		if err := r.cl.Patch(ctx, rvr, client.MergeFrom(original)); err != nil {
@@ -207,7 +208,7 @@ func (r *Reconciler) patchScheduledReplicas(
 			ctx,
 			rvr,
 			metav1.ConditionTrue,
-			v1alpha1.ReasonSchedulingReplicaScheduled,
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonReplicaScheduled,
 			"",
 		); err != nil {
 			return fmt.Errorf("failed to set Scheduled condition on RVR %s: %w", rvr.Name, err)
@@ -247,7 +248,7 @@ func (r *Reconciler) ensureScheduledConditionOnExistingReplicas(
 			ctx,
 			rvr,
 			metav1.ConditionTrue,
-			v1alpha1.ReasonSchedulingReplicaScheduled,
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonReplicaScheduled,
 			"",
 		); err != nil {
 			return fmt.Errorf("failed to set Scheduled condition on existing RVR %s: %w", rvr.Name, err)
@@ -260,15 +261,11 @@ func (r *Reconciler) ensureScheduledConditionOnExistingReplicas(
 // isRVReadyToSchedule checks if the ReplicatedVolume is ready for scheduling.
 // Returns nil if ready, or an error wrapped with errSchedulingPending if not ready.
 func isRVReadyToSchedule(rv *v1alpha1.ReplicatedVolume) error {
-	if rv.Status == nil {
-		return fmt.Errorf("%w: ReplicatedVolume status is not initialized", errSchedulingPending)
-	}
-
 	if rv.Finalizers == nil {
 		return fmt.Errorf("%w: ReplicatedVolume has no finalizers", errSchedulingPending)
 	}
 
-	if !slices.Contains(rv.Finalizers, v1alpha1.ControllerAppFinalizer) {
+	if !slices.Contains(rv.Finalizers, v1alpha1.ControllerFinalizer) {
 		return fmt.Errorf("%w: ReplicatedVolume is missing controller finalizer", errSchedulingPending)
 	}
 
@@ -808,7 +805,7 @@ func (r *Reconciler) getTieBreakerCandidateNodes(sctx *SchedulingContext) []stri
 }
 
 func getAttachToNodeList(rv *v1alpha1.ReplicatedVolume) []string {
-	if rv == nil || rv.Status == nil {
+	if rv == nil {
 		return nil
 	}
 	return slices.Clone(rv.Status.DesiredAttachTo)
@@ -884,14 +881,10 @@ func (r *Reconciler) setScheduledConditionOnRVR(
 ) error {
 	patch := client.MergeFrom(rvr.DeepCopy())
 
-	if rvr.Status == nil {
-		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-	}
-
 	changed := meta.SetStatusCondition(
 		&rvr.Status.Conditions,
 		metav1.Condition{
-			Type:               v1alpha1.ConditionTypeScheduled,
+			Type:               v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
 			Status:             status,
 			Reason:             reason,
 			Message:            message,
@@ -922,15 +915,15 @@ func (r *Reconciler) ensureNodeNameLabel(
 		return nil
 	}
 
-	labels, changed := v1alpha1.EnsureLabel(rvr.Labels, v1alpha1.LabelNodeName, rvr.Spec.NodeName)
+	original := rvr.DeepCopy()
+	changed := obju.SetLabel(rvr, v1alpha1.NodeNameLabelKey, rvr.Spec.NodeName)
 	if !changed {
 		return nil
 	}
 
 	log.V(2).Info("restoring node-name label on RVR", "rvr", rvr.Name, "node", rvr.Spec.NodeName)
 
-	patch := client.MergeFrom(rvr.DeepCopy())
-	rvr.Labels = labels
+	patch := client.MergeFrom(original)
 	if err := r.cl.Patch(ctx, rvr, patch); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil

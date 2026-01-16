@@ -1,0 +1,56 @@
+---
+description: API condition Type/Reason constants naming, ordering, comments, and stability rules. Apply when editing api/v*/**/*_conditions.go, and when deciding how to name/add conditions for API objects. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+globs: api/v*/**/*_conditions.go
+alwaysApply: false
+---
+
+- Condition constants naming:
+  - Every API object `Status` MUST expose `.status.conditions` (`[]metav1.Condition`) (see `types_rules.mdc`).
+  - Any API object that has at least one standardized/used condition MUST have its own condition type/reason constants scoped by object name.
+  - If the API type exposes `.status.conditions` but there are **no** standardized/used conditions yet:
+    - The `Conditions` field MUST remain in the API (it is part of the contract).
+    - The `<objprefix>_conditions.go` file MAY be absent.
+    - Do NOT create placeholder/empty condition constants “just in case”.
+  - Current API types that expose `.status.conditions` in this repo:
+    - `ReplicatedVolume`
+    - `ReplicatedVolumeReplica`
+    - `ReplicatedVolumeAttachment`
+    - `ReplicatedStorageClass`
+    - `ReplicatedStoragePool`
+
+- Condition Type constants MUST be named:
+  - `<ObjName>Cond<CondTypeName>Type`
+  - `CondTypeName` MUST match the string value of `.Type`.
+  - Examples:
+    - `ReplicatedVolumeCondIOReadyType = "IOReady"`
+    - `ReplicatedVolumeReplicaCondDataInitializedType = "DataInitialized"`
+    - `ReplicatedVolumeAttachmentCondReplicaIOReadyType = "ReplicaIOReady"`
+
+- Condition Reason constants MUST be named:
+  - `<ObjName>Cond<CondTypeName>Reason<ReasonName>`
+  - `CondTypeName` MUST match the string value of the condition type (the `.Type` string).
+  - `ReasonName` MUST match the string value of `.Reason`.
+  - Examples:
+    - `ReplicatedVolumeReplicaCondScheduledReasonReplicaScheduled = "ReplicaScheduled"`
+    - `ReplicatedVolumeCondQuorumReasonQuorumLost = "QuorumLost"`
+    - `ReplicatedVolumeAttachmentCondAttachedReasonSettingPrimary = "SettingPrimary"`
+
+- Conditions grouping (MUST):
+  - Keep each condition type and **all of its reasons in a single `const (...)` block**.
+  - Conditions MUST be ordered alphabetically by condition type name within the file/package.
+  - Reasons within a condition MUST be ordered alphabetically by reason constant name.
+
+- Conditions comments (MUST):
+  - Avoid controller-specific comments like “managed by X” in API packages.
+  - Add short English docs: what the condition represents and what the reasons mean.
+
+- Value stability (MUST):
+  - Do NOT change string values of `.Type` and `.Reason` constants.
+  - Only rename Go identifiers when reorganizing/clarifying.
+
+- Scoping & duplication (MUST):
+  - Do NOT use generic `ConditionType*` / `Reason*` constants.
+  - If the same reason string is used by multiple conditions, create separate constants per condition type, even if the string is identical.
+    - Example: `"NodeNotReady"`:
+      - `ReplicatedVolumeReplicaCondOnlineReasonNodeNotReady = "NodeNotReady"`
+      - `ReplicatedVolumeReplicaCondIOReadyReasonNodeNotReady = "NodeNotReady"`

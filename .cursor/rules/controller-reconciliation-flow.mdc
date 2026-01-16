@@ -1,0 +1,344 @@
+---
+description: Rules for using internal/reconciliation/flow in controller reconciliation code: phases (BeginPhase/EndPhase) and Outcome composition/propagation. Apply when writing reconciliation code that uses flow.* in reconciler*.go, and when reasoning about reconciliation control flow and error handling. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go
+alwaysApply: false
+---
+
+See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
+
+# Using flow (`internal/reconciliation/flow`)
+
+This document defines the **usage contract** for `internal/reconciliation/flow` in controller reconciliation code:
+how to structure work into **phase scopes** and how to compose/propagate/enrich reconciliation results.
+
+Scope: any function that calls `flow.BeginRootReconcile`, `flow.BeginReconcile`, `flow.BeginEnsure`, `flow.BeginStep`,
+and/or returns/handles `flow.ReconcileOutcome` / `flow.EnsureOutcome` / `error`, MUST follow this document.
+
+---
+
+## TL;DR
+
+Summary only; if anything differs, follow normative sections below.
+
+- **Root `Reconcile(...)`** MUST start with `rf := flow.BeginRootReconcile(ctx)` and return via `outcome.ToCtrl()`.
+  Root reconcile MUST NOT use `OnEnd` (root has no phase-scope end handler).
+- Any **non-root Reconcile method** that uses phase logging MUST:
+  - call `rf := flow.BeginReconcile(ctx, "<phase>", <kv...>)` on the **first executable line**,
+  - `defer rf.OnEnd(&outcome)` on the **second executable line**,
+  - declare a named return `outcome flow.ReconcileOutcome`,
+  - use only `ctx := rf.Ctx()` and (if logging) `rf.Log()` after that.
+- Any ensure helper MUST:
+  - call `ef := flow.BeginEnsure(ctx, "<phase>", <kv...>)` on the **first executable line**,
+  - `defer ef.OnEnd(&outcome)` on the **second executable line**,
+  - declare a named return `outcome flow.EnsureOutcome`,
+  - use only `ctx := ef.Ctx()` and (if logging) `ef.Log()` after that.
+- Any step function that returns plain `error` and uses phase logging MUST:
+  - call `sf := flow.BeginStep(ctx, "<phase>", <kv...>)` on the **first executable line**,
+  - `defer sf.OnEnd(&err)` on the **second executable line**,
+  - declare a named return `err error`,
+  - use only `ctx := sf.Ctx()` and (if logging) `sf.Log()` after that.
+- **Phase names** MUST be stable identifiers (no dynamic values). Variable identity MUST go into `<kv...>` key/value pairs.
+- **Error logging**: errors are logged by the deferred `OnEnd` of the corresponding scope (or by controller-runtime for the root `Reconcile`).
+  Code MUST NOT log the same error again. If you intentionally drop an error/stop signal (best-effort override), you MUST log it.
+
+---
+
+## Phase scope rules
+
+A **phase scope** is created by one of:
+- `BeginReconcile` (non-root reconcile phases; returns `ReconcileFlow`)
+- `BeginEnsure` (ensure phases; returns `EnsureFlow`)
+- `BeginStep` (step phases; returns `StepFlow`)
+
+A function is either:
+- **scoped** (exactly one `Begin*` + exactly one deferred `OnEnd`), or
+- **unscoped** (no `Begin*` / `OnEnd` in that function).
+
+There is no mixed mode.
+
+### Single-scope rule
+
+- A scoped function MUST create exactly one phase scope.
+- A function MUST NOT create multiple phase scopes (no sequential scopes).
+- A function MUST NOT create a phase scope inside a loop.
+
+### Scope placement
+
+If a function is scoped:
+- `BeginReconcile` / `BeginEnsure` / `BeginStep` MUST be called on the **first executable line** of the function.
+- The corresponding `defer <flow>.OnEnd(&...)` MUST be the **second executable line** of the function.
+- The function MUST NOT have any other statements (including variable declarations, logging, or conditionals)
+  before `Begin*` or between `Begin*` and the `defer`.
+
+This guarantees that:
+- the entire function body is covered by the scope,
+- all early returns are finalized consistently,
+- panics are logged consistently.
+
+### Required named return variables
+
+To standardize deferred end handlers:
+
+- Any function scoped with `BeginReconcile` MUST use a named return value named `outcome` of type `flow.ReconcileOutcome`.
+- Any function scoped with `BeginEnsure` MUST use a named return value named `outcome` of type `flow.EnsureOutcome`.
+- Any function scoped with `BeginStep` MUST use a named return value named `err` of type `error`.
+
+The deferred end handler MUST receive a pointer to that named return variable.
+
+### No bare return
+
+Any scoped function MUST NOT use bare `return` (empty return). It MUST return explicitly.
+
+---
+
+## Phase name and metadata
+
+### Phase name rules
+
+The phase name is used as a logger name segment (`logr.WithName`).
+
+- The phase name MUST NOT be empty.
+- The phase name MUST NOT contain whitespace or control characters.
+- The phase name MUST be a stable identifier and MUST NOT include dynamic values (resource names, UIDs, loop indices, etc.).
+
+Recommended style:
+- lowercase ASCII,
+- `kebab-case` segments,
+- optional hierarchical segments separated by `/` when it improves structure.
+
+### Metadata (key/value pairs)
+
+Variable or contextual information MUST NOT be encoded in the phase name.
+It MUST be passed as key/value pairs (`"k1","v1","k2","v2",...`) to `BeginReconcile` / `BeginEnsure` / `BeginStep`.
+
+Rules:
+- Metadata MUST be passed as key/value pairs (even number of strings).
+- Metadata SHOULD be minimal and SHOULD NOT duplicate:
+  - reconcile-request fields already present on the controller-runtime logger (`namespace`, `name`, `reconcileID`, `controller*`, ...),
+  - metadata already present in a parent phase scope.
+
+---
+
+## Context and logger handling
+
+Each `Begin*` attaches a phase-scoped logger to the returned context.
+
+- After `Begin*`, a scoped function MUST use the flow context (`ctx := <flow>.Ctx()`) as the base context for all subsequent work.
+  It MAY derive child contexts (timeouts/cancel), but MUST NOT use the incoming context again.
+- If a scoped function logs, it SHOULD use the flow logger (`<flow>.Log()`), or `log.FromContext(ctx)` where `ctx` is the flow context.
+  It MUST NOT use a logger derived from the pre-scope context.
+- Helpers called from a scoped function MUST receive the flow context so logs are attributed correctly.
+
+---
+
+## Root Reconcile
+
+Scope: the controller-runtime method:
+
+```go
+func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error)
+```
+
+Rules:
+- The root Reconcile MUST start with `rf := flow.BeginRootReconcile(ctx)`.
+- The root Reconcile MUST NOT use `BeginReconcile` / `OnEnd` inside itself.
+  If phase logging is needed, split work into non-root reconcile methods and scope those.
+- The root Reconcile MUST return via `ToCtrl()` on a `flow.ReconcileOutcome`.
+- The root Reconcile MUST NOT log errors returned via `ToCtrl()`.
+  (controller-runtime logs returned errors; scoped phases log their own errors.)
+
+Example (illustrative):
+
+```go
+func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+    rf := flow.BeginRootReconcile(ctx)
+
+    // ... orchestration ...
+
+    return rf.Done().ToCtrl()
+}
+```
+
+---
+
+## Non-root Reconcile methods
+
+Any non-root **Reconcile method** that uses flow phase logging MUST:
+- use `BeginReconcile` + deferred `OnEnd` per the placement rules,
+- return `flow.ReconcileOutcome`.
+
+Example (illustrative):
+
+```go
+func (r *Reconciler) reconcileFoo(ctx context.Context) (outcome flow.ReconcileOutcome) {
+    rf := flow.BeginReconcile(ctx, "foo")
+    defer rf.OnEnd(&outcome)
+    ctx = rf.Ctx()
+
+    // ...
+    return rf.Continue()
+}
+```
+
+---
+
+## Working with ReconcileOutcome
+
+`flow.ReconcileOutcome` is the reconciliation control-flow value (continue/done/requeue/error).
+
+### Constructing outcomes
+
+A function that returns `flow.ReconcileOutcome` MUST construct it only via `ReconcileFlow` methods:
+- `rf.Continue()`
+- `rf.Done()`
+- `rf.Requeue()`
+- `rf.RequeueAfter(d)`
+- `rf.Fail(err)`
+- `rf.Failf(err, "...")`
+
+Code MUST NOT:
+- construct `flow.ReconcileOutcome{...}` directly,
+- create a new failure outcome from an existing outcome’s `Error()`.
+
+### Handling outcomes
+
+At each call site that receives a `flow.ReconcileOutcome` that can influence control flow, the receiver MUST do one of:
+
+- **Immediate check**: check `ShouldReturn()` immediately and return on true.
+- **Immediate return**: return the outcome upward without checking locally.
+- **Accumulate then handle**: merge multiple outcomes and then check/return.
+- **Intentional override (best-effort; RARE)**: intentionally drop the merged outcome.
+  - This MUST be explicitly justified with a comment.
+  - If the override drops an error/stop signal, it MUST be made visible (log it).
+
+### Merging outcomes
+
+Use `rf.Merge(...)` to combine outcomes when multiple independent steps must all run.
+
+Reviewability:
+- Single-shot merge SHOULD NOT be used (harder to review/extend).
+  Prefer incremental merging or collect+merge.
+
+Incremental merge (illustrative):
+
+```go
+outcome = stepA(...)
+outcome = rf.Merge(outcome, stepB(...))
+outcome = rf.Merge(outcome, stepC(...))
+
+if outcome.ShouldReturn() {
+    return outcome
+}
+```
+
+Loop + collect + merge (illustrative):
+
+```go
+outcomes := make([]flow.ReconcileOutcome, 0, len(items))
+for i := range items {
+    item := items[i]
+    o := r.reconcileOne(ctx, item)
+    outcomes = append(outcomes, o)
+}
+
+outcome = rf.Merge(outcomes...)
+return outcome
+```
+
+---
+
+## Error enrichment and logging
+
+### No manual error logging
+
+- Errors carried via `ReconcileOutcome` in scoped functions are logged by the deferred `rf.OnEnd(&outcome)`.
+- Errors returned from the root `Reconcile` are logged by controller-runtime.
+- Therefore, reconciliation code MUST NOT log an error and also return it through `ReconcileOutcome`.
+
+Exception:
+- If you intentionally drop an error/stop signal (best-effort override), you MUST log it
+  (typically at Info level, because the failure is intentionally ignored).
+
+### Error enrichment
+
+Enrich errors only via:
+- `rf.Failf(err, "<local action>")` when creating a failure outcome, and/or
+- `outcome.Enrichf("<local action>")` before returning an outcome received from a callee.
+
+A receiver MUST NOT rebuild an outcome from `outcome.Error()` (this breaks error de-duplication across nested phases).
+
+Forbidden (illustrative):
+
+```go
+// BAD: reconstructs a new failure outcome; breaks single-error logging.
+return rf.Failf(childOutcome.Error(), "foo")
+```
+
+Allowed (illustrative):
+
+```go
+// GOOD: preserves the original outcome and enriches its error.
+return childOutcome.Enrichf("foo")
+```
+
+---
+
+## EnsureFlow and EnsureOutcome
+
+`flow.EnsureOutcome` is used by ensure helpers to report:
+- an error (if any),
+- whether the helper mutated its object,
+- and whether the subsequent save must use optimistic locking.
+
+Any ensure helper MUST follow the scope placement rules with `BeginEnsure`.
+
+Example (illustrative):
+
+```go
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
+    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    defer ef.OnEnd(&outcome)
+    ctx = ef.Ctx()
+
+    changed := false
+    // mutate obj; set changed=true if needed
+
+    return ef.Ok().ReportChangedIf(changed)
+}
+```
+
+Rules:
+- Ensure helpers MUST NOT log and also return the same error via `EnsureOutcome`.
+  The deferred `ef.OnEnd(&outcome)` logs errors.
+- Code MUST call `RequireOptimisticLock()` only after `ReportChanged()` / `ReportChangedIf(...)`
+  (calling it earlier is a contract violation and panics).
+- To merge multiple sub-ensure results, use `ef.Merge(...)`.
+
+---
+
+## StepFlow
+
+`StepFlow` is used by steps that return plain `error` but still want standardized phase logging and panic handling.
+
+Any step function that uses phase logging MUST follow the scope placement rules with `BeginStep`.
+
+Example (illustrative):
+
+```go
+func computeBar(ctx context.Context, input string) (err error) {
+    sf := flow.BeginStep(ctx, "compute-bar")
+    defer sf.OnEnd(&err)
+    ctx = sf.Ctx()
+
+    if input == "" {
+        return sf.Errf("bad input: %s", input)
+    }
+    // ...
+    return nil
+}
+```
+
+Rules:
+- Step functions MUST NOT log and also return the same error.
+  The deferred `sf.OnEnd(&err)` logs errors.
+- To join multiple independent errors, use `sf.Merge(errA, errB, ...)`.

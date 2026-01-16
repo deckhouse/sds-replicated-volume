@@ -1,0 +1,42 @@
+---
+description: API naming rules for label keys (labels.go) and finalizer constants (finalizers.go): naming, value formats, and stability. Apply when editing api/v*/**/labels.go or api/v*/**/finalizers.go, and when deciding label/finalizer names/values. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+globs: api/v*/**/finalizers.go,api/v*/**/labels.go
+alwaysApply: false
+---
+
+## Label keys (`labels.go`)
+
+- **Constant naming (MUST)**:
+  - Label key constants MUST end with `LabelKey`.
+    - Good: `ReplicatedVolumeLabelKey`, `NodeNameLabelKey`
+    - Bad: `LabelReplicatedVolume`, `NodeLabel`, `LabelNodeName`
+
+- **Prefix constant (MUST)**:
+  - The label prefix constant MUST be private and named `labelPrefix` (unless there is a proven need to export it).
+  - The prefix value MUST be the module-scoped prefix:
+    - `sds-replicated-volume.deckhouse.io/`
+
+- **Value format (MUST)**:
+  - Label key values MUST be built as `labelPrefix + "<suffix>"`.
+  - The `<suffix>` part MUST be lowercase-kebab-case, without repeating the module name.
+    - Good: `labelPrefix + "replicated-volume"`
+    - Bad: `labelPrefix + "sds-replicated-volume-replicated-volume"`
+
+- **Layout (MUST)**:
+  - Keep all exported `...LabelKey` constants in a single `const (...)` block.
+  - Avoid commented-out placeholder constants; prefer adding constants only when actually needed.
+
+## Finalizers (`finalizers.go`)
+
+- **Constant naming (MUST)**:
+  - Finalizer constants MUST end with `Finalizer`.
+    - Good: `ControllerFinalizer`, `AgentFinalizer`
+    - Bad: `FinalizerController`, `ControllerFinalizerName`
+
+- **Value format (MUST)**:
+  - Finalizer values MUST be module-scoped and stable:
+    - `sds-replicated-volume.deckhouse.io/<component>`
+  - `<component>` MUST be lowercase and short (e.g. `controller`, `agent`).
+
+- **Stability (MUST)**:
+  - Do NOT change existing finalizer string values (this would break cleanup semantics).
