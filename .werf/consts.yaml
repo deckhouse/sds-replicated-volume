@@ -16,8 +16,8 @@
 {{- $versions := dict }}
 {{- $_ := set $versions "UTIL_LINUX" "v2.39.3" }}
 {{- $_ := set $versions "DRBD" "9.2.16" }}
-{{- $_ := set $versions "DRBD_REACTOR" "1.8.0" }}
-{{- $_ := set $versions "DRBD_UTILS" "9.33.0" }}
+{{- $_ := set $versions "DRBD_REACTOR" "1.10.0" }}
+{{- $_ := set $versions "DRBD_UTILS" "9.31.0" }}
 {{- $_ := set $versions "LINSTOR_AFFINITY_CONTROLLER" "0.3.0" }}
 {{- $_ := set $versions "LINSTOR_API_PY" "1.19.0" }}
 {{- $_ := set $versions "LINSTOR_CLIENT" "1.19.0" }}
