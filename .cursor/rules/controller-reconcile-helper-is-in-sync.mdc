@@ -21,7 +21,7 @@ Summary only; if anything differs, follow normative sections below.
 - **IsInSyncReconcileHelpers** (`is*InSync`) are tiny, **pure**, **deterministic**, strictly **non-I/O** boolean checks.
 - They compare the current `obj` state to a single **target** (and/or **report**) value for **exactly one** **patch domain** (**main patch domain** or **status patch domain**) and return `true/false`.
 - For status **report/observations**, the compared “**report**” value MAY be directly reused from selected **actual** observations (including being the same value/type as an **actual** snapshot) when publishing observations verbatim to `.status`.
-- They SHOULD NOT return errors, MUST NOT do **Outcome control flow**, and MUST NOT log.
+- They SHOULD NOT return errors, MUST NOT do reconcile flow control (**ReconcileOutcome**), and MUST NOT log.
 - They treat `obj` and `target` / `report` as **read-only inputs** (no mutations, including via map/slice **Aliasing**; **Clone** before any normalization).
 
 ---
@@ -152,10 +152,10 @@ func isFooInSync(
 
 ---
 
-## Flow phases and **Outcome**
+## Flow phase scopes and outcomes
 
-- **IsInSyncReconcileHelpers** MUST NOT create a `reconcile/flow` **phase** (they do not accept `ctx context.Context`; see `controller-reconcile-helper.mdc`).
-- **IsInSyncReconcileHelpers** MUST NOT return **Outcome** (in code: `flow.Outcome`) (they are pure checks).
+- **IsInSyncReconcileHelpers** MUST NOT create a `reconcile/flow` **phase scope** (they do not accept `ctx context.Context`; see `controller-reconcile-helper.mdc`).
+- **IsInSyncReconcileHelpers** MUST NOT return **ReconcileOutcome** (`flow.ReconcileOutcome`) or **EnsureOutcome** (`flow.EnsureOutcome`) (they are pure checks).
   - If you need flow control (requeue, done, fail), keep it in the caller and/or use other helper categories (e.g., compute/ensure/patch).
 - **IsInSyncReconcileHelpers** MUST NOT log.
 
@@ -192,8 +192,9 @@ func isFooInSync(obj *v1alpha1.Foo, target TargetFoo) (bool, error) { // avoid
 
 ❌ Doing flow control / returning `flow.Outcome`:
 ```go
-func isFooInSync(obj *v1alpha1.Foo, target TargetFoo) flow.Outcome { // forbidden
-    return flow.Continue()
+func isFooInSync(obj *v1alpha1.Foo, target TargetFoo) flow.ReconcileOutcome { // forbidden
+    var rf flow.ReconcileFlow
+    return rf.Continue()
 }
 ```
 

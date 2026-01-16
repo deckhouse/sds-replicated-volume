@@ -26,8 +26,8 @@ Summary only; if anything differs, follow normative sections below.
   - Clone maps/slices before editing; avoid returning references that alias caller-owned storage unless explicitly documented and safe.
 - MUST NOT:
   - do Kubernetes API I/O, filesystem/network/env reads, or use time/random sources,
-  - log/print, accept `context.Context`, start `reconcile/flow` phases, or call `DeepCopy`,
-  - return `flow.Outcome` or make flow/patch orchestration decisions (patch ordering/strategy/execution).
+  - log/print, accept `context.Context`, start `reconcile/flow` phase scopes (`flow.BeginReconcile` / `flow.BeginEnsure` / `flow.BeginStep`), or call `DeepCopy`,
+  - return `flow.ReconcileOutcome` / `flow.EnsureOutcome` or make flow/patch orchestration decisions (patch ordering/strategy/execution).
 - MUST be plain functions (no `Reconciler` receiver) and may only call other **construction** helpers.
 - If the primary goal is a reconciliation pipeline artifact (**intended/actual/target/report**) or domain decision-making, prefer **ComputeReconcileHelper** (`compute*`) and use construction helpers only as sub-steps.
 
@@ -244,10 +244,10 @@ Important distinctions:
 
 ---
 
-## Flow phases and **Outcome**
+## Flow phase scopes and outcomes
 
-- **ConstructionReconcileHelpers** MUST NOT create a `reconcile/flow` **phase**.
-- **ConstructionReconcileHelpers** MUST NOT return **Outcome** (in code: `flow.Outcome`).
+- **ConstructionReconcileHelpers** MUST NOT create a `reconcile/flow` **phase scope** (`flow.BeginReconcile` / `flow.BeginEnsure` / `flow.BeginStep`).
+- **ConstructionReconcileHelpers** MUST NOT return **ReconcileOutcome** (`flow.ReconcileOutcome`) or **EnsureOutcome** (`flow.EnsureOutcome`).
 - **ConstructionReconcileHelpers** MUST NOT log (they do not accept `ctx context.Context`).
 
 ---
@@ -284,7 +284,8 @@ func newFoo(ctx context.Context, c client.Client, obj *v1alpha1.Foo) (FooOut, er
 func buildFoo(ctx context.Context, obj *v1alpha1.Foo) FooOut {
     l := log.FromContext(ctx)
     l.Info("building foo") // forbidden: no logging/phases in construction helpers
-    flow.BeginPhase(ctx, "buildFoo") // forbidden
+    rf := flow.BeginReconcile(ctx, "build-foo") // forbidden: no flow phase scopes in construction helpers
+    _ = rf
     return FooOut{}
 }
 ```
@@ -292,8 +293,9 @@ func buildFoo(ctx context.Context, obj *v1alpha1.Foo) FooOut {
 ❌ Returning `flow.Outcome` / doing flow control:
 
 ```go
-func makeFoo(obj *v1alpha1.Foo) flow.Outcome {
-    return flow.Continue() // forbidden: construction helpers do not return Outcome
+func makeFoo(obj *v1alpha1.Foo) flow.ReconcileOutcome {
+    var rf flow.ReconcileFlow
+    return rf.Continue() // forbidden: construction helpers do not return reconcile outcomes
 }
 ```
 

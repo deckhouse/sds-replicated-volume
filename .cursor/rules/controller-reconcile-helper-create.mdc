@@ -61,14 +61,6 @@ Typical create helpers are used for child resources to encapsulate the mechanica
 func (r *Reconciler) createSKN(
     ctx context.Context,
     obj *v1alpha1.SomeKindName,
-) flow.Outcome
-```
-
-Or, if **Outcome** (in code, the type is `flow.Outcome`) is intentionally not used:
-```go
-func (r *Reconciler) createSKN(
-    ctx context.Context,
-    obj *v1alpha1.SomeKindName,
 ) error
 ```
 
@@ -148,12 +140,11 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ---
 
-## Flow phases and **Outcome**
+## Flow phase scopes and outcomes
 
-- **CreateReconcileHelpers** MUST NOT create a `reconcile/flow` **phase** — they should stay mechanical and short.
-- If a **CreateReconcileHelper** returns **Outcome** (in code: `flow.Outcome`), it SHOULD use helpers from `internal/reconciliation/flow`:
-  - `flow.Continue()`, `flow.Done()`, `flow.Fail(err)`, `flow.RequeueAfter(dur)`.
-  - Prefer encoding retry/requeue policy explicitly in the returned **Outcome**.
+- **CreateReconcileHelpers** MUST NOT create a `reconcile/flow` **phase scope** — they should stay mechanical and short.
+- **CreateReconcileHelpers** MUST return `error` and MUST NOT return **ReconcileOutcome** (`flow.ReconcileOutcome`) or **EnsureOutcome** (`flow.EnsureOutcome`).
+  - Any retry/requeue policy belongs to the calling **Reconcile method** (use `ReconcileFlow` there).
 
 ---
 
@@ -161,7 +152,6 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 - See the common error handling rules in `controller-reconcile-helper.mdc`.
 - A **CreateReconcileHelper** SHOULD be mechanically thin: if the single `Create(...)` call fails, return the error **without wrapping**.
-  - If returning **Outcome** (in code: `flow.Outcome`), use `flow.Fail(err)` (or equivalent) with the original `err`.
 - A **CreateReconcileHelper** MUST NOT enrich errors with additional context (including **object identity** such as `namespace/name`, UID, object key).
   - Error enrichment (action + **object identity** + **phase**) is the calling **Reconcile method**’s responsibility.
 
@@ -171,18 +161,18 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ❌ Doing existence checks (`Get/List`) or any extra Kubernetes API calls:
 ```go
-func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) flow.Outcome {
+func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
     // forbidden: extra API call
     var existing v1alpha1.EON
     if err := r.client.Get(ctx, client.ObjectKeyFromObject(obj), &existing); err == nil {
-        return flow.Continue() // "already exists" decision belongs to Reconcile methods
+        return nil // "already exists" decision belongs to Reconcile methods
     }
 
     // forbidden: second API call in the same helper if create proceeds
     if err := r.client.Create(ctx, obj); err != nil {
-        return flow.Fail(err)
+        return err
     }
-    return flow.Continue()
+    return nil
 }
 ```
 

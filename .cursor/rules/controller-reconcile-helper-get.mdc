@@ -25,8 +25,8 @@ Summary only; if anything differs, follow normative sections below.
   - MUST NOT execute patches or make **Patch ordering** decisions.
 - They MAY implement deterministic, clearly documented “optional” semantics (for example, returning `(nil, nil)` when the object is not found).
 - If they return an ordered slice and the order is meaningful to callers, it MUST be **deterministic** (explicit sort with a tie-breaker).
-- They MUST NOT create a **phase** and MUST NOT return **Outcome**.
-  - Any **Outcome control flow** decisions (done/requeue/error) belong to the calling **Reconcile method**.
+- They MUST NOT create a **phase scope** and MUST NOT return **ReconcileOutcome** (`flow.ReconcileOutcome`) or **EnsureOutcome** (`flow.EnsureOutcome`).
+  - Any reconcile control flow decisions (done/requeue/error) belong to the calling **Reconcile method**.
 
 ---
 
@@ -200,10 +200,10 @@ If multiple reads are needed:
 
 ---
 
-## Flow phases and Outcome
+## Flow phase scopes and outcomes
 
-- **GetReconcileHelpers** MUST NOT create a **phase**.
-- **GetReconcileHelpers** MUST NOT return **Outcome**.
+- **GetReconcileHelpers** MUST NOT create a **phase scope**.
+- **GetReconcileHelpers** MUST NOT return **ReconcileOutcome** (`flow.ReconcileOutcome`) or **EnsureOutcome** (`flow.EnsureOutcome`).
 
 > Rationale: get helpers do not mutate a **patch domain**; they only read.
 
@@ -223,8 +223,9 @@ If multiple reads are needed:
 
 ❌ Returning **Outcome** from a get helper:
 ```go
-func (r *Reconciler) getSKN(ctx context.Context, key client.ObjectKey) flow.Outcome {
-    return flow.Continue() // forbidden: get helpers must not return Outcome
+func (r *Reconciler) getSKN(ctx context.Context, key client.ObjectKey) flow.ReconcileOutcome {
+    var rf flow.ReconcileFlow
+    return rf.Continue() // forbidden: get helpers must not return reconcile outcomes
 }
 ```
 

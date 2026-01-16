@@ -23,8 +23,8 @@ Summary only; if anything differs, follow normative sections below.
 - They MAY use **ConstructionReconcileHelpers** (`new*`, `build*`, `make*`, `compose*`) for internal in-memory construction, as long as the compute helper’s purity/determinism/non-I/O contract remains satisfied.
 - They treat `obj` and all caller-provided inputs as **read-only inputs** and MUST NOT mutate them (including via **Aliasing** of maps/slices; **Clone** before modifying derived maps/slices).
 - They MUST NOT perform **Kubernetes API I/O**, call **DeepCopy**, execute patches, or make any **patch ordering** / **patch type decision** decisions.
-- If a **ComputeReconcileHelper** returns **Outcome** (in code: `flow.Outcome`), it MUST use it only for **flow control** (continue/done/requeue) and/or **errors**.
-- A **ComputeReconcileHelper** MUST NOT use **Outcome** change tracking (`ReportChanged`, `ReportChangedIf`) or **Optimistic-lock signaling** (`RequireOptimisticLock`).
+- A **ComputeReconcileHelper** MUST return computed values (and optionally `error`) and MUST NOT report object mutations or optimistic-lock intent.
+  In particular, a **ComputeReconcileHelper** MUST NOT return `flow.EnsureOutcome` and MUST NOT call `ReportChanged*` / `RequireOptimisticLock`.
 - If `computeTarget*` derives **target** values for **both** **patch domains** (**main patch domain** + **status patch domain**) that will later be used by **IsInSyncReconcileHelper** and/or **ApplyReconcileHelper**, it MUST return **two separate** values (**target main** + **target status**), not a mixed struct.
 - New code MUST NOT introduce `computeDesired*` helpers. Replace legacy “desired” helpers with **intended**/**target**/**report** helpers.
 - If a **ComputeReconcileHelper** depends on previous compute output, the dependency MUST be explicit in the signature as args **after `obj`**.
@@ -159,43 +159,35 @@ Or, for **report** computations when the helper needs data from `Reconciler`:
 func (r *Reconciler) computeFooReport(obj *v1alpha1.Foo, intendedFoo IntendedFoo, actualFoo ActualFoo, targetFoo TargetFoo) (FooReport, error)
 ```
 
-### Complex compute with flow control
-Prefer returning **Outcome** (in code, the type is `flow.Outcome`) and writing to `out`:
+### Complex compute with structured logging
+
+When a compute helper is large and benefits from phase-scoped logging/panic logging, it SHOULD:
+- accept `ctx context.Context`,
+- compute into explicit `out` args,
+- return `error`,
+- and use a step scope (`flow.BeginStep`) for standardized `phase start/end` logs.
+
+Preferred signature:
 ```go
-func computeIntendedFoo(ctx context.Context, obj *v1alpha1.Foo, out *IntendedFoo) flow.Outcome
+func computeIntendedFoo(ctx context.Context, obj *v1alpha1.Foo, out *IntendedFoo) error
 ```
 
 Or, if a compute helper needs data from `Reconciler`:
 ```go
-func (r *Reconciler) computeIntendedFoo(ctx context.Context, obj *v1alpha1.Foo, out *IntendedFoo) flow.Outcome
-```
-
-Or, for **actual** computations:
-```go
-func computeActualFoo(ctx context.Context, obj *v1alpha1.Foo, out *ActualFoo) flow.Outcome
-```
-
-Or, for **actual** computations when the helper needs data from `Reconciler`:
-```go
-func (r *Reconciler) computeActualFoo(ctx context.Context, obj *v1alpha1.Foo, out *ActualFoo) flow.Outcome
-```
-
-Or, for **target** computations:
-```go
-func computeTargetFoo(ctx context.Context, obj *v1alpha1.Foo, intendedFoo IntendedFoo, actualFoo ActualFoo, out *TargetFoo) flow.Outcome
+func (r *Reconciler) computeIntendedFoo(ctx context.Context, obj *v1alpha1.Foo, out *IntendedFoo) error
 ```
 
 Or, for **target** computations that also emit a **report** in one pass:
 ```go
-func computeTargetFoo(ctx context.Context, obj *v1alpha1.Foo, intendedFoo IntendedFoo, actualFoo ActualFoo, outTarget *TargetFoo, outReport *FooReport) flow.Outcome
+func computeTargetFoo(
+    ctx context.Context,
+    obj *v1alpha1.Foo,
+    intendedFoo IntendedFoo,
+    actualFoo ActualFoo,
+    outTarget *TargetFoo,
+    outReport *FooReport,
+) error
 ```
-
-Or, for **report** computations:
-```go
-func computeFooReport(ctx context.Context, obj *v1alpha1.Foo, intendedFoo IntendedFoo, actualFoo ActualFoo, targetFoo TargetFoo, out *FooReport) flow.Outcome
-```
-
-> This keeps the call site clean and avoids `(flow.Outcome, DesiredFoo, error)` tuples.
 
 ### Dependent compute
 If a compute helper depends on previous compute output, the dependency MUST be explicit and come **after `obj`**:
@@ -257,7 +249,7 @@ See the common determinism contract in `controller-reconcile-helper.mdc`.
 In particular, avoid producing “equivalent but different” outputs across runs (e.g., unstable ordering).
 - **ComputeReconcileHelpers** MAY use extracted computation/caching components owned by the reconciler (e.g. “world view” / “planner” / “topology scorer”, caches), as described in `controller-file-structure.mdc` (“Additional components”), as long as they do not violate the I/O boundaries above.
   - Note: cache population is a side effect and an additional source of state; therefore, the helper is deterministic only relative to that state. For the same explicit inputs and the same state of these components, the result MUST be the same.
-- If a **ComputeReconcileHelper** returns **Outcome** (in code: `flow.Outcome`), its **flow decision** and **error** MUST be stable for the same inputs and object state.
+- Errors (when returned) MUST be stable for the same inputs and object state (no nondeterministic branching / hidden I/O).
 
 > Practical reason: nondeterminism creates patch churn and flaky tests.
 
@@ -277,44 +269,42 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ---
 
-## Flow phases and **Outcome**
+## Phase scopes (optional)
 
-- A **ComputeReconcileHelper** MUST NOT create a `reconcile/flow` **phase** by default.
-- A **large** **ComputeReconcileHelper** MAY create a `reconcile/flow` **phase** (`flow.BeginPhase` / `flow.EndPhase`) **only when it improves structure or diagnostics**.
-  - Otherwise (small/straightforward compute), it MUST NOT create a **phase**.
-  - If it creates a **phase** (or writes logs), it MUST accept `ctx context.Context` (see `controller-reconcile-helper.mdc`).
-- If a **ComputeReconcileHelper** returns **Outcome** (in code: `flow.Outcome`), it MUST use helpers from `internal/reconciliation/flow`:
-  - `flow.Continue()`, `flow.Done()`, `flow.Fail(err)`, `flow.RequeueAfter(dur)`.
+- A **ComputeReconcileHelper** MUST NOT create a phase scope by default.
+- A **large** **ComputeReconcileHelper** MAY create a step phase scope (`flow.BeginStep` + deferred `sf.OnEnd(&err)`)
+  **only when it improves structure or diagnostics**.
+  - Otherwise (small/straightforward compute), it MUST NOT create a phase scope.
+  - If it creates a step phase scope (or writes logs), it MUST accept `ctx context.Context` (see `controller-reconcile-helper.mdc`).
+  - Step scope placement rules are defined in `controller-reconciliation-flow.mdc`.
 
-### **Outcome** change / optimistic-lock reporting
+### Change reporting and optimistic-lock signaling
 
-**ComputeReconcileHelpers** MUST NOT report object changes or optimistic-lock requirements via **Outcome** (in code: `flow.Outcome`):
+**ComputeReconcileHelpers** MUST NOT report object changes or optimistic-lock requirements:
+- MUST NOT return `flow.EnsureOutcome`
 - MUST NOT call `ReportChanged` / `ReportChangedIf`
 - MUST NOT call `RequireOptimisticLock`
 
-Rationale: `Outcome.DidChange()` / `Outcome.OptimisticLockRequired()` semantically mean
+Rationale: change reporting / optimistic-lock intent semantically mean
 “this helper already mutated the target object and the subsequent save of that mutation must use **Optimistic locking** semantics”.
 **ComputeReconcileHelpers** do not mutate `obj` by contract.
 
----
+### Step scope pattern (illustrative)
 
-### Returning results when using **Outcome**
-
-If a **ComputeReconcileHelper** returns **Outcome** (in code: `flow.Outcome`), it MAY write its computed result into an explicit output argument passed by pointer (e.g. `*DesiredState` / `*ActualState`) instead of returning that result as an additional return value.
-
-- It MUST NOT write the result into `obj`.
-
-Example pattern (illustrative):
 ```go
-func (r *Reconciler) computeIntendedX(ctx context.Context, obj *v1alpha1.X, out *IntendedX) flow.Outcome {
+func computeIntendedFoo(ctx context.Context, obj *v1alpha1.Foo, out *IntendedFoo) (err error) {
+    sf := flow.BeginStep(ctx, "compute-intended-foo")
+    defer sf.OnEnd(&err)
+    ctx = sf.Ctx()
+
     if out == nil {
-        return flow.Fail(fmt.Errorf("out is nil"))
+        return sf.Errf("out is nil")
     }
 
     // compute into *out (pure)
-    *out = IntendedX{ /* ... */ }
+    *out = IntendedFoo{ /* ... */ }
 
-    return flow.Continue()
+    return nil
 }
 ```
 
@@ -368,7 +358,6 @@ Notes (SHOULD):
 
 - See the common error handling rules in `controller-reconcile-helper.mdc`.
 - **ComputeReconcileHelpers** SHOULD generally return errors as-is.
-  - If a **ComputeReconcileHelper** returns **Outcome** (in code: `flow.Outcome`), use `flow.Fail(err)` for errors.
 
   **Allowed (rare)**: when propagating a **non-local** error (e.g., from parsing/validation libs or injected pure components) and additional context is necessary to **disambiguate multiple different error sources** within the same calling **Reconcile method**, a **ComputeReconcileHelper** MAY wrap with small, local context:
   - prefer `fmt.Errorf("<local-action>: %w", err)`
@@ -487,10 +476,14 @@ func computeActualFoo(obj *v1alpha1.Foo) ActualFoo {
 }
 ```
 
-❌ Using `flow.Outcome` change / optimistic-lock reporting in compute:
+❌ Using change reporting / optimistic-lock signaling in compute:
 ```go
-func computeTargetFoo(ctx context.Context, obj *v1alpha1.Foo, intendedFoo IntendedFoo, actualFoo ActualFoo, out *TargetFoo) flow.Outcome {
+func computeTargetFoo(ctx context.Context, obj *v1alpha1.Foo, intendedFoo IntendedFoo, actualFoo ActualFoo, out *TargetFoo) error {
     *out = TargetFoo{ /* ... */ }
-    return flow.Continue().ReportChanged().RequireOptimisticLock() // forbidden in compute
+
+    // forbidden: compute helpers do not mutate obj and must not signal persistence semantics
+    _ = flow.EnsureOutcome{}.ReportChanged() // (illustrative) forbidden category mixing
+
+    return nil
 }
 ```

@@ -167,11 +167,12 @@ func applyFoo(
 
 ---
 
-## Flow phases and **Outcome**
+## Flow phase scopes and outcomes
 
-- **ApplyReconcileHelpers** MUST NOT create a `reconcile/flow` **phase** (they do not accept `ctx context.Context`; see `controller-reconcile-helper.mdc`).
-- **ApplyReconcileHelpers** MUST NOT return **Outcome** (in code: `flow.Outcome`) (they are “in-memory write” steps).
-  - If a failure is possible, return `error` and let the calling function convert it into `flow.Fail(err)` (or equivalent **flow** handling).
+- **ApplyReconcileHelpers** MUST NOT create a `reconcile/flow` **phase scope** (they do not accept `ctx context.Context`; see `controller-reconcile-helper.mdc`).
+- **ApplyReconcileHelpers** MUST NOT return **ReconcileOutcome** (`flow.ReconcileOutcome`) or **EnsureOutcome** (`flow.EnsureOutcome`) (they are “in-memory write” steps).
+  - If a failure is possible, return `error` and let the caller convert it into a flow result in its own scope
+    (for example, `rf.Fail(err)` in a reconcile scope or `ef.Err(err)` in an ensure scope).
 
 ---
 
@@ -212,11 +213,12 @@ func applyFoo(obj *v1alpha1.Foo, target TargetFoo) {
 }
 ```
 
-❌ Returning `flow.Outcome` / doing flow control inside apply:
+❌ Returning a reconcile/ensure outcome / doing flow control inside apply:
 ```go
-func applyFoo(obj *v1alpha1.Foo, target TargetFoo) flow.Outcome {
+func applyFoo(obj *v1alpha1.Foo, target TargetFoo) flow.ReconcileOutcome {
+    var rf flow.ReconcileFlow
     obj.Spec = target.Spec
-    return flow.Continue() // forbidden: apply helpers do not return flow control
+    return rf.Continue() // forbidden: apply helpers do not return flow control
 }
 ```
 

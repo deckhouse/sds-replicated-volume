@@ -60,14 +60,6 @@ Typical delete helpers encapsulate the mechanical delete call (including “alre
 func (r *Reconciler) deleteSKN(
     ctx context.Context,
     obj *v1alpha1.SomeKindName,
-) flow.Outcome
-```
-
-Or, if **Outcome** (in code, the type is `flow.Outcome`) is intentionally not used:
-```go
-func (r *Reconciler) deleteSKN(
-    ctx context.Context,
-    obj *v1alpha1.SomeKindName,
 ) error
 ```
 
@@ -147,12 +139,11 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ---
 
-## Flow phases and **Outcome**
+## Flow phase scopes and outcomes
 
-- **DeleteReconcileHelpers** MUST NOT create a `reconcile/flow` **phase** — they should stay mechanical and short.
-- If a **DeleteReconcileHelper** returns **Outcome** (in code: `flow.Outcome`), it SHOULD use helpers from `internal/reconciliation/flow`:
-  - `flow.Continue()`, `flow.Done()`, `flow.Fail(err)`, `flow.RequeueAfter(dur)`.
-  - Prefer encoding retry/requeue policy explicitly in the returned **Outcome**.
+- **DeleteReconcileHelpers** MUST NOT create a `reconcile/flow` **phase scope** — they should stay mechanical and short.
+- **DeleteReconcileHelpers** MUST return `error` and MUST NOT return **ReconcileOutcome** (`flow.ReconcileOutcome`) or **EnsureOutcome** (`flow.EnsureOutcome`).
+  - Any retry/requeue policy belongs to the calling **Reconcile method** (use `ReconcileFlow` there).
 
 ---
 
@@ -160,7 +151,6 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 - See the common error handling rules in `controller-reconcile-helper.mdc`.
 - A **DeleteReconcileHelper** SHOULD be mechanically thin: if the single `Delete(...)` call fails, return the error **without wrapping** (or treat NotFound per the chosen deterministic policy).
-  - If returning **Outcome** (in code: `flow.Outcome`), use `flow.Fail(err)` (or equivalent) with the original `err`.
 - A **DeleteReconcileHelper** MUST NOT enrich errors with additional context (including **object identity** such as `namespace/name`, UID, object key).
   - Error enrichment (action + **object identity** + **phase**) is the calling **Reconcile method**’s responsibility.
 
@@ -170,18 +160,18 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ❌ Doing existence checks (`Get/List`) or any extra Kubernetes API calls:
 ```go
-func (r *Reconciler) deleteEON(ctx context.Context, obj *v1alpha1.EON) flow.Outcome {
+func (r *Reconciler) deleteEON(ctx context.Context, obj *v1alpha1.EON) error {
     // forbidden: extra API call
     var existing v1alpha1.EON
     if err := r.client.Get(ctx, client.ObjectKeyFromObject(obj), &existing); err != nil {
-        return flow.Fail(err)
+        return err
     }
 
     // forbidden: second API call in the same helper
     if err := r.client.Delete(ctx, &existing); err != nil {
-        return flow.Fail(err)
+        return err
     }
-    return flow.Continue()
+    return nil
 }
 ```
 

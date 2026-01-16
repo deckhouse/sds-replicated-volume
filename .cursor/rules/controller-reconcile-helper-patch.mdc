@@ -77,30 +77,10 @@ func (r *Reconciler) patchSKN(
     obj *v1alpha1.SomeKindName,
     base *v1alpha1.SomeKindName,
     optimisticLock bool,
-) flow.Outcome
-```
-
-Or, if **Outcome** (in code, the type is `flow.Outcome`) is intentionally not used:
-```go
-func (r *Reconciler) patchSKN(
-    ctx context.Context,
-    obj *v1alpha1.SomeKindName,
-    base *v1alpha1.SomeKindName,
-    optimisticLock bool,
 ) error
 ```
 
 ### Status-subresource patch variant
-```go
-func (r *Reconciler) patchSKNStatus(
-    ctx context.Context,
-    obj *v1alpha1.SomeKindName,
-    base *v1alpha1.SomeKindName,
-    optimisticLock bool,
-) flow.Outcome
-```
-
-Or, if **Outcome** (in code, the type is `flow.Outcome`) is intentionally not used:
 ```go
 func (r *Reconciler) patchSKNStatus(
     ctx context.Context,
@@ -125,7 +105,7 @@ func (r *Reconciler) patchSKNStatus(
 - controller-runtime client usage to execute exactly **one** Kubernetes patch call for exactly **one** patch domain:
   - `Patch(...)` (main resource), or
   - `Status().Patch(...)` (status subresource),
-  using the **Optimistic locking** mode provided by the caller (e.g., derived from `flow.Outcome`).
+  using the **Optimistic locking** mode provided by the caller (typically derived from `EnsureOutcome.OptimisticLockRequired()`).
 
 **PatchReconcileHelpers** MUST NOT do any of the following:
 
@@ -191,12 +171,11 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ---
 
-## Flow phases and **Outcome**
+## Flow phase scopes and outcomes
 
-- **PatchReconcileHelpers** MUST NOT create a `reconcile/flow` **phase** — they should stay mechanical and short.
-- If a **PatchReconcileHelper** returns **Outcome** (in code: `flow.Outcome`), it SHOULD use helpers from `internal/reconciliation/flow`:
-  - `flow.Continue()`, `flow.Done()`, `flow.Fail(err)`, `flow.RequeueAfter(dur)`.
-  - Prefer encoding retry/requeue policy explicitly in the returned **Outcome**.
+- **PatchReconcileHelpers** MUST NOT create a `reconcile/flow` **phase scope** — they should stay mechanical and short.
+- **PatchReconcileHelpers** MUST return `error` and MUST NOT return **ReconcileOutcome** (`flow.ReconcileOutcome`) or **EnsureOutcome** (`flow.EnsureOutcome`).
+  - Any retry/requeue policy belongs to the calling **Reconcile method** (use `ReconcileFlow` there).
 
 ---
 
@@ -204,7 +183,6 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 - See the common error handling rules in `controller-reconcile-helper.mdc`.
 - A **PatchReconcileHelper** SHOULD be mechanically thin: if the single patch call fails, return the error **without wrapping**.
-  - If returning **Outcome** (in code: `flow.Outcome`), use `flow.Fail(err)` (or equivalent) with the original `err`.
 - A **PatchReconcileHelper** MUST NOT enrich errors with additional context (including **object identity** such as `namespace/name`, UID, object key).
   - Error enrichment (action + **object identity** + **phase**) is the calling **Reconcile method**’s responsibility.
 

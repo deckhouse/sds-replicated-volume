@@ -220,8 +220,8 @@ Examples of required protections:
 
 ### Phases for Reconcile methods (MUST)
 
-- Any **non-root Reconcile method** MUST start a **phase** (`flow.BeginPhase` / `flow.EndPhase`) and return **Outcome**.
-- The **root Reconcile** is the only exception: it MUST use `flow.Begin(ctx)` (no phases) and return via `outcome.ToCtrl()`.
+- Any **non-root Reconcile method** MUST start a **reconcile phase scope** (`flow.BeginReconcile`) and return **ReconcileOutcome** (in code: `flow.ReconcileOutcome`).
+- The **root Reconcile** MUST use `flow.BeginRootReconcile(ctx)` (no phase scope) and return via `outcome.ToCtrl()`.
 - See: `controller-reconciliation-flow.mdc`.
 
 ### One Reconcile method = one reconciliation pattern (MUST)

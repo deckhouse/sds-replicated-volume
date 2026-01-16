@@ -69,17 +69,16 @@ Category-specific conventions are defined in dedicated documents referenced in *
   - the **first argument after `ctx`** if the function accepts `ctx`.
   (root object = the full API object (`*<Kind>`), not `Spec`/`Status` or other sub-structs)
 - Additional inputs (computed flags, outputs of previous compute steps) MUST appear **after `obj`** to keep dependencies explicit.
-- If a **ReconcileHelper** returns **Outcome** (in code: `flow.Outcome`), it MUST be the **first return value**.
+- If a **ReconcileHelper** returns **EnsureOutcome** (in code: `flow.EnsureOutcome`), it MUST be the **first return value**.
   - It SHOULD be the only return value for convenience, unless additional return values are clearly justified.
 
-### Flow **phases** and **Outcome**
+### Flow phase scopes
 
-- **Phase** usage (`flow.BeginPhase` / `flow.EndPhase`) is **strictly limited**:
-  - **Large `ensure*`**: MUST create a **phase**.
-    - “Large” includes: many sub-steps, loops over items, and/or non-trivial error handling.
-  - **Large `compute*`**: MAY create a **phase** **only when it improves structure or diagnostics**.
-  - **All other Helper categories** (`apply*`, `is*InSync*`, `get*`, `create*`, `delete*`, `patch*`) MUST NOT create **phases**.
-- If a helper uses **phases**, it MUST follow `internal/reconciliation/flow` rules (one **phase** per function; **phase** on first line; no **phases** inside loops).
+- **Phase scope** usage (`flow.BeginEnsure` / `flow.BeginStep`) is **strictly limited**:
+  - **All `ensure*`**: MUST create an **ensure phase scope**.
+  - **Large `compute*`**: MAY create a **step phase scope** **only when it improves structure or diagnostics**.
+  - **All other Helper categories** (`apply*`, `is*InSync*`, `get*`, `create*`, `delete*`, `patch*`) MUST NOT create **phase scopes**.
+- If a helper uses a **phase scope**, it MUST follow `controller-reconciliation-flow.mdc` (one scope per function; scope on first line; no scopes inside loops).
 
 ### Visibility and receivers
 

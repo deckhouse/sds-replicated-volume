@@ -403,7 +403,7 @@ In this codebase:
 An **optimistic lock requirement** is a decision that the subsequent save of a changed **resource**/**object** MUST use **Optimistic locking** semantics.
 
 In this codebase:
-- **EnsureReconcileHelpers** are the primary source of “optimistic lock required” signaling via **`flow.Outcome`**.
+- **EnsureReconcileHelpers** are the primary source of “optimistic lock required” signaling via **`flow.EnsureOutcome`**.
 
 ---
 
@@ -477,46 +477,63 @@ All inputs other than the **mutation target** are **read-only inputs** and MUST 
 ## **flow** terminology
 
 ### **flow**
-**`flow`** refers to `internal/reconciliation/flow`, the internal package used to structure reconciliation and return values.
+**`flow`** refers to `internal/reconciliation/flow`, the internal package used to structure reconciliation and standardize phase-scoped logging.
 
 ### **phase**
-A **phase** is a structured execution scope created by:
+A **phase** is a structured execution scope created by one of:
 
-- `flow.BeginPhase(ctx, "<phaseName>", ...)`
+- `flow.BeginReconcile(ctx, "<phaseName>", ...)` (for **non-root Reconcile method** functions)
+- `flow.BeginEnsure(ctx, "<phaseName>", ...)` (for **EnsureReconcileHelper** functions)
+- `flow.BeginStep(ctx, "<phaseName>", ...)` (for step-style helpers that return `error`)
 
-and closed by:
+A phase is always finalized by deferring the corresponding `OnEnd` method:
 
-- `defer flow.EndPhase(ctx, &outcome)`
+- `defer rf.OnEnd(&outcome)` (where `outcome` is `flow.ReconcileOutcome`)
+- `defer ef.OnEnd(&outcome)` (where `outcome` is `flow.EnsureOutcome`)
+- `defer sf.OnEnd(&err)` (where `err` is `error`)
 
-**phases** are used to structure logs and attach context/metadata.
+**phases** are used to structure logs, attribute errors, and standardize panic logging + re-panicking.
 
-### **Outcome**
-An **Outcome** is a value of type **`flow.Outcome`** that represents the result of a step (continue/done/requeue/error) plus metadata (changed, **optimistic lock requirement**, etc.).
+### **ReconcileOutcome**
+A **ReconcileOutcome** is a value of type **`flow.ReconcileOutcome`** that represents the decision of a **Reconcile method**:
+continue/done/requeue/requeueAfter/fail + error.
 
 Naming conventions:
-- single **Outcome** variable: `outcome`
-- slice of **Outcomes**: `outcomes`
+- single **ReconcileOutcome** variable: `outcome`
+- slice of **ReconcileOutcome** values: `outcomes`
+
+### **EnsureOutcome**
+An **EnsureOutcome** is a value of type **`flow.EnsureOutcome`** that represents the result of an **EnsureReconcileHelper**:
+error + **Change reporting** + **optimistic lock requirement**.
+
+Naming conventions:
+- single **EnsureOutcome** variable: `outcome`
+- slice of **EnsureOutcome** values: `outcomes`
 
 ### **Change reporting**
 **Change reporting** means signaling that an in-memory **resource**/**object** was mutated and needs persistence, typically via:
 
-- `ReportChanged()` / `ReportChangedIf(...)`
+- `EnsureOutcome.ReportChanged()` / `EnsureOutcome.ReportChangedIf(...)`
 
-The canonical “was changed?” flag is read via `Outcome.DidChange()`.
+The canonical “was changed?” flag is read via `EnsureOutcome.DidChange()`.
 
 ### **Optimistic-lock signaling**
 **Optimistic-lock signaling** means encoding that the save MUST use **Optimistic locking** semantics, typically via:
 
-- `RequireOptimisticLock()`
+- `EnsureOutcome.RequireOptimisticLock()`
 
-The canonical flag is read via `Outcome.OptimisticLockRequired()`.
+The canonical flag is read via `EnsureOutcome.OptimisticLockRequired()`.
 
-### **Outcome control flow**
-- `Outcome.ShouldReturn()` indicates the caller should stop and return (done/requeue/error).
-- `Outcome.ToCtrl()` converts an outcome into `(ctrl.Result, error)` for controller-runtime.
+### **ReconcileOutcome control flow**
+- `ReconcileOutcome.ShouldReturn()` indicates the caller should stop and return (done/requeue/error).
+- `ReconcileOutcome.ToCtrl()` converts an outcome into `(ctrl.Result, error)` for controller-runtime.
 
 ### **Merging outcomes**
-**Merging outcomes** means combining multiple independent step **Outcomes** into one using `Outcome.Merge(...)` or `flow.Merge(...)`.
+**Merging outcomes** means combining multiple independent results deterministically:
+
+- `ReconcileFlow.Merge(...)` merges **ReconcileOutcome** values.
+- `EnsureFlow.Merge(...)` merges **EnsureOutcome** values.
+- `StepFlow.Merge(...)` merges multiple `error` values via `errors.Join`.
 
 ---
 
@@ -706,10 +723,11 @@ Terms MUST be written in italics on every mention (see `rfc-like-mdc.mdc`).
 - **Copy**
 - **flow**
 - **phase**
-- **Outcome**
+- **ReconcileOutcome**
+- **EnsureOutcome**
 - **Change reporting**
 - **Optimistic-lock signaling**
-- **Outcome control flow**
+- **ReconcileOutcome control flow**
 - **Merging outcomes**
 - **resource**
 - **object**
