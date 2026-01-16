@@ -62,7 +62,7 @@ for dir in $test_dirs; do
     # Keep this list in sync with go.work "use (...)".
     test_cmd=(go test -v)
     case "$dir" in
-        ./api/*|./images/controller/*|./internal/*|./lib/go/common/*)
+        ./api/*|./images/agent/*|./images/controller/*|./images/csi-driver/*|./images/linstor-drbd-wait/*|./images/megatest/*|./images/sds-replicated-volume-controller/*|./images/webhooks/*|./internal/*|./lib/go/common/*)
             test_cmd=(go test -v)
             ;;
         *)
