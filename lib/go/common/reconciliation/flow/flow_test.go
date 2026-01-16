@@ -29,7 +29,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/deckhouse/sds-replicated-volume/lib/go/common/flow"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
 func mustPanic(t *testing.T, fn func()) {
