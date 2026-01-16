@@ -55,7 +55,7 @@ type DRBDResourceSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
-	// +kubebuilder:validation:items:MaxLength=63
+	// +kubebuilder:validation:items:MaxLength=64
 	SystemNetworks []string `json:"systemNetworks"`
 
 	// +kubebuilder:validation:Minimum=0
