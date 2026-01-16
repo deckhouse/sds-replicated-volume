@@ -404,8 +404,8 @@ func (rf ReconcileFlow) Merge(outcomes ...ReconcileOutcome) ReconcileOutcome {
 		hasReconcileResult = true
 
 		// Compute delay for this outcome: Requeue → 0, RequeueAfter(d) → d
-		var delay time.Duration = noDelay
-		if o.result.Requeue {
+		delay := noDelay
+		if o.result.Requeue { //nolint:staticcheck // handling deprecated Requeue field for backward compatibility
 			delay = immediateDelay
 		} else if o.result.RequeueAfter > 0 {
 			delay = o.result.RequeueAfter
@@ -460,7 +460,7 @@ func reconcileOutcomeKind(o *ReconcileOutcome) (kind string, requeueAfter time.D
 		return "continue", 0
 	}
 
-	if o.result.Requeue {
+	if o.result.Requeue { //nolint:staticcheck // handling deprecated Requeue field for backward compatibility
 		return "requeue", 0
 	}
 

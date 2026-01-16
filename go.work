@@ -2,6 +2,7 @@ go 1.24.11
 
 use (
 	./api
+	./hooks/go
 	./images/agent
 	./images/controller
 	./images/csi-driver

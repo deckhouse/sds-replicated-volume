@@ -13,7 +13,7 @@ func TestReconcileOutcome_ErrWithoutResult_IsClassifiedAsInvalidKind(t *testing.
 	}
 }
 
-func TestReconcileFlow_OnEnd_ErrWithoutResult_DoesNotPanic(t *testing.T) {
+func TestReconcileFlow_OnEnd_ErrWithoutResult_DoesNotPanic(_ *testing.T) {
 	rf := BeginReconcile(context.Background(), "p")
 	o := ReconcileOutcome{err: errors.New("e")}
 	rf.OnEnd(&o)
@@ -31,7 +31,7 @@ func TestReconcileFlow_Merge_RequeueIsSupported(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected err to be nil, got %v", err)
 	}
-	if !res.Requeue {
+	if !res.Requeue { //nolint:staticcheck // testing deprecated Requeue field
 		t.Fatalf("expected Requeue to be true")
 	}
 }
@@ -50,7 +50,7 @@ func TestReconcileFlow_Merge_RequeueWinsOverRequeueAfter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected err to be nil, got %v", err)
 	}
-	if !res.Requeue {
+	if !res.Requeue { //nolint:staticcheck // testing deprecated Requeue field
 		t.Fatalf("expected Requeue to be true (delay=0 wins)")
 	}
 	if res.RequeueAfter != 0 {

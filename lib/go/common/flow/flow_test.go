@@ -113,7 +113,7 @@ func TestReconcileFlow_Requeue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected err to be nil, got %v", err)
 	}
-	if !res.Requeue {
+	if !res.Requeue { //nolint:staticcheck // testing deprecated Requeue field
 		t.Fatalf("expected Requeue to be true")
 	}
 }
@@ -550,7 +550,6 @@ func TestMustBeValidPhaseName_Valid(t *testing.T) {
 		"A1/B2",
 	}
 	for _, name := range valid {
-
 		t.Run(name, func(t *testing.T) {
 			mustNotPanic(t, func() { _ = flow.BeginReconcile(context.Background(), name) })
 		})
@@ -568,7 +567,6 @@ func TestMustBeValidPhaseName_Invalid(t *testing.T) {
 		"a:b",
 	}
 	for _, name := range invalid {
-
 		t.Run(strings.ReplaceAll(name, "\t", "\\t"), func(t *testing.T) {
 			mustPanic(t, func() { _ = flow.BeginReconcile(context.Background(), name) })
 		})
@@ -576,17 +574,17 @@ func TestMustBeValidPhaseName_Invalid(t *testing.T) {
 }
 
 func TestBeginReconcile_KVOddLengthPanics(t *testing.T) {
-	//lint:ignore SA5012 we are testing panic here
+	//nolint:staticcheck // testing panic for odd kv length
 	mustPanic(t, func() { _ = flow.BeginReconcile(context.Background(), "p", "k") })
 }
 
 func TestBeginEnsure_KVOddLengthPanics(t *testing.T) {
-	//lint:ignore SA5012 we are testing panic here
+	//nolint:staticcheck // testing panic for odd kv length
 	mustPanic(t, func() { _ = flow.BeginEnsure(context.Background(), "p", "k") })
 }
 
 func TestBeginStep_KVOddLengthPanics(t *testing.T) {
-	//lint:ignore SA5012 we are testing panic here
+	//nolint:staticcheck // testing panic for odd kv length
 	mustPanic(t, func() { _ = flow.BeginStep(context.Background(), "p", "k") })
 }
 

@@ -296,8 +296,8 @@ func ParseReplicationState(s string) ReplicationState {
 }
 
 // IsSyncingState returns true if the replication state indicates active synchronization.
-func (r ReplicationState) IsSyncingState() bool {
-	switch r {
+func (s ReplicationState) IsSyncingState() bool {
+	switch s {
 	case ReplicationStateSyncSource,
 		ReplicationStateSyncTarget,
 		ReplicationStateStartingSyncSource,
