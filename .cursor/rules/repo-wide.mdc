@@ -30,6 +30,17 @@ alwaysApply: true
 - When making a commit (MUST):
   - ALWAYS sign off (prefer `git commit -s`).
 
+- API development / design / review (MUST):
+  - When developing, designing, or reviewing API types under `api/v*/`, you MUST consult and follow the API-specific `.mdc` rules in `.cursor/rules/`:
+    - `api-file-structure.mdc` — API package conventions: object prefixes and per-object/common file naming rules.
+    - `api-types.mdc` — API type rules: type-centric layout, enums/constants, status/conditions requirements, naming.
+    - `api-conditions.mdc` — API condition Type/Reason constants naming, ordering, comments, and stability.
+    - `api-labels-and-finalizers.mdc` — API naming rules for label keys and finalizer constants.
+    - `api-codegen.mdc` — API codegen rules for kubebuilder/controller-gen and generated files hygiene.
+  - You SHOULD also consult `controller-terminology.mdc` for shared terminology (intended/actual/target/report, patch domains, etc.) that applies to API design.
+  - Each rule file has a `description` in its frontmatter indicating when to apply it.
+  - When in doubt, start with `api-file-structure.mdc` for where code belongs and `api-types.mdc` for type layout conventions.
+
 - Controller development / design / review (MUST):
   - When developing, designing, or reviewing controllers under `images/controller/internal/controllers/`, you MUST consult and follow the controller-specific `.mdc` rules in `.cursor/rules/`:
     - `controller-terminology.mdc` — shared terminology and definitions used across all controller rule files.
