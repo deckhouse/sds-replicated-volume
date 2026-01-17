@@ -53,7 +53,7 @@ func (o *ReplicatedStorageClass) SetStatusConditions(conditions []metav1.Conditi
 	o.Status.Conditions = conditions
 }
 
-// +kubebuilder:validation:XValidation:rule="(has(self.replication) && self.replication == \"None\") || ((!has(self.replication) || self.replication == \"Availability\" || self.replication == \"ConsistencyAndAvailability\") && (!has(self.zones) || size(self.zones) == 0 || size(self.zones) == 1 || size(self.zones) == 3))",message="When replication is not set or is set to Availability or ConsistencyAndAvailability (default value), zones must be either not specified, or must contain exactly three zones."
+// +kubebuilder:validation:XValidation:rule="(has(self.replication) && self.replication == \"None\") || ((!has(self.replication) || self.replication == \"Availability\" || self.replication == \"Consistency\" || self.replication == \"ConsistencyAndAvailability\") && (!has(self.zones) || size(self.zones) == 0 || size(self.zones) == 1 || size(self.zones) == 3))",message="When replication is not set or is set to Availability, Consistency, or ConsistencyAndAvailability (default value), zones must be either not specified, or must contain exactly 1 or 3 zones."
 // +kubebuilder:validation:XValidation:rule="(has(self.zones) && has(oldSelf.zones)) || (!has(self.zones) && !has(oldSelf.zones))",message="zones field cannot be deleted or added"
 // +kubebuilder:validation:XValidation:rule="(has(self.replication) && has(oldSelf.replication)) || (!has(self.replication) && !has(oldSelf.replication))",message="replication filed cannot be deleted or added"
 // +kubebuilder:validation:XValidation:rule="(has(self.volumeAccess) && has(oldSelf.volumeAccess)) || (!has(self.volumeAccess) && !has(oldSelf.volumeAccess))",message="volumeAccess filed cannot be deleted or added"
@@ -77,7 +77,7 @@ type ReplicatedStorageClassSpec struct {
 	// - ConsistencyAndAvailability — In this mode the volume remains readable and writable when one replica node fails. Data is stored in three copies on different nodes (`placementCount = 3`, `AutoEvictMinReplicaCount = 3`). This mode provides protection against data loss when two nodes containing volume replicas fail and guarantees data consistency. However, if two replicas are lost, the volume switches to suspend-io mode.
 	//
 	// > Note that default Replication mode is 'ConsistencyAndAvailability'.
-	// +kubebuilder:validation:Enum=None;Availability;ConsistencyAndAvailability
+	// +kubebuilder:validation:Enum=None;Availability;Consistency;ConsistencyAndAvailability
 	// +kubebuilder:default:=ConsistencyAndAvailability
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
 	Replication ReplicatedStorageClassReplication `json:"replication,omitempty"`
@@ -120,6 +120,23 @@ type ReplicatedStorageClassSpec struct {
 	// exactly 1 or 3 zones.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
 	Zones []string `json:"zones,omitempty"`
+	// NodeLabelSelector filters nodes eligible for DRBD participation.
+	// Only nodes matching this selector can store data, provide access, or host tiebreaker.
+	// If not specified, all nodes are candidates.
+	// +optional
+	NodeLabelSelector *metav1.LabelSelector `json:"nodeLabelSelector,omitempty"`
+	// SystemNetworkNames specifies network names used for DRBD replication traffic.
+	// At least one network name must be specified. Each name is limited to 64 characters.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:Items={type=string,maxLength=64}
+	// +kubebuilder:default:={"Internal"}
+	SystemNetworkNames []string `json:"systemNetworkNames"`
+	// RolloutStrategy defines how configuration changes are applied to existing volumes.
+	// Always present with defaults.
+	RolloutStrategy ReplicatedStorageClassRolloutStrategy `json:"rolloutStrategy"`
+	// EligibleNodesDriftPolicy defines how the controller handles changes in eligible nodes.
+	// Always present with defaults.
+	EligibleNodesDriftPolicy ReplicatedStorageClassEligibleNodesDriftPolicy `json:"eligibleNodesDriftPolicy"`
 }
 
 // ReplicatedStorageClassReclaimPolicy enumerates possible values for ReplicatedStorageClass spec.reclaimPolicy field.
@@ -146,6 +163,8 @@ const (
 	ReplicationNone ReplicatedStorageClassReplication = "None"
 	// ReplicationAvailability means 2 replicas; can lose 1 node, but may lose consistency in network partitions.
 	ReplicationAvailability ReplicatedStorageClassReplication = "Availability"
+	// ReplicationConsistency means 2 replicas with consistency guarantees; requires quorum for writes.
+	ReplicationConsistency ReplicatedStorageClassReplication = "Consistency"
 	// ReplicationConsistencyAndAvailability means 3 replicas; can lose 1 node and keeps consistency.
 	ReplicationConsistencyAndAvailability ReplicatedStorageClassReplication = "ConsistencyAndAvailability"
 )
@@ -190,6 +209,83 @@ func (t ReplicatedStorageClassTopology) String() string {
 	return string(t)
 }
 
+// ReplicatedStorageClassRolloutStrategy defines how configuration changes are rolled out to existing volumes.
+// +kubebuilder:validation:XValidation:rule="self.type != 'RollingUpdate' || has(self.rollingUpdate)",message="rollingUpdate is required when type is RollingUpdate"
+// +kubebuilder:validation:XValidation:rule="self.type == 'RollingUpdate' || !has(self.rollingUpdate)",message="rollingUpdate must not be set when type is not RollingUpdate"
+// +kubebuilder:object:generate=true
+type ReplicatedStorageClassRolloutStrategy struct {
+	// Type specifies the rollout strategy type.
+	// +kubebuilder:validation:Enum=RollingUpdate;NewOnly
+	// +kubebuilder:default:=RollingUpdate
+	Type ReplicatedStorageClassRolloutStrategyType `json:"type,omitempty"`
+	// RollingUpdate configures parameters for RollingUpdate strategy.
+	// Required when type is RollingUpdate.
+	// +optional
+	RollingUpdate *ReplicatedStorageClassRollingUpdateStrategy `json:"rollingUpdate,omitempty"`
+}
+
+// ReplicatedStorageClassRolloutStrategyType enumerates possible values for rollout strategy type.
+type ReplicatedStorageClassRolloutStrategyType string
+
+const (
+	// ReplicatedStorageClassRolloutStrategyTypeRollingUpdate means configuration changes are rolled out to existing volumes.
+	ReplicatedStorageClassRolloutStrategyTypeRollingUpdate ReplicatedStorageClassRolloutStrategyType = "RollingUpdate"
+	// ReplicatedStorageClassRolloutStrategyTypeNewOnly means configuration changes only apply to newly created volumes.
+	ReplicatedStorageClassRolloutStrategyTypeNewOnly ReplicatedStorageClassRolloutStrategyType = "NewOnly"
+)
+
+func (t ReplicatedStorageClassRolloutStrategyType) String() string { return string(t) }
+
+// ReplicatedStorageClassRollingUpdateStrategy configures parameters for rolling update rollout strategy.
+// +kubebuilder:object:generate=true
+type ReplicatedStorageClassRollingUpdateStrategy struct {
+	// MaxParallel is the maximum number of volumes being rolled out simultaneously.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default:=5
+	MaxParallel int32 `json:"maxParallel"`
+}
+
+// ReplicatedStorageClassEligibleNodesDriftPolicy defines how the controller reacts to eligible nodes changes.
+// +kubebuilder:validation:XValidation:rule="self.type != 'RollingUpdate' || has(self.rollingUpdate)",message="rollingUpdate is required when type is RollingUpdate"
+// +kubebuilder:validation:XValidation:rule="self.type == 'RollingUpdate' || !has(self.rollingUpdate)",message="rollingUpdate must not be set when type is not RollingUpdate"
+// +kubebuilder:object:generate=true
+type ReplicatedStorageClassEligibleNodesDriftPolicy struct {
+	// Type specifies the drift policy type.
+	// +kubebuilder:validation:Enum=Ignore;RollingUpdate
+	// +kubebuilder:default:=RollingUpdate
+	Type ReplicatedStorageClassEligibleNodesDriftPolicyType `json:"type,omitempty"`
+	// RollingUpdate configures parameters for RollingUpdate drift policy.
+	// Required when type is RollingUpdate.
+	// +optional
+	RollingUpdate *ReplicatedStorageClassEligibleNodesDriftRollingUpdate `json:"rollingUpdate,omitempty"`
+}
+
+// ReplicatedStorageClassEligibleNodesDriftPolicyType enumerates possible values for eligible nodes drift policy type.
+type ReplicatedStorageClassEligibleNodesDriftPolicyType string
+
+const (
+	// ReplicatedStorageClassEligibleNodesDriftPolicyTypeIgnore means changes in eligible nodes are ignored.
+	ReplicatedStorageClassEligibleNodesDriftPolicyTypeIgnore ReplicatedStorageClassEligibleNodesDriftPolicyType = "Ignore"
+	// ReplicatedStorageClassEligibleNodesDriftPolicyTypeRollingUpdate means replicas are moved when eligible nodes change.
+	ReplicatedStorageClassEligibleNodesDriftPolicyTypeRollingUpdate ReplicatedStorageClassEligibleNodesDriftPolicyType = "RollingUpdate"
+)
+
+func (t ReplicatedStorageClassEligibleNodesDriftPolicyType) String() string { return string(t) }
+
+// ReplicatedStorageClassEligibleNodesDriftRollingUpdate configures parameters for rolling update drift policy.
+// +kubebuilder:object:generate=true
+type ReplicatedStorageClassEligibleNodesDriftRollingUpdate struct {
+	// MaxParallel is the maximum number of volumes being updated simultaneously.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default:=5
+	MaxParallel int32 `json:"maxParallel"`
+	// EvictFromNotReadyNodesAfter specifies how long to wait before evicting replicas
+	// from nodes that became not ready.
+	// +kubebuilder:default:="1h"
+	// +optional
+	EvictFromNotReadyNodesAfter *metav1.Duration `json:"evictFromNotReadyNodesAfter,omitempty"`
+}
+
 // Displays current information about the Storage Class.
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassStatus struct {
@@ -207,6 +303,15 @@ type ReplicatedStorageClassStatus struct {
 	Phase ReplicatedStorageClassPhase `json:"phase,omitempty"`
 	// Additional information about the current state of the Storage Class.
 	Reason string `json:"reason,omitempty"`
+	// EligibleNodesChecksum is a hash of the current eligible nodes configuration.
+	// +optional
+	EligibleNodesChecksum string `json:"eligibleNodesChecksum,omitempty"`
+	// EligibleNodes lists nodes eligible for this storage class.
+	// +optional
+	EligibleNodes []ReplicatedStorageClassEligibleNode `json:"eligibleNodes,omitempty"`
+	// Volumes provides aggregated volume statistics.
+	// Always present (may have total=0).
+	Volumes ReplicatedStorageClassVolumesSummary `json:"volumes"`
 }
 
 // ReplicatedStorageClassPhase enumerates possible values for ReplicatedStorageClass status.phase field.
@@ -223,3 +328,75 @@ const (
 func (p ReplicatedStorageClassPhase) String() string {
 	return string(p)
 }
+
+// ReplicatedStorageClassEligibleNode represents a node eligible for placing volumes of this storage class.
+// +kubebuilder:object:generate=true
+type ReplicatedStorageClassEligibleNode struct {
+	// NodeName is the Kubernetes node name.
+	NodeName string `json:"nodeName"`
+	// ZoneName is the zone this node belongs to.
+	// +optional
+	ZoneName string `json:"zoneName,omitempty"`
+	// LVMVolumeGroups lists LVM volume groups available on this node.
+	// +optional
+	LVMVolumeGroups []ReplicatedStorageClassEligibleNodeLVMVolumeGroup `json:"lvmVolumeGroups,omitempty"`
+	// Unschedulable indicates whether new volumes should not be scheduled to this node.
+	// +optional
+	Unschedulable bool `json:"unschedulable,omitempty"`
+	// Ready indicates whether the node is ready to serve volumes.
+	// +optional
+	Ready bool `json:"ready,omitempty"`
+	// BecameNotReadyAt is the timestamp when the node became not ready.
+	// +optional
+	BecameNotReadyAt *metav1.Time `json:"becameNotReadyAt,omitempty"`
+}
+
+// ReplicatedStorageClassEligibleNodeLVMVolumeGroup represents an LVM volume group on an eligible node.
+// +kubebuilder:object:generate=true
+type ReplicatedStorageClassEligibleNodeLVMVolumeGroup struct {
+	// Name is the LVMVolumeGroup resource name.
+	Name string `json:"name"`
+	// ThinPoolName is the thin pool name (for LVMThin storage pools).
+	// +optional
+	ThinPoolName string `json:"thinPoolName,omitempty"`
+	// Unschedulable indicates whether new volumes should not use this volume group.
+	// +optional
+	Unschedulable bool `json:"unschedulable,omitempty"`
+}
+
+// ReplicatedStorageClassVolumesSummary provides aggregated information about volumes in this storage class.
+// +kubebuilder:object:generate=true
+type ReplicatedStorageClassVolumesSummary struct {
+	// Total is the total number of volumes.
+	Total int32 `json:"total"`
+	// Aligned is the number of volumes whose configuration matches the storage class.
+	Aligned int32 `json:"aligned"`
+	// EligibleNodesViolation is the number of volumes with replicas on non-eligible nodes.
+	EligibleNodesViolation int32 `json:"eligibleNodesViolation"`
+	// StaleConfiguration is the number of volumes with outdated configuration.
+	StaleConfiguration int32 `json:"staleConfiguration"`
+	// RollingUpdatesInProgress lists volumes currently being updated.
+	// +optional
+	RollingUpdatesInProgress []ReplicatedStorageClassRollingUpdateInProgress `json:"rollingUpdatesInProgress,omitempty"`
+}
+
+// ReplicatedStorageClassRollingUpdateInProgress describes a volume undergoing rolling update.
+// +kubebuilder:object:generate=true
+type ReplicatedStorageClassRollingUpdateInProgress struct {
+	// Name is the ReplicatedVolume name.
+	Name string `json:"name"`
+	// Operations lists the types of operations being performed.
+	Operations []ReplicatedStorageClassRollingUpdateOperation `json:"operations"`
+}
+
+// ReplicatedStorageClassRollingUpdateOperation describes the type of rolling update operation.
+type ReplicatedStorageClassRollingUpdateOperation string
+
+const (
+	// ReplicatedStorageClassRollingUpdateOperationConfigurationRollout means configuration is being rolled out.
+	ReplicatedStorageClassRollingUpdateOperationConfigurationRollout ReplicatedStorageClassRollingUpdateOperation = "ConfigurationRollout"
+	// ReplicatedStorageClassRollingUpdateOperationEligibleNodesViolationResolution means eligible nodes violation is being resolved.
+	ReplicatedStorageClassRollingUpdateOperationEligibleNodesViolationResolution ReplicatedStorageClassRollingUpdateOperation = "EligibleNodesViolationResolution"
+)
+
+func (o ReplicatedStorageClassRollingUpdateOperation) String() string { return string(o) }

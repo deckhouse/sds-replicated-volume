@@ -86,5 +86,49 @@ func RegisterIndexes(mgr manager.Manager) error {
 		return fmt.Errorf("index ReplicatedVolumeReplica by spec.replicatedVolumeName: %w", err)
 	}
 
+	// Index ReplicatedStorageClass by spec.storagePool for efficient lookups per RSP.
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&v1alpha1.ReplicatedStorageClass{},
+		indexes.IndexFieldRSCByStoragePool,
+		func(obj client.Object) []string {
+			rsc, ok := obj.(*v1alpha1.ReplicatedStorageClass)
+			if !ok {
+				return nil
+			}
+			if rsc.Spec.StoragePool == "" {
+				return nil
+			}
+			return []string{rsc.Spec.StoragePool}
+		},
+	); err != nil {
+		return fmt.Errorf("index ReplicatedStorageClass by spec.storagePool: %w", err)
+	}
+
+	// Index ReplicatedStoragePool by spec.lvmVolumeGroups[*].name for efficient lookups per LVG.
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&v1alpha1.ReplicatedStoragePool{},
+		indexes.IndexFieldRSPByLVMVolumeGroupName,
+		func(obj client.Object) []string {
+			rsp, ok := obj.(*v1alpha1.ReplicatedStoragePool)
+			if !ok {
+				return nil
+			}
+			if len(rsp.Spec.LVMVolumeGroups) == 0 {
+				return nil
+			}
+			names := make([]string, 0, len(rsp.Spec.LVMVolumeGroups))
+			for _, lvg := range rsp.Spec.LVMVolumeGroups {
+				if lvg.Name != "" {
+					names = append(names, lvg.Name)
+				}
+			}
+			return names
+		},
+	); err != nil {
+		return fmt.Errorf("index ReplicatedStoragePool by spec.lvmVolumeGroups.name: %w", err)
+	}
+
 	return nil
 }

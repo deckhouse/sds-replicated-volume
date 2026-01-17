@@ -21,6 +21,8 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	nodecontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/node_controller"
+	rsccontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rsc_controller"
 	rvattachcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_attach_controller"
 	rvcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller"
 	rvdeletepropagation "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_delete_propagation"
@@ -59,6 +61,8 @@ func init() {
 	registry = append(registry, rvstatusconditions.BuildController)
 	registry = append(registry, rvrschedulingcontroller.BuildController)
 	registry = append(registry, rvattachcontroller.BuildController)
+	registry = append(registry, rsccontroller.BuildController)
+	registry = append(registry, nodecontroller.BuildController)
 
 	// ...
 }

@@ -95,3 +95,27 @@ const (
 	ReplicatedVolumeCondScheduledReasonReplicasNotScheduled = "ReplicasNotScheduled" // Some replicas are not scheduled yet.
 	ReplicatedVolumeCondScheduledReasonSchedulingInProgress = "SchedulingInProgress" // Scheduling is still in progress.
 )
+
+const (
+	// ReplicatedVolumeCondStorageClassConfigurationAlignedType indicates whether the volume's configuration
+	// matches the storage class configuration.
+	//
+	// Reasons describe configuration alignment state.
+	ReplicatedVolumeCondStorageClassConfigurationAlignedType                       = "StorageClassConfigurationAligned"
+	ReplicatedVolumeCondStorageClassConfigurationAlignedReasonConfigurationAligned = "ConfigurationAligned" // Configuration matches storage class.
+	ReplicatedVolumeCondStorageClassConfigurationAlignedReasonConfigurationStale   = "ConfigurationStale"   // Configuration does not match storage class (stale).
+	ReplicatedVolumeCondStorageClassConfigurationAlignedReasonRolloutInProgress    = "RolloutInProgress"    // Configuration rollout is in progress.
+	ReplicatedVolumeCondStorageClassConfigurationAlignedReasonStorageClassNotFound = "StorageClassNotFound" // Referenced storage class does not exist.
+)
+
+const (
+	// ReplicatedVolumeCondStorageClassEligibleNodesAlignedType indicates whether all replicas are placed
+	// on eligible nodes according to the storage class.
+	//
+	// Reasons describe eligible nodes alignment state.
+	ReplicatedVolumeCondStorageClassEligibleNodesAlignedType                         = "StorageClassEligibleNodesAligned"
+	ReplicatedVolumeCondStorageClassEligibleNodesAlignedReasonEligibleNodesAligned   = "EligibleNodesAligned"   // All replicas are on eligible nodes.
+	ReplicatedVolumeCondStorageClassEligibleNodesAlignedReasonEligibleNodesViolation = "EligibleNodesViolation" // Some replicas are on non-eligible nodes.
+	ReplicatedVolumeCondStorageClassEligibleNodesAlignedReasonResolutionInProgress   = "ResolutionInProgress"   // Eligible nodes conflict resolution is in progress.
+	ReplicatedVolumeCondStorageClassEligibleNodesAlignedReasonStorageClassNotFound   = "StorageClassNotFound"   // Referenced storage class does not exist.
+)

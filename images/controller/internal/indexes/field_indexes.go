@@ -38,4 +38,13 @@ const (
 	// - client.MatchingFields{...}
 	// - fake.ClientBuilder.WithIndex(...)
 	IndexFieldRVRByReplicatedVolumeName = "spec.replicatedVolumeName"
+
+	// IndexFieldRSCByStoragePool is a controller-runtime cache index field name
+	// used to quickly list ReplicatedStorageClass objects referencing a specific RSP.
+	IndexFieldRSCByStoragePool = "spec.storagePool"
+
+	// IndexFieldRSPByLVMVolumeGroupName is a controller-runtime cache index field name
+	// used to quickly list ReplicatedStoragePool objects referencing a specific LVMVolumeGroup.
+	// The index extracts all LVG names from spec.lvmVolumeGroups[*].name.
+	IndexFieldRSPByLVMVolumeGroupName = "spec.lvmVolumeGroups.name"
 )
