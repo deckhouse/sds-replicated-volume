@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright 2025 Flant JSC
+# Copyright 2026 Flant JSC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,74 +22,51 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Function to print colored output
 print_status() {
     local color=$1
     local message=$2
     echo -e "${color}${message}${NC}"
 }
 
-print_status $YELLOW "Starting test run..."
+print_status "$YELLOW" "Starting test run..."
 
-# Find all directories with test files
-test_dirs=$(find . -name "*_test.go" -exec dirname {} \; | sort -u)
+# Get all workspace modules from go.work
+modules=$(go work edit -json | jq -r '.Use[].DiskPath')
 
-if [ -z "$test_dirs" ]; then
-    print_status $YELLOW "No test files found"
-    exit 0
+if [ -z "$modules" ]; then
+    print_status "$RED" "No modules found in go.work"
+    exit 1
 fi
 
-# Track overall results
-total_packages=0
-failed_packages=0
-passed_packages=0
+# Track results
+total_modules=0
+failed_modules=0
+passed_modules=0
 
-# Run tests for each directory
-for dir in $test_dirs; do
-    if [ ! -d "$dir" ]; then
-        continue
-    fi
+for mod in $modules; do
+    print_status "$YELLOW" "Testing $mod"
+    total_modules=$((total_modules + 1))
 
-    print_status $YELLOW "Testing $dir"
-    total_packages=$((total_packages + 1))
-
-    # Some test directories live in nested Go modules that are NOT part of the root go.work.
-    # For such modules, we must disable workspace mode (GOWORK=off) so `go test` uses the nearest go.mod.
-    #
-    # For modules that ARE in go.work, we must keep workspace mode enabled, otherwise those modules may fail
-    # due to incomplete go.sum (they rely on go.work wiring).
-    #
-    # Keep this list in sync with go.work "use (...)".
-    test_cmd=(go test -v)
-    case "$dir" in
-        ./api/*|./images/agent/*|./images/controller/*|./images/csi-driver/*|./images/linstor-drbd-wait/*|./images/megatest/*|./images/sds-replicated-volume-controller/*|./images/webhooks/*|./internal/*|./lib/go/common/*)
-            test_cmd=(go test -v)
-            ;;
-        *)
-            test_cmd=(env GOWORK=off go test -v)
-            ;;
-    esac
-
-    if (cd "$dir" && "${test_cmd[@]}"); then
-        print_status $GREEN "✓ PASSED: $dir"
-        passed_packages=$((passed_packages + 1))
+    if (cd "$mod" && go test -v ./...); then
+        print_status "$GREEN" "✓ PASSED: $mod"
+        passed_modules=$((passed_modules + 1))
     else
-        print_status $RED "✗ FAILED: $dir"
-        failed_packages=$((failed_packages + 1))
+        print_status "$RED" "✗ FAILED: $mod"
+        failed_modules=$((failed_modules + 1))
     fi
     echo
 done
 
 # Print summary
 echo "=========================================="
-print_status $YELLOW "Test Summary:"
-echo "Total packages: $total_packages"
-print_status $GREEN "Passed: $passed_packages"
-if [ $failed_packages -gt 0 ]; then
-    print_status $RED "Failed: $failed_packages"
+print_status "$YELLOW" "Test Summary:"
+echo "Total modules: $total_modules"
+print_status "$GREEN" "Passed: $passed_modules"
+if [ $failed_modules -gt 0 ]; then
+    print_status "$RED" "Failed: $failed_modules"
     exit 1
 else
-    print_status $GREEN "Failed: $failed_packages"
-    print_status $GREEN "All tests passed!"
+    print_status "$GREEN" "Failed: $failed_modules"
+    print_status "$GREEN" "All tests passed!"
     exit 0
 fi

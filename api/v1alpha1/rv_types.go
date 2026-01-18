@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -81,7 +81,7 @@ type ReplicatedVolumeStatus struct {
 
 	// +patchStrategy=merge
 	// +optional
-	DRBD *DRBDResource `json:"drbd,omitempty" patchStrategy:"merge"`
+	DRBD *DRBDResourceDetails `json:"drbd,omitempty" patchStrategy:"merge"`
 
 	// DeviceMinor is a unique DRBD device minor number assigned to this ReplicatedVolume.
 	// +optional
@@ -140,7 +140,7 @@ func (DeviceMinor) Min() uint32 { return deviceMinorMin }
 func (DeviceMinor) Max() uint32 { return deviceMinorMax }
 
 // +kubebuilder:object:generate=true
-type DRBDResource struct {
+type DRBDResourceDetails struct {
 	// +patchStrategy=merge
 	// +optional
 	Config *DRBDResourceConfig `json:"config,omitempty" patchStrategy:"merge"`
