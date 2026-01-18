@@ -35,9 +35,9 @@ func TestReconcileFlow_OnEnd_ErrWithoutResult_DoesNotPanic(_ *testing.T) {
 	rf.OnEnd(&o)
 }
 
-func TestReconcileFlow_Merge_RequeueIsSupported(t *testing.T) {
+func TestMergeReconciles_RequeueIsSupported(t *testing.T) {
 	rf := BeginRootReconcile(context.Background())
-	outcome := rf.Merge(rf.Requeue(), rf.Continue())
+	outcome := MergeReconciles(rf.Requeue(), rf.Continue())
 
 	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")
@@ -52,11 +52,11 @@ func TestReconcileFlow_Merge_RequeueIsSupported(t *testing.T) {
 	}
 }
 
-func TestReconcileFlow_Merge_RequeueWinsOverRequeueAfter(t *testing.T) {
+func TestMergeReconciles_RequeueWinsOverRequeueAfter(t *testing.T) {
 	rf := BeginRootReconcile(context.Background())
 	// Requeue() = delay 0, RequeueAfter(5) = delay 5.
 	// Minimum delay wins, so Requeue() wins.
-	outcome := rf.Merge(rf.Requeue(), rf.RequeueAfter(5))
+	outcome := MergeReconciles(rf.Requeue(), rf.RequeueAfter(5))
 
 	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")

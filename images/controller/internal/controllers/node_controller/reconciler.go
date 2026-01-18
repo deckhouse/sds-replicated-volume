@@ -48,16 +48,15 @@ func NewReconciler(cl client.Client) *Reconciler {
 // Reconcile pattern: Pure orchestration
 func (r *Reconciler) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
 	rf := flow.BeginRootReconcile(ctx)
-	ctx = rf.Ctx()
 
 	// Get all RSCs.
-	rscs, err := r.getRSCs(ctx)
+	rscs, err := r.getRSCs(rf.Ctx())
 	if err != nil {
 		return rf.Fail(err).ToCtrl()
 	}
 
 	// Get all nodes.
-	nodes, err := r.getNodes(ctx)
+	nodes, err := r.getNodes(rf.Ctx())
 	if err != nil {
 		return rf.Fail(err).ToCtrl()
 	}
@@ -70,18 +69,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	for i := range nodes {
 		node := &nodes[i]
 		shouldHaveLabel := targetNodes[node.Name]
-		outcome := r.reconcileNode(ctx, node, shouldHaveLabel)
+		outcome := r.reconcileNode(rf.Ctx(), node, shouldHaveLabel)
 		outcomes = append(outcomes, outcome)
 	}
 
-	return rf.Merge(outcomes...).ToCtrl()
+	return flow.MergeReconciles(outcomes...).ToCtrl()
 }
 
 // reconcileNode reconciles a single node's agent label.
 func (r *Reconciler) reconcileNode(ctx context.Context, node *corev1.Node, shouldHaveLabel bool) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "reconcile-node", "node", node.Name)
+	rf := flow.BeginReconcile(ctx, "node", "node", node.Name)
 	defer rf.OnEnd(&outcome)
-	ctx = rf.Ctx()
 
 	// Check if node is already in sync.
 	hasLabel := obju.HasLabel(node, v1alpha1.AgentNodeLabelKey)
@@ -100,7 +98,7 @@ func (r *Reconciler) reconcileNode(ctx context.Context, node *corev1.Node, shoul
 	}
 
 	// Patch node.
-	if err := r.cl.Patch(ctx, node, client.MergeFrom(base)); err != nil {
+	if err := r.cl.Patch(rf.Ctx(), node, client.MergeFrom(base)); err != nil {
 		return rf.Fail(err)
 	}
 

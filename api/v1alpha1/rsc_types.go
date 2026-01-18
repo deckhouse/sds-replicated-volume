@@ -417,15 +417,15 @@ type ReplicatedStorageClassVolumesSummary struct {
 	// Total is the total number of volumes.
 	// +optional
 	Total *int32 `json:"total,omitempty"`
-	// PendingAcknowledgment is the number of volumes that haven't acknowledged current RSC configuration.
+	// PendingObservation is the number of volumes that haven't observed current RSC configuration or eligible nodes.
 	// +optional
-	PendingAcknowledgment *int32 `json:"pendingAcknowledgment,omitempty"`
+	PendingObservation *int32 `json:"pendingObservation,omitempty"`
 	// Aligned is the number of volumes whose configuration matches the storage class.
 	// +optional
 	Aligned *int32 `json:"aligned,omitempty"`
-	// EligibleNodesInConflict is the number of volumes with replicas on non-eligible nodes.
+	// InConflictWithEligibleNodes is the number of volumes with replicas on non-eligible nodes.
 	// +optional
-	EligibleNodesInConflict *int32 `json:"eligibleNodesInConflict,omitempty"`
+	InConflictWithEligibleNodes *int32 `json:"inConflictWithEligibleNodes,omitempty"`
 	// StaleConfiguration is the number of volumes with outdated configuration.
 	// +optional
 	StaleConfiguration *int32 `json:"staleConfiguration,omitempty"`

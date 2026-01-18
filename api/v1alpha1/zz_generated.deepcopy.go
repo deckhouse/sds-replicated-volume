@@ -1158,8 +1158,8 @@ func (in *ReplicatedStorageClassVolumesSummary) DeepCopyInto(out *ReplicatedStor
 		*out = new(int32)
 		**out = **in
 	}
-	if in.PendingAcknowledgment != nil {
-		in, out := &in.PendingAcknowledgment, &out.PendingAcknowledgment
+	if in.PendingObservation != nil {
+		in, out := &in.PendingObservation, &out.PendingObservation
 		*out = new(int32)
 		**out = **in
 	}
@@ -1168,8 +1168,8 @@ func (in *ReplicatedStorageClassVolumesSummary) DeepCopyInto(out *ReplicatedStor
 		*out = new(int32)
 		**out = **in
 	}
-	if in.EligibleNodesInConflict != nil {
-		in, out := &in.EligibleNodesInConflict, &out.EligibleNodesInConflict
+	if in.InConflictWithEligibleNodes != nil {
+		in, out := &in.InConflictWithEligibleNodes, &out.InConflictWithEligibleNodes
 		*out = new(int32)
 		**out = **in
 	}

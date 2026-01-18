@@ -19,8 +19,8 @@ Reconcile (root)
 ├── reconcileMain      — finalizer management
 └── reconcileStatus    — status fields update
     ├── ensureConfigurationAndEligibleNodes
-    ├── ensureVolumeCounters
-    └── ensureRollingStrategies
+    ├── ensureVolumeSummary
+    └── ensureVolumeConditions
 ```
 
 ## Algorithm Flow
@@ -45,9 +45,9 @@ flowchart TD
     SetConfigFailed --> EnsureCounters
     SetConfigOk --> EnsureCounters
 
-    EnsureCounters[ensureVolumeCounters] --> EnsureRolling[ensureRollingStrategies]
+    EnsureCounters[ensureVolumeSummary] --> EnsureVolConds[ensureVolumeConditions]
 
-    EnsureRolling --> SetAlignmentConds[Set VolumesConfigurationAligned<br>Set VolumesNodeEligibilityAligned]
+    EnsureVolConds --> SetAlignmentConds[Set ConfigurationRolledOut<br>Set VolumesSatisfyEligibleNodes]
 
     SetAlignmentConds --> Changed{Changed?}
     Changed -->|Yes| PatchStatus[Patch status]
@@ -80,27 +80,27 @@ Indicates whether eligible nodes have been calculated for the storage class.
 | False | ReplicatedStoragePoolNotFound | RSP not found |
 | False | InvalidStoragePoolOrLVG | RSP phase is not Completed or thin pool not found |
 
-### VolumesConfigurationAligned
+### ConfigurationRolledOut
 
 Indicates whether all volumes' configuration matches the storage class.
 
 | Status | Reason | When |
 |--------|--------|------|
-| True | AllAligned | All RVs have `StorageClassConfigurationAligned=True` |
-| False | InProgress | Rolling update in progress |
+| True | RolledOutToAllVolumes | All RVs have `ConfigurationReady=True` |
+| False | ConfigurationRolloutInProgress | Rolling update in progress |
 | False | ConfigurationRolloutDisabled | `ConfigurationRolloutStrategy.type=NewVolumesOnly` AND `staleConfiguration > 0` |
-| Unknown | PendingAcknowledgment | Some volumes haven't acknowledged configuration yet |
+| Unknown | NewConfigurationNotYetObserved | Some volumes haven't observed the new configuration yet |
 
-### VolumesNodeEligibilityAligned
+### VolumesSatisfyEligibleNodes
 
 Indicates whether all volumes' replicas are placed on eligible nodes.
 
 | Status | Reason | When |
 |--------|--------|------|
-| True | AllAligned | All RVs have `StorageClassEligibleNodesAligned=True` |
-| False | InProgress | Resolution in progress |
-| False | ConflictResolutionManual | `EligibleNodesConflictResolutionStrategy.type=Manual` AND `eligibleNodesInConflict > 0` |
-| Unknown | PendingAcknowledgment | Some volumes haven't acknowledged configuration yet |
+| True | AllVolumesSatisfy | All RVs have `SatisfyEligibleNodes=True` |
+| False | ConflictResolutionInProgress | Resolution in progress |
+| False | ManualConflictResolution | `EligibleNodesConflictResolutionStrategy.type=Manual` AND `inConflictWithEligibleNodes > 0` |
+| Unknown | UpdatedEligibleNodesNotYetObserved | Some volumes haven't observed the updated eligible nodes yet |
 
 ## Eligible Nodes Algorithm
 
@@ -142,21 +142,12 @@ The controller validates that eligible nodes meet replication and topology requi
 The controller aggregates statistics from all `ReplicatedVolume` resources referencing this RSC:
 
 - **Total** — count of all volumes
-- **Aligned** — volumes where both `StorageClassConfigurationAligned` and `StorageClassEligibleNodesAligned` conditions are `True`
-- **StaleConfiguration** — volumes where `StorageClassConfigurationAligned` is `False`
-- **EligibleNodesInConflict** — volumes where `StorageClassEligibleNodesAligned` is `False`
-- **PendingAcknowledgment** — volumes that haven't acknowledged current RSC configuration/eligible nodes
+- **Aligned** — volumes where both `ConfigurationReady` and `SatisfyEligibleNodes` conditions are `True`
+- **StaleConfiguration** — volumes where `ConfigurationReady` is `False`
+- **InConflictWithEligibleNodes** — volumes where `SatisfyEligibleNodes` is `False`
+- **PendingObservation** — volumes that haven't observed current RSC configuration/eligible nodes
 
-> **Note:** Counters other than `Total` and `PendingAcknowledgment` are only computed when all volumes have acknowledged the current configuration.
-
-## Rolling Strategies (NOT IMPLEMENTED)
-
-Configuration rollout and conflict resolution strategies are defined in spec but not yet implemented:
-
-- `configurationRolloutStrategy.type=RollingUpdate` — automatic configuration rollout to existing volumes
-- `configurationRolloutStrategy.type=NewVolumesOnly` — apply config only to new volumes
-- `eligibleNodesConflictResolutionStrategy.type=RollingRepair` — automatic resolution of eligible nodes conflicts
-- `eligibleNodesConflictResolutionStrategy.type=Manual` — manual conflict resolution
+> **Note:** Counters other than `Total` and `PendingObservation` are only computed when all volumes have observed the current configuration.
 
 ## Data Flow
 
@@ -172,8 +163,8 @@ flowchart TD
 
     subgraph ensure [Ensure Helpers]
         EnsureConfig[ensureConfigurationAndEligibleNodes]
-        EnsureVols[ensureVolumeCounters]
-        EnsureRolling[ensureRollingStrategies]
+        EnsureVols[ensureVolumeSummary]
+        EnsureVolConds[ensureVolumeConditions]
     end
 
     subgraph status [Status Output]
@@ -203,8 +194,8 @@ flowchart TD
 
     EnsureVols --> Vol
 
-    RSC --> EnsureRolling
-    RVs --> EnsureRolling
+    RSC --> EnsureVolConds
+    RVs --> EnsureVolConds
 
-    EnsureRolling -->|VolumesConfigurationAligned<br>VolumesNodeEligibilityAligned| Conds
+    EnsureVolConds -->|ConfigurationRolledOut<br>VolumesSatisfyEligibleNodes| Conds
 ```

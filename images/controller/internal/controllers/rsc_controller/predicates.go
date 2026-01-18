@@ -21,6 +21,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	nodeutil "k8s.io/component-helpers/node/util"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -105,8 +106,9 @@ func LVGPredicates() []predicate.Predicate {
 // RVPredicates returns predicates for ReplicatedVolume events.
 // Filters to only react to changes in:
 //   - spec.replicatedStorageClassName (storage class reference)
-//   - StorageClassConfigurationAligned condition
-//   - StorageClassEligibleNodesAligned condition
+//   - status.storageClass (observed RSC state for acknowledgment tracking)
+//   - ConfigurationReady condition
+//   - SatisfyEligibleNodes condition
 func RVPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.Funcs{
@@ -123,10 +125,15 @@ func RVPredicates() []predicate.Predicate {
 					return true
 				}
 
+				// Storage class acknowledgment state change.
+				if !ptr.Equal(oldRV.Status.StorageClass, newRV.Status.StorageClass) {
+					return true
+				}
+
 				return !obju.AreConditionsSemanticallyEqual(
 					oldRV, newRV,
-					v1alpha1.ReplicatedVolumeCondStorageClassConfigurationAlignedType,
-					v1alpha1.ReplicatedVolumeCondStorageClassEligibleNodesAlignedType,
+					v1alpha1.ReplicatedVolumeCondConfigurationReadyType,
+					v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType,
 				)
 			},
 		},

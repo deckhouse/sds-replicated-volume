@@ -26,13 +26,16 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
 func TestRSCController(t *testing.T) {
@@ -269,7 +272,7 @@ var _ = Describe("computeActualVolumesSummary", func() {
 		Expect(*counters.Total).To(Equal(int32(0)))
 		Expect(*counters.Aligned).To(Equal(int32(0)))
 		Expect(*counters.StaleConfiguration).To(Equal(int32(0)))
-		Expect(*counters.EligibleNodesInConflict).To(Equal(int32(0)))
+		Expect(*counters.InConflictWithEligibleNodes).To(Equal(int32(0)))
 	})
 
 	It("counts total volumes (RVs without status.storageClass are considered acknowledged)", func() {
@@ -290,11 +293,11 @@ var _ = Describe("computeActualVolumesSummary", func() {
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.ReplicatedVolumeCondStorageClassConfigurationAlignedType,
+							Type:   v1alpha1.ReplicatedVolumeCondConfigurationReadyType,
 							Status: metav1.ConditionTrue,
 						},
 						{
-							Type:   v1alpha1.ReplicatedVolumeCondStorageClassEligibleNodesAlignedType,
+							Type:   v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -314,7 +317,7 @@ var _ = Describe("computeActualVolumesSummary", func() {
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.ReplicatedVolumeCondStorageClassConfigurationAlignedType,
+							Type:   v1alpha1.ReplicatedVolumeCondConfigurationReadyType,
 							Status: metav1.ConditionFalse,
 						},
 					},
@@ -334,7 +337,7 @@ var _ = Describe("computeActualVolumesSummary", func() {
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.ReplicatedVolumeCondStorageClassEligibleNodesAlignedType,
+							Type:   v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType,
 							Status: metav1.ConditionFalse,
 						},
 					},
@@ -344,7 +347,7 @@ var _ = Describe("computeActualVolumesSummary", func() {
 
 		counters := computeActualVolumesSummary(rsc, rvs)
 
-		Expect(*counters.EligibleNodesInConflict).To(Equal(int32(1)))
+		Expect(*counters.InConflictWithEligibleNodes).To(Equal(int32(1)))
 	})
 
 	It("returns only total when RV has not acknowledged (mismatched configurationGeneration)", func() {
@@ -359,7 +362,7 @@ var _ = Describe("computeActualVolumesSummary", func() {
 					},
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.ReplicatedVolumeCondStorageClassConfigurationAlignedType,
+							Type:   v1alpha1.ReplicatedVolumeCondConfigurationReadyType,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -372,7 +375,7 @@ var _ = Describe("computeActualVolumesSummary", func() {
 		Expect(*counters.Total).To(Equal(int32(1)))
 		Expect(counters.Aligned).To(BeNil())
 		Expect(counters.StaleConfiguration).To(BeNil())
-		Expect(counters.EligibleNodesInConflict).To(BeNil())
+		Expect(counters.InConflictWithEligibleNodes).To(BeNil())
 	})
 
 	It("returns only total when RV has not acknowledged (mismatched eligibleNodesRevision)", func() {
@@ -407,11 +410,11 @@ var _ = Describe("computeActualVolumesSummary", func() {
 					},
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.ReplicatedVolumeCondStorageClassConfigurationAlignedType,
+							Type:   v1alpha1.ReplicatedVolumeCondConfigurationReadyType,
 							Status: metav1.ConditionTrue,
 						},
 						{
-							Type:   v1alpha1.ReplicatedVolumeCondStorageClassEligibleNodesAlignedType,
+							Type:   v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -424,7 +427,7 @@ var _ = Describe("computeActualVolumesSummary", func() {
 		Expect(*counters.Total).To(Equal(int32(1)))
 		Expect(*counters.Aligned).To(Equal(int32(1)))
 		Expect(*counters.StaleConfiguration).To(Equal(int32(0)))
-		Expect(*counters.EligibleNodesInConflict).To(Equal(int32(0)))
+		Expect(*counters.InConflictWithEligibleNodes).To(Equal(int32(0)))
 	})
 })
 
@@ -1234,6 +1237,198 @@ var _ = Describe("computeRollingStrategiesConfiguration", func() {
 	})
 })
 
+var _ = Describe("ensureVolumeConditions", func() {
+	var (
+		ctx context.Context
+		rsc *v1alpha1.ReplicatedStorageClass
+	)
+
+	BeforeEach(func() {
+		ctx = flow.BeginRootReconcile(context.Background()).Ctx()
+		rsc = &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-rsc",
+			},
+			Spec: v1alpha1.ReplicatedStorageClassSpec{
+				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+					Type: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategyTypeNewVolumesOnly,
+				},
+				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+					Type: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeManual,
+				},
+			},
+		}
+	})
+
+	It("panics when PendingObservation is nil", func() {
+		rsc.Status.Volumes = v1alpha1.ReplicatedStorageClassVolumesSummary{
+			PendingObservation: nil,
+		}
+
+		Expect(func() {
+			ensureVolumeConditions(ctx, rsc, nil)
+		}).To(Panic())
+	})
+
+	It("sets both conditions to Unknown when PendingObservation > 0", func() {
+		rsc.Status.Volumes = v1alpha1.ReplicatedStorageClassVolumesSummary{
+			PendingObservation: ptr.To(int32(3)),
+		}
+
+		outcome := ensureVolumeConditions(ctx, rsc, nil)
+
+		Expect(outcome.Error()).To(BeNil())
+		Expect(outcome.DidChange()).To(BeTrue())
+
+		configCond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType)
+		Expect(configCond).NotTo(BeNil())
+		Expect(configCond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(configCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonNewConfigurationNotYetObserved))
+		Expect(configCond.Message).To(ContainSubstring("3 volume(s) pending observation"))
+
+		nodesCond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType)
+		Expect(nodesCond).NotTo(BeNil())
+		Expect(nodesCond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(nodesCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonUpdatedEligibleNodesNotYetObserved))
+	})
+
+	It("panics when StaleConfiguration is nil (after PendingObservation check passes)", func() {
+		rsc.Status.Volumes = v1alpha1.ReplicatedStorageClassVolumesSummary{
+			PendingObservation:          ptr.To(int32(0)),
+			StaleConfiguration:          nil,
+			InConflictWithEligibleNodes: ptr.To(int32(0)),
+		}
+
+		Expect(func() {
+			ensureVolumeConditions(ctx, rsc, nil)
+		}).To(Panic())
+	})
+
+	It("panics when InConflictWithEligibleNodes is nil (after PendingObservation check passes)", func() {
+		rsc.Status.Volumes = v1alpha1.ReplicatedStorageClassVolumesSummary{
+			PendingObservation:          ptr.To(int32(0)),
+			StaleConfiguration:          ptr.To(int32(0)),
+			InConflictWithEligibleNodes: nil,
+		}
+
+		Expect(func() {
+			ensureVolumeConditions(ctx, rsc, nil)
+		}).To(Panic())
+	})
+
+	It("sets ConfigurationRolledOut to False when StaleConfiguration > 0", func() {
+		rsc.Status.Volumes = v1alpha1.ReplicatedStorageClassVolumesSummary{
+			PendingObservation:          ptr.To(int32(0)),
+			StaleConfiguration:          ptr.To(int32(2)),
+			InConflictWithEligibleNodes: ptr.To(int32(0)),
+		}
+
+		outcome := ensureVolumeConditions(ctx, rsc, nil)
+
+		Expect(outcome.Error()).To(BeNil())
+		Expect(outcome.DidChange()).To(BeTrue())
+
+		configCond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType)
+		Expect(configCond).NotTo(BeNil())
+		Expect(configCond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(configCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutDisabled))
+	})
+
+	It("sets ConfigurationRolledOut to True when StaleConfiguration == 0", func() {
+		rsc.Status.Volumes = v1alpha1.ReplicatedStorageClassVolumesSummary{
+			PendingObservation:          ptr.To(int32(0)),
+			StaleConfiguration:          ptr.To(int32(0)),
+			InConflictWithEligibleNodes: ptr.To(int32(0)),
+		}
+
+		outcome := ensureVolumeConditions(ctx, rsc, nil)
+
+		Expect(outcome.Error()).To(BeNil())
+		Expect(outcome.DidChange()).To(BeTrue())
+
+		configCond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType)
+		Expect(configCond).NotTo(BeNil())
+		Expect(configCond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(configCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonRolledOutToAllVolumes))
+	})
+
+	It("sets VolumesSatisfyEligibleNodes to False when InConflictWithEligibleNodes > 0", func() {
+		rsc.Status.Volumes = v1alpha1.ReplicatedStorageClassVolumesSummary{
+			PendingObservation:          ptr.To(int32(0)),
+			StaleConfiguration:          ptr.To(int32(0)),
+			InConflictWithEligibleNodes: ptr.To(int32(5)),
+		}
+
+		outcome := ensureVolumeConditions(ctx, rsc, nil)
+
+		Expect(outcome.Error()).To(BeNil())
+		Expect(outcome.DidChange()).To(BeTrue())
+
+		nodesCond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType)
+		Expect(nodesCond).NotTo(BeNil())
+		Expect(nodesCond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(nodesCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonManualConflictResolution))
+	})
+
+	It("sets VolumesSatisfyEligibleNodes to True when InConflictWithEligibleNodes == 0", func() {
+		rsc.Status.Volumes = v1alpha1.ReplicatedStorageClassVolumesSummary{
+			PendingObservation:          ptr.To(int32(0)),
+			StaleConfiguration:          ptr.To(int32(0)),
+			InConflictWithEligibleNodes: ptr.To(int32(0)),
+		}
+
+		outcome := ensureVolumeConditions(ctx, rsc, nil)
+
+		Expect(outcome.Error()).To(BeNil())
+		Expect(outcome.DidChange()).To(BeTrue())
+
+		nodesCond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType)
+		Expect(nodesCond).NotTo(BeNil())
+		Expect(nodesCond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(nodesCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonAllVolumesSatisfy))
+	})
+
+	It("sets both conditions correctly when StaleConfiguration > 0 and InConflictWithEligibleNodes > 0", func() {
+		rsc.Status.Volumes = v1alpha1.ReplicatedStorageClassVolumesSummary{
+			PendingObservation:          ptr.To(int32(0)),
+			StaleConfiguration:          ptr.To(int32(2)),
+			InConflictWithEligibleNodes: ptr.To(int32(3)),
+		}
+
+		outcome := ensureVolumeConditions(ctx, rsc, nil)
+
+		Expect(outcome.Error()).To(BeNil())
+		Expect(outcome.DidChange()).To(BeTrue())
+
+		configCond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType)
+		Expect(configCond).NotTo(BeNil())
+		Expect(configCond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(configCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutDisabled))
+
+		nodesCond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType)
+		Expect(nodesCond).NotTo(BeNil())
+		Expect(nodesCond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(nodesCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonManualConflictResolution))
+	})
+
+	It("reports no change when conditions already match the target state", func() {
+		rsc.Status.Volumes = v1alpha1.ReplicatedStorageClassVolumesSummary{
+			PendingObservation:          ptr.To(int32(0)),
+			StaleConfiguration:          ptr.To(int32(0)),
+			InConflictWithEligibleNodes: ptr.To(int32(0)),
+		}
+
+		// First call to set conditions
+		outcome := ensureVolumeConditions(ctx, rsc, nil)
+		Expect(outcome.DidChange()).To(BeTrue())
+
+		// Second call should report no change
+		outcome = ensureVolumeConditions(ctx, rsc, nil)
+		Expect(outcome.Error()).To(BeNil())
+		Expect(outcome.DidChange()).To(BeFalse())
+	})
+})
+
 var _ = Describe("makeConfiguration", func() {
 	It("copies all fields from spec correctly", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
@@ -1437,11 +1632,11 @@ var _ = Describe("Reconciler", func() {
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.ReplicatedVolumeCondStorageClassConfigurationAlignedType,
+							Type:   v1alpha1.ReplicatedVolumeCondConfigurationReadyType,
 							Status: metav1.ConditionTrue,
 						},
 						{
-							Type:   v1alpha1.ReplicatedVolumeCondStorageClassEligibleNodesAlignedType,
+							Type:   v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType,
 							Status: metav1.ConditionTrue,
 						},
 					},

@@ -27,6 +27,18 @@ const (
 )
 
 const (
+	// ReplicatedVolumeCondConfigurationReadyType indicates whether the volume's configuration
+	// matches the storage class configuration.
+	//
+	// Reasons describe configuration readiness state.
+	ReplicatedVolumeCondConfigurationReadyType                                 = "ConfigurationReady"
+	ReplicatedVolumeCondConfigurationReadyReasonConfigurationRolloutInProgress = "ConfigurationRolloutInProgress" // Configuration rollout is in progress.
+	ReplicatedVolumeCondConfigurationReadyReasonReady                          = "Ready"                          // Configuration matches storage class.
+	ReplicatedVolumeCondConfigurationReadyReasonStaleConfiguration             = "StaleConfiguration"             // Configuration does not match storage class (stale).
+	ReplicatedVolumeCondConfigurationReadyReasonStorageClassNotFound           = "StorageClassNotFound"           // Referenced storage class does not exist.
+)
+
+const (
 	// ReplicatedVolumeCondConfiguredType indicates whether all replicas are configured.
 	//
 	// Reasons describe configuration progress / mismatch.
@@ -51,9 +63,19 @@ const (
 	//
 	// Reasons describe assignment success/failure.
 	ReplicatedVolumeCondDeviceMinorAssignedType                   = "DeviceMinorAssigned"
-	ReplicatedVolumeCondDeviceMinorAssignedReasonAssignmentFailed = "AssignmentFailed" // Assignment attempt failed.
 	ReplicatedVolumeCondDeviceMinorAssignedReasonAssigned         = "Assigned"         // Minor is assigned.
+	ReplicatedVolumeCondDeviceMinorAssignedReasonAssignmentFailed = "AssignmentFailed" // Assignment attempt failed.
 	ReplicatedVolumeCondDeviceMinorAssignedReasonDuplicate        = "Duplicate"        // Duplicate assignment detected.
+)
+
+const (
+	// ReplicatedVolumeCondInitializedType indicates whether enough replicas are initialized.
+	//
+	// Reasons describe initialization progress and waiting conditions.
+	ReplicatedVolumeCondInitializedType                           = "Initialized"
+	ReplicatedVolumeCondInitializedReasonInitializationInProgress = "InitializationInProgress" // Initialization is still in progress.
+	ReplicatedVolumeCondInitializedReasonInitialized              = "Initialized"              // Initialization requirements are met.
+	ReplicatedVolumeCondInitializedReasonWaitingForReplicas       = "WaitingForReplicas"       // Waiting for replicas to appear/initialize.
 )
 
 const (
@@ -67,16 +89,6 @@ const (
 )
 
 const (
-	// ReplicatedVolumeCondInitializedType indicates whether enough replicas are initialized.
-	//
-	// Reasons describe initialization progress and waiting conditions.
-	ReplicatedVolumeCondInitializedType                           = "Initialized"
-	ReplicatedVolumeCondInitializedReasonInitialized              = "Initialized"              // Initialization requirements are met.
-	ReplicatedVolumeCondInitializedReasonInitializationInProgress = "InitializationInProgress" // Initialization is still in progress.
-	ReplicatedVolumeCondInitializedReasonWaitingForReplicas       = "WaitingForReplicas"       // Waiting for replicas to appear/initialize.
-)
-
-const (
 	// ReplicatedVolumeCondQuorumType indicates whether the volume has quorum.
 	//
 	// Reasons describe quorum state (reached/degraded/lost).
@@ -87,6 +99,18 @@ const (
 )
 
 const (
+	// ReplicatedVolumeCondSatisfyEligibleNodesType indicates whether all replicas are placed
+	// on eligible nodes according to the storage class.
+	//
+	// Reasons describe eligible nodes satisfaction state.
+	ReplicatedVolumeCondSatisfyEligibleNodesType                               = "SatisfyEligibleNodes"
+	ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionInProgress = "ConflictResolutionInProgress" // Eligible nodes conflict resolution is in progress.
+	ReplicatedVolumeCondSatisfyEligibleNodesReasonInConflictWithEligibleNodes  = "InConflictWithEligibleNodes"  // Some replicas are on non-eligible nodes.
+	ReplicatedVolumeCondSatisfyEligibleNodesReasonSatisfyEligibleNodes         = "SatisfyEligibleNodes"         // All replicas are on eligible nodes.
+	ReplicatedVolumeCondSatisfyEligibleNodesReasonStorageClassNotFound         = "StorageClassNotFound"         // Referenced storage class does not exist.
+)
+
+const (
 	// ReplicatedVolumeCondScheduledType indicates whether all replicas have been scheduled.
 	//
 	// Reasons describe scheduling progress / deficit.
@@ -94,28 +118,4 @@ const (
 	ReplicatedVolumeCondScheduledReasonAllReplicasScheduled = "AllReplicasScheduled" // All replicas are scheduled.
 	ReplicatedVolumeCondScheduledReasonReplicasNotScheduled = "ReplicasNotScheduled" // Some replicas are not scheduled yet.
 	ReplicatedVolumeCondScheduledReasonSchedulingInProgress = "SchedulingInProgress" // Scheduling is still in progress.
-)
-
-const (
-	// ReplicatedVolumeCondStorageClassConfigurationAlignedType indicates whether the volume's configuration
-	// matches the storage class configuration.
-	//
-	// Reasons describe configuration alignment state.
-	ReplicatedVolumeCondStorageClassConfigurationAlignedType                       = "StorageClassConfigurationAligned"
-	ReplicatedVolumeCondStorageClassConfigurationAlignedReasonConfigurationAligned = "ConfigurationAligned" // Configuration matches storage class.
-	ReplicatedVolumeCondStorageClassConfigurationAlignedReasonConfigurationStale   = "ConfigurationStale"   // Configuration does not match storage class (stale).
-	ReplicatedVolumeCondStorageClassConfigurationAlignedReasonRolloutInProgress    = "RolloutInProgress"    // Configuration rollout is in progress.
-	ReplicatedVolumeCondStorageClassConfigurationAlignedReasonStorageClassNotFound = "StorageClassNotFound" // Referenced storage class does not exist.
-)
-
-const (
-	// ReplicatedVolumeCondStorageClassEligibleNodesAlignedType indicates whether all replicas are placed
-	// on eligible nodes according to the storage class.
-	//
-	// Reasons describe eligible nodes alignment state.
-	ReplicatedVolumeCondStorageClassEligibleNodesAlignedType                          = "StorageClassEligibleNodesAligned"
-	ReplicatedVolumeCondStorageClassEligibleNodesAlignedReasonEligibleNodesAligned    = "EligibleNodesAligned"    // All replicas are on eligible nodes.
-	ReplicatedVolumeCondStorageClassEligibleNodesAlignedReasonEligibleNodesInConflict = "EligibleNodesInConflict" // Some replicas are on non-eligible nodes.
-	ReplicatedVolumeCondStorageClassEligibleNodesAlignedReasonResolutionInProgress    = "ResolutionInProgress"    // Eligible nodes conflict resolution is in progress.
-	ReplicatedVolumeCondStorageClassEligibleNodesAlignedReasonStorageClassNotFound    = "StorageClassNotFound"    // Referenced storage class does not exist.
 )

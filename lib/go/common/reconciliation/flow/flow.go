@@ -378,7 +378,14 @@ func (o ReconcileOutcome) MustToCtrl() (ctrl.Result, error) {
 	return *o.result, o.err
 }
 
-// Merge combines multiple ReconcileOutcome values into one.
+// Merge combines this outcome with others and returns the merged result.
+//
+// This is a convenience method for chaining: outcome = outcome.Merge(a, b).
+func (o ReconcileOutcome) Merge(others ...ReconcileOutcome) ReconcileOutcome {
+	return MergeReconciles(append([]ReconcileOutcome{o}, others...)...)
+}
+
+// MergeReconciles combines multiple ReconcileOutcome values into one.
 //
 // Use this when you intentionally want to run multiple independent steps and then aggregate the decision.
 //
@@ -389,9 +396,9 @@ func (o ReconcileOutcome) MustToCtrl() (ctrl.Result, error) {
 //
 // Example:
 //
-//	outcome := rf.Merge(stepA(...), stepB(...))
+//	outcome := MergeReconciles(stepA(...), stepB(...))
 //	if outcome.ShouldReturn() { return outcome }
-func (rf ReconcileFlow) Merge(outcomes ...ReconcileOutcome) ReconcileOutcome {
+func MergeReconciles(outcomes ...ReconcileOutcome) ReconcileOutcome {
 	if len(outcomes) == 0 {
 		return ReconcileOutcome{}
 	}
@@ -668,13 +675,20 @@ func (o EnsureOutcome) OptimisticLockRequired() bool {
 	return o.changeState >= changedAndOptimisticLockRequiredState
 }
 
-// Merge combines multiple EnsureOutcome values into one.
+// Merge combines this outcome with others and returns the merged result.
+//
+// This is a convenience method for chaining: eo = eo.Merge(a, b).
+func (o EnsureOutcome) Merge(others ...EnsureOutcome) EnsureOutcome {
+	return MergeEnsures(append([]EnsureOutcome{o}, others...)...)
+}
+
+// MergeEnsures combines multiple EnsureOutcome values into one.
 //
 // Use this to aggregate outcomes of multiple sub-ensures within the same ensure helper.
 //
 // - Errors are joined via errors.Join.
 // - Change/lock intent is merged deterministically (strongest wins).
-func (ef EnsureFlow) Merge(outcomes ...EnsureOutcome) EnsureOutcome {
+func MergeEnsures(outcomes ...EnsureOutcome) EnsureOutcome {
 	if len(outcomes) == 0 {
 		return EnsureOutcome{}
 	}
@@ -803,11 +817,11 @@ func (sf StepFlow) Enrichf(err error, format string, args ...any) error {
 	return Wrapf(err, format, args...)
 }
 
-// Merge combines multiple errors into one via errors.Join.
+// MergeSteps combines multiple errors into one via errors.Join.
 //
 // This is useful when you want to run multiple independent sub-steps and return a single error:
 //
-//	return sf.Merge(errA, errB, errC)
-func (sf StepFlow) Merge(errs ...error) error {
+//	return MergeSteps(errA, errB, errC)
+func MergeSteps(errs ...error) error {
 	return errors.Join(errs...)
 }

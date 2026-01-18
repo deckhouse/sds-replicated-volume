@@ -22,10 +22,22 @@ const (
 	//
 	// Reasons describe readiness or validation failure conditions.
 	ReplicatedStorageClassCondConfigurationReadyType                                 = "ConfigurationReady"
-	ReplicatedStorageClassCondConfigurationReadyReasonReady                          = "Ready"                          // Configuration is ready.
 	ReplicatedStorageClassCondConfigurationReadyReasonEligibleNodesCalculationFailed = "EligibleNodesCalculationFailed" // Eligible nodes calculation failed.
 	ReplicatedStorageClassCondConfigurationReadyReasonInvalidConfiguration           = "InvalidConfiguration"           // Configuration is invalid.
+	ReplicatedStorageClassCondConfigurationReadyReasonReady                          = "Ready"                          // Configuration is ready.
 	ReplicatedStorageClassCondConfigurationReadyReasonStoragePoolNotFound            = "StoragePoolNotFound"            // Storage pool not found.
+)
+
+const (
+	// ReplicatedStorageClassCondConfigurationRolledOutType indicates whether all volumes'
+	// configuration matches the storage class.
+	//
+	// Reasons describe configuration rollout state.
+	ReplicatedStorageClassCondConfigurationRolledOutType                                 = "ConfigurationRolledOut"
+	ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutDisabled   = "ConfigurationRolloutDisabled"   // Configuration rollout strategy is NewVolumesOnly.
+	ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutInProgress = "ConfigurationRolloutInProgress" // Configuration rollout in progress.
+	ReplicatedStorageClassCondConfigurationRolledOutReasonNewConfigurationNotYetObserved = "NewConfigurationNotYetObserved" // Some volumes haven't observed the new configuration.
+	ReplicatedStorageClassCondConfigurationRolledOutReasonRolledOutToAllVolumes          = "RolledOutToAllVolumes"          // Configuration rolled out to all volumes.
 )
 
 const (
@@ -43,25 +55,13 @@ const (
 )
 
 const (
-	// ReplicatedStorageClassCondVolumesConfigurationAlignedType indicates whether all volumes'
-	// configuration matches the storage class.
-	//
-	// Reasons describe configuration alignment state.
-	ReplicatedStorageClassCondVolumesConfigurationAlignedType                               = "VolumesConfigurationAligned"
-	ReplicatedStorageClassCondVolumesConfigurationAlignedReasonAllAligned                   = "AllAligned"                   // All volumes are aligned.
-	ReplicatedStorageClassCondVolumesConfigurationAlignedReasonConfigurationRolloutDisabled = "ConfigurationRolloutDisabled" // Configuration rollout strategy is NewVolumesOnly.
-	ReplicatedStorageClassCondVolumesConfigurationAlignedReasonInProgress                   = "InProgress"                   // Configuration rollout in progress.
-	ReplicatedStorageClassCondVolumesConfigurationAlignedReasonPendingAcknowledgment        = "PendingAcknowledgment"        // Some volumes haven't acknowledged.
-)
-
-const (
-	// ReplicatedStorageClassCondVolumesNodeEligibilityAlignedType indicates whether all volumes'
+	// ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType indicates whether all volumes'
 	// replicas are placed on eligible nodes.
 	//
-	// Reasons describe node eligibility alignment state.
-	ReplicatedStorageClassCondVolumesNodeEligibilityAlignedType                           = "VolumesNodeEligibilityAligned"
-	ReplicatedStorageClassCondVolumesNodeEligibilityAlignedReasonAllAligned               = "AllAligned"               // All volumes are aligned.
-	ReplicatedStorageClassCondVolumesNodeEligibilityAlignedReasonConflictResolutionManual = "ConflictResolutionManual" // Conflict resolution strategy is Manual.
-	ReplicatedStorageClassCondVolumesNodeEligibilityAlignedReasonInProgress               = "InProgress"               // Node eligibility alignment in progress.
-	ReplicatedStorageClassCondVolumesNodeEligibilityAlignedReasonPendingAcknowledgment    = "PendingAcknowledgment"    // Some volumes haven't acknowledged.
+	// Reasons describe eligible nodes satisfaction state.
+	ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType                                     = "VolumesSatisfyEligibleNodes"
+	ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonAllVolumesSatisfy                  = "AllVolumesSatisfy"                  // All volumes satisfy eligible nodes requirements.
+	ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonConflictResolutionInProgress       = "ConflictResolutionInProgress"       // Eligible nodes conflict resolution in progress.
+	ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonManualConflictResolution           = "ManualConflictResolution"           // Conflict resolution strategy is Manual.
+	ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonUpdatedEligibleNodesNotYetObserved = "UpdatedEligibleNodesNotYetObserved" // Some volumes haven't observed the updated eligible nodes.
 )

@@ -295,13 +295,13 @@ Rationale: change reporting / optimistic-lock intent semantically mean
 func computeIntendedFoo(ctx context.Context, obj *v1alpha1.Foo, out *IntendedFoo) (err error) {
     sf := flow.BeginStep(ctx, "compute-intended-foo")
     defer sf.OnEnd(&err)
-    ctx = sf.Ctx()
 
     if out == nil {
         return sf.Errf("out is nil")
     }
 
     // compute into *out (pure)
+    // use sf.Ctx() for context if needed
     *out = IntendedFoo{ /* ... */ }
 
     return nil

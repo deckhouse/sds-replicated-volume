@@ -572,14 +572,14 @@ spec:
                       matches the storage class.
                     format: int32
                     type: integer
-                  eligibleNodesInConflict:
-                    description: EligibleNodesInConflict is the number of volumes
+                  inConflictWithEligibleNodes:
+                    description: InConflictWithEligibleNodes is the number of volumes
                       with replicas on non-eligible nodes.
                     format: int32
                     type: integer
-                  pendingAcknowledgment:
-                    description: PendingAcknowledgment is the number of volumes that
-                      haven't acknowledged current RSC configuration.
+                  pendingObservation:
+                    description: PendingObservation is the number of volumes that
+                      haven't observed current RSC configuration.
                     format: int32
                     type: integer
                   staleConfiguration:
