@@ -152,7 +152,7 @@ func updateReplicatedVolumeIfNeeded(
 ) (changed bool) {
 	quorum, qmr := CalculateQuorum(diskfulCount, all, replication)
 	if rvStatus.DRBD == nil {
-		rvStatus.DRBD = &v1alpha1.DRBDResource{}
+		rvStatus.DRBD = &v1alpha1.DRBDResourceDetails{}
 	}
 	if rvStatus.DRBD.Config == nil {
 		rvStatus.DRBD.Config = &v1alpha1.DRBDResourceConfig{}

@@ -338,7 +338,7 @@ var _ = Describe("Reconciler", func() {
 			}),
 			Entry("nil Status.DRBD.Config", func() {
 				rv.Status = v1alpha1.ReplicatedVolumeStatus{
-					DRBD: &v1alpha1.DRBDResource{Config: nil},
+					DRBD: &v1alpha1.DRBDResourceDetails{Config: nil},
 				}
 			}),
 			func(setup func()) {
@@ -506,7 +506,7 @@ var _ = Describe("Reconciler", func() {
 					Name: "volume-config-no-minor",
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
-					DRBD: &v1alpha1.DRBDResource{
+					DRBD: &v1alpha1.DRBDResourceDetails{
 						Config: &v1alpha1.DRBDResourceConfig{
 							SharedSecret:    "test-secret",
 							SharedSecretAlg: "alg",

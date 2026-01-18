@@ -154,7 +154,7 @@ var _ = Describe("Reconciler", func() {
 		When("shared secret already set", func() {
 			BeforeEach(func() {
 				rv.Status = v1alpha1.ReplicatedVolumeStatus{
-					DRBD: &v1alpha1.DRBDResource{
+					DRBD: &v1alpha1.DRBDResourceDetails{
 						Config: &v1alpha1.DRBDResourceConfig{
 							SharedSecret:    "test-secret",
 							SharedSecretAlg: v1alpha1.SharedSecretAlg(firstAlg()),
@@ -428,7 +428,7 @@ var _ = Describe("Reconciler", func() {
 			BeforeEach(func() {
 				// Set sharedSecret so controller will check RVRs (reconcileSwitchAlgorithm)
 				rv.Status = v1alpha1.ReplicatedVolumeStatus{
-					DRBD: &v1alpha1.DRBDResource{
+					DRBD: &v1alpha1.DRBDResourceDetails{
 						Config: &v1alpha1.DRBDResourceConfig{
 							SharedSecret:    "test-secret",
 							SharedSecretAlg: v1alpha1.SharedSecretAlg(firstAlg()),
