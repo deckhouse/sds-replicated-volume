@@ -137,6 +137,9 @@ type ReplicatedStorageClassSpec struct {
 	// EligibleNodesDriftPolicy defines how the controller handles changes in eligible nodes.
 	// Always present with defaults.
 	EligibleNodesDriftPolicy ReplicatedStorageClassEligibleNodesDriftPolicy `json:"eligibleNodesDriftPolicy"`
+	// EligibleNodesPolicy defines policies for managing eligible nodes.
+	// Always present with defaults.
+	EligibleNodesPolicy ReplicatedStorageClassEligibleNodesPolicy `json:"eligibleNodesPolicy"`
 }
 
 // ReplicatedStorageClassReclaimPolicy enumerates possible values for ReplicatedStorageClass spec.reclaimPolicy field.
@@ -241,6 +244,7 @@ func (t ReplicatedStorageClassRolloutStrategyType) String() string { return stri
 type ReplicatedStorageClassRollingUpdateStrategy struct {
 	// MaxParallel is the maximum number of volumes being rolled out simultaneously.
 	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=200
 	// +kubebuilder:default:=5
 	MaxParallel int32 `json:"maxParallel"`
 }
@@ -277,13 +281,18 @@ func (t ReplicatedStorageClassEligibleNodesDriftPolicyType) String() string { re
 type ReplicatedStorageClassEligibleNodesDriftRollingUpdate struct {
 	// MaxParallel is the maximum number of volumes being updated simultaneously.
 	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=200
 	// +kubebuilder:default:=5
 	MaxParallel int32 `json:"maxParallel"`
-	// EvictFromNotReadyNodesAfter specifies how long to wait before evicting replicas
-	// from nodes that became not ready.
-	// +kubebuilder:default:="1h"
-	// +optional
-	EvictFromNotReadyNodesAfter *metav1.Duration `json:"evictFromNotReadyNodesAfter,omitempty"`
+}
+
+// ReplicatedStorageClassEligibleNodesPolicy defines policies for managing eligible nodes.
+// +kubebuilder:object:generate=true
+type ReplicatedStorageClassEligibleNodesPolicy struct {
+	// NotReadyGracePeriod specifies how long to wait before removing
+	// a not-ready node from the eligible nodes list.
+	// +kubebuilder:validation:Required
+	NotReadyGracePeriod metav1.Duration `json:"notReadyGracePeriod"`
 }
 
 // Displays current information about the Storage Class.
@@ -303,15 +312,33 @@ type ReplicatedStorageClassStatus struct {
 	Phase ReplicatedStorageClassPhase `json:"phase,omitempty"`
 	// Additional information about the current state of the Storage Class.
 	Reason string `json:"reason,omitempty"`
-	// EligibleNodesChecksum is a hash of the current eligible nodes configuration.
+	// ConfigurationGeneration is the RSC generation when configuration was accepted.
 	// +optional
-	EligibleNodesChecksum string `json:"eligibleNodesChecksum,omitempty"`
+	ConfigurationGeneration int64 `json:"configurationGeneration,omitempty"`
+	// Configuration is the resolved configuration that volumes should align to.
+	// +optional
+	Configuration *ReplicatedStorageClassConfiguration `json:"configuration,omitempty"`
+	// EligibleNodesRevision is incremented when eligible nodes change.
+	// +optional
+	EligibleNodesRevision int64 `json:"eligibleNodesRevision,omitempty"`
+	// EligibleNodesWorldState tracks external state (RSP, LVGs, Nodes) that affects eligible nodes calculation.
+	// +optional
+	EligibleNodesWorldState *ReplicatedStorageClassEligibleNodesWorldState `json:"eligibleNodesWorldState,omitempty"`
 	// EligibleNodes lists nodes eligible for this storage class.
 	// +optional
 	EligibleNodes []ReplicatedStorageClassEligibleNode `json:"eligibleNodes,omitempty"`
 	// Volumes provides aggregated volume statistics.
 	// Always present (may have total=0).
 	Volumes ReplicatedStorageClassVolumesSummary `json:"volumes"`
+}
+
+// ReplicatedStorageClassEligibleNodesWorldState tracks external state that affects eligible nodes.
+// +kubebuilder:object:generate=true
+type ReplicatedStorageClassEligibleNodesWorldState struct {
+	// Checksum is a hash of external state (RSP generation, LVG generations/annotations, Node labels/conditions).
+	Checksum string `json:"checksum"`
+	// ExpiresAt is the time when this state should be recalculated regardless of checksum match.
+	ExpiresAt metav1.Time `json:"expiresAt"`
 }
 
 // ReplicatedStorageClassPhase enumerates possible values for ReplicatedStorageClass status.phase field.
@@ -327,6 +354,27 @@ const (
 
 func (p ReplicatedStorageClassPhase) String() string {
 	return string(p)
+}
+
+// ReplicatedStorageClassConfiguration represents the resolved configuration that volumes should align to.
+// +kubebuilder:object:generate=true
+type ReplicatedStorageClassConfiguration struct {
+	// Topology is the resolved topology setting.
+	Topology ReplicatedStorageClassTopology `json:"topology"`
+	// Replication is the resolved replication mode.
+	Replication ReplicatedStorageClassReplication `json:"replication"`
+	// VolumeAccess is the resolved volume access mode.
+	VolumeAccess ReplicatedStorageClassVolumeAccess `json:"volumeAccess"`
+	// Zones is the resolved list of zones.
+	// +optional
+	Zones []string `json:"zones,omitempty"`
+	// SystemNetworkNames is the resolved list of system network names.
+	SystemNetworkNames []string `json:"systemNetworkNames"`
+	// EligibleNodesPolicy is the resolved eligible nodes policy.
+	EligibleNodesPolicy ReplicatedStorageClassEligibleNodesPolicy `json:"eligibleNodesPolicy"`
+	// NodeLabelSelector filters nodes eligible for DRBD participation.
+	// +optional
+	NodeLabelSelector *metav1.LabelSelector `json:"nodeLabelSelector,omitempty"`
 }
 
 // ReplicatedStorageClassEligibleNode represents a node eligible for placing volumes of this storage class.
@@ -346,9 +394,6 @@ type ReplicatedStorageClassEligibleNode struct {
 	// Ready indicates whether the node is ready to serve volumes.
 	// +optional
 	Ready bool `json:"ready,omitempty"`
-	// BecameNotReadyAt is the timestamp when the node became not ready.
-	// +optional
-	BecameNotReadyAt *metav1.Time `json:"becameNotReadyAt,omitempty"`
 }
 
 // ReplicatedStorageClassEligibleNodeLVMVolumeGroup represents an LVM volume group on an eligible node.
@@ -368,14 +413,22 @@ type ReplicatedStorageClassEligibleNodeLVMVolumeGroup struct {
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassVolumesSummary struct {
 	// Total is the total number of volumes.
-	Total int32 `json:"total"`
+	// +optional
+	Total *int32 `json:"total,omitempty"`
+	// PendingAcknowledgment is the number of volumes that haven't acknowledged current RSC configuration.
+	// +optional
+	PendingAcknowledgment *int32 `json:"pendingAcknowledgment,omitempty"`
 	// Aligned is the number of volumes whose configuration matches the storage class.
-	Aligned int32 `json:"aligned"`
+	// +optional
+	Aligned *int32 `json:"aligned,omitempty"`
 	// EligibleNodesViolation is the number of volumes with replicas on non-eligible nodes.
-	EligibleNodesViolation int32 `json:"eligibleNodesViolation"`
+	// +optional
+	EligibleNodesViolation *int32 `json:"eligibleNodesViolation,omitempty"`
 	// StaleConfiguration is the number of volumes with outdated configuration.
-	StaleConfiguration int32 `json:"staleConfiguration"`
+	// +optional
+	StaleConfiguration *int32 `json:"staleConfiguration,omitempty"`
 	// RollingUpdatesInProgress lists volumes currently being updated.
+	// +kubebuilder:validation:MaxItems=200
 	// +optional
 	RollingUpdatesInProgress []ReplicatedStorageClassRollingUpdateInProgress `json:"rollingUpdatesInProgress,omitempty"`
 }
@@ -385,18 +438,20 @@ type ReplicatedStorageClassVolumesSummary struct {
 type ReplicatedStorageClassRollingUpdateInProgress struct {
 	// Name is the ReplicatedVolume name.
 	Name string `json:"name"`
-	// Operations lists the types of operations being performed.
-	Operations []ReplicatedStorageClassRollingUpdateOperation `json:"operations"`
+	// Operation is the type of operation being performed.
+	Operation ReplicatedStorageClassRollingUpdateOperation `json:"operation"`
+	// StartedAt is the timestamp when the rolling update started.
+	StartedAt metav1.Time `json:"startedAt"`
 }
 
 // ReplicatedStorageClassRollingUpdateOperation describes the type of rolling update operation.
 type ReplicatedStorageClassRollingUpdateOperation string
 
 const (
-	// ReplicatedStorageClassRollingUpdateOperationConfigurationRollout means configuration is being rolled out.
-	ReplicatedStorageClassRollingUpdateOperationConfigurationRollout ReplicatedStorageClassRollingUpdateOperation = "ConfigurationRollout"
-	// ReplicatedStorageClassRollingUpdateOperationEligibleNodesViolationResolution means eligible nodes violation is being resolved.
-	ReplicatedStorageClassRollingUpdateOperationEligibleNodesViolationResolution ReplicatedStorageClassRollingUpdateOperation = "EligibleNodesViolationResolution"
+	// ReplicatedStorageClassRollingUpdateOperationFullAlignment means full alignment (configuration + eligible nodes) is in progress.
+	ReplicatedStorageClassRollingUpdateOperationFullAlignment ReplicatedStorageClassRollingUpdateOperation = "FullAlignment"
+	// ReplicatedStorageClassRollingUpdateOperationOnlyEligibleNodesViolationResolution means only eligible nodes violation is being resolved.
+	ReplicatedStorageClassRollingUpdateOperationOnlyEligibleNodesViolationResolution ReplicatedStorageClassRollingUpdateOperation = "OnlyEligibleNodesViolationResolution"
 )
 
 func (o ReplicatedStorageClassRollingUpdateOperation) String() string { return string(o) }

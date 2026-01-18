@@ -71,17 +71,12 @@ spec:
                       RollingUpdate configures parameters for RollingUpdate drift policy.
                       Required when type is RollingUpdate.
                     properties:
-                      evictFromNotReadyNodesAfter:
-                        default: 1h
-                        description: |-
-                          EvictFromNotReadyNodesAfter specifies how long to wait before evicting replicas
-                          from nodes that became not ready.
-                        type: string
                       maxParallel:
                         default: 5
                         description: MaxParallel is the maximum number of volumes
                           being updated simultaneously.
                         format: int32
+                        maximum: 200
                         minimum: 1
                         type: integer
                     required:
@@ -100,11 +95,24 @@ spec:
                   rule: self.type != 'RollingUpdate' || has(self.rollingUpdate)
                 - message: rollingUpdate must not be set when type is not RollingUpdate
                   rule: self.type == 'RollingUpdate' || !has(self.rollingUpdate)
+              eligibleNodesPolicy:
+                description: |-
+                  EligibleNodesPolicy defines policies for managing eligible nodes.
+                  Always present with defaults.
+                properties:
+                  notReadyGracePeriod:
+                    description: |-
+                      NotReadyGracePeriod specifies how long to wait before removing
+                      a not-ready node from the eligible nodes list.
+                    type: string
+                required:
+                - notReadyGracePeriod
+                type: object
               nodeLabelSelector:
                 description: |-
                   NodeLabelSelector filters nodes eligible for DRBD participation.
                   Only nodes matching this selector can store data, provide access, or host tiebreaker.
-                  If not specified, all nodes are candidates (filtered only by RSP/LVG).
+                  If not specified, all nodes are candidates.
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
@@ -194,6 +202,7 @@ spec:
                         description: MaxParallel is the maximum number of volumes
                           being rolled out simultaneously.
                         format: int32
+                        maximum: 200
                         minimum: 1
                         type: integer
                     required:
@@ -290,6 +299,7 @@ spec:
                   rule: self == oldSelf
             required:
             - eligibleNodesDriftPolicy
+            - eligibleNodesPolicy
             - reclaimPolicy
             - rolloutStrategy
             - storagePool
@@ -376,17 +386,107 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              configuration:
+                description: Configuration is the resolved configuration that volumes
+                  should align to.
+                properties:
+                  eligibleNodesPolicy:
+                    description: EligibleNodesPolicy is the resolved eligible nodes
+                      policy.
+                    properties:
+                      notReadyGracePeriod:
+                        description: |-
+                          NotReadyGracePeriod specifies how long to wait before removing
+                          a not-ready node from the eligible nodes list.
+                        type: string
+                    required:
+                    - notReadyGracePeriod
+                    type: object
+                  nodeLabelSelector:
+                    description: NodeLabelSelector filters nodes eligible for DRBD
+                      participation.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  replication:
+                    description: Replication is the resolved replication mode.
+                    type: string
+                  systemNetworkNames:
+                    description: SystemNetworkNames is the resolved list of system
+                      network names.
+                    items:
+                      type: string
+                    type: array
+                  topology:
+                    description: Topology is the resolved topology setting.
+                    type: string
+                  volumeAccess:
+                    description: VolumeAccess is the resolved volume access mode.
+                    type: string
+                  zones:
+                    description: Zones is the resolved list of zones.
+                    items:
+                      type: string
+                    type: array
+                required:
+                - eligibleNodesPolicy
+                - replication
+                - systemNetworkNames
+                - topology
+                - volumeAccess
+                type: object
+              configurationGeneration:
+                description: ConfigurationGeneration is the RSC generation when configuration
+                  was accepted.
+                format: int64
+                type: integer
               eligibleNodes:
                 description: EligibleNodes lists nodes eligible for this storage class.
                 items:
                   description: ReplicatedStorageClassEligibleNode represents a node
                     eligible for placing volumes of this storage class.
                   properties:
-                    becameNotReadyAt:
-                      description: BecameNotReadyAt is the timestamp when the node
-                        became not ready.
-                      format: date-time
-                      type: string
                     lvmVolumeGroups:
                       description: LVMVolumeGroups lists LVM volume groups available
                         on this node.
@@ -427,10 +527,28 @@ spec:
                   - nodeName
                   type: object
                 type: array
-              eligibleNodesChecksum:
-                description: EligibleNodesChecksum is a hash of the current eligible
-                  nodes configuration.
-                type: string
+              eligibleNodesRevision:
+                description: EligibleNodesRevision is incremented when eligible nodes
+                  change.
+                format: int64
+                type: integer
+              eligibleNodesWorldState:
+                description: EligibleNodesWorldState tracks external state (RSP, LVGs,
+                  Nodes) that affects eligible nodes calculation.
+                properties:
+                  checksum:
+                    description: Checksum is a hash of external state (RSP generation,
+                      LVG generations/annotations, Node labels/conditions).
+                    type: string
+                  expiresAt:
+                    description: ExpiresAt is the time when this state should be recalculated
+                      regardless of checksum match.
+                    format: date-time
+                    type: string
+                required:
+                - checksum
+                - expiresAt
+                type: object
               phase:
                 description: |-
                   The Storage class current state. Might be:
@@ -459,6 +577,11 @@ spec:
                       replicas on non-eligible nodes.
                     format: int32
                     type: integer
+                  pendingAcknowledgment:
+                    description: PendingAcknowledgment is the number of volumes that
+                      haven't acknowledged current RSC configuration.
+                    format: int32
+                    type: integer
                   rollingUpdatesInProgress:
                     description: RollingUpdatesInProgress lists volumes currently
                       being updated.
@@ -469,18 +592,20 @@ spec:
                         name:
                           description: Name is the ReplicatedVolume name.
                           type: string
-                        operations:
-                          description: Operations lists the types of operations being
-                            performed.
-                          items:
-                            description: ReplicatedStorageClassRollingUpdateOperation
-                              describes the type of rolling update operation.
-                            type: string
-                          type: array
+                        operation:
+                          description: Operation is the type of operation being performed.
+                          type: string
+                        startedAt:
+                          description: StartedAt is the timestamp when the rolling
+                            update started.
+                          format: date-time
+                          type: string
                       required:
                       - name
-                      - operations
+                      - operation
+                      - startedAt
                       type: object
+                    maxItems: 200
                     type: array
                   staleConfiguration:
                     description: StaleConfiguration is the number of volumes with
@@ -491,11 +616,6 @@ spec:
                     description: Total is the total number of volumes.
                     format: int32
                     type: integer
-                required:
-                - aligned
-                - eligibleNodesViolation
-                - staleConfiguration
-                - total
                 type: object
             required:
             - volumes

@@ -17,19 +17,22 @@ limitations under the License.
 package rsccontroller
 
 import (
+	"maps"
+
 	corev1 "k8s.io/api/core/v1"
 	nodeutil "k8s.io/component-helpers/node/util"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 // NodePredicates returns predicates for Node events.
 // Filters to only react to:
-//   - Zone label changes (topology.kubernetes.io/zone)
+//   - Label changes (for zone and nodeLabelSelector matching)
 //   - Ready condition changes
 //   - spec.unschedulable changes
 func NodePredicates() []predicate.Predicate {
@@ -42,8 +45,8 @@ func NodePredicates() []predicate.Predicate {
 					return true
 				}
 
-				// Zone label change (via client.Object getter).
-				if e.ObjectOld.GetLabels()[corev1.LabelTopologyZone] != e.ObjectNew.GetLabels()[corev1.LabelTopologyZone] {
+				// Any label change (for zone and nodeLabelSelector matching).
+				if !maps.Equal(e.ObjectOld.GetLabels(), e.ObjectNew.GetLabels()) {
 					return true
 				}
 
@@ -73,9 +76,30 @@ func RSPPredicates() []predicate.Predicate {
 }
 
 // LVGPredicates returns predicates for LVMVolumeGroup events.
-// Filters to only react to generation changes (spec updates).
+// Filters to only react to:
+//   - Generation changes (spec updates, including spec.local.nodeName)
+//   - Unschedulable annotation changes
 func LVGPredicates() []predicate.Predicate {
-	return []predicate.Predicate{predicate.GenerationChangedPredicate{}}
+	return []predicate.Predicate{
+		predicate.Funcs{
+			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				// Generation change (spec updates).
+				if e.ObjectNew.GetGeneration() != e.ObjectOld.GetGeneration() {
+					return true
+				}
+
+				// Unschedulable annotation change.
+				oldLVG, okOld := e.ObjectOld.(*snc.LVMVolumeGroup)
+				newLVG, okNew := e.ObjectNew.(*snc.LVMVolumeGroup)
+				if !okOld || !okNew || oldLVG == nil || newLVG == nil {
+					return true
+				}
+				_, oldUnschedulable := oldLVG.Annotations[v1alpha1.LVMVolumeGroupUnschedulableAnnotationKey]
+				_, newUnschedulable := newLVG.Annotations[v1alpha1.LVMVolumeGroupUnschedulableAnnotationKey]
+				return oldUnschedulable != newUnschedulable
+			},
+		},
+	}
 }
 
 // RVPredicates returns predicates for ReplicatedVolume events.

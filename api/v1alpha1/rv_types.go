@@ -251,12 +251,12 @@ type ReplicatedVolumeStorageClassConfiguration struct {
 type ReplicatedVolumeStorageClassReference struct {
 	// Name is the ReplicatedStorageClass name.
 	Name string `json:"name"`
-	// ObservedEligibleNodesChecksum is the checksum of eligible nodes when last observed.
+	// ObservedConfigurationGeneration is the RSC generation when configuration was observed.
 	// +optional
-	ObservedEligibleNodesChecksum string `json:"observedEligibleNodesChecksum,omitempty"`
-	// ObservedGeneration is the generation of RSC when last observed.
+	ObservedConfigurationGeneration int64 `json:"observedConfigurationGeneration,omitempty"`
+	// ObservedEligibleNodesRevision is the eligible nodes revision when last observed.
 	// +optional
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+	ObservedEligibleNodesRevision int64 `json:"observedEligibleNodesRevision,omitempty"`
 }
 
 // ReplicatedVolumeRolloutTicket represents a ticket for rolling out configuration changes.

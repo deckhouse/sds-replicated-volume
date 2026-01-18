@@ -276,13 +276,14 @@ spec:
                   name:
                     description: Name is the ReplicatedStorageClass name.
                     type: string
-                  observedEligibleNodesChecksum:
-                    description: ObservedEligibleNodesChecksum is the checksum of
-                      eligible nodes when last observed.
-                    type: string
-                  observedGeneration:
-                    description: ObservedGeneration is the generation of RSC when
-                      last observed.
+                  observedConfigurationGeneration:
+                    description: ObservedConfigurationGeneration is the RSC generation
+                      when configuration was observed.
+                    format: int64
+                    type: integer
+                  observedEligibleNodesRevision:
+                    description: ObservedEligibleNodesRevision is the eligible nodes
+                      revision when last observed.
                     format: int64
                     type: integer
                 required:

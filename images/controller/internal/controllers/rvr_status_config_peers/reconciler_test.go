@@ -39,7 +39,7 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvrstatusconfigpeers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_peers"
-	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
+	testhelpers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 var _ = Describe("Reconciler", func() {
@@ -58,7 +58,7 @@ var _ = Describe("Reconciler", func() {
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
-		clientBuilder = indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+		clientBuilder = testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 			WithScheme(scheme)).
 			WithStatusSubresource(
 				&v1alpha1.ReplicatedVolumeReplica{},
