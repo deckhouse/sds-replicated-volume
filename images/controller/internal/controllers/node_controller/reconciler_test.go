@@ -52,11 +52,25 @@ var _ = Describe("nodeMatchesRSC", func() {
 		}
 	})
 
+	Context("configuration presence", func() {
+		It("returns false when RSC has no configuration", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: nil,
+				},
+			}
+
+			Expect(nodeMatchesRSC(node, rsc)).To(BeFalse())
+		})
+	})
+
 	Context("zone matching", func() {
 		It("returns true when RSC has no zones specified", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: nil,
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: nil,
+					},
 				},
 			}
 
@@ -65,8 +79,10 @@ var _ = Describe("nodeMatchesRSC", func() {
 
 		It("returns true when RSC has empty zones", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{},
+					},
 				},
 			}
 
@@ -75,8 +91,10 @@ var _ = Describe("nodeMatchesRSC", func() {
 
 		It("returns true when node is in one of RSC zones", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-a", "zone-b", "zone-c"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-a", "zone-b", "zone-c"},
+					},
 				},
 			}
 
@@ -85,8 +103,10 @@ var _ = Describe("nodeMatchesRSC", func() {
 
 		It("returns false when node is not in any of RSC zones", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-x", "zone-y"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-x", "zone-y"},
+					},
 				},
 			}
 
@@ -101,8 +121,10 @@ var _ = Describe("nodeMatchesRSC", func() {
 				},
 			}
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-a"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-a"},
+					},
 				},
 			}
 
@@ -113,8 +135,10 @@ var _ = Describe("nodeMatchesRSC", func() {
 	Context("nodeLabelSelector matching", func() {
 		It("returns true when RSC has no nodeLabelSelector", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					NodeLabelSelector: nil,
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						NodeLabelSelector: nil,
+					},
 				},
 			}
 
@@ -123,10 +147,12 @@ var _ = Describe("nodeMatchesRSC", func() {
 
 		It("returns true when node matches nodeLabelSelector", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					NodeLabelSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"env": "prod",
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						NodeLabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"env": "prod",
+							},
 						},
 					},
 				},
@@ -137,10 +163,12 @@ var _ = Describe("nodeMatchesRSC", func() {
 
 		It("returns false when node does not match nodeLabelSelector", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					NodeLabelSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"env": "staging",
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						NodeLabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"env": "staging",
+							},
 						},
 					},
 				},
@@ -151,13 +179,15 @@ var _ = Describe("nodeMatchesRSC", func() {
 
 		It("returns true when node matches nodeLabelSelector with MatchExpressions", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					NodeLabelSelector: &metav1.LabelSelector{
-						MatchExpressions: []metav1.LabelSelectorRequirement{
-							{
-								Key:      "env",
-								Operator: metav1.LabelSelectorOpIn,
-								Values:   []string{"prod", "staging"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						NodeLabelSelector: &metav1.LabelSelector{
+							MatchExpressions: []metav1.LabelSelectorRequirement{
+								{
+									Key:      "env",
+									Operator: metav1.LabelSelectorOpIn,
+									Values:   []string{"prod", "staging"},
+								},
 							},
 						},
 					},
@@ -169,13 +199,15 @@ var _ = Describe("nodeMatchesRSC", func() {
 
 		It("returns false when node does not match nodeLabelSelector with MatchExpressions", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					NodeLabelSelector: &metav1.LabelSelector{
-						MatchExpressions: []metav1.LabelSelectorRequirement{
-							{
-								Key:      "env",
-								Operator: metav1.LabelSelectorOpNotIn,
-								Values:   []string{"prod", "staging"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						NodeLabelSelector: &metav1.LabelSelector{
+							MatchExpressions: []metav1.LabelSelectorRequirement{
+								{
+									Key:      "env",
+									Operator: metav1.LabelSelectorOpNotIn,
+									Values:   []string{"prod", "staging"},
+								},
 							},
 						},
 					},
@@ -185,33 +217,37 @@ var _ = Describe("nodeMatchesRSC", func() {
 			Expect(nodeMatchesRSC(node, rsc)).To(BeFalse())
 		})
 
-		It("returns false when nodeLabelSelector is invalid", func() {
+		It("panics when nodeLabelSelector is invalid", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					NodeLabelSelector: &metav1.LabelSelector{
-						MatchExpressions: []metav1.LabelSelectorRequirement{
-							{
-								Key:      "env",
-								Operator: metav1.LabelSelectorOperator("invalid-operator"),
-								Values:   []string{"prod"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						NodeLabelSelector: &metav1.LabelSelector{
+							MatchExpressions: []metav1.LabelSelectorRequirement{
+								{
+									Key:      "env",
+									Operator: metav1.LabelSelectorOperator("invalid-operator"),
+									Values:   []string{"prod"},
+								},
 							},
 						},
 					},
 				},
 			}
 
-			Expect(nodeMatchesRSC(node, rsc)).To(BeFalse())
+			Expect(func() { nodeMatchesRSC(node, rsc) }).To(Panic())
 		})
 	})
 
 	Context("combined zone and nodeLabelSelector", func() {
 		It("returns true when both zone and nodeLabelSelector match", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-a", "zone-b"},
-					NodeLabelSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"env": "prod",
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-a", "zone-b"},
+						NodeLabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"env": "prod",
+							},
 						},
 					},
 				},
@@ -222,11 +258,13 @@ var _ = Describe("nodeMatchesRSC", func() {
 
 		It("returns false when zone matches but nodeLabelSelector does not", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-a"},
-					NodeLabelSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"env": "staging",
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-a"},
+						NodeLabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"env": "staging",
+							},
 						},
 					},
 				},
@@ -237,11 +275,13 @@ var _ = Describe("nodeMatchesRSC", func() {
 
 		It("returns false when nodeLabelSelector matches but zone does not", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-x"},
-					NodeLabelSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"env": "prod",
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-x"},
+						NodeLabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"env": "prod",
+							},
 						},
 					},
 				},
@@ -272,16 +312,37 @@ var _ = Describe("nodeMatchesAnyRSC", func() {
 		Expect(nodeMatchesAnyRSC(node, rscs)).To(BeFalse())
 	})
 
-	It("returns true when node matches at least one RSC", func() {
+	It("returns false when all RSCs have no configuration", func() {
 		rscs := []v1alpha1.ReplicatedStorageClass{
 			{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-x"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: nil,
 				},
 			},
 			{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-a"}, // matches
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: nil,
+				},
+			},
+		}
+
+		Expect(nodeMatchesAnyRSC(node, rscs)).To(BeFalse())
+	})
+
+	It("returns true when node matches at least one RSC", func() {
+		rscs := []v1alpha1.ReplicatedStorageClass{
+			{
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-x"},
+					},
+				},
+			},
+			{
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-a"}, // matches
+					},
 				},
 			},
 		}
@@ -292,13 +353,17 @@ var _ = Describe("nodeMatchesAnyRSC", func() {
 	It("returns false when node matches no RSC", func() {
 		rscs := []v1alpha1.ReplicatedStorageClass{
 			{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-x"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-x"},
+					},
 				},
 			},
 			{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-y"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-y"},
+					},
 				},
 			},
 		}
@@ -309,13 +374,36 @@ var _ = Describe("nodeMatchesAnyRSC", func() {
 	It("returns true when node matches first RSC", func() {
 		rscs := []v1alpha1.ReplicatedStorageClass{
 			{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-a"}, // matches first
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-a"}, // matches first
+					},
 				},
 			},
 			{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-x"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-x"},
+					},
+				},
+			},
+		}
+
+		Expect(nodeMatchesAnyRSC(node, rscs)).To(BeTrue())
+	})
+
+	It("skips RSCs without configuration and matches one with configuration", func() {
+		rscs := []v1alpha1.ReplicatedStorageClass{
+			{
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: nil, // no configuration — skip
+				},
+			},
+			{
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-a"}, // matches
+					},
 				},
 			},
 		}
@@ -348,10 +436,32 @@ var _ = Describe("computeTargetNodes", func() {
 		Expect(target["node-2"]).To(BeFalse())
 	})
 
-	It("returns correct target when RSC has no constraints", func() {
+	It("returns all false when all RSCs have no configuration", func() {
 		rscs := []v1alpha1.ReplicatedStorageClass{
 			{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: nil,
+				},
+			},
+		}
+		nodes := []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-2"}},
+		}
+
+		target := computeTargetNodes(rscs, nodes)
+
+		Expect(target).To(HaveLen(2))
+		Expect(target["node-1"]).To(BeFalse())
+		Expect(target["node-2"]).To(BeFalse())
+	})
+
+	It("returns correct target when RSC configuration has no constraints", func() {
+		rscs := []v1alpha1.ReplicatedStorageClass{
+			{
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{},
+				},
 			},
 		}
 		nodes := []corev1.Node{
@@ -369,8 +479,10 @@ var _ = Describe("computeTargetNodes", func() {
 	It("returns correct target based on zone filtering", func() {
 		rscs := []v1alpha1.ReplicatedStorageClass{
 			{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-a", "zone-b"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-a", "zone-b"},
+					},
 				},
 			},
 		}
@@ -406,10 +518,12 @@ var _ = Describe("computeTargetNodes", func() {
 	It("returns correct target based on nodeLabelSelector filtering", func() {
 		rscs := []v1alpha1.ReplicatedStorageClass{
 			{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					NodeLabelSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"storage": "fast",
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						NodeLabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"storage": "fast",
+							},
 						},
 					},
 				},
@@ -440,13 +554,17 @@ var _ = Describe("computeTargetNodes", func() {
 	It("returns true if node matches any RSC", func() {
 		rscs := []v1alpha1.ReplicatedStorageClass{
 			{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-a"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-a"},
+					},
 				},
 			},
 			{
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-b"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-b"},
+					},
 				},
 			},
 		}
@@ -505,8 +623,10 @@ var _ = Describe("Reconciler", func() {
 			}
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-a"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-a"},
+					},
 				},
 			}
 			cl = fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsc).Build()
@@ -535,8 +655,39 @@ var _ = Describe("Reconciler", func() {
 			}
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-x"}, // node-1 is in zone-a, not zone-x
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-x"}, // node-1 is in zone-a, not zone-x
+					},
+				},
+			}
+			cl = fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsc).Build()
+			rec = NewReconciler(cl)
+
+			result, err := rec.Reconcile(context.Background(), reconcile.Request{})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			var updatedNode corev1.Node
+			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-1"}, &updatedNode)).To(Succeed())
+			Expect(updatedNode.Labels).NotTo(HaveKey(v1alpha1.AgentNodeLabelKey))
+		})
+
+		It("removes label from node when RSC has no configuration yet", func() {
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-1",
+					Labels: map[string]string{
+						corev1.LabelTopologyZone:   "zone-a",
+						v1alpha1.AgentNodeLabelKey: "node-1",
+					},
+				},
+			}
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: nil, // no configuration yet
 				},
 			}
 			cl = fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsc).Build()
@@ -564,8 +715,10 @@ var _ = Describe("Reconciler", func() {
 			}
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-a"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-a"},
+					},
 				},
 			}
 			cl = fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsc).Build()
@@ -590,8 +743,10 @@ var _ = Describe("Reconciler", func() {
 			}
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-x"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-x"},
+					},
 				},
 			}
 			cl = fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsc).Build()
@@ -628,14 +783,18 @@ var _ = Describe("Reconciler", func() {
 			}
 			rsc1 := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-a"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-a"},
+					},
 				},
 			}
 			rsc2 := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-2"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Zones: []string{"zone-b"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Zones: []string{"zone-b"},
+					},
 				},
 			}
 			cl = fake.NewClientBuilder().WithScheme(scheme).WithObjects(node1, node2, node3, rsc1, rsc2).Build()
@@ -708,10 +867,12 @@ var _ = Describe("Reconciler", func() {
 			}
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					NodeLabelSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"storage": "fast",
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						NodeLabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"storage": "fast",
+							},
 						},
 					},
 				},

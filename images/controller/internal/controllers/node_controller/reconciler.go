@@ -131,22 +131,30 @@ func nodeMatchesAnyRSC(node *corev1.Node, rscs []v1alpha1.ReplicatedStorageClass
 	return false
 }
 
-// nodeMatchesRSC returns true if the node matches the RSC's zones AND nodeLabelSelector.
+// nodeMatchesRSC returns true if the node matches the RSC's configuration zones AND nodeLabelSelector.
+// Returns false if RSC has no configuration yet.
 func nodeMatchesRSC(node *corev1.Node, rsc *v1alpha1.ReplicatedStorageClass) bool {
+	cfg := rsc.Status.Configuration
+	if cfg == nil {
+		// RSC has no configuration yet — skip.
+		return false
+	}
+
 	// Zones check: if RSC has zones, node must be in one of them.
-	if len(rsc.Spec.Zones) > 0 {
+	if len(cfg.Zones) > 0 {
 		nodeZone := node.Labels[corev1.LabelTopologyZone]
-		if !slices.Contains(rsc.Spec.Zones, nodeZone) {
+		if !slices.Contains(cfg.Zones, nodeZone) {
 			return false
 		}
 	}
 
 	// NodeLabelSelector check: if RSC has nodeLabelSelector, node must match it.
-	if rsc.Spec.NodeLabelSelector != nil {
-		selector, err := metav1.LabelSelectorAsSelector(rsc.Spec.NodeLabelSelector)
+	if cfg.NodeLabelSelector != nil {
+		selector, err := metav1.LabelSelectorAsSelector(cfg.NodeLabelSelector)
 		if err != nil {
-			// Invalid selector - treat as no match.
-			return false
+			// Configuration is validated before being written to status.configuration,
+			// so an invalid selector here indicates a bug.
+			panic(err)
 		}
 		if !selector.Matches(labels.Set(node.Labels)) {
 			return false
