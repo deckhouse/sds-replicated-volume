@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvquorumcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 var _ = Describe("Reconciler", func() {
@@ -43,14 +44,27 @@ var _ = Describe("Reconciler", func() {
 	var cl client.Client
 	var rec *rvquorumcontroller.Reconciler
 
+	withRVRIndex := func(b *fake.ClientBuilder) *fake.ClientBuilder {
+		return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRByReplicatedVolumeName, func(obj client.Object) []string {
+			rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+			if !ok {
+				return nil
+			}
+			if rvr.Spec.ReplicatedVolumeName == "" {
+				return nil
+			}
+			return []string{rvr.Spec.ReplicatedVolumeName}
+		})
+	}
+
 	BeforeEach(func() {
 		cl = nil
 		rec = nil
-		clientBuilder = fake.NewClientBuilder().
+		clientBuilder = withRVRIndex(fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(
 				&v1alpha1.ReplicatedVolumeReplica{},
-				&v1alpha1.ReplicatedVolume{})
+				&v1alpha1.ReplicatedVolume{}))
 	})
 
 	JustBeforeEach(func() {
@@ -85,7 +99,7 @@ var _ = Describe("Reconciler", func() {
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: rsc.Name,
 				},
-				Status: &v1alpha1.ReplicatedVolumeStatus{
+				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions:          []metav1.Condition{},
 					DiskfulReplicaCount: "3/3",
 				},
@@ -139,13 +153,10 @@ var _ = Describe("Reconciler", func() {
 					})).NotTo(Requeue())
 				})
 			},
-			Entry("because Status is nil", func() {
-				rv.Status = nil
+			Entry("because Status is empty", func() {
+				rv.Status = v1alpha1.ReplicatedVolumeStatus{}
 			}),
 			Entry("because Conditions is nil", func() {
-				if rv.Status == nil {
-					rv.Status = &v1alpha1.ReplicatedVolumeStatus{}
-				}
 				rv.Status.Conditions = nil
 			}),
 			Entry("because Conditions is empty", func() {
@@ -154,7 +165,7 @@ var _ = Describe("Reconciler", func() {
 			Entry("because Configured is false", func() {
 				rv.Status.Conditions = []metav1.Condition{
 					{
-						Type:   v1alpha1.ConditionTypeConfigured,
+						Type:   v1alpha1.ReplicatedVolumeCondConfiguredType,
 						Status: metav1.ConditionFalse,
 					},
 				}
@@ -169,10 +180,10 @@ var _ = Describe("Reconciler", func() {
 
 		When("ReplicatedVolume is ready", func() {
 			BeforeEach(func() {
-				rv.ObjectMeta.Finalizers = []string{v1alpha1.ControllerAppFinalizer}
+				rv.ObjectMeta.Finalizers = []string{v1alpha1.ControllerFinalizer}
 				rv.Status.Conditions = []metav1.Condition{
 					{
-						Type:   v1alpha1.ConditionTypeConfigured,
+						Type:   v1alpha1.ReplicatedVolumeCondConfiguredType,
 						Status: metav1.ConditionTrue,
 					},
 				}

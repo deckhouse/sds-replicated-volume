@@ -1,17 +1,35 @@
+/*
+Copyright 2026 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package drbdconfig
 
 import (
+	"slices"
+
 	"k8s.io/apimachinery/pkg/api/equality"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func (r *Reconciler) RVCreateShouldBeReconciled(rv *v1alpha1.ReplicatedVolume) bool {
-	if !v1alpha1.HasControllerFinalizer(rv) {
+	if !slices.Contains(rv.Finalizers, v1alpha1.ControllerFinalizer) {
 		return false
 	}
 
-	if rv.Status == nil || rv.Status.DRBD == nil || rv.Status.DRBD.Config == nil {
+	if rv.Status.DRBD == nil || rv.Status.DRBD.Config == nil {
 		return false
 	}
 	if rv.Status.DRBD.Config.SharedSecret == "" {
@@ -55,7 +73,7 @@ func (r *Reconciler) RVRCreateShouldBeReconciled(
 
 	if rvr.DeletionTimestamp != nil {
 		for _, f := range rvr.Finalizers {
-			if f != v1alpha1.AgentAppFinalizer {
+			if f != v1alpha1.AgentFinalizer {
 				return false
 			}
 		}
@@ -63,7 +81,7 @@ func (r *Reconciler) RVRCreateShouldBeReconciled(
 		if rvr.Spec.ReplicatedVolumeName == "" {
 			return false
 		}
-		if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil {
+		if rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil {
 			return false
 		}
 		if rvr.Status.DRBD.Config.Address == nil {
@@ -115,7 +133,7 @@ func rvrStatusDRBDConfigEqual(rvrOld, rvrNew *v1alpha1.ReplicatedVolumeReplica) 
 }
 
 func getDRBDConfig(rvr *v1alpha1.ReplicatedVolumeReplica) *v1alpha1.DRBDConfig {
-	if rvr.Status == nil || rvr.Status.DRBD == nil {
+	if rvr.Status.DRBD == nil {
 		return nil
 	}
 	return rvr.Status.DRBD.Config
@@ -126,8 +144,5 @@ func rvrStatusLVMLogicalVolumeNameEqual(rvrOld, rvrNew *v1alpha1.ReplicatedVolum
 }
 
 func getLVMLogicalVolumeName(rvr *v1alpha1.ReplicatedVolumeReplica) string {
-	if rvr.Status == nil {
-		return ""
-	}
 	return rvr.Status.LVMLogicalVolumeName
 }

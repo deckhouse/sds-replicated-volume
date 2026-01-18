@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -120,10 +120,6 @@ var _ = Describe("Reconciler", func() {
 		When("RVR has DeletionTimestamp", func() {
 			BeforeEach(func() {
 				rvr.Finalizers = []string{}
-				// Ensure status is set before creating RVR
-				if rvr.Status == nil {
-					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-				}
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
@@ -136,9 +132,9 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			DescribeTableSubtree("when status does not have LLV name because",
-				Entry("nil Status", func() { rvr.Status = nil }),
+				Entry("empty Status", func() { rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{} }),
 				Entry("empty LVMLogicalVolumeName", func() {
-					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{LVMLogicalVolumeName: ""}
+					rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{LVMLogicalVolumeName: ""}
 				}),
 				func(setup func()) {
 					BeforeEach(func() {
@@ -155,7 +151,7 @@ var _ = Describe("Reconciler", func() {
 
 			When("status has LVMLogicalVolumeName", func() {
 				BeforeEach(func() {
-					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+					rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 						LVMLogicalVolumeName: "test-llv",
 					}
 				})
@@ -318,7 +314,7 @@ var _ = Describe("Reconciler", func() {
 
 						When("ActualType matches Spec.Type", func() {
 							BeforeEach(func() {
-								rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+								rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 									ActualType: rvr.Spec.Type,
 								}
 							})
@@ -333,7 +329,7 @@ var _ = Describe("Reconciler", func() {
 
 						When("ActualType does not match Spec.Type", func() {
 							BeforeEach(func() {
-								rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+								rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 									ActualType:           v1alpha1.ReplicaTypeDiskful,
 									LVMLogicalVolumeName: "keep-llv",
 								}
@@ -344,9 +340,9 @@ var _ = Describe("Reconciler", func() {
 							})
 						})
 
-						When("Status is nil", func() {
+						When("Status is empty", func() {
 							BeforeEach(func() {
-								rvr.Status = nil
+								rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{}
 							})
 
 							It("should reconcile successfully without error", func(ctx SpecContext) {
@@ -382,9 +378,9 @@ var _ = Describe("Reconciler", func() {
 							rvr.Spec.Type = v1alpha1.ReplicaTypeDiskful
 						})
 
-						When("Status is nil", func() {
+						When("Status is empty", func() {
 							BeforeEach(func() {
-								rvr.Status = nil
+								rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{}
 							})
 
 							It("should call reconcileLLVNormal", func(ctx SpecContext) {
@@ -394,7 +390,7 @@ var _ = Describe("Reconciler", func() {
 
 						When("Status.LVMLogicalVolumeName is empty", func() {
 							BeforeEach(func() {
-								rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+								rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 									LVMLogicalVolumeName: "",
 								}
 							})
@@ -406,7 +402,7 @@ var _ = Describe("Reconciler", func() {
 
 						When("Status.LVMLogicalVolumeName is set", func() {
 							BeforeEach(func() {
-								rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+								rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 									LVMLogicalVolumeName: "existing-llv",
 								}
 							})
@@ -524,7 +520,7 @@ var _ = Describe("Reconciler", func() {
 
 			When("RVR is Diskful with NodeName and no LLV name in status", func() {
 				BeforeEach(func() {
-					rvr.Status = nil
+					rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{}
 				})
 
 				When("LLV does not exist", func() {
@@ -550,7 +546,7 @@ var _ = Describe("Reconciler", func() {
 
 					When("ActualType was Access before switching to Diskful", func() {
 						BeforeEach(func() {
-							rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+							rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 								ActualType: v1alpha1.ReplicaTypeAccess,
 							}
 						})
@@ -810,7 +806,7 @@ var _ = Describe("Reconciler", func() {
 
 						When("RVR status does not have LLV name", func() {
 							BeforeEach(func() {
-								rvr.Status = nil
+								rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{}
 							})
 
 							It("should update RVR status with LLV name", func(ctx SpecContext) {
@@ -847,7 +843,7 @@ var _ = Describe("Reconciler", func() {
 
 						When("RVR status already has LLV name", func() {
 							BeforeEach(func() {
-								rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+								rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 									LVMLogicalVolumeName: llv.Name,
 								}
 							})
@@ -919,7 +915,7 @@ var _ = Describe("Reconciler", func() {
 					ReplicatedVolumeName: "type-switch-rv",
 					Type:                 v1alpha1.ReplicaTypeAccess,
 				},
-				Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 					ActualType:           v1alpha1.ReplicaTypeAccess,
 					LVMLogicalVolumeName: "type-switch-llv",
 				},
@@ -990,7 +986,7 @@ var _ = Describe("Reconciler", func() {
 					ReplicatedVolumeName: "mismatch-rv",
 					Type:                 v1alpha1.ReplicaTypeAccess,
 				},
-				Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 					ActualType:           v1alpha1.ReplicaTypeDiskful,
 					LVMLogicalVolumeName: "keep-llv",
 				},
@@ -1043,7 +1039,7 @@ var _ = Describe("Reconciler", func() {
 					Type:                 v1alpha1.ReplicaTypeDiskful,
 					NodeName:             "node-1",
 				},
-				Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 					LVMLogicalVolumeName: "",
 				},
 			}

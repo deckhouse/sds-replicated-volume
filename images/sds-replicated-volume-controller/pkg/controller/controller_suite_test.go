@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -200,7 +200,7 @@ func getAndValidateNotReconciledRSC(ctx context.Context, cl client.Client, testN
 	Expect(err).NotTo(HaveOccurred())
 	Expect(replicatedSC.Name).To(Equal(testName))
 	Expect(replicatedSC.Finalizers).To(BeNil())
-	Expect(replicatedSC.Status.Phase).To(Equal(""))
+	Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhase("")))
 	Expect(replicatedSC.Status.Reason).To(Equal(""))
 
 	return replicatedSC
@@ -277,8 +277,8 @@ func getConfigMap(ctx context.Context, cl client.Client, namespace string) (*cor
 	return configMap, err
 }
 
-func getVolumeBindingMode(volumeAccess string) storagev1.VolumeBindingMode {
-	if volumeAccess == controller.VolumeAccessAny {
+func getVolumeBindingMode(volumeAccess srv.ReplicatedStorageClassVolumeAccess) storagev1.VolumeBindingMode {
+	if volumeAccess == srv.VolumeAccessAny {
 		return storagev1.VolumeBindingImmediate
 	}
 

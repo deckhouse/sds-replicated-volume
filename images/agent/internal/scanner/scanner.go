@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -307,7 +307,7 @@ func (s *Scanner) updateReplicaStatusIfNeeded(
 // - DiskState (e.g. "Outdated") when not syncing but not in sync
 func calculateSyncProgress(rvr *v1alpha1.ReplicatedVolumeReplica) string {
 	// Check InSync condition first
-	inSyncCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeInSync)
+	inSyncCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondInSyncType)
 	if inSyncCond != nil && inSyncCond.Status == metav1.ConditionTrue {
 		return "True"
 	}

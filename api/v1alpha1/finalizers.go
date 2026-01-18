@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,28 +16,6 @@ limitations under the License.
 
 package v1alpha1
 
-import (
-	"slices"
+const AgentFinalizer = "sds-replicated-volume.deckhouse.io/agent"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-)
-
-const AgentAppFinalizer = "sds-replicated-volume.deckhouse.io/agent"
-
-const ControllerAppFinalizer = "sds-replicated-volume.deckhouse.io/controller"
-
-func isExternalFinalizer(f string) bool {
-	return f != ControllerAppFinalizer && f != AgentAppFinalizer
-}
-
-func HasExternalFinalizers(obj metav1.Object) bool {
-	return slices.ContainsFunc(obj.GetFinalizers(), isExternalFinalizer)
-}
-
-func HasControllerFinalizer(obj metav1.Object) bool {
-	return slices.Contains(obj.GetFinalizers(), ControllerAppFinalizer)
-}
-
-func HasAgentFinalizer(obj metav1.Object) bool {
-	return slices.Contains(obj.GetFinalizers(), AgentAppFinalizer)
-}
+const ControllerFinalizer = "sds-replicated-volume.deckhouse.io/controller"

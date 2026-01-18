@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
@@ -63,7 +64,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 		return reconcile.Result{}, err
 	}
 
-	if !v1alpha1.HasControllerFinalizer(&rv) {
+	if !obju.HasFinalizer(&rv, v1alpha1.ControllerFinalizer) {
 		log.Info("ReplicatedVolume does not have controller finalizer, skipping")
 		return reconcile.Result{}, nil
 	}
@@ -86,7 +87,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 			return true
 		}
 
-		if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil {
+		if rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil {
 			log.V(2).Info("No status.drbd.config. Skipping")
 			return true
 		}

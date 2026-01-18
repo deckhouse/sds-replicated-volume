@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
@@ -53,7 +54,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if !rvr.DeletionTimestamp.IsZero() && !v1alpha1.HasExternalFinalizers(rvr) {
+	if !rvr.DeletionTimestamp.IsZero() && !obju.HasFinalizersOtherThan(rvr, v1alpha1.ControllerFinalizer, v1alpha1.AgentFinalizer) {
 		return reconcile.Result{}, nil
 	}
 
@@ -102,11 +103,7 @@ func (r *Reconciler) processLabels(log logr.Logger, rvr *v1alpha1.ReplicatedVolu
 
 	// Set replicated-volume label from spec
 	if rvr.Spec.ReplicatedVolumeName != "" {
-		rvr.Labels, labelChanged = v1alpha1.EnsureLabel(
-			rvr.Labels,
-			v1alpha1.LabelReplicatedVolume,
-			rvr.Spec.ReplicatedVolumeName,
-		)
+		labelChanged = obju.SetLabel(rvr, v1alpha1.ReplicatedVolumeLabelKey, rvr.Spec.ReplicatedVolumeName)
 		if labelChanged {
 			log.V(1).Info("replicated-volume label set on rvr",
 				"rv", rvr.Spec.ReplicatedVolumeName)
@@ -116,11 +113,7 @@ func (r *Reconciler) processLabels(log logr.Logger, rvr *v1alpha1.ReplicatedVolu
 
 	// Set replicated-storage-class label from RV
 	if rv.Spec.ReplicatedStorageClassName != "" {
-		rvr.Labels, labelChanged = v1alpha1.EnsureLabel(
-			rvr.Labels,
-			v1alpha1.LabelReplicatedStorageClass,
-			rv.Spec.ReplicatedStorageClassName,
-		)
+		labelChanged = obju.SetLabel(rvr, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName)
 		if labelChanged {
 			log.V(1).Info("replicated-storage-class label set on rvr",
 				"rsc", rv.Spec.ReplicatedStorageClassName)

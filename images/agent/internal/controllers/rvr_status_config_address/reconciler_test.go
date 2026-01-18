@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -171,7 +171,7 @@ var _ = Describe("Reconciler", func() {
 
 				rvrList[i] = v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-%d-this-node", i+1)},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 						Conditions: []metav1.Condition{},
 						DRBD:       &v1alpha1.DRBD{Config: &v1alpha1.DRBDConfig{Address: &v1alpha1.Address{}}},
 					},
@@ -182,7 +182,7 @@ var _ = Describe("Reconciler", func() {
 				otherNodeRVRList[i] = v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-%d-other-node", i+1)},
 					Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "other-node"},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 						Conditions: []metav1.Condition{},
 						DRBD:       &v1alpha1.DRBD{Config: &v1alpha1.DRBDConfig{Address: &v1alpha1.Address{}}},
 					},
@@ -242,14 +242,14 @@ var _ = Describe("Reconciler", func() {
 
 				By("verifying condition was set")
 				Expect(rvr).To(HaveField("Status.Conditions", ContainElement(SatisfyAll(
-					HaveField("Type", Equal(v1alpha1.ConditionTypeAddressConfigured)),
+					HaveField("Type", Equal(v1alpha1.ReplicatedVolumeReplicaCondAddressConfiguredType)),
 					HaveField("Status", Equal(metav1.ConditionTrue)),
-					HaveField("Reason", Equal(v1alpha1.ReasonAddressConfigurationSucceeded)),
+					HaveField("Reason", Equal(v1alpha1.ReplicatedVolumeReplicaCondAddressConfiguredReasonAddressConfigurationSucceeded)),
 				))))
 			})
 
 			DescribeTableSubtree("should work with nil",
-				Entry("Status", func() { rvr.Status = nil }),
+				Entry("Status", func() { rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{} }),
 				Entry("DRBD", func() { rvr.Status.DRBD = nil }),
 				Entry("Config", func() { rvr.Status.DRBD.Config = nil }),
 				Entry("Address", func() { rvr.Status.DRBD.Config.Address = nil }),
@@ -268,7 +268,7 @@ var _ = Describe("Reconciler", func() {
 
 			When("RVR has different IP address", func() {
 				BeforeEach(func() {
-					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+					rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 						DRBD: &v1alpha1.DRBD{Config: &v1alpha1.DRBDConfig{Address: &v1alpha1.Address{
 							IPv4: "192.168.1.99", // different IP
 							Port: 7500,
@@ -336,9 +336,9 @@ var _ = Describe("Reconciler", func() {
 				By("verifying second RVR has error condition")
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[1]), &rvrList[1])).To(Succeed())
 				Expect(rvrList[1].Status.Conditions).To(ContainElement(SatisfyAll(
-					HaveField("Type", Equal(v1alpha1.ConditionTypeAddressConfigured)),
+					HaveField("Type", Equal(v1alpha1.ReplicatedVolumeReplicaCondAddressConfiguredType)),
 					HaveField("Status", Equal(metav1.ConditionFalse)),
-					HaveField("Reason", Equal(v1alpha1.ReasonNoFreePortAvailable)),
+					HaveField("Reason", Equal(v1alpha1.ReplicatedVolumeReplicaCondAddressConfiguredReasonNoFreePortAvailable)),
 				)))
 			})
 		})
@@ -351,8 +351,7 @@ func HaveUniquePorts() gomegatypes.GomegaMatcher {
 	return gcustom.MakeMatcher(func(list []v1alpha1.ReplicatedVolumeReplica) (bool, error) {
 		result := make(map[uint]struct{}, len(list))
 		for i := range list {
-			if list[i].Status == nil ||
-				list[i].Status.DRBD == nil ||
+			if list[i].Status.DRBD == nil ||
 				list[i].Status.DRBD.Config == nil ||
 				list[i].Status.DRBD.Config.Address == nil {
 				return false, fmt.Errorf("item %d does not have port", i)

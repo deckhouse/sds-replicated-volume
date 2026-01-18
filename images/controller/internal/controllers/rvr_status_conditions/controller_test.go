@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -71,7 +71,7 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 			inputObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "some-pod",
-					Namespace: v1alpha1.ModuleNamespace,
+					Namespace: agentNamespaceDefault,
 					Labels:    map[string]string{"app": "other"},
 				},
 				Spec: corev1.PodSpec{NodeName: "node-1"},
@@ -84,7 +84,7 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 			inputObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "agent-pod",
-					Namespace: v1alpha1.ModuleNamespace,
+					Namespace: agentNamespaceDefault,
 					Labels:    map[string]string{AgentPodLabel: AgentPodValue},
 				},
 			},
@@ -101,7 +101,7 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 			inputObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "agent-pod",
-					Namespace: v1alpha1.ModuleNamespace,
+					Namespace: agentNamespaceDefault,
 					Labels:    map[string]string{AgentPodLabel: AgentPodValue},
 				},
 				Spec: corev1.PodSpec{NodeName: "node-1"},
@@ -127,7 +127,7 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 			inputObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "agent-pod",
-					Namespace: v1alpha1.ModuleNamespace,
+					Namespace: agentNamespaceDefault,
 					Labels:    map[string]string{AgentPodLabel: AgentPodValue},
 				},
 				Spec: corev1.PodSpec{NodeName: "node-1"},

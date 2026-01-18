@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -41,7 +41,6 @@ func TestRvrStatusConfigPeers(t *testing.T) {
 // HaveNoPeers is a Gomega matcher that checks a single RVR has no peers
 func HaveNoPeers() gomegatypes.GomegaMatcher {
 	return SatisfyAny(
-		HaveField("Status", BeNil()),
 		HaveField("Status.DRBD", BeNil()),
 		HaveField("Status.DRBD.Config", BeNil()),
 		HaveField("Status.DRBD.Config.Peers", BeEmpty()),
@@ -56,11 +55,6 @@ func HaveAllPeersSet(expectedPeerReplicas []v1alpha1.ReplicatedVolumeReplica) go
 	}
 	expectedPeers := make(map[string]v1alpha1.Peer, len(expectedPeerReplicas)-1)
 	for _, rvr := range expectedPeerReplicas {
-		if rvr.Status == nil {
-			return gcustom.MakeMatcher(func(_ any) bool { return false }).
-				WithMessage("expected rvr to have status, but it's nil")
-		}
-
 		if rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil {
 			return gcustom.MakeMatcher(func(_ any) bool { return false }).
 				WithMessage("expected rvr to have status.drbd.config, but it's nil")
@@ -89,10 +83,6 @@ func HaveAllPeersSet(expectedPeerReplicas []v1alpha1.ReplicatedVolumeReplica) go
 
 // makeReady sets up an RVR to be in ready state by initializing Status and DRBD.Config with NodeId and Address
 func makeReady(rvr *v1alpha1.ReplicatedVolumeReplica, _ uint, address v1alpha1.Address) {
-	if rvr.Status == nil {
-		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-	}
-
 	if rvr.Status.DRBD == nil {
 		rvr.Status.DRBD = &v1alpha1.DRBD{}
 	}

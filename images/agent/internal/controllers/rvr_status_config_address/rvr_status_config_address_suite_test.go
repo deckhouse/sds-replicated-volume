@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -35,10 +35,6 @@ func TestRvrStatusConfigAddress(t *testing.T) {
 
 // makeReady sets up an RVR to be in ready state by initializing Status and DRBD.Config with NodeId and Address
 func makeReady(rvr *v1alpha1.ReplicatedVolumeReplica, _ uint, address v1alpha1.Address) {
-	if rvr.Status == nil {
-		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-	}
-
 	if rvr.Status.DRBD == nil {
 		rvr.Status.DRBD = &v1alpha1.DRBD{}
 	}

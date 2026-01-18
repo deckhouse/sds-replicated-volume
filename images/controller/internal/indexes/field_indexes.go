@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,5 +32,10 @@ const (
 
 	// IndexFieldRVRByReplicatedVolumeName is a controller-runtime cache index field name
 	// used to quickly list ReplicatedVolumeReplica objects belonging to a specific RV.
-	IndexFieldRVRByReplicatedVolumeName = "rvr.spec.replicatedVolumeName"
+	//
+	// NOTE: this is not a JSONPath; it must match the field name used with:
+	// - mgr.GetFieldIndexer().IndexField(...)
+	// - client.MatchingFields{...}
+	// - fake.ClientBuilder.WithIndex(...)
+	IndexFieldRVRByReplicatedVolumeName = "spec.replicatedVolumeName"
 )

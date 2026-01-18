@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -105,27 +105,24 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 
 		rva := &v1alpha1.ReplicatedVolumeAttachment{}
 		Expect(cl.Get(ctx, client.ObjectKey{Name: rvaName}, rva)).To(Succeed())
-		if rva.Status == nil {
-			rva.Status = &v1alpha1.ReplicatedVolumeAttachmentStatus{}
-		}
 		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVAConditionTypeAttached,
+			Type:               v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
 			Status:             metav1.ConditionTrue,
-			Reason:             v1alpha1.RVAAttachedReasonAttached,
+			Reason:             v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached,
 			Message:            "attached",
 			ObservedGeneration: rva.Generation,
 		})
 		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVAConditionTypeReplicaIOReady,
+			Type:               v1alpha1.ReplicatedVolumeAttachmentCondReplicaIOReadyType,
 			Status:             metav1.ConditionTrue,
-			Reason:             v1alpha1.ReasonIOReady,
+			Reason:             v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonIOReady,
 			Message:            "io ready",
 			ObservedGeneration: rva.Generation,
 		})
 		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVAConditionTypeReady,
+			Type:               v1alpha1.ReplicatedVolumeAttachmentCondReadyType,
 			Status:             metav1.ConditionTrue,
-			Reason:             v1alpha1.RVAReadyReasonReady,
+			Reason:             v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonReady,
 			Message:            "ok",
 			ObservedGeneration: rva.Generation,
 		})
@@ -143,20 +140,17 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 
 		rva := &v1alpha1.ReplicatedVolumeAttachment{}
 		Expect(cl.Get(ctx, client.ObjectKey{Name: rvaName}, rva)).To(Succeed())
-		if rva.Status == nil {
-			rva.Status = &v1alpha1.ReplicatedVolumeAttachmentStatus{}
-		}
 		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVAConditionTypeAttached,
+			Type:               v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
 			Status:             metav1.ConditionFalse,
-			Reason:             v1alpha1.RVAAttachedReasonLocalityNotSatisfied,
+			Reason:             v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonLocalityNotSatisfied,
 			Message:            "Local volume access requires a Diskful replica on the requested node",
 			ObservedGeneration: rva.Generation,
 		})
 		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVAConditionTypeReady,
+			Type:               v1alpha1.ReplicatedVolumeAttachmentCondReadyType,
 			Status:             metav1.ConditionFalse,
-			Reason:             v1alpha1.RVAReadyReasonNotAttached,
+			Reason:             v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonNotAttached,
 			Message:            "Waiting for volume to be attached to the requested node",
 			ObservedGeneration: rva.Generation,
 		})
@@ -171,9 +165,9 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 		Expect(errors.As(err, &waitErr)).To(BeTrue())
 		Expect(waitErr.Permanent).To(BeTrue())
 		Expect(waitErr.LastReadyCondition).NotTo(BeNil())
-		Expect(waitErr.LastReadyCondition.Reason).To(Equal(v1alpha1.RVAReadyReasonNotAttached))
+		Expect(waitErr.LastReadyCondition.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonNotAttached))
 		Expect(waitErr.LastAttachedCondition).NotTo(BeNil())
-		Expect(waitErr.LastAttachedCondition.Reason).To(Equal(v1alpha1.RVAAttachedReasonLocalityNotSatisfied))
+		Expect(waitErr.LastAttachedCondition.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonLocalityNotSatisfied))
 	})
 
 	It("WaitForRVAReady returns context deadline error but includes last observed reason/message", func(ctx SpecContext) {
@@ -185,20 +179,17 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 
 		rva := &v1alpha1.ReplicatedVolumeAttachment{}
 		Expect(cl.Get(ctx, client.ObjectKey{Name: rvaName}, rva)).To(Succeed())
-		if rva.Status == nil {
-			rva.Status = &v1alpha1.ReplicatedVolumeAttachmentStatus{}
-		}
 		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVAConditionTypeAttached,
+			Type:               v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
 			Status:             metav1.ConditionFalse,
-			Reason:             v1alpha1.RVAAttachedReasonSettingPrimary,
+			Reason:             v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonSettingPrimary,
 			Message:            "Waiting for replica to become Primary",
 			ObservedGeneration: rva.Generation,
 		})
 		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVAConditionTypeReady,
+			Type:               v1alpha1.ReplicatedVolumeAttachmentCondReadyType,
 			Status:             metav1.ConditionFalse,
-			Reason:             v1alpha1.RVAReadyReasonNotAttached,
+			Reason:             v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonNotAttached,
 			Message:            "Waiting for volume to be attached to the requested node",
 			ObservedGeneration: rva.Generation,
 		})
@@ -214,9 +205,9 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 		var waitErr *RVAWaitError
 		Expect(errors.As(err, &waitErr)).To(BeTrue())
 		Expect(waitErr.LastReadyCondition).NotTo(BeNil())
-		Expect(waitErr.LastReadyCondition.Reason).To(Equal(v1alpha1.RVAReadyReasonNotAttached))
+		Expect(waitErr.LastReadyCondition.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonNotAttached))
 		Expect(waitErr.LastAttachedCondition).NotTo(BeNil())
-		Expect(waitErr.LastAttachedCondition.Reason).To(Equal(v1alpha1.RVAAttachedReasonSettingPrimary))
+		Expect(waitErr.LastAttachedCondition.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonSettingPrimary))
 		Expect(waitErr.LastAttachedCondition.Message).To(Equal("Waiting for replica to become Primary"))
 	})
 })
@@ -370,13 +361,13 @@ var _ = Describe("WaitForAttachedToRemoved", func() {
 		})
 	})
 
-	Context("when status is nil", func() {
+	Context("when status is empty", func() {
 		It("should return nil (considered success)", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
 			rv := createTestReplicatedVolume(volumeName)
-			rv.Status = nil
+			rv.Status = v1alpha1.ReplicatedVolumeStatus{}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
 			err := WaitForAttachedToRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
@@ -425,7 +416,7 @@ func createTestReplicatedVolume(name string) *v1alpha1.ReplicatedVolume {
 			Size:                       resource.MustParse("1Gi"),
 			ReplicatedStorageClassName: "rsc",
 		},
-		Status: &v1alpha1.ReplicatedVolumeStatus{
+		Status: v1alpha1.ReplicatedVolumeStatus{
 			ActuallyAttachedTo: []string{},
 		},
 	}

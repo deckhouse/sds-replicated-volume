@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -164,9 +164,6 @@ func (r *Reconciler) updateErrorStatus(
 ) error {
 	patch := client.MergeFrom(rvr.DeepCopy())
 
-	if rvr.Status == nil {
-		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-	}
 	if rvr.Status.DRBD == nil {
 		rvr.Status.DRBD = &v1alpha1.DRBD{}
 	}
@@ -182,7 +179,8 @@ func (r *Reconciler) updateErrorStatus(
 			output = output[:1024]
 		}
 
-		errorField := &v1alpha1.CmdError{
+		errorField := &v1alpha1.DRBDCmdError{
+			Command:  "",
 			Output:   output,
 			ExitCode: exitCode,
 		}
@@ -222,12 +220,12 @@ func (r *Reconciler) clearErrors(ctx context.Context, rvr *v1alpha1.ReplicatedVo
 }
 
 func rvrDesiredAndActualRole(rvr *v1alpha1.ReplicatedVolumeReplica) (wantPrimary bool, actuallyPrimary bool, initialized bool) {
-	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil || rvr.Status.DRBD.Config.Primary == nil {
+	if rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil || rvr.Status.DRBD.Config.Primary == nil {
 		// not initialized
 		return
 	}
 
-	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil || rvr.Status.DRBD.Status.Role == "" {
+	if rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil || rvr.Status.DRBD.Status.Role == "" {
 		// not initialized
 		return
 	}
@@ -253,7 +251,7 @@ func (r *Reconciler) canPromote(log logr.Logger, rvr *v1alpha1.ReplicatedVolumeR
 }
 
 func allErrorsAreNil(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Errors == nil {
+	if rvr.Status.DRBD == nil || rvr.Status.DRBD.Errors == nil {
 		return true
 	}
 	if rvr.Status.DRBD.Errors.LastPrimaryError == nil && rvr.Status.DRBD.Errors.LastSecondaryError == nil {

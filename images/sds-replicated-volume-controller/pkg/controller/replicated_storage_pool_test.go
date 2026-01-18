@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -145,8 +145,8 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 
 			GoodReplicatedStoragePoolName = "goodreplicatedoperatorstoragepool"
 			BadReplicatedStoragePoolName  = "badreplicatedoperatorstoragepool"
-			TypeLVMThin                   = "LVMThin"
-			TypeLVM                       = "LVM"
+			TypeLVMThin                   = srv.ReplicatedStoragePoolType("LVMThin")
+			TypeLVM                       = srv.ReplicatedStoragePoolType("LVM")
 			LVMVGTypeLocal                = "Local"
 			LVMVGTypeShared               = "Shared"
 		)
@@ -183,7 +183,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 
 		reconciledGoodReplicatedStoragePool, err := controller.GetReplicatedStoragePool(ctx, cl, testNameSpace, GoodReplicatedStoragePoolName)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(reconciledGoodReplicatedStoragePool.Status.Phase).To(Equal("Failed"))
+		Expect(reconciledGoodReplicatedStoragePool.Status.Phase).To(Equal(srv.RSPPhaseFailed))
 		Expect(reconciledGoodReplicatedStoragePool.Status.Reason).To(Equal("lvmVG-1-on-FirstNode: Error getting LVMVolumeGroup: lvmvolumegroups.storage.deckhouse.io \"lvmVG-1-on-FirstNode\" not found\nlvmVG-1-on-SecondNode: Error getting LVMVolumeGroup: lvmvolumegroups.storage.deckhouse.io \"lvmVG-1-on-SecondNode\" not found\n"))
 
 		// Negative test with bad LVMVolumeGroups.
@@ -202,7 +202,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 
 		reconciledBadReplicatedStoragePool, err := controller.GetReplicatedStoragePool(ctx, cl, testNameSpace, BadReplicatedStoragePoolName)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(reconciledBadReplicatedStoragePool.Status.Phase).To(Equal("Failed"))
+		Expect(reconciledBadReplicatedStoragePool.Status.Phase).To(Equal(srv.RSPPhaseFailed))
 	})
 })
 
@@ -235,7 +235,7 @@ func CreateLVMVolumeGroup(ctx context.Context, cl client.WithWatch, lvmVolumeGro
 	return err
 }
 
-func CreateReplicatedStoragePool(ctx context.Context, cl client.WithWatch, replicatedStoragePoolName, namespace, lvmType string, lvmVolumeGroups []map[string]string) error {
+func CreateReplicatedStoragePool(ctx context.Context, cl client.WithWatch, replicatedStoragePoolName, namespace string, lvmType srv.ReplicatedStoragePoolType, lvmVolumeGroups []map[string]string) error {
 	volumeGroups := make([]srv.ReplicatedStoragePoolLVMVolumeGroups, 0)
 	for i := range lvmVolumeGroups {
 		for key, value := range lvmVolumeGroups[i] {

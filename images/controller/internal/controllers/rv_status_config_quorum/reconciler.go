@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,13 +24,15 @@ import (
 	"strings"
 
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 type Reconciler struct {
@@ -71,23 +73,21 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
-	if !v1alpha1.HasControllerFinalizer(&rv) {
+	if !obju.HasFinalizer(&rv, v1alpha1.ControllerFinalizer) {
 		log.V(1).Info("no controller finalizer on ReplicatedVolume, skipping")
 		return reconcile.Result{}, nil
 	}
 
-	if rv.Status == nil {
-		log.V(1).Info("No status. Skipping")
-		return reconcile.Result{}, nil
-	}
-	if !isRvReady(rv.Status, log) {
+	if !isRvReady(&rv.Status, log) {
 		log.V(1).Info("not ready for quorum calculations")
 		log.V(2).Info("status is", "status", rv.Status)
 		return reconcile.Result{}, nil
 	}
 
 	var rvrList v1alpha1.ReplicatedVolumeReplicaList
-	if err := r.cl.List(ctx, &rvrList); err != nil {
+	if err := r.cl.List(ctx, &rvrList, client.MatchingFields{
+		indexes.IndexFieldRVRByReplicatedVolumeName: rv.Name,
+	}); err != nil {
 		log.Error(err, "unable to fetch ReplicatedVolumeReplicaList")
 		return reconcile.Result{}, err
 	}
@@ -102,7 +102,7 @@ func (r *Reconciler) Reconcile(
 	rvrList.Items = slices.DeleteFunc(
 		rvrList.Items,
 		func(rvr v1alpha1.ReplicatedVolumeReplica) bool {
-			return rvr.DeletionTimestamp != nil && !v1alpha1.HasExternalFinalizers(&rvr)
+			return rvr.DeletionTimestamp != nil && !obju.HasFinalizersOtherThan(&rvr, v1alpha1.ControllerFinalizer, v1alpha1.AgentFinalizer)
 		},
 	)
 
@@ -131,7 +131,7 @@ func (r *Reconciler) Reconcile(
 
 	// updating replicated volume
 	from := client.MergeFrom(rv.DeepCopy())
-	if updateReplicatedVolumeIfNeeded(rv.Status, diskfulCount, len(rvrList.Items), rsc.Spec.Replication) {
+	if updateReplicatedVolumeIfNeeded(&rv.Status, diskfulCount, len(rvrList.Items), rsc.Spec.Replication) {
 		log.V(1).Info("Updating quorum")
 		if err := r.cl.Status().Patch(ctx, &rv, from); err != nil {
 			log.Error(err, "patching ReplicatedVolume status")
@@ -148,7 +148,7 @@ func updateReplicatedVolumeIfNeeded(
 	rvStatus *v1alpha1.ReplicatedVolumeStatus,
 	diskfulCount,
 	all int,
-	replication string,
+	replication v1alpha1.ReplicatedStorageClassReplication,
 ) (changed bool) {
 	quorum, qmr := CalculateQuorum(diskfulCount, all, replication)
 	if rvStatus.DRBD == nil {
@@ -172,7 +172,7 @@ func updateReplicatedVolumeIfNeeded(
 // QMR is set to:
 // - QuorumMinimumRedundancyDefault (1) for None and Availability modes
 // - max(QuorumMinimumRedundancyMinForConsistency, diskfulCount/2+1) for ConsistencyAndAvailability mode
-func CalculateQuorum(diskfulCount, all int, replication string) (quorum, qmr byte) {
+func CalculateQuorum(diskfulCount, all int, replication v1alpha1.ReplicatedStorageClassReplication) (quorum, qmr byte) {
 	if diskfulCount > 1 {
 		quorum = byte(max(v1alpha1.QuorumMinValue, all/2+1))
 	}
@@ -230,5 +230,7 @@ func isRvReady(rvStatus *v1alpha1.ReplicatedVolumeStatus, log logr.Logger) bool 
 		return false
 	}
 
-	return current >= desired && current > 0 && conditions.IsTrue(rvStatus, v1alpha1.ConditionTypeConfigured)
+	return current >= desired &&
+		current > 0 &&
+		meta.IsStatusConditionTrue(rvStatus.Conditions, v1alpha1.ReplicatedVolumeCondConfiguredType)
 }

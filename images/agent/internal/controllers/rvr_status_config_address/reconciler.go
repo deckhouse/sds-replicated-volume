@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -99,9 +99,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	// Instantiate the Address field here to simplify code. Zero port means not set
 	for i := range rvrList.Items {
 		rvr := &rvrList.Items[i]
-		if rvr.Status == nil {
-			rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-		}
 		if rvr.Status.Conditions == nil {
 			rvr.Status.Conditions = []metav1.Condition{}
 		}
@@ -155,7 +152,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 			if changed := r.setCondition(
 				&rvr,
 				metav1.ConditionFalse,
-				v1alpha1.ReasonNoFreePortAvailable,
+				v1alpha1.ReplicatedVolumeReplicaCondAddressConfiguredReasonNoFreePortAvailable,
 				"No free port available",
 			); changed {
 				if err := r.cl.Status().Patch(ctx, &rvr, patch); err != nil {
@@ -196,7 +193,7 @@ func (r *Reconciler) setAddressAndCondition(rvr *v1alpha1.ReplicatedVolumeReplic
 	conditionChanged := r.setCondition(
 		rvr,
 		metav1.ConditionTrue,
-		v1alpha1.ReasonAddressConfigurationSucceeded,
+		v1alpha1.ReplicatedVolumeReplicaCondAddressConfiguredReasonAddressConfigurationSucceeded,
 		"Address configured",
 	)
 
@@ -205,8 +202,8 @@ func (r *Reconciler) setAddressAndCondition(rvr *v1alpha1.ReplicatedVolumeReplic
 
 func (r *Reconciler) setCondition(rvr *v1alpha1.ReplicatedVolumeReplica, status metav1.ConditionStatus, reason, message string) bool {
 	// Check if condition is already set correctly
-	if rvr.Status != nil && rvr.Status.Conditions != nil {
-		cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeAddressConfigured)
+	if rvr.Status.Conditions != nil {
+		cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondAddressConfiguredType)
 		if cond != nil &&
 			cond.Status == status &&
 			cond.Reason == reason &&
@@ -220,7 +217,7 @@ func (r *Reconciler) setCondition(rvr *v1alpha1.ReplicatedVolumeReplica, status 
 	meta.SetStatusCondition(
 		&rvr.Status.Conditions,
 		metav1.Condition{
-			Type:    v1alpha1.ConditionTypeAddressConfigured,
+			Type:    v1alpha1.ReplicatedVolumeReplicaCondAddressConfiguredType,
 			Status:  status,
 			Reason:  reason,
 			Message: message,

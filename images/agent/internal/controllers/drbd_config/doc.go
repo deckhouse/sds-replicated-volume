@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ limitations under the License.
 //   - rv.metadata.name
 //   - rv.status.drbd.config.sharedSecret
 //   - rv.status.drbd.config.sharedSecretAlg
-//   - rv.status.drbd.config.deviceMinor
+//   - rv.status.deviceMinor
 //   - rvr.status.drbd.config.nodeId
 //   - rvr.status.drbd.config.address
 //   - rvr.status.drbd.config.peers (with peersInitialized flag)
