@@ -131,12 +131,12 @@ type ReplicatedStorageClassSpec struct {
 	// +kubebuilder:validation:Items={type=string,maxLength=64}
 	// +kubebuilder:default:={"Internal"}
 	SystemNetworkNames []string `json:"systemNetworkNames"`
-	// RolloutStrategy defines how configuration changes are applied to existing volumes.
+	// ConfigurationRolloutStrategy defines how configuration changes are applied to existing volumes.
 	// Always present with defaults.
-	RolloutStrategy ReplicatedStorageClassRolloutStrategy `json:"rolloutStrategy"`
-	// EligibleNodesDriftPolicy defines how the controller handles changes in eligible nodes.
+	ConfigurationRolloutStrategy ReplicatedStorageClassConfigurationRolloutStrategy `json:"configurationRolloutStrategy"`
+	// EligibleNodesConflictResolutionStrategy defines how the controller handles volumes with eligible nodes conflicts.
 	// Always present with defaults.
-	EligibleNodesDriftPolicy ReplicatedStorageClassEligibleNodesDriftPolicy `json:"eligibleNodesDriftPolicy"`
+	EligibleNodesConflictResolutionStrategy ReplicatedStorageClassEligibleNodesConflictResolutionStrategy `json:"eligibleNodesConflictResolutionStrategy"`
 	// EligibleNodesPolicy defines policies for managing eligible nodes.
 	// Always present with defaults.
 	EligibleNodesPolicy ReplicatedStorageClassEligibleNodesPolicy `json:"eligibleNodesPolicy"`
@@ -212,36 +212,36 @@ func (t ReplicatedStorageClassTopology) String() string {
 	return string(t)
 }
 
-// ReplicatedStorageClassRolloutStrategy defines how configuration changes are rolled out to existing volumes.
+// ReplicatedStorageClassConfigurationRolloutStrategy defines how configuration changes are rolled out to existing volumes.
 // +kubebuilder:validation:XValidation:rule="self.type != 'RollingUpdate' || has(self.rollingUpdate)",message="rollingUpdate is required when type is RollingUpdate"
 // +kubebuilder:validation:XValidation:rule="self.type == 'RollingUpdate' || !has(self.rollingUpdate)",message="rollingUpdate must not be set when type is not RollingUpdate"
 // +kubebuilder:object:generate=true
-type ReplicatedStorageClassRolloutStrategy struct {
+type ReplicatedStorageClassConfigurationRolloutStrategy struct {
 	// Type specifies the rollout strategy type.
-	// +kubebuilder:validation:Enum=RollingUpdate;NewOnly
+	// +kubebuilder:validation:Enum=RollingUpdate;NewVolumesOnly
 	// +kubebuilder:default:=RollingUpdate
-	Type ReplicatedStorageClassRolloutStrategyType `json:"type,omitempty"`
+	Type ReplicatedStorageClassConfigurationRolloutStrategyType `json:"type,omitempty"`
 	// RollingUpdate configures parameters for RollingUpdate strategy.
 	// Required when type is RollingUpdate.
 	// +optional
-	RollingUpdate *ReplicatedStorageClassRollingUpdateStrategy `json:"rollingUpdate,omitempty"`
+	RollingUpdate *ReplicatedStorageClassConfigurationRollingUpdateStrategy `json:"rollingUpdate,omitempty"`
 }
 
-// ReplicatedStorageClassRolloutStrategyType enumerates possible values for rollout strategy type.
-type ReplicatedStorageClassRolloutStrategyType string
+// ReplicatedStorageClassConfigurationRolloutStrategyType enumerates possible values for configuration rollout strategy type.
+type ReplicatedStorageClassConfigurationRolloutStrategyType string
 
 const (
-	// ReplicatedStorageClassRolloutStrategyTypeRollingUpdate means configuration changes are rolled out to existing volumes.
-	ReplicatedStorageClassRolloutStrategyTypeRollingUpdate ReplicatedStorageClassRolloutStrategyType = "RollingUpdate"
-	// ReplicatedStorageClassRolloutStrategyTypeNewOnly means configuration changes only apply to newly created volumes.
-	ReplicatedStorageClassRolloutStrategyTypeNewOnly ReplicatedStorageClassRolloutStrategyType = "NewOnly"
+	// ReplicatedStorageClassConfigurationRolloutStrategyTypeRollingUpdate means configuration changes are rolled out to existing volumes.
+	ReplicatedStorageClassConfigurationRolloutStrategyTypeRollingUpdate ReplicatedStorageClassConfigurationRolloutStrategyType = "RollingUpdate"
+	// ReplicatedStorageClassConfigurationRolloutStrategyTypeNewVolumesOnly means configuration changes only apply to newly created volumes.
+	ReplicatedStorageClassConfigurationRolloutStrategyTypeNewVolumesOnly ReplicatedStorageClassConfigurationRolloutStrategyType = "NewVolumesOnly"
 )
 
-func (t ReplicatedStorageClassRolloutStrategyType) String() string { return string(t) }
+func (t ReplicatedStorageClassConfigurationRolloutStrategyType) String() string { return string(t) }
 
-// ReplicatedStorageClassRollingUpdateStrategy configures parameters for rolling update rollout strategy.
+// ReplicatedStorageClassConfigurationRollingUpdateStrategy configures parameters for rolling update configuration rollout strategy.
 // +kubebuilder:object:generate=true
-type ReplicatedStorageClassRollingUpdateStrategy struct {
+type ReplicatedStorageClassConfigurationRollingUpdateStrategy struct {
 	// MaxParallel is the maximum number of volumes being rolled out simultaneously.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=200
@@ -249,37 +249,39 @@ type ReplicatedStorageClassRollingUpdateStrategy struct {
 	MaxParallel int32 `json:"maxParallel"`
 }
 
-// ReplicatedStorageClassEligibleNodesDriftPolicy defines how the controller reacts to eligible nodes changes.
-// +kubebuilder:validation:XValidation:rule="self.type != 'RollingUpdate' || has(self.rollingUpdate)",message="rollingUpdate is required when type is RollingUpdate"
-// +kubebuilder:validation:XValidation:rule="self.type == 'RollingUpdate' || !has(self.rollingUpdate)",message="rollingUpdate must not be set when type is not RollingUpdate"
+// ReplicatedStorageClassEligibleNodesConflictResolutionStrategy defines how the controller resolves volumes with eligible nodes conflicts.
+// +kubebuilder:validation:XValidation:rule="self.type != 'RollingRepair' || has(self.rollingRepair)",message="rollingRepair is required when type is RollingRepair"
+// +kubebuilder:validation:XValidation:rule="self.type == 'RollingRepair' || !has(self.rollingRepair)",message="rollingRepair must not be set when type is not RollingRepair"
 // +kubebuilder:object:generate=true
-type ReplicatedStorageClassEligibleNodesDriftPolicy struct {
-	// Type specifies the drift policy type.
-	// +kubebuilder:validation:Enum=Ignore;RollingUpdate
-	// +kubebuilder:default:=RollingUpdate
-	Type ReplicatedStorageClassEligibleNodesDriftPolicyType `json:"type,omitempty"`
-	// RollingUpdate configures parameters for RollingUpdate drift policy.
-	// Required when type is RollingUpdate.
+type ReplicatedStorageClassEligibleNodesConflictResolutionStrategy struct {
+	// Type specifies the conflict resolution strategy type.
+	// +kubebuilder:validation:Enum=Manual;RollingRepair
+	// +kubebuilder:default:=RollingRepair
+	Type ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType `json:"type,omitempty"`
+	// RollingRepair configures parameters for RollingRepair conflict resolution strategy.
+	// Required when type is RollingRepair.
 	// +optional
-	RollingUpdate *ReplicatedStorageClassEligibleNodesDriftRollingUpdate `json:"rollingUpdate,omitempty"`
+	RollingRepair *ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair `json:"rollingRepair,omitempty"`
 }
 
-// ReplicatedStorageClassEligibleNodesDriftPolicyType enumerates possible values for eligible nodes drift policy type.
-type ReplicatedStorageClassEligibleNodesDriftPolicyType string
+// ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType enumerates possible values for eligible nodes conflict resolution strategy type.
+type ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType string
 
 const (
-	// ReplicatedStorageClassEligibleNodesDriftPolicyTypeIgnore means changes in eligible nodes are ignored.
-	ReplicatedStorageClassEligibleNodesDriftPolicyTypeIgnore ReplicatedStorageClassEligibleNodesDriftPolicyType = "Ignore"
-	// ReplicatedStorageClassEligibleNodesDriftPolicyTypeRollingUpdate means replicas are moved when eligible nodes change.
-	ReplicatedStorageClassEligibleNodesDriftPolicyTypeRollingUpdate ReplicatedStorageClassEligibleNodesDriftPolicyType = "RollingUpdate"
+	// ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeManual means conflicts are resolved manually.
+	ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeManual ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType = "Manual"
+	// ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeRollingRepair means replicas are moved automatically when eligible nodes change.
+	ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeRollingRepair ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType = "RollingRepair"
 )
 
-func (t ReplicatedStorageClassEligibleNodesDriftPolicyType) String() string { return string(t) }
+func (t ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType) String() string {
+	return string(t)
+}
 
-// ReplicatedStorageClassEligibleNodesDriftRollingUpdate configures parameters for rolling update drift policy.
+// ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair configures parameters for rolling repair conflict resolution strategy.
 // +kubebuilder:object:generate=true
-type ReplicatedStorageClassEligibleNodesDriftRollingUpdate struct {
-	// MaxParallel is the maximum number of volumes being updated simultaneously.
+type ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair struct {
+	// MaxParallel is the maximum number of volumes being repaired simultaneously.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=200
 	// +kubebuilder:default:=5
@@ -421,37 +423,10 @@ type ReplicatedStorageClassVolumesSummary struct {
 	// Aligned is the number of volumes whose configuration matches the storage class.
 	// +optional
 	Aligned *int32 `json:"aligned,omitempty"`
-	// EligibleNodesViolation is the number of volumes with replicas on non-eligible nodes.
+	// EligibleNodesInConflict is the number of volumes with replicas on non-eligible nodes.
 	// +optional
-	EligibleNodesViolation *int32 `json:"eligibleNodesViolation,omitempty"`
+	EligibleNodesInConflict *int32 `json:"eligibleNodesInConflict,omitempty"`
 	// StaleConfiguration is the number of volumes with outdated configuration.
 	// +optional
 	StaleConfiguration *int32 `json:"staleConfiguration,omitempty"`
-	// RollingUpdatesInProgress lists volumes currently being updated.
-	// +kubebuilder:validation:MaxItems=200
-	// +optional
-	RollingUpdatesInProgress []ReplicatedStorageClassRollingUpdateInProgress `json:"rollingUpdatesInProgress,omitempty"`
 }
-
-// ReplicatedStorageClassRollingUpdateInProgress describes a volume undergoing rolling update.
-// +kubebuilder:object:generate=true
-type ReplicatedStorageClassRollingUpdateInProgress struct {
-	// Name is the ReplicatedVolume name.
-	Name string `json:"name"`
-	// Operation is the type of operation being performed.
-	Operation ReplicatedStorageClassRollingUpdateOperation `json:"operation"`
-	// StartedAt is the timestamp when the rolling update started.
-	StartedAt metav1.Time `json:"startedAt"`
-}
-
-// ReplicatedStorageClassRollingUpdateOperation describes the type of rolling update operation.
-type ReplicatedStorageClassRollingUpdateOperation string
-
-const (
-	// ReplicatedStorageClassRollingUpdateOperationFullAlignment means full alignment (configuration + eligible nodes) is in progress.
-	ReplicatedStorageClassRollingUpdateOperationFullAlignment ReplicatedStorageClassRollingUpdateOperation = "FullAlignment"
-	// ReplicatedStorageClassRollingUpdateOperationOnlyEligibleNodesViolationResolution means only eligible nodes violation is being resolved.
-	ReplicatedStorageClassRollingUpdateOperationOnlyEligibleNodesViolationResolution ReplicatedStorageClassRollingUpdateOperation = "OnlyEligibleNodesViolationResolution"
-)
-
-func (o ReplicatedStorageClassRollingUpdateOperation) String() string { return string(o) }

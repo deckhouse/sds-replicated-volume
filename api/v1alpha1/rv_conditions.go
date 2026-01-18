@@ -113,9 +113,9 @@ const (
 	// on eligible nodes according to the storage class.
 	//
 	// Reasons describe eligible nodes alignment state.
-	ReplicatedVolumeCondStorageClassEligibleNodesAlignedType                         = "StorageClassEligibleNodesAligned"
-	ReplicatedVolumeCondStorageClassEligibleNodesAlignedReasonEligibleNodesAligned   = "EligibleNodesAligned"   // All replicas are on eligible nodes.
-	ReplicatedVolumeCondStorageClassEligibleNodesAlignedReasonEligibleNodesViolation = "EligibleNodesViolation" // Some replicas are on non-eligible nodes.
-	ReplicatedVolumeCondStorageClassEligibleNodesAlignedReasonResolutionInProgress   = "ResolutionInProgress"   // Eligible nodes conflict resolution is in progress.
-	ReplicatedVolumeCondStorageClassEligibleNodesAlignedReasonStorageClassNotFound   = "StorageClassNotFound"   // Referenced storage class does not exist.
+	ReplicatedVolumeCondStorageClassEligibleNodesAlignedType                          = "StorageClassEligibleNodesAligned"
+	ReplicatedVolumeCondStorageClassEligibleNodesAlignedReasonEligibleNodesAligned    = "EligibleNodesAligned"    // All replicas are on eligible nodes.
+	ReplicatedVolumeCondStorageClassEligibleNodesAlignedReasonEligibleNodesInConflict = "EligibleNodesInConflict" // Some replicas are on non-eligible nodes.
+	ReplicatedVolumeCondStorageClassEligibleNodesAlignedReasonResolutionInProgress    = "ResolutionInProgress"    // Eligible nodes conflict resolution is in progress.
+	ReplicatedVolumeCondStorageClassEligibleNodesAlignedReasonStorageClassNotFound    = "StorageClassNotFound"    // Referenced storage class does not exist.
 )

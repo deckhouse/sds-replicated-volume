@@ -211,13 +211,13 @@ func (r *Reconciler) reconcileStatus(
 // Algorithm:
 //  1. If configuration is in sync (spec unchanged), use saved configuration; otherwise compute new one.
 //  2. Validate configuration. If invalid:
-//     - Set ConfigurationAccepted=False.
+//     - Set ConfigurationReady=False.
 //     - If no saved configuration exists, also set EligibleNodesCalculated=False and return.
 //     - Otherwise fall back to saved configuration.
 //  3. Call ensureEligibleNodes to calculate/update eligible nodes.
 //  4. If configuration is already in sync, return.
-//  5. If EligibleNodesCalculated=False, reject configuration (ConfigurationAccepted=False).
-//  6. Otherwise apply new configuration, set ConfigurationAccepted=True, require optimistic lock.
+//  5. If EligibleNodesCalculated=False, reject configuration (ConfigurationReady=False).
+//  6. Otherwise apply new configuration, set ConfigurationReady=True, require optimistic lock.
 func ensureConfigurationAndEligibleNodes(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
@@ -239,8 +239,8 @@ func ensureConfigurationAndEligibleNodes(
 
 		// Validate configuration before proceeding.
 		if err := validateConfiguration(intendedConfiguration); err != nil {
-			changed = applyConfigurationAcceptedCondFalse(rsc,
-				v1alpha1.ReplicatedStorageClassCondConfigurationAcceptedReasonInvalidConfiguration,
+			changed = applyConfigurationReadyCondFalse(rsc,
+				v1alpha1.ReplicatedStorageClassCondConfigurationReadyReasonInvalidConfiguration,
 				fmt.Sprintf("Configuration validation failed: %v", err),
 			) || changed
 
@@ -266,8 +266,8 @@ func ensureConfigurationAndEligibleNodes(
 
 	if objutilv1.IsStatusConditionPresentAndFalse(rsc, v1alpha1.ReplicatedStorageClassCondEligibleNodesCalculatedType) {
 		// Eligible nodes calculation failed - reject configuration.
-		changed := applyConfigurationAcceptedCondFalse(rsc,
-			v1alpha1.ReplicatedStorageClassCondConfigurationAcceptedReasonEligibleNodesCalculationFailed,
+		changed := applyConfigurationReadyCondFalse(rsc,
+			v1alpha1.ReplicatedStorageClassCondConfigurationReadyReasonEligibleNodesCalculationFailed,
 			"Eligible nodes calculation failed",
 		)
 
@@ -278,10 +278,10 @@ func ensureConfigurationAndEligibleNodes(
 	rsc.Status.Configuration = &intendedConfiguration
 	rsc.Status.ConfigurationGeneration = rsc.Generation
 
-	// Set ConfigurationAccepted to true.
-	applyConfigurationAcceptedCondTrue(rsc,
-		v1alpha1.ReplicatedStorageClassCondConfigurationAcceptedReasonAccepted,
-		"Configuration accepted",
+	// Set ConfigurationReady to true.
+	applyConfigurationReadyCondTrue(rsc,
+		v1alpha1.ReplicatedStorageClassCondConfigurationReadyReasonReady,
+		"Configuration ready",
 	)
 
 	return outcome.ReportChanged().RequireOptimisticLock()
@@ -330,7 +330,7 @@ func ensureEligibleNodes(
 	// Validate RSP and LVGs are ready and correctly configured.
 	if err := validateRSPAndLVGs(rsp, lvgs); err != nil {
 		changed := applyEligibleNodesCalculatedCondFalse(rsc,
-			v1alpha1.ReplicatedStorageClassCondEligibleNodesCalculatedReasonStoragePoolOrLVGNotReady,
+			v1alpha1.ReplicatedStorageClassCondEligibleNodesCalculatedReasonInvalidStoragePoolOrLVG,
 			fmt.Sprintf("RSP/LVG validation failed: %v", err),
 		)
 		return ef.Ok().ReportChangedIf(changed)
@@ -373,7 +373,7 @@ func ensureEligibleNodes(
 	return ef.Ok()
 }
 
-// ensureVolumeCounters computes and applies volume counters and VolumesAcknowledged condition.
+// ensureVolumeCounters computes and applies volume counters.
 func ensureVolumeCounters(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
@@ -382,22 +382,9 @@ func ensureVolumeCounters(
 	ef := flow.BeginEnsure(ctx, "volume-counters")
 	defer ef.OnEnd(&outcome)
 
-	// Compute and apply volume counters.
-	counters := computeActualVolumeCounters(rsc, rvs)
-	changed := applyVolumeCounters(rsc, counters)
-
-	// Apply VolumesAcknowledged condition.
-	if counters.PendingAcknowledgment != nil && *counters.PendingAcknowledgment > 0 {
-		changed = applyVolumesAcknowledgedCondFalse(rsc,
-			v1alpha1.ReplicatedStorageClassCondVolumesAcknowledgedReasonPending,
-			fmt.Sprintf("%d volume(s) pending acknowledgment", *counters.PendingAcknowledgment),
-		) || changed
-	} else {
-		changed = applyVolumesAcknowledgedCondTrue(rsc,
-			v1alpha1.ReplicatedStorageClassCondVolumesAcknowledgedReasonAllAcknowledged,
-			"All volumes acknowledged",
-		) || changed
-	}
+	// Compute and apply volume summary.
+	summary := computeActualVolumesSummary(rsc, rvs)
+	changed := applyVolumesSummary(rsc, summary)
 
 	return ef.Ok().ReportChangedIf(changed)
 }
@@ -407,7 +394,7 @@ func ensureVolumeCounters(
 // The function works in three phases:
 //  1. Handle completions: remove completed entries and count existing operations
 //  2. Configuration rollout: handle stale configuration (upgrade OnlyEligible -> Full, add new Full)
-//  3. Drift resolution: handle eligible nodes violations (add new OnlyEligible)
+//  3. Conflict resolution: handle eligible nodes conflicts (add new OnlyEligible)
 func ensureRollingUpdates(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
@@ -427,8 +414,8 @@ func ensureRollingUpdates(
 			v1alpha1.ReplicatedStorageClassCondVolumesConfigurationAlignedReasonPendingAcknowledgment,
 			msg,
 		)
-		changed = applyVolumesEligibleNodesAlignedCondUnknown(rsc,
-			v1alpha1.ReplicatedStorageClassCondVolumesEligibleNodesAlignedReasonPendingAcknowledgment,
+		changed = applyVolumesNodeEligibilityAlignedCondUnknown(rsc,
+			v1alpha1.ReplicatedStorageClassCondVolumesNodeEligibilityAlignedReasonPendingAcknowledgment,
 			msg,
 		) || changed
 
@@ -436,19 +423,19 @@ func ensureRollingUpdates(
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
-	maxParallelRollouts, maxParallelDriftResolutions := computeRollingUpdatesConfiguration(rsc)
+	maxParallelConfigurationRollouts, maxParallelConflictResolutions := computeRollingStrategiesConfiguration(rsc)
 
-	_ = maxParallelRollouts
-	_ = maxParallelDriftResolutions
+	_ = maxParallelConfigurationRollouts
+	_ = maxParallelConflictResolutions
 
 	// TODO: implement rolling updates logic
 
 	changed := applyVolumesConfigurationAlignedCondFalse(rsc,
-		v1alpha1.ReplicatedStorageClassCondVolumesConfigurationAlignedReasonRolloutDisabled,
+		v1alpha1.ReplicatedStorageClassCondVolumesConfigurationAlignedReasonConfigurationRolloutDisabled,
 		"not implemented",
 	)
-	changed = applyVolumesEligibleNodesAlignedCondFalse(rsc,
-		v1alpha1.ReplicatedStorageClassCondVolumesEligibleNodesAlignedReasonResolutionDisabled,
+	changed = applyVolumesNodeEligibilityAlignedCondFalse(rsc,
+		v1alpha1.ReplicatedStorageClassCondVolumesNodeEligibilityAlignedReasonConflictResolutionManual,
 		"not implemented",
 	) || changed
 
@@ -459,24 +446,24 @@ func ensureRollingUpdates(
 // Compute helpers
 // =============================================================================
 
-// computeRollingUpdatesConfiguration determines max parallel limits for rollouts and drift resolutions.
-// Returns 0 for a policy if it's not set to RollingUpdate type (meaning disabled).
-func computeRollingUpdatesConfiguration(rsc *v1alpha1.ReplicatedStorageClass) (maxParallelRollouts, maxParallelDriftResolutions int32) {
-	if rsc.Spec.RolloutStrategy.Type == v1alpha1.ReplicatedStorageClassRolloutStrategyTypeRollingUpdate {
-		if rsc.Spec.RolloutStrategy.RollingUpdate == nil {
-			panic("RolloutStrategy.RollingUpdate is nil but Type is RollingUpdate; API validation should prevent this")
+// computeRollingStrategiesConfiguration determines max parallel limits for configuration rollouts and conflict resolutions.
+// Returns 0 for a strategy if it's not set to RollingUpdate/RollingRepair type (meaning disabled).
+func computeRollingStrategiesConfiguration(rsc *v1alpha1.ReplicatedStorageClass) (maxParallelConfigurationRollouts, maxParallelConflictResolutions int32) {
+	if rsc.Spec.ConfigurationRolloutStrategy.Type == v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategyTypeRollingUpdate {
+		if rsc.Spec.ConfigurationRolloutStrategy.RollingUpdate == nil {
+			panic("ConfigurationRolloutStrategy.RollingUpdate is nil but Type is RollingUpdate; API validation should prevent this")
 		}
-		maxParallelRollouts = rsc.Spec.RolloutStrategy.RollingUpdate.MaxParallel
+		maxParallelConfigurationRollouts = rsc.Spec.ConfigurationRolloutStrategy.RollingUpdate.MaxParallel
 	}
 
-	if rsc.Spec.EligibleNodesDriftPolicy.Type == v1alpha1.ReplicatedStorageClassEligibleNodesDriftPolicyTypeRollingUpdate {
-		if rsc.Spec.EligibleNodesDriftPolicy.RollingUpdate == nil {
-			panic("EligibleNodesDriftPolicy.RollingUpdate is nil but Type is RollingUpdate; API validation should prevent this")
+	if rsc.Spec.EligibleNodesConflictResolutionStrategy.Type == v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeRollingRepair {
+		if rsc.Spec.EligibleNodesConflictResolutionStrategy.RollingRepair == nil {
+			panic("EligibleNodesConflictResolutionStrategy.RollingRepair is nil but Type is RollingRepair; API validation should prevent this")
 		}
-		maxParallelDriftResolutions = rsc.Spec.EligibleNodesDriftPolicy.RollingUpdate.MaxParallel
+		maxParallelConflictResolutions = rsc.Spec.EligibleNodesConflictResolutionStrategy.RollingRepair.MaxParallel
 	}
 
-	return maxParallelRollouts, maxParallelDriftResolutions
+	return maxParallelConfigurationRollouts, maxParallelConflictResolutions
 }
 
 // makeConfiguration computes the intended configuration from RSC spec.
@@ -510,22 +497,22 @@ func makeEligibleNodesWorldState(checksum string, expiresAt time.Time) *v1alpha1
 	}
 }
 
-// applyConfigurationAcceptedCondTrue sets the ConfigurationAccepted condition to True.
+// applyConfigurationReadyCondTrue sets the ConfigurationReady condition to True.
 // Returns true if the condition was changed.
-func applyConfigurationAcceptedCondTrue(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
+func applyConfigurationReadyCondTrue(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
 	return objutilv1.SetStatusCondition(rsc, metav1.Condition{
-		Type:    v1alpha1.ReplicatedStorageClassCondConfigurationAcceptedType,
+		Type:    v1alpha1.ReplicatedStorageClassCondConfigurationReadyType,
 		Status:  metav1.ConditionTrue,
 		Reason:  reason,
 		Message: message,
 	})
 }
 
-// applyConfigurationAcceptedCondFalse sets the ConfigurationAccepted condition to False.
+// applyConfigurationReadyCondFalse sets the ConfigurationReady condition to False.
 // Returns true if the condition was changed.
-func applyConfigurationAcceptedCondFalse(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
+func applyConfigurationReadyCondFalse(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
 	return objutilv1.SetStatusCondition(rsc, metav1.Condition{
-		Type:    v1alpha1.ReplicatedStorageClassCondConfigurationAcceptedType,
+		Type:    v1alpha1.ReplicatedStorageClassCondConfigurationReadyType,
 		Status:  metav1.ConditionFalse,
 		Reason:  reason,
 		Message: message,
@@ -554,28 +541,6 @@ func applyEligibleNodesCalculatedCondFalse(rsc *v1alpha1.ReplicatedStorageClass,
 	})
 }
 
-// applyVolumesAcknowledgedCondTrue sets the VolumesAcknowledged condition to True.
-// Returns true if the condition was changed.
-func applyVolumesAcknowledgedCondTrue(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
-	return objutilv1.SetStatusCondition(rsc, metav1.Condition{
-		Type:    v1alpha1.ReplicatedStorageClassCondVolumesAcknowledgedType,
-		Status:  metav1.ConditionTrue,
-		Reason:  reason,
-		Message: message,
-	})
-}
-
-// applyVolumesAcknowledgedCondFalse sets the VolumesAcknowledged condition to False.
-// Returns true if the condition was changed.
-func applyVolumesAcknowledgedCondFalse(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
-	return objutilv1.SetStatusCondition(rsc, metav1.Condition{
-		Type:    v1alpha1.ReplicatedStorageClassCondVolumesAcknowledgedType,
-		Status:  metav1.ConditionFalse,
-		Reason:  reason,
-		Message: message,
-	})
-}
-
 // applyVolumesConfigurationAlignedCondUnknown sets the VolumesConfigurationAligned condition to Unknown.
 // Returns true if the condition was changed.
 func applyVolumesConfigurationAlignedCondUnknown(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
@@ -587,11 +552,11 @@ func applyVolumesConfigurationAlignedCondUnknown(rsc *v1alpha1.ReplicatedStorage
 	})
 }
 
-// applyVolumesEligibleNodesAlignedCondUnknown sets the VolumesEligibleNodesAligned condition to Unknown.
+// applyVolumesNodeEligibilityAlignedCondUnknown sets the VolumesNodeEligibilityAligned condition to Unknown.
 // Returns true if the condition was changed.
-func applyVolumesEligibleNodesAlignedCondUnknown(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
+func applyVolumesNodeEligibilityAlignedCondUnknown(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
 	return objutilv1.SetStatusCondition(rsc, metav1.Condition{
-		Type:    v1alpha1.ReplicatedStorageClassCondVolumesEligibleNodesAlignedType,
+		Type:    v1alpha1.ReplicatedStorageClassCondVolumesNodeEligibilityAlignedType,
 		Status:  metav1.ConditionUnknown,
 		Reason:  reason,
 		Message: message,
@@ -620,22 +585,22 @@ func applyVolumesConfigurationAlignedCondFalse(rsc *v1alpha1.ReplicatedStorageCl
 	})
 }
 
-// applyVolumesEligibleNodesAlignedCondTrue sets the VolumesEligibleNodesAligned condition to True.
+// applyVolumesNodeEligibilityAlignedCondTrue sets the VolumesNodeEligibilityAligned condition to True.
 // Returns true if the condition was changed.
-func applyVolumesEligibleNodesAlignedCondTrue(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
+func applyVolumesNodeEligibilityAlignedCondTrue(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
 	return objutilv1.SetStatusCondition(rsc, metav1.Condition{
-		Type:    v1alpha1.ReplicatedStorageClassCondVolumesEligibleNodesAlignedType,
+		Type:    v1alpha1.ReplicatedStorageClassCondVolumesNodeEligibilityAlignedType,
 		Status:  metav1.ConditionTrue,
 		Reason:  reason,
 		Message: message,
 	})
 }
 
-// applyVolumesEligibleNodesAlignedCondFalse sets the VolumesEligibleNodesAligned condition to False.
+// applyVolumesNodeEligibilityAlignedCondFalse sets the VolumesNodeEligibilityAligned condition to False.
 // Returns true if the condition was changed.
-func applyVolumesEligibleNodesAlignedCondFalse(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
+func applyVolumesNodeEligibilityAlignedCondFalse(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
 	return objutilv1.SetStatusCondition(rsc, metav1.Condition{
-		Type:    v1alpha1.ReplicatedStorageClassCondVolumesEligibleNodesAlignedType,
+		Type:    v1alpha1.ReplicatedStorageClassCondVolumesNodeEligibilityAlignedType,
 		Status:  metav1.ConditionFalse,
 		Reason:  reason,
 		Message: message,
@@ -1109,24 +1074,15 @@ func isNodeReadyOrWithinGrace(node *corev1.Node, gracePeriod time.Duration) (nod
 	return false, false, graceExpiresAt // Within grace period.
 }
 
-// volumeCounters holds computed volume statistics.
-type volumeCounters struct {
-	Total                  *int32
-	PendingAcknowledgment  *int32
-	Aligned                *int32
-	StaleConfiguration     *int32
-	EligibleNodesViolation *int32
-}
-
-// computeActualVolumeCounters computes volume statistics from RV conditions.
+// computeActualVolumesSummary computes volume statistics from RV conditions.
 //
 // If any RV hasn't acknowledged the current RSC state (name/configurationGeneration/eligibleNodesRevision mismatch),
 // returns Total and PendingAcknowledgment with other counters as nil - because we don't know the real counts
 // until all RVs acknowledge.
 // RVs without status.storageClass are considered acknowledged (to avoid flapping on new volumes).
-func computeActualVolumeCounters(rsc *v1alpha1.ReplicatedStorageClass, rvs []v1alpha1.ReplicatedVolume) volumeCounters {
+func computeActualVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, rvs []v1alpha1.ReplicatedVolume) v1alpha1.ReplicatedStorageClassVolumesSummary {
 	total := int32(len(rvs))
-	var pendingAcknowledgment, aligned, staleConfiguration, eligibleNodesViolation int32
+	var pendingAcknowledgment, aligned, staleConfiguration, eligibleNodesInConflict int32
 
 	for i := range rvs {
 		rv := &rvs[i]
@@ -1149,26 +1105,26 @@ func computeActualVolumeCounters(rsc *v1alpha1.ReplicatedStorageClass, rvs []v1a
 		}
 
 		if !nodesOK {
-			eligibleNodesViolation++
+			eligibleNodesInConflict++
 		}
 	}
 
 	// If any volumes haven't acknowledged, return only Total and PendingAcknowledgment.
 	// We don't know the real counts for other counters until all RVs acknowledge.
 	if pendingAcknowledgment > 0 {
-		return volumeCounters{
+		return v1alpha1.ReplicatedStorageClassVolumesSummary{
 			Total:                 &total,
 			PendingAcknowledgment: &pendingAcknowledgment,
 		}
 	}
 
 	zero := int32(0)
-	return volumeCounters{
-		Total:                  &total,
-		PendingAcknowledgment:  &zero,
-		Aligned:                &aligned,
-		StaleConfiguration:     &staleConfiguration,
-		EligibleNodesViolation: &eligibleNodesViolation,
+	return v1alpha1.ReplicatedStorageClassVolumesSummary{
+		Total:                   &total,
+		PendingAcknowledgment:   &zero,
+		Aligned:                 &aligned,
+		StaleConfiguration:      &staleConfiguration,
+		EligibleNodesInConflict: &eligibleNodesInConflict,
 	}
 }
 
@@ -1184,39 +1140,32 @@ func areRSCConfigurationAndEligibleNodesAcknowledgedByRV(rsc *v1alpha1.Replicate
 		rv.Status.StorageClass.ObservedEligibleNodesRevision == rsc.Status.EligibleNodesRevision
 }
 
-// applyVolumeCounters applies volume counters to rsc.Status.Volumes.
+// applyVolumesSummary applies volume summary to rsc.Status.Volumes.
 // Returns true if any counter changed.
-func applyVolumeCounters(rsc *v1alpha1.ReplicatedStorageClass, counters volumeCounters) bool {
+func applyVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, summary v1alpha1.ReplicatedStorageClassVolumesSummary) bool {
 	changed := false
-	if !ptr.Equal(rsc.Status.Volumes.Total, counters.Total) {
-		rsc.Status.Volumes.Total = counters.Total
+	if !ptr.Equal(rsc.Status.Volumes.Total, summary.Total) {
+		rsc.Status.Volumes.Total = summary.Total
 		changed = true
 	}
-	if !ptr.Equal(rsc.Status.Volumes.PendingAcknowledgment, counters.PendingAcknowledgment) {
-		rsc.Status.Volumes.PendingAcknowledgment = counters.PendingAcknowledgment
+	if !ptr.Equal(rsc.Status.Volumes.PendingAcknowledgment, summary.PendingAcknowledgment) {
+		rsc.Status.Volumes.PendingAcknowledgment = summary.PendingAcknowledgment
 		changed = true
 	}
-	if !ptr.Equal(rsc.Status.Volumes.Aligned, counters.Aligned) {
-		rsc.Status.Volumes.Aligned = counters.Aligned
+	if !ptr.Equal(rsc.Status.Volumes.Aligned, summary.Aligned) {
+		rsc.Status.Volumes.Aligned = summary.Aligned
 		changed = true
 	}
-	if !ptr.Equal(rsc.Status.Volumes.StaleConfiguration, counters.StaleConfiguration) {
-		rsc.Status.Volumes.StaleConfiguration = counters.StaleConfiguration
+	if !ptr.Equal(rsc.Status.Volumes.StaleConfiguration, summary.StaleConfiguration) {
+		rsc.Status.Volumes.StaleConfiguration = summary.StaleConfiguration
 		changed = true
 	}
-	if !ptr.Equal(rsc.Status.Volumes.EligibleNodesViolation, counters.EligibleNodesViolation) {
-		rsc.Status.Volumes.EligibleNodesViolation = counters.EligibleNodesViolation
+	if !ptr.Equal(rsc.Status.Volumes.EligibleNodesInConflict, summary.EligibleNodesInConflict) {
+		rsc.Status.Volumes.EligibleNodesInConflict = summary.EligibleNodesInConflict
 		changed = true
 	}
 	return changed
 }
-
-// =============================================================================
-// Rolling updates helpers
-// =============================================================================
-
-// maxRollingUpdatesInProgress is the API limit for rollingUpdatesInProgress entries.
-const maxRollingUpdatesInProgress = 200
 
 // =============================================================================
 // Apply helpers

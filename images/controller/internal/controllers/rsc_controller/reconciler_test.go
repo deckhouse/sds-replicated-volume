@@ -250,7 +250,7 @@ var _ = Describe("computeActualEligibleNodes", func() {
 	})
 })
 
-var _ = Describe("computeActualVolumeCounters", func() {
+var _ = Describe("computeActualVolumesSummary", func() {
 	var rsc *v1alpha1.ReplicatedStorageClass
 
 	BeforeEach(func() {
@@ -264,12 +264,12 @@ var _ = Describe("computeActualVolumeCounters", func() {
 	})
 
 	It("returns zero counts for empty RV list", func() {
-		counters := computeActualVolumeCounters(rsc, nil)
+		counters := computeActualVolumesSummary(rsc, nil)
 
 		Expect(*counters.Total).To(Equal(int32(0)))
 		Expect(*counters.Aligned).To(Equal(int32(0)))
 		Expect(*counters.StaleConfiguration).To(Equal(int32(0)))
-		Expect(*counters.EligibleNodesViolation).To(Equal(int32(0)))
+		Expect(*counters.EligibleNodesInConflict).To(Equal(int32(0)))
 	})
 
 	It("counts total volumes (RVs without status.storageClass are considered acknowledged)", func() {
@@ -278,7 +278,7 @@ var _ = Describe("computeActualVolumeCounters", func() {
 			{ObjectMeta: metav1.ObjectMeta{Name: "rv-2"}},
 		}
 
-		counters := computeActualVolumeCounters(rsc, rvs)
+		counters := computeActualVolumesSummary(rsc, rvs)
 
 		Expect(*counters.Total).To(Equal(int32(2)))
 	})
@@ -302,7 +302,7 @@ var _ = Describe("computeActualVolumeCounters", func() {
 			},
 		}
 
-		counters := computeActualVolumeCounters(rsc, rvs)
+		counters := computeActualVolumesSummary(rsc, rvs)
 
 		Expect(*counters.Aligned).To(Equal(int32(1)))
 	})
@@ -322,7 +322,7 @@ var _ = Describe("computeActualVolumeCounters", func() {
 			},
 		}
 
-		counters := computeActualVolumeCounters(rsc, rvs)
+		counters := computeActualVolumesSummary(rsc, rvs)
 
 		Expect(*counters.StaleConfiguration).To(Equal(int32(1)))
 	})
@@ -342,9 +342,9 @@ var _ = Describe("computeActualVolumeCounters", func() {
 			},
 		}
 
-		counters := computeActualVolumeCounters(rsc, rvs)
+		counters := computeActualVolumesSummary(rsc, rvs)
 
-		Expect(*counters.EligibleNodesViolation).To(Equal(int32(1)))
+		Expect(*counters.EligibleNodesInConflict).To(Equal(int32(1)))
 	})
 
 	It("returns only total when RV has not acknowledged (mismatched configurationGeneration)", func() {
@@ -367,12 +367,12 @@ var _ = Describe("computeActualVolumeCounters", func() {
 			},
 		}
 
-		counters := computeActualVolumeCounters(rsc, rvs)
+		counters := computeActualVolumesSummary(rsc, rvs)
 
 		Expect(*counters.Total).To(Equal(int32(1)))
 		Expect(counters.Aligned).To(BeNil())
 		Expect(counters.StaleConfiguration).To(BeNil())
-		Expect(counters.EligibleNodesViolation).To(BeNil())
+		Expect(counters.EligibleNodesInConflict).To(BeNil())
 	})
 
 	It("returns only total when RV has not acknowledged (mismatched eligibleNodesRevision)", func() {
@@ -389,7 +389,7 @@ var _ = Describe("computeActualVolumeCounters", func() {
 			},
 		}
 
-		counters := computeActualVolumeCounters(rsc, rvs)
+		counters := computeActualVolumesSummary(rsc, rvs)
 
 		Expect(*counters.Total).To(Equal(int32(1)))
 		Expect(counters.Aligned).To(BeNil())
@@ -419,12 +419,12 @@ var _ = Describe("computeActualVolumeCounters", func() {
 			},
 		}
 
-		counters := computeActualVolumeCounters(rsc, rvs)
+		counters := computeActualVolumesSummary(rsc, rvs)
 
 		Expect(*counters.Total).To(Equal(int32(1)))
 		Expect(*counters.Aligned).To(Equal(int32(1)))
 		Expect(*counters.StaleConfiguration).To(Equal(int32(0)))
-		Expect(*counters.EligibleNodesViolation).To(Equal(int32(0)))
+		Expect(*counters.EligibleNodesInConflict).To(Equal(int32(0)))
 	})
 })
 
@@ -1112,124 +1112,124 @@ var _ = Describe("areEligibleNodesInSyncWithTheWorld", func() {
 	})
 })
 
-var _ = Describe("computeRollingUpdatesConfiguration", func() {
-	It("returns (0, 0) when both policies are not RollingUpdate", func() {
+var _ = Describe("computeRollingStrategiesConfiguration", func() {
+	It("returns (0, 0) when both policies are not RollingUpdate/RollingRepair", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				RolloutStrategy: v1alpha1.ReplicatedStorageClassRolloutStrategy{
-					Type: v1alpha1.ReplicatedStorageClassRolloutStrategyTypeNewOnly,
+				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+					Type: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategyTypeNewVolumesOnly,
 				},
-				EligibleNodesDriftPolicy: v1alpha1.ReplicatedStorageClassEligibleNodesDriftPolicy{
-					Type: v1alpha1.ReplicatedStorageClassEligibleNodesDriftPolicyTypeIgnore,
+				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+					Type: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeManual,
 				},
 			},
 		}
 
-		rollouts, drifts := computeRollingUpdatesConfiguration(rsc)
+		rollouts, conflicts := computeRollingStrategiesConfiguration(rsc)
 
 		Expect(rollouts).To(Equal(int32(0)))
-		Expect(drifts).To(Equal(int32(0)))
+		Expect(conflicts).To(Equal(int32(0)))
 	})
 
-	It("returns maxParallel for rollouts when RolloutStrategy is RollingUpdate", func() {
+	It("returns maxParallel for rollouts when ConfigurationRolloutStrategy is RollingUpdate", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				RolloutStrategy: v1alpha1.ReplicatedStorageClassRolloutStrategy{
-					Type: v1alpha1.ReplicatedStorageClassRolloutStrategyTypeRollingUpdate,
-					RollingUpdate: &v1alpha1.ReplicatedStorageClassRollingUpdateStrategy{
+				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+					Type: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategyTypeRollingUpdate,
+					RollingUpdate: &v1alpha1.ReplicatedStorageClassConfigurationRollingUpdateStrategy{
 						MaxParallel: 5,
 					},
 				},
-				EligibleNodesDriftPolicy: v1alpha1.ReplicatedStorageClassEligibleNodesDriftPolicy{
-					Type: v1alpha1.ReplicatedStorageClassEligibleNodesDriftPolicyTypeIgnore,
+				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+					Type: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeManual,
 				},
 			},
 		}
 
-		rollouts, drifts := computeRollingUpdatesConfiguration(rsc)
+		rollouts, conflicts := computeRollingStrategiesConfiguration(rsc)
 
 		Expect(rollouts).To(Equal(int32(5)))
-		Expect(drifts).To(Equal(int32(0)))
+		Expect(conflicts).To(Equal(int32(0)))
 	})
 
-	It("returns maxParallel for drifts when EligibleNodesDriftPolicy is RollingUpdate", func() {
+	It("returns maxParallel for conflicts when EligibleNodesConflictResolutionStrategy is RollingRepair", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				RolloutStrategy: v1alpha1.ReplicatedStorageClassRolloutStrategy{
-					Type: v1alpha1.ReplicatedStorageClassRolloutStrategyTypeNewOnly,
+				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+					Type: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategyTypeNewVolumesOnly,
 				},
-				EligibleNodesDriftPolicy: v1alpha1.ReplicatedStorageClassEligibleNodesDriftPolicy{
-					Type: v1alpha1.ReplicatedStorageClassEligibleNodesDriftPolicyTypeRollingUpdate,
-					RollingUpdate: &v1alpha1.ReplicatedStorageClassEligibleNodesDriftRollingUpdate{
+				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+					Type: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeRollingRepair,
+					RollingRepair: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair{
 						MaxParallel: 10,
 					},
 				},
 			},
 		}
 
-		rollouts, drifts := computeRollingUpdatesConfiguration(rsc)
+		rollouts, conflicts := computeRollingStrategiesConfiguration(rsc)
 
 		Expect(rollouts).To(Equal(int32(0)))
-		Expect(drifts).To(Equal(int32(10)))
+		Expect(conflicts).To(Equal(int32(10)))
 	})
 
-	It("returns both maxParallel values when both policies are RollingUpdate", func() {
+	It("returns both maxParallel values when both policies are rolling", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				RolloutStrategy: v1alpha1.ReplicatedStorageClassRolloutStrategy{
-					Type: v1alpha1.ReplicatedStorageClassRolloutStrategyTypeRollingUpdate,
-					RollingUpdate: &v1alpha1.ReplicatedStorageClassRollingUpdateStrategy{
+				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+					Type: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategyTypeRollingUpdate,
+					RollingUpdate: &v1alpha1.ReplicatedStorageClassConfigurationRollingUpdateStrategy{
 						MaxParallel: 3,
 					},
 				},
-				EligibleNodesDriftPolicy: v1alpha1.ReplicatedStorageClassEligibleNodesDriftPolicy{
-					Type: v1alpha1.ReplicatedStorageClassEligibleNodesDriftPolicyTypeRollingUpdate,
-					RollingUpdate: &v1alpha1.ReplicatedStorageClassEligibleNodesDriftRollingUpdate{
+				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+					Type: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeRollingRepair,
+					RollingRepair: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair{
 						MaxParallel: 7,
 					},
 				},
 			},
 		}
 
-		rollouts, drifts := computeRollingUpdatesConfiguration(rsc)
+		rollouts, conflicts := computeRollingStrategiesConfiguration(rsc)
 
 		Expect(rollouts).To(Equal(int32(3)))
-		Expect(drifts).To(Equal(int32(7)))
+		Expect(conflicts).To(Equal(int32(7)))
 	})
 
-	It("panics when RolloutStrategy is RollingUpdate but RollingUpdate config is nil", func() {
+	It("panics when ConfigurationRolloutStrategy is RollingUpdate but RollingUpdate config is nil", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				RolloutStrategy: v1alpha1.ReplicatedStorageClassRolloutStrategy{
-					Type:          v1alpha1.ReplicatedStorageClassRolloutStrategyTypeRollingUpdate,
+				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+					Type:          v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategyTypeRollingUpdate,
 					RollingUpdate: nil,
 				},
-				EligibleNodesDriftPolicy: v1alpha1.ReplicatedStorageClassEligibleNodesDriftPolicy{
-					Type: v1alpha1.ReplicatedStorageClassEligibleNodesDriftPolicyTypeIgnore,
+				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+					Type: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeManual,
 				},
 			},
 		}
 
 		Expect(func() {
-			computeRollingUpdatesConfiguration(rsc)
+			computeRollingStrategiesConfiguration(rsc)
 		}).To(Panic())
 	})
 
-	It("panics when EligibleNodesDriftPolicy is RollingUpdate but RollingUpdate config is nil", func() {
+	It("panics when EligibleNodesConflictResolutionStrategy is RollingRepair but RollingRepair config is nil", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				RolloutStrategy: v1alpha1.ReplicatedStorageClassRolloutStrategy{
-					Type: v1alpha1.ReplicatedStorageClassRolloutStrategyTypeNewOnly,
+				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+					Type: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategyTypeNewVolumesOnly,
 				},
-				EligibleNodesDriftPolicy: v1alpha1.ReplicatedStorageClassEligibleNodesDriftPolicy{
-					Type:          v1alpha1.ReplicatedStorageClassEligibleNodesDriftPolicyTypeRollingUpdate,
-					RollingUpdate: nil,
+				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+					Type:          v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeRollingRepair,
+					RollingRepair: nil,
 				},
 			},
 		}
 
 		Expect(func() {
-			computeRollingUpdatesConfiguration(rsc)
+			computeRollingStrategiesConfiguration(rsc)
 		}).To(Panic())
 	})
 })

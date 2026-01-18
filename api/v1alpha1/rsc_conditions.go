@@ -17,15 +17,15 @@ limitations under the License.
 package v1alpha1
 
 const (
-	// ReplicatedStorageClassCondConfigurationAcceptedType indicates whether the storage class
-	// configuration has been accepted and validated.
+	// ReplicatedStorageClassCondConfigurationReadyType indicates whether the storage class
+	// configuration is ready and validated.
 	//
-	// Reasons describe acceptance or validation failure conditions.
-	ReplicatedStorageClassCondConfigurationAcceptedType                                 = "ConfigurationAccepted"
-	ReplicatedStorageClassCondConfigurationAcceptedReasonAccepted                       = "Accepted"                       // Configuration accepted.
-	ReplicatedStorageClassCondConfigurationAcceptedReasonEligibleNodesCalculationFailed = "EligibleNodesCalculationFailed" // Eligible nodes calculation failed.
-	ReplicatedStorageClassCondConfigurationAcceptedReasonInvalidConfiguration           = "InvalidConfiguration"           // Configuration is invalid.
-	ReplicatedStorageClassCondConfigurationAcceptedReasonStoragePoolNotFound            = "StoragePoolNotFound"            // Storage pool not found.
+	// Reasons describe readiness or validation failure conditions.
+	ReplicatedStorageClassCondConfigurationReadyType                                 = "ConfigurationReady"
+	ReplicatedStorageClassCondConfigurationReadyReasonReady                          = "Ready"                          // Configuration is ready.
+	ReplicatedStorageClassCondConfigurationReadyReasonEligibleNodesCalculationFailed = "EligibleNodesCalculationFailed" // Eligible nodes calculation failed.
+	ReplicatedStorageClassCondConfigurationReadyReasonInvalidConfiguration           = "InvalidConfiguration"           // Configuration is invalid.
+	ReplicatedStorageClassCondConfigurationReadyReasonStoragePoolNotFound            = "StoragePoolNotFound"            // Storage pool not found.
 )
 
 const (
@@ -37,19 +37,9 @@ const (
 	ReplicatedStorageClassCondEligibleNodesCalculatedReasonCalculated                    = "Calculated"                    // Eligible nodes calculated successfully.
 	ReplicatedStorageClassCondEligibleNodesCalculatedReasonInsufficientEligibleNodes     = "InsufficientEligibleNodes"     // Not enough eligible nodes.
 	ReplicatedStorageClassCondEligibleNodesCalculatedReasonInvalidConfiguration          = "InvalidConfiguration"          // Configuration is invalid.
+	ReplicatedStorageClassCondEligibleNodesCalculatedReasonInvalidStoragePoolOrLVG       = "InvalidStoragePoolOrLVG"       // ReplicatedStoragePool or LVMVolumeGroup is invalid or not ready.
 	ReplicatedStorageClassCondEligibleNodesCalculatedReasonLVMVolumeGroupNotFound        = "LVMVolumeGroupNotFound"        // LVMVolumeGroup not found.
 	ReplicatedStorageClassCondEligibleNodesCalculatedReasonReplicatedStoragePoolNotFound = "ReplicatedStoragePoolNotFound" // ReplicatedStoragePool not found.
-	ReplicatedStorageClassCondEligibleNodesCalculatedReasonStoragePoolOrLVGNotReady      = "StoragePoolOrLVGNotReady"      // ReplicatedStoragePool or LVMVolumeGroup is not ready.
-)
-
-const (
-	// ReplicatedStorageClassCondVolumesAcknowledgedType indicates whether all volumes
-	// have acknowledged the storage class configuration and eligible nodes.
-	//
-	// Reasons describe acknowledgment state.
-	ReplicatedStorageClassCondVolumesAcknowledgedType                  = "VolumesAcknowledged"
-	ReplicatedStorageClassCondVolumesAcknowledgedReasonAllAcknowledged = "AllAcknowledged" // All volumes acknowledged.
-	ReplicatedStorageClassCondVolumesAcknowledgedReasonPending         = "Pending"         // Acknowledgment pending.
 )
 
 const (
@@ -57,21 +47,21 @@ const (
 	// configuration matches the storage class.
 	//
 	// Reasons describe configuration alignment state.
-	ReplicatedStorageClassCondVolumesConfigurationAlignedType                        = "VolumesConfigurationAligned"
-	ReplicatedStorageClassCondVolumesConfigurationAlignedReasonAllAligned            = "AllAligned"            // All volumes are aligned.
-	ReplicatedStorageClassCondVolumesConfigurationAlignedReasonInProgress            = "InProgress"            // Configuration rollout in progress.
-	ReplicatedStorageClassCondVolumesConfigurationAlignedReasonPendingAcknowledgment = "PendingAcknowledgment" // Some volumes haven't acknowledged.
-	ReplicatedStorageClassCondVolumesConfigurationAlignedReasonRolloutDisabled       = "RolloutDisabled"       // Rollout strategy is NewOnly.
+	ReplicatedStorageClassCondVolumesConfigurationAlignedType                               = "VolumesConfigurationAligned"
+	ReplicatedStorageClassCondVolumesConfigurationAlignedReasonAllAligned                   = "AllAligned"                   // All volumes are aligned.
+	ReplicatedStorageClassCondVolumesConfigurationAlignedReasonConfigurationRolloutDisabled = "ConfigurationRolloutDisabled" // Configuration rollout strategy is NewVolumesOnly.
+	ReplicatedStorageClassCondVolumesConfigurationAlignedReasonInProgress                   = "InProgress"                   // Configuration rollout in progress.
+	ReplicatedStorageClassCondVolumesConfigurationAlignedReasonPendingAcknowledgment        = "PendingAcknowledgment"        // Some volumes haven't acknowledged.
 )
 
 const (
-	// ReplicatedStorageClassCondVolumesEligibleNodesAlignedType indicates whether all volumes'
+	// ReplicatedStorageClassCondVolumesNodeEligibilityAlignedType indicates whether all volumes'
 	// replicas are placed on eligible nodes.
 	//
-	// Reasons describe eligible nodes alignment state.
-	ReplicatedStorageClassCondVolumesEligibleNodesAlignedType                        = "VolumesEligibleNodesAligned"
-	ReplicatedStorageClassCondVolumesEligibleNodesAlignedReasonAllAligned            = "AllAligned"            // All volumes are aligned.
-	ReplicatedStorageClassCondVolumesEligibleNodesAlignedReasonInProgress            = "InProgress"            // Eligible nodes alignment in progress.
-	ReplicatedStorageClassCondVolumesEligibleNodesAlignedReasonPendingAcknowledgment = "PendingAcknowledgment" // Some volumes haven't acknowledged.
-	ReplicatedStorageClassCondVolumesEligibleNodesAlignedReasonResolutionDisabled    = "ResolutionDisabled"    // Drift policy is Ignore.
+	// Reasons describe node eligibility alignment state.
+	ReplicatedStorageClassCondVolumesNodeEligibilityAlignedType                           = "VolumesNodeEligibilityAligned"
+	ReplicatedStorageClassCondVolumesNodeEligibilityAlignedReasonAllAligned               = "AllAligned"               // All volumes are aligned.
+	ReplicatedStorageClassCondVolumesNodeEligibilityAlignedReasonConflictResolutionManual = "ConflictResolutionManual" // Conflict resolution strategy is Manual.
+	ReplicatedStorageClassCondVolumesNodeEligibilityAlignedReasonInProgress               = "InProgress"               // Node eligibility alignment in progress.
+	ReplicatedStorageClassCondVolumesNodeEligibilityAlignedReasonPendingAcknowledgment    = "PendingAcknowledgment"    // Some volumes haven't acknowledged.
 )

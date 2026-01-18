@@ -61,20 +61,20 @@ spec:
 
               > Note that this field is in read-only mode.
             properties:
-              eligibleNodesDriftPolicy:
+              configurationRolloutStrategy:
                 description: |-
-                  EligibleNodesDriftPolicy defines how the controller handles changes in eligible nodes.
+                  ConfigurationRolloutStrategy defines how configuration changes are applied to existing volumes.
                   Always present with defaults.
                 properties:
                   rollingUpdate:
                     description: |-
-                      RollingUpdate configures parameters for RollingUpdate drift policy.
+                      RollingUpdate configures parameters for RollingUpdate strategy.
                       Required when type is RollingUpdate.
                     properties:
                       maxParallel:
                         default: 5
                         description: MaxParallel is the maximum number of volumes
-                          being updated simultaneously.
+                          being rolled out simultaneously.
                         format: int32
                         maximum: 200
                         minimum: 1
@@ -84,10 +84,10 @@ spec:
                     type: object
                   type:
                     default: RollingUpdate
-                    description: Type specifies the drift policy type.
+                    description: Type specifies the rollout strategy type.
                     enum:
-                    - Ignore
                     - RollingUpdate
+                    - NewVolumesOnly
                     type: string
                 type: object
                 x-kubernetes-validations:
@@ -95,6 +95,40 @@ spec:
                   rule: self.type != 'RollingUpdate' || has(self.rollingUpdate)
                 - message: rollingUpdate must not be set when type is not RollingUpdate
                   rule: self.type == 'RollingUpdate' || !has(self.rollingUpdate)
+              eligibleNodesConflictResolutionStrategy:
+                description: |-
+                  EligibleNodesConflictResolutionStrategy defines how the controller handles volumes with eligible nodes conflicts.
+                  Always present with defaults.
+                properties:
+                  rollingRepair:
+                    description: |-
+                      RollingRepair configures parameters for RollingRepair conflict resolution strategy.
+                      Required when type is RollingRepair.
+                    properties:
+                      maxParallel:
+                        default: 5
+                        description: MaxParallel is the maximum number of volumes
+                          being repaired simultaneously.
+                        format: int32
+                        maximum: 200
+                        minimum: 1
+                        type: integer
+                    required:
+                    - maxParallel
+                    type: object
+                  type:
+                    default: RollingRepair
+                    description: Type specifies the conflict resolution strategy type.
+                    enum:
+                    - Manual
+                    - RollingRepair
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: rollingRepair is required when type is RollingRepair
+                  rule: self.type != 'RollingRepair' || has(self.rollingRepair)
+                - message: rollingRepair must not be set when type is not RollingRepair
+                  rule: self.type == 'RollingRepair' || !has(self.rollingRepair)
               eligibleNodesPolicy:
                 description: |-
                   EligibleNodesPolicy defines policies for managing eligible nodes.
@@ -187,40 +221,6 @@ spec:
                 x-kubernetes-validations:
                 - message: Value is immutable.
                   rule: self == oldSelf
-              rolloutStrategy:
-                description: |-
-                  RolloutStrategy defines how configuration changes are applied to existing volumes.
-                  Always present with defaults.
-                properties:
-                  rollingUpdate:
-                    description: |-
-                      RollingUpdate configures parameters for RollingUpdate strategy.
-                      Required when type is RollingUpdate.
-                    properties:
-                      maxParallel:
-                        default: 5
-                        description: MaxParallel is the maximum number of volumes
-                          being rolled out simultaneously.
-                        format: int32
-                        maximum: 200
-                        minimum: 1
-                        type: integer
-                    required:
-                    - maxParallel
-                    type: object
-                  type:
-                    default: RollingUpdate
-                    description: Type specifies the rollout strategy type.
-                    enum:
-                    - RollingUpdate
-                    - NewOnly
-                    type: string
-                type: object
-                x-kubernetes-validations:
-                - message: rollingUpdate is required when type is RollingUpdate
-                  rule: self.type != 'RollingUpdate' || has(self.rollingUpdate)
-                - message: rollingUpdate must not be set when type is not RollingUpdate
-                  rule: self.type == 'RollingUpdate' || !has(self.rollingUpdate)
               storagePool:
                 description: Selected ReplicatedStoragePool resource's name.
                 type: string
@@ -298,10 +298,10 @@ spec:
                 - message: Value is immutable.
                   rule: self == oldSelf
             required:
-            - eligibleNodesDriftPolicy
+            - configurationRolloutStrategy
+            - eligibleNodesConflictResolutionStrategy
             - eligibleNodesPolicy
             - reclaimPolicy
-            - rolloutStrategy
             - storagePool
             - systemNetworkNames
             - topology
@@ -572,9 +572,9 @@ spec:
                       matches the storage class.
                     format: int32
                     type: integer
-                  eligibleNodesViolation:
-                    description: EligibleNodesViolation is the number of volumes with
-                      replicas on non-eligible nodes.
+                  eligibleNodesInConflict:
+                    description: EligibleNodesInConflict is the number of volumes
+                      with replicas on non-eligible nodes.
                     format: int32
                     type: integer
                   pendingAcknowledgment:
@@ -582,31 +582,6 @@ spec:
                       haven't acknowledged current RSC configuration.
                     format: int32
                     type: integer
-                  rollingUpdatesInProgress:
-                    description: RollingUpdatesInProgress lists volumes currently
-                      being updated.
-                    items:
-                      description: ReplicatedStorageClassRollingUpdateInProgress describes
-                        a volume undergoing rolling update.
-                      properties:
-                        name:
-                          description: Name is the ReplicatedVolume name.
-                          type: string
-                        operation:
-                          description: Operation is the type of operation being performed.
-                          type: string
-                        startedAt:
-                          description: StartedAt is the timestamp when the rolling
-                            update started.
-                          format: date-time
-                          type: string
-                      required:
-                      - name
-                      - operation
-                      - startedAt
-                      type: object
-                    maxItems: 200
-                    type: array
                   staleConfiguration:
                     description: StaleConfiguration is the number of volumes with
                       outdated configuration.
