@@ -1637,7 +1637,7 @@ var _ = Describe("Reconcile", func() {
 					attachTo = []string{"node-1"}
 
 					// смоделируем ситуацию, когда раньше allowTwoPrimaries уже был включён
-					rv.Status.DRBD = &v1alpha1.DRBDResource{
+					rv.Status.DRBD = &v1alpha1.DRBDResourceDetails{
 						Config: &v1alpha1.DRBDResourceConfig{
 							AllowTwoPrimaries: true,
 						},

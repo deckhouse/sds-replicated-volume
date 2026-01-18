@@ -175,7 +175,7 @@ var _ = Describe("Reconciler", func() {
 					},
 				}
 				// Initialize Status.DRBD.Config to ensure patch works correctly
-				rv.Status.DRBD = &v1alpha1.DRBDResource{
+				rv.Status.DRBD = &v1alpha1.DRBDResourceDetails{
 					Config: &v1alpha1.DRBDResourceConfig{},
 				}
 			})

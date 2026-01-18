@@ -298,7 +298,7 @@ func hasUnsupportedAlgorithmError(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 // ensureRVStatusInitialized ensures that RV status structure is initialized
 func ensureRVStatusInitialized(rv *v1alpha1.ReplicatedVolume) {
 	if rv.Status.DRBD == nil {
-		rv.Status.DRBD = &v1alpha1.DRBDResource{}
+		rv.Status.DRBD = &v1alpha1.DRBDResourceDetails{}
 	}
 	if rv.Status.DRBD.Config == nil {
 		rv.Status.DRBD.Config = &v1alpha1.DRBDResourceConfig{}
