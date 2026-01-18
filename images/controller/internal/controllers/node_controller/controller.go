@@ -46,7 +46,7 @@ func BuildController(mgr manager.Manager) error {
 	return builder.ControllerManagedBy(mgr).
 		Named(NodeControllerName).
 		// This controller has no primary resource of its own.
-		// It watches Node and RSC events and reconciles a singleton key.
+		// It watches Node, RSC, and DRBDResource events and reconciles a singleton key.
 		Watches(
 			&corev1.Node{},
 			handler.EnqueueRequestsFromMapFunc(mapNodeToSingleton),
@@ -56,6 +56,11 @@ func BuildController(mgr manager.Manager) error {
 			&v1alpha1.ReplicatedStorageClass{},
 			handler.EnqueueRequestsFromMapFunc(mapRSCToSingleton),
 			builder.WithPredicates(RSCPredicates()...),
+		).
+		Watches(
+			&v1alpha1.DRBDResource{},
+			handler.EnqueueRequestsFromMapFunc(mapDRBDResourceToSingleton),
+			builder.WithPredicates(DRBDResourcePredicates()...),
 		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Complete(rec)
@@ -68,5 +73,10 @@ func mapNodeToSingleton(_ context.Context, _ client.Object) []reconcile.Request 
 
 // mapRSCToSingleton maps any RSC event to the singleton reconcile request.
 func mapRSCToSingleton(_ context.Context, _ client.Object) []reconcile.Request {
+	return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: singletonKey}}}
+}
+
+// mapDRBDResourceToSingleton maps any DRBDResource event to the singleton reconcile request.
+func mapDRBDResourceToSingleton(_ context.Context, _ client.Object) []reconcile.Request {
 	return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: singletonKey}}}
 }

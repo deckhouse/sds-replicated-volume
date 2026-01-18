@@ -8,17 +8,28 @@ The `storage.deckhouse.io/sds-replicated-volume-node` label determines which nod
 The controller automatically adds this label to nodes that match at least one `ReplicatedStorageClass` (RSC),
 and removes it from nodes that do not match any RSC.
 
+**Important**: The label is also preserved on nodes that have at least one `DRBDResource`,
+even if the node no longer matches any RSC. This prevents orphaning DRBD resources when RSC selectors change.
+
 ## Reconciliation Structure
 
 ```
 Reconcile (root)
 ├── getRSCs             — fetch all RSCs
+├── getDRBDResources    — fetch all DRBDResources
 ├── getNodes            — fetch all Nodes
 ├── computeTargetNodes  — compute which nodes should have the label
 └── reconcileNode       — per-node label reconciliation (loop)
 ```
 
 ## Algorithm
+
+A node receives the label if **at least one** of the following conditions is met (OR):
+
+1. **RSC Match**: The node matches at least one `ReplicatedStorageClass` (see RSC matching rules below).
+2. **DRBDResource Presence**: The node has at least one `DRBDResource` (`spec.nodeName == node.Name`).
+
+### RSC Matching Rules
 
 The controller uses the **resolved configuration** from `rsc.status.configuration` (not `rsc.spec`).
 RSCs that do not yet have a configuration are skipped.
@@ -33,18 +44,22 @@ A node is considered matching an RSC if **both** conditions are met (AND):
 
 An RSC configuration without `zones` and without `nodeLabelSelector` matches all cluster nodes.
 
-A node receives the label if it matches at least one RSC (OR between RSCs).
-
 ## Algorithm Flow
 
 ```mermaid
 flowchart TD
     Start([Reconcile]) --> GetRSCs[Get all RSCs]
-    GetRSCs --> GetNodes[Get all Nodes]
-    GetNodes --> ComputeTarget[computeTargetNodes]
+    GetRSCs --> GetDRBD[Get all DRBDResources]
+    GetDRBD --> GetNodes[Get all Nodes]
+    GetNodes --> ComputeDRBD[computeNodesWithDRBDResources]
+    ComputeDRBD --> ComputeTarget[computeTargetNodes]
 
     ComputeTarget --> LoopStart{For each Node}
-    LoopStart --> CheckConfig{RSC has<br>configuration?}
+    LoopStart --> CheckDRBD{Node has<br>DRBDResource?}
+    CheckDRBD -->|Yes| MarkTrue[targetNodes = true]
+    CheckDRBD -->|No| CheckRSC{Check RSC matching}
+
+    CheckRSC --> CheckConfig{RSC has<br>configuration?}
     CheckConfig -->|No| SkipRSC[Skip RSC]
     CheckConfig -->|Yes| CheckZones{Node in<br>RSC zones?}
     SkipRSC --> NextRSC
@@ -52,7 +67,7 @@ flowchart TD
     CheckZones -->|Yes| CheckSelector{Node matches<br>nodeLabelSelector?}
     CheckSelector -->|No| NextRSC
     CheckSelector -->|Yes| MatchFound[Node matches RSC]
-    MatchFound --> MarkTrue[targetNodes = true]
+    MatchFound --> MarkTrue
     NextRSC --> MoreRSCs{More RSCs?}
     MoreRSCs -->|Yes| CheckConfig
     MoreRSCs -->|No, no match| MarkFalse[targetNodes = false]
@@ -77,10 +92,12 @@ flowchart TD
 flowchart TD
     subgraph inputs [Inputs]
         RSCs[RSCs<br>status.configuration]
+        DRBDResources[DRBDResources<br>spec.nodeName]
         Nodes[Nodes<br>labels]
     end
 
     subgraph compute [Compute]
+        ComputeDRBD[computeNodesWithDRBDResources]
         ComputeTarget[computeTargetNodes]
         NodeMatch[nodeMatchesRSC]
     end
@@ -93,6 +110,8 @@ flowchart TD
         NodeLabel[Node labels<br>storage.deckhouse.io/<br>sds-replicated-volume-node]
     end
 
+    DRBDResources -->|spec.nodeName| ComputeDRBD
+    ComputeDRBD -->|nodesWithDRBDResources| ComputeTarget
     RSCs -->|zones<br>nodeLabelSelector| ComputeTarget
     Nodes -->|topology.kubernetes.io/zone<br>other labels| ComputeTarget
 

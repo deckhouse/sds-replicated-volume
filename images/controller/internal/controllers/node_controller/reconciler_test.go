@@ -412,12 +412,67 @@ var _ = Describe("nodeMatchesAnyRSC", func() {
 	})
 })
 
+var _ = Describe("computeNodesWithDRBDResources", func() {
+	It("returns empty map when DRBDResources list is empty", func() {
+		drbdResources := []v1alpha1.DRBDResource{}
+
+		result := computeNodesWithDRBDResources(drbdResources)
+
+		Expect(result).To(BeEmpty())
+	})
+
+	It("returns nodes that have DRBDResources", func() {
+		drbdResources := []v1alpha1.DRBDResource{
+			{Spec: v1alpha1.DRBDResourceSpec{NodeName: "node-1"}},
+			{Spec: v1alpha1.DRBDResourceSpec{NodeName: "node-2"}},
+		}
+
+		result := computeNodesWithDRBDResources(drbdResources)
+
+		Expect(result).To(HaveLen(2))
+		Expect(result["node-1"]).To(BeTrue())
+		Expect(result["node-2"]).To(BeTrue())
+	})
+
+	It("handles multiple DRBDResources on the same node", func() {
+		drbdResources := []v1alpha1.DRBDResource{
+			{Spec: v1alpha1.DRBDResourceSpec{NodeName: "node-1"}},
+			{Spec: v1alpha1.DRBDResourceSpec{NodeName: "node-1"}},
+			{Spec: v1alpha1.DRBDResourceSpec{NodeName: "node-2"}},
+		}
+
+		result := computeNodesWithDRBDResources(drbdResources)
+
+		Expect(result).To(HaveLen(2))
+		Expect(result["node-1"]).To(BeTrue())
+		Expect(result["node-2"]).To(BeTrue())
+	})
+
+	It("skips DRBDResources with empty nodeName", func() {
+		drbdResources := []v1alpha1.DRBDResource{
+			{Spec: v1alpha1.DRBDResourceSpec{NodeName: "node-1"}},
+			{Spec: v1alpha1.DRBDResourceSpec{NodeName: ""}},
+		}
+
+		result := computeNodesWithDRBDResources(drbdResources)
+
+		Expect(result).To(HaveLen(1))
+		Expect(result["node-1"]).To(BeTrue())
+	})
+})
+
 var _ = Describe("computeTargetNodes", func() {
+	var emptyDRBDResources []v1alpha1.DRBDResource
+
+	BeforeEach(func() {
+		emptyDRBDResources = []v1alpha1.DRBDResource{}
+	})
+
 	It("returns empty map when both RSCs and nodes are empty", func() {
 		rscs := []v1alpha1.ReplicatedStorageClass{}
 		nodes := []corev1.Node{}
 
-		target := computeTargetNodes(rscs, nodes)
+		target := computeTargetNodes(rscs, emptyDRBDResources, nodes)
 
 		Expect(target).To(BeEmpty())
 	})
@@ -429,7 +484,7 @@ var _ = Describe("computeTargetNodes", func() {
 			{ObjectMeta: metav1.ObjectMeta{Name: "node-2"}},
 		}
 
-		target := computeTargetNodes(rscs, nodes)
+		target := computeTargetNodes(rscs, emptyDRBDResources, nodes)
 
 		Expect(target).To(HaveLen(2))
 		Expect(target["node-1"]).To(BeFalse())
@@ -449,7 +504,7 @@ var _ = Describe("computeTargetNodes", func() {
 			{ObjectMeta: metav1.ObjectMeta{Name: "node-2"}},
 		}
 
-		target := computeTargetNodes(rscs, nodes)
+		target := computeTargetNodes(rscs, emptyDRBDResources, nodes)
 
 		Expect(target).To(HaveLen(2))
 		Expect(target["node-1"]).To(BeFalse())
@@ -469,7 +524,7 @@ var _ = Describe("computeTargetNodes", func() {
 			{ObjectMeta: metav1.ObjectMeta{Name: "node-2"}},
 		}
 
-		target := computeTargetNodes(rscs, nodes)
+		target := computeTargetNodes(rscs, emptyDRBDResources, nodes)
 
 		Expect(target).To(HaveLen(2))
 		Expect(target["node-1"]).To(BeTrue())
@@ -507,7 +562,7 @@ var _ = Describe("computeTargetNodes", func() {
 			},
 		}
 
-		target := computeTargetNodes(rscs, nodes)
+		target := computeTargetNodes(rscs, emptyDRBDResources, nodes)
 
 		Expect(target).To(HaveLen(3))
 		Expect(target["node-1"]).To(BeTrue())
@@ -544,7 +599,7 @@ var _ = Describe("computeTargetNodes", func() {
 			},
 		}
 
-		target := computeTargetNodes(rscs, nodes)
+		target := computeTargetNodes(rscs, emptyDRBDResources, nodes)
 
 		Expect(target).To(HaveLen(2))
 		Expect(target["node-1"]).To(BeTrue())
@@ -589,12 +644,146 @@ var _ = Describe("computeTargetNodes", func() {
 			},
 		}
 
-		target := computeTargetNodes(rscs, nodes)
+		target := computeTargetNodes(rscs, emptyDRBDResources, nodes)
 
 		Expect(target).To(HaveLen(3))
 		Expect(target["node-1"]).To(BeTrue())
 		Expect(target["node-2"]).To(BeTrue())
 		Expect(target["node-3"]).To(BeFalse())
+	})
+
+	Context("DRBDResource protection", func() {
+		It("returns true for node with DRBDResource even if it does not match any RSC", func() {
+			rscs := []v1alpha1.ReplicatedStorageClass{
+				{
+					Status: v1alpha1.ReplicatedStorageClassStatus{
+						Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+							Zones: []string{"zone-a"},
+						},
+					},
+				},
+			}
+			drbdResources := []v1alpha1.DRBDResource{
+				{Spec: v1alpha1.DRBDResourceSpec{NodeName: "node-2"}},
+			}
+			nodes := []corev1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "node-1",
+						Labels: map[string]string{corev1.LabelTopologyZone: "zone-a"},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "node-2",
+						Labels: map[string]string{corev1.LabelTopologyZone: "zone-b"}, // does not match RSC
+					},
+				},
+			}
+
+			target := computeTargetNodes(rscs, drbdResources, nodes)
+
+			Expect(target).To(HaveLen(2))
+			Expect(target["node-1"]).To(BeTrue()) // matches RSC
+			Expect(target["node-2"]).To(BeTrue()) // has DRBDResource
+		})
+
+		It("returns true for node that matches RSC and has DRBDResource", func() {
+			rscs := []v1alpha1.ReplicatedStorageClass{
+				{
+					Status: v1alpha1.ReplicatedStorageClassStatus{
+						Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+							Zones: []string{"zone-a"},
+						},
+					},
+				},
+			}
+			drbdResources := []v1alpha1.DRBDResource{
+				{Spec: v1alpha1.DRBDResourceSpec{NodeName: "node-1"}},
+			}
+			nodes := []corev1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "node-1",
+						Labels: map[string]string{corev1.LabelTopologyZone: "zone-a"},
+					},
+				},
+			}
+
+			target := computeTargetNodes(rscs, drbdResources, nodes)
+
+			Expect(target).To(HaveLen(1))
+			Expect(target["node-1"]).To(BeTrue())
+		})
+
+		It("returns false for node without DRBDResource and not matching RSC", func() {
+			rscs := []v1alpha1.ReplicatedStorageClass{
+				{
+					Status: v1alpha1.ReplicatedStorageClassStatus{
+						Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+							Zones: []string{"zone-a"},
+						},
+					},
+				},
+			}
+			drbdResources := []v1alpha1.DRBDResource{
+				{Spec: v1alpha1.DRBDResourceSpec{NodeName: "node-1"}},
+			}
+			nodes := []corev1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "node-1",
+						Labels: map[string]string{corev1.LabelTopologyZone: "zone-a"},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "node-2",
+						Labels: map[string]string{corev1.LabelTopologyZone: "zone-b"},
+					},
+				},
+			}
+
+			target := computeTargetNodes(rscs, drbdResources, nodes)
+
+			Expect(target).To(HaveLen(2))
+			Expect(target["node-1"]).To(BeTrue())  // matches RSC and has DRBDResource
+			Expect(target["node-2"]).To(BeFalse()) // neither matches RSC nor has DRBDResource
+		})
+
+		It("keeps label when RSC selector changes but node has DRBDResource", func() {
+			// This test verifies the main use case: node had RSC match before,
+			// RSC selector changed so node no longer matches, but node has DRBDResource.
+			rscs := []v1alpha1.ReplicatedStorageClass{
+				{
+					Status: v1alpha1.ReplicatedStorageClassStatus{
+						Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+							NodeLabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"tier": "premium", // changed from "standard" to "premium"
+								},
+							},
+						},
+					},
+				},
+			}
+			drbdResources := []v1alpha1.DRBDResource{
+				{Spec: v1alpha1.DRBDResourceSpec{NodeName: "node-1"}}, // has DRBD on node-1
+			}
+			nodes := []corev1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "node-1",
+						Labels: map[string]string{"tier": "standard"}, // no longer matches RSC
+					},
+				},
+			}
+
+			target := computeTargetNodes(rscs, drbdResources, nodes)
+
+			Expect(target).To(HaveLen(1))
+			Expect(target["node-1"]).To(BeTrue()) // protected by DRBDResource presence
+		})
 	})
 })
 
@@ -892,6 +1081,220 @@ var _ = Describe("Reconciler", func() {
 			var updatedNode2 corev1.Node
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-2"}, &updatedNode2)).To(Succeed())
 			Expect(updatedNode2.Labels).NotTo(HaveKey(v1alpha1.AgentNodeLabelKey))
+		})
+
+		Context("DRBDResource protection", func() {
+			It("keeps label on node with DRBDResource even when RSC selector changes", func() {
+				// Scenario: node had the label, RSC selector changed so node no longer matches,
+				// but node has DRBDResource — label should be kept.
+				node := &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node-1",
+						Labels: map[string]string{
+							"tier":                     "standard",
+							v1alpha1.AgentNodeLabelKey: "node-1",
+						},
+					},
+				}
+				rsc := &v1alpha1.ReplicatedStorageClass{
+					ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+					Status: v1alpha1.ReplicatedStorageClassStatus{
+						Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+							NodeLabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"tier": "premium", // node-1 has "standard", not "premium"
+								},
+							},
+						},
+					},
+				}
+				drbdResource := &v1alpha1.DRBDResource{
+					ObjectMeta: metav1.ObjectMeta{Name: "drbd-1"},
+					Spec:       v1alpha1.DRBDResourceSpec{NodeName: "node-1"},
+				}
+				cl = fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsc, drbdResource).Build()
+				rec = NewReconciler(cl)
+
+				result, err := rec.Reconcile(context.Background(), reconcile.Request{})
+
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result).To(Equal(reconcile.Result{}))
+
+				var updatedNode corev1.Node
+				Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-1"}, &updatedNode)).To(Succeed())
+				Expect(updatedNode.Labels).To(HaveKey(v1alpha1.AgentNodeLabelKey))
+			})
+
+			It("adds label to node with DRBDResource even when node does not match any RSC", func() {
+				node := &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "node-1",
+						Labels: map[string]string{"tier": "standard"},
+					},
+				}
+				rsc := &v1alpha1.ReplicatedStorageClass{
+					ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+					Status: v1alpha1.ReplicatedStorageClassStatus{
+						Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+							NodeLabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"tier": "premium",
+								},
+							},
+						},
+					},
+				}
+				drbdResource := &v1alpha1.DRBDResource{
+					ObjectMeta: metav1.ObjectMeta{Name: "drbd-1"},
+					Spec:       v1alpha1.DRBDResourceSpec{NodeName: "node-1"},
+				}
+				cl = fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsc, drbdResource).Build()
+				rec = NewReconciler(cl)
+
+				result, err := rec.Reconcile(context.Background(), reconcile.Request{})
+
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result).To(Equal(reconcile.Result{}))
+
+				var updatedNode corev1.Node
+				Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-1"}, &updatedNode)).To(Succeed())
+				Expect(updatedNode.Labels).To(HaveKey(v1alpha1.AgentNodeLabelKey))
+			})
+
+			It("removes label from node without DRBDResource when RSC selector changes", func() {
+				node := &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node-1",
+						Labels: map[string]string{
+							"tier":                     "standard",
+							v1alpha1.AgentNodeLabelKey: "node-1",
+						},
+					},
+				}
+				rsc := &v1alpha1.ReplicatedStorageClass{
+					ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+					Status: v1alpha1.ReplicatedStorageClassStatus{
+						Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+							NodeLabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"tier": "premium",
+								},
+							},
+						},
+					},
+				}
+				// No DRBDResource on node-1
+				cl = fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsc).Build()
+				rec = NewReconciler(cl)
+
+				result, err := rec.Reconcile(context.Background(), reconcile.Request{})
+
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result).To(Equal(reconcile.Result{}))
+
+				var updatedNode corev1.Node
+				Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-1"}, &updatedNode)).To(Succeed())
+				Expect(updatedNode.Labels).NotTo(HaveKey(v1alpha1.AgentNodeLabelKey))
+			})
+
+			It("removes label once DRBDResource is deleted and node no longer matches RSC", func() {
+				// First reconcile: node has DRBDResource, label is kept
+				node := &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node-1",
+						Labels: map[string]string{
+							"tier":                     "standard",
+							v1alpha1.AgentNodeLabelKey: "node-1",
+						},
+					},
+				}
+				rsc := &v1alpha1.ReplicatedStorageClass{
+					ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+					Status: v1alpha1.ReplicatedStorageClassStatus{
+						Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+							NodeLabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"tier": "premium",
+								},
+							},
+						},
+					},
+				}
+				// No DRBDResource — simulating after deletion
+				cl = fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsc).Build()
+				rec = NewReconciler(cl)
+
+				result, err := rec.Reconcile(context.Background(), reconcile.Request{})
+
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result).To(Equal(reconcile.Result{}))
+
+				var updatedNode corev1.Node
+				Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-1"}, &updatedNode)).To(Succeed())
+				Expect(updatedNode.Labels).NotTo(HaveKey(v1alpha1.AgentNodeLabelKey))
+			})
+
+			It("handles multiple nodes with different DRBDResource presence", func() {
+				node1 := &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node-1",
+						Labels: map[string]string{
+							corev1.LabelTopologyZone:   "zone-a",
+							v1alpha1.AgentNodeLabelKey: "node-1",
+						},
+					},
+				}
+				node2 := &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node-2",
+						Labels: map[string]string{
+							corev1.LabelTopologyZone:   "zone-b",
+							v1alpha1.AgentNodeLabelKey: "node-2",
+						},
+					},
+				}
+				node3 := &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node-3",
+						Labels: map[string]string{
+							corev1.LabelTopologyZone:   "zone-c",
+							v1alpha1.AgentNodeLabelKey: "node-3",
+						},
+					},
+				}
+				rsc := &v1alpha1.ReplicatedStorageClass{
+					ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+					Status: v1alpha1.ReplicatedStorageClassStatus{
+						Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+							Zones: []string{"zone-a"}, // only node-1 matches
+						},
+					},
+				}
+				// DRBDResource on node-2
+				drbdResource := &v1alpha1.DRBDResource{
+					ObjectMeta: metav1.ObjectMeta{Name: "drbd-1"},
+					Spec:       v1alpha1.DRBDResourceSpec{NodeName: "node-2"},
+				}
+				cl = fake.NewClientBuilder().WithScheme(scheme).WithObjects(node1, node2, node3, rsc, drbdResource).Build()
+				rec = NewReconciler(cl)
+
+				result, err := rec.Reconcile(context.Background(), reconcile.Request{})
+
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result).To(Equal(reconcile.Result{}))
+
+				var updatedNode1 corev1.Node
+				Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-1"}, &updatedNode1)).To(Succeed())
+				Expect(updatedNode1.Labels).To(HaveKey(v1alpha1.AgentNodeLabelKey)) // matches RSC
+
+				var updatedNode2 corev1.Node
+				Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-2"}, &updatedNode2)).To(Succeed())
+				Expect(updatedNode2.Labels).To(HaveKey(v1alpha1.AgentNodeLabelKey)) // has DRBDResource
+
+				var updatedNode3 corev1.Node
+				Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-3"}, &updatedNode3)).To(Succeed())
+				Expect(updatedNode3.Labels).NotTo(HaveKey(v1alpha1.AgentNodeLabelKey)) // neither
+			})
 		})
 	})
 })

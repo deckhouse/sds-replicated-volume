@@ -55,6 +55,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		return rf.Fail(err).ToCtrl()
 	}
 
+	// Get all DRBDResources.
+	drbdResources, err := r.getDRBDResources(rf.Ctx())
+	if err != nil {
+		return rf.Fail(err).ToCtrl()
+	}
+
 	// Get all nodes.
 	nodes, err := r.getNodes(rf.Ctx())
 	if err != nil {
@@ -62,7 +68,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	}
 
 	// Compute target: which nodes should have the agent label.
-	targetNodes := computeTargetNodes(rscs, nodes)
+	targetNodes := computeTargetNodes(rscs, drbdResources, nodes)
 
 	// Reconcile each node.
 	var outcomes []flow.ReconcileOutcome
@@ -108,15 +114,37 @@ func (r *Reconciler) reconcileNode(ctx context.Context, node *corev1.Node, shoul
 // --- Helpers: compute ---
 
 // computeTargetNodes returns a map of node names that should have the AgentNodeLabelKey.
-func computeTargetNodes(rscs []v1alpha1.ReplicatedStorageClass, nodes []corev1.Node) map[string]bool {
-	target := make(map[string]bool, len(nodes))
+// A node should have the label if:
+//   - it matches at least one RSC, OR
+//   - it has at least one DRBDResource (to prevent orphaning DRBD resources)
+func computeTargetNodes(
+	rscs []v1alpha1.ReplicatedStorageClass,
+	drbdResources []v1alpha1.DRBDResource,
+	nodes []corev1.Node,
+) map[string]bool {
+	// Compute nodes that have DRBDResources.
+	nodesWithDRBDResources := computeNodesWithDRBDResources(drbdResources)
 
+	target := make(map[string]bool, len(nodes))
 	for i := range nodes {
 		node := &nodes[i]
-		target[node.Name] = nodeMatchesAnyRSC(node, rscs)
+		// Node should have label if it matches any RSC OR has any DRBDResource.
+		target[node.Name] = nodesWithDRBDResources[node.Name] || nodeMatchesAnyRSC(node, rscs)
 	}
 
 	return target
+}
+
+// computeNodesWithDRBDResources returns a set of node names that have at least one DRBDResource.
+func computeNodesWithDRBDResources(drbdResources []v1alpha1.DRBDResource) map[string]bool {
+	nodes := make(map[string]bool)
+	for i := range drbdResources {
+		nodeName := drbdResources[i].Spec.NodeName
+		if nodeName != "" {
+			nodes[nodeName] = true
+		}
+	}
+	return nodes
 }
 
 // nodeMatchesAnyRSC returns true if the node matches at least one RSC.
@@ -164,9 +192,9 @@ func nodeMatchesRSC(node *corev1.Node, rsc *v1alpha1.ReplicatedStorageClass) boo
 
 // --- Single-call I/O helper categories ---
 
-// getRSCs returns all ReplicatedStorageClass objects.
-func (r *Reconciler) getRSCs(ctx context.Context) ([]v1alpha1.ReplicatedStorageClass, error) {
-	var list v1alpha1.ReplicatedStorageClassList
+// getDRBDResources returns all DRBDResource objects.
+func (r *Reconciler) getDRBDResources(ctx context.Context) ([]v1alpha1.DRBDResource, error) {
+	var list v1alpha1.DRBDResourceList
 	if err := r.cl.List(ctx, &list); err != nil {
 		return nil, err
 	}
@@ -176,6 +204,15 @@ func (r *Reconciler) getRSCs(ctx context.Context) ([]v1alpha1.ReplicatedStorageC
 // getNodes returns all Node objects.
 func (r *Reconciler) getNodes(ctx context.Context) ([]corev1.Node, error) {
 	var list corev1.NodeList
+	if err := r.cl.List(ctx, &list); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+// getRSCs returns all ReplicatedStorageClass objects.
+func (r *Reconciler) getRSCs(ctx context.Context) ([]v1alpha1.ReplicatedStorageClass, error) {
+	var list v1alpha1.ReplicatedStorageClassList
 	if err := r.cl.List(ctx, &list); err != nil {
 		return nil, err
 	}

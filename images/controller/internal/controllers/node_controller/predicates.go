@@ -83,3 +83,19 @@ func RSCPredicates() []predicate.Predicate {
 		},
 	}
 }
+
+// DRBDResourcePredicates returns predicates for DRBDResource events.
+// Reacts to:
+//   - Create: always (new resource appeared on a node)
+//   - Update: never (nodeName is immutable, other fields don't affect decision)
+//   - Delete: always (resource removed from a node)
+func DRBDResourcePredicates() []predicate.Predicate {
+	return []predicate.Predicate{
+		predicate.Funcs{
+			UpdateFunc: func(_ event.TypedUpdateEvent[client.Object]) bool {
+				// nodeName is immutable, other fields don't affect label decisions.
+				return false
+			},
+		},
+	}
+}
