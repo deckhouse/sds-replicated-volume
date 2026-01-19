@@ -1,7 +1,7 @@
 ---
 description: Kubebuilder marker hygiene rules for CEL expressions, gofmt smart quote avoidance, and typographic character detection. Apply when writing or editing kubebuilder markers (especially XValidation with CEL), when reviewing API types under api/v*/, and when debugging unexpected character transformations in comments. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
 globs: api/v*/**/*.go
-alwaysApply: false
+alwaysApply: true
 ---
 
 Normative keywords used in this document are defined in `rfc-like-mdc.mdc`.
