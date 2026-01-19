@@ -48,6 +48,29 @@ shell:
     - ./autogen.sh && ./configure --without-manual && ./configure --enable-spec --without-manual
     # substitute ubuntu packages with ALTLinux's ones
     - sed -i -e 's/keyutils-libs-devel/libkeyutils-devel/g' drbd.spec
+    # remove %bcond_with* macros which are not supported in ALTLinux P11 RPM version
+    - sed -i '/^%bcond_with/d' drbd.spec
+    # remove references to systemd and Python files that are not created when building with --without=manual and initscripttype=sysv
+    # remove by file names (more universal, catches paths with variables like %{_unitdir})
+    - |
+      # Remove lines containing systemd unit files and Python files
+      sed -i \
+        -e '/50-drbd.preset/d' \
+        -e '/drbd\.service/d' \
+        -e '/drbd-graceful-shutdown/d' \
+        -e '/drbd-lvchange@/d' \
+        -e '/drbd-promote@/d' \
+        -e '/drbd-demote-or-escalate/d' \
+        -e '/drbd-reconfigure-suspend-or-error/d' \
+        -e '/drbd-services@/d' \
+        -e '/drbd-wait-promotable/d' \
+        -e '/drbd@\.service/d' \
+        -e '/drbd@\.target/d' \
+        -e '/drbd-configured\.target/d' \
+        -e '/tnf-drbd-fence\.py/d' \
+        drbd.spec
+      # Also remove lines with system-preset directory
+      sed -i '/system-preset/d' drbd.spec
 
     # make .rpm package
     {{- $ctx := dict }}
@@ -76,8 +99,8 @@ shell:
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
 
     - ls -la /
-    # drbd-9.30.0-1.x86_64.rpm
-    # drbd-utils-9.30.0-1.x86_64.rpm
+    # drbd-9.33.0-1.x86_64.rpm
+    # drbd-utils-9.33.0-1.x86_64.rpm
     # thin-send-recv-1.1.3-1.x86_64.rpm
 
 ---
@@ -135,7 +158,7 @@ shell:
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
 
     - ls -la /
-    # drbd-reactor-1.8.0-1.x86_64.rpm
+    # drbd-reactor-1.10.0-1.x86_64.rpm
 
 ---
 # main almost distroless image
