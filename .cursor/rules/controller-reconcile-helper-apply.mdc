@@ -1,6 +1,6 @@
 ---
 description: Contracts for ApplyReconcileHelper (apply*) functions: pure/deterministic non-I/O in-memory mutations for exactly one patch domain. Apply when writing apply* helpers in reconciler*.go, and when deciding how to apply target/report artifacts to objects. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
-globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go
+globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go,images/controller/internal/controllers/rsc_controller/reconciler*.go,images/controller/internal/controllers/node_controller/reconciler*.go
 alwaysApply: false
 ---
 

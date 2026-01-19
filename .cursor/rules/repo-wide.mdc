@@ -29,3 +29,27 @@ alwaysApply: true
 
 - When making a commit (MUST):
   - ALWAYS sign off (prefer `git commit -s`).
+
+- API development / design / review (MUST):
+  - When developing, designing, or reviewing API types under `api/v*/`, you MUST consult and follow the API-specific `.mdc` rules in `.cursor/rules/`:
+    - `api-file-structure.mdc` — API package conventions: object prefixes and per-object/common file naming rules.
+    - `api-types.mdc` — API type rules: type-centric layout, enums/constants, status/conditions requirements, naming.
+    - `api-conditions.mdc` — API condition Type/Reason constants naming, ordering, comments, and stability.
+    - `api-labels-and-finalizers.mdc` — API naming rules for label keys and finalizer constants.
+    - `api-codegen.mdc` — API codegen rules for kubebuilder/controller-gen and generated files hygiene.
+  - You SHOULD also consult `controller-terminology.mdc` for shared terminology (intended/actual/target/report, patch domains, etc.) that applies to API design.
+  - Each rule file has a `description` in its frontmatter indicating when to apply it.
+  - When in doubt, start with `api-file-structure.mdc` for where code belongs and `api-types.mdc` for type layout conventions.
+
+- Controller development / design / review (MUST):
+  - When developing, designing, or reviewing controllers under `images/controller/internal/controllers/`, you MUST consult and follow the controller-specific `.mdc` rules in `.cursor/rules/`:
+    - `controller-terminology.mdc` — shared terminology and definitions used across all controller rule files.
+    - `controller-file-structure.mdc` — controller package file structure (`controller.go`/`predicates.go`/`reconciler.go`/tests).
+    - `controller-controller.mdc` — rules for `controller.go` (wiring, builder chain, predicates wiring).
+    - `controller-predicate.mdc` — rules for `predicates.go` (mechanical change detection, no I/O, no domain logic).
+    - `controller-reconciliation.mdc` — rules for `Reconcile` method orchestration in `reconciler.go`.
+    - `controller-reconciliation-flow.mdc` — rules for using `lib/go/common/reconciliation/flow` (phases, outcomes).
+    - `controller-reconcile-helper.mdc` — common rules for ReconcileHelper functions/methods.
+    - `controller-reconcile-helper-*.mdc` — category-specific contracts (compute, apply, ensure, get, create, delete, patch, is-in-sync, construction).
+  - Each rule file has a `description` and optional `globs` in its frontmatter indicating when to apply it.
+  - When in doubt, start with `controller-terminology.mdc` for definitions and `controller-file-structure.mdc` for where code belongs.

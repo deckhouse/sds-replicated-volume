@@ -1,6 +1,6 @@
 ---
 description: Rules for using lib/go/common/reconciliation/flow in controller reconciliation code: phases (BeginPhase/EndPhase) and Outcome composition/propagation. Apply when writing reconciliation code that uses flow.* in reconciler*.go, and when reasoning about reconciliation control flow and error handling. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
-globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go
+globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go,images/controller/internal/controllers/rsc_controller/reconciler*.go,images/controller/internal/controllers/node_controller/reconciler*.go
 alwaysApply: false
 ---
 
@@ -26,17 +26,17 @@ Summary only; if anything differs, follow normative sections below.
   - call `rf := flow.BeginReconcile(ctx, "<phase>", <kv...>)` on the **first executable line**,
   - `defer rf.OnEnd(&outcome)` on the **second executable line**,
   - declare a named return `outcome flow.ReconcileOutcome`,
-  - use only `ctx := rf.Ctx()` and (if logging) `rf.Log()` after that.
+  - use `rf.Ctx()` for context and (if logging) `rf.Log()` after that.
 - Any ensure helper MUST:
   - call `ef := flow.BeginEnsure(ctx, "<phase>", <kv...>)` on the **first executable line**,
   - `defer ef.OnEnd(&outcome)` on the **second executable line**,
   - declare a named return `outcome flow.EnsureOutcome`,
-  - use only `ctx := ef.Ctx()` and (if logging) `ef.Log()` after that.
+  - use `ef.Ctx()` for context and (if logging) `ef.Log()` after that.
 - Any step function that returns plain `error` and uses phase logging MUST:
   - call `sf := flow.BeginStep(ctx, "<phase>", <kv...>)` on the **first executable line**,
   - `defer sf.OnEnd(&err)` on the **second executable line**,
   - declare a named return `err error`,
-  - use only `ctx := sf.Ctx()` and (if logging) `sf.Log()` after that.
+  - use `sf.Ctx()` for context and (if logging) `sf.Log()` after that.
 - **Phase names** MUST be stable identifiers (no dynamic values). Variable identity MUST go into `<kv...>` key/value pairs.
 - **Error logging**: errors are logged by the deferred `OnEnd` of the corresponding scope (or by controller-runtime for the root `Reconcile`).
   Code MUST NOT log the same error again. If you intentionally drop an error/stop signal (best-effort override), you MUST log it.
@@ -100,6 +100,7 @@ The phase name is used as a logger name segment (`logr.WithName`).
 - The phase name MUST NOT be empty.
 - The phase name MUST NOT contain whitespace or control characters.
 - The phase name MUST be a stable identifier and MUST NOT include dynamic values (resource names, UIDs, loop indices, etc.).
+- The phase name MUST NOT include redundant prefixes like `reconcile-` or `ensure-` (the scope type is already known from the `Begin*` call).
 
 Recommended style:
 - lowercase ASCII,
@@ -123,9 +124,10 @@ Rules:
 
 Each `Begin*` attaches a phase-scoped logger to the returned context.
 
-- After `Begin*`, a scoped function MUST use the flow context (`ctx := <flow>.Ctx()`) as the base context for all subsequent work.
+- After `Begin*`, a scoped function MUST use the flow context (`<flow>.Ctx()`) as the base context for all subsequent work.
   It MAY derive child contexts (timeouts/cancel), but MUST NOT use the incoming context again.
-- If a scoped function logs, it SHOULD use the flow logger (`<flow>.Log()`), or `log.FromContext(ctx)` where `ctx` is the flow context.
+- A scoped function SHOULD call `<flow>.Ctx()` directly at each call site instead of storing it in a variable.
+- If a scoped function logs, it SHOULD use the flow logger (`<flow>.Log()`), or `log.FromContext(<flow>.Ctx())`.
   It MUST NOT use a logger derived from the pre-scope context.
 - Helpers called from a scoped function MUST receive the flow context so logs are attributed correctly.
 
@@ -173,9 +175,8 @@ Example (illustrative):
 func (r *Reconciler) reconcileFoo(ctx context.Context) (outcome flow.ReconcileOutcome) {
     rf := flow.BeginReconcile(ctx, "foo")
     defer rf.OnEnd(&outcome)
-    ctx = rf.Ctx()
 
-    // ...
+    // use rf.Ctx() for context in all calls
     return rf.Continue()
 }
 ```
@@ -213,7 +214,7 @@ At each call site that receives a `flow.ReconcileOutcome` that can influence con
 
 ### Merging outcomes
 
-Use `rf.Merge(...)` to combine outcomes when multiple independent steps must all run.
+Use `flow.MergeReconciles(...)` or the chainable `outcome.Merge(other)` to combine outcomes when multiple independent steps must all run.
 
 Reviewability:
 - Single-shot merge SHOULD NOT be used (harder to review/extend).
@@ -223,8 +224,8 @@ Incremental merge (illustrative):
 
 ```go
 outcome = stepA(...)
-outcome = rf.Merge(outcome, stepB(...))
-outcome = rf.Merge(outcome, stepC(...))
+outcome = outcome.Merge(stepB(...))
+outcome = outcome.Merge(stepC(...))
 
 if outcome.ShouldReturn() {
     return outcome
@@ -241,7 +242,7 @@ for i := range items {
     outcomes = append(outcomes, o)
 }
 
-outcome = rf.Merge(outcomes...)
+outcome = flow.MergeReconciles(outcomes...)
 return outcome
 ```
 
@@ -296,12 +297,12 @@ Example (illustrative):
 
 ```go
 func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutcome) {
-    ef := flow.BeginEnsure(ctx, "ensure-foo")
+    ef := flow.BeginEnsure(ctx, "foo")
     defer ef.OnEnd(&outcome)
-    ctx = ef.Ctx()
 
     changed := false
     // mutate obj; set changed=true if needed
+    // use ef.Ctx() for context if needed
 
     return ef.Ok().ReportChangedIf(changed)
 }
@@ -312,7 +313,7 @@ Rules:
   The deferred `ef.OnEnd(&outcome)` logs errors.
 - Code MUST call `RequireOptimisticLock()` only after `ReportChanged()` / `ReportChangedIf(...)`
   (calling it earlier is a contract violation and panics).
-- To merge multiple sub-ensure results, use `ef.Merge(...)`.
+- To merge multiple sub-ensure results, use `flow.MergeEnsures(...)` or the chainable `outcome.Merge(other)`.
 
 ---
 
@@ -328,12 +329,11 @@ Example (illustrative):
 func computeBar(ctx context.Context, input string) (err error) {
     sf := flow.BeginStep(ctx, "compute-bar")
     defer sf.OnEnd(&err)
-    ctx = sf.Ctx()
 
     if input == "" {
         return sf.Errf("bad input: %s", input)
     }
-    // ...
+    // use sf.Ctx() for context if needed
     return nil
 }
 ```
@@ -341,4 +341,4 @@ func computeBar(ctx context.Context, input string) (err error) {
 Rules:
 - Step functions MUST NOT log and also return the same error.
   The deferred `sf.OnEnd(&err)` logs errors.
-- To join multiple independent errors, use `sf.Merge(errA, errB, ...)`.
+- To join multiple independent errors, use `flow.MergeSteps(errA, errB, ...)`.

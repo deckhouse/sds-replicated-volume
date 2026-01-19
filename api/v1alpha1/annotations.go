@@ -16,8 +16,10 @@ limitations under the License.
 
 package v1alpha1
 
-const AgentFinalizer = "sds-replicated-volume.deckhouse.io/agent"
+const annotationPrefix = "sds-replicated-volume.deckhouse.io/"
 
-const ControllerFinalizer = "sds-replicated-volume.deckhouse.io/controller"
-
-const RSCControllerFinalizer = "sds-replicated-volume.deckhouse.io/rsc-controller"
+const (
+	// LVMVolumeGroupUnschedulableAnnotationKey marks an LVMVolumeGroup as unschedulable
+	// for new ReplicatedVolumeReplicas.
+	LVMVolumeGroupUnschedulableAnnotationKey = annotationPrefix + "unschedulable"
+)

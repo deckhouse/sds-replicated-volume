@@ -1,6 +1,6 @@
 ---
 description: Contracts for GetReconcileHelper (get*) functions: at most one Kubernetes API read (Get or List), deterministic ordering, and no Outcome/phases. Apply when writing get* helpers in reconciler*.go, and when deciding what logic is allowed in read helpers. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
-globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go
+globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go,images/controller/internal/controllers/rsc_controller/reconciler*.go,images/controller/internal/controllers/node_controller/reconciler*.go
 alwaysApply: false
 ---
 

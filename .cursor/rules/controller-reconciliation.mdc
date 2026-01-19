@@ -1,6 +1,6 @@
 ---
 description: Rules for Reconcile method orchestration in reconciler.go: file layout, call-graph ordering, patch sequencing, determinism, and reconciliation patterns. Apply when editing reconciler*.go Reconcile/reconcile* methods, and when planning reconciliation structure or patch ordering. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
-globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go
+globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go,images/controller/internal/controllers/rsc_controller/reconciler*.go,images/controller/internal/controllers/node_controller/reconciler*.go
 alwaysApply: false
 ---
 
