@@ -198,8 +198,129 @@ spec:
                         type: string
                     type: object
                 type: object
+              eligibleNodesViolations:
+                description: EligibleNodesViolations lists replicas placed on non-eligible
+                  nodes.
+                items:
+                  description: ReplicatedVolumeEligibleNodesViolation describes a
+                    replica placed on a non-eligible node.
+                  properties:
+                    nodeName:
+                      description: NodeName is the node where the replica is placed.
+                      type: string
+                    reason:
+                      description: Reason describes why this placement violates eligible
+                        nodes constraints.
+                      type: string
+                    replicaName:
+                      description: ReplicaName is the ReplicatedVolumeReplica name.
+                      type: string
+                  required:
+                  - nodeName
+                  - reason
+                  - replicaName
+                  type: object
+                type: array
               phase:
                 type: string
+              rolloutTicket:
+                description: |-
+                  RolloutTicket is assigned when the volume is created and updated when selected for rolling update.
+                  Persists the last taken storage class configuration snapshot.
+                properties:
+                  configuration:
+                    description: Configuration is the configuration snapshot to roll
+                      out.
+                    properties:
+                      replication:
+                        description: Replication is the replication mode from the
+                          storage class.
+                        type: string
+                      systemNetworkNames:
+                        description: SystemNetworkNames is the list of network names
+                          from the storage class.
+                        items:
+                          type: string
+                        type: array
+                      topology:
+                        description: Topology is the topology setting from the storage
+                          class.
+                        type: string
+                      volumeAccess:
+                        description: VolumeAccess is the volume access mode from the
+                          storage class.
+                        type: string
+                      zones:
+                        description: Zones is the list of zones from the storage class.
+                        items:
+                          type: string
+                        type: array
+                    required:
+                    - replication
+                    - topology
+                    - volumeAccess
+                    type: object
+                  storageClassGeneration:
+                    description: StorageClassGeneration is the RSC generation this
+                      ticket was issued for.
+                    format: int64
+                    type: integer
+                required:
+                - configuration
+                - storageClassGeneration
+                type: object
+              storageClass:
+                description: StorageClass tracks the observed state of the referenced
+                  ReplicatedStorageClass.
+                properties:
+                  name:
+                    description: Name is the ReplicatedStorageClass name.
+                    type: string
+                  observedConfigurationGeneration:
+                    description: ObservedConfigurationGeneration is the RSC generation
+                      when configuration was observed.
+                    format: int64
+                    type: integer
+                  observedEligibleNodesRevision:
+                    description: ObservedEligibleNodesRevision is the eligible nodes
+                      revision when last observed.
+                    format: int64
+                    type: integer
+                required:
+                - name
+                type: object
+              targetConfiguration:
+                description: TargetConfiguration is the desired configuration snapshot
+                  for this volume.
+                properties:
+                  replication:
+                    description: Replication is the replication mode from the storage
+                      class.
+                    type: string
+                  systemNetworkNames:
+                    description: SystemNetworkNames is the list of network names from
+                      the storage class.
+                    items:
+                      type: string
+                    type: array
+                  topology:
+                    description: Topology is the topology setting from the storage
+                      class.
+                    type: string
+                  volumeAccess:
+                    description: VolumeAccess is the volume access mode from the storage
+                      class.
+                    type: string
+                  zones:
+                    description: Zones is the list of zones from the storage class.
+                    items:
+                      type: string
+                    type: array
+                required:
+                - replication
+                - topology
+                - volumeAccess
+                type: object
             type: object
         required:
         - metadata

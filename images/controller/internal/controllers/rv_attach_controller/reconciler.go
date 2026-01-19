@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -716,7 +716,7 @@ func (r *Reconciler) ensureRV(
 
 	original := rv.DeepCopy()
 	if rv.Status.DRBD == nil {
-		rv.Status.DRBD = &v1alpha1.DRBDResource{}
+		rv.Status.DRBD = &v1alpha1.DRBDResourceDetails{}
 	}
 	if rv.Status.DRBD.Config == nil {
 		rv.Status.DRBD.Config = &v1alpha1.DRBDResourceConfig{}

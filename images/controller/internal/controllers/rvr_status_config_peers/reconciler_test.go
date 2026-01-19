@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvrstatusconfigpeers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_peers"
-	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
+	testhelpers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 var _ = Describe("Reconciler", func() {
@@ -58,7 +58,7 @@ var _ = Describe("Reconciler", func() {
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
-		clientBuilder = indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+		clientBuilder = testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 			WithScheme(scheme)).
 			WithStatusSubresource(
 				&v1alpha1.ReplicatedVolumeReplica{},
@@ -132,7 +132,7 @@ var _ = Describe("Reconciler", func() {
 		DescribeTableSubtree("when rv does not have config because",
 			Entry("empty Status", func() { rv.Status = v1alpha1.ReplicatedVolumeStatus{} }),
 			Entry("nil Status.DRBD", func() { rv.Status = v1alpha1.ReplicatedVolumeStatus{DRBD: nil} }),
-			Entry("nil Status.DRBD.Config", func() { rv.Status = v1alpha1.ReplicatedVolumeStatus{DRBD: &v1alpha1.DRBDResource{Config: nil}} }),
+			Entry("nil Status.DRBD.Config", func() { rv.Status = v1alpha1.ReplicatedVolumeStatus{DRBD: &v1alpha1.DRBDResourceDetails{Config: nil}} }),
 			func(setup func()) {
 				BeforeEach(func() {
 					setup()

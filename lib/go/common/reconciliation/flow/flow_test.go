@@ -1,3 +1,19 @@
+/*
+Copyright 2026 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package flow_test
 
 import (
@@ -13,7 +29,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/deckhouse/sds-replicated-volume/internal/reconciliation/flow"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
 func mustPanic(t *testing.T, fn func()) {
@@ -113,14 +129,14 @@ func TestReconcileFlow_Requeue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected err to be nil, got %v", err)
 	}
-	if !res.Requeue {
+	if !res.Requeue { //nolint:staticcheck // testing deprecated Requeue field
 		t.Fatalf("expected Requeue to be true")
 	}
 }
 
-func TestReconcileFlow_Merge_DoneWinsOverContinue(t *testing.T) {
+func TestMergeReconciles_DoneWinsOverContinue(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
-	outcome := rf.Merge(rf.Done(), rf.Continue())
+	outcome := flow.MergeReconciles(rf.Done(), rf.Continue())
 	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")
 	}
@@ -129,9 +145,9 @@ func TestReconcileFlow_Merge_DoneWinsOverContinue(t *testing.T) {
 	}
 }
 
-func TestReconcileFlow_Merge_RequeueAfterChoosesSmallest(t *testing.T) {
+func TestMergeReconciles_RequeueAfterChoosesSmallest(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
-	outcome := rf.Merge(rf.RequeueAfter(5*time.Second), rf.RequeueAfter(1*time.Second))
+	outcome := flow.MergeReconciles(rf.RequeueAfter(5*time.Second), rf.RequeueAfter(1*time.Second))
 	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")
 	}
@@ -144,10 +160,10 @@ func TestReconcileFlow_Merge_RequeueAfterChoosesSmallest(t *testing.T) {
 	}
 }
 
-func TestReconcileFlow_Merge_FailAndDoneBecomesFail(t *testing.T) {
+func TestMergeReconciles_FailAndDoneBecomesFail(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
 	e := errors.New("e")
-	outcome := rf.Merge(rf.Fail(e), rf.Done())
+	outcome := flow.MergeReconciles(rf.Fail(e), rf.Done())
 	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")
 	}
@@ -161,10 +177,10 @@ func TestReconcileFlow_Merge_FailAndDoneBecomesFail(t *testing.T) {
 	}
 }
 
-func TestReconcileFlow_Merge_FailOnlyStaysFail(t *testing.T) {
+func TestMergeReconciles_FailOnlyStaysFail(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
 	e := errors.New("e")
-	outcome := rf.Merge(rf.Fail(e))
+	outcome := flow.MergeReconciles(rf.Fail(e))
 	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")
 	}
@@ -336,12 +352,12 @@ func TestEnsureOutcome_Enrichf(t *testing.T) {
 	}
 }
 
-func TestEnsureFlow_Merge_ChangeTracking_DidChange(t *testing.T) {
+func TestMergeEnsures_ChangeTracking_DidChange(t *testing.T) {
 	ef := flow.BeginEnsure(context.Background(), "test")
 	var outcome flow.EnsureOutcome
 	defer ef.OnEnd(&outcome)
 
-	o := ef.Merge(ef.Ok(), ef.Ok().ReportChanged())
+	o := flow.MergeEnsures(ef.Ok(), ef.Ok().ReportChanged())
 	if !o.DidChange() {
 		t.Fatalf("expected merged outcome to report DidChange() == true")
 	}
@@ -350,12 +366,12 @@ func TestEnsureFlow_Merge_ChangeTracking_DidChange(t *testing.T) {
 	}
 }
 
-func TestEnsureFlow_Merge_ChangeTracking_OptimisticLockRequired(t *testing.T) {
+func TestMergeEnsures_ChangeTracking_OptimisticLockRequired(t *testing.T) {
 	ef := flow.BeginEnsure(context.Background(), "test")
 	var outcome flow.EnsureOutcome
 	defer ef.OnEnd(&outcome)
 
-	o := ef.Merge(
+	o := flow.MergeEnsures(
 		ef.Ok().ReportChanged(),
 		ef.Ok().ReportChanged().RequireOptimisticLock(),
 	)
@@ -367,19 +383,19 @@ func TestEnsureFlow_Merge_ChangeTracking_OptimisticLockRequired(t *testing.T) {
 	}
 }
 
-func TestEnsureFlow_Merge_ChangeTracking_ChangeReportedOr(t *testing.T) {
+func TestMergeEnsures_ChangeTracking_ChangeReportedOr(t *testing.T) {
 	ef := flow.BeginEnsure(context.Background(), "test")
 	var outcome flow.EnsureOutcome
 	defer ef.OnEnd(&outcome)
 
-	o := ef.Merge(ef.Ok(), ef.Ok().ReportChangedIf(false))
+	o := flow.MergeEnsures(ef.Ok(), ef.Ok().ReportChangedIf(false))
 
 	// ReportChangedIf(false) does not report a semantic change, but it does report that change tracking was used.
 	if o.DidChange() {
 		t.Fatalf("expected merged outcome DidChange() == false")
 	}
 
-	// This call should not panic because Merge ORs the changeReported flag, even if no semantic change happened.
+	// This call should not panic because MergeEnsures ORs the changeReported flag, even if no semantic change happened.
 	mustNotPanic(t, func() { _ = o.RequireOptimisticLock() })
 
 	o = o.RequireOptimisticLock()
@@ -388,14 +404,14 @@ func TestEnsureFlow_Merge_ChangeTracking_ChangeReportedOr(t *testing.T) {
 	}
 }
 
-func TestEnsureFlow_Merge_ErrorsJoined(t *testing.T) {
+func TestMergeEnsures_ErrorsJoined(t *testing.T) {
 	ef := flow.BeginEnsure(context.Background(), "test")
 	var outcome flow.EnsureOutcome
 	defer ef.OnEnd(&outcome)
 
 	e1 := errors.New("e1")
 	e2 := errors.New("e2")
-	o := ef.Merge(ef.Err(e1), ef.Err(e2))
+	o := flow.MergeEnsures(ef.Err(e1), ef.Err(e2))
 
 	if o.Error() == nil {
 		t.Fatalf("expected Error() to be non-nil")
@@ -447,17 +463,17 @@ func TestStepFlow_Errf(t *testing.T) {
 	}
 }
 
-func TestStepFlow_Merge(t *testing.T) {
+func TestMergeSteps(t *testing.T) {
 	sf := flow.BeginStep(context.Background(), "test")
 	var err error
 	defer sf.OnEnd(&err)
 
 	e1 := errors.New("e1")
 	e2 := errors.New("e2")
-	got := sf.Merge(e1, e2)
+	got := flow.MergeSteps(e1, e2)
 
 	if got == nil {
-		t.Fatalf("expected Merge() to return non-nil")
+		t.Fatalf("expected MergeSteps() to return non-nil")
 	}
 	if !errors.Is(got, e1) {
 		t.Fatalf("expected errors.Is(got, e1) == true; got=%v", got)
@@ -467,27 +483,27 @@ func TestStepFlow_Merge(t *testing.T) {
 	}
 }
 
-func TestStepFlow_Merge_AllNil(t *testing.T) {
+func TestMergeSteps_AllNil(t *testing.T) {
 	sf := flow.BeginStep(context.Background(), "test")
 	var err error
 	defer sf.OnEnd(&err)
 
-	got := sf.Merge(nil, nil)
+	got := flow.MergeSteps(nil, nil)
 	if got != nil {
-		t.Fatalf("expected Merge(nil, nil) to return nil, got %v", got)
+		t.Fatalf("expected MergeSteps(nil, nil) to return nil, got %v", got)
 	}
 }
 
-func TestStepFlow_Merge_SomeNil(t *testing.T) {
+func TestMergeSteps_SomeNil(t *testing.T) {
 	sf := flow.BeginStep(context.Background(), "test")
 	var err error
 	defer sf.OnEnd(&err)
 
 	e := errors.New("e")
-	got := sf.Merge(nil, e, nil)
+	got := flow.MergeSteps(nil, e, nil)
 
 	if got == nil {
-		t.Fatalf("expected Merge() to return non-nil")
+		t.Fatalf("expected MergeSteps() to return non-nil")
 	}
 	if !errors.Is(got, e) {
 		t.Fatalf("expected errors.Is(got, e) == true; got=%v", got)
@@ -550,7 +566,6 @@ func TestMustBeValidPhaseName_Valid(t *testing.T) {
 		"A1/B2",
 	}
 	for _, name := range valid {
-		name := name
 		t.Run(name, func(t *testing.T) {
 			mustNotPanic(t, func() { _ = flow.BeginReconcile(context.Background(), name) })
 		})
@@ -568,7 +583,6 @@ func TestMustBeValidPhaseName_Invalid(t *testing.T) {
 		"a:b",
 	}
 	for _, name := range invalid {
-		name := name
 		t.Run(strings.ReplaceAll(name, "\t", "\\t"), func(t *testing.T) {
 			mustPanic(t, func() { _ = flow.BeginReconcile(context.Background(), name) })
 		})
@@ -576,14 +590,17 @@ func TestMustBeValidPhaseName_Invalid(t *testing.T) {
 }
 
 func TestBeginReconcile_KVOddLengthPanics(t *testing.T) {
+	//nolint:staticcheck // testing panic for odd kv length
 	mustPanic(t, func() { _ = flow.BeginReconcile(context.Background(), "p", "k") })
 }
 
 func TestBeginEnsure_KVOddLengthPanics(t *testing.T) {
+	//nolint:staticcheck // testing panic for odd kv length
 	mustPanic(t, func() { _ = flow.BeginEnsure(context.Background(), "p", "k") })
 }
 
 func TestBeginStep_KVOddLengthPanics(t *testing.T) {
+	//nolint:staticcheck // testing panic for odd kv length
 	mustPanic(t, func() { _ = flow.BeginStep(context.Background(), "p", "k") })
 }
 
@@ -766,9 +783,10 @@ func TestReconcileFlow_OnEnd_NestedPhases_SecondOnEndLogsAtDebugLevel(t *testing
 	debugCount := 0
 	for _, e := range observed.All() {
 		if e.Message == "phase end" {
-			if e.Level == zapcore.ErrorLevel {
+			switch e.Level {
+			case zapcore.ErrorLevel:
 				errorCount++
-			} else if e.Level == zapcore.DebugLevel {
+			case zapcore.DebugLevel:
 				debugCount++
 			}
 		}

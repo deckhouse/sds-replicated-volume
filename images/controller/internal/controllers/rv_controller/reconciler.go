@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ import (
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/idpool"
-	"github.com/deckhouse/sds-replicated-volume/internal/reconciliation/flow"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
 type Reconciler struct {
@@ -122,7 +122,7 @@ func (r *Reconciler) reconcileStatus(ctx context.Context, rvName string, rv *v1a
 
 	// Patch status with optimistic lock
 	if err := r.cl.Status().Patch(rf.Ctx(), rv, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
-		return rf.Merge(
+		return flow.MergeReconciles(
 			outcome,
 			rf.Fail(err).Enrichf("patching ReplicatedVolume"),
 		)

@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -152,7 +152,7 @@ func updateReplicatedVolumeIfNeeded(
 ) (changed bool) {
 	quorum, qmr := CalculateQuorum(diskfulCount, all, replication)
 	if rvStatus.DRBD == nil {
-		rvStatus.DRBD = &v1alpha1.DRBDResource{}
+		rvStatus.DRBD = &v1alpha1.DRBDResourceDetails{}
 	}
 	if rvStatus.DRBD.Config == nil {
 		rvStatus.DRBD.Config = &v1alpha1.DRBDResourceConfig{}

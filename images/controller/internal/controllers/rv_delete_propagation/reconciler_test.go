@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvdeletepropagation "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_delete_propagation"
-	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
+	testhelpers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 func TestReconciler_Reconcile(t *testing.T) {
@@ -128,7 +128,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cl := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme)).
 				WithObjects(tt.objects...).
 				Build()

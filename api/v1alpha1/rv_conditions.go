@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,6 +27,18 @@ const (
 )
 
 const (
+	// ReplicatedVolumeCondConfigurationReadyType indicates whether the volume's configuration
+	// matches the storage class configuration.
+	//
+	// Reasons describe configuration readiness state.
+	ReplicatedVolumeCondConfigurationReadyType                                 = "ConfigurationReady"
+	ReplicatedVolumeCondConfigurationReadyReasonConfigurationRolloutInProgress = "ConfigurationRolloutInProgress" // Configuration rollout is in progress.
+	ReplicatedVolumeCondConfigurationReadyReasonReady                          = "Ready"                          // Configuration matches storage class.
+	ReplicatedVolumeCondConfigurationReadyReasonStaleConfiguration             = "StaleConfiguration"             // Configuration does not match storage class (stale).
+	ReplicatedVolumeCondConfigurationReadyReasonStorageClassNotFound           = "StorageClassNotFound"           // Referenced storage class does not exist.
+)
+
+const (
 	// ReplicatedVolumeCondConfiguredType indicates whether all replicas are configured.
 	//
 	// Reasons describe configuration progress / mismatch.
@@ -51,9 +63,19 @@ const (
 	//
 	// Reasons describe assignment success/failure.
 	ReplicatedVolumeCondDeviceMinorAssignedType                   = "DeviceMinorAssigned"
-	ReplicatedVolumeCondDeviceMinorAssignedReasonAssignmentFailed = "AssignmentFailed" // Assignment attempt failed.
 	ReplicatedVolumeCondDeviceMinorAssignedReasonAssigned         = "Assigned"         // Minor is assigned.
+	ReplicatedVolumeCondDeviceMinorAssignedReasonAssignmentFailed = "AssignmentFailed" // Assignment attempt failed.
 	ReplicatedVolumeCondDeviceMinorAssignedReasonDuplicate        = "Duplicate"        // Duplicate assignment detected.
+)
+
+const (
+	// ReplicatedVolumeCondInitializedType indicates whether enough replicas are initialized.
+	//
+	// Reasons describe initialization progress and waiting conditions.
+	ReplicatedVolumeCondInitializedType                           = "Initialized"
+	ReplicatedVolumeCondInitializedReasonInitializationInProgress = "InitializationInProgress" // Initialization is still in progress.
+	ReplicatedVolumeCondInitializedReasonInitialized              = "Initialized"              // Initialization requirements are met.
+	ReplicatedVolumeCondInitializedReasonWaitingForReplicas       = "WaitingForReplicas"       // Waiting for replicas to appear/initialize.
 )
 
 const (
@@ -67,16 +89,6 @@ const (
 )
 
 const (
-	// ReplicatedVolumeCondInitializedType indicates whether enough replicas are initialized.
-	//
-	// Reasons describe initialization progress and waiting conditions.
-	ReplicatedVolumeCondInitializedType                           = "Initialized"
-	ReplicatedVolumeCondInitializedReasonInitialized              = "Initialized"              // Initialization requirements are met.
-	ReplicatedVolumeCondInitializedReasonInitializationInProgress = "InitializationInProgress" // Initialization is still in progress.
-	ReplicatedVolumeCondInitializedReasonWaitingForReplicas       = "WaitingForReplicas"       // Waiting for replicas to appear/initialize.
-)
-
-const (
 	// ReplicatedVolumeCondQuorumType indicates whether the volume has quorum.
 	//
 	// Reasons describe quorum state (reached/degraded/lost).
@@ -84,6 +96,18 @@ const (
 	ReplicatedVolumeCondQuorumReasonQuorumDegraded = "QuorumDegraded" // Quorum is reached but degraded.
 	ReplicatedVolumeCondQuorumReasonQuorumLost     = "QuorumLost"     // Quorum is lost.
 	ReplicatedVolumeCondQuorumReasonQuorumReached  = "QuorumReached"  // Quorum is reached.
+)
+
+const (
+	// ReplicatedVolumeCondSatisfyEligibleNodesType indicates whether all replicas are placed
+	// on eligible nodes according to the storage class.
+	//
+	// Reasons describe eligible nodes satisfaction state.
+	ReplicatedVolumeCondSatisfyEligibleNodesType                               = "SatisfyEligibleNodes"
+	ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionInProgress = "ConflictResolutionInProgress" // Eligible nodes conflict resolution is in progress.
+	ReplicatedVolumeCondSatisfyEligibleNodesReasonInConflictWithEligibleNodes  = "InConflictWithEligibleNodes"  // Some replicas are on non-eligible nodes.
+	ReplicatedVolumeCondSatisfyEligibleNodesReasonSatisfyEligibleNodes         = "SatisfyEligibleNodes"         // All replicas are on eligible nodes.
+	ReplicatedVolumeCondSatisfyEligibleNodesReasonStorageClassNotFound         = "StorageClassNotFound"         // Referenced storage class does not exist.
 )
 
 const (

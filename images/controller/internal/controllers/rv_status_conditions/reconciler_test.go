@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
+	testhelpers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 func setupScheme(t *testing.T) *runtime.Scheme {
@@ -104,7 +104,7 @@ func TestReconciler_RVNotFound(t *testing.T) {
 	ctx := t.Context()
 	s := setupScheme(t)
 
-	cl := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+	cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 		WithScheme(s)).
 		WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
 		Build()
@@ -136,7 +136,7 @@ func TestReconciler_RSCNotFound(t *testing.T) {
 		},
 	}
 
-	cl := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+	cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 		WithScheme(s)).
 		WithObjects(rv).
 		WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
@@ -452,7 +452,7 @@ func runConditionTestCase(t *testing.T, tc conditionTestCase) {
 			ReplicatedStorageClassName: tc.replicatedStorageClass,
 		},
 		Status: v1alpha1.ReplicatedVolumeStatus{
-			DRBD: &v1alpha1.DRBDResource{
+			DRBD: &v1alpha1.DRBDResourceDetails{
 				Config: &v1alpha1.DRBDResourceConfig{},
 			},
 		},
@@ -476,7 +476,7 @@ func runConditionTestCase(t *testing.T, tc conditionTestCase) {
 	}
 
 	// Build client
-	builder := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+	builder := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 		WithScheme(s)).
 		WithObjects(rv, rsc).
 		WithStatusSubresource(&v1alpha1.ReplicatedVolume{}, &v1alpha1.ReplicatedVolumeReplica{})

@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,4 +31,7 @@ const (
 	// NodeNameLabelKey is the label key for the Kubernetes node name where the RVR is scheduled.
 	// Note: This stores node.metadata.name, not the OS hostname (kubernetes.io/hostname).
 	NodeNameLabelKey = labelPrefix + "node-name"
+
+	// AgentNodeLabelKey is the label key for selecting nodes where the agent should run.
+	AgentNodeLabelKey = "storage.deckhouse.io/sds-replicated-volume-node"
 )

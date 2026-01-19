@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvstatusconfigsharedsecret "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_shared_secret"
-	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
+	testhelpers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 func TestReconciler(t *testing.T) {
@@ -69,7 +69,7 @@ var _ = Describe("Reconciler", func() {
 		// Ensure test assumptions are met
 		Expect(len(algs())).To(BeNumerically(">=", 2),
 			"tests require at least 2 algorithms to test switching logic")
-		clientBuilder = indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+		clientBuilder = testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 			WithScheme(scheme)).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{})
@@ -154,7 +154,7 @@ var _ = Describe("Reconciler", func() {
 		When("shared secret already set", func() {
 			BeforeEach(func() {
 				rv.Status = v1alpha1.ReplicatedVolumeStatus{
-					DRBD: &v1alpha1.DRBDResource{
+					DRBD: &v1alpha1.DRBDResourceDetails{
 						Config: &v1alpha1.DRBDResourceConfig{
 							SharedSecret:    "test-secret",
 							SharedSecretAlg: v1alpha1.SharedSecretAlg(firstAlg()),
@@ -428,7 +428,7 @@ var _ = Describe("Reconciler", func() {
 			BeforeEach(func() {
 				// Set sharedSecret so controller will check RVRs (reconcileSwitchAlgorithm)
 				rv.Status = v1alpha1.ReplicatedVolumeStatus{
-					DRBD: &v1alpha1.DRBDResource{
+					DRBD: &v1alpha1.DRBDResourceDetails{
 						Config: &v1alpha1.DRBDResourceConfig{
 							SharedSecret:    "test-secret",
 							SharedSecretAlg: v1alpha1.SharedSecretAlg(firstAlg()),

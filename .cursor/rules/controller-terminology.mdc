@@ -1,6 +1,6 @@
 ---
 description: Shared controller terminology and definitions used across controller rule files. Apply when editing controller code under images/controller/internal/controllers/, and when reasoning/planning/answering questions that use these terms (controller.go/predicates.go/reconciler.go, patch domains, intended/actual/target/report). Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
-globs: images/controller/internal/controllers/rv_controller/**/*.go,images/controller/internal/controllers/rv_attach_controller/**/*.go,.cursor/rules/controller*.mdc
+globs: images/controller/internal/controllers/rv_controller/**/*.go,images/controller/internal/controllers/rv_attach_controller/**/*.go,images/controller/internal/controllers/rsc_controller/**/*.go,images/controller/internal/controllers/node_controller/**/*.go,.cursor/rules/controller*.mdc
 alwaysApply: false
 ---
 
@@ -477,7 +477,7 @@ All inputs other than the **mutation target** are **read-only inputs** and MUST 
 ## **flow** terminology
 
 ### **flow**
-**`flow`** refers to `internal/reconciliation/flow`, the internal package used to structure reconciliation and standardize phase-scoped logging.
+**`flow`** refers to `lib/go/common/reconciliation/flow`, the internal package used to structure reconciliation and standardize phase-scoped logging.
 
 ### **phase**
 A **phase** is a structured execution scope created by one of:

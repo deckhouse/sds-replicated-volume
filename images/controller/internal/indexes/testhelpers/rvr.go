@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package testhelpers provides utilities for registering indexes with fake clients in tests.
 package testhelpers
 
 import (
@@ -24,21 +23,6 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
-
-// WithRVRByReplicatedVolumeNameIndex registers the IndexFieldRVRByReplicatedVolumeName index
-// on a fake.ClientBuilder. This is useful for tests that need to use the index.
-func WithRVRByReplicatedVolumeNameIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
-	return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRByReplicatedVolumeName, func(obj client.Object) []string {
-		rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
-		if !ok {
-			return nil
-		}
-		if rvr.Spec.ReplicatedVolumeName == "" {
-			return nil
-		}
-		return []string{rvr.Spec.ReplicatedVolumeName}
-	})
-}
 
 // WithRVRByNodeNameIndex registers the IndexFieldRVRByNodeName index
 // on a fake.ClientBuilder. This is useful for tests that need to use the index.
@@ -52,5 +36,20 @@ func WithRVRByNodeNameIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
 			return nil
 		}
 		return []string{rvr.Spec.NodeName}
+	})
+}
+
+// WithRVRByReplicatedVolumeNameIndex registers the IndexFieldRVRByReplicatedVolumeName index
+// on a fake.ClientBuilder. This is useful for tests that need to use the index.
+func WithRVRByReplicatedVolumeNameIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
+	return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRByReplicatedVolumeName, func(obj client.Object) []string {
+		rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+		if !ok {
+			return nil
+		}
+		if rvr.Spec.ReplicatedVolumeName == "" {
+			return nil
+		}
+		return []string{rvr.Spec.ReplicatedVolumeName}
 	})
 }

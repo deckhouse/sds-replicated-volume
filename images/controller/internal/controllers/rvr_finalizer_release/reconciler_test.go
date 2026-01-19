@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvrfinalizerrelease "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_finalizer_release"
-	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
+	testhelpers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 var _ = Describe("Reconcile", func() {
@@ -52,7 +52,7 @@ var _ = Describe("Reconcile", func() {
 	})
 
 	JustBeforeEach(func() {
-		builder := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+		builder := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 			WithScheme(scheme))
 
 		cl = builder.Build()
@@ -118,7 +118,7 @@ var _ = Describe("Reconcile", func() {
 					ReplicatedStorageClassName: rsc.Name,
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
-					DRBD: &v1alpha1.DRBDResource{
+					DRBD: &v1alpha1.DRBDResourceDetails{
 						Config: &v1alpha1.DRBDResourceConfig{
 							Quorum: 2,
 						},
@@ -378,7 +378,7 @@ var _ = Describe("Reconcile", func() {
 			})
 
 			It("returns error when getting ReplicatedVolume fails with non-NotFound error", func(ctx SpecContext) {
-				builder := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				builder := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 					WithScheme(scheme)).
 					WithObjects(rvr).
 					WithInterceptorFuncs(interceptor.Funcs{
@@ -398,7 +398,7 @@ var _ = Describe("Reconcile", func() {
 			})
 
 			It("returns error when listing ReplicatedVolumeReplica fails", func(ctx SpecContext) {
-				builder := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				builder := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 					WithScheme(scheme)).
 					WithObjects(rsc, rv, rvr).
 					WithInterceptorFuncs(interceptor.Funcs{

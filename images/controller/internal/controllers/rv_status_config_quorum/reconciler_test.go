@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvquorumcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 var _ = Describe("Reconciler", func() {
@@ -44,23 +44,10 @@ var _ = Describe("Reconciler", func() {
 	var cl client.Client
 	var rec *rvquorumcontroller.Reconciler
 
-	withRVRIndex := func(b *fake.ClientBuilder) *fake.ClientBuilder {
-		return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRByReplicatedVolumeName, func(obj client.Object) []string {
-			rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
-			if !ok {
-				return nil
-			}
-			if rvr.Spec.ReplicatedVolumeName == "" {
-				return nil
-			}
-			return []string{rvr.Spec.ReplicatedVolumeName}
-		})
-	}
-
 	BeforeEach(func() {
 		cl = nil
 		rec = nil
-		clientBuilder = withRVRIndex(fake.NewClientBuilder().
+		clientBuilder = testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(
 				&v1alpha1.ReplicatedVolumeReplica{},
@@ -188,7 +175,7 @@ var _ = Describe("Reconciler", func() {
 					},
 				}
 				// Initialize Status.DRBD.Config to ensure patch works correctly
-				rv.Status.DRBD = &v1alpha1.DRBDResource{
+				rv.Status.DRBD = &v1alpha1.DRBDResourceDetails{
 					Config: &v1alpha1.DRBDResourceConfig{},
 				}
 			})

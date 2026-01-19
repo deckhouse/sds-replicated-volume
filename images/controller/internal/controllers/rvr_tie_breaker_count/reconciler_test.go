@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ import (
 	u "github.com/deckhouse/sds-common-lib/utils"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvrtiebreakercount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_tie_breaker_count"
-	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
+	testhelpers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 var errExpectedTestError = errors.New("test error")
@@ -57,7 +57,7 @@ var _ = Describe("Reconcile", func() {
 	)
 
 	BeforeEach(func() {
-		builder = indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().WithScheme(scheme))
+		builder = testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().WithScheme(scheme))
 		cl = nil
 		rec = nil
 	})
@@ -727,7 +727,7 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 							index++
 						}
 					}
-					builder = indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().WithScheme(scheme)).WithObjects(objects...)
+					builder = testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().WithScheme(scheme)).WithObjects(objects...)
 				})
 
 				JustBeforeEach(func() {

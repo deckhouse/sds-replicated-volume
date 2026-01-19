@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -426,7 +426,7 @@ func rvWithoutSecret() *v1alpha1.ReplicatedVolume {
 			Finalizers: []string{v1alpha1.ControllerFinalizer},
 		},
 		Status: v1alpha1.ReplicatedVolumeStatus{
-			DRBD: &v1alpha1.DRBDResource{
+			DRBD: &v1alpha1.DRBDResourceDetails{
 				Config: &v1alpha1.DRBDResourceConfig{},
 			},
 		},
@@ -520,7 +520,7 @@ func readyRVWithConfig(secret, alg string, deviceMinor v1alpha1.DeviceMinor, all
 		},
 		Status: v1alpha1.ReplicatedVolumeStatus{
 			DeviceMinor: &deviceMinor,
-			DRBD: &v1alpha1.DRBDResource{
+			DRBD: &v1alpha1.DRBDResourceDetails{
 				Config: &v1alpha1.DRBDResourceConfig{
 					SharedSecret:            secret,
 					SharedSecretAlg:         v1alpha1.SharedSecretAlg(alg),
