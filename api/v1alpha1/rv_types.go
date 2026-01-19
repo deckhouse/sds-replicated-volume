@@ -119,6 +119,23 @@ type ReplicatedVolumeStatus struct {
 	// Example: "1/2" means 1 replica is IOReady out of 2 attached
 	// +optional
 	AttachedAndIOReadyCount string `json:"attachedAndIOReadyCount,omitempty"`
+
+	// StorageClass tracks the observed state of the referenced ReplicatedStorageClass.
+	// +optional
+	StorageClass *ReplicatedVolumeStorageClassReference `json:"storageClass,omitempty"`
+
+	// RolloutTicket is assigned when the volume is created and updated when selected for rolling update.
+	// Persists the last taken storage class configuration snapshot.
+	// +optional
+	RolloutTicket *ReplicatedVolumeRolloutTicket `json:"rolloutTicket,omitempty"`
+
+	// TargetConfiguration is the desired configuration snapshot for this volume.
+	// +optional
+	TargetConfiguration *ReplicatedVolumeStorageClassConfiguration `json:"targetConfiguration,omitempty"`
+
+	// EligibleNodesViolations lists replicas placed on non-eligible nodes.
+	// +optional
+	EligibleNodesViolations []ReplicatedVolumeEligibleNodesViolation `json:"eligibleNodesViolations,omitempty"`
 }
 
 // DeviceMinor is a DRBD device minor number.
@@ -210,3 +227,66 @@ func SharedSecretAlgorithms() []SharedSecretAlg {
 		SharedSecretAlgSHA1,
 	}
 }
+
+// ReplicatedVolumeStorageClassConfiguration holds storage class configuration parameters
+// that are tracked/snapshotted on ReplicatedVolume.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeStorageClassConfiguration struct {
+	// Topology is the topology setting from the storage class.
+	Topology ReplicatedStorageClassTopology `json:"topology"`
+	// Replication is the replication mode from the storage class.
+	Replication ReplicatedStorageClassReplication `json:"replication"`
+	// VolumeAccess is the volume access mode from the storage class.
+	VolumeAccess ReplicatedStorageClassVolumeAccess `json:"volumeAccess"`
+	// Zones is the list of zones from the storage class.
+	// +optional
+	Zones []string `json:"zones,omitempty"`
+	// SystemNetworkNames is the list of network names from the storage class.
+	// +optional
+	SystemNetworkNames []string `json:"systemNetworkNames,omitempty"`
+}
+
+// ReplicatedVolumeStorageClassReference tracks the observed state of the referenced storage class.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeStorageClassReference struct {
+	// Name is the ReplicatedStorageClass name.
+	Name string `json:"name"`
+	// ObservedConfigurationGeneration is the RSC generation when configuration was observed.
+	// +optional
+	ObservedConfigurationGeneration int64 `json:"observedConfigurationGeneration,omitempty"`
+	// ObservedEligibleNodesRevision is the eligible nodes revision when last observed.
+	// +optional
+	ObservedEligibleNodesRevision int64 `json:"observedEligibleNodesRevision,omitempty"`
+}
+
+// ReplicatedVolumeRolloutTicket represents a ticket for rolling out configuration changes.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeRolloutTicket struct {
+	// StorageClassGeneration is the RSC generation this ticket was issued for.
+	StorageClassGeneration int64 `json:"storageClassGeneration"`
+	// Configuration is the configuration snapshot to roll out.
+	Configuration ReplicatedVolumeStorageClassConfiguration `json:"configuration"`
+}
+
+// ReplicatedVolumeEligibleNodesViolation describes a replica placed on a non-eligible node.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeEligibleNodesViolation struct {
+	// NodeName is the node where the replica is placed.
+	NodeName string `json:"nodeName"`
+	// ReplicaName is the ReplicatedVolumeReplica name.
+	ReplicaName string `json:"replicaName"`
+	// Reason describes why this placement violates eligible nodes constraints.
+	Reason ReplicatedVolumeEligibleNodesViolationReason `json:"reason"`
+}
+
+// ReplicatedVolumeEligibleNodesViolationReason enumerates possible reasons for eligible nodes violation.
+type ReplicatedVolumeEligibleNodesViolationReason string
+
+const (
+	// ReplicatedVolumeEligibleNodesViolationReasonOutOfEligibleNodes means replica is on a node not in eligible nodes list.
+	ReplicatedVolumeEligibleNodesViolationReasonOutOfEligibleNodes ReplicatedVolumeEligibleNodesViolationReason = "OutOfEligibleNodes"
+	// ReplicatedVolumeEligibleNodesViolationReasonNodeTopologyMismatch means replica is on a node with wrong topology.
+	ReplicatedVolumeEligibleNodesViolationReasonNodeTopologyMismatch ReplicatedVolumeEligibleNodesViolationReason = "NodeTopologyMismatch"
+)
+
+func (r ReplicatedVolumeEligibleNodesViolationReason) String() string { return string(r) }

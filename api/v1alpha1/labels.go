@@ -31,4 +31,7 @@ const (
 	// NodeNameLabelKey is the label key for the Kubernetes node name where the RVR is scheduled.
 	// Note: This stores node.metadata.name, not the OS hostname (kubernetes.io/hostname).
 	NodeNameLabelKey = labelPrefix + "node-name"
+
+	// AgentNodeLabelKey is the label key for selecting nodes where the agent should run.
+	AgentNodeLabelKey = "storage.deckhouse.io/sds-replicated-volume-node"
 )

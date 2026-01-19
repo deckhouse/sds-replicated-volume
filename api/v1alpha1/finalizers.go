@@ -19,3 +19,5 @@ package v1alpha1
 const AgentFinalizer = "sds-replicated-volume.deckhouse.io/agent"
 
 const ControllerFinalizer = "sds-replicated-volume.deckhouse.io/controller"
+
+const RSCControllerFinalizer = "sds-replicated-volume.deckhouse.io/rsc-controller"

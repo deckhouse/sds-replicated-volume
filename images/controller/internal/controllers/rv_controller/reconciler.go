@@ -122,7 +122,7 @@ func (r *Reconciler) reconcileStatus(ctx context.Context, rvName string, rv *v1a
 
 	// Patch status with optimistic lock
 	if err := r.cl.Status().Patch(rf.Ctx(), rv, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
-		return rf.Merge(
+		return flow.MergeReconciles(
 			outcome,
 			rf.Fail(err).Enrichf("patching ReplicatedVolume"),
 		)
