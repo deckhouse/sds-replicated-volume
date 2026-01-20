@@ -26,7 +26,6 @@ import (
 	rvattachcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_attach_controller"
 	rvcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller"
 	rvdeletepropagation "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_delete_propagation"
-	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
 	rvrmetadata "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_metadata"
 	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
 	rvrtiebreakercount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_tie_breaker_count"
@@ -39,7 +38,6 @@ func init() {
 	// Must be first: controllers rely on MatchingFields against these indexes.
 	registry = append(registry, RegisterIndexes)
 
-	registry = append(registry, rvrdiskfulcount.BuildController)
 	registry = append(registry, rvrtiebreakercount.BuildController)
 	registry = append(registry, rvcontroller.BuildController)
 	registry = append(registry, rvrvolume.BuildController)

@@ -30,25 +30,25 @@ const (
 	ReplicatedVolumeAttachmentCondAttachedReasonWaitingForActiveAttachmentsToDetach = "WaitingForActiveAttachmentsToDetach"
 	ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica                   = "WaitingForReplica"
 	ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolume          = "WaitingForReplicatedVolume"
-	ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolumeIOReady   = "WaitingForReplicatedVolumeIOReady"
+	ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolumeReady     = "WaitingForReplicatedVolumeReady"
 )
 
 const (
 	// ReplicatedVolumeAttachmentCondReadyType indicates whether the attachment is ready for use.
-	// It is an aggregate condition: Attached=True AND ReplicaIOReady=True.
+	// It is an aggregate condition: Attached=True AND ReplicaReady=True.
 	//
 	// Reasons describe which prerequisite is missing.
-	ReplicatedVolumeAttachmentCondReadyType                    = "Ready"
-	ReplicatedVolumeAttachmentCondReadyReasonNotAttached       = "NotAttached"       // Attached=False.
-	ReplicatedVolumeAttachmentCondReadyReasonReady             = "Ready"             // Attached=True and ReplicaIOReady=True.
-	ReplicatedVolumeAttachmentCondReadyReasonReplicaNotIOReady = "ReplicaNotIOReady" // ReplicaIOReady=False.
+	ReplicatedVolumeAttachmentCondReadyType                  = "Ready"
+	ReplicatedVolumeAttachmentCondReadyReasonNotAttached     = "NotAttached"     // Attached=False.
+	ReplicatedVolumeAttachmentCondReadyReasonReady           = "Ready"           // Attached=True and ReplicaReady=True.
+	ReplicatedVolumeAttachmentCondReadyReasonReplicaNotReady = "ReplicaNotReady" // ReplicaReady=False.
 )
 
 const (
-	// ReplicatedVolumeAttachmentCondReplicaIOReadyType indicates whether the replica on the requested node is IOReady.
-	// This condition mirrors RVR IOReady (status/reason/message) for the replica on rva.spec.nodeName.
+	// ReplicatedVolumeAttachmentCondReplicaReadyType indicates whether the replica on the requested node is Ready.
+	// This condition mirrors RVR Ready (status/reason/message) for the replica on rva.spec.nodeName.
 	//
-	// Reasons typically mirror the replica's IOReady reason; this one is used when it is not yet observable.
-	ReplicatedVolumeAttachmentCondReplicaIOReadyType                    = "ReplicaIOReady"
-	ReplicatedVolumeAttachmentCondReplicaIOReadyReasonWaitingForReplica = "WaitingForReplica"
+	// Reasons typically mirror the replica's Ready reason; this one is used when it is not yet observable.
+	ReplicatedVolumeAttachmentCondReplicaReadyType                    = "ReplicaReady"
+	ReplicatedVolumeAttachmentCondReplicaReadyReasonWaitingForReplica = "WaitingForReplica"
 )
