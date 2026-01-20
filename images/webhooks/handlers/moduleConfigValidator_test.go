@@ -37,13 +37,13 @@ func TestModuleConfigValidate(t *testing.T) {
 	t.Setenv("POD_NAMESPACE", testNamespace)
 
 	tests := []struct {
-		name               string
-		obj                metav1.Object
+		name                 string
+		obj                  metav1.Object
 		existingModuleConfig *d8commonapi.ModuleConfig
-		configMap          *corev1.ConfigMap
-		wantValid          bool
-		wantMessage        string
-		wantMessageContains string
+		configMap            *corev1.ConfigMap
+		wantValid            bool
+		wantMessage          string
+		wantMessageContains  string
 	}{
 		{
 			name:      "Non ModuleConfig object allowed",
@@ -78,7 +78,7 @@ func TestModuleConfigValidate(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: sdsReplicatedVolumeModuleName},
 				Spec:       d8commonapi.ModuleConfigSpec{Settings: map[string]interface{}{"drbdVersion": "9.2.13"}},
 			},
-			wantValid:          false,
+			wantValid:           false,
 			wantMessageContains: "failed to read",
 		},
 		{
@@ -87,8 +87,8 @@ func TestModuleConfigValidate(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: sdsReplicatedVolumeModuleName},
 				Spec:       d8commonapi.ModuleConfigSpec{Settings: map[string]interface{}{"drbdVersion": "9.2.13"}},
 			},
-			configMap: allowedVersionsConfigMap("9.2.16"),
-			wantValid: false,
+			configMap:   allowedVersionsConfigMap("9.2.16"),
+			wantValid:   false,
 			wantMessage: "drbdVersion \"9.2.13\" is not allowed",
 		},
 		{
