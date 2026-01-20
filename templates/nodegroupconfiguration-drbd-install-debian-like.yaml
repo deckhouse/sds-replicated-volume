@@ -1,12 +1,12 @@
 apiVersion: deckhouse.io/v1alpha1
 kind: NodeGroupConfiguration
 metadata:
-  name: drbd-install-debian.sh
+  name: drbd-install.sh
   {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
 spec:
   weight: 98
   nodeGroups: ["*"]
-  bundles: ["ubuntu-lts", "debian", "astra"]
+  bundles: ["ubuntu-lts", "debian", "astra", "altlinux", "centos", "redos"]
   content: |
     # Copyright 2023 Flant JSC
     #
@@ -42,6 +42,23 @@ spec:
     kubeconfig="/etc/kubernetes/kubelet.conf"
 
     kernel_version_in_use="$(uname -r)"
+
+    os_id=""
+    os_id_like=""
+    if [ -f /etc/os-release ]; then
+      . /etc/os-release
+      os_id="${ID:-}"
+      os_id_like="${ID_LIKE:-}"
+    fi
+
+    os_family="unknown"
+    if [ -f /etc/altlinux-release ] || [ "$os_id" = "altlinux" ]; then
+      os_family="altlinux"
+    elif [ -f /etc/redhat-release ] || [[ "$os_id_like" =~ rhel ]] || [[ "$os_id" =~ ^(centos|redos|rhel|rocky|alma)$ ]]; then
+      os_family="rhel"
+    elif [ -f /etc/debian_version ] || [[ "$os_id_like" =~ debian ]] || [[ "$os_id" =~ ^(debian|ubuntu|astra)$ ]]; then
+      os_family="debian"
+    fi
 
     CLUSTER_DNS="{{ .Values.global.discovery.clusterDNSAddress }}"
     DRBD_BUILD_SERVER_FQDN="drbd-build-server.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
@@ -90,17 +107,53 @@ spec:
     fi
 
     # DRBD requires the kernel sources to be installed.
-    # Install actual kernel headers
-    bb-apt-install "linux-headers-${kernel_version_in_use}"
+    case "$os_family" in
+      debian)
+        # Install actual kernel headers
+        bb-apt-install "linux-headers-${kernel_version_in_use}"
 
-    # Remove unused kernel-headers
-    kernel_version_pattern="$(echo "$kernel_version_in_use" | sed -r 's/([0-9\.-]+)-([^0-9]+)$/^linux-headers-(\1|\1-\2)$/')"
-    packages_to_remove="$(
-      dpkg-query -S '/lib/modules/*/build' | awk -F: '{print $1}' | grep -Ev "$kernel_version_pattern" || true
-    )"
-    if [ -n "$packages_to_remove" ]; then
-      bb-apt-remove $packages_to_remove
-    fi
+        # Remove unused kernel-headers
+        kernel_version_pattern="$(echo "$kernel_version_in_use" | sed -r 's/([0-9\.-]+)-([^0-9]+)$/^linux-headers-(\1|\1-\2)$/')"
+        packages_to_remove="$(
+          dpkg-query -S '/lib/modules/*/build' | awk -F: '{print $1}' | grep -Ev "$kernel_version_pattern" || true
+        )"
+        if [ -n "$packages_to_remove" ]; then
+          bb-apt-remove $packages_to_remove
+        fi
+        ;;
+      altlinux)
+        # Install actual kernel headers. It can be different from current kernel version!
+        # So further we check, if we need new kernel version. It is altlinux feature.
+        apt-get update
+        apt-get -y install kernel-headers-modules-std-def
+
+        if [ ! -e "/lib/modules/$kernel_version_in_use/build" ]; then
+          update-kernel -y
+          bb-flag-set reboot
+          exit 0
+        fi
+        ;;
+      rhel)
+        # Install actual kernel headers
+        #   kernel                --> kernel-devel
+        #   kernel-core           --> kernel-devel
+        #   kernel-modules-core   --> kernel-devel
+        #   kernel-lt             --> kernel-lt-devel
+        #   kernel-lt-core        --> kernel-lt-devel
+        package_name="$(rpm -qf --qf "%{NAME}\t" "/lib/modules/${kernel_version_in_use}" | awk '{printf "%s", $1}' | sed 's/\(-modules-core\)\?$//g; s/\(-core\)\?$/-devel/g')"
+        bb-dnf-install "${package_name}-${kernel_version_in_use}"
+
+        # Remove unused kernel-headers
+        packages_to_remove="$(rpm -q "$package_name" | grep -Ev "^${package_name}-${kernel_version_in_use}$" || true)"
+        if [ -n "$packages_to_remove" ]; then
+          bb-dnf-remove $packages_to_remove
+        fi
+        ;;
+      *)
+        bb-log-info "Unsupported OS for DRBD install"
+        exit 1
+        ;;
+    esac
 
     if [ -e "/proc/drbd" ]; then
       # DRBD check version
@@ -139,8 +192,25 @@ spec:
       fi
     fi
 
-    # Install curl for API calls
-    bb-apt-install curl bind9-host
+    # Install tools for API calls and build
+    if [ "$os_family" = "debian" ]; then
+      bb-apt-install curl bind9-host
+    elif [ "$os_family" = "altlinux" ]; then
+      apt-get -y install curl bind-utils
+    else
+      bb-dnf-install curl make gcc bind-utils patch mokutil
+      check_sb_state="$(mokutil --sb-state || echo "Not supported")"
+      if [[ "$check_sb_state" == "SecureBoot enabled" ]]; then
+        bb-log-info "SecureBoot is enabled. Please manually install DRBD version  {{ $.Values.sdsReplicatedVolume.internal.drbdVersion }} or higher."
+        exit 0
+      fi
+
+      {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
+      bb-package-module-install "drbd:{{ include "helm_lib_module_image_digest" (list . "drbd" "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
+      {{- else }}
+      bb-rp-from-module-image-install "drbd:{{ include "helm_lib_module_image_digest" (list . "drbd" "sdsReplicatedVolume") }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
+      {{- end }}
+    fi
 
     attempt=0
     until DRBD_BUILD_SERVER_IP="$(host -t A "$DRBD_BUILD_SERVER_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
@@ -182,57 +252,107 @@ spec:
     # Archive kernel headers and send build request
     bb-log-info "Sending build request to DRBD build server"
     
-    # Check if there are kernel headers in /usr/src/
-    if ls -d /usr/src/linux-headers-* >/dev/null 2>&1; then
-      HEADERS_DIRS=$(ls -d /usr/src/linux-headers-* 2>/dev/null)
-      
-      # If flavor-specific directory exists for current kernel (e.g., -generic), use it for API version
-      if [ -d "/usr/src/linux-headers-${kernel_version_in_use}-generic" ]; then
-        KERNEL_VERSION_FOR_API="${kernel_version_in_use}-generic"
-      fi
-      
-      bb-log-info "Found kernel headers directories: $HEADERS_DIRS"
-      bb-log-info "Archiving all /usr/src/linux-headers-* directories"
-      
-      # Archive all linux-headers directories, try with -h first, then fallback without -h if it fails
-      if ! tar --hard-dereference -chzf /tmp/headers.tar.gz /usr/src/linux-* 2>/dev/null; then
-        bb-log-info "tar with -h failed, retrying without -h"
-        tar --hard-dereference -czf /tmp/headers.tar.gz /usr/src/linux-*
-      fi
+    if [ "$os_family" = "rhel" ]; then
+      # Check if there are kernel headers in /usr/src/kernels/
+      if ls -d /usr/src/kernels/* >/dev/null 2>&1; then
+        HEADERS_DIRS=$(ls -d /usr/src/kernels/* 2>/dev/null)
 
-      HTTP_CODE=$(curl -s -w '%{http_code}' -X POST \
-        -H "Content-Type: application/gzip" \
-        -H "X-Kernel-Version: ${KERNEL_VERSION_FOR_API}" \
-        -H "X-DRBD-Version: ${DESIRED_DRBD_VERSION}" \
-        --data-binary @/tmp/headers.tar.gz \
-        -o "$MODULES_TAR" \
-        "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}&drbd_version=${DESIRED_DRBD_VERSION}")
-      
-      # Cleanup temporary headers archive
-      rm -f /tmp/headers.tar.gz
-    elif [ -d "/lib/modules/${kernel_version_in_use}/build" ]; then
-      # Fallback: use /lib/modules/.../build (for other Debian-like distributions)
-      KERNEL_HEADERS_DIR="$(readlink -f "/lib/modules/${kernel_version_in_use}/build")"
-      bb-log-info "Using kernel headers from /lib/modules via symlink: $KERNEL_HEADERS_DIR"
-      
-      # Archive kernel headers directory
-      if ! tar --hard-dereference -chzf /tmp/headers.tar.gz "$KERNEL_HEADERS_DIR" 2>/dev/null; then
-        tar --hard-dereference -czf /tmp/headers.tar.gz "$KERNEL_HEADERS_DIR"
+        bb-log-info "Found kernel headers directories: $HEADERS_DIRS"
+        bb-log-info "Archiving all /usr/src/kernels/* directories"
+
+        # Archive all kernels directories, try with --hard-dereference first, then fallback without it if it fails
+        if ! tar --hard-dereference -chzf /tmp/headers.tar.gz /usr/src/kernels/* 2>/dev/null; then
+          bb-log-info "tar with --hard-dereference failed, retrying without it"
+          tar --hard-dereference -czf /tmp/headers.tar.gz /usr/src/kernels/*
+        fi
+
+        HTTP_CODE=$(curl -s -w '%{http_code}' -X POST \
+          -H "Content-Type: application/gzip" \
+          -H "X-Kernel-Version: ${KERNEL_VERSION_FOR_API}" \
+          -H "X-DRBD-Version: ${DESIRED_DRBD_VERSION}" \
+          --data-binary @/tmp/headers.tar.gz \
+          -o "$MODULES_TAR" \
+          "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}&drbd_version=${DESIRED_DRBD_VERSION}")
+
+        # Cleanup temporary headers archive
+        rm -f /tmp/headers.tar.gz
+      elif [ -d "/lib/modules/${kernel_version_in_use}/build" ]; then
+        # Fallback: use /lib/modules/.../build
+        KERNEL_HEADERS_DIR="$(readlink -f "/lib/modules/${kernel_version_in_use}/build")"
+        bb-log-info "Using kernel headers from /lib/modules via symlink: $KERNEL_HEADERS_DIR"
+
+        # Archive kernel headers directory
+        if ! tar --hard-dereference -chzf /tmp/headers.tar.gz "$KERNEL_HEADERS_DIR" 2>/dev/null; then
+          tar --hard-dereference -czf /tmp/headers.tar.gz "$KERNEL_HEADERS_DIR"
+        fi
+
+        HTTP_CODE=$(curl -s -w '%{http_code}' -X POST \
+          -H "Content-Type: application/gzip" \
+          -H "X-Kernel-Version: ${KERNEL_VERSION_FOR_API}" \
+          -H "X-DRBD-Version: ${DESIRED_DRBD_VERSION}" \
+          --data-binary @/tmp/headers.tar.gz \
+          -o "$MODULES_TAR" \
+          "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}&drbd_version=${DESIRED_DRBD_VERSION}")
+
+        # Cleanup temporary headers archive
+        rm -f /tmp/headers.tar.gz
+      else
+        bb-log-info "Kernel headers directory not found for version ${kernel_version_in_use}"
+        exit 1
       fi
-      
-      HTTP_CODE=$(curl -s -w '%{http_code}' -X POST \
-        -H "Content-Type: application/gzip" \
-        -H "X-Kernel-Version: ${KERNEL_VERSION_FOR_API}" \
-        -H "X-DRBD-Version: ${DESIRED_DRBD_VERSION}" \
-        --data-binary @/tmp/headers.tar.gz \
-        -o "$MODULES_TAR" \
-        "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}&drbd_version=${DESIRED_DRBD_VERSION}")
-      
-      # Cleanup temporary headers archive
-      rm -f /tmp/headers.tar.gz
     else
-      bb-log-info "Kernel headers directory not found for version ${kernel_version_in_use}"
-      exit 1
+      # Check if there are kernel headers in /usr/src/
+      if ls -d /usr/src/linux-headers-* >/dev/null 2>&1; then
+        HEADERS_DIRS=$(ls -d /usr/src/linux-headers-* 2>/dev/null)
+
+        # If flavor-specific directory exists for current kernel (e.g., -generic), use it for API version
+        if [ -d "/usr/src/linux-headers-${kernel_version_in_use}-generic" ]; then
+          KERNEL_VERSION_FOR_API="${kernel_version_in_use}-generic"
+        fi
+
+        bb-log-info "Found kernel headers directories: $HEADERS_DIRS"
+        bb-log-info "Archiving all /usr/src/linux-headers-* directories"
+
+        # Archive all linux-headers directories, try with -h first, then fallback without -h if it fails
+        if ! tar --hard-dereference -chzf /tmp/headers.tar.gz /usr/src/linux-* 2>/dev/null; then
+          bb-log-info "tar with -h failed, retrying without -h"
+          tar --hard-dereference -czf /tmp/headers.tar.gz /usr/src/linux-*
+        fi
+
+        HTTP_CODE=$(curl -s -w '%{http_code}' -X POST \
+          -H "Content-Type: application/gzip" \
+          -H "X-Kernel-Version: ${KERNEL_VERSION_FOR_API}" \
+          -H "X-DRBD-Version: ${DESIRED_DRBD_VERSION}" \
+          --data-binary @/tmp/headers.tar.gz \
+          -o "$MODULES_TAR" \
+          "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}&drbd_version=${DESIRED_DRBD_VERSION}")
+
+        # Cleanup temporary headers archive
+        rm -f /tmp/headers.tar.gz
+      elif [ -d "/lib/modules/${kernel_version_in_use}/build" ]; then
+        # Fallback: use /lib/modules/.../build (for other Debian-like distributions)
+        KERNEL_HEADERS_DIR="$(readlink -f "/lib/modules/${kernel_version_in_use}/build")"
+        bb-log-info "Using kernel headers from /lib/modules via symlink: $KERNEL_HEADERS_DIR"
+
+        # Archive kernel headers directory
+        if ! tar --hard-dereference -chzf /tmp/headers.tar.gz "$KERNEL_HEADERS_DIR" 2>/dev/null; then
+          tar --hard-dereference -czf /tmp/headers.tar.gz "$KERNEL_HEADERS_DIR"
+        fi
+
+        HTTP_CODE=$(curl -s -w '%{http_code}' -X POST \
+          -H "Content-Type: application/gzip" \
+          -H "X-Kernel-Version: ${KERNEL_VERSION_FOR_API}" \
+          -H "X-DRBD-Version: ${DESIRED_DRBD_VERSION}" \
+          --data-binary @/tmp/headers.tar.gz \
+          -o "$MODULES_TAR" \
+          "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}&drbd_version=${DESIRED_DRBD_VERSION}")
+
+        # Cleanup temporary headers archive
+        rm -f /tmp/headers.tar.gz
+      else
+        bb-log-info "Kernel headers directory not found for version ${kernel_version_in_use}"
+        exit 1
+      fi
     fi
 
     if [ "$HTTP_CODE" == "200" ]; then
@@ -330,6 +450,15 @@ spec:
     fi
     bb-sync-file /etc/modules-load.d/d8_drbd.conf - <<< "drbd"
     depmod
+    if [ -e "/proc/drbd" ]; then
+      current_version="$(cat /proc/drbd | grep 'version:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+      if [[ $current_version =~ ^8\. ]]; then
+        bb-log-info "Loaded DRBD 8.x detected, unloading module before modprobe"
+        rmmod drbd_transport_rdma || true
+        rmmod drbd_transport_tcp || true
+        rmmod drbd || true
+      fi
+    fi
     modprobe drbd
     modprobe dm-thin-pool
 

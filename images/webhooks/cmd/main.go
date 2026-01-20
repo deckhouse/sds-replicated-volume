@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 
+	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/webhooks/handlers"
 )
@@ -62,6 +63,7 @@ const (
 	RSPValidatorID = "RSPValidator"
 	SCValidatorID  = "SCValidator"
 	PVCValidatorID = "PVCValidator"
+	ModuleConfigValidatorID = "ModuleConfigValidator"
 )
 
 func main() {
@@ -95,11 +97,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	moduleConfigValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.ModuleConfigValidate, ModuleConfigValidatorID, &d8commonapi.ModuleConfig{}, logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating moduleConfigValidatingWebhookHandler: %s", err)
+		os.Exit(1)
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/rsc-validate", rscValidatingWebhookHandler)
 	mux.Handle("/sc-validate", scValidatingWebhookHandler)
 	mux.Handle("/rsp-validate", rspValidatingWebhookHandler)
 	mux.Handle("/pvc-validate", pvcValidatingWebhookHandler)
+	mux.Handle("/module-config-validate", moduleConfigValidatingWebhookHandler)
 	mux.HandleFunc("/healthz", httpHandlerHealthz)
 
 	logger.Infof("Listening on %s", port)
