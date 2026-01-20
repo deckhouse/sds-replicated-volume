@@ -42,6 +42,24 @@ type Opt struct {
 	DisableVolumeResizer          bool
 	DisableVolumeReplicaDestroyer bool
 	DisableVolumeReplicaCreator   bool
+
+	// Chaos engineering flags
+	ParentKubeconfig        string
+	VMNamespace             string
+	EnableChaosDRBDBlock    bool
+	EnableChaosNetBlock     bool
+	EnableChaosNetDegrade   bool
+	EnableChaosVMReboot     bool
+	EnableChaosNetPartition bool
+	ChaosPeriodMin          time.Duration
+	ChaosPeriodMax          time.Duration
+	ChaosIncidentMin        time.Duration
+	ChaosIncidentMax        time.Duration
+	ChaosDelayMsMin         int
+	ChaosDelayMsMax         int
+	ChaosLossPercentMin     float64
+	ChaosLossPercentMax     float64
+	ChaosPartitionGroupSize int
 }
 
 func (o *Opt) Parse() {
@@ -70,32 +88,49 @@ Interrupting Cleanup:
 				return errors.New("invalid 'log-level' (allowed values: debug, info, warn, error)")
 			}
 
-			if o.VolumeStepMin < 1 {
-				return errors.New("volume-step-min must be at least 1")
-			}
-
+			// Range checks only (defaults are valid)
 			if o.VolumeStepMax < o.VolumeStepMin {
-				return errors.New("volume-step-max must be greater than or equal to volume-step-min")
+				return errors.New("volume-step-max must be >= volume-step-min")
 			}
-
-			if o.StepPeriodMin <= 0 {
-				return errors.New("step-period-min must be positive")
-			}
-
 			if o.StepPeriodMax < o.StepPeriodMin {
-				return errors.New("step-period-max must be greater than or equal to step-period-min")
+				return errors.New("step-period-max must be >= step-period-min")
 			}
-
-			if o.VolumePeriodMin <= 0 {
-				return errors.New("volume-period-min must be positive")
-			}
-
 			if o.VolumePeriodMax < o.VolumePeriodMin {
-				return errors.New("volume-period-max must be greater than or equal to volume-period-min")
+				return errors.New("volume-period-max must be >= volume-period-min")
 			}
 
-			if o.MaxVolumes < 1 {
-				return errors.New("max-volumes must be at least 1")
+			// Validate chaos flags if any chaos feature is enabled
+			chaosEnabled := o.EnableChaosDRBDBlock || o.EnableChaosNetBlock ||
+				o.EnableChaosNetDegrade || o.EnableChaosVMReboot || o.EnableChaosNetPartition
+
+			if chaosEnabled {
+				// Required flags (no defaults)
+				if o.ParentKubeconfig == "" {
+					return errors.New("parent-kubeconfig is required when chaos features are enabled")
+				}
+				if o.VMNamespace == "" {
+					return errors.New("vm-namespace is required when chaos features are enabled")
+				}
+				// Range checks only
+				if o.ChaosPeriodMax < o.ChaosPeriodMin {
+					return errors.New("chaos-period-max must be >= chaos-period-min")
+				}
+				if o.ChaosIncidentMax < o.ChaosIncidentMin {
+					return errors.New("chaos-incident-max must be >= chaos-incident-min")
+				}
+			}
+
+			// Validate network degradation specific flags
+			if o.EnableChaosNetDegrade {
+				if o.ChaosDelayMsMax < o.ChaosDelayMsMin {
+					return errors.New("chaos-delay-ms-max must be >= chaos-delay-ms-min")
+				}
+				if o.ChaosLossPercentMax < o.ChaosLossPercentMin {
+					return errors.New("chaos-loss-percent-max must be >= chaos-loss-percent-min")
+				}
+				if o.ChaosLossPercentMin < 0 || o.ChaosLossPercentMax > 100 {
+					return errors.New("chaos-loss-percent values must be between 0 and 100")
+				}
 			}
 
 			return nil
@@ -136,6 +171,32 @@ Interrupting Cleanup:
 	rootCmd.Flags().BoolVarP(&o.DisableVolumeResizer, "disable-volume-resizer", "", false, "Disable volume-resizer goroutine")
 	rootCmd.Flags().BoolVarP(&o.DisableVolumeReplicaDestroyer, "disable-volume-replica-destroyer", "", false, "Disable volume-replica-destroyer goroutine")
 	rootCmd.Flags().BoolVarP(&o.DisableVolumeReplicaCreator, "disable-volume-replica-creator", "", false, "Disable volume-replica-creator goroutine")
+
+	// Chaos engineering flags
+	rootCmd.Flags().StringVarP(&o.ParentKubeconfig, "parent-kubeconfig", "", "", "Path to kubeconfig for parent cluster (DVP)")
+	rootCmd.Flags().StringVarP(&o.VMNamespace, "vm-namespace", "", "", "Namespace in parent cluster where VMs are located")
+
+	// Chaos enable flags
+	rootCmd.Flags().BoolVarP(&o.EnableChaosDRBDBlock, "enable-chaos-drbd-block", "", false, "Enable DRBD port blocking chaos")
+	rootCmd.Flags().BoolVarP(&o.EnableChaosNetBlock, "enable-chaos-network-block", "", false, "Enable full network blocking chaos")
+	rootCmd.Flags().BoolVarP(&o.EnableChaosNetDegrade, "enable-chaos-network-degrade", "", false, "Enable network degradation chaos (latency/loss)")
+	rootCmd.Flags().BoolVarP(&o.EnableChaosVMReboot, "enable-chaos-vm-reboot", "", false, "Enable VM hard reboot chaos")
+	rootCmd.Flags().BoolVarP(&o.EnableChaosNetPartition, "enable-chaos-network-partition", "", false, "Enable network partition (split-brain) chaos")
+
+	// Chaos timing flags
+	rootCmd.Flags().DurationVarP(&o.ChaosPeriodMin, "chaos-period-min", "", 60*time.Second, "Minimum wait between chaos events")
+	rootCmd.Flags().DurationVarP(&o.ChaosPeriodMax, "chaos-period-max", "", 300*time.Second, "Maximum wait between chaos events")
+	rootCmd.Flags().DurationVarP(&o.ChaosIncidentMin, "chaos-incident-min", "", 10*time.Second, "Minimum duration of chaos incident")
+	rootCmd.Flags().DurationVarP(&o.ChaosIncidentMax, "chaos-incident-max", "", 60*time.Second, "Maximum duration of chaos incident")
+
+	// Network degradation specific flags
+	rootCmd.Flags().IntVarP(&o.ChaosDelayMsMin, "chaos-delay-ms-min", "", 30, "Minimum network delay in milliseconds")
+	rootCmd.Flags().IntVarP(&o.ChaosDelayMsMax, "chaos-delay-ms-max", "", 60, "Maximum network delay in milliseconds")
+	rootCmd.Flags().Float64VarP(&o.ChaosLossPercentMin, "chaos-loss-percent-min", "", 1.0, "Minimum packet loss percentage")
+	rootCmd.Flags().Float64VarP(&o.ChaosLossPercentMax, "chaos-loss-percent-max", "", 10.0, "Maximum packet loss percentage")
+
+	// Network partition specific flags
+	rootCmd.Flags().IntVarP(&o.ChaosPartitionGroupSize, "chaos-partition-group-size", "", 0, "Target size for partition group (0 = split in half)")
 
 	if err := rootCmd.Execute(); err != nil {
 		// we expect err to be logged already

@@ -22,9 +22,11 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/chaos"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/runners"
@@ -107,6 +109,16 @@ func main() {
 		DisableVolumeReplicaCreator:   opt.DisableVolumeReplicaCreator,
 	}
 
+	// Setup chaos engineering if enabled
+	chaosEnabled := opt.EnableChaosDRBDBlock || opt.EnableChaosNetBlock ||
+		opt.EnableChaosNetDegrade || opt.EnableChaosVMReboot || opt.EnableChaosNetPartition
+
+	var chaosCleanup func()
+	if chaosEnabled {
+		chaosCleanup = setupChaosRunners(ctx, log, opt, kubeClient, forceCleanupChan)
+		defer chaosCleanup()
+	}
+
 	multiVolume := runners.NewMultiVolume(cfg, kubeClient, forceCleanupChan)
 	_ = multiVolume.Run(ctx)
 
@@ -177,4 +189,176 @@ func printCheckerStats(stats []*runners.CheckerStats) {
 	fmt.Fprintf(os.Stdout, "Stable (0 transitions):        %d\n", stableCount)
 	fmt.Fprintf(os.Stdout, "Recovered (even transitions):  %d\n", recoveredCount)
 	fmt.Fprintf(os.Stdout, "Broken (odd transitions):      %d\n", brokenCount)
+}
+
+// setupChaosRunners initializes and starts chaos engineering runners
+// Returns a cleanup function that should be called on shutdown
+func setupChaosRunners(
+	ctx context.Context,
+	log *slog.Logger,
+	opt Opt,
+	kubeClient *kubeutils.Client,
+	forceCleanupChan <-chan struct{},
+) func() {
+	log.Info("setting up chaos engineering runners")
+
+	// Create parent cluster client
+	parentClient, err := chaos.NewParentClient(opt.ParentKubeconfig, opt.VMNamespace)
+	if err != nil {
+		log.Error("failed to create parent cluster client", "error", err)
+		return func() {}
+	}
+
+	// Create Cilium policy manager (uses child cluster client)
+	ciliumManager := chaos.NewCiliumPolicyManager(kubeClient.Client())
+
+	// Create netem manager (uses child cluster client)
+	netemManager := chaos.NewNetemManager(kubeClient.Client())
+
+	// Create DRBD port collector (uses child cluster client)
+	portCollector := chaos.NewDRBDPortCollector(kubeClient.Client())
+
+	// Check if Cilium Host Firewall is available (required for network blocking)
+	ciliumEnabled, ciliumMsg := ciliumManager.IsHostFirewallEnabled(ctx)
+	if !ciliumEnabled {
+		log.Warn("Cilium Host Firewall may not be available, network blocking chaos may not work",
+			"reason", ciliumMsg)
+	} else {
+		log.Info("Cilium Host Firewall check passed", "status", ciliumMsg)
+	}
+
+	// Cleanup stale resources from previous runs
+	log.Info("cleaning up stale chaos resources from previous runs")
+	if stalePolicies, err := ciliumManager.CleanupStaleChaosPolicies(ctx); err != nil {
+		log.Warn("failed to cleanup stale Cilium policies", "error", err)
+	} else if stalePolicies > 0 {
+		log.Info("cleaned up stale Cilium policies", "count", stalePolicies)
+	}
+
+	if staleJobs, err := netemManager.CleanupStaleNetemJobs(ctx); err != nil {
+		log.Warn("failed to cleanup stale netem Jobs", "error", err)
+	} else if staleJobs > 0 {
+		log.Info("cleaned up stale netem Jobs", "count", staleJobs)
+	}
+
+	if staleVMOps, err := parentClient.CleanupStaleVMOperations(ctx); err != nil {
+		log.Warn("failed to cleanup stale VMOperations", "error", err)
+	} else if staleVMOps > 0 {
+		log.Info("cleaned up stale VMOperations", "count", staleVMOps)
+	}
+
+	// Common timing config
+	period := config.DurationMinMax{Min: opt.ChaosPeriodMin, Max: opt.ChaosPeriodMax}
+	incidentDuration := config.DurationMinMax{Min: opt.ChaosIncidentMin, Max: opt.ChaosIncidentMax}
+
+	// Track running chaos goroutines
+	var wg sync.WaitGroup
+
+	// Start DRBD blocker
+	// Note: DRBD ports are collected dynamically before each incident (not at startup)
+	// to ensure we block actual ports even when new RVs/RVRs are created during the test.
+	// If no DRBD ports found on selected nodes, the incident is skipped.
+	if opt.EnableChaosDRBDBlock {
+		cfg := config.ChaosDRBDBlockerConfig{
+			Period:           period,
+			IncidentDuration: incidentDuration,
+		}
+		blocker := runners.NewChaosDRBDBlocker(cfg, ciliumManager, parentClient, portCollector, forceCleanupChan)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = blocker.Run(ctx)
+		}()
+		log.Info("started chaos-drbd-blocker")
+	}
+
+	// Start network blocker
+	if opt.EnableChaosNetBlock {
+		cfg := config.ChaosNetworkBlockerConfig{
+			Period:           period,
+			IncidentDuration: incidentDuration,
+		}
+		blocker := runners.NewChaosNetworkBlocker(cfg, ciliumManager, parentClient, forceCleanupChan)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = blocker.Run(ctx)
+		}()
+		log.Info("started chaos-network-blocker")
+	}
+
+	// Start network degrader
+	if opt.EnableChaosNetDegrade {
+		cfg := config.ChaosNetworkDegraderConfig{
+			Period:           period,
+			IncidentDuration: incidentDuration,
+			DelayMs:          config.StepMinMax{Min: opt.ChaosDelayMsMin, Max: opt.ChaosDelayMsMax},
+			LossPercent:      config.Float64MinMax{Min: opt.ChaosLossPercentMin, Max: opt.ChaosLossPercentMax},
+		}
+		degrader := runners.NewChaosNetworkDegrader(cfg, netemManager, parentClient, forceCleanupChan)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = degrader.Run(ctx)
+		}()
+		log.Info("started chaos-network-degrader")
+	}
+
+	// Start VM reboter
+	if opt.EnableChaosVMReboot {
+		cfg := config.ChaosVMReboterConfig{
+			Period: period,
+		}
+		reboter := runners.NewChaosVMReboter(cfg, parentClient)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = reboter.Run(ctx)
+		}()
+		log.Info("started chaos-vm-reboter")
+	}
+
+	// Start network partitioner
+	if opt.EnableChaosNetPartition {
+		cfg := config.ChaosNetworkPartitionerConfig{
+			Period:           period,
+			IncidentDuration: incidentDuration,
+			GroupSize:        opt.ChaosPartitionGroupSize,
+		}
+		partitioner := runners.NewChaosNetworkPartitioner(cfg, ciliumManager, parentClient, forceCleanupChan)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = partitioner.Run(ctx)
+		}()
+		log.Info("started chaos-network-partitioner")
+	}
+
+	// Return cleanup function
+	return func() {
+		log.Info("cleaning up chaos resources")
+
+		// Wait for all chaos goroutines to finish
+		wg.Wait()
+
+		// Cleanup Cilium policies
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := ciliumManager.CleanupAllChaosPolicies(cleanupCtx); err != nil {
+			log.Error("failed to cleanup Cilium policies", "error", err)
+		}
+
+		// Cleanup netem Jobs
+		if err := netemManager.CleanupAllNetemJobs(cleanupCtx); err != nil {
+			log.Error("failed to cleanup netem Jobs", "error", err)
+		}
+
+		// Cleanup VM operations
+		if err := parentClient.CleanupVMOperations(cleanupCtx); err != nil {
+			log.Error("failed to cleanup VM operations", "error", err)
+		}
+
+		log.Info("chaos cleanup completed")
+	}
 }
