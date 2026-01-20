@@ -89,9 +89,9 @@ type mockExtenderClient struct {
 }
 
 func (m *mockExtenderClient) QueryLVGScores(
-	ctx context.Context,
+	_ context.Context,
 	lvgs []rvrschedulingcontroller.LVGQuery,
-	volume rvrschedulingcontroller.VolumeInfo,
+	_ rvrschedulingcontroller.VolumeInfo,
 ) (map[string]int, error) {
 	result := make(map[string]int)
 	for _, lvg := range lvgs {

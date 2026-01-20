@@ -25,10 +25,10 @@ import (
 func RVRPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.Funcs{
-			CreateFunc:  func(e event.TypedCreateEvent[client.Object]) bool { return true },
-			UpdateFunc:  func(e event.TypedUpdateEvent[client.Object]) bool { return false },
-			DeleteFunc:  func(e event.TypedDeleteEvent[client.Object]) bool { return false },
-			GenericFunc: func(e event.TypedGenericEvent[client.Object]) bool { return false },
+			CreateFunc:  func(_ event.TypedCreateEvent[client.Object]) bool { return true },
+			UpdateFunc:  func(_ event.TypedUpdateEvent[client.Object]) bool { return false },
+			DeleteFunc:  func(_ event.TypedDeleteEvent[client.Object]) bool { return false },
+			GenericFunc: func(_ event.TypedGenericEvent[client.Object]) bool { return false },
 		},
 	}
 }
