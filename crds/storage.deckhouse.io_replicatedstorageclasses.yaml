@@ -579,7 +579,7 @@ spec:
                     type: integer
                   pendingObservation:
                     description: PendingObservation is the number of volumes that
-                      haven't observed current RSC configuration.
+                      haven't observed current RSC configuration or eligible nodes.
                     format: int32
                     type: integer
                   staleConfiguration:
