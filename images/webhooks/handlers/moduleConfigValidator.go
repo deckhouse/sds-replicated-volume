@@ -57,7 +57,7 @@ func ModuleConfigValidate(ctx context.Context, _ *model.AdmissionReview, obj met
 		return &kwhvalidating.ValidatorResult{Valid: true}, nil
 	}
 
-	cl, err := NewKubeClient("")
+	cl, err := kubeClientFactory("")
 	if err != nil {
 		return &kwhvalidating.ValidatorResult{Valid: false, Message: err.Error()}, nil
 	}
