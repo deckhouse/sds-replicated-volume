@@ -34,8 +34,8 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Online')].status
       name: Online
       type: string
-    - jsonPath: .status.conditions[?(@.type=='IOReady')].status
-      name: IOReady
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
       type: string
     - jsonPath: .status.conditions[?(@.type=='Configured')].status
       name: Configured

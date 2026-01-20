@@ -87,7 +87,7 @@
 
 Для миграции надо две primary.
 
-Виртуалка может подключится к TB либо запросить себе AP. 
+Виртуалка может подключится к TB либо запросить себе AP.
 
 В случае если `spec.volumeAcess!=Local` AP не может быть Primary.
 
@@ -121,7 +121,7 @@ TB в любой ситуации поддерживает нечетное, и 
  - `sha1`
 
 ### Порты DRBD
- - `drbdMinPort=7000` - минимальный порт для использования ресурсами 
+ - `drbdMinPort=7000` - минимальный порт для использования ресурсами
  - `drbdMaxPort=7999` - максимальный порт для использования ресурсами
 
 ### Финализаторы ресурсов
@@ -207,19 +207,19 @@ RVA — это ресурс «намерения публикации» тома
     - `status=False` — ожидание/ошибка публикации. Основные `reason`:
       - `WaitingForActiveAttachmentsToDetach`
       - `WaitingForReplicatedVolume`
-      - `WaitingForReplicatedVolumeIOReady`
+      - `WaitingForReplicatedVolumeReady`
       - `WaitingForReplica`
       - `ConvertingTieBreakerToAccess`
       - `UnableToProvideLocalVolumeAccess`
       - `LocalityNotSatisfied`
       - `SettingPrimary`
-  - `type=ReplicaIOReady`
+  - `type=ReplicaReady`
     - Зеркалирует `rvr.status.conditions[type=IOReady]` для реплики на `spec.nodeName`
       (копируются `status`, `reason`, `message`).
   - `type=Ready`
-    - Агрегат: `Attached=True` **и** `ReplicaIOReady=True`.
+    - Агрегат: `Attached=True` **и** `ReplicaReady=True`.
     - `status=True`, `reason=Ready`.
-    - `status=False`, `reason=NotAttached` или `ReplicaNotIOReady`.
+    - `status=False`, `reason=NotAttached` или `ReplicaNotReady`.
 
 # Контракт данных: `ReplicatedVolumeReplica`
 ## `spec`
@@ -287,10 +287,10 @@ RVA — это ресурс «намерения публикации» тома
 
 ### Статус: [OK | priority: 5 | complexity: 5]
 
-### Цель 
+### Цель
 
 Согласовать желаемую конфигурацию в полях ресурсов и конфигурации DRBD, выполнять
-первоначальную синхронизацию и настройку DRBD ресурсов на ноде. Название ноды 
+первоначальную синхронизацию и настройку DRBD ресурсов на ноде. Название ноды
 `rvr.spec.nodeName` должно соответствовать названию ноды контроллера
 (переменная окружения `NODE_NAME`, см. `images/agent/cmd/env_config.go`)
 
@@ -381,7 +381,7 @@ TODO:
  - Агент (drbd-config) должен ставить финалайзер agent на llv перед тем, как начинает ее использовать и снимать после того, как перестал.
  - У реплики добавить отдельный condition FullyConnected, который НЕ влияет на Ready. Он true, когда у реплики есть связь со всеми ее пирами.
 
-### Вывод 
+### Вывод
   - `rvr.status.drbd.errors.*`
   - `rvr.status.drbd.actual.*`
   - *.res, *.res_tmp файлы на ноде
@@ -411,14 +411,14 @@ Cм. существующую реализацию `drbdadm primary` и `drbdadm
 
 Ошибки drbd команд требуется выводить в `rvr.status.drbd.errors.*`.
 
-### Вывод 
+### Вывод
   - `rvr.status.drbd.errors.*`
 
 ## `rvr-status-config-address-controller`
 
 ### Статус: [OK | priority: 5 | complexity: 3]
 
-### Цель 
+### Цель
 Проставить значение свойству `rvr.status.drbd.config.address`.
  - `ipv4` - взять из `node.status.addresses[type=InternalIP]`
  - `port` - найти наименьший свободный порт в диапазоне, задаваемом в [портах DRBD](#Порты-DRBD) `drbdMinPort`/`drbdMaxPort`
@@ -427,10 +427,10 @@ Cм. существующую реализацию `drbdadm primary` и `drbdadm
 
 Процесс и результат работы контроллера должен быть отражён в `rvr.status.conditions[type=AddressConfigured]`
 
-### Триггер 
+### Триггер
   - `CREATE/UPDATE(RVR, rvr.spec.nodeName, !rvr.status.drbd.config.address)`
 
-### Вывод 
+### Вывод
   - `rvr.status.drbd.config.address`
   - `rvr.status.conditions[type=AddressConfigured]`
 
@@ -440,7 +440,7 @@ Cм. существующую реализацию `drbdadm primary` и `drbdadm
 
 ### Статус: [OK | priority: 5 | complexity: 4]
 
-### Цель 
+### Цель
 Добавлять привязанные diskful-реплики (RVR) для RV.
 
 Целевое количество реплик определяется в `ReplicatedStorageClass` (получать через `rv.spec.replicatedStorageClassName`).
@@ -508,7 +508,7 @@ Cм. существующую реализацию `drbdadm primary` и `drbdadm
       - если не хватает свободных узлов - ошибка невозможности планирования
     - `TransZonal` - каждый rvr планируем в зону с самым маленьким количеством реплик (всех типов)
       - если зон с самым маленьким количеством несколько - выбираем любую из них
-      - если в зонах с самым маленьким количеством реплик нет свободного узла - 
+      - если в зонах с самым маленьким количеством реплик нет свободного узла -
         ошибка невозможности планирования (нельзя гарантировать равномерное распределение)
     - `Ignored` - зоны не учитываются
       - если не хватает свободных узлов - ошибка невозможности планирования
@@ -587,7 +587,7 @@ Cм. существующую реализацию `drbdadm primary` и `drbdadm
 
 Failure domain (FD) - либо - нода, либо, в случае, если `rsc.spec.topology==TransZonal`, то - и нода, и зона.
 
-Создавать и удалять RVR с `rvr.spec.type==TieBreaker`, чтобы поддерживались требования: 
+Создавать и удалять RVR с `rvr.spec.type==TieBreaker`, чтобы поддерживались требования:
 
 - отказ любого одного FD не должен приводить к потере кворума
 - отказ большинства FD должен приводить к потере кворума
@@ -604,7 +604,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 
 ### Статус: [OK | priority: 5 | complexity: 3]
 
-### Цель 
+### Цель
 Поддерживать количество `rvr.spec.type==Access` реплик (для всех режимов
 `rsc.spec.volumeAccess`, кроме `Local`) таким, чтобы их хватало для размещения на тех узлах, где это требуется:
  - список запрашиваемых для доступа узлов — `rv.status.desiredAttachTo` (вычисляется из RVA)
@@ -619,11 +619,11 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 
 ### Статус: [OK | priority: 5 | complexity: 4]
 
-### Цель 
+### Цель
 
 Обеспечить переход в primary (промоут) и обратно реплик. Для этого нужно следить за списком нод в
 `rv.status.desiredAttachTo` (вычисляется из RVA) и приводить в соответствие реплики на этих нодах,
-проставляя им `rvr.status.drbd.config.primary`. 
+проставляя им `rvr.status.drbd.config.primary`.
 Источник запроса на публикацию — активные ресурсы `ReplicatedVolumeAttachment` (RVA). Контроллер вычисляет
 целевой набор нод как `rv.status.desiredAttachTo` и уже по нему промоут/демоут реплик.
 
@@ -649,7 +649,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 
 Контроллер работает только когда RV имеет `status.condition[type=Ready].status=True`
 
-### Вывод 
+### Вывод
   - `rvr.status.drbd.config.primary`
   - `rv.status.drbd.config.allowTwoPrimaries`
   - `rv.status.actuallyAttachedTo`
@@ -668,7 +668,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 фактический тип (`rvr.status.actualType`) соответствует целевому `rvr.spec.type`.
 4. Обеспечить сброс свойства `rvr.status.lvmLogicalVolumeName` после удаления LLV.
 
-### Вывод 
+### Вывод
   - Новое `llv`
   - Обновление для уже существующих: `llv.metadata.ownerReference` - вынесли в отдельный контроллер [`llv-owner-reference-controller`](#llv-owner-reference-controller)
   - `rvr.status.lvmLogicalVolumeName` (задание и сброс)
@@ -686,9 +686,9 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 При удалении RVR, agent не удаляет ресурс из DRBD, и не снимает финализаторы,
 пока стоит `F/controller`.
 
-### Цель 
+### Цель
 
-Цель `rvr-quorum-and-attach-constrained-release-controller` - снимать финализатор `F/controller` с удаляемых rvr, когда 
+Цель `rvr-quorum-and-attach-constrained-release-controller` - снимать финализатор `F/controller` с удаляемых rvr, когда
 кластер к этому готов. Условия готовности:
 
 - количество rvr `rvr.status.conditions[type=Ready].status == rvr.status.conditions[type=FullyConnected].status == True`
@@ -705,7 +705,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 
 ### Статус: [OK | priority: 5 | complexity: 1]
 
-### Цель 
+### Цель
 
 Поддерживать `rvr.metada.ownerReference`, указывающий на `rv` по имени
 `rvr.spec.replicatedVolumeName`.
@@ -713,14 +713,14 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 Чтобы выставить правильные настройки, требуется использовать функцию `SetControllerReference` из пакета
 `sigs.k8s.io/controller-runtime/pkg/controller/controllerutil`.
 
-### Вывод 
+### Вывод
  - `rvr.metada.ownerReference`
 
 ## `rv-status-config-quorum-controller`
 
 ### Статус: [OK | priority: 5 | complexity: 4]
 
-### Цель 
+### Цель
 
 Поднять значение кворума до необходимого, после того как кластер станет работоспособным.
 
@@ -767,7 +767,7 @@ if M > 1 {
  - `CREATE(RV)`
  - `CREATE/UPDATE(RVR)`
 
-### Вывод 
+### Вывод
  - `rv.status.drbd.config.sharedSecret`
    - генерируется новый
  - `rv.status.drbd.config.sharedSecretAlg`

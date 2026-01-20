@@ -231,7 +231,7 @@ var _ = Describe("Reconcile", func() {
 		Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rv-missing"}})).To(Equal(reconcile.Result{}))
 	})
 
-	It("runs detach-only: keeps attached RVA Attached, sets others Pending/WaitingForReplicatedVolumeIOReady, and releases finalizer only when safe", func(ctx SpecContext) {
+	It("runs detach-only: keeps attached RVA Attached, sets others Pending/WaitingForReplicatedVolumeReady, and releases finalizer only when safe", func(ctx SpecContext) {
 		// Same reason as in the test above: to simulate a deleting RVA, we seed the fake client with it.
 		now := metav1.Now()
 
@@ -342,7 +342,7 @@ var _ = Describe("Reconcile", func() {
 		Expect(cond1).NotTo(BeNil())
 		Expect(cond1.Status).To(Equal(metav1.ConditionTrue))
 
-		// rva2: deleting + not attached => finalizer removed, status Pending with WaitingForReplicatedVolumeIOReady.
+		// rva2: deleting + not attached => finalizer removed, status Pending with WaitingForReplicatedVolumeReady.
 		gotRVA2 := &v1alpha1.ReplicatedVolumeAttachment{}
 		err := localCl.Get(ctx, client.ObjectKeyFromObject(rva2), gotRVA2)
 		if client.IgnoreNotFound(err) != nil {
@@ -353,7 +353,7 @@ var _ = Describe("Reconcile", func() {
 			cond2 := meta.FindStatusCondition(gotRVA2.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 			Expect(cond2).NotTo(BeNil())
 			Expect(cond2.Status).To(Equal(metav1.ConditionFalse))
-			Expect(cond2.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolumeIOReady))
+			Expect(cond2.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolumeReady))
 		}
 
 		// rvr-node-2 should be demoted
@@ -2232,7 +2232,7 @@ var _ = Describe("Reconcile", func() {
 				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 			})
 
-			It("sets Ready=True when Attached=True and replica IOReady=True", func(ctx SpecContext) {
+			It("sets Ready=True when Attached=True and replica Ready=True", func(ctx SpecContext) {
 				rva := &v1alpha1.ReplicatedVolumeAttachment{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "rva-ready-true",
@@ -2260,9 +2260,9 @@ var _ = Describe("Reconcile", func() {
 							},
 						},
 						Conditions: []metav1.Condition{{
-							Type:    v1alpha1.ReplicatedVolumeReplicaCondIOReadyType,
+							Type:    v1alpha1.ReplicatedVolumeReplicaCondReadyType,
 							Status:  metav1.ConditionTrue,
-							Reason:  v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonIOReady,
+							Reason:  v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
 							Message: "replica is io ready",
 						}},
 					},
@@ -2282,10 +2282,10 @@ var _ = Describe("Reconcile", func() {
 				Expect(attachedCond.Status).To(Equal(metav1.ConditionTrue))
 				Expect(attachedCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
 
-				replicaIOReadyCond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondReplicaIOReadyType)
-				Expect(replicaIOReadyCond).NotTo(BeNil())
-				Expect(replicaIOReadyCond.Status).To(Equal(metav1.ConditionTrue))
-				Expect(replicaIOReadyCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonIOReady))
+				replicaReadyCond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondReplicaReadyType)
+				Expect(replicaReadyCond).NotTo(BeNil())
+				Expect(replicaReadyCond.Status).To(Equal(metav1.ConditionTrue))
+				Expect(replicaReadyCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady))
 
 				readyCond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondReadyType)
 				Expect(readyCond).NotTo(BeNil())
@@ -2293,7 +2293,7 @@ var _ = Describe("Reconcile", func() {
 				Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonReady))
 			})
 
-			It("sets Ready=False/ReplicaNotIOReady when Attached=True but replica IOReady=False", func(ctx SpecContext) {
+			It("sets Ready=False/ReplicaNotReady when Attached=True but replica Ready=False", func(ctx SpecContext) {
 				rva := &v1alpha1.ReplicatedVolumeAttachment{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "rva-ready-false",
@@ -2321,9 +2321,9 @@ var _ = Describe("Reconcile", func() {
 							},
 						},
 						Conditions: []metav1.Condition{{
-							Type:    v1alpha1.ReplicatedVolumeReplicaCondIOReadyType,
+							Type:    v1alpha1.ReplicatedVolumeReplicaCondReadyType,
 							Status:  metav1.ConditionFalse,
-							Reason:  v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonOutOfSync,
+							Reason:  "OutOfSync",
 							Message: "replica is not in sync",
 						}},
 					},
@@ -2338,15 +2338,15 @@ var _ = Describe("Reconcile", func() {
 				Expect(gotRVA.Status).NotTo(BeNil())
 				Expect(gotRVA.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseAttached))
 
-				replicaIOReadyCond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondReplicaIOReadyType)
-				Expect(replicaIOReadyCond).NotTo(BeNil())
-				Expect(replicaIOReadyCond.Status).To(Equal(metav1.ConditionFalse))
-				Expect(replicaIOReadyCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonOutOfSync))
+				replicaReadyCond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondReplicaReadyType)
+				Expect(replicaReadyCond).NotTo(BeNil())
+				Expect(replicaReadyCond.Status).To(Equal(metav1.ConditionFalse))
+				Expect(replicaReadyCond.Reason).To(Equal("OutOfSync"))
 
 				readyCond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondReadyType)
 				Expect(readyCond).NotTo(BeNil())
 				Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
-				Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonReplicaNotIOReady))
+				Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonReplicaNotReady))
 			})
 
 			It("marks all RVAs for the same attached node as successful (Attached=True)", func(ctx SpecContext) {
