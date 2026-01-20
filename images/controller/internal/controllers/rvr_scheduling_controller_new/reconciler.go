@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -97,6 +98,10 @@ func (r *Reconciler) Reconcile(
 		if err := r.setScheduledConditionFalseOnRVRs(ctx, sctx.UnscheduledTieBreaker, tieBreakerFailureReason); err != nil {
 			return reconcile.Result{}, err
 		}
+	}
+
+	if diskfulFailureReason != nil || tieBreakerFailureReason != nil {
+		return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
 	return reconcile.Result{}, nil
