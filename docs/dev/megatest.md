@@ -234,8 +234,8 @@ TODO: не увеличивать размер > maxRvSize
     - удаляет активную policy если есть
     - выходит
 
-## chaos-network-degrader (period_min, period_max, incident_min, incident_max, delay_ms_min, delay_ms_max, loss_percent_min, loss_percent_max)
-Деградирует сеть (latency + packet loss) между парами нод через **tc netem** Jobs.
+## chaos-network-degrader (period_min, period_max, incident_min, incident_max, delay_ms, loss_percent, rate_kbit)
+Деградирует сеть (latency + packet loss + bandwidth limit) между парами нод через **tc netem** Jobs.
   - в цикле:
     - ждет рандом(period_min, period_max)
     - получает список VM из parent-кластера
@@ -244,10 +244,11 @@ TODO: не увеличивать размер > maxRvSize
       - delay: рандом(delay_ms_min, delay_ms_max) мс
       - jitter: delay/4 мс
       - loss: рандом(loss_percent_min, loss_percent_max) %
+      - rate: рандом(rate_mbit_min, rate_mbit_max) mbit/s (0 = без ограничения)
     - создаёт privileged **Job** на nodeA с hostNetwork:true:
       - определяет интерфейс для достижения nodeB через `ip route get`
       - применяет tc qdisc с уникальными handles (31337/31338) для избежания конфликтов
-      - добавляет netem правило с delay/loss для трафика к nodeB
+      - добавляет netem правило с delay/loss/rate для трафика к nodeB
       - **auto-cleanup**: если megatest не очистит rules в течение incident_duration + 120s, Job сам удалит правила
     - Note: деградация односторонняя (nodeA → nodeB), этого достаточно для DRBD тестов
     - ждет рандом(incident_min, incident_max)
@@ -309,5 +310,7 @@ TODO: не увеличивать размер > maxRvSize
 --chaos-delay-ms-max        # макс. задержка сети в мс (default: 60)
 --chaos-loss-percent-min    # мин. потеря пакетов % (default: 1.0)
 --chaos-loss-percent-max    # макс. потеря пакетов % (default: 10.0)
+--chaos-rate-mbit-min       # мин. ограничение bandwidth в mbit/s (default: 5)
+--chaos-rate-mbit-max       # макс. ограничение bandwidth в mbit/s (default: 50)
 --chaos-partition-group-size # размер группы для partition (default: 0 = пополам)
 ```

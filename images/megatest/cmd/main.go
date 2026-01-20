@@ -294,6 +294,7 @@ func setupChaosRunners(
 			IncidentDuration: incidentDuration,
 			DelayMs:          config.StepMinMax{Min: opt.ChaosDelayMsMin, Max: opt.ChaosDelayMsMax},
 			LossPercent:      config.Float64MinMax{Min: opt.ChaosLossPercentMin, Max: opt.ChaosLossPercentMax},
+			RateMbit:         config.StepMinMax{Min: opt.ChaosRateMbitMin, Max: opt.ChaosRateMbitMax},
 		}
 		degrader := runners.NewChaosNetworkDegrader(cfg, netemManager, parentClient, forceCleanupChan)
 		wg.Add(1)

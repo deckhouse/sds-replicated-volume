@@ -266,6 +266,7 @@
 │  │  tc qdisc (netem)                          │  ← Network Degrader         │
 │  │  • delay: добавляет задержку               │    (chaos-network-degrader)  │
 │  │  • loss: случайно отбрасывает пакеты       │                              │
+│  │  • rate: ограничивает bandwidth            │                              │
 │  │  • handles: 31337/31338 (уникальные)       │                              │
 │  └────────────────────────────────────────────┘                             │
 │       │                                                                      │
@@ -357,7 +358,7 @@
                               ▼                                  │
               ┌───────────────────────────────┐                  │
               │  Выбираем случайные nodeA, nodeB│                │
-              │  Выбираем delay, jitter, loss %│                 │
+              │  Выбираем delay, jitter, loss, rate│             │
               └───────────────┬───────────────┘                  │
                               ▼                                  │
               ┌───────────────────────────────┐                  │
@@ -376,7 +377,7 @@
 │  │  1. IFACE=$(ip route get $TARGET_IP | grep dev | awk '{print $3}')     │ │
 │  │  2. tc qdisc add dev $IFACE root handle 31337: prio                    │ │
 │  │  3. tc qdisc add dev $IFACE parent 31337:3 handle 31338: \             │ │
-│  │        netem delay ${DELAY}ms ${JITTER}ms loss ${LOSS}%                │ │
+│  │        netem delay ${DELAY}ms ${JITTER}ms loss ${LOSS}% [rate Xkbit]   │ │
 │  │  4. tc filter add dev $IFACE protocol ip parent 31337:0 prio 3 \       │ │
 │  │        u32 match ip dst $TARGET_IP/32 flowid 31337:3                   │ │
 │  │  5. sleep (incident_duration + 120s буфер)                             │ │
@@ -590,6 +591,8 @@ megatest \
   --chaos-delay-ms-max 60 \
   --chaos-loss-percent-min 1.0 \
   --chaos-loss-percent-max 10.0 \
+  --chaos-rate-mbit-min 5 \
+  --chaos-rate-mbit-max 50 \
   --chaos-partition-group-size 1 \
   \
   --log-level debug

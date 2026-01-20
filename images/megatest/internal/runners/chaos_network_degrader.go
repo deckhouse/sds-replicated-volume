@@ -50,6 +50,7 @@ func NewChaosNetworkDegrader(
 			"runner", "chaos-network-degrader",
 			"delay_ms", cfg.DelayMs,
 			"loss_percent", cfg.LossPercent,
+			"rate_mbit", cfg.RateMbit,
 		),
 	}
 }
@@ -98,10 +99,17 @@ func (c *ChaosNetworkDegrader) doDegrade(ctx context.Context) error {
 	}
 	lossPercent := randomFloat64(c.cfg.LossPercent.Min, c.cfg.LossPercent.Max)
 
+	// Rate limit: 0 means no limit
+	rateMbit := 0
+	if c.cfg.RateMbit.Max > 0 {
+		rateMbit = randomInt(c.cfg.RateMbit.Min, c.cfg.RateMbit.Max)
+	}
+
 	degradeCfg := chaos.NetworkDegradationConfig{
 		DelayMs:          delayMs,
 		DelayJitter:      delayJitter,
 		LossPercent:      lossPercent,
+		RateMbit:         rateMbit,
 		IncidentDuration: incidentDuration, // For auto-cleanup timeout in job
 	}
 
@@ -111,6 +119,7 @@ func (c *ChaosNetworkDegrader) doDegrade(ctx context.Context) error {
 		"delay_ms", delayMs,
 		"delay_jitter", delayJitter,
 		"loss_percent", lossPercent,
+		"rate_mbit", rateMbit,
 		"duration", incidentDuration.String(),
 	)
 

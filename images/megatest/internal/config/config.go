@@ -119,6 +119,7 @@ type ChaosNetworkDegraderConfig struct {
 	IncidentDuration DurationMinMax
 	DelayMs          StepMinMax
 	LossPercent      Float64MinMax
+	RateMbit         StepMinMax // Bandwidth limit in mbit/s (0 = no limit)
 }
 
 // ChaosVMReboterConfig configures the chaos-vm-reboter goroutine

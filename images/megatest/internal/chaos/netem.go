@@ -64,6 +64,7 @@ type NetworkDegradationConfig struct {
 	DelayMs          int           // Delay in milliseconds
 	DelayJitter      int           // Delay jitter in milliseconds
 	LossPercent      float64       // Packet loss percentage
+	RateMbit         int           // Bandwidth limit in mbit/s (0 = no limit)
 	IncidentDuration time.Duration // How long the degradation should last (for auto-cleanup timeout)
 }
 
@@ -199,6 +200,14 @@ func (m *NetemManager) buildNetemScript(targetIP string, cfg NetworkDegradationC
 	// Calculate auto-cleanup timeout: incident duration + safety buffer
 	autoCleanupTimeout := int(cfg.IncidentDuration.Seconds()) + netemAutoCleanupBuffer
 
+	// Build rate parameter string (empty if no rate limit)
+	rateParam := ""
+	rateLogMsg := "none"
+	if cfg.RateMbit > 0 {
+		rateParam = fmt.Sprintf("rate %dmbit", cfg.RateMbit)
+		rateLogMsg = fmt.Sprintf("%dmbit", cfg.RateMbit)
+	}
+
 	return fmt.Sprintf(`#!/bin/sh
 set -e
 
@@ -209,6 +218,7 @@ TARGET_IP="%s"
 CHAOS_ROOT_HANDLE="%s"
 CHAOS_NETEM_HANDLE="%s"
 AUTO_CLEANUP_TIMEOUT=%d
+RATE_PARAM="%s"
 
 # Find the interface used to reach target IP
 IFACE=$(ip route get $TARGET_IP 2>/dev/null | grep -oP 'dev \K\S+' | head -1)
@@ -254,14 +264,14 @@ tc qdisc add dev $IFACE root handle ${CHAOS_ROOT_HANDLE}: prio 2>/dev/null || {
     exit 1
 }
 
-# Add netem qdisc with delay and loss (child of our prio qdisc)
-tc qdisc add dev $IFACE parent ${CHAOS_ROOT_HANDLE}:3 handle ${CHAOS_NETEM_HANDLE}: netem delay %dms %dms loss %.2f%%
+# Add netem qdisc with delay, loss, and optional rate limit (child of our prio qdisc)
+tc qdisc add dev $IFACE parent ${CHAOS_ROOT_HANDLE}:3 handle ${CHAOS_NETEM_HANDLE}: netem delay %dms %dms loss %.2f%% $RATE_PARAM
 
 # Add filter to route traffic to target IP through netem
 tc filter add dev $IFACE protocol ip parent ${CHAOS_ROOT_HANDLE}:0 prio 3 u32 match ip dst $TARGET_IP/32 flowid ${CHAOS_ROOT_HANDLE}:3
 
 echo "SUCCESS: Network degradation applied on $IFACE"
-echo "  delay=%dms jitter=%dms loss=%.2f%% to $TARGET_IP"
+echo "  delay=%dms jitter=%dms loss=%.2f%% rate=%s to $TARGET_IP"
 
 # Wait for auto-cleanup timeout.
 # Normal flow: megatest creates cleanup job before this timeout expires.
@@ -273,7 +283,7 @@ sleep $AUTO_CLEANUP_TIMEOUT
 echo "Auto-cleanup: timeout reached, removing tc rules"
 tc qdisc del dev $IFACE root 2>/dev/null || true
 echo "Auto-cleanup completed"
-`, targetIP, chaosRootHandle, chaosNetemHandle, autoCleanupTimeout, cfg.DelayMs, cfg.DelayJitter, cfg.LossPercent, cfg.DelayMs, cfg.DelayJitter, cfg.LossPercent)
+`, targetIP, chaosRootHandle, chaosNetemHandle, autoCleanupTimeout, rateParam, cfg.DelayMs, cfg.DelayJitter, cfg.LossPercent, cfg.DelayMs, cfg.DelayJitter, cfg.LossPercent, rateLogMsg)
 }
 
 // buildCleanupScript builds the shell script to remove tc netem rules safely.

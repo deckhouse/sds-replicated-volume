@@ -59,6 +59,8 @@ type Opt struct {
 	ChaosDelayMsMax         int
 	ChaosLossPercentMin     float64
 	ChaosLossPercentMax     float64
+	ChaosRateMbitMin        int
+	ChaosRateMbitMax        int
 	ChaosPartitionGroupSize int
 }
 
@@ -131,6 +133,12 @@ Interrupting Cleanup:
 				if o.ChaosLossPercentMin < 0 || o.ChaosLossPercentMax > 100 {
 					return errors.New("chaos-loss-percent values must be between 0 and 100")
 				}
+				if o.ChaosRateMbitMax < o.ChaosRateMbitMin {
+					return errors.New("chaos-rate-mbit-max must be >= chaos-rate-mbit-min")
+				}
+				if o.ChaosRateMbitMin < 0 {
+					return errors.New("chaos-rate-mbit values must be >= 0")
+				}
 			}
 
 			return nil
@@ -194,6 +202,8 @@ Interrupting Cleanup:
 	rootCmd.Flags().IntVarP(&o.ChaosDelayMsMax, "chaos-delay-ms-max", "", 60, "Maximum network delay in milliseconds")
 	rootCmd.Flags().Float64VarP(&o.ChaosLossPercentMin, "chaos-loss-percent-min", "", 1.0, "Minimum packet loss percentage")
 	rootCmd.Flags().Float64VarP(&o.ChaosLossPercentMax, "chaos-loss-percent-max", "", 10.0, "Maximum packet loss percentage")
+	rootCmd.Flags().IntVarP(&o.ChaosRateMbitMin, "chaos-rate-mbit-min", "", 5, "Minimum bandwidth limit in mbit/s (0 = no limit)")
+	rootCmd.Flags().IntVarP(&o.ChaosRateMbitMax, "chaos-rate-mbit-max", "", 50, "Maximum bandwidth limit in mbit/s (0 = no limit)")
 
 	// Network partition specific flags
 	rootCmd.Flags().IntVarP(&o.ChaosPartitionGroupSize, "chaos-partition-group-size", "", 0, "Target size for partition group (0 = split in half)")
