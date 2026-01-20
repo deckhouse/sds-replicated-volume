@@ -147,6 +147,132 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              datamesh:
+                description: Datamesh is the computed datamesh configuration for the
+                  volume.
+                properties:
+                  allowTwoPrimaries:
+                    default: false
+                    description: AllowTwoPrimaries enables two primaries mode for
+                      the datamesh.
+                    type: boolean
+                  members:
+                    description: Members is the list of datamesh members.
+                    items:
+                      description: ReplicatedVolumeDatameshMember represents a member
+                        of the datamesh.
+                      properties:
+                        addresses:
+                          description: Addresses is the list of DRBD addresses for
+                            this member.
+                          items:
+                            properties:
+                              address:
+                                properties:
+                                  ipv4:
+                                    pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
+                                    type: string
+                                  port:
+                                    maximum: 65535
+                                    minimum: 1025
+                                    type: integer
+                                required:
+                                - ipv4
+                                - port
+                                type: object
+                              systemNetworkName:
+                                maxLength: 64
+                                type: string
+                            required:
+                            - address
+                            - systemNetworkName
+                            type: object
+                          maxItems: 16
+                          type: array
+                        name:
+                          description: Name is the member name (used as list map key).
+                          minLength: 1
+                          type: string
+                        nodeName:
+                          description: NodeName is the Kubernetes node name where
+                            the member is located.
+                          minLength: 1
+                          type: string
+                        role:
+                          description: Role is the DRBD role of this member.
+                          type: string
+                        type:
+                          description: Type is the member type (Diskful, Access, or
+                            TieBreaker).
+                          type: string
+                        typeTransition:
+                          description: TypeTransition indicates the desired type transition
+                            for this member.
+                          enum:
+                          - ToDiskful
+                          - ToDiskless
+                          type: string
+                        zone:
+                          description: Zone is the zone where the member is located.
+                          type: string
+                      required:
+                      - addresses
+                      - name
+                      - nodeName
+                      - type
+                      type: object
+                      x-kubernetes-validations:
+                      - message: typeTransition must be ToDiskless for Diskful type,
+                          or ToDiskful for Access/TieBreaker types
+                        rule: 'self.type == ''Diskful'' ? (!has(self.typeTransition)
+                          || self.typeTransition == ''ToDiskless'') : (!has(self.typeTransition)
+                          || self.typeTransition == ''ToDiskful'')'
+                    maxItems: 24
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  quorum:
+                    default: 0
+                    description: Quorum is the quorum value for the datamesh.
+                    maximum: 13
+                    minimum: 0
+                    type: integer
+                  quorumMinimumRedundancy:
+                    default: 0
+                    description: QuorumMinimumRedundancy is the minimum redundancy
+                      required for quorum.
+                    maximum: 8
+                    minimum: 0
+                    type: integer
+                  size:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: Size is the desired size of the volume.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  systemNetworkNames:
+                    description: SystemNetworkNames is the list of system network
+                      names for DRBD communication.
+                    items:
+                      maxLength: 64
+                      type: string
+                    maxItems: 16
+                    type: array
+                required:
+                - allowTwoPrimaries
+                - members
+                - quorum
+                - quorumMinimumRedundancy
+                - size
+                - systemNetworkNames
+                type: object
+              datameshRevision:
+                description: DatameshRevision is a counter incremented when datamesh
+                  configuration changes.
+                format: int64
+                type: integer
               desiredAttachTo:
                 description: |-
                   DesiredAttachTo is the desired set of nodes where the volume should be attached (up to 2 nodes).
@@ -321,6 +447,9 @@ spec:
                 - topology
                 - volumeAccess
                 type: object
+            required:
+            - datamesh
+            - datameshRevision
             type: object
         required:
         - metadata

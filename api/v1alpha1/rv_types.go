@@ -136,6 +136,89 @@ type ReplicatedVolumeStatus struct {
 	// EligibleNodesViolations lists replicas placed on non-eligible nodes.
 	// +optional
 	EligibleNodesViolations []ReplicatedVolumeEligibleNodesViolation `json:"eligibleNodesViolations,omitempty"`
+
+	// DatameshRevision is a counter incremented when datamesh configuration changes.
+	DatameshRevision int64 `json:"datameshRevision"`
+
+	// Datamesh is the computed datamesh configuration for the volume.
+	// +patchStrategy=merge
+	Datamesh ReplicatedVolumeDatamesh `json:"datamesh" patchStrategy:"merge"`
+}
+
+// ReplicatedVolumeDatamesh holds datamesh configuration for the volume.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeDatamesh struct {
+	// SystemNetworkNames is the list of system network names for DRBD communication.
+	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:MaxLength=64
+	SystemNetworkNames []string `json:"systemNetworkNames"`
+	// AllowTwoPrimaries enables two primaries mode for the datamesh.
+	// +kubebuilder:default=false
+	AllowTwoPrimaries bool `json:"allowTwoPrimaries"`
+	// Size is the desired size of the volume.
+	// +kubebuilder:validation:Required
+	Size resource.Quantity `json:"size"`
+	// Members is the list of datamesh members.
+	// +kubebuilder:validation:MaxItems=24
+	// +patchMergeKey=name
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=name
+	Members []ReplicatedVolumeDatameshMember `json:"members" patchStrategy:"merge" patchMergeKey:"name"`
+	// Quorum is the quorum value for the datamesh.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=13
+	// +kubebuilder:default=0
+	Quorum byte `json:"quorum"`
+	// QuorumMinimumRedundancy is the minimum redundancy required for quorum.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=8
+	// +kubebuilder:default=0
+	QuorumMinimumRedundancy byte `json:"quorumMinimumRedundancy"`
+}
+
+// ReplicatedVolumeDatameshMember represents a member of the datamesh.
+// +kubebuilder:object:generate=true
+// +kubebuilder:validation:XValidation:rule="self.type == 'Diskful' ? (!has(self.typeTransition) || self.typeTransition == 'ToDiskless') : (!has(self.typeTransition) || self.typeTransition == 'ToDiskful')",message="typeTransition must be ToDiskless for Diskful type, or ToDiskful for Access/TieBreaker types"
+type ReplicatedVolumeDatameshMember struct {
+	// Name is the member name (used as list map key).
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+	// Type is the member type (Diskful, Access, or TieBreaker).
+	// +kubebuilder:validation:Required
+	Type ReplicaType `json:"type"`
+	// TypeTransition indicates the desired type transition for this member.
+	// +kubebuilder:validation:Enum=ToDiskful;ToDiskless
+	// +optional
+	TypeTransition ReplicatedVolumeDatameshMemberTypeTransition `json:"typeTransition,omitempty"`
+	// Role is the DRBD role of this member.
+	// +optional
+	Role DRBDRole `json:"role,omitempty"`
+	// NodeName is the Kubernetes node name where the member is located.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	NodeName string `json:"nodeName"`
+	// Zone is the zone where the member is located.
+	// +optional
+	Zone string `json:"zone,omitempty"`
+	// Addresses is the list of DRBD addresses for this member.
+	// +kubebuilder:validation:MaxItems=16
+	Addresses []DRBDResourceAddressStatus `json:"addresses"`
+}
+
+// ReplicatedVolumeDatameshMemberTypeTransition enumerates possible type transitions for datamesh members.
+type ReplicatedVolumeDatameshMemberTypeTransition string
+
+const (
+	// ReplicatedVolumeDatameshMemberTypeTransitionToDiskful indicates transition to Diskful type.
+	ReplicatedVolumeDatameshMemberTypeTransitionToDiskful ReplicatedVolumeDatameshMemberTypeTransition = "ToDiskful"
+	// ReplicatedVolumeDatameshMemberTypeTransitionToDiskless indicates transition to a diskless type (Access or TieBreaker).
+	ReplicatedVolumeDatameshMemberTypeTransitionToDiskless ReplicatedVolumeDatameshMemberTypeTransition = "ToDiskless"
+)
+
+func (t ReplicatedVolumeDatameshMemberTypeTransition) String() string {
+	return string(t)
 }
 
 // DeviceMinor is a DRBD device minor number.
