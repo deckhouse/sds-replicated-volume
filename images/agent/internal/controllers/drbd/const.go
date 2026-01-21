@@ -16,10 +16,11 @@ limitations under the License.
 
 package drbd
 
-import "time"
-
 const (
-	ControllerName  = "drbd_controller"
-	ScannerName     = "drbd_scanner"
-	ScannerInterval = 30 * time.Second
+	// ControllerName is the stable name for the DRBD controller.
+	// Used in .Named(...) for controller-runtime builder.
+	ControllerName = "drbd-controller"
+
+	// ScannerName is the name of the DRBD scanner component.
+	ScannerName = "drbd-scanner"
 )

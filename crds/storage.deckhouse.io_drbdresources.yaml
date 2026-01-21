@@ -367,12 +367,6 @@ spec:
                 x-kubernetes-list-type: map
               quorum:
                 type: boolean
-              role:
-                description: DRBDRole represents the role of a DRBD resource.
-                enum:
-                - Primary
-                - Secondary
-                type: string
             type: object
         required:
         - metadata

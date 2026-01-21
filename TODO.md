@@ -28,7 +28,8 @@ cooldown and batching.
 implemented. Anoother command example is `images/agent/pkg/drbdadm`.
 
 `docs/drbd/*.txt` - man pages you would definetely need when working with
-drbd-utils commands.
+drbd-utils commands, and also `*_output.txt` files demonstrate sample output of
+programs.
 
 `api/v1alpha1/drbd_resource.go` - our main custom resource, which will be
 reconciled.
@@ -45,9 +46,11 @@ node.
 ## Reconcilation algorithm
 
 1. Take desired state (everything from spec)
-2. Calculate intended state (validate the desired state)
-3. Collect actual state (mostly with `drbdsetup show` and `drbdsetup status` commands)
-4. Compare intended with actual and calcluate target
+2. Calculate the intended state (i.e. validate the desired state). Calculation
+   result may be cached in variables in status.
+3. Collect actual state (mostly with `drbdsetup show` and `drbdsetup status`
+   commands)
+4. Compare intended with actual and calculate target
    If target non-zero:
     1. apply target
     2. refresh actual
@@ -57,29 +60,19 @@ Properties in `drbdr.spec`, have different desired, intended, target states, and
 they result in different things in actual state, and therefore, produce
 different output to the report state. Let's define them:
 
-<TBD>
-
  - `systemNetworks`
- - `quorum` and `quorumMinimumRedundancy`
- - `state`
- - `size`
- - `role`
- - `allowTwoPrimaries`
- - `type`
- - `lvmLogicalVolumeName`
- - `nodeID`
- - `peers`
- - `peers[*].name`
- - `peers[*].type`
- - `peers[*].allowRemoteRead`
- - `peers[*].nodeID`
- - `peers[*].protocol`
- - `peers[*].sharedSecret`
- - `peers[*].sharedSecretAlg`
- - `peers[*].pauseSync`
- - `peers[*].paths`
- - `peers[*].sharedSecret`
- - `peers[*].sharedSecret`
+   - intended state: `address`. The only valid value `Internal` means that we
+     should use address from `Node.status.addresses[type="InternalIP"].address`.
+     This address should be cached in `drbdr.status.addresses`, and taken from
+     there, if it's set.
+   - intended state: `port`. Port is the lowest free port on interface
+     `address`, in range from 7000 to 8000. This should also be cached in
+     `drbdr.status.addresses`.
+   - actual state is the address:port used on the current node, according to
+     `drbdsetup show`
+
+Other properties - try to figure out by youself, feel free to leave your
+converns as TODO comments. Don't change the API schema.
 
 ===========
 

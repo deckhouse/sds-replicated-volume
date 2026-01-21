@@ -18,22 +18,22 @@ package drbd
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
-	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
 
-// Scanner periodically triggers controller reconciliation for all DRBDResource
-// objects on this node by sending events through a channel.
+// Scanner listens for DRBD events via drbdsetup events2 and triggers
+// reconciliation of DRBDResource objects by sending events to the controller.
 type Scanner struct {
 	log      *slog.Logger
 	cl       client.Client
 	nodeName string
-	interval time.Duration
 	eventCh  chan event.GenericEvent
 }
 
@@ -42,72 +42,139 @@ func NewScanner(
 	cl client.Client,
 	log *slog.Logger,
 	nodeName string,
-	interval time.Duration,
 	eventCh chan event.GenericEvent,
 ) *Scanner {
 	return &Scanner{
 		log:      log.With("name", ScannerName),
 		cl:       cl,
 		nodeName: nodeName,
-		interval: interval,
 		eventCh:  eventCh,
 	}
 }
 
 // Start implements manager.Runnable interface.
-// It starts the periodic scanning loop.
+// It starts listening for DRBD events and triggers reconciliation.
 func (s *Scanner) Start(ctx context.Context) error {
-	s.log.Info("Starting scanner", "interval", s.interval)
-
-	ticker := time.NewTicker(s.interval)
-	defer ticker.Stop()
-
-	// Run immediately on start
-	s.scan(ctx)
+	s.log.Info("Starting scanner")
 
 	for {
+		if err := s.runEventsLoop(ctx); err != nil {
+			if ctx.Err() != nil {
+				s.log.Info("Scanner stopping due to context cancellation")
+				return nil
+			}
+			s.log.Error("Events loop failed, restarting", "error", err)
+			// Continue to retry
+		}
+
 		select {
 		case <-ctx.Done():
-			s.log.Info("Scanner stopping due to context cancellation")
 			return nil
-		case <-ticker.C:
-			s.scan(ctx)
+		default:
+			// Continue to restart
 		}
 	}
 }
 
-// scan lists all DRBDResource objects for this node and sends events to trigger reconciliation.
-func (s *Scanner) scan(ctx context.Context) {
-	s.log.Debug("Starting periodic scan")
+// runEventsLoop runs a single iteration of the events2 listener.
+// Returns error if the loop terminates unexpectedly.
+func (s *Scanner) runEventsLoop(ctx context.Context) error {
+	var err error
+	var online bool
 
-	// List all DRBDResource objects
+	for ev := range drbdsetup.ExecuteEvents2(ctx, &err) {
+		switch tev := ev.(type) {
+		case *drbdsetup.Event:
+			// Check for "exists -" which indicates initial state dump is complete
+			if !online && tev.Kind == "exists" && tev.Object == "-" {
+				online = true
+				s.log.Info("DRBD events online, triggering full reconciliation")
+				// Trigger reconciliation for all resources on this node
+				s.triggerAllResources(ctx)
+				continue
+			}
+
+			// Extract resource name from event
+			resourceName, ok := tev.State["name"]
+			if !ok {
+				s.log.Debug("Skipping event without name", "event", tev)
+				continue
+			}
+
+			s.log.Debug("DRBD event received", "kind", tev.Kind, "object", tev.Object, "resource", resourceName)
+			s.triggerReconciliation(ctx, resourceName)
+
+		case *drbdsetup.UnparsedEvent:
+			s.log.Warn("Unparsed event", "error", tev.Err, "line", tev.RawEventLine)
+		}
+	}
+
+	if err != nil {
+		return fmt.Errorf("events2 failed: %w", err)
+	}
+
+	return nil
+}
+
+// triggerAllResources lists all DRBDResource objects for this node and triggers reconciliation.
+func (s *Scanner) triggerAllResources(ctx context.Context) {
 	drList := &v1alpha1.DRBDResourceList{}
 	if err := s.cl.List(ctx, drList); err != nil {
 		s.log.Error("Failed to list DRBDResources", "error", err)
 		return
 	}
 
-	enqueued := 0
 	for i := range drList.Items {
 		dr := &drList.Items[i]
-		// Only enqueue resources for this node
 		if dr.Spec.NodeName != s.nodeName {
 			continue
 		}
 
-		// Send event through channel to trigger reconciliation
-		select {
-		case s.eventCh <- event.GenericEvent{Object: dr}:
-			enqueued++
-		case <-ctx.Done():
+		s.sendEvent(ctx, dr)
+	}
+}
+
+// triggerReconciliation sends an event to trigger reconciliation for a specific resource.
+func (s *Scanner) triggerReconciliation(ctx context.Context, resourceName string) {
+	// List DRBDResources to find the one matching the resource name
+	// The DRBD resource name in the API is derived from the DRBDResource.Name
+	drList := &v1alpha1.DRBDResourceList{}
+	if err := s.cl.List(ctx, drList); err != nil {
+		s.log.Error("Failed to list DRBDResources", "error", err)
+		return
+	}
+
+	for i := range drList.Items {
+		dr := &drList.Items[i]
+		if dr.Spec.NodeName != s.nodeName {
+			continue
+		}
+
+		// TODO: Match by DRBD resource name. For now, trigger all resources on this node
+		// when any event is received. The actual matching will depend on how DRBD resource
+		// names are computed from DRBDResource objects.
+		if dr.Name == resourceName {
+			s.sendEvent(ctx, dr)
 			return
-		default:
-			// Channel full, skip this resource this time
-			s.log.Warn("Event channel full, skipping resource", "name", dr.Name)
 		}
 	}
 
-	s.log.Debug("Periodic scan completed", "enqueued", enqueued)
+	// If not found by exact name, trigger all resources (fallback for initial implementation)
+	s.log.Debug("Resource not found by name, triggering all resources on node", "resourceName", resourceName)
+	s.triggerAllResources(ctx)
+}
+
+// sendEvent sends a generic event to trigger reconciliation.
+func (s *Scanner) sendEvent(ctx context.Context, dr *v1alpha1.DRBDResource) {
+	select {
+	case s.eventCh <- event.GenericEvent{Object: dr}:
+		s.log.Debug("Triggered reconciliation", "name", dr.Name)
+	case <-ctx.Done():
+		return
+	default:
+		// Channel full, skip this resource this time
+		s.log.Warn("Event channel full, skipping resource", "name", dr.Name)
+	}
 }
 
 // NeedLeaderElection implements manager.LeaderElectionRunnable.

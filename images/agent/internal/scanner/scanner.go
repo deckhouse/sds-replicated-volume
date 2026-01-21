@@ -194,7 +194,7 @@ func (s *Scanner) ConsumeBatches() error {
 		for batch := range s.batcher.ConsumeWithCooldown(s.ctx, cd) {
 			log.Debug("got batch of 'n' resources", "n", len(batch))
 
-			statusResult, err := drbdsetup.ExecuteStatus(s.ctx)
+			statusResult, err := drbdsetup.ExecuteStatus(s.ctx, "")
 			if err != nil {
 				return u.LogError(log, fmt.Errorf("getting statusResult: %w", err))
 			}

@@ -14,16 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drbdsetup
+package v1alpha1
 
-var Command = "drbdsetup"
+const (
+	DRBDResourceCondConfiguredType = "Configured"
 
-var StatusArgs = func(resourceName string) []string {
-	return []string{"status", "--json", resourceName}
-}
+	DRBDResourceCondConfiguredReasonConfigured = "Configured"
 
-var Events2Args = []string{"events2", "--timestamps"}
-
-var DownArgs = func(resource string) []string {
-	return []string{"down", resource}
-}
+	DRBDResourceCondConfiguredReasonFailed = "Failed"
+)

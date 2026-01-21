@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"fmt"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -41,11 +43,41 @@ type DRBDResource struct {
 
 	Spec DRBDResourceSpec `json:"spec"`
 	// +patchStrategy=merge
-	Status *DRBDResourceStatus `json:"status,omitempty" patchStrategy:"merge"`
+	Status DRBDResourceStatus `json:"status" patchStrategy:"merge"`
+}
+
+// GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
+// It returns the root object's `.status.conditions`.
+func (d *DRBDResource) GetStatusConditions() []metav1.Condition {
+	return d.Status.Conditions
+}
+
+// SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
+// It sets the root object's `.status.conditions`.
+func (d *DRBDResource) SetStatusConditions(conditions []metav1.Condition) {
+	d.Status.Conditions = conditions
+}
+
+func (d *DRBDResource) DRBDResourceNameOnTheNode() string {
+	if d.Spec.ActualNameOnTheNode != "" {
+		return d.Spec.ActualNameOnTheNode
+	}
+	return fmt.Sprintf("sdsrv-%s", d.Name)
 }
 
 // +kubebuilder:object:generate=true
 type DRBDResourceSpec struct {
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[0-9A-Za-z.+_-]*$`
+	// +optional
+	ActualNameOnTheNode string `json:"actualNameOnTheNode,omitempty"`
+
+	// +kubebuilder:validation:Enum=Up;Down
+	// +kubebuilder:default=Up
+	// +optional
+	State DRBDResourceState `json:"state,omitempty"`
+
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
@@ -67,11 +99,6 @@ type DRBDResourceSpec struct {
 	// +kubebuilder:validation:Maximum=32
 	// +optional
 	QuorumMinimumRedundancy byte `json:"quorumMinimumRedundancy,omitempty"`
-
-	// +kubebuilder:validation:Enum=Up;Down
-	// +kubebuilder:default=Up
-	// +optional
-	State DRBDResourceState `json:"state,omitempty"`
 
 	// +kubebuilder:validation:Required
 	Size resource.Quantity `json:"size"`
@@ -209,10 +236,6 @@ type DRBDResourceStatus struct {
 	// +optional
 	Addresses []DRBDResourceAddressStatus `json:"addresses,omitempty"`
 
-	// +kubebuilder:validation:Enum=Primary;Secondary
-	// +optional
-	Role DRBDRole `json:"role,omitempty"`
-
 	// +patchStrategy=merge
 	// +optional
 	ActiveConfiguration *DRBDResourceActiveConfiguration `json:"activeConfiguration,omitempty" patchStrategy:"merge"`
@@ -230,6 +253,13 @@ type DRBDResourceStatus struct {
 
 	// +optional
 	Quorum *bool `json:"quorum,omitempty"`
+
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 }
 
 // +kubebuilder:object:generate=true

@@ -98,11 +98,20 @@ type PeerDevice struct {
 	PercentInSync          float64 `json:"percent-in-sync"`
 }
 
-func ExecuteStatus(ctx context.Context) (StatusResult, error) {
-	cmd := exec.CommandContext(ctx, Command, StatusArgs...)
+// ExecuteStatus runs "drbdsetup status --json <resourceName>". Pass "" to query
+// all resources. Returns empty result (not error) if resource not found.
+func ExecuteStatus(ctx context.Context, resourceName string) (StatusResult, error) {
+	if resourceName == "" {
+		resourceName = "all"
+	}
+	cmd := exec.CommandContext(ctx, Command, StatusArgs(resourceName)...)
 
 	jsonBytes, err := cmd.CombinedOutput()
 	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 10 {
+			// Exit code 10 means resource not found
+			return StatusResult{}, nil
+		}
 		return nil,
 			fmt.Errorf(
 				"running command: %w; output: %q",
@@ -110,7 +119,6 @@ func ExecuteStatus(ctx context.Context) (StatusResult, error) {
 			)
 	}
 
-	// TODO: we need all items to be sorted and not rely on sorting on DRBD side
 	var res StatusResult
 	if err := json.Unmarshal(jsonBytes, &res); err != nil {
 		return nil,

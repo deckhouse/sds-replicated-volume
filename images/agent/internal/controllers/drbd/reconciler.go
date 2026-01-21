@@ -18,25 +18,25 @@ package drbd
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
-// Reconciler reconciles DRBDResource objects.
 type Reconciler struct {
 	cl       client.Client
 	log      *slog.Logger
 	nodeName string
 }
 
-var _ reconcile.Reconciler = &Reconciler{}
+var _ reconcile.Reconciler = (*Reconciler)(nil)
 
-// NewReconciler creates a new Reconciler.
 func NewReconciler(cl client.Client, log *slog.Logger, nodeName string) *Reconciler {
 	if log == nil {
 		log = slog.Default()
@@ -48,34 +48,101 @@ func NewReconciler(cl client.Client, log *slog.Logger, nodeName string) *Reconci
 	}
 }
 
-// Reconcile handles a single DRBDResource reconciliation request.
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req reconcile.Request,
 ) (reconcile.Result, error) {
 	log := r.log.With("name", req.Name)
-	log.Info("Reconciling DRBDResource")
+	log.Debug("Reconciling DRBDResource")
 
-	// Fetch the DRBDResource
-	dr := &v1alpha1.DRBDResource{}
-	if err := r.cl.Get(ctx, req.NamespacedName, dr); err != nil {
-		if apierrors.IsNotFound(err) {
-			log.Info("DRBDResource not found, skipping")
-			return reconcile.Result{}, nil
-		}
-		log.Error("Failed to get DRBDResource", "error", err)
+	dr, ok, err := r.getCurrentNodeDRBDResource(ctx, log, req)
+	if !ok || err != nil {
 		return reconcile.Result{}, err
 	}
 
-	// Check if this resource belongs to this node
-	if dr.Spec.NodeName != r.nodeName {
-		log.Debug("DRBDResource belongs to different node, skipping",
-			"resourceNodeName", dr.Spec.NodeName)
-		return reconcile.Result{}, nil
+	var (
+		drbdResName       string = dr.DRBDResourceNameOnTheNode()
+		iErr, aErr, aErr2 error
+		drbdErr, patchErr error
+		iState            IntendedState
+		aState            ActualState
+		tgtStateActions   TargetStateActions
+	)
+
+	iState, iErr = getIntendedState(dr)
+
+	aState, aErr = getActualState(ctx, drbdResName)
+
+	// iState/aState will have `.IsZero() == true` in case of errors
+	tgtStateActions = computeTargetStateActions(iState, aState)
+
+	var patchNeeded, patchStatusNeeded, refreshActualNeeded bool
+	original := client.MergeFrom(dr)
+
+	for len(tgtStateActions) > 0 {
+		switch ta := tgtStateActions[0].(type) {
+		case PatchAction:
+			patchNeeded = ta.ApplyPatch(dr) || patchNeeded
+		case PatchStatusAction:
+			patchStatusNeeded = ta.ApplyStatusPatch(dr) || patchStatusNeeded
+		case ExecuteDRBDAction:
+			drbdErr = ta.Execute(ctx)
+			if drbdErr != nil {
+				// leave failed along with non-executed actions in tgtState
+				break
+			}
+			refreshActualNeeded = true
+		}
+		// pop successful action
+		tgtStateActions = tgtStateActions[1:]
 	}
 
-	// TODO: Implement actual reconciliation logic here
-	log.Info("DRBDResource reconciled successfully")
+	if refreshActualNeeded {
+		aState, aErr2 = getActualState(ctx, drbdResName)
+	}
 
-	return reconcile.Result{}, nil
+	if patchNeeded {
+		patchErr = r.cl.Patch(ctx, dr, original)
+	}
+
+	err = errors.Join(iErr, aErr, aErr2, drbdErr, patchErr)
+
+	patchStatusNeeded = applyReportState(
+		aState,
+		dr,
+		err,
+		tgtStateActions,
+	) || patchStatusNeeded
+
+	if patchStatusNeeded {
+		patchErr = r.cl.Status().Patch(ctx, dr, original)
+		err = errors.Join(err, patchErr)
+	}
+
+	return reconcile.Result{}, err
+}
+
+func (r *Reconciler) getCurrentNodeDRBDResource(
+	ctx context.Context,
+	log *slog.Logger,
+	req reconcile.Request,
+) (*v1alpha1.DRBDResource, bool, error) {
+	dr := &v1alpha1.DRBDResource{}
+	if err := r.cl.Get(ctx, req.NamespacedName, dr); err != nil {
+		if client.IgnoreNotFound(err) != nil {
+			return nil, false, u.LogError(log, fmt.Errorf("getting DRBDResource: %w", err))
+		}
+		log.Debug("DRBDResource not found, skipping")
+		return nil, false, nil
+	}
+
+	if dr.Spec.NodeName != r.nodeName {
+		log.Debug(
+			"DRBDResource belongs to different node, skipping",
+			"nodeName", dr.Spec.NodeName,
+		)
+		return nil, false, nil
+	}
+
+	return dr, true, nil
 }
