@@ -379,7 +379,8 @@ spec:
 
     # Find and copy .ko files to /lib/modules
     # The archive contains modules with relative paths from the build output
-    MODULES_DEST="/lib/modules/${kernel_version_in_use}/kernel/drivers/block"
+    # Path taken from https://github.com/LINBIT/drbd/blob/master/drbd/Makefile#L153
+    MODULES_DEST="/lib/modules/${kernel_version_in_use}/updates"
     mkdir -p "$MODULES_DEST"
     
     # Find all .ko files in the extracted archive and copy them to the destination
