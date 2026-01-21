@@ -80,6 +80,10 @@ func ModuleConfigValidate(ctx context.Context, _ *model.AdmissionReview, obj met
 	}
 
 	if currentVersion != "" {
+		if desiredVersion == currentVersion {
+			return &kwhvalidating.ValidatorResult{Valid: true}, nil
+		}
+
 		cmp, err := compareSemver(desiredVersion, currentVersion)
 		if err != nil {
 			return &kwhvalidating.ValidatorResult{Valid: false, Message: err.Error()}, nil
@@ -90,12 +94,72 @@ func ModuleConfigValidate(ctx context.Context, _ *model.AdmissionReview, obj met
 				Message: fmt.Sprintf("drbdVersion downgrade is not allowed (current %s, requested %s)", currentVersion, desiredVersion),
 			}, nil
 		}
+
+		// Enforce "one step at a time" upgrade based on allowed versions list
+		if err := verifyInOrderUpgrade(currentVersion, desiredVersion, allowedVersions); err != nil {
+			return &kwhvalidating.ValidatorResult{Valid: false, Message: err.Error()}, nil
+		}
 	}
 
 	return &kwhvalidating.ValidatorResult{Valid: true}, nil
 }
 
-func getDrbdVersionFromSettings(settings map[string]interface{}) (string, bool, error) {
+func verifyInOrderUpgrade(current, desired string, allowed map[string]struct{}) error {
+	// We need to find if there are any allowed versions between current and desired
+	// This requires sorting allowed versions
+	sortedAllowed := sortVersions(allowed)
+
+	currentIndex := -1
+	desiredIndex := -1
+
+	for i, v := range sortedAllowed {
+		if v == current {
+			currentIndex = i
+		}
+		if v == desired {
+			desiredIndex = i
+		}
+	}
+
+	if currentIndex == -1 {
+		// Current version is not in the allowed list, we can't strictly enforce "in order"
+		// but we still allow it as long as it's not a downgrade (checked earlier)
+		return nil
+	}
+
+	if desiredIndex == -1 {
+		// This should not happen as desiredVersion was already checked against allowed list
+		return fmt.Errorf("desired version %s not in allowed list", desired)
+	}
+
+	if desiredIndex > currentIndex+1 {
+		skipped := sortedAllowed[currentIndex+1 : desiredIndex]
+		return fmt.Errorf("drbdVersion upgrade must be in order. Please upgrade to %s first. Skipped: %s",
+			sortedAllowed[currentIndex+1], strings.Join(skipped, ", "))
+	}
+
+	return nil
+}
+
+func sortVersions(versions map[string]struct{}) []string {
+	res := make([]string, 0, len(versions))
+	for v := range versions {
+		res = append(res, v)
+	}
+
+	// Simple semver sort
+	for i := 0; i < len(res); i++ {
+		for j := i + 1; j < len(res); j++ {
+			cmp, _ := compareSemver(res[i], res[j])
+			if cmp > 0 {
+				res[i], res[j] = res[j], res[i]
+			}
+		}
+	}
+	return res
+}
+
+func getDrbdVersionFromSettings(settings map[string]any) (string, bool, error) {
 	raw, ok := settings["drbdVersion"]
 	if !ok {
 		return "", false, nil
@@ -118,7 +182,10 @@ func fetchAllowedDrbdVersions(ctx context.Context, cl client.Client) (map[string
 		return nil, fmt.Errorf("failed to read %s/%s configmap: %w", namespace, drbdVersionsConfigMapName, err)
 	}
 
-	raw := configMap.Data[drbdVersionsConfigMapKey]
+	raw, ok := configMap.Data[drbdVersionsConfigMapKey]
+	if !ok {
+		return nil, fmt.Errorf("configmap %s/%s does not have a key %s", namespace, drbdVersionsConfigMapName, drbdVersionsConfigMapKey)
+	}
 	if strings.TrimSpace(raw) == "" {
 		return nil, fmt.Errorf("configmap %s/%s has empty %s", namespace, drbdVersionsConfigMapName, drbdVersionsConfigMapKey)
 	}

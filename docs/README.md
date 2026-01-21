@@ -96,8 +96,18 @@ Enabling the `sds-node-configurator` module:
    spec:
      enabled: true
      version: 1
+     settings:
+       drbdVersion: 9.2.13
    EOF
    ```
+
+   The list of allowed DRBD versions is stored in the ConfigMap `d8-sds-replicated-volume-drbd-versions` in the module namespace:
+
+   ```shell
+   kubectl -n d8-sds-replicated-volume get configmap d8-sds-replicated-volume-drbd-versions -o jsonpath='{.data.allowedDrbdVersions}'
+   ```
+
+   You can only upgrade the version and must follow the allowed list in order.
    
    {{< alert level="warning" >}}
    The [settings.dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) parameter is recommended to be specified when enabling the module.

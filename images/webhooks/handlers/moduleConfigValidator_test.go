@@ -113,6 +113,17 @@ func TestModuleConfigValidate(t *testing.T) {
 			wantValid:            true,
 		},
 		{
+			name: "Skip version is blocked",
+			obj: &d8commonapi.ModuleConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: sdsReplicatedVolumeModuleName},
+				Spec:       d8commonapi.ModuleConfigSpec{Settings: map[string]interface{}{"drbdVersion": "9.2.16"}},
+			},
+			existingModuleConfig: moduleConfigWithVersion("9.2.13"),
+			configMap:            allowedVersionsConfigMap("9.2.13", "9.2.14", "9.2.16"),
+			wantValid:            false,
+			wantMessageContains:  "upgrade must be in order",
+		},
+		{
 			name: "Allowed when no current ModuleConfig",
 			obj: &d8commonapi.ModuleConfig{
 				ObjectMeta: metav1.ObjectMeta{Name: sdsReplicatedVolumeModuleName},
