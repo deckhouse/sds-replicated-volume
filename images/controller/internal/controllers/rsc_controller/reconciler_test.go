@@ -1526,7 +1526,7 @@ var _ = Describe("Reconciler", func() {
 	Describe("Reconcile", func() {
 		It("does nothing when RSC is not found", func() {
 			cl = fake.NewClientBuilder().WithScheme(scheme).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nil)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -1576,7 +1576,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc, rsp, lvg, node).
 				WithStatusSubresource(rsc)).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nil)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -1647,7 +1647,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc, rsp, lvg, node, rv).
 				WithStatusSubresource(rsc)).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nil)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -1674,7 +1674,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc).
 				WithStatusSubresource(rsc)).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nil)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -1700,7 +1700,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc).
 				WithStatusSubresource(rsc)).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nil)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -1737,7 +1737,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc, rv).
 				WithStatusSubresource(rsc)).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nil)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -1768,7 +1768,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc).
 				WithStatusSubresource(rsc)).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nil)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},

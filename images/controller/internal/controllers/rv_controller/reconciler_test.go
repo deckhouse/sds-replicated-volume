@@ -102,7 +102,7 @@ var _ = Describe("Reconciler", func() {
 
 	JustBeforeEach(func() {
 		cl = clientBuilder.Build()
-		rec = rvcontroller.NewReconciler(cl)
+		rec = rvcontroller.NewReconciler(cl, nil)
 	})
 
 	Describe("Reconcile (metadata)", func() {
@@ -121,7 +121,7 @@ var _ = Describe("Reconciler", func() {
 					WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
 					WithObjects(tt.objects...).
 					Build()
-				localRec := rvcontroller.NewReconciler(localCl)
+				localRec := rvcontroller.NewReconciler(localCl, nil)
 
 				_, err := localRec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: tt.reqName}})
 				Expect(err).NotTo(HaveOccurred())

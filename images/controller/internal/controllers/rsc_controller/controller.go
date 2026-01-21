@@ -32,6 +32,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/world"
 )
 
 const (
@@ -39,10 +40,11 @@ const (
 	RSCControllerName = "rsc-controller"
 )
 
-func BuildController(mgr manager.Manager) error {
+func BuildController(mgr manager.Manager, worldGate world.WorldGate, worldBus world.WorldBus) error {
 	cl := mgr.GetClient()
+	_ = worldBus // TODO: use when needed
 
-	rec := NewReconciler(cl)
+	rec := NewReconciler(cl, worldGate)
 
 	return builder.ControllerManagedBy(mgr).
 		Named(RSCControllerName).

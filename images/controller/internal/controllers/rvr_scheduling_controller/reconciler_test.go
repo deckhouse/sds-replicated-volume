@@ -373,7 +373,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 			WithRuntimeObjects(objects...).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 			Build()
-		rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+		rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme, nil)
 		Expect(err).ToNot(HaveOccurred())
 
 		// Reconcile
@@ -972,7 +972,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				WithRuntimeObjects(objects...).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
-			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme, nil)
 			Expect(err).ToNot(HaveOccurred())
 
 			// With best-effort scheduling, no error is returned
@@ -1058,7 +1058,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				WithRuntimeObjects(objects...).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
-			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme, nil)
 			Expect(err).ToNot(HaveOccurred())
 
 			_, err = rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
@@ -1198,7 +1198,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 		}
 		cl = builder.Build()
 		var err error
-		rec, err = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+		rec, err = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme, nil)
 		Expect(err).ToNot(HaveOccurred())
 	})
 
@@ -1427,7 +1427,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				WithRuntimeObjects(objects...).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
-			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme, nil)
 			Expect(err).ToNot(HaveOccurred())
 
 			// Reconcile should succeed (no error) even though not all replicas can be scheduled
@@ -1545,7 +1545,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				WithRuntimeObjects(objects...).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
-			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme, nil)
 			Expect(err).ToNot(HaveOccurred())
 
 			_, err = rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
@@ -1631,7 +1631,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				WithRuntimeObjects(objects...).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
-			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme, nil)
 			Expect(err).ToNot(HaveOccurred())
 
 			_, err = rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
@@ -1722,7 +1722,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				WithRuntimeObjects(objects...).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
-			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme, nil)
 			Expect(err).ToNot(HaveOccurred())
 
 			// Reconcile - should succeed but some replicas may not be scheduled

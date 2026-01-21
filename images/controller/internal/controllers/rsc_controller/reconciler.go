@@ -39,19 +39,24 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/world"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
 // --- Wiring / construction ---
 
 type Reconciler struct {
-	cl client.Client
+	cl        client.Client
+	worldGate world.WorldGate
 }
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
-func NewReconciler(cl client.Client) *Reconciler {
-	return &Reconciler{cl: cl}
+func NewReconciler(cl client.Client, worldGate world.WorldGate) *Reconciler {
+	return &Reconciler{
+		cl:        cl,
+		worldGate: worldGate,
+	}
 }
 
 // --- Reconcile ---

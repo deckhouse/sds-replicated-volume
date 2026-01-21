@@ -22,15 +22,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/world"
 )
 
 const controllerName = "rvr-scheduling-controller"
 
-func BuildController(mgr manager.Manager) error {
+func BuildController(mgr manager.Manager, worldGate world.WorldGate) error {
 	r, err := NewReconciler(
 		mgr.GetClient(),
 		mgr.GetLogger().WithName(controllerName).WithName("Reconciler"),
 		mgr.GetScheme(),
+		worldGate,
 	)
 	if err != nil {
 		return err

@@ -26,37 +26,61 @@ import (
 	rvattachcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_attach_controller"
 	rvcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller"
 	rvdeletepropagation "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_delete_propagation"
+	rvrcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_controller"
 	rvrmetadata "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_metadata"
 	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
 	rvrtiebreakercount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_tie_breaker_count"
 	rvrvolume "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_volume"
+	worldcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/world_controller"
 )
 
-var registry = []func(mgr manager.Manager) error{}
-
-func init() {
-	// Must be first: controllers rely on MatchingFields against these indexes.
-	registry = append(registry, RegisterIndexes)
-
-	registry = append(registry, rvrtiebreakercount.BuildController)
-	registry = append(registry, rvcontroller.BuildController)
-	registry = append(registry, rvrvolume.BuildController)
-	registry = append(registry, rvrmetadata.BuildController)
-	registry = append(registry, rvdeletepropagation.BuildController)
-	registry = append(registry, rvrschedulingcontroller.BuildController)
-	registry = append(registry, rvattachcontroller.BuildController)
-	registry = append(registry, rsccontroller.BuildController)
-	registry = append(registry, nodecontroller.BuildController)
-
-	// ...
-}
-
 func BuildAll(mgr manager.Manager) error {
-	for i, buildCtl := range registry {
-		err := buildCtl(mgr)
-		if err != nil {
-			return fmt.Errorf("building controller %d: %w", i, err)
-		}
+	// Must be first: controllers rely on MatchingFields against these indexes.
+	if err := RegisterIndexes(mgr); err != nil {
+		return fmt.Errorf("registering indexes: %w", err)
 	}
+
+	worldGate, worldBus, err := worldcontroller.BuildController(mgr)
+	if err != nil {
+		return fmt.Errorf("building world_controller: %w", err)
+	}
+
+	if err := rsccontroller.BuildController(mgr, worldGate, worldBus); err != nil {
+		return fmt.Errorf("building rsc_controller: %w", err)
+	}
+
+	if err := rvcontroller.BuildController(mgr, worldGate, worldBus); err != nil {
+		return fmt.Errorf("building rv_controller: %w", err)
+	}
+
+	if err := rvrcontroller.BuildController(mgr, worldGate, worldBus); err != nil {
+		return fmt.Errorf("building rvr_controller: %w", err)
+	}
+
+	if err := rvrschedulingcontroller.BuildController(mgr, worldGate); err != nil {
+		return fmt.Errorf("building rvr_scheduling_controller: %w", err)
+	}
+
+	if err := nodecontroller.BuildController(mgr); err != nil {
+		return fmt.Errorf("building node_controller: %w", err)
+	}
+
+	// Old controllers
+	if err := rvrtiebreakercount.BuildController(mgr); err != nil {
+		return fmt.Errorf("building rvr_tie_breaker_count controller: %w", err)
+	}
+	if err := rvrvolume.BuildController(mgr); err != nil {
+		return fmt.Errorf("building rvr_volume controller: %w", err)
+	}
+	if err := rvrmetadata.BuildController(mgr); err != nil {
+		return fmt.Errorf("building rvr_metadata controller: %w", err)
+	}
+	if err := rvdeletepropagation.BuildController(mgr); err != nil {
+		return fmt.Errorf("building rv_delete_propagation controller: %w", err)
+	}
+	if err := rvattachcontroller.BuildController(mgr); err != nil {
+		return fmt.Errorf("building rv_attach_controller: %w", err)
+	}
+
 	return nil
 }

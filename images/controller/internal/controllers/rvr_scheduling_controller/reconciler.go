@@ -35,6 +35,7 @@ import (
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/world"
 )
 
 const (
@@ -55,11 +56,12 @@ type Reconciler struct {
 	log            logr.Logger
 	scheme         *runtime.Scheme
 	extenderClient *SchedulerExtenderClient
+	worldGate      world.WorldGate
 }
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
-func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) (*Reconciler, error) {
+func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme, worldGate world.WorldGate) (*Reconciler, error) {
 	extenderClient, err := NewSchedulerHTTPClient()
 	if err != nil {
 		log.Error(err, "failed to create scheduler-extender client")
@@ -72,6 +74,7 @@ func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) (*
 		log:            log,
 		scheme:         scheme,
 		extenderClient: extenderClient,
+		worldGate:      worldGate,
 	}, nil
 }
 
