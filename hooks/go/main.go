@@ -24,6 +24,7 @@ import (
 	_ "github.com/deckhouse/sds-replicated-volume/hooks/go/060-manual-cert-renewal"
 	_ "github.com/deckhouse/sds-replicated-volume/hooks/go/070-generate-certs"
 	_ "github.com/deckhouse/sds-replicated-volume/hooks/go/080-discover-data-nodes-checksum"
+	_ "github.com/deckhouse/sds-replicated-volume/hooks/go/085-check-drbd-version"
 	_ "github.com/deckhouse/sds-replicated-volume/hooks/go/090-on-start-checks"
 )
 
