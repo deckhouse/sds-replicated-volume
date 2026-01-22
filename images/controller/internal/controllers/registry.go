@@ -26,6 +26,7 @@ import (
 	rvattachcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_attach_controller"
 	rvcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller"
 	rvdeletepropagation "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_delete_propagation"
+	rvrcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_controller"
 	rvrmetadata "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_metadata"
 	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
 	rvrtiebreakercount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_tie_breaker_count"
@@ -44,11 +45,10 @@ func init() {
 	registry = append(registry, rvrmetadata.BuildController)
 	registry = append(registry, rvdeletepropagation.BuildController)
 	registry = append(registry, rvrschedulingcontroller.BuildController)
+	registry = append(registry, rvrcontroller.BuildController)
 	registry = append(registry, rvattachcontroller.BuildController)
 	registry = append(registry, rsccontroller.BuildController)
 	registry = append(registry, nodecontroller.BuildController)
-
-	// ...
 }
 
 func BuildAll(mgr manager.Manager) error {

@@ -1,6 +1,6 @@
 ---
 description: Contracts for ConstructionReconcileHelper (new*/build*/make*/compose*) functions: pure/deterministic non-I/O in-memory construction helpers and naming family selection. Apply when writing construction helpers used by compute helpers in reconciler*.go, and when deciding naming/shape for in-memory builders. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
-globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go,images/controller/internal/controllers/rsc_controller/reconciler*.go,images/controller/internal/controllers/node_controller/reconciler*.go
+globs: images/controller/internal/controllers/**/reconciler*.go
 alwaysApply: false
 ---
 

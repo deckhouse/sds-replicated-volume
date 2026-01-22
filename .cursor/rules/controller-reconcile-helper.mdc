@@ -1,6 +1,6 @@
 ---
 description: Common rules for ReconcileHelper functions/methods in reconciler.go: naming-by-category, signatures, determinism, aliasing, and I/O boundaries. Apply when implementing or reviewing reconcile helper functions in reconciler*.go, and when deciding helper categories or allowed side effects. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
-globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go,images/controller/internal/controllers/rsc_controller/reconciler*.go,images/controller/internal/controllers/node_controller/reconciler*.go
+globs: images/controller/internal/controllers/**/reconciler*.go
 alwaysApply: false
 ---
 

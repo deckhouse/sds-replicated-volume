@@ -107,7 +107,6 @@ const (
 	ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionInProgress = "ConflictResolutionInProgress" // Eligible nodes conflict resolution is in progress.
 	ReplicatedVolumeCondSatisfyEligibleNodesReasonInConflictWithEligibleNodes  = "InConflictWithEligibleNodes"  // Some replicas are on non-eligible nodes.
 	ReplicatedVolumeCondSatisfyEligibleNodesReasonSatisfyEligibleNodes         = "SatisfyEligibleNodes"         // All replicas are on eligible nodes.
-	ReplicatedVolumeCondSatisfyEligibleNodesReasonStorageClassNotFound         = "StorageClassNotFound"         // Referenced storage class does not exist.
 )
 
 const (
