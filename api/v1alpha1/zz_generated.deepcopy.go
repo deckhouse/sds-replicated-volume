@@ -1317,6 +1317,11 @@ func (in *ReplicatedStoragePoolSpec) DeepCopyInto(out *ReplicatedStoragePoolSpec
 		*out = new(v1.LabelSelector)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.SystemNetworkNames != nil {
+		in, out := &in.SystemNetworkNames, &out.SystemNetworkNames
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	out.EligibleNodesPolicy = in.EligibleNodesPolicy
 }
 

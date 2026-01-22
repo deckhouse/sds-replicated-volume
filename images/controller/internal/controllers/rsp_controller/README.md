@@ -1,5 +1,14 @@
 # rsp_controller
 
+> **TODO(systemnetwork): IMPORTANT!** This controller does not yet support custom SystemNetworkNames.
+> Currently only "Internal" (default node network) is allowed by API validation.
+> When systemnetwork feature stabilizes, the controller must:
+> - Watch NetworkNode resources
+> - Filter eligible nodes based on configured networks availability
+> - Add NetworkNode predicates for Ready condition changes
+>
+> See `controller.go` for detailed TODO comments.
+
 This controller manages the `ReplicatedStoragePool` status fields by aggregating information from LVMVolumeGroups, Nodes, and agent Pods.
 
 ## Purpose
