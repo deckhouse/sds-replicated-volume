@@ -19,6 +19,7 @@ package checkdrbdversion
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/deckhouse/module-sdk/pkg"
@@ -73,6 +74,113 @@ func onBeforeHelmChecks(ctx context.Context, input *pkg.HookInput) error {
 		return fmt.Errorf("drbdVersion %q is not in allowed list", drbdVersion)
 	}
 
-	input.Logger.Info("DRBD version check passed", "drbdVersion", drbdVersion)
+	currentVersion := strings.TrimSpace(input.Values.Get("sdsReplicatedVolume.drbdVersion").String())
+	if currentVersion != "" && currentVersion != drbdVersion {
+		cmp, err := compareSemver(drbdVersion, currentVersion)
+		if err != nil {
+			return err
+		}
+		if cmp < 0 {
+			return fmt.Errorf("drbdVersion downgrade is not allowed (current %s, requested %s)", currentVersion, drbdVersion)
+		}
+		if err := verifyInOrderUpgrade(currentVersion, drbdVersion, allowedDrbdVersions); err != nil {
+			return err
+		}
+	}
+
+	input.Logger.Info("DRBD version check passed", "drbdVersion", drbdVersion, "currentVersion", currentVersion)
 	return nil
+}
+
+func verifyInOrderUpgrade(current, desired string, allowed map[string]struct{}) error {
+	sortedAllowed := sortVersions(allowed)
+
+	currentIndex := -1
+	desiredIndex := -1
+
+	for i, v := range sortedAllowed {
+		if v == current {
+			currentIndex = i
+		}
+		if v == desired {
+			desiredIndex = i
+		}
+	}
+
+	if currentIndex == -1 {
+		return nil
+	}
+	if desiredIndex == -1 {
+		return fmt.Errorf("desired version %s not in allowed list", desired)
+	}
+
+	if desiredIndex > currentIndex+1 {
+		skipped := sortedAllowed[currentIndex+1 : desiredIndex]
+		return fmt.Errorf("drbdVersion upgrade must be in order. Please upgrade to %s first. Skipped: %s",
+			sortedAllowed[currentIndex+1], strings.Join(skipped, ", "))
+	}
+
+	return nil
+}
+
+func sortVersions(versions map[string]struct{}) []string {
+	res := make([]string, 0, len(versions))
+	for v := range versions {
+		res = append(res, v)
+	}
+
+	for i := 0; i < len(res); i++ {
+		for j := i + 1; j < len(res); j++ {
+			cmp, _ := compareSemver(res[i], res[j])
+			if cmp > 0 {
+				res[i], res[j] = res[j], res[i]
+			}
+		}
+	}
+	return res
+}
+
+func compareSemver(a, b string) (int, error) {
+	aParts, err := parseSemverParts(a)
+	if err != nil {
+		return 0, err
+	}
+	bParts, err := parseSemverParts(b)
+	if err != nil {
+		return 0, err
+	}
+
+	for i := 0; i < 3; i++ {
+		if aParts[i] < bParts[i] {
+			return -1, nil
+		}
+		if aParts[i] > bParts[i] {
+			return 1, nil
+		}
+	}
+
+	return 0, nil
+}
+
+func parseSemverParts(v string) ([3]int, error) {
+	var result [3]int
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return result, fmt.Errorf("version is empty")
+	}
+	v = strings.SplitN(v, "-", 2)[0]
+	parts := strings.Split(v, ".")
+	if len(parts) != 3 {
+		return result, fmt.Errorf("version %q must be in x.y.z format", v)
+	}
+
+	for i := 0; i < 3; i++ {
+		n, err := strconv.Atoi(parts[i])
+		if err != nil {
+			return result, fmt.Errorf("version %q has invalid numeric part", v)
+		}
+		result[i] = n
+	}
+
+	return result, nil
 }
