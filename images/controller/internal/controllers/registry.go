@@ -23,6 +23,7 @@ import (
 
 	nodecontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/node_controller"
 	rsccontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rsc_controller"
+	rspcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rsp_controller"
 	rvattachcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_attach_controller"
 	rvcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller"
 	rvdeletepropagation "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_delete_propagation"
@@ -33,30 +34,39 @@ import (
 	rvrvolume "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_volume"
 )
 
-var registry = []func(mgr manager.Manager) error{}
-
-func init() {
+// BuildAll builds all controllers.
+// podNamespace is the namespace where the controller pod runs, used by controllers
+// that need to access other pods in this namespace (e.g., agent pods).
+func BuildAll(mgr manager.Manager, podNamespace string) error {
 	// Must be first: controllers rely on MatchingFields against these indexes.
-	registry = append(registry, RegisterIndexes)
+	if err := RegisterIndexes(mgr); err != nil {
+		return fmt.Errorf("building indexes: %w", err)
+	}
 
-	registry = append(registry, rvrtiebreakercount.BuildController)
-	registry = append(registry, rvcontroller.BuildController)
-	registry = append(registry, rvrvolume.BuildController)
-	registry = append(registry, rvrmetadata.BuildController)
-	registry = append(registry, rvdeletepropagation.BuildController)
-	registry = append(registry, rvrschedulingcontroller.BuildController)
-	registry = append(registry, rvrcontroller.BuildController)
-	registry = append(registry, rvattachcontroller.BuildController)
-	registry = append(registry, rsccontroller.BuildController)
-	registry = append(registry, nodecontroller.BuildController)
-}
+	// Controllers that don't need podNamespace.
+	builders := []func(mgr manager.Manager) error{
+		rvrtiebreakercount.BuildController,
+		rvcontroller.BuildController,
+		rvrvolume.BuildController,
+		rvrmetadata.BuildController,
+		rvdeletepropagation.BuildController,
+		rvrschedulingcontroller.BuildController,
+		rvrcontroller.BuildController,
+		rvattachcontroller.BuildController,
+		rsccontroller.BuildController,
+		nodecontroller.BuildController,
+	}
 
-func BuildAll(mgr manager.Manager) error {
-	for i, buildCtl := range registry {
-		err := buildCtl(mgr)
-		if err != nil {
+	for i, buildCtl := range builders {
+		if err := buildCtl(mgr); err != nil {
 			return fmt.Errorf("building controller %d: %w", i, err)
 		}
 	}
+
+	// RSP controller needs podNamespace for agent pod discovery.
+	if err := rspcontroller.BuildController(mgr, podNamespace); err != nil {
+		return fmt.Errorf("building rsp controller: %w", err)
+	}
+
 	return nil
 }

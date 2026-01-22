@@ -1268,11 +1268,6 @@ func areLVGsEqual(a, b []v1alpha1.ReplicatedStorageClassEligibleNodeLVMVolumeGro
 //   - RSP phase is Completed
 //   - For LVMThin type, thinPoolName exists in each referenced LVG's Spec.ThinPools
 func validateRSPAndLVGs(rsp *v1alpha1.ReplicatedStoragePool, lvgs []snc.LVMVolumeGroup) error {
-	// Check RSP phase.
-	if rsp.Status.Phase != v1alpha1.RSPPhaseCompleted {
-		return fmt.Errorf("ReplicatedStoragePool %q is not ready (phase: %s)", rsp.Name, rsp.Status.Phase)
-	}
-
 	// Build LVG lookup by name.
 	lvgByName := make(map[string]*snc.LVMVolumeGroup, len(lvgs))
 	for i := range lvgs {

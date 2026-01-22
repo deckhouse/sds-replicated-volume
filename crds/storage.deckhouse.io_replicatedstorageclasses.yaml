@@ -292,11 +292,11 @@ spec:
                   > Note that for Replication mode 'Availability' and 'ConsistencyAndAvailability' you have to select
                   exactly 1 or 3 zones.
                 items:
+                  maxLength: 63
                   type: string
+                maxItems: 10
                 type: array
-                x-kubernetes-validations:
-                - message: Value is immutable.
-                  rule: self == oldSelf
+                x-kubernetes-list-type: set
             required:
             - configurationRolloutStrategy
             - eligibleNodesConflictResolutionStrategy

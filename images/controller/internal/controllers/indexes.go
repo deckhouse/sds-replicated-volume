@@ -52,6 +52,9 @@ func RegisterIndexes(mgr manager.Manager) error {
 	if err := indexes.RegisterRSPByLVMVolumeGroupName(mgr); err != nil {
 		return err
 	}
+	if err := indexes.RegisterRSPByEligibleNodeName(mgr); err != nil {
+		return err
+	}
 
 	return nil
 }
