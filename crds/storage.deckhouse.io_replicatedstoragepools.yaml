@@ -160,6 +160,22 @@ spec:
                   rule: '!has(self.matchExpressions) || self.matchExpressions.all(e,
                     (e.operator in [''Exists'', ''DoesNotExist'']) ? (!has(e.values)
                     || size(e.values) == 0) : (has(e.values) && size(e.values) > 0))'
+              systemNetworkNames:
+                default:
+                - Internal
+                description: |-
+                  SystemNetworkNames specifies network names used for DRBD replication traffic.
+                  At least one network name must be specified. Each name is limited to 64 characters.
+
+                  Custom network support requires NetworkNode watch implementation in the controller.
+                items:
+                  type: string
+                maxItems: 1
+                minItems: 1
+                type: array
+                x-kubernetes-validations:
+                - message: Only 'Internal' network is currently supported
+                  rule: self.all(n, n == 'Internal')
               type:
                 description: |-
                   Defines the volumes type. Might be:
@@ -187,6 +203,7 @@ spec:
             required:
             - eligibleNodesPolicy
             - lvmVolumeGroups
+            - systemNetworkNames
             - type
             type: object
             x-kubernetes-validations:

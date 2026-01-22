@@ -234,10 +234,16 @@ spec:
                 description: |-
                   SystemNetworkNames specifies network names used for DRBD replication traffic.
                   At least one network name must be specified. Each name is limited to 64 characters.
+
+                  Custom network support requires NetworkNode watch implementation in the controller.
                 items:
                   type: string
+                maxItems: 1
                 minItems: 1
                 type: array
+                x-kubernetes-validations:
+                - message: Only 'Internal' network is currently supported
+                  rule: self.all(n, n == 'Internal')
               topology:
                 description: |-
                   The topology settings for the volumes in the created Storage class. Might be:
