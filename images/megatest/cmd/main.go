@@ -254,6 +254,21 @@ func setupChaosRunners(
 	// Track running chaos goroutines
 	var wg sync.WaitGroup
 
+	// Start network blocker
+	if opt.EnableChaosNetBlock {
+		cfg := config.ChaosNetworkBlockerConfig{
+			Period:           period,
+			IncidentDuration: incidentDuration,
+		}
+		blocker := runners.NewChaosNetworkBlocker(cfg, ciliumManager, parentClient, forceCleanupChan)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = blocker.Run(ctx)
+		}()
+		log.Info("started chaos-network-blocker")
+	}
+
 	// Start DRBD blocker
 	// Note: DRBD ports are collected dynamically before each incident (not at startup)
 	// to ensure we block actual ports even when new RVs/RVRs are created during the test.
@@ -272,19 +287,20 @@ func setupChaosRunners(
 		log.Info("started chaos-drbd-blocker")
 	}
 
-	// Start network blocker
-	if opt.EnableChaosNetBlock {
-		cfg := config.ChaosNetworkBlockerConfig{
+	// Start network partitioner
+	if opt.EnableChaosNetPartition {
+		cfg := config.ChaosNetworkPartitionerConfig{
 			Period:           period,
 			IncidentDuration: incidentDuration,
+			GroupSize:        opt.ChaosPartitionGroupSize,
 		}
-		blocker := runners.NewChaosNetworkBlocker(cfg, ciliumManager, parentClient, forceCleanupChan)
+		partitioner := runners.NewChaosNetworkPartitioner(cfg, ciliumManager, parentClient, forceCleanupChan)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = blocker.Run(ctx)
+			_ = partitioner.Run(ctx)
 		}()
-		log.Info("started chaos-network-blocker")
+		log.Info("started chaos-network-partitioner")
 	}
 
 	// Start network degrader
@@ -317,22 +333,6 @@ func setupChaosRunners(
 			_ = reboter.Run(ctx)
 		}()
 		log.Info("started chaos-vm-reboter")
-	}
-
-	// Start network partitioner
-	if opt.EnableChaosNetPartition {
-		cfg := config.ChaosNetworkPartitionerConfig{
-			Period:           period,
-			IncidentDuration: incidentDuration,
-			GroupSize:        opt.ChaosPartitionGroupSize,
-		}
-		partitioner := runners.NewChaosNetworkPartitioner(cfg, ciliumManager, parentClient, forceCleanupChan)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_ = partitioner.Run(ctx)
-		}()
-		log.Info("started chaos-network-partitioner")
 	}
 
 	// Return cleanup function
