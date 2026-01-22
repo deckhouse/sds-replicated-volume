@@ -44,6 +44,7 @@ var _ = registry.RegisterFunc(
 )
 
 func onBeforeHelmChecks(ctx context.Context, input *pkg.HookInput) error {
+	input.Logger.Info("Starting DRBD version validation (OnBeforeHelm)")
 	cl := input.DC.MustGetK8sClient()
 
 	modCfg := &unstructured.Unstructured{}
@@ -56,34 +57,43 @@ func onBeforeHelmChecks(ctx context.Context, input *pkg.HookInput) error {
 
 	if err := cl.Get(ctx, client.ObjectKey{Name: moduleConfigName}, modCfg); err != nil {
 		if client.IgnoreNotFound(err) == nil {
+			input.Logger.Info("ModuleConfig not found, skipping DRBD version check", "module", moduleConfigName)
 			return nil
 		}
+		input.Logger.Error("Failed to get ModuleConfig", "module", moduleConfigName, "err", err)
 		return fmt.Errorf("failed to get ModuleConfig %q: %w", moduleConfigName, err)
 	}
 
 	drbdVersion, found, _ := unstructured.NestedString(modCfg.Object, "spec", "settings", "drbdVersion")
 	if !found || strings.TrimSpace(drbdVersion) == "" {
+		input.Logger.Info("drbdVersion is not set, skipping DRBD version check")
 		return nil
 	}
 
 	if len(allowedDrbdVersions) == 0 {
+		input.Logger.Error("Allowed DRBD versions list is empty")
 		return fmt.Errorf("allowed drbd versions list is empty")
 	}
 
 	if _, ok := allowedDrbdVersions[drbdVersion]; !ok {
+		input.Logger.Error("drbdVersion is not in allowed list", "drbdVersion", drbdVersion)
 		return fmt.Errorf("drbdVersion %q is not in allowed list", drbdVersion)
 	}
 
 	currentVersion := strings.TrimSpace(input.Values.Get("sdsReplicatedVolume.drbdVersion").String())
 	if currentVersion != "" && currentVersion != drbdVersion {
+		input.Logger.Info("Comparing DRBD versions", "currentVersion", currentVersion, "desiredVersion", drbdVersion)
 		cmp, err := compareSemver(drbdVersion, currentVersion)
 		if err != nil {
+			input.Logger.Error("Failed to compare DRBD versions", "currentVersion", currentVersion, "desiredVersion", drbdVersion, "err", err)
 			return err
 		}
 		if cmp < 0 {
+			input.Logger.Error("DRBD version downgrade is not allowed", "currentVersion", currentVersion, "desiredVersion", drbdVersion)
 			return fmt.Errorf("drbdVersion downgrade is not allowed (current %s, requested %s)", currentVersion, drbdVersion)
 		}
 		if err := verifyInOrderUpgrade(currentVersion, drbdVersion, allowedDrbdVersions); err != nil {
+			input.Logger.Error("DRBD version upgrade order is invalid", "currentVersion", currentVersion, "desiredVersion", drbdVersion, "err", err)
 			return err
 		}
 	}
