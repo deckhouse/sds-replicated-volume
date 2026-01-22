@@ -1,4 +1,4 @@
-package controller
+package v1alpha1
 
 const (
 	ReplicatedStorageClassFinalizerName = "replicatedstorageclass.storage.deckhouse.io"
@@ -13,10 +13,6 @@ const (
 
 	ReclaimPolicyRetain = "Retain"
 	ReclaimPolicyDelete = "Delete"
-
-	ReplicationNone                       = "None"
-	ReplicationAvailability               = "Availability"
-	ReplicationConsistencyAndAvailability = "ConsistencyAndAvailability"
 
 	TopologyTransZonal = "TransZonal"
 	TopologyZonal      = "Zonal"

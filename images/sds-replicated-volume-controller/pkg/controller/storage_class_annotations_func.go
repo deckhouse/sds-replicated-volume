@@ -45,7 +45,7 @@ func ReconcileControllerConfigMapEvent(ctx context.Context, cl client.Client, lo
 	}
 	log.Debug(fmt.Sprintf("[ReconcileControllerConfigMapEvent] Virtualization module enabled: %t", virtualizationEnabled))
 
-	storageClassList, err := getStorageClassListForAnnotationsReconcile(ctx, cl, log, StorageClassProvisioner, virtualizationEnabled)
+	storageClassList, err := getStorageClassListForAnnotationsReconcile(ctx, cl, log, srv.StorageClassProvisioner, virtualizationEnabled)
 	if err != nil {
 		log.Error(err, "[ReconcileControllerConfigMapEvent] Failed to get storage class list for annotations reconcile")
 		return true, err
@@ -86,7 +86,7 @@ func getStorageClassListForAnnotationsReconcile(ctx context.Context, cl client.C
 	storageClassList := &storagev1.StorageClassList{}
 	for _, storageClass := range storageClassesWithReplicatedVolumeProvisioner.Items {
 		log.Trace(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] Processing storage class %+v", storageClass))
-		if storageClass.Parameters[StorageClassParamAllowRemoteVolumeAccessKey] == "false" {
+		if storageClass.Parameters[srv.StorageClassParamAllowRemoteVolumeAccessKey] == "false" {
 			if storageClass.Annotations == nil {
 				storageClass.Annotations = make(map[string]string)
 			}

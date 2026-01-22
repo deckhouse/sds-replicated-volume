@@ -144,19 +144,19 @@ func ReconcileReplicatedStorageClassReplication(
 	for _, rsc := range rscs {
 		log.Debug(fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] ReplicatedStorageClass %s replication type %s", rsc.Name, rsc.Spec.Replication))
 		switch rsc.Spec.Replication {
-		case ReplicationNone:
-		case ReplicationAvailability, ReplicationConsistencyAndAvailability:
+		case srv.ReplicationNone:
+		case srv.ReplicationAvailability, srv.ReplicationConsistencyAndAvailability:
 			nodes := spNodes[rsc.Spec.StoragePool]
 			zoneNodesCount := make(map[string]int, len(nodes))
 			for _, node := range nodes {
-				if zone, exist := node.Labels[ZoneLabel]; exist {
+				if zone, exist := node.Labels[srv.ZoneLabel]; exist {
 					zoneNodesCount[zone]++
 				}
 			}
 			log.Debug(fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] ReplicatedStorageClass %s topology type %s", rsc.Name, rsc.Spec.Topology))
 			switch rsc.Spec.Topology {
 			// As we need to place 3 storage replicas in a some random zone, we check if at least one zone has enough nodes for quorum.
-			case TopologyZonal:
+			case srv.RSCTopologyZonal:
 				var enoughNodes bool
 				for _, nodesCount := range zoneNodesCount {
 					if nodesCount > 2 {
@@ -173,7 +173,7 @@ func ReconcileReplicatedStorageClassReplication(
 					removeNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByReplicasLabel)
 				}
 				// As we need to place every storage replica in a different zone, we check if at least one node is available in every selected zone.
-			case TopologyTransZonal:
+			case srv.RSCTopologyTransZonal:
 				enoughNodes := true
 				for _, zone := range rsc.Spec.Zones {
 					nodesCount := zoneNodesCount[zone]
@@ -191,7 +191,7 @@ func ReconcileReplicatedStorageClassReplication(
 					removeNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByReplicasLabel)
 				}
 				// As we do not care about zones, we just check if selected storage pool has enough nodes for quorum.
-			case TopologyIgnored:
+			case srv.RSCTopologyIgnored:
 				if len(spNodes[rsc.Spec.StoragePool]) < 3 {
 					err := errors.New("not enough nodes are available in the zones for a quorum")
 					log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] replicas validation failed for ReplicatedStorageClass %s", rsc.Name))
@@ -312,7 +312,7 @@ func GetReplicatedStoragePoolsZones(spNodes map[string][]v1.Node) map[string][]s
 
 	for sp, nodes := range spNodes {
 		for _, node := range nodes {
-			if zone, exist := node.Labels[ZoneLabel]; exist {
+			if zone, exist := node.Labels[srv.ZoneLabel]; exist {
 				if spZones[sp] == nil {
 					spZones[sp] = make(map[string]struct{}, len(nodes))
 				}

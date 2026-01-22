@@ -34,7 +34,6 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/controller"
 )
 
 const (
@@ -210,7 +209,7 @@ func getAndValidateReconciledRSC(ctx context.Context, cl client.Client, testName
 	replicatedSC, err := getRSC(ctx, cl, testName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(replicatedSC.Name).To(Equal(testName))
-	Expect(replicatedSC.Finalizers).To(ContainElement(controller.ReplicatedStorageClassFinalizerName))
+	Expect(replicatedSC.Finalizers).To(ContainElement(srv.ReplicatedStorageClassFinalizerName))
 	Expect(replicatedSC.Status).NotTo(BeNil())
 
 	return replicatedSC
@@ -224,11 +223,11 @@ func getAndValidateSC(ctx context.Context, cl client.Client, replicatedSC srv.Re
 	Expect(storageClass).NotTo(BeNil())
 	Expect(storageClass.Name).To(Equal(replicatedSC.Name))
 	Expect(storageClass.Namespace).To(Equal(replicatedSC.Namespace))
-	Expect(storageClass.Provisioner).To(Equal(controller.StorageClassProvisioner))
+	Expect(storageClass.Provisioner).To(Equal(srv.StorageClassProvisioner))
 	Expect(*storageClass.AllowVolumeExpansion).To(BeTrue())
 	Expect(*storageClass.VolumeBindingMode).To(Equal(volumeBindingMode))
 	Expect(*storageClass.ReclaimPolicy).To(Equal(corev1.PersistentVolumeReclaimPolicy(replicatedSC.Spec.ReclaimPolicy)))
-	Expect(slices.Contains(storageClass.ObjectMeta.Finalizers, controller.StorageClassFinalizerName)).To(BeTrue())
+	Expect(slices.Contains(storageClass.ObjectMeta.Finalizers, srv.StorageClassFinalizerName)).To(BeTrue())
 
 	return storageClass
 }
