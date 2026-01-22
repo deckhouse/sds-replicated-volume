@@ -28,5 +28,7 @@ func computeTargetStateActions(iState IntendedState, aState ActualState) (res Ta
 		return
 	}
 
+	// DRBD actions
+
 	return nil
 }

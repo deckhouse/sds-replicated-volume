@@ -86,6 +86,20 @@ func (r *Reconciler) Reconcile(
 		case PatchStatusAction:
 			patchStatusNeeded = ta.ApplyStatusPatch(dr) || patchStatusNeeded
 		case ExecuteDRBDAction:
+			// flush pending K8S patches before executing DRBD commands
+			if patchNeeded {
+				if prepatchErr := r.cl.Patch(ctx, dr, original); prepatchErr != nil {
+					// TODO
+				}
+				patchNeeded = false
+			}
+
+			if patchStatusNeeded {
+				//
+				patchStatusNeeded = false
+			}
+
+			// execute
 			drbdErr = ta.Execute(ctx)
 			if drbdErr != nil {
 				// leave failed along with non-executed actions in tgtState
@@ -102,7 +116,7 @@ func (r *Reconciler) Reconcile(
 	}
 
 	if patchNeeded {
-		patchErr = r.cl.Patch(ctx, dr, original)
+		patchErr = errors.Join(patchErr, r.cl.Patch(ctx, dr, original))
 	}
 
 	err = errors.Join(iErr, aErr, aErr2, drbdErr, patchErr)
@@ -115,7 +129,7 @@ func (r *Reconciler) Reconcile(
 	) || patchStatusNeeded
 
 	if patchStatusNeeded {
-		patchErr = r.cl.Status().Patch(ctx, dr, original)
+		patchErr = errors.Join(patchErr, r.cl.Status().Patch(ctx, dr, original))
 		err = errors.Join(err, patchErr)
 	}
 
