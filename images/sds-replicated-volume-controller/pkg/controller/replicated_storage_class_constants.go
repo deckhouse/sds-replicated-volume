@@ -1,8 +1,7 @@
-package rsccontroller
+package controller
 
 const (
-	ReplicatedStorageClassControllerName = "replicated-storage-class-controller"
-	ReplicatedStorageClassFinalizerName  = "replicatedstorageclass.storage.deckhouse.io"
+	ReplicatedStorageClassFinalizerName = "replicatedstorageclass.storage.deckhouse.io"
 
 	StorageClassFinalizerName = "storage.deckhouse.io/sds-replicated-volume"
 	StorageClassProvisioner   = "replicated.csi.storage.deckhouse.io"
@@ -11,11 +10,6 @@ const (
 
 	ZoneLabel                  = "topology.kubernetes.io/zone"
 	StorageClassLabelKeyPrefix = "class.storage.deckhouse.io"
-
-	VolumeAccessLocal           = "Local"
-	VolumeAccessEventuallyLocal = "EventuallyLocal"
-	VolumeAccessPreferablyLocal = "PreferablyLocal"
-	VolumeAccessAny             = "Any"
 
 	ReclaimPolicyRetain = "Retain"
 	ReclaimPolicyDelete = "Delete"
@@ -28,16 +22,12 @@ const (
 	TopologyZonal      = "Zonal"
 	TopologyIgnored    = "Ignored"
 
-	StorageClassPlacementCountKey                 = "replicated.csi.storage.deckhouse.io/placementCount"
-	StorageClassAutoEvictMinReplicaCountKey       = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/AutoEvictMinReplicaCount"
-	StorageClassStoragePoolKey                    = "replicated.csi.storage.deckhouse.io/storagePool"
-	StorageClassParamReplicasOnDifferentKey       = "replicated.csi.storage.deckhouse.io/replicasOnDifferent"
-	StorageClassParamReplicasOnSameKey            = "replicated.csi.storage.deckhouse.io/replicasOnSame"
-	StorageClassParamAllowRemoteVolumeAccessKey   = "replicated.csi.storage.deckhouse.io/allowRemoteVolumeAccess"
-	StorageClassParamAllowRemoteVolumeAccessValue = "- fromSame:\n  - topology.kubernetes.io/zone"
-	ReplicatedStorageClassParamNameKey            = "replicated.csi.storage.deckhouse.io/replicatedStorageClassName"
-	StorageClassParamTopologyKey                  = "replicated.csi.storage.deckhouse.io/topology"
-	StorageClassParamZonesKey                     = "replicated.csi.storage.deckhouse.io/zones"
+	StorageClassPlacementCountKey               = "replicated.csi.storage.deckhouse.io/placementCount"
+	StorageClassAutoEvictMinReplicaCountKey     = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/AutoEvictMinReplicaCount"
+	StorageClassStoragePoolKey                  = "replicated.csi.storage.deckhouse.io/storagePool"
+	StorageClassParamReplicasOnDifferentKey     = "replicated.csi.storage.deckhouse.io/replicasOnDifferent"
+	StorageClassParamReplicasOnSameKey          = "replicated.csi.storage.deckhouse.io/replicasOnSame"
+	StorageClassParamAllowRemoteVolumeAccessKey = "replicated.csi.storage.deckhouse.io/allowRemoteVolumeAccess"
 
 	StorageClassParamFSTypeKey                     = "csi.storage.k8s.io/fstype"
 	FsTypeExt4                                     = "ext4"
@@ -54,18 +44,6 @@ const (
 	StorageClassParamOnNoDataAccessibleKey         = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/on-no-data-accessible"
 	StorageClassParamOnSuspendedPrimaryOutdatedKey = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/on-suspended-primary-outdated"
 	PrimaryOutdatedForceSecondary                  = "force-secondary"
-
-	StorageClassParamAutoDiskfulKey             = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/auto-diskful"
-	StorageClassParamAutoDiskfulAllowCleanupKey = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/auto-diskful-allow-cleanup"
-
-	ManagedLabelKey   = "storage.deckhouse.io/managed-by"
-	ManagedLabelValue = "sds-replicated-volume"
-
-	RSCStorageClassVolumeSnapshotClassAnnotationKey   = "storage.deckhouse.io/volumesnapshotclass"
-	RSCStorageClassVolumeSnapshotClassAnnotationValue = "sds-replicated-volume"
-
-	Created = "Created"
-	Failed  = "Failed"
 
 	DefaultStorageClassAnnotationKey = "storageclass.kubernetes.io/is-default-class"
 )
