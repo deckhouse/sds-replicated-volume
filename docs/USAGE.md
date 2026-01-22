@@ -10,9 +10,9 @@ As for any other configurations, the module may work, but its smooth operation i
 
 Once the `sds-replicated-volume` module is enabled in the Deckhouse configuration, all that remains is to create the storage pools and StorageClass according to the instructions below.
 
-## Configuring the `sds-replicated-volume` backend
+## Configuring the module
 
-In `Deckhouse`, the `sds-replicated-volume-controller` is configured by creating `ReplicatedStoragePool` and `ReplicatedStorageClass` [custom resources](./cr.html). The `LVM Volume Group` and `LVM Thin pool` configured on the cluster nodes are required to create a `Storage Pool`. The [sds-node-configurator](/modules/sds-node-configurator/usage.html) module handles the configuration of `LVM`.
+The configuration is performed by the `sds-replicated-volume-controller` using the custom resources [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) and [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass). To create a Storage Pool, the [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) and an LVM Thin Pool must be preconfigured on the cluster nodes. LVM configuration is provided by the [`sds-node-configurator`](/modules/sds-node-configurator/) module.
 
 ### Setting up LVM
 

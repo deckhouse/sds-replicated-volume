@@ -10,9 +10,9 @@ description: "Использование и примеры работы sds-repl
 
 После включения модуля `sds-replicated-volume` в конфигурации Deckhouse, останется только создать ReplicatedStoragePool и ReplicatedStorageClass по инструкции ниже.
 
-## Конфигурация sds-replicated-volume
+## Конфигурация модуля
 
-Конфигурация осуществляется `sds-replicated-volume-controller'ом` через [пользовательских ресурсов](./cr.html): `ReplicatedStoragePool` и `ReplicatedStorageClass`. Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVM Volume Group` и `LVM Thin-pool`. Настройка `LVM` осуществляется модулем [sds-node-configurator](/modules/sds-node-configurator/usage.html).
+Конфигурацию выполняет контроллер `sds-replicated-volume-controller` с использованием пользовательских ресурсов [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) и [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass). Для создания Storage Pool требуется, чтобы на узлах кластера были заранее настроены [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) и LVM Thin Pool. Настройку LVM обеспечивает модуль [`sds-node-configurator`](/modules/sds-node-configurator/).
 
 ### Настройка LVM
 
