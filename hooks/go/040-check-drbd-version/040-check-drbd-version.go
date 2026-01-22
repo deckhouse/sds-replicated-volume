@@ -30,6 +30,7 @@ import (
 )
 
 const moduleConfigName = "sds-replicated-volume"
+const validationErrorPath = "sdsReplicatedVolume.internal.drbdVersionValidation"
 
 var allowedDrbdVersions = map[string]struct{}{
 	"9.2.13": {},
@@ -58,26 +59,31 @@ func onBeforeHelmChecks(ctx context.Context, input *pkg.HookInput) error {
 	if err := cl.Get(ctx, client.ObjectKey{Name: moduleConfigName}, modCfg); err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			input.Logger.Info("ModuleConfig not found, skipping DRBD version check", "module", moduleConfigName)
+			clearValidationError(input)
 			return nil
 		}
 		input.Logger.Error("Failed to get ModuleConfig", "module", moduleConfigName, "err", err)
-		return fmt.Errorf("failed to get ModuleConfig %q: %w", moduleConfigName, err)
+		setValidationError(input, fmt.Errorf("failed to get ModuleConfig %q: %w", moduleConfigName, err))
+		return nil
 	}
 
 	drbdVersion, found, _ := unstructured.NestedString(modCfg.Object, "spec", "settings", "drbdVersion")
 	if !found || strings.TrimSpace(drbdVersion) == "" {
 		input.Logger.Info("drbdVersion is not set, skipping DRBD version check")
+		clearValidationError(input)
 		return nil
 	}
 
 	if len(allowedDrbdVersions) == 0 {
 		input.Logger.Error("Allowed DRBD versions list is empty")
-		return fmt.Errorf("allowed drbd versions list is empty")
+		setValidationError(input, fmt.Errorf("allowed drbd versions list is empty"))
+		return nil
 	}
 
 	if _, ok := allowedDrbdVersions[drbdVersion]; !ok {
 		input.Logger.Error("drbdVersion is not in allowed list", "drbdVersion", drbdVersion)
-		return fmt.Errorf("drbdVersion %q is not in allowed list", drbdVersion)
+		setValidationError(input, fmt.Errorf("drbdVersion %q is not in allowed list", drbdVersion))
+		return nil
 	}
 
 	currentVersion := strings.TrimSpace(input.Values.Get("sdsReplicatedVolume.drbdVersion").String())
@@ -86,20 +92,37 @@ func onBeforeHelmChecks(ctx context.Context, input *pkg.HookInput) error {
 		cmp, err := compareSemver(drbdVersion, currentVersion)
 		if err != nil {
 			input.Logger.Error("Failed to compare DRBD versions", "currentVersion", currentVersion, "desiredVersion", drbdVersion, "err", err)
-			return err
+			setValidationError(input, err)
+			return nil
 		}
 		if cmp < 0 {
 			input.Logger.Error("DRBD version downgrade is not allowed", "currentVersion", currentVersion, "desiredVersion", drbdVersion)
-			return fmt.Errorf("drbdVersion downgrade is not allowed (current %s, requested %s)", currentVersion, drbdVersion)
+			setValidationError(input, fmt.Errorf("drbdVersion downgrade is not allowed (current %s, requested %s)", currentVersion, drbdVersion))
+			return nil
 		}
 		if err := verifyInOrderUpgrade(currentVersion, drbdVersion, allowedDrbdVersions); err != nil {
 			input.Logger.Error("DRBD version upgrade order is invalid", "currentVersion", currentVersion, "desiredVersion", drbdVersion, "err", err)
-			return err
+			setValidationError(input, err)
+			return nil
 		}
 	}
 
 	input.Logger.Info("DRBD version check passed", "drbdVersion", drbdVersion, "currentVersion", currentVersion)
+	clearValidationError(input)
 	return nil
+}
+
+func setValidationError(input *pkg.HookInput, err error) {
+	if err == nil {
+		return
+	}
+	input.Values.Set(validationErrorPath, map[string]string{
+		"error": err.Error(),
+	})
+}
+
+func clearValidationError(input *pkg.HookInput) {
+	input.Values.Remove(validationErrorPath)
 }
 
 func verifyInOrderUpgrade(current, desired string, allowed map[string]struct{}) error {
