@@ -57,6 +57,20 @@ spec:
           spec:
             description: Defines desired rules for Linstor's Storage-pools.
             properties:
+              eligibleNodesPolicy:
+                description: |-
+                  EligibleNodesPolicy defines policies for managing eligible nodes.
+                  Always present with defaults.
+                properties:
+                  notReadyGracePeriod:
+                    default: 10m
+                    description: |-
+                      NotReadyGracePeriod specifies how long to wait before removing
+                      a not-ready node from the eligible nodes list.
+                    type: string
+                required:
+                - notReadyGracePeriod
+                type: object
               lvmVolumeGroups:
                 description: |-
                   An array of names of LVMVolumeGroup resources, whose Volume Groups/Thin-pools will be used to allocate
@@ -171,6 +185,7 @@ spec:
                 - message: Value is immutable.
                   rule: self == oldSelf
             required:
+            - eligibleNodesPolicy
             - lvmVolumeGroups
             - type
             type: object

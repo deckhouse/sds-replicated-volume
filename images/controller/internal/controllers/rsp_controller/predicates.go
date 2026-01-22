@@ -129,18 +129,18 @@ func lvgReadyConditionStatus(lvg *snc.LVMVolumeGroup) metav1.ConditionStatus {
 }
 
 // areThinPoolsReadyEqual compares only the Ready field of thin pools by name.
-func areThinPoolsReadyEqual(old, new []snc.LVMVolumeGroupThinPoolStatus) bool {
+func areThinPoolsReadyEqual(oldPools, newPools []snc.LVMVolumeGroupThinPoolStatus) bool {
 	// Build map of name -> ready for old thin pools.
-	oldReady := make(map[string]bool, len(old))
-	for _, tp := range old {
+	oldReady := make(map[string]bool, len(oldPools))
+	for _, tp := range oldPools {
 		oldReady[tp.Name] = tp.Ready
 	}
 
 	// Check new thin pools against old.
-	if len(old) != len(new) {
+	if len(oldPools) != len(newPools) {
 		return false
 	}
-	for _, tp := range new {
+	for _, tp := range newPools {
 		if oldReady[tp.Name] != tp.Ready {
 			return false
 		}

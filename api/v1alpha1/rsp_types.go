@@ -88,6 +88,18 @@ type ReplicatedStoragePoolSpec struct {
 	// +kubebuilder:validation:XValidation:rule="!has(self.matchExpressions) || self.matchExpressions.all(e, (e.operator in ['Exists', 'DoesNotExist']) ? (!has(e.values) || size(e.values) == 0) : (has(e.values) && size(e.values) > 0))",message="matchExpressions[].values must be empty for Exists/DoesNotExist operators, non-empty for In/NotIn"
 	// +optional
 	NodeLabelSelector *metav1.LabelSelector `json:"nodeLabelSelector,omitempty"`
+	// EligibleNodesPolicy defines policies for managing eligible nodes.
+	// Always present with defaults.
+	EligibleNodesPolicy ReplicatedStoragePoolEligibleNodesPolicy `json:"eligibleNodesPolicy"`
+}
+
+// EligibleNodesPolicy defines policies for managing eligible nodes.
+// +kubebuilder:object:generate=true
+type ReplicatedStoragePoolEligibleNodesPolicy struct {
+	// NotReadyGracePeriod specifies how long to wait before removing
+	// a not-ready node from the eligible nodes list.
+	// +kubebuilder:default="10m"
+	NotReadyGracePeriod metav1.Duration `json:"notReadyGracePeriod"`
 }
 
 // ReplicatedStoragePoolType enumerates possible values for ReplicatedStoragePool spec.type field.

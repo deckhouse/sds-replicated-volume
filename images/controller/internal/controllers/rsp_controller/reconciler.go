@@ -40,12 +40,10 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
-// defaultNotReadyGracePeriod is the default grace period for NotReady nodes.
-// Nodes that have been NotReady for longer than this period are excluded from eligible nodes.
-const defaultNotReadyGracePeriod = 5 * time.Minute
-
 // --- Wiring / construction ---
 
+// Reconciler reconciles ReplicatedStoragePool resources.
+// It calculates EligibleNodes based on LVMVolumeGroups, Nodes, and agent pod status.
 type Reconciler struct {
 	cl                client.Client
 	log               logr.Logger
@@ -54,6 +52,8 @@ type Reconciler struct {
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
+// NewReconciler creates a new RSP reconciler.
+// agentPodNamespace is the namespace where agent pods are deployed (used for AgentReady status).
 func NewReconciler(cl client.Client, log logr.Logger, agentPodNamespace string) *Reconciler {
 	return &Reconciler{
 		cl:                cl,
@@ -119,7 +119,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 		if err != nil {
 			if applyReadyCondFalse(rsp,
-				v1alpha1.ReplicatedStoragePoolCondReadyReasonLVMTopologyMismatch,
+				v1alpha1.ReplicatedStoragePoolCondReadyReasonInvalidNodeLabelSelector,
 				fmt.Sprintf("Invalid NodeLabelSelector: %v", err),
 			) {
 				return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base, false)).ToCtrl()
@@ -134,9 +134,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if len(rsp.Spec.Zones) > 0 {
 		req, err := labels.NewRequirement(corev1.LabelTopologyZone, selection.In, rsp.Spec.Zones)
 		if err != nil {
-			// handle error
+			if applyReadyCondFalse(rsp,
+				v1alpha1.ReplicatedStoragePoolCondReadyReasonInvalidNodeLabelSelector,
+				fmt.Sprintf("Invalid Zones: %v", err),
+			) {
+				return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base, false)).ToCtrl()
+			}
+			return rf.Done().ToCtrl()
 		}
-
 		nodeSelector = nodeSelector.Add(*req)
 	}
 
@@ -151,7 +156,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if err != nil {
 		return rf.Fail(err).ToCtrl()
 	}
-	agentReadyByNode := buildAgentReadyByNode(agentPods)
+	agentReadyByNode := computeActualAgentReadiness(agentPods)
 
 	eligibleNodes, worldStateExpiresAt := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
 
@@ -180,10 +185,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 }
 
 // =============================================================================
-// Compute helpers
+// Helpers: Reconcile (non-I/O)
 // =============================================================================
 
+// --- Compute helpers ---
+
 // computeActualEligibleNodes computes the list of eligible nodes for an RSP.
+//
+// IMPORTANT: The nodes slice must be pre-filtered by the caller (Reconcile) to include
+// only nodes matching RSP's NodeLabelSelector and Zones. This function does NOT perform
+// zone/label filtering - it assumes all passed nodes are potential candidates.
+//
 // It also returns worldStateExpiresAt - the earliest time when a node's grace period
 // will expire and the eligible nodes list may change. Returns nil if no expiration is needed.
 func computeActualEligibleNodes(
@@ -195,8 +207,8 @@ func computeActualEligibleNodes(
 	// Build LVG lookup by node name.
 	lvgByNode := buildLVGByNodeMap(lvgs, rsp)
 
-	// Get grace period for not-ready nodes.
-	gracePeriod := defaultNotReadyGracePeriod
+	// Get grace period for not-ready nodes from spec.
+	gracePeriod := rsp.Spec.EligibleNodesPolicy.NotReadyGracePeriod.Duration
 
 	result := make([]v1alpha1.ReplicatedStoragePoolEligibleNode, 0)
 	var earliestExpiration *time.Time
@@ -238,59 +250,23 @@ func computeActualEligibleNodes(
 	return result, earliestExpiration
 }
 
-// buildLVGByNodeMap builds a map of node name to LVG entries for the RSP.
-func buildLVGByNodeMap(
-	lvgs []snc.LVMVolumeGroup,
-	rsp *v1alpha1.ReplicatedStoragePool,
-) map[string][]v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup {
-	// Build RSP LVG reference lookup: lvgName -> thinPoolName (for LVMThin).
-	rspLVGRef := make(map[string]string, len(rsp.Spec.LVMVolumeGroups))
-	for _, ref := range rsp.Spec.LVMVolumeGroups {
-		rspLVGRef[ref.Name] = ref.ThinPoolName
-	}
-
-	result := make(map[string][]v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup)
-
-	for i := range lvgs {
-		lvg := &lvgs[i]
-
-		// Check if this LVG is referenced by the RSP.
-		thinPoolName, referenced := rspLVGRef[lvg.Name]
-		if !referenced {
-			continue
-		}
-
-		// Get node name from LVG spec.
-		nodeName := lvg.Spec.Local.NodeName
+// computeActualAgentReadiness computes agent readiness by node from agent pods.
+// Returns a map of nodeName -> isReady. Nodes without agent pods are not included
+// in the map, which results in AgentReady=false when accessed via map lookup.
+func computeActualAgentReadiness(pods []corev1.Pod) map[string]bool {
+	result := make(map[string]bool)
+	for i := range pods {
+		pod := &pods[i]
+		nodeName := pod.Spec.NodeName
 		if nodeName == "" {
 			continue
 		}
-
-		// Check if LVG is unschedulable.
-		_, unschedulable := lvg.Annotations[v1alpha1.LVMVolumeGroupUnschedulableAnnotationKey]
-
-		// Determine readiness of the LVG (and thin pool if applicable).
-		ready := isLVGReady(lvg, thinPoolName)
-
-		entry := v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
-			Name:          lvg.Name,
-			ThinPoolName:  thinPoolName,
-			Unschedulable: unschedulable,
-			Ready:         ready,
-		}
-
-		result[nodeName] = append(result[nodeName], entry)
+		result[nodeName] = isPodReady(pod)
 	}
-
-	// Sort LVGs by name for deterministic output.
-	for nodeName := range result {
-		sort.Slice(result[nodeName], func(i, j int) bool {
-			return result[nodeName][i].Name < result[nodeName][j].Name
-		})
-	}
-
 	return result
 }
+
+// --- Pure helpers ---
 
 // isLVGReady checks if an LVMVolumeGroup is ready.
 // For LVM (no thin pool): checks if the LVG Ready condition is True.
@@ -344,49 +320,7 @@ func isNodeReadyOrWithinGrace(node *corev1.Node, gracePeriod time.Duration) (nod
 	return false, false, graceExpiresAt // Within grace period.
 }
 
-// =============================================================================
-// Apply helpers
-// =============================================================================
-
-// applyReadyCondTrue sets the Ready condition to True.
-// Returns true if the condition was changed.
-func applyReadyCondTrue(rsp *v1alpha1.ReplicatedStoragePool, reason, message string) bool {
-	return objutilv1.SetStatusCondition(rsp, metav1.Condition{
-		Type:    v1alpha1.ReplicatedStoragePoolCondReadyType,
-		Status:  metav1.ConditionTrue,
-		Reason:  reason,
-		Message: message,
-	})
-}
-
-// applyReadyCondFalse sets the Ready condition to False.
-// Returns true if the condition was changed.
-func applyReadyCondFalse(rsp *v1alpha1.ReplicatedStoragePool, reason, message string) bool {
-	return objutilv1.SetStatusCondition(rsp, metav1.Condition{
-		Type:    v1alpha1.ReplicatedStoragePoolCondReadyType,
-		Status:  metav1.ConditionFalse,
-		Reason:  reason,
-		Message: message,
-	})
-}
-
-// applyEligibleNodesAndIncrementRevisionIfChanged updates eligible nodes in RSP status
-// and increments revision if nodes changed. Returns true if changed.
-func applyEligibleNodesAndIncrementRevisionIfChanged(
-	rsp *v1alpha1.ReplicatedStoragePool,
-	eligibleNodes []v1alpha1.ReplicatedStoragePoolEligibleNode,
-) bool {
-	if areEligibleNodesEqual(rsp.Status.EligibleNodes, eligibleNodes) {
-		return false
-	}
-	rsp.Status.EligibleNodes = eligibleNodes
-	rsp.Status.EligibleNodesRevision++
-	return true
-}
-
-// =============================================================================
-// Comparison helpers
-// =============================================================================
+// --- Comparison helpers ---
 
 // areEligibleNodesEqual compares two eligible nodes slices for equality.
 func areEligibleNodesEqual(a, b []v1alpha1.ReplicatedStoragePoolEligibleNode) bool {
@@ -424,9 +358,45 @@ func areLVGsEqual(a, b []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGrou
 	return true
 }
 
-// =============================================================================
-// Validate helpers
-// =============================================================================
+// --- Apply helpers ---
+
+// applyReadyCondTrue sets the Ready condition to True.
+// Returns true if the condition was changed.
+func applyReadyCondTrue(rsp *v1alpha1.ReplicatedStoragePool, reason, message string) bool {
+	return objutilv1.SetStatusCondition(rsp, metav1.Condition{
+		Type:    v1alpha1.ReplicatedStoragePoolCondReadyType,
+		Status:  metav1.ConditionTrue,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// applyReadyCondFalse sets the Ready condition to False.
+// Returns true if the condition was changed.
+func applyReadyCondFalse(rsp *v1alpha1.ReplicatedStoragePool, reason, message string) bool {
+	return objutilv1.SetStatusCondition(rsp, metav1.Condition{
+		Type:    v1alpha1.ReplicatedStoragePoolCondReadyType,
+		Status:  metav1.ConditionFalse,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// applyEligibleNodesAndIncrementRevisionIfChanged updates eligible nodes in RSP status
+// and increments revision if nodes changed. Returns true if changed.
+func applyEligibleNodesAndIncrementRevisionIfChanged(
+	rsp *v1alpha1.ReplicatedStoragePool,
+	eligibleNodes []v1alpha1.ReplicatedStoragePoolEligibleNode,
+) bool {
+	if areEligibleNodesEqual(rsp.Status.EligibleNodes, eligibleNodes) {
+		return false
+	}
+	rsp.Status.EligibleNodes = eligibleNodes
+	rsp.Status.EligibleNodesRevision++
+	return true
+}
+
+// --- Validate helpers ---
 
 // validateRSPAndLVGs validates that RSP and LVGs are correctly configured.
 // It checks:
@@ -468,9 +438,69 @@ func validateRSPAndLVGs(rsp *v1alpha1.ReplicatedStoragePool, lvgs []snc.LVMVolum
 	return nil
 }
 
+// --- Construction helpers ---
+
+// buildLVGByNodeMap builds a map of node name to LVG entries for the RSP.
+// Only LVGs that are referenced in rsp.Spec.LVMVolumeGroups are included.
+// LVGs are sorted by name per node for deterministic output.
+func buildLVGByNodeMap(
+	lvgs []snc.LVMVolumeGroup,
+	rsp *v1alpha1.ReplicatedStoragePool,
+) map[string][]v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup {
+	// Build RSP LVG reference lookup: lvgName -> thinPoolName (for LVMThin).
+	rspLVGRef := make(map[string]string, len(rsp.Spec.LVMVolumeGroups))
+	for _, ref := range rsp.Spec.LVMVolumeGroups {
+		rspLVGRef[ref.Name] = ref.ThinPoolName
+	}
+
+	result := make(map[string][]v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup)
+
+	for i := range lvgs {
+		lvg := &lvgs[i]
+
+		// Check if this LVG is referenced by the RSP.
+		thinPoolName, referenced := rspLVGRef[lvg.Name]
+		if !referenced {
+			continue
+		}
+
+		// Get node name from LVG spec.
+		nodeName := lvg.Spec.Local.NodeName
+		if nodeName == "" {
+			continue
+		}
+
+		// Check if LVG is unschedulable.
+		_, unschedulable := lvg.Annotations[v1alpha1.LVMVolumeGroupUnschedulableAnnotationKey]
+
+		// Determine readiness of the LVG (and thin pool if applicable).
+		ready := isLVGReady(lvg, thinPoolName)
+
+		entry := v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+			Name:          lvg.Name,
+			ThinPoolName:  thinPoolName,
+			Unschedulable: unschedulable,
+			Ready:         ready,
+		}
+
+		result[nodeName] = append(result[nodeName], entry)
+	}
+
+	// Sort LVGs by name for deterministic output.
+	for nodeName := range result {
+		sort.Slice(result[nodeName], func(i, j int) bool {
+			return result[nodeName][i].Name < result[nodeName][j].Name
+		})
+	}
+
+	return result
+}
+
 // =============================================================================
-// Single-call I/O helper categories
+// Single-call I/O helpers
 // =============================================================================
+
+// --- RSP ---
 
 // getRSP fetches an RSP by name.
 func (r *Reconciler) getRSP(ctx context.Context, name string) (*v1alpha1.ReplicatedStoragePool, error) {
@@ -480,6 +510,24 @@ func (r *Reconciler) getRSP(ctx context.Context, name string) (*v1alpha1.Replica
 	}
 	return &rsp, nil
 }
+
+// patchRSPStatus patches the RSP status subresource.
+func (r *Reconciler) patchRSPStatus(
+	ctx context.Context,
+	rsp *v1alpha1.ReplicatedStoragePool,
+	base *v1alpha1.ReplicatedStoragePool,
+	optimisticLock bool,
+) error {
+	var patch client.Patch
+	if optimisticLock {
+		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
+	} else {
+		patch = client.MergeFrom(base)
+	}
+	return r.cl.Status().Patch(ctx, rsp, patch)
+}
+
+// --- LVG ---
 
 // getSortedLVGsByRSP fetches LVGs referenced by the given RSP, sorted by name.
 // Returns:
@@ -519,7 +567,10 @@ func (r *Reconciler) getSortedLVGsByRSP(ctx context.Context, rsp *v1alpha1.Repli
 	return lvgs, errors.Join(notFoundErrs...), nil
 }
 
-// getSortedNodes fetches all nodes sorted by name.
+// --- Node ---
+
+// getSortedNodes fetches nodes matching the given selector, sorted by name.
+// The selector should include NodeLabelSelector and Zones requirements from RSP.
 func (r *Reconciler) getSortedNodes(ctx context.Context, selector labels.Selector) ([]corev1.Node, error) {
 	var list corev1.NodeList
 	if err := r.cl.List(ctx, &list, client.MatchingLabelsSelector{Selector: selector}); err != nil {
@@ -531,21 +582,7 @@ func (r *Reconciler) getSortedNodes(ctx context.Context, selector labels.Selecto
 	return list.Items, nil
 }
 
-// patchRSPStatus patches the RSP status subresource.
-func (r *Reconciler) patchRSPStatus(
-	ctx context.Context,
-	rsp *v1alpha1.ReplicatedStoragePool,
-	base *v1alpha1.ReplicatedStoragePool,
-	optimisticLock bool,
-) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Status().Patch(ctx, rsp, patch)
-}
+// --- Pod ---
 
 // getAgentPods fetches all agent pods in the controller namespace.
 func (r *Reconciler) getAgentPods(ctx context.Context) ([]corev1.Pod, error) {
@@ -557,18 +594,4 @@ func (r *Reconciler) getAgentPods(ctx context.Context) ([]corev1.Pod, error) {
 		return nil, err
 	}
 	return list.Items, nil
-}
-
-// buildAgentReadyByNode builds a map of node name to agent readiness status.
-func buildAgentReadyByNode(pods []corev1.Pod) map[string]bool {
-	result := make(map[string]bool)
-	for i := range pods {
-		pod := &pods[i]
-		nodeName := pod.Spec.NodeName
-		if nodeName == "" {
-			continue
-		}
-		result[nodeName] = isPodReady(pod)
-	}
-	return result
 }

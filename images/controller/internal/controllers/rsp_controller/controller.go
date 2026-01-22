@@ -37,6 +37,8 @@ import (
 
 const RSPControllerName = "rsp-controller"
 
+// BuildController registers the RSP controller with the manager.
+// It sets up watches on ReplicatedStoragePool, Node, LVMVolumeGroup, and agent Pod resources.
 func BuildController(mgr manager.Manager, podNamespace string) error {
 	cl := mgr.GetClient()
 

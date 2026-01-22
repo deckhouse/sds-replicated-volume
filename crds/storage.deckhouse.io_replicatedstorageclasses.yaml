@@ -135,6 +135,7 @@ spec:
                   Always present with defaults.
                 properties:
                   notReadyGracePeriod:
+                    default: 10m
                     description: |-
                       NotReadyGracePeriod specifies how long to wait before removing
                       a not-ready node from the eligible nodes list.
@@ -395,6 +396,7 @@ spec:
                       policy.
                     properties:
                       notReadyGracePeriod:
+                        default: 10m
                         description: |-
                           NotReadyGracePeriod specifies how long to wait before removing
                           a not-ready node from the eligible nodes list.

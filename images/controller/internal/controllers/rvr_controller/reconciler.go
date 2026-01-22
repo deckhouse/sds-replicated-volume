@@ -41,6 +41,9 @@ func NewReconciler(cl client.Client, log logr.Logger) *Reconciler {
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	_ = r.log.WithValues("req", req)
 
+	_ = ctx
+	_ = req
+
 	// TODO: implement reconciliation logic
 
 	return reconcile.Result{}, nil
