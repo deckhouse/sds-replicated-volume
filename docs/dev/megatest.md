@@ -1,4 +1,5 @@
-# Каждая горутина пишет в лог:
+# Базовые горутины
+## Каждая горутина пишет в лог:
 - при начале действия:
   - имя rv
     - название действия и параметры
@@ -12,8 +13,8 @@
     - ожидаемое состояние
     - наблюдаемое состояние
 
-# Пачка горутин
-## volume-checker(rv)
+## Горутины
+### volume-checker(rv)
 Собирает статистику по переходам состояния rv ориентируясь на condition.
   - следит (Watch вместо Get каждые N секунд), что с rv все ок.
     - condition остается RV.ioReady==True
@@ -21,7 +22,8 @@
   - при переключении состояния - писать в лог с Reason и Message если Condition status меняется. Записать в структуру rvName, кол-во переходов для каждого из condition, в начале condition должны быть в true. Написать  в лог condition rvr == false.
     Таким образом четное кол-во переходов указывает на то, что rv поддерживает нужное состояние несмотря на попытки ее развалить, а нечетное, что попытки удались. В идеале нужно иметь счетчики переходов по нулям.
   - когда получает сигнал окончания — выходит
-## volume-attacher (rv, period_min, period_max)
+
+### volume-attacher (rv, period_min, period_max)
 Эмулирует работу CSI, публикуя RV на разных нодах через ресурсы **RVA** (`ReplicatedVolumeAttachment`).
   - в цикле:
     - ждет рандом
@@ -74,7 +76,8 @@
       - удаляет все RVA для данного RV
       - дожидается успеха 
     - выходит
-## volume-resizer(rv, period_min, period_max, step_min, step_max) - ОТЛОЖЕНО!
+
+### volume-resizer(rv, period_min, period_max, step_min, step_max) - ОТЛОЖЕНО!
 Меняет размеры rv.
 TODO: не увеличивать размер > maxRvSize
   - в цикле 
@@ -84,7 +87,8 @@ TODO: не увеличивать размер > maxRvSize
       - дожидается успеха
   - когда получает сигнал окончания
     - выходит
-## volume-replica-destroyer (rv, period_min, period_max)
+
+### volume-replica-destroyer (rv, period_min, period_max)
 Удаляет случайные rvr у rv.
   - в цикле пока не выйдем, с случайным интервалом из (period_min+max)
     - ждет рандом(в интервале выше)
@@ -95,7 +99,8 @@ TODO: не увеличивать размер > maxRvSize
       - пишет в лог , который уже структурирован, действие
   - когда получает сигнал окончания
     - выходит
-## volume-replica-creator (rv, period_min, period_max)
+
+### volume-replica-creator (rv, period_min, period_max)
 Создает случайные rvr у rv.
   - в цикле пока не выйдем, с случайным интервалом из (period_min+max)
     - ждет рандом (в интервале выше)
@@ -108,7 +113,8 @@ TODO: не увеличивать размер > maxRvSize
       - пишет в лог, который уже структурирован, тип и действие
   - когда получает сигнал окончания
     - выходит
-## volume-main (rv, sc, lifetime_period)
+
+### volume-main (rv, sc, lifetime_period)
   - рандомом выбирает, сколько нод сразу в паблиш (это первоначальное состояние кластера при запуске megatest, далее поддерживать такое не надо)
     - 0 — 30%
     - 1 — 60%
@@ -136,7 +142,8 @@ TODO: не увеличивать размер > maxRvSize
       - volume-replica-destroyer
       - volume-replica-creator
     - выходит
-## pod-destroyer (ns, label_selector, pod_min, pod_max, period_min, period_max)
+
+### pod-destroyer (ns, label_selector, pod_min, pod_max, period_min, period_max)
 Удаляет поды control-plane по label_selector
   - в цикле:
     - ждет рандом rand(period_min, period_max)
@@ -146,7 +153,8 @@ TODO: не увеличивать размер > maxRvSize
     - не дожидается удаления
   - когда ей посылают сигнал окончания
     - выходит
-## multivolume(list sc, max_vol, step_min, step_max, step_period_min, step_period_max, vol_period_min, vol_period_max)
+
+### multivolume(list sc, max_vol, step_min, step_max, step_period_min, step_period_max, vol_period_min, vol_period_max)
 Оркестратор горутин (он же main). 
   - запускает:
     - pod-destroyer(agent, 1, 2, 30, 60)
@@ -166,40 +174,41 @@ TODO: не увеличивать размер > maxRvSize
     - выходит
 
 # Chaos Engineering горутины
-
-Для работы chaos-горутин требуется:
-- второй kubeconfig для parent-кластера DVP (--parent-kubeconfig)
-- namespace где находятся VM (--vm-namespace)
-- Cilium с включённым Host Firewall в child-кластере (для network blocking)
-
-## Технологии и уровни применения правил
-
-Используются две технологии, работающие на разных уровнях сетевого стека:
-
-| Технология | Уровень | Что делает | Используется для |
-|------------|---------|------------|------------------|
-| **Cilium eBPF** | XDP/tc-bpf hook | ALLOW / DROP пакетов | block (DRBD ports, all network, partition) |
-| **tc netem** | qdisc (queue discipline) | delay, loss, reorder | degrade (latency, packet loss) |
-
-```
-Пакет (egress): App → Socket → Routing → [tc netem] → [Cilium eBPF] → NIC
-                                              ↓              ↓
-                                         delay/loss      allow/drop
-```
-
-Технологии не конфликтуют: tc netem модифицирует timing пакетов, Cilium решает пропустить или нет.
+Для работы chaos-горутин требуется чтобы кластер для тестирования был вложенным кластером развернутым в DVP и следовательно появляются требования:
+- второй kubeconfig для родительского кластера (--parent-kubeconfig)
+- namespace где находятся VM тестируемого кластера (--vm-namespace)
 
 При старте:
-- очищает stale ресурсы от предыдущих запусков (Cilium policies, netem Jobs, VMOperations)
+- очищает stale ресурсы от предыдущих запусков (NetworkPolicy, VirtualMachineOperation и т.д.)
 
 При завершении:
-- удаляет все созданные CiliumClusterwideNetworkPolicy
-- удаляет все созданные netem Jobs и запускает cleanup tc правил
+- удаляет все созданные NetworkPolicy
 - удаляет все созданные VirtualMachineOperation
 
-## chaos-drbd-blocker (period_min, period_max, incident_min, incident_max)
-Блокирует DRBD порты между случайными парами нод через **CiliumClusterwideNetworkPolicy**.
-  - в цикле:
+## Горутины
+### chaos-network-blocker (period_min, period_max, incident_min, incident_max)
+Блокирует всю сеть между случайными парами нод вложенного кластера через **NetworkPolicy** в родительском кластере,
+при этом оставляя трафик между мастерами родительского и вложенного кластеров.
+  - в цикле:!!!!!!
+    - ждет рандом(period_min, period_max)
+    - получает список VM из parent-кластера
+    - случайным образом выбирает пару нод (nodeA, nodeB)
+    - создаёт **CiliumClusterwideNetworkPolicy** с:
+      - nodeSelector на nodeA
+      - ingressDeny/egressDeny для IP nodeB (все порты)
+    - Note: блокировка односторонняя (nodeA → nodeB). Этого достаточно для DRBD тестов.
+      Для полной изоляции (bidirectional) используйте chaos-network-partitioner.
+    - ждет рандом(incident_min, incident_max)
+    - удаляет созданную policy
+    - пишет в лог действия с именами нод
+  - когда получает сигнал окончания
+    - удаляет активную policy если есть
+    - выходит
+
+### chaos-drbd-blocker (period_min, period_max, incident_min, incident_max)
+Блокирует DRBD порты между случайными парами нод вложенного кластера через **NetworkPolicy** в родительском кластере,
+при этом оставляя трафик между мастерами родительского и вложенного кластеров.
+  - в цикле: !!!!!!!
     - ждет рандом(period_min, period_max)
     - получает список VM из parent-кластера (namespace --vm-namespace)
     - случайным образом выбирает пару нод (nodeA, nodeB)
@@ -216,27 +225,31 @@ TODO: не увеличивать размер > maxRvSize
     - удаляет активную policy если есть
     - выходит
 
-## chaos-network-blocker (period_min, period_max, incident_min, incident_max)
-Блокирует всю сеть между случайными парами нод через **CiliumClusterwideNetworkPolicy**.
-  - в цикле:
+### chaos-network-partitioner (period_min, period_max, incident_min, incident_max, group_size)
+Создаёт split-brain: разделяет ноды вложенного кластера на группы и блокирует всю сеть между ними через **NetworkPolicy** в родительском кластере,
+при этом оставляя трафик между мастерами родительского и вложенного кластеров.
+  - в цикле: !!!!!!!!
     - ждет рандом(period_min, period_max)
     - получает список VM из parent-кластера
-    - случайным образом выбирает пару нод (nodeA, nodeB)
-    - создаёт **CiliumClusterwideNetworkPolicy** с:
-      - nodeSelector на nodeA
-      - ingressDeny/egressDeny для IP nodeB (все порты)
-    - Note: блокировка односторонняя (nodeA → nodeB). Этого достаточно для DRBD тестов.
-      Для полной изоляции (bidirectional) используйте chaos-network-partitioner.
+    - разделяет ноды на две группы:
+      - если group_size > 0: группа A = group_size нод, группа B = остальные
+      - если group_size = 0: делит пополам
+    - для каждой пары (nodeA из группы A, nodeB из группы B):
+      - создаёт **CiliumClusterwideNetworkPolicy** с блокировкой всей сети
     - ждет рандом(incident_min, incident_max)
-    - удаляет созданную policy
-    - пишет в лог действия с именами нод
+    - удаляет все созданные policies
+    - пишет в лог состав групп и количество policies
   - когда получает сигнал окончания
-    - удаляет активную policy если есть
+    - удаляет все активные policies
     - выходит
 
-## chaos-network-degrader (period_min, period_max, incident_min, incident_max, delay_ms, loss_percent, rate_kbit)
-Деградирует сеть (latency + packet loss + bandwidth limit) между парами нод через **tc netem** Jobs.
-  - в цикле:
+### chaos-network-degrader (period_min, period_max, incident_min, incident_max, delay_ms, loss_percent, rate_kbit)
+Деградирует сеть (latency + packet loss + bandwidth limit) между парами нод вложенного кластера.
+Решили отказаться от tc (сложно подружить с cilium) и использовать во вложенном кластере:
+  - iptables для потери пакетов
+  - iperf3 для увеличения latency + нагрузка на сеть
+  - bandwidth limit не делаем, т.к. вероятность, что сеть будет слишком узкая крайне мала. Скорее сеть будет нагружена, что покрывается iperf3.
+  - в цикле:!!!!
     - ждет рандом(period_min, period_max)
     - получает список VM из parent-кластера
     - случайным образом выбирает пару нод (nodeA, nodeB)
@@ -259,8 +272,8 @@ TODO: не увеличивать размер > maxRvSize
     - создаёт cleanup Jobs для всех затронутых нод
     - выходит
 
-## chaos-vm-reboter (period_min, period_max)
-Выполняет hard reboot случайных VM через **VirtualMachineOperation** (DVP API).
+### chaos-vm-reboter (period_min, period_max)
+Выполняет hard reboot случайных VM через **VirtualMachineOperation** в родительском кластере.
   - в цикле:
     - ждет рандом(period_min, period_max)
     - получает список VM из parent-кластера
@@ -273,44 +286,27 @@ TODO: не увеличивать размер > maxRvSize
   - когда получает сигнал окончания
     - выходит
 
-## chaos-network-partitioner (period_min, period_max, incident_min, incident_max, group_size)
-Создаёт split-brain: разделяет ноды на группы и блокирует сеть между ними.
-  - в цикле:
-    - ждет рандом(period_min, period_max)
-    - получает список VM из parent-кластера
-    - разделяет ноды на две группы:
-      - если group_size > 0: группа A = group_size нод, группа B = остальные
-      - если group_size = 0: делит пополам
-    - для каждой пары (nodeA из группы A, nodeB из группы B):
-      - создаёт **CiliumClusterwideNetworkPolicy** с блокировкой всей сети
-    - ждет рандом(incident_min, incident_max)
-    - удаляет все созданные policies
-    - пишет в лог состав групп и количество policies
-  - когда получает сигнал окончания
-    - удаляет все активные policies
-    - выходит
-
-# CLI флаги для chaos
+## CLI флаги для chaos
 ```
---parent-kubeconfig         # путь к kubeconfig parent-кластера DVP (обязателен для chaos)
---vm-namespace              # namespace с VM в parent-кластере (обязателен для chaos)
+--parent-kubeconfig              # путь к kubeconfig parent-кластера DVP (обязателен для chaos)
+--vm-namespace                   # namespace с VM в parent-кластере (обязателен для chaos)
 
---enable-chaos-drbd-block   # включить chaos-drbd-blocker
---enable-chaos-network-block # включить chaos-network-blocker
---enable-chaos-network-degrade # включить chaos-network-degrader
---enable-chaos-vm-reboot    # включить chaos-vm-reboter
+--enable-chaos-drbd-block        # включить chaos-drbd-blocker
+--enable-chaos-network-block     # включить chaos-network-blocker
+--enable-chaos-network-degrade   # включить chaos-network-degrader
+--enable-chaos-vm-reboot         # включить chaos-vm-reboter
 --enable-chaos-network-partition # включить chaos-network-partitioner
 
---chaos-period-min          # мин. интервал между инцидентами (default: 60s)
---chaos-period-max          # макс. интервал между инцидентами (default: 300s)
---chaos-incident-min        # мин. длительность инцидента (default: 10s)
---chaos-incident-max        # макс. длительность инцидента (default: 60s)
+--chaos-period-min               # мин. интервал между инцидентами (default: 60s)
+--chaos-period-max               # макс. интервал между инцидентами (default: 300s)
+--chaos-incident-min             # мин. длительность инцидента (default: 10s)
+--chaos-incident-max             # макс. длительность инцидента (default: 60s)
 
---chaos-delay-ms-min        # мин. задержка сети в мс (default: 30)
---chaos-delay-ms-max        # макс. задержка сети в мс (default: 60)
---chaos-loss-percent-min    # мин. потеря пакетов % (default: 1.0)
---chaos-loss-percent-max    # макс. потеря пакетов % (default: 10.0)
---chaos-rate-mbit-min       # мин. ограничение bandwidth в mbit/s (default: 5)
---chaos-rate-mbit-max       # макс. ограничение bandwidth в mbit/s (default: 50)
---chaos-partition-group-size # размер группы для partition (default: 0 = пополам)
+--chaos-delay-ms-min             # мин. задержка сети в мс (default: 30)
+--chaos-delay-ms-max             # макс. задержка сети в мс (default: 60)
+--chaos-loss-percent-min         # мин. потеря пакетов % (default: 1.0)
+--chaos-loss-percent-max         # макс. потеря пакетов % (default: 10.0)
+--chaos-rate-mbit-min            # мин. ограничение bandwidth в mbit/s (default: 5)
+--chaos-rate-mbit-max            # макс. ограничение bandwidth в mbit/s (default: 50)
+--chaos-partition-group-size     # размер группы для partition (default: 0 = пополам)
 ```
