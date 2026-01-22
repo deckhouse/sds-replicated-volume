@@ -142,7 +142,7 @@ type ReplicatedStorageClassSpec struct {
 	EligibleNodesConflictResolutionStrategy ReplicatedStorageClassEligibleNodesConflictResolutionStrategy `json:"eligibleNodesConflictResolutionStrategy"`
 	// EligibleNodesPolicy defines policies for managing eligible nodes.
 	// Always present with defaults.
-	EligibleNodesPolicy ReplicatedStorageClassEligibleNodesPolicy `json:"eligibleNodesPolicy"`
+	EligibleNodesPolicy ReplicatedStoragePoolEligibleNodesPolicy `json:"eligibleNodesPolicy"`
 }
 
 // ReplicatedStorageClassReclaimPolicy enumerates possible values for ReplicatedStorageClass spec.reclaimPolicy field.
@@ -291,15 +291,6 @@ type ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair struct {
 	MaxParallel int32 `json:"maxParallel"`
 }
 
-// ReplicatedStorageClassEligibleNodesPolicy defines policies for managing eligible nodes.
-// +kubebuilder:object:generate=true
-type ReplicatedStorageClassEligibleNodesPolicy struct {
-	// NotReadyGracePeriod specifies how long to wait before removing
-	// a not-ready node from the eligible nodes list.
-	// +kubebuilder:validation:Required
-	NotReadyGracePeriod metav1.Duration `json:"notReadyGracePeriod"`
-}
-
 // Displays current information about the Storage Class.
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassStatus struct {
@@ -376,7 +367,7 @@ type ReplicatedStorageClassConfiguration struct {
 	// SystemNetworkNames is the resolved list of system network names.
 	SystemNetworkNames []string `json:"systemNetworkNames"`
 	// EligibleNodesPolicy is the resolved eligible nodes policy.
-	EligibleNodesPolicy ReplicatedStorageClassEligibleNodesPolicy `json:"eligibleNodesPolicy"`
+	EligibleNodesPolicy ReplicatedStoragePoolEligibleNodesPolicy `json:"eligibleNodesPolicy"`
 	// NodeLabelSelector filters nodes eligible for DRBD participation.
 	// +optional
 	NodeLabelSelector *metav1.LabelSelector `json:"nodeLabelSelector,omitempty"`

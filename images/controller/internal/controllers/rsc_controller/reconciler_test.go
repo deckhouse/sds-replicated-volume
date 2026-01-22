@@ -1409,7 +1409,7 @@ var _ = Describe("makeConfiguration", func() {
 				VolumeAccess:       v1alpha1.VolumeAccessLocal,
 				Zones:              []string{"zone-c", "zone-a", "zone-b"},
 				SystemNetworkNames: []string{"net-b", "net-a"},
-				EligibleNodesPolicy: v1alpha1.ReplicatedStorageClassEligibleNodesPolicy{
+				EligibleNodesPolicy: v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
 					NotReadyGracePeriod: metav1.Duration{Duration: 5 * time.Minute},
 				},
 			},
