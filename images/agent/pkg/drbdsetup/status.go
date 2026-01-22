@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 )
 
 type StatusResult []Resource
@@ -104,11 +103,11 @@ func ExecuteStatus(ctx context.Context, resourceName string) (StatusResult, erro
 	if resourceName == "" {
 		resourceName = "all"
 	}
-	cmd := exec.CommandContext(ctx, Command, StatusArgs(resourceName)...)
+	cmd := ExecCommandContext(ctx, Command, StatusArgs(resourceName)...)
 
 	jsonBytes, err := cmd.CombinedOutput()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 10 {
+		if errToExitCode(err) == 10 {
 			// Exit code 10 means resource not found
 			return StatusResult{}, nil
 		}

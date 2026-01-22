@@ -8,5 +8,6 @@ func applyReportState(
 	existingErr error,
 	incompleteActions []Action,
 ) bool {
+	// TODO Observed generation bumped here
 	return false
 }

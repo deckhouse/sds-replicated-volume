@@ -9,10 +9,34 @@ type IntendedState interface {
 	IsZero() bool
 
 	IsUpAndNotInCleanup() bool
+
+	IPv4BySystemNetworkNames() map[string]string
+
+	Peers() []IntendedPeer
+}
+
+type IntendedPeer interface {
+	NodeId() uint
+	Paths() []IntendedPath
+}
+
+type IntendedPath interface {
+	IPv4() string
+	Port() uint
 }
 
 type intendedState struct {
 	drbdr *v1alpha1.DRBDResource
+}
+
+// IPv4BySystemNetworkNames implements IntendedState.
+func (iState *intendedState) IPv4BySystemNetworkNames() map[string]string {
+	panic("unimplemented")
+}
+
+// Peers implements IntendedState.
+func (iState *intendedState) Peers() []IntendedPeer {
+	panic("unimplemented")
 }
 
 func (iState *intendedState) IsZero() bool {
@@ -33,5 +57,6 @@ var _ IntendedState = (*intendedState)(nil)
 
 func getIntendedState(drbdr *v1alpha1.DRBDResource) (*intendedState, error) {
 	// TODO: add fields needed for [Intended] getters and materialize them here
+
 	return &intendedState{drbdr}, nil
 }

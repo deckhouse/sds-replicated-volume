@@ -4,17 +4,15 @@ type TargetStateActions []Action
 
 func computeTargetStateActions(iState IntendedState, aState ActualState) (res TargetStateActions) {
 	// actions, which don't need neither [IntendedState], nor [ActualState]
-	res = append(res, BumpObservedGenerationForConfiguredAction{})
+
+	// (none)
 
 	if iState.IsZero() {
 		return
 	}
 
-	// TODO: adding finalizer BEFORE drbd actions
-
-	// TODO: removing finalizer AFTER drbd actions
-
 	// actions, which don't need [ActualState]
+
 	if iState.IsUpAndNotInCleanup() {
 		res = append(res, AddAgentFinalizerAction{})
 	} else {
@@ -23,6 +21,9 @@ func computeTargetStateActions(iState IntendedState, aState ActualState) (res Ta
 			res = append(res, RemoveAgentFinalizerAction{})
 		}()
 	}
+
+	res = append(res, ConfigureIPAddressAction{IPv4BySystemNetworkNames: iState.IPv4BySystemNetworkNames()})
+	res = append(res, AllocatePortsAction{})
 
 	if aState.IsZero() {
 		return

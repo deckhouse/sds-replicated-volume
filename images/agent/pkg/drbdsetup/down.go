@@ -19,12 +19,11 @@ package drbdsetup
 import (
 	"context"
 	"fmt"
-	"os/exec"
 )
 
 func ExecuteDown(ctx context.Context, resource string) error {
 	args := DownArgs(resource)
-	cmd := exec.CommandContext(ctx, Command, args...)
+	cmd := ExecCommandContext(ctx, Command, args...)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {

@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 )
 
 // ShowArgs returns the arguments for drbdsetup show command.
@@ -153,7 +152,7 @@ type ShowConnectionVolumeDisk struct {
 
 // ExecuteShow executes drbdsetup show --json --show-defaults and parses the output.
 func ExecuteShow(ctx context.Context, resourceName string) (*ShowResource, error) {
-	cmd := exec.CommandContext(ctx, Command, ShowArgs(resourceName)...)
+	cmd := ExecCommandContext(ctx, Command, ShowArgs(resourceName)...)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {

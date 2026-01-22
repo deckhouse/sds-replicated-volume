@@ -27,6 +27,7 @@ import (
 
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
 type Reconciler struct {
@@ -52,12 +53,17 @@ func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req reconcile.Request,
 ) (reconcile.Result, error) {
+	rf := flow.BeginRootReconcile(ctx)
+
 	log := r.log.With("name", req.Name)
 	log.Debug("Reconciling DRBDResource")
 
-	dr, ok, err := r.getCurrentNodeDRBDResource(ctx, log, req)
-	if !ok || err != nil {
-		return reconcile.Result{}, err
+	dr, ok, err := r.getCurrentNodeDRBDResource(rf.Ctx(), log, req)
+	if err != nil {
+		return rf.Fail(err).ToCtrl()
+	}
+	if !ok {
+		return rf.Done().ToCtrl()
 	}
 
 	var (
@@ -71,7 +77,7 @@ func (r *Reconciler) Reconcile(
 
 	iState, iErr = getIntendedState(dr)
 
-	aState, aErr = getActualState(ctx, drbdResName)
+	aState, aErr = getActualState(rf.Ctx(), drbdResName)
 
 	// iState/aState will have `.IsZero() == true` in case of errors
 	tgtStateActions = computeTargetStateActions(iState, aState)
@@ -87,20 +93,29 @@ func (r *Reconciler) Reconcile(
 			patchStatusNeeded = ta.ApplyStatusPatch(dr) || patchStatusNeeded
 		case ExecuteDRBDAction:
 			// flush pending K8S patches before executing DRBD commands
+			var resetOriginalNeeded bool
 			if patchNeeded {
-				if prepatchErr := r.cl.Patch(ctx, dr, original); prepatchErr != nil {
-					// TODO
+				if prepatchErr := r.cl.Patch(rf.Ctx(), dr, original); prepatchErr != nil {
+					return rf.Failf(prepatchErr, "prepatching").ToCtrl()
 				}
 				patchNeeded = false
+				resetOriginalNeeded = true
 			}
 
 			if patchStatusNeeded {
-				//
+				if prepatchErr := r.cl.Status().Patch(rf.Ctx(), dr, original); prepatchErr != nil {
+					return rf.Failf(prepatchErr, "prepatching status").ToCtrl()
+				}
 				patchStatusNeeded = false
+				resetOriginalNeeded = true
+			}
+
+			if resetOriginalNeeded {
+				original = client.MergeFrom(dr)
 			}
 
 			// execute
-			drbdErr = ta.Execute(ctx)
+			drbdErr = ta.Execute(rf.Ctx())
 			if drbdErr != nil {
 				// leave failed along with non-executed actions in tgtState
 				break
@@ -112,11 +127,11 @@ func (r *Reconciler) Reconcile(
 	}
 
 	if refreshActualNeeded {
-		aState, aErr2 = getActualState(ctx, drbdResName)
+		aState, aErr2 = getActualState(rf.Ctx(), drbdResName)
 	}
 
 	if patchNeeded {
-		patchErr = errors.Join(patchErr, r.cl.Patch(ctx, dr, original))
+		patchErr = errors.Join(patchErr, r.cl.Patch(rf.Ctx(), dr, original))
 	}
 
 	err = errors.Join(iErr, aErr, aErr2, drbdErr, patchErr)
@@ -129,11 +144,14 @@ func (r *Reconciler) Reconcile(
 	) || patchStatusNeeded
 
 	if patchStatusNeeded {
-		patchErr = errors.Join(patchErr, r.cl.Status().Patch(ctx, dr, original))
+		patchErr = errors.Join(patchErr, r.cl.Status().Patch(rf.Ctx(), dr, original))
 		err = errors.Join(err, patchErr)
 	}
 
-	return reconcile.Result{}, err
+	if err != nil {
+		return rf.Fail(err).ToCtrl()
+	}
+	return rf.Done().ToCtrl()
 }
 
 func (r *Reconciler) getCurrentNodeDRBDResource(

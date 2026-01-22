@@ -30,13 +30,15 @@ type ExecuteDRBDAction interface {
 
 var _ PatchAction = AddAgentFinalizerAction{}
 var _ PatchAction = RemoveAgentFinalizerAction{}
-var _ PatchStatusAction = BumpObservedGenerationForConfiguredAction{}
+var _ PatchStatusAction = ConfigureIPAddressAction{}
+var _ PatchStatusAction = AllocatePortsAction{}
 
 //
 
-func (f AddAgentFinalizerAction) _action()                   {}
-func (f RemoveAgentFinalizerAction) _action()                {}
-func (a BumpObservedGenerationForConfiguredAction) _action() {}
+func (f AddAgentFinalizerAction) _action()    {}
+func (f RemoveAgentFinalizerAction) _action() {}
+func (f ConfigureIPAddressAction) _action()   {}
+func (f AllocatePortsAction) _action()        {}
 
 //
 
@@ -56,10 +58,28 @@ func (RemoveAgentFinalizerAction) ApplyPatch(drbdr *v1alpha1.DRBDResource) bool 
 
 //
 
-type BumpObservedGenerationForConfiguredAction struct{}
+type ConfigureIPAddressAction struct {
+	IPv4BySystemNetworkNames map[string]string
+}
 
-func (BumpObservedGenerationForConfiguredAction) ApplyStatusPatch(drbdr *v1alpha1.DRBDResource) (changed bool) {
-	// only bump ObservedGeneration for type=Configured
-	cond := obju.GetStatusCondition(drbdr, v1alpha1.DRBDResourceCondConfiguredType)
-	return obju.SetStatusCondition(drbdr, *cond)
+// ApplyStatusPatch implements PatchStatusAction.
+func (a ConfigureIPAddressAction) ApplyStatusPatch(drbdr *v1alpha1.DRBDResource) bool {
+	// allocate missing
+	for _, nw := range a.SystemNetworks {
+
+		for _, existingAddr := range drbdr.Status.Addresses {
+			if existingAddr.SystemNetworkName == nw {
+				// existingAddr.Address.IPv4
+				// existingAddr.Address.Port
+			}
+		}
+
+	}
+}
+
+type AllocatePortsAction struct {
+}
+
+func (f AllocatePortsAction) ApplyStatusPatch(drbdr *v1alpha1.DRBDResource) bool {
+	panic("unimplemented")
 }
