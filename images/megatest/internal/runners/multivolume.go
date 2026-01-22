@@ -137,7 +137,9 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 				rvName := fmt.Sprintf("mgt-%s", uuid.New().String())
 
 				// Start volume-main
-				m.startVolumeMain(ctx, rvName, storageClass, volumeLifetime)
+				//m.startVolumeMain(ctx, rvName, storageClass, volumeLifetime)
+				// disable base goroutines
+				m.fakeStartVolumeMain(ctx, rvName, storageClass, volumeLifetime)
 			}
 		}
 
@@ -242,4 +244,18 @@ func (m *MultiVolume) startPodDestroyers(ctx context.Context) {
 	go func() {
 		_ = NewPodDestroyer(controllerCfg, m.client, podDestroyerControllerPodCountMinMax, podDestroyerControllerPeriodMinMax).Run(ctx)
 	}()
+}
+
+func (m *MultiVolume) fakeStartVolumeMain(ctx context.Context, rvName string, storageClass string, volumeLifetime time.Duration) {
+loop1:
+	for {
+		m.log.Info("--- base runners ---", "rvName", rvName, "storageClass", storageClass, "volumeLifetime", volumeLifetime)
+
+		select {
+		case <-ctx.Done():
+			m.log.Info("END --- base runners --- END")
+			break loop1
+		case <-time.After(5 * time.Second):
+		}
+	}
 }
