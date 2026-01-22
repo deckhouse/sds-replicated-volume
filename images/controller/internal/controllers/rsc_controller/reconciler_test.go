@@ -883,29 +883,11 @@ var _ = Describe("validateConfiguration", func() {
 })
 
 var _ = Describe("validateRSPAndLVGs", func() {
-	It("returns error when RSP phase is not Completed", func() {
-		rsp := &v1alpha1.ReplicatedStoragePool{
-			ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
-			Status: v1alpha1.ReplicatedStoragePoolStatus{
-				Phase: v1alpha1.RSPPhaseFailed,
-			},
-		}
-
-		err := validateRSPAndLVGs(rsp, nil)
-
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("not ready"))
-		Expect(err.Error()).To(ContainSubstring("Failed"))
-	})
-
-	It("returns nil when RSP is Completed and type is not LVMThin", func() {
+	It("returns nil when type is not LVMThin", func() {
 		rsp := &v1alpha1.ReplicatedStoragePool{
 			ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
 			Spec: v1alpha1.ReplicatedStoragePoolSpec{
 				Type: v1alpha1.RSPTypeLVM,
-			},
-			Status: v1alpha1.ReplicatedStoragePoolStatus{
-				Phase: v1alpha1.RSPPhaseCompleted,
 			},
 		}
 
@@ -922,9 +904,6 @@ var _ = Describe("validateRSPAndLVGs", func() {
 				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
 					{Name: "lvg-1", ThinPoolName: ""},
 				},
-			},
-			Status: v1alpha1.ReplicatedStoragePoolStatus{
-				Phase: v1alpha1.RSPPhaseCompleted,
 			},
 		}
 		lvgs := []snc.LVMVolumeGroup{
@@ -945,9 +924,6 @@ var _ = Describe("validateRSPAndLVGs", func() {
 				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
 					{Name: "lvg-1", ThinPoolName: "missing-pool"},
 				},
-			},
-			Status: v1alpha1.ReplicatedStoragePoolStatus{
-				Phase: v1alpha1.RSPPhaseCompleted,
 			},
 		}
 		lvgs := []snc.LVMVolumeGroup{
@@ -976,9 +952,6 @@ var _ = Describe("validateRSPAndLVGs", func() {
 					{Name: "lvg-1", ThinPoolName: "my-pool"},
 				},
 			},
-			Status: v1alpha1.ReplicatedStoragePoolStatus{
-				Phase: v1alpha1.RSPPhaseCompleted,
-			},
 		}
 		lvgs := []snc.LVMVolumeGroup{
 			{
@@ -1004,9 +977,6 @@ var _ = Describe("validateRSPAndLVGs", func() {
 				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
 					{Name: "missing-lvg", ThinPoolName: "my-pool"},
 				},
-			},
-			Status: v1alpha1.ReplicatedStoragePoolStatus{
-				Phase: v1alpha1.RSPPhaseCompleted,
 			},
 		}
 		lvgs := []snc.LVMVolumeGroup{} // Empty - missing LVG
@@ -1550,9 +1520,6 @@ var _ = Describe("Reconciler", func() {
 						{Name: "lvg-1"},
 					},
 				},
-				Status: v1alpha1.ReplicatedStoragePoolStatus{
-					Phase: v1alpha1.RSPPhaseCompleted,
-				},
 			}
 			lvg := &snc.LVMVolumeGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
@@ -1605,9 +1572,6 @@ var _ = Describe("Reconciler", func() {
 					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
 						{Name: "lvg-1"},
 					},
-				},
-				Status: v1alpha1.ReplicatedStoragePoolStatus{
-					Phase: v1alpha1.RSPPhaseCompleted,
 				},
 			}
 			lvg := &snc.LVMVolumeGroup{

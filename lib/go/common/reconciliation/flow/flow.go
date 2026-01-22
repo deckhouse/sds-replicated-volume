@@ -327,6 +327,15 @@ func (rf ReconcileFlow) Failf(err error, format string, args ...any) ReconcileOu
 	return rf.Fail(Wrapf(err, format, args...))
 }
 
+// DoneOrFail returns Done() if err is nil, or Fail(err) otherwise.
+// Useful for propagating errors from final operations like patches.
+func (rf ReconcileFlow) DoneOrFail(err error) ReconcileOutcome {
+	if err != nil {
+		return rf.Fail(err)
+	}
+	return rf.Done()
+}
+
 // ReconcileOutcome is the return value for Reconcile methods.
 //
 // Typical usage is:

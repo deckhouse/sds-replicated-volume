@@ -118,7 +118,10 @@ type ReplicatedStorageClassSpec struct {
 	//
 	// > Note that for Replication mode 'Availability' and 'ConsistencyAndAvailability' you have to select
 	// exactly 1 or 3 zones.
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
+	// +kubebuilder:validation:MaxItems=10
+	// +kubebuilder:validation:items:MaxLength=63
+	// +listType=set
+	// +optional
 	Zones []string `json:"zones,omitempty"`
 	// NodeLabelSelector filters nodes eligible for DRBD participation.
 	// Only nodes matching this selector can store data, provide access, or host tiebreaker.
