@@ -109,6 +109,10 @@ func main() {
 		DisableVolumeReplicaCreator:   opt.DisableVolumeReplicaCreator,
 	}
 
+	multiVolume := runners.NewMultiVolume(cfg, kubeClient, forceCleanupChan)
+	_ = multiVolume.Run(ctx)
+
+	// ----------- chaos ---------------------
 	// Setup chaos engineering if enabled
 	chaosEnabled := opt.EnableChaosDRBDBlock || opt.EnableChaosNetBlock ||
 		opt.EnableChaosNetDegrade || opt.EnableChaosVMReboot || opt.EnableChaosNetPartition
@@ -118,9 +122,7 @@ func main() {
 		chaosCleanup = setupChaosRunners(ctx, log, opt, kubeClient, forceCleanupChan)
 		defer chaosCleanup()
 	}
-
-	multiVolume := runners.NewMultiVolume(cfg, kubeClient, forceCleanupChan)
-	_ = multiVolume.Run(ctx)
+	// ----------- chaos ---------------------
 
 	// Print statistics
 	stats := multiVolume.GetStats()
