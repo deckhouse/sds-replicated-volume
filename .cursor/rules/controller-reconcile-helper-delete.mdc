@@ -1,6 +1,6 @@
 ---
 description: Contracts for DeleteReconcileHelper (delete<Kind>) functions: exactly one Kubernetes API Delete call for one object, deterministic handling, and no object/status mutation. Apply when writing delete* helpers in reconciler*.go, and when deciding deletion semantics and ordering. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
-globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go
+globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go,images/controller/internal/controllers/rsc_controller/reconciler*.go,images/controller/internal/controllers/node_controller/reconciler*.go
 alwaysApply: false
 ---
 

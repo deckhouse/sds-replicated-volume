@@ -1,6 +1,6 @@
 ---
 description: Contracts for ComputeReconcileHelper (compute*) functions: pure/deterministic non-I/O computations producing intended/actual/target/report artifacts. Apply when writing compute* helpers in reconciler*.go, and when deciding what should be computed vs observed vs reported. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
-globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go
+globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go,images/controller/internal/controllers/rsc_controller/reconciler*.go,images/controller/internal/controllers/node_controller/reconciler*.go
 alwaysApply: false
 ---
 
@@ -295,13 +295,13 @@ Rationale: change reporting / optimistic-lock intent semantically mean
 func computeIntendedFoo(ctx context.Context, obj *v1alpha1.Foo, out *IntendedFoo) (err error) {
     sf := flow.BeginStep(ctx, "compute-intended-foo")
     defer sf.OnEnd(&err)
-    ctx = sf.Ctx()
 
     if out == nil {
         return sf.Errf("out is nil")
     }
 
     // compute into *out (pure)
+    // use sf.Ctx() for context if needed
     *out = IntendedFoo{ /* ... */ }
 
     return nil

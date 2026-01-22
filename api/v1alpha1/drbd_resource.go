@@ -35,7 +35,7 @@ import (
 // +kubebuilder:printcolumn:name="DiskState",type=string,JSONPath=".status.diskState"
 // +kubebuilder:printcolumn:name="Quorum",type=boolean,JSONPath=".status.quorum"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.lvmLogicalVolumeName) && self.spec.lvmLogicalVolumeName != ” : !has(self.spec.lvmLogicalVolumeName) || self.spec.lvmLogicalVolumeName == ”",message="lvmLogicalVolumeName is required when type is Diskful and must be empty when type is Diskless"
+// +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName) > 0 : !has(self.spec.lvmLogicalVolumeName) || size(self.spec.lvmLogicalVolumeName) == 0",message="lvmLogicalVolumeName is required when type is Diskful and must be empty when type is Diskless"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.spec.size) || self.spec.size >= oldSelf.spec.size",message="spec.size cannot be decreased"
 type DRBDResource struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -345,8 +345,8 @@ type DRBDResourcePathStatus struct {
 	// +kubebuilder:validation:Required
 	Address DRBDAddress `json:"address"`
 
-	// +kubebuilder:validation:Required
-	Established bool `json:"established"`
+	// +optional
+	Established bool `json:"established,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

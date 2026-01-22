@@ -34,7 +34,7 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvstatusconfigsharedsecret "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_shared_secret"
-	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
+	testhelpers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 func TestReconciler(t *testing.T) {
@@ -69,7 +69,7 @@ var _ = Describe("Reconciler", func() {
 		// Ensure test assumptions are met
 		Expect(len(algs())).To(BeNumerically(">=", 2),
 			"tests require at least 2 algorithms to test switching logic")
-		clientBuilder = indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+		clientBuilder = testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 			WithScheme(scheme)).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{})

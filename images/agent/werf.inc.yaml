@@ -21,9 +21,13 @@ shell:
     - cd /src/drbd-utils
     - git submodule update --init --recursive
     #- rm -rf /src/drbd-utils/.git # needed for make
+    # LVM2
+    - git clone --depth 1 --branch v{{ $.Versions.LVM2 }} {{ $.Root.SOURCE_REPO }}/lvmteam/lvm2.git /src/lvm2
+    - rm -rf /src/lvm2/.git
+
 
 ---
-{{- $drbdBinaries := "/drbd-utils/sbin/* /drbd-utils/etc/drbd.conf /drbd-utils/etc/drbd.d/global_common.conf /drbd-utils/etc/multipath/conf.d/drbd.conf" }}
+{{- $drbdBinaries := "/drbd-utils/sbin/* /drbd-utils/etc/drbd.conf /drbd-utils/etc/drbd.d/global_common.conf /drbd-utils/etc/multipath/conf.d/drbd.conf /usr/sbin/dmsetup /usr/sbin/dmstats" }}
 image: {{ .ImageName }}-binaries-artifact
 fromImage: builder/alt
 final: false
@@ -33,6 +37,7 @@ import:
     to: /src
     includePaths:
       - drbd-utils
+      - lvm2
     before: install
 git:
   - add: /tools/dev_images/additional_tools/alt/binary_replace.sh
@@ -57,6 +62,11 @@ shell:
     - make
     - make install DESTDIR=/drbd-utils
     - sed -i 's/usage-count\s*yes;/usage-count no;/' /drbd-utils/etc/drbd.d/global_common.conf
+    # LVM2 - Let's take only dmsetup
+    - cd /src/lvm2
+    - ./configure --prefix=/ --libdir=/lib64 --build=x86_64-linux-gnu --disable-readline --without-systemd
+    - make libdm.device-mapper
+    - make -C libdm install_device-mapper
   beforeSetup:
     - chmod +x /binary_replace.sh
     - /binary_replace.sh -i "{{ $drbdBinaries }}" -o /relocate
