@@ -130,8 +130,13 @@ type ReplicatedStorageClassSpec struct {
 	NodeLabelSelector *metav1.LabelSelector `json:"nodeLabelSelector,omitempty"`
 	// SystemNetworkNames specifies network names used for DRBD replication traffic.
 	// At least one network name must be specified. Each name is limited to 64 characters.
+	//
+	// TODO(systemnetwork): Currently only "Internal" (default node network) is supported.
+	// Custom network support requires NetworkNode watch implementation in the controller.
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=1
 	// +kubebuilder:validation:Items={type=string,maxLength=64}
+	// +kubebuilder:validation:XValidation:rule="self.all(n, n == 'Internal')",message="Only 'Internal' network is currently supported"
 	// +kubebuilder:default:={"Internal"}
 	SystemNetworkNames []string `json:"systemNetworkNames"`
 	// ConfigurationRolloutStrategy defines how configuration changes are applied to existing volumes.

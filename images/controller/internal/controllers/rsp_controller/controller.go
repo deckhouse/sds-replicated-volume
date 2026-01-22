@@ -62,6 +62,24 @@ func BuildController(mgr manager.Manager, podNamespace string) error {
 			handler.EnqueueRequestsFromMapFunc(mapAgentPodToRSP(cl, podNamespace)),
 			builder.WithPredicates(AgentPodPredicates(podNamespace)...),
 		).
+		// TODO(systemnetwork): IMPORTANT! Watch NetworkNode resources and filter eligible nodes.
+		//
+		// Currently missing:
+		// 1. Watch on NetworkNode resources (requires new index + mapNetworkNodeToRSP mapping function).
+		// 2. Filter eligible nodes to include only nodes where the specified SystemNetworkNames
+		//    are configured (i.e., the node has corresponding NetworkNode resources with ready status).
+		// 3. Add NetworkNode predicates to react on NetworkNode Ready condition changes.
+		//
+		// This is not implemented because the systemnetwork feature is still under active development.
+		// Once systemnetwork stabilizes, this controller MUST be updated to:
+		// - Subscribe to NetworkNode changes
+		// - Validate that RSP's spec.systemNetworkNames are available on each eligible node
+		// - Exclude nodes from EligibleNodes if required networks are not configured/ready
+		//
+		// Current workaround: The only allowed value for spec.systemNetworkNames is "Internal"
+		// (the default node internal network). The API (kubebuilder validation) currently forbids
+		// other values. This means no NetworkNode filtering is needed until custom networks are supported.
+		//
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(rec)
 }
