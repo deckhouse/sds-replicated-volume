@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	NodeNameEnvVar               = "NODE_NAME"
+	PodNamespaceEnvVar           = "POD_NAMESPACE"
 	HealthProbeBindAddressEnvVar = "HEALTH_PROBE_BIND_ADDRESS"
 	MetricsPortEnvVar            = "METRICS_BIND_ADDRESS"
 
@@ -35,7 +35,7 @@ const (
 var ErrInvalidConfig = errors.New("invalid config")
 
 type Config struct {
-	nodeName               string
+	podNamespace           string
 	healthProbeBindAddress string
 	metricsBindAddress     string
 }
@@ -48,12 +48,12 @@ func (c *Config) MetricsBindAddress() string {
 	return c.metricsBindAddress
 }
 
-func (c *Config) NodeName() string {
-	return c.nodeName
+func (c *Config) PodNamespace() string {
+	return c.podNamespace
 }
 
 type ConfigProvider interface {
-	NodeName() string
+	PodNamespace() string
 	HealthProbeBindAddress() string
 	MetricsBindAddress() string
 }
@@ -63,23 +63,19 @@ var _ ConfigProvider = &Config{}
 func GetConfig() (*Config, error) {
 	cfg := &Config{}
 
-	//
-	cfg.nodeName = os.Getenv(NodeNameEnvVar)
-	if cfg.nodeName == "" {
-		hostName, err := os.Hostname()
-		if err != nil {
-			return nil, fmt.Errorf("getting hostname: %w", err)
-		}
-		cfg.nodeName = hostName
+	// Pod namespace (required): used to discover agent pods.
+	cfg.podNamespace = os.Getenv(PodNamespaceEnvVar)
+	if cfg.podNamespace == "" {
+		return nil, fmt.Errorf("%w: %s is required", ErrInvalidConfig, PodNamespaceEnvVar)
 	}
 
-	//
+	// Health probe bind address (optional, has default).
 	cfg.healthProbeBindAddress = os.Getenv(HealthProbeBindAddressEnvVar)
 	if cfg.healthProbeBindAddress == "" {
 		cfg.healthProbeBindAddress = DefaultHealthProbeBindAddress
 	}
 
-	//
+	// Metrics bind address (optional, has default).
 	cfg.metricsBindAddress = os.Getenv(MetricsPortEnvVar)
 	if cfg.metricsBindAddress == "" {
 		cfg.metricsBindAddress = DefaultMetricsBindAddress
