@@ -179,68 +179,40 @@ TODO: не увеличивать размер > maxRvSize
 - namespace где находятся VM тестируемого кластера (--vm-namespace)
 
 При старте:
-- очищает stale ресурсы от предыдущих запусков (CiliumNetworkPolicy, VirtualMachineOperation и т.д.)
+- очищает оставшиеся ресурсы от предыдущих запусков (CiliumNetworkPolicy)
 
 При завершении:
 - удаляет все созданные CiliumNetworkPolicy
-- удаляет все созданные VirtualMachineOperation
 
 ## Горутины
-### chaos-network-blocker (period_min, period_max, incident_min, incident_max)
-Блокирует всю сеть между случайными парами нод вложенного кластера через **CiliumNetworkPolicy** в родительском кластере,
-при этом оставляя трафик между мастерами родительского и вложенного кластеров.
-  - в цикле:!!!!!!
-    - ждет рандом(period_min, period_max)
-    - получает список VM из parent-кластера
-    - случайным образом выбирает пару нод (nodeA, nodeB)
-    - создаёт **CiliumClusterwideNetworkPolicy** с:
-      - nodeSelector на nodeA
-      - ingressDeny/egressDeny для IP nodeB (все порты)
-    - Note: блокировка односторонняя (nodeA → nodeB). Этого достаточно для DRBD тестов.
-      Для полной изоляции (bidirectional) используйте chaos-network-partitioner.
-    - ждет рандом(incident_min, incident_max)
-    - удаляет созданную policy
-    - пишет в лог действия с именами нод
-  - когда получает сигнал окончания
-    - удаляет активную policy если есть
-    - выходит
+### chaos-network-blocker (period_min, period_max, incident_min, incident_max, group_size)
+Блокирует сеть между VM вложенного кластера через `CiliumNetworkPolicy` в родительском кластере,
+при этом оставляя трафик между родительским кластером и вложенным.
+Для выделения выбранных VM в `CiliumNetworkPolicy` используется лейбл `vm.kubevirt.internal.virtualization.deckhouse.io/name: vmName` у пода, где `vmName` это имя VM. 
 
-### chaos-drbd-blocker (period_min, period_max, incident_min, incident_max)
-Блокирует DRBD порты между случайными парами нод вложенного кластера через **CiliumNetworkPolicy** в родительском кластере,
-при этом оставляя трафик между мастерами родительского и вложенного кластеров.
-  - в цикле: !!!!!!!
+  - в цикле:
     - ждет рандом(period_min, period_max)
-    - получает список VM из parent-кластера (namespace --vm-namespace)
-    - случайным образом выбирает пару нод (nodeA, nodeB)
-    - **собирает актуальные DRBD порты** из RVR CRD (`status.drbd.config.address.port`)
-      - быстро (<100ms), не требует privileged Jobs
-      - **если порты не найдены - инцидент пропускается** (ожидает создания RV life-simulation)
-    - создаёт **CiliumClusterwideNetworkPolicy** с:
-      - nodeSelector на nodeA
-      - ingressDeny/egressDeny для IP nodeB на обнаруженных DRBD портах
+    - получает список VM из родительского кластера и рандомно его перемешивает
+    - rand(100) <= 30 (вариант инцидента **blocking-everything**)
+      - берет первые две VM (можно будет увеличить)
+      - создаёт `CiliumNetworkPolicy` в родительском кластере для блокировки всего tcp трафика между ними
+    - rand(100) > 30 и <= 60 (вариант инцидента **blocking-drbd**)
+      - берет первую VM (можно будет увеличить)
+      - получает все RV (или что-то другое) для этой VM и выбирает случайным образом пару DRBD портов
+      - создаёт `CiliumNetworkPolicy` в родительском кластере для блокировки выбранных DRBD портов
+    - rand(100) > 60 (вариант инцидента **split-brain**)
+        - разделяет VM на две группы:
+          - если group_size > 0: группа-A = group_size нод, группа-B = остальные
+          - если group_size = 0: делит пополам (если нечетное число VM, то группа-А = большая часть, группа-В = меньшая часть)
+        - создаёт `CiliumNetworkPolicy` в родительском кластере для блокировки всего tcp трафика между группами нод
     - ждет рандом(incident_min, incident_max) - длительность инцидента
-    - удаляет созданную policy
-    - пишет в лог действия с именами нод и портами
+    - удаляет созданные policy
+    - пишет в лог вариант инцидента +
+      - для **blocking-everything**: имена VM
+      - для **blocking-drbd**: имя VM и DRBD порты
+      - для **split-brain**: имена VM в каждой из групп
   - когда получает сигнал окончания
     - удаляет активную policy если есть
-    - выходит
-
-### chaos-network-partitioner (period_min, period_max, incident_min, incident_max, group_size)
-Создаёт split-brain: разделяет ноды вложенного кластера на группы и блокирует всю сеть между ними через **CiliumNetworkPolicy** в родительском кластере,
-при этом оставляя трафик между мастерами родительского и вложенного кластеров.
-  - в цикле: !!!!!!!!
-    - ждет рандом(period_min, period_max)
-    - получает список VM из parent-кластера
-    - разделяет ноды на две группы:
-      - если group_size > 0: группа A = group_size нод, группа B = остальные
-      - если group_size = 0: делит пополам
-    - для каждой пары (nodeA из группы A, nodeB из группы B):
-      - создаёт **CiliumClusterwideNetworkPolicy** с блокировкой всей сети
-    - ждет рандом(incident_min, incident_max)
-    - удаляет все созданные policies
-    - пишет в лог состав групп и количество policies
-  - когда получает сигнал окончания
-    - удаляет все активные policies
     - выходит
 
 ### chaos-network-degrader (period_min, period_max, incident_min, incident_max, delay_ms, loss_percent, rate_kbit)
@@ -251,7 +223,7 @@ TODO: не увеличивать размер > maxRvSize
   - bandwidth limit не делаем, т.к. вероятность, что сеть будет слишком узкая крайне мала. Скорее сеть будет нагружена, что покрывается iperf3.
   - в цикле:!!!!
     - ждет рандом(period_min, period_max)
-    - получает список VM из parent-кластера
+    - получает список VM из родительского кластера
     - случайным образом выбирает пару нод (nodeA, nodeB)
     - выбирает параметры деградации:
       - delay: рандом(delay_ms_min, delay_ms_max) мс
@@ -273,14 +245,18 @@ TODO: не увеличивать размер > maxRvSize
     - выходит
 
 ### chaos-vm-reboter (period_min, period_max)
-Выполняет hard reboot случайных VM через **VirtualMachineOperation** в родительском кластере.
+Выполняет hard reboot случайных VM через `VirtualMachineOperation` в родительском кластере.
   - в цикле:
-    - ждет рандом(period_min, period_max)
-    - получает список VM из parent-кластера
-    - случайным образом выбирает одну VM
-    - создаёт **VirtualMachineOperation** с:
-      - type: Restart
-      - force: true (hard reboot)
+    - ждет рандом(period_min, period_max), если период получается меньше 5 минут, то ждем рандом от 5 до 6 минут
+    - получает список VM из родительского кластера и рандомно его перемешивает
+    - для первой VM получает `VirtualMachineOperation`
+      - \> 0
+        - во всех `VirtualMachineOperation` считает status.phase = Failed | Completed
+          - количество `VirtualMachineOperation` != посчитанному количеству status.phase
+            - идет на следующую итерацию цикла (то есть ничего не делаем для этой VM), при этом записав в лог, что для выбранной VM есть незавершенные `VirtualMachineOperation`
+    - для первой VM из списка создаёт `VirtualMachineOperation` с:
+      - spec.type: Restart
+      - spec.force: true
     - НЕ дожидается завершения операции
     - пишет в лог имя VM
   - когда получает сигнал окончания
@@ -288,8 +264,8 @@ TODO: не увеличивать размер > maxRvSize
 
 ## CLI флаги для chaos
 ```
---parent-kubeconfig              # путь к kubeconfig parent-кластера DVP (обязателен для chaos)
---vm-namespace                   # namespace с VM в parent-кластере (обязателен для chaos)
+--parent-kubeconfig              # путь к kubeconfig родительского кластера DVP (обязателен для chaos)
+--vm-namespace                   # namespace с VM в родительском кластере (обязателен для chaos)
 
 --enable-chaos-drbd-block        # включить chaos-drbd-blocker
 --enable-chaos-network-block     # включить chaos-network-blocker
@@ -309,4 +285,111 @@ TODO: не увеличивать размер > maxRvSize
 --chaos-rate-mbit-min            # мин. ограничение bandwidth в mbit/s (default: 5)
 --chaos-rate-mbit-max            # макс. ограничение bandwidth в mbit/s (default: 50)
 --chaos-partition-group-size     # размер группы для partition (default: 0 = пополам)
+```
+
+## Примеры манифестов
+```yaml
+apiVersion: virtualization.deckhouse.io/v1alpha2
+kind: VirtualMachineOperation
+metadata:
+  name: megatest-chaos-restart-zsz9c
+  namespace: e2e-sds-test-cluster
+spec:
+  type: Restart
+  force: true
+  virtualMachineName: worker-11
+```
+
+```yaml
+---
+# запретить только один порт между двумя подами
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: deny-5201-only-between-worker-01-and-worker-10
+  namespace: e2e-sds-test-cluster
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: vm.kubevirt.internal.virtualization.deckhouse.io/name
+        operator: In
+        values: ["worker-01", "worker-10"]
+
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: e2e-sds-test-cluster
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: e2e-sds-test-cluster
+
+  ingressDeny:
+    - fromEndpoints:
+        - matchExpressions:
+            - key: vm.kubevirt.internal.virtualization.deckhouse.io/name
+              operator: In
+              values: ["worker-01", "worker-10"]
+      toPorts:
+        - ports:
+            - port: "5201"
+              protocol: TCP
+
+  egressDeny:
+    - toEndpoints:
+        - matchExpressions:
+            - key: vm.kubevirt.internal.virtualization.deckhouse.io/name
+              operator: In
+              values: ["worker-01", "worker-10"]
+      toPorts:
+        - ports:
+            - port: "5201"
+              protocol: TCP
+
+---
+# запретить весь tcp между двумя подами
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: deny-all-tcp-between-worker-01-and-worker-10
+  namespace: e2e-sds-test-cluster
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: vm.kubevirt.internal.virtualization.deckhouse.io/name
+        operator: In
+        values: ["worker-01", "worker-10"]
+
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: e2e-sds-test-cluster
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: e2e-sds-test-cluster
+
+  ingressDeny:
+    - fromEndpoints:
+        - matchExpressions:
+            - key: vm.kubevirt.internal.virtualization.deckhouse.io/name
+              operator: In
+              values: ["worker-01", "worker-10"]
+      toPorts:
+        - ports:
+            - port: "1"
+              endPort: 65535
+              protocol: TCP
+
+  egressDeny:
+    - toEndpoints:
+        - matchExpressions:
+            - key: vm.kubevirt.internal.virtualization.deckhouse.io/name
+              operator: In
+              values: ["worker-01", "worker-10"]
+      toPorts:
+        - ports:
+            - port: "1"
+              endPort: 65535
+              protocol: TCP
 ```
