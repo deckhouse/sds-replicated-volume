@@ -179,15 +179,15 @@ TODO: не увеличивать размер > maxRvSize
 - namespace где находятся VM тестируемого кластера (--vm-namespace)
 
 При старте:
-- очищает stale ресурсы от предыдущих запусков (NetworkPolicy, VirtualMachineOperation и т.д.)
+- очищает stale ресурсы от предыдущих запусков (CiliumNetworkPolicy, VirtualMachineOperation и т.д.)
 
 При завершении:
-- удаляет все созданные NetworkPolicy
+- удаляет все созданные CiliumNetworkPolicy
 - удаляет все созданные VirtualMachineOperation
 
 ## Горутины
 ### chaos-network-blocker (period_min, period_max, incident_min, incident_max)
-Блокирует всю сеть между случайными парами нод вложенного кластера через **NetworkPolicy** в родительском кластере,
+Блокирует всю сеть между случайными парами нод вложенного кластера через **CiliumNetworkPolicy** в родительском кластере,
 при этом оставляя трафик между мастерами родительского и вложенного кластеров.
   - в цикле:!!!!!!
     - ждет рандом(period_min, period_max)
@@ -206,7 +206,7 @@ TODO: не увеличивать размер > maxRvSize
     - выходит
 
 ### chaos-drbd-blocker (period_min, period_max, incident_min, incident_max)
-Блокирует DRBD порты между случайными парами нод вложенного кластера через **NetworkPolicy** в родительском кластере,
+Блокирует DRBD порты между случайными парами нод вложенного кластера через **CiliumNetworkPolicy** в родительском кластере,
 при этом оставляя трафик между мастерами родительского и вложенного кластеров.
   - в цикле: !!!!!!!
     - ждет рандом(period_min, period_max)
@@ -226,7 +226,7 @@ TODO: не увеличивать размер > maxRvSize
     - выходит
 
 ### chaos-network-partitioner (period_min, period_max, incident_min, incident_max, group_size)
-Создаёт split-brain: разделяет ноды вложенного кластера на группы и блокирует всю сеть между ними через **NetworkPolicy** в родительском кластере,
+Создаёт split-brain: разделяет ноды вложенного кластера на группы и блокирует всю сеть между ними через **CiliumNetworkPolicy** в родительском кластере,
 при этом оставляя трафик между мастерами родительского и вложенного кластеров.
   - в цикле: !!!!!!!!
     - ждет рандом(period_min, period_max)
