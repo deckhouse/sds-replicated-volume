@@ -1,0 +1,1252 @@
+/*
+Copyright 2026 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package rspcontroller
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/go-logr/logr"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+)
+
+// testGracePeriod is the grace period used in tests for NotReady nodes.
+const testGracePeriod = 5 * time.Minute
+
+func TestRSPController(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "rsp_controller Reconciler Suite")
+}
+
+var _ = Describe("computeActualEligibleNodes", func() {
+	var (
+		rsp              *v1alpha1.ReplicatedStoragePool
+		lvgs             []snc.LVMVolumeGroup
+		nodes            []corev1.Node
+		agentReadyByNode map[string]bool
+	)
+
+	BeforeEach(func() {
+		rsp = &v1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			Spec: v1alpha1.ReplicatedStoragePoolSpec{
+				Type: v1alpha1.RSPTypeLVM,
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+					{Name: "lvg-1"},
+				},
+				EligibleNodesPolicy: v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
+					NotReadyGracePeriod: metav1.Duration{Duration: testGracePeriod},
+				},
+			},
+		}
+		lvgs = []snc.LVMVolumeGroup{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
+				Spec: snc.LVMVolumeGroupSpec{
+					Local: snc.LVMVolumeGroupLocalSpec{
+						NodeName: "node-1",
+					},
+				},
+				Status: snc.LVMVolumeGroupStatus{
+					Conditions: []metav1.Condition{
+						{Type: "Ready", Status: metav1.ConditionTrue},
+					},
+				},
+			},
+		}
+		nodes = []corev1.Node{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-1",
+					Labels: map[string]string{
+						corev1.LabelTopologyZone: "zone-a",
+					},
+				},
+				Status: corev1.NodeStatus{
+					Conditions: []corev1.NodeCondition{
+						{
+							Type:   corev1.NodeReady,
+							Status: corev1.ConditionTrue,
+						},
+					},
+				},
+			},
+		}
+		agentReadyByNode = map[string]bool{
+			"node-1": true,
+		}
+	})
+
+	It("returns eligible node when all conditions match", func() {
+		result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+
+		Expect(result).To(HaveLen(1))
+		Expect(result[0].NodeName).To(Equal("node-1"))
+		Expect(result[0].ZoneName).To(Equal("zone-a"))
+		Expect(result[0].NodeReady).To(BeTrue())
+		Expect(result[0].AgentReady).To(BeTrue())
+		Expect(result[0].LVMVolumeGroups).To(HaveLen(1))
+		Expect(result[0].LVMVolumeGroups[0].Name).To(Equal("lvg-1"))
+		Expect(result[0].LVMVolumeGroups[0].Ready).To(BeTrue())
+	})
+
+	Context("zone extraction", func() {
+		// Note: Zone/label filtering is done in Reconcile before calling computeActualEligibleNodes.
+		// This function only extracts the zone label from nodes that are passed to it.
+
+		It("extracts zone label from node", func() {
+			nodes[0].Labels[corev1.LabelTopologyZone] = "zone-x"
+
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].ZoneName).To(Equal("zone-x"))
+		})
+
+		It("sets empty zone when label is missing", func() {
+			delete(nodes[0].Labels, corev1.LabelTopologyZone)
+
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].ZoneName).To(BeEmpty())
+		})
+	})
+
+	Context("LVG matching", func() {
+		It("includes node without matching LVG (client-only/tiebreaker nodes)", func() {
+			rsp.Spec.LVMVolumeGroups = []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+				{Name: "lvg-2"}, // This LVG does not exist on node-1.
+			}
+
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+
+			// Node is still eligible but without LVGs.
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].NodeName).To(Equal("node-1"))
+			Expect(result[0].LVMVolumeGroups).To(BeEmpty())
+		})
+	})
+
+	Context("node readiness", func() {
+		It("excludes node NotReady beyond grace period", func() {
+			nodes[0].Status.Conditions = []corev1.NodeCondition{
+				{
+					Type:               corev1.NodeReady,
+					Status:             corev1.ConditionFalse,
+					LastTransitionTime: metav1.NewTime(time.Now().Add(-10 * time.Minute)),
+				},
+			}
+
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+
+			Expect(result).To(BeEmpty())
+		})
+
+		It("includes node NotReady within grace period", func() {
+			nodes[0].Status.Conditions = []corev1.NodeCondition{
+				{
+					Type:               corev1.NodeReady,
+					Status:             corev1.ConditionFalse,
+					LastTransitionTime: metav1.NewTime(time.Now().Add(-2 * time.Minute)),
+				},
+			}
+
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].NodeReady).To(BeFalse())
+		})
+	})
+
+	Context("LVG unschedulable annotation", func() {
+		It("marks LVG as unschedulable when annotation is present", func() {
+			lvgs[0].Annotations = map[string]string{
+				v1alpha1.LVMVolumeGroupUnschedulableAnnotationKey: "",
+			}
+
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].LVMVolumeGroups[0].Unschedulable).To(BeTrue())
+		})
+	})
+
+	Context("node unschedulable", func() {
+		It("marks node as unschedulable when spec.unschedulable is true", func() {
+			nodes[0].Spec.Unschedulable = true
+
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].Unschedulable).To(BeTrue())
+		})
+	})
+
+	Context("agent readiness", func() {
+		It("populates AgentReady from agentReadyByNode map", func() {
+			agentReadyByNode["node-1"] = false
+
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].AgentReady).To(BeFalse())
+		})
+
+		It("sets AgentReady to false when node not in map", func() {
+			delete(agentReadyByNode, "node-1")
+
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].AgentReady).To(BeFalse())
+		})
+	})
+
+	Context("LVG Ready status", func() {
+		It("marks LVG as not ready when Ready condition is False", func() {
+			lvgs[0].Status.Conditions = []metav1.Condition{
+				{Type: "Ready", Status: metav1.ConditionFalse},
+			}
+
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].LVMVolumeGroups[0].Ready).To(BeFalse())
+		})
+
+		It("marks LVG as not ready when thin pool is not ready", func() {
+			rsp.Spec.Type = v1alpha1.RSPTypeLVMThin
+			rsp.Spec.LVMVolumeGroups = []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+				{Name: "lvg-1", ThinPoolName: "thin-pool-1"},
+			}
+			lvgs[0].Status.ThinPools = []snc.LVMVolumeGroupThinPoolStatus{
+				{Name: "thin-pool-1", Ready: false},
+			}
+
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].LVMVolumeGroups[0].Ready).To(BeFalse())
+		})
+
+		It("marks LVG as ready when thin pool is ready", func() {
+			rsp.Spec.Type = v1alpha1.RSPTypeLVMThin
+			rsp.Spec.LVMVolumeGroups = []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+				{Name: "lvg-1", ThinPoolName: "thin-pool-1"},
+			}
+			lvgs[0].Status.ThinPools = []snc.LVMVolumeGroupThinPoolStatus{
+				{Name: "thin-pool-1", Ready: true},
+			}
+
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].LVMVolumeGroups[0].Ready).To(BeTrue())
+		})
+	})
+
+	Context("worldStateExpiresAt", func() {
+		It("returns nil when no grace period is active", func() {
+			_, expiresAt := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+
+			Expect(expiresAt).To(BeNil())
+		})
+
+		It("returns earliest grace expiration time", func() {
+			transitionTime := time.Now().Add(-2 * time.Minute)
+			nodes[0].Status.Conditions = []corev1.NodeCondition{
+				{
+					Type:               corev1.NodeReady,
+					Status:             corev1.ConditionFalse,
+					LastTransitionTime: metav1.NewTime(transitionTime),
+				},
+			}
+
+			_, expiresAt := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+
+			Expect(expiresAt).NotTo(BeNil())
+			expected := transitionTime.Add(testGracePeriod)
+			Expect(expiresAt.Sub(expected)).To(BeNumerically("<", time.Second))
+		})
+	})
+
+	It("sorts eligible nodes by name", func() {
+		lvgs = append(lvgs, snc.LVMVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{Name: "lvg-2"},
+			Spec: snc.LVMVolumeGroupSpec{
+				Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-2"},
+			},
+			Status: snc.LVMVolumeGroupStatus{
+				Conditions: []metav1.Condition{
+					{Type: "Ready", Status: metav1.ConditionTrue},
+				},
+			},
+		})
+		rsp.Spec.LVMVolumeGroups = append(rsp.Spec.LVMVolumeGroups, v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{Name: "lvg-2"})
+		nodes = append(nodes, corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "node-2"},
+			Status: corev1.NodeStatus{
+				Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}},
+			},
+		})
+
+		result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+
+		Expect(result).To(HaveLen(2))
+		Expect(result[0].NodeName).To(Equal("node-1"))
+		Expect(result[1].NodeName).To(Equal("node-2"))
+	})
+})
+
+var _ = Describe("buildLVGByNodeMap", func() {
+	var (
+		rsp  *v1alpha1.ReplicatedStoragePool
+		lvgs []snc.LVMVolumeGroup
+	)
+
+	BeforeEach(func() {
+		rsp = &v1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			Spec: v1alpha1.ReplicatedStoragePoolSpec{
+				Type: v1alpha1.RSPTypeLVM,
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+					{Name: "lvg-1"},
+				},
+				EligibleNodesPolicy: v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
+					NotReadyGracePeriod: metav1.Duration{Duration: testGracePeriod},
+				},
+			},
+		}
+		lvgs = []snc.LVMVolumeGroup{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
+				Spec: snc.LVMVolumeGroupSpec{
+					Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-1"},
+				},
+				Status: snc.LVMVolumeGroupStatus{
+					Conditions: []metav1.Condition{
+						{Type: "Ready", Status: metav1.ConditionTrue},
+					},
+				},
+			},
+		}
+	})
+
+	It("returns empty map for empty LVGs", func() {
+		result := buildLVGByNodeMap(nil, rsp)
+
+		Expect(result).To(BeEmpty())
+	})
+
+	It("maps LVG to node correctly", func() {
+		result := buildLVGByNodeMap(lvgs, rsp)
+
+		Expect(result).To(HaveKey("node-1"))
+		Expect(result["node-1"]).To(HaveLen(1))
+		Expect(result["node-1"][0].Name).To(Equal("lvg-1"))
+	})
+
+	It("skips LVG not referenced by RSP", func() {
+		lvgs = append(lvgs, snc.LVMVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{Name: "lvg-not-referenced"},
+			Spec: snc.LVMVolumeGroupSpec{
+				Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-2"},
+			},
+		})
+
+		result := buildLVGByNodeMap(lvgs, rsp)
+
+		Expect(result).NotTo(HaveKey("node-2"))
+	})
+
+	It("skips LVG with empty nodeName", func() {
+		lvgs[0].Spec.Local.NodeName = ""
+
+		result := buildLVGByNodeMap(lvgs, rsp)
+
+		Expect(result).To(BeEmpty())
+	})
+
+	It("sorts LVGs by name per node", func() {
+		rsp.Spec.LVMVolumeGroups = []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+			{Name: "lvg-c"},
+			{Name: "lvg-a"},
+			{Name: "lvg-b"},
+		}
+		lvgs = []snc.LVMVolumeGroup{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "lvg-c"},
+				Spec: snc.LVMVolumeGroupSpec{
+					Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-1"},
+				},
+				Status: snc.LVMVolumeGroupStatus{
+					Conditions: []metav1.Condition{{Type: "Ready", Status: metav1.ConditionTrue}},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "lvg-a"},
+				Spec: snc.LVMVolumeGroupSpec{
+					Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-1"},
+				},
+				Status: snc.LVMVolumeGroupStatus{
+					Conditions: []metav1.Condition{{Type: "Ready", Status: metav1.ConditionTrue}},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "lvg-b"},
+				Spec: snc.LVMVolumeGroupSpec{
+					Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-1"},
+				},
+				Status: snc.LVMVolumeGroupStatus{
+					Conditions: []metav1.Condition{{Type: "Ready", Status: metav1.ConditionTrue}},
+				},
+			},
+		}
+
+		result := buildLVGByNodeMap(lvgs, rsp)
+
+		Expect(result["node-1"]).To(HaveLen(3))
+		Expect(result["node-1"][0].Name).To(Equal("lvg-a"))
+		Expect(result["node-1"][1].Name).To(Equal("lvg-b"))
+		Expect(result["node-1"][2].Name).To(Equal("lvg-c"))
+	})
+
+	It("sets Ready field based on LVG condition", func() {
+		lvgs[0].Status.Conditions = []metav1.Condition{
+			{Type: "Ready", Status: metav1.ConditionFalse},
+		}
+
+		result := buildLVGByNodeMap(lvgs, rsp)
+
+		Expect(result["node-1"][0].Ready).To(BeFalse())
+	})
+
+	It("sets Ready field based on thin pool status for LVMThin", func() {
+		rsp.Spec.Type = v1alpha1.RSPTypeLVMThin
+		rsp.Spec.LVMVolumeGroups = []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+			{Name: "lvg-1", ThinPoolName: "thin-pool-1"},
+		}
+		lvgs[0].Status.ThinPools = []snc.LVMVolumeGroupThinPoolStatus{
+			{Name: "thin-pool-1", Ready: false},
+		}
+
+		result := buildLVGByNodeMap(lvgs, rsp)
+
+		Expect(result["node-1"][0].Ready).To(BeFalse())
+		Expect(result["node-1"][0].ThinPoolName).To(Equal("thin-pool-1"))
+	})
+
+	It("marks LVG as unschedulable when annotation present", func() {
+		lvgs[0].Annotations = map[string]string{
+			v1alpha1.LVMVolumeGroupUnschedulableAnnotationKey: "",
+		}
+
+		result := buildLVGByNodeMap(lvgs, rsp)
+
+		Expect(result["node-1"][0].Unschedulable).To(BeTrue())
+	})
+})
+
+var _ = Describe("isLVGReady", func() {
+	var lvg *snc.LVMVolumeGroup
+
+	BeforeEach(func() {
+		lvg = &snc.LVMVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
+			Status: snc.LVMVolumeGroupStatus{
+				Conditions: []metav1.Condition{
+					{Type: "Ready", Status: metav1.ConditionTrue},
+				},
+			},
+		}
+	})
+
+	It("returns false when LVG has no Ready condition", func() {
+		lvg.Status.Conditions = nil
+
+		result := isLVGReady(lvg, "")
+
+		Expect(result).To(BeFalse())
+	})
+
+	It("returns false when LVG Ready=False", func() {
+		lvg.Status.Conditions = []metav1.Condition{
+			{Type: "Ready", Status: metav1.ConditionFalse},
+		}
+
+		result := isLVGReady(lvg, "")
+
+		Expect(result).To(BeFalse())
+	})
+
+	It("returns true when LVG Ready=True and no thin pool specified", func() {
+		result := isLVGReady(lvg, "")
+
+		Expect(result).To(BeTrue())
+	})
+
+	It("returns true when LVG Ready=True and thin pool Ready=true", func() {
+		lvg.Status.ThinPools = []snc.LVMVolumeGroupThinPoolStatus{
+			{Name: "thin-pool-1", Ready: true},
+		}
+
+		result := isLVGReady(lvg, "thin-pool-1")
+
+		Expect(result).To(BeTrue())
+	})
+
+	It("returns false when LVG Ready=True but thin pool Ready=false", func() {
+		lvg.Status.ThinPools = []snc.LVMVolumeGroupThinPoolStatus{
+			{Name: "thin-pool-1", Ready: false},
+		}
+
+		result := isLVGReady(lvg, "thin-pool-1")
+
+		Expect(result).To(BeFalse())
+	})
+
+	It("returns false when thin pool not found in status", func() {
+		lvg.Status.ThinPools = []snc.LVMVolumeGroupThinPoolStatus{
+			{Name: "other-pool", Ready: true},
+		}
+
+		result := isLVGReady(lvg, "thin-pool-1")
+
+		Expect(result).To(BeFalse())
+	})
+})
+
+var _ = Describe("isNodeReadyOrWithinGrace", func() {
+	var node corev1.Node
+
+	BeforeEach(func() {
+		node = corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "node-1"},
+			Status: corev1.NodeStatus{
+				Conditions: []corev1.NodeCondition{
+					{Type: corev1.NodeReady, Status: corev1.ConditionTrue},
+				},
+			},
+		}
+	})
+
+	It("returns (true, false, zero) for Ready node", func() {
+		isReady, excluded, expiresAt := isNodeReadyOrWithinGrace(&node, testGracePeriod)
+
+		Expect(isReady).To(BeTrue())
+		Expect(excluded).To(BeFalse())
+		Expect(expiresAt.IsZero()).To(BeTrue())
+	})
+
+	It("returns (false, false, zero) for node without Ready condition (unknown state)", func() {
+		node.Status.Conditions = nil
+
+		isReady, excluded, expiresAt := isNodeReadyOrWithinGrace(&node, testGracePeriod)
+
+		Expect(isReady).To(BeFalse())
+		Expect(excluded).To(BeFalse()) // Unknown state is treated as within grace.
+		Expect(expiresAt.IsZero()).To(BeTrue())
+	})
+
+	It("returns (false, true, zero) for NotReady beyond grace period", func() {
+		node.Status.Conditions = []corev1.NodeCondition{
+			{
+				Type:               corev1.NodeReady,
+				Status:             corev1.ConditionFalse,
+				LastTransitionTime: metav1.NewTime(time.Now().Add(-10 * time.Minute)),
+			},
+		}
+
+		isReady, excluded, expiresAt := isNodeReadyOrWithinGrace(&node, testGracePeriod)
+
+		Expect(isReady).To(BeFalse())
+		Expect(excluded).To(BeTrue())
+		Expect(expiresAt.IsZero()).To(BeTrue())
+	})
+
+	It("returns (false, false, expiresAt) for NotReady within grace period", func() {
+		transitionTime := time.Now().Add(-2 * time.Minute)
+		node.Status.Conditions = []corev1.NodeCondition{
+			{
+				Type:               corev1.NodeReady,
+				Status:             corev1.ConditionFalse,
+				LastTransitionTime: metav1.NewTime(transitionTime),
+			},
+		}
+
+		isReady, excluded, expiresAt := isNodeReadyOrWithinGrace(&node, testGracePeriod)
+
+		Expect(isReady).To(BeFalse())
+		Expect(excluded).To(BeFalse())
+		expected := transitionTime.Add(testGracePeriod)
+		Expect(expiresAt.Sub(expected)).To(BeNumerically("<", time.Second))
+	})
+})
+
+var _ = Describe("validateRSPAndLVGs", func() {
+	var (
+		rsp  *v1alpha1.ReplicatedStoragePool
+		lvgs []snc.LVMVolumeGroup
+	)
+
+	BeforeEach(func() {
+		rsp = &v1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			Spec: v1alpha1.ReplicatedStoragePoolSpec{
+				Type: v1alpha1.RSPTypeLVM,
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+					{Name: "lvg-1"},
+				},
+				EligibleNodesPolicy: v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
+					NotReadyGracePeriod: metav1.Duration{Duration: testGracePeriod},
+				},
+			},
+		}
+		lvgs = []snc.LVMVolumeGroup{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
+				Spec: snc.LVMVolumeGroupSpec{
+					Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-1"},
+				},
+			},
+		}
+	})
+
+	It("returns nil when type is not LVMThin", func() {
+		err := validateRSPAndLVGs(rsp, lvgs)
+
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("returns error for LVMThin when thinPoolName is empty", func() {
+		rsp.Spec.Type = v1alpha1.RSPTypeLVMThin
+		// thinPoolName is empty
+
+		err := validateRSPAndLVGs(rsp, lvgs)
+
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("thinPoolName is required"))
+	})
+
+	It("returns error for LVMThin when thinPool not found in LVG spec", func() {
+		rsp.Spec.Type = v1alpha1.RSPTypeLVMThin
+		rsp.Spec.LVMVolumeGroups = []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+			{Name: "lvg-1", ThinPoolName: "missing-thin-pool"},
+		}
+		lvgs[0].Spec.ThinPools = []snc.LVMVolumeGroupThinPoolSpec{
+			{Name: "other-thin-pool"},
+		}
+
+		err := validateRSPAndLVGs(rsp, lvgs)
+
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("not found in Spec.ThinPools"))
+	})
+
+	It("returns nil when all validations pass for LVMThin", func() {
+		rsp.Spec.Type = v1alpha1.RSPTypeLVMThin
+		rsp.Spec.LVMVolumeGroups = []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+			{Name: "lvg-1", ThinPoolName: "thin-pool-1"},
+		}
+		lvgs[0].Spec.ThinPools = []snc.LVMVolumeGroupThinPoolSpec{
+			{Name: "thin-pool-1"},
+		}
+
+		err := validateRSPAndLVGs(rsp, lvgs)
+
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("panics when LVG referenced by RSP not in lvgs list", func() {
+		rsp.Spec.Type = v1alpha1.RSPTypeLVMThin
+		rsp.Spec.LVMVolumeGroups = []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+			{Name: "lvg-missing", ThinPoolName: "thin-pool-1"},
+		}
+
+		Expect(func() {
+			_ = validateRSPAndLVGs(rsp, lvgs)
+		}).To(Panic())
+	})
+})
+
+var _ = Describe("applyEligibleNodesAndIncrementRevisionIfChanged", func() {
+	var rsp *v1alpha1.ReplicatedStoragePool
+
+	BeforeEach(func() {
+		rsp = &v1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			Status: v1alpha1.ReplicatedStoragePoolStatus{
+				EligibleNodesRevision: 1,
+				EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+					{NodeName: "node-1"},
+				},
+			},
+		}
+	})
+
+	It("returns false when eligible nodes unchanged", func() {
+		newNodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-1"},
+		}
+
+		changed := applyEligibleNodesAndIncrementRevisionIfChanged(rsp, newNodes)
+
+		Expect(changed).To(BeFalse())
+		Expect(rsp.Status.EligibleNodesRevision).To(Equal(int64(1)))
+	})
+
+	It("returns true and increments revision when nodes changed", func() {
+		newNodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-1"},
+			{NodeName: "node-2"},
+		}
+
+		changed := applyEligibleNodesAndIncrementRevisionIfChanged(rsp, newNodes)
+
+		Expect(changed).To(BeTrue())
+		Expect(rsp.Status.EligibleNodesRevision).To(Equal(int64(2)))
+		Expect(rsp.Status.EligibleNodes).To(HaveLen(2))
+	})
+
+	It("detects change in NodeReady field", func() {
+		newNodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-1", NodeReady: true},
+		}
+
+		changed := applyEligibleNodesAndIncrementRevisionIfChanged(rsp, newNodes)
+
+		Expect(changed).To(BeTrue())
+	})
+})
+
+var _ = Describe("areEligibleNodesEqual", func() {
+	It("returns true for equal slices", func() {
+		a := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-1", ZoneName: "zone-a"},
+		}
+		b := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-1", ZoneName: "zone-a"},
+		}
+
+		Expect(areEligibleNodesEqual(a, b)).To(BeTrue())
+	})
+
+	It("returns false for different lengths", func() {
+		a := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-1"},
+		}
+		b := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-1"},
+			{NodeName: "node-2"},
+		}
+
+		Expect(areEligibleNodesEqual(a, b)).To(BeFalse())
+	})
+
+	It("returns false for different field values", func() {
+		a := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-1", AgentReady: true},
+		}
+		b := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-1", AgentReady: false},
+		}
+
+		Expect(areEligibleNodesEqual(a, b)).To(BeFalse())
+	})
+
+	It("handles empty slices", func() {
+		var a []v1alpha1.ReplicatedStoragePoolEligibleNode
+		var b []v1alpha1.ReplicatedStoragePoolEligibleNode
+
+		Expect(areEligibleNodesEqual(a, b)).To(BeTrue())
+	})
+})
+
+var _ = Describe("areLVGsEqual", func() {
+	It("returns true for equal slices", func() {
+		a := []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+			{Name: "lvg-1", ThinPoolName: "tp-1", Unschedulable: false, Ready: true},
+		}
+		b := []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+			{Name: "lvg-1", ThinPoolName: "tp-1", Unschedulable: false, Ready: true},
+		}
+
+		Expect(areLVGsEqual(a, b)).To(BeTrue())
+	})
+
+	It("returns false for different lengths", func() {
+		a := []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+			{Name: "lvg-1"},
+		}
+		b := []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+			{Name: "lvg-1"},
+			{Name: "lvg-2"},
+		}
+
+		Expect(areLVGsEqual(a, b)).To(BeFalse())
+	})
+
+	It("returns false for different Ready values", func() {
+		a := []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+			{Name: "lvg-1", Ready: true},
+		}
+		b := []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+			{Name: "lvg-1", Ready: false},
+		}
+
+		Expect(areLVGsEqual(a, b)).To(BeFalse())
+	})
+
+	It("handles empty slices", func() {
+		var a []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup
+		var b []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup
+
+		Expect(areLVGsEqual(a, b)).To(BeTrue())
+	})
+})
+
+var _ = Describe("computeActualAgentReadiness", func() {
+	It("returns empty map for empty pods", func() {
+		result := computeActualAgentReadiness(nil)
+
+		Expect(result).To(BeEmpty())
+	})
+
+	It("maps pod to node with Ready status", func() {
+		pods := []corev1.Pod{
+			{
+				Spec: corev1.PodSpec{NodeName: "node-1"},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+					},
+				},
+			},
+		}
+
+		result := computeActualAgentReadiness(pods)
+
+		Expect(result).To(HaveKey("node-1"))
+		Expect(result["node-1"]).To(BeTrue())
+	})
+
+	It("maps pod to node with not Ready status", func() {
+		pods := []corev1.Pod{
+			{
+				Spec: corev1.PodSpec{NodeName: "node-1"},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionFalse},
+					},
+				},
+			},
+		}
+
+		result := computeActualAgentReadiness(pods)
+
+		Expect(result).To(HaveKey("node-1"))
+		Expect(result["node-1"]).To(BeFalse())
+	})
+
+	It("skips pod without NodeName", func() {
+		pods := []corev1.Pod{
+			{
+				Spec: corev1.PodSpec{NodeName: ""}, // Unscheduled pod.
+			},
+		}
+
+		result := computeActualAgentReadiness(pods)
+
+		Expect(result).To(BeEmpty())
+	})
+
+	It("handles multiple pods on same node (last wins)", func() {
+		pods := []corev1.Pod{
+			{
+				Spec: corev1.PodSpec{NodeName: "node-1"},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+					},
+				},
+			},
+			{
+				Spec: corev1.PodSpec{NodeName: "node-1"},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionFalse},
+					},
+				},
+			},
+		}
+
+		result := computeActualAgentReadiness(pods)
+
+		Expect(result).To(HaveKey("node-1"))
+		Expect(result["node-1"]).To(BeFalse())
+	})
+})
+
+// =============================================================================
+// Integration Tests
+// =============================================================================
+
+var _ = Describe("Reconciler", func() {
+	var (
+		scheme *runtime.Scheme
+		cl     client.WithWatch
+		rec    *Reconciler
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(corev1.AddToScheme(scheme)).To(Succeed())
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		Expect(snc.AddToScheme(scheme)).To(Succeed())
+		cl = nil
+		rec = nil
+	})
+
+	Describe("Reconcile", func() {
+		It("does nothing when RSP is not found", func() {
+			cl = fake.NewClientBuilder().WithScheme(scheme).Build()
+			rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+
+			result, err := rec.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: "rsp-not-found"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+		})
+
+		It("sets Ready=False when LVGs not found", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Spec: v1alpha1.ReplicatedStoragePoolSpec{
+					Type: v1alpha1.RSPTypeLVM,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+						{Name: "lvg-missing"},
+					},
+					EligibleNodesPolicy: v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
+						NotReadyGracePeriod: metav1.Duration{Duration: testGracePeriod},
+					},
+				},
+			}
+			cl = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rsp).
+				WithStatusSubresource(rsp).
+				Build()
+			rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+
+			result, err := rec.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: "rsp-1"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			var updatedRSP v1alpha1.ReplicatedStoragePool
+			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsp-1"}, &updatedRSP)).To(Succeed())
+			readyCond := obju.GetStatusCondition(&updatedRSP, v1alpha1.ReplicatedStoragePoolCondReadyType)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedStoragePoolCondReadyReasonLVMVolumeGroupNotFound))
+		})
+
+		It("sets Ready=False when validation fails for LVMThin", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Spec: v1alpha1.ReplicatedStoragePoolSpec{
+					Type: v1alpha1.RSPTypeLVMThin,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+						{Name: "lvg-1"}, // Missing thinPoolName.
+					},
+					EligibleNodesPolicy: v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
+						NotReadyGracePeriod: metav1.Duration{Duration: testGracePeriod},
+					},
+				},
+			}
+			lvg := &snc.LVMVolumeGroup{
+				ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
+				Spec: snc.LVMVolumeGroupSpec{
+					Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-1"},
+				},
+			}
+			cl = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rsp, lvg).
+				WithStatusSubresource(rsp).
+				Build()
+			rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+
+			result, err := rec.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: "rsp-1"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			var updatedRSP v1alpha1.ReplicatedStoragePool
+			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsp-1"}, &updatedRSP)).To(Succeed())
+			readyCond := obju.GetStatusCondition(&updatedRSP, v1alpha1.ReplicatedStoragePoolCondReadyType)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedStoragePoolCondReadyReasonInvalidLVMVolumeGroup))
+		})
+
+		It("sets Ready=False when NodeLabelSelector is invalid", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Spec: v1alpha1.ReplicatedStoragePoolSpec{
+					Type: v1alpha1.RSPTypeLVM,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+						{Name: "lvg-1"},
+					},
+					NodeLabelSelector: &metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{
+								Key:      "invalid key with spaces",
+								Operator: metav1.LabelSelectorOpIn,
+								Values:   []string{"value"},
+							},
+						},
+					},
+					EligibleNodesPolicy: v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
+						NotReadyGracePeriod: metav1.Duration{Duration: testGracePeriod},
+					},
+				},
+			}
+			lvg := &snc.LVMVolumeGroup{
+				ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
+				Spec: snc.LVMVolumeGroupSpec{
+					Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-1"},
+				},
+				Status: snc.LVMVolumeGroupStatus{
+					Conditions: []metav1.Condition{
+						{Type: "Ready", Status: metav1.ConditionTrue},
+					},
+				},
+			}
+			cl = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rsp, lvg).
+				WithStatusSubresource(rsp).
+				Build()
+			rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+
+			result, err := rec.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: "rsp-1"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			var updatedRSP v1alpha1.ReplicatedStoragePool
+			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsp-1"}, &updatedRSP)).To(Succeed())
+			readyCond := obju.GetStatusCondition(&updatedRSP, v1alpha1.ReplicatedStoragePoolCondReadyType)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedStoragePoolCondReadyReasonInvalidNodeLabelSelector))
+			Expect(readyCond.Message).To(ContainSubstring("Invalid NodeLabelSelector"))
+		})
+
+		It("sets Ready=True and updates EligibleNodes on success", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Spec: v1alpha1.ReplicatedStoragePoolSpec{
+					Type: v1alpha1.RSPTypeLVM,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+						{Name: "lvg-1"},
+					},
+					EligibleNodesPolicy: v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
+						NotReadyGracePeriod: metav1.Duration{Duration: testGracePeriod},
+					},
+				},
+			}
+			lvg := &snc.LVMVolumeGroup{
+				ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
+				Spec: snc.LVMVolumeGroupSpec{
+					Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-1"},
+				},
+				Status: snc.LVMVolumeGroupStatus{
+					Conditions: []metav1.Condition{
+						{Type: "Ready", Status: metav1.ConditionTrue},
+					},
+				},
+			}
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "node-1",
+					Labels: map[string]string{corev1.LabelTopologyZone: "zone-a"},
+				},
+				Status: corev1.NodeStatus{
+					Conditions: []corev1.NodeCondition{
+						{Type: corev1.NodeReady, Status: corev1.ConditionTrue},
+					},
+				},
+			}
+			cl = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rsp, lvg, node).
+				WithStatusSubresource(rsp).
+				Build()
+			rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+
+			result, err := rec.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: "rsp-1"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			var updatedRSP v1alpha1.ReplicatedStoragePool
+			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsp-1"}, &updatedRSP)).To(Succeed())
+			readyCond := obju.GetStatusCondition(&updatedRSP, v1alpha1.ReplicatedStoragePoolCondReadyType)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(updatedRSP.Status.EligibleNodes).To(HaveLen(1))
+			Expect(updatedRSP.Status.EligibleNodes[0].NodeName).To(Equal("node-1"))
+			Expect(updatedRSP.Status.EligibleNodes[0].ZoneName).To(Equal("zone-a"))
+			Expect(updatedRSP.Status.EligibleNodesRevision).To(BeNumerically(">", 0))
+		})
+
+		It("increments EligibleNodesRevision when nodes change", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Spec: v1alpha1.ReplicatedStoragePoolSpec{
+					Type: v1alpha1.RSPTypeLVM,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+						{Name: "lvg-1"},
+					},
+					EligibleNodesPolicy: v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
+						NotReadyGracePeriod: metav1.Duration{Duration: testGracePeriod},
+					},
+				},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodesRevision: 5,
+					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+						{NodeName: "node-old"},
+					},
+				},
+			}
+			lvg := &snc.LVMVolumeGroup{
+				ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
+				Spec: snc.LVMVolumeGroupSpec{
+					Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-1"},
+				},
+				Status: snc.LVMVolumeGroupStatus{
+					Conditions: []metav1.Condition{
+						{Type: "Ready", Status: metav1.ConditionTrue},
+					},
+				},
+			}
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node-1"},
+				Status: corev1.NodeStatus{
+					Conditions: []corev1.NodeCondition{
+						{Type: corev1.NodeReady, Status: corev1.ConditionTrue},
+					},
+				},
+			}
+			cl = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rsp, lvg, node).
+				WithStatusSubresource(rsp).
+				Build()
+			rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+
+			result, err := rec.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: "rsp-1"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			var updatedRSP v1alpha1.ReplicatedStoragePool
+			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsp-1"}, &updatedRSP)).To(Succeed())
+			Expect(updatedRSP.Status.EligibleNodesRevision).To(Equal(int64(6)))
+		})
+
+		It("requeues when grace period will expire", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Spec: v1alpha1.ReplicatedStoragePoolSpec{
+					Type: v1alpha1.RSPTypeLVM,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+						{Name: "lvg-1"},
+					},
+					EligibleNodesPolicy: v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
+						NotReadyGracePeriod: metav1.Duration{Duration: testGracePeriod},
+					},
+				},
+			}
+			lvg := &snc.LVMVolumeGroup{
+				ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
+				Spec: snc.LVMVolumeGroupSpec{
+					Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-1"},
+				},
+				Status: snc.LVMVolumeGroupStatus{
+					Conditions: []metav1.Condition{
+						{Type: "Ready", Status: metav1.ConditionTrue},
+					},
+				},
+			}
+			// Node is NotReady within grace period.
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node-1"},
+				Status: corev1.NodeStatus{
+					Conditions: []corev1.NodeCondition{
+						{
+							Type:               corev1.NodeReady,
+							Status:             corev1.ConditionFalse,
+							LastTransitionTime: metav1.NewTime(time.Now().Add(-2 * time.Minute)),
+						},
+					},
+				},
+			}
+			cl = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rsp, lvg, node).
+				WithStatusSubresource(rsp).
+				Build()
+			rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+
+			result, err := rec.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: "rsp-1"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+			Expect(result.RequeueAfter).To(BeNumerically("<=", testGracePeriod))
+		})
+	})
+})
