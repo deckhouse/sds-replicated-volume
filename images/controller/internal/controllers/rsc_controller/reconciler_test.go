@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
@@ -1517,6 +1518,7 @@ var _ = Describe("Reconciler", func() {
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
 		Expect(corev1.AddToScheme(scheme)).To(Succeed())
+		Expect(storagev1.AddToScheme(scheme)).To(Succeed())
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 		Expect(snc.AddToScheme(scheme)).To(Succeed())
 		cl = nil
@@ -1540,7 +1542,11 @@ var _ = Describe("Reconciler", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool: "rsp-1",
+					StoragePool:   "rsp-1",
+					ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
+					Replication:   v1alpha1.ReplicationNone,
+					VolumeAccess:  v1alpha1.VolumeAccessPreferablyLocal,
+					Topology:      v1alpha1.RSCTopologyZonal,
 				},
 			}
 			rsp := &v1alpha1.ReplicatedStoragePool{
@@ -1596,7 +1602,11 @@ var _ = Describe("Reconciler", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool: "rsp-1",
+					StoragePool:   "rsp-1",
+					ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
+					Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:  v1alpha1.VolumeAccessPreferablyLocal,
+					Topology:      v1alpha1.RSCTopologyZonal,
 				},
 			}
 			rsp := &v1alpha1.ReplicatedStoragePool{
@@ -1666,7 +1676,11 @@ var _ = Describe("Reconciler", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool: "rsp-not-found",
+					StoragePool:   "rsp-not-found",
+					ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
+					Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:  v1alpha1.VolumeAccessPreferablyLocal,
+					Topology:      v1alpha1.RSCTopologyZonal,
 				},
 			}
 			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
@@ -1692,7 +1706,11 @@ var _ = Describe("Reconciler", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool: "rsp-1",
+					StoragePool:   "rsp-1",
+					ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
+					Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:  v1alpha1.VolumeAccessPreferablyLocal,
+					Topology:      v1alpha1.RSCTopologyZonal,
 				},
 			}
 			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
@@ -1712,6 +1730,7 @@ var _ = Describe("Reconciler", func() {
 			var updatedRSC v1alpha1.ReplicatedStorageClass
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)).To(Succeed())
 			Expect(updatedRSC.Finalizers).To(ContainElement(v1alpha1.RSCControllerFinalizer))
+			Expect(updatedRSC.Finalizers).To(ContainElement(replicatedStorageClassFinalizerName))
 		})
 
 		It("keeps finalizer when RSC has deletionTimestamp but RVs exist", func() {
@@ -1719,11 +1738,15 @@ var _ = Describe("Reconciler", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:              "rsc-1",
-					Finalizers:        []string{v1alpha1.RSCControllerFinalizer},
+					Finalizers:        []string{v1alpha1.RSCControllerFinalizer, replicatedStorageClassFinalizerName},
 					DeletionTimestamp: &now,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool: "rsp-1",
+					StoragePool:   "rsp-1",
+					ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
+					Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:  v1alpha1.VolumeAccessPreferablyLocal,
+					Topology:      v1alpha1.RSCTopologyZonal,
 				},
 			}
 			rv := &v1alpha1.ReplicatedVolume{
@@ -1749,6 +1772,7 @@ var _ = Describe("Reconciler", func() {
 			var updatedRSC v1alpha1.ReplicatedStorageClass
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)).To(Succeed())
 			Expect(updatedRSC.Finalizers).To(ContainElement(v1alpha1.RSCControllerFinalizer))
+			Expect(updatedRSC.Finalizers).NotTo(ContainElement(replicatedStorageClassFinalizerName))
 		})
 
 		It("removes finalizer when RSC has deletionTimestamp and no RVs", func() {
@@ -1756,11 +1780,15 @@ var _ = Describe("Reconciler", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:              "rsc-1",
-					Finalizers:        []string{v1alpha1.RSCControllerFinalizer},
+					Finalizers:        []string{v1alpha1.RSCControllerFinalizer, replicatedStorageClassFinalizerName},
 					DeletionTimestamp: &now,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool: "rsp-1",
+					StoragePool:   "rsp-1",
+					ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
+					Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:  v1alpha1.VolumeAccessPreferablyLocal,
+					Topology:      v1alpha1.RSCTopologyZonal,
 				},
 			}
 			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
@@ -1783,5 +1811,202 @@ var _ = Describe("Reconciler", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(client.IgnoreNotFound(err)).To(BeNil())
 		})
+	})
+})
+
+var _ = Describe("StorageClass reconciliation", func() {
+	var (
+		scheme *runtime.Scheme
+		cl     client.WithWatch
+		rec    *Reconciler
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(corev1.AddToScheme(scheme)).To(Succeed())
+		Expect(storagev1.AddToScheme(scheme)).To(Succeed())
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		Expect(snc.AddToScheme(scheme)).To(Succeed())
+		cl = nil
+		rec = nil
+	})
+
+	It("creates StorageClass when missing", func() {
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			Spec: v1alpha1.ReplicatedStorageClassSpec{
+				StoragePool:   "pool-1",
+				ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
+				Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
+				VolumeAccess:  v1alpha1.VolumeAccessLocal,
+				Topology:      v1alpha1.RSCTopologyTransZonal,
+				Zones:         []string{"zone-a", "zone-b", "zone-c"},
+			},
+		}
+
+		cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(rsc).
+			WithStatusSubresource(rsc)).
+			Build()
+		rec = NewReconciler(cl)
+
+		_, err := rec.Reconcile(context.Background(), reconcile.Request{
+			NamespacedName: client.ObjectKey{Name: "rsc-1"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		var sc storagev1.StorageClass
+		Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &sc)).To(Succeed())
+		Expect(sc.Provisioner).To(Equal(storageClassProvisioner))
+		Expect(sc.Parameters).To(HaveKeyWithValue(storageClassParamTopologyKey, string(v1alpha1.RSCTopologyTransZonal)))
+		Expect(sc.Annotations).NotTo(HaveKey(storageClassVirtualizationAnnotationKey))
+	})
+
+	It("returns error when StorageClass has different provisioner", func() {
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			Spec: v1alpha1.ReplicatedStorageClassSpec{
+				StoragePool:   "pool-1",
+				ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
+				Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
+				VolumeAccess:  v1alpha1.VolumeAccessAny,
+				Topology:      v1alpha1.RSCTopologyIgnored,
+			},
+		}
+		sc := &storagev1.StorageClass{
+			ObjectMeta:  metav1.ObjectMeta{Name: "rsc-1"},
+			Provisioner: "other.provisioner",
+		}
+
+		cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(rsc, sc).
+			WithStatusSubresource(rsc)).
+			Build()
+		rec = NewReconciler(cl)
+
+		_, err := rec.Reconcile(context.Background(), reconcile.Request{
+			NamespacedName: client.ObjectKey{Name: "rsc-1"},
+		})
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("recreates StorageClass when only new parameters differ", func() {
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			Spec: v1alpha1.ReplicatedStorageClassSpec{
+				StoragePool:   "pool-1",
+				ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
+				Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
+				VolumeAccess:  v1alpha1.VolumeAccessAny,
+				Topology:      v1alpha1.RSCTopologyTransZonal,
+				Zones:         []string{"zone-a", "zone-b", "zone-c"},
+			},
+		}
+
+		intended := computeIntendedStorageClass(rsc, false)
+		oldSC := intended.DeepCopy()
+		delete(oldSC.Parameters, storageClassParamTopologyKey)
+		delete(oldSC.Parameters, storageClassParamZonesKey)
+		oldSC.Labels = map[string]string{"custom": "1"}
+
+		cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(rsc, oldSC).
+			WithStatusSubresource(rsc)).
+			Build()
+		rec = NewReconciler(cl)
+
+		_, err := rec.Reconcile(context.Background(), reconcile.Request{
+			NamespacedName: client.ObjectKey{Name: "rsc-1"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		var sc storagev1.StorageClass
+		Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &sc)).To(Succeed())
+		Expect(sc.Parameters).To(HaveKey(storageClassParamTopologyKey))
+		Expect(sc.Parameters).To(HaveKey(storageClassParamZonesKey))
+		Expect(sc.Labels).To(HaveKeyWithValue("custom", "1"))
+		Expect(sc.Labels).To(HaveKeyWithValue(managedLabelKey, managedLabelValue))
+	})
+
+	It("updates StorageClass metadata when needed", func() {
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			Spec: v1alpha1.ReplicatedStorageClassSpec{
+				StoragePool:   "pool-1",
+				ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
+				Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
+				VolumeAccess:  v1alpha1.VolumeAccessAny,
+				Topology:      v1alpha1.RSCTopologyIgnored,
+			},
+		}
+
+		intended := computeIntendedStorageClass(rsc, false)
+		oldSC := intended.DeepCopy()
+		oldSC.Labels = nil
+		oldSC.Annotations = nil
+		oldSC.Finalizers = nil
+
+		cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(rsc, oldSC).
+			WithStatusSubresource(rsc)).
+			Build()
+		rec = NewReconciler(cl)
+
+		_, err := rec.Reconcile(context.Background(), reconcile.Request{
+			NamespacedName: client.ObjectKey{Name: "rsc-1"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		var sc storagev1.StorageClass
+		Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &sc)).To(Succeed())
+		Expect(sc.Labels).To(HaveKeyWithValue(managedLabelKey, managedLabelValue))
+		Expect(sc.Annotations).To(HaveKeyWithValue(rscStorageClassVolumeSnapshotClassAnnotationKey, rscStorageClassVolumeSnapshotClassAnnotationValue))
+		Expect(sc.Finalizers).To(ContainElement(storageClassFinalizerName))
+	})
+
+	It("deletes StorageClass when RSC is being deleted", func() {
+		now := metav1.Now()
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rsc-1",
+				Finalizers:        []string{v1alpha1.RSCControllerFinalizer},
+				DeletionTimestamp: &now,
+			},
+			Spec: v1alpha1.ReplicatedStorageClassSpec{
+				StoragePool:   "pool-1",
+				ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
+				Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
+				VolumeAccess:  v1alpha1.VolumeAccessAny,
+				Topology:      v1alpha1.RSCTopologyIgnored,
+			},
+		}
+		sc := &storagev1.StorageClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "rsc-1",
+				Finalizers: []string{storageClassFinalizerName},
+			},
+			Provisioner: storageClassProvisioner,
+		}
+
+		cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(rsc, sc).
+			WithStatusSubresource(rsc)).
+			Build()
+		rec = NewReconciler(cl)
+
+		_, err := rec.Reconcile(context.Background(), reconcile.Request{
+			NamespacedName: client.ObjectKey{Name: "rsc-1"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		var gotSC storagev1.StorageClass
+		err = cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &gotSC)
+		Expect(err).To(HaveOccurred())
+		Expect(client.IgnoreNotFound(err)).To(BeNil())
 	})
 })

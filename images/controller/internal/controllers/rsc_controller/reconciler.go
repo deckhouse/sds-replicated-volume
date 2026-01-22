@@ -50,6 +50,8 @@ type Reconciler struct {
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
+const replicatedStorageClassFinalizerName = "replicatedstorageclass.storage.deckhouse.io"
+
 func NewReconciler(cl client.Client) *Reconciler {
 	return &Reconciler{cl: cl}
 }
@@ -72,17 +74,60 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Get RVs referencing this RSC.
 	rvs, err := r.getSortedRVsByRSC(rf.Ctx(), rsc.Name)
 	if err != nil {
+		if statusErr := r.patchRSCFailedStatus(rf.Ctx(), rsc, err); statusErr != nil {
+			return rf.Fail(errors.Join(err, statusErr)).ToCtrl()
+		}
 		return rf.Fail(err).ToCtrl()
 	}
 
-	// Reconcile main (finalizer management).
-	outcome := r.reconcileMain(rf.Ctx(), rsc, rvs)
+	if rsc.DeletionTimestamp == nil {
+		nodes, err := r.getSortedNodes(rf.Ctx())
+		if err != nil {
+			if statusErr := r.patchRSCFailedStatus(rf.Ctx(), rsc, err); statusErr != nil {
+				return rf.Fail(errors.Join(err, statusErr)).ToCtrl()
+			}
+			return rf.Fail(err).ToCtrl()
+		}
+		clusterZones := computeClusterZones(nodes)
+		valid, msg := validateRSCSpec(rsc, clusterZones)
+		if !valid {
+			err := fmt.Errorf("%s", msg)
+			if statusErr := r.patchRSCFailedStatus(rf.Ctx(), rsc, err); statusErr != nil {
+				return rf.Fail(errors.Join(err, statusErr)).ToCtrl()
+			}
+			return rf.Fail(err).ToCtrl()
+		}
+	}
+
+	outcome := r.reconcileStorageClass(rf.Ctx(), rsc)
 	if outcome.ShouldReturn() {
+		if outcome.Error() != nil {
+			if statusErr := r.patchRSCFailedStatus(rf.Ctx(), rsc, outcome.Error()); statusErr != nil {
+				return rf.Fail(errors.Join(outcome.Error(), statusErr)).ToCtrl()
+			}
+		}
+		return outcome.ToCtrl()
+	}
+
+	// Reconcile main (finalizer management).
+	outcome = r.reconcileMain(rf.Ctx(), rsc, rvs)
+	if outcome.ShouldReturn() {
+		if outcome.Error() != nil {
+			if statusErr := r.patchRSCFailedStatus(rf.Ctx(), rsc, outcome.Error()); statusErr != nil {
+				return rf.Fail(errors.Join(outcome.Error(), statusErr)).ToCtrl()
+			}
+		}
 		return outcome.ToCtrl()
 	}
 
 	// Reconcile status.
-	return r.reconcileStatus(rf.Ctx(), rsc, rvs).ToCtrl()
+	outcome = r.reconcileStatus(rf.Ctx(), rsc, rvs)
+	if outcome.Error() != nil {
+		if statusErr := r.patchRSCFailedStatus(rf.Ctx(), rsc, outcome.Error()); statusErr != nil {
+			return rf.Fail(errors.Join(outcome.Error(), statusErr)).ToCtrl()
+		}
+	}
+	return outcome.ToCtrl()
 }
 
 // reconcileMain manages the finalizer on the RSC.
@@ -100,36 +145,37 @@ func (r *Reconciler) reconcileMain(
 	rf := flow.BeginReconcile(ctx, "main")
 	defer rf.OnEnd(&outcome)
 
-	actualFinalizerPresent := computeActualFinalizerPresent(rsc)
-	targetFinalizerPresent := computeTargetFinalizerPresent(rsc, rvs)
+	actualControllerFinalizerPresent := computeActualControllerFinalizerPresent(rsc)
+	targetControllerFinalizerPresent := computeTargetControllerFinalizerPresent(rsc, rvs)
 
-	if targetFinalizerPresent == actualFinalizerPresent {
+	actualLegacyFinalizerPresent := computeActualLegacyFinalizerPresent(rsc)
+	targetLegacyFinalizerPresent := computeTargetLegacyFinalizerPresent(rsc)
+
+	if targetControllerFinalizerPresent == actualControllerFinalizerPresent &&
+		targetLegacyFinalizerPresent == actualLegacyFinalizerPresent {
 		return rf.Continue()
 	}
 
 	base := rsc.DeepCopy()
-	applyFinalizer(rsc, targetFinalizerPresent)
+	applyFinalizers(rsc, targetControllerFinalizerPresent, targetLegacyFinalizerPresent)
 
 	if err := r.patchRSC(rf.Ctx(), rsc, base, true); err != nil {
 		return rf.Fail(err)
 	}
 
 	// If finalizer was removed, we're done (object will be deleted).
-	if !targetFinalizerPresent {
+	if !targetControllerFinalizerPresent {
 		return rf.Done()
 	}
 
 	return rf.Continue()
 }
 
-// computeActualFinalizerPresent returns whether the controller finalizer is present on the RSC.
-func computeActualFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass) bool {
+func computeActualControllerFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass) bool {
 	return objutilv1.HasFinalizer(rsc, v1alpha1.RSCControllerFinalizer)
 }
 
-// computeTargetFinalizerPresent returns whether the controller finalizer should be present.
-// The finalizer should be present unless the RSC is being deleted AND has no RVs.
-func computeTargetFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass, rvs []v1alpha1.ReplicatedVolume) bool {
+func computeTargetControllerFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass, rvs []v1alpha1.ReplicatedVolume) bool {
 	isDeleting := rsc.DeletionTimestamp != nil
 	hasRVs := len(rvs) > 0
 
@@ -137,12 +183,25 @@ func computeTargetFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass, rvs []v
 	return !isDeleting || hasRVs
 }
 
-// applyFinalizer adds or removes the controller finalizer based on target state.
-func applyFinalizer(rsc *v1alpha1.ReplicatedStorageClass, targetPresent bool) {
-	if targetPresent {
+func computeActualLegacyFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass) bool {
+	return objutilv1.HasFinalizer(rsc, replicatedStorageClassFinalizerName)
+}
+
+func computeTargetLegacyFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass) bool {
+	return rsc.DeletionTimestamp == nil
+}
+
+func applyFinalizers(rsc *v1alpha1.ReplicatedStorageClass, targetControllerFinalizerPresent, targetLegacyFinalizerPresent bool) {
+	if targetControllerFinalizerPresent {
 		objutilv1.AddFinalizer(rsc, v1alpha1.RSCControllerFinalizer)
 	} else {
 		objutilv1.RemoveFinalizer(rsc, v1alpha1.RSCControllerFinalizer)
+	}
+
+	if targetLegacyFinalizerPresent {
+		objutilv1.AddFinalizer(rsc, replicatedStorageClassFinalizerName)
+	} else {
+		objutilv1.RemoveFinalizer(rsc, replicatedStorageClassFinalizerName)
 	}
 }
 
@@ -187,6 +246,8 @@ func (r *Reconciler) reconcileStatus(
 
 		// Ensure rolling updates.
 		ensureVolumeConditions(rf.Ctx(), rsc, rvs),
+
+		ensurePhaseReason(rf.Ctx(), rsc),
 	)
 
 	// Patch if changed.
@@ -197,6 +258,34 @@ func (r *Reconciler) reconcileStatus(
 	}
 
 	return rf.Done()
+}
+
+func ensurePhaseReason(ctx context.Context, rsc *v1alpha1.ReplicatedStorageClass) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "phase-reason")
+	defer ef.OnEnd(&outcome)
+
+	if rsc.DeletionTimestamp != nil {
+		return ef.Ok()
+	}
+
+	changed := false
+	if rsc.Status.Phase != v1alpha1.RSCPhaseCreated {
+		rsc.Status.Phase = v1alpha1.RSCPhaseCreated
+		changed = true
+	}
+	if rsc.Status.Reason != "ReplicatedStorageClass and StorageClass are equal." {
+		rsc.Status.Reason = "ReplicatedStorageClass and StorageClass are equal."
+		changed = true
+	}
+
+	return ef.Ok().ReportChangedIf(changed)
+}
+
+func (r *Reconciler) patchRSCFailedStatus(ctx context.Context, rsc *v1alpha1.ReplicatedStorageClass, err error) error {
+	base := rsc.DeepCopy()
+	rsc.Status.Phase = v1alpha1.RSCPhaseFailed
+	rsc.Status.Reason = err.Error()
+	return r.patchRSCStatus(ctx, rsc, base, false)
 }
 
 // =============================================================================

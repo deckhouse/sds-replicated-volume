@@ -125,12 +125,6 @@ func main() {
 	}
 	log.Info("the NewLinstorNode controller starts")
 
-	if _, err := controller.NewReplicatedStorageClass(mgr, cfgParams, *log); err != nil {
-		log.Error(err, "failed to create the NewReplicatedStorageClass controller")
-		os.Exit(1)
-	}
-	log.Info("the NewReplicatedStorageClass controller starts")
-
 	if _, err := controller.NewReplicatedStoragePool(mgr, lc, cfgParams.ScanInterval, *log); err != nil {
 		log.Error(err, "failed to create the NewReplicatedStoragePool controller")
 		os.Exit(1)
