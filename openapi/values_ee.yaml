@@ -12,6 +12,12 @@ properties:
     - sslNodeCert
     - dataNodesChecksum
     properties:
+      drbdVersionValidation:
+        type: object
+        default: {}
+        properties:
+          error:
+            type: string
       dataNodesChecksum:
         type: string
         default: "default_data_nodes_checksum"
