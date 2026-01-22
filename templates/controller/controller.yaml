@@ -65,3 +65,13 @@
   "rules" (list (dict "apiGroups" (list "") "apiVersions" (list "v1") "operations" (list "CREATE") "resources" (list "persistentvolumeclaims") "scope" "Namespaced"))
 }}
 {{ include "helm_lib_module_validating_webhook_configuration" (list . $pvcWebhookConfig) }}
+
+{{- /* ValidatingWebhookConfiguration for ModuleConfig */ -}}
+{{- $moduleConfigWebhookConfig := dict
+  "name" "module-config-validation"
+  "webhookName" "module-config-validation"
+  "valuesKey" "sdsReplicatedVolume"
+  "path" "/module-config-validate"
+  "rules" (list (dict "apiGroups" (list "deckhouse.io") "apiVersions" (list "v1alpha1") "operations" (list "CREATE" "UPDATE") "resources" (list "moduleconfigs") "scope" "Cluster"))
+}}
+{{ include "helm_lib_module_validating_webhook_configuration" (list . $moduleConfigWebhookConfig) }}

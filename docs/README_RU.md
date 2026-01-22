@@ -95,11 +95,21 @@ moduleStatus: preview
    kind: ModuleConfig
    metadata:
      name: sds-replicated-volume
-   spec:
-     enabled: true
-     version: 1
-   EOF
+    spec:
+      enabled: true
+      version: 1
+      settings:
+        drbdVersion: 9.2.13
+    EOF
+    ```
+
+   Список разрешённых версий DRBD хранится в ConfigMap `d8-sds-replicated-volume-drbd-versions` в пространстве имён модуля:
+
+   ```shell
+   kubectl -n d8-sds-replicated-volume get configmap d8-sds-replicated-volume-drbd-versions -o jsonpath='{.data.allowedDrbdVersions}'
    ```
+
+   Менять версию можно только вверх и по порядку.
   
    {{< alert level="warning" >}}
    Параметр [settings.dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) рекомендуется указывать в момент включения модуля.

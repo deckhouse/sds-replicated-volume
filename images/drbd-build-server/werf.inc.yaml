@@ -1,0 +1,105 @@
+---
+image: {{ $.ImageName }}-src-artifact
+fromImage: builder/src
+final: false
+
+git:
+  - add: /
+    to: /src
+    includePaths:
+      - api
+      - images/{{ $.ImageName }}
+    stageDependencies:
+      install:
+        - '**/*'
+    excludePaths:
+      - images/{{ $.ImageName }}/werf.yaml
+
+shell:
+  install:
+    - echo "src artifact"
+
+---
+# Build Go application
+image: {{ $.ImageName }}-golang-artifact
+from: builder/golang-alpine
+final: false
+
+import:
+  - image: {{ $.ImageName }}-src-artifact
+    add: /src
+    to: /src
+    before: install
+
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
+
+shell:
+  setup:
+    - cd /src/images/{{ $.ImageName }}/cmd
+    - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
+    - export GOOS=linux GOARCH=amd64 CGO_ENABLED=0    
+    - go build -ldflags="-s -w" -o /drbd-build-server main.go
+    - chmod +x /drbd-build-server
+
+---
+# Runtime image with build tools for DRBD kernel module compilation
+image: {{ $.ImageName }}
+from: builder/alt
+
+import:
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /drbd-build-server
+    to: /usr/local/bin/drbd-build-server
+    before: setup
+
+shell:
+  beforeInstall:
+    - export DEBIAN_FRONTEND=noninteractive
+  install:
+    - |
+      apt-get update \
+      && apt-get install -y \
+          coreutils \
+          flex \
+          bison \
+          coccinelle \
+          gcc \
+          gcc12 \
+          make \
+          bc \
+          libssl-devel \
+          libelf-devel \
+          git \
+          ca-certificates \
+          tar \
+          gzip \
+          python3 \
+          python3-dev \
+          patch \
+          perl \
+          build-essential \
+      && ln -sf /usr/bin/python3 /usr/bin/python \
+      && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+  setup:
+    - git clone --depth 1 --no-single-branch --recurse-submodules {{ $.Root.SOURCE_REPO }}/LINBIT/drbd.git /drbd
+    - cd /drbd && git submodule update --init --recursive
+    - cd /drbd && git submodule foreach --recursive 'git fetch --all --tags'
+    - |
+      cd /drbd
+      git rev-parse HEAD > /tmp/drbd_git_hash
+      mkdir -p /drbd/drbd
+      printf "GIT-hash:%s\n" "$(cat /tmp/drbd_git_hash)" > /drbd/drbd/.drbd_git_revision
+      rm -rf /tmp/drbd_git_hash
+    - mkdir -p /var/cache/drbd-build-server /tmp/drbd-builds
+
+docker:
+  WORKDIR: /drbd
+  EXPOSE: "2021"
+  ENTRYPOINT: ["/usr/local/bin/drbd-build-server"]
+  CMD: ["-addr", ":2021"]
+  LABEL:
+    distro: debian
+    version: all
+
