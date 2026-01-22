@@ -23,20 +23,17 @@ import (
 
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/registry"
-	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const (
-	drbdVersionsConfigMapName = "d8-sds-replicated-volume-drbd-versions"
-	allowedDrbdVersionsKey    = "allowedDrbdVersions"
-	moduleConfigName          = "sds-replicated-volume"
-)
+const moduleConfigName = "sds-replicated-volume"
+
+var allowedDrbdVersions = map[string]struct{}{
+	"9.2.13": {},
+	"9.2.16": {},
+}
 
 var _ = registry.RegisterFunc(
 	&pkg.HookConfig{
@@ -68,37 +65,14 @@ func onBeforeHelmChecks(ctx context.Context, input *pkg.HookInput) error {
 		return nil
 	}
 
-	cm := &corev1.ConfigMap{}
-	if err := cl.Get(ctx, types.NamespacedName{Name: drbdVersionsConfigMapName, Namespace: consts.ModuleNamespace}, cm); err != nil {
-		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("configmap %q not found in namespace %q", drbdVersionsConfigMapName, consts.ModuleNamespace)
-		}
-		return fmt.Errorf("failed to get configmap %q in namespace %q: %w", drbdVersionsConfigMapName, consts.ModuleNamespace, err)
+	if len(allowedDrbdVersions) == 0 {
+		return fmt.Errorf("allowed drbd versions list is empty")
 	}
 
-	allowedVersions := parseAllowedVersions(cm.Data[allowedDrbdVersionsKey])
-	if len(allowedVersions) == 0 {
-		return fmt.Errorf("configmap %q has empty %q list", drbdVersionsConfigMapName, allowedDrbdVersionsKey)
-	}
-
-	if _, ok := allowedVersions[drbdVersion]; !ok {
-		return fmt.Errorf("drbdVersion %q is not in allowed list from %q", drbdVersion, drbdVersionsConfigMapName)
+	if _, ok := allowedDrbdVersions[drbdVersion]; !ok {
+		return fmt.Errorf("drbdVersion %q is not in allowed list", drbdVersion)
 	}
 
 	input.Logger.Info("DRBD version check passed", "drbdVersion", drbdVersion)
 	return nil
-}
-
-func parseAllowedVersions(raw string) map[string]struct{} {
-	versions := map[string]struct{}{}
-	for _, part := range strings.FieldsFunc(raw, func(r rune) bool {
-		return r == '\n' || r == '\r' || r == '\t' || r == ' ' || r == ','
-	}) {
-		v := strings.TrimSpace(part)
-		if v == "" {
-			continue
-		}
-		versions[v] = struct{}{}
-	}
-	return versions
 }
