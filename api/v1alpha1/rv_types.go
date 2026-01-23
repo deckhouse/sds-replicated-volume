@@ -117,6 +117,11 @@ type ReplicatedVolumeStatus struct {
 	// Datamesh is the computed datamesh configuration for the volume.
 	// +patchStrategy=merge
 	Datamesh ReplicatedVolumeDatamesh `json:"datamesh" patchStrategy:"merge"`
+
+	// LastOperation tracks the most recent rolling operation for this volume.
+	// Provides observability for kubectl and UI.
+	// +optional
+	LastOperation *ReplicatedVolumeLastOperation `json:"lastOperation,omitempty"`
 }
 
 // ReplicatedVolumeDatamesh holds datamesh configuration for the volume.
@@ -245,3 +250,23 @@ const (
 )
 
 func (r ReplicatedVolumeEligibleNodesViolationReason) String() string { return string(r) }
+
+// ReplicatedVolumeLastOperation tracks the most recent rolling operation for a volume.
+// Provides observability for kubectl get and UI.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeLastOperation struct {
+	// Type is the operation type (UpdateConfiguration or ResolveEligibleNodesConflict).
+	Type string `json:"type"`
+	// Name is the ReplicatedVolumeOperation resource name.
+	Name string `json:"name"`
+	// CreatedAt is when the operation was created.
+	CreatedAt metav1.Time `json:"createdAt"`
+	// CompletedAt is when the operation completed (nil if still in progress).
+	// +optional
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+	// Status is the operation status: Pending, InProgress, Succeeded, or Failed.
+	Status string `json:"status"`
+	// Message provides additional information about the operation status.
+	// +optional
+	Message string `json:"message,omitempty"`
+}

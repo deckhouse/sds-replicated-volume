@@ -1,0 +1,141 @@
+---
+description: Go performance patterns for sorting and iteration. Apply when reviewing code with sort.Slice over collections that may have 100+ items with non-trivial comparators, or when expensive operations are applied to collections before filtering.
+alwaysApply: false
+---
+
+See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
+
+# Go performance patterns
+
+## Schwartzian transform for sorting (SHOULD)
+
+When sorting slices where:
+- the comparator calls **expensive functions** (hash computations, string formatting, allocations), AND
+- the slice may contain **100+ items** in production scenarios,
+
+you SHOULD use the **Schwartzian transform** (decorate-sort-undecorate) pattern:
+
+1. **Decorate**: Precompute expensive values into a temporary struct slice — O(N)
+2. **Sort**: Sort by precomputed values (cheap comparison) — O(N log N) comparisons
+3. **Undecorate**: Extract results — O(N)
+
+This reduces expensive computations from O(N log N) to O(N).
+
+### Why it matters
+
+| Items | Comparisons (sort) | Hash calls (naive) | Hash calls (optimized) |
+|-------|-------------------|--------------------|------------------------|
+| 100   | ~665              | ~1330              | 100                    |
+| 500   | ~4483             | ~8966              | 500                    |
+| 1000  | ~9966             | ~19932             | 1000                   |
+
+### Example (GOOD)
+
+```go
+// sortItemsByExpensiveKey sorts items using Schwartzian transform.
+// Precomputes keys to avoid O(N log N) expensive calls.
+func sortItemsByExpensiveKey(items []Item) []Item {
+    // Decorate: precompute keys once.
+    type decorated struct {
+        item *Item
+        key  string
+    }
+    tmp := make([]decorated, len(items))
+    for i := range items {
+        tmp[i] = decorated{
+            item: &items[i],
+            key:  expensiveKeyComputation(items[i]),
+        }
+    }
+
+    // Sort by precomputed key.
+    sort.SliceStable(tmp, func(i, j int) bool {
+        return tmp[i].key < tmp[j].key
+    })
+
+    // Undecorate: extract sorted items.
+    result := make([]Item, len(tmp))
+    for i, d := range tmp {
+        result[i] = *d.item
+    }
+    return result
+}
+```
+
+### Example (BAD)
+
+```go
+// BAD: expensiveKeyComputation called O(N log N) times
+sort.SliceStable(items, func(i, j int) bool {
+    return expensiveKeyComputation(items[i]) < expensiveKeyComputation(items[j])
+})
+```
+
+### When reviewing code
+
+When you see `sort.Slice` / `sort.SliceStable` with a non-trivial comparator:
+
+1. ASK about expected collection size in production
+2. ASK about comparator cost (allocations, hashing, formatting)
+3. SUGGEST Schwartzian transform if:
+   - Collection may have 100+ items, AND
+   - Comparator is more expensive than simple field access
+
+---
+
+## Filter before compute (SHOULD)
+
+When processing a collection with expensive per-element operations (hashing, serialization, complex computations), you SHOULD filter the collection **before** applying those operations.
+
+### Rationale
+
+If only M of N elements need processing, filtering first reduces expensive operations from O(N) to O(M).
+
+### Example (BAD)
+
+```go
+// BAD: computes expensive values for ALL N items, then filters
+sortedAll := sortByExpensiveHash(items) // N hash calls
+var candidates []Item
+for _, item := range sortedAll {
+    if needsProcessing(item) { // cheap check
+        candidates = append(candidates, item)
+    }
+}
+// Only M candidates actually needed, but we computed N hashes
+```
+
+### Example (GOOD)
+
+```go
+// GOOD: filter first, then compute only for candidates
+var candidates []Item
+for i := range items {
+    if needsProcessing(&items[i]) { // cheap check: O(N)
+        candidates = append(candidates, items[i])
+    }
+}
+// Now compute expensive values only for M candidates
+sortedCandidates := sortByExpensiveHash(candidates) // M hash calls
+```
+
+### Combining with Schwartzian transform
+
+When both patterns apply:
+
+1. **Filter** to candidates — O(N) cheap checks
+2. **Decorate** candidates with expensive keys — O(M) expensive calls
+3. **Sort** by precomputed keys — O(M log M) cheap comparisons
+4. **Undecorate** (if needed) — O(M)
+
+This reduces expensive computations from O(N + N log N) to O(M).
+
+### When reviewing code
+
+When you see expensive operations applied to a collection before filtering:
+
+1. ASK: "Can we filter first to reduce the set?"
+2. CHECK: Is the filter condition cheap (simple field checks, map lookups)?
+3. SUGGEST filter-before-compute if:
+   - Only a subset M of N items need the expensive operation, AND
+   - The filter condition is significantly cheaper than the expensive operation
