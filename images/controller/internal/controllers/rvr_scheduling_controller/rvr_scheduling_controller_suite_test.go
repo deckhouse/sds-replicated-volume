@@ -17,56 +17,13 @@ limitations under the License.
 package rvrschedulingcontroller_test
 
 import (
-	"context"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 func TestRvrSchedulingController(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "RvrSchedulingController Suite")
-}
-
-func Requeue() OmegaMatcher {
-	return Not(Equal(reconcile.Result{}))
-}
-
-// InterceptGet creates an interceptor that modifies objects in both Get and List operations.
-// If Get or List returns an error, intercept is called with a nil (zero) value of type T allowing
-// the test to override the error.
-func InterceptGet[T client.Object](
-	intercept func(T) error,
-) interceptor.Funcs {
-	return interceptor.Funcs{
-		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-			if target, ok := obj.(T); ok {
-				if err := cl.Get(ctx, key, obj, opts...); err != nil {
-					var zero T
-					if err := intercept(zero); err != nil {
-						return err
-					}
-					return err
-				}
-				if err := intercept(target); err != nil {
-					return err
-				}
-			}
-			return cl.Get(ctx, key, obj, opts...)
-		},
-		List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-			if err := cl.List(ctx, list, opts...); err != nil {
-				var zero T
-				if err := intercept(zero); err != nil {
-					return err
-				}
-				return err
-			}
-			return nil
-		},
-	}
+	RunSpecs(t, "RvrSchedulingControllerNew Suite")
 }

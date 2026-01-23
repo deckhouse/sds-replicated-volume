@@ -24,24 +24,20 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
-const controllerName = "rvr-scheduling-controller"
+const RVRSchedulingControllerName = "rvr-scheduling-controller"
 
 func BuildController(mgr manager.Manager) error {
-	r, err := NewReconciler(
-		mgr.GetClient(),
-		mgr.GetLogger().WithName(controllerName).WithName("Reconciler"),
-		mgr.GetScheme(),
-	)
+	r, err := NewReconciler(mgr.GetClient())
 	if err != nil {
 		return err
 	}
 
 	return builder.ControllerManagedBy(mgr).
-		Named(controllerName).
-		For(&v1alpha1.ReplicatedVolume{}).
+		Named(RVRSchedulingControllerName).
 		Watches(
 			&v1alpha1.ReplicatedVolumeReplica{},
 			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha1.ReplicatedVolume{}),
+			builder.WithPredicates(RVRPredicates()...),
 		).
 		Complete(r)
 }
