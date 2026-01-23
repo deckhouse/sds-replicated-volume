@@ -179,17 +179,16 @@ TODO: не увеличивать размер > maxRvSize
 - namespace где находятся VM тестируемого кластера (--vm-namespace)
 
 При старте:
-- очищает оставшиеся ресурсы от предыдущих запусков (CiliumNetworkPolicy)
-
-При завершении:
-- удаляет все созданные CiliumNetworkPolicy
+- очищает оставшиеся ресурсы от предыдущих запусков
+  - удаляет все существующие `CiliumNetworkPolicy` в родительском кластере
+  - удаляет все существующие `Job` во вложенном кластере
 
 ## Горутины
 ### chaos-network-blocker (period_min, period_max, incident_min, incident_max, group_size)
 Блокирует сеть между VM вложенного кластера через `CiliumNetworkPolicy` в родительском кластере,
 при этом оставляя трафик между родительским кластером и вложенным.
 Для выделения выбранных VM в `CiliumNetworkPolicy` используется лейбл `vm.kubevirt.internal.virtualization.deckhouse.io/name: vmName` у пода, где `vmName` это имя VM. 
-
+Перед созданием `CiliumNetworkPolicy` нужно проверять, существование политики с таким именем и если она есть, то удалять.
   - в цикле:
     - ждет рандом(period_min, period_max)
     - получает список VM из родительского кластера и рандомно его перемешивает
@@ -205,43 +204,61 @@ TODO: не увеличивать размер > maxRvSize
           - если group_size > 0: группа-A = group_size нод, группа-B = остальные
           - если group_size = 0: делит пополам (если нечетное число VM, то группа-А = большая часть, группа-В = меньшая часть)
         - создаёт `CiliumNetworkPolicy` в родительском кластере для блокировки всего tcp трафика между группами нод
-    - ждет рандом(incident_min, incident_max) - длительность инцидента
-    - удаляет созданные policy
     - пишет в лог вариант инцидента +
       - для **blocking-everything**: имена VM
       - для **blocking-drbd**: имя VM и DRBD порты
       - для **split-brain**: имена VM в каждой из групп
+    - ждет рандом(incident_min, incident_max) - длительность инцидента
+    - удаляет созданные policy
   - когда получает сигнал окончания
     - удаляет активную policy если есть
     - выходит
 
-### chaos-network-degrader (period_min, period_max, incident_min, incident_max, delay_ms, loss_percent, rate_kbit)
-Деградирует сеть (latency + packet loss + bandwidth limit) между парами нод вложенного кластера.
-Решили отказаться от tc (сложно подружить с cilium) и использовать во вложенном кластере:
-  - iptables для потери пакетов
-  - iperf3 для увеличения latency + нагрузка на сеть
-  - bandwidth limit не делаем, т.к. вероятность, что сеть будет слишком узкая крайне мала. Скорее сеть будет нагружена, что покрывается iperf3.
-  - в цикле:!!!!
+### chaos-network-degrader (period_min, period_max, incident_min, incident_max, loss_percent)
+Деградирует сеть (latency + packet loss) между парой VM.
+Решили не использовать tc т.к. сложно подружить с cilium.
+Все манипуляции производятся во вложенном кластере в ns default.
+Перед созданием `Job` нужно проверять, существование джобы с таким именем и если она есть, то удалять.
+  - в цикле:
     - ждет рандом(period_min, period_max)
-    - получает список VM из родительского кластера
-    - случайным образом выбирает пару нод (nodeA, nodeB)
-    - выбирает параметры деградации:
-      - delay: рандом(delay_ms_min, delay_ms_max) мс
-      - jitter: delay/4 мс
-      - loss: рандом(loss_percent_min, loss_percent_max) %
-      - rate: рандом(rate_mbit_min, rate_mbit_max) mbit/s (0 = без ограничения)
-    - создаёт privileged **Job** на nodeA с hostNetwork:true:
-      - определяет интерфейс для достижения nodeB через `ip route get`
-      - применяет tc qdisc с уникальными handles (31337/31338) для избежания конфликтов
-      - добавляет netem правило с delay/loss/rate для трафика к nodeB
-      - **auto-cleanup**: если megatest не очистит rules в течение incident_duration + 120s, Job сам удалит правила
-    - Note: деградация односторонняя (nodeA → nodeB), этого достаточно для DRBD тестов
-    - ждет рандом(incident_min, incident_max)
-    - создаёт cleanup **Job** на nodeA:
-      - удаляет только tc правила с нашими handles (structure-based detection)
-    - пишет в лог действия с параметрами
+    - получает список VM из родительского кластера и рандомно его перемешивает
+    - берет первые две VM (nodeA, nodeB)
+    - выбирает incident_lifetime = рандом(incident_min, incident_max)
+    - rand(100) <= 50 (вариант инцидента **losses**)
+      - создаёт две privileged `Job` для каждой из VM с `hostNetwork:true` и командами:
+        - первая джоба:
+          ```sh
+          set -e
+          iptables -A INPUT -s 10.211.1.47 -m statistic --mode random --probability 0.01 -j DROP -m comment --comment "this-name-of-job"
+          echo "iptables rule added"
+          ```
+        - вторая джоба:
+          ```sh
+          set -e
+          sleep $incident_lifetime
+          COMMENT="this-name-of-job"
+          while iptables -L INPUT --line-numbers | grep -q "$COMMENT"; do
+            iptables -D INPUT $(iptables -L INPUT --line-numbers | grep -F "$COMMENT" | head -n1 | awk '{print $1}')
+          done
+          ```
+        где: 10.211.1.47 - это ip противоположной VM (для nodeA это ip от nodeB и наоборот); 0.01 - это loss_percent
+    - rand(100) > 50 (вариант инцидента **latency**)
+      - создаёт privileged `Job` на каждой из VM с `hostNetwork:true` и командами:
+        ```sh
+        set -e
+        timeout $incident_lifetimes sh -c '
+          iperf3 -s -D || true
+          while true;do
+            iperf3 -c 10.211.1.47 -t 60 -i 30 || true
+            sleep 0.5
+         done
+        ' || true
+        ```
+        где 10.211.1.47 - это ip противоположной VM
+    - пишет в лог вариант инцидента + имена VM
+    - ждет incident_lifetime
   - когда получает сигнал окончания
-    - создаёт cleanup Jobs для всех затронутых нод
+    - удаляет активные джобы
     - выходит
 
 ### chaos-vm-reboter (period_min, period_max)
@@ -267,27 +284,28 @@ TODO: не увеличивать размер > maxRvSize
 --parent-kubeconfig              # путь к kubeconfig родительского кластера DVP (обязателен для chaos)
 --vm-namespace                   # namespace с VM в родительском кластере (обязателен для chaos)
 
---enable-chaos-drbd-block        # включить chaos-drbd-blocker
+удалить --enable-chaos-drbd-block        # включить chaos-drbd-blocker
 --enable-chaos-network-block     # включить chaos-network-blocker
 --enable-chaos-network-degrade   # включить chaos-network-degrader
 --enable-chaos-vm-reboot         # включить chaos-vm-reboter
---enable-chaos-network-partition # включить chaos-network-partitioner
+удалить --enable-chaos-network-partition # включить chaos-network-partitioner
 
 --chaos-period-min               # мин. интервал между инцидентами (default: 60s)
 --chaos-period-max               # макс. интервал между инцидентами (default: 300s)
 --chaos-incident-min             # мин. длительность инцидента (default: 10s)
 --chaos-incident-max             # макс. длительность инцидента (default: 60s)
 
---chaos-delay-ms-min             # мин. задержка сети в мс (default: 30)
---chaos-delay-ms-max             # макс. задержка сети в мс (default: 60)
---chaos-loss-percent-min         # мин. потеря пакетов % (default: 1.0)
---chaos-loss-percent-max         # макс. потеря пакетов % (default: 10.0)
---chaos-rate-mbit-min            # мин. ограничение bandwidth в mbit/s (default: 5)
---chaos-rate-mbit-max            # макс. ограничение bandwidth в mbit/s (default: 50)
+добавить --chaos-loss-percent         # потеря пакетов %; принимает значение от 0.0 до 1.0 (0.01 = 1%, 0.10 = 10%; default: 0.01)
+удалить --chaos-delay-ms-min             # мин. задержка сети в мс (default: 30)
+удалить --chaos-delay-ms-max             # макс. задержка сети в мс (default: 60)
+удалить --chaos-loss-percent-min         # мин. потеря пакетов % (default: 1.0)
+удалить --chaos-loss-percent-max         # макс. потеря пакетов % (default: 10.0)
+удалить --chaos-rate-mbit-min            # мин. ограничение bandwidth в mbit/s (default: 5)
+удалить --chaos-rate-mbit-max            # макс. ограничение bandwidth в mbit/s (default: 50)
 --chaos-partition-group-size     # размер группы для partition (default: 0 = пополам)
 ```
 
-## Примеры манифестов
+## Примеры
 ```yaml
 apiVersion: virtualization.deckhouse.io/v1alpha2
 kind: VirtualMachineOperation
@@ -392,4 +410,54 @@ spec:
             - port: "1"
               endPort: 65535
               protocol: TCP
+```
+
+```yml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: worker-01-del-iptables
+  namespace: default
+spec:
+  ttlSecondsAfterFinished: 600          # incident_lifitime + 4sec
+  backoffLimit: 0                       # не перезапускать при ошибке
+  activeDeadlineSeconds: 180            # incident_lifetime + 2sec
+  template:
+    spec:
+      restartPolicy: Never
+      hostNetwork: true
+      nodeName: worker-01
+      terminationGracePeriodSeconds: 1
+      containers:
+      - name: net-tools
+        image: krpsh/iperf3:0.1.0
+        securityContext:
+          privileged: true
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -e
+          sleep 30
+          COMMENT="worker-01-add-iptables"
+          while iptables -L INPUT --line-numbers | grep -q "$COMMENT"; do
+            NUMBER=$(iptables -L INPUT --line-numbers | grep -F "$COMMENT" | head -n1 | awk '{print $1}')
+            echo "delete rule number $NUMBER"
+            iptables -D INPUT $NUMBER
+          done
+```
+
+
+```sh
+# Дропать ~10% всех входящих пакетов
+iptables -A INPUT -m statistic --mode random --probability 0.10 -j DROP
+
+# Дропать ~5% только TCP-пакетов
+iptables -A INPUT -p tcp -m statistic --mode random --probability 0.05 -j DROP
+
+# Дропать ~3% исходящих TCP-пакетов
+iptables -A OUTPUT -p tcp -m statistic --mode random --probability 0.03 -j DROP
+
+# Удалить добавленное правило
+iptables -L INPUT --line-numbers
+iptables -D INPUT 1
 ```
