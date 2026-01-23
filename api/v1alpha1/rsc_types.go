@@ -62,14 +62,19 @@ func (o *ReplicatedStorageClass) SetStatusConditions(conditions []metav1.Conditi
 // > Note that this field is in read-only mode.
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassSpec struct {
-	// Selected ReplicatedStoragePool resource's name.
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
-	StoragePool string `json:"storagePool"`
+	// StoragePool is the name of a ReplicatedStoragePool resource.
+	// Deprecated: Use Storage instead. This field cannot be added or changed, only removed.
+	// +kubebuilder:validation:XValidation:rule="!has(self) || (has(oldSelf) && self == oldSelf)",message="StoragePool cannot be added or changed, only removed"
+	// +optional
+	StoragePool string `json:"storagePool,omitempty"`
+	// Storage defines the storage backend configuration for this storage class.
+	// Specifies the type of volumes (LVM or LVMThin) and which LVMVolumeGroups
+	// will be used to allocate space for volumes.
+	Storage ReplicatedStorageClassStorage `json:"storage"`
 	// The storage class's reclaim policy. Might be:
 	// - Delete (If the Persistent Volume Claim is deleted, deletes the Persistent Volume and its associated storage as well)
 	// - Retain (If the Persistent Volume Claim is deleted, remains the Persistent Volume and its associated storage)
 	// +kubebuilder:validation:Enum=Delete;Retain
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
 	ReclaimPolicy ReplicatedStorageClassReclaimPolicy `json:"reclaimPolicy"`
 	// The Storage class's replication mode. Might be:
 	// - None — In this mode the Storage class's 'placementCount' and 'AutoEvictMinReplicaCount' params equal '1'.
@@ -79,7 +84,6 @@ type ReplicatedStorageClassSpec struct {
 	// > Note that default Replication mode is 'ConsistencyAndAvailability'.
 	// +kubebuilder:validation:Enum=None;Availability;Consistency;ConsistencyAndAvailability
 	// +kubebuilder:default:=ConsistencyAndAvailability
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
 	Replication ReplicatedStorageClassReplication `json:"replication,omitempty"`
 	// The Storage class's access mode. Might be:
 	// - Local (in this mode the Storage class's 'allowRemoteVolumeAccess' param equals 'false'
@@ -98,7 +102,6 @@ type ReplicatedStorageClassSpec struct {
 	// > Note that the default Volume Access mode is 'PreferablyLocal'.
 	// +kubebuilder:validation:Enum=Local;EventuallyLocal;PreferablyLocal;Any
 	// +kubebuilder:default:=PreferablyLocal
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
 	VolumeAccess ReplicatedStorageClassVolumeAccess `json:"volumeAccess,omitempty"`
 	// The topology settings for the volumes in the created Storage class. Might be:
 	// - TransZonal - replicas of the volumes will be created in different zones (one replica per zone).
@@ -111,7 +114,6 @@ type ReplicatedStorageClassSpec struct {
 	//
 	// > For the system to operate correctly, either every cluster node must be labeled with 'topology.kubernetes.io/zone', or none of them should have this label.
 	// +kubebuilder:validation:Enum=TransZonal;Zonal;Ignored
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
 	Topology ReplicatedStorageClassTopology `json:"topology"`
 	// Array of zones the Storage class's volumes should be replicated in. The controller will put a label with
 	// the Storage class's name on the nodes which be actual used by the Storage class.
@@ -148,6 +150,25 @@ type ReplicatedStorageClassSpec struct {
 	// EligibleNodesPolicy defines policies for managing eligible nodes.
 	// Always present with defaults.
 	EligibleNodesPolicy ReplicatedStoragePoolEligibleNodesPolicy `json:"eligibleNodesPolicy"`
+}
+
+// ReplicatedStorageClassStorage defines the storage backend configuration for RSC.
+// +kubebuilder:validation:XValidation:rule="self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, g.thinPoolName != ”)",message="thinPoolName is required for each lvmVolumeGroups entry when type is LVMThin"
+// +kubebuilder:validation:XValidation:rule="self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName) || g.thinPoolName == ”)",message="thinPoolName must not be specified when type is LVM"
+// +kubebuilder:object:generate=true
+type ReplicatedStorageClassStorage struct {
+	// Type defines the volumes type. Might be:
+	// - LVM (for Thick)
+	// - LVMThin (for Thin)
+	// +kubebuilder:validation:Enum=LVM;LVMThin
+	Type ReplicatedStoragePoolType `json:"type"`
+	// LVMVolumeGroups is an array of LVMVolumeGroup resource names whose Volume Groups/Thin-pools
+	// will be used to allocate the required space.
+	//
+	// > Note that every LVMVolumeGroup resource must have the same type (Thin/Thick)
+	// as specified in the Type field.
+	// +kubebuilder:validation:MinItems=1
+	LVMVolumeGroups []ReplicatedStoragePoolLVMVolumeGroups `json:"lvmVolumeGroups"`
 }
 
 // ReplicatedStorageClassReclaimPolicy enumerates possible values for ReplicatedStorageClass spec.reclaimPolicy field.
