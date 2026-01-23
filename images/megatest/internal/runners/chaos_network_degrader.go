@@ -20,37 +20,42 @@ import (
 	"context"
 	"log/slog"
 	"math/rand"
+	"time"
 
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/chaos"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 )
 
+const (
+	// lossesProbability is the probability threshold for losses incident (50%)
+	lossesProbability = 50
+)
+
 // ChaosNetworkDegrader periodically applies network degradation (latency/packet loss) between random node pairs
 type ChaosNetworkDegrader struct {
-	cfg              config.ChaosNetworkDegraderConfig
-	netemManager     *chaos.NetemManager
-	parentClient     *chaos.ParentClient
-	log              *slog.Logger
-	forceCleanupChan <-chan struct{}
+	cfg               config.ChaosNetworkDegraderConfig
+	networkDegradeMgr *chaos.NetworkDegradeManager
+	parentClient      *chaos.ParentClient
+	log               *slog.Logger
+	forceCleanupChan  <-chan struct{}
+	activeJobNames    []string
 }
 
 // NewChaosNetworkDegrader creates a new ChaosNetworkDegrader
 func NewChaosNetworkDegrader(
 	cfg config.ChaosNetworkDegraderConfig,
-	netemManager *chaos.NetemManager,
+	networkDegradeMgr *chaos.NetworkDegradeManager,
 	parentClient *chaos.ParentClient,
 	forceCleanupChan <-chan struct{},
 ) *ChaosNetworkDegrader {
 	return &ChaosNetworkDegrader{
-		cfg:              cfg,
-		netemManager:     netemManager,
-		parentClient:     parentClient,
-		forceCleanupChan: forceCleanupChan,
+		cfg:               cfg,
+		networkDegradeMgr: networkDegradeMgr,
+		parentClient:      parentClient,
+		forceCleanupChan:  forceCleanupChan,
 		log: slog.Default().With(
 			"runner", "chaos-network-degrader",
-			"delay_ms", cfg.DelayMs,
 			"loss_percent", cfg.LossPercent,
-			"rate_mbit", cfg.RateMbit,
 		),
 	}
 }
@@ -85,97 +90,128 @@ func (c *ChaosNetworkDegrader) doDegrade(ctx context.Context) error {
 		return nil
 	}
 
-	// Select random pair of nodes
-	nodeA, nodeB := c.randomNodePair(nodes)
+	// Shuffle nodes randomly
+	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
+	rand.Shuffle(len(nodes), func(i, j int) {
+		nodes[i], nodes[j] = nodes[j], nodes[i]
+	})
 
-	// Determine incident duration first (needed for auto-cleanup timeout in job)
+	// Select first two nodes
+	nodeA, nodeB := nodes[0], nodes[1]
+
+	// Determine incident duration
 	incidentDuration := randomDuration(c.cfg.IncidentDuration)
 
-	// Determine degradation parameters
-	delayMs := randomInt(c.cfg.DelayMs.Min, c.cfg.DelayMs.Max)
-	delayJitter := delayMs / 4 // 25% jitter
-	if delayJitter < 1 {
-		delayJitter = 1
-	}
-	lossPercent := randomFloat64(c.cfg.LossPercent.Min, c.cfg.LossPercent.Max)
+	// Select incident type based on probability
+	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
+	randValue := rand.Intn(100)
 
-	// Rate limit: 0 means no limit
-	rateMbit := 0
-	if c.cfg.RateMbit.Max > 0 {
-		rateMbit = randomInt(c.cfg.RateMbit.Min, c.cfg.RateMbit.Max)
+	if randValue < lossesProbability {
+		// losses: 50% probability
+		return c.doLosses(ctx, nodeA, nodeB, incidentDuration)
 	}
 
-	degradeCfg := chaos.NetworkDegradationConfig{
-		DelayMs:          delayMs,
-		DelayJitter:      delayJitter,
-		LossPercent:      lossPercent,
-		RateMbit:         rateMbit,
-		IncidentDuration: incidentDuration, // For auto-cleanup timeout in job
-	}
+	// latency: 50% probability
+	return c.doLatency(ctx, nodeA, nodeB, incidentDuration)
+}
 
-	c.log.Info("applying network degradation",
+// doLosses applies packet loss using iptables
+func (c *ChaosNetworkDegrader) doLosses(ctx context.Context, nodeA, nodeB chaos.NodeInfo, incidentDuration time.Duration) error {
+
+	c.log.Info("applying packet loss",
+		"incident_type", "losses",
 		"node_a", nodeA.Name,
-		"target_ip", nodeB.IPAddress,
-		"delay_ms", delayMs,
-		"delay_jitter", delayJitter,
-		"loss_percent", lossPercent,
-		"rate_mbit", rateMbit,
+		"node_b", nodeB.Name,
+		"loss_percent", c.cfg.LossPercent,
 		"duration", incidentDuration.String(),
 	)
 
-	// Apply degradation via netem Job
-	// Note: Degradation is applied only from nodeA to nodeB (one-directional).
-	// This is intentional for DRBD testing - even one-sided network issues
-	// (latency/packet loss) will break replication and trigger failover scenarios.
-	// Bidirectional degradation would require creating two Jobs, which is more complex
-	// and not necessary for our testing purposes.
-	jobName, err := c.netemManager.ApplyNetworkDegradation(ctx, nodeA.Name, nodeB.IPAddress, degradeCfg)
+	jobNames, err := c.networkDegradeMgr.ApplyPacketLoss(ctx, nodeA, nodeB, c.cfg.LossPercent, incidentDuration)
 	if err != nil {
 		return err
 	}
 
+	c.activeJobNames = jobNames
+
 	// Wait for incident duration or context cancellation
-	c.log.Debug("keeping network degraded", "duration", incidentDuration.String())
+	c.log.Debug("keeping packet loss active", "duration", incidentDuration.String())
 
 	select {
 	case <-ctx.Done():
 		// Cleanup on context cancellation
-		c.cleanup(nodeA.Name, jobName)
+		c.cleanup()
 		return ctx.Err()
 	case <-c.forceCleanupChan:
 		// Cleanup on force signal
-		c.cleanup(nodeA.Name, jobName)
+		c.cleanup()
 		return nil
 	case <-waitChan(incidentDuration):
 		// Normal timeout, remove degradation
 	}
 
 	// Remove degradation
-	c.log.Info("removing network degradation",
+	c.log.Info("removing packet loss",
+		"incident_type", "losses",
 		"node_a", nodeA.Name,
-		"job", jobName,
+		"node_b", nodeB.Name,
 	)
-
-	if err := c.netemManager.RemoveNetworkDegradation(context.Background(), nodeA.Name); err != nil {
-		c.log.Error("failed to remove network degradation", "error", err)
-	}
+	c.cleanup()
 
 	return nil
 }
 
-func (c *ChaosNetworkDegrader) cleanup(nodeName, jobName string) {
-	c.log.Info("cleanup: removing network degradation", "node", nodeName, "job", jobName)
-	if err := c.netemManager.RemoveNetworkDegradation(context.Background(), nodeName); err != nil {
-		c.log.Error("cleanup failed", "error", err)
+// doLatency applies latency using iperf3
+func (c *ChaosNetworkDegrader) doLatency(ctx context.Context, nodeA, nodeB chaos.NodeInfo, incidentDuration time.Duration) error {
+
+	c.log.Info("applying latency",
+		"incident_type", "latency",
+		"node_a", nodeA.Name,
+		"node_b", nodeB.Name,
+		"duration", incidentDuration.String(),
+	)
+
+	jobNames, err := c.networkDegradeMgr.ApplyLatency(ctx, nodeA, nodeB, incidentDuration)
+	if err != nil {
+		return err
 	}
+
+	c.activeJobNames = jobNames
+
+	// Wait for incident duration or context cancellation
+	c.log.Debug("keeping latency active", "duration", incidentDuration.String())
+
+	select {
+	case <-ctx.Done():
+		// Cleanup on context cancellation
+		c.cleanup()
+		return ctx.Err()
+	case <-c.forceCleanupChan:
+		// Cleanup on force signal
+		c.cleanup()
+		return nil
+	case <-waitChan(incidentDuration):
+		// Normal timeout, remove degradation
+	}
+
+	// Remove degradation
+	c.log.Info("removing latency",
+		"incident_type", "latency",
+		"node_a", nodeA.Name,
+		"node_b", nodeB.Name,
+	)
+	c.cleanup()
+
+	return nil
 }
 
-func (c *ChaosNetworkDegrader) randomNodePair(nodes []chaos.NodeInfo) (chaos.NodeInfo, chaos.NodeInfo) {
-	// Shuffle nodes
-	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
-	rand.Shuffle(len(nodes), func(i, j int) {
-		nodes[i], nodes[j] = nodes[j], nodes[i]
-	})
+func (c *ChaosNetworkDegrader) cleanup() {
+	if len(c.activeJobNames) == 0 {
+		return
+	}
 
-	return nodes[0], nodes[1]
+	c.log.Info("cleanup: removing network degradation", "job_count", len(c.activeJobNames))
+	if err := c.networkDegradeMgr.RemoveNetworkDegradation(context.Background(), c.activeJobNames); err != nil {
+		c.log.Error("cleanup failed", "error", err)
+	}
+	c.activeJobNames = nil
 }

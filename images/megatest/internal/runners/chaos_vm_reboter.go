@@ -20,9 +20,17 @@ import (
 	"context"
 	"log/slog"
 	"math/rand"
+	"time"
 
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/chaos"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
+)
+
+const (
+	// minRebootPeriod is the minimum period between reboots (5 minutes)
+	minRebootPeriod = 5 * time.Minute
+	// minRebootPeriodMax is the maximum period when minRebootPeriod is enforced (6 minutes)
+	minRebootPeriodMax = 6 * time.Minute
 )
 
 // ChaosVMReboter periodically performs hard reboot of random VMs
@@ -50,8 +58,20 @@ func (c *ChaosVMReboter) Run(ctx context.Context) error {
 	defer c.log.Info("finished")
 
 	for {
-		// Wait random duration before next reboot
-		if err := waitRandomWithContext(ctx, c.cfg.Period); err != nil {
+		// Determine wait period
+		period := randomDuration(c.cfg.Period)
+
+		// If period is less than 5 minutes, use 5-6 minutes instead
+		if period < minRebootPeriod {
+			period = randomDuration(config.DurationMinMax{
+				Min: minRebootPeriod,
+				Max: minRebootPeriodMax,
+			})
+			c.log.Debug("period adjusted to minimum", "original_period", c.cfg.Period, "adjusted_period", period)
+		}
+
+		// Wait for period
+		if err := waitWithContext(ctx, period); err != nil {
 			return err
 		}
 
@@ -74,8 +94,50 @@ func (c *ChaosVMReboter) doReboot(ctx context.Context) error {
 		return nil
 	}
 
-	// Select random VM
-	vm := c.randomVM(nodes)
+	// Shuffle nodes randomly
+	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
+	rand.Shuffle(len(nodes), func(i, j int) {
+		nodes[i], nodes[j] = nodes[j], nodes[i]
+	})
+
+	// Try to find a VM without unfinished operations
+	var selectedVM *chaos.NodeInfo
+	for _, node := range nodes {
+		hasUnfinished, err := c.parentClient.HasUnfinishedVMOperations(ctx, node.Name)
+		if err != nil {
+			c.log.Warn("failed to check VM operations", "vm", node.Name, "error", err)
+			continue
+		}
+
+		if !hasUnfinished {
+			selectedVM = &node
+			break
+		}
+
+		c.log.Debug("skipping VM with unfinished operations", "vm", node.Name)
+	}
+
+	// If no VM without unfinished operations found, use first one and log warning
+	if selectedVM == nil {
+		selectedVM = &nodes[0]
+		c.log.Warn("no VM without unfinished operations found, using first VM anyway",
+			"vm", selectedVM.Name,
+		)
+	}
+
+	vm := *selectedVM
+
+	// Check again for unfinished operations before creating new one
+	hasUnfinished, err := c.parentClient.HasUnfinishedVMOperations(ctx, vm.Name)
+	if err != nil {
+		c.log.Warn("failed to check VM operations before reboot", "vm", vm.Name, "error", err)
+		// Continue anyway
+	} else if hasUnfinished {
+		c.log.Info("skipping reboot, VM has unfinished operations",
+			"vm", vm.Name,
+		)
+		return nil
+	}
 
 	c.log.Info("performing hard reboot",
 		"vm", vm.Name,

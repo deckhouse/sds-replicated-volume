@@ -98,38 +98,21 @@ type PodDestroyerConfig struct {
 	Period        DurationMinMax
 }
 
-// ChaosDRBDBlockerConfig configures the chaos-drbd-blocker goroutine
-type ChaosDRBDBlockerConfig struct {
-	Period           DurationMinMax
-	IncidentDuration DurationMinMax
-	// Note: DRBD ports are collected dynamically before each incident
-	// from the two selected nodes using DRBDPortCollector.
-	// If no ports found, the incident is skipped (waiting for RVs to be created).
-}
-
 // ChaosNetworkBlockerConfig configures the chaos-network-blocker goroutine
 type ChaosNetworkBlockerConfig struct {
 	Period           DurationMinMax
 	IncidentDuration DurationMinMax
+	GroupSize        int // Target size for one of the partition groups (0 = split in half)
 }
 
 // ChaosNetworkDegraderConfig configures the chaos-network-degrader goroutine
 type ChaosNetworkDegraderConfig struct {
 	Period           DurationMinMax
 	IncidentDuration DurationMinMax
-	DelayMs          StepMinMax
-	LossPercent      Float64MinMax
-	RateMbit         StepMinMax // Bandwidth limit in mbit/s (0 = no limit)
+	LossPercent      float64 // Packet loss percentage (single value, not range)
 }
 
 // ChaosVMReboterConfig configures the chaos-vm-reboter goroutine
 type ChaosVMReboterConfig struct {
 	Period DurationMinMax
-}
-
-// ChaosNetworkPartitionerConfig configures the chaos-network-partitioner goroutine
-type ChaosNetworkPartitionerConfig struct {
-	Period           DurationMinMax
-	IncidentDuration DurationMinMax
-	GroupSize        int // Target size for one of the partition groups (0 = split in half)
 }

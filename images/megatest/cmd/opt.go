@@ -46,21 +46,14 @@ type Opt struct {
 	// Chaos engineering flags
 	ParentKubeconfig        string
 	VMNamespace             string
-	EnableChaosDRBDBlock    bool
 	EnableChaosNetBlock     bool
 	EnableChaosNetDegrade   bool
 	EnableChaosVMReboot     bool
-	EnableChaosNetPartition bool
 	ChaosPeriodMin          time.Duration
 	ChaosPeriodMax          time.Duration
 	ChaosIncidentMin        time.Duration
 	ChaosIncidentMax        time.Duration
-	ChaosDelayMsMin         int
-	ChaosDelayMsMax         int
-	ChaosLossPercentMin     float64
-	ChaosLossPercentMax     float64
-	ChaosRateMbitMin        int
-	ChaosRateMbitMax        int
+	ChaosLossPercent        float64
 	ChaosPartitionGroupSize int
 }
 
@@ -102,8 +95,8 @@ Interrupting Cleanup:
 			}
 
 			// Validate chaos flags if any chaos feature is enabled
-			chaosEnabled := o.EnableChaosDRBDBlock || o.EnableChaosNetBlock ||
-				o.EnableChaosNetDegrade || o.EnableChaosVMReboot || o.EnableChaosNetPartition
+			chaosEnabled := o.EnableChaosNetBlock ||
+				o.EnableChaosNetDegrade || o.EnableChaosVMReboot
 
 			if chaosEnabled {
 				// Required flags (no defaults)
@@ -124,20 +117,8 @@ Interrupting Cleanup:
 
 			// Validate network degradation specific flags
 			if o.EnableChaosNetDegrade {
-				if o.ChaosDelayMsMax < o.ChaosDelayMsMin {
-					return errors.New("chaos-delay-ms-max must be >= chaos-delay-ms-min")
-				}
-				if o.ChaosLossPercentMax < o.ChaosLossPercentMin {
-					return errors.New("chaos-loss-percent-max must be >= chaos-loss-percent-min")
-				}
-				if o.ChaosLossPercentMin < 0 || o.ChaosLossPercentMax > 100 {
-					return errors.New("chaos-loss-percent values must be between 0 and 100")
-				}
-				if o.ChaosRateMbitMax < o.ChaosRateMbitMin {
-					return errors.New("chaos-rate-mbit-max must be >= chaos-rate-mbit-min")
-				}
-				if o.ChaosRateMbitMin < 0 {
-					return errors.New("chaos-rate-mbit values must be >= 0")
+				if o.ChaosLossPercent < 0 || o.ChaosLossPercent > 1.0 {
+					return errors.New("chaos-loss-percent must be between 0.0 and 1.0 (0.01 = 1%, 0.10 = 10%)")
 				}
 			}
 
@@ -185,11 +166,9 @@ Interrupting Cleanup:
 	rootCmd.Flags().StringVarP(&o.VMNamespace, "vm-namespace", "", "", "Namespace in parent cluster where VMs are located")
 
 	// Chaos enable flags
-	rootCmd.Flags().BoolVarP(&o.EnableChaosDRBDBlock, "enable-chaos-drbd-block", "", false, "Enable DRBD port blocking chaos")
 	rootCmd.Flags().BoolVarP(&o.EnableChaosNetBlock, "enable-chaos-network-block", "", false, "Enable full network blocking chaos")
 	rootCmd.Flags().BoolVarP(&o.EnableChaosNetDegrade, "enable-chaos-network-degrade", "", false, "Enable network degradation chaos (latency/loss)")
 	rootCmd.Flags().BoolVarP(&o.EnableChaosVMReboot, "enable-chaos-vm-reboot", "", false, "Enable VM hard reboot chaos")
-	rootCmd.Flags().BoolVarP(&o.EnableChaosNetPartition, "enable-chaos-network-partition", "", false, "Enable network partition (split-brain) chaos")
 
 	// Chaos timing flags
 	rootCmd.Flags().DurationVarP(&o.ChaosPeriodMin, "chaos-period-min", "", 60*time.Second, "Minimum wait between chaos events")
@@ -198,12 +177,7 @@ Interrupting Cleanup:
 	rootCmd.Flags().DurationVarP(&o.ChaosIncidentMax, "chaos-incident-max", "", 60*time.Second, "Maximum duration of chaos incident")
 
 	// Network degradation specific flags
-	rootCmd.Flags().IntVarP(&o.ChaosDelayMsMin, "chaos-delay-ms-min", "", 30, "Minimum network delay in milliseconds")
-	rootCmd.Flags().IntVarP(&o.ChaosDelayMsMax, "chaos-delay-ms-max", "", 60, "Maximum network delay in milliseconds")
-	rootCmd.Flags().Float64VarP(&o.ChaosLossPercentMin, "chaos-loss-percent-min", "", 1.0, "Minimum packet loss percentage")
-	rootCmd.Flags().Float64VarP(&o.ChaosLossPercentMax, "chaos-loss-percent-max", "", 10.0, "Maximum packet loss percentage")
-	rootCmd.Flags().IntVarP(&o.ChaosRateMbitMin, "chaos-rate-mbit-min", "", 5, "Minimum bandwidth limit in mbit/s (0 = no limit)")
-	rootCmd.Flags().IntVarP(&o.ChaosRateMbitMax, "chaos-rate-mbit-max", "", 50, "Maximum bandwidth limit in mbit/s (0 = no limit)")
+	rootCmd.Flags().Float64VarP(&o.ChaosLossPercent, "chaos-loss-percent", "", 0.01, "Packet loss percentage; accepts value from 0.0 to 1.0 (0.01 = 1%, 0.10 = 10%)")
 
 	// Network partition specific flags
 	rootCmd.Flags().IntVarP(&o.ChaosPartitionGroupSize, "chaos-partition-group-size", "", 0, "Target size for partition group (0 = split in half)")

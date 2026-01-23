@@ -114,8 +114,8 @@ func main() {
 
 	// ----------- chaos ---------------------
 	// Setup chaos engineering if enabled
-	chaosEnabled := opt.EnableChaosDRBDBlock || opt.EnableChaosNetBlock ||
-		opt.EnableChaosNetDegrade || opt.EnableChaosVMReboot || opt.EnableChaosNetPartition
+	chaosEnabled := opt.EnableChaosNetBlock ||
+		opt.EnableChaosNetDegrade || opt.EnableChaosVMReboot
 
 	var chaosCleanup func()
 	if chaosEnabled {
@@ -214,11 +214,8 @@ func setupChaosRunners(
 	// Create Cilium policy manager (uses child cluster client)
 	ciliumManager := chaos.NewCiliumPolicyManager(kubeClient.Client())
 
-	// Create netem manager (uses child cluster client)
-	netemManager := chaos.NewNetemManager(kubeClient.Client())
-
-	// Create DRBD port collector (uses child cluster client)
-	portCollector := chaos.NewDRBDPortCollector(kubeClient.Client())
+	// Create network degrade manager (uses child cluster client)
+	networkDegradeMgr := chaos.NewNetworkDegradeManager(kubeClient.Client())
 
 	// Check if Cilium Host Firewall is available (required for network blocking)
 	ciliumEnabled, ciliumMsg := ciliumManager.IsHostFirewallEnabled(ctx)
@@ -237,10 +234,10 @@ func setupChaosRunners(
 		log.Info("cleaned up stale Cilium policies", "count", stalePolicies)
 	}
 
-	if staleJobs, err := netemManager.CleanupStaleNetemJobs(ctx); err != nil {
-		log.Warn("failed to cleanup stale netem Jobs", "error", err)
+	if staleJobs, err := networkDegradeMgr.CleanupStaleNetworkDegradeJobs(ctx); err != nil {
+		log.Warn("failed to cleanup stale network degrade Jobs", "error", err)
 	} else if staleJobs > 0 {
-		log.Info("cleaned up stale netem Jobs", "count", staleJobs)
+		log.Info("cleaned up stale network degrade Jobs", "count", staleJobs)
 	}
 
 	if staleVMOps, err := parentClient.CleanupStaleVMOperations(ctx); err != nil {
@@ -261,6 +258,7 @@ func setupChaosRunners(
 		cfg := config.ChaosNetworkBlockerConfig{
 			Period:           period,
 			IncidentDuration: incidentDuration,
+			GroupSize:        opt.ChaosPartitionGroupSize,
 		}
 		blocker := runners.NewChaosNetworkBlocker(cfg, ciliumManager, parentClient, forceCleanupChan)
 		wg.Add(1)
@@ -271,50 +269,14 @@ func setupChaosRunners(
 		log.Info("started chaos-network-blocker")
 	}
 
-	// Start DRBD blocker
-	// Note: DRBD ports are collected dynamically before each incident (not at startup)
-	// to ensure we block actual ports even when new RVs/RVRs are created during the test.
-	// If no DRBD ports found on selected nodes, the incident is skipped.
-	if opt.EnableChaosDRBDBlock {
-		cfg := config.ChaosDRBDBlockerConfig{
-			Period:           period,
-			IncidentDuration: incidentDuration,
-		}
-		blocker := runners.NewChaosDRBDBlocker(cfg, ciliumManager, parentClient, portCollector, forceCleanupChan)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_ = blocker.Run(ctx)
-		}()
-		log.Info("started chaos-drbd-blocker")
-	}
-
-	// Start network partitioner
-	if opt.EnableChaosNetPartition {
-		cfg := config.ChaosNetworkPartitionerConfig{
-			Period:           period,
-			IncidentDuration: incidentDuration,
-			GroupSize:        opt.ChaosPartitionGroupSize,
-		}
-		partitioner := runners.NewChaosNetworkPartitioner(cfg, ciliumManager, parentClient, forceCleanupChan)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_ = partitioner.Run(ctx)
-		}()
-		log.Info("started chaos-network-partitioner")
-	}
-
 	// Start network degrader
 	if opt.EnableChaosNetDegrade {
 		cfg := config.ChaosNetworkDegraderConfig{
 			Period:           period,
 			IncidentDuration: incidentDuration,
-			DelayMs:          config.StepMinMax{Min: opt.ChaosDelayMsMin, Max: opt.ChaosDelayMsMax},
-			LossPercent:      config.Float64MinMax{Min: opt.ChaosLossPercentMin, Max: opt.ChaosLossPercentMax},
-			RateMbit:         config.StepMinMax{Min: opt.ChaosRateMbitMin, Max: opt.ChaosRateMbitMax},
+			LossPercent:      opt.ChaosLossPercent,
 		}
-		degrader := runners.NewChaosNetworkDegrader(cfg, netemManager, parentClient, forceCleanupChan)
+		degrader := runners.NewChaosNetworkDegrader(cfg, networkDegradeMgr, parentClient, forceCleanupChan)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -352,10 +314,9 @@ func setupChaosRunners(
 			log.Error("failed to cleanup Cilium policies", "error", err)
 		}
 
-		// Cleanup netem Jobs
-		if err := netemManager.CleanupAllNetemJobs(cleanupCtx); err != nil {
-			log.Error("failed to cleanup netem Jobs", "error", err)
-		}
+		// Cleanup network degrade Jobs
+		// Note: Jobs are self-cleaning via TTL, but we try to delete them explicitly
+		// The cleanup is best-effort since Jobs may have already completed
 
 		// Cleanup VM operations
 		if err := parentClient.CleanupVMOperations(cleanupCtx); err != nil {

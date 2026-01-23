@@ -284,25 +284,17 @@ TODO: не увеличивать размер > maxRvSize
 --parent-kubeconfig              # путь к kubeconfig родительского кластера DVP (обязателен для chaos)
 --vm-namespace                   # namespace с VM в родительском кластере (обязателен для chaos)
 
-удалить --enable-chaos-drbd-block        # включить chaos-drbd-blocker
---enable-chaos-network-block     # включить chaos-network-blocker
---enable-chaos-network-degrade   # включить chaos-network-degrader
+--enable-chaos-network-block     # включить chaos-network-blocker (поддерживает blocking-everything, blocking-drbd, split-brain)
+--enable-chaos-network-degrade   # включить chaos-network-degrader (поддерживает losses, latency)
 --enable-chaos-vm-reboot         # включить chaos-vm-reboter
-удалить --enable-chaos-network-partition # включить chaos-network-partitioner
 
 --chaos-period-min               # мин. интервал между инцидентами (default: 60s)
 --chaos-period-max               # макс. интервал между инцидентами (default: 300s)
 --chaos-incident-min             # мин. длительность инцидента (default: 10s)
 --chaos-incident-max             # макс. длительность инцидента (default: 60s)
 
-добавить --chaos-loss-percent         # потеря пакетов %; принимает значение от 0.0 до 1.0 (0.01 = 1%, 0.10 = 10%; default: 0.01)
-удалить --chaos-delay-ms-min             # мин. задержка сети в мс (default: 30)
-удалить --chaos-delay-ms-max             # макс. задержка сети в мс (default: 60)
-удалить --chaos-loss-percent-min         # мин. потеря пакетов % (default: 1.0)
-удалить --chaos-loss-percent-max         # макс. потеря пакетов % (default: 10.0)
-удалить --chaos-rate-mbit-min            # мин. ограничение bandwidth в mbit/s (default: 5)
-удалить --chaos-rate-mbit-max            # макс. ограничение bandwidth в mbit/s (default: 50)
---chaos-partition-group-size     # размер группы для partition (default: 0 = пополам)
+--chaos-loss-percent             # потеря пакетов %; принимает значение от 0.0 до 1.0 (0.01 = 1%, 0.10 = 10%; default: 0.01)
+--chaos-partition-group-size     # размер группы для partition в chaos-network-blocker (default: 0 = пополам)
 ```
 
 ## Примеры

@@ -223,3 +223,51 @@ func (c *ParentClient) cleanupVMOperationsByLabel(ctx context.Context) (int, err
 func (c *ParentClient) VMNamespace() string {
 	return c.vmNamespace
 }
+
+// ListVMOperationsForVM returns all VirtualMachineOperations for a specific VM
+func (c *ParentClient) ListVMOperationsForVM(ctx context.Context, vmName string) ([]unstructured.Unstructured, error) {
+	vmOpList := &unstructured.UnstructuredList{}
+	vmOpList.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   vmOpGVR.Group,
+		Version: vmOpGVR.Version,
+		Kind:    "VirtualMachineOperationList",
+	})
+
+	if err := c.cl.List(ctx, vmOpList, client.InNamespace(c.vmNamespace), client.MatchingLabels{
+		LabelChaosType:  string(ChaosTypeVMReboot),
+		LabelChaosNodeA: vmName,
+	}); err != nil {
+		return nil, fmt.Errorf("listing VMOperations for VM %s: %w", vmName, err)
+	}
+
+	return vmOpList.Items, nil
+}
+
+// HasUnfinishedVMOperations checks if there are unfinished VirtualMachineOperations for a VM
+// Returns true if there are operations with status.phase != Failed && != Completed
+func (c *ParentClient) HasUnfinishedVMOperations(ctx context.Context, vmName string) (bool, error) {
+	vmOps, err := c.ListVMOperationsForVM(ctx, vmName)
+	if err != nil {
+		return false, err
+	}
+
+	if len(vmOps) == 0 {
+		return false, nil
+	}
+
+	// Count operations with phase = Failed or Completed
+	finishedCount := 0
+	for _, vmOp := range vmOps {
+		phase, found, err := unstructured.NestedString(vmOp.Object, "status", "phase")
+		if err != nil {
+			// If we can't read phase, assume it's unfinished
+			return true, nil
+		}
+		if found && (phase == "Failed" || phase == "Completed") {
+			finishedCount++
+		}
+	}
+
+	// If count of finished operations != total count, there are unfinished operations
+	return finishedCount != len(vmOps), nil
+}

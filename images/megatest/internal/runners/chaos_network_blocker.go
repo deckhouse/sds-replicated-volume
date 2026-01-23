@@ -25,7 +25,14 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 )
 
-// ChaosNetworkBlocker periodically blocks all network between random node pairs
+const (
+	// blockingEverythingProbability is the probability threshold for blocking-everything incident (30%)
+	blockingEverythingProbability = 30
+	// blockingDRBDProbability is the probability threshold for blocking-drbd incident (30%, cumulative: 60%)
+	blockingDRBDProbability = 60
+)
+
+// ChaosNetworkBlocker periodically blocks network between nodes with different incident types
 type ChaosNetworkBlocker struct {
 	cfg              config.ChaosNetworkBlockerConfig
 	ciliumManager    *chaos.CiliumPolicyManager
@@ -80,19 +87,42 @@ func (c *ChaosNetworkBlocker) doBlock(ctx context.Context) error {
 		return nil
 	}
 
-	// Select random pair of nodes
-	nodeA, nodeB := c.randomNodePair(nodes)
+	// Shuffle nodes randomly
+	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
+	rand.Shuffle(len(nodes), func(i, j int) {
+		nodes[i], nodes[j] = nodes[j], nodes[i]
+	})
+
+	// Select incident type based on probability
+	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
+	randValue := rand.Intn(100)
+
+	switch {
+	case randValue < blockingEverythingProbability:
+		// blocking-everything: 30% probability
+		return c.doBlockingEverything(ctx, nodes)
+	case randValue < blockingDRBDProbability:
+		// blocking-drbd: 30% probability (cumulative: 30-60%)
+		return c.doBlockingDRBD(ctx, nodes)
+	default:
+		// split-brain: 40% probability (60-100%)
+		return c.doSplitBrain(ctx, nodes)
+	}
+}
+
+// doBlockingEverything blocks all TCP traffic between two random nodes
+func (c *ChaosNetworkBlocker) doBlockingEverything(ctx context.Context, nodes []chaos.NodeInfo) error {
+	nodeA, nodeB := nodes[0], nodes[1]
 
 	c.log.Info("blocking all network",
+		"incident_type", "blocking-everything",
 		"node_a", nodeA.Name,
 		"node_a_ip", nodeA.IPAddress,
 		"node_b", nodeB.Name,
 		"node_b_ip", nodeB.IPAddress,
 	)
 
-	// Create blocking policy (one-directional: nodeA blocks traffic to/from nodeB).
-	// Note: This is intentional - even one-sided network issues will break DRBD replication
-	// and trigger failover scenarios. For bidirectional blocking use chaos-network-partitioner.
+	// Create blocking policy (one-directional: nodeA blocks traffic to/from nodeB)
 	policyName, err := c.ciliumManager.BlockAllNetwork(ctx, nodeA, nodeB)
 	if err != nil {
 		return err
@@ -105,11 +135,11 @@ func (c *ChaosNetworkBlocker) doBlock(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		// Cleanup on context cancellation
-		c.cleanup(policyName)
+		c.cleanup([]string{policyName})
 		return ctx.Err()
 	case <-c.forceCleanupChan:
 		// Cleanup on force signal
-		c.cleanup(policyName)
+		c.cleanup([]string{policyName})
 		return nil
 	case <-waitChan(incidentDuration):
 		// Normal timeout, unblock
@@ -117,6 +147,7 @@ func (c *ChaosNetworkBlocker) doBlock(ctx context.Context) error {
 
 	// Unblock traffic
 	c.log.Info("unblocking network",
+		"incident_type", "blocking-everything",
 		"node_a", nodeA.Name,
 		"node_b", nodeB.Name,
 		"policy", policyName,
@@ -129,19 +160,116 @@ func (c *ChaosNetworkBlocker) doBlock(ctx context.Context) error {
 	return nil
 }
 
-func (c *ChaosNetworkBlocker) cleanup(policyName string) {
-	c.log.Info("cleanup: unblocking network", "policy", policyName)
-	if err := c.ciliumManager.UnblockTraffic(context.Background(), policyName); err != nil {
-		c.log.Error("cleanup failed", "error", err)
+// doBlockingDRBD is a stub for blocking-drbd incident (implementation deferred)
+func (c *ChaosNetworkBlocker) doBlockingDRBD(ctx context.Context, nodes []chaos.NodeInfo) error {
+	nodeA, nodeB := nodes[0], nodes[1]
+
+	c.log.Info("blocking-drbd incident selected (not implemented yet)",
+		"incident_type", "blocking-drbd",
+		"node_a", nodeA.Name,
+		"node_b", nodeB.Name,
+	)
+
+	return nil
+}
+
+// doSplitBrain creates a network partition by splitting nodes into two groups
+func (c *ChaosNetworkBlocker) doSplitBrain(ctx context.Context, nodes []chaos.NodeInfo) error {
+	// Split nodes into two groups
+	groupA, groupB := c.splitNodes(nodes)
+
+	c.log.Info("creating network partition",
+		"incident_type", "split-brain",
+		"group_a_size", len(groupA),
+		"group_b_size", len(groupB),
+		"group_a_nodes", nodeNames(groupA),
+		"group_b_nodes", nodeNames(groupB),
+	)
+
+	// Create blocking policies between groups (bidirectional)
+	var policyNames []string
+	for _, nodeA := range groupA {
+		for _, nodeB := range groupB {
+			// Block A -> B
+			policyName, err := c.ciliumManager.BlockAllNetwork(ctx, nodeA, nodeB)
+			if err != nil {
+				c.log.Error("failed to block network", "node_a", nodeA.Name, "node_b", nodeB.Name, "error", err)
+				continue
+			}
+			policyNames = append(policyNames, policyName)
+
+			// Block B -> A
+			policyName, err = c.ciliumManager.BlockAllNetwork(ctx, nodeB, nodeA)
+			if err != nil {
+				c.log.Error("failed to block network", "node_a", nodeB.Name, "node_b", nodeA.Name, "error", err)
+				continue
+			}
+			policyNames = append(policyNames, policyName)
+		}
+	}
+
+	c.log.Info("network partition created", "policy_count", len(policyNames))
+
+	// Wait for incident duration or context cancellation
+	incidentDuration := randomDuration(c.cfg.IncidentDuration)
+	c.log.Debug("keeping network partitioned", "duration", incidentDuration.String())
+
+	select {
+	case <-ctx.Done():
+		// Cleanup on context cancellation
+		c.cleanup(policyNames)
+		return ctx.Err()
+	case <-c.forceCleanupChan:
+		// Cleanup on force signal
+		c.cleanup(policyNames)
+		return nil
+	case <-waitChan(incidentDuration):
+		// Normal timeout, remove partition
+	}
+
+	// Remove partition
+	c.log.Info("removing network partition",
+		"incident_type", "split-brain",
+		"policy_count", len(policyNames),
+	)
+	c.cleanup(policyNames)
+
+	return nil
+}
+
+func (c *ChaosNetworkBlocker) cleanup(policyNames []string) {
+	for _, policyName := range policyNames {
+		if err := c.ciliumManager.UnblockTraffic(context.Background(), policyName); err != nil {
+			c.log.Error("cleanup failed", "policy", policyName, "error", err)
+		}
 	}
 }
 
-func (c *ChaosNetworkBlocker) randomNodePair(nodes []chaos.NodeInfo) (chaos.NodeInfo, chaos.NodeInfo) {
-	// Shuffle nodes
-	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
-	rand.Shuffle(len(nodes), func(i, j int) {
-		nodes[i], nodes[j] = nodes[j], nodes[i]
-	})
+func (c *ChaosNetworkBlocker) splitNodes(nodes []chaos.NodeInfo) ([]chaos.NodeInfo, []chaos.NodeInfo) {
+	// Split into two groups
+	// If GroupSize is specified, use it as target size for group A
+	// Otherwise, split roughly in half
+	splitPoint := len(nodes) / 2
+	if c.cfg.GroupSize > 0 && c.cfg.GroupSize < len(nodes) {
+		splitPoint = c.cfg.GroupSize
+	}
 
-	return nodes[0], nodes[1]
+	// Ensure at least 1 node in each group
+	if splitPoint < 1 {
+		splitPoint = 1
+	}
+	if splitPoint >= len(nodes) {
+		splitPoint = len(nodes) - 1
+	}
+
+	return nodes[:splitPoint], nodes[splitPoint:]
+}
+
+// nodeNames extracts names from NodeInfo slice for logging
+func nodeNames(nodes []chaos.NodeInfo) []string {
+	names := make([]string, len(nodes))
+	for i, node := range nodes {
+		names[i] = node.Name
+	}
+	return names
 }
