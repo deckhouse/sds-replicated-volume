@@ -494,6 +494,16 @@ spec:
                 description: Additional information about the current state of the
                   Storage Class.
                 type: string
+              rollingOperationsCursor:
+                description: |-
+                  RollingOperationsCursor tracks the last processed volume hash during rolling operations.
+                  Used for round-robin processing of volumes (both config updates and conflict resolutions).
+                type: string
+              sortSalt:
+                description: |-
+                  SortSalt is a random value used for deterministic volume sorting during rolling operations.
+                  Generated when rolling operations start, cleared when all volumes are aligned.
+                type: string
               storagePoolBasedOnGeneration:
                 description: StoragePoolBasedOnGeneration is the RSC generation when
                   storagePoolName was computed.

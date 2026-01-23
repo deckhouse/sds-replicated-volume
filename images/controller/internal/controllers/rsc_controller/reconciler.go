@@ -18,6 +18,7 @@ package rsccontroller
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -28,8 +29,10 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/objutilv1"
@@ -68,6 +71,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Get RVs referencing this RSC.
 	rvs, err := r.getSortedRVsByRSC(rf.Ctx(), req.Name)
+	if err != nil {
+		return rf.Fail(err).ToCtrl()
+	}
+
+	// Get existing RVOs for this RSC.
+	rvos, err := r.getSortedRVOsByRSC(rf.Ctx(), req.Name)
 	if err != nil {
 		return rf.Fail(err).ToCtrl()
 	}
@@ -114,15 +123,41 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		// Ensure configuration is up to date based on RSP state.
 		ensureConfiguration(rf.Ctx(), rsc, rsp),
 
-		// Ensure volume summary and conditions.
-		ensureVolumeSummaryAndConditions(rf.Ctx(), rsc, rvs),
+		// Ensure volume summary (counters only).
+		ensureVolumeSummary(rf.Ctx(), rsc, rvs),
 	)
 
-	// Patch if changed.
+	// Ensure rolling operations (conditions + target operations).
+	var targetOps []v1alpha1.ReplicatedVolumeOperation
+	eoRolling, ops := ensureRollingOperations(rf.Ctx(), rsc, rvs, rvos)
+	eo = eo.Merge(eoRolling)
+	targetOps = ops
+
+	// Create target operations BEFORE status patch.
+	// This ensures that if RVO creation fails, the cursor doesn't advance.
+	// If status patch fails after RVO creation, the RVO will be found as pending
+	// on next reconcile and the cursor will catch up.
+	for i := range targetOps {
+		op := &targetOps[i]
+		if err := r.createRVO(rf.Ctx(), op); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				// Operation already exists (cache lag or previous failed reconcile).
+				continue
+			}
+			return rf.Fail(err).ToCtrl()
+		}
+	}
+
+	// Patch status after successful RVO creation.
 	if eo.DidChange() {
 		if err := r.patchRSCStatus(rf.Ctx(), rsc, base); err != nil {
 			return rf.Fail(err).ToCtrl()
 		}
+	}
+
+	// Remove finalizers from completed RVOs when cursor moved forward.
+	if err := r.removeRVOLockFinalizers(rf.Ctx(), rsc, rvos); err != nil {
+		return rf.Fail(err).ToCtrl()
 	}
 
 	// Release storage pools that are no longer used.
@@ -384,35 +419,117 @@ func ensureConfiguration(
 	return ef.Ok().ReportChanged()
 }
 
-// ensureVolumeSummaryAndConditions computes and applies volume summary and conditions in-place.
+// ensureVolumeSummary computes and applies volume summary in-place.
 //
-// Sets ConfigurationRolledOut and VolumesSatisfyEligibleNodes conditions based on
-// volume counters (StaleConfiguration, InConflictWithEligibleNodes, PendingObservation).
-func ensureVolumeSummaryAndConditions(
+// Computes volume counters only. Conditions are handled by ensureRollingOperations.
+func ensureVolumeSummary(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 	rvs []rvView,
 ) (outcome flow.EnsureOutcome) {
-	ef := flow.BeginEnsure(ctx, "volume-summary-and-conditions")
+	ef := flow.BeginEnsure(ctx, "volume-summary")
 	defer ef.OnEnd(&outcome)
 
 	// Compute and apply volume summary.
 	summary := computeActualVolumesSummary(rsc, rvs)
 	changed := applyVolumesSummary(rsc, summary)
 
+	return ef.Ok().ReportChangedIf(changed)
+}
+
+// ensureRollingOperations computes volume conditions and target operations for rolling updates.
+//
+// Sets ConfigurationRolledOut and VolumesSatisfyEligibleNodes conditions based on
+// volume counters and existing operations. Returns target operations to be created.
+//
+// Algorithm:
+//  1. If volumes pending observation - set conditions to Unknown, skip rolling.
+//  2. If all volumes aligned - clear sortSalt/cursors, set conditions to True.
+//  3. Otherwise - generate sortSalt if needed, compute target operations using round-robin.
+func ensureRollingOperations(
+	ctx context.Context,
+	rsc *v1alpha1.ReplicatedStorageClass,
+	rvs []rvView,
+	rvos []v1alpha1.ReplicatedVolumeOperation,
+) (outcome flow.EnsureOutcome, targetOps []v1alpha1.ReplicatedVolumeOperation) {
+	ef := flow.BeginEnsure(ctx, "rolling-operations")
+	defer ef.OnEnd(&outcome)
+
+	if rsc.Status.Volumes.PendingObservation == nil {
+		panic("ensureRollingOperations: PendingObservation is nil; ensureVolumeSummary must be called first")
+	}
+
+	// If some volumes haven't observed the configuration, set alignment conditions to Unknown.
+	if *rsc.Status.Volumes.PendingObservation > 0 {
+		msg := fmt.Sprintf("%d volume(s) pending observation", *rsc.Status.Volumes.PendingObservation)
+		changed := applyConfigurationRolledOutCondUnknown(rsc,
+			v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonNewConfigurationNotYetObserved,
+			msg,
+		)
+		changed = applyVolumesSatisfyEligibleNodesCondUnknown(rsc,
+			v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonUpdatedEligibleNodesNotYetObserved,
+			msg,
+		) || changed
+
+		// Don't process rolling updates until all volumes acknowledge current configuration.
+		return ef.Ok().ReportChangedIf(changed), nil
+	}
+
+	if rsc.Status.Volumes.StaleConfiguration == nil || rsc.Status.Volumes.InConflictWithEligibleNodes == nil {
+		panic("ensureRollingOperations: StaleConfiguration or InConflictWithEligibleNodes is nil; ensureVolumeSummary must be called first")
+	}
+
+	staleCount := *rsc.Status.Volumes.StaleConfiguration
+	conflictCount := *rsc.Status.Volumes.InConflictWithEligibleNodes
+
+	// If all volumes aligned - clear sortSalt/cursors and set conditions to True.
+	if staleCount == 0 && conflictCount == 0 {
+		changed := applyClearRollingState(rsc)
+		changed = applyConfigurationRolledOutCondTrue(rsc,
+			v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonRolledOutToAllVolumes,
+			"All volumes have configuration matching the storage class",
+		) || changed
+		changed = applyVolumesSatisfyEligibleNodesCondTrue(rsc,
+			v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonAllVolumesSatisfy,
+			"All volumes have replicas on eligible nodes",
+		) || changed
+		return ef.Ok().ReportChangedIf(changed), nil
+	}
+
 	maxParallelConfigurationRollouts, maxParallelConflictResolutions := computeRollingStrategiesConfiguration(rsc)
 
-	// Apply VolumesSatisfyEligibleNodes condition (calculated regardless of acknowledgment).
-	if *rsc.Status.Volumes.InConflictWithEligibleNodes > 0 {
+	changed := false
+
+	// Set conditions based on strategy and counters.
+	if staleCount > 0 {
+		if maxParallelConfigurationRollouts > 0 {
+			changed = applyConfigurationRolledOutCondFalse(rsc,
+				v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutInProgress,
+				fmt.Sprintf("%d volume(s) with stale configuration, rolling update in progress", staleCount),
+			)
+		} else {
+			changed = applyConfigurationRolledOutCondFalse(rsc,
+				v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutDisabled,
+				fmt.Sprintf("%d volume(s) with stale configuration, automatic rollout disabled", staleCount),
+			)
+		}
+	} else {
+		changed = applyConfigurationRolledOutCondTrue(rsc,
+			v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonRolledOutToAllVolumes,
+			"All volumes have configuration matching the storage class",
+		) || changed
+	}
+
+	if conflictCount > 0 {
 		if maxParallelConflictResolutions > 0 {
 			changed = applyVolumesSatisfyEligibleNodesCondFalse(rsc,
 				v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonConflictResolutionInProgress,
-				"Not implemented",
+				fmt.Sprintf("%d volume(s) in conflict with eligible nodes, resolution in progress", conflictCount),
 			) || changed
 		} else {
 			changed = applyVolumesSatisfyEligibleNodesCondFalse(rsc,
 				v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonManualConflictResolution,
-				"Not implemented",
+				fmt.Sprintf("%d volume(s) in conflict with eligible nodes, manual resolution required", conflictCount),
 			) || changed
 		}
 	} else {
@@ -422,38 +539,22 @@ func ensureVolumeSummaryAndConditions(
 		) || changed
 	}
 
-	// ConfigurationRolledOut requires all volumes to acknowledge.
-	if *rsc.Status.Volumes.PendingObservation > 0 {
-		msg := fmt.Sprintf("%d volume(s) pending observation", *rsc.Status.Volumes.PendingObservation)
-		changed = applyConfigurationRolledOutCondUnknown(rsc,
-			v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonNewConfigurationNotYetObserved,
-			msg,
-		) || changed
-		// Don't process configuration rolling updates until all volumes acknowledge.
-		return ef.Ok().ReportChangedIf(changed)
+	// If no rolling is enabled, return early.
+	if maxParallelConfigurationRollouts == 0 && maxParallelConflictResolutions == 0 {
+		return ef.Ok().ReportChangedIf(changed), nil
 	}
 
-	// Apply ConfigurationRolledOut condition.
-	if *rsc.Status.Volumes.StaleConfiguration > 0 {
-		if maxParallelConfigurationRollouts > 0 {
-			changed = applyConfigurationRolledOutCondFalse(rsc,
-				v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutInProgress,
-				"Not implemented",
-			) || changed
-		} else {
-			changed = applyConfigurationRolledOutCondFalse(rsc,
-				v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutDisabled,
-				"Not implemented",
-			) || changed
-		}
-	} else {
-		changed = applyConfigurationRolledOutCondTrue(rsc,
-			v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonRolledOutToAllVolumes,
-			"All volumes have configuration matching the storage class",
-		) || changed
-	}
+	// Select target operations.
+	ops, saltChanged, cursorsChanged := selectTargetRollingOperations(
+		rsc, rvs, rvos,
+		maxParallelConfigurationRollouts,
+		maxParallelConflictResolutions,
+	)
 
-	return ef.Ok().ReportChangedIf(changed)
+	changed = changed || saltChanged || cursorsChanged
+	targetOps = ops
+
+	return ef.Ok().ReportChangedIf(changed), targetOps
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -463,6 +564,7 @@ func ensureVolumeSummaryAndConditions(
 // rvView is a lightweight projection of ReplicatedVolume fields used by this controller.
 type rvView struct {
 	name                            string
+	uid                             types.UID
 	configurationStoragePoolName    string
 	configurationObservedGeneration int64
 	conditions                      rvViewConditions
@@ -480,6 +582,7 @@ type rvViewConditions struct {
 func newRVView(unsafeRV *v1alpha1.ReplicatedVolume) rvView {
 	view := rvView{
 		name:                            unsafeRV.Name,
+		uid:                             unsafeRV.UID,
 		configurationObservedGeneration: unsafeRV.Status.ConfigurationObservedGeneration,
 		conditions: rvViewConditions{
 			satisfyEligibleNodesKnown: objutilv1.HasStatusCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType),
@@ -658,6 +761,17 @@ func applyVolumesSatisfyEligibleNodesCondTrue(rsc *v1alpha1.ReplicatedStorageCla
 	})
 }
 
+// applyVolumesSatisfyEligibleNodesCondUnknown sets the VolumesSatisfyEligibleNodes condition to Unknown.
+// Returns true if the condition was changed.
+func applyVolumesSatisfyEligibleNodesCondUnknown(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
+	return objutilv1.SetStatusCondition(rsc, metav1.Condition{
+		Type:    v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType,
+		Status:  metav1.ConditionUnknown,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
 // applyVolumesSatisfyEligibleNodesCondFalse sets the VolumesSatisfyEligibleNodes condition to False.
 // Returns true if the condition was changed.
 func applyVolumesSatisfyEligibleNodesCondFalse(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
@@ -667,6 +781,304 @@ func applyVolumesSatisfyEligibleNodesCondFalse(rsc *v1alpha1.ReplicatedStorageCl
 		Reason:  reason,
 		Message: message,
 	})
+}
+
+// applyClearRollingState clears sortSalt and cursor when all volumes are aligned.
+// Returns true if any field was cleared.
+func applyClearRollingState(rsc *v1alpha1.ReplicatedStorageClass) bool {
+	changed := false
+	if rsc.Status.SortSalt != "" {
+		rsc.Status.SortSalt = ""
+		changed = true
+	}
+	if rsc.Status.RollingOperationsCursor != "" {
+		rsc.Status.RollingOperationsCursor = ""
+		changed = true
+	}
+	return changed
+}
+
+// selectTargetRollingOperations selects and builds target operations for rolling updates.
+// It mutates rsc.Status (SortSalt, cursors) when generating new operations.
+//
+// NOTE: Named "select" instead of "compute" because it mutates rsc.Status in-place,
+// violating compute* pure/non-mutating convention.
+//
+// Algorithm:
+//  1. Generate sortSalt if not present.
+//  2. Build lookup for pending operations.
+//  3. Filter RVs that need operations (not aligned, no pending operation) — O(N) cheap checks.
+//  4. Compute hashes and sort candidates — O(C) hash computations, O(C log C) sort.
+//  5. Calculate available budget based on existing uncompleted operations.
+//  6. Select RVs from cursor position, wrapping around for full circle.
+//  7. Build target operations.
+//
+// Optimization: filter-before-compute reduces hash computations from O(N+C) to O(C).
+// See .cursor/rules/go-performance-patterns.mdc "Filter before compute".
+//
+// Behavior when ConfigurationRolloutStrategy=NewVolumesOnly (disabled for existing)
+// but EligibleNodesConflictResolutionStrategy=RollingRepair (enabled):
+// If a volume needs both config update and conflict resolution, we still perform
+// conflict resolution alone. Eligible nodes violations are usually more urgent than
+// config drift. Config update will happen later when strategy changes or volume is
+// recreated.
+func selectTargetRollingOperations(
+	rsc *v1alpha1.ReplicatedStorageClass,
+	rvs []rvView,
+	rvos []v1alpha1.ReplicatedVolumeOperation,
+	maxParallelConfigurationRollouts int32,
+	maxParallelConflictResolutions int32,
+) (targetOps []v1alpha1.ReplicatedVolumeOperation, saltChanged, cursorsChanged bool) {
+	// Generate sortSalt if needed.
+	if rsc.Status.SortSalt == "" {
+		rsc.Status.SortSalt = generateSortSalt()
+		saltChanged = true
+	}
+
+	// Build lookup for existing uncompleted operations by RV name.
+	pendingOpsByRV := make(map[string]*v1alpha1.ReplicatedVolumeOperation)
+	var inFlightConfigOps, inFlightConflictOps int32
+	for i := range rvos {
+		op := &rvos[i]
+		// Skip completed operations.
+		if objutilv1.IsStatusConditionPresentAndTrue(op, v1alpha1.ReplicatedVolumeOperationCondCompletedType) {
+			continue
+		}
+		pendingOpsByRV[op.Spec.ReplicatedVolumeName] = op
+		switch op.Spec.Type {
+		case v1alpha1.ReplicatedVolumeOperationTypeUpdateConfiguration:
+			inFlightConfigOps++
+			if op.Spec.ResolveEligibleNodesConflict {
+				inFlightConflictOps++
+			}
+		case v1alpha1.ReplicatedVolumeOperationTypeResolveEligibleNodesConflict:
+			inFlightConflictOps++
+		}
+	}
+
+	// Calculate available budget.
+	configBudget := maxParallelConfigurationRollouts - inFlightConfigOps
+	if configBudget < 0 {
+		configBudget = 0
+	}
+	conflictBudget := maxParallelConflictResolutions - inFlightConflictOps
+	if conflictBudget < 0 {
+		conflictBudget = 0
+	}
+
+	// Step 1: Filter candidates first (cheap O(N) condition checks, no hashing).
+	type rvNeed struct {
+		rv                rvView
+		needsConfigUpdate bool
+		needsConflictFix  bool
+		hash              string // computed later, only for candidates
+	}
+	var rawCandidates []rvNeed
+
+	for i := range rvs {
+		rv := rvs[i]
+
+		// Skip RVs with pending operations.
+		if _, hasPending := pendingOpsByRV[rv.name]; hasPending {
+			continue
+		}
+
+		configOK := rv.conditions.configurationReady
+		nodesOK := rv.conditions.satisfyEligibleNodes
+
+		if configOK && nodesOK {
+			continue // Already aligned.
+		}
+
+		rawCandidates = append(rawCandidates, rvNeed{
+			rv:                rv,
+			needsConfigUpdate: !configOK,
+			needsConflictFix:  !nodesOK,
+			// hash computed in step 2
+		})
+	}
+
+	if len(rawCandidates) == 0 {
+		return nil, saltChanged, false
+	}
+
+	// Step 2: Compute hashes and sort candidates (O(C) hash calls, O(C log C) sort).
+	// This is cheaper than sorting all N RVs when C << N.
+	// Uses Schwartzian transform: hash is computed once per candidate.
+	for i := range rawCandidates {
+		rawCandidates[i].hash = computeRVHash(rsc.Status.SortSalt, string(rawCandidates[i].rv.uid))
+	}
+	sort.SliceStable(rawCandidates, func(i, j int) bool {
+		return rawCandidates[i].hash < rawCandidates[j].hash
+	})
+	candidates := rawCandidates
+
+	// Find cursor position for round-robin (shared by all operation types).
+	cursorIdx := findCursorIndex(candidates, rsc.Status.RollingOperationsCursor,
+		func(n rvNeed) string { return n.hash },
+		func(_ rvNeed) bool { return true }) // Match all candidates.
+
+	var lastSelectedHash string
+	selectedRVs := make(map[string]bool)
+
+	// Select RVs for configuration update (higher priority).
+	for i := 0; i < len(candidates) && configBudget > 0; i++ {
+		idx := (cursorIdx + i) % len(candidates)
+		need := candidates[idx]
+		if !need.needsConfigUpdate {
+			continue
+		}
+
+		// Check if we also need conflict resolution budget.
+		if need.needsConflictFix {
+			if conflictBudget <= 0 {
+				continue // No conflict budget available.
+			}
+			conflictBudget--
+		}
+
+		selectedRVs[need.rv.name] = true
+		configBudget--
+		lastSelectedHash = need.hash
+
+		op := buildRVOperation(rsc, need.rv, v1alpha1.ReplicatedVolumeOperationTypeUpdateConfiguration, need.hash, need.needsConflictFix)
+		targetOps = append(targetOps, op)
+	}
+
+	// Select RVs for conflict resolution (not needing config update,
+	// OR needing config update but config rollout is disabled for existing volumes).
+	// If a volume needs both but wasn't selected above, it means config rollout is
+	// disabled (NewVolumesOnly). We still perform conflict resolution — see doc comment.
+	for i := 0; i < len(candidates) && conflictBudget > 0; i++ {
+		idx := (cursorIdx + i) % len(candidates)
+		need := candidates[idx]
+
+		// Skip if already selected (config update loop picked it).
+		if selectedRVs[need.rv.name] {
+			continue
+		}
+		if !need.needsConflictFix {
+			continue
+		}
+
+		selectedRVs[need.rv.name] = true
+		conflictBudget--
+		lastSelectedHash = need.hash
+
+		op := buildRVOperation(rsc, need.rv, v1alpha1.ReplicatedVolumeOperationTypeResolveEligibleNodesConflict, need.hash, false)
+		targetOps = append(targetOps, op)
+	}
+
+	// Update cursor if changed.
+	if lastSelectedHash != "" && lastSelectedHash != rsc.Status.RollingOperationsCursor {
+		rsc.Status.RollingOperationsCursor = lastSelectedHash
+		cursorsChanged = true
+	}
+
+	return targetOps, saltChanged, cursorsChanged
+}
+
+// generateSortSalt generates a random 8-character hex string for sorting.
+func generateSortSalt() string {
+	b := make([]byte, 4)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// computeRVHash computes a deterministic hash for sorting RVs.
+//
+// TODO(perf): fmt.Sprintf is ~50ns overhead per call. For 500+ candidates,
+// consider replacing with strconv.FormatUint or manual hex encoding:
+//
+//	const hexDigits = "0123456789abcdef"
+//	v := h.Sum64() & 0xFFFFFFFF
+//	buf := [8]byte{...}  // manual hex conversion
+//
+// Benchmark before optimizing — current overhead is acceptable for typical workloads.
+func computeRVHash(salt, uid string) string {
+	h := fnv.New64a()
+	h.Write([]byte(salt))
+	h.Write([]byte(uid))
+	return fmt.Sprintf("%08x", h.Sum64()&0xFFFFFFFF) // 8 hex chars.
+}
+
+// findCursorIndex finds the starting index for round-robin based on cursor.
+// Returns the index of the first matching item AFTER the cursor item.
+// If cursor is empty or not found, returns 0.
+func findCursorIndex[T any](items []T, cursor string, getHash func(T) string, match func(T) bool) int {
+	if cursor == "" {
+		return 0
+	}
+
+	foundCursor := false
+	for i, item := range items {
+		if !match(item) {
+			continue
+		}
+
+		if getHash(item) == cursor {
+			foundCursor = true
+			continue // Skip cursor item, start from next
+		}
+
+		if foundCursor {
+			return i
+		}
+	}
+
+	// Cursor not found or no items after cursor - wrap around to beginning.
+	return 0
+}
+
+// buildRVOperation builds a ReplicatedVolumeOperation for the given RV.
+func buildRVOperation(
+	rsc *v1alpha1.ReplicatedStorageClass,
+	rv rvView,
+	opType v1alpha1.ReplicatedVolumeOperationType,
+	cursor string,
+	resolveConflict bool,
+) v1alpha1.ReplicatedVolumeOperation {
+	opName := fmt.Sprintf("%s-%s-%s", rv.name, opType.NameSuffix(), cursor)
+
+	op := v1alpha1.ReplicatedVolumeOperation{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: opName,
+			Labels: map[string]string{
+				// Store cursor value for reliable lookup (avoids parsing from name).
+				v1alpha1.OperationCursorLabelKey: cursor,
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				// RSC as controller owner (for deletion when RSC is deleted).
+				{
+					APIVersion:         v1alpha1.SchemeGroupVersion.String(),
+					Kind:               "ReplicatedStorageClass",
+					Name:               rsc.Name,
+					UID:                rsc.UID,
+					Controller:         ptr.To(true),
+					BlockOwnerDeletion: ptr.To(true),
+				},
+				// RV as non-controller owner (for deletion when RV is deleted).
+				{
+					APIVersion:         v1alpha1.SchemeGroupVersion.String(),
+					Kind:               "ReplicatedVolume",
+					Name:               rv.name,
+					UID:                rv.uid,
+					Controller:         ptr.To(false),
+					BlockOwnerDeletion: ptr.To(false),
+				},
+			},
+		},
+		Spec: v1alpha1.ReplicatedVolumeOperationSpec{
+			ReplicatedVolumeName:         rv.name,
+			Type:                         opType,
+			ResolveEligibleNodesConflict: resolveConflict,
+		},
+	}
+
+	// Add finalizer to prevent GC until cursor moves forward.
+	controllerutil.AddFinalizer(&op, v1alpha1.RSCRVOLockFinalizer)
+
+	return op
 }
 
 // validateEligibleNodes validates that eligible nodes from RSP meet the requirements
@@ -1406,5 +1818,86 @@ func (r *Reconciler) deleteRSP(ctx context.Context, rsp *v1alpha1.ReplicatedStor
 		return err
 	}
 	rsp.DeletionTimestamp = ptr.To(metav1.Now())
+	return nil
+}
+
+// getSortedRVOsByRSC fetches RVOs owned by a specific RSC using the index, sorted by name.
+func (r *Reconciler) getSortedRVOsByRSC(ctx context.Context, rscName string) ([]v1alpha1.ReplicatedVolumeOperation, error) {
+	var list v1alpha1.ReplicatedVolumeOperationList
+	if err := r.cl.List(ctx, &list, client.MatchingFields{
+		indexes.IndexFieldRVOByRSCOwnerRef: rscName,
+	}); err != nil {
+		return nil, err
+	}
+	sort.Slice(list.Items, func(i, j int) bool {
+		return list.Items[i].Name < list.Items[j].Name
+	})
+	return list.Items, nil
+}
+
+// createRVO creates a ReplicatedVolumeOperation.
+func (r *Reconciler) createRVO(ctx context.Context, rvo *v1alpha1.ReplicatedVolumeOperation) error {
+	return r.cl.Create(ctx, rvo)
+}
+
+// removeRVOLockFinalizers removes the lock finalizer from completed RVOs
+// when the cursor has moved forward or rolling update is complete.
+//
+// NOTE: This function patches multiple objects in a loop. It is NOT a PatchReconcileHelper
+// (which must perform exactly one patch per call). This is a batch cleanup operation
+// similar to patchScheduledReplicas in rvr_scheduling_controller. The controller rules
+// may need an explicit "batch operation" category for such cases.
+//
+// TODO(rvo-controller): Handle edge case where RV is deleted while RVO is in progress.
+// If the target ReplicatedVolume is deleted, the RVO will be stuck in "terminating" state
+// because the finalizer blocks GC. The RVO controller must detect this case (missing RV)
+// and mark the operation as Completed (Failed or Succeeded) to allow finalizer removal.
+func (r *Reconciler) removeRVOLockFinalizers(
+	ctx context.Context,
+	rsc *v1alpha1.ReplicatedStorageClass,
+	rvos []v1alpha1.ReplicatedVolumeOperation,
+) error {
+	for i := range rvos {
+		rvo := &rvos[i]
+
+		// Skip if no finalizer.
+		if !controllerutil.ContainsFinalizer(rvo, v1alpha1.RSCRVOLockFinalizer) {
+			continue
+		}
+
+		// Skip if not completed.
+		completed := objutilv1.GetStatusCondition(rvo, v1alpha1.ReplicatedVolumeOperationCondCompletedType)
+		if completed == nil || completed.Status != metav1.ConditionTrue {
+			continue
+		}
+
+		// Get cursor from label (reliable, avoids parsing from name).
+		opCursor := rvo.Labels[v1alpha1.OperationCursorLabelKey]
+
+		// Skip RVOs without cursor label (legacy or corrupted).
+		// These require manual cleanup or handling by RVO controller.
+		if opCursor == "" {
+			continue
+		}
+
+		// Determine if we should remove the finalizer.
+		// Remove if:
+		// 1. Rolling update is complete (cursor is empty), OR
+		// 2. Cursor has moved forward (current cursor != operation cursor)
+		currentCursor := rsc.Status.RollingOperationsCursor
+		shouldRemove := currentCursor == "" || currentCursor != opCursor
+
+		if !shouldRemove {
+			continue
+		}
+
+		// Patch to remove finalizer.
+		base := rvo.DeepCopy()
+		controllerutil.RemoveFinalizer(rvo, v1alpha1.RSCRVOLockFinalizer)
+		if err := r.cl.Patch(ctx, rvo, client.MergeFrom(base)); err != nil {
+			return fmt.Errorf("remove finalizer from RVO %s: %w", rvo.Name, err)
+		}
+	}
+
 	return nil
 }

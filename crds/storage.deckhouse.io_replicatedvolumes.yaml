@@ -543,6 +543,41 @@ spec:
                 x-kubernetes-validations:
                 - message: eligibleNodesViolations[].replicaName must be unique
                   rule: self.all(x, self.exists_one(y, x.replicaName == y.replicaName))
+              lastOperation:
+                description: |-
+                  LastOperation tracks the most recent rolling operation for this volume.
+                  Provides observability for kubectl and UI.
+                properties:
+                  completedAt:
+                    description: CompletedAt is when the operation completed (nil
+                      if still in progress).
+                    format: date-time
+                    type: string
+                  createdAt:
+                    description: CreatedAt is when the operation was created.
+                    format: date-time
+                    type: string
+                  message:
+                    description: Message provides additional information about the
+                      operation status.
+                    type: string
+                  name:
+                    description: Name is the ReplicatedVolumeOperation resource name.
+                    type: string
+                  status:
+                    description: 'Status is the operation status: Pending, InProgress,
+                      Succeeded, or Failed.'
+                    type: string
+                  type:
+                    description: Type is the operation type (UpdateConfiguration or
+                      ResolveEligibleNodesConflict).
+                    type: string
+                required:
+                - createdAt
+                - name
+                - status
+                - type
+                type: object
             required:
             - datamesh
             - datameshRevision
