@@ -201,9 +201,6 @@ spec:
                 - Delete
                 - Retain
                 type: string
-                x-kubernetes-validations:
-                - message: Value is immutable.
-                  rule: self == oldSelf
               replication:
                 default: ConsistencyAndAvailability
                 description: |-
@@ -219,15 +216,66 @@ spec:
                 - Consistency
                 - ConsistencyAndAvailability
                 type: string
+              storage:
+                description: |-
+                  Storage defines the storage backend configuration for this storage class.
+                  Specifies the type of volumes (LVM or LVMThin) and which LVMVolumeGroups
+                  will be used to allocate space for volumes.
+                properties:
+                  lvmVolumeGroups:
+                    description: |-
+                      LVMVolumeGroups is an array of LVMVolumeGroup resource names whose Volume Groups/Thin-pools
+                      will be used to allocate the required space.
+
+                      > Note that every LVMVolumeGroup resource must have the same type (Thin/Thick)
+                      as specified in the Type field.
+                    items:
+                      properties:
+                        name:
+                          description: Selected LVMVolumeGroup resource's name.
+                          minLength: 1
+                          pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
+                          type: string
+                        thinPoolName:
+                          description: Selected Thin-pool name.
+                          maxLength: 128
+                          minLength: 1
+                          pattern: ^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    minItems: 1
+                    type: array
+                  type:
+                    description: |-
+                      Type defines the volumes type. Might be:
+                      - LVM (for Thick)
+                      - LVMThin (for Thin)
+                    enum:
+                    - LVM
+                    - LVMThin
+                    type: string
+                required:
+                - lvmVolumeGroups
+                - type
+                type: object
                 x-kubernetes-validations:
-                - message: Value is immutable.
-                  rule: self == oldSelf
+                - message: thinPoolName is required for each lvmVolumeGroups entry
+                    when type is LVMThin
+                  rule: self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, g.thinPoolName
+                    != ”)
+                - message: thinPoolName must not be specified when type is LVM
+                  rule: self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName)
+                    || g.thinPoolName == ”)
               storagePool:
-                description: Selected ReplicatedStoragePool resource's name.
+                description: |-
+                  StoragePool is the name of a ReplicatedStoragePool resource.
+                  Deprecated: Use Storage instead. This field cannot be added or changed, only removed.
                 type: string
                 x-kubernetes-validations:
-                - message: Value is immutable.
-                  rule: self == oldSelf
+                - message: StoragePool cannot be added or changed, only removed
+                  rule: '!has(self) || (has(oldSelf) && self == oldSelf)'
               systemNetworkNames:
                 default:
                 - Internal
@@ -261,9 +309,6 @@ spec:
                 - Zonal
                 - Ignored
                 type: string
-                x-kubernetes-validations:
-                - message: Value is immutable.
-                  rule: self == oldSelf
               volumeAccess:
                 default: PreferablyLocal
                 description: |-
@@ -288,9 +333,6 @@ spec:
                 - PreferablyLocal
                 - Any
                 type: string
-                x-kubernetes-validations:
-                - message: Value is immutable.
-                  rule: self == oldSelf
               zones:
                 description: |-
                   Array of zones the Storage class's volumes should be replicated in. The controller will put a label with
@@ -309,7 +351,7 @@ spec:
             - eligibleNodesConflictResolutionStrategy
             - eligibleNodesPolicy
             - reclaimPolicy
-            - storagePool
+            - storage
             - systemNetworkNames
             - topology
             type: object
