@@ -19,7 +19,6 @@ package rsccontroller
 import (
 	"context"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -29,7 +28,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
@@ -50,28 +48,21 @@ func BuildController(mgr manager.Manager) error {
 		Watches(
 			&v1alpha1.ReplicatedStoragePool{},
 			handler.EnqueueRequestsFromMapFunc(mapRSPToRSC(cl)),
-			builder.WithPredicates(RSPPredicates()...),
-		).
-		Watches(
-			&snc.LVMVolumeGroup{},
-			handler.EnqueueRequestsFromMapFunc(mapLVGToRSC(cl)),
-			builder.WithPredicates(LVGPredicates()...),
-		).
-		Watches(
-			&corev1.Node{},
-			handler.EnqueueRequestsFromMapFunc(mapNodeToRSC(cl)),
-			builder.WithPredicates(NodePredicates()...),
+			builder.WithPredicates(rspPredicates()...),
 		).
 		Watches(
 			&v1alpha1.ReplicatedVolume{},
 			rvEventHandler(),
-			builder.WithPredicates(RVPredicates()...),
+			builder.WithPredicates(rvPredicates()...),
 		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(rec)
 }
 
 // mapRSPToRSC maps a ReplicatedStoragePool to all ReplicatedStorageClass resources that reference it.
+// It queries RSCs using two indexes:
+//   - spec.storagePool (for migration from deprecated field)
+//   - status.storagePoolName (for auto-generated RSPs)
 func mapRSPToRSC(cl client.Client) handler.MapFunc {
 	return func(ctx context.Context, obj client.Object) []reconcile.Request {
 		rsp, ok := obj.(*v1alpha1.ReplicatedStoragePool)
@@ -79,85 +70,39 @@ func mapRSPToRSC(cl client.Client) handler.MapFunc {
 			return nil
 		}
 
-		var rscList v1alpha1.ReplicatedStorageClassList
-		if err := cl.List(ctx, &rscList, client.MatchingFields{
-			indexes.IndexFieldRSCByStoragePool: rsp.Name,
-		}); err != nil {
-			return nil
-		}
+		// Deduplicate RSC names from both indexes.
+		seen := make(map[string]struct{})
 
-		requests := make([]reconcile.Request, 0, len(rscList.Items))
-		for i := range rscList.Items {
-			requests = append(requests, reconcile.Request{
-				NamespacedName: client.ObjectKeyFromObject(&rscList.Items[i]),
-			})
-		}
-		return requests
-	}
-}
-
-// mapLVGToRSC maps an LVMVolumeGroup to all ReplicatedStorageClass resources that reference
-// a ReplicatedStoragePool containing this LVG.
-func mapLVGToRSC(cl client.Client) handler.MapFunc {
-	return func(ctx context.Context, obj client.Object) []reconcile.Request {
-		lvg, ok := obj.(*snc.LVMVolumeGroup)
-		if !ok || lvg == nil {
-			return nil
-		}
-
-		// Find all RSPs that reference this LVG (using index).
-		var rspList v1alpha1.ReplicatedStoragePoolList
-		if err := cl.List(ctx, &rspList, client.MatchingFields{
-			indexes.IndexFieldRSPByLVMVolumeGroupName: lvg.Name,
-		}); err != nil {
-			return nil
-		}
-
-		if len(rspList.Items) == 0 {
-			return nil
-		}
-
-		// Find all RSCs that reference any of the affected RSPs (using index).
-		var requests []reconcile.Request
-		for i := range rspList.Items {
-			rspName := rspList.Items[i].Name
-
-			var rscList v1alpha1.ReplicatedStorageClassList
-			if err := cl.List(ctx, &rscList, client.MatchingFields{
-				indexes.IndexFieldRSCByStoragePool: rspName,
-			}); err != nil {
-				continue
-			}
-
-			for j := range rscList.Items {
-				requests = append(requests, reconcile.Request{
-					NamespacedName: client.ObjectKeyFromObject(&rscList.Items[j]),
-				})
+		// Query by spec.storagePool (migration).
+		var listBySpec v1alpha1.ReplicatedStorageClassList
+		if err := cl.List(ctx, &listBySpec,
+			client.MatchingFields{indexes.IndexFieldRSCByStoragePool: rsp.Name},
+			client.UnsafeDisableDeepCopy,
+		); err == nil {
+			for i := range listBySpec.Items {
+				seen[listBySpec.Items[i].Name] = struct{}{}
 			}
 		}
-		return requests
-	}
-}
 
-// mapNodeToRSC maps a Node to all ReplicatedStorageClass resources.
-// All RSCs are reconciled when relevant node properties change.
-func mapNodeToRSC(cl client.Client) handler.MapFunc {
-	return func(ctx context.Context, obj client.Object) []reconcile.Request {
-		_, ok := obj.(*corev1.Node)
-		if !ok {
+		// Query by status.storagePoolName (auto-generated).
+		var listByStatus v1alpha1.ReplicatedStorageClassList
+		if err := cl.List(ctx, &listByStatus,
+			client.MatchingFields{indexes.IndexFieldRSCByStatusStoragePoolName: rsp.Name},
+			client.UnsafeDisableDeepCopy,
+		); err == nil {
+			for i := range listByStatus.Items {
+				seen[listByStatus.Items[i].Name] = struct{}{}
+			}
+		}
+
+		if len(seen) == 0 {
 			return nil
 		}
 
-		var rscList v1alpha1.ReplicatedStorageClassList
-		if err := cl.List(ctx, &rscList); err != nil {
-			return nil
-		}
-
-		requests := make([]reconcile.Request, 0, len(rscList.Items))
-		for i := range rscList.Items {
-			rsc := &rscList.Items[i]
+		requests := make([]reconcile.Request, 0, len(seen))
+		for name := range seen {
 			requests = append(requests, reconcile.Request{
-				NamespacedName: client.ObjectKeyFromObject(rsc),
+				NamespacedName: client.ObjectKey{Name: name},
 			})
 		}
 		return requests

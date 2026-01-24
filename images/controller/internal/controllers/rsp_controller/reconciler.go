@@ -40,7 +40,9 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
-// --- Wiring / construction ---
+// ──────────────────────────────────────────────────────────────────────────────
+// Wiring / construction
+//
 
 // Reconciler reconciles ReplicatedStoragePool resources.
 // It calculates EligibleNodes based on LVMVolumeGroups, Nodes, and agent pod status.
@@ -62,7 +64,9 @@ func NewReconciler(cl client.Client, log logr.Logger, agentPodNamespace string) 
 	}
 }
 
-// --- Reconcile ---
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile
+//
 
 // Reconcile pattern: In-place reconciliation
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -81,7 +85,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	base := rsp.DeepCopy()
 
 	// Get LVGs referenced by RSP.
-	lvgs, lvgsNotFoundErr, err := r.getSortedLVGsByRSP(rf.Ctx(), rsp)
+	lvgs, lvgsNotFoundErr, err := r.getLVGsByRSP(rf.Ctx(), rsp)
 	if err != nil {
 		return rf.Fail(err).ToCtrl()
 	}
@@ -151,12 +155,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Fail(err).ToCtrl()
 	}
 
-	// Get agent pods to determine agent readiness per node.
-	agentPods, err := r.getAgentPods(rf.Ctx())
+	// Get agent readiness per node.
+	agentReadyByNode, err := r.getAgentReadiness(rf.Ctx())
 	if err != nil {
 		return rf.Fail(err).ToCtrl()
 	}
-	agentReadyByNode := computeActualAgentReadiness(agentPods)
 
 	eligibleNodes, worldStateExpiresAt := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
 
@@ -184,9 +187,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return rf.Done().ToCtrl()
 }
 
-// =============================================================================
+// ──────────────────────────────────────────────────────────────────────────────
 // Helpers: Reconcile (non-I/O)
-// =============================================================================
+//
 
 // --- Compute helpers ---
 
@@ -200,8 +203,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 // will expire and the eligible nodes list may change. Returns nil if no expiration is needed.
 func computeActualEligibleNodes(
 	rsp *v1alpha1.ReplicatedStoragePool,
-	lvgs []snc.LVMVolumeGroup,
-	nodes []corev1.Node,
+	lvgs map[string]lvgView,
+	nodes []nodeView,
 	agentReadyByNode map[string]bool,
 ) (eligibleNodes []v1alpha1.ReplicatedStoragePoolEligibleNode, worldStateExpiresAt *time.Time) {
 	// Build LVG lookup by node name.
@@ -217,7 +220,7 @@ func computeActualEligibleNodes(
 		node := &nodes[i]
 
 		// Check node readiness and grace period.
-		nodeReady, notReadyBeyondGrace, graceExpiresAt := isNodeReadyOrWithinGrace(node, gracePeriod)
+		nodeReady, notReadyBeyondGrace, graceExpiresAt := isNodeReadyOrWithinGrace(node.ready, gracePeriod)
 		if notReadyBeyondGrace {
 			// Node has been not-ready beyond grace period - exclude from eligible nodes.
 			continue
@@ -231,16 +234,16 @@ func computeActualEligibleNodes(
 		}
 
 		// Get LVGs for this node (may be empty for client-only/tiebreaker nodes).
-		nodeLVGs := lvgByNode[node.Name]
+		nodeLVGs := lvgByNode[node.name]
 
 		// Build eligible node entry.
 		eligibleNode := v1alpha1.ReplicatedStoragePoolEligibleNode{
-			NodeName:        node.Name,
-			ZoneName:        node.Labels[corev1.LabelTopologyZone],
+			NodeName:        node.name,
+			ZoneName:        node.zoneName,
 			NodeReady:       nodeReady,
-			Unschedulable:   node.Spec.Unschedulable,
+			Unschedulable:   node.unschedulable,
 			LVMVolumeGroups: nodeLVGs,
-			AgentReady:      agentReadyByNode[node.Name],
+			AgentReady:      agentReadyByNode[node.name],
 		}
 
 		result = append(result, eligibleNode)
@@ -250,20 +253,89 @@ func computeActualEligibleNodes(
 	return result, earliestExpiration
 }
 
-// computeActualAgentReadiness computes agent readiness by node from agent pods.
-// Returns a map of nodeName -> isReady. Nodes without agent pods are not included
-// in the map, which results in AgentReady=false when accessed via map lookup.
-func computeActualAgentReadiness(pods []corev1.Pod) map[string]bool {
-	result := make(map[string]bool)
-	for i := range pods {
-		pod := &pods[i]
-		nodeName := pod.Spec.NodeName
-		if nodeName == "" {
-			continue
-		}
-		result[nodeName] = isPodReady(pod)
+// ──────────────────────────────────────────────────────────────────────────────
+// View types
+//
+
+// nodeView is a lightweight read-only snapshot of Node fields needed for RSP reconciliation.
+// It is safe to use with UnsafeDisableDeepCopy because it copies only scalar values.
+type nodeView struct {
+	name          string
+	zoneName      string
+	unschedulable bool
+	ready         nodeViewReady
+}
+
+// nodeViewReady contains Ready condition state needed for grace period calculation.
+type nodeViewReady struct {
+	status             bool      // True if Ready condition is True
+	hasCondition       bool      // True if Ready condition exists
+	lastTransitionTime time.Time // For grace period calculation
+}
+
+// newNodeView creates a nodeView from a Node.
+// The unsafeNode may come from cache without DeepCopy; nodeView copies only the needed scalar fields.
+func newNodeView(unsafeNode *corev1.Node) nodeView {
+	view := nodeView{
+		name:          unsafeNode.Name,
+		zoneName:      unsafeNode.Labels[corev1.LabelTopologyZone],
+		unschedulable: unsafeNode.Spec.Unschedulable,
 	}
-	return result
+
+	_, readyCond := nodeutil.GetNodeCondition(&unsafeNode.Status, corev1.NodeReady)
+	if readyCond != nil {
+		view.ready = nodeViewReady{
+			hasCondition:       true,
+			status:             readyCond.Status == corev1.ConditionTrue,
+			lastTransitionTime: readyCond.LastTransitionTime.Time,
+		}
+	}
+
+	return view
+}
+
+// lvgView is a lightweight read-only snapshot of LVMVolumeGroup fields needed for RSP reconciliation.
+// It is safe to use with UnsafeDisableDeepCopy because it copies only scalar values and small maps.
+type lvgView struct {
+	name              string
+	nodeName          string
+	unschedulable     bool
+	ready             bool                // Ready condition status
+	specThinPoolNames map[string]struct{} // set of thin pool names from spec
+	thinPoolReady     map[string]struct{} // set of ready thin pool names from status
+}
+
+// newLVGView creates an lvgView from an LVMVolumeGroup.
+// The unsafeLVG may come from cache without DeepCopy; lvgView copies only the needed fields.
+func newLVGView(unsafeLVG *snc.LVMVolumeGroup) lvgView {
+	view := lvgView{
+		name:     unsafeLVG.Name,
+		nodeName: unsafeLVG.Spec.Local.NodeName,
+		ready:    meta.IsStatusConditionTrue(unsafeLVG.Status.Conditions, "Ready"),
+	}
+
+	// Check unschedulable annotation.
+	_, view.unschedulable = unsafeLVG.Annotations[v1alpha1.LVMVolumeGroupUnschedulableAnnotationKey]
+
+	// Copy spec thin pool names (for validation).
+	if len(unsafeLVG.Spec.ThinPools) > 0 {
+		view.specThinPoolNames = make(map[string]struct{}, len(unsafeLVG.Spec.ThinPools))
+		for _, tp := range unsafeLVG.Spec.ThinPools {
+			view.specThinPoolNames[tp.Name] = struct{}{}
+		}
+	}
+
+	// Copy status thin pool readiness (only ready thin pools).
+	if len(unsafeLVG.Status.ThinPools) > 0 {
+		view.thinPoolReady = make(map[string]struct{}, len(unsafeLVG.Status.ThinPools))
+		for _, tp := range unsafeLVG.Status.ThinPools {
+			if tp.Ready {
+				view.thinPoolReady[tp.Name] = struct{}{}
+			}
+		}
+	}
+
+	return view
 }
 
 // --- Pure helpers ---
@@ -272,9 +344,9 @@ func computeActualAgentReadiness(pods []corev1.Pod) map[string]bool {
 // For LVM (no thin pool): checks if the LVG Ready condition is True.
 // For LVMThin (with thin pool): checks if the LVG Ready condition is True AND
 // the specific thin pool status.ready is true.
-func isLVGReady(lvg *snc.LVMVolumeGroup, thinPoolName string) bool {
+func isLVGReady(lvg *lvgView, thinPoolName string) bool {
 	// Check LVG Ready condition.
-	if !meta.IsStatusConditionTrue(lvg.Status.Conditions, "Ready") {
+	if !lvg.ready {
 		return false
 	}
 
@@ -284,14 +356,8 @@ func isLVGReady(lvg *snc.LVMVolumeGroup, thinPoolName string) bool {
 	}
 
 	// For LVMThin, also check thin pool readiness.
-	for _, tp := range lvg.Status.ThinPools {
-		if tp.Name == thinPoolName {
-			return tp.Ready
-		}
-	}
-
-	// Thin pool not found in status - not ready.
-	return false
+	_, ready := lvg.thinPoolReady[thinPoolName]
+	return ready
 }
 
 // isNodeReadyOrWithinGrace checks node readiness and grace period status.
@@ -299,20 +365,18 @@ func isLVGReady(lvg *snc.LVMVolumeGroup, thinPoolName string) bool {
 //   - nodeReady: true if node is Ready
 //   - notReadyBeyondGrace: true if node is NotReady and beyond grace period (should be excluded)
 //   - graceExpiresAt: when the grace period will expire (zero if node is Ready or beyond grace)
-func isNodeReadyOrWithinGrace(node *corev1.Node, gracePeriod time.Duration) (nodeReady bool, notReadyBeyondGrace bool, graceExpiresAt time.Time) {
-	_, readyCond := nodeutil.GetNodeCondition(&node.Status, corev1.NodeReady)
-
-	if readyCond == nil {
+func isNodeReadyOrWithinGrace(ready nodeViewReady, gracePeriod time.Duration) (nodeReady bool, notReadyBeyondGrace bool, graceExpiresAt time.Time) {
+	if !ready.hasCondition {
 		// No Ready condition - consider not ready but within grace (unknown state).
 		return false, false, time.Time{}
 	}
 
-	if readyCond.Status == corev1.ConditionTrue {
+	if ready.status {
 		return true, false, time.Time{}
 	}
 
 	// Node is not ready - check grace period.
-	graceExpiresAt = readyCond.LastTransitionTime.Time.Add(gracePeriod)
+	graceExpiresAt = ready.lastTransitionTime.Add(gracePeriod)
 	if time.Now().After(graceExpiresAt) {
 		return false, true, time.Time{} // Beyond grace period.
 	}
@@ -401,35 +465,22 @@ func applyEligibleNodesAndIncrementRevisionIfChanged(
 // validateRSPAndLVGs validates that RSP and LVGs are correctly configured.
 // It checks:
 //   - For LVMThin type, thinPoolName exists in each referenced LVG's Spec.ThinPools
-func validateRSPAndLVGs(rsp *v1alpha1.ReplicatedStoragePool, lvgs []snc.LVMVolumeGroup) error {
-	// Build LVG lookup by name.
-	lvgByName := make(map[string]*snc.LVMVolumeGroup, len(lvgs))
-	for i := range lvgs {
-		lvgByName[lvgs[i].Name] = &lvgs[i]
-	}
-
+func validateRSPAndLVGs(rsp *v1alpha1.ReplicatedStoragePool, lvgs map[string]lvgView) error {
 	// Validate ThinPool references for LVMThin type.
-	if rsp.Spec.Type == v1alpha1.RSPTypeLVMThin {
+	if rsp.Spec.Type == v1alpha1.ReplicatedStoragePoolTypeLVMThin {
 		for _, rspLVG := range rsp.Spec.LVMVolumeGroups {
 			if rspLVG.ThinPoolName == "" {
 				return fmt.Errorf("LVMVolumeGroup %q: thinPoolName is required for LVMThin type", rspLVG.Name)
 			}
 
-			lvg, ok := lvgByName[rspLVG.Name]
+			lvg, ok := lvgs[rspLVG.Name]
 			if !ok {
-				// LVG not found in the provided list - this is a bug in the calling code.
-				panic(fmt.Sprintf("validateRSPAndLVGs: LVG %q not found in lvgByName (invariant violation)", rspLVG.Name))
+				// LVG not found in the provided map - this is a bug in the calling code.
+				panic(fmt.Sprintf("validateRSPAndLVGs: LVG %q not found in lvgs (invariant violation)", rspLVG.Name))
 			}
 
 			// Check if ThinPool exists in LVG.
-			thinPoolFound := false
-			for _, tp := range lvg.Spec.ThinPools {
-				if tp.Name == rspLVG.ThinPoolName {
-					thinPoolFound = true
-					break
-				}
-			}
-			if !thinPoolFound {
+			if _, thinPoolFound := lvg.specThinPoolNames[rspLVG.ThinPoolName]; !thinPoolFound {
 				return fmt.Errorf("LVMVolumeGroup %q: thinPool %q not found in Spec.ThinPools", rspLVG.Name, rspLVG.ThinPoolName)
 			}
 		}
@@ -441,45 +492,34 @@ func validateRSPAndLVGs(rsp *v1alpha1.ReplicatedStoragePool, lvgs []snc.LVMVolum
 // --- Construction helpers ---
 
 // buildLVGByNodeMap builds a map of node name to LVG entries for the RSP.
-// Only LVGs that are referenced in rsp.Spec.LVMVolumeGroups are included.
+// Iterates over rsp.Spec.LVMVolumeGroups and looks up each LVG in the provided map.
 // LVGs are sorted by name per node for deterministic output.
 func buildLVGByNodeMap(
-	lvgs []snc.LVMVolumeGroup,
+	lvgs map[string]lvgView,
 	rsp *v1alpha1.ReplicatedStoragePool,
 ) map[string][]v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup {
-	// Build RSP LVG reference lookup: lvgName -> thinPoolName (for LVMThin).
-	rspLVGRef := make(map[string]string, len(rsp.Spec.LVMVolumeGroups))
-	for _, ref := range rsp.Spec.LVMVolumeGroups {
-		rspLVGRef[ref.Name] = ref.ThinPoolName
-	}
-
 	result := make(map[string][]v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup)
 
-	for i := range lvgs {
-		lvg := &lvgs[i]
-
-		// Check if this LVG is referenced by the RSP.
-		thinPoolName, referenced := rspLVGRef[lvg.Name]
-		if !referenced {
+	for _, ref := range rsp.Spec.LVMVolumeGroups {
+		lvg, ok := lvgs[ref.Name]
+		if !ok {
+			// LVG not found - skip (caller should have validated).
 			continue
 		}
 
-		// Get node name from LVG spec.
-		nodeName := lvg.Spec.Local.NodeName
+		// Get node name from LVG.
+		nodeName := lvg.nodeName
 		if nodeName == "" {
 			continue
 		}
 
-		// Check if LVG is unschedulable.
-		_, unschedulable := lvg.Annotations[v1alpha1.LVMVolumeGroupUnschedulableAnnotationKey]
-
 		// Determine readiness of the LVG (and thin pool if applicable).
-		ready := isLVGReady(lvg, thinPoolName)
+		ready := isLVGReady(&lvg, ref.ThinPoolName)
 
 		entry := v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
-			Name:          lvg.Name,
-			ThinPoolName:  thinPoolName,
-			Unschedulable: unschedulable,
+			Name:          lvg.name,
+			ThinPoolName:  ref.ThinPoolName,
+			Unschedulable: lvg.unschedulable,
 			Ready:         ready,
 		}
 
@@ -496,9 +536,9 @@ func buildLVGByNodeMap(
 	return result
 }
 
-// =============================================================================
-// Single-call I/O helpers
-// =============================================================================
+// ──────────────────────────────────────────────────────────────────────────────
+// Single-call I/O helper categories
+//
 
 // --- RSP ---
 
@@ -529,13 +569,14 @@ func (r *Reconciler) patchRSPStatus(
 
 // --- LVG ---
 
-// getSortedLVGsByRSP fetches LVGs referenced by the given RSP, sorted by name.
+// getLVGsByRSP fetches LVGs referenced by the given RSP and returns them as a map keyed by LVG name.
+// Uses UnsafeDisableDeepCopy for efficiency.
 // Returns:
-//   - lvgs: successfully found LVGs, sorted by name
+//   - lvgs: map of LVG name to lvgView snapshot for found LVGs
 //   - lvgsNotFoundErr: merged error for any NotFound cases (nil if all found)
 //   - err: non-NotFound error (if any occurred, lvgs will be nil)
-func (r *Reconciler) getSortedLVGsByRSP(ctx context.Context, rsp *v1alpha1.ReplicatedStoragePool) (
-	lvgs []snc.LVMVolumeGroup,
+func (r *Reconciler) getLVGsByRSP(ctx context.Context, rsp *v1alpha1.ReplicatedStoragePool) (
+	lvgs map[string]lvgView,
 	lvgsNotFoundErr error,
 	err error,
 ) {
@@ -543,25 +584,39 @@ func (r *Reconciler) getSortedLVGsByRSP(ctx context.Context, rsp *v1alpha1.Repli
 		return nil, nil, nil
 	}
 
-	lvgs = make([]snc.LVMVolumeGroup, 0, len(rsp.Spec.LVMVolumeGroups))
-	var notFoundErrs []error
-
-	for _, lvgRef := range rsp.Spec.LVMVolumeGroups {
-		var lvg snc.LVMVolumeGroup
-		if err := r.cl.Get(ctx, client.ObjectKey{Name: lvgRef.Name}, &lvg); err != nil {
-			if apierrors.IsNotFound(err) {
-				notFoundErrs = append(notFoundErrs, err)
-				continue
-			}
-			// Non-NotFound error - fail immediately.
-			return nil, nil, err
-		}
-		lvgs = append(lvgs, lvg)
+	// Build a set of wanted LVG names.
+	wantedNames := make(map[string]struct{}, len(rsp.Spec.LVMVolumeGroups))
+	for _, ref := range rsp.Spec.LVMVolumeGroups {
+		wantedNames[ref.Name] = struct{}{}
 	}
 
-	// Sort by name for deterministic output.
-	sort.Slice(lvgs, func(i, j int) bool {
-		return lvgs[i].Name < lvgs[j].Name
+	// List all LVGs with UnsafeDisableDeepCopy and filter in-memory.
+	var unsafeList snc.LVMVolumeGroupList
+	if err := r.cl.List(ctx, &unsafeList, client.UnsafeDisableDeepCopy); err != nil {
+		return nil, nil, err
+	}
+
+	lvgs = make(map[string]lvgView, len(rsp.Spec.LVMVolumeGroups))
+
+	for i := range unsafeList.Items {
+		unsafeLVG := &unsafeList.Items[i]
+		if _, wanted := wantedNames[unsafeLVG.Name]; !wanted {
+			continue
+		}
+		lvgs[unsafeLVG.Name] = newLVGView(unsafeLVG)
+	}
+
+	// Check for not found LVGs.
+	var notFoundErrs []error
+	for name := range wantedNames {
+		if _, found := lvgs[name]; !found {
+			notFoundErrs = append(notFoundErrs, fmt.Errorf("LVMVolumeGroup %q not found", name))
+		}
+	}
+
+	// Sort notFoundErrs for deterministic error message.
+	sort.Slice(notFoundErrs, func(i, j int) bool {
+		return notFoundErrs[i].Error() < notFoundErrs[j].Error()
 	})
 
 	return lvgs, errors.Join(notFoundErrs...), nil
@@ -569,29 +624,53 @@ func (r *Reconciler) getSortedLVGsByRSP(ctx context.Context, rsp *v1alpha1.Repli
 
 // --- Node ---
 
-// getSortedNodes fetches nodes matching the given selector, sorted by name.
+// getSortedNodes fetches nodes matching the given selector and returns lightweight nodeView snapshots,
+// sorted by name. Uses UnsafeDisableDeepCopy for efficiency.
 // The selector should include NodeLabelSelector and Zones requirements from RSP.
-func (r *Reconciler) getSortedNodes(ctx context.Context, selector labels.Selector) ([]corev1.Node, error) {
-	var list corev1.NodeList
-	if err := r.cl.List(ctx, &list, client.MatchingLabelsSelector{Selector: selector}); err != nil {
+func (r *Reconciler) getSortedNodes(ctx context.Context, selector labels.Selector) ([]nodeView, error) {
+	var unsafeList corev1.NodeList
+	if err := r.cl.List(ctx, &unsafeList,
+		client.MatchingLabelsSelector{Selector: selector},
+		client.UnsafeDisableDeepCopy,
+	); err != nil {
 		return nil, err
 	}
-	sort.Slice(list.Items, func(i, j int) bool {
-		return list.Items[i].Name < list.Items[j].Name
+
+	views := make([]nodeView, len(unsafeList.Items))
+	for i := range unsafeList.Items {
+		views[i] = newNodeView(&unsafeList.Items[i])
+	}
+
+	sort.Slice(views, func(i, j int) bool {
+		return views[i].name < views[j].name
 	})
-	return list.Items, nil
+
+	return views, nil
 }
 
 // --- Pod ---
 
-// getAgentPods fetches all agent pods in the controller namespace.
-func (r *Reconciler) getAgentPods(ctx context.Context) ([]corev1.Pod, error) {
-	var list corev1.PodList
-	if err := r.cl.List(ctx, &list,
+// getAgentReadiness fetches agent pods and returns a map of nodeName -> isReady.
+// Uses UnsafeDisableDeepCopy for efficiency. Nodes without agent pods are not included
+// in the map, which results in AgentReady=false when accessed via map lookup.
+func (r *Reconciler) getAgentReadiness(ctx context.Context) (map[string]bool, error) {
+	var unsafeList corev1.PodList
+	if err := r.cl.List(ctx, &unsafeList,
 		client.InNamespace(r.agentPodNamespace),
 		client.MatchingLabels{"app": "agent"},
+		client.UnsafeDisableDeepCopy,
 	); err != nil {
 		return nil, err
 	}
-	return list.Items, nil
+
+	result := make(map[string]bool, len(unsafeList.Items))
+	for i := range unsafeList.Items {
+		unsafePod := &unsafeList.Items[i]
+		nodeName := unsafePod.Spec.NodeName
+		if nodeName == "" {
+			continue
+		}
+		result[nodeName] = isPodReady(unsafePod)
+	}
+	return result, nil
 }
