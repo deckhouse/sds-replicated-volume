@@ -97,10 +97,6 @@ type ReplicatedVolumeReplicaSpec struct {
 	Type ReplicaType `json:"type"`
 }
 
-func (s *ReplicatedVolumeReplicaSpec) IsDiskless() bool {
-	return s.Type != ReplicaTypeDiskful
-}
-
 // ReplicaType enumerates possible values for ReplicatedVolumeReplica spec.type and status.actualType fields.
 type ReplicaType string
 
@@ -136,13 +132,6 @@ type ReplicatedVolumeReplicaStatus struct {
 
 	// +patchStrategy=merge
 	DRBD *DRBD `json:"drbd,omitempty" patchStrategy:"merge"`
-
-	// SyncProgress shows sync status for kubectl output:
-	// - "True" when fully synced (InSync condition is True)
-	// - "XX.XX%" during active synchronization (SyncTarget)
-	// - DiskState (e.g. "Outdated", "Inconsistent") when not syncing but not in sync
-	// +optional
-	SyncProgress string `json:"syncProgress,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -153,8 +142,6 @@ type DRBD struct {
 	Actual *DRBDActual `json:"actual,omitempty" patchStrategy:"merge"`
 	// +patchStrategy=merge
 	Status *DRBDStatus `json:"status,omitempty" patchStrategy:"merge"`
-	// +patchStrategy=merge
-	Errors *DRBDErrors `json:"errors,omitempty" patchStrategy:"merge"`
 }
 
 // +kubebuilder:object:generate=true
@@ -401,41 +388,6 @@ type PeerDeviceStatus struct {
 	HasSyncDetails         bool             `json:"hasSyncDetails"`
 	HasOnlineVerifyDetails bool             `json:"hasOnlineVerifyDetails"`
 	PercentInSync          string           `json:"percentInSync"`
-}
-
-// +k8s:deepcopy-gen=true
-type DRBDMessageError struct {
-	// +kubebuilder:validation:MaxLength=1024
-	Message string `json:"message,omitempty"`
-}
-
-// +k8s:deepcopy-gen=true
-type DRBDCmdError struct {
-	// +kubebuilder:validation:MaxLength=1024
-	Command string `json:"command,omitempty"`
-	// +kubebuilder:validation:MaxLength=1024
-	Output   string `json:"output,omitempty"`
-	ExitCode int    `json:"exitCode,omitempty"`
-}
-
-// +k8s:deepcopy-gen=true
-type SharedSecretUnsupportedAlgError struct {
-	// +kubebuilder:validation:MaxLength=1024
-	UnsupportedAlg string `json:"unsupportedAlg,omitempty"`
-}
-
-// +kubebuilder:object:generate=true
-type DRBDErrors struct {
-	// +patchStrategy=merge
-	FileSystemOperationError *DRBDMessageError `json:"fileSystemOperationError,omitempty" patchStrategy:"merge"`
-	// +patchStrategy=merge
-	ConfigurationCommandError *DRBDCmdError `json:"configurationCommandError,omitempty" patchStrategy:"merge"`
-	// +patchStrategy=merge
-	SharedSecretAlgSelectionError *SharedSecretUnsupportedAlgError `json:"sharedSecretAlgSelectionError,omitempty" patchStrategy:"merge"`
-	// +patchStrategy=merge
-	LastPrimaryError *DRBDCmdError `json:"lastPrimaryError,omitempty" patchStrategy:"merge"`
-	// +patchStrategy=merge
-	LastSecondaryError *DRBDCmdError `json:"lastSecondaryError,omitempty" patchStrategy:"merge"`
 }
 
 // +kubebuilder:object:generate=true

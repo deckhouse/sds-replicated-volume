@@ -29,11 +29,11 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
-var _ = Describe("NodePredicates", func() {
+var _ = Describe("nodePredicates", func() {
 	var predicates []predicate.Predicate
 
 	BeforeEach(func() {
-		predicates = NodePredicates()
+		predicates = nodePredicates()
 	})
 
 	It("returns true for label change", func() {
@@ -127,11 +127,11 @@ var _ = Describe("NodePredicates", func() {
 	})
 })
 
-var _ = Describe("LVGPredicates", func() {
+var _ = Describe("lvgPredicates", func() {
 	var predicates []predicate.Predicate
 
 	BeforeEach(func() {
-		predicates = LVGPredicates()
+		predicates = lvgPredicates()
 	})
 
 	It("returns true for generation change", func() {
@@ -245,12 +245,12 @@ var _ = Describe("LVGPredicates", func() {
 	})
 })
 
-var _ = Describe("AgentPodPredicates", func() {
+var _ = Describe("agentPodPredicates", func() {
 	var predicates []predicate.Predicate
 	const testNamespace = "test-namespace"
 
 	BeforeEach(func() {
-		predicates = AgentPodPredicates(testNamespace)
+		predicates = agentPodPredicates(testNamespace)
 	})
 
 	Context("CreateFunc", func() {

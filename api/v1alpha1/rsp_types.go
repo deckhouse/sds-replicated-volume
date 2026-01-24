@@ -119,10 +119,10 @@ type ReplicatedStoragePoolType string
 // ReplicatedStoragePool spec.type possible values.
 // Keep these in sync with `ReplicatedStoragePoolSpec.Type` validation enum.
 const (
-	// RSPTypeLVM means Thick volumes backed by LVM.
-	RSPTypeLVM ReplicatedStoragePoolType = "LVM"
-	// RSPTypeLVMThin means Thin volumes backed by LVM Thin pools.
-	RSPTypeLVMThin ReplicatedStoragePoolType = "LVMThin"
+	// ReplicatedStoragePoolTypeLVM means Thick volumes backed by LVM.
+	ReplicatedStoragePoolTypeLVM ReplicatedStoragePoolType = "LVM"
+	// ReplicatedStoragePoolTypeLVMThin means Thin volumes backed by LVM Thin pools.
+	ReplicatedStoragePoolTypeLVMThin ReplicatedStoragePoolType = "LVMThin"
 )
 
 func (t ReplicatedStoragePoolType) String() string {
@@ -167,6 +167,19 @@ type ReplicatedStoragePoolStatus struct {
 	// EligibleNodes lists nodes eligible for this storage pool.
 	// +optional
 	EligibleNodes []ReplicatedStoragePoolEligibleNode `json:"eligibleNodes,omitempty"`
+
+	// UsedBy tracks which resources are using this storage pool.
+	// +optional
+	UsedBy ReplicatedStoragePoolUsedBy `json:"usedBy,omitempty"`
+}
+
+// ReplicatedStoragePoolUsedBy tracks resources using this storage pool.
+// +kubebuilder:object:generate=true
+type ReplicatedStoragePoolUsedBy struct {
+	// ReplicatedStorageClassNames lists RSC names using this storage pool.
+	// +listType=set
+	// +optional
+	ReplicatedStorageClassNames []string `json:"replicatedStorageClassNames,omitempty"`
 }
 
 // TODO: Remove ReplicatedStoragePoolPhase once the old controller (sds-replicated-volume-controller) is retired.

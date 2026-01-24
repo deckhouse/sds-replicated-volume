@@ -19,15 +19,37 @@ The controller reconciles `ReplicatedStoragePool` status with:
 2. **Eligible nodes revision** — for quick change detection
 3. **Ready condition** — describing the current state
 
+## Interactions
+
+| Direction | Resource/Controller | Relationship |
+|-----------|---------------------|--------------|
+| ← input | LVMVolumeGroup | Reads LVGs referenced by RSP spec |
+| ← input | Node | Reads nodes matching selector |
+| ← input | Pod (agent) | Reads agent pod readiness |
+| → used by | rsc_controller | RSC uses `RSP.Status.EligibleNodes` for validation |
+| → used by | node_controller | Reads `RSP.Status.EligibleNodes` to manage node labels |
+
+## Algorithm
+
+A node is eligible if **all** conditions are met:
+
+```
+eligible = matchesNodeLabelSelector
+       AND matchesZones
+       AND (nodeReady OR withinGracePeriod)
+```
+
+For each eligible node, the controller also records LVG readiness and agent readiness.
+
 ## Reconciliation Structure
 
 ```
 Reconcile (root)
 ├── getRSP                                    — fetch the RSP
-├── getSortedLVGsByRSP                        — fetch LVGs referenced by RSP
+├── getLVGsByRSP                              — fetch LVGs referenced by RSP
 ├── validateRSPAndLVGs                        — validate RSP/LVG configuration
 ├── getSortedNodes                            — fetch nodes (filtered by selector)
-├── getAgentPods                              — fetch agent pods
+├── getAgentReadiness                         — fetch agent pods and compute readiness
 ├── computeActualEligibleNodes                — compute eligible nodes list
 ├── applyEligibleNodesAndIncrementRevisionIfChanged
 ├── applyReadyCondTrue/applyReadyCondFalse    — set Ready condition
@@ -67,8 +89,8 @@ flowchart TD
     SetInvalidZones --> PatchStatus4[Patch status]
     PatchStatus4 --> Done5([Done])
 
-    GetNodes --> GetAgentPods[Get Agent Pods]
-    GetAgentPods --> ComputeEligible[Compute Eligible Nodes]
+    GetNodes --> GetAgentReadiness[Get Agent Readiness]
+    GetAgentReadiness --> ComputeEligible[Compute Eligible Nodes]
 
     ComputeEligible --> ApplyEligible[Apply eligible nodes<br>Increment revision if changed]
     ApplyEligible --> SetReady[Ready=True]
@@ -95,7 +117,7 @@ Indicates whether the storage pool eligible nodes have been calculated successfu
 | False | InvalidLVMVolumeGroup | RSP/LVG validation failed (e.g., thin pool not found) |
 | False | InvalidNodeLabelSelector | NodeLabelSelector or Zones parsing failed |
 
-## Eligible Nodes Algorithm
+## Eligible Nodes Details
 
 A node is considered eligible for an RSP if **all** conditions are met (AND):
 
@@ -120,6 +142,32 @@ For each eligible node, the controller records:
   - **Unschedulable** — from `storage.deckhouse.io/lvmVolumeGroupUnschedulable` annotation
   - **Ready** — LVG Ready condition status (and thin pool ready status for LVMThin)
 
+## Managed Metadata
+
+This controller manages `RSP.Status` fields only and does not create external labels, annotations, or finalizers.
+
+| Type | Key | Managed On | Purpose |
+|------|-----|------------|---------|
+| Status field | `status.eligibleNodes` | RSP | List of eligible nodes |
+| Status field | `status.eligibleNodesRevision` | RSP | Change detection counter |
+| Status field | `status.conditions[Ready]` | RSP | Controller health condition |
+
+## Watches
+
+| Resource | Events | Handler |
+|----------|--------|---------|
+| ReplicatedStoragePool | Generation changes | Direct (primary) |
+| Node | Label changes, Ready condition, spec.unschedulable | Index + selector matching |
+| LVMVolumeGroup | Generation, unschedulable annotation, Ready condition, ThinPools[].Ready | Index by LVG name |
+| Pod (agent) | Ready condition changes, namespace + label filter | Index by node name |
+
+## Indexes
+
+| Index | Field | Purpose |
+|-------|-------|---------|
+| RSP by eligible node name | `status.eligibleNodes[].nodeName` | Find RSPs where a node is eligible |
+| LVMVolumeGroup by name | `metadata.name` | Fetch LVGs referenced by RSP |
+
 ## Data Flow
 
 ```mermaid
@@ -134,7 +182,7 @@ flowchart TD
     subgraph compute [Compute]
         BuildSelector[Build node selector<br>from NodeLabelSelector + Zones]
         BuildLVGMap[buildLVGByNodeMap]
-        ComputeAgent[computeActualAgentReadiness]
+        GetAgent[getAgentReadiness]
         ComputeEligible[computeActualEligibleNodes]
     end
 
@@ -152,21 +200,10 @@ flowchart TD
     LVGs --> BuildLVGMap
     BuildLVGMap --> ComputeEligible
 
-    AgentPods --> ComputeAgent
-    ComputeAgent --> ComputeEligible
+    AgentPods --> GetAgent
+    GetAgent --> ComputeEligible
 
     ComputeEligible --> EN
     ComputeEligible --> ENRev
     ComputeEligible -->|Ready| Conds
 ```
-
-## Watches and Predicates
-
-The controller watches the following resources:
-
-| Resource | Predicates | Mapping |
-|----------|------------|---------|
-| ReplicatedStoragePool | Generation changes | Direct (primary) |
-| Node | Label changes, Ready condition, spec.unschedulable | Index + selector matching |
-| LVMVolumeGroup | Generation, unschedulable annotation, Ready condition, ThinPools[].Ready | Index by LVG name |
-| Pod (agent) | Ready condition changes, namespace + label filter | Index by node name |

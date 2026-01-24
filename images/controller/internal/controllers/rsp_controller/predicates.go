@@ -31,20 +31,20 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
-// RSPPredicates returns predicates for ReplicatedStoragePool events.
+// rspPredicates returns predicates for ReplicatedStoragePool events.
 // Filters to only react to generation changes (spec updates).
-func RSPPredicates() []predicate.Predicate {
+func rspPredicates() []predicate.Predicate {
 	return []predicate.Predicate{predicate.GenerationChangedPredicate{}}
 }
 
-// NodePredicates returns predicates for Node events.
+// nodePredicates returns predicates for Node events.
 // Filters to only react to:
 //   - Label changes (for zone and node matching)
 //   - Ready condition changes
 //   - spec.unschedulable changes
-func NodePredicates() []predicate.Predicate {
+func nodePredicates() []predicate.Predicate {
 	return []predicate.Predicate{
-		predicate.Funcs{
+		predicate.TypedFuncs[client.Object]{
 			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
 				oldNode, okOld := e.ObjectOld.(*corev1.Node)
 				newNode, okNew := e.ObjectNew.(*corev1.Node)
@@ -76,15 +76,15 @@ func NodePredicates() []predicate.Predicate {
 	}
 }
 
-// LVGPredicates returns predicates for LVMVolumeGroup events.
+// lvgPredicates returns predicates for LVMVolumeGroup events.
 // Filters to only react to:
 //   - Generation changes (spec updates, including spec.local.nodeName)
 //   - Unschedulable annotation changes
 //   - Ready condition status changes
 //   - ThinPools[].Ready status changes
-func LVGPredicates() []predicate.Predicate {
+func lvgPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
-		predicate.Funcs{
+		predicate.TypedFuncs[client.Object]{
 			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
 				// Generation change (spec updates).
 				if e.ObjectNew.GetGeneration() != e.ObjectOld.GetGeneration() {
@@ -148,14 +148,14 @@ func areThinPoolsReadyEqual(oldPools, newPools []snc.LVMVolumeGroupThinPoolStatu
 	return true
 }
 
-// AgentPodPredicates returns predicates for agent Pod events.
+// agentPodPredicates returns predicates for agent Pod events.
 // Filters to only react to:
 //   - Pods in the specified namespace with label app=agent
 //   - Ready condition changes
 //   - Create/Delete events
-func AgentPodPredicates(podNamespace string) []predicate.Predicate {
+func agentPodPredicates(podNamespace string) []predicate.Predicate {
 	return []predicate.Predicate{
-		predicate.Funcs{
+		predicate.TypedFuncs[client.Object]{
 			CreateFunc: func(e event.TypedCreateEvent[client.Object]) bool {
 				pod, ok := e.Object.(*corev1.Pod)
 				if !ok || pod == nil {

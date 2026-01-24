@@ -349,6 +349,18 @@ spec:
                 description: Reason is used only by the old controller and will be
                   removed in a future version.
                 type: string
+              usedBy:
+                description: UsedBy tracks which resources are using this storage
+                  pool.
+                properties:
+                  replicatedStorageClassNames:
+                    description: ReplicatedStorageClassNames lists RSC names using
+                      this storage pool.
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
+                type: object
             type: object
         required:
         - spec

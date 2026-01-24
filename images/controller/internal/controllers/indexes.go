@@ -43,6 +43,16 @@ func RegisterIndexes(mgr manager.Manager) error {
 		return err
 	}
 
+	// Node
+	if err := indexes.RegisterNodeByMetadataName(mgr); err != nil {
+		return err
+	}
+
+	// DRBDResource
+	if err := indexes.RegisterDRBDResourceByNodeName(mgr); err != nil {
+		return err
+	}
+
 	// ReplicatedStorageClass (RSC)
 	if err := indexes.RegisterRSCByStoragePool(mgr); err != nil {
 		return err
@@ -53,6 +63,9 @@ func RegisterIndexes(mgr manager.Manager) error {
 		return err
 	}
 	if err := indexes.RegisterRSPByEligibleNodeName(mgr); err != nil {
+		return err
+	}
+	if err := indexes.RegisterRSPByUsedByRSCName(mgr); err != nil {
 		return err
 	}
 
