@@ -44,3 +44,36 @@ func WithRSPByLVMVolumeGroupNameIndex(b *fake.ClientBuilder) *fake.ClientBuilder
 		return names
 	})
 }
+
+// WithRSPByEligibleNodeNameIndex registers the IndexFieldRSPByEligibleNodeName index
+// on a fake.ClientBuilder. This is useful for tests that need to use the index.
+func WithRSPByEligibleNodeNameIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
+	return b.WithIndex(&v1alpha1.ReplicatedStoragePool{}, indexes.IndexFieldRSPByEligibleNodeName, func(obj client.Object) []string {
+		rsp, ok := obj.(*v1alpha1.ReplicatedStoragePool)
+		if !ok {
+			return nil
+		}
+		if len(rsp.Status.EligibleNodes) == 0 {
+			return nil
+		}
+		names := make([]string, 0, len(rsp.Status.EligibleNodes))
+		for _, en := range rsp.Status.EligibleNodes {
+			if en.NodeName != "" {
+				names = append(names, en.NodeName)
+			}
+		}
+		return names
+	})
+}
+
+// WithRSPByUsedByRSCNameIndex registers the IndexFieldRSPByUsedByRSCName index
+// on a fake.ClientBuilder. This is useful for tests that need to use the index.
+func WithRSPByUsedByRSCNameIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
+	return b.WithIndex(&v1alpha1.ReplicatedStoragePool{}, indexes.IndexFieldRSPByUsedByRSCName, func(obj client.Object) []string {
+		rsp, ok := obj.(*v1alpha1.ReplicatedStoragePool)
+		if !ok {
+			return nil
+		}
+		return rsp.Status.UsedBy.ReplicatedStorageClassNames
+	})
+}

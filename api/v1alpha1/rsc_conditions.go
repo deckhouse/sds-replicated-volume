@@ -17,18 +17,6 @@ limitations under the License.
 package v1alpha1
 
 const (
-	// ReplicatedStorageClassCondConfigurationReadyType indicates whether the storage class
-	// configuration is ready and validated.
-	//
-	// Reasons describe readiness or validation failure conditions.
-	ReplicatedStorageClassCondConfigurationReadyType                                 = "ConfigurationReady"
-	ReplicatedStorageClassCondConfigurationReadyReasonEligibleNodesCalculationFailed = "EligibleNodesCalculationFailed" // Eligible nodes calculation failed.
-	ReplicatedStorageClassCondConfigurationReadyReasonInvalidConfiguration           = "InvalidConfiguration"           // Configuration is invalid.
-	ReplicatedStorageClassCondConfigurationReadyReasonReady                          = "Ready"                          // Configuration is ready.
-	ReplicatedStorageClassCondConfigurationReadyReasonStoragePoolNotFound            = "StoragePoolNotFound"            // Storage pool not found.
-)
-
-const (
 	// ReplicatedStorageClassCondConfigurationRolledOutType indicates whether all volumes'
 	// configuration matches the storage class.
 	//
@@ -41,17 +29,24 @@ const (
 )
 
 const (
-	// ReplicatedStorageClassCondEligibleNodesCalculatedType indicates whether eligible nodes
-	// have been calculated for the storage class.
+	// ReplicatedStorageClassCondReadyType indicates overall readiness of the storage class.
 	//
-	// Reasons describe calculation success or failure conditions.
-	ReplicatedStorageClassCondEligibleNodesCalculatedType                                = "EligibleNodesCalculated"
-	ReplicatedStorageClassCondEligibleNodesCalculatedReasonCalculated                    = "Calculated"                    // Eligible nodes calculated successfully.
-	ReplicatedStorageClassCondEligibleNodesCalculatedReasonInsufficientEligibleNodes     = "InsufficientEligibleNodes"     // Not enough eligible nodes.
-	ReplicatedStorageClassCondEligibleNodesCalculatedReasonInvalidConfiguration          = "InvalidConfiguration"          // Configuration is invalid.
-	ReplicatedStorageClassCondEligibleNodesCalculatedReasonInvalidStoragePoolOrLVG       = "InvalidStoragePoolOrLVG"       // ReplicatedStoragePool or LVMVolumeGroup is invalid or not ready.
-	ReplicatedStorageClassCondEligibleNodesCalculatedReasonLVMVolumeGroupNotFound        = "LVMVolumeGroupNotFound"        // LVMVolumeGroup not found.
-	ReplicatedStorageClassCondEligibleNodesCalculatedReasonReplicatedStoragePoolNotFound = "ReplicatedStoragePoolNotFound" // ReplicatedStoragePool not found.
+	// Reasons describe readiness or blocking conditions.
+	ReplicatedStorageClassCondReadyType                            = "Ready"
+	ReplicatedStorageClassCondReadyReasonInsufficientEligibleNodes = "InsufficientEligibleNodes" // Not enough eligible nodes.
+	ReplicatedStorageClassCondReadyReasonInvalidConfiguration      = "InvalidConfiguration"      // Configuration is invalid.
+	ReplicatedStorageClassCondReadyReasonReady                     = "Ready"                     // Storage class is ready.
+	ReplicatedStorageClassCondReadyReasonWaitingForStoragePool     = "WaitingForStoragePool"     // Waiting for referenced storage pool.
+)
+
+const (
+	// ReplicatedStorageClassCondStoragePoolReadyType indicates whether the referenced storage pool is ready.
+	//
+	// Reasons describe storage pool state. This condition may also use any reason
+	// from ReplicatedStoragePool Ready condition (see rsp_conditions.go).
+	ReplicatedStorageClassCondStoragePoolReadyType                      = "StoragePoolReady"
+	ReplicatedStorageClassCondStoragePoolReadyReasonPending             = "Pending"             // ReplicatedStoragePool has no Ready condition yet.
+	ReplicatedStorageClassCondStoragePoolReadyReasonStoragePoolNotFound = "StoragePoolNotFound" // Referenced storage pool not found; used only when migration from storagePool field failed because RSP does not exist.
 )
 
 const (

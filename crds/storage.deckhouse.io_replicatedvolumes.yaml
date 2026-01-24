@@ -72,22 +72,11 @@ spec:
             type: object
           status:
             properties:
-              actualSize:
-                anyOf:
-                - type: integer
-                - type: string
-                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                x-kubernetes-int-or-string: true
               actuallyAttachedTo:
                 items:
                   type: string
                 maxItems: 2
                 type: array
-              attachedAndIOReadyCount:
-                description: |-
-                  AttachedAndIOReadyCount represents the number of attached replicas that are IOReady in format "ready/attached"
-                  Example: "1/2" means 1 replica is IOReady out of 2 attached
-                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -147,6 +136,165 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              configuration:
+                description: Configuration is the desired configuration snapshot for
+                  this volume.
+                properties:
+                  replication:
+                    description: Replication is the resolved replication mode.
+                    type: string
+                  storagePoolName:
+                    description: StoragePoolName is the name of the ReplicatedStoragePool
+                      used by this RSC.
+                    type: string
+                  topology:
+                    description: Topology is the resolved topology setting.
+                    type: string
+                  volumeAccess:
+                    description: VolumeAccess is the resolved volume access mode.
+                    type: string
+                required:
+                - replication
+                - storagePoolName
+                - topology
+                - volumeAccess
+                type: object
+              configurationGeneration:
+                description: ConfigurationGeneration is the RSC generation from which
+                  configuration was taken.
+                format: int64
+                type: integer
+              configurationObservedGeneration:
+                description: ConfigurationObservedGeneration is the RSC generation
+                  when configuration was last observed/acknowledged.
+                format: int64
+                type: integer
+              datamesh:
+                description: Datamesh is the computed datamesh configuration for the
+                  volume.
+                properties:
+                  allowTwoPrimaries:
+                    default: false
+                    description: AllowTwoPrimaries enables two primaries mode for
+                      the datamesh.
+                    type: boolean
+                  members:
+                    description: Members is the list of datamesh members.
+                    items:
+                      description: ReplicatedVolumeDatameshMember represents a member
+                        of the datamesh.
+                      properties:
+                        addresses:
+                          description: Addresses is the list of DRBD addresses for
+                            this member.
+                          items:
+                            properties:
+                              address:
+                                properties:
+                                  ipv4:
+                                    pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
+                                    type: string
+                                  port:
+                                    maximum: 65535
+                                    minimum: 1025
+                                    type: integer
+                                required:
+                                - ipv4
+                                - port
+                                type: object
+                              systemNetworkName:
+                                maxLength: 64
+                                type: string
+                            required:
+                            - address
+                            - systemNetworkName
+                            type: object
+                          maxItems: 16
+                          type: array
+                        name:
+                          description: Name is the member name (used as list map key).
+                          minLength: 1
+                          type: string
+                        nodeName:
+                          description: NodeName is the Kubernetes node name where
+                            the member is located.
+                          minLength: 1
+                          type: string
+                        role:
+                          description: Role is the DRBD role of this member.
+                          type: string
+                        type:
+                          description: Type is the member type (Diskful, Access, or
+                            TieBreaker).
+                          type: string
+                        typeTransition:
+                          description: TypeTransition indicates the desired type transition
+                            for this member.
+                          enum:
+                          - ToDiskful
+                          - ToDiskless
+                          type: string
+                        zone:
+                          description: Zone is the zone where the member is located.
+                          type: string
+                      required:
+                      - addresses
+                      - name
+                      - nodeName
+                      - type
+                      type: object
+                      x-kubernetes-validations:
+                      - message: typeTransition must be ToDiskless for Diskful type,
+                          or ToDiskful for Access/TieBreaker types
+                        rule: 'self.type == ''Diskful'' ? (!has(self.typeTransition)
+                          || self.typeTransition == ''ToDiskless'') : (!has(self.typeTransition)
+                          || self.typeTransition == ''ToDiskful'')'
+                    maxItems: 24
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  quorum:
+                    default: 0
+                    description: Quorum is the quorum value for the datamesh.
+                    maximum: 13
+                    minimum: 0
+                    type: integer
+                  quorumMinimumRedundancy:
+                    default: 0
+                    description: QuorumMinimumRedundancy is the minimum redundancy
+                      required for quorum.
+                    maximum: 8
+                    minimum: 0
+                    type: integer
+                  size:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: Size is the desired size of the volume.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  systemNetworkNames:
+                    description: SystemNetworkNames is the list of system network
+                      names for DRBD communication.
+                    items:
+                      maxLength: 64
+                      type: string
+                    maxItems: 16
+                    type: array
+                required:
+                - allowTwoPrimaries
+                - members
+                - quorum
+                - quorumMinimumRedundancy
+                - size
+                - systemNetworkNames
+                type: object
+              datameshRevision:
+                description: DatameshRevision is a counter incremented when datamesh
+                  configuration changes.
+                format: int64
+                type: integer
               desiredAttachTo:
                 description: |-
                   DesiredAttachTo is the desired set of nodes where the volume should be attached (up to 2 nodes).
@@ -155,23 +303,6 @@ spec:
                   type: string
                 maxItems: 2
                 type: array
-              deviceMinor:
-                description: DeviceMinor is a unique DRBD device minor number assigned
-                  to this ReplicatedVolume.
-                format: int32
-                maximum: 1048575
-                minimum: 0
-                type: integer
-              diskfulReplicaCount:
-                description: |-
-                  DiskfulReplicaCount represents the current and desired number of diskful replicas in format "current/desired"
-                  Example: "2/3" means 2 current diskful replicas out of 3 desired
-                type: string
-              diskfulReplicasInSync:
-                description: |-
-                  DiskfulReplicasInSync represents the number of diskful replicas that are in sync in format "inSync/total"
-                  Example: "2/3" means 2 diskful replicas are in sync out of 3 total diskful replicas
-                type: string
               drbd:
                 properties:
                   config:
@@ -179,23 +310,6 @@ spec:
                       allowTwoPrimaries:
                         default: false
                         type: boolean
-                      quorum:
-                        maximum: 8
-                        minimum: 0
-                        type: integer
-                      quorumMinimumRedundancy:
-                        maximum: 8
-                        minimum: 0
-                        type: integer
-                      sharedSecret:
-                        minLength: 1
-                        type: string
-                      sharedSecretAlg:
-                        enum:
-                        - SHA256
-                        - SHA1
-                        - DummyForTest
-                        type: string
                     type: object
                 type: object
               eligibleNodesViolations:
@@ -221,106 +335,9 @@ spec:
                   - replicaName
                   type: object
                 type: array
-              phase:
-                type: string
-              rolloutTicket:
-                description: |-
-                  RolloutTicket is assigned when the volume is created and updated when selected for rolling update.
-                  Persists the last taken storage class configuration snapshot.
-                properties:
-                  configuration:
-                    description: Configuration is the configuration snapshot to roll
-                      out.
-                    properties:
-                      replication:
-                        description: Replication is the replication mode from the
-                          storage class.
-                        type: string
-                      systemNetworkNames:
-                        description: SystemNetworkNames is the list of network names
-                          from the storage class.
-                        items:
-                          type: string
-                        type: array
-                      topology:
-                        description: Topology is the topology setting from the storage
-                          class.
-                        type: string
-                      volumeAccess:
-                        description: VolumeAccess is the volume access mode from the
-                          storage class.
-                        type: string
-                      zones:
-                        description: Zones is the list of zones from the storage class.
-                        items:
-                          type: string
-                        type: array
-                    required:
-                    - replication
-                    - topology
-                    - volumeAccess
-                    type: object
-                  storageClassGeneration:
-                    description: StorageClassGeneration is the RSC generation this
-                      ticket was issued for.
-                    format: int64
-                    type: integer
-                required:
-                - configuration
-                - storageClassGeneration
-                type: object
-              storageClass:
-                description: StorageClass tracks the observed state of the referenced
-                  ReplicatedStorageClass.
-                properties:
-                  name:
-                    description: Name is the ReplicatedStorageClass name.
-                    type: string
-                  observedConfigurationGeneration:
-                    description: ObservedConfigurationGeneration is the RSC generation
-                      when configuration was observed.
-                    format: int64
-                    type: integer
-                  observedEligibleNodesRevision:
-                    description: ObservedEligibleNodesRevision is the eligible nodes
-                      revision when last observed.
-                    format: int64
-                    type: integer
-                required:
-                - name
-                type: object
-              targetConfiguration:
-                description: TargetConfiguration is the desired configuration snapshot
-                  for this volume.
-                properties:
-                  replication:
-                    description: Replication is the replication mode from the storage
-                      class.
-                    type: string
-                  systemNetworkNames:
-                    description: SystemNetworkNames is the list of network names from
-                      the storage class.
-                    items:
-                      type: string
-                    type: array
-                  topology:
-                    description: Topology is the topology setting from the storage
-                      class.
-                    type: string
-                  volumeAccess:
-                    description: VolumeAccess is the volume access mode from the storage
-                      class.
-                    type: string
-                  zones:
-                    description: Zones is the list of zones from the storage class.
-                    items:
-                      type: string
-                    type: array
-                required:
-                - replication
-                - topology
-                - volumeAccess
-                type: object
+            required:
+            - datamesh
+            - datameshRevision
             type: object
         required:
         - metadata
