@@ -229,12 +229,12 @@ type ReplicatedStorageClassTopology string
 
 // Topology values for [ReplicatedStorageClass] spec.topology field.
 const (
-	// RSCTopologyTransZonal means replicas should be placed across zones.
-	RSCTopologyTransZonal ReplicatedStorageClassTopology = "TransZonal"
-	// RSCTopologyZonal means replicas should be placed in a single zone.
-	RSCTopologyZonal ReplicatedStorageClassTopology = "Zonal"
-	// RSCTopologyIgnored means topology information is not used for placement.
-	RSCTopologyIgnored ReplicatedStorageClassTopology = "Ignored"
+	// TopologyTransZonal means replicas should be placed across zones.
+	TopologyTransZonal ReplicatedStorageClassTopology = "TransZonal"
+	// TopologyZonal means replicas should be placed in a single zone.
+	TopologyZonal ReplicatedStorageClassTopology = "Zonal"
+	// TopologyIgnored means topology information is not used for placement.
+	TopologyIgnored ReplicatedStorageClassTopology = "Ignored"
 )
 
 func (t ReplicatedStorageClassTopology) String() string {
@@ -260,10 +260,10 @@ type ReplicatedStorageClassConfigurationRolloutStrategy struct {
 type ReplicatedStorageClassConfigurationRolloutStrategyType string
 
 const (
-	// ReplicatedStorageClassConfigurationRolloutStrategyTypeRollingUpdate means configuration changes are rolled out to existing volumes.
-	ReplicatedStorageClassConfigurationRolloutStrategyTypeRollingUpdate ReplicatedStorageClassConfigurationRolloutStrategyType = "RollingUpdate"
-	// ReplicatedStorageClassConfigurationRolloutStrategyTypeNewVolumesOnly means configuration changes only apply to newly created volumes.
-	ReplicatedStorageClassConfigurationRolloutStrategyTypeNewVolumesOnly ReplicatedStorageClassConfigurationRolloutStrategyType = "NewVolumesOnly"
+	// ConfigurationRolloutRollingUpdate means configuration changes are rolled out to existing volumes.
+	ConfigurationRolloutRollingUpdate ReplicatedStorageClassConfigurationRolloutStrategyType = "RollingUpdate"
+	// ConfigurationRolloutNewVolumesOnly means configuration changes only apply to newly created volumes.
+	ConfigurationRolloutNewVolumesOnly ReplicatedStorageClassConfigurationRolloutStrategyType = "NewVolumesOnly"
 )
 
 func (t ReplicatedStorageClassConfigurationRolloutStrategyType) String() string { return string(t) }
@@ -297,10 +297,10 @@ type ReplicatedStorageClassEligibleNodesConflictResolutionStrategy struct {
 type ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType string
 
 const (
-	// ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeManual means conflicts are resolved manually.
-	ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeManual ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType = "Manual"
-	// ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeRollingRepair means replicas are moved automatically when eligible nodes change.
-	ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeRollingRepair ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType = "RollingRepair"
+	// EligibleNodesConflictResolutionManual means conflicts are resolved manually.
+	EligibleNodesConflictResolutionManual ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType = "Manual"
+	// EligibleNodesConflictResolutionRollingRepair means replicas are moved automatically when eligible nodes change.
+	EligibleNodesConflictResolutionRollingRepair ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType = "RollingRepair"
 )
 
 func (t ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType) String() string {
