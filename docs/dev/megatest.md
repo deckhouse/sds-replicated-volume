@@ -1,3 +1,42 @@
+# CLI флаги
+```
+# Общие
+--log-level      # уровень логирования (allowed values: debug, info, warn, error; default: "info")
+
+# Базовые горутины
+--storage-classes                    # список storage class через запятую (обязателен)
+--kubeconfig                         # путь к kubeconfig файлу
+
+--max-volumes                        # максимальное количество одновременных ReplicatedVolumes (default: 10)
+--volume-step-min                    # мин. количество ReplicatedVolumes для создания за шаг (default: 1)
+--volume-step-max                    # макс. количество ReplicatedVolumes для создания за шаг (default: 3)
+--step-period-min                    # мин. интервал между шагами создания ReplicatedVolumes (default: 10s)
+--step-period-max                    # макс. интервал между шагами создания ReplicatedVolumes (default: 30s)
+--volume-period-min                  # мин. время жизни ReplicatedVolume (default: 60s)
+--volume-period-max                  # макс. время жизни ReplicatedVolume (default: 300s)
+
+--enable-pod-destroyer               # включить pod-destroyer горутины (default: false)
+--enable-volume-resizer              # включить volume-resizer горутину (default: false)
+--enable-volume-replica-destroyer    # включить volume-replica-destroyer горутину (default: false)
+--enable-volume-replica-creator      # включить volume-replica-creator горутину (default: false)
+
+# Chaos
+--parent-kubeconfig              # путь к kubeconfig родительского кластера DVP (обязателен для chaos)
+--vm-namespace                   # namespace с VM в родительском кластере (обязателен для chaos)
+
+--enable-chaos-network-block     # включить chaos-network-blocker (поддерживает blocking-everything, blocking-drbd, split-brain)
+--enable-chaos-network-degrade   # включить chaos-network-degrader (поддерживает losses, latency)
+--enable-chaos-vm-reboot         # включить chaos-vm-reboter
+
+--chaos-period-min               # мин. интервал между инцидентами (default: 60s)
+--chaos-period-max               # макс. интервал между инцидентами (default: 300s)
+--chaos-incident-min             # мин. длительность инцидента (default: 10s)
+--chaos-incident-max             # макс. длительность инцидента (default: 60s)
+
+--chaos-loss-percent             # потеря пакетов %; принимает значение от 0.0 до 1.0 (0.01 = 1%, 0.10 = 10%; default: 0.01)
+--chaos-partition-group-size     # размер группы для partition в chaos-network-blocker (default: 0 = пополам)
+```
+
 # Базовые горутины
 ## Каждая горутина пишет в лог:
 - при начале действия:
@@ -278,24 +317,6 @@ TODO: не увеличивать размер > maxRvSize
     - пишет в лог имя VM
   - когда получает сигнал окончания
     - выходит
-
-## CLI флаги для chaos
-```
---parent-kubeconfig              # путь к kubeconfig родительского кластера DVP (обязателен для chaos)
---vm-namespace                   # namespace с VM в родительском кластере (обязателен для chaos)
-
---enable-chaos-network-block     # включить chaos-network-blocker (поддерживает blocking-everything, blocking-drbd, split-brain)
---enable-chaos-network-degrade   # включить chaos-network-degrader (поддерживает losses, latency)
---enable-chaos-vm-reboot         # включить chaos-vm-reboter
-
---chaos-period-min               # мин. интервал между инцидентами (default: 60s)
---chaos-period-max               # макс. интервал между инцидентами (default: 300s)
---chaos-incident-min             # мин. длительность инцидента (default: 10s)
---chaos-incident-max             # макс. длительность инцидента (default: 60s)
-
---chaos-loss-percent             # потеря пакетов %; принимает значение от 0.0 до 1.0 (0.01 = 1%, 0.10 = 10%; default: 0.01)
---chaos-partition-group-size     # размер группы для partition в chaos-network-blocker (default: 0 = пополам)
-```
 
 ## Примеры
 ```yaml
