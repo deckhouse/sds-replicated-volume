@@ -98,15 +98,15 @@ func main() {
 
 	// Create multivolume config
 	cfg := config.MultiVolumeConfig{
-		StorageClasses:                opt.StorageClasses,
-		MaxVolumes:                    opt.MaxVolumes,
-		VolumeStep:                    config.StepMinMax{Min: opt.VolumeStepMin, Max: opt.VolumeStepMax},
-		StepPeriod:                    config.DurationMinMax{Min: opt.StepPeriodMin, Max: opt.StepPeriodMax},
-		VolumePeriod:                  config.DurationMinMax{Min: opt.VolumePeriodMin, Max: opt.VolumePeriodMax},
-		DisablePodDestroyer:           opt.DisablePodDestroyer,
-		DisableVolumeResizer:          opt.DisableVolumeResizer,
-		DisableVolumeReplicaDestroyer: opt.DisableVolumeReplicaDestroyer,
-		DisableVolumeReplicaCreator:   opt.DisableVolumeReplicaCreator,
+		StorageClasses:               opt.StorageClasses,
+		MaxVolumes:                   opt.MaxVolumes,
+		VolumeStep:                   config.StepMinMax{Min: opt.VolumeStepMin, Max: opt.VolumeStepMax},
+		StepPeriod:                   config.DurationMinMax{Min: opt.StepPeriodMin, Max: opt.StepPeriodMax},
+		VolumePeriod:                 config.DurationMinMax{Min: opt.VolumePeriodMin, Max: opt.VolumePeriodMax},
+		EnablePodDestroyer:           opt.EnablePodDestroyer,
+		EnableVolumeResizer:          opt.EnableVolumeResizer,
+		EnableVolumeReplicaDestroyer: opt.EnableVolumeReplicaDestroyer,
+		EnableVolumeReplicaCreator:   opt.EnableVolumeReplicaCreator,
 	}
 
 	multiVolume := runners.NewMultiVolume(cfg, kubeClient, forceCleanupChan)

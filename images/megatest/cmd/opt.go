@@ -37,11 +37,11 @@ type Opt struct {
 	VolumePeriodMax time.Duration
 	LogLevel        string
 
-	// Disable flags for goroutines
-	DisablePodDestroyer           bool
-	DisableVolumeResizer          bool
-	DisableVolumeReplicaDestroyer bool
-	DisableVolumeReplicaCreator   bool
+	// Enable flags for goroutines
+	EnablePodDestroyer           bool
+	EnableVolumeResizer          bool
+	EnableVolumeReplicaDestroyer bool
+	EnableVolumeReplicaCreator   bool
 
 	// Chaos engineering flags
 	ParentKubeconfig        string
@@ -155,20 +155,20 @@ Interrupting Cleanup:
 	rootCmd.Flags().DurationVarP(&o.VolumePeriodMax, "volume-period-max", "", 300*time.Second, "Maximum ReplicatedVolume lifetime")
 	rootCmd.Flags().StringVarP(&o.LogLevel, "log-level", "", "info", "Log level (allowed values: debug, info, warn, error)")
 
-	// Disable flags for goroutines
-	rootCmd.Flags().BoolVarP(&o.DisablePodDestroyer, "disable-pod-destroyer", "", false, "Disable pod-destroyer goroutines")
-	rootCmd.Flags().BoolVarP(&o.DisableVolumeResizer, "disable-volume-resizer", "", false, "Disable volume-resizer goroutine")
-	rootCmd.Flags().BoolVarP(&o.DisableVolumeReplicaDestroyer, "disable-volume-replica-destroyer", "", false, "Disable volume-replica-destroyer goroutine")
-	rootCmd.Flags().BoolVarP(&o.DisableVolumeReplicaCreator, "disable-volume-replica-creator", "", false, "Disable volume-replica-creator goroutine")
+	// Enable flags for goroutines
+	rootCmd.Flags().BoolVarP(&o.EnablePodDestroyer, "enable-pod-destroyer", "", false, "Enable pod-destroyer goroutines")
+	rootCmd.Flags().BoolVarP(&o.EnableVolumeResizer, "enable-volume-resizer", "", false, "Enable volume-resizer goroutine")
+	rootCmd.Flags().BoolVarP(&o.EnableVolumeReplicaDestroyer, "enable-volume-replica-destroyer", "", false, "Enable volume-replica-destroyer goroutine")
+	rootCmd.Flags().BoolVarP(&o.EnableVolumeReplicaCreator, "enable-volume-replica-creator", "", false, "Enable volume-replica-creator goroutine")
 
 	// Chaos engineering flags
 	rootCmd.Flags().StringVarP(&o.ParentKubeconfig, "parent-kubeconfig", "", "", "Path to kubeconfig for parent cluster (DVP)")
 	rootCmd.Flags().StringVarP(&o.VMNamespace, "vm-namespace", "", "", "Namespace in parent cluster where VMs are located")
 
 	// Chaos enable flags
-	rootCmd.Flags().BoolVarP(&o.EnableChaosNetBlock, "enable-chaos-network-block", "", false, "Enable full network blocking chaos")
-	rootCmd.Flags().BoolVarP(&o.EnableChaosNetDegrade, "enable-chaos-network-degrade", "", false, "Enable network degradation chaos (latency/loss)")
-	rootCmd.Flags().BoolVarP(&o.EnableChaosVMReboot, "enable-chaos-vm-reboot", "", false, "Enable VM hard reboot chaos")
+	rootCmd.Flags().BoolVarP(&o.EnableChaosNetBlock, "enable-chaos-network-block", "", false, "Enable chaos-network-blocker goroutine")
+	rootCmd.Flags().BoolVarP(&o.EnableChaosNetDegrade, "enable-chaos-network-degrade", "", false, "Enable chaos-network-degrader goroutine")
+	rootCmd.Flags().BoolVarP(&o.EnableChaosVMReboot, "enable-chaos-vm-reboot", "", false, "Enable chaos-vm-reboter goroutine")
 
 	// Chaos timing flags
 	rootCmd.Flags().DurationVarP(&o.ChaosPeriodMin, "chaos-period-min", "", 60*time.Second, "Minimum wait between chaos events")
@@ -180,7 +180,7 @@ Interrupting Cleanup:
 	rootCmd.Flags().Float64VarP(&o.ChaosLossPercent, "chaos-loss-percent", "", 0.01, "Packet loss percentage; accepts value from 0.0 to 1.0 (0.01 = 1%, 0.10 = 10%)")
 
 	// Network partition specific flags
-	rootCmd.Flags().IntVarP(&o.ChaosPartitionGroupSize, "chaos-partition-group-size", "", 0, "Target size for partition group (0 = split in half)")
+	rootCmd.Flags().IntVarP(&o.ChaosPartitionGroupSize, "chaos-partition-group-size", "", 0, "Target size for partition group (0 = split in half, default: 0)")
 
 	if err := rootCmd.Execute(); err != nil {
 		// we expect err to be logged already

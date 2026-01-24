@@ -48,25 +48,25 @@ type Float64MinMax struct {
 
 // MultiVolumeConfig configures the multivolume orchestrator
 type MultiVolumeConfig struct {
-	StorageClasses                []string
-	MaxVolumes                    int
-	VolumeStep                    StepMinMax
-	StepPeriod                    DurationMinMax
-	VolumePeriod                  DurationMinMax
-	DisablePodDestroyer           bool
-	DisableVolumeResizer          bool
-	DisableVolumeReplicaDestroyer bool
-	DisableVolumeReplicaCreator   bool
+	StorageClasses               []string
+	MaxVolumes                   int
+	VolumeStep                   StepMinMax
+	StepPeriod                   DurationMinMax
+	VolumePeriod                 DurationMinMax
+	EnablePodDestroyer           bool
+	EnableVolumeResizer          bool
+	EnableVolumeReplicaDestroyer bool
+	EnableVolumeReplicaCreator   bool
 }
 
 // VolumeMainConfig configures the volume-main goroutine
 type VolumeMainConfig struct {
-	StorageClassName              string
-	VolumeLifetime                time.Duration
-	InitialSize                   resource.Quantity
-	DisableVolumeResizer          bool
-	DisableVolumeReplicaDestroyer bool
-	DisableVolumeReplicaCreator   bool
+	StorageClassName             string
+	VolumeLifetime               time.Duration
+	InitialSize                  resource.Quantity
+	EnableVolumeResizer          bool
+	EnableVolumeReplicaDestroyer bool
+	EnableVolumeReplicaCreator   bool
 }
 
 // VolumeAttacherConfig configures the volume-attacher goroutine

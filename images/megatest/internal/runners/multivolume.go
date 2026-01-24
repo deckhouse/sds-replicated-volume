@@ -94,26 +94,27 @@ func NewMultiVolume(
 // Run starts the multivolume orchestration until context is cancelled
 func (m *MultiVolume) Run(ctx context.Context) error {
 	var disabledRunners []string
-	if m.cfg.DisablePodDestroyer {
+	if !m.cfg.EnablePodDestroyer {
 		disabledRunners = append(disabledRunners, "pod-destroyer")
 	}
-	if m.cfg.DisableVolumeResizer {
+	if !m.cfg.EnableVolumeResizer {
 		disabledRunners = append(disabledRunners, "volume-resizer")
 	}
-	if m.cfg.DisableVolumeReplicaDestroyer {
+	if !m.cfg.EnableVolumeReplicaDestroyer {
 		disabledRunners = append(disabledRunners, "volume-replica-destroyer")
 	}
-	if m.cfg.DisableVolumeReplicaCreator {
+	if !m.cfg.EnableVolumeReplicaCreator {
 		disabledRunners = append(disabledRunners, "volume-replica-creator")
 	}
 
 	m.log.Info("started", "disabled_runners", disabledRunners)
 	defer m.log.Info("finished")
 
-	if m.cfg.DisablePodDestroyer {
-		m.log.Debug("pod-destroyer runners are disabled")
-	} else {
+	if m.cfg.EnablePodDestroyer {
+		m.log.Info("pod-destroyer runners are enabled")
 		m.startPodDestroyers(ctx)
+	} else {
+		m.log.Debug("pod-destroyer runners are disabled")
 	}
 
 	// Main volume creation loop
@@ -191,12 +192,12 @@ func (m *MultiVolume) cleanup(reason error) {
 
 func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName string, storageClass string, volumeLifetime time.Duration) {
 	cfg := config.VolumeMainConfig{
-		StorageClassName:              storageClass,
-		VolumeLifetime:                volumeLifetime,
-		InitialSize:                   resource.MustParse("100Mi"),
-		DisableVolumeResizer:          m.cfg.DisableVolumeResizer,
-		DisableVolumeReplicaDestroyer: m.cfg.DisableVolumeReplicaDestroyer,
-		DisableVolumeReplicaCreator:   m.cfg.DisableVolumeReplicaCreator,
+		StorageClassName:             storageClass,
+		VolumeLifetime:               volumeLifetime,
+		InitialSize:                  resource.MustParse("100Mi"),
+		EnableVolumeResizer:          m.cfg.EnableVolumeResizer,
+		EnableVolumeReplicaDestroyer: m.cfg.EnableVolumeReplicaDestroyer,
+		EnableVolumeReplicaCreator:   m.cfg.EnableVolumeReplicaCreator,
 	}
 	volumeMain := NewVolumeMain(
 		rvName, cfg, m.client,
