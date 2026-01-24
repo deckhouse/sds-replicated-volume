@@ -18,11 +18,14 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 type Opt struct {
@@ -55,6 +58,174 @@ type Opt struct {
 	ChaosIncidentMax        time.Duration
 	ChaosLossPercent        float64
 	ChaosPartitionGroupSize int
+}
+
+// printGroupedFlags prints flags grouped by categories
+func printGroupedFlags(cmd *cobra.Command) {
+	// Define flag groups
+	flagGroups := map[string][]string{
+		"General": {
+			"log-level",
+		},
+		"Basic goroutines": {
+			"storage-classes",
+			"kubeconfig",
+			"max-volumes",
+			"volume-step-min",
+			"volume-step-max",
+			"step-period-min",
+			"step-period-max",
+			"volume-period-min",
+			"volume-period-max",
+			"enable-pod-destroyer",
+			"enable-volume-resizer",
+			"enable-volume-replica-destroyer",
+			"enable-volume-replica-creator",
+		},
+		"Chaos Engineering": {
+			"parent-kubeconfig",
+			"vm-namespace",
+			"enable-chaos-network-block",
+			"enable-chaos-network-degrade",
+			"enable-chaos-vm-reboot",
+			"chaos-period-min",
+			"chaos-period-max",
+			"chaos-incident-min",
+			"chaos-incident-max",
+			"chaos-loss-percent",
+			"chaos-partition-group-size",
+		},
+	}
+
+	// Group order
+	groupOrder := []string{"General", "Basic goroutines", "Chaos Engineering"}
+
+	// Collect all flags from command
+	allFlags := make(map[string]*pflag.Flag)
+	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
+		allFlags[flag.Name] = flag
+	})
+
+	// Print Usage
+	cmd.Println("Usage:")
+	cmd.Printf("  %s [flags]\n\n", cmd.Use)
+
+	// Print flag groups
+	for _, groupName := range groupOrder {
+		flagNames := flagGroups[groupName]
+		var groupFlags []*pflag.Flag
+
+		for _, flagName := range flagNames {
+			if flag, exists := allFlags[flagName]; exists {
+				groupFlags = append(groupFlags, flag)
+			}
+		}
+
+		if len(groupFlags) > 0 {
+			cmd.Printf("Flags (%s):\n", groupName)
+			// Calculate max width for this group
+			maxWidth := 0
+			for _, flag := range groupFlags {
+				width := calculateFlagWidth(flag)
+				if width > maxWidth {
+					maxWidth = width
+				}
+			}
+			// Print all flags in the group with aligned descriptions
+			for _, flag := range groupFlags {
+				printFlag(cmd, flag, maxWidth)
+			}
+			cmd.Println()
+		}
+	}
+
+	// Print remaining flags (if any)
+	var remainingFlags []*pflag.Flag
+	for _, flag := range allFlags {
+		found := false
+		for _, groupFlags := range flagGroups {
+			for _, flagName := range groupFlags {
+				if flag.Name == flagName {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			remainingFlags = append(remainingFlags, flag)
+		}
+	}
+
+	if len(remainingFlags) > 0 {
+		cmd.Println("Flags:")
+		// Calculate max width for remaining flags
+		maxWidth := 0
+		for _, flag := range remainingFlags {
+			width := calculateFlagWidth(flag)
+			if width > maxWidth {
+				maxWidth = width
+			}
+		}
+		// Print all remaining flags with aligned descriptions
+		for _, flag := range remainingFlags {
+			printFlag(cmd, flag, maxWidth)
+		}
+	}
+}
+
+// calculateFlagWidth calculates the display width of a flag including its type
+func calculateFlagWidth(flag *pflag.Flag) int {
+	width := 0
+	if flag.Shorthand != "" && flag.ShorthandDeprecated == "" {
+		// Format: "  -s, --flag-name"
+		width = 6 + len(flag.Shorthand) + 4 + len(flag.Name)
+	} else {
+		// Format: "      --flag-name"
+		width = 6 + len(flag.Name)
+	}
+	// Add type width if not bool
+	if flag.Value.Type() != "bool" {
+		// Format: " type"
+		width += 1 + len(flag.Value.Type())
+	}
+	return width
+}
+
+// printFlag prints a single flag in cobra-style format with aligned description
+func printFlag(cmd *cobra.Command, flag *pflag.Flag, maxWidth int) {
+	var b strings.Builder
+
+	if flag.Shorthand != "" && flag.ShorthandDeprecated == "" {
+		b.WriteString(fmt.Sprintf("  -%s, --%s", flag.Shorthand, flag.Name))
+	} else {
+		b.WriteString(fmt.Sprintf("      --%s", flag.Name))
+	}
+
+	if flag.Value.Type() != "bool" {
+		b.WriteString(fmt.Sprintf(" %s", flag.Value.Type()))
+	}
+
+	// Add spacing to align descriptions
+	flagLine := b.String()
+	currentWidth := len(flagLine)
+	if currentWidth < maxWidth {
+		flagLine += strings.Repeat(" ", maxWidth-currentWidth+1)
+	} else {
+		flagLine += " "
+	}
+
+	cmd.Print(flagLine)
+	cmd.Print(flag.Usage)
+
+	// Add default value if present and not zero value
+	defValue := flag.DefValue
+	if defValue != "" && defValue != "false" && defValue != "0" && defValue != "[]" && defValue != `""` {
+		cmd.Printf(" (default %s)", defValue)
+	}
+	cmd.Println()
 }
 
 func (o *Opt) Parse() {
@@ -138,8 +309,8 @@ Interrupting Cleanup:
 			cmd.Println(cmd.Long)
 			cmd.Println()
 		}
-		// Print usage and flags
-		cmd.Print(cmd.UsageString())
+		// Print grouped flags
+		printGroupedFlags(cmd)
 		os.Exit(0)
 	})
 
