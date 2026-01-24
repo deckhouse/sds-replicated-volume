@@ -53,10 +53,10 @@ func (o *ReplicatedStorageClass) SetStatusConditions(conditions []metav1.Conditi
 	o.Status.Conditions = conditions
 }
 
-// +kubebuilder:validation:XValidation:rule="(has(self.replication) && self.replication == \"None\") || ((!has(self.replication) || self.replication == \"Availability\" || self.replication == \"Consistency\" || self.replication == \"ConsistencyAndAvailability\") && (!has(self.zones) || size(self.zones) == 0 || size(self.zones) == 1 || size(self.zones) == 3))",message="When replication is not set or is set to Availability, Consistency, or ConsistencyAndAvailability (default value), zones must be either not specified, or must contain exactly 1 or 3 zones."
-// +kubebuilder:validation:XValidation:rule="(has(self.zones) && has(oldSelf.zones)) || (!has(self.zones) && !has(oldSelf.zones))",message="zones field cannot be deleted or added"
-// +kubebuilder:validation:XValidation:rule="(has(self.replication) && has(oldSelf.replication)) || (!has(self.replication) && !has(oldSelf.replication))",message="replication filed cannot be deleted or added"
-// +kubebuilder:validation:XValidation:rule="(has(self.volumeAccess) && has(oldSelf.volumeAccess)) || (!has(self.volumeAccess) && !has(oldSelf.volumeAccess))",message="volumeAccess filed cannot be deleted or added"
+// +kubebuilder:validation:XValidation:rule="!has(self.replication) || self.replication != 'None' || self.topology == 'Ignored'",message="Replication None requires topology Ignored (no replicas to distribute)."
+// +kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.replication) || self.replication != 'Availability' || !has(self.zones) || size(self.zones) == 0 || size(self.zones) >= 3",message="TransZonal topology with Availability replication requires at least 3 zones (if specified)."
+// +kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.replication) || self.replication != 'Consistency' || !has(self.zones) || size(self.zones) == 0 || size(self.zones) >= 2",message="TransZonal topology with Consistency replication requires at least 2 zones (if specified)."
+// +kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || (has(self.replication) && self.replication != 'ConsistencyAndAvailability') || !has(self.zones) || size(self.zones) == 0 || size(self.zones) >= 3",message="TransZonal topology with ConsistencyAndAvailability replication (default) requires at least 3 zones (if specified)."
 // Defines a Kubernetes Storage class configuration.
 //
 // > Note that this field is in read-only mode.
@@ -78,6 +78,7 @@ type ReplicatedStorageClassSpec struct {
 	ReclaimPolicy ReplicatedStorageClassReclaimPolicy `json:"reclaimPolicy"`
 	// The Storage class's replication mode. Might be:
 	// - None — In this mode the Storage class's 'placementCount' and 'AutoEvictMinReplicaCount' params equal '1'.
+	//   Requires topology to be 'Ignored' (no replicas to distribute across zones).
 	// - Availability — In this mode the volume remains readable and writable even if one of the replica nodes becomes unavailable. Data is stored in two copies on different nodes. This corresponds to `placementCount = 2` and `AutoEvictMinReplicaCount = 2`. **Important:** this mode does not guarantee data consistency and may lead to split brain and data loss in case of network connectivity issues between nodes. Recommended only for non-critical data and applications that do not require high reliability and data integrity.
 	// - ConsistencyAndAvailability — In this mode the volume remains readable and writable when one replica node fails. Data is stored in three copies on different nodes (`placementCount = 3`, `AutoEvictMinReplicaCount = 3`). This mode provides protection against data loss when two nodes containing volume replicas fail and guarantees data consistency. However, if two replicas are lost, the volume switches to suspend-io mode.
 	//
@@ -85,30 +86,25 @@ type ReplicatedStorageClassSpec struct {
 	// +kubebuilder:validation:Enum=None;Availability;Consistency;ConsistencyAndAvailability
 	// +kubebuilder:default:=ConsistencyAndAvailability
 	Replication ReplicatedStorageClassReplication `json:"replication,omitempty"`
-	// The Storage class's access mode. Might be:
-	// - Local (in this mode the Storage class's 'allowRemoteVolumeAccess' param equals 'false'
-	// and Volume Binding mode equals 'WaitForFirstConsumer')
-	// - EventuallyLocal (in this mode the Storage class's 'allowRemoteVolumeAccess' param
-	// equals '- fromSame:\n  - topology.kubernetes.io/zone', 'auto-diskful' param equals '30' minutes,
-	// 'auto-diskful-allow-cleanup' param equals 'true',
-	// and Volume Binding mode equals 'WaitForFirstConsumer')
-	// - PreferablyLocal (in this mode the Storage class's 'allowRemoteVolumeAccess' param
-	// equals '- fromSame:\n  - topology.kubernetes.io/zone',
-	// and Volume Binding mode equals 'WaitForFirstConsumer')
-	// - Any (in this mode the Storage class's 'allowRemoteVolumeAccess' param
-	// equals '- fromSame:\n  - topology.kubernetes.io/zone',
-	// and Volume Binding mode equals 'Immediate')
+	// The Storage class's volume access mode. Defines how pods access the volume. Might be:
+	// - Local — volume is accessed only from the node where a replica resides. Pod scheduling waits for consumer.
+	// - EventuallyLocal — volume can be accessed remotely, but a local replica will be created on the accessing node
+	//   after some time. Pod scheduling waits for consumer.
+	// - PreferablyLocal — volume prefers local access but allows remote access if no local replica is available.
+	//   Scheduler tries to place pods on nodes with replicas. Pod scheduling waits for consumer.
+	// - Any — volume can be accessed from any node. Most flexible mode with immediate volume binding.
 	//
 	// > Note that the default Volume Access mode is 'PreferablyLocal'.
 	// +kubebuilder:validation:Enum=Local;EventuallyLocal;PreferablyLocal;Any
 	// +kubebuilder:default:=PreferablyLocal
 	VolumeAccess ReplicatedStorageClassVolumeAccess `json:"volumeAccess,omitempty"`
 	// The topology settings for the volumes in the created Storage class. Might be:
-	// - TransZonal - replicas of the volumes will be created in different zones (one replica per zone).
-	// To use this topology, the available zones must be specified in the 'zones' param, and the cluster nodes must have the topology.kubernetes.io/zone=<zone name> label.
-	// - Zonal - all replicas of the volumes are created in the same zone that the scheduler selected to place the pod using this volume.
-	// - Ignored - the topology information will not be used to place replicas of the volumes.
-	// The replicas can be placed on any available nodes, with the restriction: no more than one replica of a given volume on one node.
+	// - TransZonal — replicas of the volumes will be created in different zones (one replica per zone).
+	//   To use this topology, the available zones must be specified in the 'zones' param, and the cluster nodes must have the topology.kubernetes.io/zone=<zone name> label.
+	// - Zonal — all replicas of the volumes are created in the same zone that the scheduler selected to place the pod using this volume.
+	// - Ignored — the topology information will not be used to place replicas of the volumes.
+	//   The replicas can be placed on any available nodes, with the restriction: no more than one replica of a given volume on one node.
+	//   Required when replication is 'None'.
 	//
 	// > Note that the 'Ignored' value can be used only if there are no zones in the cluster (there are no nodes with the topology.kubernetes.io/zone label).
 	//
@@ -118,8 +114,12 @@ type ReplicatedStorageClassSpec struct {
 	// Array of zones the Storage class's volumes should be replicated in. The controller will put a label with
 	// the Storage class's name on the nodes which be actual used by the Storage class.
 	//
-	// > Note that for Replication mode 'Availability' and 'ConsistencyAndAvailability' you have to select
-	// exactly 1 or 3 zones.
+	// For TransZonal topology, the number of zones depends on replication mode:
+	// - Availability, ConsistencyAndAvailability: at least 3 zones required
+	// - Consistency: at least 2 zones required
+	//
+	// When replication is 'None' (topology 'Ignored'), zones act as a node constraint
+	// limiting where the single replica can be placed.
 	// +kubebuilder:validation:MaxItems=10
 	// +kubebuilder:validation:items:MaxLength=63
 	// +listType=set
@@ -340,27 +340,20 @@ type ReplicatedStorageClassStatus struct {
 	// Configuration is the resolved configuration that volumes should align to.
 	// +optional
 	Configuration *ReplicatedStorageClassConfiguration `json:"configuration,omitempty"`
-	// EligibleNodesRevision is incremented when eligible nodes change.
+	// StoragePoolEligibleNodesRevision tracks RSP's eligibleNodesRevision for change detection.
 	// +optional
-	EligibleNodesRevision int64 `json:"eligibleNodesRevision,omitempty"`
-	// EligibleNodesWorldState tracks external state (RSP, LVGs, Nodes) that affects eligible nodes calculation.
+	StoragePoolEligibleNodesRevision int64 `json:"storagePoolEligibleNodesRevision,omitempty"`
+	// StoragePoolBasedOnGeneration is the RSC generation when storagePoolName was computed.
 	// +optional
-	EligibleNodesWorldState *ReplicatedStorageClassEligibleNodesWorldState `json:"eligibleNodesWorldState,omitempty"`
-	// EligibleNodes lists nodes eligible for this storage class.
+	StoragePoolBasedOnGeneration int64 `json:"storagePoolBasedOnGeneration,omitempty"`
+	// StoragePoolName is the computed name of the ReplicatedStoragePool for this RSC.
+	// Format: auto-rsp-<fnv128-hex>. Multiple RSCs with identical storage parameters
+	// will share the same StoragePoolName.
 	// +optional
-	EligibleNodes []ReplicatedStorageClassEligibleNode `json:"eligibleNodes,omitempty"`
+	StoragePoolName string `json:"storagePoolName,omitempty"`
 	// Volumes provides aggregated volume statistics.
 	// Always present (may have total=0).
 	Volumes ReplicatedStorageClassVolumesSummary `json:"volumes"`
-}
-
-// ReplicatedStorageClassEligibleNodesWorldState tracks external state that affects eligible nodes.
-// +kubebuilder:object:generate=true
-type ReplicatedStorageClassEligibleNodesWorldState struct {
-	// Checksum is a hash of external state (RSP generation, LVG generations/annotations, Node labels/conditions).
-	Checksum string `json:"checksum"`
-	// ExpiresAt is the time when this state should be recalculated regardless of checksum match.
-	ExpiresAt metav1.Time `json:"expiresAt"`
 }
 
 // ReplicatedStorageClassPhase enumerates possible values for ReplicatedStorageClass status.phase field.
@@ -387,48 +380,8 @@ type ReplicatedStorageClassConfiguration struct {
 	Replication ReplicatedStorageClassReplication `json:"replication"`
 	// VolumeAccess is the resolved volume access mode.
 	VolumeAccess ReplicatedStorageClassVolumeAccess `json:"volumeAccess"`
-	// Zones is the resolved list of zones.
-	// +optional
-	Zones []string `json:"zones,omitempty"`
-	// SystemNetworkNames is the resolved list of system network names.
-	SystemNetworkNames []string `json:"systemNetworkNames"`
-	// EligibleNodesPolicy is the resolved eligible nodes policy.
-	EligibleNodesPolicy ReplicatedStoragePoolEligibleNodesPolicy `json:"eligibleNodesPolicy"`
-	// NodeLabelSelector filters nodes eligible for DRBD participation.
-	// +optional
-	NodeLabelSelector *metav1.LabelSelector `json:"nodeLabelSelector,omitempty"`
-}
-
-// ReplicatedStorageClassEligibleNode represents a node eligible for placing volumes of this storage class.
-// +kubebuilder:object:generate=true
-type ReplicatedStorageClassEligibleNode struct {
-	// NodeName is the Kubernetes node name.
-	NodeName string `json:"nodeName"`
-	// ZoneName is the zone this node belongs to.
-	// +optional
-	ZoneName string `json:"zoneName,omitempty"`
-	// LVMVolumeGroups lists LVM volume groups available on this node.
-	// +optional
-	LVMVolumeGroups []ReplicatedStorageClassEligibleNodeLVMVolumeGroup `json:"lvmVolumeGroups,omitempty"`
-	// Unschedulable indicates whether new volumes should not be scheduled to this node.
-	// +optional
-	Unschedulable bool `json:"unschedulable,omitempty"`
-	// Ready indicates whether the node is ready to serve volumes.
-	// +optional
-	Ready bool `json:"ready,omitempty"`
-}
-
-// ReplicatedStorageClassEligibleNodeLVMVolumeGroup represents an LVM volume group on an eligible node.
-// +kubebuilder:object:generate=true
-type ReplicatedStorageClassEligibleNodeLVMVolumeGroup struct {
-	// Name is the LVMVolumeGroup resource name.
-	Name string `json:"name"`
-	// ThinPoolName is the thin pool name (for LVMThin storage pools).
-	// +optional
-	ThinPoolName string `json:"thinPoolName,omitempty"`
-	// Unschedulable indicates whether new volumes should not use this volume group.
-	// +optional
-	Unschedulable bool `json:"unschedulable,omitempty"`
+	// StoragePoolName is the name of the ReplicatedStoragePool used by this RSC.
+	StoragePoolName string `json:"storagePoolName"`
 }
 
 // ReplicatedStorageClassVolumesSummary provides aggregated information about volumes in this storage class.
@@ -449,4 +402,7 @@ type ReplicatedStorageClassVolumesSummary struct {
 	// StaleConfiguration is the number of volumes with outdated configuration.
 	// +optional
 	StaleConfiguration *int32 `json:"staleConfiguration,omitempty"`
+	// UsedStoragePoolNames is a sorted list of storage pool names currently used by volumes.
+	// +optional
+	UsedStoragePoolNames []string `json:"usedStoragePoolNames,omitempty"`
 }

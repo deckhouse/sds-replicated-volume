@@ -5,119 +5,130 @@ This controller manages the `storage.deckhouse.io/sds-replicated-volume-node` la
 ## Purpose
 
 The `storage.deckhouse.io/sds-replicated-volume-node` label determines which nodes should run the sds-replicated-volume agent.
-The controller automatically adds this label to nodes that match at least one `ReplicatedStorageClass` (RSC),
-and removes it from nodes that do not match any RSC.
+The controller automatically adds this label to nodes that are in at least one `ReplicatedStoragePool` (RSP) `eligibleNodes` list,
+and removes it from nodes that are not in any RSP's `eligibleNodes`.
 
 **Important**: The label is also preserved on nodes that have at least one `DRBDResource`,
-even if the node no longer matches any RSC. This prevents orphaning DRBD resources when RSC selectors change.
+even if the node is not in any RSP's `eligibleNodes`. This prevents orphaning DRBD resources when RSP configuration changes.
 
-## Reconciliation Structure
+## Interactions
 
-```
-Reconcile (root)
-├── getRSCs             — fetch all RSCs
-├── getDRBDResources    — fetch all DRBDResources
-├── getNodes            — fetch all Nodes
-├── computeTargetNodes  — compute which nodes should have the label
-└── reconcileNode       — per-node label reconciliation (loop)
-```
+| Direction | Resource/Controller | Relationship |
+|-----------|---------------------|--------------|
+| ← input | rsp_controller | Reads `RSP.Status.EligibleNodes` to decide node labels |
+| ← input | DRBDResource | Reads presence of DRBDResources to preserve labels |
+| → output | Node | Manages `AgentNodeLabelKey` label |
 
 ## Algorithm
 
 A node receives the label if **at least one** of the following conditions is met (OR):
 
-1. **RSC Match**: The node matches at least one `ReplicatedStorageClass` (see RSC matching rules below).
+1. **RSP Eligibility**: The node is in at least one `ReplicatedStoragePool`'s `status.eligibleNodes` list.
 2. **DRBDResource Presence**: The node has at least one `DRBDResource` (`spec.nodeName == node.Name`).
 
-### RSC Matching Rules
+```
+shouldHaveLabel = (rspCount > 0) OR (drbdCount > 0)
+```
 
-The controller uses the **resolved configuration** from `rsc.status.configuration` (not `rsc.spec`).
-RSCs that do not yet have a configuration are skipped.
+## Reconciliation Structure
 
-A node is considered matching an RSC if **both** conditions are met (AND):
+The controller reconciles individual nodes (not a singleton):
 
-1. **Zones**: if the RSC configuration has `zones` specified — the node's `topology.kubernetes.io/zone` label must be in that list;
-   if `zones` is not specified — the condition is satisfied for any node.
-
-2. **NodeLabelSelector**: if the RSC configuration has `nodeLabelSelector` specified — the node must match this selector;
-   if `nodeLabelSelector` is not specified — the condition is satisfied for any node.
-
-An RSC configuration without `zones` and without `nodeLabelSelector` matches all cluster nodes.
+```
+Reconcile(nodeName)
+├── getNodeAgentLabelPresence  — check if node exists and has label (index lookup)
+├── getNumberOfDRBDResourcesByNode — count DRBDResources on node (index lookup)
+├── getNumberOfRSPByEligibleNode — count RSPs with this node eligible (index lookup)
+├── if hasLabel == shouldHaveLabel → Done (no patch needed)
+├── getNode — fetch full node object
+└── Patch node label (add or remove)
+```
 
 ## Algorithm Flow
 
 ```mermaid
 flowchart TD
-    Start([Reconcile]) --> GetRSCs[Get all RSCs]
-    GetRSCs --> GetDRBD[Get all DRBDResources]
-    GetDRBD --> GetNodes[Get all Nodes]
-    GetNodes --> ComputeDRBD[computeNodesWithDRBDResources]
-    ComputeDRBD --> ComputeTarget[computeTargetNodes]
-
-    ComputeTarget --> LoopStart{For each Node}
-    LoopStart --> CheckDRBD{Node has<br>DRBDResource?}
-    CheckDRBD -->|Yes| MarkTrue[targetNodes = true]
-    CheckDRBD -->|No| CheckRSC{Check RSC matching}
-
-    CheckRSC --> CheckConfig{RSC has<br>configuration?}
-    CheckConfig -->|No| SkipRSC[Skip RSC]
-    CheckConfig -->|Yes| CheckZones{Node in<br>RSC zones?}
-    SkipRSC --> NextRSC
-    CheckZones -->|No| NextRSC[Next RSC]
-    CheckZones -->|Yes| CheckSelector{Node matches<br>nodeLabelSelector?}
-    CheckSelector -->|No| NextRSC
-    CheckSelector -->|Yes| MatchFound[Node matches RSC]
-    MatchFound --> MarkTrue
-    NextRSC --> MoreRSCs{More RSCs?}
-    MoreRSCs -->|Yes| CheckConfig
-    MoreRSCs -->|No, no match| MarkFalse[targetNodes = false]
-    MarkTrue --> NextNode
-    MarkFalse --> NextNode[Next Node]
-    NextNode --> MoreNodes{More Nodes?}
-    MoreNodes -->|Yes| LoopStart
-    MoreNodes -->|No| ReconcileLoop
-
-    ReconcileLoop{For each Node} --> CheckInSync{Label in sync?}
-    CheckInSync -->|Yes| DoneNode([Skip])
-    CheckInSync -->|No| PatchNode[Patch Node label]
-    PatchNode --> DoneNode
-    DoneNode --> MoreNodes2{More Nodes?}
-    MoreNodes2 -->|Yes| ReconcileLoop
-    MoreNodes2 -->|No| Done([Done])
+    Start([Reconcile Node]) --> CheckExists{Node exists?}
+    CheckExists -->|No| Done([Done])
+    CheckExists -->|Yes| GetDRBD[Count DRBDResources on node]
+    GetDRBD --> GetRSP[Count RSPs with node eligible]
+    GetRSP --> ComputeTarget[shouldHaveLabel = drbd > 0 OR rsp > 0]
+    ComputeTarget --> CheckSync{hasLabel == shouldHaveLabel?}
+    CheckSync -->|Yes| Done
+    CheckSync -->|No| FetchNode[Fetch full Node object]
+    FetchNode --> Patch[Patch Node label]
+    Patch --> Done
 ```
+
+## Managed Metadata
+
+| Type | Key | Managed On | Purpose |
+|------|-----|------------|---------|
+| Label | `storage.deckhouse.io/sds-replicated-volume-node` | Node | Mark nodes that should run the agent |
+
+## Watches
+
+The controller watches three event sources:
+
+| Resource | Events | Handler |
+|----------|--------|---------|
+| Node | Create, Update | Reacts to `AgentNodeLabelKey` presence changes |
+| ReplicatedStoragePool | Create, Update, Delete | Reacts to `eligibleNodes` changes (delta computation) |
+| DRBDResource | Create, Delete | Maps to node via `spec.nodeName` |
+
+### RSP Delta Computation
+
+When an RSP's `eligibleNodes` changes, the controller computes the delta (added/removed nodes)
+and enqueues reconcile requests only for affected nodes, not for all nodes in the cluster.
+
+## Indexes
+
+| Index | Field | Purpose |
+|-------|-------|---------|
+| Node by metadata.name | `metadata.name` | Efficient node existence and label check |
+| DRBDResource by node | `spec.nodeName` | Count DRBDResources per node |
+| RSP by eligible node | `status.eligibleNodes[].nodeName` | Count RSPs where node is eligible |
 
 ## Data Flow
 
 ```mermaid
 flowchart TD
-    subgraph inputs [Inputs]
-        RSCs[RSCs<br>status.configuration]
-        DRBDResources[DRBDResources<br>spec.nodeName]
-        Nodes[Nodes<br>labels]
+    subgraph events [Event Sources]
+        NodeEvents[Node label changes]
+        RSPEvents[RSP eligibleNodes changes]
+        DRBDEvents[DRBDResource create/delete]
     end
 
-    subgraph compute [Compute]
-        ComputeDRBD[computeNodesWithDRBDResources]
-        ComputeTarget[computeTargetNodes]
-        NodeMatch[nodeMatchesRSC]
+    subgraph indexes [Index Lookups]
+        NodeIndex[Node by metadata.name]
+        DRBDIndex[DRBDResource by spec.nodeName]
+        RSPIndex[RSP by eligibleNodeName]
     end
 
     subgraph reconcile [Reconcile]
-        ReconcileNode[reconcileNode]
+        CheckLabel[getNodeAgentLabelPresence]
+        CountDRBD[getNumberOfDRBDResourcesByNode]
+        CountRSP[getNumberOfRSPByEligibleNode]
+        Decision[shouldHaveLabel?]
+        PatchNode[Patch Node]
     end
 
     subgraph output [Output]
-        NodeLabel[Node labels<br>storage.deckhouse.io/<br>sds-replicated-volume-node]
+        NodeLabel[Node label<br>AgentNodeLabelKey]
     end
 
-    DRBDResources -->|spec.nodeName| ComputeDRBD
-    ComputeDRBD -->|nodesWithDRBDResources| ComputeTarget
-    RSCs -->|zones<br>nodeLabelSelector| ComputeTarget
-    Nodes -->|topology.kubernetes.io/zone<br>other labels| ComputeTarget
+    NodeEvents --> CheckLabel
+    RSPEvents --> CountRSP
+    DRBDEvents --> CountDRBD
 
-    ComputeTarget --> NodeMatch
-    NodeMatch -->|targetNodes map| ReconcileNode
+    NodeIndex --> CheckLabel
+    DRBDIndex --> CountDRBD
+    RSPIndex --> CountRSP
 
-    Nodes --> ReconcileNode
-    ReconcileNode -->|add/remove label| NodeLabel
+    CheckLabel --> Decision
+    CountDRBD --> Decision
+    CountRSP --> Decision
+
+    Decision -->|Need patch| PatchNode
+    PatchNode --> NodeLabel
 ```

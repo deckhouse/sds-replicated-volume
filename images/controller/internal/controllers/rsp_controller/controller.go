@@ -46,21 +46,21 @@ func BuildController(mgr manager.Manager, podNamespace string) error {
 
 	return builder.ControllerManagedBy(mgr).
 		Named(RSPControllerName).
-		For(&v1alpha1.ReplicatedStoragePool{}, builder.WithPredicates(RSPPredicates()...)).
+		For(&v1alpha1.ReplicatedStoragePool{}, builder.WithPredicates(rspPredicates()...)).
 		Watches(
 			&corev1.Node{},
 			handler.EnqueueRequestsFromMapFunc(mapNodeToRSP(cl)),
-			builder.WithPredicates(NodePredicates()...),
+			builder.WithPredicates(nodePredicates()...),
 		).
 		Watches(
 			&snc.LVMVolumeGroup{},
 			handler.EnqueueRequestsFromMapFunc(mapLVGToRSP(cl)),
-			builder.WithPredicates(LVGPredicates()...),
+			builder.WithPredicates(lvgPredicates()...),
 		).
 		Watches(
 			&corev1.Pod{},
 			handler.EnqueueRequestsFromMapFunc(mapAgentPodToRSP(cl, podNamespace)),
-			builder.WithPredicates(AgentPodPredicates(podNamespace)...),
+			builder.WithPredicates(agentPodPredicates(podNamespace)...),
 		).
 		// TODO(systemnetwork): IMPORTANT! Watch NetworkNode resources and filter eligible nodes.
 		//
@@ -97,15 +97,16 @@ func mapNodeToRSP(cl client.Client) handler.MapFunc {
 
 		// 1. Find RSPs where this node is already in EligibleNodes (for update/removal).
 		var byIndex v1alpha1.ReplicatedStoragePoolList
-		if err := cl.List(ctx, &byIndex, client.MatchingFields{
-			indexes.IndexFieldRSPByEligibleNodeName: node.Name,
-		}); err != nil {
+		if err := cl.List(ctx, &byIndex,
+			client.MatchingFields{indexes.IndexFieldRSPByEligibleNodeName: node.Name},
+			client.UnsafeDisableDeepCopy,
+		); err != nil {
 			return nil
 		}
 
 		// 2. Find all RSPs to check if node could be added.
 		var all v1alpha1.ReplicatedStoragePoolList
-		if err := cl.List(ctx, &all); err != nil {
+		if err := cl.List(ctx, &all, client.UnsafeDisableDeepCopy); err != nil {
 			return nil
 		}
 

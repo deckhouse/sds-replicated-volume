@@ -83,10 +83,6 @@ type ReplicatedVolumeStatus struct {
 	// +optional
 	DRBD *DRBDResourceDetails `json:"drbd,omitempty" patchStrategy:"merge"`
 
-	// DeviceMinor is a unique DRBD device minor number assigned to this ReplicatedVolume.
-	// +optional
-	DeviceMinor *DeviceMinor `json:"deviceMinor,omitempty"`
-
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
 	// +optional
@@ -99,39 +95,17 @@ type ReplicatedVolumeStatus struct {
 	// +optional
 	DesiredAttachTo []string `json:"desiredAttachTo,omitempty"`
 
+	// Configuration is the desired configuration snapshot for this volume.
 	// +optional
-	ActualSize *resource.Quantity `json:"actualSize,omitempty"`
+	Configuration *ReplicatedStorageClassConfiguration `json:"configuration,omitempty"`
 
+	// ConfigurationGeneration is the RSC generation from which configuration was taken.
 	// +optional
-	Phase string `json:"phase,omitempty"`
+	ConfigurationGeneration int64 `json:"configurationGeneration,omitempty"`
 
-	// DiskfulReplicaCount represents the current and desired number of diskful replicas in format "current/desired"
-	// Example: "2/3" means 2 current diskful replicas out of 3 desired
+	// ConfigurationObservedGeneration is the RSC generation when configuration was last observed/acknowledged.
 	// +optional
-	DiskfulReplicaCount string `json:"diskfulReplicaCount,omitempty"`
-
-	// DiskfulReplicasInSync represents the number of diskful replicas that are in sync in format "inSync/total"
-	// Example: "2/3" means 2 diskful replicas are in sync out of 3 total diskful replicas
-	// +optional
-	DiskfulReplicasInSync string `json:"diskfulReplicasInSync,omitempty"`
-
-	// AttachedAndIOReadyCount represents the number of attached replicas that are IOReady in format "ready/attached"
-	// Example: "1/2" means 1 replica is IOReady out of 2 attached
-	// +optional
-	AttachedAndIOReadyCount string `json:"attachedAndIOReadyCount,omitempty"`
-
-	// StorageClass tracks the observed state of the referenced ReplicatedStorageClass.
-	// +optional
-	StorageClass *ReplicatedVolumeStorageClassReference `json:"storageClass,omitempty"`
-
-	// RolloutTicket is assigned when the volume is created and updated when selected for rolling update.
-	// Persists the last taken storage class configuration snapshot.
-	// +optional
-	RolloutTicket *ReplicatedVolumeRolloutTicket `json:"rolloutTicket,omitempty"`
-
-	// TargetConfiguration is the desired configuration snapshot for this volume.
-	// +optional
-	TargetConfiguration *ReplicatedVolumeStorageClassConfiguration `json:"targetConfiguration,omitempty"`
+	ConfigurationObservedGeneration int64 `json:"configurationObservedGeneration,omitempty"`
 
 	// EligibleNodesViolations lists replicas placed on non-eligible nodes.
 	// +optional
@@ -221,24 +195,6 @@ func (t ReplicatedVolumeDatameshMemberTypeTransition) String() string {
 	return string(t)
 }
 
-// DeviceMinor is a DRBD device minor number.
-//
-// This is a named type (uint32-based) to keep RV status type-safe while preserving
-// JSON/YAML encoding as a plain integer.
-// +kubebuilder:validation:Minimum=0
-// +kubebuilder:validation:Maximum=1048575
-type DeviceMinor uint32
-
-const (
-	deviceMinorMin uint32 = 0
-	// 1048575 = 2^20 - 1: maximum minor number supported by modern Linux kernels.
-	deviceMinorMax uint32 = 1048575
-)
-
-func (DeviceMinor) Min() uint32 { return deviceMinorMin }
-
-func (DeviceMinor) Max() uint32 { return deviceMinorMax }
-
 // +kubebuilder:object:generate=true
 type DRBDResourceDetails struct {
 	// +patchStrategy=merge
@@ -248,42 +204,9 @@ type DRBDResourceDetails struct {
 
 // +kubebuilder:object:generate=true
 type DRBDResourceConfig struct {
-	// +optional
-	// +kubebuilder:validation:MinLength=1
-	SharedSecret string `json:"sharedSecret,omitempty"`
-
-	// +optional
-	// +kubebuilder:validation:Enum=SHA256;SHA1;DummyForTest
-	SharedSecretAlg SharedSecretAlg `json:"sharedSecretAlg,omitempty"`
-
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=8
-	Quorum byte `json:"quorum,omitempty"`
-
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=8
-	QuorumMinimumRedundancy byte `json:"quorumMinimumRedundancy,omitempty"`
-
 	// +kubebuilder:default=false
 	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
 }
-
-// DRBD quorum configuration constants for ReplicatedVolume
-const (
-	// QuorumMinValue is the minimum quorum value when diskfulCount > 1.
-	// Quorum formula: max(QuorumMinValue, allReplicas/2+1)
-	QuorumMinValue = 2
-
-	// QuorumMinimumRedundancyDefault is the default minimum number of UpToDate
-	// replicas required for quorum. Used for None and Availability replication modes.
-	// This ensures at least one UpToDate replica is required for quorum.
-	QuorumMinimumRedundancyDefault = 1
-
-	// QuorumMinimumRedundancyMinForConsistency is the minimum QMR value
-	// for ConsistencyAndAvailability replication mode when calculating majority-based QMR.
-	// QMR formula for C&A: max(QuorumMinimumRedundancyMinForConsistency, diskfulCount/2+1)
-	QuorumMinimumRedundancyMinForConsistency = 2
-)
 
 type SharedSecretAlg string
 
@@ -298,57 +221,6 @@ const (
 
 func (a SharedSecretAlg) String() string {
 	return string(a)
-}
-
-// SharedSecretAlgorithms returns the ordered list of supported shared secret algorithms.
-// The order matters: algorithms are tried sequentially when one fails on any replica.
-func SharedSecretAlgorithms() []SharedSecretAlg {
-	return []SharedSecretAlg{
-		// TODO: remove after testing
-		SharedSecretAlgDummyForTest,
-		SharedSecretAlgSHA256,
-		SharedSecretAlgSHA1,
-	}
-}
-
-// ReplicatedVolumeStorageClassConfiguration holds storage class configuration parameters
-// that are tracked/snapshotted on ReplicatedVolume.
-// +kubebuilder:object:generate=true
-type ReplicatedVolumeStorageClassConfiguration struct {
-	// Topology is the topology setting from the storage class.
-	Topology ReplicatedStorageClassTopology `json:"topology"`
-	// Replication is the replication mode from the storage class.
-	Replication ReplicatedStorageClassReplication `json:"replication"`
-	// VolumeAccess is the volume access mode from the storage class.
-	VolumeAccess ReplicatedStorageClassVolumeAccess `json:"volumeAccess"`
-	// Zones is the list of zones from the storage class.
-	// +optional
-	Zones []string `json:"zones,omitempty"`
-	// SystemNetworkNames is the list of network names from the storage class.
-	// +optional
-	SystemNetworkNames []string `json:"systemNetworkNames,omitempty"`
-}
-
-// ReplicatedVolumeStorageClassReference tracks the observed state of the referenced storage class.
-// +kubebuilder:object:generate=true
-type ReplicatedVolumeStorageClassReference struct {
-	// Name is the ReplicatedStorageClass name.
-	Name string `json:"name"`
-	// ObservedConfigurationGeneration is the RSC generation when configuration was observed.
-	// +optional
-	ObservedConfigurationGeneration int64 `json:"observedConfigurationGeneration,omitempty"`
-	// ObservedEligibleNodesRevision is the eligible nodes revision when last observed.
-	// +optional
-	ObservedEligibleNodesRevision int64 `json:"observedEligibleNodesRevision,omitempty"`
-}
-
-// ReplicatedVolumeRolloutTicket represents a ticket for rolling out configuration changes.
-// +kubebuilder:object:generate=true
-type ReplicatedVolumeRolloutTicket struct {
-	// StorageClassGeneration is the RSC generation this ticket was issued for.
-	StorageClassGeneration int64 `json:"storageClassGeneration"`
-	// Configuration is the configuration snapshot to roll out.
-	Configuration ReplicatedVolumeStorageClassConfiguration `json:"configuration"`
 }
 
 // ReplicatedVolumeEligibleNodesViolation describes a replica placed on a non-eligible node.

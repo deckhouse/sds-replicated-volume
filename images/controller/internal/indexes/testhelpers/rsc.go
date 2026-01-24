@@ -38,3 +38,18 @@ func WithRSCByStoragePoolIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
 		return []string{rsc.Spec.StoragePool}
 	})
 }
+
+// WithRSCByStatusStoragePoolNameIndex registers the IndexFieldRSCByStatusStoragePoolName index
+// on a fake.ClientBuilder. This is useful for tests that need to use the index.
+func WithRSCByStatusStoragePoolNameIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
+	return b.WithIndex(&v1alpha1.ReplicatedStorageClass{}, indexes.IndexFieldRSCByStatusStoragePoolName, func(obj client.Object) []string {
+		rsc, ok := obj.(*v1alpha1.ReplicatedStorageClass)
+		if !ok {
+			return nil
+		}
+		if rsc.Status.StoragePoolName == "" {
+			return nil
+		}
+		return []string{rsc.Status.StoragePoolName}
+	})
+}

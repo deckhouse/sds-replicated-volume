@@ -18,31 +18,28 @@ package rsccontroller
 
 import (
 	"context"
-	"encoding/binary"
-	"errors"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"slices"
 	"sort"
-	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	nodeutil "k8s.io/component-helpers/node/util"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
-// --- Wiring / construction ---
+// ──────────────────────────────────────────────────────────────────────────────
+// Wiring / construction
+//
 
 type Reconciler struct {
 	cl client.Client
@@ -54,7 +51,9 @@ func NewReconciler(cl client.Client) *Reconciler {
 	return &Reconciler{cl: cl}
 }
 
-// --- Reconcile ---
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile
+//
 
 // Reconcile pattern: Pure orchestration
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -75,17 +74,84 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Fail(err).ToCtrl()
 	}
 
+	// Reconcile migration from RSP (deprecated storagePool field).
+	outcome := r.reconcileMigrationFromRSP(rf.Ctx(), rsc)
+	if outcome.ShouldReturn() {
+		return outcome.ToCtrl()
+	}
+
 	// Reconcile main (finalizer management).
-	outcome := r.reconcileMain(rf.Ctx(), rsc, rvs)
+	outcome = r.reconcileMain(rf.Ctx(), rsc, rvs)
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
 	}
 
 	// Reconcile status.
-	return r.reconcileStatus(rf.Ctx(), rsc, rvs).ToCtrl()
+	outcome = r.reconcileStatus(rf.Ctx(), rsc, rvs)
+	if outcome.ShouldReturn() {
+		return outcome.ToCtrl()
+	}
+
+	// Release storage pools that are no longer used.
+	return r.reconcileUnusedRSPs(rf.Ctx(), rsc).ToCtrl()
 }
 
-// reconcileMain manages the finalizer on the RSC.
+// reconcileMigrationFromRSP migrates StoragePool to spec.Storage.
+//
+// Reconcile pattern: Target-state driven
+//
+// Logic:
+//   - If storagePool is empty → Continue (nothing to migrate)
+//   - If storagePool set AND RSP not found → set conditions (Ready=False, StoragePoolReady=False), patch status, return Done
+//   - If storagePool set AND RSP found → copy type+lvmVolumeGroups to spec.storage, clear storagePool
+func (r *Reconciler) reconcileMigrationFromRSP(
+	ctx context.Context,
+	rsc *v1alpha1.ReplicatedStorageClass,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "migration-from-rsp")
+	defer rf.OnEnd(&outcome)
+
+	// Nothing to migrate.
+	if rsc.Spec.StoragePool == "" {
+		return rf.Continue()
+	}
+
+	rsp, err := r.getRSP(rf.Ctx(), rsc.Spec.StoragePool)
+	if err != nil {
+		return rf.Fail(err)
+	}
+
+	// RSP not found - set conditions and wait.
+	if rsp == nil {
+		base := rsc.DeepCopy()
+		changed := applyReadyCondFalse(rsc,
+			v1alpha1.ReplicatedStorageClassCondReadyReasonWaitingForStoragePool,
+			fmt.Sprintf("Cannot migrate from storagePool field: ReplicatedStoragePool %q not found", rsc.Spec.StoragePool))
+		changed = applyStoragePoolReadyCondFalse(rsc,
+			v1alpha1.ReplicatedStorageClassCondStoragePoolReadyReasonStoragePoolNotFound,
+			fmt.Sprintf("ReplicatedStoragePool %q not found", rsc.Spec.StoragePool)) || changed
+		if changed {
+			if err := r.patchRSCStatus(rf.Ctx(), rsc, base, false); err != nil {
+				return rf.Fail(err)
+			}
+		}
+		return rf.Done()
+	}
+
+	// RSP found, migrate storage configuration.
+	targetStorage := computeTargetStorageFromRSP(rsp)
+
+	base := rsc.DeepCopy()
+	applyStorageMigration(rsc, targetStorage)
+
+	if err := r.patchRSC(rf.Ctx(), rsc, base, true); err != nil {
+		return rf.Fail(err)
+	}
+
+	return rf.Continue()
+}
+
+// reconcileMain manages the finalizer.
 //
 // Reconcile pattern: Target-state driven
 //
@@ -95,14 +161,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 func (r *Reconciler) reconcileMain(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
-	rvs []v1alpha1.ReplicatedVolume,
+	rvs []rvView,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "main")
 	defer rf.OnEnd(&outcome)
 
+	// Compute target for finalizer.
 	actualFinalizerPresent := computeActualFinalizerPresent(rsc)
 	targetFinalizerPresent := computeTargetFinalizerPresent(rsc, rvs)
 
+	// If nothing changed, continue.
 	if targetFinalizerPresent == actualFinalizerPresent {
 		return rf.Continue()
 	}
@@ -122,6 +190,24 @@ func (r *Reconciler) reconcileMain(
 	return rf.Continue()
 }
 
+// computeTargetStorageFromRSP computes the target Storage from the RSP spec.
+func computeTargetStorageFromRSP(rsp *v1alpha1.ReplicatedStoragePool) v1alpha1.ReplicatedStorageClassStorage {
+	// Clone LVMVolumeGroups to avoid aliasing.
+	lvmVolumeGroups := make([]v1alpha1.ReplicatedStoragePoolLVMVolumeGroups, len(rsp.Spec.LVMVolumeGroups))
+	copy(lvmVolumeGroups, rsp.Spec.LVMVolumeGroups)
+
+	return v1alpha1.ReplicatedStorageClassStorage{
+		Type:            rsp.Spec.Type,
+		LVMVolumeGroups: lvmVolumeGroups,
+	}
+}
+
+// applyStorageMigration applies the target storage and clears the storagePool field.
+func applyStorageMigration(rsc *v1alpha1.ReplicatedStorageClass, targetStorage v1alpha1.ReplicatedStorageClassStorage) {
+	rsc.Spec.Storage = targetStorage
+	rsc.Spec.StoragePool = ""
+}
+
 // computeActualFinalizerPresent returns whether the controller finalizer is present on the RSC.
 func computeActualFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass) bool {
 	return objutilv1.HasFinalizer(rsc, v1alpha1.RSCControllerFinalizer)
@@ -129,7 +215,7 @@ func computeActualFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass) bool {
 
 // computeTargetFinalizerPresent returns whether the controller finalizer should be present.
 // The finalizer should be present unless the RSC is being deleted AND has no RVs.
-func computeTargetFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass, rvs []v1alpha1.ReplicatedVolume) bool {
+func computeTargetFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass, rvs []rvView) bool {
 	isDeleting := rsc.DeletionTimestamp != nil
 	hasRVs := len(rvs) > 0
 
@@ -146,47 +232,40 @@ func applyFinalizer(rsc *v1alpha1.ReplicatedStorageClass, targetPresent bool) {
 	}
 }
 
-// reconcileStatus reconciles the RSC status using In-place pattern.
+// --- Reconcile: status ---
+
+// reconcileStatus reconciles the RSC status.
 //
-// Pattern: DeepCopy -> ensure* -> if changed -> Patch
+// Reconcile pattern: In-place reconciliation
 func (r *Reconciler) reconcileStatus(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
-	rvs []v1alpha1.ReplicatedVolume,
+	rvs []rvView,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "status")
 	defer rf.OnEnd(&outcome)
 
-	// Get RSP referenced by RSC.
-	rsp, err := r.getRSP(rf.Ctx(), rsc.Spec.StoragePool)
-	if err != nil {
-		return rf.Fail(err)
-	}
+	// Compute target storage pool name (cached if already computed for this generation).
+	targetStoragePoolName := computeTargetStoragePool(rsc)
 
-	// Get LVGs referenced by RSP.
-	lvgs, lvgsNotFoundErr, err := r.getSortedLVGsByRSP(rf.Ctx(), rsp)
-	if err != nil {
-		return rf.Fail(err)
-	}
-
-	// Get all nodes.
-	nodes, err := r.getSortedNodes(rf.Ctx())
-	if err != nil {
-		return rf.Fail(err)
+	// Ensure auto-generated RSP exists and is configured.
+	outcome, rsp := r.reconcileRSP(rf.Ctx(), rsc, targetStoragePoolName)
+	if outcome.ShouldReturn() {
+		return outcome
 	}
 
 	// Take patch base before mutations.
 	base := rsc.DeepCopy()
 
 	eo := flow.MergeEnsures(
-		// Ensure configuration and eligible nodes.
-		ensureConfigurationAndEligibleNodes(rf.Ctx(), rsc, rsp, lvgs, lvgsNotFoundErr, nodes),
+		// Ensure storagePool name and condition are up to date.
+		ensureStoragePool(rf.Ctx(), rsc, targetStoragePoolName, rsp),
 
-		// Ensure volume counters.
-		ensureVolumeSummary(rf.Ctx(), rsc, rvs),
+		// Ensure configuration is up to date based on RSP state.
+		ensureConfiguration(rf.Ctx(), rsc, rsp),
 
-		// Ensure rolling updates.
-		ensureVolumeConditions(rf.Ctx(), rsc, rvs),
+		// Ensure volume summary and conditions.
+		ensureVolumeSummaryAndConditions(rf.Ctx(), rsc, rvs),
 	)
 
 	// Patch if changed.
@@ -199,252 +278,125 @@ func (r *Reconciler) reconcileStatus(
 	return rf.Done()
 }
 
-// =============================================================================
-// Ensure helpers
-// =============================================================================
+// --- Ensure helpers ---
 
-// ensureConfigurationAndEligibleNodes handles configuration and eligible nodes update.
+// ensureStoragePool ensures status.storagePoolName and StoragePoolReady condition are up to date.
+//
+// Logic:
+//   - If storagePool not in sync → update status.storagePoolName and status.storagePoolBasedOnGeneration
+//   - If rsp == nil → set StoragePoolReady=False (not found)
+//   - If rsp != nil → copy Ready condition from RSP to our StoragePoolReady
+func ensureStoragePool(
+	ctx context.Context,
+	rsc *v1alpha1.ReplicatedStorageClass,
+	targetStoragePoolName string,
+	rsp *v1alpha1.ReplicatedStoragePool,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "storage-pool")
+	defer ef.OnEnd(&outcome)
+
+	// Update storagePoolName.
+	changed := applyStoragePool(rsc, targetStoragePoolName)
+
+	// Update StoragePoolReady condition based on RSP existence and state.
+	if rsp == nil {
+		changed = applyStoragePoolReadyCondFalse(rsc,
+			v1alpha1.ReplicatedStorageClassCondStoragePoolReadyReasonStoragePoolNotFound,
+			fmt.Sprintf("ReplicatedStoragePool %q not found", targetStoragePoolName)) || changed
+	} else {
+		changed = applyStoragePoolReadyCondFromRSP(rsc, rsp) || changed
+	}
+
+	return ef.Ok().ReportChangedIf(changed)
+}
+
+// ensureConfiguration ensures configuration is up to date based on RSP state.
 //
 // Algorithm:
-//  1. If configuration is in sync (spec unchanged), use saved configuration; otherwise compute new one.
-//  2. Validate configuration. If invalid:
-//     - Set ConfigurationReady=False.
-//     - If no saved configuration exists, also set EligibleNodesCalculated=False and return.
-//     - Otherwise fall back to saved configuration.
-//  3. Call ensureEligibleNodes to calculate/update eligible nodes.
-//  4. If configuration is already in sync, return.
-//  5. If EligibleNodesCalculated=False, reject configuration (ConfigurationReady=False).
-//  6. Otherwise apply new configuration, set ConfigurationReady=True, require optimistic lock.
-func ensureConfigurationAndEligibleNodes(
+//  1. Panic if StoragePoolBasedOnGeneration != Generation (caller bug).
+//  2. If StoragePoolReady != True: set Ready=False (WaitingForStoragePool) and return.
+//  3. If RSP.EligibleNodesRevision != rsc.status.StoragePoolEligibleNodesRevision:
+//     - Validate RSP.EligibleNodes against topology/replication requirements.
+//     - If invalid: Ready=False (InsufficientEligibleNodes) and return.
+//     - Update rsc.status.StoragePoolEligibleNodesRevision.
+//  4. If ConfigurationGeneration == Generation: done (configuration already in sync).
+//  5. Otherwise: apply new Configuration, set ConfigurationGeneration.
+func ensureConfiguration(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 	rsp *v1alpha1.ReplicatedStoragePool,
-	lvgs []snc.LVMVolumeGroup,
-	lvgsNotFoundErr error,
-	nodes []corev1.Node,
 ) (outcome flow.EnsureOutcome) {
-	ef := flow.BeginEnsure(ctx, "configuration-and-eligible-nodes")
+	ef := flow.BeginEnsure(ctx, "configuration")
 	defer ef.OnEnd(&outcome)
+
+	// 1. Panic if StoragePoolBasedOnGeneration != Generation (caller bug).
+	if rsc.Status.StoragePoolBasedOnGeneration != rsc.Generation {
+		panic(fmt.Sprintf("ensureConfiguration: StoragePoolBasedOnGeneration (%d) != Generation (%d); ensureStoragePool must be called first",
+			rsc.Status.StoragePoolBasedOnGeneration, rsc.Generation))
+	}
 
 	changed := false
 
-	var intendedConfiguration v1alpha1.ReplicatedStorageClassConfiguration
-	if isConfigurationInSync(rsc) && rsc.Status.Configuration != nil {
-		intendedConfiguration = *rsc.Status.Configuration
-	} else {
-		intendedConfiguration = makeConfiguration(rsc)
+	// 2. If StoragePoolReady != True: set Ready=False and return.
+	if !objutilv1.IsStatusConditionPresentAndTrue(rsc, v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType) {
+		changed = applyReadyCondFalse(rsc,
+			v1alpha1.ReplicatedStorageClassCondReadyReasonWaitingForStoragePool,
+			"Waiting for ReplicatedStoragePool to become ready")
+		return ef.Ok().ReportChangedIf(changed)
+	}
 
-		// Validate configuration before proceeding.
-		if err := validateConfiguration(intendedConfiguration); err != nil {
-			changed = applyConfigurationReadyCondFalse(rsc,
-				v1alpha1.ReplicatedStorageClassCondConfigurationReadyReasonInvalidConfiguration,
-				fmt.Sprintf("Configuration validation failed: %v", err),
-			) || changed
-
-			if rsc.Status.Configuration == nil {
-				// First time configuration is invalid - set EligibleNodesCalculated to false.
-				changed = applyEligibleNodesCalculatedCondFalse(rsc,
-					v1alpha1.ReplicatedStorageClassCondEligibleNodesCalculatedReasonInvalidConfiguration,
-					fmt.Sprintf("Cannot calculate eligible nodes: %v", err),
-				) || changed
-
-				return ef.Ok().ReportChangedIf(changed)
-			}
-
-			intendedConfiguration = *rsc.Status.Configuration
+	// 3. Validate eligibleNodes if revision changed.
+	if rsp.Status.EligibleNodesRevision != rsc.Status.StoragePoolEligibleNodesRevision {
+		if err := validateEligibleNodes(rsp.Status.EligibleNodes, rsc.Spec.Topology, rsc.Spec.Replication); err != nil {
+			changed = applyReadyCondFalse(rsc,
+				v1alpha1.ReplicatedStorageClassCondReadyReasonInsufficientEligibleNodes,
+				err.Error())
+			return ef.Ok().ReportChangedIf(changed)
 		}
+
+		// Update StoragePoolEligibleNodesRevision.
+		rsc.Status.StoragePoolEligibleNodesRevision = rsp.Status.EligibleNodesRevision
+		changed = true
 	}
 
-	outcome = ensureEligibleNodes(ctx, rsc, intendedConfiguration, rsp, lvgs, lvgsNotFoundErr, nodes)
-
+	// 4. If configuration is in sync, we're done.
 	if isConfigurationInSync(rsc) {
-		return outcome
+		return ef.Ok().ReportChangedIf(changed)
 	}
 
-	if objutilv1.IsStatusConditionPresentAndFalse(rsc, v1alpha1.ReplicatedStorageClassCondEligibleNodesCalculatedType) {
-		// Eligible nodes calculation failed - reject configuration.
-		changed := applyConfigurationReadyCondFalse(rsc,
-			v1alpha1.ReplicatedStorageClassCondConfigurationReadyReasonEligibleNodesCalculationFailed,
-			"Eligible nodes calculation failed",
-		)
-
-		return outcome.ReportChangedIf(changed)
-	}
-
-	// Apply new configuration.
-	rsc.Status.Configuration = &intendedConfiguration
+	// 5. Apply new configuration.
+	config := makeConfiguration(rsc, rsc.Status.StoragePoolName)
+	rsc.Status.Configuration = &config
 	rsc.Status.ConfigurationGeneration = rsc.Generation
 
-	// Set ConfigurationReady to true.
-	applyConfigurationReadyCondTrue(rsc,
-		v1alpha1.ReplicatedStorageClassCondConfigurationReadyReasonReady,
-		"Configuration ready",
+	// Set Ready condition.
+	applyReadyCondTrue(rsc,
+		v1alpha1.ReplicatedStorageClassCondReadyReasonReady,
+		"Storage class is ready",
 	)
 
-	return outcome.ReportChanged().RequireOptimisticLock()
+	return ef.Ok().ReportChanged().RequireOptimisticLock()
 }
 
-// ensureEligibleNodes ensures eligible nodes are calculated and up to date.
+// ensureVolumeSummaryAndConditions computes and applies volume summary and conditions in-place.
 //
-// Algorithm:
-//  1. If RSP is nil, set EligibleNodesCalculated=False (ReplicatedStoragePoolNotFound) and return.
-//  2. If any LVGs are not found, set EligibleNodesCalculated=False (LVMVolumeGroupNotFound) and return.
-//  3. Validate RSP and LVGs (phase, thin pool existence). If invalid, set EligibleNodesCalculated=False.
-//  4. Skip recalculation if configuration is in sync AND world state checksum matches.
-//  5. Compute eligible nodes from configuration + RSP + LVGs + Nodes.
-//  6. Validate eligible nodes meet replication/topology requirements. If not, set EligibleNodesCalculated=False.
-//  7. Apply eligible nodes (increment revision if changed), update world state, set EligibleNodesCalculated=True.
-//  8. If any changes, require optimistic lock.
-func ensureEligibleNodes(
+// Sets ConfigurationRolledOut and VolumesSatisfyEligibleNodes conditions based on
+// volume counters (StaleConfiguration, InConflictWithEligibleNodes, PendingObservation).
+func ensureVolumeSummaryAndConditions(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
-	intendedConfiguration v1alpha1.ReplicatedStorageClassConfiguration,
-	rsp *v1alpha1.ReplicatedStoragePool,
-	lvgs []snc.LVMVolumeGroup,
-	lvgsNotFoundErr error,
-	nodes []corev1.Node,
+	rvs []rvView,
 ) (outcome flow.EnsureOutcome) {
-	ef := flow.BeginEnsure(ctx, "eligible-nodes")
-	defer ef.OnEnd(&outcome)
-
-	// Cannot calculate eligible nodes if RSP or LVGs are missing.
-	// Set condition and keep old eligible nodes.
-	if rsp == nil {
-		changed := applyEligibleNodesCalculatedCondFalse(rsc,
-			v1alpha1.ReplicatedStorageClassCondEligibleNodesCalculatedReasonReplicatedStoragePoolNotFound,
-			fmt.Sprintf("ReplicatedStoragePool %q not found", rsc.Spec.StoragePool),
-		)
-		return ef.Ok().ReportChangedIf(changed)
-	}
-	if lvgsNotFoundErr != nil {
-		changed := applyEligibleNodesCalculatedCondFalse(rsc,
-			v1alpha1.ReplicatedStorageClassCondEligibleNodesCalculatedReasonLVMVolumeGroupNotFound,
-			fmt.Sprintf("Some LVMVolumeGroups not found: %v", lvgsNotFoundErr),
-		)
-		return ef.Ok().ReportChangedIf(changed)
-	}
-
-	// Validate RSP and LVGs are ready and correctly configured.
-	if err := validateRSPAndLVGs(rsp, lvgs); err != nil {
-		changed := applyEligibleNodesCalculatedCondFalse(rsc,
-			v1alpha1.ReplicatedStorageClassCondEligibleNodesCalculatedReasonInvalidStoragePoolOrLVG,
-			fmt.Sprintf("RSP/LVG validation failed: %v", err),
-		)
-		return ef.Ok().ReportChangedIf(changed)
-	}
-
-	// Skip recalculation if external state (RSP, LVGs, Nodes) hasn't changed.
-	actualEligibleNodesWorldChecksum := computeActualEligibleNodesWorldChecksum(rsp, lvgs, nodes)
-	if isConfigurationInSync(rsc) && areEligibleNodesInSyncWithTheWorld(rsc, actualEligibleNodesWorldChecksum) {
-		return ef.Ok()
-	}
-
-	eligibleNodes, worldStateExpiresAt := computeActualEligibleNodes(intendedConfiguration, rsp, lvgs, nodes)
-
-	// Validate that eligible nodes meet replication and topology requirements.
-	if err := validateEligibleNodes(intendedConfiguration, eligibleNodes); err != nil {
-		changed := applyEligibleNodesCalculatedCondFalse(rsc,
-			v1alpha1.ReplicatedStorageClassCondEligibleNodesCalculatedReasonInsufficientEligibleNodes,
-			err.Error(),
-		)
-		return ef.Ok().ReportChangedIf(changed)
-	}
-
-	// Apply changes to status.
-	changed := applyEligibleNodesAndIncrementRevisionIfChanged(rsc, eligibleNodes)
-
-	// Update world state.
-	targetWorldState := makeEligibleNodesWorldState(actualEligibleNodesWorldChecksum, worldStateExpiresAt)
-	changed = applyEligibleNodesWorldState(rsc, targetWorldState) || changed
-
-	// Set condition to success.
-	changed = applyEligibleNodesCalculatedCondTrue(rsc,
-		v1alpha1.ReplicatedStorageClassCondEligibleNodesCalculatedReasonCalculated,
-		fmt.Sprintf("Eligible nodes calculated successfully: %d nodes", len(eligibleNodes)),
-	) || changed
-
-	if changed {
-		return ef.Ok().ReportChanged().RequireOptimisticLock()
-	}
-
-	return ef.Ok()
-}
-
-// ensureVolumeSummary computes and applies volume summary.
-func ensureVolumeSummary(
-	ctx context.Context,
-	rsc *v1alpha1.ReplicatedStorageClass,
-	rvs []v1alpha1.ReplicatedVolume,
-) (outcome flow.EnsureOutcome) {
-	ef := flow.BeginEnsure(ctx, "volume-summary")
+	ef := flow.BeginEnsure(ctx, "volume-summary-and-conditions")
 	defer ef.OnEnd(&outcome)
 
 	// Compute and apply volume summary.
 	summary := computeActualVolumesSummary(rsc, rvs)
 	changed := applyVolumesSummary(rsc, summary)
 
-	return ef.Ok().ReportChangedIf(changed)
-}
-
-// ensureVolumeConditions computes and applies volume-related conditions in-place.
-//
-// Sets ConfigurationRolledOut and VolumesSatisfyEligibleNodes conditions based on
-// volume counters (StaleConfiguration, InConflictWithEligibleNodes, PendingObservation).
-func ensureVolumeConditions(
-	ctx context.Context,
-	rsc *v1alpha1.ReplicatedStorageClass,
-	_ []v1alpha1.ReplicatedVolume, // rvs - reserved for future rolling updates implementation
-) (outcome flow.EnsureOutcome) {
-	ef := flow.BeginEnsure(ctx, "volume-conditions")
-	defer ef.OnEnd(&outcome)
-
-	if rsc.Status.Volumes.PendingObservation == nil {
-		panic("ensureVolumeConditions: PendingObservation is nil; ensureVolumeSummary must be called first")
-	}
-
-	// If some volumes haven't observed the configuration, set alignment conditions to Unknown.
-	if *rsc.Status.Volumes.PendingObservation > 0 {
-		msg := fmt.Sprintf("%d volume(s) pending observation", *rsc.Status.Volumes.PendingObservation)
-		changed := applyConfigurationRolledOutCondUnknown(rsc,
-			v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonNewConfigurationNotYetObserved,
-			msg,
-		)
-		changed = applyVolumesSatisfyEligibleNodesCondUnknown(rsc,
-			v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonUpdatedEligibleNodesNotYetObserved,
-			msg,
-		) || changed
-
-		// Don't process rolling updates until all volumes acknowledge current configuration.
-		return ef.Ok().ReportChangedIf(changed)
-	}
-
 	maxParallelConfigurationRollouts, maxParallelConflictResolutions := computeRollingStrategiesConfiguration(rsc)
 
-	changed := false
-
-	if rsc.Status.Volumes.StaleConfiguration == nil || rsc.Status.Volumes.InConflictWithEligibleNodes == nil {
-		panic("ensureVolumeConditions: StaleConfiguration or InConflictWithEligibleNodes is nil; ensureVolumeSummary must be called first")
-	}
-
-	if *rsc.Status.Volumes.StaleConfiguration > 0 {
-		if maxParallelConfigurationRollouts > 0 {
-			changed = applyConfigurationRolledOutCondFalse(rsc,
-				v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutInProgress,
-				"not implemented",
-			)
-		} else {
-			changed = applyConfigurationRolledOutCondFalse(rsc,
-				v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutDisabled,
-				"not implemented",
-			)
-		}
-	} else {
-		changed = applyConfigurationRolledOutCondTrue(rsc,
-			v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonRolledOutToAllVolumes,
-			"All volumes have configuration matching the storage class",
-		) || changed
-	}
-
+	// Apply VolumesSatisfyEligibleNodes condition (calculated regardless of acknowledgment).
 	if *rsc.Status.Volumes.InConflictWithEligibleNodes > 0 {
 		if maxParallelConflictResolutions > 0 {
 			changed = applyVolumesSatisfyEligibleNodesCondFalse(rsc,
@@ -464,12 +416,75 @@ func ensureVolumeConditions(
 		) || changed
 	}
 
+	// ConfigurationRolledOut requires all volumes to acknowledge.
+	if *rsc.Status.Volumes.PendingObservation > 0 {
+		msg := fmt.Sprintf("%d volume(s) pending observation", *rsc.Status.Volumes.PendingObservation)
+		changed = applyConfigurationRolledOutCondUnknown(rsc,
+			v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonNewConfigurationNotYetObserved,
+			msg,
+		) || changed
+		// Don't process configuration rolling updates until all volumes acknowledge.
+		return ef.Ok().ReportChangedIf(changed)
+	}
+
+	// Apply ConfigurationRolledOut condition.
+	if *rsc.Status.Volumes.StaleConfiguration > 0 {
+		if maxParallelConfigurationRollouts > 0 {
+			changed = applyConfigurationRolledOutCondFalse(rsc,
+				v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutInProgress,
+				"not implemented",
+			) || changed
+		} else {
+			changed = applyConfigurationRolledOutCondFalse(rsc,
+				v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutDisabled,
+				"not implemented",
+			) || changed
+		}
+	} else {
+		changed = applyConfigurationRolledOutCondTrue(rsc,
+			v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonRolledOutToAllVolumes,
+			"All volumes have configuration matching the storage class",
+		) || changed
+	}
+
 	return ef.Ok().ReportChangedIf(changed)
 }
 
-// =============================================================================
-// Compute helpers
-// =============================================================================
+// ──────────────────────────────────────────────────────────────────────────────
+// View types
+//
+
+// rvView is a lightweight projection of ReplicatedVolume fields used by this controller.
+type rvView struct {
+	name                            string
+	configurationStoragePoolName    string
+	configurationObservedGeneration int64
+	conditions                      rvViewConditions
+}
+
+type rvViewConditions struct {
+	satisfyEligibleNodes bool
+	configurationReady   bool
+}
+
+// newRVView creates an rvView from a ReplicatedVolume.
+// The unsafeRV may come from cache without DeepCopy; rvView copies only the needed scalar fields.
+func newRVView(unsafeRV *v1alpha1.ReplicatedVolume) rvView {
+	view := rvView{
+		name:                            unsafeRV.Name,
+		configurationObservedGeneration: unsafeRV.Status.ConfigurationObservedGeneration,
+		conditions: rvViewConditions{
+			satisfyEligibleNodes: objutilv1.IsStatusConditionPresentAndTrue(unsafeRV, v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType),
+			configurationReady:   objutilv1.IsStatusConditionPresentAndTrue(unsafeRV, v1alpha1.ReplicatedVolumeCondConfigurationReadyType),
+		},
+	}
+
+	if unsafeRV.Status.Configuration != nil {
+		view.configurationStoragePoolName = unsafeRV.Status.Configuration.StoragePoolName
+	}
+
+	return view
+}
 
 // computeRollingStrategiesConfiguration determines max parallel limits for configuration rollouts and conflict resolutions.
 // Returns 0 for a strategy if it's not set to RollingUpdate/RollingRepair type (meaning disabled).
@@ -492,78 +507,13 @@ func computeRollingStrategiesConfiguration(rsc *v1alpha1.ReplicatedStorageClass)
 }
 
 // makeConfiguration computes the intended configuration from RSC spec.
-func makeConfiguration(rsc *v1alpha1.ReplicatedStorageClass) v1alpha1.ReplicatedStorageClassConfiguration {
-	config := v1alpha1.ReplicatedStorageClassConfiguration{
-		Topology:            rsc.Spec.Topology,
-		Replication:         rsc.Spec.Replication,
-		VolumeAccess:        rsc.Spec.VolumeAccess,
-		Zones:               slices.Clone(rsc.Spec.Zones),
-		SystemNetworkNames:  slices.Clone(rsc.Spec.SystemNetworkNames),
-		EligibleNodesPolicy: rsc.Spec.EligibleNodesPolicy,
+func makeConfiguration(rsc *v1alpha1.ReplicatedStorageClass, storagePoolName string) v1alpha1.ReplicatedStorageClassConfiguration {
+	return v1alpha1.ReplicatedStorageClassConfiguration{
+		Topology:        rsc.Spec.Topology,
+		Replication:     rsc.Spec.Replication,
+		VolumeAccess:    rsc.Spec.VolumeAccess,
+		StoragePoolName: storagePoolName,
 	}
-
-	// Copy NodeLabelSelector if present.
-	if rsc.Spec.NodeLabelSelector != nil {
-		config.NodeLabelSelector = rsc.Spec.NodeLabelSelector.DeepCopy()
-	}
-
-	// Sort zones for deterministic comparison.
-	sort.Strings(config.Zones)
-	sort.Strings(config.SystemNetworkNames)
-
-	return config
-}
-
-// makeEligibleNodesWorldState creates a new world state with checksum and expiration time.
-func makeEligibleNodesWorldState(checksum string, expiresAt time.Time) *v1alpha1.ReplicatedStorageClassEligibleNodesWorldState {
-	return &v1alpha1.ReplicatedStorageClassEligibleNodesWorldState{
-		Checksum:  checksum,
-		ExpiresAt: metav1.NewTime(expiresAt),
-	}
-}
-
-// applyConfigurationReadyCondTrue sets the ConfigurationReady condition to True.
-// Returns true if the condition was changed.
-func applyConfigurationReadyCondTrue(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
-	return objutilv1.SetStatusCondition(rsc, metav1.Condition{
-		Type:    v1alpha1.ReplicatedStorageClassCondConfigurationReadyType,
-		Status:  metav1.ConditionTrue,
-		Reason:  reason,
-		Message: message,
-	})
-}
-
-// applyConfigurationReadyCondFalse sets the ConfigurationReady condition to False.
-// Returns true if the condition was changed.
-func applyConfigurationReadyCondFalse(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
-	return objutilv1.SetStatusCondition(rsc, metav1.Condition{
-		Type:    v1alpha1.ReplicatedStorageClassCondConfigurationReadyType,
-		Status:  metav1.ConditionFalse,
-		Reason:  reason,
-		Message: message,
-	})
-}
-
-// applyEligibleNodesCalculatedCondTrue sets the EligibleNodesCalculated condition to True.
-// Returns true if the condition was changed.
-func applyEligibleNodesCalculatedCondTrue(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
-	return objutilv1.SetStatusCondition(rsc, metav1.Condition{
-		Type:    v1alpha1.ReplicatedStorageClassCondEligibleNodesCalculatedType,
-		Status:  metav1.ConditionTrue,
-		Reason:  reason,
-		Message: message,
-	})
-}
-
-// applyEligibleNodesCalculatedCondFalse sets the EligibleNodesCalculated condition to False.
-// Returns true if the condition was changed.
-func applyEligibleNodesCalculatedCondFalse(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
-	return objutilv1.SetStatusCondition(rsc, metav1.Condition{
-		Type:    v1alpha1.ReplicatedStorageClassCondEligibleNodesCalculatedType,
-		Status:  metav1.ConditionFalse,
-		Reason:  reason,
-		Message: message,
-	})
 }
 
 // applyConfigurationRolledOutCondUnknown sets the ConfigurationRolledOut condition to Unknown.
@@ -577,14 +527,59 @@ func applyConfigurationRolledOutCondUnknown(rsc *v1alpha1.ReplicatedStorageClass
 	})
 }
 
-// applyVolumesSatisfyEligibleNodesCondUnknown sets the VolumesSatisfyEligibleNodes condition to Unknown.
+// applyReadyCondTrue sets the Ready condition to True.
 // Returns true if the condition was changed.
-func applyVolumesSatisfyEligibleNodesCondUnknown(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
+func applyReadyCondTrue(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
 	return objutilv1.SetStatusCondition(rsc, metav1.Condition{
-		Type:    v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType,
-		Status:  metav1.ConditionUnknown,
+		Type:    v1alpha1.ReplicatedStorageClassCondReadyType,
+		Status:  metav1.ConditionTrue,
 		Reason:  reason,
 		Message: message,
+	})
+}
+
+// applyReadyCondFalse sets the Ready condition to False.
+// Returns true if the condition was changed.
+func applyReadyCondFalse(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
+	return objutilv1.SetStatusCondition(rsc, metav1.Condition{
+		Type:    v1alpha1.ReplicatedStorageClassCondReadyType,
+		Status:  metav1.ConditionFalse,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// applyStoragePoolReadyCondFalse sets the StoragePoolReady condition to False.
+// Returns true if the condition was changed.
+func applyStoragePoolReadyCondFalse(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
+	return objutilv1.SetStatusCondition(rsc, metav1.Condition{
+		Type:    v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType,
+		Status:  metav1.ConditionFalse,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// applyStoragePoolReadyCondFromRSP copies the Ready condition from RSP to RSC's StoragePoolReady condition.
+// Returns true if the condition was changed.
+func applyStoragePoolReadyCondFromRSP(rsc *v1alpha1.ReplicatedStorageClass, rsp *v1alpha1.ReplicatedStoragePool) bool {
+	readyCond := objutilv1.GetStatusCondition(rsp, v1alpha1.ReplicatedStoragePoolCondReadyType)
+	if readyCond == nil {
+		// RSP has no Ready condition yet - set StoragePoolReady to Unknown.
+		return objutilv1.SetStatusCondition(rsc, metav1.Condition{
+			Type:    v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType,
+			Status:  metav1.ConditionUnknown,
+			Reason:  v1alpha1.ReplicatedStorageClassCondStoragePoolReadyReasonPending,
+			Message: "ReplicatedStoragePool has no Ready condition yet",
+		})
+	}
+
+	// Copy Ready condition from RSP to RSC's StoragePoolReady.
+	return objutilv1.SetStatusCondition(rsc, metav1.Condition{
+		Type:    v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType,
+		Status:  readyCond.Status,
+		Reason:  readyCond.Reason,
+		Message: readyCond.Message,
 	})
 }
 
@@ -632,23 +627,8 @@ func applyVolumesSatisfyEligibleNodesCondFalse(rsc *v1alpha1.ReplicatedStorageCl
 	})
 }
 
-// validateConfiguration validates that the configuration is correct and usable.
-// It checks:
-//   - NodeLabelSelector compiles into a valid selector
-func validateConfiguration(config v1alpha1.ReplicatedStorageClassConfiguration) error {
-	// Validate NodeLabelSelector.
-	if config.NodeLabelSelector != nil {
-		_, err := metav1.LabelSelectorAsSelector(config.NodeLabelSelector)
-		if err != nil {
-			return fmt.Errorf("invalid NodeLabelSelector: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// validateEligibleNodes validates that eligible nodes meet the requirements for the given
-// replication mode and topology.
+// validateEligibleNodes validates that eligible nodes from RSP meet the requirements
+// for the RSC's replication mode and topology.
 //
 // Requirements by replication mode:
 //   - None: at least 1 node
@@ -660,8 +640,9 @@ func validateConfiguration(config v1alpha1.ReplicatedStorageClassConfiguration) 
 //   - TransZonal: nodes must be distributed across required number of zones
 //   - Zonal: each zone must independently meet the requirements
 func validateEligibleNodes(
-	config v1alpha1.ReplicatedStorageClassConfiguration,
-	eligibleNodes []v1alpha1.ReplicatedStorageClassEligibleNode,
+	eligibleNodes []v1alpha1.ReplicatedStoragePoolEligibleNode,
+	topology v1alpha1.ReplicatedStorageClassTopology,
+	replication v1alpha1.ReplicatedStorageClassReplication,
 ) error {
 	if len(eligibleNodes) == 0 {
 		return fmt.Errorf("no eligible nodes")
@@ -677,7 +658,7 @@ func validateEligibleNodes(
 	}
 
 	// Group nodes by zone.
-	nodesByZone := make(map[string][]v1alpha1.ReplicatedStorageClassEligibleNode)
+	nodesByZone := make(map[string][]v1alpha1.ReplicatedStoragePoolEligibleNode)
 	for _, n := range eligibleNodes {
 		zone := n.ZoneName
 		if zone == "" {
@@ -697,7 +678,7 @@ func validateEligibleNodes(
 		}
 	}
 
-	switch config.Replication {
+	switch replication {
 	case v1alpha1.ReplicationNone:
 		// At least 1 node required.
 		if totalNodes < 1 {
@@ -706,19 +687,19 @@ func validateEligibleNodes(
 
 	case v1alpha1.ReplicationAvailability:
 		// At least 3 nodes, at least 2 with disks.
-		if err := validateAvailabilityReplication(config.Topology, totalNodes, nodesWithDisks, nodesByZone, zonesWithDisks); err != nil {
+		if err := validateAvailabilityReplication(topology, totalNodes, nodesWithDisks, nodesByZone, zonesWithDisks); err != nil {
 			return err
 		}
 
 	case v1alpha1.ReplicationConsistency:
 		// 2 nodes, both with disks.
-		if err := validateConsistencyReplication(config.Topology, totalNodes, nodesWithDisks, nodesByZone, zonesWithDisks); err != nil {
+		if err := validateConsistencyReplication(topology, totalNodes, nodesWithDisks, nodesByZone, zonesWithDisks); err != nil {
 			return err
 		}
 
 	case v1alpha1.ReplicationConsistencyAndAvailability:
 		// At least 3 nodes with disks.
-		if err := validateConsistencyAndAvailabilityReplication(config.Topology, nodesWithDisks, nodesByZone, zonesWithDisks); err != nil {
+		if err := validateConsistencyAndAvailabilityReplication(topology, nodesWithDisks, nodesByZone, zonesWithDisks); err != nil {
 			return err
 		}
 	}
@@ -730,7 +711,7 @@ func validateEligibleNodes(
 func validateAvailabilityReplication(
 	topology v1alpha1.ReplicatedStorageClassTopology,
 	totalNodes, nodesWithDisks int,
-	nodesByZone map[string][]v1alpha1.ReplicatedStorageClassEligibleNode,
+	nodesByZone map[string][]v1alpha1.ReplicatedStoragePoolEligibleNode,
 	zonesWithDisks int,
 ) error {
 	switch topology {
@@ -777,7 +758,7 @@ func validateAvailabilityReplication(
 func validateConsistencyReplication(
 	topology v1alpha1.ReplicatedStorageClassTopology,
 	totalNodes, nodesWithDisks int,
-	nodesByZone map[string][]v1alpha1.ReplicatedStorageClassEligibleNode,
+	nodesByZone map[string][]v1alpha1.ReplicatedStoragePoolEligibleNode,
 	zonesWithDisks int,
 ) error {
 	switch topology {
@@ -818,7 +799,7 @@ func validateConsistencyReplication(
 func validateConsistencyAndAvailabilityReplication(
 	topology v1alpha1.ReplicatedStorageClassTopology,
 	nodesWithDisks int,
-	nodesByZone map[string][]v1alpha1.ReplicatedStorageClassEligibleNode,
+	nodesByZone map[string][]v1alpha1.ReplicatedStoragePoolEligibleNode,
 	zonesWithDisks int,
 ) error {
 	switch topology {
@@ -858,288 +839,61 @@ func isConfigurationInSync(rsc *v1alpha1.ReplicatedStorageClass) bool {
 	return rsc.Status.Configuration != nil && rsc.Status.ConfigurationGeneration == rsc.Generation
 }
 
-// areEligibleNodesInSyncWithTheWorld checks if eligible nodes are in sync with external state.
-// Returns true if world state exists, checksum matches, and state has not expired.
-func areEligibleNodesInSyncWithTheWorld(rsc *v1alpha1.ReplicatedStorageClass, worldChecksum string) bool {
-	ws := rsc.Status.EligibleNodesWorldState
-	if ws == nil {
-		return false
-	}
-	if ws.Checksum != worldChecksum {
-		return false
-	}
-	if time.Now().After(ws.ExpiresAt.Time) {
-		return false
-	}
-	return true
-}
-
-// computeActualEligibleNodesWorldChecksum computes a checksum of external state that affects eligible nodes.
-// It includes:
-//   - RSP generation
-//   - LVG generations and unschedulable annotations
-//   - Node names, labels, unschedulable field, and Ready condition (status + lastTransitionTime)
-//
-// NOTE: lvgs and nodes MUST be pre-sorted by name for deterministic output.
-func computeActualEligibleNodesWorldChecksum(
-	rsp *v1alpha1.ReplicatedStoragePool,
-	lvgs []snc.LVMVolumeGroup,
-	nodes []corev1.Node,
-) string {
-	h := fnv.New128a()
-
-	// RSP generation.
-	if rsp != nil {
-		_ = binary.Write(h, binary.LittleEndian, rsp.Generation)
-	}
-
-	// LVGs (pre-sorted by name).
-	for i := range lvgs {
-		lvg := &lvgs[i]
-		_ = binary.Write(h, binary.LittleEndian, lvg.Generation)
-		_, unschedulable := lvg.Annotations[v1alpha1.LVMVolumeGroupUnschedulableAnnotationKey]
-		if unschedulable {
-			h.Write([]byte{1})
-		} else {
-			h.Write([]byte{0})
-		}
-	}
-
-	// Nodes (pre-sorted by name).
-	for i := range nodes {
-		node := &nodes[i]
-
-		// Name.
-		h.Write([]byte(node.Name))
-
-		// Labels: sort keys for determinism.
-		labelKeys := make([]string, 0, len(node.Labels))
-		for k := range node.Labels {
-			labelKeys = append(labelKeys, k)
-		}
-		sort.Strings(labelKeys)
-		for _, k := range labelKeys {
-			h.Write([]byte(k))
-			h.Write([]byte(node.Labels[k]))
-		}
-
-		// Unschedulable.
-		if node.Spec.Unschedulable {
-			h.Write([]byte{1})
-		} else {
-			h.Write([]byte{0})
-		}
-
-		// Ready condition status and lastTransitionTime.
-		_, readyCond := nodeutil.GetNodeCondition(&node.Status, corev1.NodeReady)
-		if readyCond != nil {
-			h.Write([]byte(string(readyCond.Status)))
-			_ = binary.Write(h, binary.LittleEndian, readyCond.LastTransitionTime.Unix())
-		}
-	}
-
-	return fmt.Sprintf("%032x", h.Sum(nil))
-}
-
-// computeActualEligibleNodes computes the list of eligible nodes for an RSC.
-// It also returns worldStateExpiresAt - the earliest time when a node's grace period
-// will expire and the eligible nodes list may change.
-func computeActualEligibleNodes(
-	config v1alpha1.ReplicatedStorageClassConfiguration,
-	rsp *v1alpha1.ReplicatedStoragePool,
-	lvgs []snc.LVMVolumeGroup,
-	nodes []corev1.Node,
-) (eligibleNodes []v1alpha1.ReplicatedStorageClassEligibleNode, worldStateExpiresAt time.Time) {
-	if rsp == nil {
-		panic("computeActualEligibleNodes: rsp is nil (invariant violation)")
-	}
-
-	// Build LVG lookup by node name.
-	lvgByNode := buildLVGByNodeMap(lvgs, rsp)
-
-	// Get grace period for not-ready nodes.
-	gracePeriod := config.EligibleNodesPolicy.NotReadyGracePeriod.Duration
-
-	// Build label selector if specified.
-	var selector labels.Selector
-	if config.NodeLabelSelector != nil {
-		var err error
-		selector, err = metav1.LabelSelectorAsSelector(config.NodeLabelSelector)
-		if err != nil {
-			// Configuration should have been validated before calling this function.
-			panic(fmt.Sprintf("computeActualEligibleNodes: invalid NodeLabelSelector (invariant violation): %v", err))
-		}
-	}
-
-	result := make([]v1alpha1.ReplicatedStorageClassEligibleNode, 0)
-	var earliestExpiration time.Time
-
-	for i := range nodes {
-		node := &nodes[i]
-
-		// Check zones filter.
-		if len(config.Zones) > 0 {
-			nodeZone := node.Labels[corev1.LabelTopologyZone]
-			if !slices.Contains(config.Zones, nodeZone) {
-				continue
-			}
-		}
-
-		// Check label selector.
-		if selector != nil && !selector.Matches(labels.Set(node.Labels)) {
-			continue
-		}
-
-		// Check node readiness and grace period.
-		nodeReady, notReadyBeyondGrace, graceExpiresAt := isNodeReadyOrWithinGrace(node, gracePeriod)
-		if notReadyBeyondGrace {
-			// Node has been not-ready beyond grace period - exclude from eligible nodes.
-			continue
-		}
-
-		// Track earliest grace period expiration for NotReady nodes within grace.
-		if !nodeReady && !graceExpiresAt.IsZero() {
-			if earliestExpiration.IsZero() || graceExpiresAt.Before(earliestExpiration) {
-				earliestExpiration = graceExpiresAt
-			}
-		}
-
-		// Get LVGs for this node (may be empty for client-only/tiebreaker nodes).
-		nodeLVGs := lvgByNode[node.Name]
-
-		// Build eligible node entry.
-		eligibleNode := v1alpha1.ReplicatedStorageClassEligibleNode{
-			NodeName:        node.Name,
-			ZoneName:        node.Labels[corev1.LabelTopologyZone],
-			Ready:           nodeReady,
-			Unschedulable:   node.Spec.Unschedulable,
-			LVMVolumeGroups: nodeLVGs,
-		}
-
-		result = append(result, eligibleNode)
-	}
-
-	// Result is already sorted by node name because nodes are pre-sorted by getSortedNodes.
-	return result, earliestExpiration
-}
-
-// buildLVGByNodeMap builds a map of node name to LVG entries for the RSP.
-func buildLVGByNodeMap(
-	lvgs []snc.LVMVolumeGroup,
-	rsp *v1alpha1.ReplicatedStoragePool,
-) map[string][]v1alpha1.ReplicatedStorageClassEligibleNodeLVMVolumeGroup {
-	// Build RSP LVG reference lookup: lvgName -> thinPoolName (for LVMThin).
-	rspLVGRef := make(map[string]string, len(rsp.Spec.LVMVolumeGroups))
-	for _, ref := range rsp.Spec.LVMVolumeGroups {
-		rspLVGRef[ref.Name] = ref.ThinPoolName
-	}
-
-	result := make(map[string][]v1alpha1.ReplicatedStorageClassEligibleNodeLVMVolumeGroup)
-
-	for i := range lvgs {
-		lvg := &lvgs[i]
-
-		// Check if this LVG is referenced by the RSP.
-		thinPoolName, referenced := rspLVGRef[lvg.Name]
-		if !referenced {
-			continue
-		}
-
-		// Get node name from LVG spec.
-		nodeName := lvg.Spec.Local.NodeName
-		if nodeName == "" {
-			continue
-		}
-
-		// Check if LVG is unschedulable.
-		_, unschedulable := lvg.Annotations[v1alpha1.LVMVolumeGroupUnschedulableAnnotationKey]
-
-		entry := v1alpha1.ReplicatedStorageClassEligibleNodeLVMVolumeGroup{
-			Name:          lvg.Name,
-			ThinPoolName:  thinPoolName,
-			Unschedulable: unschedulable,
-		}
-
-		result[nodeName] = append(result[nodeName], entry)
-	}
-
-	// Sort LVGs by name for deterministic output.
-	for nodeName := range result {
-		sort.Slice(result[nodeName], func(i, j int) bool {
-			return result[nodeName][i].Name < result[nodeName][j].Name
-		})
-	}
-
-	return result
-}
-
-// isNodeReadyOrWithinGrace checks node readiness and grace period status.
-// Returns:
-//   - nodeReady: true if node is Ready
-//   - notReadyBeyondGrace: true if node is NotReady and beyond grace period (should be excluded)
-//   - graceExpiresAt: when the grace period will expire (zero if node is Ready or beyond grace)
-func isNodeReadyOrWithinGrace(node *corev1.Node, gracePeriod time.Duration) (nodeReady bool, notReadyBeyondGrace bool, graceExpiresAt time.Time) {
-	_, readyCond := nodeutil.GetNodeCondition(&node.Status, corev1.NodeReady)
-
-	if readyCond == nil {
-		// No Ready condition - consider not ready but within grace (unknown state).
-		return false, false, time.Time{}
-	}
-
-	if readyCond.Status == corev1.ConditionTrue {
-		return true, false, time.Time{}
-	}
-
-	// Node is not ready - check grace period.
-	graceExpiresAt = readyCond.LastTransitionTime.Time.Add(gracePeriod)
-	if time.Now().After(graceExpiresAt) {
-		return false, true, time.Time{} // Beyond grace period.
-	}
-
-	return false, false, graceExpiresAt // Within grace period.
-}
-
 // computeActualVolumesSummary computes volume statistics from RV conditions.
 //
-// If any RV hasn't acknowledged the current RSC state (name/configurationGeneration/eligibleNodesRevision mismatch),
-// returns Total and PendingObservation with other counters as nil - because we don't know the real counts
-// until all RVs acknowledge.
+// InConflictWithEligibleNodes is always calculated (regardless of acknowledgment).
+// If any RV hasn't acknowledged the current RSC state (name/configurationGeneration mismatch),
+// returns Total, PendingObservation, and InConflictWithEligibleNodes with Aligned/StaleConfiguration as nil -
+// because we don't know the real counts for those until all RVs acknowledge.
 // RVs without status.storageClass are considered acknowledged (to avoid flapping on new volumes).
-func computeActualVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, rvs []v1alpha1.ReplicatedVolume) v1alpha1.ReplicatedStorageClassVolumesSummary {
+func computeActualVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, rvs []rvView) v1alpha1.ReplicatedStorageClassVolumesSummary {
 	total := int32(len(rvs))
 	var pendingObservation, aligned, staleConfiguration, inConflictWithEligibleNodes int32
+	usedStoragePoolNames := make(map[string]struct{})
 
 	for i := range rvs {
 		rv := &rvs[i]
 
-		// Count unobserved volumes.
-		if !areRSCConfigurationAndEligibleNodesAcknowledgedByRV(rsc, rv) {
+		// Collect used storage pool names.
+		if rv.configurationStoragePoolName != "" {
+			usedStoragePoolNames[rv.configurationStoragePoolName] = struct{}{}
+		}
+
+		// Check nodes condition regardless of acknowledgment.
+		if !rv.conditions.satisfyEligibleNodes {
+			inConflictWithEligibleNodes++
+		}
+
+		// Count unobserved volumes (aligned/staleConfiguration require acknowledgment).
+		if !isRSCConfigurationAcknowledgedByRV(rsc, rv) {
 			pendingObservation++
 			continue
 		}
 
-		configOK := objutilv1.IsStatusConditionPresentAndTrue(rv, v1alpha1.ReplicatedVolumeCondConfigurationReadyType)
-		nodesOK := objutilv1.IsStatusConditionPresentAndTrue(rv, v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType)
-
-		if configOK && nodesOK {
+		if rv.conditions.configurationReady && rv.conditions.satisfyEligibleNodes {
 			aligned++
 		}
 
-		if !configOK {
+		if !rv.conditions.configurationReady {
 			staleConfiguration++
-		}
-
-		if !nodesOK {
-			inConflictWithEligibleNodes++
 		}
 	}
 
-	// If any volumes haven't observed, return only Total and PendingObservation.
-	// We don't know the real counts for other counters until all RVs observe.
+	// Build sorted list of used storage pool names.
+	usedPoolNames := make([]string, 0, len(usedStoragePoolNames))
+	for name := range usedStoragePoolNames {
+		usedPoolNames = append(usedPoolNames, name)
+	}
+	slices.Sort(usedPoolNames)
+
+	// If any volumes haven't observed, return Total, PendingObservation, and InConflictWithEligibleNodes.
+	// We don't know the real counts for aligned/staleConfiguration until all RVs observe.
 	if pendingObservation > 0 {
 		return v1alpha1.ReplicatedStorageClassVolumesSummary{
-			Total:              &total,
-			PendingObservation: &pendingObservation,
+			Total:                       &total,
+			PendingObservation:          &pendingObservation,
+			InConflictWithEligibleNodes: &inConflictWithEligibleNodes,
+			UsedStoragePoolNames:        usedPoolNames,
 		}
 	}
 
@@ -1150,19 +904,14 @@ func computeActualVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, rvs []v1a
 		Aligned:                     &aligned,
 		StaleConfiguration:          &staleConfiguration,
 		InConflictWithEligibleNodes: &inConflictWithEligibleNodes,
+		UsedStoragePoolNames:        usedPoolNames,
 	}
 }
 
-// areRSCConfigurationAndEligibleNodesAcknowledgedByRV checks if the RV has acknowledged
-// the current RSC configuration and eligible nodes state.
-// RVs without status.storageClass are considered acknowledged (new volumes).
-func areRSCConfigurationAndEligibleNodesAcknowledgedByRV(rsc *v1alpha1.ReplicatedStorageClass, rv *v1alpha1.ReplicatedVolume) bool {
-	if rv.Status.StorageClass == nil {
-		return true
-	}
-	return rv.Status.StorageClass.Name == rsc.Name &&
-		rv.Status.StorageClass.ObservedConfigurationGeneration == rsc.Status.ConfigurationGeneration &&
-		rv.Status.StorageClass.ObservedEligibleNodesRevision == rsc.Status.EligibleNodesRevision
+// isRSCConfigurationAcknowledgedByRV checks if the RV has acknowledged
+// the current RSC configuration.
+func isRSCConfigurationAcknowledgedByRV(rsc *v1alpha1.ReplicatedStorageClass, rv *rvView) bool {
+	return rv.configurationObservedGeneration == rsc.Status.ConfigurationGeneration
 }
 
 // applyVolumesSummary applies volume summary to rsc.Status.Volumes.
@@ -1189,124 +938,297 @@ func applyVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, summary v1alpha1.
 		rsc.Status.Volumes.InConflictWithEligibleNodes = summary.InConflictWithEligibleNodes
 		changed = true
 	}
+	if !slices.Equal(rsc.Status.Volumes.UsedStoragePoolNames, summary.UsedStoragePoolNames) {
+		rsc.Status.Volumes.UsedStoragePoolNames = summary.UsedStoragePoolNames
+		changed = true
+	}
 	return changed
 }
 
-// =============================================================================
-// Apply helpers
-// =============================================================================
+// --- Compute/Apply helpers: storagePool ---
 
-// applyEligibleNodesAndIncrementRevisionIfChanged updates eligible nodes in RSC status
-// and increments revision if nodes changed. Returns true if changed.
-func applyEligibleNodesAndIncrementRevisionIfChanged(
+// computeTargetStoragePool computes the target storagePool name.
+// If status already has a value for the current generation, returns it without recomputing.
+func computeTargetStoragePool(rsc *v1alpha1.ReplicatedStorageClass) string {
+	// Return cached value if already computed for this generation.
+	if rsc.Status.StoragePoolBasedOnGeneration == rsc.Generation && rsc.Status.StoragePoolName != "" {
+		return rsc.Status.StoragePoolName
+	}
+
+	checksum := computeStoragePoolChecksum(rsc)
+	return "auto-rsp-" + checksum
+}
+
+// computeStoragePoolChecksum computes FNV-128a checksum of RSC spec fields that go into RSP.
+// Fields: storage.type, storage.lvmVolumeGroups, zones, nodeLabelSelector, systemNetworkNames.
+func computeStoragePoolChecksum(rsc *v1alpha1.ReplicatedStorageClass) string {
+	h := fnv.New128a()
+
+	// storage.type
+	h.Write([]byte(rsc.Spec.Storage.Type))
+	h.Write([]byte{0}) // separator
+
+	// storage.lvmVolumeGroups (sorted for determinism)
+	lvgs := make([]string, 0, len(rsc.Spec.Storage.LVMVolumeGroups))
+	for _, lvg := range rsc.Spec.Storage.LVMVolumeGroups {
+		// Include both name and thinPoolName
+		lvgs = append(lvgs, lvg.Name+":"+lvg.ThinPoolName)
+	}
+	slices.Sort(lvgs)
+	for _, lvg := range lvgs {
+		h.Write([]byte(lvg))
+		h.Write([]byte{0})
+	}
+
+	// zones (sorted for determinism)
+	zones := slices.Clone(rsc.Spec.Zones)
+	slices.Sort(zones)
+	for _, z := range zones {
+		h.Write([]byte(z))
+		h.Write([]byte{0})
+	}
+
+	// nodeLabelSelector (JSON for deterministic serialization)
+	if rsc.Spec.NodeLabelSelector != nil {
+		selectorBytes, _ := json.Marshal(rsc.Spec.NodeLabelSelector)
+		h.Write(selectorBytes)
+	}
+	h.Write([]byte{0})
+
+	// systemNetworkNames (sorted for determinism)
+	networkNames := slices.Clone(rsc.Spec.SystemNetworkNames)
+	slices.Sort(networkNames)
+	for _, n := range networkNames {
+		h.Write([]byte(n))
+		h.Write([]byte{0})
+	}
+
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// applyStoragePool applies target storagePool fields to status. Returns true if changed.
+func applyStoragePool(rsc *v1alpha1.ReplicatedStorageClass, targetName string) bool {
+	changed := false
+	if rsc.Status.StoragePoolBasedOnGeneration != rsc.Generation {
+		rsc.Status.StoragePoolBasedOnGeneration = rsc.Generation
+		changed = true
+	}
+	if rsc.Status.StoragePoolName != targetName {
+		rsc.Status.StoragePoolName = targetName
+		changed = true
+	}
+	return changed
+}
+
+// --- Reconcile: RSP ---
+
+// reconcileRSP ensures the auto-generated RSP exists and is properly configured.
+// Creates RSP if not found, updates finalizer and usedBy if needed.
+//
+// Reconcile pattern: Conditional desired evaluation
+func (r *Reconciler) reconcileRSP(
+	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
-	eligibleNodes []v1alpha1.ReplicatedStorageClassEligibleNode,
-) bool {
-	if areEligibleNodesEqual(rsc.Status.EligibleNodes, eligibleNodes) {
-		return false
+	targetStoragePoolName string,
+) (outcome flow.ReconcileOutcome, rsp *v1alpha1.ReplicatedStoragePool) {
+	rf := flow.BeginReconcile(ctx, "rsp")
+	defer rf.OnEnd(&outcome)
+
+	// Get existing RSP.
+	var err error
+	rsp, err = r.getRSP(rf.Ctx(), targetStoragePoolName)
+	if err != nil {
+		return rf.Fail(err), nil
 	}
-	rsc.Status.EligibleNodes = eligibleNodes
-	rsc.Status.EligibleNodesRevision++
-	return true
+
+	// If RSP doesn't exist, create it.
+	if rsp == nil {
+		rsp = newRSP(targetStoragePoolName, rsc)
+		if err := r.createRSP(rf.Ctx(), rsp); err != nil {
+			return rf.Fail(err), nil
+		}
+		// Continue to ensure usedBy is set below.
+	}
+
+	// Ensure finalizer is set.
+	if !objutilv1.HasFinalizer(rsp, v1alpha1.RSCControllerFinalizer) {
+		base := rsp.DeepCopy()
+		applyRSPFinalizer(rsp, true)
+		if err := r.patchRSP(rf.Ctx(), rsp, base, true); err != nil {
+			return rf.Fail(err), nil
+		}
+	}
+
+	// Ensure usedBy is set.
+	if !slices.Contains(rsp.Status.UsedBy.ReplicatedStorageClassNames, rsc.Name) {
+		base := rsp.DeepCopy()
+		applyRSPUsedBy(rsp, rsc.Name)
+		if err := r.patchRSPStatus(rf.Ctx(), rsp, base, true); err != nil {
+			return rf.Fail(err), nil
+		}
+	}
+
+	return rf.Continue(), rsp
 }
 
-// applyEligibleNodesWorldState updates the world state in RSC status if changed.
-// Returns true if changed.
-func applyEligibleNodesWorldState(
+// reconcileUnusedRSPs releases storage pools that are no longer used by this RSC.
+//
+// Reconcile pattern: Pure orchestration
+func (r *Reconciler) reconcileUnusedRSPs(
+	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
-	worldState *v1alpha1.ReplicatedStorageClassEligibleNodesWorldState,
-) bool {
-	if rsc.Status.EligibleNodesWorldState != nil &&
-		rsc.Status.EligibleNodesWorldState.Checksum == worldState.Checksum &&
-		rsc.Status.EligibleNodesWorldState.ExpiresAt.Equal(&worldState.ExpiresAt) {
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "unused-rsps")
+	defer rf.OnEnd(&outcome)
+
+	// Get all RSPs that reference this RSC.
+	usedStoragePoolNames, err := r.getUsedStoragePoolNames(rf.Ctx(), rsc.Name)
+	if err != nil {
+		return rf.Fail(err)
+	}
+
+	// Filter out RSPs that are still in use.
+	unusedStoragePoolNames := slices.DeleteFunc(slices.Clone(usedStoragePoolNames), func(name string) bool {
+		if name == rsc.Status.StoragePoolName {
+			return true
+		}
+		_, found := slices.BinarySearch(rsc.Status.Volumes.UsedStoragePoolNames, name)
+		return found
+	})
+
+	// Release each unused RSP.
+	outcomes := make([]flow.ReconcileOutcome, 0, len(unusedStoragePoolNames))
+	for _, rspName := range unusedStoragePoolNames {
+		outcomes = append(outcomes, r.reconcileRSPRelease(rf.Ctx(), rsc.Name, rspName))
+	}
+
+	return flow.MergeReconciles(outcomes...)
+}
+
+// reconcileRSPRelease releases the RSP from this RSC.
+// Removes RSC from usedBy, and if no more users - deletes the RSP.
+//
+// Reconcile pattern: Conditional desired evaluation
+func (r *Reconciler) reconcileRSPRelease(
+	ctx context.Context,
+	rscName string,
+	rspName string,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "rsp-release", "rsp", rspName)
+	defer rf.OnEnd(&outcome)
+
+	// Get RSP. If not found - nothing to release.
+	rsp, err := r.getRSP(rf.Ctx(), rspName)
+	if err != nil {
+		return rf.Fail(err)
+	}
+	if rsp == nil {
+		return rf.Continue()
+	}
+
+	// Check if this RSC is in usedBy (sorted list).
+	if _, found := slices.BinarySearch(rsp.Status.UsedBy.ReplicatedStorageClassNames, rscName); !found {
+		return rf.Continue()
+	}
+
+	// Remove RSC from usedBy with optimistic lock.
+	base := rsp.DeepCopy()
+	applyRSPRemoveUsedBy(rsp, rscName)
+	if err := r.patchRSPStatus(rf.Ctx(), rsp, base, true); err != nil {
+		return rf.Fail(err)
+	}
+
+	// If no more users - delete RSP.
+	if len(rsp.Status.UsedBy.ReplicatedStorageClassNames) == 0 {
+		// Remove finalizer first (if present).
+		if objutilv1.HasFinalizer(rsp, v1alpha1.RSCControllerFinalizer) {
+			base := rsp.DeepCopy()
+			applyRSPFinalizer(rsp, false)
+			if err := r.patchRSP(rf.Ctx(), rsp, base, true); err != nil {
+				return rf.Fail(err)
+			}
+		}
+
+		// Delete RSP.
+		if err := r.deleteRSP(rf.Ctx(), rsp); err != nil {
+			return rf.Fail(err)
+		}
+	}
+
+	return rf.Continue()
+}
+
+// --- Helpers: Reconcile (non-I/O) ---
+
+// --- Helpers: RSP ---
+
+// newRSP constructs a new RSP from RSC spec.
+func newRSP(name string, rsc *v1alpha1.ReplicatedStorageClass) *v1alpha1.ReplicatedStoragePool {
+	rsp := &v1alpha1.ReplicatedStoragePool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       name,
+			Finalizers: []string{v1alpha1.RSCControllerFinalizer},
+		},
+		Spec: v1alpha1.ReplicatedStoragePoolSpec{
+			Type:               rsc.Spec.Storage.Type,
+			LVMVolumeGroups:    slices.Clone(rsc.Spec.Storage.LVMVolumeGroups),
+			Zones:              slices.Clone(rsc.Spec.Zones),
+			SystemNetworkNames: slices.Clone(rsc.Spec.SystemNetworkNames),
+			EligibleNodesPolicy: v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
+				NotReadyGracePeriod: rsc.Spec.EligibleNodesPolicy.NotReadyGracePeriod,
+			},
+		},
+	}
+
+	// Copy NodeLabelSelector if present.
+	if rsc.Spec.NodeLabelSelector != nil {
+		rsp.Spec.NodeLabelSelector = rsc.Spec.NodeLabelSelector.DeepCopy()
+	}
+
+	return rsp
+}
+
+// applyRSPFinalizer adds or removes the RSC controller finalizer on RSP.
+// Returns true if the finalizer list was changed.
+//
+//nolint:unparam // Return value might be unused because callers pre-check with HasFinalizer.
+func applyRSPFinalizer(rsp *v1alpha1.ReplicatedStoragePool, present bool) bool {
+	if present {
+		return objutilv1.AddFinalizer(rsp, v1alpha1.RSCControllerFinalizer)
+	}
+	return objutilv1.RemoveFinalizer(rsp, v1alpha1.RSCControllerFinalizer)
+}
+
+// applyRSPUsedBy adds the RSC name to RSP status.usedBy if not already present.
+func applyRSPUsedBy(rsp *v1alpha1.ReplicatedStoragePool, rscName string) bool {
+	if slices.Contains(rsp.Status.UsedBy.ReplicatedStorageClassNames, rscName) {
 		return false
 	}
-	rsc.Status.EligibleNodesWorldState = worldState
+	rsp.Status.UsedBy.ReplicatedStorageClassNames = append(
+		rsp.Status.UsedBy.ReplicatedStorageClassNames,
+		rscName,
+	)
+	// Sort for deterministic ordering.
+	sort.Strings(rsp.Status.UsedBy.ReplicatedStorageClassNames)
 	return true
 }
 
-// =============================================================================
-// Comparison helpers
-// =============================================================================
-
-// areEligibleNodesEqual compares two eligible nodes slices for equality.
-func areEligibleNodesEqual(a, b []v1alpha1.ReplicatedStorageClassEligibleNode) bool {
-	if len(a) != len(b) {
+// applyRSPRemoveUsedBy removes the RSC name from RSP status.usedBy.
+func applyRSPRemoveUsedBy(rsp *v1alpha1.ReplicatedStoragePool, rscName string) bool {
+	idx := slices.Index(rsp.Status.UsedBy.ReplicatedStorageClassNames, rscName)
+	if idx < 0 {
 		return false
 	}
-	for i := range a {
-		if a[i].NodeName != b[i].NodeName ||
-			a[i].ZoneName != b[i].ZoneName ||
-			a[i].Ready != b[i].Ready ||
-			a[i].Unschedulable != b[i].Unschedulable {
-			return false
-		}
-		if !areLVGsEqual(a[i].LVMVolumeGroups, b[i].LVMVolumeGroups) {
-			return false
-		}
-	}
+	rsp.Status.UsedBy.ReplicatedStorageClassNames = slices.Delete(
+		rsp.Status.UsedBy.ReplicatedStorageClassNames,
+		idx, idx+1,
+	)
 	return true
 }
 
-// areLVGsEqual compares two LVG slices for equality.
-func areLVGsEqual(a, b []v1alpha1.ReplicatedStorageClassEligibleNodeLVMVolumeGroup) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].Name != b[i].Name ||
-			a[i].ThinPoolName != b[i].ThinPoolName ||
-			a[i].Unschedulable != b[i].Unschedulable {
-			return false
-		}
-	}
-	return true
-}
-
-// validateRSPAndLVGs validates that RSP and LVGs are ready and correctly configured.
-// It checks:
-//   - RSP phase is Completed
-//   - For LVMThin type, thinPoolName exists in each referenced LVG's Spec.ThinPools
-func validateRSPAndLVGs(rsp *v1alpha1.ReplicatedStoragePool, lvgs []snc.LVMVolumeGroup) error {
-	// Build LVG lookup by name.
-	lvgByName := make(map[string]*snc.LVMVolumeGroup, len(lvgs))
-	for i := range lvgs {
-		lvgByName[lvgs[i].Name] = &lvgs[i]
-	}
-
-	// Validate ThinPool references for LVMThin type.
-	if rsp.Spec.Type == v1alpha1.RSPTypeLVMThin {
-		for _, rspLVG := range rsp.Spec.LVMVolumeGroups {
-			if rspLVG.ThinPoolName == "" {
-				return fmt.Errorf("LVMVolumeGroup %q: thinPoolName is required for LVMThin type", rspLVG.Name)
-			}
-
-			lvg, ok := lvgByName[rspLVG.Name]
-			if !ok {
-				// LVG not found in the provided list - this is a bug in the calling code.
-				panic(fmt.Sprintf("validateRSPAndLVGs: LVG %q not found in lvgByName (invariant violation)", rspLVG.Name))
-			}
-
-			// Check if ThinPool exists in LVG.
-			thinPoolFound := false
-			for _, tp := range lvg.Spec.ThinPools {
-				if tp.Name == rspLVG.ThinPoolName {
-					thinPoolFound = true
-					break
-				}
-			}
-			if !thinPoolFound {
-				return fmt.Errorf("LVMVolumeGroup %q: thinPool %q not found in Spec.ThinPools", rspLVG.Name, rspLVG.ThinPoolName)
-			}
-		}
-	}
-
-	return nil
-}
-
-// =============================================================================
+// ──────────────────────────────────────────────────────────────────────────────
 // Single-call I/O helper categories
-// =============================================================================
+//
 
 // getRSC fetches an RSC by name.
 func (r *Reconciler) getRSC(ctx context.Context, name string) (*v1alpha1.ReplicatedStorageClass, error) {
@@ -1329,68 +1251,44 @@ func (r *Reconciler) getRSP(ctx context.Context, name string) (*v1alpha1.Replica
 	return &rsp, nil
 }
 
-// getSortedLVGsByRSP fetches LVGs referenced by the given RSP, sorted by name.
-// Returns:
-//   - lvgs: successfully found LVGs, sorted by name
-//   - lvgsNotFoundErr: merged error for any NotFound cases (nil if all found)
-//   - err: non-NotFound error (if any occurred, lvgs will be nil)
-func (r *Reconciler) getSortedLVGsByRSP(ctx context.Context, rsp *v1alpha1.ReplicatedStoragePool) (
-	lvgs []snc.LVMVolumeGroup,
-	lvgsNotFoundErr error,
-	err error,
-) {
-	if rsp == nil || len(rsp.Spec.LVMVolumeGroups) == 0 {
-		return nil, nil, nil
-	}
-
-	lvgs = make([]snc.LVMVolumeGroup, 0, len(rsp.Spec.LVMVolumeGroups))
-	var notFoundErrs []error
-
-	for _, lvgRef := range rsp.Spec.LVMVolumeGroups {
-		var lvg snc.LVMVolumeGroup
-		if err := r.cl.Get(ctx, client.ObjectKey{Name: lvgRef.Name}, &lvg); err != nil {
-			if apierrors.IsNotFound(err) {
-				notFoundErrs = append(notFoundErrs, err)
-				continue
-			}
-			// Non-NotFound error - fail immediately.
-			return nil, nil, err
-		}
-		lvgs = append(lvgs, lvg)
-	}
-
-	// Sort by name for deterministic output.
-	sort.Slice(lvgs, func(i, j int) bool {
-		return lvgs[i].Name < lvgs[j].Name
-	})
-
-	return lvgs, errors.Join(notFoundErrs...), nil
-}
-
-// getSortedNodes fetches all nodes sorted by name.
-func (r *Reconciler) getSortedNodes(ctx context.Context) ([]corev1.Node, error) {
-	var list corev1.NodeList
-	if err := r.cl.List(ctx, &list); err != nil {
+// getUsedStoragePoolNames returns names of RSPs used by this RSC.
+// Uses the index for efficient lookup and UnsafeDisableDeepCopy for performance.
+func (r *Reconciler) getUsedStoragePoolNames(ctx context.Context, rscName string) ([]string, error) {
+	var unsafeList v1alpha1.ReplicatedStoragePoolList
+	if err := r.cl.List(ctx, &unsafeList,
+		client.MatchingFields{indexes.IndexFieldRSPByUsedByRSCName: rscName},
+		client.UnsafeDisableDeepCopy,
+	); err != nil {
 		return nil, err
 	}
-	sort.Slice(list.Items, func(i, j int) bool {
-		return list.Items[i].Name < list.Items[j].Name
-	})
-	return list.Items, nil
+
+	names := make([]string, len(unsafeList.Items))
+	for i := range unsafeList.Items {
+		names[i] = unsafeList.Items[i].Name
+	}
+	return names, nil
 }
 
 // getSortedRVsByRSC fetches RVs referencing a specific RSC using the index, sorted by name.
-func (r *Reconciler) getSortedRVsByRSC(ctx context.Context, rscName string) ([]v1alpha1.ReplicatedVolume, error) {
-	var list v1alpha1.ReplicatedVolumeList
-	if err := r.cl.List(ctx, &list, client.MatchingFields{
-		indexes.IndexFieldRVByReplicatedStorageClassName: rscName,
-	}); err != nil {
+func (r *Reconciler) getSortedRVsByRSC(ctx context.Context, rscName string) ([]rvView, error) {
+	var unsafeList v1alpha1.ReplicatedVolumeList
+	if err := r.cl.List(ctx, &unsafeList,
+		client.MatchingFields{indexes.IndexFieldRVByReplicatedStorageClassName: rscName},
+		client.UnsafeDisableDeepCopy,
+	); err != nil {
 		return nil, err
 	}
-	sort.Slice(list.Items, func(i, j int) bool {
-		return list.Items[i].Name < list.Items[j].Name
+
+	rvs := make([]rvView, len(unsafeList.Items))
+	for i := range unsafeList.Items {
+		rvs[i] = newRVView(&unsafeList.Items[i])
+	}
+
+	sort.Slice(rvs, func(i, j int) bool {
+		return rvs[i].name < rvs[j].name
 	})
-	return list.Items, nil
+
+	return rvs, nil
 }
 
 // patchRSC patches the RSC main resource.
@@ -1423,4 +1321,49 @@ func (r *Reconciler) patchRSCStatus(
 		patch = client.MergeFrom(base)
 	}
 	return r.cl.Status().Patch(ctx, rsc, patch)
+}
+
+// createRSP creates an RSP.
+func (r *Reconciler) createRSP(ctx context.Context, rsp *v1alpha1.ReplicatedStoragePool) error {
+	return r.cl.Create(ctx, rsp)
+}
+
+// patchRSP patches the RSP main resource.
+func (r *Reconciler) patchRSP(
+	ctx context.Context,
+	rsp *v1alpha1.ReplicatedStoragePool,
+	base *v1alpha1.ReplicatedStoragePool,
+	optimisticLock bool,
+) error {
+	var patch client.Patch
+	if optimisticLock {
+		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
+	} else {
+		patch = client.MergeFrom(base)
+	}
+	return r.cl.Patch(ctx, rsp, patch)
+}
+
+// patchRSPStatus patches the RSP status subresource.
+func (r *Reconciler) patchRSPStatus(
+	ctx context.Context,
+	rsp *v1alpha1.ReplicatedStoragePool,
+	base *v1alpha1.ReplicatedStoragePool,
+	optimisticLock bool,
+) error {
+	var patch client.Patch
+	if optimisticLock {
+		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
+	} else {
+		patch = client.MergeFrom(base)
+	}
+	return r.cl.Status().Patch(ctx, rsp, patch)
+}
+
+// deleteRSP deletes an RSP.
+func (r *Reconciler) deleteRSP(ctx context.Context, rsp *v1alpha1.ReplicatedStoragePool) error {
+	return r.cl.Delete(ctx, rsp, client.Preconditions{
+		UID:             &rsp.UID,
+		ResourceVersion: &rsp.ResourceVersion,
+	})
 }
