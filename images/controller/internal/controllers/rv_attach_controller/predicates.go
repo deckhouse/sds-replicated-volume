@@ -112,10 +112,10 @@ func replicatedVolumeReplicaPredicate() predicate.Predicate {
 				return true
 			}
 
-			// RVA ReplicaIOReady mirrors replica condition IOReady, so changes must trigger reconcile.
+			// RVA ReplicaReady mirrors replica condition Ready, so changes must trigger reconcile.
 			// Compare (status, reason, message) to keep mirroring accurate even when status doesn't change.
-			oldCond := meta.FindStatusCondition(oldRVR.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondIOReadyType)
-			newCond := meta.FindStatusCondition(newRVR.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondIOReadyType)
+			oldCond := meta.FindStatusCondition(oldRVR.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+			newCond := meta.FindStatusCondition(newRVR.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
 			return !obju.ConditionSemanticallyEqual(oldCond, newCond)
 		},
 	}

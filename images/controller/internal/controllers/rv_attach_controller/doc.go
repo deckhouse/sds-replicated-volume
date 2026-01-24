@@ -66,7 +66,7 @@ limitations under the License.
 //   - Attached (Ready=True, Reason=Attached) when the node is in actuallyAttachedTo.
 //   - Detaching (Ready=True, Reason=Attached) when RVA is deleting but the node is still attached.
 //   - Pending (Ready=False) when attachment cannot progress:
-//     WaitingForReplicatedVolume, WaitingForReplicatedVolumeIOReady, WaitingForActiveAttachmentsToDetach,
+//     WaitingForReplicatedVolume, WaitingForReplicatedVolumeReady, WaitingForActiveAttachmentsToDetach,
 //     LocalityNotSatisfied.
 //   - Attaching (Ready=False) while progressing:
 //     WaitingForReplica, ConvertingTieBreakerToAccess, SettingPrimary.
