@@ -489,14 +489,14 @@ func newRVView(unsafeRV *v1alpha1.ReplicatedVolume) rvView {
 // computeRollingStrategiesConfiguration determines max parallel limits for configuration rollouts and conflict resolutions.
 // Returns 0 for a strategy if it's not set to RollingUpdate/RollingRepair type (meaning disabled).
 func computeRollingStrategiesConfiguration(rsc *v1alpha1.ReplicatedStorageClass) (maxParallelConfigurationRollouts, maxParallelConflictResolutions int32) {
-	if rsc.Spec.ConfigurationRolloutStrategy.Type == v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategyTypeRollingUpdate {
+	if rsc.Spec.ConfigurationRolloutStrategy.Type == v1alpha1.ConfigurationRolloutRollingUpdate {
 		if rsc.Spec.ConfigurationRolloutStrategy.RollingUpdate == nil {
 			panic("ConfigurationRolloutStrategy.RollingUpdate is nil but Type is RollingUpdate; API validation should prevent this")
 		}
 		maxParallelConfigurationRollouts = rsc.Spec.ConfigurationRolloutStrategy.RollingUpdate.MaxParallel
 	}
 
-	if rsc.Spec.EligibleNodesConflictResolutionStrategy.Type == v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeRollingRepair {
+	if rsc.Spec.EligibleNodesConflictResolutionStrategy.Type == v1alpha1.EligibleNodesConflictResolutionRollingRepair {
 		if rsc.Spec.EligibleNodesConflictResolutionStrategy.RollingRepair == nil {
 			panic("EligibleNodesConflictResolutionStrategy.RollingRepair is nil but Type is RollingRepair; API validation should prevent this")
 		}
@@ -715,7 +715,7 @@ func validateAvailabilityReplication(
 	zonesWithDisks int,
 ) error {
 	switch topology {
-	case v1alpha1.RSCTopologyTransZonal:
+	case v1alpha1.TopologyTransZonal:
 		// 3 different zones, at least 2 with disks.
 		if len(nodesByZone) < 3 {
 			return fmt.Errorf("replication Availability with TransZonal topology requires nodes in at least 3 zones, have %d", len(nodesByZone))
@@ -724,7 +724,7 @@ func validateAvailabilityReplication(
 			return fmt.Errorf("replication Availability with TransZonal topology requires at least 2 zones with disks, have %d", zonesWithDisks)
 		}
 
-	case v1alpha1.RSCTopologyZonal:
+	case v1alpha1.TopologyZonal:
 		// Per zone: at least 3 nodes, at least 2 with disks.
 		for zone, nodes := range nodesByZone {
 			zoneNodesWithDisks := 0
@@ -762,13 +762,13 @@ func validateConsistencyReplication(
 	zonesWithDisks int,
 ) error {
 	switch topology {
-	case v1alpha1.RSCTopologyTransZonal:
+	case v1alpha1.TopologyTransZonal:
 		// 2 different zones with disks.
 		if zonesWithDisks < 2 {
 			return fmt.Errorf("replication Consistency with TransZonal topology requires at least 2 zones with disks, have %d", zonesWithDisks)
 		}
 
-	case v1alpha1.RSCTopologyZonal:
+	case v1alpha1.TopologyZonal:
 		// Per zone: at least 2 nodes with disks.
 		for zone, nodes := range nodesByZone {
 			zoneNodesWithDisks := 0
@@ -803,13 +803,13 @@ func validateConsistencyAndAvailabilityReplication(
 	zonesWithDisks int,
 ) error {
 	switch topology {
-	case v1alpha1.RSCTopologyTransZonal:
+	case v1alpha1.TopologyTransZonal:
 		// 3 zones with disks.
 		if zonesWithDisks < 3 {
 			return fmt.Errorf("replication ConsistencyAndAvailability with TransZonal topology requires at least 3 zones with disks, have %d", zonesWithDisks)
 		}
 
-	case v1alpha1.RSCTopologyZonal:
+	case v1alpha1.TopologyZonal:
 		// Per zone: at least 3 nodes with disks.
 		for zone, nodes := range nodesByZone {
 			zoneNodesWithDisks := 0

@@ -268,7 +268,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationAvailability,
-					Topology:    v1alpha1.RSCTopologyIgnored,
+					Topology:    v1alpha1.TopologyIgnored,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -286,7 +286,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationAvailability,
-					Topology:    v1alpha1.RSCTopologyIgnored,
+					Topology:    v1alpha1.TopologyIgnored,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -304,7 +304,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationAvailability,
-					Topology:    v1alpha1.RSCTopologyIgnored,
+					Topology:    v1alpha1.TopologyIgnored,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -325,7 +325,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationAvailability,
-					Topology:    v1alpha1.RSCTopologyTransZonal,
+					Topology:    v1alpha1.TopologyTransZonal,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -343,7 +343,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationAvailability,
-					Topology:    v1alpha1.RSCTopologyTransZonal,
+					Topology:    v1alpha1.TopologyTransZonal,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -361,7 +361,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationAvailability,
-					Topology:    v1alpha1.RSCTopologyTransZonal,
+					Topology:    v1alpha1.TopologyTransZonal,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -382,7 +382,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationAvailability,
-					Topology:    v1alpha1.RSCTopologyZonal,
+					Topology:    v1alpha1.TopologyZonal,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -400,7 +400,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationAvailability,
-					Topology:    v1alpha1.RSCTopologyZonal,
+					Topology:    v1alpha1.TopologyZonal,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -418,7 +418,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationAvailability,
-					Topology:    v1alpha1.RSCTopologyZonal,
+					Topology:    v1alpha1.TopologyZonal,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -439,7 +439,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationConsistency,
-					Topology:    v1alpha1.RSCTopologyIgnored,
+					Topology:    v1alpha1.TopologyIgnored,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -456,7 +456,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationConsistency,
-					Topology:    v1alpha1.RSCTopologyIgnored,
+					Topology:    v1alpha1.TopologyIgnored,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -473,7 +473,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationConsistency,
-					Topology:    v1alpha1.RSCTopologyIgnored,
+					Topology:    v1alpha1.TopologyIgnored,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -493,7 +493,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationConsistency,
-					Topology:    v1alpha1.RSCTopologyTransZonal,
+					Topology:    v1alpha1.TopologyTransZonal,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -510,7 +510,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationConsistency,
-					Topology:    v1alpha1.RSCTopologyTransZonal,
+					Topology:    v1alpha1.TopologyTransZonal,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -530,7 +530,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationConsistency,
-					Topology:    v1alpha1.RSCTopologyZonal,
+					Topology:    v1alpha1.TopologyZonal,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -547,7 +547,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationConsistency,
-					Topology:    v1alpha1.RSCTopologyZonal,
+					Topology:    v1alpha1.TopologyZonal,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -567,7 +567,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationConsistencyAndAvailability,
-					Topology:    v1alpha1.RSCTopologyIgnored,
+					Topology:    v1alpha1.TopologyIgnored,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -585,7 +585,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationConsistencyAndAvailability,
-					Topology:    v1alpha1.RSCTopologyIgnored,
+					Topology:    v1alpha1.TopologyIgnored,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -605,7 +605,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationConsistencyAndAvailability,
-					Topology:    v1alpha1.RSCTopologyTransZonal,
+					Topology:    v1alpha1.TopologyTransZonal,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -623,7 +623,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationConsistencyAndAvailability,
-					Topology:    v1alpha1.RSCTopologyTransZonal,
+					Topology:    v1alpha1.TopologyTransZonal,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -643,7 +643,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationConsistencyAndAvailability,
-					Topology:    v1alpha1.RSCTopologyZonal,
+					Topology:    v1alpha1.TopologyZonal,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -661,7 +661,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationConsistencyAndAvailability,
-					Topology:    v1alpha1.RSCTopologyZonal,
+					Topology:    v1alpha1.TopologyZonal,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -723,10 +723,10 @@ var _ = Describe("computeRollingStrategiesConfiguration", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
 				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
-					Type: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategyTypeNewVolumesOnly,
+					Type: v1alpha1.ConfigurationRolloutNewVolumesOnly,
 				},
 				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
-					Type: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeManual,
+					Type: v1alpha1.EligibleNodesConflictResolutionManual,
 				},
 			},
 		}
@@ -741,13 +741,13 @@ var _ = Describe("computeRollingStrategiesConfiguration", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
 				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
-					Type: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategyTypeRollingUpdate,
+					Type: v1alpha1.ConfigurationRolloutRollingUpdate,
 					RollingUpdate: &v1alpha1.ReplicatedStorageClassConfigurationRollingUpdateStrategy{
 						MaxParallel: 5,
 					},
 				},
 				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
-					Type: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeManual,
+					Type: v1alpha1.EligibleNodesConflictResolutionManual,
 				},
 			},
 		}
@@ -762,10 +762,10 @@ var _ = Describe("computeRollingStrategiesConfiguration", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
 				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
-					Type: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategyTypeNewVolumesOnly,
+					Type: v1alpha1.ConfigurationRolloutNewVolumesOnly,
 				},
 				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
-					Type: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeRollingRepair,
+					Type: v1alpha1.EligibleNodesConflictResolutionRollingRepair,
 					RollingRepair: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair{
 						MaxParallel: 10,
 					},
@@ -783,13 +783,13 @@ var _ = Describe("computeRollingStrategiesConfiguration", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
 				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
-					Type: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategyTypeRollingUpdate,
+					Type: v1alpha1.ConfigurationRolloutRollingUpdate,
 					RollingUpdate: &v1alpha1.ReplicatedStorageClassConfigurationRollingUpdateStrategy{
 						MaxParallel: 3,
 					},
 				},
 				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
-					Type: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeRollingRepair,
+					Type: v1alpha1.EligibleNodesConflictResolutionRollingRepair,
 					RollingRepair: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair{
 						MaxParallel: 7,
 					},
@@ -807,11 +807,11 @@ var _ = Describe("computeRollingStrategiesConfiguration", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
 				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
-					Type:          v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategyTypeRollingUpdate,
+					Type:          v1alpha1.ConfigurationRolloutRollingUpdate,
 					RollingUpdate: nil,
 				},
 				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
-					Type: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeManual,
+					Type: v1alpha1.EligibleNodesConflictResolutionManual,
 				},
 			},
 		}
@@ -825,10 +825,10 @@ var _ = Describe("computeRollingStrategiesConfiguration", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
 				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
-					Type: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategyTypeNewVolumesOnly,
+					Type: v1alpha1.ConfigurationRolloutNewVolumesOnly,
 				},
 				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
-					Type:          v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeRollingRepair,
+					Type:          v1alpha1.EligibleNodesConflictResolutionRollingRepair,
 					RollingRepair: nil,
 				},
 			},
@@ -878,10 +878,10 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 			},
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
 				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
-					Type: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategyTypeNewVolumesOnly,
+					Type: v1alpha1.ConfigurationRolloutNewVolumesOnly,
 				},
 				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
-					Type: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategyTypeManual,
+					Type: v1alpha1.EligibleNodesConflictResolutionManual,
 				},
 			},
 			Status: v1alpha1.ReplicatedStorageClassStatus{
@@ -1052,7 +1052,7 @@ var _ = Describe("makeConfiguration", func() {
 	It("copies all fields from spec correctly", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				Topology:     v1alpha1.RSCTopologyTransZonal,
+				Topology:     v1alpha1.TopologyTransZonal,
 				Replication:  v1alpha1.ReplicationAvailability,
 				VolumeAccess: v1alpha1.VolumeAccessLocal,
 			},
@@ -1060,7 +1060,7 @@ var _ = Describe("makeConfiguration", func() {
 
 		config := makeConfiguration(rsc, "my-storage-pool")
 
-		Expect(config.Topology).To(Equal(v1alpha1.RSCTopologyTransZonal))
+		Expect(config.Topology).To(Equal(v1alpha1.TopologyTransZonal))
 		Expect(config.Replication).To(Equal(v1alpha1.ReplicationAvailability))
 		Expect(config.VolumeAccess).To(Equal(v1alpha1.VolumeAccessLocal))
 		Expect(config.StoragePoolName).To(Equal("my-storage-pool"))
@@ -2093,7 +2093,7 @@ var _ = Describe("Reconciler", func() {
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication:  v1alpha1.ReplicationNone,
 					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal,
-					Topology:     v1alpha1.RSCTopologyIgnored,
+					Topology:     v1alpha1.TopologyIgnored,
 				},
 				Status: v1alpha1.ReplicatedStorageClassStatus{
 					StoragePoolBasedOnGeneration:     6,
