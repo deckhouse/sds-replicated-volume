@@ -31,8 +31,8 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Attached')].status
       name: Attached
       type: string
-    - jsonPath: .status.conditions[?(@.type=='ReplicaIOReady')].status
-      name: ReplicaIOReady
+    - jsonPath: .status.conditions[?(@.type=='ReplicaReady')].status
+      name: ReplicaReady
       type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready

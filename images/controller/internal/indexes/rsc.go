@@ -27,8 +27,12 @@ import (
 )
 
 // IndexFieldRSCByStoragePool is used to quickly list
-// ReplicatedStorageClass objects referencing a specific RSP.
+// ReplicatedStorageClass objects referencing a specific RSP (deprecated field for migration).
 const IndexFieldRSCByStoragePool = "spec.storagePool"
+
+// IndexFieldRSCByStatusStoragePoolName is used to quickly list
+// ReplicatedStorageClass objects by their auto-generated RSP name.
+const IndexFieldRSCByStatusStoragePoolName = "status.storagePoolName"
 
 // RegisterRSCByStoragePool registers the index for listing
 // ReplicatedStorageClass objects by spec.storagePool.
@@ -49,6 +53,29 @@ func RegisterRSCByStoragePool(mgr manager.Manager) error {
 		},
 	); err != nil {
 		return fmt.Errorf("index ReplicatedStorageClass by spec.storagePool: %w", err)
+	}
+	return nil
+}
+
+// RegisterRSCByStatusStoragePoolName registers the index for listing
+// ReplicatedStorageClass objects by status.storagePoolName.
+func RegisterRSCByStatusStoragePoolName(mgr manager.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&v1alpha1.ReplicatedStorageClass{},
+		IndexFieldRSCByStatusStoragePoolName,
+		func(obj client.Object) []string {
+			rsc, ok := obj.(*v1alpha1.ReplicatedStorageClass)
+			if !ok {
+				return nil
+			}
+			if rsc.Status.StoragePoolName == "" {
+				return nil
+			}
+			return []string{rsc.Status.StoragePoolName}
+		},
+	); err != nil {
+		return fmt.Errorf("index ReplicatedStorageClass by status.storagePoolName: %w", err)
 	}
 	return nil
 }

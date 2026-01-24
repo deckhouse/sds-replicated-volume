@@ -20,9 +20,11 @@ import (
 	"context"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -30,13 +32,8 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
-const (
-	// NodeControllerName is the controller name for node_controller.
-	NodeControllerName = "node-controller"
-
-	// singletonKey is the fixed key used for the global singleton reconcile request.
-	singletonKey = "singleton"
-)
+// NodeControllerName is the controller name for node_controller.
+const NodeControllerName = "node-controller"
 
 func BuildController(mgr manager.Manager) error {
 	cl := mgr.GetClient()
@@ -45,38 +42,113 @@ func BuildController(mgr manager.Manager) error {
 
 	return builder.ControllerManagedBy(mgr).
 		Named(NodeControllerName).
-		// This controller has no primary resource of its own.
-		// It watches Node, RSC, and DRBDResource events and reconciles a singleton key.
+		// This controller reconciles individual Node objects.
+		// It also watches RSP and DRBDResource events.
+		For(&corev1.Node{}, builder.WithPredicates(nodePredicates()...)).
 		Watches(
-			&corev1.Node{},
-			handler.EnqueueRequestsFromMapFunc(mapNodeToSingleton),
-			builder.WithPredicates(NodePredicates()...),
-		).
-		Watches(
-			&v1alpha1.ReplicatedStorageClass{},
-			handler.EnqueueRequestsFromMapFunc(mapRSCToSingleton),
-			builder.WithPredicates(RSCPredicates()...),
+			&v1alpha1.ReplicatedStoragePool{},
+			rspEventHandler(),
+			builder.WithPredicates(rspPredicates()...),
 		).
 		Watches(
 			&v1alpha1.DRBDResource{},
-			handler.EnqueueRequestsFromMapFunc(mapDRBDResourceToSingleton),
-			builder.WithPredicates(DRBDResourcePredicates()...),
+			handler.EnqueueRequestsFromMapFunc(mapDRBDResourceToNode),
+			builder.WithPredicates(drbdResourcePredicates()...),
 		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(rec)
 }
 
-// mapNodeToSingleton maps any Node event to the singleton reconcile request.
-func mapNodeToSingleton(_ context.Context, _ client.Object) []reconcile.Request {
-	return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: singletonKey}}}
+// rspEventHandler returns an event handler for RSP that computes the delta of eligibleNodes
+// and enqueues reconcile requests for affected nodes.
+func rspEventHandler() handler.TypedEventHandler[client.Object, reconcile.Request] {
+	return handler.TypedFuncs[client.Object, reconcile.Request]{
+		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[client.Object], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			rsp, ok := e.Object.(*v1alpha1.ReplicatedStoragePool)
+			if !ok || rsp == nil {
+				return
+			}
+			enqueueNodesFromRSP(q, rsp)
+		},
+		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[client.Object], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			oldRSP, okOld := e.ObjectOld.(*v1alpha1.ReplicatedStoragePool)
+			newRSP, okNew := e.ObjectNew.(*v1alpha1.ReplicatedStoragePool)
+			if !okOld || !okNew || oldRSP == nil || newRSP == nil {
+				return
+			}
+			// Compute delta: nodes added or removed from eligibleNodes.
+			enqueueEligibleNodesDelta(q, oldRSP.Status.EligibleNodes, newRSP.Status.EligibleNodes)
+		},
+		DeleteFunc: func(_ context.Context, e event.TypedDeleteEvent[client.Object], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			rsp, ok := e.Object.(*v1alpha1.ReplicatedStoragePool)
+			if !ok || rsp == nil {
+				return
+			}
+			enqueueNodesFromRSP(q, rsp)
+		},
+	}
 }
 
-// mapRSCToSingleton maps any RSC event to the singleton reconcile request.
-func mapRSCToSingleton(_ context.Context, _ client.Object) []reconcile.Request {
-	return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: singletonKey}}}
+// enqueueNodesFromRSP enqueues reconcile requests for all nodes in RSP's eligibleNodes.
+func enqueueNodesFromRSP(q workqueue.TypedRateLimitingInterface[reconcile.Request], rsp *v1alpha1.ReplicatedStoragePool) {
+	for i := range rsp.Status.EligibleNodes {
+		nodeName := rsp.Status.EligibleNodes[i].NodeName
+		if nodeName != "" {
+			q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: nodeName}})
+		}
+	}
 }
 
-// mapDRBDResourceToSingleton maps any DRBDResource event to the singleton reconcile request.
-func mapDRBDResourceToSingleton(_ context.Context, _ client.Object) []reconcile.Request {
-	return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: singletonKey}}}
+// enqueueEligibleNodesDelta enqueues reconcile requests for nodes that were added or removed.
+// Precondition: both oldNodes and newNodes are sorted by NodeName (RSP controller guarantees this).
+func enqueueEligibleNodesDelta(
+	q workqueue.TypedRateLimitingInterface[reconcile.Request],
+	oldNodes, newNodes []v1alpha1.ReplicatedStoragePoolEligibleNode,
+) {
+	// Merge-style traversal of two sorted lists to find delta.
+	i, j := 0, 0
+	for i < len(oldNodes) || j < len(newNodes) {
+		switch {
+		case i >= len(oldNodes):
+			// Remaining newNodes are all added.
+			if newNodes[j].NodeName != "" {
+				q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: newNodes[j].NodeName}})
+			}
+			j++
+		case j >= len(newNodes):
+			// Remaining oldNodes are all removed.
+			if oldNodes[i].NodeName != "" {
+				q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: oldNodes[i].NodeName}})
+			}
+			i++
+		case oldNodes[i].NodeName < newNodes[j].NodeName:
+			// Node was removed.
+			if oldNodes[i].NodeName != "" {
+				q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: oldNodes[i].NodeName}})
+			}
+			i++
+		case oldNodes[i].NodeName > newNodes[j].NodeName:
+			// Node was added.
+			if newNodes[j].NodeName != "" {
+				q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: newNodes[j].NodeName}})
+			}
+			j++
+		default:
+			// Same node in both lists, no change.
+			i++
+			j++
+		}
+	}
+}
+
+// mapDRBDResourceToNode maps a DRBDResource event to a reconcile request for the node it belongs to.
+func mapDRBDResourceToNode(_ context.Context, obj client.Object) []reconcile.Request {
+	dr, ok := obj.(*v1alpha1.DRBDResource)
+	if !ok || dr == nil {
+		return nil
+	}
+	if dr.Spec.NodeName == "" {
+		return nil
+	}
+	return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: dr.Spec.NodeName}}}
 }

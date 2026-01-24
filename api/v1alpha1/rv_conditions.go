@@ -59,16 +59,6 @@ const (
 )
 
 const (
-	// ReplicatedVolumeCondDeviceMinorAssignedType indicates whether a DRBD device minor is assigned to the volume.
-	//
-	// Reasons describe assignment success/failure.
-	ReplicatedVolumeCondDeviceMinorAssignedType                   = "DeviceMinorAssigned"
-	ReplicatedVolumeCondDeviceMinorAssignedReasonAssigned         = "Assigned"         // Minor is assigned.
-	ReplicatedVolumeCondDeviceMinorAssignedReasonAssignmentFailed = "AssignmentFailed" // Assignment attempt failed.
-	ReplicatedVolumeCondDeviceMinorAssignedReasonDuplicate        = "Duplicate"        // Duplicate assignment detected.
-)
-
-const (
 	// ReplicatedVolumeCondInitializedType indicates whether enough replicas are initialized.
 	//
 	// Reasons describe initialization progress and waiting conditions.
@@ -107,7 +97,6 @@ const (
 	ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionInProgress = "ConflictResolutionInProgress" // Eligible nodes conflict resolution is in progress.
 	ReplicatedVolumeCondSatisfyEligibleNodesReasonInConflictWithEligibleNodes  = "InConflictWithEligibleNodes"  // Some replicas are on non-eligible nodes.
 	ReplicatedVolumeCondSatisfyEligibleNodesReasonSatisfyEligibleNodes         = "SatisfyEligibleNodes"         // All replicas are on eligible nodes.
-	ReplicatedVolumeCondSatisfyEligibleNodesReasonStorageClassNotFound         = "StorageClassNotFound"         // Referenced storage class does not exist.
 )
 
 const (

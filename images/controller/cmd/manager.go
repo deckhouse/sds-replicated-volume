@@ -22,6 +22,10 @@ import (
 	"log/slog"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -33,6 +37,7 @@ import (
 )
 
 type managerConfig interface {
+	PodNamespace() string
 	HealthProbeBindAddress() string
 	MetricsBindAddress() string
 }
@@ -52,11 +57,25 @@ func newManager(
 		return nil, u.LogError(log, fmt.Errorf("building scheme: %w", err))
 	}
 
+	// Configure cache to only watch agent pods in the controller's namespace.
+	// This reduces memory usage and API server load.
+	cacheOpt := cache.Options{
+		ByObject: map[client.Object]cache.ByObject{
+			&corev1.Pod{}: {
+				Namespaces: map[string]cache.Config{
+					envConfig.PodNamespace(): {},
+				},
+				Label: labels.SelectorFromSet(labels.Set{"app": "agent"}),
+			},
+		},
+	}
+
 	mgrOpts := manager.Options{
 		Scheme:                 scheme,
 		BaseContext:            func() context.Context { return ctx },
 		Logger:                 logr.FromSlogHandler(log.Handler()),
 		HealthProbeBindAddress: envConfig.HealthProbeBindAddress(),
+		Cache:                  cacheOpt,
 		Metrics: server.Options{
 			BindAddress: envConfig.MetricsBindAddress(),
 		},
@@ -75,7 +94,7 @@ func newManager(
 		return nil, u.LogError(log, fmt.Errorf("AddReadyzCheck: %w", err))
 	}
 
-	if err := controllers.BuildAll(mgr); err != nil {
+	if err := controllers.BuildAll(mgr, envConfig.PodNamespace()); err != nil {
 		return nil, err
 	}
 

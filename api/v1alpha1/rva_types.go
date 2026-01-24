@@ -31,7 +31,7 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Attached",type=string,JSONPath=".status.conditions[?(@.type=='Attached')].status"
-// +kubebuilder:printcolumn:name="ReplicaIOReady",type=string,JSONPath=".status.conditions[?(@.type=='ReplicaIOReady')].status"
+// +kubebuilder:printcolumn:name="ReplicaReady",type=string,JSONPath=".status.conditions[?(@.type=='ReplicaReady')].status"
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 type ReplicatedVolumeAttachment struct {
