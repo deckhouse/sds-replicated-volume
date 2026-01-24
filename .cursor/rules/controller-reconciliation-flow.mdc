@@ -199,7 +199,48 @@ A function that returns `flow.ReconcileOutcome` MUST construct it only via `Reco
 
 Code MUST NOT:
 - construct `flow.ReconcileOutcome{...}` directly,
-- create a new failure outcome from an existing outcome’s `Error()`.
+- create a new failure outcome from an existing outcome's `Error()`.
+
+### Change tracking
+
+`ReconcileOutcome` supports change tracking and optimistic lock requirements, enabling sub-reconciles to propagate change information upward through the reconciliation call graph.
+
+Methods:
+- `ReportChanged()` — marks that something changed.
+- `ReportChangedIf(cond bool)` — marks change if condition is true.
+- `DidChange()` — reports whether any change was recorded.
+- `RequireOptimisticLock()` — marks that save requires optimistic locking.
+  - Contract: MUST be called only after `ReportChanged()` / `ReportChangedIf(...)` (panics otherwise).
+- `OptimisticLockRequired()` — reports whether optimistic locking is required.
+- `WithChangeFrom(eo EnsureOutcome)` — copies change state from an `EnsureOutcome`.
+
+Rules:
+- Code MUST call `RequireOptimisticLock()` only after `ReportChanged()` / `ReportChangedIf(...)`
+  (calling it earlier is a contract violation and panics).
+- Change tracking is optional: if a reconcile method does not call `ReportChanged*`, change state remains "unchanged".
+- Change tracking in **ReconcileOutcome** is useful when **one object** needs to be mutated from **multiple sub-reconciles**,
+  and the parent reconcile method must aggregate change/lock state to decide whether to patch.
+
+Example patterns (illustrative):
+
+```go
+// Pattern 1: Direct change reporting
+return rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+
+// Pattern 2: Propagate from EnsureOutcome
+eo := flow.MergeEnsures(ensureA(...), ensureB(...))
+if eo.Error() != nil {
+    return rf.Fail(eo.Error())
+}
+return rf.Continue().WithChangeFrom(eo)
+
+// Pattern 3: Query change state after merging child outcomes
+outcome := r.reconcileChild1(ctx)
+outcome = outcome.Merge(r.reconcileChild2(ctx))
+if outcome.DidChange() {
+    // ... use outcome.OptimisticLockRequired() for patch decisions
+}
+```
 
 ### Handling outcomes
 
@@ -215,6 +256,12 @@ At each call site that receives a `flow.ReconcileOutcome` that can influence con
 ### Merging outcomes
 
 Use `flow.MergeReconciles(...)` or the chainable `outcome.Merge(other)` to combine outcomes when multiple independent steps must all run.
+
+Merge semantics:
+- Errors are joined via `errors.Join`.
+- Requeue/RequeueAfter: minimum delay wins.
+- Done wins over Continue.
+- Change/lock state is merged: any changed outcome makes merged outcome changed; strongest lock requirement wins.
 
 Reviewability:
 - Single-shot merge SHOULD NOT be used (harder to review/extend).

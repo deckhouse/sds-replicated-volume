@@ -241,11 +241,12 @@ func BeginReconcile(ctx context.Context, phaseName string, kv ...string) Reconci
 	return ReconcileFlow{ctx: ctx, log: l}
 }
 
-// OnEnd is the deferred “phase end handler” for non-root reconciles.
+// OnEnd is the deferred "phase end handler" for non-root reconciles.
 //
 // What it does:
 // - logs `phase end` (and duration if available),
 // - if the outcome has an error, logs it at Error level exactly once across nested phases,
+// - if change tracking is used, logs `changed` and `optimisticLock` fields,
 // - if the phase panics, logs `phase panic` and re-panics.
 func (rf ReconcileFlow) OnEnd(out *ReconcileOutcome) {
 	if r := recover(); r != nil {
@@ -271,6 +272,13 @@ func (rf ReconcileFlow) OnEnd(out *ReconcileOutcome) {
 	}
 	if requeueAfter > 0 {
 		fields = append(fields, "requeueAfter", requeueAfter)
+	}
+	// Include change tracking info only if change reporting was used.
+	if out.changeReported {
+		fields = append(fields,
+			"changed", out.DidChange(),
+			"optimisticLock", out.OptimisticLockRequired(),
+		)
 	}
 	if !v.start.IsZero() {
 		fields = append(fields, "duration", time.Since(v.start))
@@ -342,10 +350,18 @@ func (rf ReconcileFlow) DoneOrFail(err error) ReconcileOutcome {
 // - declare `outcome flow.ReconcileOutcome` as a named return,
 // - return `rf.Continue()/Done()/Requeue.../Fail...`,
 // - and use `outcome.ShouldReturn()` at intermediate boundaries to early-exit.
+//
+// ReconcileOutcome also supports change tracking and optimistic lock requirements,
+// enabling sub-reconciles to propagate change information upward:
+// - use `ReportChanged()`/`ReportChangedIf(cond)` to mark changes,
+// - use `RequireOptimisticLock()` to indicate optimistic locking is needed,
+// - use `DidChange()` and `OptimisticLockRequired()` to query the state.
 type ReconcileOutcome struct {
-	result      *ctrl.Result
-	err         error
-	errorLogged bool
+	result         *ctrl.Result
+	err            error
+	errorLogged    bool
+	changeState    changeState
+	changeReported bool
 }
 
 // ShouldReturn reports whether the caller should return from the current Reconcile method.
@@ -394,6 +410,65 @@ func (o ReconcileOutcome) Merge(others ...ReconcileOutcome) ReconcileOutcome {
 	return MergeReconciles(append([]ReconcileOutcome{o}, others...)...)
 }
 
+// ReportChanged marks that this reconcile step changed something.
+func (o ReconcileOutcome) ReportChanged() ReconcileOutcome {
+	o.changeReported = true
+	if o.changeState == unchangedState {
+		o.changeState = changedState
+	}
+	return o
+}
+
+// ReportChangedIf is like ReportChanged, but records a change only when cond is true.
+//
+// Call this even for "no change" paths to make subsequent use of RequireOptimisticLock explicit and safe:
+//
+//	return rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+func (o ReconcileOutcome) ReportChangedIf(cond bool) ReconcileOutcome {
+	o.changeReported = true
+	if cond && o.changeState == unchangedState {
+		o.changeState = changedState
+	}
+	return o
+}
+
+// DidChange reports whether the outcome records a change.
+func (o ReconcileOutcome) DidChange() bool { return o.changeState >= changedState }
+
+// RequireOptimisticLock returns a copy of ReconcileOutcome that requires optimistic locking.
+//
+// Contract: it must be called only after ReportChanged/ReportChangedIf; otherwise it panics
+// (this is a guard against forgetting change reporting).
+func (o ReconcileOutcome) RequireOptimisticLock() ReconcileOutcome {
+	if !o.changeReported {
+		panic("flow: ReconcileOutcome.RequireOptimisticLock called before ReportChanged/ReportChangedIf")
+	}
+	if o.changeState == changedState {
+		o.changeState = changedAndOptimisticLockRequiredState
+	}
+	return o
+}
+
+// OptimisticLockRequired reports whether the outcome requires optimistic locking.
+func (o ReconcileOutcome) OptimisticLockRequired() bool {
+	return o.changeState >= changedAndOptimisticLockRequiredState
+}
+
+// WithChangeFrom copies change tracking state from an EnsureOutcome.
+//
+// This is useful for propagating ensure helper results through reconcile outcomes:
+//
+//	eo := flow.MergeEnsures(ensureA(...), ensureB(...))
+//	if eo.Error() != nil {
+//	    return rf.Fail(eo.Error())
+//	}
+//	return rf.Continue().WithChangeFrom(eo)
+func (o ReconcileOutcome) WithChangeFrom(eo EnsureOutcome) ReconcileOutcome {
+	o.changeState = eo.changeState
+	o.changeReported = eo.changeReported
+	return o
+}
+
 // MergeReconciles combines multiple ReconcileOutcome values into one.
 //
 // Use this when you intentionally want to run multiple independent steps and then aggregate the decision.
@@ -402,6 +477,7 @@ func (o ReconcileOutcome) Merge(others ...ReconcileOutcome) ReconcileOutcome {
 // - Errors are joined via errors.Join (any error makes the merged outcome a Fail).
 // - Requeue/RequeueAfter: treat Requeue as delay=0, RequeueAfter(d) as delay=d, pick minimum delay.
 // - Done wins over Continue.
+// - Change/lock intent is merged deterministically (strongest wins).
 //
 // Example:
 //
@@ -422,12 +498,20 @@ func MergeReconciles(outcomes ...ReconcileOutcome) ReconcileOutcome {
 		minDelay           = noDelay
 		errs               []error
 		allErrorsLogged    = true
+		maxChangeState     changeState
+		anyChangeReported  bool
 	)
 
 	for _, o := range outcomes {
 		if o.err != nil {
 			errs = append(errs, o.err)
 			allErrorsLogged = allErrorsLogged && o.errorLogged
+		}
+
+		// Merge change tracking state.
+		anyChangeReported = anyChangeReported || o.changeReported
+		if o.changeState > maxChangeState {
+			maxChangeState = o.changeState
 		}
 
 		if o.result == nil {
@@ -456,27 +540,44 @@ func MergeReconciles(outcomes ...ReconcileOutcome) ReconcileOutcome {
 	// 1) Fail: if there are errors.
 	if combinedErr != nil {
 		return ReconcileOutcome{
-			result:      &ctrl.Result{},
-			err:         combinedErr,
-			errorLogged: allErrorsLogged,
+			result:         &ctrl.Result{},
+			err:            combinedErr,
+			errorLogged:    allErrorsLogged,
+			changeState:    maxChangeState,
+			changeReported: anyChangeReported,
 		}
 	}
 
 	// 2) Requeue/RequeueAfter: minDelay wins.
 	if minDelay == immediateDelay {
-		return ReconcileOutcome{result: &ctrl.Result{Requeue: true}}
+		return ReconcileOutcome{
+			result:         &ctrl.Result{Requeue: true},
+			changeState:    maxChangeState,
+			changeReported: anyChangeReported,
+		}
 	}
 	if minDelay > immediateDelay {
-		return ReconcileOutcome{result: &ctrl.Result{RequeueAfter: minDelay}}
+		return ReconcileOutcome{
+			result:         &ctrl.Result{RequeueAfter: minDelay},
+			changeState:    maxChangeState,
+			changeReported: anyChangeReported,
+		}
 	}
 
 	// 3) Done: at least one non-nil result (no requeue requested).
 	if hasReconcileResult {
-		return ReconcileOutcome{result: &ctrl.Result{}}
+		return ReconcileOutcome{
+			result:         &ctrl.Result{},
+			changeState:    maxChangeState,
+			changeReported: anyChangeReported,
+		}
 	}
 
 	// 4) Continue.
-	return ReconcileOutcome{}
+	return ReconcileOutcome{
+		changeState:    maxChangeState,
+		changeReported: anyChangeReported,
+	}
 }
 
 // reconcileOutcomeKind classifies the outcome for phase-end logging.
