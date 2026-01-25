@@ -32,15 +32,16 @@ const (
 	// ReplicatedVolumeReplicaCondBackingVolumeReadyType indicates whether the backing volume is ready.
 	//
 	// Reasons describe applicability, provisioning/resizing progress, and outcomes.
-	ReplicatedVolumeReplicaCondBackingVolumeReadyType                     = "BackingVolumeReady"
-	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable      = "NotApplicable"      // Not applicable for this replica type.
-	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotReady           = "NotReady"           // Backing volume exists but become not ready.
-	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioning       = "Provisioning"       // Backing volume is being provisioned.
-	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioningFailed = "ProvisioningFailed" // Provisioning failed.
-	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonReady              = "Ready"              // Backing volume is ready.
-	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonReprovisioning     = "Reprovisioning"     // Backing volume is being reprovisioned (replacing existing).
-	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizeFailed       = "ResizeFailed"       // Resize failed.
-	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizing           = "Resizing"           // Backing volume is being resized.
+	ReplicatedVolumeReplicaCondBackingVolumeReadyType                          = "BackingVolumeReady"
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable           = "NotApplicable"           // Not applicable for this replica type.
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotReady                = "NotReady"                // Backing volume exists but become not ready.
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioning            = "Provisioning"            // Backing volume is being provisioned.
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioningFailed      = "ProvisioningFailed"      // Provisioning failed.
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonReady                   = "Ready"                   // Backing volume is ready.
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonReprovisioning          = "Reprovisioning"          // Backing volume is being reprovisioned (replacing existing).
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizeFailed            = "ResizeFailed"            // Resize failed.
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizing                = "Resizing"                // Backing volume is being resized.
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForConfiguration = "WaitingForConfiguration" // Waiting for node or storage assignment.
 )
 
 const (

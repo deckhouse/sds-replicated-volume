@@ -425,6 +425,155 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 	})
 })
 
+var _ = Describe("computeBackingVolumeNotApplicableReason", func() {
+	var rv *v1alpha1.ReplicatedVolume
+
+	BeforeEach(func() {
+		rv = &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Size: resource.MustParse("1Gi"),
+				},
+			},
+		}
+	})
+
+	It("returns NotApplicable when RV is nil", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		reason, message := computeBackingVolumeNotApplicableReason(rvr, nil)
+
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
+		Expect(message).To(ContainSubstring("ReplicatedVolume not found"))
+	})
+
+	It("returns NotApplicable for datamesh member with Access type", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+			{Name: "rvr-1", Type: v1alpha1.ReplicaTypeAccess},
+		}
+
+		reason, message := computeBackingVolumeNotApplicableReason(rvr, rv)
+
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
+		Expect(message).To(ContainSubstring("diskless replica type"))
+	})
+
+	It("returns NotApplicable for datamesh member with TieBreaker type", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+			{Name: "rvr-1", Type: v1alpha1.ReplicaTypeTieBreaker},
+		}
+
+		reason, message := computeBackingVolumeNotApplicableReason(rvr, rv)
+
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
+		Expect(message).To(ContainSubstring("diskless replica type"))
+	})
+
+	It("returns NotApplicable for datamesh member with TypeTransition=ToDiskless", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+			{
+				Name:           "rvr-1",
+				Type:           v1alpha1.ReplicaTypeDiskful,
+				TypeTransition: v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskless,
+			},
+		}
+
+		reason, message := computeBackingVolumeNotApplicableReason(rvr, rv)
+
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
+		Expect(message).To(ContainSubstring("transition to diskless"))
+	})
+
+	It("returns WaitingForConfiguration for datamesh member with empty LVMVolumeGroupName", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+			{Name: "rvr-1", Type: v1alpha1.ReplicaTypeDiskful, LVMVolumeGroupName: ""},
+		}
+
+		reason, message := computeBackingVolumeNotApplicableReason(rvr, rv)
+
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForConfiguration))
+		Expect(message).To(ContainSubstring("storage assignment"))
+	})
+
+	It("returns NotApplicable for non-member with Access type", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+				Type:                 v1alpha1.ReplicaTypeAccess,
+			},
+		}
+
+		reason, message := computeBackingVolumeNotApplicableReason(rvr, rv)
+
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
+		Expect(message).To(ContainSubstring("diskless replica type"))
+	})
+
+	It("returns NotApplicable for non-member with TieBreaker type", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+				Type:                 v1alpha1.ReplicaTypeTieBreaker,
+			},
+		}
+
+		reason, message := computeBackingVolumeNotApplicableReason(rvr, rv)
+
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
+		Expect(message).To(ContainSubstring("diskless replica type"))
+	})
+
+	It("returns WaitingForConfiguration for non-member Diskful with empty NodeName", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+				Type:                 v1alpha1.ReplicaTypeDiskful,
+				NodeName:             "",
+			},
+		}
+
+		reason, message := computeBackingVolumeNotApplicableReason(rvr, rv)
+
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForConfiguration))
+		Expect(message).To(ContainSubstring("node assignment"))
+	})
+
+	It("returns WaitingForConfiguration for non-member Diskful with NodeName but empty LVMVolumeGroupName", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+				Type:                 v1alpha1.ReplicaTypeDiskful,
+				NodeName:             "node-1",
+				LVMVolumeGroupName:   "",
+			},
+		}
+
+		reason, message := computeBackingVolumeNotApplicableReason(rvr, rv)
+
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForConfiguration))
+		Expect(message).To(ContainSubstring("storage assignment"))
+	})
+})
+
 var _ = Describe("computeLLVName", func() {
 	It("produces deterministic output", func() {
 		name1 := computeLLVName("rvr-1", "lvg-1", "thinpool-1")

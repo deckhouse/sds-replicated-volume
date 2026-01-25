@@ -280,22 +280,19 @@ func (r *Reconciler) reconcileBackingVolume(
 	actual := computeActualBackingVolume(drbdr, *llvs)
 	intended := computeIntendedBackingVolume(rvr, rv, actual)
 
-	// 3. If intended == nil, backing volume is not applicable (diskless replica).
+	// 3. If intended == nil, determine why and set appropriate condition.
 	if intended == nil {
-		message := "Backing volume is not applicable for effective replica type"
+		reason, message := computeBackingVolumeNotApplicableReason(rvr, rv)
 
 		if len(*llvs) > 0 {
 			deletingNames, ro := r.reconcileLLVsDeletion(rf.Ctx(), llvs, nil)
 			if ro.ShouldReturn() {
 				return "", ro
 			}
-
-			message = fmt.Sprintf("Backing volume is not applicable for effective replica type; deleting: %s", strings.Join(deletingNames, ", "))
+			message = fmt.Sprintf("%s; deleting backing volumes: %s", message, strings.Join(deletingNames, ", "))
 		}
 
-		changed := applyRVRBackingVolumeReadyCondFalse(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable,
-			message)
+		changed := applyRVRBackingVolumeReadyCondFalse(rvr, reason, message)
 		return "", rf.Continue().ReportChangedIf(changed)
 	}
 
@@ -582,6 +579,53 @@ func computeIntendedBackingVolume(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1a
 	return bv
 }
 
+// computeBackingVolumeNotApplicableReason determines the reason and message
+// when backing volume cannot be computed (intended == nil).
+// Returns (reason, message) for the BackingVolumeReady condition.
+//
+// This function mirrors the logic of computeIntendedBackingVolume to identify
+// the specific cause of returning nil.
+func computeBackingVolumeNotApplicableReason(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.ReplicatedVolume) (reason, message string) {
+	// If RV is nil, we can't determine precise reason.
+	if rv == nil {
+		return v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable,
+			"Backing volume state cannot be determined (ReplicatedVolume not found)"
+	}
+
+	// Find datamesh member.
+	member := rv.Status.Datamesh.FindMemberByName(rvr.Name)
+
+	if member != nil {
+		// Member in datamesh.
+		if member.Type != v1alpha1.ReplicaTypeDiskful {
+			return v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable,
+				"Backing volume is not applicable for diskless replica type"
+		}
+		if member.TypeTransition == v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskless {
+			return v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable,
+				"Backing volume is being removed (transition to diskless)"
+		}
+		// Member is Diskful but LVMVolumeGroupName is empty.
+		return v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForConfiguration,
+			"Waiting for storage assignment"
+	}
+
+	// Not a member.
+	if rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful {
+		return v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable,
+			"Backing volume is not applicable for diskless replica type"
+	}
+
+	if rvr.Spec.NodeName == "" {
+		return v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForConfiguration,
+			"Waiting for node assignment"
+	}
+
+	// NodeName is set but LVMVolumeGroupName is empty.
+	return v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForConfiguration,
+		"Waiting for storage assignment"
+}
+
 // computeLLVName computes the LVMLogicalVolume name for a given RVR.
 // Format: rvrName + "-" + fnv128(lvgName + thinPoolName)
 func computeLLVName(rvrName, lvgName, thinPoolName string) string {
@@ -831,7 +875,8 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 
 	// TODO: implement DRBD resource reconciliation
 
-	// TODO: status.effectiveType
+	// rvr.status.effectiveType — надо заполнять
+	// conditions[type=Configured]
 
 	_ = rv
 
