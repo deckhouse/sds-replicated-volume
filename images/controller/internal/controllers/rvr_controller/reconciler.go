@@ -101,13 +101,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		base = rvr.DeepCopy()
 	}
 
-	readyLLVName, outcome := r.reconcileBackingVolume(rf.Ctx(), rvr, &llvs, rv, drbdr)
+	targetLLVName, outcome := r.reconcileBackingVolume(rf.Ctx(), rvr, &llvs, rv, drbdr)
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
 	}
 
-	// TODO: pass readyLLVName to reconcileDRBDResource when it needs the backing volume name
-	_ = readyLLVName
+	// TODO: pass targetLLVName to reconcileDRBDResource when it needs the backing volume name
+	_ = targetLLVName
 
 	outcome = outcome.Merge(r.reconcileDRBDResource(rf.Ctx(), rvr, rv, drbdr))
 	if outcome.ShouldReturn() {
@@ -249,7 +249,7 @@ func (r *Reconciler) reconcileBackingVolume(
 	llvs *[]snc.LVMLogicalVolume,
 	rv *v1alpha1.ReplicatedVolume,
 	drbdr *v1alpha1.DRBDResource,
-) (readyLLVName string, outcome flow.ReconcileOutcome) {
+) (targetLLVName string, outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "backing-volume")
 	defer rf.OnEnd(&outcome)
 

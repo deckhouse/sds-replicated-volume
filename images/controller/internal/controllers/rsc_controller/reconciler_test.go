@@ -1407,7 +1407,7 @@ var _ = Describe("Reconciler", func() {
 			rec = NewReconciler(cl)
 
 			targetStoragePoolName := "auto-rsp-test123"
-			outcome, rsp := rec.reconcileRSP(context.Background(), rsc, targetStoragePoolName)
+			rsp, outcome := rec.reconcileRSP(context.Background(), rsc, targetStoragePoolName)
 
 			Expect(outcome.ShouldReturn()).To(BeFalse())
 			Expect(rsp).NotTo(BeNil())
@@ -1461,7 +1461,7 @@ var _ = Describe("Reconciler", func() {
 				Build()
 			rec = NewReconciler(cl)
 
-			outcome, rsp := rec.reconcileRSP(context.Background(), rsc, "auto-rsp-existing")
+			rsp, outcome := rec.reconcileRSP(context.Background(), rsc, "auto-rsp-existing")
 
 			Expect(outcome.ShouldReturn()).To(BeFalse())
 			Expect(rsp).NotTo(BeNil())
@@ -1507,7 +1507,7 @@ var _ = Describe("Reconciler", func() {
 				Build()
 			rec = NewReconciler(cl)
 
-			outcome, rsp := rec.reconcileRSP(context.Background(), rsc, "auto-rsp-existing")
+			rsp, outcome := rec.reconcileRSP(context.Background(), rsc, "auto-rsp-existing")
 
 			Expect(outcome.ShouldReturn()).To(BeFalse())
 			Expect(rsp).NotTo(BeNil())
@@ -1557,7 +1557,7 @@ var _ = Describe("Reconciler", func() {
 				Build()
 			rec = NewReconciler(cl)
 
-			outcome, rsp := rec.reconcileRSP(context.Background(), rsc, "auto-rsp-existing")
+			rsp, outcome := rec.reconcileRSP(context.Background(), rsc, "auto-rsp-existing")
 
 			Expect(outcome.ShouldReturn()).To(BeFalse())
 			Expect(rsp).NotTo(BeNil())

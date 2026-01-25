@@ -85,6 +85,12 @@ To standardize deferred end handlers:
 
 The deferred end handler MUST receive a pointer to that named return variable.
 
+### Return value ordering
+
+- If a function returns **ReconcileOutcome** (in code: `flow.ReconcileOutcome`) along with other return values, **ReconcileOutcome** MUST be the **last return value**.
+- If a function returns **EnsureOutcome** (in code: `flow.EnsureOutcome`) along with other return values, **EnsureOutcome** MUST be the **last return value**.
+- Outcome SHOULD be the only return value for convenience, unless additional return values are clearly justified.
+
 ### No bare return
 
 Any scoped function MUST NOT use bare `return` (empty return). It MUST return explicitly.

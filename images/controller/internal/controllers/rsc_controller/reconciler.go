@@ -248,7 +248,7 @@ func (r *Reconciler) reconcileStatus(
 	targetStoragePoolName := computeTargetStoragePool(rsc)
 
 	// Ensure auto-generated RSP exists and is configured.
-	outcome, rsp := r.reconcileRSP(rf.Ctx(), rsc, targetStoragePoolName)
+	rsp, outcome := r.reconcileRSP(rf.Ctx(), rsc, targetStoragePoolName)
 	if outcome.ShouldReturn() {
 		return outcome
 	}
@@ -1031,7 +1031,7 @@ func (r *Reconciler) reconcileRSP(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 	targetStoragePoolName string,
-) (outcome flow.ReconcileOutcome, rsp *v1alpha1.ReplicatedStoragePool) {
+) (rsp *v1alpha1.ReplicatedStoragePool, outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "rsp", "rsp", targetStoragePoolName)
 	defer rf.OnEnd(&outcome)
 
@@ -1039,14 +1039,14 @@ func (r *Reconciler) reconcileRSP(
 	var err error
 	rsp, err = r.getRSP(rf.Ctx(), targetStoragePoolName)
 	if err != nil {
-		return rf.Fail(err), nil
+		return nil, rf.Fail(err)
 	}
 
 	// If RSP doesn't exist, create it.
 	if rsp == nil {
 		rsp = newRSP(targetStoragePoolName, rsc)
 		if err := r.createRSP(rf.Ctx(), rsp); err != nil {
-			return rf.Fail(err), nil
+			return nil, rf.Fail(err)
 		}
 		// Continue to ensure usedBy is set below.
 	}
@@ -1056,7 +1056,7 @@ func (r *Reconciler) reconcileRSP(
 		base := rsp.DeepCopy()
 		applyRSPFinalizer(rsp, true)
 		if err := r.patchRSP(rf.Ctx(), rsp, base, true); err != nil {
-			return rf.Fail(err), nil
+			return nil, rf.Fail(err)
 		}
 	}
 
@@ -1065,11 +1065,11 @@ func (r *Reconciler) reconcileRSP(
 		base := rsp.DeepCopy()
 		applyRSPUsedBy(rsp, rsc.Name)
 		if err := r.patchRSPStatus(rf.Ctx(), rsp, base, true); err != nil {
-			return rf.Fail(err), nil
+			return nil, rf.Fail(err)
 		}
 	}
 
-	return rf.Continue(), rsp
+	return rsp, rf.Continue()
 }
 
 // reconcileUnusedRSPs releases storage pools that are no longer used by this RSC.
