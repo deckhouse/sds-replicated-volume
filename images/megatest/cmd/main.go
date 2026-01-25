@@ -217,15 +217,6 @@ func setupChaosRunners(
 	// Create network degrade manager (uses child cluster client)
 	networkDegradeMgr := chaos.NewNetworkDegradeManager(kubeClient.Client())
 
-	// Check if Cilium Host Firewall is available (required for network blocking)
-	ciliumEnabled, ciliumMsg := ciliumManager.IsHostFirewallEnabled(ctx)
-	if !ciliumEnabled {
-		log.Warn("Cilium Host Firewall may not be available, network blocking chaos may not work",
-			"reason", ciliumMsg)
-	} else {
-		log.Info("Cilium Host Firewall check passed", "status", ciliumMsg)
-	}
-
 	// Cleanup stale resources from previous runs
 	log.Info("cleaning up stale chaos resources from previous runs")
 	if stalePolicies, err := ciliumManager.CleanupStaleChaosPolicies(ctx); err != nil {

@@ -140,29 +140,6 @@ func (m *CiliumPolicyManager) cleanupPoliciesByLabel(ctx context.Context) (int, 
 	return deleted, nil
 }
 
-// IsHostFirewallEnabled checks if Cilium Host Firewall is enabled
-// by trying to verify that CiliumClusterwideNetworkPolicy with nodeSelector works
-func (m *CiliumPolicyManager) IsHostFirewallEnabled(ctx context.Context) (bool, string) {
-	// Check if CCNP CRD exists by trying to list policies
-	policyList := &unstructured.UnstructuredList{}
-	policyList.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   ccnpGVR.Group,
-		Version: ccnpGVR.Version,
-		Kind:    "CiliumClusterwideNetworkPolicyList",
-	})
-
-	if err := m.cl.List(ctx, policyList); err != nil {
-		return false, fmt.Sprintf("cannot list CiliumClusterwideNetworkPolicy: %v", err)
-	}
-
-	// CRD exists and we can list policies
-	// Note: We cannot definitively check if Host Firewall is enabled without
-	// examining Cilium's configuration. However, if nodeSelector-based policies
-	// don't work, the chaos will simply have no effect (not break anything).
-	// For now, we assume it's enabled if CRD exists.
-	return true, "CiliumClusterwideNetworkPolicy CRD available"
-}
-
 // buildDRBDBlockPolicyFromPorts creates a CiliumClusterwideNetworkPolicy to block specific DRBD ports.
 // Uses actual ports list instead of a range - more efficient and targeted.
 func (m *CiliumPolicyManager) buildDRBDBlockPolicyFromPorts(name string, nodeA, nodeB NodeInfo, portList []int) *unstructured.Unstructured {
