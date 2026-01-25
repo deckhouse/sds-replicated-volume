@@ -77,6 +77,16 @@ spec:
             type: object
           spec:
             properties:
+              lvmVolumeGroupName:
+                description: LVMVolumeGroupName is the LVMVolumeGroup resource name
+                  where this replica should be placed.
+                minLength: 1
+                pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
+                type: string
+              lvmVolumeGroupThinPoolName:
+                description: LVMVolumeGroupThinPoolName is the thin pool name (for
+                  LVMThin storage pools).
+                type: string
               nodeName:
                 maxLength: 253
                 minLength: 1
@@ -101,6 +111,15 @@ spec:
             - replicatedVolumeName
             - type
             type: object
+            x-kubernetes-validations:
+            - message: lvmVolumeGroupName requires nodeName to be set
+              rule: size(self.lvmVolumeGroupName) == 0 || size(self.nodeName) > 0
+            - message: lvmVolumeGroupName can only be set for Diskful type
+              rule: size(self.lvmVolumeGroupName) == 0 || self.type == 'Diskful'
+            - message: lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be
+                set
+              rule: size(self.lvmVolumeGroupThinPoolName) == 0 || size(self.lvmVolumeGroupName)
+                > 0
           status:
             properties:
               actualType:
@@ -170,6 +189,11 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              datameshRevision:
+                description: DatameshRevision is the datamesh revision this replica
+                  was configured for.
+                format: int64
+                type: integer
               drbd:
                 properties:
                   actual:

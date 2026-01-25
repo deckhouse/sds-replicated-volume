@@ -540,7 +540,7 @@ func buildLVGByNodeMap(
 // Single-call I/O helper categories
 //
 
-// --- RSP ---
+// --- ReplicatedStoragePool (RSP) ---
 
 // getRSP fetches an RSP by name.
 func (r *Reconciler) getRSP(ctx context.Context, name string) (*v1alpha1.ReplicatedStoragePool, error) {
@@ -567,7 +567,7 @@ func (r *Reconciler) patchRSPStatus(
 	return r.cl.Status().Patch(ctx, rsp, patch)
 }
 
-// --- LVG ---
+// --- LVMVolumeGroup (LVG) ---
 
 // getLVGsByRSP fetches LVGs referenced by the given RSP and returns them as a map keyed by LVG name.
 // Uses UnsafeDisableDeepCopy for efficiency.

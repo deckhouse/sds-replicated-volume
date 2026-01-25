@@ -69,5 +69,10 @@ func RegisterIndexes(mgr manager.Manager) error {
 		return err
 	}
 
+	// LVMLogicalVolume (LLV)
+	if err := indexes.RegisterLLVByRVROwner(mgr); err != nil {
+		return err
+	}
+
 	return nil
 }

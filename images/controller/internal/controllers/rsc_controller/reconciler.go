@@ -232,7 +232,9 @@ func applyFinalizer(rsc *v1alpha1.ReplicatedStorageClass, targetPresent bool) {
 	}
 }
 
-// --- Reconcile: status ---
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: status
+//
 
 // reconcileStatus reconciles the RSC status.
 //
@@ -1020,7 +1022,9 @@ func applyStoragePool(rsc *v1alpha1.ReplicatedStorageClass, targetName string) b
 	return changed
 }
 
-// --- Reconcile: RSP ---
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: ReplicatedStoragePool (RSP)
+//
 
 // reconcileRSP ensures the auto-generated RSP exists and is properly configured.
 // Creates RSP if not found, updates finalizer and usedBy if needed.
@@ -1160,7 +1164,7 @@ func (r *Reconciler) reconcileRSPRelease(
 
 // --- Helpers: Reconcile (non-I/O) ---
 
-// --- Helpers: RSP ---
+// --- Helpers: ReplicatedStoragePool (RSP) ---
 
 // newRSP constructs a new RSP from RSC spec.
 func newRSP(name string, rsc *v1alpha1.ReplicatedStorageClass) *v1alpha1.ReplicatedStoragePool {

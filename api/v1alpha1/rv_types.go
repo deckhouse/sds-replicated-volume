@@ -126,6 +126,17 @@ type ReplicatedVolumeDatamesh struct {
 	// +kubebuilder:validation:MaxItems=16
 	// +kubebuilder:validation:items:MaxLength=64
 	SystemNetworkNames []string `json:"systemNetworkNames"`
+
+	// SharedSecret is the shared secret for DRBD authentication.
+	// +kubebuilder:validation:MaxLength=256
+	// +optional
+	SharedSecret string `json:"sharedSecret,omitempty"`
+
+	// SharedSecretAlg is the hashing algorithm for the shared secret.
+	// +kubebuilder:validation:Enum=SHA256;SHA1;DummyForTest
+	// +optional
+	SharedSecretAlg SharedSecretAlg `json:"sharedSecretAlg,omitempty"`
+
 	// AllowTwoPrimaries enables two primaries mode for the datamesh.
 	// +kubebuilder:default=false
 	AllowTwoPrimaries bool `json:"allowTwoPrimaries"`
@@ -151,9 +162,38 @@ type ReplicatedVolumeDatamesh struct {
 	QuorumMinimumRedundancy byte `json:"quorumMinimumRedundancy"`
 }
 
+// FindMemberByName returns a pointer to the member with the given name, or nil if not found.
+func (d *ReplicatedVolumeDatamesh) FindMemberByName(name string) *ReplicatedVolumeDatameshMember {
+	for i := range d.Members {
+		if d.Members[i].Name == name {
+			return &d.Members[i]
+		}
+	}
+	return nil
+}
+
+// SharedSecretAlg enumerates possible hashing algorithms for DRBD shared secrets.
+type SharedSecretAlg string
+
+// Shared secret hashing algorithms.
+const (
+	// SharedSecretAlgSHA256 is the SHA256 hashing algorithm for shared secrets.
+	SharedSecretAlgSHA256 SharedSecretAlg = "SHA256"
+	// SharedSecretAlgSHA1 is the SHA1 hashing algorithm for shared secrets.
+	SharedSecretAlgSHA1 SharedSecretAlg = "SHA1"
+	// SharedSecretAlgDummyForTest is a dummy algorithm for testing.
+	SharedSecretAlgDummyForTest SharedSecretAlg = "DummyForTest"
+)
+
+func (a SharedSecretAlg) String() string {
+	return string(a)
+}
+
 // ReplicatedVolumeDatameshMember represents a member of the datamesh.
 // +kubebuilder:object:generate=true
 // +kubebuilder:validation:XValidation:rule="self.type == 'Diskful' ? (!has(self.typeTransition) || self.typeTransition == 'ToDiskless') : (!has(self.typeTransition) || self.typeTransition == 'ToDiskful')",message="typeTransition must be ToDiskless for Diskful type, or ToDiskful for Access/TieBreaker types"
+// +kubebuilder:validation:XValidation:rule="size(self.lvmVolumeGroupName) == 0 || self.type == 'Diskful' || (has(self.typeTransition) && self.typeTransition == 'ToDiskful')",message="lvmVolumeGroupName can only be set for Diskful type or when typeTransition is ToDiskful"
+// +kubebuilder:validation:XValidation:rule="size(self.lvmVolumeGroupThinPoolName) == 0 || size(self.lvmVolumeGroupName) > 0",message="lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be set"
 type ReplicatedVolumeDatameshMember struct {
 	// Name is the member name (used as list map key).
 	// +kubebuilder:validation:Required
@@ -179,6 +219,14 @@ type ReplicatedVolumeDatameshMember struct {
 	// Addresses is the list of DRBD addresses for this member.
 	// +kubebuilder:validation:MaxItems=16
 	Addresses []DRBDResourceAddressStatus `json:"addresses"`
+	// LVMVolumeGroupName is the LVMVolumeGroup resource name where this replica should be placed.
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$`
+	LVMVolumeGroupName string `json:"lvmVolumeGroupName,omitempty"`
+	// LVMVolumeGroupThinPoolName is the thin pool name (for LVMThin storage pools).
+	// +optional
+	LVMVolumeGroupThinPoolName string `json:"lvmVolumeGroupThinPoolName,omitempty"`
 }
 
 // ReplicatedVolumeDatameshMemberTypeTransition enumerates possible type transitions for datamesh members.
@@ -206,21 +254,6 @@ type DRBDResourceDetails struct {
 type DRBDResourceConfig struct {
 	// +kubebuilder:default=false
 	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
-}
-
-type SharedSecretAlg string
-
-// Shared secret hashing algorithms
-const (
-	// SharedSecretAlgSHA256 is the SHA256 hashing algorithm for shared secrets
-	SharedSecretAlgSHA256 = "SHA256"
-	// SharedSecretAlgSHA1 is the SHA1 hashing algorithm for shared secrets
-	SharedSecretAlgSHA1         = "SHA1"
-	SharedSecretAlgDummyForTest = "DummyForTest"
-)
-
-func (a SharedSecretAlg) String() string {
-	return string(a)
 }
 
 // ReplicatedVolumeEligibleNodesViolation describes a replica placed on a non-eligible node.

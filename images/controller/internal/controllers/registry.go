@@ -28,10 +28,8 @@ import (
 	rvcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller"
 	rvdeletepropagation "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_delete_propagation"
 	rvrcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_controller"
-	rvrmetadata "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_metadata"
 	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
 	rvrtiebreakercount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_tie_breaker_count"
-	rvrvolume "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_volume"
 )
 
 // BuildAll builds all controllers.
@@ -47,8 +45,6 @@ func BuildAll(mgr manager.Manager, podNamespace string) error {
 	builders := []func(mgr manager.Manager) error{
 		rvrtiebreakercount.BuildController,
 		rvcontroller.BuildController,
-		rvrvolume.BuildController,
-		rvrmetadata.BuildController,
 		rvdeletepropagation.BuildController,
 		rvrschedulingcontroller.BuildController,
 		rvrcontroller.BuildController,

@@ -1,0 +1,94 @@
+/*
+Copyright 2026 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package rvrcontroller
+
+import (
+	"slices"
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+)
+
+// rvrPredicates returns predicates for ReplicatedVolumeReplica events.
+// Reacts to Generation changes (Spec) and Finalizers changes.
+// Skips pure Status updates and Labels/Annotations changes.
+func rvrPredicates() []predicate.Predicate {
+	return []predicate.Predicate{
+		predicate.TypedFuncs[client.Object]{
+			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				// React to Generation change (Spec changes).
+				if e.ObjectNew.GetGeneration() != e.ObjectOld.GetGeneration() {
+					return true
+				}
+				// React to Finalizers change.
+				if !slices.Equal(e.ObjectNew.GetFinalizers(), e.ObjectOld.GetFinalizers()) {
+					return true
+				}
+				return false
+			},
+		},
+	}
+}
+
+// llvPredicates returns predicates for LVMLogicalVolume events.
+// Intentionally empty: we need to react to all LLV fields (Status, Spec, Labels, Finalizers, OwnerReferences).
+// Filtering only Annotations would add complexity with negligible benefit.
+func llvPredicates() []predicate.Predicate {
+	return nil
+}
+
+// drbdrPredicates returns predicates for DRBDResource events.
+// Intentionally empty: we need to react to all DRBDResource fields
+func drbdrPredicates() []predicate.Predicate {
+	return nil
+}
+
+// rvPredicates returns predicates for ReplicatedVolume events.
+// Reacts to:
+// - DatameshRevision changes (Status.Datamesh.Size, membership, etc.)
+// - Spec.ReplicatedStorageClassName changes (for labels)
+func rvPredicates() []predicate.Predicate {
+	return []predicate.Predicate{
+		predicate.TypedFuncs[client.Object]{
+			CreateFunc:  func(event.TypedCreateEvent[client.Object]) bool { return false },
+			DeleteFunc:  func(event.TypedDeleteEvent[client.Object]) bool { return false },
+			GenericFunc: func(event.TypedGenericEvent[client.Object]) bool { return false },
+			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				oldRV, okOld := e.ObjectOld.(*v1alpha1.ReplicatedVolume)
+				newRV, okNew := e.ObjectNew.(*v1alpha1.ReplicatedVolume)
+				if !okOld || !okNew || oldRV == nil || newRV == nil {
+					return true
+				}
+
+				// React to DatameshRevision change (covers Size, membership changes, etc.).
+				if oldRV.Status.DatameshRevision != newRV.Status.DatameshRevision {
+					return true
+				}
+
+				// React to Spec.ReplicatedStorageClassName change (for labels).
+				if oldRV.Spec.ReplicatedStorageClassName != newRV.Spec.ReplicatedStorageClassName {
+					return true
+				}
+
+				return false
+			},
+		},
+	}
+}

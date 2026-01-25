@@ -79,6 +79,9 @@ func (o *ReplicatedVolumeReplica) SetStatusConditions(conditions []metav1.Condit
 }
 
 // +kubebuilder:object:generate=true
+// +kubebuilder:validation:XValidation:rule="size(self.lvmVolumeGroupName) == 0 || size(self.nodeName) > 0",message="lvmVolumeGroupName requires nodeName to be set"
+// +kubebuilder:validation:XValidation:rule="size(self.lvmVolumeGroupName) == 0 || self.type == 'Diskful'",message="lvmVolumeGroupName can only be set for Diskful type"
+// +kubebuilder:validation:XValidation:rule="size(self.lvmVolumeGroupThinPoolName) == 0 || size(self.lvmVolumeGroupName) > 0",message="lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be set"
 type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
@@ -91,6 +94,16 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	NodeName string `json:"nodeName,omitempty"`
+
+	// LVMVolumeGroupName is the LVMVolumeGroup resource name where this replica should be placed.
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$`
+	LVMVolumeGroupName string `json:"lvmVolumeGroupName,omitempty"`
+
+	// LVMVolumeGroupThinPoolName is the thin pool name (for LVMThin storage pools).
+	// +optional
+	LVMVolumeGroupThinPoolName string `json:"lvmVolumeGroupThinPoolName,omitempty"`
 
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
@@ -132,6 +145,9 @@ type ReplicatedVolumeReplicaStatus struct {
 
 	// +patchStrategy=merge
 	DRBD *DRBD `json:"drbd,omitempty" patchStrategy:"merge"`
+
+	// DatameshRevision is the datamesh revision this replica was configured for.
+	DatameshRevision int64 `json:"datameshRevision,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

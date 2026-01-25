@@ -158,6 +158,8 @@ spec:
                       maxLength: 256
                       type: string
                     sharedSecretAlg:
+                      description: SharedSecretAlg enumerates possible hashing algorithms
+                        for DRBD shared secrets.
                       enum:
                       - SHA256
                       - SHA1
@@ -378,10 +380,14 @@ spec:
         - message: lvmLogicalVolumeName is required when type is Diskful and must
             be empty when type is Diskless
           rule: 'self.spec.type == ''Diskful'' ? has(self.spec.lvmLogicalVolumeName)
-            && self.spec.lvmLogicalVolumeName != ” : !has(self.spec.lvmLogicalVolumeName)
-            || self.spec.lvmLogicalVolumeName == ”'
+            && size(self.spec.lvmLogicalVolumeName) > 0 : !has(self.spec.lvmLogicalVolumeName)
+            || size(self.spec.lvmLogicalVolumeName) == 0'
         - message: spec.size cannot be decreased
           rule: '!has(oldSelf.spec.size) || self.spec.size >= oldSelf.spec.size'
+        - message: DRBDResource name must match its ReplicatedVolumeReplica owner
+            name
+          rule: '!has(self.metadata.ownerReferences) || self.metadata.ownerReferences.all(ref,
+            ref.kind != ''ReplicatedVolumeReplica'' || ref.name == self.metadata.name)'
     served: true
     storage: true
     subresources:
