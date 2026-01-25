@@ -195,6 +195,11 @@ func (c *ParentClient) cleanupVMOperationsByLabel(ctx context.Context) (int, err
 	return deleted, nil
 }
 
+// Client returns the Kubernetes client for the parent cluster
+func (c *ParentClient) Client() client.Client {
+	return c.cl
+}
+
 // VMNamespace returns the namespace where VMs are located
 func (c *ParentClient) VMNamespace() string {
 	return c.vmNamespace

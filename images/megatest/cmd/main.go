@@ -211,8 +211,8 @@ func setupChaosRunners(
 		return func() {}
 	}
 
-	// Create Cilium policy manager (uses child cluster client)
-	ciliumManager := chaos.NewCiliumPolicyManager(kubeClient.Client())
+	// Create Cilium policy manager (uses parent cluster client)
+	ciliumManager := chaos.NewCiliumPolicyManager(parentClient.Client())
 
 	// Create network degrade manager (uses child cluster client)
 	networkDegradeMgr := chaos.NewNetworkDegradeManager(kubeClient.Client())
