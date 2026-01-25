@@ -212,17 +212,18 @@ func setupChaosRunners(
 	}
 
 	// Create network block manager (uses parent cluster client)
-	networkBlockMgr := chaos.NewNetworkBlockManager(parentClient.Client())
-
-	// Create VM reboot manager (uses parent cluster client)
-	vmRebootMgr := chaos.NewVMRebootManager(parentClient.Client(), opt.VMNamespace)
+	networkBlockMgr := chaos.NewNetworkBlockManager(parentClient)
 
 	// Create network degrade manager (uses child cluster client)
 	networkDegradeMgr := chaos.NewNetworkDegradeManager(kubeClient.Client())
 
+	// Create VM reboot manager (uses parent cluster client)
+	vmRebootMgr := chaos.NewVMRebootManager(parentClient)
+
 	// Cleanup stale resources from previous runs
 	log.Info("cleaning up stale chaos resources from previous runs")
-	if stalePolicies, err := networkBlockMgr.CleanupStaleChaosPolicies(ctx, opt.VMNamespace); err != nil {
+
+	if stalePolicies, err := networkBlockMgr.CleanupStaleChaosPolicies(ctx); err != nil {
 		log.Warn("failed to cleanup stale network block policies", "error", err)
 	} else if stalePolicies > 0 {
 		log.Info("cleaned up stale network block policies", "count", stalePolicies)
@@ -304,7 +305,7 @@ func setupChaosRunners(
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		if err := networkBlockMgr.CleanupAllChaosPolicies(cleanupCtx, opt.VMNamespace); err != nil {
+		if err := networkBlockMgr.CleanupAllChaosPolicies(cleanupCtx); err != nil {
 			log.Error("failed to cleanup network block policies", "error", err)
 		}
 

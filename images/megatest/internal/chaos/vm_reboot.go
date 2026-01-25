@@ -35,20 +35,19 @@ var vmOpGVR = schema.GroupVersionResource{
 
 // VMRebootManager manages VirtualMachineOperation for VM reboot chaos scenarios
 type VMRebootManager struct {
-	cl          client.Client
-	vmNamespace string
+	parentClient *ParentClient
 }
 
 // NewVMRebootManager creates a new VMRebootManager
-func NewVMRebootManager(cl client.Client, vmNamespace string) *VMRebootManager {
+func NewVMRebootManager(parentClient *ParentClient) *VMRebootManager {
 	return &VMRebootManager{
-		cl:          cl,
-		vmNamespace: vmNamespace,
+		parentClient: parentClient,
 	}
 }
 
 // CreateVMOperation creates a VirtualMachineOperation to control VM state
 func (m *VMRebootManager) CreateVMOperation(ctx context.Context, vmName string, opType VMOperationType, force bool) error {
+	namespace := m.parentClient.VMNamespace()
 	opName := fmt.Sprintf("chaos-%s-%s-%d", string(opType), vmName, time.Now().Unix())
 
 	vmOp := &unstructured.Unstructured{
@@ -57,7 +56,7 @@ func (m *VMRebootManager) CreateVMOperation(ctx context.Context, vmName string, 
 			"kind":       "VirtualMachineOperation",
 			"metadata": map[string]interface{}{
 				"name":      opName,
-				"namespace": m.vmNamespace,
+				"namespace": namespace,
 				"labels": map[string]interface{}{
 					LabelChaosType:  string(ChaosTypeVMReboot),
 					LabelChaosNodeA: vmName,
@@ -71,7 +70,7 @@ func (m *VMRebootManager) CreateVMOperation(ctx context.Context, vmName string, 
 		},
 	}
 
-	if err := m.cl.Create(ctx, vmOp); err != nil {
+	if err := m.parentClient.Client().Create(ctx, vmOp); err != nil {
 		return fmt.Errorf("creating VMOperation %s for VM %s: %w", opName, vmName, err)
 	}
 
@@ -80,6 +79,7 @@ func (m *VMRebootManager) CreateVMOperation(ctx context.Context, vmName string, 
 
 // ListVMOperationsForVM returns all VirtualMachineOperations for a specific VM
 func (m *VMRebootManager) ListVMOperationsForVM(ctx context.Context, vmName string) ([]unstructured.Unstructured, error) {
+	namespace := m.parentClient.VMNamespace()
 	vmOpList := &unstructured.UnstructuredList{}
 	vmOpList.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   vmOpGVR.Group,
@@ -87,7 +87,7 @@ func (m *VMRebootManager) ListVMOperationsForVM(ctx context.Context, vmName stri
 		Kind:    "VirtualMachineOperationList",
 	})
 
-	if err := m.cl.List(ctx, vmOpList, client.InNamespace(m.vmNamespace), client.MatchingLabels{
+	if err := m.parentClient.Client().List(ctx, vmOpList, client.InNamespace(namespace), client.MatchingLabels{
 		LabelChaosType:  string(ChaosTypeVMReboot),
 		LabelChaosNodeA: vmName,
 	}); err != nil {
@@ -139,6 +139,7 @@ func (m *VMRebootManager) CleanupStaleVMOperations(ctx context.Context) (int, er
 }
 
 func (m *VMRebootManager) cleanupVMOperationsByLabel(ctx context.Context) (int, error) {
+	namespace := m.parentClient.VMNamespace()
 	vmOpList := &unstructured.UnstructuredList{}
 	vmOpList.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   vmOpGVR.Group,
@@ -146,7 +147,7 @@ func (m *VMRebootManager) cleanupVMOperationsByLabel(ctx context.Context) (int, 
 		Kind:    "VirtualMachineOperationList",
 	})
 
-	if err := m.cl.List(ctx, vmOpList, client.InNamespace(m.vmNamespace), client.MatchingLabels{
+	if err := m.parentClient.Client().List(ctx, vmOpList, client.InNamespace(namespace), client.MatchingLabels{
 		LabelChaosType: string(ChaosTypeVMReboot),
 	}); err != nil {
 		return 0, fmt.Errorf("listing VMOperations: %w", err)
@@ -154,7 +155,7 @@ func (m *VMRebootManager) cleanupVMOperationsByLabel(ctx context.Context) (int, 
 
 	deleted := 0
 	for _, vmOp := range vmOpList.Items {
-		if err := m.cl.Delete(ctx, &vmOp); err == nil {
+		if err := m.parentClient.Client().Delete(ctx, &vmOp); err == nil {
 			deleted++
 		}
 		// Ignore errors, best effort cleanup

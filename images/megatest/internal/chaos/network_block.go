@@ -35,22 +35,23 @@ var cnpGVR = schema.GroupVersionResource{
 
 // NetworkBlockManager manages CiliumNetworkPolicy for network blocking chaos scenarios
 type NetworkBlockManager struct {
-	cl client.Client
+	parentClient *ParentClient
 }
 
 // NewNetworkBlockManager creates a new NetworkBlockManager
-func NewNetworkBlockManager(cl client.Client) *NetworkBlockManager {
-	return &NetworkBlockManager{cl: cl}
+func NewNetworkBlockManager(parentClient *ParentClient) *NetworkBlockManager {
+	return &NetworkBlockManager{parentClient: parentClient}
 }
 
 // BlockAllNetwork creates a CiliumNetworkPolicy to block all network between two nodes
 // Returns the policy name for later cleanup
-func (m *NetworkBlockManager) BlockAllNetwork(ctx context.Context, nodeA, nodeB NodeInfo, namespace string) (string, error) {
+func (m *NetworkBlockManager) BlockAllNetwork(ctx context.Context, nodeA, nodeB NodeInfo) (string, error) {
+	namespace := m.parentClient.VMNamespace()
 	policyName := fmt.Sprintf("chaos-net-%s-%s-%d", nodeA.Name, nodeB.Name, time.Now().Unix())
 
 	policy := m.buildNetworkBlockPolicy(policyName, nodeA, nodeB, namespace)
 
-	if err := m.cl.Create(ctx, policy); err != nil {
+	if err := m.parentClient.Client().Create(ctx, policy); err != nil {
 		return "", fmt.Errorf("creating network block policy %s: %w", policyName, err)
 	}
 
@@ -58,7 +59,8 @@ func (m *NetworkBlockManager) BlockAllNetwork(ctx context.Context, nodeA, nodeB 
 }
 
 // UnblockTraffic deletes a CiliumNetworkPolicy by name
-func (m *NetworkBlockManager) UnblockTraffic(ctx context.Context, policyName string, namespace string) error {
+func (m *NetworkBlockManager) UnblockTraffic(ctx context.Context, policyName string) error {
+	namespace := m.parentClient.VMNamespace()
 	policy := &unstructured.Unstructured{}
 	policy.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   cnpGVR.Group,
@@ -68,7 +70,7 @@ func (m *NetworkBlockManager) UnblockTraffic(ctx context.Context, policyName str
 	policy.SetName(policyName)
 	policy.SetNamespace(namespace)
 
-	if err := m.cl.Delete(ctx, policy); err != nil {
+	if err := m.parentClient.Client().Delete(ctx, policy); err != nil {
 		return client.IgnoreNotFound(err)
 	}
 
@@ -76,8 +78,8 @@ func (m *NetworkBlockManager) UnblockTraffic(ctx context.Context, policyName str
 }
 
 // CleanupAllChaosPolicies deletes all CiliumNetworkPolicy created by chaos
-func (m *NetworkBlockManager) CleanupAllChaosPolicies(ctx context.Context, namespace string) error {
-	deleted, err := m.cleanupPoliciesByLabel(ctx, namespace)
+func (m *NetworkBlockManager) CleanupAllChaosPolicies(ctx context.Context) error {
+	deleted, err := m.cleanupPoliciesByLabel(ctx)
 	if err != nil {
 		return err
 	}
@@ -87,11 +89,12 @@ func (m *NetworkBlockManager) CleanupAllChaosPolicies(ctx context.Context, names
 
 // CleanupStaleChaosPolicies cleans up any leftover Cilium policies from previous runs
 // Should be called at startup. Returns number of deleted policies.
-func (m *NetworkBlockManager) CleanupStaleChaosPolicies(ctx context.Context, namespace string) (int, error) {
-	return m.cleanupPoliciesByLabel(ctx, namespace)
+func (m *NetworkBlockManager) CleanupStaleChaosPolicies(ctx context.Context) (int, error) {
+	return m.cleanupPoliciesByLabel(ctx)
 }
 
-func (m *NetworkBlockManager) cleanupPoliciesByLabel(ctx context.Context, namespace string) (int, error) {
+func (m *NetworkBlockManager) cleanupPoliciesByLabel(ctx context.Context) (int, error) {
+	namespace := m.parentClient.VMNamespace()
 	policyList := &unstructured.UnstructuredList{}
 	policyList.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   cnpGVR.Group,
@@ -99,7 +102,7 @@ func (m *NetworkBlockManager) cleanupPoliciesByLabel(ctx context.Context, namesp
 		Kind:    "CiliumNetworkPolicyList",
 	})
 
-	if err := m.cl.List(ctx, policyList, client.InNamespace(namespace)); err != nil {
+	if err := m.parentClient.Client().List(ctx, policyList, client.InNamespace(namespace)); err != nil {
 		return 0, fmt.Errorf("listing Cilium policies: %w", err)
 	}
 
@@ -112,7 +115,7 @@ func (m *NetworkBlockManager) cleanupPoliciesByLabel(ctx context.Context, namesp
 
 		// Only delete policies created by chaos (have chaos.megatest/type label)
 		if _, ok := labels[LabelChaosType]; ok {
-			if err := m.cl.Delete(ctx, &policy); err == nil {
+			if err := m.parentClient.Client().Delete(ctx, &policy); err == nil {
 				deleted++
 			}
 			// Ignore errors, best effort cleanup
