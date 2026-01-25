@@ -1029,7 +1029,7 @@ func applyStoragePool(rsc *v1alpha1.ReplicatedStorageClass, targetName string) b
 // reconcileRSP ensures the auto-generated RSP exists and is properly configured.
 // Creates RSP if not found, updates finalizer and usedBy if needed.
 //
-// Reconcile pattern: Conditional desired evaluation
+// Reconcile pattern: Conditional target evaluation
 func (r *Reconciler) reconcileRSP(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
@@ -1112,7 +1112,7 @@ func (r *Reconciler) reconcileUnusedRSPs(
 // reconcileRSPRelease releases the RSP from this RSC.
 // Removes RSC from usedBy, and if no more users - deletes the RSP.
 //
-// Reconcile pattern: Conditional desired evaluation
+// Reconcile pattern: Conditional target evaluation
 func (r *Reconciler) reconcileRSPRelease(
 	ctx context.Context,
 	rscName string,

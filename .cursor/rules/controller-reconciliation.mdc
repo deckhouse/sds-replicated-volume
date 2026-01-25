@@ -253,7 +253,7 @@ Examples of required protections:
   - `Reconcile pattern:` `<PatternName>`
 
   Example (required format):
-  - `// Reconcile pattern: Conditional desired evaluation`
+  - `// Reconcile pattern: Conditional target evaluation`
 
 ---
 
@@ -366,7 +366,7 @@ ComputeTarget #1 → ComputeTarget #2 → ... → if !all isInSync → ObjCopy �
 
 Use when computing the target is cheap/necessary and the up-to-date check naturally depends on the computed target.
 
-### Pattern 3: Conditional desired evaluation
+### Pattern 3: Conditional target evaluation
 
 if ! isInSync → ObjCopy → Ensure OR (ComputeTarget + Apply) → Patch
 

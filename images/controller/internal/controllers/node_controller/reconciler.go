@@ -48,7 +48,7 @@ func NewReconciler(cl client.Client) *Reconciler {
 // Reconcile
 //
 
-// Reconcile pattern: Conditional desired evaluation
+// Reconcile pattern: Conditional target evaluation
 //
 // Reconciles a single Node by checking if it should have the AgentNodeLabelKey.
 // A node should have the label if:
