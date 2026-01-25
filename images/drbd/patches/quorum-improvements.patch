@@ -1,0 +1,139 @@
+diff --git a/drbd/drbd_main.c b/drbd/drbd_main.c
+index dd1fb2f..14d5bc5 100644
+--- a/drbd/drbd_main.c
++++ b/drbd/drbd_main.c
+@@ -3703,6 +3703,7 @@ int set_resource_options(struct drbd_resource *resource, struct res_opts *res_op
+ 		res_opts->nr_requests = DRBD_NR_REQUESTS_MIN;
+ 
+ 	if (old_opts->quorum != res_opts->quorum ||
++	    old_opts->quorum_min_redundancy != res_opts->quorum_min_redundancy ||
+ 	    old_opts->on_no_quorum != res_opts->on_no_quorum)
+ 		force_state_recalc = true;
+ 
+diff --git a/drbd/drbd_nl.c b/drbd/drbd_nl.c
+index 6264e80..3ca90a1 100644
+--- a/drbd/drbd_nl.c
++++ b/drbd/drbd_nl.c
+@@ -7787,6 +7787,7 @@ static int drbd_adm_forget_peer(struct sk_buff *skb, struct genl_info *info)
+ 	struct drbd_device *device;
+ 	struct forget_peer_parms parms = { };
+ 	enum drbd_ret_code retcode;
++	unsigned long irq_flags;
+ 	int vnr, peer_node_id, err;
+ 
+ 	retcode = drbd_adm_prepare(&adm_ctx, skb, info, DRBD_ADM_NEED_RESOURCE);
+@@ -7820,6 +7821,13 @@ static int drbd_adm_forget_peer(struct sk_buff *skb, struct genl_info *info)
+ 
+ 	idr_for_each_entry(&resource->devices, device, vnr)
+ 		clear_peer_slot(device, peer_node_id, 0);
++
++	/* Remove the peer from cluster members and recalculate quorum */
++	resource->members &= ~NODE_MASK(peer_node_id);
++	if (resource->res_opts.quorum != QOU_OFF) {
++		begin_state_change(resource, &irq_flags, CS_VERBOSE | CS_FORCE_RECALC);
++		end_state_change(resource, &irq_flags, "forget-peer");
++	}
+ out:
+ 	mutex_unlock(&resource->adm_mutex);
+ out_no_adm_mutex:
+diff --git a/drbd/drbd_receiver.c b/drbd/drbd_receiver.c
+index 65c67f0..fdf95ac 100644
+--- a/drbd/drbd_receiver.c
++++ b/drbd/drbd_receiver.c
+@@ -8178,10 +8178,21 @@ static int receive_state(struct drbd_connection *connection, struct packet_info
+ 	clear_bit(RS_SOURCE_MISSED_END, &peer_device->flags);
+ 	clear_bit(RS_PEER_MISSED_END, &peer_device->flags);
+ 
+-	if (peer_state.quorum)
+-		set_bit(PEER_QUORATE, &peer_device->flags);
+-	else
+-		clear_bit(PEER_QUORATE, &peer_device->flags);
++	/* Track peer quorum changes for diskless nodes */
++	{
++		bool old_peer_quorate = test_bit(PEER_QUORATE, &peer_device->flags);
++
++		if (peer_state.quorum)
++			set_bit(PEER_QUORATE, &peer_device->flags);
++		else
++			clear_bit(PEER_QUORATE, &peer_device->flags);
++
++		/* For diskless nodes, quorum depends on peer's quorum state.
++		 * Force recalculation when peer quorum changes. */
++		if (old_peer_quorate != peer_state.quorum &&
++		    device->disk_state[NOW] == D_DISKLESS)
++			begin_state_chg_flags |= CS_FORCE_RECALC;
++	}
+ 
+ 	if (do_handshake) {
+ 		/* Ignoring state packets before the 2PC; they are from aborted 2PCs */
+@@ -9797,7 +9808,7 @@ static void conn_disconnect(struct drbd_connection *connection)
+ 
+ 	drbd_maybe_khelper(NULL, connection, "disconnected");
+ 
+-	begin_state_change(resource, &irq_flags, CS_VERBOSE | CS_LOCAL_ONLY);
++	begin_state_change(resource, &irq_flags, CS_VERBOSE | CS_LOCAL_ONLY | CS_HARD);
+ 	oc = connection->cstate[NOW];
+ 	if (oc >= C_UNCONNECTED) {
+ 		__change_cstate(connection, C_UNCONNECTED);
+diff --git a/drbd/drbd_state.c b/drbd/drbd_state.c
+index 08a74f9..76e20e6 100644
+--- a/drbd/drbd_state.c
++++ b/drbd/drbd_state.c
+@@ -1489,23 +1489,12 @@ static bool calc_quorum(struct drbd_device *device, struct quorum_info *qi)
+ 		__calc_quorum_no_disk(device, &qd);
+ 	}
+ 
+-	/* Check if a partition containing all missing nodes might have quorum */
+-	voters = qd.outdated + qd.quorumless + qd.unknown + qd.up_to_date + qd.present;
+-	quorum_at = calc_quorum_at(resource->res_opts.quorum, voters);
+-	if (qd.outdated + qd.quorumless + qd.unknown >= quorum_at) {
+-		/* when the missing nodes have the quorum, give up the quorumless */
+-		qd.unknown += qd.quorumless;
+-		qd.quorumless = 0;
+-	}
+-
+-	/* When all the absent nodes are D_OUTDATED (no one D_UNKNOWN), we can be
+-	   sure that the other partition is not able to promote. ->
+-	   We remove them from the voters. -> We have quorum */
+-	if (qd.unknown)
+-		voters = qd.outdated + qd.quorumless + qd.unknown + qd.up_to_date + qd.present;
+-	else
+-		voters = qd.up_to_date + qd.present;
++	drbd_info(device, "calc_quorum: up_to_date=%d present=%d outdated=%d diskless=%d "
++		  "missing_diskless=%d quorumless=%d unknown=%d quorate_peers=%d\n",
++		  qd.up_to_date, qd.present, qd.outdated, qd.diskless,
++		  qd.missing_diskless, qd.quorumless, qd.unknown, qd.quorate_peers);
+ 
++	voters = qd.outdated + qd.quorumless + qd.unknown + qd.up_to_date + qd.present;
+ 	quorum_at = calc_quorum_at(resource->res_opts.quorum, voters);
+ 	diskless_majority_at = calc_quorum_at(QOU_MAJORITY, qd.diskless + qd.missing_diskless);
+ 	min_redundancy_at = calc_quorum_at(resource->res_opts.quorum_min_redundancy, voters);
+@@ -1518,10 +1507,11 @@ static bool calc_quorum(struct drbd_device *device, struct quorum_info *qi)
+ 		qi->min_redundancy_at = min_redundancy_at;
+ 	}
+ 
+-	have_quorum = qd.quorate_peers ||
+-		((qd.up_to_date + qd.present) >= quorum_at && qd.up_to_date >= min_redundancy_at);
++	have_quorum = qd.quorate_peers >= min_redundancy_at ||
++	((qd.up_to_date + qd.present) >= quorum_at && qd.up_to_date >= min_redundancy_at);
+ 
+ 	if (!have_quorum && voters != 0 && voters % 2 == 0 && qd.up_to_date + qd.present == quorum_at - 1 &&
++		qd.up_to_date >= min_redundancy_at &&
+ 		/* It is an even number of nodes (think 2) and we failed by one vote.
+ 		   Check if we have majority of the diskless nodes connected.
+ 		   Using the diskless nodes a tie-breaker! */
+@@ -1708,9 +1698,12 @@ handshake_found:
+ 			nr_negotiating++;
+ 
+ 		/* Prevent promote when there is no quorum and
+-		 * prevent graceful disconnect/detach that would kill quorum
++		 * prevent graceful disconnect/detach that would kill quorum.
++		 * Allow forced recalculation (CS_FORCE_RECALC) to proceed,
++		 * so the node can transition to suspend-io when quorum is lost.
+ 		 */
+-		if ((role[OLD] == R_SECONDARY || device->have_quorum[OLD]) &&
++		if (!(resource->state_change_flags & CS_FORCE_RECALC) &&
++		    (role[OLD] == R_SECONDARY || device->have_quorum[OLD]) &&
+ 		    role[NEW] == R_PRIMARY && !device->have_quorum[NEW]) {
+ 			struct quorum_info qi;
+ 
