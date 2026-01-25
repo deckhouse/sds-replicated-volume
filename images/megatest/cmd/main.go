@@ -219,7 +219,7 @@ func setupChaosRunners(
 
 	// Cleanup stale resources from previous runs
 	log.Info("cleaning up stale chaos resources from previous runs")
-	if stalePolicies, err := ciliumManager.CleanupStaleChaosPolicies(ctx); err != nil {
+	if stalePolicies, err := ciliumManager.CleanupStaleChaosPolicies(ctx, opt.VMNamespace); err != nil {
 		log.Warn("failed to cleanup stale Cilium policies", "error", err)
 	} else if stalePolicies > 0 {
 		log.Info("cleaned up stale Cilium policies", "count", stalePolicies)
@@ -301,7 +301,7 @@ func setupChaosRunners(
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		if err := ciliumManager.CleanupAllChaosPolicies(cleanupCtx); err != nil {
+		if err := ciliumManager.CleanupAllChaosPolicies(cleanupCtx, opt.VMNamespace); err != nil {
 			log.Error("failed to cleanup Cilium policies", "error", err)
 		}
 

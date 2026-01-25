@@ -195,6 +195,11 @@ func (c *ParentClient) cleanupVMOperationsByLabel(ctx context.Context) (int, err
 	return deleted, nil
 }
 
+// VMNamespace returns the namespace where VMs are located
+func (c *ParentClient) VMNamespace() string {
+	return c.vmNamespace
+}
+
 // ListVMOperationsForVM returns all VirtualMachineOperations for a specific VM
 func (c *ParentClient) ListVMOperationsForVM(ctx context.Context, vmName string) ([]unstructured.Unstructured, error) {
 	vmOpList := &unstructured.UnstructuredList{}
