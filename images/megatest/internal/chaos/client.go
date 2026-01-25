@@ -127,30 +127,6 @@ func (c *ParentClient) ListVMs(ctx context.Context) ([]NodeInfo, error) {
 	return nodes, nil
 }
 
-// GetVM returns a single VirtualMachine by name
-func (c *ParentClient) GetVM(ctx context.Context, name string) (*NodeInfo, error) {
-	vm := &unstructured.Unstructured{}
-	vm.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   vmGVR.Group,
-		Version: vmGVR.Version,
-		Kind:    "VirtualMachine",
-	})
-
-	if err := c.cl.Get(ctx, client.ObjectKey{Namespace: c.vmNamespace, Name: name}, vm); err != nil {
-		return nil, fmt.Errorf("getting VM %s: %w", name, err)
-	}
-
-	ipAddress, found, err := unstructured.NestedString(vm.Object, "status", "ipAddress")
-	if err != nil || !found || ipAddress == "" {
-		return nil, fmt.Errorf("VM %s has no IP address", name)
-	}
-
-	return &NodeInfo{
-		Name:      name,
-		IPAddress: ipAddress,
-	}, nil
-}
-
 // CreateVMOperation creates a VirtualMachineOperation to control VM state
 func (c *ParentClient) CreateVMOperation(ctx context.Context, vmName string, opType VMOperationType, force bool) error {
 	opName := fmt.Sprintf("chaos-%s-%s-%d", string(opType), vmName, time.Now().Unix())
@@ -217,11 +193,6 @@ func (c *ParentClient) cleanupVMOperationsByLabel(ctx context.Context) (int, err
 	}
 
 	return deleted, nil
-}
-
-// VMNamespace returns the namespace where VMs are located
-func (c *ParentClient) VMNamespace() string {
-	return c.vmNamespace
 }
 
 // ListVMOperationsForVM returns all VirtualMachineOperations for a specific VM

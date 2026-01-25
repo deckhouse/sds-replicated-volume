@@ -43,25 +43,6 @@ func NewCiliumPolicyManager(cl client.Client) *CiliumPolicyManager {
 	return &CiliumPolicyManager{cl: cl}
 }
 
-// BlockDRBDPortsList creates a CiliumClusterwideNetworkPolicy to block specific DRBD ports between two nodes.
-// This is more efficient than BlockDRBDPorts when actual ports are known (fewer rules in policy).
-// Returns the policy name for later cleanup.
-func (m *CiliumPolicyManager) BlockDRBDPortsList(ctx context.Context, nodeA, nodeB NodeInfo, ports []int) (string, error) {
-	if len(ports) == 0 {
-		return "", fmt.Errorf("no ports specified for DRBD blocking")
-	}
-
-	policyName := fmt.Sprintf("chaos-drbd-%s-%s-%d", nodeA.Name, nodeB.Name, time.Now().Unix())
-
-	policy := m.buildDRBDBlockPolicyFromPorts(policyName, nodeA, nodeB, ports)
-
-	if err := m.cl.Create(ctx, policy); err != nil {
-		return "", fmt.Errorf("creating DRBD block policy %s: %w", policyName, err)
-	}
-
-	return policyName, nil
-}
-
 // BlockAllNetwork creates a CiliumClusterwideNetworkPolicy to block all network between two nodes
 // Returns the policy name for later cleanup
 func (m *CiliumPolicyManager) BlockAllNetwork(ctx context.Context, nodeA, nodeB NodeInfo) (string, error) {
@@ -138,67 +119,6 @@ func (m *CiliumPolicyManager) cleanupPoliciesByLabel(ctx context.Context) (int, 
 	}
 
 	return deleted, nil
-}
-
-// buildDRBDBlockPolicyFromPorts creates a CiliumClusterwideNetworkPolicy to block specific DRBD ports.
-// Uses actual ports list instead of a range - more efficient and targeted.
-func (m *CiliumPolicyManager) buildDRBDBlockPolicyFromPorts(name string, nodeA, nodeB NodeInfo, portList []int) *unstructured.Unstructured {
-	// Build port list from actual ports
-	ports := make([]interface{}, 0, len(portList))
-	for _, port := range portList {
-		ports = append(ports, map[string]interface{}{
-			"port":     fmt.Sprintf("%d", port),
-			"protocol": "TCP",
-		})
-	}
-
-	policy := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "cilium.io/v2",
-			"kind":       "CiliumClusterwideNetworkPolicy",
-			"metadata": map[string]interface{}{
-				"name": name,
-				"labels": map[string]interface{}{
-					LabelChaosType:  string(ChaosTypeDRBDBlock),
-					LabelChaosNodeA: nodeA.Name,
-					LabelChaosNodeB: nodeB.Name,
-				},
-			},
-			"spec": map[string]interface{}{
-				"nodeSelector": map[string]interface{}{
-					"matchLabels": map[string]interface{}{
-						"kubernetes.io/hostname": nodeA.Name,
-					},
-				},
-				"ingressDeny": []interface{}{
-					map[string]interface{}{
-						"fromCIDR": []interface{}{
-							fmt.Sprintf("%s/32", nodeB.IPAddress),
-						},
-						"toPorts": []interface{}{
-							map[string]interface{}{
-								"ports": ports,
-							},
-						},
-					},
-				},
-				"egressDeny": []interface{}{
-					map[string]interface{}{
-						"toCIDR": []interface{}{
-							fmt.Sprintf("%s/32", nodeB.IPAddress),
-						},
-						"toPorts": []interface{}{
-							map[string]interface{}{
-								"ports": ports,
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	return policy
 }
 
 // buildNetworkBlockPolicy creates a CiliumClusterwideNetworkPolicy to block all network
