@@ -35,20 +35,26 @@ const (
 
 // ChaosVMReboter periodically performs hard reboot of random VMs
 type ChaosVMReboter struct {
-	cfg          config.ChaosVMReboterConfig
-	parentClient *chaos.ParentClient
-	log          *slog.Logger
+	cfg              config.ChaosVMReboterConfig
+	vmOpManager      *chaos.VMOperationManager
+	parentClient     *chaos.ParentClient
+	log              *slog.Logger
+	forceCleanupChan <-chan struct{}
 }
 
 // NewChaosVMReboter creates a new ChaosVMReboter
 func NewChaosVMReboter(
 	cfg config.ChaosVMReboterConfig,
+	vmOpManager *chaos.VMOperationManager,
 	parentClient *chaos.ParentClient,
+	forceCleanupChan <-chan struct{},
 ) *ChaosVMReboter {
 	return &ChaosVMReboter{
-		cfg:          cfg,
-		parentClient: parentClient,
-		log:          slog.Default().With("runner", "chaos-vm-reboter"),
+		cfg:              cfg,
+		vmOpManager:      vmOpManager,
+		parentClient:     parentClient,
+		forceCleanupChan: forceCleanupChan,
+		log:              slog.Default().With("runner", "chaos-vm-reboter"),
 	}
 }
 
@@ -103,7 +109,7 @@ func (c *ChaosVMReboter) doReboot(ctx context.Context) error {
 	// Try to find a VM without unfinished operations
 	var selectedVM *chaos.NodeInfo
 	for _, node := range nodes {
-		hasUnfinished, err := c.parentClient.HasUnfinishedVMOperations(ctx, node.Name)
+		hasUnfinished, err := c.vmOpManager.HasUnfinishedVMOperations(ctx, node.Name)
 		if err != nil {
 			c.log.Warn("failed to check VM operations", "vm", node.Name, "error", err)
 			continue
@@ -128,7 +134,7 @@ func (c *ChaosVMReboter) doReboot(ctx context.Context) error {
 	vm := *selectedVM
 
 	// Check again for unfinished operations before creating new one
-	hasUnfinished, err := c.parentClient.HasUnfinishedVMOperations(ctx, vm.Name)
+	hasUnfinished, err := c.vmOpManager.HasUnfinishedVMOperations(ctx, vm.Name)
 	if err != nil {
 		c.log.Warn("failed to check VM operations before reboot", "vm", vm.Name, "error", err)
 		// Continue anyway
@@ -146,7 +152,7 @@ func (c *ChaosVMReboter) doReboot(ctx context.Context) error {
 	)
 
 	// Create VirtualMachineOperation for hard reboot
-	if err := c.parentClient.CreateVMOperation(ctx, vm.Name, chaos.VMOperationRestart, true); err != nil {
+	if err := c.vmOpManager.CreateVMOperation(ctx, vm.Name, chaos.VMOperationRestart, true); err != nil {
 		return err
 	}
 
@@ -155,9 +161,4 @@ func (c *ChaosVMReboter) doReboot(ctx context.Context) error {
 	)
 
 	return nil
-}
-
-func (c *ChaosVMReboter) randomVM(nodes []chaos.NodeInfo) chaos.NodeInfo {
-	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
-	return nodes[rand.Intn(len(nodes))]
 }
