@@ -87,7 +87,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Get LVGs referenced by RSP.
 	lvgs, lvgsNotFoundErr, err := r.getLVGsByRSP(rf.Ctx(), rsp)
 	if err != nil {
-		return rf.Fail(err).ToCtrl()
+		return rf.Failf(err, "listing LVMVolumeGroups").ToCtrl()
 	}
 
 	// Cannot calculate eligible nodes if LVGs are missing.
@@ -152,13 +152,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Get all nodes matching selector.
 	nodes, err := r.getSortedNodes(rf.Ctx(), nodeSelector)
 	if err != nil {
-		return rf.Fail(err).ToCtrl()
+		return rf.Failf(err, "listing Nodes").ToCtrl()
 	}
 
 	// Get agent readiness per node.
 	agentReadyByNode, err := r.getAgentReadiness(rf.Ctx())
 	if err != nil {
-		return rf.Fail(err).ToCtrl()
+		return rf.Failf(err, "listing agent Pods").ToCtrl()
 	}
 
 	eligibleNodes, worldStateExpiresAt := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)

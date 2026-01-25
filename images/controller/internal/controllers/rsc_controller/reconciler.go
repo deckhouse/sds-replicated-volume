@@ -75,13 +75,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Reconcile migration from RSP (deprecated storagePool field).
-	outcome := r.reconcileMigrationFromRSP(rf.Ctx(), rsc)
-	if outcome.ShouldReturn() {
-		return outcome.ToCtrl()
+	if rsc.Spec.StoragePool != "" {
+		if outcome := r.reconcileMigrationFromRSP(rf.Ctx(), rsc); outcome.ShouldReturn() {
+			return outcome.ToCtrl()
+		}
 	}
 
 	// Reconcile main (finalizer management).
-	outcome = r.reconcileMain(rf.Ctx(), rsc, rvs)
+	outcome := r.reconcileMain(rf.Ctx(), rsc, rvs)
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
 	}
@@ -98,23 +99,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 // reconcileMigrationFromRSP migrates StoragePool to spec.Storage.
 //
+// Precondition: rsc.Spec.StoragePool != "" (checked by caller)
+//
 // Reconcile pattern: Target-state driven
 //
 // Logic:
-//   - If storagePool is empty → Continue (nothing to migrate)
-//   - If storagePool set AND RSP not found → set conditions (Ready=False, StoragePoolReady=False), patch status, return Done
-//   - If storagePool set AND RSP found → copy type+lvmVolumeGroups to spec.storage, clear storagePool
+//   - If RSP not found → set conditions (Ready=False, StoragePoolReady=False), patch status, return Done
+//   - If RSP found → copy type+lvmVolumeGroups to spec.storage, clear storagePool
 func (r *Reconciler) reconcileMigrationFromRSP(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 ) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "migration-from-rsp")
+	rf := flow.BeginReconcile(ctx, "migration-from-rsp", "rsp", rsc.Spec.StoragePool)
 	defer rf.OnEnd(&outcome)
-
-	// Nothing to migrate.
-	if rsc.Spec.StoragePool == "" {
-		return rf.Continue()
-	}
 
 	rsp, err := r.getRSP(rf.Ctx(), rsc.Spec.StoragePool)
 	if err != nil {
@@ -1035,7 +1032,7 @@ func (r *Reconciler) reconcileRSP(
 	rsc *v1alpha1.ReplicatedStorageClass,
 	targetStoragePoolName string,
 ) (outcome flow.ReconcileOutcome, rsp *v1alpha1.ReplicatedStoragePool) {
-	rf := flow.BeginReconcile(ctx, "rsp")
+	rf := flow.BeginReconcile(ctx, "rsp", "rsp", targetStoragePoolName)
 	defer rf.OnEnd(&outcome)
 
 	// Get existing RSP.

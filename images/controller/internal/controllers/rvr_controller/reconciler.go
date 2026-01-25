@@ -76,17 +76,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	drbdr, err := r.getDRBDR(rf.Ctx(), req.Name)
 	if err != nil {
-		return rf.Fail(err).ToCtrl()
+		return rf.Failf(err, "getting DRBDResource").ToCtrl()
 	}
 
 	llvs, err := r.getLLVs(rf.Ctx(), req.Name, drbdr)
 	if err != nil {
-		return rf.Fail(err).ToCtrl()
+		return rf.Failf(err, "listing LVMLogicalVolumes").ToCtrl()
 	}
 
 	rv, err := r.getRV(rf.Ctx(), rvr)
 	if err != nil {
-		return rf.Fail(err).ToCtrl()
+		return rf.Failf(err, "getting ReplicatedVolume %s", rvr.Spec.ReplicatedVolumeName).ToCtrl()
 	}
 
 	if rvr != nil {
@@ -306,7 +306,7 @@ func (r *Reconciler) reconcileBackingVolume(
 	if intendedLLV == nil {
 		llv, err := newLLV(r.scheme, rvr, rv, intended)
 		if err != nil {
-			return "", rf.Failf(err, "constructing LLV")
+			return "", rf.Failf(err, "constructing LLV %s", intended.LLVName)
 		}
 
 		if err := r.createLLV(rf.Ctx(), llv); err != nil {
@@ -323,7 +323,7 @@ func (r *Reconciler) reconcileBackingVolume(
 				}
 				return "", rf.RequeueAfter(5 * time.Minute).ReportChanged()
 			}
-			return "", rf.Failf(err, "creating LLV")
+			return "", rf.Failf(err, "creating LLV %s", intended.LLVName)
 		}
 
 		// Add newly created LLV to the slice for further processing.
@@ -353,10 +353,10 @@ func (r *Reconciler) reconcileBackingVolume(
 	if !isLLVMetadataInSync(rvr, rv, intendedLLV) {
 		base := intendedLLV.DeepCopy()
 		if _, err := applyLLVMetadata(r.scheme, rvr, rv, intendedLLV); err != nil {
-			return "", rf.Failf(err, "applying LLV metadata")
+			return "", rf.Failf(err, "applying LLV %s metadata", intendedLLV.Name)
 		}
 		if err := r.patchLLV(rf.Ctx(), intendedLLV, base, true); err != nil {
-			return "", rf.Failf(err, "patching LLV metadata")
+			return "", rf.Failf(err, "patching LLV %s metadata", intendedLLV.Name)
 		}
 	}
 
@@ -404,7 +404,7 @@ func (r *Reconciler) reconcileBackingVolume(
 						fmt.Sprintf("Failed to resize backing volume %s: %s", intended.LLVName, computeAPIValidationErrorCauses(err)))
 					return intended.LLVName, rf.RequeueAfter(5 * time.Minute).ReportChanged()
 				}
-				return "", rf.Failf(err, "patching LLV size")
+				return "", rf.Failf(err, "patching LLV %s size", intendedLLV.Name)
 			}
 		}
 
@@ -713,13 +713,13 @@ func (r *Reconciler) reconcileLLVsDeletion(
 			base := llv.DeepCopy()
 			obju.RemoveFinalizer(llv, v1alpha1.RVRControllerFinalizer)
 			if err := r.patchLLV(rf.Ctx(), llv, base, false); err != nil {
-				return deletingNames, rf.Fail(err)
+				return deletingNames, rf.Failf(err, "patching LLV %s", llv.Name)
 			}
 		}
 
 		// Delete the LLV and remove from slice.
 		if err := r.deleteLLV(rf.Ctx(), llv); err != nil {
-			return deletingNames, rf.Fail(err)
+			return deletingNames, rf.Failf(err, "deleting LLV %s", llv.Name)
 		}
 		*llvs = slices.Delete(*llvs, i, i+1)
 	}
@@ -803,13 +803,13 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 				base := drbdr.DeepCopy()
 				obju.RemoveFinalizer(drbdr, v1alpha1.RVRControllerFinalizer)
 				if err := r.patchDRBDR(rf.Ctx(), drbdr, base, false); err != nil {
-					return rf.Fail(err)
+					return rf.Failf(err, "patching DRBDResource %s", drbdr.Name)
 				}
 			}
 
 			// Delete the DRBDResource.
 			if err := r.deleteDRBDR(rf.Ctx(), drbdr); err != nil {
-				return rf.Fail(err)
+				return rf.Failf(err, "deleting DRBDResource %s", drbdr.Name)
 			}
 		}
 
