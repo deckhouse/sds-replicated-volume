@@ -34,8 +34,8 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Online')].status
       name: Online
       type: string
-    - jsonPath: .status.conditions[?(@.type=='IOReady')].status
-      name: IOReady
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
       type: string
     - jsonPath: .status.conditions[?(@.type=='Configured')].status
       name: Configured
@@ -239,54 +239,6 @@ spec:
                       primary:
                         type: boolean
                     type: object
-                  errors:
-                    properties:
-                      configurationCommandError:
-                        properties:
-                          command:
-                            maxLength: 1024
-                            type: string
-                          exitCode:
-                            type: integer
-                          output:
-                            maxLength: 1024
-                            type: string
-                        type: object
-                      fileSystemOperationError:
-                        properties:
-                          message:
-                            maxLength: 1024
-                            type: string
-                        type: object
-                      lastPrimaryError:
-                        properties:
-                          command:
-                            maxLength: 1024
-                            type: string
-                          exitCode:
-                            type: integer
-                          output:
-                            maxLength: 1024
-                            type: string
-                        type: object
-                      lastSecondaryError:
-                        properties:
-                          command:
-                            maxLength: 1024
-                            type: string
-                          exitCode:
-                            type: integer
-                          output:
-                            maxLength: 1024
-                            type: string
-                        type: object
-                      sharedSecretAlgSelectionError:
-                        properties:
-                          unsupportedAlg:
-                            maxLength: 1024
-                            type: string
-                        type: object
-                    type: object
                   status:
                     properties:
                       connections:
@@ -449,13 +401,6 @@ spec:
                 type: object
               lvmLogicalVolumeName:
                 maxLength: 256
-                type: string
-              syncProgress:
-                description: |-
-                  SyncProgress shows sync status for kubectl output:
-                  - "True" when fully synced (InSync condition is True)
-                  - "XX.XX%" during active synchronization (SyncTarget)
-                  - DiskState (e.g. "Outdated", "Inconsistent") when not syncing but not in sync
                 type: string
             type: object
         required:

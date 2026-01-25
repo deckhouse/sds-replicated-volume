@@ -17,8 +17,6 @@ limitations under the License.
 package rvcontroller
 
 import (
-	"fmt"
-
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -37,16 +35,7 @@ const (
 func BuildController(mgr manager.Manager) error {
 	cl := mgr.GetClient()
 
-	// Initialize deviceMinor idpool after leader election (used for deviceMinor assignment).
-	poolSource := NewDeviceMinorPoolInitializer(mgr)
-	if err := mgr.Add(poolSource); err != nil {
-		return fmt.Errorf("adding cache initializer runnable: %w", err)
-	}
-
-	rec := NewReconciler(
-		cl,
-		poolSource,
-	)
+	rec := NewReconciler(cl)
 
 	return builder.ControllerManagedBy(mgr).
 		Named(RVControllerName).

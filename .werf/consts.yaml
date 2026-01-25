@@ -37,6 +37,7 @@
 {{- $_ := set $versions "SEMVER_TOOL" "3.4.0" }}
 {{- $_ := set $versions "SPAAS" "v0.1.5" }}
 {{- $_ := set $versions "THIN_SEND_RECV" "1.1.3" }}
+{{- $_ := set $versions "LVM2" "2_03_38" }}
 
 {{- $_ := set $ "VERSIONS" $versions }}
 

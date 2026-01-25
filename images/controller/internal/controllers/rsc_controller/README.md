@@ -1,26 +1,59 @@
 # rsc_controller
 
-This controller manages the `ReplicatedStorageClass` status fields by aggregating information from cluster topology and associated `ReplicatedVolume` resources.
+This controller manages `ReplicatedStorageClass` (RSC) resources by aggregating status from associated `ReplicatedStoragePool` (RSP) and `ReplicatedVolume` (RV) resources.
 
 ## Purpose
 
 The controller reconciles `ReplicatedStorageClass` status with:
 
-1. **Configuration** — resolved configuration snapshot from spec
-2. **Eligible nodes** — nodes that can host volumes of this storage class
-3. **Generations/Revisions** — for quick change detection
+1. **Storage pool management** — auto-generates and manages an RSP based on `spec.storage` configuration
+2. **Configuration snapshot** — resolved configuration from spec, stored in `status.configuration`
+3. **Generations/Revisions** — for quick change detection between RSC and RSP
 4. **Conditions** — 4 conditions describing the current state
 5. **Volume statistics** — counts of total, aligned, stale, and conflict volumes
+
+> **Note:** RSC does not calculate eligible nodes directly. It uses `RSP.Status.EligibleNodes` from the associated storage pool and validates them against topology/replication requirements.
+
+## Interactions
+
+| Direction | Resource/Controller | Relationship |
+|-----------|---------------------|--------------|
+| ← input | rsp_controller | Reads `RSP.Status.EligibleNodes` for validation |
+| ← input | ReplicatedVolume | Reads RVs for volume statistics |
+| → manages | ReplicatedStoragePool | Creates/updates auto-generated RSP |
+
+## Algorithm
+
+The controller creates/updates an RSP from `spec.storage`, validates eligible nodes against topology/replication requirements, and aggregates volume statistics:
+
+```
+readiness = storagePoolReady AND eligibleNodesValid
+configuration = resolved(spec) if readiness else previous
+volumeStats = aggregate(RVs) if allObserved else partial
+```
 
 ## Reconciliation Structure
 
 ```
-Reconcile (root)
-├── reconcileMain      — finalizer management
-└── reconcileStatus    — status fields update
-    ├── ensureConfigurationAndEligibleNodes
-    ├── ensureVolumeSummary
-    └── ensureVolumeConditions
+Reconcile (root) [Pure orchestration]
+├── getRSC
+├── getSortedRVsByRSC
+├── reconcileMigrationFromRSP [Target-state driven]
+│   └── migrate spec.storagePool → spec.storage (deprecated field)
+├── reconcileMain [Target-state driven]
+│   └── finalizer management
+├── reconcileStatus [In-place reconciliation]
+│   ├── reconcileRSP [Conditional desired evaluation]
+│   │   └── create/update auto-generated RSP
+│   ├── ensureStoragePool
+│   │   └── status.storagePoolName + StoragePoolReady condition
+│   ├── ensureConfiguration
+│   │   └── status.configuration + Ready condition
+│   └── ensureVolumeSummaryAndConditions
+│       └── status.volumes + ConfigurationRolledOut/VolumesSatisfyEligibleNodes conditions
+└── reconcileUnusedRSPs [Pure orchestration]
+    └── reconcileRSPRelease [Conditional desired evaluation]
+        └── release RSPs no longer referenced by this RSC
 ```
 
 ## Algorithm Flow
@@ -29,56 +62,67 @@ Reconcile (root)
 flowchart TD
     Start([Reconcile]) --> GetRSC[Get RSC]
     GetRSC -->|NotFound| Done1([Done])
-    GetRSC --> GetRVs[Get RVs]
+    GetRSC --> GetRVs[Get RVs by RSC]
 
-    GetRVs --> ReconcileMain[reconcileMain: Finalizer]
-    ReconcileMain -->|Deleting| Done2([Done])
-    ReconcileMain --> ReconcileStatus
+    GetRVs --> Migration[reconcileMigrationFromRSP]
+    Migration -->|storagePool empty| Main
+    Migration -->|RSP not found| SetMigrationFailed[Set Ready=False, StoragePoolReady=False]
+    SetMigrationFailed --> Done2([Done])
+    Migration -->|RSP found| MigrateStorage[Copy RSP config to spec.storage]
+    MigrateStorage --> Main
 
-    ReconcileStatus --> GetDeps[Get RSP, LVGs, Nodes]
-    GetDeps --> EnsureConfig[ensureConfigurationAndEligibleNodes]
+    Main[reconcileMain] --> CheckFinalizer{Finalizer check}
+    CheckFinalizer -->|Add/Remove| PatchMain[Patch main]
+    CheckFinalizer -->|No change| Status
+    PatchMain -->|Finalizer removed| Done3([Done])
+    PatchMain --> Status
 
-    EnsureConfig --> ValidateAndCompute[Validate config<br>Compute eligible nodes]
-    ValidateAndCompute -->|Invalid| SetConfigFailed[ConfigurationReady=False]
-    ValidateAndCompute -->|Valid| SetConfigOk[ConfigurationReady=True<br>EligibleNodesCalculated=True/False]
+    Status[reconcileStatus] --> ReconcileRSP[reconcileRSP]
+    ReconcileRSP -->|RSP not exists| CreateRSP[Create RSP]
+    CreateRSP --> EnsureRSPMain[Ensure RSP finalizer and usedBy]
+    ReconcileRSP -->|RSP exists| EnsureRSPMain
 
-    SetConfigFailed --> EnsureCounters
-    SetConfigOk --> EnsureCounters
+    EnsureRSPMain --> EnsureStoragePool[ensureStoragePool]
+    EnsureStoragePool --> EnsureConfig[ensureConfiguration]
 
-    EnsureCounters[ensureVolumeSummary] --> EnsureVolConds[ensureVolumeConditions]
+    EnsureConfig -->|StoragePoolReady != True| SetWaiting[Ready=False WaitingForStoragePool]
+    EnsureConfig -->|Eligible nodes invalid| SetInvalid[Ready=False InsufficientEligibleNodes]
+    EnsureConfig -->|Valid| SetReady[Ready=True, update configuration]
+    SetWaiting --> EnsureVolumes
+    SetInvalid --> EnsureVolumes
+    SetReady --> EnsureVolumes
 
-    EnsureVolConds --> SetAlignmentConds[Set ConfigurationRolledOut<br>Set VolumesSatisfyEligibleNodes]
-
-    SetAlignmentConds --> Changed{Changed?}
+    EnsureVolumes[ensureVolumeSummaryAndConditions] --> Changed{Changed?}
     Changed -->|Yes| PatchStatus[Patch status]
-    Changed -->|No| EndNode([Done])
-    PatchStatus --> EndNode
+    Changed -->|No| ReleaseRSPs
+    PatchStatus --> ReleaseRSPs
+
+    ReleaseRSPs[reconcileUnusedRSPs] --> EndNode([Done])
 ```
 
 ## Conditions
 
-### ConfigurationReady
+### Ready
 
-Indicates whether the storage class configuration has been accepted and validated.
+Indicates overall readiness of the storage class configuration.
 
 | Status | Reason | When |
 |--------|--------|------|
-| True | Ready | Configuration accepted and saved |
+| True | Ready | Configuration accepted and validated |
 | False | InvalidConfiguration | Configuration validation failed |
-| False | EligibleNodesCalculationFailed | Cannot calculate eligible nodes |
+| False | InsufficientEligibleNodes | RSP eligible nodes do not meet topology/replication requirements |
+| False | WaitingForStoragePool | Waiting for RSP to become ready |
 
-### EligibleNodesCalculated
+### StoragePoolReady
 
-Indicates whether eligible nodes have been calculated for the storage class.
+Indicates whether the associated storage pool exists and is ready.
 
 | Status | Reason | When |
 |--------|--------|------|
-| True | Calculated | Successfully calculated |
-| False | InsufficientEligibleNodes | Not enough eligible nodes for replication/topology |
-| False | InvalidConfiguration | Configuration is invalid (e.g., bad NodeLabelSelector) |
-| False | LVMVolumeGroupNotFound | Referenced LVG not found |
-| False | ReplicatedStoragePoolNotFound | RSP not found |
-| False | InvalidStoragePoolOrLVG | RSP phase is not Completed or thin pool not found |
+| True | Ready | RSP exists and has Ready=True |
+| False | StoragePoolNotFound | RSP does not exist (migration from deprecated storagePool field failed) |
+| False | Pending | RSP has no Ready condition yet |
+| False | (from RSP) | Propagated from RSP.Ready condition |
 
 ### ConfigurationRolledOut
 
@@ -102,27 +146,11 @@ Indicates whether all volumes' replicas are placed on eligible nodes.
 | False | ManualConflictResolution | `EligibleNodesConflictResolutionStrategy.type=Manual` AND `inConflictWithEligibleNodes > 0` |
 | Unknown | UpdatedEligibleNodesNotYetObserved | Some volumes haven't observed the updated eligible nodes yet |
 
-## Eligible Nodes Algorithm
+## Eligible Nodes Validation
 
-A node is considered eligible for an RSC if **all** conditions are met (AND):
+RSC does not calculate eligible nodes. The `rsp_controller` calculates them and stores in `RSP.Status.EligibleNodes`.
 
-1. **Zones** — if the RSC has `zones` specified, the node's `topology.kubernetes.io/zone` label must be in that list; if `zones` is not specified, the condition is satisfied for any node
-
-2. **NodeLabelSelector** — if the RSC has `nodeLabelSelector` specified, the node must match this selector; if not specified, the condition is satisfied for any node
-
-3. **Ready status** — if the node has been `NotReady` longer than `spec.eligibleNodesPolicy.notReadyGracePeriod`, it is excluded from the eligible nodes list
-
-> **Note:** A node does **not** need to have an LVMVolumeGroup to be eligible. Nodes without LVGs can serve as client-only nodes or tiebreaker nodes.
-
-For each eligible node, the controller also records:
-
-- **Unschedulable** flag — from `node.spec.unschedulable`
-- **Ready** flag — current node readiness status
-- **LVMVolumeGroups** — list of matching LVGs with their unschedulable status (from `storage.deckhouse.io/lvmVolumeGroupUnschedulable` annotation)
-
-### Eligible Nodes Validation
-
-The controller validates that eligible nodes meet replication and topology requirements:
+RSC validates that the eligible nodes from RSP meet replication and topology requirements:
 
 | Replication | Topology | Requirement |
 |-------------|----------|-------------|
@@ -137,7 +165,9 @@ The controller validates that eligible nodes meet replication and topology requi
 | ConsistencyAndAvailability | TransZonal | ≥3 zones with disks |
 | ConsistencyAndAvailability | Zonal | per zone: ≥3 nodes with disks |
 
-## Volume Statistics Algorithm
+If validation fails, RSC sets `Ready=False` with reason `InsufficientEligibleNodes`.
+
+## Volume Statistics
 
 The controller aggregates statistics from all `ReplicatedVolume` resources referencing this RSC:
 
@@ -146,56 +176,81 @@ The controller aggregates statistics from all `ReplicatedVolume` resources refer
 - **StaleConfiguration** — volumes where `ConfigurationReady` is `False`
 - **InConflictWithEligibleNodes** — volumes where `SatisfyEligibleNodes` is `False`
 - **PendingObservation** — volumes that haven't observed current RSC configuration/eligible nodes
+- **UsedStoragePoolNames** — sorted list of storage pool names referenced by volumes
 
 > **Note:** Counters other than `Total` and `PendingObservation` are only computed when all volumes have observed the current configuration.
+
+## Managed Metadata
+
+| Type | Key | Managed On | Purpose |
+|------|-----|------------|---------|
+| Finalizer | `storage.deckhouse.io/rsc-controller` | RSC | Prevent deletion while RSP exists |
+| Finalizer | `storage.deckhouse.io/rsc-controller` | RSP | Prevent deletion while RSC references it |
+| Label | `storage.deckhouse.io/rsc-managed-rsp` | RSP | Mark RSP as auto-generated by RSC |
+| Annotation | `storage.deckhouse.io/used-by-rsc` | RSP | Track which RSC uses this RSP |
+
+## Watches
+
+| Resource | Events | Handler |
+|----------|--------|---------|
+| RSC | For() (primary) | — |
+| RSP | Generation change, EligibleNodesRevision change, Ready condition change | mapRSPToRSC |
+| RV | spec.replicatedStorageClassName change, status.ConfigurationObservedGeneration change, ConfigurationReady/SatisfyEligibleNodes condition changes | rvEventHandler |
+
+## Indexes
+
+| Index | Field | Purpose |
+|-------|-------|---------|
+| `IndexFieldRSCByStoragePool` | `spec.storagePool` | Find RSCs referencing an RSP (migration from deprecated field) |
+| `IndexFieldRSCByStatusStoragePoolName` | `status.storagePoolName` | Find RSCs using an RSP |
+| `IndexFieldRVByRSC` | `spec.replicatedStorageClassName` | Find RVs referencing an RSC |
 
 ## Data Flow
 
 ```mermaid
 flowchart TD
     subgraph inputs [Inputs]
-        RSC[RSC.spec]
-        Nodes[Nodes]
-        RSP[ReplicatedStoragePool]
-        LVGs[LVMVolumeGroups]
+        RSCSpec[RSC.spec]
+        RSP[RSP.status]
         RVs[ReplicatedVolumes]
     end
 
-    subgraph ensure [Ensure Helpers]
-        EnsureConfig[ensureConfigurationAndEligibleNodes]
-        EnsureVols[ensureVolumeSummary]
-        EnsureVolConds[ensureVolumeConditions]
+    subgraph reconcilers [Reconcilers]
+        ReconcileRSP[reconcileRSP]
+        EnsureStoragePool[ensureStoragePool]
+        EnsureConfig[ensureConfiguration]
+        EnsureVols[ensureVolumeSummaryAndConditions]
     end
 
     subgraph status [Status Output]
+        StoragePoolName[status.storagePoolName]
+        StoragePoolGen[status.storagePoolBasedOnGeneration]
+        EligibleRev[status.storagePoolEligibleNodesRevision]
         Config[status.configuration]
         ConfigGen[status.configurationGeneration]
-        EN[status.eligibleNodes]
-        ENRev[status.eligibleNodesRevision]
-        WorldState[status.eligibleNodesWorldState]
         Conds[status.conditions]
         Vol[status.volumes]
     end
 
-    RSC --> EnsureConfig
-    Nodes --> EnsureConfig
-    RSP --> EnsureConfig
-    LVGs --> EnsureConfig
+    RSCSpec --> ReconcileRSP
+    ReconcileRSP -->|Creates/updates| RSP
 
+    RSCSpec --> EnsureStoragePool
+    RSP --> EnsureStoragePool
+    EnsureStoragePool --> StoragePoolName
+    EnsureStoragePool --> StoragePoolGen
+    EnsureStoragePool -->|StoragePoolReady| Conds
+
+    RSCSpec --> EnsureConfig
+    RSP --> EnsureConfig
     EnsureConfig --> Config
     EnsureConfig --> ConfigGen
-    EnsureConfig --> EN
-    EnsureConfig --> ENRev
-    EnsureConfig --> WorldState
-    EnsureConfig -->|ConfigurationReady<br>EligibleNodesCalculated| Conds
+    EnsureConfig --> EligibleRev
+    EnsureConfig -->|Ready| Conds
 
-    RSC --> EnsureVols
+    RSCSpec --> EnsureVols
     RVs --> EnsureVols
-
     EnsureVols --> Vol
-
-    RSC --> EnsureVolConds
-    RVs --> EnsureVolConds
-
-    EnsureVolConds -->|ConfigurationRolledOut<br>VolumesSatisfyEligibleNodes| Conds
+    EnsureVols -->|ConfigurationRolledOut| Conds
+    EnsureVols -->|VolumesSatisfyEligibleNodes| Conds
 ```
