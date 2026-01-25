@@ -35,7 +35,7 @@ const (
 // ChaosNetworkBlocker periodically blocks network between nodes with different incident types
 type ChaosNetworkBlocker struct {
 	cfg              config.ChaosNetworkBlockerConfig
-	ciliumManager    *chaos.CiliumPolicyManager
+	networkBlockMgr  *chaos.NetworkBlockManager
 	parentClient     *chaos.ParentClient
 	log              *slog.Logger
 	forceCleanupChan <-chan struct{}
@@ -44,13 +44,13 @@ type ChaosNetworkBlocker struct {
 // NewChaosNetworkBlocker creates a new ChaosNetworkBlocker
 func NewChaosNetworkBlocker(
 	cfg config.ChaosNetworkBlockerConfig,
-	ciliumManager *chaos.CiliumPolicyManager,
+	networkBlockMgr *chaos.NetworkBlockManager,
 	parentClient *chaos.ParentClient,
 	forceCleanupChan <-chan struct{},
 ) *ChaosNetworkBlocker {
 	return &ChaosNetworkBlocker{
 		cfg:              cfg,
-		ciliumManager:    ciliumManager,
+		networkBlockMgr:  networkBlockMgr,
 		parentClient:     parentClient,
 		forceCleanupChan: forceCleanupChan,
 		log:              slog.Default().With("runner", "chaos-network-blocker"),
@@ -123,7 +123,7 @@ func (c *ChaosNetworkBlocker) doBlockingEverything(ctx context.Context, nodes []
 	)
 
 	// Create blocking policy (one-directional: nodeA blocks traffic to/from nodeB)
-	policyName, err := c.ciliumManager.BlockAllNetwork(ctx, nodeA, nodeB, c.parentClient.VMNamespace())
+	policyName, err := c.networkBlockMgr.BlockAllNetwork(ctx, nodeA, nodeB, c.parentClient.VMNamespace())
 	if err != nil {
 		return err
 	}
@@ -153,7 +153,7 @@ func (c *ChaosNetworkBlocker) doBlockingEverything(ctx context.Context, nodes []
 		"policy", policyName,
 	)
 
-	if err := c.ciliumManager.UnblockTraffic(context.Background(), policyName, c.parentClient.VMNamespace()); err != nil {
+	if err := c.networkBlockMgr.UnblockTraffic(context.Background(), policyName, c.parentClient.VMNamespace()); err != nil {
 		c.log.Error("failed to unblock network", "error", err)
 	}
 
@@ -192,7 +192,7 @@ func (c *ChaosNetworkBlocker) doSplitBrain(ctx context.Context, nodes []chaos.No
 	for _, nodeA := range groupA {
 		for _, nodeB := range groupB {
 			// Block A -> B
-			policyName, err := c.ciliumManager.BlockAllNetwork(ctx, nodeA, nodeB, namespace)
+			policyName, err := c.networkBlockMgr.BlockAllNetwork(ctx, nodeA, nodeB, namespace)
 			if err != nil {
 				c.log.Error("failed to block network", "node_a", nodeA.Name, "node_b", nodeB.Name, "error", err)
 				continue
@@ -200,7 +200,7 @@ func (c *ChaosNetworkBlocker) doSplitBrain(ctx context.Context, nodes []chaos.No
 			policyNames = append(policyNames, policyName)
 
 			// Block B -> A
-			policyName, err = c.ciliumManager.BlockAllNetwork(ctx, nodeB, nodeA, namespace)
+			policyName, err = c.networkBlockMgr.BlockAllNetwork(ctx, nodeB, nodeA, namespace)
 			if err != nil {
 				c.log.Error("failed to block network", "node_a", nodeB.Name, "node_b", nodeA.Name, "error", err)
 				continue
@@ -241,7 +241,7 @@ func (c *ChaosNetworkBlocker) doSplitBrain(ctx context.Context, nodes []chaos.No
 func (c *ChaosNetworkBlocker) cleanup(policyNames []string) {
 	namespace := c.parentClient.VMNamespace()
 	for _, policyName := range policyNames {
-		if err := c.ciliumManager.UnblockTraffic(context.Background(), policyName, namespace); err != nil {
+		if err := c.networkBlockMgr.UnblockTraffic(context.Background(), policyName, namespace); err != nil {
 			c.log.Error("cleanup failed", "policy", policyName, "error", err)
 		}
 	}

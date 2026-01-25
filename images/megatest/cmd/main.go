@@ -211,21 +211,21 @@ func setupChaosRunners(
 		return func() {}
 	}
 
-	// Create Cilium policy manager (uses parent cluster client)
-	ciliumManager := chaos.NewCiliumPolicyManager(parentClient.Client())
+	// Create network block manager (uses parent cluster client)
+	networkBlockMgr := chaos.NewNetworkBlockManager(parentClient.Client())
 
-	// Create VM operation manager (uses parent cluster client)
-	vmOpManager := chaos.NewVMOperationManager(parentClient.Client(), opt.VMNamespace)
+	// Create VM reboot manager (uses parent cluster client)
+	vmRebootMgr := chaos.NewVMRebootManager(parentClient.Client(), opt.VMNamespace)
 
 	// Create network degrade manager (uses child cluster client)
 	networkDegradeMgr := chaos.NewNetworkDegradeManager(kubeClient.Client())
 
 	// Cleanup stale resources from previous runs
 	log.Info("cleaning up stale chaos resources from previous runs")
-	if stalePolicies, err := ciliumManager.CleanupStaleChaosPolicies(ctx, opt.VMNamespace); err != nil {
-		log.Warn("failed to cleanup stale Cilium policies", "error", err)
+	if stalePolicies, err := networkBlockMgr.CleanupStaleChaosPolicies(ctx, opt.VMNamespace); err != nil {
+		log.Warn("failed to cleanup stale network block policies", "error", err)
 	} else if stalePolicies > 0 {
-		log.Info("cleaned up stale Cilium policies", "count", stalePolicies)
+		log.Info("cleaned up stale network block policies", "count", stalePolicies)
 	}
 
 	if staleJobs, err := networkDegradeMgr.CleanupStaleNetworkDegradeJobs(ctx); err != nil {
@@ -234,7 +234,7 @@ func setupChaosRunners(
 		log.Info("cleaned up stale network degrade Jobs", "count", staleJobs)
 	}
 
-	if staleVMOps, err := vmOpManager.CleanupStaleVMOperations(ctx); err != nil {
+	if staleVMOps, err := vmRebootMgr.CleanupStaleVMOperations(ctx); err != nil {
 		log.Warn("failed to cleanup stale VMOperations", "error", err)
 	} else if staleVMOps > 0 {
 		log.Info("cleaned up stale VMOperations", "count", staleVMOps)
@@ -254,7 +254,7 @@ func setupChaosRunners(
 			IncidentDuration: incidentDuration,
 			GroupSize:        opt.ChaosPartitionGroupSize,
 		}
-		blocker := runners.NewChaosNetworkBlocker(cfg, ciliumManager, parentClient, forceCleanupChan)
+		blocker := runners.NewChaosNetworkBlocker(cfg, networkBlockMgr, parentClient, forceCleanupChan)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -284,7 +284,7 @@ func setupChaosRunners(
 		cfg := config.ChaosVMReboterConfig{
 			Period: period,
 		}
-		reboter := runners.NewChaosVMReboter(cfg, vmOpManager, parentClient, forceCleanupChan)
+		reboter := runners.NewChaosVMReboter(cfg, vmRebootMgr, parentClient, forceCleanupChan)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -304,8 +304,8 @@ func setupChaosRunners(
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		if err := ciliumManager.CleanupAllChaosPolicies(cleanupCtx, opt.VMNamespace); err != nil {
-			log.Error("failed to cleanup Cilium policies", "error", err)
+		if err := networkBlockMgr.CleanupAllChaosPolicies(cleanupCtx, opt.VMNamespace); err != nil {
+			log.Error("failed to cleanup network block policies", "error", err)
 		}
 
 		// Cleanup network degrade Jobs
@@ -313,7 +313,7 @@ func setupChaosRunners(
 		// The cleanup is best-effort since Jobs may have already completed
 
 		// Cleanup VM operations
-		if err := vmOpManager.CleanupAllVMOperations(cleanupCtx); err != nil {
+		if err := vmRebootMgr.CleanupAllVMOperations(cleanupCtx); err != nil {
 			log.Error("failed to cleanup VM operations", "error", err)
 		}
 

@@ -33,22 +33,22 @@ var vmOpGVR = schema.GroupVersionResource{
 	Resource: "virtualmachineoperations",
 }
 
-// VMOperationManager manages VirtualMachineOperation for chaos scenarios
-type VMOperationManager struct {
+// VMRebootManager manages VirtualMachineOperation for VM reboot chaos scenarios
+type VMRebootManager struct {
 	cl          client.Client
 	vmNamespace string
 }
 
-// NewVMOperationManager creates a new VMOperationManager
-func NewVMOperationManager(cl client.Client, vmNamespace string) *VMOperationManager {
-	return &VMOperationManager{
+// NewVMRebootManager creates a new VMRebootManager
+func NewVMRebootManager(cl client.Client, vmNamespace string) *VMRebootManager {
+	return &VMRebootManager{
 		cl:          cl,
 		vmNamespace: vmNamespace,
 	}
 }
 
 // CreateVMOperation creates a VirtualMachineOperation to control VM state
-func (m *VMOperationManager) CreateVMOperation(ctx context.Context, vmName string, opType VMOperationType, force bool) error {
+func (m *VMRebootManager) CreateVMOperation(ctx context.Context, vmName string, opType VMOperationType, force bool) error {
 	opName := fmt.Sprintf("chaos-%s-%s-%d", string(opType), vmName, time.Now().Unix())
 
 	vmOp := &unstructured.Unstructured{
@@ -79,7 +79,7 @@ func (m *VMOperationManager) CreateVMOperation(ctx context.Context, vmName strin
 }
 
 // ListVMOperationsForVM returns all VirtualMachineOperations for a specific VM
-func (m *VMOperationManager) ListVMOperationsForVM(ctx context.Context, vmName string) ([]unstructured.Unstructured, error) {
+func (m *VMRebootManager) ListVMOperationsForVM(ctx context.Context, vmName string) ([]unstructured.Unstructured, error) {
 	vmOpList := &unstructured.UnstructuredList{}
 	vmOpList.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   vmOpGVR.Group,
@@ -99,7 +99,7 @@ func (m *VMOperationManager) ListVMOperationsForVM(ctx context.Context, vmName s
 
 // HasUnfinishedVMOperations checks if there are unfinished VirtualMachineOperations for a VM
 // Returns true if there are operations with status.phase != Failed && != Completed
-func (m *VMOperationManager) HasUnfinishedVMOperations(ctx context.Context, vmName string) (bool, error) {
+func (m *VMRebootManager) HasUnfinishedVMOperations(ctx context.Context, vmName string) (bool, error) {
 	vmOps, err := m.ListVMOperationsForVM(ctx, vmName)
 	if err != nil {
 		return false, err
@@ -127,18 +127,18 @@ func (m *VMOperationManager) HasUnfinishedVMOperations(ctx context.Context, vmNa
 }
 
 // CleanupAllVMOperations deletes all VirtualMachineOperations created by chaos
-func (m *VMOperationManager) CleanupAllVMOperations(ctx context.Context) error {
+func (m *VMRebootManager) CleanupAllVMOperations(ctx context.Context) error {
 	_, err := m.cleanupVMOperationsByLabel(ctx)
 	return err
 }
 
 // CleanupStaleVMOperations cleans up any leftover VMOperations from previous runs
 // Should be called at startup. Returns number of deleted operations.
-func (m *VMOperationManager) CleanupStaleVMOperations(ctx context.Context) (int, error) {
+func (m *VMRebootManager) CleanupStaleVMOperations(ctx context.Context) (int, error) {
 	return m.cleanupVMOperationsByLabel(ctx)
 }
 
-func (m *VMOperationManager) cleanupVMOperationsByLabel(ctx context.Context) (int, error) {
+func (m *VMRebootManager) cleanupVMOperationsByLabel(ctx context.Context) (int, error) {
 	vmOpList := &unstructured.UnstructuredList{}
 	vmOpList.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   vmOpGVR.Group,

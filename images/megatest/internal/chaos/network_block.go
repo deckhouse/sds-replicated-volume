@@ -33,19 +33,19 @@ var cnpGVR = schema.GroupVersionResource{
 	Resource: "ciliumnetworkpolicies",
 }
 
-// CiliumPolicyManager manages CiliumNetworkPolicy for chaos scenarios
-type CiliumPolicyManager struct {
+// NetworkBlockManager manages CiliumNetworkPolicy for network blocking chaos scenarios
+type NetworkBlockManager struct {
 	cl client.Client
 }
 
-// NewCiliumPolicyManager creates a new CiliumPolicyManager
-func NewCiliumPolicyManager(cl client.Client) *CiliumPolicyManager {
-	return &CiliumPolicyManager{cl: cl}
+// NewNetworkBlockManager creates a new NetworkBlockManager
+func NewNetworkBlockManager(cl client.Client) *NetworkBlockManager {
+	return &NetworkBlockManager{cl: cl}
 }
 
 // BlockAllNetwork creates a CiliumNetworkPolicy to block all network between two nodes
 // Returns the policy name for later cleanup
-func (m *CiliumPolicyManager) BlockAllNetwork(ctx context.Context, nodeA, nodeB NodeInfo, namespace string) (string, error) {
+func (m *NetworkBlockManager) BlockAllNetwork(ctx context.Context, nodeA, nodeB NodeInfo, namespace string) (string, error) {
 	policyName := fmt.Sprintf("chaos-net-%s-%s-%d", nodeA.Name, nodeB.Name, time.Now().Unix())
 
 	policy := m.buildNetworkBlockPolicy(policyName, nodeA, nodeB, namespace)
@@ -58,7 +58,7 @@ func (m *CiliumPolicyManager) BlockAllNetwork(ctx context.Context, nodeA, nodeB 
 }
 
 // UnblockTraffic deletes a CiliumNetworkPolicy by name
-func (m *CiliumPolicyManager) UnblockTraffic(ctx context.Context, policyName string, namespace string) error {
+func (m *NetworkBlockManager) UnblockTraffic(ctx context.Context, policyName string, namespace string) error {
 	policy := &unstructured.Unstructured{}
 	policy.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   cnpGVR.Group,
@@ -76,7 +76,7 @@ func (m *CiliumPolicyManager) UnblockTraffic(ctx context.Context, policyName str
 }
 
 // CleanupAllChaosPolicies deletes all CiliumNetworkPolicy created by chaos
-func (m *CiliumPolicyManager) CleanupAllChaosPolicies(ctx context.Context, namespace string) error {
+func (m *NetworkBlockManager) CleanupAllChaosPolicies(ctx context.Context, namespace string) error {
 	deleted, err := m.cleanupPoliciesByLabel(ctx, namespace)
 	if err != nil {
 		return err
@@ -87,11 +87,11 @@ func (m *CiliumPolicyManager) CleanupAllChaosPolicies(ctx context.Context, names
 
 // CleanupStaleChaosPolicies cleans up any leftover Cilium policies from previous runs
 // Should be called at startup. Returns number of deleted policies.
-func (m *CiliumPolicyManager) CleanupStaleChaosPolicies(ctx context.Context, namespace string) (int, error) {
+func (m *NetworkBlockManager) CleanupStaleChaosPolicies(ctx context.Context, namespace string) (int, error) {
 	return m.cleanupPoliciesByLabel(ctx, namespace)
 }
 
-func (m *CiliumPolicyManager) cleanupPoliciesByLabel(ctx context.Context, namespace string) (int, error) {
+func (m *NetworkBlockManager) cleanupPoliciesByLabel(ctx context.Context, namespace string) (int, error) {
 	policyList := &unstructured.UnstructuredList{}
 	policyList.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   cnpGVR.Group,
@@ -123,7 +123,7 @@ func (m *CiliumPolicyManager) cleanupPoliciesByLabel(ctx context.Context, namesp
 }
 
 // buildNetworkBlockPolicy creates a CiliumNetworkPolicy to block all network
-func (m *CiliumPolicyManager) buildNetworkBlockPolicy(name string, nodeA, nodeB NodeInfo, namespace string) *unstructured.Unstructured {
+func (m *NetworkBlockManager) buildNetworkBlockPolicy(name string, nodeA, nodeB NodeInfo, namespace string) *unstructured.Unstructured {
 	policy := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "cilium.io/v2",
