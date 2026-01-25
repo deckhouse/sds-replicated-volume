@@ -19,92 +19,182 @@ package objutilv1_test
 import (
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 )
 
-func TestOwnerRefsHelpers(t *testing.T) {
-	obj := &metav1.PartialObjectMetadata{}
+func TestHasControllerRef(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
 
-	ownerNoGVK := &metav1.PartialObjectMetadata{}
-	ownerNoGVK.SetName("owner")
-	ownerNoGVK.SetUID(types.UID("u1"))
+	owner := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "owner",
+			Namespace: "default",
+			UID:       types.UID("owner-uid"),
+		},
+	}
 
-	t.Run("empty_GVK_panics", func(t *testing.T) {
-		func() {
-			defer func() {
-				if r := recover(); r == nil {
-					t.Fatalf("expected panic when owner has empty GVK (SetOwnerRef)")
-				}
-			}()
-			_ = objutilv1.SetOwnerRef(obj, ownerNoGVK, true)
-		}()
+	obj := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "child",
+			Namespace: "default",
+		},
+	}
 
-		func() {
-			defer func() {
-				if r := recover(); r == nil {
-					t.Fatalf("expected panic when owner has empty GVK (HasMatchingOwnerRef)")
-				}
-			}()
-			_ = objutilv1.HasMatchingOwnerRef(obj, ownerNoGVK, true)
-		}()
-	})
+	// Initially should return false.
+	if objutilv1.HasControllerRef(obj, owner) {
+		t.Fatalf("expected HasControllerRef=false before setting")
+	}
 
-	t.Run("empty_name_panics", func(t *testing.T) {
-		owner := &metav1.PartialObjectMetadata{}
-		owner.TypeMeta.APIVersion = "test.io/v1"
-		owner.TypeMeta.Kind = "TestOwner"
-		owner.SetUID(types.UID("u1"))
+	// Set controller ref.
+	_, _ = objutilv1.SetControllerRef(obj, owner, scheme)
 
-		defer func() {
-			if r := recover(); r == nil {
-				t.Fatalf("expected panic when owner has empty name")
-			}
-		}()
-		_ = objutilv1.SetOwnerRef(obj, owner, true)
-	})
+	// Now should return true.
+	if !objutilv1.HasControllerRef(obj, owner) {
+		t.Fatalf("expected HasControllerRef=true after setting")
+	}
+}
 
-	t.Run("empty_uid_panics", func(t *testing.T) {
-		owner := &metav1.PartialObjectMetadata{}
-		owner.TypeMeta.APIVersion = "test.io/v1"
-		owner.TypeMeta.Kind = "TestOwner"
-		owner.SetName("owner")
+func TestHasOwnerRef(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
 
-		defer func() {
-			if r := recover(); r == nil {
-				t.Fatalf("expected panic when owner has empty uid")
-			}
-		}()
-		_ = objutilv1.SetOwnerRef(obj, owner, true)
-	})
+	owner := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "owner",
+			Namespace: "default",
+			UID:       types.UID("owner-uid"),
+		},
+	}
 
-	owner := &metav1.PartialObjectMetadata{}
-	owner.TypeMeta.APIVersion = "test.io/v1"
-	owner.TypeMeta.Kind = "TestOwner"
-	owner.SetName("owner")
-	owner.SetUID(types.UID("u1"))
+	obj := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "child",
+			Namespace: "default",
+		},
+	}
 
-	if changed := objutilv1.SetOwnerRef(obj, owner, true); !changed {
+	// Initially should return false.
+	if objutilv1.HasOwnerRef(obj, owner) {
+		t.Fatalf("expected HasOwnerRef=false before setting")
+	}
+
+	// Set owner ref (non-controller).
+	_, _ = objutilv1.SetOwnerRef(obj, owner, scheme)
+
+	// Now should return true.
+	if !objutilv1.HasOwnerRef(obj, owner) {
+		t.Fatalf("expected HasOwnerRef=true after setting")
+	}
+
+	// HasOwnerRef should also return true for controller refs.
+	obj2 := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "child2",
+			Namespace: "default",
+		},
+	}
+	_, _ = objutilv1.SetControllerRef(obj2, owner, scheme)
+	if !objutilv1.HasOwnerRef(obj2, owner) {
+		t.Fatalf("expected HasOwnerRef=true for controller ref")
+	}
+}
+
+func TestSetControllerRef(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+
+	owner := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "owner",
+			Namespace: "default",
+			UID:       types.UID("owner-uid"),
+		},
+	}
+
+	obj := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "child",
+			Namespace: "default",
+		},
+	}
+
+	// First set should return changed=true.
+	changed, err := objutilv1.SetControllerRef(obj, owner, scheme)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !changed {
 		t.Fatalf("expected changed=true on first set")
 	}
-	if changed := objutilv1.SetOwnerRef(obj, owner, true); changed {
+
+	// Verify owner reference was set as controller.
+	if !metav1.IsControlledBy(obj, owner) {
+		t.Fatalf("expected obj to be controlled by owner")
+	}
+
+	// Second set should return changed=false (idempotent).
+	changed, err = objutilv1.SetControllerRef(obj, owner, scheme)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if changed {
 		t.Fatalf("expected changed=false on idempotent set")
 	}
+}
 
-	if !objutilv1.HasMatchingOwnerRef(obj, owner, true) {
-		t.Fatalf("expected to match ownerRef")
-	}
-	if objutilv1.HasMatchingOwnerRef(obj, owner, false) {
-		t.Fatalf("expected not to match ownerRef with different controller flag")
+func TestSetOwnerRef(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+
+	owner := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "owner",
+			Namespace: "default",
+			UID:       types.UID("owner-uid"),
+		},
 	}
 
-	// Update controller flag for the same owner UID.
-	if changed := objutilv1.SetOwnerRef(obj, owner, false); !changed {
-		t.Fatalf("expected changed=true when updating controller flag")
+	obj := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "child",
+			Namespace: "default",
+		},
 	}
-	if !objutilv1.HasMatchingOwnerRef(obj, owner, false) {
-		t.Fatalf("expected to match updated ownerRef")
+
+	// First set should return changed=true.
+	changed, err := objutilv1.SetOwnerRef(obj, owner, scheme)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !changed {
+		t.Fatalf("expected changed=true on first set")
+	}
+
+	// Verify owner reference was set (but not as controller).
+	refs := obj.GetOwnerReferences()
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 owner reference, got %d", len(refs))
+	}
+	if refs[0].UID != owner.GetUID() {
+		t.Fatalf("expected owner UID %s, got %s", owner.GetUID(), refs[0].UID)
+	}
+	// SetOwnerReference from controllerutil does NOT set Controller=true by default.
+	if refs[0].Controller != nil && *refs[0].Controller {
+		t.Fatalf("expected non-controller owner reference")
+	}
+
+	// Second set should return changed=false (idempotent).
+	changed, err = objutilv1.SetOwnerRef(obj, owner, scheme)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if changed {
+		t.Fatalf("expected changed=false on idempotent set")
 	}
 }
