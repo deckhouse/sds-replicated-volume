@@ -168,15 +168,12 @@ func (r *Reconciler) reconcileMain(
 	rf := flow.BeginReconcile(ctx, "main")
 	defer rf.OnEnd(&outcome)
 
-	// Compute target for finalizers.
-	actualControllerFinalizerPresent := computeActualFinalizerPresent(rsc)
-	targetControllerFinalizerPresent := computeTargetFinalizerPresent(rsc, rvs)
-	actualLegacyFinalizerPresent := computeActualLegacyFinalizerPresent(rsc)
-	targetLegacyFinalizerPresent := computeTargetLegacyFinalizerPresent(rsc)
+	// Compute target for finalizer.
+	actualFinalizerPresent := computeActualFinalizerPresent(rsc)
+	targetFinalizerPresent := computeTargetFinalizerPresent(rsc, rvs)
 
 	// If nothing changed, continue.
-	if targetControllerFinalizerPresent == actualControllerFinalizerPresent &&
-		targetLegacyFinalizerPresent == actualLegacyFinalizerPresent {
+	if targetFinalizerPresent == actualFinalizerPresent {
 		return rf.Continue()
 	}
 
@@ -643,19 +640,6 @@ func applyVolumesSatisfyEligibleNodesCondFalse(rsc *v1alpha1.ReplicatedStorageCl
 		Reason:  reason,
 		Message: message,
 	})
-}
-
-// isNodeSchedulable checks if a node is ready and has at least one ready LVG.
-func isNodeSchedulable(node v1alpha1.ReplicatedStoragePoolEligibleNode) bool {
-	if node.Unschedulable || !node.NodeReady || !node.AgentReady {
-		return false
-	}
-	for _, lvg := range node.LVMVolumeGroups {
-		if lvg.Ready && !lvg.Unschedulable {
-			return true
-		}
-	}
-	return false
 }
 
 // validateEligibleNodes validates that eligible nodes from RSP meet the requirements
