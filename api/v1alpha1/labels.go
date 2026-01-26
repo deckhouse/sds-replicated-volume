@@ -34,8 +34,4 @@ const (
 
 	// AgentNodeLabelKey is the label key for selecting nodes where the agent should run.
 	AgentNodeLabelKey = "storage.deckhouse.io/sds-replicated-volume-node"
-
-	// OperationCursorLabelKey is the label key for storing the cursor value on RVO objects.
-	// Used to reliably identify which cursor the operation belongs to without parsing the name.
-	OperationCursorLabelKey = labelPrefix + "operation-cursor"
 )
