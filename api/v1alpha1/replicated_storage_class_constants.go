@@ -14,10 +14,6 @@ const (
 	ReclaimPolicyRetain = "Retain"
 	ReclaimPolicyDelete = "Delete"
 
-	TopologyTransZonal = "TransZonal"
-	TopologyZonal      = "Zonal"
-	TopologyIgnored    = "Ignored"
-
 	StorageClassPlacementCountKey               = "replicated.csi.storage.deckhouse.io/placementCount"
 	StorageClassAutoEvictMinReplicaCountKey     = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/AutoEvictMinReplicaCount"
 	StorageClassStoragePoolKey                  = "replicated.csi.storage.deckhouse.io/storagePool"
