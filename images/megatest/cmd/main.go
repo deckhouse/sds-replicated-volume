@@ -96,6 +96,18 @@ func main() {
 		close(forceCleanupChan) // Broadcast: all readers will get notification simultaneously
 	}()
 
+	// ----------- chaos ---------------------
+	// Setup chaos engineering if enabled
+	chaosEnabled := opt.EnableChaosNetBlock ||
+		opt.EnableChaosNetDegrade || opt.EnableChaosVMReboot
+
+	var chaosCleanup func()
+	if chaosEnabled {
+		chaosCleanup = setupChaosRunners(ctx, log, opt, kubeClient, forceCleanupChan)
+		defer chaosCleanup()
+	}
+	// ----------- chaos ---------------------
+
 	// Create multivolume config
 	cfg := config.MultiVolumeConfig{
 		StorageClasses:               opt.StorageClasses,
@@ -111,18 +123,6 @@ func main() {
 
 	multiVolume := runners.NewMultiVolume(cfg, kubeClient, forceCleanupChan)
 	_ = multiVolume.Run(ctx)
-
-	// ----------- chaos ---------------------
-	// Setup chaos engineering if enabled
-	chaosEnabled := opt.EnableChaosNetBlock ||
-		opt.EnableChaosNetDegrade || opt.EnableChaosVMReboot
-
-	var chaosCleanup func()
-	if chaosEnabled {
-		chaosCleanup = setupChaosRunners(ctx, log, opt, kubeClient, forceCleanupChan)
-		defer chaosCleanup()
-	}
-	// ----------- chaos ---------------------
 
 	// Print statistics
 	stats := multiVolume.GetStats()

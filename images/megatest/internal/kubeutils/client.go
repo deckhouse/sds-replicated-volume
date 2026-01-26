@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -111,6 +112,9 @@ func NewClientWithKubeconfig(kubeconfigPath string) (*Client, error) {
 	scheme := runtime.NewScheme()
 	if err := corev1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("adding corev1 to scheme: %w", err)
+	}
+	if err := batchv1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("adding batchv1 to scheme: %w", err)
 	}
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("adding v1alpha1 to scheme: %w", err)
