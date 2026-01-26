@@ -152,6 +152,12 @@ func (m *NetworkBlockManager) buildNetworkBlockPolicy(name string, nodeA, nodeB 
 				},
 				"ingress": []interface{}{
 					map[string]interface{}{
+						"fromEntities": []interface{}{
+							"host",
+							"remote-node",
+						},
+					},
+					map[string]interface{}{
 						"fromEndpoints": []interface{}{
 							map[string]interface{}{
 								"matchLabels": map[string]interface{}{
@@ -162,6 +168,12 @@ func (m *NetworkBlockManager) buildNetworkBlockPolicy(name string, nodeA, nodeB 
 					},
 				},
 				"egress": []interface{}{
+					map[string]interface{}{
+						"toEntities": []interface{}{
+							"host",
+							"remote-node",
+						},
+					},
 					map[string]interface{}{
 						"toEndpoints": []interface{}{
 							map[string]interface{}{

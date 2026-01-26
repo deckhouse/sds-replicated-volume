@@ -346,10 +346,16 @@ spec:
         values: ["worker-01", "worker-10"]
 
   ingress:
+    - fromEntities:
+        - host
+        - remote-node
     - fromEndpoints:
         - matchLabels:
             io.kubernetes.pod.namespace: e2e-sds-test-cluster
   egress:
+    - toEntities:
+        - host
+        - remote-node
     - toEndpoints:
         - matchLabels:
             io.kubernetes.pod.namespace: e2e-sds-test-cluster
