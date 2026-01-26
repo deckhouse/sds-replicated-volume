@@ -210,7 +210,9 @@ func (c *ChaosNetworkDegrader) cleanup() {
 	}
 
 	c.log.Info("cleanup: removing network degradation", "job_count", len(c.activeJobNames))
-	if err := c.networkDegradeMgr.RemoveNetworkDegradation(context.Background(), c.activeJobNames); err != nil {
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), CleanupTimeout)
+	defer cleanupCancel()
+	if err := c.networkDegradeMgr.RemoveNetworkDegradation(cleanupCtx, c.activeJobNames); err != nil {
 		c.log.Error("cleanup failed", "error", err)
 	}
 	c.activeJobNames = nil

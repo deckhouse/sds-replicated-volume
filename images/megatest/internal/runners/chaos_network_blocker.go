@@ -117,12 +117,9 @@ func (c *ChaosNetworkBlocker) doBlockingEverything(ctx context.Context, nodes []
 	c.log.Info("blocking all network",
 		"incident_type", "blocking-everything",
 		"node_a", nodeA.Name,
-		"node_a_ip", nodeA.IPAddress,
 		"node_b", nodeB.Name,
-		"node_b_ip", nodeB.IPAddress,
 	)
 
-	// Create blocking policy (one-directional: nodeA blocks traffic to/from nodeB)
 	policyName, err := c.networkBlockMgr.BlockAllNetwork(ctx, nodeA, nodeB)
 	if err != nil {
 		return err
@@ -153,7 +150,9 @@ func (c *ChaosNetworkBlocker) doBlockingEverything(ctx context.Context, nodes []
 		"policy", policyName,
 	)
 
-	if err := c.networkBlockMgr.UnblockTraffic(context.Background(), policyName); err != nil {
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), CleanupTimeout)
+	defer cleanupCancel()
+	if err := c.networkBlockMgr.UnblockTraffic(cleanupCtx, policyName); err != nil {
 		c.log.Error("failed to unblock network", "error", err)
 	}
 
@@ -238,8 +237,10 @@ func (c *ChaosNetworkBlocker) doSplitBrain(ctx context.Context, nodes []chaos.No
 }
 
 func (c *ChaosNetworkBlocker) cleanup(policyNames []string) {
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), CleanupTimeout)
+	defer cleanupCancel()
 	for _, policyName := range policyNames {
-		if err := c.networkBlockMgr.UnblockTraffic(context.Background(), policyName); err != nil {
+		if err := c.networkBlockMgr.UnblockTraffic(cleanupCtx, policyName); err != nil {
 			c.log.Error("cleanup failed", "policy", policyName, "error", err)
 		}
 	}
