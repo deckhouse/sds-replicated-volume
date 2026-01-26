@@ -25,6 +25,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
@@ -434,14 +435,19 @@ var _ = Describe("computeActualVolumesSummary", func() {
 
 var _ = Describe("validateEligibleNodes", func() {
 	// Helper to create eligible node with or without LVG.
-	makeNode := func(name, zone string, hasLVG bool) v1alpha1.ReplicatedStorageClassEligibleNode {
-		node := v1alpha1.ReplicatedStorageClassEligibleNode{
-			NodeName: name,
-			ZoneName: zone,
+	makeNode := func(name, zone string, hasLVG bool) v1alpha1.ReplicatedStoragePoolEligibleNode {
+		node := v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:   name,
+			ZoneName:   zone,
+			NodeReady:  true,
+			AgentReady: true,
 		}
 		if hasLVG {
-			node.LVMVolumeGroups = []v1alpha1.ReplicatedStorageClassEligibleNodeLVMVolumeGroup{
-				{Name: "lvg-1"},
+			node.LVMVolumeGroups = []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+				{
+					Name:  "lvg-1",
+					Ready: true,
+				},
 			}
 		}
 		return node
@@ -1555,7 +1561,7 @@ var _ = Describe("Reconciler", func() {
 					ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
 					Replication:   v1alpha1.ReplicationNone,
 					VolumeAccess:  v1alpha1.VolumeAccessPreferablyLocal,
-					Topology:      v1alpha1.RSCTopologyZonal,
+					Topology:      v1alpha1.TopologyZonal,
 				},
 			}
 			rsp := &v1alpha1.ReplicatedStoragePool{
@@ -1683,7 +1689,7 @@ var _ = Describe("Reconciler", func() {
 					ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
 					Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
 					VolumeAccess:  v1alpha1.VolumeAccessPreferablyLocal,
-					Topology:      v1alpha1.RSCTopologyZonal,
+					Topology:      v1alpha1.TopologyZonal,
 				},
 			}
 			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
@@ -2012,7 +2018,11 @@ var _ = Describe("StorageClass reconciliation", func() {
 				Status: v1alpha1.ReplicatedStoragePoolStatus{
 					EligibleNodesRevision: 2, // Changed.
 					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
-						{NodeName: "node-1"}, // Not enough for ConsistencyAndAvailability.
+						{
+							NodeName:   "node-1",
+							NodeReady:  true,
+							AgentReady: true,
+						}, // Not enough for ConsistencyAndAvailability.
 					},
 				},
 			}
@@ -2053,7 +2063,11 @@ var _ = Describe("StorageClass reconciliation", func() {
 				Status: v1alpha1.ReplicatedStoragePoolStatus{
 					EligibleNodesRevision: 2, // Changed.
 					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
-						{NodeName: "node-1"}, // Enough for ReplicationNone.
+						{
+							NodeName:   "node-1",
+							NodeReady:  true,
+							AgentReady: true,
+						}, // Enough for ReplicationNone.
 					},
 				},
 			}
@@ -2095,7 +2109,11 @@ var _ = Describe("StorageClass reconciliation", func() {
 				Status: v1alpha1.ReplicatedStoragePoolStatus{
 					EligibleNodesRevision: 2, // Same as rsc.
 					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
-						{NodeName: "node-1"},
+						{
+							NodeName:   "node-1",
+							NodeReady:  true,
+							AgentReady: true,
+						},
 					},
 				},
 			}
@@ -2135,7 +2153,11 @@ var _ = Describe("StorageClass reconciliation", func() {
 				Status: v1alpha1.ReplicatedStoragePoolStatus{
 					EligibleNodesRevision: 2,
 					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
-						{NodeName: "node-1"},
+						{
+							NodeName:   "node-1",
+							NodeReady:  true,
+							AgentReady: true,
+						},
 					},
 				},
 			}
@@ -2156,6 +2178,641 @@ var _ = Describe("StorageClass reconciliation", func() {
 		})
 	})
 
+	Describe("applyStoragePool", func() {
+		It("returns true and updates when generation differs", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rsc-1",
+					Generation: 5,
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					StoragePoolBasedOnGeneration: 4,
+					StoragePoolName:              "old-name",
+				},
+			}
+
+			changed := applyStoragePool(rsc, "new-name")
+
+			Expect(changed).To(BeTrue())
+			Expect(rsc.Status.StoragePoolBasedOnGeneration).To(Equal(int64(5)))
+			Expect(rsc.Status.StoragePoolName).To(Equal("new-name"))
+		})
+
+		It("returns true and updates when name differs", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rsc-1",
+					Generation: 5,
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					StoragePoolBasedOnGeneration: 5,
+					StoragePoolName:              "old-name",
+				},
+			}
+
+			changed := applyStoragePool(rsc, "new-name")
+
+			Expect(changed).To(BeTrue())
+			Expect(rsc.Status.StoragePoolName).To(Equal("new-name"))
+		})
+
+		It("returns false when already in sync", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rsc-1",
+					Generation: 5,
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					StoragePoolBasedOnGeneration: 5,
+					StoragePoolName:              "same-name",
+				},
+			}
+
+			changed := applyStoragePool(rsc, "same-name")
+
+			Expect(changed).To(BeFalse())
+		})
+	})
+
+	Describe("applyRSPRemoveUsedBy", func() {
+		It("removes RSC name and returns true when present", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					UsedBy: v1alpha1.ReplicatedStoragePoolUsedBy{
+						ReplicatedStorageClassNames: []string{"rsc-a", "rsc-b", "rsc-c"},
+					},
+				},
+			}
+
+			changed := applyRSPRemoveUsedBy(rsp, "rsc-b")
+
+			Expect(changed).To(BeTrue())
+			Expect(rsp.Status.UsedBy.ReplicatedStorageClassNames).To(Equal([]string{"rsc-a", "rsc-c"}))
+		})
+
+		It("returns false when RSC name not present", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					UsedBy: v1alpha1.ReplicatedStoragePoolUsedBy{
+						ReplicatedStorageClassNames: []string{"rsc-a", "rsc-c"},
+					},
+				},
+			}
+
+			changed := applyRSPRemoveUsedBy(rsp, "rsc-b")
+
+			Expect(changed).To(BeFalse())
+			Expect(rsp.Status.UsedBy.ReplicatedStorageClassNames).To(Equal([]string{"rsc-a", "rsc-c"}))
+		})
+
+		It("handles empty usedBy list", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					UsedBy: v1alpha1.ReplicatedStoragePoolUsedBy{
+						ReplicatedStorageClassNames: []string{},
+					},
+				},
+			}
+
+			changed := applyRSPRemoveUsedBy(rsp, "rsc-a")
+
+			Expect(changed).To(BeFalse())
+			Expect(rsp.Status.UsedBy.ReplicatedStorageClassNames).To(BeEmpty())
+		})
+
+		It("removes last element correctly", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					UsedBy: v1alpha1.ReplicatedStoragePoolUsedBy{
+						ReplicatedStorageClassNames: []string{"rsc-only"},
+					},
+				},
+			}
+
+			changed := applyRSPRemoveUsedBy(rsp, "rsc-only")
+
+			Expect(changed).To(BeTrue())
+			Expect(rsp.Status.UsedBy.ReplicatedStorageClassNames).To(BeEmpty())
+		})
+	})
+
+	Describe("computeStoragePoolChecksum", func() {
+		It("produces deterministic output for same parameters", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+							{Name: "lvg-1"},
+							{Name: "lvg-2"},
+						},
+					},
+					Zones:              []string{"zone-a", "zone-b"},
+					SystemNetworkNames: []string{"Internal"},
+				},
+			}
+
+			checksum1 := computeStoragePoolChecksum(rsc)
+			checksum2 := computeStoragePoolChecksum(rsc)
+
+			Expect(checksum1).To(Equal(checksum2))
+		})
+
+		It("produces same checksum regardless of LVMVolumeGroups order", func() {
+			rsc1 := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+							{Name: "lvg-a"},
+							{Name: "lvg-b"},
+						},
+					},
+				},
+			}
+			rsc2 := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-2"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+							{Name: "lvg-b"},
+							{Name: "lvg-a"},
+						},
+					},
+				},
+			}
+
+			checksum1 := computeStoragePoolChecksum(rsc1)
+			checksum2 := computeStoragePoolChecksum(rsc2)
+
+			Expect(checksum1).To(Equal(checksum2))
+		})
+
+		It("produces same checksum regardless of zones order", func() {
+			rsc1 := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+							{Name: "lvg-1"},
+						},
+					},
+					Zones: []string{"zone-a", "zone-b", "zone-c"},
+				},
+			}
+			rsc2 := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-2"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+							{Name: "lvg-1"},
+						},
+					},
+					Zones: []string{"zone-c", "zone-a", "zone-b"},
+				},
+			}
+
+			checksum1 := computeStoragePoolChecksum(rsc1)
+			checksum2 := computeStoragePoolChecksum(rsc2)
+
+			Expect(checksum1).To(Equal(checksum2))
+		})
+
+		It("produces different checksums for different types", func() {
+			rsc1 := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
+					},
+				},
+			}
+			rsc2 := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-2"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type:            v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
+					},
+				},
+			}
+
+			checksum1 := computeStoragePoolChecksum(rsc1)
+			checksum2 := computeStoragePoolChecksum(rsc2)
+
+			Expect(checksum1).NotTo(Equal(checksum2))
+		})
+
+		It("produces different checksums for different LVMVolumeGroups", func() {
+			rsc1 := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
+					},
+				},
+			}
+			rsc2 := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-2"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-2"}},
+					},
+				},
+			}
+
+			checksum1 := computeStoragePoolChecksum(rsc1)
+			checksum2 := computeStoragePoolChecksum(rsc2)
+
+			Expect(checksum1).NotTo(Equal(checksum2))
+		})
+
+		It("produces different checksums for different zones", func() {
+			rsc1 := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
+					},
+					Zones: []string{"zone-a"},
+				},
+			}
+			rsc2 := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-2"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
+					},
+					Zones: []string{"zone-b"},
+				},
+			}
+
+			checksum1 := computeStoragePoolChecksum(rsc1)
+			checksum2 := computeStoragePoolChecksum(rsc2)
+
+			Expect(checksum1).NotTo(Equal(checksum2))
+		})
+
+		It("produces different checksums for different NodeLabelSelector", func() {
+			rsc1 := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
+					},
+					NodeLabelSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"tier": "storage"},
+					},
+				},
+			}
+			rsc2 := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-2"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
+					},
+					NodeLabelSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"tier": "compute"},
+					},
+				},
+			}
+
+			checksum1 := computeStoragePoolChecksum(rsc1)
+			checksum2 := computeStoragePoolChecksum(rsc2)
+
+			Expect(checksum1).NotTo(Equal(checksum2))
+		})
+
+		It("produces 32-character hex string (FNV-128)", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
+					},
+				},
+			}
+
+			checksum := computeStoragePoolChecksum(rsc)
+
+			Expect(checksum).To(HaveLen(32))
+			// Verify it's a valid hex string.
+			Expect(checksum).To(MatchRegexp("^[0-9a-f]{32}$"))
+		})
+
+		It("includes thinPoolName in checksum", func() {
+			rsc1 := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type:            v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1", ThinPoolName: "thin-1"}},
+					},
+				},
+			}
+			rsc2 := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-2"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type:            v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1", ThinPoolName: "thin-2"}},
+					},
+				},
+			}
+
+			checksum1 := computeStoragePoolChecksum(rsc1)
+			checksum2 := computeStoragePoolChecksum(rsc2)
+
+			Expect(checksum1).NotTo(Equal(checksum2))
+		})
+	})
+
+	Describe("computeTargetStoragePool", func() {
+		It("returns auto-rsp-<checksum> format", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rsc-1",
+					Generation: 1,
+				},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
+					},
+				},
+			}
+
+			name := computeTargetStoragePool(rsc)
+
+			Expect(name).To(HavePrefix("auto-rsp-"))
+			Expect(name).To(HaveLen(9 + 32)) // "auto-rsp-" + 32-char checksum
+		})
+
+		It("returns cached value when StoragePoolBasedOnGeneration matches Generation", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rsc-1",
+					Generation: 5,
+				},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
+					},
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					StoragePoolBasedOnGeneration: 5, // Matches Generation.
+					StoragePoolName:              "auto-rsp-cached-value",
+				},
+			}
+
+			name := computeTargetStoragePool(rsc)
+
+			Expect(name).To(Equal("auto-rsp-cached-value"))
+		})
+
+		It("recomputes when StoragePoolBasedOnGeneration does not match Generation", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rsc-1",
+					Generation: 6, // Changed from 5.
+				},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
+					},
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					StoragePoolBasedOnGeneration: 5, // Does not match Generation.
+					StoragePoolName:              "auto-rsp-old-value",
+				},
+			}
+
+			name := computeTargetStoragePool(rsc)
+
+			Expect(name).NotTo(Equal("auto-rsp-old-value"))
+			Expect(name).To(HavePrefix("auto-rsp-"))
+		})
+
+		It("recomputes when StoragePoolName is empty even if generation matches", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rsc-1",
+					Generation: 5,
+				},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
+					},
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					StoragePoolBasedOnGeneration: 5,
+					StoragePoolName:              "", // Empty.
+				},
+			}
+
+			name := computeTargetStoragePool(rsc)
+
+			Expect(name).To(HavePrefix("auto-rsp-"))
+			Expect(name).NotTo(BeEmpty())
+		})
+
+		It("is deterministic for same spec", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rsc-1",
+					Generation: 1,
+				},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+							{Name: "lvg-1"},
+							{Name: "lvg-2"},
+						},
+					},
+					Zones:              []string{"zone-a", "zone-b"},
+					SystemNetworkNames: []string{"Internal"},
+				},
+			}
+
+			name1 := computeTargetStoragePool(rsc)
+			name2 := computeTargetStoragePool(rsc)
+
+			Expect(name1).To(Equal(name2))
+		})
+	})
+})
+
+var _ = Describe("StorageClass reconciliation", func() {
+	var (
+		scheme *runtime.Scheme
+		cl     client.WithWatch
+		rec    *Reconciler
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(corev1.AddToScheme(scheme)).To(Succeed())
+		Expect(storagev1.AddToScheme(scheme)).To(Succeed())
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		Expect(snc.AddToScheme(scheme)).To(Succeed())
+		cl = nil
+		rec = nil
+	})
+
+	It("creates StorageClass when missing", func() {
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			Spec: v1alpha1.ReplicatedStorageClassSpec{
+				StoragePool:   "pool-1",
+				ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
+				Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
+				VolumeAccess:  v1alpha1.VolumeAccessLocal,
+				Topology:      v1alpha1.TopologyTransZonal,
+				Zones:         []string{"zone-a", "zone-b", "zone-c"},
+			},
+		}
+
+		cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(rsc).
+			WithStatusSubresource(rsc)).
+			Build()
+		rec = NewReconciler(cl)
+
+		_, err := rec.Reconcile(context.Background(), reconcile.Request{
+			NamespacedName: client.ObjectKey{Name: "rsc-1"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		var sc storagev1.StorageClass
+		Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &sc)).To(Succeed())
+		Expect(sc.Provisioner).To(Equal(storageClassProvisioner))
+		Expect(sc.Parameters).To(HaveKeyWithValue(storageClassParamTopologyKey, string(v1alpha1.TopologyTransZonal)))
+		Expect(sc.Annotations).NotTo(HaveKey(storageClassVirtualizationAnnotationKey))
+	})
+
+	It("returns error when StorageClass has different provisioner", func() {
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			Spec: v1alpha1.ReplicatedStorageClassSpec{
+				StoragePool:   "pool-1",
+				ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
+				Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
+				VolumeAccess:  v1alpha1.VolumeAccessAny,
+				Topology:      v1alpha1.TopologyIgnored,
+			},
+		}
+		sc := &storagev1.StorageClass{
+			ObjectMeta:  metav1.ObjectMeta{Name: "rsc-1"},
+			Provisioner: "other.provisioner",
+		}
+
+		cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(rsc, sc).
+			WithStatusSubresource(rsc)).
+			Build()
+		rec = NewReconciler(cl)
+
+		_, err := rec.Reconcile(context.Background(), reconcile.Request{
+			NamespacedName: client.ObjectKey{Name: "rsc-1"},
+		})
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("recreates StorageClass when only new parameters differ", func() {
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			Spec: v1alpha1.ReplicatedStorageClassSpec{
+				StoragePool:   "pool-1",
+				ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
+				Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
+				VolumeAccess:  v1alpha1.VolumeAccessAny,
+				Topology:      v1alpha1.TopologyTransZonal,
+				Zones:         []string{"zone-a", "zone-b", "zone-c"},
+			},
+		}
+
+		intended := computeIntendedStorageClass(rsc, false)
+		oldSC := intended.DeepCopy()
+		delete(oldSC.Parameters, storageClassParamTopologyKey)
+		delete(oldSC.Parameters, storageClassParamZonesKey)
+		oldSC.Labels = map[string]string{"custom": "1"}
+
+		cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(rsc, oldSC).
+			WithStatusSubresource(rsc)).
+			Build()
+		rec = NewReconciler(cl)
+
+		_, err := rec.Reconcile(context.Background(), reconcile.Request{
+			NamespacedName: client.ObjectKey{Name: "rsc-1"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		var sc storagev1.StorageClass
+		Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &sc)).To(Succeed())
+		Expect(sc.Parameters).To(HaveKey(storageClassParamTopologyKey))
+		Expect(sc.Parameters).To(HaveKey(storageClassParamZonesKey))
+		Expect(sc.Labels).To(HaveKeyWithValue("custom", "1"))
+		Expect(sc.Labels).To(HaveKeyWithValue(managedLabelKey, managedLabelValue))
+	})
+
+	It("updates StorageClass metadata when needed", func() {
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			Spec: v1alpha1.ReplicatedStorageClassSpec{
+				StoragePool:   "pool-1",
+				ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
+				Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
+				VolumeAccess:  v1alpha1.VolumeAccessAny,
+				Topology:      v1alpha1.TopologyIgnored,
+			},
+		}
+
+		intended := computeIntendedStorageClass(rsc, false)
+		oldSC := intended.DeepCopy()
+		oldSC.Labels = nil
+		oldSC.Annotations = nil
+		oldSC.Finalizers = nil
+
+		cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(rsc, oldSC).
+			WithStatusSubresource(rsc)).
+			Build()
+		rec = NewReconciler(cl)
+
+		_, err := rec.Reconcile(context.Background(), reconcile.Request{
+			NamespacedName: client.ObjectKey{Name: "rsc-1"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		var sc storagev1.StorageClass
+		Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &sc)).To(Succeed())
+		Expect(sc.Labels).To(HaveKeyWithValue(managedLabelKey, managedLabelValue))
+		Expect(sc.Annotations).To(HaveKeyWithValue(rscStorageClassVolumeSnapshotClassAnnotationKey, rscStorageClassVolumeSnapshotClassAnnotationValue))
+		Expect(sc.Finalizers).To(ContainElement(storageClassFinalizerName))
+	})
+
 	It("deletes StorageClass when RSC is being deleted", func() {
 		now := metav1.Now()
 		rsc := &v1alpha1.ReplicatedStorageClass{
@@ -2169,7 +2826,7 @@ var _ = Describe("StorageClass reconciliation", func() {
 				ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
 				Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
 				VolumeAccess:  v1alpha1.VolumeAccessAny,
-				Topology:      v1alpha1.RSCTopologyIgnored,
+				Topology:      v1alpha1.TopologyIgnored,
 			},
 		}
 		sc := &storagev1.StorageClass{

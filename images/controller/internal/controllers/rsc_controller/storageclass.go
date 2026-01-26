@@ -183,7 +183,7 @@ func computeIntendedStorageClass(rsc *v1alpha1.ReplicatedStorageClass, virtualiz
 
 	params := map[string]string{
 		storageClassParamFSTypeKey:                     fsTypeExt4,
-		storageClassStoragePoolKey:                     rsc.Spec.StoragePool,
+		storageClassStoragePoolKey:                     rsc.Status.StoragePoolName,
 		storageClassParamPlacementPolicyKey:            placementPolicyAutoPlaceTopology,
 		storageClassParamNetProtocolKey:                netProtocolC,
 		storageClassParamNetRRConflictKey:              rrConflictRetryConnect,
@@ -246,13 +246,13 @@ func computeIntendedStorageClass(rsc *v1alpha1.ReplicatedStorageClass, virtualiz
 	}
 
 	switch rsc.Spec.Topology {
-	case v1alpha1.RSCTopologyTransZonal:
+	case v1alpha1.TopologyTransZonal:
 		params[storageClassParamReplicasOnSameKey] = fmt.Sprintf("%s/%s", storageClassLabelKeyPrefix, rsc.Name)
 		params[storageClassParamReplicasOnDifferentKey] = zoneLabel
-	case v1alpha1.RSCTopologyZonal:
+	case v1alpha1.TopologyZonal:
 		params[storageClassParamReplicasOnSameKey] = zoneLabel
 		params[storageClassParamReplicasOnDifferentKey] = corev1.LabelHostname
-	case v1alpha1.RSCTopologyIgnored:
+	case v1alpha1.TopologyIgnored:
 		params[storageClassParamReplicasOnDifferentKey] = corev1.LabelHostname
 	}
 

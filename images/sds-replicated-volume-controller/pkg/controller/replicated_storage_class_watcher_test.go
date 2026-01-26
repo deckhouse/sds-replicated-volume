@@ -478,7 +478,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				},
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationAvailability,
-					Topology:    srv.RSCTopologyZonal,
+					Topology:    srv.TopologyZonal,
 					StoragePool: rspName,
 				},
 			},
@@ -566,7 +566,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				},
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationAvailability,
-					Topology:    srv.RSCTopologyZonal,
+					Topology:    srv.TopologyZonal,
 					StoragePool: rspName,
 				},
 			},
@@ -657,7 +657,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationAvailability,
 					Zones:       []string{zone1, zone2, zone3},
-					Topology:    srv.RSCTopologyTransZonal,
+					Topology:    srv.TopologyTransZonal,
 					StoragePool: rspName,
 				},
 			},
@@ -729,7 +729,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				},
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationAvailability,
-					Topology:    srv.RSCTopologyIgnored,
+					Topology:    srv.TopologyIgnored,
 					StoragePool: rspName,
 				},
 			},
@@ -820,7 +820,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationAvailability,
 					Zones:       []string{zone1, zone2, zone3},
-					Topology:    srv.RSCTopologyTransZonal,
+					Topology:    srv.TopologyTransZonal,
 					StoragePool: rspName,
 				},
 			},
@@ -898,7 +898,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				},
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationAvailability,
-					Topology:    srv.RSCTopologyIgnored,
+					Topology:    srv.TopologyIgnored,
 					StoragePool: rspName,
 				},
 			},
@@ -975,7 +975,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				},
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationAvailability,
-					Topology:    srv.RSCTopologyZonal,
+					Topology:    srv.TopologyZonal,
 					StoragePool: rspName,
 				},
 			},
@@ -1099,7 +1099,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationAvailability,
 					Zones:       []string{zone1, zone2, zone3},
-					Topology:    srv.RSCTopologyTransZonal,
+					Topology:    srv.TopologyTransZonal,
 					StoragePool: rspName,
 				},
 			},
@@ -1216,7 +1216,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				},
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationAvailability,
-					Topology:    srv.RSCTopologyIgnored,
+					Topology:    srv.TopologyIgnored,
 					StoragePool: rspName,
 				},
 			},
@@ -1337,7 +1337,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				},
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationConsistencyAndAvailability,
-					Topology:    srv.RSCTopologyZonal,
+					Topology:    srv.TopologyZonal,
 					StoragePool: rspName,
 				},
 			},
@@ -1425,7 +1425,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				},
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationConsistencyAndAvailability,
-					Topology:    srv.RSCTopologyZonal,
+					Topology:    srv.TopologyZonal,
 					StoragePool: rspName,
 				},
 			},
@@ -1515,7 +1515,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				},
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationConsistencyAndAvailability,
-					Topology:    srv.RSCTopologyTransZonal,
+					Topology:    srv.TopologyTransZonal,
 					Zones:       []string{zone1, zone2, zone3},
 					StoragePool: rspName,
 				},
@@ -1606,7 +1606,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				},
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationConsistencyAndAvailability,
-					Topology:    srv.RSCTopologyTransZonal,
+					Topology:    srv.TopologyTransZonal,
 					Zones:       []string{zone1, zone2, zone3},
 					StoragePool: rspName,
 				},
@@ -1679,7 +1679,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				},
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationConsistencyAndAvailability,
-					Topology:    srv.RSCTopologyIgnored,
+					Topology:    srv.TopologyIgnored,
 					StoragePool: rspName,
 				},
 			},
@@ -1757,7 +1757,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				},
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationConsistencyAndAvailability,
-					Topology:    srv.RSCTopologyIgnored,
+					Topology:    srv.TopologyIgnored,
 					StoragePool: rspName,
 				},
 			},
@@ -1844,7 +1844,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				},
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationConsistencyAndAvailability,
-					Topology:    srv.RSCTopologyZonal,
+					Topology:    srv.TopologyZonal,
 					StoragePool: rspName,
 				},
 			},
@@ -1976,7 +1976,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				},
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationConsistencyAndAvailability,
-					Topology:    srv.RSCTopologyTransZonal,
+					Topology:    srv.TopologyTransZonal,
 					Zones:       []string{zone1, zone2, zone3},
 					StoragePool: rspName,
 				},
@@ -2094,7 +2094,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 				},
 				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: srv.ReplicationConsistencyAndAvailability,
-					Topology:    srv.RSCTopologyIgnored,
+					Topology:    srv.TopologyIgnored,
 					StoragePool: rspName,
 				},
 			},

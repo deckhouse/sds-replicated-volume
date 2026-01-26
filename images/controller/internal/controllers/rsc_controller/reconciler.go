@@ -73,9 +73,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Get RVs referencing this RSC.
 	rvs, err := r.getSortedRVsByRSC(rf.Ctx(), rsc.Name)
 	if err != nil {
-		if statusErr := r.patchRSCFailedStatus(rf.Ctx(), rsc, err); statusErr != nil {
-			return rf.Fail(errors.Join(err, statusErr)).ToCtrl()
-		}
 		return rf.Fail(err).ToCtrl()
 	}
 
@@ -88,22 +85,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Reconcile main (finalizer management).
 	outcome = r.reconcileMain(rf.Ctx(), rsc, rvs)
 	if outcome.ShouldReturn() {
-		if outcome.Error() != nil {
-			if statusErr := r.patchRSCFailedStatus(rf.Ctx(), rsc, outcome.Error()); statusErr != nil {
-				return rf.Fail(errors.Join(outcome.Error(), statusErr)).ToCtrl()
-			}
-		}
-		return outcome.ToCtrl()
-	}
-
-	// Reconcile main (finalizer management).
-	outcome = r.reconcileMain(rf.Ctx(), rsc, rvs)
-	if outcome.ShouldReturn() {
-		if outcome.Error() != nil {
-			if statusErr := r.patchRSCFailedStatus(rf.Ctx(), rsc, outcome.Error()); statusErr != nil {
-				return rf.Fail(errors.Join(outcome.Error(), statusErr)).ToCtrl()
-			}
-		}
 		return outcome.ToCtrl()
 	}
 
@@ -187,12 +168,15 @@ func (r *Reconciler) reconcileMain(
 	rf := flow.BeginReconcile(ctx, "main")
 	defer rf.OnEnd(&outcome)
 
-	// Compute target for finalizer.
-	actualFinalizerPresent := computeActualFinalizerPresent(rsc)
-	targetFinalizerPresent := computeTargetFinalizerPresent(rsc, rvs)
+	// Compute target for finalizers.
+	actualControllerFinalizerPresent := computeActualFinalizerPresent(rsc)
+	targetControllerFinalizerPresent := computeTargetFinalizerPresent(rsc, rvs)
+	actualLegacyFinalizerPresent := computeActualLegacyFinalizerPresent(rsc)
+	targetLegacyFinalizerPresent := computeTargetLegacyFinalizerPresent(rsc)
 
 	// If nothing changed, continue.
-	if targetFinalizerPresent == actualFinalizerPresent {
+	if targetControllerFinalizerPresent == actualControllerFinalizerPresent &&
+		targetLegacyFinalizerPresent == actualLegacyFinalizerPresent {
 		return rf.Continue()
 	}
 
@@ -203,7 +187,7 @@ func (r *Reconciler) reconcileMain(
 		return rf.Fail(err)
 	}
 
-	// If finalizer was removed, we're done (object will be deleted).
+	// If controller finalizer was removed, we're done (object will be deleted).
 	if !targetControllerFinalizerPresent {
 		return rf.Done()
 	}
@@ -661,6 +645,19 @@ func applyVolumesSatisfyEligibleNodesCondFalse(rsc *v1alpha1.ReplicatedStorageCl
 	})
 }
 
+// isNodeSchedulable checks if a node is ready and has at least one ready LVG.
+func isNodeSchedulable(node v1alpha1.ReplicatedStoragePoolEligibleNode) bool {
+	if node.Unschedulable || !node.NodeReady || !node.AgentReady {
+		return false
+	}
+	for _, lvg := range node.LVMVolumeGroups {
+		if lvg.Ready && !lvg.Unschedulable {
+			return true
+		}
+	}
+	return false
+}
+
 // validateEligibleNodes validates that eligible nodes from RSP meet the requirements
 // for the RSC's replication mode and topology.
 //
@@ -686,7 +683,7 @@ func validateEligibleNodes(
 	totalNodes := len(eligibleNodes)
 	nodesWithDisks := 0
 	for _, n := range eligibleNodes {
-		if len(n.LVMVolumeGroups) > 0 {
+		if isNodeSchedulable(n) {
 			nodesWithDisks++
 		}
 	}
@@ -705,7 +702,7 @@ func validateEligibleNodes(
 	zonesWithDisks := 0
 	for _, nodes := range nodesByZone {
 		for _, n := range nodes {
-			if len(n.LVMVolumeGroups) > 0 {
+			if isNodeSchedulable(n) {
 				zonesWithDisks++
 				break
 			}
@@ -763,7 +760,7 @@ func validateAvailabilityReplication(
 		for zone, nodes := range nodesByZone {
 			zoneNodesWithDisks := 0
 			for _, n := range nodes {
-				if len(n.LVMVolumeGroups) > 0 {
+				if isNodeSchedulable(n) {
 					zoneNodesWithDisks++
 				}
 			}
@@ -807,7 +804,7 @@ func validateConsistencyReplication(
 		for zone, nodes := range nodesByZone {
 			zoneNodesWithDisks := 0
 			for _, n := range nodes {
-				if len(n.LVMVolumeGroups) > 0 {
+				if isNodeSchedulable(n) {
 					zoneNodesWithDisks++
 				}
 			}
@@ -848,7 +845,7 @@ func validateConsistencyAndAvailabilityReplication(
 		for zone, nodes := range nodesByZone {
 			zoneNodesWithDisks := 0
 			for _, n := range nodes {
-				if len(n.LVMVolumeGroups) > 0 {
+				if isNodeSchedulable(n) {
 					zoneNodesWithDisks++
 				}
 			}

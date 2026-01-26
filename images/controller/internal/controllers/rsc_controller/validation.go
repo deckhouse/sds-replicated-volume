@@ -17,18 +17,13 @@ func validateRSCSpec(rsc *v1alpha1.ReplicatedStorageClass, clusterZones map[stri
 
 	b.WriteString("Validation of ReplicatedStorageClass failed: ")
 
-	if rsc.Spec.StoragePool == "" {
-		valid = false
-		b.WriteString("StoragePool is empty; ")
-	}
-
 	if rsc.Spec.ReclaimPolicy == "" {
 		valid = false
 		b.WriteString("ReclaimPolicy is empty; ")
 	}
 
 	switch rsc.Spec.Topology {
-	case v1alpha1.RSCTopologyTransZonal:
+	case v1alpha1.TopologyTransZonal:
 		if len(rsc.Spec.Zones) == 0 {
 			valid = false
 			b.WriteString("Topology is set to 'TransZonal', but zones are not specified; ")
@@ -49,13 +44,13 @@ func validateRSCSpec(rsc *v1alpha1.ReplicatedStorageClass, clusterZones map[stri
 			}
 		}
 
-	case v1alpha1.RSCTopologyZonal:
+	case v1alpha1.TopologyZonal:
 		if len(rsc.Spec.Zones) != 0 {
 			valid = false
 			b.WriteString("Topology is set to 'Zonal', but zones are specified; ")
 		}
 
-	case v1alpha1.RSCTopologyIgnored:
+	case v1alpha1.TopologyIgnored:
 		if len(clusterZones) > 0 {
 			valid = false
 			b.WriteString("Setting 'topology' to 'Ignored' is prohibited when zones are present in the cluster; ")
