@@ -76,8 +76,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Fail(err).ToCtrl()
 	}
 
+	// Reconcile StorageClass.
+	outcome := r.reconcileStorageClass(rf.Ctx(), rsc)
+	if outcome.ShouldReturn() {
+		return outcome.ToCtrl()
+	}
+
 	// Reconcile migration from RSP (deprecated storagePool field).
-	outcome := r.reconcileMigrationFromRSP(rf.Ctx(), rsc)
+	outcome = r.reconcileMigrationFromRSP(rf.Ctx(), rsc)
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
 	}
@@ -168,12 +174,15 @@ func (r *Reconciler) reconcileMain(
 	rf := flow.BeginReconcile(ctx, "main")
 	defer rf.OnEnd(&outcome)
 
-	// Compute target for finalizer.
-	actualFinalizerPresent := computeActualFinalizerPresent(rsc)
-	targetFinalizerPresent := computeTargetFinalizerPresent(rsc, rvs)
+	// Compute target for finalizers.
+	actualControllerFinalizerPresent := computeActualFinalizerPresent(rsc)
+	targetControllerFinalizerPresent := computeTargetFinalizerPresent(rsc, rvs)
+	actualLegacyFinalizerPresent := computeActualLegacyFinalizerPresent(rsc)
+	targetLegacyFinalizerPresent := computeTargetLegacyFinalizerPresent(rsc)
 
 	// If nothing changed, continue.
-	if targetFinalizerPresent == actualFinalizerPresent {
+	if targetControllerFinalizerPresent == actualControllerFinalizerPresent &&
+		targetLegacyFinalizerPresent == actualLegacyFinalizerPresent {
 		return rf.Continue()
 	}
 
@@ -846,6 +855,26 @@ func validateConsistencyAndAvailabilityReplication(
 	}
 
 	return nil
+}
+
+// isNodeSchedulable checks if a node is eligible for scheduling new replicas.
+// A node is schedulable if:
+//  1. Node is not explicitly marked unschedulable
+//  2. Node (Kubernetes) is ready
+//  3. Agent (sds-replicated-volume) is ready
+//  4. Node has at least one ready and schedulable LVG
+func isNodeSchedulable(node v1alpha1.ReplicatedStoragePoolEligibleNode) bool {
+	if node.Unschedulable || !node.NodeReady || !node.AgentReady {
+		return false
+	}
+
+	for _, lvg := range node.LVMVolumeGroups {
+		if lvg.Ready && !lvg.Unschedulable {
+			return true
+		}
+	}
+
+	return false
 }
 
 // isConfigurationInSync checks if the RSC status configuration matches current generation.
