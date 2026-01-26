@@ -66,19 +66,25 @@ spec:
                 maxLength: 120
                 minLength: 1
                 type: string
-              resolveEligibleNodesConflict:
-                default: false
-                description: |-
-                  ResolveEligibleNodesConflict indicates whether this operation should also resolve
-                  eligible nodes conflicts when updating configuration. Only meaningful when Type is
-                  UpdateConfiguration. Determined by EligibleNodesConflictResolutionStrategy.
-                type: boolean
               type:
                 description: Type specifies the operation type.
                 enum:
                 - UpdateConfiguration
                 - ResolveEligibleNodesConflict
                 type: string
+              updateConfigOptions:
+                description: |-
+                  UpdateConfigOptions provides additional options for UpdateConfiguration operations.
+                  Only allowed when Type is UpdateConfiguration (validated by CEL).
+                properties:
+                  resolveEligibleNodes:
+                    default: false
+                    description: |-
+                      ResolveEligibleNodes indicates whether this operation should also resolve
+                      eligible nodes conflicts when updating configuration.
+                      Determined by EligibleNodesConflictResolutionStrategy in the RSC spec.
+                    type: boolean
+                type: object
             required:
             - replicatedVolumeName
             - type
@@ -86,6 +92,8 @@ spec:
             x-kubernetes-validations:
             - message: spec is immutable
               rule: self == oldSelf
+            - message: updateConfigOptions can only be set when type is UpdateConfiguration
+              rule: self.type == 'UpdateConfiguration' || !has(self.updateConfigOptions)
           status:
             description: ReplicatedVolumeOperationStatus represents the current state
               of a ReplicatedVolumeOperation.

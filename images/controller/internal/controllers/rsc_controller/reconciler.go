@@ -25,6 +25,7 @@ import (
 	"hash/fnv"
 	"slices"
 	"sort"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,6 +40,28 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Constants
+//
+
+// rvoNameSuffixUpdateConfig is the short suffix for UpdateConfiguration RVO names.
+const rvoNameSuffixUpdateConfig = "updateConfig"
+
+// rvoNameSuffixResolveNodes is the short suffix for ResolveEligibleNodesConflict RVO names.
+const rvoNameSuffixResolveNodes = "resolveNodes"
+
+// rvoNameSuffix returns the short suffix for generating RVO resource names.
+func rvoNameSuffix(opType v1alpha1.ReplicatedVolumeOperationType) string {
+	switch opType {
+	case v1alpha1.ReplicatedVolumeOperationTypeUpdateConfiguration:
+		return rvoNameSuffixUpdateConfig
+	case v1alpha1.ReplicatedVolumeOperationTypeResolveEligibleNodesConflict:
+		return rvoNameSuffixResolveNodes
+	default:
+		return string(opType)
+	}
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Wiring / construction
@@ -745,8 +768,8 @@ func applyVolumesSatisfyEligibleNodesCondFalse(rsc *v1alpha1.ReplicatedStorageCl
 // Returns true if any field was cleared.
 func applyClearRollingState(rsc *v1alpha1.ReplicatedStorageClass) bool {
 	changed := false
-	if rsc.Status.SortSalt != "" {
-		rsc.Status.SortSalt = ""
+	if rsc.Status.RollingOperationsSortSalt != "" {
+		rsc.Status.RollingOperationsSortSalt = ""
 		changed = true
 	}
 	if rsc.Status.RollingOperationsCursor != "" {
@@ -757,13 +780,13 @@ func applyClearRollingState(rsc *v1alpha1.ReplicatedStorageClass) bool {
 }
 
 // selectTargetRollingOperations selects and builds target operations for rolling updates.
-// It mutates rsc.Status (SortSalt, cursors) when generating new operations.
+// It mutates rsc.Status (RollingOperationsSortSalt, cursors) when generating new operations.
 //
 // NOTE: Named "select" instead of "compute" because it mutates rsc.Status in-place,
 // violating compute* pure/non-mutating convention.
 //
 // Algorithm:
-//  1. Generate sortSalt if not present.
+//  1. Generate RollingOperationsSortSalt if not present.
 //  2. Build lookup for pending operations.
 //  3. Filter RVs that need operations (not aligned, no pending operation) — O(N) cheap checks.
 //  4. Compute hashes and sort candidates — O(C) hash computations, O(C log C) sort.
@@ -788,8 +811,8 @@ func selectTargetRollingOperations(
 	maxParallelConflictResolutions int32,
 ) (targetOps []v1alpha1.ReplicatedVolumeOperation, saltChanged, cursorsChanged bool) {
 	// Generate sortSalt if needed.
-	if rsc.Status.SortSalt == "" {
-		rsc.Status.SortSalt = generateSortSalt()
+	if rsc.Status.RollingOperationsSortSalt == "" {
+		rsc.Status.RollingOperationsSortSalt = generateSortSalt()
 		saltChanged = true
 	}
 
@@ -806,7 +829,7 @@ func selectTargetRollingOperations(
 		switch op.Spec.Type {
 		case v1alpha1.ReplicatedVolumeOperationTypeUpdateConfiguration:
 			inFlightConfigOps++
-			if op.Spec.ResolveEligibleNodesConflict {
+			if op.Spec.UpdateConfigOptions != nil && op.Spec.UpdateConfigOptions.ResolveEligibleNodes {
 				inFlightConflictOps++
 			}
 		case v1alpha1.ReplicatedVolumeOperationTypeResolveEligibleNodesConflict:
@@ -864,7 +887,7 @@ func selectTargetRollingOperations(
 	// This is cheaper than sorting all N RVs when C << N.
 	// Uses Schwartzian transform: hash is computed once per candidate.
 	for i := range rawCandidates {
-		rawCandidates[i].hash = computeRVHash(rsc.Status.SortSalt, string(rawCandidates[i].rv.uid))
+		rawCandidates[i].hash = computeRVHash(rsc.Status.RollingOperationsSortSalt, string(rawCandidates[i].rv.uid))
 	}
 	sort.SliceStable(rawCandidates, func(i, j int) bool {
 		return rawCandidates[i].hash < rawCandidates[j].hash
@@ -957,7 +980,7 @@ func computeRVHash(salt, uid string) string {
 	h := fnv.New64a()
 	h.Write([]byte(salt))
 	h.Write([]byte(uid))
-	return fmt.Sprintf("%08x", h.Sum64()&0xFFFFFFFF) // 8 hex chars.
+	return fmt.Sprintf("%016x", h.Sum64()) // 16 hex chars, full 64-bit.
 }
 
 // findCursorIndex finds the starting index for round-robin based on cursor.
@@ -996,15 +1019,11 @@ func buildRVOperation(
 	cursor string,
 	resolveConflict bool,
 ) v1alpha1.ReplicatedVolumeOperation {
-	opName := fmt.Sprintf("%s-%s-%s", rv.name, opType.NameSuffix(), cursor)
+	opName := fmt.Sprintf("%s-%s-%s", rv.name, rvoNameSuffix(opType), cursor)
 
 	op := v1alpha1.ReplicatedVolumeOperation{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: opName,
-			Labels: map[string]string{
-				// Store cursor value for reliable lookup (avoids parsing from name).
-				v1alpha1.OperationCursorLabelKey: cursor,
-			},
 			OwnerReferences: []metav1.OwnerReference{
 				// RSC as controller owner (for deletion when RSC is deleted).
 				{
@@ -1027,16 +1046,33 @@ func buildRVOperation(
 			},
 		},
 		Spec: v1alpha1.ReplicatedVolumeOperationSpec{
-			ReplicatedVolumeName:         rv.name,
-			Type:                         opType,
-			ResolveEligibleNodesConflict: resolveConflict,
+			ReplicatedVolumeName: rv.name,
+			Type:                 opType,
 		},
 	}
 
+	// Set UpdateConfigOptions only for UpdateConfiguration operations.
+	if opType == v1alpha1.ReplicatedVolumeOperationTypeUpdateConfiguration && resolveConflict {
+		op.Spec.UpdateConfigOptions = &v1alpha1.UpdateConfigOptions{
+			ResolveEligibleNodes: true,
+		}
+	}
+
 	// Add finalizer to prevent GC until cursor moves forward.
-	controllerutil.AddFinalizer(&op, v1alpha1.RSCRVOLockFinalizer)
+	controllerutil.AddFinalizer(&op, v1alpha1.RSCControllerFinalizer)
 
 	return op
+}
+
+// parseRVOCursor extracts the cursor from an RVO name.
+// RVO name format: <rv-name>-<suffix>-<cursor>
+// Cursor is always the last segment after the final "-".
+// Returns empty string if no "-" found.
+func parseRVOCursor(rvoName string) string {
+	if idx := strings.LastIndex(rvoName, "-"); idx != -1 {
+		return rvoName[idx+1:]
+	}
+	return ""
 }
 
 // validateEligibleNodes validates that eligible nodes from RSP meet the requirements
@@ -1820,7 +1856,7 @@ func (r *Reconciler) removeRVOLockFinalizers(
 		rvo := &rvos[i]
 
 		// Skip if no finalizer.
-		if !controllerutil.ContainsFinalizer(rvo, v1alpha1.RSCRVOLockFinalizer) {
+		if !controllerutil.ContainsFinalizer(rvo, v1alpha1.RSCControllerFinalizer) {
 			continue
 		}
 
@@ -1830,10 +1866,10 @@ func (r *Reconciler) removeRVOLockFinalizers(
 			continue
 		}
 
-		// Get cursor from label (reliable, avoids parsing from name).
-		opCursor := rvo.Labels[v1alpha1.OperationCursorLabelKey]
+		// Parse cursor from RVO name.
+		opCursor := parseRVOCursor(rvo.Name)
 
-		// Skip RVOs without cursor label (legacy or corrupted).
+		// Skip RVOs with unparseable cursor (corrupted name).
 		// These require manual cleanup or handling by RVO controller.
 		if opCursor == "" {
 			continue
@@ -1852,7 +1888,7 @@ func (r *Reconciler) removeRVOLockFinalizers(
 
 		// Patch to remove finalizer.
 		base := rvo.DeepCopy()
-		controllerutil.RemoveFinalizer(rvo, v1alpha1.RSCRVOLockFinalizer)
+		controllerutil.RemoveFinalizer(rvo, v1alpha1.RSCControllerFinalizer)
 		if err := r.cl.Patch(ctx, rvo, client.MergeFrom(base)); err != nil {
 			return fmt.Errorf("remove finalizer from RVO %s: %w", rvo.Name, err)
 		}
