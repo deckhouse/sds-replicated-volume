@@ -10,7 +10,56 @@ import (
 type ActualState interface {
 	IsZero() bool
 
+	// ResourceName returns the DRBD resource name.
 	ResourceName() string
+
+	// ResourceExists returns true if the resource exists in DRBD.
+	ResourceExists() bool
+
+	// NodeID returns this node's ID for the resource.
+	NodeID() int
+
+	// Volumes returns the list of volumes/devices for this resource.
+	Volumes() []ActualVolume
+
+	// Peers returns the list of peer connections for this resource.
+	Peers() []ActualPeer
+}
+
+type ActualVolume interface {
+	// Minor returns the device minor number.
+	Minor() int
+
+	// VolumeNr returns the volume number within the resource.
+	VolumeNr() int
+
+	// BackingDisk returns the path to the backing device.
+	BackingDisk() string
+
+	// DiskState returns the disk state (e.g., "UpToDate", "Diskless").
+	DiskState() string
+}
+
+type ActualPeer interface {
+	// NodeID returns the peer's node ID.
+	NodeID() int
+
+	// ConnectionState returns the connection state (e.g., "Connected", "StandAlone").
+	ConnectionState() string
+
+	// Paths returns the network paths to this peer.
+	Paths() []ActualPath
+}
+
+type ActualPath interface {
+	// LocalAddr returns the local address in "ip:port" format.
+	LocalAddr() string
+
+	// RemoteAddr returns the remote address in "ip:port" format.
+	RemoteAddr() string
+
+	// Established returns true if the path is established.
+	Established() bool
 }
 
 // actualState represents the observed DRBD resource state.
@@ -24,10 +73,127 @@ func (aState *actualState) IsZero() bool {
 }
 
 func (aState *actualState) ResourceName() string {
-	return aState.status.Name
+	if aState.status != nil {
+		return aState.status.Name
+	}
+	if aState.show != nil {
+		return aState.show.Resource
+	}
+	return ""
+}
+
+func (aState *actualState) ResourceExists() bool {
+	return aState.status != nil || aState.show != nil
+}
+
+func (aState *actualState) NodeID() int {
+	if aState.show != nil {
+		return aState.show.ThisHost.NodeID
+	}
+	if aState.status != nil {
+		return aState.status.NodeID
+	}
+	return -1
+}
+
+func (aState *actualState) Volumes() []ActualVolume {
+	if aState.status == nil {
+		return nil
+	}
+
+	// Build a map of backing disks from show output
+	backingDisks := make(map[int]string)
+	if aState.show != nil {
+		for _, vol := range aState.show.ThisHost.Volumes {
+			backingDisks[vol.VolumeNr] = vol.BackingDisk
+		}
+	}
+
+	volumes := make([]ActualVolume, 0, len(aState.status.Devices))
+	for i := range aState.status.Devices {
+		dev := &aState.status.Devices[i]
+		volumes = append(volumes, &actualVolume{
+			minor:       dev.Minor,
+			volumeNr:    dev.Volume,
+			backingDisk: backingDisks[dev.Volume],
+			diskState:   dev.DiskState,
+		})
+	}
+	return volumes
+}
+
+func (aState *actualState) Peers() []ActualPeer {
+	if aState.status == nil {
+		return nil
+	}
+
+	peers := make([]ActualPeer, 0, len(aState.status.Connections))
+	for i := range aState.status.Connections {
+		conn := &aState.status.Connections[i]
+		peers = append(peers, &actualPeer{connection: conn})
+	}
+	return peers
 }
 
 var _ ActualState = &actualState{}
+
+// actualVolume implements ActualVolume.
+type actualVolume struct {
+	minor       int
+	volumeNr    int
+	backingDisk string
+	diskState   string
+}
+
+func (v *actualVolume) Minor() int          { return v.minor }
+func (v *actualVolume) VolumeNr() int       { return v.volumeNr }
+func (v *actualVolume) BackingDisk() string { return v.backingDisk }
+func (v *actualVolume) DiskState() string   { return v.diskState }
+
+var _ ActualVolume = &actualVolume{}
+
+// actualPeer implements ActualPeer.
+type actualPeer struct {
+	connection *drbdsetup.Connection
+}
+
+func (p *actualPeer) NodeID() int {
+	return p.connection.PeerNodeID
+}
+
+func (p *actualPeer) ConnectionState() string {
+	return p.connection.ConnectionState
+}
+
+func (p *actualPeer) Paths() []ActualPath {
+	paths := make([]ActualPath, 0, len(p.connection.Paths))
+	for i := range p.connection.Paths {
+		path := &p.connection.Paths[i]
+		paths = append(paths, &actualPath{path: path})
+	}
+	return paths
+}
+
+var _ ActualPeer = &actualPeer{}
+
+// actualPath implements ActualPath.
+type actualPath struct {
+	path *drbdsetup.Path
+}
+
+func (p *actualPath) LocalAddr() string {
+	return fmt.Sprintf("%s:%d", p.path.ThisHost.Address, p.path.ThisHost.Port)
+}
+
+func (p *actualPath) RemoteAddr() string {
+	return fmt.Sprintf("%s:%d", p.path.RemoteHost.Address, p.path.RemoteHost.Port)
+}
+
+func (p *actualPath) Established() bool {
+	return p.path.Established
+}
+
+var _ ActualPath = &actualPath{}
 
 func getActualState(ctx context.Context, drbdResName string) (*actualState, error) {
 	statusResult, err := drbdsetup.ExecuteStatus(ctx, drbdResName)

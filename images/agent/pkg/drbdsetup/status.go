@@ -97,6 +97,20 @@ type PeerDevice struct {
 	PercentInSync          float64 `json:"percent-in-sync"`
 }
 
+// FindMaxMinor returns the maximum device minor number across all resources.
+// Returns -1 if no devices are found.
+func (sr StatusResult) FindMaxMinor() int {
+	maxMinor := -1
+	for _, res := range sr {
+		for _, dev := range res.Devices {
+			if dev.Minor > maxMinor {
+				maxMinor = dev.Minor
+			}
+		}
+	}
+	return maxMinor
+}
+
 // ExecuteStatus runs "drbdsetup status --json <resourceName>". Pass "" to query
 // all resources. Returns empty result (not error) if resource not found.
 func ExecuteStatus(ctx context.Context, resourceName string) (StatusResult, error) {

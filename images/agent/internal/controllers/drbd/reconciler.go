@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	u "github.com/deckhouse/sds-common-lib/utils"
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
@@ -75,7 +76,7 @@ func (r *Reconciler) Reconcile(
 		tgtStateActions   TargetStateActions
 	)
 
-	iState, iErr = getIntendedState(dr)
+	iState, iErr = getIntendedState(dr, r.buildIntendedStateParams(rf.Ctx(), dr))
 
 	aState, aErr = getActualState(rf.Ctx(), drbdResName)
 
@@ -152,6 +153,52 @@ func (r *Reconciler) Reconcile(
 		return rf.Fail(err).ToCtrl()
 	}
 	return rf.Done().ToCtrl()
+}
+
+// buildIntendedStateParams constructs IntendedStateParams from DRBDResource.
+// For diskful resources, it looks up LVMLogicalVolume and LVMVolumeGroup to
+// construct the backing disk path.
+func (r *Reconciler) buildIntendedStateParams(ctx context.Context, dr *v1alpha1.DRBDResource) IntendedStateParams {
+	localAddresses := make(map[string]v1alpha1.DRBDAddress, len(dr.Status.Addresses))
+	for _, addr := range dr.Status.Addresses {
+		localAddresses[addr.SystemNetworkName] = addr.Address
+	}
+
+	params := IntendedStateParams{
+		LocalAddresses: localAddresses,
+	}
+
+	// For diskful resources, lookup LLV and LVG to get the backing disk path
+	if dr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful && dr.Spec.LVMLogicalVolumeName != "" {
+		backingDisk, err := r.getBackingDiskPath(ctx, dr.Spec.LVMLogicalVolumeName)
+		if err != nil {
+			// Log error but continue - backingDisk will be empty
+			r.log.Error("failed to get backing disk path",
+				"llvName", dr.Spec.LVMLogicalVolumeName,
+				"error", err,
+			)
+		} else {
+			params.BackingDisk = backingDisk
+		}
+	}
+
+	return params
+}
+
+// getBackingDiskPath looks up LVMLogicalVolume and LVMVolumeGroup to construct
+// the backing disk path in the format /dev/<vg>/<lv>.
+func (r *Reconciler) getBackingDiskPath(ctx context.Context, llvName string) (string, error) {
+	llv := &snc.LVMLogicalVolume{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: llvName}, llv); err != nil {
+		return "", fmt.Errorf("getting LVMLogicalVolume %q: %w", llvName, err)
+	}
+
+	lvg := &snc.LVMVolumeGroup{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: llv.Spec.LVMVolumeGroupName}, lvg); err != nil {
+		return "", fmt.Errorf("getting LVMVolumeGroup %q: %w", llv.Spec.LVMVolumeGroupName, err)
+	}
+
+	return v1alpha1.SprintDRBDDisk(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode), nil
 }
 
 func (r *Reconciler) getCurrentNodeDRBDResource(
