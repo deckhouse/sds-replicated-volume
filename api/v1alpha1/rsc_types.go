@@ -366,12 +366,14 @@ type ReplicatedStorageClassStatus struct {
 	// +kubebuilder:default={}
 	Volumes ReplicatedStorageClassVolumesSummary `json:"volumes"`
 
-	// SortSalt is a random value used for deterministic volume sorting during rolling operations.
+	// RollingOperationsSortSalt is a random value used for deterministic volume sorting during rolling operations.
 	// Generated when rolling operations start, cleared when all volumes are aligned.
+	// +kubebuilder:validation:MaxLength=8
 	// +optional
-	SortSalt string `json:"sortSalt,omitempty"`
+	RollingOperationsSortSalt string `json:"rollingOperationsSortSalt,omitempty"`
 	// RollingOperationsCursor tracks the last processed volume hash during rolling operations.
 	// Used for round-robin processing of volumes (both config updates and conflict resolutions).
+	// +kubebuilder:validation:MaxLength=16
 	// +optional
 	RollingOperationsCursor string `json:"rollingOperationsCursor,omitempty"`
 }

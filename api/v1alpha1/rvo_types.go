@@ -66,6 +66,7 @@ func (o *ReplicatedVolumeOperation) SetStatusConditions(conditions []metav1.Cond
 // All fields are immutable after creation.
 //
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec is immutable"
+// +kubebuilder:validation:XValidation:rule="self.type == 'UpdateConfiguration' || !has(self.updateConfigOptions)",message="updateConfigOptions can only be set when type is UpdateConfiguration"
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeOperationSpec struct {
 	// ReplicatedVolumeName is the name of the ReplicatedVolume this operation targets.
@@ -79,12 +80,21 @@ type ReplicatedVolumeOperationSpec struct {
 	// +kubebuilder:validation:Enum=UpdateConfiguration;ResolveEligibleNodesConflict
 	Type ReplicatedVolumeOperationType `json:"type"`
 
-	// ResolveEligibleNodesConflict indicates whether this operation should also resolve
-	// eligible nodes conflicts when updating configuration. Only meaningful when Type is
-	// UpdateConfiguration. Determined by EligibleNodesConflictResolutionStrategy.
+	// UpdateConfigOptions provides additional options for UpdateConfiguration operations.
+	// Only allowed when Type is UpdateConfiguration (validated by CEL).
+	// +optional
+	UpdateConfigOptions *UpdateConfigOptions `json:"updateConfigOptions,omitempty"`
+}
+
+// UpdateConfigOptions provides additional options for UpdateConfiguration operations.
+// +kubebuilder:object:generate=true
+type UpdateConfigOptions struct {
+	// ResolveEligibleNodes indicates whether this operation should also resolve
+	// eligible nodes conflicts when updating configuration.
+	// Determined by EligibleNodesConflictResolutionStrategy in the RSC spec.
 	// +kubebuilder:default=false
 	// +optional
-	ResolveEligibleNodesConflict bool `json:"resolveEligibleNodesConflict,omitempty"`
+	ResolveEligibleNodes bool `json:"resolveEligibleNodes,omitempty"`
 }
 
 // ReplicatedVolumeOperationType enumerates possible operation types.
@@ -100,27 +110,6 @@ const (
 )
 
 func (t ReplicatedVolumeOperationType) String() string { return string(t) }
-
-// Short name suffixes for operation resource naming.
-// Format: <rv-name>-<suffix>-<cursor>
-const (
-	// ReplicatedVolumeOperationNameSuffixUpdateConfig is the short suffix for UpdateConfiguration operations.
-	ReplicatedVolumeOperationNameSuffixUpdateConfig = "updateConfig"
-	// ReplicatedVolumeOperationNameSuffixResolveNodes is the short suffix for ResolveEligibleNodesConflict operations.
-	ReplicatedVolumeOperationNameSuffixResolveNodes = "resolveNodes"
-)
-
-// NameSuffix returns the short suffix for generating operation resource names.
-func (t ReplicatedVolumeOperationType) NameSuffix() string {
-	switch t {
-	case ReplicatedVolumeOperationTypeUpdateConfiguration:
-		return ReplicatedVolumeOperationNameSuffixUpdateConfig
-	case ReplicatedVolumeOperationTypeResolveEligibleNodesConflict:
-		return ReplicatedVolumeOperationNameSuffixResolveNodes
-	default:
-		return string(t)
-	}
-}
 
 // ReplicatedVolumeOperationStatus represents the current state of a ReplicatedVolumeOperation.
 // +kubebuilder:object:generate=true

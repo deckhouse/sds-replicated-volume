@@ -23,7 +23,3 @@ const RSCControllerFinalizer = "sds-replicated-volume.deckhouse.io/rsc-controlle
 const RVControllerFinalizer = "sds-replicated-volume.deckhouse.io/rv-controller"
 
 const RVRControllerFinalizer = "sds-replicated-volume.deckhouse.io/rvr-controller"
-
-// RSCRVOLockFinalizer is set by the RSC controller on RVO objects to prevent
-// garbage collection until the rolling update cursor has moved forward.
-const RSCRVOLockFinalizer = "sds-replicated-volume.deckhouse.io/rsc-rvo-lock"
