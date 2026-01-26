@@ -185,22 +185,13 @@ func (c *ChaosNetworkBlocker) doSplitBrain(ctx context.Context, nodes []chaos.No
 		"group_b_nodes", nodeNames(groupB),
 	)
 
-	// Create blocking policies between groups (bidirectional)
+	// Create blocking policies between groups
 	var policyNames []string
 	for _, nodeA := range groupA {
 		for _, nodeB := range groupB {
-			// Block A -> B
 			policyName, err := c.networkBlockMgr.BlockAllNetwork(ctx, nodeA, nodeB)
 			if err != nil {
 				c.log.Error("failed to block network", "node_a", nodeA.Name, "node_b", nodeB.Name, "error", err)
-				continue
-			}
-			policyNames = append(policyNames, policyName)
-
-			// Block B -> A
-			policyName, err = c.networkBlockMgr.BlockAllNetwork(ctx, nodeB, nodeA)
-			if err != nil {
-				c.log.Error("failed to block network", "node_a", nodeB.Name, "node_b", nodeA.Name, "error", err)
 				continue
 			}
 			policyNames = append(policyNames, policyName)
