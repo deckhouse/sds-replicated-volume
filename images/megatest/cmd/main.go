@@ -261,7 +261,6 @@ func setupChaosRunners(
 			defer wg.Done()
 			_ = blocker.Run(ctx)
 		}()
-		log.Info("started chaos-network-blocker")
 	}
 
 	// Start network degrader
@@ -277,7 +276,6 @@ func setupChaosRunners(
 			defer wg.Done()
 			_ = degrader.Run(ctx)
 		}()
-		log.Info("started chaos-network-degrader")
 	}
 
 	// Start VM reboter
@@ -291,7 +289,6 @@ func setupChaosRunners(
 			defer wg.Done()
 			_ = reboter.Run(ctx)
 		}()
-		log.Info("started chaos-vm-reboter")
 	}
 
 	// Return cleanup function
