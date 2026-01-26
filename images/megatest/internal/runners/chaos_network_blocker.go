@@ -237,8 +237,12 @@ func (c *ChaosNetworkBlocker) doSplitBrain(ctx context.Context, nodes []chaos.No
 }
 
 func (c *ChaosNetworkBlocker) cleanup(policyNames []string) {
+	c.log.Info("started cleanup")
+	defer c.log.Info("finished cleanup")
+
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), CleanupTimeout)
 	defer cleanupCancel()
+
 	for _, policyName := range policyNames {
 		if err := c.networkBlockMgr.UnblockTraffic(cleanupCtx, policyName); err != nil {
 			c.log.Error("cleanup failed", "policy", policyName, "error", err)

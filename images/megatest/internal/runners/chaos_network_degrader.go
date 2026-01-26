@@ -205,6 +205,9 @@ func (c *ChaosNetworkDegrader) doLatency(ctx context.Context, nodeA, nodeB chaos
 }
 
 func (c *ChaosNetworkDegrader) cleanup() {
+	c.log.Info("started cleanup")
+	defer c.log.Info("finished cleanup")
+
 	if len(c.activeJobNames) == 0 {
 		return
 	}
