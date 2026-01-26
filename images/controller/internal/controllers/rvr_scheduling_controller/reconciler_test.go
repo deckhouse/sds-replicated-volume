@@ -105,8 +105,8 @@ func (m *mockExtenderClient) QueryLVGScores(
 	return result, nil
 }
 
-func generateEligibleNodes(setup ClusterSetup) ([]v1alpha1.ReplicatedStorageClassEligibleNode, map[string]int) {
-	var eligible []v1alpha1.ReplicatedStorageClassEligibleNode
+func generateEligibleNodes(setup ClusterSetup) ([]v1alpha1.ReplicatedStoragePoolEligibleNode, map[string]int) {
+	var eligible []v1alpha1.ReplicatedStoragePoolEligibleNode
 	scores := make(map[string]int)
 
 	for _, zone := range setup.Zones {
@@ -114,12 +114,16 @@ func generateEligibleNodes(setup ClusterSetup) ([]v1alpha1.ReplicatedStorageClas
 			nodeName := fmt.Sprintf("node-%s%d", zone[len(zone)-1:], i)
 			lvgName := fmt.Sprintf("vg-%s", nodeName)
 
-			node := v1alpha1.ReplicatedStorageClassEligibleNode{
-				NodeName: nodeName,
-				ZoneName: zone,
-				Ready:    true,
-				LVMVolumeGroups: []v1alpha1.ReplicatedStorageClassEligibleNodeLVMVolumeGroup{
-					{Name: lvgName},
+			node := v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName:   nodeName,
+				ZoneName:   zone,
+				NodeReady:  true,
+				AgentReady: true,
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{
+						Name:  lvgName,
+						Ready: true,
+					},
 				},
 			}
 			eligible = append(eligible, node)
@@ -132,6 +136,41 @@ func generateEligibleNodes(setup ClusterSetup) ([]v1alpha1.ReplicatedStorageClas
 		}
 	}
 	return eligible, scores
+}
+
+func generateRSCAndRSP(rscName, rspName string, topology v1alpha1.ReplicatedStorageClassTopology, zones []string, eligible []v1alpha1.ReplicatedStoragePoolEligibleNode) (*v1alpha1.ReplicatedStorageClass, *v1alpha1.ReplicatedStoragePool) {
+	rsc := &v1alpha1.ReplicatedStorageClass{
+		ObjectMeta: metav1.ObjectMeta{Name: rscName},
+		Spec: v1alpha1.ReplicatedStorageClassSpec{
+			Storage: v1alpha1.ReplicatedStorageClassStorage{
+				Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+					{Name: "vg-1"},
+				},
+			},
+			VolumeAccess: v1alpha1.VolumeAccessAny,
+			Topology:     topology,
+			Zones:        zones,
+		},
+		Status: v1alpha1.ReplicatedStorageClassStatus{
+			StoragePoolName: rspName,
+		},
+	}
+
+	rsp := &v1alpha1.ReplicatedStoragePool{
+		ObjectMeta: metav1.ObjectMeta{Name: rspName},
+		Spec: v1alpha1.ReplicatedStoragePoolSpec{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+				{Name: "vg-1"},
+			},
+		},
+		Status: v1alpha1.ReplicatedStoragePoolStatus{
+			EligibleNodes: eligible,
+		},
+	}
+
+	return rsc, rsp
 }
 
 var clusterConfigs = map[string]ClusterSetup{
@@ -218,18 +257,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 
 		eligibleNodes, scores := generateEligibleNodes(cluster)
 
-		rsc := &v1alpha1.ReplicatedStorageClass{
-			ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
-			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				StoragePool:  "pool-1",
-				VolumeAccess: "Any",
-				Topology:     tc.Topology,
-				Zones:        cluster.RSCZones,
-			},
-			Status: v1alpha1.ReplicatedStorageClassStatus{
-				EligibleNodes: eligibleNodes,
-			},
-		}
+		rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", tc.Topology, cluster.RSCZones, eligibleNodes)
 
 		rv := &v1alpha1.ReplicatedVolume{
 			ObjectMeta: metav1.ObjectMeta{
@@ -287,7 +315,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 			rvrList = append(rvrList, rvr)
 		}
 
-		objects := []runtime.Object{rv, rsc}
+		objects := []runtime.Object{rv, rsc, rsp}
 		for _, rvr := range rvrList {
 			objects = append(objects, rvr)
 		}
@@ -620,18 +648,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 			cluster := clusterConfigs["medium-2z"]
 			eligibleNodes, _ := generateEligibleNodes(cluster)
 
-			rsc := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool:  "pool-1",
-					VolumeAccess: "Any",
-					Topology:     "Ignored",
-					Zones:        cluster.RSCZones,
-				},
-				Status: v1alpha1.ReplicatedStorageClassStatus{
-					EligibleNodes: eligibleNodes,
-				},
-			}
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", cluster.RSCZones, eligibleNodes)
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
@@ -652,11 +669,11 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 
 			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme)).
-				WithRuntimeObjects(rv, rsc, rvr).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
 
-		extender := &mockExtenderClient{scores: map[string]int{}}
+			extender := &mockExtenderClient{scores: map[string]int{}}
 		rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, extender)
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
@@ -675,17 +692,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 			cluster := clusterConfigs["medium-2z"]
 			eligibleNodes, scores := generateEligibleNodes(cluster)
 
-			rsc := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool: "pool-1",
-					Topology:    "Ignored",
-					Zones:       cluster.RSCZones,
-				},
-				Status: v1alpha1.ReplicatedStorageClassStatus{
-					EligibleNodes: eligibleNodes,
-				},
-			}
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", cluster.RSCZones, eligibleNodes)
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
@@ -706,7 +713,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 
 			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme)).
-				WithRuntimeObjects(rv, rsc, rvr).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
 
@@ -744,17 +751,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 			cluster := clusterConfigs["small-1z"]
 			eligibleNodes, scores := generateEligibleNodes(cluster)
 
-			rsc := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool: "pool-1",
-					Topology:    "Ignored",
-					Zones:       cluster.RSCZones,
-				},
-				Status: v1alpha1.ReplicatedStorageClassStatus{
-					EligibleNodes: eligibleNodes,
-				},
-			}
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", cluster.RSCZones, eligibleNodes)
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
@@ -790,7 +787,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 
 			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme)).
-				WithRuntimeObjects(rv, rsc, rvr1, rvr2, rvr3).
+				WithRuntimeObjects(rv, rsc, rsp, rvr1, rvr2, rvr3).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
 
@@ -830,17 +827,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 			cluster := clusterConfigs["small-1z"]
 			eligibleNodes, scores := generateEligibleNodes(cluster)
 
-			rsc := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool: "pool-1",
-					Topology:    "Ignored",
-					Zones:       cluster.RSCZones,
-				},
-				Status: v1alpha1.ReplicatedStorageClassStatus{
-					EligibleNodes: eligibleNodes,
-				},
-			}
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", cluster.RSCZones, eligibleNodes)
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
@@ -876,7 +863,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 
 			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme)).
-				WithRuntimeObjects(rv, rsc, deletingRvr, newRvr).
+				WithRuntimeObjects(rv, rsc, rsp, deletingRvr, newRvr).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
 
@@ -898,17 +885,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 			cluster := clusterConfigs["small-1z"]
 			eligibleNodes, scores := generateEligibleNodes(cluster)
 
-			rsc := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool: "pool-1",
-					Topology:    "Ignored",
-					Zones:       cluster.RSCZones,
-				},
-				Status: v1alpha1.ReplicatedStorageClassStatus{
-					EligibleNodes: eligibleNodes,
-				},
-			}
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", cluster.RSCZones, eligibleNodes)
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
@@ -935,7 +912,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 
 			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme)).
-				WithRuntimeObjects(rv, rsc, deletingRvr).
+				WithRuntimeObjects(rv, rsc, rsp, deletingRvr).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
 
@@ -956,17 +933,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 			cluster := clusterConfigs["small-1z"]
 			eligibleNodes, scores := generateEligibleNodes(cluster)
 
-			rsc := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool: "pool-1",
-					Topology:    "Ignored",
-					Zones:       cluster.RSCZones,
-				},
-				Status: v1alpha1.ReplicatedStorageClassStatus{
-					EligibleNodes: eligibleNodes,
-				},
-			}
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", cluster.RSCZones, eligibleNodes)
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
@@ -997,7 +964,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 
 			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme)).
-				WithRuntimeObjects(rv, rsc, existingRvr, newRvr).
+				WithRuntimeObjects(rv, rsc, rsp, existingRvr, newRvr).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
 
@@ -1029,16 +996,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 			cluster := clusterConfigs["small-1z"]
 			eligibleNodes, _ := generateEligibleNodes(cluster)
 
-			rsc := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool: "pool-1",
-					Topology:    "Ignored",
-				},
-				Status: v1alpha1.ReplicatedStorageClassStatus{
-					EligibleNodes: eligibleNodes,
-				},
-			}
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, eligibleNodes)
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "rv-test",
@@ -1059,7 +1017,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 
 			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme)).
-				WithRuntimeObjects(rv, rsc, rvr).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
 
@@ -1082,11 +1040,11 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 	Context("Constraint Violation Conditions", func() {
 		It("sets Scheduled=False with appropriate reason when topology constraints fail", func(ctx SpecContext) {
 			cluster := clusterConfigs["medium-2z"]
-			eligible, scores := generateEligibleNodes(cluster)
+		eligible, scores := generateEligibleNodes(cluster)
 
-			zoneAOnlyEligible := make([]v1alpha1.ReplicatedStorageClassEligibleNode, 0)
-			zoneAOnlyScores := make(map[string]int)
-			for _, node := range eligible {
+		zoneAOnlyEligible := make([]v1alpha1.ReplicatedStoragePoolEligibleNode, 0)
+		zoneAOnlyScores := make(map[string]int)
+		for _, node := range eligible {
 				if node.ZoneName == "zone-a" {
 					zoneAOnlyEligible = append(zoneAOnlyEligible, node)
 					for _, lvg := range node.LVMVolumeGroups {
@@ -1097,18 +1055,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				}
 			}
 
-			rsc := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool:  "pool-1",
-					VolumeAccess: "Any",
-					Topology:     "TransZonal",
-					Zones:        cluster.RSCZones,
-				},
-				Status: v1alpha1.ReplicatedStorageClassStatus{
-					EligibleNodes: zoneAOnlyEligible,
-				},
-			}
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "TransZonal", cluster.RSCZones, zoneAOnlyEligible)
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
@@ -1141,7 +1088,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				},
 			}
 
-			objects := []runtime.Object{rv, rsc, rvr1, rvr2}
+			objects := []runtime.Object{rv, rsc, rsp, rvr1, rvr2}
 			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme)).
 				WithRuntimeObjects(objects...).

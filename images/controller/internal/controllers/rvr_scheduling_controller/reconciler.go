@@ -323,7 +323,7 @@ func (r *Reconciler) applyCapacityFilterAndScore(
 	}
 
 	if len(lvgQueries) == 0 {
-		return nil, fmt.Errorf("%w: no candidate nodes have LVGs from storage pool %s", errSchedulingNoCandidateNodes, sctx.RSC.Spec.StoragePool)
+		return nil, fmt.Errorf("%w: no candidate nodes have LVGs from storage pool %s", errSchedulingNoCandidateNodes, sctx.RSC.Status.StoragePoolName)
 	}
 
 	var volType string
@@ -555,10 +555,10 @@ func assignReplicasTransZonalTopology(
 
 // --- Helpers: scheduling (compute)
 
-func computeEligibleNodeNames(eligible []v1alpha1.ReplicatedStorageClassEligibleNode, occupied map[string]struct{}) []string {
+func computeEligibleNodeNames(eligible []v1alpha1.ReplicatedStoragePoolEligibleNode, occupied map[string]struct{}) []string {
 	var result []string
 	for _, node := range eligible {
-		if node.Unschedulable || !node.Ready {
+		if node.Unschedulable || !node.NodeReady || !node.AgentReady {
 			continue
 		}
 		if _, ok := occupied[node.NodeName]; ok {
@@ -669,7 +669,7 @@ func computeSchedulingFailureReason(err error) *schedulingFailureReason {
 	}
 }
 
-func computeNodeToZoneFromEligible(eligible []v1alpha1.ReplicatedStorageClassEligibleNode) map[string]string {
+func computeNodeToZoneFromEligible(eligible []v1alpha1.ReplicatedStoragePoolEligibleNode) map[string]string {
 	result := make(map[string]string, len(eligible))
 	for _, node := range eligible {
 		result[node.NodeName] = node.ZoneName
@@ -677,10 +677,13 @@ func computeNodeToZoneFromEligible(eligible []v1alpha1.ReplicatedStorageClassEli
 	return result
 }
 
-func computeLVGToNodeFromEligible(eligible []v1alpha1.ReplicatedStorageClassEligibleNode) map[string]LVGInfo {
+func computeLVGToNodeFromEligible(eligible []v1alpha1.ReplicatedStoragePoolEligibleNode) map[string]LVGInfo {
 	result := make(map[string]LVGInfo)
 	for _, node := range eligible {
 		for _, lvg := range node.LVMVolumeGroups {
+			if !lvg.Ready || lvg.Unschedulable {
+				continue
+			}
 			result[lvg.Name] = LVGInfo{
 				NodeName:     node.NodeName,
 				ThinPoolName: lvg.ThinPoolName,
@@ -690,7 +693,7 @@ func computeLVGToNodeFromEligible(eligible []v1alpha1.ReplicatedStorageClassElig
 	return result
 }
 
-func computeStoragePoolType(eligible []v1alpha1.ReplicatedStorageClassEligibleNode) string {
+func computeStoragePoolType(eligible []v1alpha1.ReplicatedStoragePoolEligibleNode) string {
 	for _, node := range eligible {
 		for _, lvg := range node.LVMVolumeGroups {
 			if lvg.ThinPoolName != "" {
@@ -829,15 +832,25 @@ func (r *Reconciler) prepareSchedulingContext(
 		return nil, err
 	}
 
+	if rsc.Status.StoragePoolName == "" {
+		return nil, fmt.Errorf("%w: RSC %s has no storage pool configured yet", errSchedulingPending, rsc.Name)
+	}
+
+	rsp, err := r.getRSP(ctx, rsc.Status.StoragePoolName)
+	if err != nil {
+		return nil, err
+	}
+
 	allRVRs, err := r.listRVRsByRV(ctx, rv.Name)
 	if err != nil {
 		return nil, err
 	}
 
-	eligible := rsc.Status.EligibleNodes
+	eligible := rsp.Status.EligibleNodes
 	sctx := &SchedulingContext{
 		RV:              rv,
 		RSC:             rsc,
+		RSP:             rsp,
 		EligibleNodes:   eligible,
 		AttachToNodes:   computeAttachToNodes(rv),
 		NodeToZone:      computeNodeToZoneFromEligible(eligible),
@@ -988,6 +1001,16 @@ func (r *Reconciler) getRSC(ctx context.Context, name string) (*v1alpha1.Replica
 		return nil, fmt.Errorf("unable to get ReplicatedStorageClass %s: %w", name, err)
 	}
 	return rsc, nil
+}
+
+// --- Single-call I/O helpers: RSP
+
+func (r *Reconciler) getRSP(ctx context.Context, name string) (*v1alpha1.ReplicatedStoragePool, error) {
+	rsp := &v1alpha1.ReplicatedStoragePool{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, rsp); err != nil {
+		return nil, fmt.Errorf("unable to get ReplicatedStoragePool %s: %w", name, err)
+	}
+	return rsp, nil
 }
 
 // --- Single-call I/O helpers: RVR

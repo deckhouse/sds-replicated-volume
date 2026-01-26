@@ -23,7 +23,8 @@ import (
 type SchedulingContext struct {
 	RV              *v1alpha1.ReplicatedVolume
 	RSC             *v1alpha1.ReplicatedStorageClass
-	EligibleNodes   []v1alpha1.ReplicatedStorageClassEligibleNode
+	RSP             *v1alpha1.ReplicatedStoragePool
+	EligibleNodes   []v1alpha1.ReplicatedStoragePoolEligibleNode
 	AttachToNodes   []string
 	NodeToZone      map[string]string
 	LVGToNode       map[string]LVGInfo
