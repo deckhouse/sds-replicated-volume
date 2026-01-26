@@ -47,6 +47,8 @@ type Reconciler struct {
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
+const replicatedStorageClassFinalizerName = "replicatedstorageclass.storage.deckhouse.io"
+
 func NewReconciler(cl client.Client) *Reconciler {
 	return &Reconciler{cl: cl}
 }
@@ -74,8 +76,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Fail(err).ToCtrl()
 	}
 
+	// Reconcile StorageClass.
+	outcome := r.reconcileStorageClass(rf.Ctx(), rsc)
+	if outcome.ShouldReturn() {
+		return outcome.ToCtrl()
+	}
+
 	// Reconcile migration from RSP (deprecated storagePool field).
-	outcome := r.reconcileMigrationFromRSP(rf.Ctx(), rsc)
+	outcome = r.reconcileMigrationFromRSP(rf.Ctx(), rsc)
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
 	}
@@ -166,24 +174,27 @@ func (r *Reconciler) reconcileMain(
 	rf := flow.BeginReconcile(ctx, "main")
 	defer rf.OnEnd(&outcome)
 
-	// Compute target for finalizer.
-	actualFinalizerPresent := computeActualFinalizerPresent(rsc)
-	targetFinalizerPresent := computeTargetFinalizerPresent(rsc, rvs)
+	// Compute target for finalizers.
+	actualControllerFinalizerPresent := computeActualFinalizerPresent(rsc)
+	targetControllerFinalizerPresent := computeTargetFinalizerPresent(rsc, rvs)
+	actualLegacyFinalizerPresent := computeActualLegacyFinalizerPresent(rsc)
+	targetLegacyFinalizerPresent := computeTargetLegacyFinalizerPresent(rsc)
 
 	// If nothing changed, continue.
-	if targetFinalizerPresent == actualFinalizerPresent {
+	if targetControllerFinalizerPresent == actualControllerFinalizerPresent &&
+		targetLegacyFinalizerPresent == actualLegacyFinalizerPresent {
 		return rf.Continue()
 	}
 
 	base := rsc.DeepCopy()
-	applyFinalizer(rsc, targetFinalizerPresent)
+	applyFinalizers(rsc, targetControllerFinalizerPresent, targetLegacyFinalizerPresent)
 
 	if err := r.patchRSC(rf.Ctx(), rsc, base, true); err != nil {
 		return rf.Fail(err)
 	}
 
-	// If finalizer was removed, we're done (object will be deleted).
-	if !targetFinalizerPresent {
+	// If controller finalizer was removed, we're done (object will be deleted).
+	if !targetControllerFinalizerPresent {
 		return rf.Done()
 	}
 
@@ -223,12 +234,25 @@ func computeTargetFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass, rvs []r
 	return !isDeleting || hasRVs
 }
 
-// applyFinalizer adds or removes the controller finalizer based on target state.
-func applyFinalizer(rsc *v1alpha1.ReplicatedStorageClass, targetPresent bool) {
-	if targetPresent {
+func computeActualLegacyFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass) bool {
+	return objutilv1.HasFinalizer(rsc, replicatedStorageClassFinalizerName)
+}
+
+func computeTargetLegacyFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass) bool {
+	return rsc.DeletionTimestamp == nil
+}
+
+func applyFinalizers(rsc *v1alpha1.ReplicatedStorageClass, targetControllerFinalizerPresent, targetLegacyFinalizerPresent bool) {
+	if targetControllerFinalizerPresent {
 		objutilv1.AddFinalizer(rsc, v1alpha1.RSCControllerFinalizer)
 	} else {
 		objutilv1.RemoveFinalizer(rsc, v1alpha1.RSCControllerFinalizer)
+	}
+
+	if targetLegacyFinalizerPresent {
+		objutilv1.AddFinalizer(rsc, replicatedStorageClassFinalizerName)
+	} else {
+		objutilv1.RemoveFinalizer(rsc, replicatedStorageClassFinalizerName)
 	}
 }
 
@@ -652,7 +676,7 @@ func validateEligibleNodes(
 	totalNodes := len(eligibleNodes)
 	nodesWithDisks := 0
 	for _, n := range eligibleNodes {
-		if len(n.LVMVolumeGroups) > 0 {
+		if isNodeSchedulable(n) {
 			nodesWithDisks++
 		}
 	}
@@ -671,7 +695,7 @@ func validateEligibleNodes(
 	zonesWithDisks := 0
 	for _, nodes := range nodesByZone {
 		for _, n := range nodes {
-			if len(n.LVMVolumeGroups) > 0 {
+			if isNodeSchedulable(n) {
 				zonesWithDisks++
 				break
 			}
@@ -729,7 +753,7 @@ func validateAvailabilityReplication(
 		for zone, nodes := range nodesByZone {
 			zoneNodesWithDisks := 0
 			for _, n := range nodes {
-				if len(n.LVMVolumeGroups) > 0 {
+				if isNodeSchedulable(n) {
 					zoneNodesWithDisks++
 				}
 			}
@@ -773,7 +797,7 @@ func validateConsistencyReplication(
 		for zone, nodes := range nodesByZone {
 			zoneNodesWithDisks := 0
 			for _, n := range nodes {
-				if len(n.LVMVolumeGroups) > 0 {
+				if isNodeSchedulable(n) {
 					zoneNodesWithDisks++
 				}
 			}
@@ -814,7 +838,7 @@ func validateConsistencyAndAvailabilityReplication(
 		for zone, nodes := range nodesByZone {
 			zoneNodesWithDisks := 0
 			for _, n := range nodes {
-				if len(n.LVMVolumeGroups) > 0 {
+				if isNodeSchedulable(n) {
 					zoneNodesWithDisks++
 				}
 			}
@@ -831,6 +855,26 @@ func validateConsistencyAndAvailabilityReplication(
 	}
 
 	return nil
+}
+
+// isNodeSchedulable checks if a node is eligible for scheduling new replicas.
+// A node is schedulable if:
+//  1. Node is not explicitly marked unschedulable
+//  2. Node (Kubernetes) is ready
+//  3. Agent (sds-replicated-volume) is ready
+//  4. Node has at least one ready and schedulable LVG
+func isNodeSchedulable(node v1alpha1.ReplicatedStoragePoolEligibleNode) bool {
+	if node.Unschedulable || !node.NodeReady || !node.AgentReady {
+		return false
+	}
+
+	for _, lvg := range node.LVMVolumeGroups {
+		if lvg.Ready && !lvg.Unschedulable {
+			return true
+		}
+	}
+
+	return false
 }
 
 // isConfigurationInSync checks if the RSC status configuration matches current generation.

@@ -51,30 +51,30 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 
 		allowVolumeExpansion   bool = true
 		volumeBindingMode           = storagev1.VolumeBindingWaitForFirstConsumer
-		reclaimPolicy               = corev1.PersistentVolumeReclaimPolicy(controller.ReclaimPolicyRetain)
+		reclaimPolicy               = corev1.PersistentVolumeReclaimPolicy(srv.ReclaimPolicyRetain)
 		storageClassParameters      = map[string]string{
-			controller.StorageClassStoragePoolKey:                     "test-sp",
-			controller.StorageClassParamFSTypeKey:                     controller.FsTypeExt4,
-			controller.StorageClassParamPlacementPolicyKey:            controller.PlacementPolicyAutoPlaceTopology,
-			controller.StorageClassParamNetProtocolKey:                controller.NetProtocolC,
-			controller.StorageClassParamNetRRConflictKey:              controller.RrConflictRetryConnect,
-			controller.StorageClassParamAutoQuorumKey:                 controller.SuspendIo,
-			controller.StorageClassParamAutoAddQuorumTieBreakerKey:    "true",
-			controller.StorageClassParamOnNoQuorumKey:                 controller.SuspendIo,
-			controller.StorageClassParamOnNoDataAccessibleKey:         controller.SuspendIo,
-			controller.StorageClassParamOnSuspendedPrimaryOutdatedKey: controller.PrimaryOutdatedForceSecondary,
-			controller.StorageClassPlacementCountKey:                  "3",
-			controller.StorageClassAutoEvictMinReplicaCountKey:        "3",
-			controller.StorageClassParamReplicasOnSameKey:             fmt.Sprintf("class.storage.deckhouse.io/%s", testName),
-			controller.StorageClassParamReplicasOnDifferentKey:        controller.ZoneLabel,
-			controller.StorageClassParamAllowRemoteVolumeAccessKey:    "false",
-			controller.QuorumMinimumRedundancyWithPrefixSCKey:         "2",
+			srv.StorageClassStoragePoolKey:                     "test-sp",
+			srv.StorageClassParamFSTypeKey:                     srv.FsTypeExt4,
+			srv.StorageClassParamPlacementPolicyKey:            srv.PlacementPolicyAutoPlaceTopology,
+			srv.StorageClassParamNetProtocolKey:                srv.NetProtocolC,
+			srv.StorageClassParamNetRRConflictKey:              srv.RrConflictRetryConnect,
+			srv.StorageClassParamAutoQuorumKey:                 srv.SuspendIo,
+			srv.StorageClassParamAutoAddQuorumTieBreakerKey:    "true",
+			srv.StorageClassParamOnNoQuorumKey:                 srv.SuspendIo,
+			srv.StorageClassParamOnNoDataAccessibleKey:         srv.SuspendIo,
+			srv.StorageClassParamOnSuspendedPrimaryOutdatedKey: srv.PrimaryOutdatedForceSecondary,
+			srv.StorageClassPlacementCountKey:                  "3",
+			srv.StorageClassAutoEvictMinReplicaCountKey:        "3",
+			srv.StorageClassParamReplicasOnSameKey:             fmt.Sprintf("class.storage.deckhouse.io/%s", testName),
+			srv.StorageClassParamReplicasOnDifferentKey:        srv.ZoneLabel,
+			srv.StorageClassParamAllowRemoteVolumeAccessKey:    "false",
+			controller.QuorumMinimumRedundancyWithPrefixSCKey:  "2",
 		}
 
 		validStorageClassResource = &storagev1.StorageClass{
 			TypeMeta: metav1.TypeMeta{
-				Kind:       controller.StorageClassKind,
-				APIVersion: controller.StorageClassAPIVersion,
+				Kind:       srv.StorageClassKind,
+				APIVersion: srv.StorageClassAPIVersion,
 			},
 			ObjectMeta: metav1.ObjectMeta{
 				Name:            testName,
@@ -89,7 +89,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 			ReclaimPolicy:        &reclaimPolicy,
 			AllowVolumeExpansion: &allowVolumeExpansion,
 			VolumeBindingMode:    &volumeBindingMode,
-			Provisioner:          controller.StorageClassProvisioner,
+			Provisioner:          srv.StorageClassProvisioner,
 		}
 
 		storageClassResource           *storagev1.StorageClass
@@ -219,13 +219,13 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 						if storageClassResource.Parameters == nil {
 							storageClassResource.Parameters = make(map[string]string)
 						}
-						storageClassResource.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey] = "true"
+						storageClassResource.Parameters[srv.StorageClassParamAllowRemoteVolumeAccessKey] = "true"
 					})
 					foo()
 					JustAfterEach(func(ctx SpecContext) {
 						storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
 						Expect(err).NotTo(HaveOccurred())
-						Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "true"))
+						Expect(storageClass.Parameters).To(HaveKeyWithValue(srv.StorageClassParamAllowRemoteVolumeAccessKey, "true"))
 					})
 				})
 			} else {
@@ -234,19 +234,19 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 						if storageClassResource == nil {
 							return
 						}
-						storageClassResource.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey] = "false"
+						storageClassResource.Parameters[srv.StorageClassParamAllowRemoteVolumeAccessKey] = "false"
 					})
 					JustBeforeEach(func() {
 						if storageClassResource == nil {
 							return
 						}
-						Expect(storageClassResource.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
+						Expect(storageClassResource.Parameters).To(HaveKeyWithValue(srv.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
 					})
 					foo()
 					JustAfterEach(func(ctx SpecContext) {
 						storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
 						Expect(err).NotTo(HaveOccurred())
-						Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
+						Expect(storageClass.Parameters).To(HaveKeyWithValue(srv.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
 					})
 				})
 			}
@@ -260,11 +260,11 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 						if storageClassResource.Annotations == nil {
 							storageClassResource.Annotations = make(map[string]string)
 						}
-						storageClassResource.Annotations[controller.DefaultStorageClassAnnotationKey] = "true"
+						storageClassResource.Annotations[srv.DefaultStorageClassAnnotationKey] = "true"
 					})
 					JustBeforeEach(func() {
 						Expect(storageClassResource).ToNot(BeNil())
-						Expect(storageClassResource.Annotations).To(HaveKeyWithValue(controller.DefaultStorageClassAnnotationKey, "true"))
+						Expect(storageClassResource.Annotations).To(HaveKeyWithValue(srv.DefaultStorageClassAnnotationKey, "true"))
 					})
 					foo()
 				})
@@ -330,7 +330,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 				Expect(storageClass).NotTo(BeNil())
 				Expect(storageClass.Annotations).NotTo(BeNil())
 				Expect(storageClass.Annotations).To(HaveLen(1))
-				Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.DefaultStorageClassAnnotationKey, "true"))
+				Expect(storageClass.Annotations).To(HaveKeyWithValue(srv.DefaultStorageClassAnnotationKey, "true"))
 			})
 		}
 
@@ -396,7 +396,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 								Expect(storageClass).NotTo(BeNil())
 								Expect(storageClass.Annotations).NotTo(BeNil())
 								Expect(storageClass.Annotations).To(HaveLen(2))
-								Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.DefaultStorageClassAnnotationKey, "true"))
+								Expect(storageClass.Annotations).To(HaveKeyWithValue(srv.DefaultStorageClassAnnotationKey, "true"))
 								Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.StorageClassVirtualizationAnnotationKey, controller.StorageClassVirtualizationAnnotationValue))
 							})
 						})
@@ -409,8 +409,8 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 						var anotherProvisioner string
 						BeforeEach(func() {
 							anotherProvisioner = "another.provisioner"
-							storageClassResource.Annotations = map[string]string{controller.DefaultStorageClassAnnotationKey: "true"}
-							storageClassResource.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey] = "false"
+							storageClassResource.Annotations = map[string]string{srv.DefaultStorageClassAnnotationKey: "true"}
+							storageClassResource.Parameters[srv.StorageClassParamAllowRemoteVolumeAccessKey] = "false"
 							storageClassResource.Provisioner = anotherProvisioner
 						})
 
@@ -424,7 +424,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 							storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
 							Expect(err).NotTo(HaveOccurred())
 							Expect(storageClass).NotTo(BeNil())
-							Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
+							Expect(storageClass.Parameters).To(HaveKeyWithValue(srv.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
 							Expect(storageClass.Provisioner).To(Equal(anotherProvisioner))
 						})
 					})
