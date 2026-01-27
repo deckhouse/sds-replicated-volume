@@ -121,14 +121,15 @@ func (c *ChaosNetworkDegrader) doDegrade(ctx context.Context) error {
 
 // doLosses applies packet loss using iptables
 func (c *ChaosNetworkDegrader) doLosses(ctx context.Context, nodeA, nodeB chaos.NodeInfo, incidentDuration time.Duration) error {
-
-	c.log.Info("applying packet loss",
+	log := c.log.With(
 		"incident_type", "losses",
 		"node_a", nodeA.Name,
 		"node_b", nodeB.Name,
 		"loss_percent", c.cfg.LossPercent,
 		"duration", incidentDuration.String(),
 	)
+
+	log.Info("applying packet loss")
 
 	jobNames, err := c.networkDegradeMgr.ApplyPacketLoss(ctx, nodeA, nodeB, c.cfg.LossPercent, incidentDuration)
 	if err != nil {
@@ -138,7 +139,7 @@ func (c *ChaosNetworkDegrader) doLosses(ctx context.Context, nodeA, nodeB chaos.
 	c.activeJobNames = jobNames
 
 	// Wait for incident duration or context cancellation
-	c.log.Debug("keeping packet loss active", "duration", incidentDuration.String())
+	log.Debug("keeping packet loss active", "duration", incidentDuration.String())
 
 	select {
 	case <-ctx.Done():
@@ -154,11 +155,7 @@ func (c *ChaosNetworkDegrader) doLosses(ctx context.Context, nodeA, nodeB chaos.
 	}
 
 	// Remove degradation
-	c.log.Info("removing packet loss",
-		"incident_type", "losses",
-		"node_a", nodeA.Name,
-		"node_b", nodeB.Name,
-	)
+	log.Info("removing packet loss")
 	c.cleanup()
 
 	return nil
@@ -166,13 +163,14 @@ func (c *ChaosNetworkDegrader) doLosses(ctx context.Context, nodeA, nodeB chaos.
 
 // doLatency applies latency using iperf3
 func (c *ChaosNetworkDegrader) doLatency(ctx context.Context, nodeA, nodeB chaos.NodeInfo, incidentDuration time.Duration) error {
-
-	c.log.Info("applying latency",
+	log := c.log.With(
 		"incident_type", "latency",
 		"node_a", nodeA.Name,
 		"node_b", nodeB.Name,
 		"duration", incidentDuration.String(),
 	)
+
+	log.Info("applying latency")
 
 	jobNames, err := c.networkDegradeMgr.ApplyLatency(ctx, nodeA, nodeB, incidentDuration)
 	if err != nil {
@@ -182,7 +180,7 @@ func (c *ChaosNetworkDegrader) doLatency(ctx context.Context, nodeA, nodeB chaos
 	c.activeJobNames = jobNames
 
 	// Wait for incident duration or context cancellation
-	c.log.Debug("keeping latency active", "duration", incidentDuration.String())
+	log.Debug("keeping latency active", "duration", incidentDuration.String())
 
 	select {
 	case <-ctx.Done():
@@ -198,11 +196,7 @@ func (c *ChaosNetworkDegrader) doLatency(ctx context.Context, nodeA, nodeB chaos
 	}
 
 	// Remove degradation
-	c.log.Info("removing latency",
-		"incident_type", "latency",
-		"node_a", nodeA.Name,
-		"node_b", nodeB.Name,
-	)
+	log.Info("removing latency")
 	c.cleanup()
 
 	return nil

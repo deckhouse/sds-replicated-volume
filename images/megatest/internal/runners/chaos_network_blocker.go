@@ -118,11 +118,13 @@ func (c *ChaosNetworkBlocker) doBlock(ctx context.Context) error {
 func (c *ChaosNetworkBlocker) doBlockingEverything(ctx context.Context, nodes []chaos.NodeInfo) error {
 	nodeA, nodeB := nodes[0], nodes[1]
 
-	c.log.Info("blocking all network",
+	log := c.log.With(
 		"incident_type", "blocking-everything",
 		"node_a", nodeA.Name,
 		"node_b", nodeB.Name,
 	)
+
+	log.Info("blocking all network")
 
 	policyName, err := c.networkBlockMgr.BlockAllNetwork(ctx, nodeA, nodeB)
 	if err != nil {
@@ -131,7 +133,7 @@ func (c *ChaosNetworkBlocker) doBlockingEverything(ctx context.Context, nodes []
 
 	// Wait for incident duration or context cancellation
 	incidentDuration := randomDuration(c.cfg.IncidentDuration)
-	c.log.Debug("keeping network blocked", "duration", incidentDuration.String())
+	log.Debug("keeping network blocked", "duration", incidentDuration.String())
 
 	select {
 	case <-ctx.Done():
@@ -146,18 +148,12 @@ func (c *ChaosNetworkBlocker) doBlockingEverything(ctx context.Context, nodes []
 		// Normal timeout, unblock
 	}
 
-	// Unblock traffic
-	c.log.Info("unblocking network",
-		"incident_type", "blocking-everything",
-		"node_a", nodeA.Name,
-		"node_b", nodeB.Name,
-		"policy", policyName,
-	)
+	log.Info("unblocking network")
 
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), CleanupTimeout)
 	defer cleanupCancel()
 	if err := c.networkBlockMgr.UnblockTraffic(cleanupCtx, policyName); err != nil {
-		c.log.Error("failed to unblock network", "error", err)
+		log.Error("failed to unblock network", "error", err)
 	}
 
 	return nil
@@ -167,11 +163,13 @@ func (c *ChaosNetworkBlocker) doBlockingEverything(ctx context.Context, nodes []
 func (c *ChaosNetworkBlocker) doBlockingDRBD(ctx context.Context, nodes []chaos.NodeInfo) error {
 	nodeA, nodeB := nodes[0], nodes[1]
 
-	c.log.Info("blocking-drbd incident selected (not implemented yet)",
+	log := c.log.With(
 		"incident_type", "blocking-drbd",
 		"node_a", nodeA.Name,
 		"node_b", nodeB.Name,
 	)
+
+	log.Info("blocking-drbd incident selected (not implemented yet)")
 
 	return nil
 }
@@ -181,7 +179,7 @@ func (c *ChaosNetworkBlocker) doSplitBrain(ctx context.Context, nodes []chaos.No
 	// Split nodes into two groups
 	groupA, groupB := c.splitNodes(nodes)
 
-	c.log.Info("creating network partition",
+	log := c.log.With(
 		"incident_type", "split-brain",
 		"group_a_size", len(groupA),
 		"group_b_size", len(groupB),
@@ -189,24 +187,26 @@ func (c *ChaosNetworkBlocker) doSplitBrain(ctx context.Context, nodes []chaos.No
 		"group_b_nodes", nodeNames(groupB),
 	)
 
+	log.Info("creating network partition")
+
 	// Create blocking policies between groups
 	var policyNames []string
 	for _, nodeA := range groupA {
 		for _, nodeB := range groupB {
 			policyName, err := c.networkBlockMgr.BlockAllNetwork(ctx, nodeA, nodeB)
 			if err != nil {
-				c.log.Error("failed to block network", "node_a", nodeA.Name, "node_b", nodeB.Name, "error", err)
+				log.Error("failed to block network", "node_a", nodeA.Name, "node_b", nodeB.Name, "error", err)
 				continue
 			}
 			policyNames = append(policyNames, policyName)
 		}
 	}
 
-	c.log.Info("network partition created", "policy_count", len(policyNames))
+	log.Info("network partition created", "policy_count", len(policyNames))
 
 	// Wait for incident duration or context cancellation
 	incidentDuration := randomDuration(c.cfg.IncidentDuration)
-	c.log.Debug("keeping network partitioned", "duration", incidentDuration.String())
+	log.Debug("keeping network partitioned", "duration", incidentDuration.String())
 
 	select {
 	case <-ctx.Done():
@@ -222,10 +222,7 @@ func (c *ChaosNetworkBlocker) doSplitBrain(ctx context.Context, nodes []chaos.No
 	}
 
 	// Remove partition
-	c.log.Info("removing network partition",
-		"incident_type", "split-brain",
-		"policy_count", len(policyNames),
-	)
+	log.Info("removing network partition", "policy_count", len(policyNames))
 	c.cleanup(policyNames)
 
 	return nil

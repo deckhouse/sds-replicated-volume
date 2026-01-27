@@ -149,20 +149,16 @@ func (c *ChaosVMReboter) doReboot(ctx context.Context) error {
 		return nil
 	}
 
-	c.log.Info("performing hard reboot",
-		"vm", vm.Name,
-		"ip", vm.IPAddress,
-		"force", true,
-	)
+	log := c.log.With("incident_type", "vm-reboot", "vm", vm.Name, "ip", vm.IPAddress, "force", true)
+
+	log.Info("performing hard reboot")
 
 	// Create VirtualMachineOperation for hard reboot
 	if err := c.vmRebootMgr.CreateVMOperation(ctx, vm.Name, chaos.VMOperationRestart, true); err != nil {
 		return err
 	}
 
-	c.log.Info("VM reboot initiated",
-		"vm", vm.Name,
-	)
+	log.Info("VM reboot initiated")
 
 	return nil
 }
