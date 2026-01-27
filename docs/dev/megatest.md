@@ -5,15 +5,15 @@
 
 # Базовые горутины
 --storage-classes                    # список storage class через запятую (обязателен)
---kubeconfig                         # путь к kubeconfig файлу
+--kubeconfig                         # путь к kubeconfig файлу (default: "")
 
 --max-volumes                        # максимальное количество одновременных ReplicatedVolumes (default: 10)
 --volume-step-min                    # мин. количество ReplicatedVolumes для создания за шаг (default: 1)
 --volume-step-max                    # макс. количество ReplicatedVolumes для создания за шаг (default: 3)
 --step-period-min                    # мин. интервал между шагами создания ReplicatedVolumes (default: 10s)
 --step-period-max                    # макс. интервал между шагами создания ReplicatedVolumes (default: 30s)
---volume-period-min                  # мин. время жизни ReplicatedVolume (default: 60s)
---volume-period-max                  # макс. время жизни ReplicatedVolume (default: 300s)
+--volume-period-min                  # мин. время жизни ReplicatedVolume (default: 1m0s)
+--volume-period-max                  # макс. время жизни ReplicatedVolume (default: 5m0s)
 
 --enable-pod-destroyer               # включить pod-destroyer горутины (default: false)
 --enable-volume-resizer              # включить volume-resizer горутину (default: false)
@@ -21,17 +21,17 @@
 --enable-volume-replica-creator      # включить volume-replica-creator горутину (default: false)
 
 # Chaos
---parent-kubeconfig              # путь к kubeconfig родительского кластера DVP (обязателен для chaos)
---vm-namespace                   # namespace с VM в родительском кластере (обязателен для chaos)
+--parent-kubeconfig              # путь к kubeconfig родительского кластера DVP (обязателен для chaos, default: "")
+--vm-namespace                   # namespace с VM в родительском кластере (обязателен для chaos, default: "")
 
---enable-chaos-network-block     # включить chaos-network-blocker (поддерживает blocking-everything, blocking-drbd, split-brain)
---enable-chaos-network-degrade   # включить chaos-network-degrader (поддерживает losses, latency)
---enable-chaos-vm-reboot         # включить chaos-vm-reboter
+--enable-chaos-network-block     # включить chaos-network-blocker (поддерживает blocking-everything, blocking-drbd, split-brain) (default: false)
+--enable-chaos-network-degrade   # включить chaos-network-degrader (поддерживает losses, latency) (default: false)
+--enable-chaos-vm-reboot         # включить chaos-vm-reboter (default: false)
 
---chaos-period-min               # мин. интервал между инцидентами (default: 60s)
---chaos-period-max               # макс. интервал между инцидентами (default: 300s)
+--chaos-period-min               # мин. интервал между инцидентами (default: 1m0s)
+--chaos-period-max               # макс. интервал между инцидентами (default: 5m0s)
 --chaos-incident-min             # мин. длительность инцидента (default: 10s)
---chaos-incident-max             # макс. длительность инцидента (default: 60s)
+--chaos-incident-max             # макс. длительность инцидента (default: 1m0s)
 
 --chaos-loss-percent             # потеря пакетов %; принимает значение от 0.0 до 1.0 (0.01 = 1%, 0.10 = 10%; default: 0.01)
 --chaos-partition-group-size     # размер группы для partition в chaos-network-blocker (default: 0 = пополам)
@@ -231,10 +231,10 @@ TODO: не увеличивать размер > maxRvSize
     - ждет рандом(period_min, period_max)
     - получает список VM из родительского кластера и рандомно его перемешивает
     - rand(100) <= 30 (вариант инцидента **blocking-everything**)
-      - берет первые две VM (можно будет увеличить)
+      - берет первые две VM
       - создаёт `CiliumNetworkPolicy` в родительском кластере для блокировки всего tcp трафика между ними
     - rand(100) > 30 и <= 60 (вариант инцидента **blocking-drbd**)
-      - берет первую VM (можно будет увеличить)
+      - берет первую VM
       - получает все RV (или что-то другое) для этой VM и выбирает случайным образом пару DRBD портов
       - создаёт `CiliumNetworkPolicy` в родительском кластере для блокировки выбранных DRBD портов
     - rand(100) > 60 (вариант инцидента **split-brain**)
