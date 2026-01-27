@@ -36,10 +36,10 @@ const (
 	networkDegradeImage = "krpsh/iperf3:0.1.0"
 
 	// networkDegradeAutoCleanupBuffer is added to incident duration for auto-cleanup timeout
-	networkDegradeAutoCleanupBuffer = 4 * time.Second
+	networkDegradeAutoCleanupBuffer = 12 * time.Second
 
 	// networkDegradeActiveDeadlineBuffer is added to incident duration for active deadline timeout
-	networkDegradeActiveDeadlineBuffer = 2 * time.Second
+	networkDegradeActiveDeadlineBuffer = 10 * time.Second
 )
 
 // NetworkDegradeManager manages Jobs for network degradation (iptables/iperf3)
