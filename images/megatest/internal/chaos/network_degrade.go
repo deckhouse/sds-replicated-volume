@@ -170,36 +170,6 @@ func (m *NetworkDegradeManager) ApplyLatency(ctx context.Context, nodeA, nodeB N
 	return jobNames, nil
 }
 
-// CleanupStaleNetworkDegradeJobs cleans up any leftover Jobs from previous runs
-// Should be called at startup. Returns number of deleted jobs.
-func (m *NetworkDegradeManager) CleanupStaleNetworkDegradeJobs(ctx context.Context) (int, error) {
-	jobList := &batchv1.JobList{}
-
-	if err := m.cl.List(ctx, jobList, client.InNamespace(networkDegradeNamespace), client.MatchingLabels{
-		LabelChaosType: string(ChaosTypeNetworkDegrade),
-	}); err != nil {
-		return 0, fmt.Errorf("listing stale network degrade Jobs: %w", err)
-	}
-
-	if len(jobList.Items) == 0 {
-		return 0, nil
-	}
-
-	// Delete stale Jobs
-	propagation := metav1.DeletePropagationBackground
-	deleted := 0
-	for _, job := range jobList.Items {
-		if err := m.cl.Delete(ctx, &job, &client.DeleteOptions{
-			PropagationPolicy: &propagation,
-		}); err == nil {
-			deleted++
-		}
-		// Ignore errors, best effort cleanup
-	}
-
-	return deleted, nil
-}
-
 // jobExists checks if a Job exists
 func (m *NetworkDegradeManager) jobExists(ctx context.Context, jobName string) (bool, error) {
 	job := &batchv1.Job{

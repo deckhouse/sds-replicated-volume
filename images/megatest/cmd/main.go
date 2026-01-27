@@ -230,12 +230,6 @@ func setupChaosRunners(
 		log.Info("cleaned up stale network block policies", "count", stalePolicies)
 	}
 
-	if staleJobs, err := networkDegradeMgr.CleanupStaleNetworkDegradeJobs(ctx); err != nil {
-		log.Warn("failed to cleanup stale network degrade Jobs", "error", err)
-	} else if staleJobs > 0 {
-		log.Info("cleaned up stale network degrade Jobs", "count", staleJobs)
-	}
-
 	if staleVMOps, err := vmRebootMgr.CleanupStaleVMOperations(ctx); err != nil {
 		log.Warn("failed to cleanup stale VMOperations", "error", err)
 	} else if staleVMOps > 0 {
