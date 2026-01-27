@@ -57,6 +57,7 @@ type MultiVolumeConfig struct {
 	EnableVolumeResizer          bool
 	EnableVolumeReplicaDestroyer bool
 	EnableVolumeReplicaCreator   bool
+	ChaosDebugMode               bool
 }
 
 // VolumeMainConfig configures the volume-main goroutine

@@ -138,9 +138,11 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 				rvName := fmt.Sprintf("mgt-%s", uuid.New().String())
 
 				// Start volume-main
-				//m.startVolumeMain(ctx, rvName, storageClass, volumeLifetime)
-				// disable base goroutines
-				m.fakeStartVolumeMain(ctx, rvName, storageClass, volumeLifetime)
+				if m.cfg.ChaosDebugMode {
+					m.fakeStartVolumeMain(ctx, rvName, storageClass, volumeLifetime)
+				} else {
+					m.startVolumeMain(ctx, rvName, storageClass, volumeLifetime)
+				}
 			}
 		}
 
@@ -250,11 +252,11 @@ func (m *MultiVolume) startPodDestroyers(ctx context.Context) {
 func (m *MultiVolume) fakeStartVolumeMain(ctx context.Context, rvName string, storageClass string, volumeLifetime time.Duration) {
 loop1:
 	for {
-		m.log.Info("--- base runners ---", "rvName", rvName, "storageClass", storageClass, "volumeLifetime", volumeLifetime)
+		m.log.Info("chaos debug mode: basic runners disabled, using stub", "rvName", rvName, "storageClass", storageClass, "volumeLifetime", volumeLifetime)
 
 		select {
 		case <-ctx.Done():
-			m.log.Info("END --- base runners --- END")
+			m.log.Info("chaos debug mode: stub finished")
 			break loop1
 		case <-time.After(5 * time.Second):
 		}

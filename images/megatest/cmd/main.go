@@ -119,6 +119,7 @@ func main() {
 		EnableVolumeResizer:          opt.EnableVolumeResizer,
 		EnableVolumeReplicaDestroyer: opt.EnableVolumeReplicaDestroyer,
 		EnableVolumeReplicaCreator:   opt.EnableVolumeReplicaCreator,
+		ChaosDebugMode:               opt.ChaosDebugMode,
 	}
 
 	multiVolume := runners.NewMultiVolume(cfg, kubeClient, forceCleanupChan)

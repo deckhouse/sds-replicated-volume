@@ -45,6 +45,7 @@ type Opt struct {
 	EnableVolumeResizer          bool
 	EnableVolumeReplicaDestroyer bool
 	EnableVolumeReplicaCreator   bool
+	ChaosDebugMode               bool
 
 	// Chaos engineering flags
 	ParentKubeconfig        string
@@ -66,6 +67,8 @@ func printGroupedFlags(cmd *cobra.Command) {
 	flagGroups := map[string][]string{
 		"General": {
 			"log-level",
+			"chaos-debug-mode",
+			"help",
 		},
 		"Basic goroutines": {
 			"storage-classes",
@@ -110,36 +113,7 @@ func printGroupedFlags(cmd *cobra.Command) {
 	cmd.Println("Usage:")
 	cmd.Printf("  %s [flags]\n\n", cmd.Use)
 
-	// Print flag groups
-	for _, groupName := range groupOrder {
-		flagNames := flagGroups[groupName]
-		var groupFlags []*pflag.Flag
-
-		for _, flagName := range flagNames {
-			if flag, exists := allFlags[flagName]; exists {
-				groupFlags = append(groupFlags, flag)
-			}
-		}
-
-		if len(groupFlags) > 0 {
-			cmd.Printf("Flags (%s):\n", groupName)
-			// Calculate max width for this group
-			maxWidth := 0
-			for _, flag := range groupFlags {
-				width := calculateFlagWidth(flag)
-				if width > maxWidth {
-					maxWidth = width
-				}
-			}
-			// Print all flags in the group with aligned descriptions
-			for _, flag := range groupFlags {
-				printFlag(cmd, flag, maxWidth)
-			}
-			cmd.Println()
-		}
-	}
-
-	// Print remaining flags (if any)
+	// Collect remaining flags (not in any group)
 	var remainingFlags []*pflag.Flag
 	for _, flag := range allFlags {
 		found := false
@@ -159,19 +133,37 @@ func printGroupedFlags(cmd *cobra.Command) {
 		}
 	}
 
-	if len(remainingFlags) > 0 {
-		cmd.Println("Flags:")
-		// Calculate max width for remaining flags
-		maxWidth := 0
-		for _, flag := range remainingFlags {
-			width := calculateFlagWidth(flag)
-			if width > maxWidth {
-				maxWidth = width
+	// Print flag groups
+	for _, groupName := range groupOrder {
+		flagNames := flagGroups[groupName]
+		var groupFlags []*pflag.Flag
+
+		for _, flagName := range flagNames {
+			if flag, exists := allFlags[flagName]; exists {
+				groupFlags = append(groupFlags, flag)
 			}
 		}
-		// Print all remaining flags with aligned descriptions
-		for _, flag := range remainingFlags {
-			printFlag(cmd, flag, maxWidth)
+
+		// For General group, also include remaining flags
+		if groupName == "General" && len(remainingFlags) > 0 {
+			groupFlags = append(groupFlags, remainingFlags...)
+		}
+
+		if len(groupFlags) > 0 {
+			cmd.Printf("Flags (%s):\n", groupName)
+			// Calculate max width for this group
+			maxWidth := 0
+			for _, flag := range groupFlags {
+				width := calculateFlagWidth(flag)
+				if width > maxWidth {
+					maxWidth = width
+				}
+			}
+			// Print all flags in the group with aligned descriptions
+			for _, flag := range groupFlags {
+				printFlag(cmd, flag, maxWidth)
+			}
+			cmd.Println()
 		}
 	}
 }
@@ -331,6 +323,7 @@ Interrupting Cleanup:
 	rootCmd.Flags().BoolVarP(&o.EnableVolumeResizer, "enable-volume-resizer", "", false, "Enable volume-resizer goroutine")
 	rootCmd.Flags().BoolVarP(&o.EnableVolumeReplicaDestroyer, "enable-volume-replica-destroyer", "", false, "Enable volume-replica-destroyer goroutine")
 	rootCmd.Flags().BoolVarP(&o.EnableVolumeReplicaCreator, "enable-volume-replica-creator", "", false, "Enable volume-replica-creator goroutine")
+	rootCmd.Flags().BoolVarP(&o.ChaosDebugMode, "chaos-debug-mode", "", false, "Enable chaos debug mode: disable basic runners and use stub mode for chaos goroutines debugging")
 
 	// Chaos engineering flags
 	rootCmd.Flags().StringVarP(&o.ParentKubeconfig, "parent-kubeconfig", "", "", "Path to kubeconfig for parent cluster (DVP)")
