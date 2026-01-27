@@ -1,7 +1,8 @@
 # CLI флаги
 ```
 # Общие
---log-level      # уровень логирования (allowed values: debug, info, warn, error; default: "info")
+--log-level         # уровень логирования (allowed values: debug, info, warn, error; default: "info")
+--chaos-debug-mode  # включить режим отладки chaos: отключить базовые раннеры и использовать режим заглушки для отладки chaos горутин (default: false)
 
 # Базовые горутины
 --storage-classes                    # список storage class через запятую (обязателен)
@@ -19,7 +20,6 @@
 --enable-volume-resizer              # включить volume-resizer горутину (default: false)
 --enable-volume-replica-destroyer    # включить volume-replica-destroyer горутину (default: false)
 --enable-volume-replica-creator      # включить volume-replica-creator горутину (default: false)
---chaos-debug-mode                   # включить режим отладки chaos: отключить базовые раннеры и использовать режим заглушки для отладки chaos горутин (default: false)
 
 # Chaos
 --parent-kubeconfig              # путь к kubeconfig родительского кластера DVP (обязателен для chaos, default: "")
