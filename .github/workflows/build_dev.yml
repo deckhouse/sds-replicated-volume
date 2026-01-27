@@ -131,7 +131,7 @@ jobs:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/build@v4
+      - uses: deckhouse/modules-actions/build@feat/vex-vars
         with:
           module_source: "${{ vars.DEV_MODULE_SOURCE }}"
           module_name: ${{ vars.MODULE_NAME }}
@@ -142,6 +142,8 @@ jobs:
           svace_analyze_host: "${{ secrets.SVACE_ANALYZE_HOST }}"
           svace_analyze_ssh_user: "${{ secrets.SVACE_ANALYZE_SSH_USER }}"
           svace_analyze_ssh_key: "${{ secrets.SVACE_ANALYZE_SSH_PRIVATE_KEY }}"
+          registry_user: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
+          registry_password: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
 
   analyze_build:
     if: ${{ contains(github.event.pull_request.labels.*.name, 'analyze/svace') || inputs.svace_enabled == true }}
