@@ -77,16 +77,6 @@ func (m *NetworkBlockManager) UnblockTraffic(ctx context.Context, policyName str
 	return nil
 }
 
-// CleanupAllChaosPolicies deletes all CiliumNetworkPolicy created by chaos
-func (m *NetworkBlockManager) CleanupAllChaosPolicies(ctx context.Context) error {
-	deleted, err := m.cleanupPoliciesByLabel(ctx)
-	if err != nil {
-		return err
-	}
-	_ = deleted // unused but returned for logging purposes
-	return nil
-}
-
 // CleanupStaleChaosPolicies cleans up any leftover Cilium policies from previous runs
 // Should be called at startup. Returns number of deleted policies.
 func (m *NetworkBlockManager) CleanupStaleChaosPolicies(ctx context.Context) (int, error) {

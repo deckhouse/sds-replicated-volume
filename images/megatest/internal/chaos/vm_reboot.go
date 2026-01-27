@@ -126,12 +126,6 @@ func (m *VMRebootManager) HasUnfinishedVMOperations(ctx context.Context, vmName 
 	return finishedCount != len(vmOps), nil
 }
 
-// CleanupAllVMOperations deletes all VirtualMachineOperations created by chaos
-func (m *VMRebootManager) CleanupAllVMOperations(ctx context.Context) error {
-	_, err := m.cleanupVMOperationsByLabel(ctx)
-	return err
-}
-
 // CleanupStaleVMOperations cleans up any leftover VMOperations from previous runs
 // Should be called at startup. Returns number of deleted operations.
 func (m *VMRebootManager) CleanupStaleVMOperations(ctx context.Context) (int, error) {

@@ -293,28 +293,9 @@ func setupChaosRunners(
 
 	// Return cleanup function
 	return func() {
-		log.Info("cleaning up chaos resources")
+		// Each runner is responsible for cleaning up its own resources
 
 		// Wait for all chaos goroutines to finish
 		wg.Wait()
-
-		// Cleanup Cilium policies
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		if err := networkBlockMgr.CleanupAllChaosPolicies(cleanupCtx); err != nil {
-			log.Error("failed to cleanup network block policies", "error", err)
-		}
-
-		// Cleanup network degrade Jobs
-		// Note: Jobs are self-cleaning via TTL, but we try to delete them explicitly
-		// The cleanup is best-effort since Jobs may have already completed
-
-		// Cleanup VM operations
-		if err := vmRebootMgr.CleanupAllVMOperations(cleanupCtx); err != nil {
-			log.Error("failed to cleanup VM operations", "error", err)
-		}
-
-		log.Info("chaos cleanup completed")
 	}
 }
