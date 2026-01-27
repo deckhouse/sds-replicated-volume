@@ -1,6 +1,6 @@
 ---
 description: Rules for controller package file structure (controller.go/predicates.go/reconciler.go/tests) and what belongs in each file. Apply when creating or editing controller packages under images/controller/internal/controllers/, and when deciding where to place controller logic. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
-globs: images/controller/internal/controllers/rv_controller/**/*.go,images/controller/internal/controllers/rv_attach_controller/**/*.go,images/controller/internal/controllers/rsc_controller/**/*.go,images/controller/internal/controllers/node_controller/**/*.go
+globs: images/controller/internal/controllers/**/*.go
 alwaysApply: false
 ---
 

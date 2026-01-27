@@ -113,9 +113,9 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 			ObservedGeneration: rva.Generation,
 		})
 		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.ReplicatedVolumeAttachmentCondReplicaIOReadyType,
+			Type:               v1alpha1.ReplicatedVolumeAttachmentCondReplicaReadyType,
 			Status:             metav1.ConditionTrue,
-			Reason:             v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonIOReady,
+			Reason:             v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
 			Message:            "io ready",
 			ObservedGeneration: rva.Generation,
 		})

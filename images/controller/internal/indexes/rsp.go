@@ -59,3 +59,62 @@ func RegisterRSPByLVMVolumeGroupName(mgr manager.Manager) error {
 	}
 	return nil
 }
+
+// IndexFieldRSPByUsedByRSCName is used to quickly list
+// ReplicatedStoragePool objects that are used by a specific RSC.
+// The index extracts all RSC names from status.usedBy.replicatedStorageClassNames.
+const IndexFieldRSPByUsedByRSCName = "status.usedBy.replicatedStorageClassNames"
+
+// RegisterRSPByUsedByRSCName registers the index for listing
+// ReplicatedStoragePool objects by status.usedBy.replicatedStorageClassNames.
+func RegisterRSPByUsedByRSCName(mgr manager.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&v1alpha1.ReplicatedStoragePool{},
+		IndexFieldRSPByUsedByRSCName,
+		func(obj client.Object) []string {
+			rsp, ok := obj.(*v1alpha1.ReplicatedStoragePool)
+			if !ok {
+				return nil
+			}
+			return rsp.Status.UsedBy.ReplicatedStorageClassNames
+		},
+	); err != nil {
+		return fmt.Errorf("index ReplicatedStoragePool by status.usedBy.replicatedStorageClassNames: %w", err)
+	}
+	return nil
+}
+
+// IndexFieldRSPByEligibleNodeName is used to quickly list
+// ReplicatedStoragePool objects that have a specific node in their EligibleNodes.
+// The index extracts all node names from status.eligibleNodes[*].nodeName.
+const IndexFieldRSPByEligibleNodeName = "status.eligibleNodes.nodeName"
+
+// RegisterRSPByEligibleNodeName registers the index for listing
+// ReplicatedStoragePool objects by status.eligibleNodes[*].nodeName.
+func RegisterRSPByEligibleNodeName(mgr manager.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&v1alpha1.ReplicatedStoragePool{},
+		IndexFieldRSPByEligibleNodeName,
+		func(obj client.Object) []string {
+			rsp, ok := obj.(*v1alpha1.ReplicatedStoragePool)
+			if !ok {
+				return nil
+			}
+			if len(rsp.Status.EligibleNodes) == 0 {
+				return nil
+			}
+			names := make([]string, 0, len(rsp.Status.EligibleNodes))
+			for _, en := range rsp.Status.EligibleNodes {
+				if en.NodeName != "" {
+					names = append(names, en.NodeName)
+				}
+			}
+			return names
+		},
+	); err != nil {
+		return fmt.Errorf("index ReplicatedStoragePool by status.eligibleNodes.nodeName: %w", err)
+	}
+	return nil
+}
