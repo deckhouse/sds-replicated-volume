@@ -26,10 +26,8 @@ import (
 )
 
 const (
-	// blockingEverythingProbability is the probability threshold for blocking-everything incident (30%)
-	blockingEverythingProbability = 30
-	// blockingDRBDProbability is the probability threshold for blocking-drbd incident (30%, cumulative: 60%)
-	blockingDRBDProbability = 60
+	blockingEverythingProbability = 45
+	blockingDRBDProbability       = 90
 )
 
 // ChaosNetworkBlocker periodically blocks network between nodes with different incident types
@@ -103,13 +101,10 @@ func (c *ChaosNetworkBlocker) doBlock(ctx context.Context) error {
 
 	switch {
 	case randValue < blockingEverythingProbability:
-		// blocking-everything: 30% probability
 		return c.doBlockingEverything(ctx, nodes)
 	case randValue < blockingDRBDProbability:
-		// blocking-drbd: 30% probability (cumulative: 30-60%)
 		return c.doBlockingDRBD(ctx, nodes)
 	default:
-		// split-brain: 40% probability (60-100%)
 		return c.doSplitBrain(ctx, nodes)
 	}
 }
@@ -229,8 +224,8 @@ func (c *ChaosNetworkBlocker) doSplitBrain(ctx context.Context, nodes []chaos.No
 }
 
 func (c *ChaosNetworkBlocker) cleanup(policyNames []string) {
-	c.log.Info("started cleanup")
-	defer c.log.Info("finished cleanup")
+	c.log.Debug("started cleanup")
+	defer c.log.Debug("finished cleanup")
 
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), CleanupTimeout)
 	defer cleanupCancel()
