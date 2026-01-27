@@ -220,7 +220,6 @@ TODO: не увеличивать размер > maxRvSize
 При старте:
 - очищает оставшиеся ресурсы от предыдущих запусков
   - удаляет все существующие `CiliumNetworkPolicy` в родительском кластере
-  - удаляет все существующие `Job` во вложенном кластере
 
 ## Горутины
 ### chaos-network-blocker (period_min, period_max, incident_min, incident_max, group_size)
@@ -231,14 +230,14 @@ TODO: не увеличивать размер > maxRvSize
   - в цикле:
     - ждет рандом(period_min, period_max)
     - получает список VM из родительского кластера и рандомно его перемешивает
-    - rand(100) <= 30 (вариант инцидента **blocking-everything**)
+    - rand(100) <= 45 (вариант инцидента **blocking-everything**)
       - берет первые две VM
       - создаёт `CiliumNetworkPolicy` в родительском кластере для блокировки всего tcp трафика между ними
-    - rand(100) > 30 и <= 60 (вариант инцидента **blocking-drbd**)
+    - rand(100) > 45 и <= 90 (вариант инцидента **blocking-drbd**)
       - берет первую VM
       - получает все RV (или что-то другое) для этой VM и выбирает случайным образом пару DRBD портов
       - создаёт `CiliumNetworkPolicy` в родительском кластере для блокировки выбранных DRBD портов
-    - rand(100) > 60 (вариант инцидента **split-brain**)
+    - rand(100) > 90 (вариант инцидента **split-brain**)
         - разделяет VM на две группы:
           - если group_size > 0: группа-A = group_size нод, группа-B = остальные
           - если group_size = 0: делит пополам (если нечетное число VM, то группа-А = большая часть, группа-В = меньшая часть)
@@ -256,8 +255,8 @@ TODO: не увеличивать размер > maxRvSize
 ### chaos-network-degrader (period_min, period_max, incident_min, incident_max, loss_percent)
 Деградирует сеть (latency + packet loss) между парой VM.
 Решили не использовать tc т.к. сложно подружить с cilium.
-Все манипуляции производятся во вложенном кластере в ns default.
-Перед созданием `Job` нужно проверять, существование джобы с таким именем и если она есть, то удалять.
+Все манипуляции производятся во вложенном кластере в ns default созданием `Job`.
+Перед созданием `Job` нужно проверять, существование джобы с таким именем и если она есть, то писать об этом в лог и пропускать инцидент.
   - в цикле:
     - ждет рандом(period_min, period_max)
     - получает список VM из родительского кластера и рандомно его перемешивает
@@ -297,7 +296,6 @@ TODO: не увеличивать размер > maxRvSize
     - пишет в лог вариант инцидента + имена VM
     - ждет incident_lifetime
   - когда получает сигнал окончания
-    - удаляет активные джобы
     - выходит
 
 ### chaos-vm-reboter (period_min, period_max)
@@ -438,9 +436,9 @@ metadata:
   name: worker-01-del-iptables
   namespace: default
 spec:
-  ttlSecondsAfterFinished: 600          # incident_lifitime + 4sec
+  ttlSecondsAfterFinished: 600          # incident_lifitime + 12sec
   backoffLimit: 0                       # не перезапускать при ошибке
-  activeDeadlineSeconds: 180            # incident_lifetime + 2sec
+  activeDeadlineSeconds: 180            # incident_lifetime + 10sec
   template:
     spec:
       restartPolicy: Never
