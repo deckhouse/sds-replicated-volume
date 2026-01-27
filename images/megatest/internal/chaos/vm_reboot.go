@@ -19,6 +19,7 @@ package chaos
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -48,7 +49,9 @@ func NewVMRebootManager(parentClient *ParentClient) *VMRebootManager {
 // CreateVMOperation creates a VirtualMachineOperation to control VM state
 func (m *VMRebootManager) CreateVMOperation(ctx context.Context, vmName string, opType VMOperationType, force bool) error {
 	namespace := m.parentClient.VMNamespace()
-	opName := fmt.Sprintf("chaos-%s-%s-%d", string(opType), vmName, time.Now().Unix())
+	// Convert opType to lowercase for RFC 1123 subdomain compliance
+	opTypeLower := strings.ToLower(string(opType))
+	opName := fmt.Sprintf("chaos-%s-%s-%d", opTypeLower, vmName, time.Now().Unix())
 
 	vmOp := &unstructured.Unstructured{
 		Object: map[string]interface{}{

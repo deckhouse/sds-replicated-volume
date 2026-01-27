@@ -100,7 +100,7 @@ func (c *ChaosVMReboter) doReboot(ctx context.Context) error {
 	}
 
 	if len(nodes) == 0 {
-		c.log.Debug("no VMs available for reboot")
+		c.log.Info("no VMs available for reboot")
 		return nil
 	}
 
@@ -127,34 +127,18 @@ func (c *ChaosVMReboter) doReboot(ctx context.Context) error {
 		c.log.Debug("skipping VM with unfinished operations", "vm", node.Name)
 	}
 
-	// If no VM without unfinished operations found, use first one and log warning
+	// If no VM without unfinished operations found, skip incident
 	if selectedVM == nil {
-		selectedVM = &nodes[0]
-		c.log.Warn("no VM without unfinished operations found, using first VM anyway",
-			"vm", selectedVM.Name,
-		)
-	}
-
-	vm := *selectedVM
-
-	// Check again for unfinished operations before creating new one
-	hasUnfinished, err := c.vmRebootMgr.HasUnfinishedVMOperations(ctx, vm.Name)
-	if err != nil {
-		c.log.Warn("failed to check VM operations before reboot", "vm", vm.Name, "error", err)
-		// Continue anyway
-	} else if hasUnfinished {
-		c.log.Info("skipping reboot, VM has unfinished operations",
-			"vm", vm.Name,
-		)
+		c.log.Info("skipping reboot, all VMs have unfinished operations")
 		return nil
 	}
 
-	log := c.log.With("incident_type", "vm-reboot", "vm", vm.Name, "ip", vm.IPAddress, "force", true)
+	log := c.log.With("vm", selectedVM.Name)
 
 	log.Info("performing hard reboot")
 
 	// Create VirtualMachineOperation for hard reboot
-	if err := c.vmRebootMgr.CreateVMOperation(ctx, vm.Name, chaos.VMOperationRestart, true); err != nil {
+	if err := c.vmRebootMgr.CreateVMOperation(ctx, selectedVM.Name, chaos.VMOperationRestart, true); err != nil {
 		return err
 	}
 

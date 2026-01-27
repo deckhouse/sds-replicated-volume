@@ -27,26 +27,20 @@ type VMOperationType string
 
 const (
 	VMOperationRestart VMOperationType = "Restart"
-	VMOperationStop    VMOperationType = "Stop"
-	VMOperationStart   VMOperationType = "Start"
 )
 
 // ChaosType represents type of chaos scenario
 type ChaosType string
 
 const (
-	ChaosTypeDRBDBlock        ChaosType = "drbd-block"
-	ChaosTypeNetworkBlock     ChaosType = "network-block"
-	ChaosTypeNetworkDegrade   ChaosType = "network-degrade"
-	ChaosTypeVMReboot         ChaosType = "vm-reboot"
-	ChaosTypeNetworkPartition ChaosType = "network-partition"
+	ChaosTypeNetworkBlock   ChaosType = "network-block"
+	ChaosTypeNetworkDegrade ChaosType = "network-degrade"
+	ChaosTypeVMReboot       ChaosType = "vm-reboot"
 )
 
 // Label keys for chaos resources
 const (
-	LabelChaosType      = "chaos.megatest/type"
-	LabelChaosNodeA     = "chaos.megatest/node-a"
-	LabelChaosNodeB     = "chaos.megatest/node-b"
-	LabelChaosInterface = "chaos.megatest/interface"
-	LabelChaosTargetIP  = "chaos.megatest/target-ip"
+	LabelChaosType  = "chaos.megatest/type"
+	LabelChaosNodeA = "chaos.megatest/node-a"
+	LabelChaosNodeB = "chaos.megatest/node-b"
 )
