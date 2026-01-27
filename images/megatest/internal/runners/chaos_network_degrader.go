@@ -38,7 +38,6 @@ type ChaosNetworkDegrader struct {
 	parentClient      *chaos.ParentClient
 	log               *slog.Logger
 	forceCleanupChan  <-chan struct{}
-	activeJobNames    []string
 }
 
 // NewChaosNetworkDegrader creates a new ChaosNetworkDegrader
@@ -55,7 +54,6 @@ func NewChaosNetworkDegrader(
 		forceCleanupChan:  forceCleanupChan,
 		log: slog.Default().With(
 			"runner", "chaos-network-degrader",
-			"loss_percent", cfg.LossPercent,
 		),
 	}
 }
@@ -136,19 +134,17 @@ func (c *ChaosNetworkDegrader) doLosses(ctx context.Context, nodeA, nodeB chaos.
 		return err
 	}
 
-	c.activeJobNames = jobNames
-
 	// Wait for incident duration or context cancellation
 	log.Debug("keeping packet loss active", "duration", incidentDuration.String())
 
 	select {
 	case <-ctx.Done():
 		// Cleanup on context cancellation
-		c.cleanup()
+		c.cleanup(jobNames)
 		return ctx.Err()
 	case <-c.forceCleanupChan:
 		// Cleanup on force signal
-		c.cleanup()
+		c.cleanup(jobNames)
 		return nil
 	case <-waitChan(incidentDuration):
 		// Normal timeout, remove degradation
@@ -156,7 +152,7 @@ func (c *ChaosNetworkDegrader) doLosses(ctx context.Context, nodeA, nodeB chaos.
 
 	// Remove degradation
 	log.Info("removing packet loss")
-	c.cleanup()
+	c.cleanup(jobNames)
 
 	return nil
 }
@@ -177,19 +173,17 @@ func (c *ChaosNetworkDegrader) doLatency(ctx context.Context, nodeA, nodeB chaos
 		return err
 	}
 
-	c.activeJobNames = jobNames
-
 	// Wait for incident duration or context cancellation
 	log.Debug("keeping latency active", "duration", incidentDuration.String())
 
 	select {
 	case <-ctx.Done():
 		// Cleanup on context cancellation
-		c.cleanup()
+		c.cleanup(jobNames)
 		return ctx.Err()
 	case <-c.forceCleanupChan:
 		// Cleanup on force signal
-		c.cleanup()
+		c.cleanup(jobNames)
 		return nil
 	case <-waitChan(incidentDuration):
 		// Normal timeout, remove degradation
@@ -197,24 +191,23 @@ func (c *ChaosNetworkDegrader) doLatency(ctx context.Context, nodeA, nodeB chaos
 
 	// Remove degradation
 	log.Info("removing latency")
-	c.cleanup()
+	c.cleanup(jobNames)
 
 	return nil
 }
 
-func (c *ChaosNetworkDegrader) cleanup() {
-	c.log.Info("started cleanup")
-	defer c.log.Info("finished cleanup")
+func (c *ChaosNetworkDegrader) cleanup(jobNames []string) {
+	c.log.Debug("started cleanup")
+	defer c.log.Debug("finished cleanup")
 
-	if len(c.activeJobNames) == 0 {
+	if len(jobNames) == 0 {
 		return
 	}
 
-	c.log.Info("cleanup: removing network degradation", "job_count", len(c.activeJobNames))
+	c.log.Info("cleanup: removing network degradation", "job_count", len(jobNames))
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), CleanupTimeout)
 	defer cleanupCancel()
-	if err := c.networkDegradeMgr.RemoveNetworkDegradation(cleanupCtx, c.activeJobNames); err != nil {
+	if err := c.networkDegradeMgr.RemoveNetworkDegradation(cleanupCtx, jobNames); err != nil {
 		c.log.Error("cleanup failed", "error", err)
 	}
-	c.activeJobNames = nil
 }
