@@ -64,7 +64,7 @@ func (o *ReplicatedStorageClass) SetStatusConditions(conditions []metav1.Conditi
 type ReplicatedStorageClassSpec struct {
 	// StoragePool is the name of a ReplicatedStoragePool resource.
 	// Deprecated: Use Storage instead. This field cannot be added or changed, only removed.
-	// +kubebuilder:validation:XValidation:rule="!has(self) || (has(oldSelf) && self == oldSelf)",message="StoragePool cannot be added or changed, only removed"
+	// +kubebuilder:validation:XValidation:rule="size(self) == 0 || self == oldSelf",message="StoragePool cannot be added or changed, only removed"
 	// +optional
 	StoragePool string `json:"storagePool,omitempty"`
 	// Storage defines the storage backend configuration for this storage class.

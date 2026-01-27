@@ -276,7 +276,7 @@ spec:
                 type: string
                 x-kubernetes-validations:
                 - message: StoragePool cannot be added or changed, only removed
-                  rule: '!has(self) || (has(oldSelf) && self == oldSelf)'
+                  rule: size(self) == 0 || self == oldSelf
               systemNetworkNames:
                 default:
                 - Internal
