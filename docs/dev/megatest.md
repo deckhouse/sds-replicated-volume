@@ -478,3 +478,15 @@ iptables -A OUTPUT -p tcp -m statistic --mode random --probability 0.03 -j DROP
 iptables -L INPUT --line-numbers
 iptables -D INPUT 1
 ```
+
+### Dockerfile
+```Dockerfile
+# контейнер "net-tools" для Job
+FROM alpine:latest
+RUN apk update --no-cache && \
+    apk add --no-cache \
+        iperf3 \
+        iptables \
+    && rm -rf /var/cache/apk/*
+CMD ["iperf3", "-s"]
+```
