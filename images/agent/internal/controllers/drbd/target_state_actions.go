@@ -7,6 +7,7 @@ import (
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdmeta"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
 
@@ -37,9 +38,13 @@ var _ PatchStatusAction = ConfigureIPAddressAction{}
 var _ PatchStatusAction = AllocatePortsAction{}
 
 var _ ExecuteDRBDAction = NewResourceAction{}
+var _ ExecuteDRBDAction = ResourceOptionsAction{}
 var _ ExecuteDRBDAction = NewMinorAction{}
+var _ ExecuteDRBDAction = CreateMetadataAction{}
 var _ ExecuteDRBDAction = AttachAction{}
+var _ ExecuteDRBDAction = DiskOptionsAction{}
 var _ ExecuteDRBDAction = NewPeerAction{}
+var _ ExecuteDRBDAction = NetOptionsAction{}
 var _ ExecuteDRBDAction = NewPathAction{}
 var _ ExecuteDRBDAction = ConnectAction{}
 var _ ExecuteDRBDAction = DisconnectAction{}
@@ -54,9 +59,13 @@ func (RemoveAgentFinalizerAction) _action() {}
 func (ConfigureIPAddressAction) _action()   {}
 func (AllocatePortsAction) _action()        {}
 func (NewResourceAction) _action()          {}
+func (ResourceOptionsAction) _action()      {}
 func (NewMinorAction) _action()             {}
+func (CreateMetadataAction) _action()       {}
 func (AttachAction) _action()               {}
+func (DiskOptionsAction) _action()          {}
 func (NewPeerAction) _action()              {}
+func (NetOptionsAction) _action()           {}
 func (NewPathAction) _action()              {}
 func (ConnectAction) _action()              {}
 func (DisconnectAction) _action()           {}
@@ -191,6 +200,30 @@ func (a NewResourceAction) Execute(ctx context.Context) error {
 
 //
 
+// ResourceOptionsAction sets resource-level options.
+type ResourceOptionsAction struct {
+	ResourceName               string
+	AutoPromote                *bool
+	OnNoQuorum                 string
+	OnNoDataAccessible         string
+	OnSuspendedPrimaryOutdated string
+	Quorum                     *uint
+	QuorumMinimumRedundancy    *uint
+}
+
+func (a ResourceOptionsAction) Execute(ctx context.Context) error {
+	return drbdsetup.ExecuteResourceOptions(ctx, a.ResourceName, drbdsetup.ResourceOptions{
+		AutoPromote:                a.AutoPromote,
+		OnNoQuorum:                 a.OnNoQuorum,
+		OnNoDataAccessible:         a.OnNoDataAccessible,
+		OnSuspendedPrimaryOutdated: a.OnSuspendedPrimaryOutdated,
+		Quorum:                     a.Quorum,
+		QuorumMinimumRedundancy:    a.QuorumMinimumRedundancy,
+	})
+}
+
+//
+
 // NewMinorAction creates a new DRBD device/volume within a resource.
 type NewMinorAction struct {
 	ResourceName   string
@@ -207,6 +240,21 @@ func (a NewMinorAction) Execute(ctx context.Context) error {
 		*a.AllocatedMinor = minor
 	}
 	return nil
+}
+
+//
+
+// CreateMetadataAction creates DRBD metadata on a backing device.
+type CreateMetadataAction struct {
+	Minor      *uint
+	BackingDev string
+}
+
+func (a CreateMetadataAction) Execute(ctx context.Context) error {
+	if a.Minor == nil {
+		return fmt.Errorf("CreateMetadataAction: minor not set")
+	}
+	return drbdmeta.ExecuteCreateMD(ctx, *a.Minor, a.BackingDev)
 }
 
 //
@@ -228,23 +276,63 @@ func (a AttachAction) Execute(ctx context.Context) error {
 
 //
 
+// DiskOptionsAction sets disk options on an attached volume.
+type DiskOptionsAction struct {
+	Minor                  *uint
+	DiscardZeroesIfAligned *bool
+	RsDiscardGranularity   *uint
+}
+
+func (a DiskOptionsAction) Execute(ctx context.Context) error {
+	if a.Minor == nil {
+		return fmt.Errorf("DiskOptionsAction: minor not set")
+	}
+	return drbdsetup.ExecuteDiskOptions(ctx, *a.Minor, drbdsetup.DiskOptions{
+		DiscardZeroesIfAligned: a.DiscardZeroesIfAligned,
+		RsDiscardGranularity:   a.RsDiscardGranularity,
+	})
+}
+
+//
+
 // NewPeerAction makes a peer node known to the resource.
 type NewPeerAction struct {
 	ResourceName string
 	PeerNodeID   uint
 	Protocol     string // A, B, or C
 	SharedSecret string
+	CRAMHMACAlg  string // HMAC algorithm for authentication
+	RRConflict   string // e.g., "retry-connect"
 }
 
 func (a NewPeerAction) Execute(ctx context.Context) error {
 	var opts *drbdsetup.NewPeerOptions
-	if a.Protocol != "" || a.SharedSecret != "" {
+	if a.Protocol != "" || a.SharedSecret != "" || a.CRAMHMACAlg != "" || a.RRConflict != "" {
 		opts = &drbdsetup.NewPeerOptions{
 			Protocol:     a.Protocol,
 			SharedSecret: a.SharedSecret,
+			CRAMHMACAlg:  a.CRAMHMACAlg,
+			RRConflict:   a.RRConflict,
 		}
 	}
 	return drbdsetup.ExecuteNewPeer(ctx, a.ResourceName, a.PeerNodeID, opts)
+}
+
+//
+
+// NetOptionsAction sets network options on a peer connection.
+type NetOptionsAction struct {
+	ResourceName      string
+	PeerNodeID        uint
+	AllowTwoPrimaries *bool
+	AllowRemoteRead   *bool
+}
+
+func (a NetOptionsAction) Execute(ctx context.Context) error {
+	return drbdsetup.ExecuteNetOptions(ctx, a.ResourceName, a.PeerNodeID, drbdsetup.NetOptions{
+		AllowTwoPrimaries: a.AllowTwoPrimaries,
+		AllowRemoteRead:   a.AllowRemoteRead,
+	})
 }
 
 //

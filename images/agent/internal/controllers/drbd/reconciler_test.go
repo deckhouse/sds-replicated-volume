@@ -102,11 +102,23 @@ func TestReconciler_Reconcile(t *testing.T) {
 				// After status returns empty, actions are generated:
 				// NewResourceAction calls new-resource
 				newResourceCmd(testDRBDResName, 0),
+				// ResourceOptionsAction sets resource options
+				resourceOptionsCmd(testDRBDResName),
 				// NewMinorAction calls ExecuteNewAutoMinor which tries nextDeviceMinor=0 first
 				newMinorCmd(testDRBDResName, 0, 0),
 				// After actions, refresh actual state
 				statusCmd(testDRBDResName, configuredStatus(testDRBDResName)),
-				showCmd(testDRBDResName, &drbdsetup.ShowResource{Resource: testDRBDResName}),
+				showCmd(testDRBDResName, &drbdsetup.ShowResource{
+					Resource: testDRBDResName,
+					Options: drbdsetup.ShowOptions{
+						AutoPromote:                false,
+						Quorum:                     "off",
+						QuorumMinimumRedundancy:    "off",
+						OnNoQuorum:                 "suspend-io",
+						OnNoDataAccessible:         "suspend-io",
+						OnSuspendedPrimaryOutdated: "force-secondary",
+					},
+				}),
 			},
 		},
 		{
@@ -116,9 +128,16 @@ func TestReconciler_Reconcile(t *testing.T) {
 				statusCmd(testDRBDResName, configuredStatus(testDRBDResName)),
 				showCmd(testDRBDResName, &drbdsetup.ShowResource{
 					Resource: testDRBDResName,
-					Options:  drbdsetup.ShowOptions{Quorum: "2", QuorumMinimumRedundancy: "1"},
+					Options: drbdsetup.ShowOptions{
+						AutoPromote:                false,
+						Quorum:                     "off",
+						QuorumMinimumRedundancy:    "off",
+						OnNoQuorum:                 "suspend-io",
+						OnNoDataAccessible:         "suspend-io",
+						OnSuspendedPrimaryOutdated: "force-secondary",
+					},
 				}),
-				// Resource exists and matches - no additional commands
+				// Resource exists and options match - no additional commands
 			},
 		},
 
@@ -146,7 +165,17 @@ func TestReconciler_Reconcile(t *testing.T) {
 			drbdr: drbdrWithCustomName(testNodeName, testCustomDRBDName),
 			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
 				statusCmd(testCustomDRBDName, configuredStatus(testCustomDRBDName)),
-				showCmd(testCustomDRBDName, &drbdsetup.ShowResource{Resource: testCustomDRBDName}),
+				showCmd(testCustomDRBDName, &drbdsetup.ShowResource{
+					Resource: testCustomDRBDName,
+					Options: drbdsetup.ShowOptions{
+						AutoPromote:                false,
+						Quorum:                     "off",
+						QuorumMinimumRedundancy:    "off",
+						OnNoQuorum:                 "suspend-io",
+						OnNoDataAccessible:         "suspend-io",
+						OnSuspendedPrimaryOutdated: "force-secondary",
+					},
+				}),
 			},
 		},
 
@@ -192,11 +221,23 @@ func TestReconciler_Reconcile(t *testing.T) {
 				},
 				// Resource not found triggers creation
 				newResourceCmd(testDRBDResName, 0),
+				// ResourceOptionsAction sets resource options
+				resourceOptionsCmd(testDRBDResName),
 				// ExecuteNewAutoMinor tries nextDeviceMinor=0 first
 				newMinorCmd(testDRBDResName, 0, 0),
 				// Refresh after actions
 				statusCmd(testDRBDResName, configuredStatus(testDRBDResName)),
-				showCmd(testDRBDResName, &drbdsetup.ShowResource{Resource: testDRBDResName}),
+				showCmd(testDRBDResName, &drbdsetup.ShowResource{
+					Resource: testDRBDResName,
+					Options: drbdsetup.ShowOptions{
+						AutoPromote:                false,
+						Quorum:                     "off",
+						QuorumMinimumRedundancy:    "off",
+						OnNoQuorum:                 "suspend-io",
+						OnNoDataAccessible:         "suspend-io",
+						OnSuspendedPrimaryOutdated: "force-secondary",
+					},
+				}),
 			},
 		},
 
@@ -206,7 +247,17 @@ func TestReconciler_Reconcile(t *testing.T) {
 			drbdr: drbdrInMaintenance(testNodeName, v1alpha1.MaintenanceModeNoResourceReconciliation),
 			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
 				statusCmd(testDRBDResName, configuredStatus(testDRBDResName)),
-				showCmd(testDRBDResName, &drbdsetup.ShowResource{Resource: testDRBDResName}),
+				showCmd(testDRBDResName, &drbdsetup.ShowResource{
+					Resource: testDRBDResName,
+					Options: drbdsetup.ShowOptions{
+						AutoPromote:                false,
+						Quorum:                     "off",
+						QuorumMinimumRedundancy:    "off",
+						OnNoQuorum:                 "suspend-io",
+						OnNoDataAccessible:         "suspend-io",
+						OnSuspendedPrimaryOutdated: "force-secondary",
+					},
+				}),
 			},
 		},
 
@@ -237,7 +288,14 @@ func TestReconciler_Reconcile(t *testing.T) {
 				}),
 				showCmd(testDRBDResName, &drbdsetup.ShowResource{
 					Resource: testDRBDResName,
-					Options:  drbdsetup.ShowOptions{Quorum: "2"},
+					Options: drbdsetup.ShowOptions{
+						AutoPromote:                false,
+						Quorum:                     "off",
+						QuorumMinimumRedundancy:    "off",
+						OnNoQuorum:                 "suspend-io",
+						OnNoDataAccessible:         "suspend-io",
+						OnSuspendedPrimaryOutdated: "force-secondary",
+					},
 					Connections: []drbdsetup.ShowConnection{
 						{PeerNodeID: 1, Net: drbdsetup.ShowNet{Protocol: "C"}},
 					},
@@ -247,7 +305,17 @@ func TestReconciler_Reconcile(t *testing.T) {
 				delPeerCmd(testDRBDResName, 1),
 				// Refresh after actions
 				statusCmd(testDRBDResName, configuredStatus(testDRBDResName)),
-				showCmd(testDRBDResName, &drbdsetup.ShowResource{Resource: testDRBDResName}),
+				showCmd(testDRBDResName, &drbdsetup.ShowResource{
+					Resource: testDRBDResName,
+					Options: drbdsetup.ShowOptions{
+						AutoPromote:                false,
+						Quorum:                     "off",
+						QuorumMinimumRedundancy:    "off",
+						OnNoQuorum:                 "suspend-io",
+						OnNoDataAccessible:         "suspend-io",
+						OnSuspendedPrimaryOutdated: "force-secondary",
+					},
+				}),
 			},
 		},
 	}
@@ -441,6 +509,25 @@ func delPeerCmd(resourceName string, peerNodeID uint) *fakedrbdsetup.ExpectedCmd
 	return &fakedrbdsetup.ExpectedCmd{
 		Name:         drbdsetup.Command,
 		Args:         drbdsetup.DelPeerArgs(resourceName, peerNodeID),
+		ResultOutput: []byte{},
+		ResultErr:    nil,
+	}
+}
+
+func resourceOptionsCmd(resourceName string) *fakedrbdsetup.ExpectedCmd {
+	autoPromote := false
+	quorum := uint(0)
+	quorumMinRedundancy := uint(0)
+	return &fakedrbdsetup.ExpectedCmd{
+		Name: drbdsetup.Command,
+		Args: drbdsetup.ResourceOptionsArgs(resourceName, drbdsetup.ResourceOptions{
+			AutoPromote:                &autoPromote,
+			OnNoQuorum:                 "suspend-io",
+			OnNoDataAccessible:         "suspend-io",
+			OnSuspendedPrimaryOutdated: "force-secondary",
+			Quorum:                     &quorum,
+			QuorumMinimumRedundancy:    &quorumMinRedundancy,
+		}),
 		ResultOutput: []byte{},
 		ResultErr:    nil,
 	}

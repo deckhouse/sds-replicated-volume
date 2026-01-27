@@ -25,6 +25,15 @@ type IntendedState interface {
 	// Returns empty string for diskless resources.
 	BackingDisk() string
 
+	// Quorum returns the quorum setting. 0 means off.
+	Quorum() byte
+
+	// QuorumMinimumRedundancy returns the quorum minimum redundancy setting. 0 means off.
+	QuorumMinimumRedundancy() byte
+
+	// AllowTwoPrimaries returns whether dual-primary mode is allowed.
+	AllowTwoPrimaries() bool
+
 	// Peers returns the list of intended peer configurations.
 	Peers() []IntendedPeer
 }
@@ -41,6 +50,12 @@ type IntendedPeer interface {
 
 	// SharedSecret returns the shared secret for authentication.
 	SharedSecret() string
+
+	// SharedSecretAlg returns the HMAC algorithm for shared secret (e.g., SHA256, SHA1).
+	SharedSecretAlg() v1alpha1.SharedSecretAlg
+
+	// AllowRemoteRead returns whether reading from this peer is allowed.
+	AllowRemoteRead() bool
 
 	// Paths returns the network paths to this peer.
 	Paths() []IntendedPath
@@ -112,6 +127,18 @@ func (iState *intendedState) BackingDisk() string {
 	return iState.backingDisk
 }
 
+func (iState *intendedState) Quorum() byte {
+	return iState.drbdr.Spec.Quorum
+}
+
+func (iState *intendedState) QuorumMinimumRedundancy() byte {
+	return iState.drbdr.Spec.QuorumMinimumRedundancy
+}
+
+func (iState *intendedState) AllowTwoPrimaries() bool {
+	return iState.drbdr.Spec.AllowTwoPrimaries
+}
+
 func (iState *intendedState) Peers() []IntendedPeer {
 	peers := make([]IntendedPeer, 0, len(iState.drbdr.Spec.Peers))
 	for i := range iState.drbdr.Spec.Peers {
@@ -145,6 +172,14 @@ func (p *intendedPeer) Protocol() v1alpha1.DRBDProtocol {
 
 func (p *intendedPeer) SharedSecret() string {
 	return p.peer.SharedSecret
+}
+
+func (p *intendedPeer) SharedSecretAlg() v1alpha1.SharedSecretAlg {
+	return p.peer.SharedSecretAlg
+}
+
+func (p *intendedPeer) AllowRemoteRead() bool {
+	return p.peer.AllowRemoteRead
 }
 
 func (p *intendedPeer) Paths() []IntendedPath {

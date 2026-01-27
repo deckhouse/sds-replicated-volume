@@ -19,6 +19,24 @@ type ActualState interface {
 	// NodeID returns this node's ID for the resource.
 	NodeID() uint
 
+	// AutoPromote returns the auto-promote setting.
+	AutoPromote() bool
+
+	// Quorum returns the quorum setting (e.g., "off", "1", "2", etc.).
+	Quorum() string
+
+	// QuorumMinimumRedundancy returns the quorum-minimum-redundancy setting.
+	QuorumMinimumRedundancy() string
+
+	// OnNoQuorum returns the on-no-quorum action.
+	OnNoQuorum() string
+
+	// OnNoDataAccessible returns the on-no-data-accessible action.
+	OnNoDataAccessible() string
+
+	// OnSuspendedPrimaryOutdated returns the on-suspended-primary-outdated action.
+	OnSuspendedPrimaryOutdated() string
+
 	// Volumes returns the list of volumes/devices for this resource.
 	Volumes() []ActualVolume
 
@@ -38,6 +56,12 @@ type ActualVolume interface {
 
 	// DiskState returns the disk state (e.g., "UpToDate", "Diskless").
 	DiskState() string
+
+	// DiscardZeroesIfAligned returns the discard-zeroes-if-aligned setting.
+	DiscardZeroesIfAligned() bool
+
+	// RsDiscardGranularity returns the rs-discard-granularity setting.
+	RsDiscardGranularity() string
 }
 
 type ActualPeer interface {
@@ -46,6 +70,12 @@ type ActualPeer interface {
 
 	// ConnectionState returns the connection state (e.g., "Connected", "StandAlone").
 	ConnectionState() string
+
+	// AllowTwoPrimaries returns the allow-two-primaries setting.
+	AllowTwoPrimaries() bool
+
+	// AllowRemoteRead returns the allow-remote-read setting.
+	AllowRemoteRead() bool
 
 	// Paths returns the network paths to this peer.
 	Paths() []ActualPath
@@ -96,16 +126,59 @@ func (aState *actualState) NodeID() uint {
 	return 0
 }
 
+func (aState *actualState) AutoPromote() bool {
+	if aState.show != nil {
+		return aState.show.Options.AutoPromote
+	}
+	return false
+}
+
+func (aState *actualState) Quorum() string {
+	if aState.show != nil {
+		return aState.show.Options.Quorum
+	}
+	return ""
+}
+
+func (aState *actualState) QuorumMinimumRedundancy() string {
+	if aState.show != nil {
+		return aState.show.Options.QuorumMinimumRedundancy
+	}
+	return ""
+}
+
+func (aState *actualState) OnNoQuorum() string {
+	if aState.show != nil {
+		return aState.show.Options.OnNoQuorum
+	}
+	return ""
+}
+
+func (aState *actualState) OnNoDataAccessible() string {
+	if aState.show != nil {
+		return aState.show.Options.OnNoDataAccessible
+	}
+	return ""
+}
+
+func (aState *actualState) OnSuspendedPrimaryOutdated() string {
+	if aState.show != nil {
+		return aState.show.Options.OnSuspendedPrimaryOutdated
+	}
+	return ""
+}
+
 func (aState *actualState) Volumes() []ActualVolume {
 	if aState.status == nil {
 		return nil
 	}
 
-	// Build a map of backing disks from show output
-	backingDisks := make(map[int]string)
+	// Build a map of show volumes by volume number
+	showVolumes := make(map[int]*drbdsetup.ShowVolume)
 	if aState.show != nil {
-		for _, vol := range aState.show.ThisHost.Volumes {
-			backingDisks[vol.VolumeNr] = vol.BackingDisk
+		for i := range aState.show.ThisHost.Volumes {
+			vol := &aState.show.ThisHost.Volumes[i]
+			showVolumes[vol.VolumeNr] = vol
 		}
 	}
 
@@ -113,10 +186,10 @@ func (aState *actualState) Volumes() []ActualVolume {
 	for i := range aState.status.Devices {
 		dev := &aState.status.Devices[i]
 		volumes = append(volumes, &actualVolume{
-			minor:       dev.Minor,
-			volumeNr:    dev.Volume,
-			backingDisk: backingDisks[dev.Volume],
-			diskState:   dev.DiskState,
+			minor:      dev.Minor,
+			volumeNr:   dev.Volume,
+			diskState:  dev.DiskState,
+			showVolume: showVolumes[dev.Volume],
 		})
 	}
 	return volumes
@@ -127,10 +200,22 @@ func (aState *actualState) Peers() []ActualPeer {
 		return nil
 	}
 
+	// Build a map of show connections by peer node ID
+	showConnections := make(map[int]*drbdsetup.ShowConnection)
+	if aState.show != nil {
+		for i := range aState.show.Connections {
+			conn := &aState.show.Connections[i]
+			showConnections[conn.PeerNodeID] = conn
+		}
+	}
+
 	peers := make([]ActualPeer, 0, len(aState.status.Connections))
 	for i := range aState.status.Connections {
 		conn := &aState.status.Connections[i]
-		peers = append(peers, &actualPeer{connection: conn})
+		peers = append(peers, &actualPeer{
+			connection:     conn,
+			showConnection: showConnections[conn.PeerNodeID],
+		})
 	}
 	return peers
 }
@@ -139,22 +224,40 @@ var _ ActualState = &actualState{}
 
 // actualVolume implements ActualVolume.
 type actualVolume struct {
-	minor       int
-	volumeNr    int
-	backingDisk string
-	diskState   string
+	minor      int
+	volumeNr   int
+	diskState  string
+	showVolume *drbdsetup.ShowVolume
 }
 
-func (v *actualVolume) Minor() int          { return v.minor }
-func (v *actualVolume) VolumeNr() int       { return v.volumeNr }
-func (v *actualVolume) BackingDisk() string { return v.backingDisk }
-func (v *actualVolume) DiskState() string   { return v.diskState }
+func (v *actualVolume) Minor() int    { return v.minor }
+func (v *actualVolume) VolumeNr() int { return v.volumeNr }
+func (v *actualVolume) BackingDisk() string {
+	if v.showVolume != nil {
+		return v.showVolume.BackingDisk
+	}
+	return ""
+}
+func (v *actualVolume) DiskState() string { return v.diskState }
+func (v *actualVolume) DiscardZeroesIfAligned() bool {
+	if v.showVolume != nil {
+		return v.showVolume.Disk.DiscardZeroesIfAligned
+	}
+	return false
+}
+func (v *actualVolume) RsDiscardGranularity() string {
+	if v.showVolume != nil {
+		return v.showVolume.Disk.RSDiscardGranularity
+	}
+	return ""
+}
 
 var _ ActualVolume = &actualVolume{}
 
 // actualPeer implements ActualPeer.
 type actualPeer struct {
-	connection *drbdsetup.Connection
+	connection     *drbdsetup.Connection
+	showConnection *drbdsetup.ShowConnection
 }
 
 func (p *actualPeer) NodeID() uint {
@@ -163,6 +266,20 @@ func (p *actualPeer) NodeID() uint {
 
 func (p *actualPeer) ConnectionState() string {
 	return p.connection.ConnectionState
+}
+
+func (p *actualPeer) AllowTwoPrimaries() bool {
+	if p.showConnection != nil {
+		return p.showConnection.Net.AllowTwoPrimaries
+	}
+	return false
+}
+
+func (p *actualPeer) AllowRemoteRead() bool {
+	if p.showConnection != nil {
+		return p.showConnection.Net.AllowRemoteRead
+	}
+	return false
 }
 
 func (p *actualPeer) Paths() []ActualPath {

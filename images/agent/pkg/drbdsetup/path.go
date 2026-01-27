@@ -85,8 +85,7 @@ func ExecuteDelPath(ctx context.Context, resource string, peerNodeID uint, local
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		switch errToExitCode(err) {
-		case 158:
+		if errToExitCode(err) == 158 {
 			return ErrDelPathNotFound
 		}
 		return fmt.Errorf(

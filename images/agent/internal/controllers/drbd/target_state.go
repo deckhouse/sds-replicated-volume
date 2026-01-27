@@ -62,6 +62,9 @@ func computeTargetStateActions(iState IntendedState, aState ActualState) (res Ta
 func computeBringUpActions(iState IntendedState, aState ActualState) (res TargetStateActions) {
 	resourceName := iState.ResourceName()
 
+	// Shared minor pointer for passing between actions
+	var allocatedMinor uint
+
 	if !aState.ResourceExists() {
 		// Resource doesn't exist - create it
 		res = append(res, NewResourceAction{
@@ -69,8 +72,10 @@ func computeBringUpActions(iState IntendedState, aState ActualState) (res Target
 			NodeID:       iState.NodeID(),
 		})
 
+		// Set resource options
+		res = append(res, computeResourceOptionsAction(resourceName, iState)...)
+
 		// Create volume/minor
-		var allocatedMinor uint
 		res = append(res, NewMinorAction{
 			ResourceName:   resourceName,
 			Volume:         0,
@@ -79,13 +84,24 @@ func computeBringUpActions(iState IntendedState, aState ActualState) (res Target
 
 		// Attach backing storage for diskful resources
 		if iState.Type() == v1alpha1.DRBDResourceTypeDiskful && iState.BackingDisk() != "" {
+			// Create metadata first
+			res = append(res, CreateMetadataAction{
+				Minor:      &allocatedMinor,
+				BackingDev: iState.BackingDisk(),
+			})
 			res = append(res, AttachAction{
 				Minor:    &allocatedMinor,
 				LowerDev: iState.BackingDisk(),
 				MetaDev:  "internal",
 				MetaIdx:  "internal",
 			})
+			// Set disk options
+			res = append(res, computeDiskOptionsAction(&allocatedMinor)...)
 		}
+	} else {
+		// Resource exists - reconcile options
+		res = append(res, computeResourceOptionsActionReconcile(resourceName, iState, aState)...)
+		res = append(res, computeDiskOptionsActionReconcile(aState)...)
 	}
 
 	toAdd, existing, toRemove := maps.IntersectItersKeyFunc(
@@ -101,7 +117,11 @@ func computeBringUpActions(iState IntendedState, aState ActualState) (res Target
 			PeerNodeID:   nodeID,
 			Protocol:     string(iPeer.Protocol()),
 			SharedSecret: iPeer.SharedSecret(),
+			CRAMHMACAlg:  string(iPeer.SharedSecretAlg()),
+			RRConflict:   "retry-connect",
 		})
+		// Set net options
+		res = append(res, computeNetOptionsAction(resourceName, iPeer)...)
 		res = append(res, computePathActions(resourceName, iPeer, nil)...)
 		res = append(res, ConnectAction{
 			ResourceName: resourceName,
@@ -110,6 +130,8 @@ func computeBringUpActions(iState IntendedState, aState ActualState) (res Target
 	}
 
 	for nodeID, pair := range existing {
+		// Reconcile net options
+		res = append(res, computeNetOptionsActionReconcile(resourceName, pair.Left, pair.Right)...)
 		res = append(res, computePathActions(resourceName, pair.Left, pair.Right)...)
 		if !isConnected(pair.Right) {
 			res = append(res, ConnectAction{
@@ -131,6 +153,160 @@ func computeBringUpActions(iState IntendedState, aState ActualState) (res Target
 	}
 
 	return res
+}
+
+func computeResourceOptionsAction(resourceName string, iState IntendedState) (res TargetStateActions) {
+	autoPromote := false
+	quorum := uint(iState.Quorum())
+	quorumMinRedundancy := uint(iState.QuorumMinimumRedundancy())
+
+	res = append(res, ResourceOptionsAction{
+		ResourceName:               resourceName,
+		AutoPromote:                &autoPromote,
+		OnNoQuorum:                 "suspend-io",
+		OnNoDataAccessible:         "suspend-io",
+		OnSuspendedPrimaryOutdated: "force-secondary",
+		Quorum:                     &quorum,
+		QuorumMinimumRedundancy:    &quorumMinRedundancy,
+	})
+	return res
+}
+
+func computeResourceOptionsActionReconcile(resourceName string, iState IntendedState, aState ActualState) (res TargetStateActions) {
+	var changed bool
+	action := ResourceOptionsAction{ResourceName: resourceName}
+
+	// Check quorum
+	intendedQuorum := uint(iState.Quorum())
+	actualQuorum := aState.Quorum()
+	if !quorumMatches(intendedQuorum, actualQuorum) {
+		action.Quorum = &intendedQuorum
+		changed = true
+	}
+
+	// Check quorum minimum redundancy
+	intendedQMR := uint(iState.QuorumMinimumRedundancy())
+	actualQMR := aState.QuorumMinimumRedundancy()
+	if !quorumMatches(intendedQMR, actualQMR) {
+		action.QuorumMinimumRedundancy = &intendedQMR
+		changed = true
+	}
+
+	// Check auto-promote
+	if aState.AutoPromote() {
+		autoPromote := false
+		action.AutoPromote = &autoPromote
+		changed = true
+	}
+
+	// Check on-no-quorum
+	if aState.OnNoQuorum() != "suspend-io" {
+		action.OnNoQuorum = "suspend-io"
+		changed = true
+	}
+
+	// Check on-no-data-accessible
+	if aState.OnNoDataAccessible() != "suspend-io" {
+		action.OnNoDataAccessible = "suspend-io"
+		changed = true
+	}
+
+	// Check on-suspended-primary-outdated
+	if aState.OnSuspendedPrimaryOutdated() != "force-secondary" {
+		action.OnSuspendedPrimaryOutdated = "force-secondary"
+		changed = true
+	}
+
+	if changed {
+		res = append(res, action)
+	}
+	return res
+}
+
+func computeDiskOptionsAction(minor *uint) (res TargetStateActions) {
+	discardZeroes := false
+	rsDiscardGran := uint(8192)
+	res = append(res, DiskOptionsAction{
+		Minor:                  minor,
+		DiscardZeroesIfAligned: &discardZeroes,
+		RsDiscardGranularity:   &rsDiscardGran,
+	})
+	return res
+}
+
+func computeDiskOptionsActionReconcile(aState ActualState) (res TargetStateActions) {
+	for _, vol := range aState.Volumes() {
+		// Skip volumes without backing disk (diskless or no show data)
+		if vol.BackingDisk() == "" {
+			continue
+		}
+
+		var changed bool
+		minor := uint(vol.Minor())
+		action := DiskOptionsAction{Minor: &minor}
+
+		// Check discard-zeroes-if-aligned
+		if vol.DiscardZeroesIfAligned() {
+			discardZeroes := false
+			action.DiscardZeroesIfAligned = &discardZeroes
+			changed = true
+		}
+
+		// Check rs-discard-granularity
+		if vol.RsDiscardGranularity() != "8192" {
+			rsDiscardGran := uint(8192)
+			action.RsDiscardGranularity = &rsDiscardGran
+			changed = true
+		}
+
+		if changed {
+			res = append(res, action)
+		}
+	}
+	return res
+}
+
+func computeNetOptionsAction(resourceName string, iPeer IntendedPeer) (res TargetStateActions) {
+	allowTwoPrimaries := false // default, will be set from spec if needed
+	allowRemoteRead := iPeer.AllowRemoteRead()
+
+	res = append(res, NetOptionsAction{
+		ResourceName:      resourceName,
+		PeerNodeID:        iPeer.NodeID(),
+		AllowTwoPrimaries: &allowTwoPrimaries,
+		AllowRemoteRead:   &allowRemoteRead,
+	})
+	return res
+}
+
+func computeNetOptionsActionReconcile(resourceName string, iPeer IntendedPeer, aPeer ActualPeer) (res TargetStateActions) {
+	var changed bool
+	action := NetOptionsAction{
+		ResourceName: resourceName,
+		PeerNodeID:   iPeer.NodeID(),
+	}
+
+	// Check allow-remote-read
+	if iPeer.AllowRemoteRead() != aPeer.AllowRemoteRead() {
+		allowRemoteRead := iPeer.AllowRemoteRead()
+		action.AllowRemoteRead = &allowRemoteRead
+		changed = true
+	}
+
+	// Note: AllowTwoPrimaries comes from IntendedState, not IntendedPeer
+	// We'll skip it here since it requires access to iState
+
+	if changed {
+		res = append(res, action)
+	}
+	return res
+}
+
+func quorumMatches(intended uint, actual string) bool {
+	if intended == 0 {
+		return actual == "off"
+	}
+	return actual == fmt.Sprintf("%d", intended)
 }
 
 func computePathActions(resourceName string, iPeer IntendedPeer, aPeer ActualPeer) (res TargetStateActions) {

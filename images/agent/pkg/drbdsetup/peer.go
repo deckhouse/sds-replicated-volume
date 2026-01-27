@@ -35,6 +35,8 @@ var (
 type NewPeerOptions struct {
 	Protocol     string // A, B, or C
 	SharedSecret string
+	CRAMHMACAlg  string // Required for shared-secret to work (e.g., "sha256", "sha1")
+	RRConflict   string // "retry-connect", "disconnect", etc.
 }
 
 // NewPeerArgs returns the arguments for drbdsetup new-peer command.
@@ -49,6 +51,12 @@ var NewPeerArgs = func(resource string, peerNodeID uint, opts *NewPeerOptions) [
 		}
 		if opts.SharedSecret != "" {
 			args = append(args, "--shared-secret", opts.SharedSecret)
+		}
+		if opts.CRAMHMACAlg != "" {
+			args = append(args, "--cram-hmac-alg", opts.CRAMHMACAlg)
+		}
+		if opts.RRConflict != "" {
+			args = append(args, "--rr-conflict", opts.RRConflict)
 		}
 	}
 	return args
@@ -93,8 +101,7 @@ func ExecuteDelPeer(ctx context.Context, resource string, peerNodeID uint) error
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		switch errToExitCode(err) {
-		case 158:
+		if errToExitCode(err) == 158 {
 			return ErrDelPeerResourceNotFound
 		}
 		return fmt.Errorf(
@@ -121,8 +128,7 @@ func ExecuteForgetPeer(ctx context.Context, resource string, peerNodeID uint) er
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		switch errToExitCode(err) {
-		case 158:
+		if errToExitCode(err) == 158 {
 			return ErrForgetPeerResourceNotFound
 		}
 		return fmt.Errorf(

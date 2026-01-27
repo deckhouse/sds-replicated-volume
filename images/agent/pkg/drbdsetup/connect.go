@@ -77,8 +77,7 @@ func ExecuteDisconnect(ctx context.Context, resource string, peerNodeID uint) er
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		switch errToExitCode(err) {
-		case 158:
+		if errToExitCode(err) == 158 {
 			return ErrDisconnectResourceNotFound
 		}
 		return fmt.Errorf(

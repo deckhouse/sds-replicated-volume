@@ -86,7 +86,7 @@ func ExecuteNewAutoMinor(ctx context.Context, resource string, volume uint) (uin
 		minor := nextDeviceMinor
 		err := ExecuteNewMinor(ctx, resource, nextDeviceMinor, volume)
 		if err == nil {
-			incrementDeviceMinor(nil)
+			_ = incrementDeviceMinor(nil) // error can only occur with exhausted minors; nil input skips that check
 			return minor, nil
 		}
 
