@@ -1,5 +1,5 @@
 ---
-description: Go performance patterns for sorting and iteration. Apply when reviewing code with sort.Slice over collections that may have 100+ items with non-trivial comparators, or when expensive operations are applied to collections before filtering.
+description: Go performance patterns for sorting, iteration, and controller-runtime optimizations. Apply when reviewing code with sort.Slice over collections that may have 100+ items, expensive operations before filtering, or List operations that may return many objects.
 alwaysApply: false
 ---
 
@@ -139,3 +139,174 @@ When you see expensive operations applied to a collection before filtering:
 3. SUGGEST filter-before-compute if:
    - Only a subset M of N items need the expensive operation, AND
    - The filter condition is significantly cheaper than the expensive operation
+
+---
+
+## UnsafeDisableDeepCopy for List operations (MAY)
+
+When listing Kubernetes objects in controllers where:
+- The list may contain **100+ items** in large clusters, AND
+- Items are primarily **read** (not modified), AND
+- The overhead of N × DeepCopy is measurable (GC pressure, latency),
+
+you MAY use `client.UnsafeDisableDeepCopy` to skip per-item deep copying.
+
+### Why it matters
+
+By default, controller-runtime's cached client performs `DeepCopy` on every object
+returned from `List` to protect the informer cache from accidental modifications.
+With `UnsafeDisableDeepCopy`, returned items point directly to cache memory.
+
+| Items | DeepCopy overhead (default) | With UnsafeDisableDeepCopy |
+|-------|----------------------------|----------------------------|
+| 100   | 100 × DeepCopy             | 0                          |
+| 500   | 500 × DeepCopy             | 0                          |
+| 2000  | 2000 × DeepCopy            | 0                          |
+
+### Safety consideration (SHOULD)
+
+When using `UnsafeDisableDeepCopy`, you SHOULD consider wrapping results in a read-only wrapper type
+that prevents accidental modifications. Modifying cache items directly **corrupts the informer cache**.
+
+Alternative approaches:
+- **Wrapper type** (recommended): Prevents misuse at compile time
+- **Inline with explicit comments**: Keep `UnsafeDisableDeepCopy` visible at each call site
+- **Naming convention**: Use `*CacheRefs` suffix to signal read-only semantics
+
+### Example wrapper pattern (OPTIONAL, recommended for reusable code)
+
+```go
+// fooCacheRefs wraps Foo list from informer cache (UnsafeDisableDeepCopy).
+// Items are READ-ONLY direct cache references - modifying them corrupts the cache.
+//
+// This optimization avoids N×DeepCopy allocations when listing Foos.
+// In large clusters with 2000+ items, skipping DeepCopy reduces GC pressure significantly.
+//
+// Usage:
+//   - Use Len()/At(i) for iteration
+//   - NEVER modify items directly - always DeepCopy first
+//   - Pass the wrapper (not raw slice) to prevent accidental modifications
+type fooCacheRefs struct {
+    items []v1alpha1.Foo
+}
+
+// Len returns the number of cached items.
+func (r *fooCacheRefs) Len() int { return len(r.items) }
+
+// At returns a READ-ONLY pointer to the item at index i.
+// WARNING: Do NOT modify the returned value - it points to informer cache.
+// Use item.DeepCopy() before any modification.
+func (r *fooCacheRefs) At(i int) *v1alpha1.Foo { return &r.items[i] }
+
+// getFoosCacheRefs fetches Foos with UnsafeDisableDeepCopy.
+// Returns fooCacheRefs wrapper - see type doc for usage guidelines.
+func (r *Reconciler) getFoosCacheRefs(ctx context.Context) (*fooCacheRefs, error) {
+    var list v1alpha1.FooList
+    if err := r.cl.List(ctx, &list,
+        client.UnsafeDisableDeepCopy,
+    ); err != nil {
+        return nil, err
+    }
+    return &fooCacheRefs{items: list.Items}, nil
+}
+```
+
+### Using the wrapper (GOOD)
+
+```go
+refs, err := r.getFoosCacheRefs(ctx)
+if err != nil {
+    return err
+}
+
+for i := 0; i < refs.Len(); i++ {
+    item := refs.At(i) // Read-only cache ref.
+
+    // READ operations are safe:
+    if item.Status.Phase == "Ready" {
+        // ...
+    }
+
+    // WRITE operations require DeepCopy:
+    if needsModification(item) {
+        modified := item.DeepCopy()
+        modified.Spec.Value = "new"
+        if err := r.cl.Patch(ctx, modified, client.MergeFrom(item)); err != nil {
+            return err
+        }
+    }
+}
+```
+
+### Alternative: Inline with explicit comments (GOOD for simple cases)
+
+```go
+// When UnsafeDisableDeepCopy is used inline (not extracted to function),
+// keep the danger visible at the call site:
+var list v1alpha1.FooList
+if err := r.cl.List(ctx, &list,
+    client.UnsafeDisableDeepCopy, // ⚠️ Returns cache refs - read-only!
+); err != nil {
+    return err
+}
+
+for i := range list.Items {
+    item := &list.Items[i] // Read-only cache ref.
+
+    // Modify requires DeepCopy:
+    modified := item.DeepCopy()
+    modified.Spec.Value = "new"
+    if err := r.cl.Patch(ctx, modified, client.MergeFrom(item)); err != nil {
+        return err
+    }
+}
+```
+
+### Example without safety measures (BAD)
+
+```go
+// BAD: Raw slice exposes cache to accidental modification
+func (r *Reconciler) getFoos(ctx context.Context) ([]v1alpha1.Foo, error) {
+    var list v1alpha1.FooList
+    if err := r.cl.List(ctx, &list, client.UnsafeDisableDeepCopy); err != nil {
+        return nil, err
+    }
+    return list.Items, nil // DANGEROUS: caller can modify cache!
+}
+
+// Caller might accidentally do:
+foos, _ := r.getFoos(ctx)
+for i := range foos {
+    foos[i].Spec.Value = "oops" // CORRUPTS CACHE!
+}
+```
+
+### Why wrapper prevents misuse
+
+The wrapper type:
+
+1. **No `range` iteration**: `for _, item := range refs` won't compile
+2. **Explicit API**: `At(i)` name reminds developer about read-only semantics
+3. **Documentation**: Type's GoDoc explains the danger and proper usage
+4. **Zero overhead**: Wrapper is 24 bytes on stack (slice header), no heap allocation
+
+### When to use this optimization
+
+| Scenario | Recommendation |
+|----------|----------------|
+| List returns 10-50 items | Skip optimization (overhead minimal) |
+| List returns 100+ items | Consider if read-heavy |
+| List returns 500+ items | Likely beneficial |
+| Hot path with frequent reconciles | Likely beneficial |
+| Items mostly read, rarely modified | Good candidate |
+| Items frequently modified | Skip (DeepCopy needed anyway) |
+
+### When reviewing code
+
+When you see `client.UnsafeDisableDeepCopy` usage:
+
+1. CHECK: Is `DeepCopy()` called before any modification?
+2. CHECK: Are there clear comments warning about read-only semantics?
+3. ASK: Is the optimization justified by collection size / hot path?
+4. SUGGEST: Wrapper type if the code is reused or complex
+5. WARN: Raw slice returns without safety measures (cache corruption risk)
