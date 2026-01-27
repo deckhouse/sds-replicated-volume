@@ -17,7 +17,7 @@ type ActualState interface {
 	ResourceExists() bool
 
 	// NodeID returns this node's ID for the resource.
-	NodeID() int
+	NodeID() uint
 
 	// Volumes returns the list of volumes/devices for this resource.
 	Volumes() []ActualVolume
@@ -42,7 +42,7 @@ type ActualVolume interface {
 
 type ActualPeer interface {
 	// NodeID returns the peer's node ID.
-	NodeID() int
+	NodeID() uint
 
 	// ConnectionState returns the connection state (e.g., "Connected", "StandAlone").
 	ConnectionState() string
@@ -86,14 +86,14 @@ func (aState *actualState) ResourceExists() bool {
 	return aState.status != nil || aState.show != nil
 }
 
-func (aState *actualState) NodeID() int {
+func (aState *actualState) NodeID() uint {
 	if aState.show != nil {
-		return aState.show.ThisHost.NodeID
+		return uint(aState.show.ThisHost.NodeID)
 	}
 	if aState.status != nil {
-		return aState.status.NodeID
+		return uint(aState.status.NodeID)
 	}
-	return -1
+	return 0
 }
 
 func (aState *actualState) Volumes() []ActualVolume {
@@ -157,8 +157,8 @@ type actualPeer struct {
 	connection *drbdsetup.Connection
 }
 
-func (p *actualPeer) NodeID() int {
-	return p.connection.PeerNodeID
+func (p *actualPeer) NodeID() uint {
+	return uint(p.connection.PeerNodeID)
 }
 
 func (p *actualPeer) ConnectionState() string {
@@ -202,14 +202,23 @@ func getActualState(ctx context.Context, drbdResName string) (*actualState, erro
 	}
 
 	if len(statusResult) != 1 {
-		// Resource not found in DRBD status - it might not be configured yet
-		return nil, nil
+		// Resource not found in DRBD status - it's not configured yet.
+		// Return a valid (non-nil) state with ResourceExists() == false.
+		return &actualState{}, nil
 	}
 
 	// Get show output for configuration details
-	showResult, err := drbdsetup.ExecuteShow(ctx, drbdResName)
+	showResults, err := drbdsetup.ExecuteShow(ctx, drbdResName, true)
 	if err != nil {
 		return nil, fmt.Errorf("executing drbdsetup show: %w", err)
+	}
+
+	var showResult *drbdsetup.ShowResource
+	for i := range showResults {
+		if showResults[i].Resource == drbdResName {
+			showResult = &showResults[i]
+			break
+		}
 	}
 
 	return &actualState{

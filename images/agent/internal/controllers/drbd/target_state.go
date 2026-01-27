@@ -2,8 +2,10 @@ package drbd
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/maps"
 )
 
 type TargetStateActions []Action
@@ -31,11 +33,19 @@ func computeTargetStateActions(iState IntendedState, aState ActualState) (res Ta
 	res = append(res, ConfigureIPAddressAction{IPv4BySystemNetworkNames: iState.IPv4BySystemNetworkNames()})
 	res = append(res, AllocatePortsAction{PortAllocator: DefaultPortCache.Allocate})
 
-	// DRBD actions
+	// DRBD actions - require valid actual state
+	//
+	// If aState.IsZero() is true, it means we failed to get the actual DRBD state
+	// (e.g. "drbdsetup show" failed). In this case we skip all DRBD actions since
+	// we don't know the current state to compare against.
+
+	if aState.IsZero() {
+		return res
+	}
 
 	if !iState.IsUpAndNotInCleanup() {
 		// Teardown: generate Down action if resource exists
-		if !aState.IsZero() && aState.ResourceExists() {
+		if aState.ResourceExists() {
 			res = append(res, DownAction{ResourceName: iState.ResourceName()})
 		}
 		return res
@@ -48,13 +58,11 @@ func computeTargetStateActions(iState IntendedState, aState ActualState) (res Ta
 }
 
 // computeBringUpActions computes actions to bring DRBD to intended state.
+// Precondition: aState is valid (not zero).
 func computeBringUpActions(iState IntendedState, aState ActualState) (res TargetStateActions) {
 	resourceName := iState.ResourceName()
 
-	// Check if resource exists
-	resourceExists := !aState.IsZero() && aState.ResourceExists()
-
-	if !resourceExists {
+	if !aState.ResourceExists() {
 		// Resource doesn't exist - create it
 		res = append(res, NewResourceAction{
 			ResourceName: resourceName,
@@ -62,16 +70,17 @@ func computeBringUpActions(iState IntendedState, aState ActualState) (res Target
 		})
 
 		// Create volume/minor
+		var allocatedMinor uint
 		res = append(res, NewMinorAction{
 			ResourceName:   resourceName,
-			MinorAllocator: AllocateNextMinor,
-			Volume:         0, // Single volume per resource
+			Volume:         0,
+			AllocatedMinor: &allocatedMinor,
 		})
 
 		// Attach backing storage for diskful resources
 		if iState.Type() == v1alpha1.DRBDResourceTypeDiskful && iState.BackingDisk() != "" {
 			res = append(res, AttachAction{
-				Minor:    0, // Will be allocated by NewMinorAction
+				Minor:    &allocatedMinor,
 				LowerDev: iState.BackingDisk(),
 				MetaDev:  "internal",
 				MetaIdx:  "internal",
@@ -79,101 +88,78 @@ func computeBringUpActions(iState IntendedState, aState ActualState) (res Target
 		}
 	}
 
-	// Build maps for peer/path comparison
-	actualPeers := make(map[int]ActualPeer)
-	if !aState.IsZero() {
-		for _, peer := range aState.Peers() {
-			actualPeers[peer.NodeID()] = peer
+	toAdd, existing, toRemove := maps.IntersectItersKeyFunc(
+		slices.Values(iState.Peers()),
+		IntendedPeer.NodeID,
+		slices.Values(aState.Peers()),
+		ActualPeer.NodeID,
+	)
+
+	for nodeID, iPeer := range toAdd {
+		res = append(res, NewPeerAction{
+			ResourceName: resourceName,
+			PeerNodeID:   nodeID,
+			Protocol:     string(iPeer.Protocol()),
+			SharedSecret: iPeer.SharedSecret(),
+		})
+		res = append(res, computePathActions(resourceName, iPeer, nil)...)
+		res = append(res, ConnectAction{
+			ResourceName: resourceName,
+			PeerNodeID:   nodeID,
+		})
+	}
+
+	for nodeID, pair := range existing {
+		res = append(res, computePathActions(resourceName, pair.Left, pair.Right)...)
+		if !isConnected(pair.Right) {
+			res = append(res, ConnectAction{
+				ResourceName: resourceName,
+				PeerNodeID:   nodeID,
+			})
 		}
 	}
 
-	// Reconcile peers
-	for _, iPeer := range iState.Peers() {
-		peerNodeID := iPeer.NodeID()
-		aPeer, peerExists := actualPeers[int(peerNodeID)]
-
-		if !peerExists {
-			// Peer doesn't exist - create it
-			res = append(res, NewPeerAction{
-				ResourceName: resourceName,
-				PeerNodeID:   peerNodeID,
-				Protocol:     string(iPeer.Protocol()),
-				SharedSecret: iPeer.SharedSecret(),
-			})
-		}
-
-		// Reconcile paths for this peer
-		res = append(res, computePathActions(resourceName, iPeer, aPeer, peerExists)...)
-
-		// Connect to peer if not connected
-		if peerExists && !isConnected(aPeer) {
-			res = append(res, ConnectAction{
-				ResourceName: resourceName,
-				PeerNodeID:   peerNodeID,
-			})
-		} else if !peerExists {
-			// New peer needs connection after paths are added
-			res = append(res, ConnectAction{
-				ResourceName: resourceName,
-				PeerNodeID:   peerNodeID,
-			})
-		}
-
-		// Mark peer as processed
-		delete(actualPeers, int(peerNodeID))
-	}
-
-	// Remove stale peers (in actual but not in intended)
-	for peerNodeID := range actualPeers {
-		// First disconnect
+	for nodeID := range toRemove {
 		res = append(res, DisconnectAction{
 			ResourceName: resourceName,
-			PeerNodeID:   uint(peerNodeID),
+			PeerNodeID:   nodeID,
 		})
-		// Then remove peer
 		res = append(res, DelPeerAction{
 			ResourceName: resourceName,
-			PeerNodeID:   uint(peerNodeID),
+			PeerNodeID:   nodeID,
 		})
 	}
 
 	return res
 }
 
-// computePathActions computes actions to reconcile paths for a peer.
-func computePathActions(resourceName string, iPeer IntendedPeer, aPeer ActualPeer, peerExists bool) (res TargetStateActions) {
+func computePathActions(resourceName string, iPeer IntendedPeer, aPeer ActualPeer) (res TargetStateActions) {
 	peerNodeID := iPeer.NodeID()
 
-	// Build map of actual paths
-	actualPaths := make(map[string]ActualPath) // key: "local->remote"
-	if peerExists && aPeer != nil {
-		for _, path := range aPeer.Paths() {
-			key := pathKey(path.LocalAddr(), path.RemoteAddr())
-			actualPaths[key] = path
-		}
+	var actualPaths []ActualPath
+	if aPeer != nil {
+		actualPaths = aPeer.Paths()
 	}
 
-	// Add missing paths
-	for _, iPath := range iPeer.Paths() {
-		localAddr := formatAddr(iPath.LocalIPv4(), iPath.LocalPort())
-		remoteAddr := formatAddr(iPath.RemoteIPv4(), iPath.RemotePort())
-		key := pathKey(localAddr, remoteAddr)
+	toAdd, _, toRemove := maps.IntersectItersKeyFunc(
+		slices.Values(iPeer.Paths()),
+		func(p IntendedPath) string {
+			return pathKey(formatAddr(p.LocalIPv4(), p.LocalPort()), formatAddr(p.RemoteIPv4(), p.RemotePort()))
+		},
+		slices.Values(actualPaths),
+		func(p ActualPath) string { return pathKey(p.LocalAddr(), p.RemoteAddr()) },
+	)
 
-		if _, exists := actualPaths[key]; !exists {
-			res = append(res, NewPathAction{
-				ResourceName: resourceName,
-				PeerNodeID:   peerNodeID,
-				LocalAddr:    localAddr,
-				RemoteAddr:   remoteAddr,
-			})
-		}
-
-		// Mark as processed
-		delete(actualPaths, key)
+	for _, iPath := range toAdd {
+		res = append(res, NewPathAction{
+			ResourceName: resourceName,
+			PeerNodeID:   peerNodeID,
+			LocalAddr:    formatAddr(iPath.LocalIPv4(), iPath.LocalPort()),
+			RemoteAddr:   formatAddr(iPath.RemoteIPv4(), iPath.RemotePort()),
+		})
 	}
 
-	// Remove stale paths (in actual but not in intended)
-	for _, aPath := range actualPaths {
+	for _, aPath := range toRemove {
 		res = append(res, DelPathAction{
 			ResourceName: resourceName,
 			PeerNodeID:   peerNodeID,
@@ -185,15 +171,11 @@ func computePathActions(resourceName string, iPeer IntendedPeer, aPeer ActualPee
 	return res
 }
 
-// isConnected returns true if the peer is in a connected state.
 func isConnected(aPeer ActualPeer) bool {
 	if aPeer == nil {
 		return false
 	}
-	state := aPeer.ConnectionState()
-	// Connected states from DRBD
-	return state == "Connected" || state == "SyncSource" || state == "SyncTarget" ||
-		state == "PausedSyncS" || state == "PausedSyncT" || state == "VerifyS" || state == "VerifyT"
+	return aPeer.ConnectionState() == v1alpha1.ConnectionStateConnected.String()
 }
 
 // pathKey creates a unique key for a path.

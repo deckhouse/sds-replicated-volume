@@ -18,8 +18,23 @@ package drbdsetup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
+)
+
+var (
+	ErrAttachCannotOpenBackingDevice = errors.New("cannot open backing device")
+	ErrAttachCannotOpenMetaDevice    = errors.New("cannot open meta device")
+	ErrAttachNotBlockDevice          = errors.New("device not a block device")
+	ErrAttachDeviceTooSmall          = errors.New("device too small")
+	ErrAttachDeviceClaimed           = errors.New("device already claimed")
+	ErrAttachInvalidMetaDataIndex    = errors.New("invalid meta-data index")
+	ErrAttachMetaDataIOError         = errors.New("I/O error on meta-data")
+	ErrAttachMetaDataInvalid         = errors.New("meta-data invalid or uninitialized")
+	ErrAttachAlreadyAttached         = errors.New("already attached")
+	ErrAttachMinorNotAllocated       = errors.New("minor not allocated")
+	ErrAttachMetaDataUnclean         = errors.New("meta-data unclean")
 )
 
 // AttachArgs returns the arguments for drbdsetup attach command.
@@ -42,6 +57,30 @@ func ExecuteAttach(ctx context.Context, minor uint, lowerDev, metaDev, metaIdx s
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		switch errToExitCode(err) {
+		case 104:
+			return ErrAttachCannotOpenBackingDevice
+		case 105:
+			return ErrAttachCannotOpenMetaDevice
+		case 107, 108:
+			return ErrAttachNotBlockDevice
+		case 111, 112:
+			return ErrAttachDeviceTooSmall
+		case 114, 115:
+			return ErrAttachDeviceClaimed
+		case 116:
+			return ErrAttachInvalidMetaDataIndex
+		case 118:
+			return ErrAttachMetaDataIOError
+		case 119:
+			return ErrAttachMetaDataInvalid
+		case 124:
+			return ErrAttachAlreadyAttached
+		case 127:
+			return ErrAttachMinorNotAllocated
+		case 165:
+			return ErrAttachMetaDataUnclean
+		}
 		return fmt.Errorf(
 			"running command %s %v: %w; output: %q",
 			Command, args, err, string(out),

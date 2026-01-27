@@ -18,8 +18,16 @@ package drbdsetup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
+)
+
+var (
+	ErrConnectDiscardNotAllowed   = errors.New("discard-my-data not allowed when primary")
+	ErrConnectResourceNotFound    = errors.New("resource not found")
+	ErrConnectNeedStandalone      = errors.New("need to be standalone")
+	ErrDisconnectResourceNotFound = errors.New("resource not found")
 )
 
 // ConnectArgs returns the arguments for drbdsetup connect command.
@@ -37,6 +45,14 @@ func ExecuteConnect(ctx context.Context, resource string, peerNodeID uint) error
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		switch errToExitCode(err) {
+		case 123:
+			return ErrConnectDiscardNotAllowed
+		case 158:
+			return ErrConnectResourceNotFound
+		case 151:
+			return ErrConnectNeedStandalone
+		}
 		return fmt.Errorf(
 			"running command %s %v: %w; output: %q",
 			Command, args, err, string(out),
@@ -61,6 +77,10 @@ func ExecuteDisconnect(ctx context.Context, resource string, peerNodeID uint) er
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		switch errToExitCode(err) {
+		case 158:
+			return ErrDisconnectResourceNotFound
+		}
 		return fmt.Errorf(
 			"running command %s %v: %w; output: %q",
 			Command, args, err, string(out),

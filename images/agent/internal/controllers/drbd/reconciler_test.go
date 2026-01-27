@@ -102,9 +102,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 				// After status returns empty, actions are generated:
 				// NewResourceAction calls new-resource
 				newResourceCmd(testDRBDResName, 0),
-				// NewMinorAction calls status all for allocation, then new-minor
-				statusCmd("all", drbdsetup.StatusResult{}), // No existing minors
-				newMinorCmd(testDRBDResName, 1000, 0),      // DefaultMinorStart=1000
+				// NewMinorAction calls ExecuteNewAutoMinor which tries nextDeviceMinor=0 first
+				newMinorCmd(testDRBDResName, 0, 0),
 				// After actions, refresh actual state
 				statusCmd(testDRBDResName, configuredStatus(testDRBDResName)),
 				showCmd(testDRBDResName, &drbdsetup.ShowResource{Resource: testDRBDResName}),
@@ -174,7 +173,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 				}),
 				{
 					Name:         drbdsetup.Command,
-					Args:         drbdsetup.ShowArgs(testDRBDResName),
+					Args:         drbdsetup.ShowArgs(testDRBDResName, true),
 					ResultOutput: []byte("show error"),
 					ResultErr:    fakedrbdsetup.ExitErr{Code: 1},
 				},
@@ -193,8 +192,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 				},
 				// Resource not found triggers creation
 				newResourceCmd(testDRBDResName, 0),
-				statusCmd("all", drbdsetup.StatusResult{}),
-				newMinorCmd(testDRBDResName, 1000, 0),
+				// ExecuteNewAutoMinor tries nextDeviceMinor=0 first
+				newMinorCmd(testDRBDResName, 0, 0),
 				// Refresh after actions
 				statusCmd(testDRBDResName, configuredStatus(testDRBDResName)),
 				showCmd(testDRBDResName, &drbdsetup.ShowResource{Resource: testDRBDResName}),
@@ -262,6 +261,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			drbdsetup.ResetNextDeviceMinor()
+
 			// Build client with objects
 			clientBuilder := fake.NewClientBuilder().
 				WithScheme(sch).
@@ -403,7 +404,7 @@ func showCmd(resourceName string, result *drbdsetup.ShowResource) *fakedrbdsetup
 	output, _ := json.Marshal(results)
 	return &fakedrbdsetup.ExpectedCmd{
 		Name:         drbdsetup.Command,
-		Args:         drbdsetup.ShowArgs(resourceName),
+		Args:         drbdsetup.ShowArgs(resourceName, true),
 		ResultOutput: output,
 		ResultErr:    nil,
 	}

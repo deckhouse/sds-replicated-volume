@@ -18,8 +18,17 @@ package drbdsetup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
+)
+
+var (
+	ErrNewPathLocalAddrInUse  = errors.New("local address already in use")
+	ErrNewPathRemoteAddrInUse = errors.New("remote address already in use")
+	ErrNewPathAddrPairInUse   = errors.New("address pair combination already in use")
+	ErrNewPathAlreadyExists   = errors.New("path already exists")
+	ErrDelPathNotFound        = errors.New("resource or path not found")
 )
 
 // NewPathArgs returns the arguments for drbdsetup new-path command.
@@ -40,6 +49,16 @@ func ExecuteNewPath(ctx context.Context, resource string, peerNodeID uint, local
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		switch errToExitCode(err) {
+		case 102:
+			return ErrNewPathLocalAddrInUse
+		case 103:
+			return ErrNewPathRemoteAddrInUse
+		case 563:
+			return ErrNewPathAddrPairInUse
+		case 564:
+			return ErrNewPathAlreadyExists
+		}
 		return fmt.Errorf(
 			"running command %s %v: %w; output: %q",
 			Command, args, err, string(out),
@@ -66,6 +85,10 @@ func ExecuteDelPath(ctx context.Context, resource string, peerNodeID uint, local
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		switch errToExitCode(err) {
+		case 158:
+			return ErrDelPathNotFound
+		}
 		return fmt.Errorf(
 			"running command %s %v: %w; output: %q",
 			Command, args, err, string(out),

@@ -18,8 +18,17 @@ package drbdsetup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
+)
+
+var (
+	ErrNewPeerResourceNotFound      = errors.New("resource not found")
+	ErrNewPeerInvalidNodeID         = errors.New("invalid peer node ID")
+	ErrNewPeerTransportCreateFailed = errors.New("failed to create transport")
+	ErrDelPeerResourceNotFound      = errors.New("resource not found")
+	ErrForgetPeerResourceNotFound   = errors.New("resource not found")
 )
 
 // NewPeerOptions contains optional parameters for new-peer command.
@@ -52,6 +61,14 @@ func ExecuteNewPeer(ctx context.Context, resource string, peerNodeID uint, opts 
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		switch errToExitCode(err) {
+		case 158:
+			return ErrNewPeerResourceNotFound
+		case 561:
+			return ErrNewPeerInvalidNodeID
+		case 562:
+			return ErrNewPeerTransportCreateFailed
+		}
 		return fmt.Errorf(
 			"running command %s %v: %w; output: %q",
 			Command, args, err, string(out),
@@ -76,6 +93,10 @@ func ExecuteDelPeer(ctx context.Context, resource string, peerNodeID uint) error
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		switch errToExitCode(err) {
+		case 158:
+			return ErrDelPeerResourceNotFound
+		}
 		return fmt.Errorf(
 			"running command %s %v: %w; output: %q",
 			Command, args, err, string(out),
@@ -100,6 +121,10 @@ func ExecuteForgetPeer(ctx context.Context, resource string, peerNodeID uint) er
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		switch errToExitCode(err) {
+		case 158:
+			return ErrForgetPeerResourceNotFound
+		}
 		return fmt.Errorf(
 			"running command %s %v: %w; output: %q",
 			Command, args, err, string(out),

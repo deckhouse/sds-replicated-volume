@@ -22,11 +22,6 @@ import (
 	"fmt"
 )
 
-// ShowArgs returns the arguments for drbdsetup show command.
-var ShowArgs = func(resource string) []string {
-	return []string{"show", "--json", "--show-defaults", resource}
-}
-
 // ShowResource represents the parsed output of drbdsetup show --json.
 type ShowResource struct {
 	Resource    string           `json:"resource"`
@@ -150,9 +145,23 @@ type ShowConnectionVolumeDisk struct {
 	Bitmap       bool   `json:"bitmap"`
 }
 
-// ExecuteShow executes drbdsetup show --json --show-defaults and parses the output.
-func ExecuteShow(ctx context.Context, resourceName string) (*ShowResource, error) {
-	cmd := ExecCommandContext(ctx, Command, ShowArgs(resourceName)...)
+// ShowArgs returns the arguments for drbdsetup show command.
+var ShowArgs = func(resourceName string, showDefaults bool) []string {
+	args := []string{"show", "--json"}
+	if showDefaults {
+		args = append(args, "--show-defaults")
+	}
+	if resourceName != "" {
+		args = append(args, resourceName)
+	}
+	return args
+}
+
+// ExecuteShow executes drbdsetup show --json and parses the output.
+// Pass empty resourceName to query all resources.
+func ExecuteShow(ctx context.Context, resourceName string, showDefaults bool) ([]ShowResource, error) {
+	args := ShowArgs(resourceName, showDefaults)
+	cmd := ExecCommandContext(ctx, Command, args...)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -164,16 +173,5 @@ func ExecuteShow(ctx context.Context, resourceName string) (*ShowResource, error
 		return nil, fmt.Errorf("parsing JSON output: %w", err)
 	}
 
-	// Empty array means resource doesn't exist
-	if len(results) == 0 {
-		return nil, nil
-	}
-
-	for i := range results {
-		if results[i].Resource == resourceName {
-			return &results[i], nil
-		}
-	}
-
-	return nil, nil
+	return results, nil
 }

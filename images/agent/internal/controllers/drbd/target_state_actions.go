@@ -2,6 +2,7 @@ package drbd
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
@@ -190,41 +191,39 @@ func (a NewResourceAction) Execute(ctx context.Context) error {
 
 //
 
-// MinorAllocator is a function that allocates a new minor number.
-type MinorAllocator func(ctx context.Context) (uint, error)
-
 // NewMinorAction creates a new DRBD device/volume within a resource.
 type NewMinorAction struct {
 	ResourceName   string
-	Minor          uint           // If non-zero, use this minor. Otherwise use MinorAllocator.
-	MinorAllocator MinorAllocator // Called if Minor is 0.
 	Volume         uint
+	AllocatedMinor *uint
 }
 
 func (a NewMinorAction) Execute(ctx context.Context) error {
-	minor := a.Minor
-	if minor == 0 && a.MinorAllocator != nil {
-		var err error
-		minor, err = a.MinorAllocator(ctx)
-		if err != nil {
-			return err
-		}
+	minor, err := drbdsetup.ExecuteNewAutoMinor(ctx, a.ResourceName, a.Volume)
+	if err != nil {
+		return err
 	}
-	return drbdsetup.ExecuteNewMinor(ctx, a.ResourceName, minor, a.Volume)
+	if a.AllocatedMinor != nil {
+		*a.AllocatedMinor = minor
+	}
+	return nil
 }
 
 //
 
 // AttachAction attaches a backing device to a volume.
 type AttachAction struct {
-	Minor    uint
+	Minor    *uint
 	LowerDev string // Path to backing block device
 	MetaDev  string // Path to meta-data device or "internal"
 	MetaIdx  string // Meta-data index or "internal"/"flexible"
 }
 
 func (a AttachAction) Execute(ctx context.Context) error {
-	return drbdsetup.ExecuteAttach(ctx, a.Minor, a.LowerDev, a.MetaDev, a.MetaIdx)
+	if a.Minor == nil {
+		return fmt.Errorf("AttachAction: minor not set")
+	}
+	return drbdsetup.ExecuteAttach(ctx, *a.Minor, a.LowerDev, a.MetaDev, a.MetaIdx)
 }
 
 //
