@@ -97,12 +97,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Fail(err).ToCtrl()
 	}
 
-	// Get existing RVOs for this RSC.
-	rvos, err := r.getSortedRVOsByRSC(rf.Ctx(), req.Name)
-	if err != nil {
-		return rf.Fail(err).ToCtrl()
-	}
-
 	// Get all RSPs that reference this RSC (via usedBy).
 	usedStoragePoolNames, err := r.getUsedStoragePoolNames(rf.Ctx(), req.Name)
 	if err != nil {
@@ -133,6 +127,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	rsp, outcome := r.reconcileRSP(rf.Ctx(), rsc, targetStoragePoolName)
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
+	}
+
+	// Get existing RVOs for this RSC (cache refs, read-only).
+	rvos, err := r.getRVOsCacheRefs(rf.Ctx(), rsc.Name)
+	if err != nil {
+		return rf.Fail(err).ToCtrl()
 	}
 
 	// Take patch base before mutations.
@@ -472,7 +472,7 @@ func ensureRollingOperations(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 	rvs []rvView,
-	rvos []v1alpha1.ReplicatedVolumeOperation,
+	rvos *rvoCacheRefs,
 ) (outcome flow.EnsureOutcome, targetOps []v1alpha1.ReplicatedVolumeOperation) {
 	ef := flow.BeginEnsure(ctx, "rolling-operations")
 	defer ef.OnEnd(&outcome)
@@ -847,7 +847,7 @@ func applyClearRollingState(rsc *v1alpha1.ReplicatedStorageClass) bool {
 func selectTargetRollingOperations(
 	rsc *v1alpha1.ReplicatedStorageClass,
 	rvs []rvView,
-	rvos []v1alpha1.ReplicatedVolumeOperation,
+	rvos *rvoCacheRefs,
 	maxParallelConfigurationRollouts int32,
 	maxParallelConflictResolutions int32,
 ) (targetOps []v1alpha1.ReplicatedVolumeOperation, saltChanged, cursorsChanged bool) {
@@ -860,8 +860,8 @@ func selectTargetRollingOperations(
 	// Build lookup for existing uncompleted operations by RV name.
 	pendingOpsByRV := make(map[string]*v1alpha1.ReplicatedVolumeOperation)
 	var inFlightConfigOps, inFlightConflictOps int32
-	for i := range rvos {
-		op := &rvos[i]
+	for i := 0; i < rvos.Len(); i++ {
+		op := rvos.At(i) // Read-only cache ref.
 		// Skip completed operations.
 		if objutilv1.IsStatusConditionPresentAndTrue(op, v1alpha1.ReplicatedVolumeOperationCondCompletedType) {
 			continue
@@ -1856,18 +1856,44 @@ func (r *Reconciler) deleteRSP(ctx context.Context, rsp *v1alpha1.ReplicatedStor
 	return nil
 }
 
-// getSortedRVOsByRSC fetches RVOs owned by a specific RSC using the index, sorted by name.
-func (r *Reconciler) getSortedRVOsByRSC(ctx context.Context, rscName string) ([]v1alpha1.ReplicatedVolumeOperation, error) {
+// rvoCacheRefs wraps RVO list from informer cache (UnsafeDisableDeepCopy).
+// Items are READ-ONLY direct cache references - modifying them corrupts the cache.
+//
+// This optimization avoids N×DeepCopy allocations when listing RVOs.
+// In large clusters with 2000+ ReplicatedVolumes, we may have 100-400 active RVOs
+// during rolling operations. Skipping DeepCopy reduces GC pressure significantly.
+//
+// Usage:
+//   - Use Len()/At(i) for iteration
+//   - NEVER modify items directly - always DeepCopy first
+//   - Pass the wrapper (not raw slice) to prevent accidental modifications
+type rvoCacheRefs struct {
+	items []v1alpha1.ReplicatedVolumeOperation
+}
+
+// Len returns the number of cached RVOs.
+func (r *rvoCacheRefs) Len() int { return len(r.items) }
+
+// At returns a READ-ONLY pointer to the item at index i.
+// WARNING: Do NOT modify the returned value - it points to informer cache.
+// Use item.DeepCopy() before any modification.
+func (r *rvoCacheRefs) At(i int) *v1alpha1.ReplicatedVolumeOperation { return &r.items[i] }
+
+// getRVOsCacheRefs fetches RVOs owned by a specific RSC, sorted by name.
+// Returns rvoCacheRefs wrapper with direct cache references (UnsafeDisableDeepCopy).
+// See rvoCacheRefs doc for usage and safety guidelines.
+func (r *Reconciler) getRVOsCacheRefs(ctx context.Context, rscName string) (*rvoCacheRefs, error) {
 	var list v1alpha1.ReplicatedVolumeOperationList
-	if err := r.cl.List(ctx, &list, client.MatchingFields{
-		indexes.IndexFieldRVOByRSCOwnerRef: rscName,
-	}); err != nil {
+	if err := r.cl.List(ctx, &list,
+		client.MatchingFields{indexes.IndexFieldRVOByRSCOwnerRef: rscName},
+		client.UnsafeDisableDeepCopy,
+	); err != nil {
 		return nil, err
 	}
 	sort.Slice(list.Items, func(i, j int) bool {
 		return list.Items[i].Name < list.Items[j].Name
 	})
-	return list.Items, nil
+	return &rvoCacheRefs{items: list.Items}, nil
 }
 
 // createRVO creates a ReplicatedVolumeOperation.
@@ -1890,10 +1916,10 @@ func (r *Reconciler) createRVO(ctx context.Context, rvo *v1alpha1.ReplicatedVolu
 func (r *Reconciler) removeRVOLockFinalizers(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
-	rvos []v1alpha1.ReplicatedVolumeOperation,
+	rvos *rvoCacheRefs,
 ) error {
-	for i := range rvos {
-		rvo := &rvos[i]
+	for i := 0; i < rvos.Len(); i++ {
+		rvo := rvos.At(i) // Read-only cache ref.
 
 		// Skip if no finalizer.
 		if !controllerutil.ContainsFinalizer(rvo, v1alpha1.RSCControllerFinalizer) {
@@ -1927,9 +1953,10 @@ func (r *Reconciler) removeRVOLockFinalizers(
 		}
 
 		// Patch to remove finalizer.
-		base := rvo.DeepCopy()
-		controllerutil.RemoveFinalizer(rvo, v1alpha1.RSCControllerFinalizer)
-		if err := r.cl.Patch(ctx, rvo, client.MergeFrom(base)); err != nil {
+		// rvo is read-only cache ref (rvoCacheRefs) - must DeepCopy before modifying.
+		modified := rvo.DeepCopy()
+		controllerutil.RemoveFinalizer(modified, v1alpha1.RSCControllerFinalizer)
+		if err := r.cl.Patch(ctx, modified, client.MergeFrom(rvo)); err != nil {
 			return fmt.Errorf("remove finalizer from RVO %s: %w", rvo.Name, err)
 		}
 	}
