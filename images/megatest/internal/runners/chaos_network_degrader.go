@@ -73,6 +73,10 @@ func (c *ChaosNetworkDegrader) Run(ctx context.Context) error {
 
 		// Perform degradation
 		if err := c.doDegrade(ctx); err != nil {
+			// Don't log error if context was cancelled (normal shutdown)
+			if ctx.Err() == context.Canceled {
+				return err
+			}
 			c.log.Error("degradation failed", "error", err)
 		}
 	}
