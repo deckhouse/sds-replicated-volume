@@ -36,6 +36,9 @@ const (
 
 	// networkDegradeAutoCleanupBuffer is added to incident duration for auto-cleanup timeout
 	networkDegradeAutoCleanupBuffer = 4 * time.Second
+
+	// networkDegradeActiveDeadlineBuffer is added to incident duration for active deadline timeout
+	networkDegradeActiveDeadlineBuffer = 2 * time.Second
 )
 
 // NetworkDegradeManager manages Jobs for network degradation (iptables/iperf3)
@@ -68,7 +71,7 @@ func (m *NetworkDegradeManager) ApplyPacketLoss(ctx context.Context, nodeA, node
 	}
 
 	// Job 1 for nodeA: add iptables rule
-	jobA1 := m.buildPacketLossAddJob(jobNameA1, nodeA.Name, nodeB.IPAddress, lossPercent)
+	jobA1 := m.buildPacketLossAddJob(jobNameA1, nodeA.Name, nodeB.IPAddress, lossPercent, incidentDuration)
 	if err := m.cl.Create(ctx, jobA1); err != nil {
 		return nil, fmt.Errorf("creating packet loss add job %s: %w", jobNameA1, err)
 	}
@@ -94,7 +97,7 @@ func (m *NetworkDegradeManager) ApplyPacketLoss(ctx context.Context, nodeA, node
 	}
 
 	// Job 1 for nodeB: add iptables rule
-	jobB1 := m.buildPacketLossAddJob(jobNameB1, nodeB.Name, nodeA.IPAddress, lossPercent)
+	jobB1 := m.buildPacketLossAddJob(jobNameB1, nodeB.Name, nodeA.IPAddress, lossPercent, incidentDuration)
 	if err := m.cl.Create(ctx, jobB1); err != nil {
 		return nil, fmt.Errorf("creating packet loss add job %s: %w", jobNameB1, err)
 	}
@@ -216,13 +219,14 @@ func (m *NetworkDegradeManager) deleteJobIfExists(ctx context.Context, jobName s
 }
 
 // buildPacketLossAddJob builds a Job that adds iptables rule for packet loss
-func (m *NetworkDegradeManager) buildPacketLossAddJob(jobName, nodeName, targetIP string, lossPercent float64) *batchv1.Job {
+func (m *NetworkDegradeManager) buildPacketLossAddJob(jobName, nodeName, targetIP string, lossPercent float64, incidentDuration time.Duration) *batchv1.Job {
 	privileged := true
 	hostNetwork := true
-	ttl := int32(int(time.Hour.Seconds())) // 1 hour TTL
+	ttl := int32(int((incidentDuration + networkDegradeAutoCleanupBuffer).Seconds()))
+	activeDeadline := int64((incidentDuration + networkDegradeActiveDeadlineBuffer).Seconds())
 
 	script := fmt.Sprintf(`set -e
-iptables -A INPUT -s %s -m statistic --mode random --probability %.4f -j DROP -m comment --comment "%s"
+iptables -A INPUT -s %s -m statistic --mode random --probability %.2f -j DROP -m comment --comment "%s"
 echo "iptables rule added"
 `, targetIP, lossPercent, jobName)
 
@@ -237,6 +241,7 @@ echo "iptables rule added"
 		},
 		Spec: batchv1.JobSpec{
 			TTLSecondsAfterFinished: &ttl,
+			ActiveDeadlineSeconds:   &activeDeadline,
 			BackoffLimit:            int32Ptr(0),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
@@ -271,7 +276,7 @@ func (m *NetworkDegradeManager) buildPacketLossRemoveJob(jobName, nodeName, comm
 	privileged := true
 	hostNetwork := true
 	ttl := int32(int((incidentDuration + networkDegradeAutoCleanupBuffer).Seconds()))
-	activeDeadline := int64((incidentDuration + 2*time.Second).Seconds())
+	activeDeadline := int64((incidentDuration + networkDegradeActiveDeadlineBuffer).Seconds())
 
 	script := fmt.Sprintf(`set -e
 sleep %d
@@ -329,7 +334,7 @@ func (m *NetworkDegradeManager) buildLatencyJob(jobName, nodeName, targetIP stri
 	privileged := true
 	hostNetwork := true
 	ttl := int32(int((incidentDuration + networkDegradeAutoCleanupBuffer).Seconds()))
-	activeDeadline := int64((incidentDuration + 2*time.Second).Seconds())
+	activeDeadline := int64((incidentDuration + networkDegradeActiveDeadlineBuffer).Seconds())
 
 	script := fmt.Sprintf(`set -e
 timeout %d sh -c '
