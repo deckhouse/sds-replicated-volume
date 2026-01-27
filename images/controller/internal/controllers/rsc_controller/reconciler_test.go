@@ -840,6 +840,21 @@ var _ = Describe("computeRollingStrategiesConfiguration", func() {
 	})
 })
 
+// ensureVolumeSummaryAndConditions is a test wrapper that combines ensureVolumeSummary and
+// ensureRollingOperations for backward compatibility with existing tests.
+func ensureVolumeSummaryAndConditions(
+	ctx context.Context,
+	rsc *v1alpha1.ReplicatedStorageClass,
+	rvs []rvView,
+) flow.EnsureOutcome {
+	eo := ensureVolumeSummary(ctx, rsc, rvs)
+	if eo.Error() != nil {
+		return eo
+	}
+	eoRolling, _ := ensureRollingOperations(ctx, rsc, rvs, nil)
+	return eo.Merge(eoRolling)
+}
+
 var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 	var (
 		ctx context.Context
@@ -914,11 +929,12 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 		Expect(configCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonNewConfigurationNotYetObserved))
 		Expect(configCond.Message).To(ContainSubstring("3 volume(s) pending observation"))
 
-		// VolumesSatisfyEligibleNodes is calculated regardless of acknowledgment.
+		// VolumesSatisfyEligibleNodes is set to Unknown when PendingObservation > 0
+		// because we can't determine node satisfaction until volumes acknowledge configuration.
 		nodesCond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType)
 		Expect(nodesCond).NotTo(BeNil())
-		Expect(nodesCond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(nodesCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonManualConflictResolution))
+		Expect(nodesCond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(nodesCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonUpdatedEligibleNodesNotYetObserved))
 	})
 
 	It("sets ConfigurationRolledOut to False when StaleConfiguration > 0", func() {
@@ -1113,10 +1129,10 @@ var _ = Describe("Reconciler", func() {
 					},
 				},
 			}
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			cl = testhelpers.WithRVOByRSCOwnerRefIndex(testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rsc, rsp).
-				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})).
+				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{}))).
 				Build()
 			rec = NewReconciler(cl)
 
@@ -1150,10 +1166,10 @@ var _ = Describe("Reconciler", func() {
 					StoragePool: "rsp-not-found",
 				},
 			}
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			cl = testhelpers.WithRVOByRSCOwnerRefIndex(testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rsc).
-				WithStatusSubresource(rsc)).
+				WithStatusSubresource(rsc))).
 				Build()
 			rec = NewReconciler(cl)
 
@@ -1201,10 +1217,10 @@ var _ = Describe("Reconciler", func() {
 					},
 				},
 			}
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			cl = testhelpers.WithRVOByRSCOwnerRefIndex(testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rsc).
-				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})).
+				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{}))).
 				Build()
 			rec = NewReconciler(cl)
 
@@ -1232,10 +1248,10 @@ var _ = Describe("Reconciler", func() {
 					StoragePool: "rsp-not-found",
 				},
 			}
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			cl = testhelpers.WithRVOByRSCOwnerRefIndex(testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rsc).
-				WithStatusSubresource(rsc)).
+				WithStatusSubresource(rsc))).
 				Build()
 			rec = NewReconciler(cl)
 
@@ -1275,10 +1291,10 @@ var _ = Describe("Reconciler", func() {
 					},
 				},
 			}
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			cl = testhelpers.WithRVOByRSCOwnerRefIndex(testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rsc).
-				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})).
+				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{}))).
 				Build()
 			rec = NewReconciler(cl)
 
@@ -1318,10 +1334,10 @@ var _ = Describe("Reconciler", func() {
 					ReplicatedStorageClassName: "rsc-1",
 				},
 			}
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			cl = testhelpers.WithRVOByRSCOwnerRefIndex(testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rsc, rv).
-				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})).
+				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{}))).
 				Build()
 			rec = NewReconciler(cl)
 
@@ -1355,10 +1371,10 @@ var _ = Describe("Reconciler", func() {
 					},
 				},
 			}
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			cl = testhelpers.WithRVOByRSCOwnerRefIndex(testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rsc).
-				WithStatusSubresource(rsc)).
+				WithStatusSubresource(rsc))).
 				Build()
 			rec = NewReconciler(cl)
 
