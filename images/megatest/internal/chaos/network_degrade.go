@@ -18,6 +18,7 @@ package chaos
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -62,12 +63,20 @@ func (m *NetworkDegradeManager) ApplyPacketLoss(ctx context.Context, nodeA, node
 	jobNameA1 := fmt.Sprintf("%s-add-iptables", nodeA.Name)
 	jobNameA2 := fmt.Sprintf("%s-del-iptables", nodeA.Name)
 
-	// Check and delete existing Jobs before creating new ones
-	if err := m.deleteJobIfExists(ctx, jobNameA1); err != nil {
-		return nil, fmt.Errorf("deleting existing job %s: %w", jobNameA1, err)
+	// Check if Jobs already exist - if so, skip incident
+	exists, err := m.jobExists(ctx, jobNameA1)
+	if err != nil {
+		return nil, fmt.Errorf("checking existing job %s: %w", jobNameA1, err)
 	}
-	if err := m.deleteJobIfExists(ctx, jobNameA2); err != nil {
-		return nil, fmt.Errorf("deleting existing job %s: %w", jobNameA2, err)
+	if exists {
+		return nil, ErrJobAlreadyExists
+	}
+	exists, err = m.jobExists(ctx, jobNameA2)
+	if err != nil {
+		return nil, fmt.Errorf("checking existing job %s: %w", jobNameA2, err)
+	}
+	if exists {
+		return nil, ErrJobAlreadyExists
 	}
 
 	// Job 1 for nodeA: add iptables rule
@@ -88,12 +97,20 @@ func (m *NetworkDegradeManager) ApplyPacketLoss(ctx context.Context, nodeA, node
 	jobNameB1 := fmt.Sprintf("%s-add-iptables", nodeB.Name)
 	jobNameB2 := fmt.Sprintf("%s-del-iptables", nodeB.Name)
 
-	// Check and delete existing Jobs before creating new ones
-	if err := m.deleteJobIfExists(ctx, jobNameB1); err != nil {
-		return nil, fmt.Errorf("deleting existing job %s: %w", jobNameB1, err)
+	// Check if Jobs already exist - if so, skip incident
+	exists, err = m.jobExists(ctx, jobNameB1)
+	if err != nil {
+		return nil, fmt.Errorf("checking existing job %s: %w", jobNameB1, err)
 	}
-	if err := m.deleteJobIfExists(ctx, jobNameB2); err != nil {
-		return nil, fmt.Errorf("deleting existing job %s: %w", jobNameB2, err)
+	if exists {
+		return nil, ErrJobAlreadyExists
+	}
+	exists, err = m.jobExists(ctx, jobNameB2)
+	if err != nil {
+		return nil, fmt.Errorf("checking existing job %s: %w", jobNameB2, err)
+	}
+	if exists {
+		return nil, ErrJobAlreadyExists
 	}
 
 	// Job 1 for nodeB: add iptables rule
@@ -120,8 +137,12 @@ func (m *NetworkDegradeManager) ApplyLatency(ctx context.Context, nodeA, nodeB N
 
 	// Create Job for nodeA
 	jobNameA := fmt.Sprintf("%s-latency", nodeA.Name)
-	if err := m.deleteJobIfExists(ctx, jobNameA); err != nil {
-		return nil, fmt.Errorf("deleting existing job %s: %w", jobNameA, err)
+	exists, err := m.jobExists(ctx, jobNameA)
+	if err != nil {
+		return nil, fmt.Errorf("checking existing job %s: %w", jobNameA, err)
+	}
+	if exists {
+		return nil, ErrJobAlreadyExists
 	}
 
 	jobA := m.buildLatencyJob(jobNameA, nodeA.Name, nodeB.IPAddress, incidentDuration)
@@ -132,8 +153,12 @@ func (m *NetworkDegradeManager) ApplyLatency(ctx context.Context, nodeA, nodeB N
 
 	// Create Job for nodeB
 	jobNameB := fmt.Sprintf("%s-latency", nodeB.Name)
-	if err := m.deleteJobIfExists(ctx, jobNameB); err != nil {
-		return nil, fmt.Errorf("deleting existing job %s: %w", jobNameB, err)
+	exists, err = m.jobExists(ctx, jobNameB)
+	if err != nil {
+		return nil, fmt.Errorf("checking existing job %s: %w", jobNameB, err)
+	}
+	if exists {
+		return nil, ErrJobAlreadyExists
 	}
 
 	jobB := m.buildLatencyJob(jobNameB, nodeB.Name, nodeA.IPAddress, incidentDuration)
@@ -143,28 +168,6 @@ func (m *NetworkDegradeManager) ApplyLatency(ctx context.Context, nodeA, nodeB N
 	jobNames = append(jobNames, jobNameB)
 
 	return jobNames, nil
-}
-
-// RemoveNetworkDegradation deletes Jobs by their names
-func (m *NetworkDegradeManager) RemoveNetworkDegradation(ctx context.Context, jobNames []string) error {
-	propagation := metav1.DeletePropagationBackground
-	for _, jobName := range jobNames {
-		job := &batchv1.Job{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      jobName,
-				Namespace: networkDegradeNamespace,
-			},
-		}
-		if err := m.cl.Delete(ctx, job, &client.DeleteOptions{
-			PropagationPolicy: &propagation,
-		}); err != nil {
-			// Ignore NotFound errors
-			if client.IgnoreNotFound(err) != nil {
-				return fmt.Errorf("deleting job %s: %w", jobName, err)
-			}
-		}
-	}
-	return nil
 }
 
 // CleanupStaleNetworkDegradeJobs cleans up any leftover Jobs from previous runs
@@ -197,8 +200,8 @@ func (m *NetworkDegradeManager) CleanupStaleNetworkDegradeJobs(ctx context.Conte
 	return deleted, nil
 }
 
-// deleteJobIfExists deletes a Job if it exists
-func (m *NetworkDegradeManager) deleteJobIfExists(ctx context.Context, jobName string) error {
+// jobExists checks if a Job exists
+func (m *NetworkDegradeManager) jobExists(ctx context.Context, jobName string) (bool, error) {
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
@@ -207,16 +210,15 @@ func (m *NetworkDegradeManager) deleteJobIfExists(ctx context.Context, jobName s
 	}
 	if err := m.cl.Get(ctx, client.ObjectKey{Name: jobName, Namespace: networkDegradeNamespace}, job); err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			return nil // Job doesn't exist, nothing to delete
+			return false, nil // Job doesn't exist
 		}
-		return err
+		return false, err
 	}
-
-	propagation := metav1.DeletePropagationBackground
-	return client.IgnoreNotFound(m.cl.Delete(ctx, job, &client.DeleteOptions{
-		PropagationPolicy: &propagation,
-	}))
+	return true, nil
 }
+
+// ErrJobAlreadyExists is returned when a job already exists and incident should be skipped
+var ErrJobAlreadyExists = errors.New("job already exists, skipping incident")
 
 // buildPacketLossAddJob builds a Job that adds iptables rule for packet loss
 func (m *NetworkDegradeManager) buildPacketLossAddJob(jobName, nodeName, targetIP string, lossPercent float64, incidentDuration time.Duration) *batchv1.Job {

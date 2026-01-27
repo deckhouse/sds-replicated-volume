@@ -18,6 +18,7 @@ package runners
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"math/rand"
 	"time"
@@ -129,8 +130,13 @@ func (c *ChaosNetworkDegrader) doLosses(ctx context.Context, nodeA, nodeB chaos.
 
 	log.Info("applying packet loss")
 
-	jobNames, err := c.networkDegradeMgr.ApplyPacketLoss(ctx, nodeA, nodeB, c.cfg.LossPercent, incidentDuration)
+	_, err := c.networkDegradeMgr.ApplyPacketLoss(ctx, nodeA, nodeB, c.cfg.LossPercent, incidentDuration)
 	if err != nil {
+		// If job already exists, skip incident
+		if errors.Is(err, chaos.ErrJobAlreadyExists) {
+			log.Info("jobs already exist, skipping incident")
+			return nil
+		}
 		return err
 	}
 
@@ -139,20 +145,16 @@ func (c *ChaosNetworkDegrader) doLosses(ctx context.Context, nodeA, nodeB chaos.
 
 	select {
 	case <-ctx.Done():
-		// Cleanup on context cancellation
-		c.cleanup(jobNames)
+		// Jobs will be cleaned up automatically via TTL
 		return ctx.Err()
 	case <-c.forceCleanupChan:
-		// Cleanup on force signal
-		c.cleanup(jobNames)
+		// Jobs will be cleaned up automatically via TTL
 		return nil
 	case <-waitChan(incidentDuration):
-		// Normal timeout, remove degradation
+		// Normal timeout, jobs will be cleaned up automatically via TTL
 	}
 
-	// Remove degradation
-	log.Info("removing packet loss")
-	c.cleanup(jobNames)
+	log.Info("packet loss incident completed, jobs will be cleaned up automatically")
 
 	return nil
 }
@@ -168,8 +170,13 @@ func (c *ChaosNetworkDegrader) doLatency(ctx context.Context, nodeA, nodeB chaos
 
 	log.Info("applying latency")
 
-	jobNames, err := c.networkDegradeMgr.ApplyLatency(ctx, nodeA, nodeB, incidentDuration)
+	_, err := c.networkDegradeMgr.ApplyLatency(ctx, nodeA, nodeB, incidentDuration)
 	if err != nil {
+		// If job already exists, skip incident
+		if errors.Is(err, chaos.ErrJobAlreadyExists) {
+			log.Info("jobs already exist, skipping incident")
+			return nil
+		}
 		return err
 	}
 
@@ -178,36 +185,17 @@ func (c *ChaosNetworkDegrader) doLatency(ctx context.Context, nodeA, nodeB chaos
 
 	select {
 	case <-ctx.Done():
-		// Cleanup on context cancellation
-		c.cleanup(jobNames)
+		// Jobs will be cleaned up automatically via TTL
 		return ctx.Err()
 	case <-c.forceCleanupChan:
-		// Cleanup on force signal
-		c.cleanup(jobNames)
+		// Jobs will be cleaned up automatically via TTL
 		return nil
 	case <-waitChan(incidentDuration):
-		// Normal timeout, remove degradation
+		// Normal timeout, jobs will be cleaned up automatically via TTL
 	}
 
-	// Remove degradation
-	log.Info("removing latency")
-	c.cleanup(jobNames)
+	log.Info("latency incident completed, jobs will be cleaned up automatically")
 
 	return nil
 }
 
-func (c *ChaosNetworkDegrader) cleanup(jobNames []string) {
-	c.log.Debug("started cleanup")
-	defer c.log.Debug("finished cleanup")
-
-	if len(jobNames) == 0 {
-		return
-	}
-
-	c.log.Info("cleanup: removing network degradation", "job_count", len(jobNames))
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), CleanupTimeout)
-	defer cleanupCancel()
-	if err := c.networkDegradeMgr.RemoveNetworkDegradation(cleanupCtx, jobNames); err != nil {
-		c.log.Error("cleanup failed", "error", err)
-	}
-}
