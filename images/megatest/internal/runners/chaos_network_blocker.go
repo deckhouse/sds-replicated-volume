@@ -20,6 +20,7 @@ import (
 	"context"
 	"log/slog"
 	"math/rand"
+	"time"
 
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/chaos"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
@@ -95,28 +96,32 @@ func (c *ChaosNetworkBlocker) doBlock(ctx context.Context) error {
 		nodes[i], nodes[j] = nodes[j], nodes[i]
 	})
 
+	// Determine incident duration
+	incidentDuration := randomDuration(c.cfg.IncidentDuration)
+
 	// Select incident type based on probability
 	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
 	randValue := rand.Intn(100)
 
 	switch {
 	case randValue < blockingEverythingProbability:
-		return c.doBlockingEverything(ctx, nodes)
+		return c.doBlockingEverything(ctx, nodes, incidentDuration)
 	case randValue < blockingDRBDProbability:
-		return c.doBlockingDRBD(ctx, nodes)
+		return c.doBlockingDRBD(ctx, nodes, incidentDuration)
 	default:
-		return c.doSplitBrain(ctx, nodes)
+		return c.doSplitBrain(ctx, nodes, incidentDuration)
 	}
 }
 
 // doBlockingEverything blocks all TCP traffic between two random nodes
-func (c *ChaosNetworkBlocker) doBlockingEverything(ctx context.Context, nodes []chaos.NodeInfo) error {
+func (c *ChaosNetworkBlocker) doBlockingEverything(ctx context.Context, nodes []chaos.NodeInfo, incidentDuration time.Duration) error {
 	nodeA, nodeB := nodes[0], nodes[1]
 
 	log := c.log.With(
 		"incident_type", "blocking-everything",
 		"node_a", nodeA.Name,
 		"node_b", nodeB.Name,
+		"duration", incidentDuration.String(),
 	)
 
 	log.Info("blocking all network")
@@ -125,10 +130,6 @@ func (c *ChaosNetworkBlocker) doBlockingEverything(ctx context.Context, nodes []
 	if err != nil {
 		return err
 	}
-
-	// Wait for incident duration or context cancellation
-	incidentDuration := randomDuration(c.cfg.IncidentDuration)
-	log.Debug("keeping network blocked", "duration", incidentDuration.String())
 
 	select {
 	case <-ctx.Done():
@@ -155,13 +156,14 @@ func (c *ChaosNetworkBlocker) doBlockingEverything(ctx context.Context, nodes []
 }
 
 // doBlockingDRBD is a stub for blocking-drbd incident (implementation deferred)
-func (c *ChaosNetworkBlocker) doBlockingDRBD(ctx context.Context, nodes []chaos.NodeInfo) error {
+func (c *ChaosNetworkBlocker) doBlockingDRBD(ctx context.Context, nodes []chaos.NodeInfo, incidentDuration time.Duration) error {
 	nodeA, nodeB := nodes[0], nodes[1]
 
 	log := c.log.With(
 		"incident_type", "blocking-drbd",
 		"node_a", nodeA.Name,
 		"node_b", nodeB.Name,
+		"duration", incidentDuration.String(),
 	)
 
 	log.Info("blocking-drbd incident selected (not implemented yet)")
@@ -170,7 +172,7 @@ func (c *ChaosNetworkBlocker) doBlockingDRBD(ctx context.Context, nodes []chaos.
 }
 
 // doSplitBrain creates a network partition by splitting nodes into two groups
-func (c *ChaosNetworkBlocker) doSplitBrain(ctx context.Context, nodes []chaos.NodeInfo) error {
+func (c *ChaosNetworkBlocker) doSplitBrain(ctx context.Context, nodes []chaos.NodeInfo, incidentDuration time.Duration) error {
 	// Split nodes into two groups
 	groupA, groupB := c.splitNodes(nodes)
 
@@ -180,6 +182,7 @@ func (c *ChaosNetworkBlocker) doSplitBrain(ctx context.Context, nodes []chaos.No
 		"group_b_size", len(groupB),
 		"group_a_nodes", nodeNames(groupA),
 		"group_b_nodes", nodeNames(groupB),
+		"duration", incidentDuration.String(),
 	)
 
 	log.Info("creating network partition")
@@ -198,10 +201,6 @@ func (c *ChaosNetworkBlocker) doSplitBrain(ctx context.Context, nodes []chaos.No
 	}
 
 	log.Info("network partition created", "policy_count", len(policyNames))
-
-	// Wait for incident duration or context cancellation
-	incidentDuration := randomDuration(c.cfg.IncidentDuration)
-	log.Debug("keeping network partitioned", "duration", incidentDuration.String())
 
 	select {
 	case <-ctx.Done():
