@@ -18,15 +18,34 @@ package drbdsetup
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
 )
 
-func ExecuteDown(ctx context.Context, resource string) error {
-	args := DownArgs(resource)
+var (
+	ErrNewResourceAlreadyExists    = errors.New("resource already exists")
+	ErrNewResourcePermissionDenied = errors.New("permission denied")
+)
+
+// NewResourceArgs returns the arguments for drbdsetup new-resource command.
+var NewResourceArgs = func(resource string, nodeID uint) []string {
+	return []string{"new-resource", resource, strconv.FormatUint(uint64(nodeID), 10)}
+}
+
+// ExecuteNewResource creates a new DRBD resource.
+func ExecuteNewResource(ctx context.Context, resource string, nodeID uint) error {
+	args := NewResourceArgs(resource, nodeID)
 	cmd := ExecCommandContext(ctx, Command, args...)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		switch errToExitCode(err) {
+		case 161:
+			return ErrNewResourceAlreadyExists
+		case 152:
+			return ErrNewResourcePermissionDenied
+		}
 		return fmt.Errorf(
 			"running command %s %v: %w; output: %q",
 			Command, args, err, string(out),

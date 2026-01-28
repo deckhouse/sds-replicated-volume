@@ -14,7 +14,7 @@ spec:
     listKind: DRBDNodeOperationList
     plural: drbdnodeoperations
     shortNames:
-    - dno
+    - drbdnop
     singular: drbdnodeoperation
   scope: Cluster
   versions:

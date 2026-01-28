@@ -14,16 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drbdsetup
+package drbd
 
-var Command = "drbdsetup"
+const (
+	// ControllerName is the stable name for the DRBD controller.
+	// Used in .Named(...) for controller-runtime builder.
+	ControllerName = "drbd-controller"
 
-var StatusArgs = func(resourceName string) []string {
-	return []string{"status", "--json", resourceName}
-}
-
-var Events2Args = []string{"events2", "--timestamps"}
-
-var DownArgs = func(resource string) []string {
-	return []string{"down", resource}
-}
+	// ScannerName is the name of the DRBD scanner component.
+	ScannerName = "drbd-scanner"
+)

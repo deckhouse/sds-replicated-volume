@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"iter"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -72,7 +71,7 @@ func ExecuteEvents2(
 	}
 
 	return func(yield func(Events2Result) bool) {
-		cmd := exec.CommandContext(
+		cmd := ExecCommandContext(
 			ctx,
 			Command,
 			Events2Args...,

@@ -1,0 +1,151 @@
+drbdsetup status r2-test --json
+[
+{
+  "name": "r2-test",
+  "node-id": 0,
+  "role": "Primary",
+  "suspended": false,
+  "suspended-user": false,
+  "suspended-no-data": false,
+  "suspended-fencing": false,
+  "suspended-quorum": false,
+  "force-io-failures": false,
+  "write-ordering": "flush",
+  "devices": [
+    {
+      "volume": 0,
+      "minor": 1001,
+      "disk-state": "UpToDate",
+      "client": false,
+      "quorum": true,
+      "size": 102340,
+      "read": 102340,
+      "written": 0,
+      "al-writes": 0,
+      "bm-writes": 12,
+      "upper-pending": 0,
+      "lower-pending": 0
+    } ],
+  "connections": [
+    {
+      "peer-node-id": 1,
+      "name": "astef-sds-rv-redos-1",
+      "connection-state": "Connected", 
+      "congested": false,
+      "peer-role": "Secondary",
+      "tls": false,
+      "ap-in-flight": 0,
+      "rs-in-flight": 0,
+      "paths": [
+        {
+          "this_host": {
+            "address": "10.12.0.241",
+            "port": 7001,
+            "family": "ipv4"
+          },
+          "remote_host": {
+            "address": "10.12.0.235",
+            "port": 7001,
+            "family": "ipv4"
+          },
+          "established": true
+        } ],
+      "peer_devices": [
+        {
+          "volume": 0,
+          "replication-state": "Established",
+          "peer-disk-state": "UpToDate",
+          "peer-client": false,
+          "resync-suspended": "no",
+          "received": 0,
+          "sent": 102340,
+          "out-of-sync": 0,
+          "pending": 0,
+          "unacked": 0,
+          "has-sync-details": false,
+          "has-online-verify-details": false,
+          "percent-in-sync": 100.00
+        } ]
+    },
+    {
+      "peer-node-id": 2,
+      "name": "astef-sds-rv-ubuntu-0",
+      "connection-state": "Connected", 
+      "congested": false,
+      "peer-role": "Secondary",
+      "tls": false,
+      "ap-in-flight": 0,
+      "rs-in-flight": 0,
+      "paths": [
+        {
+          "this_host": {
+            "address": "10.12.0.241",
+            "port": 7001,
+            "family": "ipv4"
+          },
+          "remote_host": {
+            "address": "10.12.0.236",
+            "port": 7001,
+            "family": "ipv4"
+          },
+          "established": true
+        } ],
+      "peer_devices": [
+        {
+          "volume": 0,
+          "replication-state": "Established",
+          "peer-disk-state": "Diskless",
+          "peer-client": true,
+          "resync-suspended": "no",
+          "received": 0,
+          "sent": 0,
+          "out-of-sync": 0,
+          "pending": 0,
+          "unacked": 0,
+          "has-sync-details": false,
+          "has-online-verify-details": false,
+          "percent-in-sync": 100.00
+        } ]
+    },
+    {
+      "peer-node-id": 3,
+      "name": "astef-sds-rv-ubuntu-1",
+      "connection-state": "Connected", 
+      "congested": false,
+      "peer-role": "Secondary",
+      "tls": false,
+      "ap-in-flight": 0,
+      "rs-in-flight": 0,
+      "paths": [
+        {
+          "this_host": {
+            "address": "10.12.0.241",
+            "port": 7001,
+            "family": "ipv4"
+          },
+          "remote_host": {
+            "address": "10.12.0.234",
+            "port": 7001,
+            "family": "ipv4"
+          },
+          "established": true
+        } ],
+      "peer_devices": [
+        {
+          "volume": 0,
+          "replication-state": "Established",
+          "peer-disk-state": "Diskless",
+          "peer-client": true,
+          "resync-suspended": "no",
+          "received": 0,
+          "sent": 0,
+          "out-of-sync": 0,
+          "pending": 0,
+          "unacked": 0,
+          "has-sync-details": false,
+          "has-online-verify-details": false,
+          "percent-in-sync": 100.00
+        } ]
+    } ]
+}
+]

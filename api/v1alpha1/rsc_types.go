@@ -64,7 +64,7 @@ func (o *ReplicatedStorageClass) SetStatusConditions(conditions []metav1.Conditi
 type ReplicatedStorageClassSpec struct {
 	// StoragePool is the name of a ReplicatedStoragePool resource.
 	// Deprecated: Use Storage instead. This field cannot be added or changed, only removed.
-	// +kubebuilder:validation:XValidation:rule="!has(self) || (has(oldSelf) && self == oldSelf)",message="StoragePool cannot be added or changed, only removed"
+	// +kubebuilder:validation:XValidation:rule="size(self) == 0 || self == oldSelf",message="StoragePool cannot be added or changed, only removed"
 	// +optional
 	StoragePool string `json:"storagePool,omitempty"`
 	// Storage defines the storage backend configuration for this storage class.
@@ -153,8 +153,8 @@ type ReplicatedStorageClassSpec struct {
 }
 
 // ReplicatedStorageClassStorage defines the storage backend configuration for RSC.
-// +kubebuilder:validation:XValidation:rule="self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, g.thinPoolName != ”)",message="thinPoolName is required for each lvmVolumeGroups entry when type is LVMThin"
-// +kubebuilder:validation:XValidation:rule="self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName) || g.thinPoolName == ”)",message="thinPoolName must not be specified when type is LVM"
+// +kubebuilder:validation:XValidation:rule="self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, size(g.thinPoolName) > 0)",message="thinPoolName is required for each lvmVolumeGroups entry when type is LVMThin"
+// +kubebuilder:validation:XValidation:rule="self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName) || size(g.thinPoolName) == 0)",message="thinPoolName must not be specified when type is LVM"
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassStorage struct {
 	// Type defines the volumes type. Might be:

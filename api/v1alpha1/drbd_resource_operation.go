@@ -23,7 +23,7 @@ import (
 // +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster,shortName=dro
+// +kubebuilder:resource:scope=Cluster,shortName=drbdrop
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:printcolumn:name="Resource",type=string,JSONPath=".spec.drbdResourceName"
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=".spec.type"

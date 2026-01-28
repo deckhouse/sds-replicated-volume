@@ -14,16 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drbdsetup
+package drbd
 
-var Command = "drbdsetup"
-
-var StatusArgs = func(resourceName string) []string {
-	return []string{"status", "--json", resourceName}
+// ConfiguredReasonSource carries a condition reason for configuration failures.
+type ConfiguredReasonSource interface {
+	ConfiguredReason() string
 }
 
-var Events2Args = []string{"events2", "--timestamps"}
+type configuredReasonError struct {
+	error
+	reason string
+}
 
-var DownArgs = func(resource string) []string {
-	return []string{"down", resource}
+func (e configuredReasonError) ConfiguredReason() string { return e.reason }
+
+// ConfiguredReasonError wraps an error with a configured reason.
+// Returns nil if err is nil.
+func ConfiguredReasonError(err error, reason string) error {
+	if err == nil {
+		return nil
+	}
+	return configuredReasonError{error: err, reason: reason}
 }
