@@ -103,62 +103,59 @@ func (r *Reconciler) reconcileScheduling(ctx context.Context, rvName string) (ou
 		return rf.Done()
 	}
 
+	outcome = r.reconcileAlreadyScheduled(rf.Ctx(), sctx)
+	if outcome.ShouldReturn() {
+		return outcome
+	}
+
+	outcome = r.reconcileDiskful(rf.Ctx(), sctx)
+	outcome = outcome.Merge(r.reconcileTieBreaker(rf.Ctx(), sctx))
+
+	return outcome
+}
+
+// --- Reconcile: already-scheduled
+
+// reconcileAlreadyScheduled updates conditions on already scheduled RVRs.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileAlreadyScheduled(ctx context.Context, sctx *SchedulingContext) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "already-scheduled")
+	defer rf.OnEnd(&outcome)
+
 	if err := r.updateScheduledConditionOnScheduledRVRs(rf.Ctx(), sctx); err != nil {
 		return rf.Fail(err)
 	}
 
-	var newlyScheduledRVRs []*v1alpha1.ReplicatedVolumeReplica
-
-	scheduledDiskfulRVRs, diskfulFailureReason := r.reconcileDiskfulPhase(rf.Ctx(), sctx)
-	newlyScheduledRVRs = append(newlyScheduledRVRs, scheduledDiskfulRVRs...)
-
-	scheduledTieBreakerRVRs, tieBreakerFailureReason := r.reconcileTieBreakerPhase(sctx)
-	newlyScheduledRVRs = append(newlyScheduledRVRs, scheduledTieBreakerRVRs...)
-
-	if err := r.updateScheduledRVRs(rf.Ctx(), newlyScheduledRVRs); err != nil {
-		return rf.Fail(err)
-	}
-
-	if diskfulFailureReason != nil {
-		if err := r.setScheduledConditionFalseOnRVRs(rf.Ctx(), sctx.UnscheduledDiskful, diskfulFailureReason); err != nil {
-			return rf.Fail(err)
-		}
-	}
-
-	if tieBreakerFailureReason != nil {
-		if err := r.setScheduledConditionFalseOnRVRs(rf.Ctx(), sctx.UnscheduledTieBreaker, tieBreakerFailureReason); err != nil {
-			return rf.Fail(err)
-		}
-	}
-
-	if diskfulFailureReason != nil || tieBreakerFailureReason != nil {
-		return rf.RequeueAfter(30 * time.Second)
-	}
-
-	return rf.Done()
+	return rf.Continue()
 }
 
-func (r *Reconciler) reconcileDiskfulPhase(
-	ctx context.Context,
-	sctx *SchedulingContext,
-) ([]*v1alpha1.ReplicatedVolumeReplica, *schedulingFailureReason) {
+// --- Reconcile: diskful
+
+// reconcileDiskful schedules diskful replicas.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileDiskful(ctx context.Context, sctx *SchedulingContext) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "diskful")
+	defer rf.OnEnd(&outcome)
+
 	if len(sctx.UnscheduledDiskful) == 0 {
-		return nil, nil
+		return rf.Done()
 	}
 
 	candidateNodes := computeEligibleNodeNames(sctx.EligibleNodes, sctx.OccupiedNodes)
 	if len(candidateNodes) == 0 {
-		return nil, computeSchedulingFailureReason(fmt.Errorf("%w: no candidate nodes from storage pool", errSchedulingNoCandidateNodes))
+		return r.failDiskfulScheduling(rf, sctx, fmt.Errorf("%w: no candidate nodes from storage pool", errSchedulingNoCandidateNodes))
 	}
 
 	zoneCandidates, err := r.applyTopologyFilter(candidateNodes, true, sctx)
 	if err != nil {
-		return nil, computeSchedulingFailureReason(err)
+		return r.failDiskfulScheduling(rf, sctx, err)
 	}
 
-	zoneCandidates, err = r.applyCapacityFilterAndScore(ctx, zoneCandidates, sctx)
+	zoneCandidates, err = r.applyCapacityFilterAndScore(rf.Ctx(), zoneCandidates, sctx)
 	if err != nil {
-		return nil, computeSchedulingFailureReason(err)
+		return r.failDiskfulScheduling(rf, sctx, err)
 	}
 
 	applyAttachToBonus(zoneCandidates, sctx.AttachToNodes)
@@ -171,33 +168,51 @@ func (r *Reconciler) reconcileDiskfulPhase(
 		true,
 	)
 	if err != nil {
-		return nil, computeSchedulingFailureReason(err)
+		return r.failDiskfulScheduling(rf, sctx, err)
+	}
+
+	if err := r.updateScheduledRVRs(rf.Ctx(), assignedRVRs); err != nil {
+		return rf.Fail(err)
 	}
 
 	updateStateAfterScheduling(sctx, assignedRVRs)
 
 	if len(sctx.UnscheduledDiskful) > 0 {
-		return assignedRVRs, computeSchedulingFailureReason(fmt.Errorf("%w: not enough candidate nodes to schedule all Diskful replicas", errSchedulingNoCandidateNodes))
+		return r.failDiskfulScheduling(rf, sctx, fmt.Errorf("%w: not enough candidate nodes to schedule all Diskful replicas", errSchedulingNoCandidateNodes))
 	}
 
-	return assignedRVRs, nil
+	return rf.Done()
 }
 
-func (r *Reconciler) reconcileTieBreakerPhase(
-	sctx *SchedulingContext,
-) ([]*v1alpha1.ReplicatedVolumeReplica, *schedulingFailureReason) {
+func (r *Reconciler) failDiskfulScheduling(rf flow.ReconcileFlow, sctx *SchedulingContext, err error) flow.ReconcileOutcome {
+	failureReason := computeSchedulingFailureReason(err)
+	if setErr := r.setScheduledConditionFalseOnRVRs(rf.Ctx(), sctx.UnscheduledDiskful, failureReason); setErr != nil {
+		return rf.Fail(setErr)
+	}
+	return rf.RequeueAfter(30 * time.Second)
+}
+
+// --- Reconcile: tiebreaker
+
+// reconcileTieBreaker schedules tiebreaker replicas.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileTieBreaker(ctx context.Context, sctx *SchedulingContext) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "tiebreaker")
+	defer rf.OnEnd(&outcome)
+
 	if len(sctx.UnscheduledTieBreaker) == 0 {
-		return nil, nil
+		return rf.Done()
 	}
 
 	candidateNodes := computeEligibleNodeNames(sctx.EligibleNodes, sctx.OccupiedNodes)
 	if len(candidateNodes) == 0 {
-		return nil, computeSchedulingFailureReason(fmt.Errorf("%w: no candidate nodes for TieBreaker", errSchedulingNoCandidateNodes))
+		return r.failTieBreakerScheduling(rf, sctx, fmt.Errorf("%w: no candidate nodes for TieBreaker", errSchedulingNoCandidateNodes))
 	}
 
 	zoneCandidates, err := r.applyTopologyFilter(candidateNodes, false, sctx)
 	if err != nil {
-		return nil, computeSchedulingFailureReason(err)
+		return r.failTieBreakerScheduling(rf, sctx, err)
 	}
 
 	assignedRVRs, err := r.assignReplicasToNodes(
@@ -208,16 +223,28 @@ func (r *Reconciler) reconcileTieBreakerPhase(
 		true,
 	)
 	if err != nil {
-		return nil, computeSchedulingFailureReason(err)
+		return r.failTieBreakerScheduling(rf, sctx, err)
+	}
+
+	if err := r.updateScheduledRVRs(rf.Ctx(), assignedRVRs); err != nil {
+		return rf.Fail(err)
 	}
 
 	updateStateAfterScheduling(sctx, assignedRVRs)
 
 	if len(sctx.UnscheduledTieBreaker) > 0 {
-		return assignedRVRs, computeSchedulingFailureReason(fmt.Errorf("%w: not enough candidate nodes to schedule all TieBreaker replicas", errSchedulingNoCandidateNodes))
+		return r.failTieBreakerScheduling(rf, sctx, fmt.Errorf("%w: not enough candidate nodes to schedule all TieBreaker replicas", errSchedulingNoCandidateNodes))
 	}
 
-	return assignedRVRs, nil
+	return rf.Done()
+}
+
+func (r *Reconciler) failTieBreakerScheduling(rf flow.ReconcileFlow, sctx *SchedulingContext, err error) flow.ReconcileOutcome {
+	failureReason := computeSchedulingFailureReason(err)
+	if setErr := r.setScheduledConditionFalseOnRVRs(rf.Ctx(), sctx.UnscheduledTieBreaker, failureReason); setErr != nil {
+		return rf.Fail(setErr)
+	}
+	return rf.RequeueAfter(30 * time.Second)
 }
 
 // --- Helpers: scheduling (apply)
