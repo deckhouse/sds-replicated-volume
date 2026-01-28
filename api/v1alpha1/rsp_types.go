@@ -232,3 +232,17 @@ type ReplicatedStoragePoolEligibleNodeLVMVolumeGroup struct {
 	// Ready indicates whether the LVMVolumeGroup (and its thin pool, if applicable) is ready.
 	Ready bool `json:"ready"`
 }
+
+// EligibleNodesEqual compares two eligibleNodes slices by node names only.
+// Precondition: both slices are sorted by NodeName (RSP controller guarantees this).
+func EligibleNodesEqual(a, b []ReplicatedStoragePoolEligibleNode) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].NodeName != b[i].NodeName {
+			return false
+		}
+	}
+	return true
+}

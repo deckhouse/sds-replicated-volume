@@ -42,6 +42,9 @@ func RegisterIndexes(mgr manager.Manager) error {
 	if err := indexes.RegisterRVRByReplicatedVolumeName(mgr); err != nil {
 		return err
 	}
+	if err := indexes.RegisterRVRUnscheduled(mgr); err != nil {
+		return err
+	}
 
 	// Node
 	if err := indexes.RegisterNodeByMetadataName(mgr); err != nil {

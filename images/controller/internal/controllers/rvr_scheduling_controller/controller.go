@@ -17,11 +17,16 @@ limitations under the License.
 package rvrschedulingcontroller
 
 import (
+	"context"
+
 	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 const RVRSchedulingControllerName = "rvr-scheduling-controller"
@@ -39,5 +44,45 @@ func BuildController(mgr manager.Manager) error {
 			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha1.ReplicatedVolume{}),
 			builder.WithPredicates(RVRPredicates()...),
 		).
+		Watches(
+			&v1alpha1.ReplicatedStoragePool{},
+			handler.EnqueueRequestsFromMapFunc(mapRSPToRV(mgr.GetClient())),
+			builder.WithPredicates(RSPPredicates()...),
+		).
 		Complete(r)
+}
+
+// mapRSPToRV maps a ReplicatedStoragePool event to reconcile requests for
+// ReplicatedVolumes that have at least one unscheduled non-Access replica.
+func mapRSPToRV(cl client.Client) handler.MapFunc {
+	return func(ctx context.Context, obj client.Object) []reconcile.Request {
+		// Get all unscheduled RVRs using index (efficient).
+		var unscheduledRVRs v1alpha1.ReplicatedVolumeReplicaList
+		if err := cl.List(ctx, &unscheduledRVRs,
+			client.MatchingFields{indexes.IndexFieldRVRUnscheduled: "true"},
+			client.UnsafeDisableDeepCopy,
+		); err != nil {
+			return nil
+		}
+
+		// Collect unique RV names for non-Access replicas.
+		seen := make(map[string]struct{})
+		for i := range unscheduledRVRs.Items {
+			rvr := &unscheduledRVRs.Items[i]
+			if rvr.Spec.Type == v1alpha1.ReplicaTypeAccess {
+				continue
+			}
+			if rvr.Spec.ReplicatedVolumeName != "" {
+				seen[rvr.Spec.ReplicatedVolumeName] = struct{}{}
+			}
+		}
+
+		requests := make([]reconcile.Request, 0, len(seen))
+		for rvName := range seen {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: rvName},
+			})
+		}
+		return requests
+	}
 }

@@ -20,6 +20,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func RVRPredicates() []predicate.Predicate {
@@ -29,6 +31,28 @@ func RVRPredicates() []predicate.Predicate {
 			UpdateFunc:  func(_ event.TypedUpdateEvent[client.Object]) bool { return false },
 			DeleteFunc:  func(_ event.TypedDeleteEvent[client.Object]) bool { return false },
 			GenericFunc: func(_ event.TypedGenericEvent[client.Object]) bool { return false },
+		},
+	}
+}
+
+// RSPPredicates returns predicates for ReplicatedStoragePool events.
+// Reacts to:
+//   - Create: always (new RSP may have eligibleNodes)
+//   - Update: only if eligibleNodes changed
+//   - Delete: always (RSP removed)
+//   - Generic: always (external triggers)
+func RSPPredicates() []predicate.Predicate {
+	return []predicate.Predicate{
+		predicate.TypedFuncs[client.Object]{
+			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				oldRSP, okOld := e.ObjectOld.(*v1alpha1.ReplicatedStoragePool)
+				newRSP, okNew := e.ObjectNew.(*v1alpha1.ReplicatedStoragePool)
+				if !okOld || !okNew || oldRSP == nil || newRSP == nil {
+					return true
+				}
+				// React only if eligibleNodes changed.
+				return !v1alpha1.EligibleNodesEqual(oldRSP.Status.EligibleNodes, newRSP.Status.EligibleNodes)
+			},
 		},
 	}
 }

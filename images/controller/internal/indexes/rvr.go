@@ -34,6 +34,11 @@ const (
 	// IndexFieldRVRByReplicatedVolumeName is used to quickly list
 	// ReplicatedVolumeReplica objects belonging to a specific RV.
 	IndexFieldRVRByReplicatedVolumeName = "spec.replicatedVolumeName"
+
+	// IndexFieldRVRUnscheduled is used to quickly list
+	// ReplicatedVolumeReplica objects that have no node assigned.
+	// Query with value "true" to get all unscheduled RVRs.
+	IndexFieldRVRUnscheduled = "unscheduled"
 )
 
 // RegisterRVRByNodeName registers the index for listing
@@ -78,6 +83,29 @@ func RegisterRVRByReplicatedVolumeName(mgr manager.Manager) error {
 		},
 	); err != nil {
 		return fmt.Errorf("index ReplicatedVolumeReplica by spec.replicatedVolumeName: %w", err)
+	}
+	return nil
+}
+
+// RegisterRVRUnscheduled registers the index for listing
+// ReplicatedVolumeReplica objects that have no node assigned.
+func RegisterRVRUnscheduled(mgr manager.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&v1alpha1.ReplicatedVolumeReplica{},
+		IndexFieldRVRUnscheduled,
+		func(obj client.Object) []string {
+			rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+			if !ok {
+				return nil
+			}
+			if rvr.Spec.NodeName == "" {
+				return []string{"true"}
+			}
+			return nil
+		},
+	); err != nil {
+		return fmt.Errorf("index ReplicatedVolumeReplica by unscheduled: %w", err)
 	}
 	return nil
 }
