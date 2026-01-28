@@ -198,4 +198,3 @@ func (c *ChaosNetworkDegrader) doLatency(ctx context.Context, nodeA, nodeB chaos
 
 	return nil
 }
-

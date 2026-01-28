@@ -159,6 +159,8 @@ func (c *ChaosNetworkBlocker) doBlockingEverything(ctx context.Context, nodes []
 func (c *ChaosNetworkBlocker) doBlockingDRBD(ctx context.Context, nodes []chaos.NodeInfo, incidentDuration time.Duration) error {
 	nodeA, nodeB := nodes[0], nodes[1]
 
+	_ = ctx
+
 	log := c.log.With(
 		"incident_type", "blocking-drbd",
 		"node_a", nodeA.Name,
