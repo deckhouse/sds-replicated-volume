@@ -18,11 +18,13 @@ package rvrcontroller
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,6 +37,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
@@ -93,7 +96,8 @@ var _ = Describe("rvrShouldNotExist", func() {
 
 var _ = Describe("computeActualBackingVolume", func() {
 	It("returns nil for nil DRBDResource", func() {
-		Expect(computeActualBackingVolume(nil, nil)).To(BeNil())
+		bv := computeActualBackingVolume(nil, nil)
+		Expect(bv).To(BeNil())
 	})
 
 	It("returns nil when DRBDResource has empty LVMLogicalVolumeName", func() {
@@ -101,7 +105,8 @@ var _ = Describe("computeActualBackingVolume", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1"},
 			Spec:       v1alpha1.DRBDResourceSpec{LVMLogicalVolumeName: ""},
 		}
-		Expect(computeActualBackingVolume(drbdr, nil)).To(BeNil())
+		bv := computeActualBackingVolume(drbdr, nil)
+		Expect(bv).To(BeNil())
 	})
 
 	It("returns nil when referenced LLV is not found", func() {
@@ -112,7 +117,8 @@ var _ = Describe("computeActualBackingVolume", func() {
 		llvs := []snc.LVMLogicalVolume{
 			{ObjectMeta: metav1.ObjectMeta{Name: "llv-other"}},
 		}
-		Expect(computeActualBackingVolume(drbdr, llvs)).To(BeNil())
+		bv := computeActualBackingVolume(drbdr, llvs)
+		Expect(bv).To(BeNil())
 	})
 
 	It("returns backing volume for thick volume", func() {
@@ -200,6 +206,7 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 			Spec:       v1alpha1.ReplicatedVolumeSpec{},
 			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 1,
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 					Size: resource.MustParse("10Gi"),
 				},
@@ -207,25 +214,19 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 		}
 	})
 
-	It("returns nil for nil RVR", func() {
-		Expect(computeIntendedBackingVolume(nil, rv, nil)).To(BeNil())
+	It("panics for nil RVR", func() {
+		Expect(func() {
+			computeIntendedBackingVolume(nil, rv, nil)
+		}).To(PanicWith("computeIntendedBackingVolume: rvr is nil"))
 	})
 
-	It("returns actual when RV is nil", func() {
+	It("panics when RV is nil", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
-		actual := &backingVolume{LLVName: "existing-llv", LVMVolumeGroupName: "lvg-1"}
-		result := computeIntendedBackingVolume(rvr, nil, actual)
-		Expect(result).To(Equal(actual))
-	})
-
-	It("returns nil when RV is nil and actual is nil", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-		result := computeIntendedBackingVolume(rvr, nil, nil)
-		Expect(result).To(BeNil())
+		Expect(func() {
+			computeIntendedBackingVolume(rvr, nil, nil)
+		}).To(PanicWith("computeIntendedBackingVolume: rv is nil"))
 	})
 
 	It("returns nil for datamesh member that is Access (diskless)", func() {
@@ -236,7 +237,9 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			{Name: "rvr-1", Type: v1alpha1.ReplicaTypeAccess},
 		}
 
-		Expect(computeIntendedBackingVolume(rvr, rv, nil)).To(BeNil())
+		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil)
+		Expect(intended).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
 	})
 
 	It("returns nil for datamesh member with TypeTransition=ToDiskless", func() {
@@ -251,7 +254,9 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			},
 		}
 
-		Expect(computeIntendedBackingVolume(rvr, rv, nil)).To(BeNil())
+		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil)
+		Expect(intended).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
 	})
 
 	It("returns nil for datamesh member with empty LVMVolumeGroupName", func() {
@@ -262,7 +267,9 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			{Name: "rvr-1", Type: v1alpha1.ReplicaTypeDiskful, LVMVolumeGroupName: ""},
 		}
 
-		Expect(computeIntendedBackingVolume(rvr, rv, nil)).To(BeNil())
+		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil)
+		Expect(intended).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling))
 	})
 
 	It("returns backing volume for datamesh member (diskful)", func() {
@@ -277,9 +284,10 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			},
 		}
 
-		bv := computeIntendedBackingVolume(rvr, rv, nil)
+		bv, reason, _ := computeIntendedBackingVolume(rvr, rv, nil)
 
 		Expect(bv).NotTo(BeNil())
+		Expect(reason).To(BeEmpty())
 		Expect(bv.LVMVolumeGroupName).To(Equal("lvg-1"))
 		Expect(bv.ThinPoolName).To(BeEmpty())
 		// Size comes from datamesh, adjusted by drbd_size.LowerVolumeSize
@@ -299,7 +307,7 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			},
 		}
 
-		bv := computeIntendedBackingVolume(rvr, rv, nil)
+		bv, _, _ := computeIntendedBackingVolume(rvr, rv, nil)
 
 		Expect(bv).NotTo(BeNil())
 		Expect(bv.LVMVolumeGroupName).To(Equal("lvg-1"))
@@ -314,25 +322,9 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			},
 		}
 
-		Expect(computeIntendedBackingVolume(rvr, rv, nil)).To(BeNil())
-	})
-
-	It("returns nil for non-member being deleted", func() {
-		now := metav1.Now()
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:              "rvr-1",
-				DeletionTimestamp: &now,
-				Finalizers:        []string{v1alpha1.RVRControllerFinalizer},
-			},
-			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
-				Type:               v1alpha1.ReplicaTypeDiskful,
-				NodeName:           "node-1",
-				LVMVolumeGroupName: "lvg-1",
-			},
-		}
-
-		Expect(computeIntendedBackingVolume(rvr, rv, nil)).To(BeNil())
+		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil)
+		Expect(intended).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
 	})
 
 	It("returns nil for non-member with incomplete config (no nodeName)", func() {
@@ -345,7 +337,9 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			},
 		}
 
-		Expect(computeIntendedBackingVolume(rvr, rv, nil)).To(BeNil())
+		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil)
+		Expect(intended).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling))
 	})
 
 	It("returns nil for non-member with incomplete config (no lvgName)", func() {
@@ -358,7 +352,9 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			},
 		}
 
-		Expect(computeIntendedBackingVolume(rvr, rv, nil)).To(BeNil())
+		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil)
+		Expect(intended).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling))
 	})
 
 	It("returns backing volume for non-member (diskful, complete config)", func() {
@@ -371,7 +367,7 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			},
 		}
 
-		bv := computeIntendedBackingVolume(rvr, rv, nil)
+		bv, _, _ := computeIntendedBackingVolume(rvr, rv, nil)
 
 		Expect(bv).NotTo(BeNil())
 		Expect(bv.LVMVolumeGroupName).To(Equal("lvg-1"))
@@ -395,7 +391,7 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			ThinPoolName:       "",
 		}
 
-		bv := computeIntendedBackingVolume(rvr, rv, actual)
+		bv, _, _ := computeIntendedBackingVolume(rvr, rv, actual)
 
 		Expect(bv).NotTo(BeNil())
 		Expect(bv.LLVName).To(Equal("llv-old-name"))
@@ -417,160 +413,11 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			LVMVolumeGroupName: "lvg-old",
 		}
 
-		bv := computeIntendedBackingVolume(rvr, rv, actual)
+		bv, _, _ := computeIntendedBackingVolume(rvr, rv, actual)
 
 		Expect(bv).NotTo(BeNil())
 		Expect(bv.LLVName).NotTo(Equal("llv-old-name"))
 		Expect(bv.LLVName).To(HavePrefix("rvr-1-"))
-	})
-})
-
-var _ = Describe("computeBackingVolumeNotApplicableReason", func() {
-	var rv *v1alpha1.ReplicatedVolume
-
-	BeforeEach(func() {
-		rv = &v1alpha1.ReplicatedVolume{
-			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
-			Status: v1alpha1.ReplicatedVolumeStatus{
-				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Size: resource.MustParse("1Gi"),
-				},
-			},
-		}
-	})
-
-	It("returns NotApplicable when RV is nil", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-
-		reason, message := computeBackingVolumeNotApplicableReason(rvr, nil)
-
-		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
-		Expect(message).To(ContainSubstring("ReplicatedVolume not found"))
-	})
-
-	It("returns NotApplicable for datamesh member with Access type", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rvr-1", Type: v1alpha1.ReplicaTypeAccess},
-		}
-
-		reason, message := computeBackingVolumeNotApplicableReason(rvr, rv)
-
-		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
-		Expect(message).To(ContainSubstring("diskless replica type"))
-	})
-
-	It("returns NotApplicable for datamesh member with TieBreaker type", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rvr-1", Type: v1alpha1.ReplicaTypeTieBreaker},
-		}
-
-		reason, message := computeBackingVolumeNotApplicableReason(rvr, rv)
-
-		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
-		Expect(message).To(ContainSubstring("diskless replica type"))
-	})
-
-	It("returns NotApplicable for datamesh member with TypeTransition=ToDiskless", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
-			{
-				Name:           "rvr-1",
-				Type:           v1alpha1.ReplicaTypeDiskful,
-				TypeTransition: v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskless,
-			},
-		}
-
-		reason, message := computeBackingVolumeNotApplicableReason(rvr, rv)
-
-		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
-		Expect(message).To(ContainSubstring("transition to diskless"))
-	})
-
-	It("returns WaitingForConfiguration for datamesh member with empty LVMVolumeGroupName", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rvr-1", Type: v1alpha1.ReplicaTypeDiskful, LVMVolumeGroupName: ""},
-		}
-
-		reason, message := computeBackingVolumeNotApplicableReason(rvr, rv)
-
-		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForConfiguration))
-		Expect(message).To(ContainSubstring("storage assignment"))
-	})
-
-	It("returns NotApplicable for non-member with Access type", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
-				ReplicatedVolumeName: "rv-1",
-				Type:                 v1alpha1.ReplicaTypeAccess,
-			},
-		}
-
-		reason, message := computeBackingVolumeNotApplicableReason(rvr, rv)
-
-		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
-		Expect(message).To(ContainSubstring("diskless replica type"))
-	})
-
-	It("returns NotApplicable for non-member with TieBreaker type", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
-				ReplicatedVolumeName: "rv-1",
-				Type:                 v1alpha1.ReplicaTypeTieBreaker,
-			},
-		}
-
-		reason, message := computeBackingVolumeNotApplicableReason(rvr, rv)
-
-		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
-		Expect(message).To(ContainSubstring("diskless replica type"))
-	})
-
-	It("returns WaitingForConfiguration for non-member Diskful with empty NodeName", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
-				ReplicatedVolumeName: "rv-1",
-				Type:                 v1alpha1.ReplicaTypeDiskful,
-				NodeName:             "",
-			},
-		}
-
-		reason, message := computeBackingVolumeNotApplicableReason(rvr, rv)
-
-		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForConfiguration))
-		Expect(message).To(ContainSubstring("node assignment"))
-	})
-
-	It("returns WaitingForConfiguration for non-member Diskful with NodeName but empty LVMVolumeGroupName", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
-				ReplicatedVolumeName: "rv-1",
-				Type:                 v1alpha1.ReplicaTypeDiskful,
-				NodeName:             "node-1",
-				LVMVolumeGroupName:   "",
-			},
-		}
-
-		reason, message := computeBackingVolumeNotApplicableReason(rvr, rv)
-
-		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForConfiguration))
-		Expect(message).To(ContainSubstring("storage assignment"))
 	})
 })
 
@@ -1427,6 +1274,1677 @@ var _ = Describe("newLLV", func() {
 	})
 })
 
+var _ = Describe("newDRBDR", func() {
+	var scheme *runtime.Scheme
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		_ = v1alpha1.AddToScheme(scheme)
+	})
+
+	It("creates DRBDR with correct name from RVR", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+		}
+		spec := v1alpha1.DRBDResourceSpec{
+			NodeName: "node-1",
+			NodeID:   1,
+		}
+
+		drbdr, err := newDRBDR(scheme, rvr, spec)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(drbdr.Name).To(Equal("rvr-1"))
+	})
+
+	It("creates DRBDR with finalizer", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+		}
+		spec := v1alpha1.DRBDResourceSpec{
+			NodeName: "node-1",
+			NodeID:   1,
+		}
+
+		drbdr, err := newDRBDR(scheme, rvr, spec)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(obju.HasFinalizer(drbdr, v1alpha1.RVRControllerFinalizer)).To(BeTrue())
+	})
+
+	It("creates DRBDR with owner reference to RVR", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+		}
+		spec := v1alpha1.DRBDResourceSpec{
+			NodeName: "node-1",
+			NodeID:   1,
+		}
+
+		drbdr, err := newDRBDR(scheme, rvr, spec)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(obju.HasControllerRef(drbdr, rvr)).To(BeTrue())
+	})
+
+	It("assigns spec to DRBDR", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+		}
+		spec := v1alpha1.DRBDResourceSpec{
+			NodeName: "node-1",
+			NodeID:   1,
+			Type:     v1alpha1.DRBDResourceTypeDiskful,
+			State:    v1alpha1.DRBDResourceStateUp,
+		}
+
+		drbdr, err := newDRBDR(scheme, rvr, spec)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(drbdr.Spec.NodeName).To(Equal("node-1"))
+		Expect(drbdr.Spec.NodeID).To(Equal(uint8(1)))
+		Expect(drbdr.Spec.Type).To(Equal(v1alpha1.DRBDResourceTypeDiskful))
+		Expect(drbdr.Spec.State).To(Equal(v1alpha1.DRBDResourceStateUp))
+	})
+})
+
+var _ = Describe("buildDRBDRPeerPaths", func() {
+	It("returns empty slice for empty addresses", func() {
+		paths := buildDRBDRPeerPaths(nil)
+		Expect(paths).To(HaveLen(0))
+	})
+
+	It("returns empty slice for empty addresses slice", func() {
+		paths := buildDRBDRPeerPaths([]v1alpha1.DRBDResourceAddressStatus{})
+		Expect(paths).To(HaveLen(0))
+	})
+
+	It("builds single path from single address", func() {
+		addresses := []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
+		}
+
+		paths := buildDRBDRPeerPaths(addresses)
+
+		Expect(paths).To(HaveLen(1))
+		Expect(paths[0].SystemNetworkName).To(Equal("net-1"))
+		Expect(paths[0].Address.IPv4).To(Equal("10.0.0.1"))
+		Expect(paths[0].Address.Port).To(Equal(uint(7000)))
+	})
+
+	It("builds multiple paths from multiple addresses", func() {
+		addresses := []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
+			{SystemNetworkName: "net-2", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.2", Port: 7001}},
+		}
+
+		paths := buildDRBDRPeerPaths(addresses)
+
+		Expect(paths).To(HaveLen(2))
+		Expect(paths[0].SystemNetworkName).To(Equal("net-1"))
+		Expect(paths[0].Address.IPv4).To(Equal("10.0.0.1"))
+		Expect(paths[1].SystemNetworkName).To(Equal("net-2"))
+		Expect(paths[1].Address.IPv4).To(Equal("10.0.0.2"))
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// DRBDR Compute helpers tests
+//
+
+var _ = Describe("computeActualDRBDRConfigured", func() {
+	It("panics for nil drbdr", func() {
+		Expect(func() {
+			computeActualDRBDRConfigured(nil)
+		}).To(Panic())
+	})
+
+	It("returns Pending when Configured condition is not set", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1"},
+		}
+
+		state, msg := computeActualDRBDRConfigured(drbdr)
+
+		Expect(state).To(Equal(DRBDRConfiguredStatePending))
+		Expect(msg).To(ContainSubstring("not set yet"))
+	})
+
+	It("returns Pending when ObservedGeneration does not match Generation", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1", Generation: 2},
+			Status: v1alpha1.DRBDResourceStatus{
+				Conditions: []metav1.Condition{
+					{
+						Type:               v1alpha1.DRBDResourceCondConfiguredType,
+						Status:             metav1.ConditionTrue,
+						ObservedGeneration: 1, // Intentionally mismatched
+					},
+				},
+			},
+		}
+
+		state, msg := computeActualDRBDRConfigured(drbdr)
+
+		Expect(state).To(Equal(DRBDRConfiguredStatePending))
+		Expect(msg).To(ContainSubstring("generation: 2"))
+		Expect(msg).To(ContainSubstring("observedGeneration: 1"))
+	})
+
+	It("returns Pending when DRBD is in maintenance mode", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1", Generation: 1},
+		}
+		obju.SetStatusCondition(drbdr, metav1.Condition{
+			Type:               v1alpha1.DRBDResourceCondConfiguredType,
+			Status:             metav1.ConditionFalse,
+			Reason:             v1alpha1.DRBDResourceCondConfiguredReasonInMaintenance,
+			ObservedGeneration: 1,
+		})
+
+		state, msg := computeActualDRBDRConfigured(drbdr)
+
+		Expect(state).To(Equal(DRBDRConfiguredStatePending))
+		Expect(msg).To(ContainSubstring("maintenance"))
+	})
+
+	It("returns True when Configured condition is True and ObservedGeneration matches", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1", Generation: 1},
+		}
+		obju.SetStatusCondition(drbdr, metav1.Condition{
+			Type:               v1alpha1.DRBDResourceCondConfiguredType,
+			Status:             metav1.ConditionTrue,
+			ObservedGeneration: 1,
+		})
+
+		state, msg := computeActualDRBDRConfigured(drbdr)
+
+		Expect(state).To(Equal(DRBDRConfiguredStateTrue))
+		Expect(msg).To(BeEmpty())
+	})
+
+	It("returns False when Configured condition is False and ObservedGeneration matches", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1", Generation: 1},
+		}
+		obju.SetStatusCondition(drbdr, metav1.Condition{
+			Type:               v1alpha1.DRBDResourceCondConfiguredType,
+			Status:             metav1.ConditionFalse,
+			Reason:             "SomeError",
+			ObservedGeneration: 1,
+		})
+
+		state, msg := computeActualDRBDRConfigured(drbdr)
+
+		Expect(state).To(Equal(DRBDRConfiguredStateFalse))
+		Expect(msg).To(ContainSubstring("SomeError"))
+	})
+})
+
+var _ = Describe("computeIntendedEffectiveType", func() {
+	It("returns RVR spec type when member is nil", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type: v1alpha1.ReplicaTypeDiskful,
+			},
+		}
+
+		result := computeIntendedEffectiveType(rvr, nil)
+
+		Expect(result).To(Equal(v1alpha1.ReplicaTypeDiskful))
+	})
+
+	It("returns Diskless from RVR spec when member is nil", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type: v1alpha1.ReplicaTypeAccess,
+			},
+		}
+
+		result := computeIntendedEffectiveType(rvr, nil)
+
+		Expect(result).To(Equal(v1alpha1.ReplicaTypeAccess))
+	})
+
+	It("returns member type when no transition", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{}
+		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+			Type: v1alpha1.ReplicaTypeDiskful,
+		}
+
+		result := computeIntendedEffectiveType(rvr, member)
+
+		Expect(result).To(Equal(v1alpha1.ReplicaTypeDiskful))
+	})
+
+	It("returns TieBreaker during Diskful to Diskless transition", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{}
+		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+			Type:           v1alpha1.ReplicaTypeDiskful,
+			TypeTransition: v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskless,
+		}
+
+		result := computeIntendedEffectiveType(rvr, member)
+
+		Expect(result).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
+	})
+
+	It("returns member type during non-ToDiskless transition", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{}
+		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+			Type:           v1alpha1.ReplicaTypeTieBreaker,
+			TypeTransition: v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskful,
+		}
+
+		result := computeIntendedEffectiveType(rvr, member)
+
+		Expect(result).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
+	})
+})
+
+var _ = Describe("computeTargetEffectiveType", func() {
+	It("returns intended type when target LLV name is present", func() {
+		result := computeTargetEffectiveType(v1alpha1.ReplicaTypeDiskful, "llv-1")
+
+		Expect(result).To(Equal(v1alpha1.ReplicaTypeDiskful))
+	})
+
+	It("returns TieBreaker when intended is Diskful but no backing volume", func() {
+		result := computeTargetEffectiveType(v1alpha1.ReplicaTypeDiskful, "")
+
+		Expect(result).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
+	})
+
+	It("returns intended type when intended is not Diskful and no backing volume", func() {
+		result := computeTargetEffectiveType(v1alpha1.ReplicaTypeAccess, "")
+
+		Expect(result).To(Equal(v1alpha1.ReplicaTypeAccess))
+	})
+
+	It("returns TieBreaker type as-is when no backing volume", func() {
+		result := computeTargetEffectiveType(v1alpha1.ReplicaTypeTieBreaker, "")
+
+		Expect(result).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
+	})
+})
+
+var _ = Describe("computeDRBDRType", func() {
+	It("converts Diskful to DRBDResourceTypeDiskful", func() {
+		result := computeDRBDRType(v1alpha1.ReplicaTypeDiskful)
+
+		Expect(result).To(Equal(v1alpha1.DRBDResourceTypeDiskful))
+	})
+
+	It("converts Access to DRBDResourceTypeDiskless", func() {
+		result := computeDRBDRType(v1alpha1.ReplicaTypeAccess)
+
+		Expect(result).To(Equal(v1alpha1.DRBDResourceTypeDiskless))
+	})
+
+	It("converts TieBreaker to DRBDResourceTypeDiskless", func() {
+		result := computeDRBDRType(v1alpha1.ReplicaTypeTieBreaker)
+
+		Expect(result).To(Equal(v1alpha1.DRBDResourceTypeDiskless))
+	})
+})
+
+var _ = Describe("computeTargetDRBDRSpec", func() {
+	It("creates new spec with NodeName and NodeID from RVR when drbdr is nil", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+			},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			SystemNetworkNames: []string{"net-1"},
+		}
+
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+
+		Expect(spec.NodeName).To(Equal("node-1"))
+		Expect(spec.NodeID).To(Equal(uint8(1)))
+	})
+
+	It("preserves NodeName and NodeID from existing drbdr", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-2"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+			},
+		}
+		drbdr := &v1alpha1.DRBDResource{
+			Spec: v1alpha1.DRBDResourceSpec{
+				NodeName: "existing-node",
+				NodeID:   99,
+			},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			SystemNetworkNames: []string{"net-1"},
+		}
+
+		spec := computeTargetDRBDRSpec(rvr, drbdr, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+
+		Expect(spec.NodeName).To(Equal("existing-node"))
+		Expect(spec.NodeID).To(Equal(uint8(99)))
+	})
+
+	It("sets Type based on targetEffectiveType", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{}
+
+		specDiskful := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "llv-1", v1alpha1.ReplicaTypeDiskful)
+		specDiskless := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+
+		Expect(specDiskful.Type).To(Equal(v1alpha1.DRBDResourceTypeDiskful))
+		Expect(specDiskless.Type).To(Equal(v1alpha1.DRBDResourceTypeDiskless))
+	})
+
+	It("sets LVMLogicalVolumeName and Size for Diskful type", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Size: resource.MustParse("10Gi"),
+		}
+
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "llv-1", v1alpha1.ReplicaTypeDiskful)
+
+		Expect(spec.LVMLogicalVolumeName).To(Equal("llv-1"))
+		Expect(spec.Size).NotTo(BeNil())
+		Expect(spec.Size.String()).To(Equal("10Gi"))
+	})
+
+	It("clears LVMLogicalVolumeName and Size for Diskless type", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Size: resource.MustParse("10Gi"),
+		}
+
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+
+		Expect(spec.LVMLogicalVolumeName).To(BeEmpty())
+		Expect(spec.Size).To(BeNil())
+	})
+
+	It("sets Role to Secondary when member is nil", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{}
+
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+
+		Expect(spec.Role).To(Equal(v1alpha1.DRBDRoleSecondary))
+	})
+
+	It("sets Peers to nil when member is nil", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{}
+
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+
+		Expect(spec.Peers).To(BeNil())
+	})
+
+	It("sets Role from member when member is present", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{}
+		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+			Name: "pvc-abc-1",
+			Role: v1alpha1.DRBDRolePrimary,
+		}
+
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "", v1alpha1.ReplicaTypeAccess)
+
+		Expect(spec.Role).To(Equal(v1alpha1.DRBDRolePrimary))
+	})
+})
+
+var _ = Describe("computeTargetDRBDRPeers", func() {
+	It("returns nil when datamesh has single member", func() {
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
+			},
+		}
+		self := &datamesh.Members[0]
+
+		peers := computeTargetDRBDRPeers(datamesh, self)
+
+		Expect(peers).To(BeNil())
+	})
+
+	It("excludes self from peers", func() {
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful},
+			},
+		}
+		self := &datamesh.Members[0]
+
+		peers := computeTargetDRBDRPeers(datamesh, self)
+
+		Expect(peers).To(HaveLen(1))
+		Expect(peers[0].Name).To(Equal("pvc-abc-2"))
+	})
+
+	It("Diskful connects to all peers", func() {
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful},
+				{Name: "pvc-abc-3", Type: v1alpha1.ReplicaTypeAccess},
+			},
+		}
+		self := &datamesh.Members[0]
+
+		peers := computeTargetDRBDRPeers(datamesh, self)
+
+		Expect(peers).To(HaveLen(2))
+	})
+
+	It("Access connects only to Diskful peers", func() {
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeAccess},
+				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful},
+				{Name: "pvc-abc-3", Type: v1alpha1.ReplicaTypeAccess},
+			},
+		}
+		self := &datamesh.Members[0]
+
+		peers := computeTargetDRBDRPeers(datamesh, self)
+
+		Expect(peers).To(HaveLen(1))
+		Expect(peers[0].Name).To(Equal("pvc-abc-2"))
+	})
+
+	It("TieBreaker transitioning ToDiskful connects to all peers like Diskful", func() {
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeTieBreaker, TypeTransition: v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful},
+				{Name: "pvc-abc-3", Type: v1alpha1.ReplicaTypeAccess},
+			},
+		}
+		self := &datamesh.Members[0]
+
+		peers := computeTargetDRBDRPeers(datamesh, self)
+
+		Expect(peers).To(HaveLen(2))
+	})
+
+	It("Access connects to TieBreaker transitioning ToDiskful as Diskful peer", func() {
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeAccess},
+				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeTieBreaker, TypeTransition: v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskful},
+			},
+		}
+		self := &datamesh.Members[0]
+
+		peers := computeTargetDRBDRPeers(datamesh, self)
+
+		Expect(peers).To(HaveLen(1))
+		Expect(peers[0].Name).To(Equal("pvc-abc-2"))
+		Expect(peers[0].Type).To(Equal(v1alpha1.DRBDResourceTypeDiskful))
+	})
+
+	It("sets AllowRemoteRead to false for Access peers", func() {
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeAccess},
+			},
+		}
+		self := &datamesh.Members[0]
+
+		peers := computeTargetDRBDRPeers(datamesh, self)
+
+		Expect(peers).To(HaveLen(1))
+		Expect(peers[0].AllowRemoteRead).To(BeFalse())
+	})
+
+	It("sets AllowRemoteRead to true for non-Access peers", func() {
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful},
+			},
+		}
+		self := &datamesh.Members[0]
+
+		peers := computeTargetDRBDRPeers(datamesh, self)
+
+		Expect(peers).To(HaveLen(1))
+		Expect(peers[0].AllowRemoteRead).To(BeTrue())
+	})
+
+	It("copies SharedSecret and SharedSecretAlg from datamesh", func() {
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			SharedSecret:    "secret123",
+			SharedSecretAlg: v1alpha1.SharedSecretAlgSHA256,
+			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful},
+			},
+		}
+		self := &datamesh.Members[0]
+
+		peers := computeTargetDRBDRPeers(datamesh, self)
+
+		Expect(peers[0].SharedSecret).To(Equal("secret123"))
+		Expect(peers[0].SharedSecretAlg).To(Equal(v1alpha1.SharedSecretAlgSHA256))
+	})
+
+	It("builds peer paths from member addresses", func() {
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful, Addresses: []v1alpha1.DRBDResourceAddressStatus{
+					{SystemNetworkName: "net-1", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
+				}},
+			},
+		}
+		self := &datamesh.Members[0]
+
+		peers := computeTargetDRBDRPeers(datamesh, self)
+
+		Expect(peers[0].Paths).To(HaveLen(1))
+		Expect(peers[0].Paths[0].Address.IPv4).To(Equal("10.0.0.1"))
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Additional Apply helpers tests
+//
+
+var _ = Describe("applyRVRConfiguredCondTrue", func() {
+	It("sets condition to True", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applyRVRConfiguredCondTrue(rvr, "TestReason", "Test message")
+
+		Expect(changed).To(BeTrue())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal("TestReason"))
+		Expect(cond.Message).To(Equal("Test message"))
+	})
+
+	It("returns false when condition already True with same reason", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+			Status:  metav1.ConditionTrue,
+			Reason:  "TestReason",
+			Message: "Test message",
+		})
+
+		changed := applyRVRConfiguredCondTrue(rvr, "TestReason", "Test message")
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applyRVRBackingVolumeSize", func() {
+	It("sets size when different", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applyRVRBackingVolumeSize(rvr, resource.MustParse("10Gi"))
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.BackingVolumeSize.String()).To(Equal("10Gi"))
+	})
+
+	It("returns false when size is same", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				BackingVolumeSize: resource.MustParse("10Gi"),
+			},
+		}
+
+		changed := applyRVRBackingVolumeSize(rvr, resource.MustParse("10Gi"))
+
+		Expect(changed).To(BeFalse())
+	})
+
+	It("can set zero quantity to clear size", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				BackingVolumeSize: resource.MustParse("10Gi"),
+			},
+		}
+
+		changed := applyRVRBackingVolumeSize(rvr, resource.Quantity{})
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.BackingVolumeSize.IsZero()).To(BeTrue())
+	})
+})
+
+var _ = Describe("applyRVREffectiveType", func() {
+	It("sets effective type when different", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applyRVREffectiveType(rvr, v1alpha1.ReplicaTypeDiskful)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.EffectiveType).To(Equal(v1alpha1.ReplicaTypeDiskful))
+	})
+
+	It("returns false when type is same", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				EffectiveType: v1alpha1.ReplicaTypeDiskful,
+			},
+		}
+
+		changed := applyRVREffectiveType(rvr, v1alpha1.ReplicaTypeDiskful)
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applyRVRDatameshRevision", func() {
+	It("sets revision when different", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applyRVRDatameshRevision(rvr, 5)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DatameshRevision).To(Equal(int64(5)))
+	})
+
+	It("returns false when revision is same", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 5,
+			},
+		}
+
+		changed := applyRVRDatameshRevision(rvr, 5)
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applyRVRAddresses", func() {
+	It("sets addresses when different", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		addresses := []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
+		}
+
+		changed := applyRVRAddresses(rvr, addresses)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.Addresses).To(HaveLen(1))
+		Expect(rvr.Status.Addresses[0].Address.IPv4).To(Equal("10.0.0.1"))
+	})
+
+	It("returns false when addresses are same", func() {
+		addresses := []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
+		}
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				Addresses: addresses,
+			},
+		}
+
+		changed := applyRVRAddresses(rvr, addresses)
+
+		Expect(changed).To(BeFalse())
+	})
+
+	It("sets nil addresses", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				Addresses: []v1alpha1.DRBDResourceAddressStatus{
+					{SystemNetworkName: "net-1", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
+				},
+			},
+		}
+
+		changed := applyRVRAddresses(rvr, nil)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.Addresses).To(BeNil())
+	})
+
+	It("clones addresses to avoid aliasing", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		addresses := []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
+		}
+
+		_ = applyRVRAddresses(rvr, addresses)
+
+		// Modify original slice
+		addresses[0].Address.IPv4 = "10.0.0.2"
+		// RVR should not be affected
+		Expect(rvr.Status.Addresses[0].Address.IPv4).To(Equal("10.0.0.1"))
+	})
+})
+
+var _ = Describe("applyRVRDRBDResourceGeneration", func() {
+	It("sets generation when different", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applyRVRDRBDResourceGeneration(rvr, 3)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DRBDResourceGeneration).To(Equal(int64(3)))
+	})
+
+	It("returns false when generation is same", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DRBDResourceGeneration: 3,
+			},
+		}
+
+		changed := applyRVRDRBDResourceGeneration(rvr, 3)
+
+		Expect(changed).To(BeFalse())
+	})
+
+	It("handles zero generation", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DRBDResourceGeneration: 3,
+			},
+		}
+
+		changed := applyRVRDRBDResourceGeneration(rvr, 0)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DRBDResourceGeneration).To(Equal(int64(0)))
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Get helpers tests
+//
+
+var _ = Describe("getRVR", func() {
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
+	})
+
+	It("returns RVR when found", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rvr).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		result, err := rec.getRVR(ctx, "rvr-1")
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).NotTo(BeNil())
+		Expect(result.Name).To(Equal("rvr-1"))
+	})
+
+	It("returns nil, nil when not found", func() {
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		result, err := rec.getRVR(ctx, "rvr-1")
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeNil())
+	})
+
+	It("returns error on API error", func() {
+		testErr := errors.New("test API error")
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+					return testErr
+				},
+			}).
+			Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		result, err := rec.getRVR(ctx, "rvr-1")
+
+		Expect(err).To(MatchError(testErr))
+		Expect(result).To(BeNil())
+	})
+})
+
+var _ = Describe("getDRBDR", func() {
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
+	})
+
+	It("returns DRBDR when found", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1"},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(drbdr).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		result, err := rec.getDRBDR(ctx, "drbdr-1")
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).NotTo(BeNil())
+		Expect(result.Name).To(Equal("drbdr-1"))
+	})
+
+	It("returns nil, nil when not found", func() {
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		result, err := rec.getDRBDR(ctx, "drbdr-1")
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeNil())
+	})
+
+	It("returns error on API error", func() {
+		testErr := errors.New("test API error")
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+					return testErr
+				},
+			}).
+			Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		result, err := rec.getDRBDR(ctx, "drbdr-1")
+
+		Expect(err).To(MatchError(testErr))
+		Expect(result).To(BeNil())
+	})
+})
+
+var _ = Describe("getRV", func() {
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
+	})
+
+	It("returns RV when found", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+		}
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+			},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rv).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		result, err := rec.getRV(ctx, rvr)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).NotTo(BeNil())
+		Expect(result.Name).To(Equal("rv-1"))
+	})
+
+	It("returns nil, nil when RVR has no ReplicatedVolumeName", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		result, err := rec.getRV(ctx, rvr)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeNil())
+	})
+
+	It("returns nil, nil when RVR is nil", func() {
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		result, err := rec.getRV(ctx, nil)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeNil())
+	})
+
+	It("returns nil, nil when RV not found", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+			},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		result, err := rec.getRV(ctx, rvr)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeNil())
+	})
+
+	It("returns error on API error", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+			},
+		}
+		testErr := errors.New("test API error")
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+					return testErr
+				},
+			}).
+			Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		result, err := rec.getRV(ctx, rvr)
+
+		Expect(err).To(MatchError(testErr))
+		Expect(result).To(BeNil())
+	})
+})
+
+var _ = Describe("getLLVs", func() {
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		Expect(snc.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
+	})
+
+	It("returns empty list when no LLVs exist", func() {
+		cl := testhelpers.WithLLVByRVROwnerIndex(
+			fake.NewClientBuilder().WithScheme(scheme),
+		).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		result, err := rec.getLLVs(ctx, "rvr-1", nil)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeEmpty())
+	})
+
+	It("returns LLVs owned by RVR", func() {
+		llv := &snc.LVMLogicalVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "llv-1",
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         v1alpha1.SchemeGroupVersion.String(),
+						Kind:               "ReplicatedVolumeReplica",
+						Name:               "rvr-1",
+						UID:                "uid-1",
+						Controller:         boolPtr(true),
+						BlockOwnerDeletion: boolPtr(true),
+					},
+				},
+			},
+		}
+		cl := testhelpers.WithLLVByRVROwnerIndex(
+			fake.NewClientBuilder().WithScheme(scheme).WithObjects(llv),
+		).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		result, err := rec.getLLVs(ctx, "rvr-1", nil)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(HaveLen(1))
+		Expect(result[0].Name).To(Equal("llv-1"))
+	})
+
+	It("includes LLV referenced by DRBDR spec", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.DRBDResourceSpec{
+				LVMLogicalVolumeName: "llv-legacy",
+			},
+		}
+		llvLegacy := &snc.LVMLogicalVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "llv-legacy"},
+		}
+		cl := testhelpers.WithLLVByRVROwnerIndex(
+			fake.NewClientBuilder().WithScheme(scheme).WithObjects(llvLegacy),
+		).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		result, err := rec.getLLVs(ctx, "rvr-1", drbdr)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(HaveLen(1))
+		Expect(result[0].Name).To(Equal("llv-legacy"))
+	})
+
+	It("does not duplicate LLV if both owned and referenced by DRBDR", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.DRBDResourceSpec{
+				LVMLogicalVolumeName: "llv-1",
+			},
+		}
+		llv := &snc.LVMLogicalVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "llv-1",
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         v1alpha1.SchemeGroupVersion.String(),
+						Kind:               "ReplicatedVolumeReplica",
+						Name:               "rvr-1",
+						UID:                "uid-1",
+						Controller:         boolPtr(true),
+						BlockOwnerDeletion: boolPtr(true),
+					},
+				},
+			},
+		}
+		cl := testhelpers.WithLLVByRVROwnerIndex(
+			fake.NewClientBuilder().WithScheme(scheme).WithObjects(llv),
+		).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		result, err := rec.getLLVs(ctx, "rvr-1", drbdr)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(HaveLen(1))
+		Expect(result[0].Name).To(Equal("llv-1"))
+	})
+})
+
+var _ = Describe("getNodeReady", func() {
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(corev1.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
+	})
+
+	It("returns true when node is ready", func() {
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "node-1"},
+			Status: corev1.NodeStatus{
+				Conditions: []corev1.NodeCondition{
+					{Type: corev1.NodeReady, Status: corev1.ConditionTrue},
+				},
+			},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(node).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		ready, err := rec.getNodeReady(ctx, "node-1")
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ready).To(BeTrue())
+	})
+
+	It("returns false when node is not ready", func() {
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "node-1"},
+			Status: corev1.NodeStatus{
+				Conditions: []corev1.NodeCondition{
+					{Type: corev1.NodeReady, Status: corev1.ConditionFalse},
+				},
+			},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(node).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		ready, err := rec.getNodeReady(ctx, "node-1")
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ready).To(BeFalse())
+	})
+
+	It("returns false when Ready condition is not present", func() {
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "node-1"},
+			Status: corev1.NodeStatus{
+				Conditions: []corev1.NodeCondition{
+					{Type: corev1.NodeMemoryPressure, Status: corev1.ConditionFalse},
+				},
+			},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(node).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		ready, err := rec.getNodeReady(ctx, "node-1")
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ready).To(BeFalse())
+	})
+
+	It("returns error when node not found", func() {
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		ready, err := rec.getNodeReady(ctx, "node-1")
+
+		Expect(err).To(HaveOccurred())
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		Expect(ready).To(BeFalse())
+	})
+})
+
+var _ = Describe("getAgentReady", func() {
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(corev1.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
+	})
+
+	withPodByNodeNameIndex := func(builder *fake.ClientBuilder) *fake.ClientBuilder {
+		return builder.WithIndex(&corev1.Pod{}, indexes.IndexFieldPodByNodeName, func(obj client.Object) []string {
+			pod := obj.(*corev1.Pod)
+			if pod.Spec.NodeName == "" {
+				return nil
+			}
+			return []string{pod.Spec.NodeName}
+		})
+	}
+
+	It("returns true when agent pod is ready", func() {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "agent-abc",
+				Namespace: "d8-sds-replicated-volume",
+				Labels:    map[string]string{"app": "agent"},
+			},
+			Spec: corev1.PodSpec{NodeName: "node-1"},
+			Status: corev1.PodStatus{
+				Conditions: []corev1.PodCondition{
+					{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+				},
+			},
+		}
+		cl := withPodByNodeNameIndex(
+			fake.NewClientBuilder().WithScheme(scheme).WithObjects(pod),
+		).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "d8-sds-replicated-volume")
+
+		ready, err := rec.getAgentReady(ctx, "node-1")
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ready).To(BeTrue())
+	})
+
+	It("returns false when agent pod is not ready", func() {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "agent-abc",
+				Namespace: "d8-sds-replicated-volume",
+				Labels:    map[string]string{"app": "agent"},
+			},
+			Spec: corev1.PodSpec{NodeName: "node-1"},
+			Status: corev1.PodStatus{
+				Conditions: []corev1.PodCondition{
+					{Type: corev1.PodReady, Status: corev1.ConditionFalse},
+				},
+			},
+		}
+		cl := withPodByNodeNameIndex(
+			fake.NewClientBuilder().WithScheme(scheme).WithObjects(pod),
+		).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "d8-sds-replicated-volume")
+
+		ready, err := rec.getAgentReady(ctx, "node-1")
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ready).To(BeFalse())
+	})
+
+	It("returns false when no agent pods on node", func() {
+		cl := withPodByNodeNameIndex(
+			fake.NewClientBuilder().WithScheme(scheme),
+		).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "d8-sds-replicated-volume")
+
+		ready, err := rec.getAgentReady(ctx, "node-1")
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ready).To(BeFalse())
+	})
+
+	It("returns true when at least one agent pod is ready among multiple", func() {
+		podNotReady := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "agent-old",
+				Namespace: "d8-sds-replicated-volume",
+				Labels:    map[string]string{"app": "agent"},
+			},
+			Spec: corev1.PodSpec{NodeName: "node-1"},
+			Status: corev1.PodStatus{
+				Conditions: []corev1.PodCondition{
+					{Type: corev1.PodReady, Status: corev1.ConditionFalse},
+				},
+			},
+		}
+		podReady := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "agent-new",
+				Namespace: "d8-sds-replicated-volume",
+				Labels:    map[string]string{"app": "agent"},
+			},
+			Spec: corev1.PodSpec{NodeName: "node-1"},
+			Status: corev1.PodStatus{
+				Conditions: []corev1.PodCondition{
+					{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+				},
+			},
+		}
+		cl := withPodByNodeNameIndex(
+			fake.NewClientBuilder().WithScheme(scheme).WithObjects(podNotReady, podReady),
+		).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "d8-sds-replicated-volume")
+
+		ready, err := rec.getAgentReady(ctx, "node-1")
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ready).To(BeTrue())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Patch/Create/Delete helpers tests
+//
+
+var _ = Describe("patchRVRStatus", func() {
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
+	})
+
+	It("patches status successfully", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rvr).WithStatusSubresource(rvr).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		base := rvr.DeepCopy()
+		rvr.Status.EffectiveType = v1alpha1.ReplicaTypeDiskful
+
+		err := rec.patchRVRStatus(ctx, rvr, base, false)
+
+		Expect(err).NotTo(HaveOccurred())
+
+		// Verify status was updated
+		var updated v1alpha1.ReplicatedVolumeReplica
+		Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, &updated)).To(Succeed())
+		Expect(updated.Status.EffectiveType).To(Equal(v1alpha1.ReplicaTypeDiskful))
+	})
+
+	It("patches with optimistic lock when requested", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", ResourceVersion: "1"},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rvr).WithStatusSubresource(rvr).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		base := rvr.DeepCopy()
+		rvr.Status.EffectiveType = v1alpha1.ReplicaTypeDiskful
+
+		err := rec.patchRVRStatus(ctx, rvr, base, true)
+
+		Expect(err).NotTo(HaveOccurred())
+	})
+})
+
+var _ = Describe("patchRVR", func() {
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
+	})
+
+	It("patches main resource successfully", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rvr).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		base := rvr.DeepCopy()
+		rvr.Finalizers = []string{v1alpha1.RVRControllerFinalizer}
+
+		err := rec.patchRVR(ctx, rvr, base, false)
+
+		Expect(err).NotTo(HaveOccurred())
+
+		// Verify finalizer was added
+		var updated v1alpha1.ReplicatedVolumeReplica
+		Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, &updated)).To(Succeed())
+		Expect(obju.HasFinalizer(&updated, v1alpha1.RVRControllerFinalizer)).To(BeTrue())
+	})
+})
+
+var _ = Describe("createDRBDR", func() {
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
+	})
+
+	It("creates DRBDR successfully", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1"},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		err := rec.createDRBDR(ctx, drbdr)
+
+		Expect(err).NotTo(HaveOccurred())
+
+		// Verify DRBDR was created
+		var created v1alpha1.DRBDResource
+		Expect(cl.Get(ctx, client.ObjectKey{Name: "drbdr-1"}, &created)).To(Succeed())
+	})
+
+	It("returns error when DRBDR already exists", func() {
+		existing := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1"},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1"},
+		}
+		err := rec.createDRBDR(ctx, drbdr)
+
+		Expect(err).To(HaveOccurred())
+		Expect(apierrors.IsAlreadyExists(err)).To(BeTrue())
+	})
+})
+
+var _ = Describe("deleteDRBDR", func() {
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
+	})
+
+	It("deletes DRBDR successfully", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1"},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(drbdr).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		err := rec.deleteDRBDR(ctx, drbdr)
+
+		Expect(err).NotTo(HaveOccurred())
+
+		// Verify DRBDR was deleted
+		var deleted v1alpha1.DRBDResource
+		err = cl.Get(ctx, client.ObjectKey{Name: "drbdr-1"}, &deleted)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("returns nil without calling delete when DRBDR has DeletionTimestamp", func() {
+		now := metav1.Now()
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "drbdr-1",
+				DeletionTimestamp: &now,
+				Finalizers:        []string{"some-finalizer"},
+			},
+		}
+
+		deleteCalled := false
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(drbdr).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Delete: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					deleteCalled = true
+					return client.Delete(ctx, obj, opts...)
+				},
+			}).
+			Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		err := rec.deleteDRBDR(ctx, drbdr)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(deleteCalled).To(BeFalse())
+	})
+
+	It("returns nil when DRBDR not found", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1"},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		err := rec.deleteDRBDR(ctx, drbdr)
+
+		Expect(err).NotTo(HaveOccurred())
+	})
+})
+
+var _ = Describe("patchDRBDR", func() {
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
+	})
+
+	It("patches DRBDR successfully", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1"},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(drbdr).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		base := drbdr.DeepCopy()
+		drbdr.Spec.NodeName = "node-1"
+
+		err := rec.patchDRBDR(ctx, drbdr, base, false)
+
+		Expect(err).NotTo(HaveOccurred())
+
+		// Verify spec was updated
+		var updated v1alpha1.DRBDResource
+		Expect(cl.Get(ctx, client.ObjectKey{Name: "drbdr-1"}, &updated)).To(Succeed())
+		Expect(updated.Spec.NodeName).To(Equal("node-1"))
+	})
+})
+
+var _ = Describe("patchLLV", func() {
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		Expect(snc.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
+	})
+
+	It("patches LLV successfully", func() {
+		llv := &snc.LVMLogicalVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "llv-1"},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(llv).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		base := llv.DeepCopy()
+		llv.Finalizers = []string{v1alpha1.RVRControllerFinalizer}
+
+		err := rec.patchLLV(ctx, llv, base, false)
+
+		Expect(err).NotTo(HaveOccurred())
+
+		// Verify finalizer was added
+		var updated snc.LVMLogicalVolume
+		Expect(cl.Get(ctx, client.ObjectKey{Name: "llv-1"}, &updated)).To(Succeed())
+		Expect(obju.HasFinalizer(&updated, v1alpha1.RVRControllerFinalizer)).To(BeTrue())
+	})
+})
+
+var _ = Describe("createLLV", func() {
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		Expect(snc.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
+	})
+
+	It("creates LLV successfully", func() {
+		llv := &snc.LVMLogicalVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "llv-1"},
+			Spec:       snc.LVMLogicalVolumeSpec{LVMVolumeGroupName: "lvg-1"},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		err := rec.createLLV(ctx, llv)
+
+		Expect(err).NotTo(HaveOccurred())
+
+		// Verify LLV was created
+		var created snc.LVMLogicalVolume
+		Expect(cl.Get(ctx, client.ObjectKey{Name: "llv-1"}, &created)).To(Succeed())
+	})
+
+	It("returns error when LLV already exists", func() {
+		existing := &snc.LVMLogicalVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "llv-1"},
+			Spec:       snc.LVMLogicalVolumeSpec{LVMVolumeGroupName: "lvg-1"},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		llv := &snc.LVMLogicalVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "llv-1"},
+			Spec:       snc.LVMLogicalVolumeSpec{LVMVolumeGroupName: "lvg-1"},
+		}
+		err := rec.createLLV(ctx, llv)
+
+		Expect(err).To(HaveOccurred())
+		Expect(apierrors.IsAlreadyExists(err)).To(BeTrue())
+	})
+})
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Integration tests (Reconciler)
 //
@@ -1450,7 +2968,7 @@ var _ = Describe("Reconciler", func() {
 				fake.NewClientBuilder().
 					WithScheme(scheme),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			// When RVR is not found, reconcileMetadata returns early with Continue()
 			// since rvrShouldNotExist(nil) returns true.
@@ -1490,7 +3008,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rv, rvr).
 					WithStatusSubresource(rvr, rv),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -1522,7 +3040,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rvr).
 					WithStatusSubresource(rvr),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -1542,7 +3060,7 @@ var _ = Describe("Reconciler", func() {
 					Name:              "rvr-1",
 					UID:               "uid-1",
 					DeletionTimestamp: &now,
-					Finalizers:        []string{v1alpha1.RVRControllerFinalizer, "other-finalizer"},
+					Finalizers:        []string{v1alpha1.RVRControllerFinalizer}, // Only our finalizer
 				},
 				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					Type: v1alpha1.ReplicaTypeDiskful,
@@ -1571,7 +3089,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rvr, llv).
 					WithStatusSubresource(rvr),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -1586,6 +3104,7 @@ var _ = Describe("Reconciler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -1618,7 +3137,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rv, rvr).
 					WithStatusSubresource(rvr, rv),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -1636,6 +3155,7 @@ var _ = Describe("Reconciler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -1668,7 +3188,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rv, rvr).
 					WithStatusSubresource(rvr, rv),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -1684,6 +3204,7 @@ var _ = Describe("Reconciler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -1714,7 +3235,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rv, rvr).
 					WithStatusSubresource(rvr, rv),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -1729,6 +3250,7 @@ var _ = Describe("Reconciler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -1790,7 +3312,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rv, rvr, llv).
 					WithStatusSubresource(rvr, rv, llv),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -1804,6 +3326,7 @@ var _ = Describe("Reconciler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -1892,7 +3415,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rv, rvr, oldLLV, newLLV).
 					WithStatusSubresource(rvr, rv, oldLLV, newLLV),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -1930,7 +3453,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rvr, drbdr).
 					WithStatusSubresource(rvr),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -1945,6 +3468,7 @@ var _ = Describe("Reconciler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -2015,7 +3539,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rv, rvr, llv, drbdr).
 					WithStatusSubresource(rvr, rv, llv, drbdr),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -2033,6 +3557,7 @@ var _ = Describe("Reconciler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -2095,7 +3620,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rv, rvr, llv).
 					WithStatusSubresource(rvr, rv, llv),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -2113,6 +3638,7 @@ var _ = Describe("Reconciler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("20Gi"), // Larger than LLV actual size
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -2175,7 +3701,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rv, rvr, llv).
 					WithStatusSubresource(rvr, rv, llv),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -2198,6 +3724,7 @@ var _ = Describe("Reconciler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -2260,7 +3787,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rv, rvr, llv).
 					WithStatusSubresource(rvr, rv, llv),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -2283,6 +3810,7 @@ var _ = Describe("Reconciler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -2353,7 +3881,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rv, rvr, drbdr, oldLLV).
 					WithStatusSubresource(rvr, rv, drbdr, oldLLV),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -2383,6 +3911,7 @@ var _ = Describe("Reconciler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -2454,7 +3983,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rv, rvr, drbdr, oldLLV).
 					WithStatusSubresource(rvr, rv, drbdr, oldLLV),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -2541,7 +4070,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rvr, drbdr, llv). // No RV!
 					WithStatusSubresource(rvr, drbdr, llv),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -2557,13 +4086,13 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Get(ctx, client.ObjectKey{Name: llvName}, &existingLLV)).To(Succeed())
 			Expect(existingLLV.Spec.LVMVolumeGroupName).To(Equal("lvg-1"))
 
-			// Verify BackingVolumeReady condition is set to Ready (actual == intended when RV is nil)
+			// Verify BackingVolumeReady condition is set to WaitingForReplicatedVolume when RV is nil
 			var updatedRVR v1alpha1.ReplicatedVolumeReplica
 			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, &updatedRVR)).To(Succeed())
 			cond := obju.GetStatusCondition(&updatedRVR, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
 			Expect(cond).NotTo(BeNil())
-			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonReady))
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForReplicatedVolume))
 		})
 
 		It("patches LLV metadata when out of sync", func() {
@@ -2573,6 +4102,7 @@ var _ = Describe("Reconciler", func() {
 					ReplicatedStorageClassName: "rsc-1",
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -2634,7 +4164,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rv, rvr, llv).
 					WithStatusSubresource(rvr, rv, llv),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -2669,7 +4199,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rvr).
 					WithStatusSubresource(rvr),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -2699,7 +4229,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rvr).
 					WithStatusSubresource(rvr),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -2714,6 +4244,7 @@ var _ = Describe("Reconciler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -2779,7 +4310,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rv, rvr, drbdr, llv).
 					WithStatusSubresource(rvr, rv, drbdr, llv),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -2794,6 +4325,7 @@ var _ = Describe("Reconciler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -2860,7 +4392,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rv, rvr, drbdr, llv).
 					WithStatusSubresource(rvr, rv, drbdr, llv),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -2875,6 +4407,7 @@ var _ = Describe("Reconciler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -2934,7 +4467,7 @@ var _ = Describe("Reconciler", func() {
 					WithObjects(rv, rvr, drbdr, llv).
 					WithStatusSubresource(rvr, rv, drbdr, llv),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -2951,6 +4484,7 @@ var _ = Describe("Reconciler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -3011,7 +4545,7 @@ var _ = Describe("Reconciler", func() {
 						},
 					}),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -3030,6 +4564,7 @@ var _ = Describe("Reconciler", func() {
 					ReplicatedStorageClassName: "rsc-1",
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("20Gi"), // Larger than actual
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -3121,7 +4656,7 @@ var _ = Describe("Reconciler", func() {
 						},
 					}),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -3178,7 +4713,7 @@ var _ = Describe("Reconciler", func() {
 						},
 					}),
 			).Build()
-			rec := NewReconciler(cl, scheme, logr.Discard())
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
@@ -3224,7 +4759,7 @@ var _ = Describe("deleteLLV", func() {
 				},
 			}).
 			Build()
-		rec := NewReconciler(cl, scheme, logr.Discard())
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 		err := rec.deleteLLV(ctx, llv)
 		Expect(err).NotTo(HaveOccurred())
@@ -3249,7 +4784,7 @@ var _ = Describe("deleteLLV", func() {
 				},
 			}).
 			Build()
-		rec := NewReconciler(cl, scheme, logr.Discard())
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 		err := rec.deleteLLV(ctx, llv)
 		Expect(err).NotTo(HaveOccurred())
@@ -3329,7 +4864,7 @@ var _ = Describe("reconcileLLVsDeletion", func() {
 				WithScheme(scheme).
 				WithObjects(&llv1, &llv2, &llv3),
 		).Build()
-		rec := NewReconciler(cl, scheme, logr.Discard())
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 		// Keep only llv-2, delete llv-1 and llv-3
 		llvs := []snc.LVMLogicalVolume{llv1, llv2, llv3}
@@ -3381,7 +4916,7 @@ var _ = Describe("reconcileLLVsDeletion", func() {
 					},
 				}),
 		).Build()
-		rec := NewReconciler(cl, scheme, logr.Discard())
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 		// Empty keep list means delete all
 		llvs := []snc.LVMLogicalVolume{llv}
@@ -3440,7 +4975,7 @@ var _ = Describe("reconcileLLVsDeletion", func() {
 					},
 				}),
 		).Build()
-		rec := NewReconciler(cl, scheme, logr.Discard())
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 		llvs := []snc.LVMLogicalVolume{llv}
 		keep := []string{}

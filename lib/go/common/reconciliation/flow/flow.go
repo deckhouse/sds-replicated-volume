@@ -454,7 +454,9 @@ func (o ReconcileOutcome) OptimisticLockRequired() bool {
 	return o.changeState >= changedAndOptimisticLockRequiredState
 }
 
-// WithChangeFrom copies change tracking state from an EnsureOutcome.
+// WithChangeFrom merges change tracking state from an EnsureOutcome into ReconcileOutcome.
+//
+// Merge semantics: strongest change state wins, changeReported is OR-ed.
 //
 // This is useful for propagating ensure helper results through reconcile outcomes:
 //
@@ -464,8 +466,10 @@ func (o ReconcileOutcome) OptimisticLockRequired() bool {
 //	}
 //	return rf.Continue().WithChangeFrom(eo)
 func (o ReconcileOutcome) WithChangeFrom(eo EnsureOutcome) ReconcileOutcome {
-	o.changeState = eo.changeState
-	o.changeReported = eo.changeReported
+	if eo.changeState > o.changeState {
+		o.changeState = eo.changeState
+	}
+	o.changeReported = o.changeReported || eo.changeReported
 	return o
 }
 

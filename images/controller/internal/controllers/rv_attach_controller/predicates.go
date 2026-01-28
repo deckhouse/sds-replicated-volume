@@ -93,10 +93,10 @@ func replicatedVolumeReplicaPredicate() predicate.Predicate {
 				return true
 			}
 
-			// Local volume access requires Diskful actualType on requested node.
-			oldActualType := oldRVR.Status.ActualType
-			newActualType := newRVR.Status.ActualType
-			if oldActualType != newActualType {
+			// Local volume access requires Diskful effectiveType on requested node.
+			oldEffectiveType := oldRVR.Status.EffectiveType
+			newEffectiveType := newRVR.Status.EffectiveType
+			if oldEffectiveType != newEffectiveType {
 				return true
 			}
 

@@ -17,9 +17,6 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"fmt"
-	"strings"
-
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -53,25 +50,14 @@ type DRBDResource struct {
 
 // GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It returns the root object's `.status.conditions`.
-func (d *DRBDResource) GetStatusConditions() []metav1.Condition {
-	return d.Status.Conditions
+func (drbdr *DRBDResource) GetStatusConditions() []metav1.Condition {
+	return drbdr.Status.Conditions
 }
 
 // SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It sets the root object's `.status.conditions`.
-func (d *DRBDResource) SetStatusConditions(conditions []metav1.Condition) {
-	d.Status.Conditions = conditions
-}
-
-func (d *DRBDResource) DRBDResourceNameOnTheNode() string {
-	if d.Spec.ActualNameOnTheNode != "" {
-		return d.Spec.ActualNameOnTheNode
-	}
-	return fmt.Sprintf("sdsrv-%s", d.Name)
-}
-
-func ParseDRBDResourceNameOnTheNode(s string) (string, bool) {
-	return strings.CutPrefix(s, "sdsrv-")
+func (drbdr *DRBDResource) SetStatusConditions(conditions []metav1.Condition) {
+	drbdr.Status.Conditions = conditions
 }
 
 // +kubebuilder:object:generate=true
@@ -137,7 +123,7 @@ type DRBDResourceSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=31
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeID is immutable"
-	NodeID uint `json:"nodeID"`
+	NodeID uint8 `json:"nodeID"`
 
 	// +patchMergeKey=name
 	// +patchStrategy=merge
@@ -182,7 +168,7 @@ type DRBDResourcePeer struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=31
-	NodeID uint `json:"nodeID"`
+	NodeID uint8 `json:"nodeID"`
 
 	// +kubebuilder:validation:Enum=A;B;C
 	// +kubebuilder:default=C
@@ -236,13 +222,6 @@ type DRBDAddress struct {
 
 // +kubebuilder:object:generate=true
 type DRBDResourceStatus struct {
-	// +patchMergeKey=type
-	// +patchStrategy=merge
-	// +listType=map
-	// +listMapKey=type
-	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
-
 	// Device path, e.g. /dev/drbd10012 or /dev/sds-replicated/<rvrName>
 	// Only present on primary
 	// +kubebuilder:validation:MaxLength=256
