@@ -76,42 +76,34 @@ func NewReconcilerWithExtender(cl client.Client, extenderClient SchedulerExtende
 
 // --- Root Reconcile
 
+// Reconcile pattern: Pure orchestration
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	rf := flow.BeginRootReconcile(ctx)
-	outcome := r.reconcileScheduling(rf.Ctx(), req.Name)
-	return outcome.ToCtrl()
-}
 
-// --- Reconcile: scheduling
-
-// reconcileScheduling orchestrates the scheduling process for replicas.
-//
-// Reconcile pattern: Pure orchestration
-func (r *Reconciler) reconcileScheduling(ctx context.Context, rvName string) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "scheduling")
-	defer rf.OnEnd(&outcome)
-
-	sctx, err := r.prepareSchedulingContext(rf.Ctx(), rvName)
+	// Prepare scheduling context.
+	sctx, err := r.prepareSchedulingContext(rf.Ctx(), req.Name)
 	if err != nil {
-		setErr := r.setFailedScheduledConditionOnUnscheduledRVRs(rf.Ctx(), rvName, computeSchedulingFailureReason(err))
+		setErr := r.setFailedScheduledConditionOnUnscheduledRVRs(rf.Ctx(), req.Name, computeSchedulingFailureReason(err))
 		if setErr != nil {
-			return rf.Fail(setErr)
+			return rf.Fail(setErr).ToCtrl()
 		}
-		return rf.Fail(err)
+		return rf.Fail(err).ToCtrl()
 	}
 	if sctx == nil {
-		return rf.Done()
+		return rf.Done().ToCtrl()
 	}
 
-	outcome = r.reconcileAlreadyScheduled(rf.Ctx(), sctx)
+	// Reconcile already scheduled RVRs.
+	outcome := r.reconcileAlreadyScheduled(rf.Ctx(), sctx)
 	if outcome.ShouldReturn() {
-		return outcome
+		return outcome.ToCtrl()
 	}
 
+	// Reconcile diskful and tiebreaker phases.
 	outcome = r.reconcileDiskful(rf.Ctx(), sctx)
 	outcome = outcome.Merge(r.reconcileTieBreaker(rf.Ctx(), sctx))
 
-	return outcome
+	return outcome.ToCtrl()
 }
 
 // --- Reconcile: already-scheduled
