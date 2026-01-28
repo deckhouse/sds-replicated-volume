@@ -55,6 +55,15 @@ func randomInt(minVal, maxVal int) int {
 	return minVal + rand.Intn(maxVal-minVal+1)
 }
 
+// randomFloat64 returns a random float64 between minVal and maxVal
+func randomFloat64(minVal, maxVal float64) float64 {
+	if maxVal <= minVal {
+		return minVal
+	}
+	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
+	return minVal + rand.Float64()*(maxVal-minVal)
+}
+
 // waitWithContext waits for the specified duration or until context is cancelled
 func waitWithContext(ctx context.Context, d time.Duration) error {
 	select {
@@ -75,4 +84,10 @@ func measureDurationError(fn func() error) (time.Duration, error) {
 	startTime := time.Now()
 	err := fn()
 	return time.Since(startTime), err
+}
+
+// waitChan returns a channel that receives after the specified duration
+// Useful for select statements with multiple conditions
+func waitChan(d time.Duration) <-chan time.Time {
+	return time.After(d)
 }
