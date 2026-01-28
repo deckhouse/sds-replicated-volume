@@ -52,12 +52,12 @@ type ReplicatedVolumeList struct {
 
 // GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It returns the root object's `.status.conditions`.
-func (o *ReplicatedVolume) GetStatusConditions() []metav1.Condition { return o.Status.Conditions }
+func (rv *ReplicatedVolume) GetStatusConditions() []metav1.Condition { return rv.Status.Conditions }
 
 // SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It sets the root object's `.status.conditions`.
-func (o *ReplicatedVolume) SetStatusConditions(conditions []metav1.Condition) {
-	o.Status.Conditions = conditions
+func (rv *ReplicatedVolume) SetStatusConditions(conditions []metav1.Condition) {
+	rv.Status.Conditions = conditions
 }
 
 // +kubebuilder:object:generate=true
@@ -126,6 +126,17 @@ type ReplicatedVolumeDatamesh struct {
 	// +kubebuilder:validation:MaxItems=16
 	// +kubebuilder:validation:items:MaxLength=64
 	SystemNetworkNames []string `json:"systemNetworkNames"`
+
+	// SharedSecret is the shared secret for DRBD authentication.
+	// +kubebuilder:validation:MaxLength=256
+	// +optional
+	SharedSecret string `json:"sharedSecret,omitempty"`
+
+	// SharedSecretAlg is the hashing algorithm for the shared secret.
+	// +kubebuilder:validation:Enum=SHA256;SHA1;DummyForTest
+	// +optional
+	SharedSecretAlg SharedSecretAlg `json:"sharedSecretAlg,omitempty"`
+
 	// AllowTwoPrimaries enables two primaries mode for the datamesh.
 	// +kubebuilder:default=false
 	AllowTwoPrimaries bool `json:"allowTwoPrimaries"`
@@ -151,11 +162,45 @@ type ReplicatedVolumeDatamesh struct {
 	QuorumMinimumRedundancy byte `json:"quorumMinimumRedundancy"`
 }
 
+// FindMemberByName returns a pointer to the member with the given name, or nil if not found.
+func (dm *ReplicatedVolumeDatamesh) FindMemberByName(name string) *ReplicatedVolumeDatameshMember {
+	for i := range dm.Members {
+		if dm.Members[i].Name == name {
+			return &dm.Members[i]
+		}
+	}
+	return nil
+}
+
+// SharedSecretAlg enumerates possible hashing algorithms for DRBD shared secrets.
+type SharedSecretAlg string
+
+// Shared secret hashing algorithms.
+const (
+	// SharedSecretAlgSHA256 is the SHA256 hashing algorithm for shared secrets.
+	SharedSecretAlgSHA256 SharedSecretAlg = "SHA256"
+	// SharedSecretAlgSHA1 is the SHA1 hashing algorithm for shared secrets.
+	SharedSecretAlgSHA1 SharedSecretAlg = "SHA1"
+	// SharedSecretAlgDummyForTest is a dummy algorithm for testing.
+	SharedSecretAlgDummyForTest SharedSecretAlg = "DummyForTest"
+)
+
+func (a SharedSecretAlg) String() string {
+	return string(a)
+}
+
 // ReplicatedVolumeDatameshMember represents a member of the datamesh.
 // +kubebuilder:object:generate=true
-// +kubebuilder:validation:XValidation:rule="self.type == 'Diskful' ? (!has(self.typeTransition) || self.typeTransition == 'ToDiskless') : (!has(self.typeTransition) || self.typeTransition == 'ToDiskful')",message="typeTransition must be ToDiskless for Diskful type, or ToDiskful for Access/TieBreaker types"
+// +kubebuilder:validation:XValidation:rule="self.type != 'Diskful' || !has(self.typeTransition) || self.typeTransition == 'ToDiskless'",message="Diskful can only have ToDiskless typeTransition"
+// +kubebuilder:validation:XValidation:rule="self.type != 'TieBreaker' || !has(self.typeTransition) || self.typeTransition == 'ToDiskful'",message="TieBreaker can only have ToDiskful typeTransition"
+// +kubebuilder:validation:XValidation:rule="self.type != 'Access' || !has(self.typeTransition)",message="Access cannot have typeTransition"
+// +kubebuilder:validation:XValidation:rule="self.name.lastIndexOf('-') >= 0",message="name must contain '-' separator"
+// +kubebuilder:validation:XValidation:rule="int(self.name.substring(self.name.lastIndexOf('-') + 1)) <= 31",message="name numeric suffix must be between 0 and 31"
+// +kubebuilder:validation:XValidation:rule="size(self.lvmVolumeGroupName) == 0 || self.type == 'Diskful' || (has(self.typeTransition) && self.typeTransition == 'ToDiskful')",message="lvmVolumeGroupName can only be set for Diskful type or when typeTransition is ToDiskful"
+// +kubebuilder:validation:XValidation:rule="size(self.lvmVolumeGroupThinPoolName) == 0 || size(self.lvmVolumeGroupName) > 0",message="lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be set"
 type ReplicatedVolumeDatameshMember struct {
 	// Name is the member name (used as list map key).
+	// Must have format "prefix-N" where N is 0-31.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
@@ -177,8 +222,22 @@ type ReplicatedVolumeDatameshMember struct {
 	// +optional
 	Zone string `json:"zone,omitempty"`
 	// Addresses is the list of DRBD addresses for this member.
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
 	Addresses []DRBDResourceAddressStatus `json:"addresses"`
+	// LVMVolumeGroupName is the LVMVolumeGroup resource name where this replica should be placed.
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$`
+	LVMVolumeGroupName string `json:"lvmVolumeGroupName,omitempty"`
+	// LVMVolumeGroupThinPoolName is the thin pool name (for LVMThin storage pools).
+	// +optional
+	LVMVolumeGroupThinPoolName string `json:"lvmVolumeGroupThinPoolName,omitempty"`
+}
+
+// NodeID extracts NodeID from the member name (e.g., "pvc-xxx-5" → 5).
+func (m *ReplicatedVolumeDatameshMember) NodeID() (uint8, bool) {
+	return nodeIDFromName(m.Name)
 }
 
 // ReplicatedVolumeDatameshMemberTypeTransition enumerates possible type transitions for datamesh members.
@@ -206,21 +265,6 @@ type DRBDResourceDetails struct {
 type DRBDResourceConfig struct {
 	// +kubebuilder:default=false
 	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
-}
-
-type SharedSecretAlg string
-
-// Shared secret hashing algorithms
-const (
-	// SharedSecretAlgSHA256 is the SHA256 hashing algorithm for shared secrets
-	SharedSecretAlgSHA256 = "SHA256"
-	// SharedSecretAlgSHA1 is the SHA1 hashing algorithm for shared secrets
-	SharedSecretAlgSHA1         = "SHA1"
-	SharedSecretAlgDummyForTest = "DummyForTest"
-)
-
-func (a SharedSecretAlg) String() string {
-	return string(a)
 }
 
 // ReplicatedVolumeEligibleNodesViolation describes a replica placed on a non-eligible node.

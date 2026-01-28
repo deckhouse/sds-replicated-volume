@@ -218,7 +218,7 @@ var _ = Describe("Reconcile", func() {
 				Type:                 v1alpha1.ReplicaTypeDiskful,
 			},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				ActualType: v1alpha1.ReplicaTypeDiskful,
+				EffectiveType: v1alpha1.ReplicaTypeDiskful,
 				DRBD: &v1alpha1.DRBD{
 					Status: &v1alpha1.DRBDStatus{
 						Role: "Primary",
@@ -287,7 +287,7 @@ var _ = Describe("Reconcile", func() {
 				Type:                 v1alpha1.ReplicaTypeDiskful,
 			},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				ActualType: v1alpha1.ReplicaTypeDiskful,
+				EffectiveType: v1alpha1.ReplicaTypeDiskful,
 				DRBD: &v1alpha1.DRBD{
 					Status: &v1alpha1.DRBDStatus{
 						Role: "Primary",
@@ -456,7 +456,7 @@ var _ = Describe("Reconcile", func() {
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-						ActualType: v1alpha1.ReplicaTypeDiskful,
+						EffectiveType: v1alpha1.ReplicaTypeDiskful,
 					},
 				}
 				rvr2 := &v1alpha1.ReplicatedVolumeReplica{
@@ -469,7 +469,7 @@ var _ = Describe("Reconcile", func() {
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-						ActualType: v1alpha1.ReplicaTypeDiskful,
+						EffectiveType: v1alpha1.ReplicaTypeDiskful,
 					},
 				}
 				Expect(cl.Create(ctx, rvr1)).To(Succeed())
@@ -537,7 +537,7 @@ var _ = Describe("Reconcile", func() {
 				}
 				// Keep RV.status.desiredAttachTo pre-initialized:
 				// for Local access the controller may be unable to "add" nodes from RVA until replicas are initialized
-				// (status.actualType must be reported by the agent), but it still must keep already-desired nodes.
+				// (status.effectiveType must be reported by the agent), but it still must keep already-desired nodes.
 				rv.Status.DesiredAttachTo = attachTo
 
 				rsc = v1alpha1.ReplicatedStorageClass{
@@ -626,17 +626,17 @@ var _ = Describe("Reconcile", func() {
 					// Simulate that the agent already reported actual types:
 					// node-2 is not Diskful (will violate Locality once SC becomes Local).
 					for _, item := range []struct {
-						name       string
-						actualType v1alpha1.ReplicaType
+						name          string
+						effectiveType v1alpha1.ReplicaType
 					}{
-						{name: "rvr-df1", actualType: v1alpha1.ReplicaTypeDiskful},
-						{name: "rvr-df2", actualType: v1alpha1.ReplicaTypeAccess},
+						{name: "rvr-df1", effectiveType: v1alpha1.ReplicaTypeDiskful},
+						{name: "rvr-df2", effectiveType: v1alpha1.ReplicaTypeAccess},
 					} {
 						got := &v1alpha1.ReplicatedVolumeReplica{}
 						Expect(cl.Get(ctx, client.ObjectKey{Name: item.name}, got)).To(Succeed())
 						orig := got.DeepCopy()
 						got.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
-							ActualType: item.actualType,
+							EffectiveType: item.effectiveType,
 						}
 						Expect(cl.Status().Patch(ctx, got, client.MergeFrom(orig))).To(Succeed())
 					}
@@ -683,7 +683,7 @@ var _ = Describe("Reconcile", func() {
 						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df1"}, rvr1)).To(Succeed())
 						orig1 := rvr1.DeepCopy()
 						rvr1.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
-							ActualType: v1alpha1.ReplicaTypeDiskful,
+							EffectiveType: v1alpha1.ReplicaTypeDiskful,
 							DRBD: &v1alpha1.DRBD{
 								Status: &v1alpha1.DRBDStatus{Role: "Secondary"},
 							},
@@ -694,7 +694,7 @@ var _ = Describe("Reconcile", func() {
 						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df2"}, rvr2)).To(Succeed())
 						orig2 := rvr2.DeepCopy()
 						rvr2.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
-							ActualType: v1alpha1.ReplicaTypeAccess,
+							EffectiveType: v1alpha1.ReplicaTypeAccess,
 							DRBD: &v1alpha1.DRBD{
 								Status: &v1alpha1.DRBDStatus{Role: "Primary"},
 							},
@@ -751,17 +751,17 @@ var _ = Describe("Reconcile", func() {
 						// Simulate that the agent already reported actual types:
 						// node-2 is not Diskful, so it must not be added into desiredAttachTo under Local access.
 						for _, item := range []struct {
-							name       string
-							actualType v1alpha1.ReplicaType
+							name          string
+							effectiveType v1alpha1.ReplicaType
 						}{
-							{name: "rvr-df1", actualType: v1alpha1.ReplicaTypeDiskful},
-							{name: "rvr-df2", actualType: v1alpha1.ReplicaTypeAccess},
+							{name: "rvr-df1", effectiveType: v1alpha1.ReplicaTypeDiskful},
+							{name: "rvr-df2", effectiveType: v1alpha1.ReplicaTypeAccess},
 						} {
 							got := &v1alpha1.ReplicatedVolumeReplica{}
 							Expect(cl.Get(ctx, client.ObjectKey{Name: item.name}, got)).To(Succeed())
 							orig := got.DeepCopy()
 							got.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
-								ActualType: item.actualType,
+								EffectiveType: item.effectiveType,
 							}
 							Expect(cl.Status().Patch(ctx, got, client.MergeFrom(orig))).To(Succeed())
 						}
@@ -876,7 +876,7 @@ var _ = Describe("Reconcile", func() {
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df1"}, rvr1)).To(Succeed())
 					orig1 := rvr1.DeepCopy()
 					rvr1.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
-						ActualType: v1alpha1.ReplicaTypeDiskful,
+						EffectiveType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: false},
 							Status: &v1alpha1.DRBDStatus{Role: "Primary"},
@@ -888,7 +888,7 @@ var _ = Describe("Reconcile", func() {
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df2"}, rvr2)).To(Succeed())
 					orig2 := rvr2.DeepCopy()
 					rvr2.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
-						ActualType: v1alpha1.ReplicaTypeDiskful,
+						EffectiveType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: false},
 							Status: &v1alpha1.DRBDStatus{Role: "Secondary"},
@@ -930,7 +930,7 @@ var _ = Describe("Reconcile", func() {
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df1"}, rvr1)).To(Succeed())
 					orig1 := rvr1.DeepCopy()
 					rvr1.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
-						ActualType: v1alpha1.ReplicaTypeDiskful,
+						EffectiveType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: false},
 							Status: &v1alpha1.DRBDStatus{Role: "Primary"},
@@ -942,7 +942,7 @@ var _ = Describe("Reconcile", func() {
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df2"}, rvr2)).To(Succeed())
 					orig2 := rvr2.DeepCopy()
 					rvr2.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
-						ActualType: v1alpha1.ReplicaTypeDiskful,
+						EffectiveType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: false},
 							Status: &v1alpha1.DRBDStatus{Role: "Secondary"},
@@ -998,11 +998,11 @@ var _ = Describe("Reconcile", func() {
 
 					attachTo = []string{"node-1", "node-2"}
 
-					// Both replicas are initialized by the agent (status.actualType is set) and already have
+					// Both replicas are initialized by the agent (status.effectiveType is set) and already have
 					// actual.AllowTwoPrimaries=true.
 					for i := range rvrList.Items {
 						rvrList.Items[i].Status = v1alpha1.ReplicatedVolumeReplicaStatus{
-							ActualType: v1alpha1.ReplicaTypeDiskful,
+							EffectiveType: v1alpha1.ReplicaTypeDiskful,
 							DRBD: &v1alpha1.DRBD{
 								Actual: &v1alpha1.DRBDActual{
 									AllowTwoPrimaries: true,
@@ -1075,7 +1075,7 @@ var _ = Describe("Reconcile", func() {
 						Expect(cl.Get(ctx, client.ObjectKey{Name: item.name}, rvr)).To(Succeed())
 						orig := rvr.DeepCopy()
 						rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
-							ActualType: v1alpha1.ReplicaTypeDiskful,
+							EffectiveType: v1alpha1.ReplicaTypeDiskful,
 							DRBD: &v1alpha1.DRBD{
 								Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: true},
 								Status: &v1alpha1.DRBDStatus{Role: item.role},
@@ -1097,7 +1097,7 @@ var _ = Describe("Reconcile", func() {
 							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 						Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-							ActualType: v1alpha1.ReplicaTypeDiskful,
+							EffectiveType: v1alpha1.ReplicaTypeDiskful,
 							DRBD: &v1alpha1.DRBD{
 								Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: false},
 								Status: &v1alpha1.DRBDStatus{Role: "Secondary"},
@@ -1183,8 +1183,8 @@ var _ = Describe("Reconcile", func() {
 					}
 				})
 
-				It("converts TieBreaker to Access first, then requests primary=true after actualType becomes Access", func(ctx SpecContext) {
-					// Reconcile #1: conversion only (the agent must first report actualType=Access).
+				It("converts TieBreaker to Access first, then requests primary=true after effectiveType becomes Access", func(ctx SpecContext) {
+					// Reconcile #1: conversion only (the agent must first report effectiveType=Access).
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
 					gotRVR := &v1alpha1.ReplicatedVolumeReplica{}
@@ -1192,9 +1192,9 @@ var _ = Describe("Reconcile", func() {
 
 					Expect(gotRVR.Spec.Type).To(Equal(v1alpha1.ReplicaTypeAccess))
 
-					// Simulate the agent updating actualType after conversion (TieBreaker -> Access).
+					// Simulate the agent updating effectiveType after conversion (TieBreaker -> Access).
 					orig := gotRVR.DeepCopy()
-					gotRVR.Status.ActualType = v1alpha1.ReplicaTypeAccess
+					gotRVR.Status.EffectiveType = v1alpha1.ReplicaTypeAccess
 					if gotRVR.Status.DRBD == nil {
 						gotRVR.Status.DRBD = &v1alpha1.DRBD{}
 					}
@@ -1208,7 +1208,7 @@ var _ = Describe("Reconcile", func() {
 					gotRVR.Status.DRBD.Status.Role = "Secondary"
 					Expect(cl.Status().Patch(ctx, gotRVR, client.MergeFrom(orig))).To(Succeed())
 
-					// Reconcile #2: now primary request is allowed for Access/Diskful actualType.
+					// Reconcile #2: now primary request is allowed for Access/Diskful effectiveType.
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
 					gotRVR2 := &v1alpha1.ReplicatedVolumeReplica{}
@@ -1255,20 +1255,20 @@ var _ = Describe("Reconcile", func() {
 				})
 
 				It("keeps replica on non-attachTo node non-primary", func(ctx SpecContext) {
-					// Simulate that the agent has already initialized replicas (status.actualType is set),
+					// Simulate that the agent has already initialized replicas (status.effectiveType is set),
 					// otherwise the controller must not request Primary.
 					for _, item := range []struct {
-						name       string
-						actualType v1alpha1.ReplicaType
+						name          string
+						effectiveType v1alpha1.ReplicaType
 					}{
-						{name: "rvr-node-1", actualType: v1alpha1.ReplicaTypeDiskful},
-						{name: "rvr-node-2", actualType: v1alpha1.ReplicaTypeAccess},
+						{name: "rvr-node-1", effectiveType: v1alpha1.ReplicaTypeDiskful},
+						{name: "rvr-node-2", effectiveType: v1alpha1.ReplicaTypeAccess},
 					} {
 						rvr := &v1alpha1.ReplicatedVolumeReplica{}
 						Expect(cl.Get(ctx, client.ObjectKey{Name: item.name}, rvr)).To(Succeed())
 						orig := rvr.DeepCopy()
 						rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
-							ActualType: item.actualType,
+							EffectiveType: item.effectiveType,
 							DRBD: &v1alpha1.DRBD{
 								Actual: &v1alpha1.DRBDActual{
 									AllowTwoPrimaries: false,
@@ -1333,7 +1333,7 @@ var _ = Describe("Reconcile", func() {
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df1"}, rvr1)).To(Succeed())
 					orig1 := rvr1.DeepCopy()
 					rvr1.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
-						ActualType: v1alpha1.ReplicaTypeDiskful,
+						EffectiveType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: false},
 							Status: &v1alpha1.DRBDStatus{Role: "Primary"},
@@ -1345,7 +1345,7 @@ var _ = Describe("Reconcile", func() {
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df2"}, rvr2)).To(Succeed())
 					orig2 := rvr2.DeepCopy()
 					rvr2.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
-						ActualType: v1alpha1.ReplicaTypeDiskful,
+						EffectiveType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: false},
 							Status: &v1alpha1.DRBDStatus{Role: "Secondary"},
@@ -1456,7 +1456,7 @@ var _ = Describe("Reconcile", func() {
 						Expect(cl.Get(ctx, client.ObjectKey{Name: item.name}, rvr)).To(Succeed())
 						orig := rvr.DeepCopy()
 						rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
-							ActualType: v1alpha1.ReplicaTypeDiskful,
+							EffectiveType: v1alpha1.ReplicaTypeDiskful,
 							DRBD: &v1alpha1.DRBD{
 								Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: true},
 								Status: &v1alpha1.DRBDStatus{Role: item.role},
@@ -1542,11 +1542,11 @@ var _ = Describe("Reconcile", func() {
 					})
 				})
 
-				When("replica type is set via status.actualType", func() {
+				When("replica type is set via status.effectiveType", func() {
 					BeforeEach(func() {
 						// Keep spec.type Diskful, but mark replica on node-2 as actually Access (via status).
 						rvrList.Items[1].Status = v1alpha1.ReplicatedVolumeReplicaStatus{
-							ActualType: v1alpha1.ReplicaTypeAccess,
+							EffectiveType: v1alpha1.ReplicaTypeAccess,
 						}
 					})
 
@@ -1601,11 +1601,11 @@ var _ = Describe("Reconcile", func() {
 					})
 				})
 
-				When("replica type is set via status.actualType", func() {
+				When("replica type is set via status.effectiveType", func() {
 					BeforeEach(func() {
 						// Keep spec.type Diskful, but mark replica on node-2 as actually TieBreaker (via status).
 						rvrList.Items[1].Status = v1alpha1.ReplicatedVolumeReplicaStatus{
-							ActualType: v1alpha1.ReplicaTypeTieBreaker,
+							EffectiveType: v1alpha1.ReplicaTypeTieBreaker,
 						}
 					})
 
@@ -1753,7 +1753,7 @@ var _ = Describe("Reconcile", func() {
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-						ActualType: v1alpha1.ReplicaTypeDiskful,
+						EffectiveType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Status: &v1alpha1.DRBDStatus{
 								Role: "Primary",
@@ -1809,7 +1809,7 @@ var _ = Describe("Reconcile", func() {
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-						ActualType: v1alpha1.ReplicaTypeDiskful,
+						EffectiveType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: false},
 							Status: &v1alpha1.DRBDStatus{Role: "Secondary"},
@@ -1904,7 +1904,7 @@ var _ = Describe("Reconcile", func() {
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-						ActualType: v1alpha1.ReplicaTypeDiskful,
+						EffectiveType: v1alpha1.ReplicaTypeDiskful,
 					},
 				}
 				rvr2 := &v1alpha1.ReplicatedVolumeReplica{
@@ -1919,7 +1919,7 @@ var _ = Describe("Reconcile", func() {
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-						ActualType: v1alpha1.ReplicaTypeDiskful,
+						EffectiveType: v1alpha1.ReplicaTypeDiskful,
 					},
 				}
 				localRV := rv
@@ -2253,7 +2253,7 @@ var _ = Describe("Reconcile", func() {
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-						ActualType: v1alpha1.ReplicaTypeDiskful,
+						EffectiveType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Status: &v1alpha1.DRBDStatus{
 								Role: rolePrimary,
@@ -2314,7 +2314,7 @@ var _ = Describe("Reconcile", func() {
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-						ActualType: v1alpha1.ReplicaTypeDiskful,
+						EffectiveType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Status: &v1alpha1.DRBDStatus{
 								Role: rolePrimary,
@@ -2453,7 +2453,7 @@ var _ = Describe("Reconcile", func() {
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-						ActualType: v1alpha1.ReplicaTypeDiskful,
+						EffectiveType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Status: &v1alpha1.DRBDStatus{
 								Role: rolePrimary,

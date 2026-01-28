@@ -81,13 +81,14 @@ In this repository:
 - When `<Kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<Kind>` MUST use the **short kind name** (not the full kind name).
 - Short kind names MUST be stable and MUST NOT be invented ad-hoc.
 
-Canonical short kind names for this repository’s API kinds:
+Canonical short kind names for this repository's API kinds:
 
 - `ReplicatedVolume` → `RV`
 - `ReplicatedVolumeReplica` → `RVR`
 - `ReplicatedVolumeAttachment` → `RVA`
 - `ReplicatedStorageClass` → `RSC`
 - `ReplicatedStoragePool` → `RSP`
+- `DRBDResource` → `DRBDR`
 
 ### **manager**
 The **manager** is the controller-runtime **`manager.Manager`** instance.
@@ -498,6 +499,9 @@ A phase is always finalized by deferring the corresponding `OnEnd` method:
 A **ReconcileOutcome** is a value of type **`flow.ReconcileOutcome`** that represents the decision of a **Reconcile method**:
 continue/done/requeue/requeueAfter/fail + error.
 
+Additionally, **ReconcileOutcome** supports **Change reporting** and **Optimistic-lock signaling** (mirroring **EnsureOutcome**), enabling sub-reconciles to propagate change information upward through the reconciliation call graph.
+This is useful when one **object** is mutated by multiple sub-reconciles and the parent must aggregate change/lock state to decide whether to patch.
+
 Naming conventions:
 - single **ReconcileOutcome** variable: `outcome`
 - slice of **ReconcileOutcome** values: `outcomes`
@@ -511,18 +515,27 @@ Naming conventions:
 - slice of **EnsureOutcome** values: `outcomes`
 
 ### **Change reporting**
-**Change reporting** means signaling that an in-memory **resource**/**object** was mutated and needs persistence, typically via:
+**Change reporting** means signaling that an in-memory **resource**/**object** was mutated and needs persistence.
 
+For **EnsureOutcome**:
 - `EnsureOutcome.ReportChanged()` / `EnsureOutcome.ReportChangedIf(...)`
+- `EnsureOutcome.DidChange()` — reads the "was changed?" flag.
 
-The canonical “was changed?” flag is read via `EnsureOutcome.DidChange()`.
+For **ReconcileOutcome**:
+- `ReconcileOutcome.ReportChanged()` / `ReconcileOutcome.ReportChangedIf(...)`
+- `ReconcileOutcome.DidChange()` — reads the "was changed?" flag.
+- `ReconcileOutcome.WithChangeFrom(EnsureOutcome)` — merges change state from an **EnsureOutcome** (strongest wins).
 
 ### **Optimistic-lock signaling**
-**Optimistic-lock signaling** means encoding that the save MUST use **Optimistic locking** semantics, typically via:
+**Optimistic-lock signaling** means encoding that the save MUST use **Optimistic locking** semantics.
 
-- `EnsureOutcome.RequireOptimisticLock()`
+For **EnsureOutcome**:
+- `EnsureOutcome.RequireOptimisticLock()` — marks that optimistic locking is required.
+- `EnsureOutcome.OptimisticLockRequired()` — reads the flag.
 
-The canonical flag is read via `EnsureOutcome.OptimisticLockRequired()`.
+For **ReconcileOutcome**:
+- `ReconcileOutcome.RequireOptimisticLock()` — marks that optimistic locking is required.
+- `ReconcileOutcome.OptimisticLockRequired()` — reads the flag.
 
 ### **ReconcileOutcome control flow**
 - `ReconcileOutcome.ShouldReturn()` indicates the caller should stop and return (done/requeue/error).
@@ -531,9 +544,11 @@ The canonical flag is read via `EnsureOutcome.OptimisticLockRequired()`.
 ### **Merging outcomes**
 **Merging outcomes** means combining multiple independent results deterministically:
 
-- `ReconcileFlow.Merge(...)` merges **ReconcileOutcome** values.
-- `EnsureFlow.Merge(...)` merges **EnsureOutcome** values.
-- `StepFlow.Merge(...)` merges multiple `error` values via `errors.Join`.
+- `ReconcileOutcome.Merge(...)` / `flow.MergeReconciles(...)` merges **ReconcileOutcome** values (control flow + change/lock state).
+- `EnsureOutcome.Merge(...)` / `flow.MergeEnsures(...)` merges **EnsureOutcome** values (error + change/lock state).
+- `flow.MergeSteps(...)` merges multiple `error` values via `errors.Join`.
+
+For **ReconcileOutcome** and **EnsureOutcome**, merging combines **Change reporting** and **Optimistic-lock signaling**: any changed outcome makes merged outcome changed; strongest lock requirement wins.
 
 ---
 
