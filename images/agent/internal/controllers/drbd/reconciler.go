@@ -84,7 +84,7 @@ func (r *Reconciler) Reconcile(
 	tgtStateActions = computeTargetStateActions(iState, aState)
 
 	var patchNeeded, patchStatusNeeded, refreshActualNeeded bool
-	original := client.MergeFrom(dr.DeepCopy())
+	base := dr.DeepCopy()
 
 	for len(tgtStateActions) > 0 {
 		switch ta := tgtStateActions[0].(type) {
@@ -96,7 +96,7 @@ func (r *Reconciler) Reconcile(
 			// flush pending K8S patches before executing DRBD commands
 			var resetOriginalNeeded bool
 			if patchNeeded {
-				if prepatchErr := r.cl.Patch(rf.Ctx(), dr, original); prepatchErr != nil {
+				if prepatchErr := r.cl.Patch(rf.Ctx(), dr, client.MergeFrom(base)); prepatchErr != nil {
 					return rf.Failf(prepatchErr, "prepatching").ToCtrl()
 				}
 				patchNeeded = false
@@ -104,7 +104,7 @@ func (r *Reconciler) Reconcile(
 			}
 
 			if patchStatusNeeded {
-				if prepatchErr := r.cl.Status().Patch(rf.Ctx(), dr, original); prepatchErr != nil {
+				if prepatchErr := r.cl.Status().Patch(rf.Ctx(), dr, client.MergeFrom(base)); prepatchErr != nil {
 					return rf.Failf(prepatchErr, "prepatching status").ToCtrl()
 				}
 				patchStatusNeeded = false
@@ -112,7 +112,7 @@ func (r *Reconciler) Reconcile(
 			}
 
 			if resetOriginalNeeded {
-				original = client.MergeFrom(dr.DeepCopy())
+				base = dr.DeepCopy()
 			}
 
 			// execute
@@ -132,7 +132,7 @@ func (r *Reconciler) Reconcile(
 	}
 
 	if patchNeeded {
-		patchErr = errors.Join(patchErr, r.cl.Patch(rf.Ctx(), dr, original))
+		patchErr = errors.Join(patchErr, r.cl.Patch(rf.Ctx(), dr, client.MergeFrom(base)))
 	}
 
 	err = errors.Join(iErr, aErr, aErr2, drbdErr, patchErr)
@@ -145,7 +145,7 @@ func (r *Reconciler) Reconcile(
 	) || patchStatusNeeded
 
 	if patchStatusNeeded {
-		patchErr = errors.Join(patchErr, r.cl.Status().Patch(rf.Ctx(), dr, original))
+		patchErr = errors.Join(patchErr, r.cl.Status().Patch(rf.Ctx(), dr, client.MergeFrom(base)))
 		err = errors.Join(err, patchErr)
 	}
 
