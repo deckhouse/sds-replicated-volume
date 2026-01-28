@@ -47,7 +47,6 @@ func BuildAll(mgr manager.Manager, podNamespace string) error {
 		rvcontroller.BuildController,
 		rvdeletepropagation.BuildController,
 		rvrschedulingcontroller.BuildController,
-		rvrcontroller.BuildController,
 		rvattachcontroller.BuildController,
 		rsccontroller.BuildController,
 		nodecontroller.BuildController,
@@ -59,9 +58,12 @@ func BuildAll(mgr manager.Manager, podNamespace string) error {
 		}
 	}
 
-	// RSP controller needs podNamespace for agent pod discovery.
+	// Controllers that need podNamespace for agent pod discovery.
 	if err := rspcontroller.BuildController(mgr, podNamespace); err != nil {
 		return fmt.Errorf("building rsp controller: %w", err)
+	}
+	if err := rvrcontroller.BuildController(mgr, podNamespace); err != nil {
+		return fmt.Errorf("building rvr controller: %w", err)
 	}
 
 	return nil

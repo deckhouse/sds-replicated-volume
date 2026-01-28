@@ -670,7 +670,10 @@ func (r *Reconciler) getAgentReadiness(ctx context.Context) (map[string]bool, er
 		if nodeName == "" {
 			continue
 		}
-		result[nodeName] = isPodReady(unsafePod)
+
+		// There may be completed/terminated pods that haven't been cleaned up yet,
+		// so we use OR logic: if any pod on a node is ready, the node's agent is ready.
+		result[nodeName] = result[nodeName] || isPodReady(unsafePod)
 	}
 	return result, nil
 }

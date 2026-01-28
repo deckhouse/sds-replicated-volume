@@ -25,22 +25,29 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
-// IndexFieldNodeByMetadataName is used to quickly look up
-// a Node by its metadata.name.
-const IndexFieldNodeByMetadataName = "metadata.name"
+// IndexFieldPodByNodeName is used to quickly list
+// Pod objects on a specific node.
+const IndexFieldPodByNodeName = "spec.nodeName"
 
-// RegisterNodeByMetadataName registers the index for looking up
-// Node objects by metadata.name.
-func RegisterNodeByMetadataName(mgr manager.Manager) error {
+// RegisterPodByNodeName registers the index for listing
+// Pod objects by spec.nodeName.
+func RegisterPodByNodeName(mgr manager.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(
 		context.Background(),
-		&corev1.Node{},
-		IndexFieldNodeByMetadataName,
+		&corev1.Pod{},
+		IndexFieldPodByNodeName,
 		func(obj client.Object) []string {
-			return []string{obj.GetName()}
+			pod, ok := obj.(*corev1.Pod)
+			if !ok {
+				return nil
+			}
+			if pod.Spec.NodeName == "" {
+				return nil
+			}
+			return []string{pod.Spec.NodeName}
 		},
 	); err != nil {
-		return fmt.Errorf("index Node by metadata.name: %w", err)
+		return fmt.Errorf("index Pod by spec.nodeName: %w", err)
 	}
 	return nil
 }

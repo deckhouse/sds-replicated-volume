@@ -43,11 +43,6 @@ func RegisterIndexes(mgr manager.Manager) error {
 		return err
 	}
 
-	// Node
-	if err := indexes.RegisterNodeByMetadataName(mgr); err != nil {
-		return err
-	}
-
 	// DRBDResource
 	if err := indexes.RegisterDRBDResourceByNodeName(mgr); err != nil {
 		return err
@@ -71,6 +66,11 @@ func RegisterIndexes(mgr manager.Manager) error {
 
 	// LVMLogicalVolume (LLV)
 	if err := indexes.RegisterLLVByRVROwner(mgr); err != nil {
+		return err
+	}
+
+	// Pod
+	if err := indexes.RegisterPodByNodeName(mgr); err != nil {
 		return err
 	}
 

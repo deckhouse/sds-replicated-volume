@@ -19,6 +19,7 @@ package rvrcontroller
 import (
 	"context"
 
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -33,11 +34,11 @@ import (
 
 const RVRControllerName = "rvr-controller"
 
-func BuildController(mgr manager.Manager) error {
+func BuildController(mgr manager.Manager, agentPodNamespace string) error {
 	cl := mgr.GetClient()
 	scheme := mgr.GetScheme()
 
-	rec := NewReconciler(cl, scheme, mgr.GetLogger().WithName(RVRControllerName))
+	rec := NewReconciler(cl, scheme, mgr.GetLogger().WithName(RVRControllerName), agentPodNamespace)
 
 	return builder.ControllerManagedBy(mgr).
 		Named(RVRControllerName).
@@ -48,6 +49,11 @@ func BuildController(mgr manager.Manager) error {
 			&v1alpha1.ReplicatedVolume{},
 			handler.EnqueueRequestsFromMapFunc(mapRVToRVRs(cl)),
 			builder.WithPredicates(rvPredicates()...),
+		).
+		Watches(
+			&corev1.Pod{},
+			handler.EnqueueRequestsFromMapFunc(mapAgentPodToRVRs(cl, agentPodNamespace)),
+			builder.WithPredicates(agentPodPredicates(agentPodNamespace)...),
 		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(rec)
@@ -64,6 +70,46 @@ func mapRVToRVRs(cl client.Client) handler.MapFunc {
 		var rvrList v1alpha1.ReplicatedVolumeReplicaList
 		if err := cl.List(ctx, &rvrList,
 			client.MatchingFields{indexes.IndexFieldRVRByReplicatedVolumeName: rv.Name},
+			client.UnsafeDisableDeepCopy,
+		); err != nil {
+			return nil
+		}
+
+		requests := make([]reconcile.Request, 0, len(rvrList.Items))
+		for _, rvr := range rvrList.Items {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: rvr.Name},
+			})
+		}
+		return requests
+	}
+}
+
+// mapAgentPodToRVRs maps an agent pod to ReplicatedVolumeReplica resources on the same node.
+func mapAgentPodToRVRs(cl client.Client, podNamespace string) handler.MapFunc {
+	return func(ctx context.Context, obj client.Object) []reconcile.Request {
+		pod, ok := obj.(*corev1.Pod)
+		if !ok || pod == nil {
+			return nil
+		}
+
+		// Only handle pods in the agent namespace with the agent label.
+		if pod.Namespace != podNamespace {
+			return nil
+		}
+		if pod.Labels["app"] != "agent" {
+			return nil
+		}
+
+		nodeName := pod.Spec.NodeName
+		if nodeName == "" {
+			return nil // Pod not yet scheduled.
+		}
+
+		// Find all RVRs on this node.
+		var rvrList v1alpha1.ReplicatedVolumeReplicaList
+		if err := cl.List(ctx, &rvrList,
+			client.MatchingFields{indexes.IndexFieldRVRByNodeName: nodeName},
 			client.UnsafeDisableDeepCopy,
 		); err != nil {
 			return nil

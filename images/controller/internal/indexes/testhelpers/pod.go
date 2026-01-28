@@ -24,10 +24,17 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
-// WithNodeByMetadataNameIndex registers the IndexFieldNodeByMetadataName index
+// WithPodByNodeNameIndex registers the IndexFieldPodByNodeName index
 // on a fake.ClientBuilder. This is useful for tests that need to use the index.
-func WithNodeByMetadataNameIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
-	return b.WithIndex(&corev1.Node{}, indexes.IndexFieldNodeByMetadataName, func(obj client.Object) []string {
-		return []string{obj.GetName()}
+func WithPodByNodeNameIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
+	return b.WithIndex(&corev1.Pod{}, indexes.IndexFieldPodByNodeName, func(obj client.Object) []string {
+		pod, ok := obj.(*corev1.Pod)
+		if !ok {
+			return nil
+		}
+		if pod.Spec.NodeName == "" {
+			return nil
+		}
+		return []string{pod.Spec.NodeName}
 	})
 }

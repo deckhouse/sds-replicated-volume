@@ -19,6 +19,7 @@ package rvrcontroller
 import (
 	"slices"
 
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -91,4 +92,57 @@ func rvPredicates() []predicate.Predicate {
 			},
 		},
 	}
+}
+
+// agentPodPredicates returns predicates for agent Pod events.
+// Filters to only react to:
+//   - Pods in the specified namespace with label app=agent
+//   - Ready condition changes
+//   - Create/Delete events
+func agentPodPredicates(podNamespace string) []predicate.Predicate {
+	return []predicate.Predicate{
+		predicate.TypedFuncs[client.Object]{
+			CreateFunc: func(e event.TypedCreateEvent[client.Object]) bool {
+				pod, ok := e.Object.(*corev1.Pod)
+				if !ok || pod == nil {
+					return true // Be conservative on type assertion failure.
+				}
+				return pod.Namespace == podNamespace && pod.Labels["app"] == "agent"
+			},
+			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				oldPod, okOld := e.ObjectOld.(*corev1.Pod)
+				newPod, okNew := e.ObjectNew.(*corev1.Pod)
+				if !okOld || !okNew || oldPod == nil || newPod == nil {
+					return true // Be conservative on type assertion failure.
+				}
+
+				// Only care about agent pods in the target namespace.
+				if newPod.Namespace != podNamespace || newPod.Labels["app"] != "agent" {
+					return false
+				}
+
+				// React to Ready condition changes.
+				oldReady := isPodReady(oldPod)
+				newReady := isPodReady(newPod)
+				return oldReady != newReady
+			},
+			DeleteFunc: func(e event.TypedDeleteEvent[client.Object]) bool {
+				pod, ok := e.Object.(*corev1.Pod)
+				if !ok || pod == nil {
+					return true // Be conservative on type assertion failure.
+				}
+				return pod.Namespace == podNamespace && pod.Labels["app"] == "agent"
+			},
+		},
+	}
+}
+
+// isPodReady checks if a pod has the Ready condition set to True.
+func isPodReady(pod *corev1.Pod) bool {
+	for _, cond := range pod.Status.Conditions {
+		if cond.Type == corev1.PodReady {
+			return cond.Status == corev1.ConditionTrue
+		}
+	}
+	return false
 }

@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -68,14 +69,53 @@ type ReplicatedVolumeReplicaList struct {
 
 // GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It returns the root object's `.status.conditions`.
-func (o *ReplicatedVolumeReplica) GetStatusConditions() []metav1.Condition {
-	return o.Status.Conditions
+func (rvr *ReplicatedVolumeReplica) GetStatusConditions() []metav1.Condition {
+	return rvr.Status.Conditions
 }
 
 // SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It sets the root object's `.status.conditions`.
-func (o *ReplicatedVolumeReplica) SetStatusConditions(conditions []metav1.Condition) {
-	o.Status.Conditions = conditions
+func (rvr *ReplicatedVolumeReplica) SetStatusConditions(conditions []metav1.Condition) {
+	rvr.Status.Conditions = conditions
+}
+
+// NodeID extracts NodeID from the RVR name (e.g., "pvc-xxx-5" → 5).
+func (rvr *ReplicatedVolumeReplica) NodeID() (uint8, bool) {
+	return nodeIDFromName(rvr.Name)
+}
+
+// SetNameWithNodeID sets the RVR name using the ReplicatedVolumeName and the given NodeID.
+func (rvr *ReplicatedVolumeReplica) SetNameWithNodeID(nodeID uint8) {
+	rvr.Name = fmt.Sprintf("%s-%d", rvr.Spec.ReplicatedVolumeName, nodeID)
+}
+
+// ChooseNewName selects the first available NodeID and sets the RVR name.
+// Returns false if all NodeIDs (0-31) are already taken by other RVRs.
+func (rvr *ReplicatedVolumeReplica) ChooseNewName(otherRVRs []ReplicatedVolumeReplica) bool {
+	// Bitmask for reserved NodeIDs (0-31 fit in uint32).
+	var reserved uint32
+
+	for i := range otherRVRs {
+		otherRVR := &otherRVRs[i]
+		if otherRVR.Spec.ReplicatedVolumeName != rvr.Spec.ReplicatedVolumeName {
+			continue
+		}
+
+		id, ok := otherRVR.NodeID()
+		if !ok {
+			continue
+		}
+		reserved |= 1 << id
+	}
+
+	for i := RVRMinNodeID; i <= RVRMaxNodeID; i++ {
+		if reserved&(1<<i) == 0 {
+			rvr.SetNameWithNodeID(i)
+			return true
+		}
+	}
+
+	return false
 }
 
 // +kubebuilder:object:generate=true
@@ -93,6 +133,7 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +optional
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="nodeName is immutable once set"
 	NodeName string `json:"nodeName,omitempty"`
 
 	// LVMVolumeGroupName is the LVMVolumeGroup resource name where this replica should be placed.
@@ -110,7 +151,7 @@ type ReplicatedVolumeReplicaSpec struct {
 	Type ReplicaType `json:"type"`
 }
 
-// ReplicaType enumerates possible values for ReplicatedVolumeReplica spec.type and status.actualType fields.
+// ReplicaType enumerates possible values for ReplicatedVolumeReplica spec.type and status.effectiveType fields.
 type ReplicaType string
 
 // Replica type values for [ReplicatedVolumeReplica] spec.type field.
@@ -137,17 +178,27 @@ type ReplicatedVolumeReplicaStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 
 	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
-	ActualType ReplicaType `json:"actualType,omitempty"`
-
-	// +optional
-	// +kubebuilder:validation:MaxLength=256
-	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName,omitempty"`
+	EffectiveType ReplicaType `json:"effectiveType,omitempty"`
 
 	// +patchStrategy=merge
 	DRBD *DRBD `json:"drbd,omitempty" patchStrategy:"merge"`
 
+	// +kubebuilder:validation:MaxItems=32
+	// +optional
+	Addresses []DRBDResourceAddressStatus `json:"addresses,omitempty"`
+
 	// DatameshRevision is the datamesh revision this replica was configured for.
 	DatameshRevision int64 `json:"datameshRevision,omitempty"`
+
+	// BackingVolumeSize is the size of the backing LVM logical volume for this replica.
+	// Only set for Diskful replicas.
+	// +optional
+	BackingVolumeSize resource.Quantity `json:"backingVolumeSize,omitempty"`
+
+	// DRBDResourceGeneration is the generation of the DRBDResource that was last applied.
+	// Used to skip redundant spec comparison when the generation matches.
+	// +optional
+	DRBDResourceGeneration int64 `json:"drbdResourceGeneration,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -434,13 +485,13 @@ type Address struct {
 // DRBD node ID constants for ReplicatedVolumeReplica
 const (
 	// RVRMinNodeID is the minimum valid node ID for DRBD configuration in ReplicatedVolumeReplica
-	RVRMinNodeID = uint(0)
+	RVRMinNodeID = uint8(0)
 	// RVRMaxNodeID is the maximum valid node ID for DRBD configuration in ReplicatedVolumeReplica
-	RVRMaxNodeID = uint(31)
+	RVRMaxNodeID = uint8(31)
 )
 
 // IsValidNodeID checks if nodeID is within valid range [RVRMinNodeID; RVRMaxNodeID].
-func IsValidNodeID(nodeID uint) bool {
+func IsValidNodeID(nodeID uint8) bool {
 	return nodeID >= RVRMinNodeID && nodeID <= RVRMaxNodeID
 }
 

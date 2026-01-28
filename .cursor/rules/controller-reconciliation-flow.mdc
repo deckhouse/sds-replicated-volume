@@ -218,7 +218,7 @@ Methods:
 - `RequireOptimisticLock()` — marks that save requires optimistic locking.
   - Contract: MUST be called only after `ReportChanged()` / `ReportChangedIf(...)` (panics otherwise).
 - `OptimisticLockRequired()` — reports whether optimistic locking is required.
-- `WithChangeFrom(eo EnsureOutcome)` — copies change state from an `EnsureOutcome`.
+- `WithChangeFrom(eo EnsureOutcome)` — merges change state from an `EnsureOutcome` (strongest wins).
 
 Rules:
 - Code MUST call `RequireOptimisticLock()` only after `ReportChanged()` / `ReportChangedIf(...)`

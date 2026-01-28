@@ -125,17 +125,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 // Uses UnsafeDisableDeepCopy for performance since we only need to read the label.
 // Returns (exists, hasLabel, err).
 func (r *Reconciler) getNodeAgentLabelPresence(ctx context.Context, name string) (bool, bool, error) {
-	var list corev1.NodeList
-	if err := r.cl.List(ctx, &list,
-		client.MatchingFields{indexes.IndexFieldNodeByMetadataName: name},
-		client.UnsafeDisableDeepCopy,
-	); err != nil {
+	var unsafeNode corev1.Node
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, &unsafeNode, client.UnsafeDisableDeepCopy); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, false, nil
+		}
 		return false, false, err
 	}
-	if len(list.Items) == 0 {
-		return false, false, nil
-	}
-	hasLabel := obju.HasLabel(&list.Items[0], v1alpha1.AgentNodeLabelKey)
+	hasLabel := obju.HasLabel(&unsafeNode, v1alpha1.AgentNodeLabelKey)
 	return true, hasLabel, nil
 }
 

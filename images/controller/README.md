@@ -77,6 +77,7 @@ flowchart TB
     subgraph inputs [Inputs]
         RVR[ReplicatedVolumeReplica]
         RV[ReplicatedVolume]
+        AgentPod[Agent Pod]
     end
 
     subgraph controller [Controller]
@@ -89,13 +90,14 @@ flowchart TB
     end
 
     subgraph status [Managed State]
-        RVRStatus[RVR.status.conditions]
+        RVRStatus[RVR.status]
     end
 
     RVR --> RVRCtrl
     RV --> RVRCtrl
+    AgentPod --> RVRCtrl
     RVRCtrl -->|creates/resizes/deletes| LLV
-    RVRCtrl -->|manages| DRBDR
+    RVRCtrl -->|creates/configures/deletes| DRBDR
     RVRCtrl --> RVRStatus
 ```
 
@@ -116,7 +118,7 @@ Each controller reconciles independently, reacting to changes in its watched res
 Currently, `rvr_controller` operates as a standalone controller, managing:
 
 - **LVMLogicalVolume** — backing storage for diskful replicas
-- **DRBDResource** — DRBD configuration (deletion only for now)
+- **DRBDResource** — DRBD configuration and lifecycle management
 
 ### Future Architecture
 

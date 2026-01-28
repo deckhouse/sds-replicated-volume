@@ -138,3 +138,179 @@ var _ = Describe("mapRVToRVRs", func() {
 		Expect(requests).To(BeNil())
 	})
 })
+
+var _ = Describe("mapAgentPodToRVRs", func() {
+	var scheme *runtime.Scheme
+	const testNamespace = "d8-sds-replicated-volume"
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		Expect(corev1.AddToScheme(scheme)).To(Succeed())
+	})
+
+	It("returns requests for RVRs on the same node", func() {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "agent-pod-1",
+				Namespace: testNamespace,
+				Labels:    map[string]string{"app": "agent"},
+			},
+			Spec: corev1.PodSpec{
+				NodeName: "node-1",
+			},
+		}
+		rvr1 := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+		rvr2 := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+		rvrOther := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-other"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-2"},
+		}
+
+		cl := testhelpers.WithRVRByNodeNameIndex(
+			fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(pod, rvr1, rvr2, rvrOther),
+		).Build()
+
+		mapFunc := mapAgentPodToRVRs(cl, testNamespace)
+		requests := mapFunc(context.Background(), pod)
+
+		Expect(requests).To(HaveLen(2))
+		names := []string{requests[0].Name, requests[1].Name}
+		Expect(names).To(ContainElements("rvr-1", "rvr-2"))
+	})
+
+	It("returns nil for pod in wrong namespace", func() {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "agent-pod-1",
+				Namespace: "other-namespace",
+				Labels:    map[string]string{"app": "agent"},
+			},
+			Spec: corev1.PodSpec{
+				NodeName: "node-1",
+			},
+		}
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+
+		cl := testhelpers.WithRVRByNodeNameIndex(
+			fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(pod, rvr),
+		).Build()
+
+		mapFunc := mapAgentPodToRVRs(cl, testNamespace)
+		requests := mapFunc(context.Background(), pod)
+
+		Expect(requests).To(BeNil())
+	})
+
+	It("returns nil for pod without app=agent label", func() {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "other-pod",
+				Namespace: testNamespace,
+				Labels:    map[string]string{"app": "other"},
+			},
+			Spec: corev1.PodSpec{
+				NodeName: "node-1",
+			},
+		}
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+
+		cl := testhelpers.WithRVRByNodeNameIndex(
+			fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(pod, rvr),
+		).Build()
+
+		mapFunc := mapAgentPodToRVRs(cl, testNamespace)
+		requests := mapFunc(context.Background(), pod)
+
+		Expect(requests).To(BeNil())
+	})
+
+	It("returns nil for unscheduled pod (empty NodeName)", func() {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "agent-pod-1",
+				Namespace: testNamespace,
+				Labels:    map[string]string{"app": "agent"},
+			},
+			// No NodeName set - pod not yet scheduled.
+		}
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+
+		cl := testhelpers.WithRVRByNodeNameIndex(
+			fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(pod, rvr),
+		).Build()
+
+		mapFunc := mapAgentPodToRVRs(cl, testNamespace)
+		requests := mapFunc(context.Background(), pod)
+
+		Expect(requests).To(BeNil())
+	})
+
+	It("returns nil for non-Pod object", func() {
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+		mapFunc := mapAgentPodToRVRs(cl, testNamespace)
+		requests := mapFunc(context.Background(), &corev1.Node{})
+
+		Expect(requests).To(BeNil())
+	})
+
+	It("returns nil for nil object", func() {
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+		mapFunc := mapAgentPodToRVRs(cl, testNamespace)
+		requests := mapFunc(context.Background(), nil)
+
+		Expect(requests).To(BeNil())
+	})
+
+	It("returns nil when List fails", func() {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "agent-pod-1",
+				Namespace: testNamespace,
+				Labels:    map[string]string{"app": "agent"},
+			},
+			Spec: corev1.PodSpec{
+				NodeName: "node-1",
+			},
+		}
+
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList, _ ...client.ListOption) error {
+					return errors.New("list error")
+				},
+			}).
+			Build()
+
+		mapFunc := mapAgentPodToRVRs(cl, testNamespace)
+		requests := mapFunc(context.Background(), pod)
+
+		Expect(requests).To(BeNil())
+	})
+})

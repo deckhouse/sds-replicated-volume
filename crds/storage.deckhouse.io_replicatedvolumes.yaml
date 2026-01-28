@@ -210,6 +210,7 @@ spec:
                             - systemNetworkName
                             type: object
                           maxItems: 16
+                          minItems: 1
                           type: array
                         lvmVolumeGroupName:
                           description: LVMVolumeGroupName is the LVMVolumeGroup resource
@@ -222,7 +223,9 @@ spec:
                             name (for LVMThin storage pools).
                           type: string
                         name:
-                          description: Name is the member name (used as list map key).
+                          description: |-
+                            Name is the member name (used as list map key).
+                            Must have format "prefix-N" where N is 0-31.
                           minLength: 1
                           type: string
                         nodeName:
@@ -254,11 +257,19 @@ spec:
                       - type
                       type: object
                       x-kubernetes-validations:
-                      - message: typeTransition must be ToDiskless for Diskful type,
-                          or ToDiskful for Access/TieBreaker types
-                        rule: 'self.type == ''Diskful'' ? (!has(self.typeTransition)
-                          || self.typeTransition == ''ToDiskless'') : (!has(self.typeTransition)
-                          || self.typeTransition == ''ToDiskful'')'
+                      - message: Diskful can only have ToDiskless typeTransition
+                        rule: self.type != 'Diskful' || !has(self.typeTransition)
+                          || self.typeTransition == 'ToDiskless'
+                      - message: TieBreaker can only have ToDiskful typeTransition
+                        rule: self.type != 'TieBreaker' || !has(self.typeTransition)
+                          || self.typeTransition == 'ToDiskful'
+                      - message: Access cannot have typeTransition
+                        rule: self.type != 'Access' || !has(self.typeTransition)
+                      - message: name must contain '-' separator
+                        rule: self.name.lastIndexOf('-') >= 0
+                      - message: name numeric suffix must be between 0 and 31
+                        rule: int(self.name.substring(self.name.lastIndexOf('-') +
+                          1)) <= 31
                       - message: lvmVolumeGroupName can only be set for Diskful type
                           or when typeTransition is ToDiskful
                         rule: size(self.lvmVolumeGroupName) == 0 || self.type == 'Diskful'

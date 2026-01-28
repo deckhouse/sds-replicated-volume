@@ -340,3 +340,329 @@ var _ = Describe("rvPredicates", func() {
 		})
 	})
 })
+
+var _ = Describe("agentPodPredicates", func() {
+	var predicates []predicate.Predicate
+	const testNamespace = "test-namespace"
+
+	BeforeEach(func() {
+		predicates = agentPodPredicates(testNamespace)
+	})
+
+	Context("CreateFunc", func() {
+		It("returns true for agent pod in namespace", func() {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-abc",
+					Namespace: testNamespace,
+					Labels:    map[string]string{"app": "agent"},
+				},
+			}
+
+			e := event.TypedCreateEvent[client.Object]{Object: pod}
+			result := predicates[0].Create(e)
+			Expect(result).To(BeTrue())
+		})
+
+		It("returns false for non-agent pod", func() {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "other-pod",
+					Namespace: testNamespace,
+					Labels:    map[string]string{"app": "other"},
+				},
+			}
+
+			e := event.TypedCreateEvent[client.Object]{Object: pod}
+			result := predicates[0].Create(e)
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns false for pod in wrong namespace", func() {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-abc",
+					Namespace: "other-namespace",
+					Labels:    map[string]string{"app": "agent"},
+				},
+			}
+
+			e := event.TypedCreateEvent[client.Object]{Object: pod}
+			result := predicates[0].Create(e)
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns true on type assertion failure (conservative)", func() {
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node-1"},
+			}
+
+			e := event.TypedCreateEvent[client.Object]{Object: node}
+			result := predicates[0].Create(e)
+			Expect(result).To(BeTrue())
+		})
+	})
+
+	Context("UpdateFunc", func() {
+		It("returns true when Ready condition changes (false->true)", func() {
+			oldPod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-abc",
+					Namespace: testNamespace,
+					Labels:    map[string]string{"app": "agent"},
+				},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionFalse},
+					},
+				},
+			}
+			newPod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-abc",
+					Namespace: testNamespace,
+					Labels:    map[string]string{"app": "agent"},
+				},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+					},
+				},
+			}
+
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldPod,
+				ObjectNew: newPod,
+			}
+			result := predicates[0].Update(e)
+			Expect(result).To(BeTrue())
+		})
+
+		It("returns true when Ready condition changes (true->false)", func() {
+			oldPod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-abc",
+					Namespace: testNamespace,
+					Labels:    map[string]string{"app": "agent"},
+				},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+					},
+				},
+			}
+			newPod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-abc",
+					Namespace: testNamespace,
+					Labels:    map[string]string{"app": "agent"},
+				},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionFalse},
+					},
+				},
+			}
+
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldPod,
+				ObjectNew: newPod,
+			}
+			result := predicates[0].Update(e)
+			Expect(result).To(BeTrue())
+		})
+
+		It("returns false when Ready unchanged", func() {
+			oldPod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-abc",
+					Namespace: testNamespace,
+					Labels:    map[string]string{"app": "agent"},
+				},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+					},
+				},
+			}
+			newPod := oldPod.DeepCopy()
+			newPod.ResourceVersion = "2"
+
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldPod,
+				ObjectNew: newPod,
+			}
+			result := predicates[0].Update(e)
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns false for non-agent pod", func() {
+			oldPod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "other-pod",
+					Namespace: testNamespace,
+					Labels:    map[string]string{"app": "other"},
+				},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionFalse},
+					},
+				},
+			}
+			newPod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "other-pod",
+					Namespace: testNamespace,
+					Labels:    map[string]string{"app": "other"},
+				},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+					},
+				},
+			}
+
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldPod,
+				ObjectNew: newPod,
+			}
+			result := predicates[0].Update(e)
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns false for pod in wrong namespace", func() {
+			oldPod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-abc",
+					Namespace: "other-namespace",
+					Labels:    map[string]string{"app": "agent"},
+				},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionFalse},
+					},
+				},
+			}
+			newPod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-abc",
+					Namespace: "other-namespace",
+					Labels:    map[string]string{"app": "agent"},
+				},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+					},
+				},
+			}
+
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldPod,
+				ObjectNew: newPod,
+			}
+			result := predicates[0].Update(e)
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns true on type assertion failure (conservative)", func() {
+			oldNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node-1"},
+			}
+			newNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node-1"},
+			}
+
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldNode,
+				ObjectNew: newNode,
+			}
+			result := predicates[0].Update(e)
+			Expect(result).To(BeTrue())
+		})
+	})
+
+	Context("DeleteFunc", func() {
+		It("returns true for agent pod in namespace", func() {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-abc",
+					Namespace: testNamespace,
+					Labels:    map[string]string{"app": "agent"},
+				},
+			}
+
+			e := event.TypedDeleteEvent[client.Object]{Object: pod}
+			result := predicates[0].Delete(e)
+			Expect(result).To(BeTrue())
+		})
+
+		It("returns false for non-agent pod", func() {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "other-pod",
+					Namespace: testNamespace,
+					Labels:    map[string]string{"app": "other"},
+				},
+			}
+
+			e := event.TypedDeleteEvent[client.Object]{Object: pod}
+			result := predicates[0].Delete(e)
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns false for pod in wrong namespace", func() {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-abc",
+					Namespace: "other-namespace",
+					Labels:    map[string]string{"app": "agent"},
+				},
+			}
+
+			e := event.TypedDeleteEvent[client.Object]{Object: pod}
+			result := predicates[0].Delete(e)
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns true on type assertion failure (conservative)", func() {
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node-1"},
+			}
+
+			e := event.TypedDeleteEvent[client.Object]{Object: node}
+			result := predicates[0].Delete(e)
+			Expect(result).To(BeTrue())
+		})
+	})
+})
+
+var _ = Describe("Helper functions", func() {
+	Describe("isPodReady", func() {
+		It("returns true when PodReady=True", func() {
+			pod := &corev1.Pod{
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+					},
+				},
+			}
+			Expect(isPodReady(pod)).To(BeTrue())
+		})
+
+		It("returns false when PodReady=False", func() {
+			pod := &corev1.Pod{
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionFalse},
+					},
+				},
+			}
+			Expect(isPodReady(pod)).To(BeFalse())
+		})
+
+		It("returns false when no PodReady condition", func() {
+			pod := &corev1.Pod{}
+			Expect(isPodReady(pod)).To(BeFalse())
+		})
+	})
+})
