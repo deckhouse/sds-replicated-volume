@@ -46,8 +46,7 @@ func computeTargetStateActions(iState IntendedState, aState ActualState) (res Ta
 		}()
 	}
 
-	res = append(res, ConfigureIPAddressAction{IPv4BySystemNetworkNames: iState.IPv4BySystemNetworkNames()})
-	res = append(res, AllocatePortsAction{PortAllocator: DefaultPortCache.Allocate})
+	res = append(res, SetAddressesAction{Addresses: iState.Addresses()})
 
 	// DRBD actions - require valid actual state
 	//

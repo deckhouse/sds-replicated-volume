@@ -17,16 +17,27 @@ limitations under the License.
 package drbd
 
 import (
+	"context"
+	"fmt"
+
+	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
+
+// PortAllocator is a function that allocates a port for a given IP address.
+type PortAllocator func(ip string) uint
 
 type IntendedState interface {
 	IsZero() bool
 
 	IsUpAndNotInCleanup() bool
 
-	IPv4BySystemNetworkNames() map[string]string
+	// Addresses returns the intended local addresses with IPs and ports.
+	Addresses() []v1alpha1.DRBDResourceAddressStatus
 
 	// ResourceName returns the DRBD resource name on the node.
 	ResourceName() string
@@ -94,129 +105,58 @@ type IntendedPath interface {
 	RemotePort() uint
 }
 
-// intendedState implements IntendedState.
+// intendedState implements IntendedState with pre-computed values.
 type intendedState struct {
-	drbdr *v1alpha1.DRBDResource
-
-	// backingDisk is populated externally from LLV/LVG lookup.
-	backingDisk string
-
-	// localAddresses maps system network name to local address.
-	localAddresses map[string]v1alpha1.DRBDAddress
+	isUpAndNotInCleanup     bool
+	addresses               []v1alpha1.DRBDResourceAddressStatus
+	resourceName            string
+	nodeID                  uint
+	resourceType            v1alpha1.DRBDResourceType
+	backingDisk             string
+	quorum                  byte
+	quorumMinimumRedundancy byte
+	allowTwoPrimaries       bool
+	peers                   []IntendedPeer
 }
 
-func (iState *intendedState) IsZero() bool {
-	return iState == nil
+func (s *intendedState) IsZero() bool              { return s == nil }
+func (s *intendedState) IsUpAndNotInCleanup() bool { return s.isUpAndNotInCleanup }
+func (s *intendedState) Addresses() []v1alpha1.DRBDResourceAddressStatus {
+	return s.addresses
 }
-
-func (iState *intendedState) IsUpAndNotInCleanup() bool {
-	if iState.drbdr.DeletionTimestamp != nil &&
-		!obju.HasFinalizersOtherThan(iState.drbdr, v1alpha1.AgentFinalizer) {
-		// it's time to cleanup, so ignoring an spec.state
-		return false
-	}
-
-	return iState.drbdr.Spec.State != v1alpha1.DRBDResourceStateDown
-}
-
-func (iState *intendedState) IPv4BySystemNetworkNames() map[string]string {
-	result := make(map[string]string, len(iState.localAddresses))
-	for snn, addr := range iState.localAddresses {
-		result[snn] = addr.IPv4
-	}
-	return result
-}
-
-func (iState *intendedState) ResourceName() string {
-	return iState.drbdr.DRBDResourceNameOnTheNode()
-}
-
-func (iState *intendedState) NodeID() uint {
-	return iState.drbdr.Spec.NodeID
-}
-
-func (iState *intendedState) Type() v1alpha1.DRBDResourceType {
-	return iState.drbdr.Spec.Type
-}
-
-func (iState *intendedState) BackingDisk() string {
-	return iState.backingDisk
-}
-
-func (iState *intendedState) Quorum() byte {
-	return iState.drbdr.Spec.Quorum
-}
-
-func (iState *intendedState) QuorumMinimumRedundancy() byte {
-	return iState.drbdr.Spec.QuorumMinimumRedundancy
-}
-
-func (iState *intendedState) AllowTwoPrimaries() bool {
-	return iState.drbdr.Spec.AllowTwoPrimaries
-}
-
-func (iState *intendedState) Peers() []IntendedPeer {
-	peers := make([]IntendedPeer, 0, len(iState.drbdr.Spec.Peers))
-	for i := range iState.drbdr.Spec.Peers {
-		peers = append(peers, &intendedPeer{
-			peer:           &iState.drbdr.Spec.Peers[i],
-			localAddresses: iState.localAddresses,
-		})
-	}
-	return peers
-}
+func (s *intendedState) ResourceName() string            { return s.resourceName }
+func (s *intendedState) NodeID() uint                    { return s.nodeID }
+func (s *intendedState) Type() v1alpha1.DRBDResourceType { return s.resourceType }
+func (s *intendedState) BackingDisk() string             { return s.backingDisk }
+func (s *intendedState) Quorum() byte                    { return s.quorum }
+func (s *intendedState) QuorumMinimumRedundancy() byte   { return s.quorumMinimumRedundancy }
+func (s *intendedState) AllowTwoPrimaries() bool         { return s.allowTwoPrimaries }
+func (s *intendedState) Peers() []IntendedPeer           { return s.peers }
 
 var _ IntendedState = (*intendedState)(nil)
 
-// intendedPeer implements IntendedPeer.
+// intendedPeer implements IntendedPeer with pre-computed values.
 type intendedPeer struct {
-	peer           *v1alpha1.DRBDResourcePeer
-	localAddresses map[string]v1alpha1.DRBDAddress
+	name            string
+	nodeID          uint
+	protocol        v1alpha1.DRBDProtocol
+	sharedSecret    string
+	sharedSecretAlg v1alpha1.SharedSecretAlg
+	allowRemoteRead bool
+	paths           []IntendedPath
 }
 
-func (p *intendedPeer) Name() string {
-	return p.peer.Name
-}
-
-func (p *intendedPeer) NodeID() uint {
-	return p.peer.NodeID
-}
-
-func (p *intendedPeer) Protocol() v1alpha1.DRBDProtocol {
-	return p.peer.Protocol
-}
-
-func (p *intendedPeer) SharedSecret() string {
-	return p.peer.SharedSecret
-}
-
-func (p *intendedPeer) SharedSecretAlg() v1alpha1.SharedSecretAlg {
-	return p.peer.SharedSecretAlg
-}
-
-func (p *intendedPeer) AllowRemoteRead() bool {
-	return p.peer.AllowRemoteRead
-}
-
-func (p *intendedPeer) Paths() []IntendedPath {
-	paths := make([]IntendedPath, 0, len(p.peer.Paths))
-	for i := range p.peer.Paths {
-		peerPath := &p.peer.Paths[i]
-		localAddr := p.localAddresses[peerPath.SystemNetworkName]
-		paths = append(paths, &intendedPath{
-			systemNetworkName: peerPath.SystemNetworkName,
-			localIPv4:         localAddr.IPv4,
-			localPort:         localAddr.Port,
-			remoteIPv4:        peerPath.Address.IPv4,
-			remotePort:        peerPath.Address.Port,
-		})
-	}
-	return paths
-}
+func (p *intendedPeer) Name() string                              { return p.name }
+func (p *intendedPeer) NodeID() uint                              { return p.nodeID }
+func (p *intendedPeer) Protocol() v1alpha1.DRBDProtocol           { return p.protocol }
+func (p *intendedPeer) SharedSecret() string                      { return p.sharedSecret }
+func (p *intendedPeer) SharedSecretAlg() v1alpha1.SharedSecretAlg { return p.sharedSecretAlg }
+func (p *intendedPeer) AllowRemoteRead() bool                     { return p.allowRemoteRead }
+func (p *intendedPeer) Paths() []IntendedPath                     { return p.paths }
 
 var _ IntendedPeer = (*intendedPeer)(nil)
 
-// intendedPath implements IntendedPath.
+// intendedPath implements IntendedPath with pre-computed values.
 type intendedPath struct {
 	systemNetworkName string
 	localIPv4         string
@@ -233,21 +173,145 @@ func (p *intendedPath) RemotePort() uint          { return p.remotePort }
 
 var _ IntendedPath = (*intendedPath)(nil)
 
-// IntendedStateParams contains parameters for constructing IntendedState.
-type IntendedStateParams struct {
-	// BackingDisk is the path to the backing device (from LLV/LVG lookup).
-	BackingDisk string
-
-	// LocalAddresses maps system network name to local address.
-	// This is typically populated from DRBDResource.Status.Addresses.
-	LocalAddresses map[string]v1alpha1.DRBDAddress
+// systemNetworkToNodeAddressType maps system network names to Kubernetes Node address types.
+func systemNetworkToNodeAddressType(systemNetwork string) corev1.NodeAddressType {
+	switch systemNetwork {
+	case "Internal":
+		return corev1.NodeInternalIP
+	case "External":
+		return corev1.NodeExternalIP
+	default:
+		return corev1.NodeAddressType(systemNetwork + "IP")
+	}
 }
 
-//nolint:unparam // error is kept for future validation extensibility
-func getIntendedState(drbdr *v1alpha1.DRBDResource, params IntendedStateParams) (*intendedState, error) {
+// getIntendedState constructs IntendedState by querying all required resources.
+func getIntendedState(
+	ctx context.Context,
+	cl client.Client,
+	drbdr *v1alpha1.DRBDResource,
+	portAllocator PortAllocator,
+) (*intendedState, error) {
+	// Fetch Node to get local addresses
+	node := &corev1.Node{}
+	if err := cl.Get(ctx, client.ObjectKey{Name: drbdr.Spec.NodeName}, node); err != nil {
+		return nil, fmt.Errorf("getting Node %q: %w", drbdr.Spec.NodeName, err)
+	}
+
+	// Build address map from Node.status.addresses
+	nodeAddressesByType := make(map[corev1.NodeAddressType]string)
+	for _, addr := range node.Status.Addresses {
+		nodeAddressesByType[addr.Type] = addr.Address
+	}
+
+	// Build existing addresses map from status (keyed by system network name + IP)
+	type addrKey struct {
+		snn string
+		ip  string
+	}
+	existingPorts := make(map[addrKey]uint)
+	for _, addr := range drbdr.Status.Addresses {
+		existingPorts[addrKey{snn: addr.SystemNetworkName, ip: addr.Address.IPv4}] = addr.Address.Port
+	}
+
+	// Compute intended addresses using IPs from Node and ports from status or allocator
+	addresses := make([]v1alpha1.DRBDResourceAddressStatus, 0, len(drbdr.Spec.SystemNetworks))
+	localAddresses := make(map[string]v1alpha1.DRBDAddress, len(drbdr.Spec.SystemNetworks))
+
+	for _, snn := range drbdr.Spec.SystemNetworks {
+		addrType := systemNetworkToNodeAddressType(snn)
+		ip, ok := nodeAddressesByType[addrType]
+		if !ok {
+			continue
+		}
+
+		// Reuse port if IP matches, otherwise allocate new
+		var port uint
+		if existingPort, found := existingPorts[addrKey{snn: snn, ip: ip}]; found && existingPort != 0 {
+			port = existingPort
+		} else {
+			port = portAllocator(ip)
+		}
+
+		addr := v1alpha1.DRBDAddress{IPv4: ip, Port: port}
+		addresses = append(addresses, v1alpha1.DRBDResourceAddressStatus{
+			SystemNetworkName: snn,
+			Address:           addr,
+		})
+		localAddresses[snn] = addr
+	}
+
+	// Get backing disk path for diskful resources
+	var backingDisk string
+	if drbdr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful && drbdr.Spec.LVMLogicalVolumeName != "" {
+		var err error
+		backingDisk, err = getBackingDiskPath(ctx, cl, drbdr.Spec.LVMLogicalVolumeName)
+		if err != nil {
+			return nil, fmt.Errorf("getting backing disk path: %w", err)
+		}
+	}
+
+	// Build peers
+	peers := make([]IntendedPeer, 0, len(drbdr.Spec.Peers))
+	for i := range drbdr.Spec.Peers {
+		peer := &drbdr.Spec.Peers[i]
+		paths := make([]IntendedPath, 0, len(peer.Paths))
+		for j := range peer.Paths {
+			peerPath := &peer.Paths[j]
+			localAddr := localAddresses[peerPath.SystemNetworkName]
+			paths = append(paths, &intendedPath{
+				systemNetworkName: peerPath.SystemNetworkName,
+				localIPv4:         localAddr.IPv4,
+				localPort:         localAddr.Port,
+				remoteIPv4:        peerPath.Address.IPv4,
+				remotePort:        peerPath.Address.Port,
+			})
+		}
+		peers = append(peers, &intendedPeer{
+			name:            peer.Name,
+			nodeID:          peer.NodeID,
+			protocol:        peer.Protocol,
+			sharedSecret:    peer.SharedSecret,
+			sharedSecretAlg: peer.SharedSecretAlg,
+			allowRemoteRead: peer.AllowRemoteRead,
+			paths:           paths,
+		})
+	}
+
+	// Compute isUpAndNotInCleanup
+	isUpAndNotInCleanup := true
+	if drbdr.DeletionTimestamp != nil && !obju.HasFinalizersOtherThan(drbdr, v1alpha1.AgentFinalizer) {
+		isUpAndNotInCleanup = false
+	} else if drbdr.Spec.State == v1alpha1.DRBDResourceStateDown {
+		isUpAndNotInCleanup = false
+	}
+
 	return &intendedState{
-		drbdr:          drbdr,
-		backingDisk:    params.BackingDisk,
-		localAddresses: params.LocalAddresses,
+		isUpAndNotInCleanup:     isUpAndNotInCleanup,
+		addresses:               addresses,
+		resourceName:            drbdr.DRBDResourceNameOnTheNode(),
+		nodeID:                  drbdr.Spec.NodeID,
+		resourceType:            drbdr.Spec.Type,
+		backingDisk:             backingDisk,
+		quorum:                  drbdr.Spec.Quorum,
+		quorumMinimumRedundancy: drbdr.Spec.QuorumMinimumRedundancy,
+		allowTwoPrimaries:       drbdr.Spec.AllowTwoPrimaries,
+		peers:                   peers,
 	}, nil
+}
+
+// getBackingDiskPath looks up LVMLogicalVolume and LVMVolumeGroup to construct
+// the backing disk path in the format /dev/<vg>/<lv>.
+func getBackingDiskPath(ctx context.Context, cl client.Client, llvName string) (string, error) {
+	llv := &snc.LVMLogicalVolume{}
+	if err := cl.Get(ctx, client.ObjectKey{Name: llvName}, llv); err != nil {
+		return "", fmt.Errorf("getting LVMLogicalVolume %q: %w", llvName, err)
+	}
+
+	lvg := &snc.LVMVolumeGroup{}
+	if err := cl.Get(ctx, client.ObjectKey{Name: llv.Spec.LVMVolumeGroupName}, lvg); err != nil {
+		return "", fmt.Errorf("getting LVMVolumeGroup %q: %w", llv.Spec.LVMVolumeGroupName, err)
+	}
+
+	return v1alpha1.SprintDRBDDisk(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode), nil
 }

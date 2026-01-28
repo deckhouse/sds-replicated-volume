@@ -43,7 +43,7 @@ func drbdrPredicates(nodeName string) []predicate.Predicate {
 				}
 				return dr.Spec.NodeName == nodeName
 			},
-			DeleteFunc: func(e event.TypedDeleteEvent[client.Object]) bool {
+			DeleteFunc: func(_ event.TypedDeleteEvent[client.Object]) bool {
 				return false
 			},
 			GenericFunc: func(e event.TypedGenericEvent[client.Object]) bool {

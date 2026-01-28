@@ -50,8 +50,7 @@ type ExecuteDRBDAction interface {
 
 var _ PatchAction = AddAgentFinalizerAction{}
 var _ PatchAction = RemoveAgentFinalizerAction{}
-var _ PatchStatusAction = ConfigureIPAddressAction{}
-var _ PatchStatusAction = AllocatePortsAction{}
+var _ PatchStatusAction = SetAddressesAction{}
 
 var _ ExecuteDRBDAction = NewResourceAction{}
 var _ ExecuteDRBDAction = ResourceOptionsAction{}
@@ -72,8 +71,7 @@ var _ ExecuteDRBDAction = DownAction{}
 
 func (AddAgentFinalizerAction) _action()    {}
 func (RemoveAgentFinalizerAction) _action() {}
-func (ConfigureIPAddressAction) _action()   {}
-func (AllocatePortsAction) _action()        {}
+func (SetAddressesAction) _action()         {}
 func (NewResourceAction) _action()          {}
 func (ResourceOptionsAction) _action()      {}
 func (NewMinorAction) _action()             {}
@@ -107,97 +105,16 @@ func (RemoveAgentFinalizerAction) ApplyPatch(drbdr *v1alpha1.DRBDResource) bool 
 
 //
 
-type ConfigureIPAddressAction struct {
-	IPv4BySystemNetworkNames map[string]string
+type SetAddressesAction struct {
+	Addresses []v1alpha1.DRBDResourceAddressStatus
 }
 
-func (a ConfigureIPAddressAction) ApplyStatusPatch(drbdr *v1alpha1.DRBDResource) (changed bool) {
-	statusAddresses := drbdr.Status.Addresses
-
-	// Track which original addresses were matched
-	originalLen := len(statusAddresses)
-	visitedIdxs := make([]bool, originalLen)
-
-	// update and add new
-	for snn, ipv4 := range a.IPv4BySystemNetworkNames {
-		var found bool
-		// Only iterate over original addresses (not newly added ones)
-		for i := range originalLen {
-			if visitedIdxs[i] {
-				continue
-			}
-			if statusAddresses[i].SystemNetworkName != snn {
-				continue
-			}
-
-			//
-			found = true
-			visitedIdxs[i] = true
-
-			if statusAddresses[i].Address.IPv4 == ipv4 {
-				// match
-				break
-			}
-
-			// update
-			changed = true
-			statusAddresses[i].Address.IPv4 = ipv4
-			break
-		}
-
-		if found {
-			continue
-		}
-
-		// adding
-		changed = true
-		statusAddresses = append(
-			statusAddresses,
-			v1alpha1.DRBDResourceAddressStatus{
-				SystemNetworkName: snn,
-				Address: v1alpha1.DRBDAddress{
-					IPv4: ipv4,
-					// leave port blank, it's created by another action
-				},
-			},
-		)
+func (a SetAddressesAction) ApplyStatusPatch(drbdr *v1alpha1.DRBDResource) bool {
+	if slices.Equal(drbdr.Status.Addresses, a.Addresses) {
+		return false
 	}
-
-	// remove extra (iterate in reverse to avoid index shifting issues)
-	for i := originalLen - 1; i >= 0; i-- {
-		if visitedIdxs[i] {
-			continue
-		}
-		changed = true
-		statusAddresses = slices.Delete(statusAddresses, i, i+1)
-	}
-
-	// assign result back
-	drbdr.Status.Addresses = statusAddresses
-	return
-}
-
-//
-
-type AllocatePortsAction struct {
-	PortAllocator func(ip string) uint
-}
-
-func (a AllocatePortsAction) ApplyStatusPatch(drbdr *v1alpha1.DRBDResource) (changed bool) {
-	for _, addrStatus := range drbdr.Status.Addresses {
-		if addrStatus.Address.Port != 0 {
-			// port already allocated
-			continue
-		}
-		port := a.PortAllocator(addrStatus.Address.IPv4)
-		if port == 0 {
-			// problem allocating port
-			continue
-		}
-		addrStatus.Address.Port = port
-		changed = true
-	}
-	return
+	drbdr.Status.Addresses = a.Addresses
+	return true
 }
 
 //

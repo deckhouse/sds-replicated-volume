@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -346,6 +347,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 			objs := tc.objs
 			if tc.drbdr != nil {
 				objs = append([]client.Object{tc.drbdr}, objs...)
+				// Add Node object for the DRBDResource's node
+				objs = append(objs, testNode(tc.drbdr.Spec.NodeName))
 			}
 			if len(objs) > 0 {
 				clientBuilder = clientBuilder.WithObjects(objs...)
@@ -571,4 +574,17 @@ func expectFinalizers(t *testing.T, got []string, expected ...string) {
 func mustParseQuantity(s string) *resource.Quantity {
 	q, _ := resource.ParseQuantity(s)
 	return &q
+}
+
+func testNode(name string) *corev1.Node {
+	return &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+		Status: corev1.NodeStatus{
+			Addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+			},
+		},
+	}
 }
