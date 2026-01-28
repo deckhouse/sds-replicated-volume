@@ -16,14 +16,78 @@ limitations under the License.
 
 package drbd
 
-import "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+import (
+	"errors"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+)
 
 func applyReportState(
-	_ ActualState,
-	_ *v1alpha1.DRBDResource,
-	_ error,
+	aState ActualState,
+	drbdr *v1alpha1.DRBDResource,
+	err error,
 	_ []Action,
 ) bool {
-	// TODO Observed generation bumped here
-	return false
+	reportChanged, reportErr := aState.Report(&drbdr.Status)
+	err = errors.Join(err, reportErr)
+
+	condChanged := applyConfiguredCondition(drbdr, err)
+
+	return reportChanged || condChanged
+}
+
+func applyConfiguredCondition(drbdr *v1alpha1.DRBDResource, err error) bool {
+	var status metav1.ConditionStatus
+	var reason, message string
+
+	if err == nil {
+		status = metav1.ConditionTrue
+		reason = v1alpha1.DRBDResourceCondConfiguredReasonConfigured
+		message = ""
+	} else {
+		status = metav1.ConditionFalse
+		reason = getConfiguredReason(err)
+		message = err.Error()
+	}
+
+	return setCondition(drbdr, v1alpha1.DRBDResourceCondConfiguredType, status, reason, message)
+}
+
+func getConfiguredReason(err error) string {
+	var cfr ConfiguredReasonSource
+	if errors.As(err, &cfr) {
+		return cfr.ConfiguredReason()
+	}
+	return v1alpha1.DRBDResourceCondConfiguredReasonFailed
+}
+
+func setCondition(drbdr *v1alpha1.DRBDResource, condType string, status metav1.ConditionStatus, reason, message string) bool {
+	now := metav1.Now()
+
+	for i := range drbdr.Status.Conditions {
+		c := &drbdr.Status.Conditions[i]
+		if c.Type == condType {
+			if c.Status == status && c.Reason == reason && c.Message == message {
+				return false
+			}
+			c.Status = status
+			c.Reason = reason
+			c.Message = message
+			if c.Status != status {
+				c.LastTransitionTime = now
+			}
+			return true
+		}
+	}
+
+	drbdr.Status.Conditions = append(drbdr.Status.Conditions, metav1.Condition{
+		Type:               condType,
+		Status:             status,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: now,
+	})
+	return true
 }

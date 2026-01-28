@@ -17,9 +17,27 @@ limitations under the License.
 package v1alpha1
 
 const (
+	// DRBDResourceCondConfiguredType indicates whether the DRBD resource is configured.
+	//
+	// Status=True means the resource is fully configured and matches the intended state.
+	// Status=False means configuration failed; see Reason for the failing step.
 	DRBDResourceCondConfiguredType = "Configured"
 
-	DRBDResourceCondConfiguredReasonConfigured = "Configured"
-
-	DRBDResourceCondConfiguredReasonFailed = "Failed"
+	DRBDResourceCondConfiguredReasonAttachFailed          = "AttachFailed"
+	DRBDResourceCondConfiguredReasonConfigured            = "Configured"
+	DRBDResourceCondConfiguredReasonConnectFailed         = "ConnectFailed"
+	DRBDResourceCondConfiguredReasonCreateMetadataFailed  = "CreateMetadataFailed"
+	DRBDResourceCondConfiguredReasonDelPathFailed         = "DelPathFailed"
+	DRBDResourceCondConfiguredReasonDelPeerFailed         = "DelPeerFailed"
+	DRBDResourceCondConfiguredReasonDisconnectFailed      = "DisconnectFailed"
+	DRBDResourceCondConfiguredReasonDiskOptionsFailed     = "DiskOptionsFailed"
+	DRBDResourceCondConfiguredReasonDownFailed            = "DownFailed"
+	DRBDResourceCondConfiguredReasonFailed                = "Failed"
+	DRBDResourceCondConfiguredReasonNetOptionsFailed      = "NetOptionsFailed"
+	DRBDResourceCondConfiguredReasonNewMinorFailed        = "NewMinorFailed"
+	DRBDResourceCondConfiguredReasonNewPathFailed         = "NewPathFailed"
+	DRBDResourceCondConfiguredReasonNewPeerFailed         = "NewPeerFailed"
+	DRBDResourceCondConfiguredReasonNewResourceFailed     = "NewResourceFailed"
+	DRBDResourceCondConfiguredReasonResourceOptionsFailed = "ResourceOptionsFailed"
+	DRBDResourceCondConfiguredReasonStateQueryFailed      = "StateQueryFailed"
 )

@@ -128,7 +128,8 @@ type NewResourceAction struct {
 }
 
 func (a NewResourceAction) Execute(ctx context.Context) error {
-	return drbdsetup.ExecuteNewResource(ctx, a.ResourceName, a.NodeID)
+	err := drbdsetup.ExecuteNewResource(ctx, a.ResourceName, a.NodeID)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNewResourceFailed)
 }
 
 //
@@ -145,7 +146,7 @@ type ResourceOptionsAction struct {
 }
 
 func (a ResourceOptionsAction) Execute(ctx context.Context) error {
-	return drbdsetup.ExecuteResourceOptions(ctx, a.ResourceName, drbdsetup.ResourceOptions{
+	err := drbdsetup.ExecuteResourceOptions(ctx, a.ResourceName, drbdsetup.ResourceOptions{
 		AutoPromote:                a.AutoPromote,
 		OnNoQuorum:                 a.OnNoQuorum,
 		OnNoDataAccessible:         a.OnNoDataAccessible,
@@ -153,6 +154,7 @@ func (a ResourceOptionsAction) Execute(ctx context.Context) error {
 		Quorum:                     a.Quorum,
 		QuorumMinimumRedundancy:    a.QuorumMinimumRedundancy,
 	})
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonResourceOptionsFailed)
 }
 
 //
@@ -167,7 +169,7 @@ type NewMinorAction struct {
 func (a NewMinorAction) Execute(ctx context.Context) error {
 	minor, err := drbdsetup.ExecuteNewAutoMinor(ctx, a.ResourceName, a.Volume)
 	if err != nil {
-		return err
+		return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNewMinorFailed)
 	}
 	if a.AllocatedMinor != nil {
 		*a.AllocatedMinor = minor
@@ -185,9 +187,13 @@ type CreateMetadataAction struct {
 
 func (a CreateMetadataAction) Execute(ctx context.Context) error {
 	if a.Minor == nil {
-		return fmt.Errorf("CreateMetadataAction: minor not set")
+		return ConfiguredReasonError(
+			fmt.Errorf("CreateMetadataAction: minor not set"),
+			v1alpha1.DRBDResourceCondConfiguredReasonCreateMetadataFailed,
+		)
 	}
-	return drbdmeta.ExecuteCreateMD(ctx, *a.Minor, a.BackingDev)
+	err := drbdmeta.ExecuteCreateMD(ctx, *a.Minor, a.BackingDev)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonCreateMetadataFailed)
 }
 
 //
@@ -202,9 +208,13 @@ type AttachAction struct {
 
 func (a AttachAction) Execute(ctx context.Context) error {
 	if a.Minor == nil {
-		return fmt.Errorf("AttachAction: minor not set")
+		return ConfiguredReasonError(
+			fmt.Errorf("AttachAction: minor not set"),
+			v1alpha1.DRBDResourceCondConfiguredReasonAttachFailed,
+		)
 	}
-	return drbdsetup.ExecuteAttach(ctx, *a.Minor, a.LowerDev, a.MetaDev, a.MetaIdx)
+	err := drbdsetup.ExecuteAttach(ctx, *a.Minor, a.LowerDev, a.MetaDev, a.MetaIdx)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonAttachFailed)
 }
 
 //
@@ -218,12 +228,16 @@ type DiskOptionsAction struct {
 
 func (a DiskOptionsAction) Execute(ctx context.Context) error {
 	if a.Minor == nil {
-		return fmt.Errorf("DiskOptionsAction: minor not set")
+		return ConfiguredReasonError(
+			fmt.Errorf("DiskOptionsAction: minor not set"),
+			v1alpha1.DRBDResourceCondConfiguredReasonDiskOptionsFailed,
+		)
 	}
-	return drbdsetup.ExecuteDiskOptions(ctx, *a.Minor, drbdsetup.DiskOptions{
+	err := drbdsetup.ExecuteDiskOptions(ctx, *a.Minor, drbdsetup.DiskOptions{
 		DiscardZeroesIfAligned: a.DiscardZeroesIfAligned,
 		RsDiscardGranularity:   a.RsDiscardGranularity,
 	})
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDiskOptionsFailed)
 }
 
 //
@@ -248,7 +262,8 @@ func (a NewPeerAction) Execute(ctx context.Context) error {
 			RRConflict:   a.RRConflict,
 		}
 	}
-	return drbdsetup.ExecuteNewPeer(ctx, a.ResourceName, a.PeerNodeID, opts)
+	err := drbdsetup.ExecuteNewPeer(ctx, a.ResourceName, a.PeerNodeID, opts)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNewPeerFailed)
 }
 
 //
@@ -262,10 +277,11 @@ type NetOptionsAction struct {
 }
 
 func (a NetOptionsAction) Execute(ctx context.Context) error {
-	return drbdsetup.ExecuteNetOptions(ctx, a.ResourceName, a.PeerNodeID, drbdsetup.NetOptions{
+	err := drbdsetup.ExecuteNetOptions(ctx, a.ResourceName, a.PeerNodeID, drbdsetup.NetOptions{
 		AllowTwoPrimaries: a.AllowTwoPrimaries,
 		AllowRemoteRead:   a.AllowRemoteRead,
 	})
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNetOptionsFailed)
 }
 
 //
@@ -279,7 +295,8 @@ type NewPathAction struct {
 }
 
 func (a NewPathAction) Execute(ctx context.Context) error {
-	return drbdsetup.ExecuteNewPath(ctx, a.ResourceName, a.PeerNodeID, a.LocalAddr, a.RemoteAddr)
+	err := drbdsetup.ExecuteNewPath(ctx, a.ResourceName, a.PeerNodeID, a.LocalAddr, a.RemoteAddr)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNewPathFailed)
 }
 
 //
@@ -291,7 +308,8 @@ type ConnectAction struct {
 }
 
 func (a ConnectAction) Execute(ctx context.Context) error {
-	return drbdsetup.ExecuteConnect(ctx, a.ResourceName, a.PeerNodeID)
+	err := drbdsetup.ExecuteConnect(ctx, a.ResourceName, a.PeerNodeID)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonConnectFailed)
 }
 
 //
@@ -303,7 +321,8 @@ type DisconnectAction struct {
 }
 
 func (a DisconnectAction) Execute(ctx context.Context) error {
-	return drbdsetup.ExecuteDisconnect(ctx, a.ResourceName, a.PeerNodeID)
+	err := drbdsetup.ExecuteDisconnect(ctx, a.ResourceName, a.PeerNodeID)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDisconnectFailed)
 }
 
 //
@@ -317,7 +336,8 @@ type DelPathAction struct {
 }
 
 func (a DelPathAction) Execute(ctx context.Context) error {
-	return drbdsetup.ExecuteDelPath(ctx, a.ResourceName, a.PeerNodeID, a.LocalAddr, a.RemoteAddr)
+	err := drbdsetup.ExecuteDelPath(ctx, a.ResourceName, a.PeerNodeID, a.LocalAddr, a.RemoteAddr)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDelPathFailed)
 }
 
 //
@@ -329,7 +349,8 @@ type DelPeerAction struct {
 }
 
 func (a DelPeerAction) Execute(ctx context.Context) error {
-	return drbdsetup.ExecuteDelPeer(ctx, a.ResourceName, a.PeerNodeID)
+	err := drbdsetup.ExecuteDelPeer(ctx, a.ResourceName, a.PeerNodeID)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDelPeerFailed)
 }
 
 //
@@ -340,5 +361,6 @@ type DownAction struct {
 }
 
 func (a DownAction) Execute(ctx context.Context) error {
-	return drbdsetup.ExecuteDown(ctx, a.ResourceName)
+	err := drbdsetup.ExecuteDown(ctx, a.ResourceName)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDownFailed)
 }

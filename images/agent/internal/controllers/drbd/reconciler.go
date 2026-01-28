@@ -76,8 +76,10 @@ func (r *Reconciler) Reconcile(
 	)
 
 	iState, iErr = getIntendedState(rf.Ctx(), r.cl, dr, DefaultPortCache.Allocate)
+	iErr = ConfiguredReasonError(iErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 
 	aState, aErr = getActualState(rf.Ctx(), drbdResName)
+	aErr = ConfiguredReasonError(aErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 
 	// iState/aState will have `.IsZero() == true` in case of errors
 	tgtStateActions = computeTargetStateActions(iState, aState)
@@ -128,6 +130,7 @@ func (r *Reconciler) Reconcile(
 
 	if refreshActualNeeded {
 		aState, aErr2 = getActualState(rf.Ctx(), drbdResName)
+		aErr2 = ConfiguredReasonError(aErr2, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 	}
 
 	if patchNeeded {
@@ -144,8 +147,13 @@ func (r *Reconciler) Reconcile(
 	) || patchStatusNeeded
 
 	if patchStatusNeeded {
-		patchErr = errors.Join(patchErr, r.cl.Status().Patch(rf.Ctx(), dr, client.MergeFrom(base)))
-		err = errors.Join(err, patchErr)
+		statusPatchErr := r.cl.Status().Patch(rf.Ctx(), dr, client.MergeFrom(base))
+		// Ignore "not found" error if object was being deleted - it's expected
+		// when the finalizer removal caused garbage collection
+		if statusPatchErr != nil && !(dr.DeletionTimestamp != nil && client.IgnoreNotFound(statusPatchErr) == nil) {
+			patchErr = errors.Join(patchErr, statusPatchErr)
+			err = errors.Join(err, patchErr)
+		}
 	}
 
 	if err != nil {

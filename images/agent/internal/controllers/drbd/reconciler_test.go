@@ -543,15 +543,6 @@ func resourceOptionsCmd(resourceName string) *fakedrbdsetup.ExpectedCmd {
 	}
 }
 
-func fetchDRBDR(t *testing.T, cl client.Client, name string) *v1alpha1.DRBDResource {
-	t.Helper()
-	drbdr := &v1alpha1.DRBDResource{}
-	if err := cl.Get(t.Context(), types.NamespacedName{Name: name}, drbdr); err != nil {
-		t.Fatalf("getting DRBDResource %s: %v", name, err)
-	}
-	return drbdr
-}
-
 func expectFinalizers(t *testing.T, got []string, expected ...string) {
 	t.Helper()
 	if len(got) != len(expected) {
