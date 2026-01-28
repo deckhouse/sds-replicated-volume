@@ -120,6 +120,13 @@ func TestReconciler_Reconcile(t *testing.T) {
 					},
 				}),
 			},
+			postCheck: func(t *testing.T, cl client.Client) {
+				dr := &v1alpha1.DRBDResource{}
+				if err := cl.Get(t.Context(), types.NamespacedName{Name: testDRBDRName}, dr); err != nil {
+					t.Fatalf("failed to get DRBDResource: %v", err)
+				}
+				expectFinalizers(t, dr.Finalizers, v1alpha1.AgentFinalizer)
+			},
 		},
 		{
 			name:  "state up, drbd configured - queries status and show only",
@@ -561,7 +568,7 @@ func expectFinalizers(t *testing.T, got []string, expected ...string) {
 	}
 }
 
-func mustParseQuantity(s string) (q resource.Quantity) {
-	q, _ = resource.ParseQuantity(s)
-	return q
+func mustParseQuantity(s string) *resource.Quantity {
+	q, _ := resource.ParseQuantity(s)
+	return &q
 }

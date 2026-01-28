@@ -43,9 +43,9 @@ var ResourceOptionsArgs = func(resource string, opts ResourceOptions) []string {
 
 	if opts.AutoPromote != nil {
 		if *opts.AutoPromote {
-			args = append(args, "--auto-promote", "yes")
+			args = append(args, "--auto-promote=yes")
 		} else {
-			args = append(args, "--auto-promote", "no")
+			args = append(args, "--auto-promote=no")
 		}
 	}
 

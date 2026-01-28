@@ -609,7 +609,11 @@ func (in *DRBDResourceSpec) DeepCopyInto(out *DRBDResourceSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
-	out.Size = in.Size.DeepCopy()
+	if in.Size != nil {
+		in, out := &in.Size, &out.Size
+		x := (*in).DeepCopy()
+		*out = &x
+	}
 	if in.Peers != nil {
 		in, out := &in.Peers, &out.Peers
 		*out = make([]DRBDResourcePeer, len(*in))

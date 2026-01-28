@@ -8,26 +8,67 @@ Based on my analysis of the DRBD source code, here's a comprehensive **Caller's 
 
 # DRBDSETUP COMMAND CALLER'S GUIDE
 
-## Exit Codes (Common to All Commands)
+## Exit Code Mappings
 
-```
-0   (SS_SUCCESS / NO_ERROR) - Command succeeded
-101 (NO_ERROR)              - No error / Success
-102-180                     - Specific error codes (see below)
-900 (OTHER_ERROR)          - General error
-901 (ERR_MODULE_UNLOADED)  - DRBD kernel module not loaded
+**drbdsetup** commands return exit codes based on the operation result:
+
+- **`0`** - Success (NO_ERROR or SS_SUCCESS)
+- **`5`** - State change error: Lower than outdated
+- **`10`** - Kernel error (any ERR_CODE_BASE error from kernel, 100-170 range)
+- **`11`** - State change error (generic SS_ error)
+- **`16`** - State change error: No local disk
+- **`17`** - State change error: No up-to-date disk
+- **`20`** - Userspace error (OTHER_ERROR - invalid arguments, parsing errors, netlink failures, etc.)
+- **`121`** - DRBD kernel module not loaded
+
+Each command documents its specific exit codes below. Exit code `10` indicates a kernel error - check kernel logs or error message for the specific error code (102-170 range).
+
+---
+
+## OPTION SYNTAX RULES
+
+**CRITICAL:** Different option types require different syntax!
+
+### Boolean Options (use `=` or prefix):
+```bash
+# Method 1: Use equals sign
+--auto-promote=yes
+--auto-promote=no
+
+# Method 2: Use prefix for "no"
+--auto-promote        # sets to yes
+--no-auto-promote     # sets to no
+
+# ❌ WRONG - will cause "Excess arguments" error:
+--auto-promote yes
+--auto-promote no
 ```
 
-### Common Error Codes:
-- `119` - Meta-data not valid (need to initialize)
-- `124` - Disk already configured (detach first)
-- `125` - Network already configured (disconnect first)
-- `127` - Minor not allocated
-- `152` - Permission denied (need CAP_SYS_ADMIN)
-- `158` - Resource not known
-- `159` - Resource in use (delete minors first)
-- `160` - Minor still configured (down it first)
-- `161` - Minor or volume already exists
+**All boolean options:** `--auto-promote`, `--allow-two-primaries`, `--disk-barrier`, `--disk-flushes`, `--disk-drain`, `--md-flushes`, `--al-updates`, `--discard-zeroes-if-aligned`, `--disable-write-same`, `--always-asbp`, `--tcp-cork`, `--use-rle`, `--csums-after-crash-only`, `--allow-remote-read`, `--tls`, `--load-balance-paths`, `--bitmap`
+
+### Flag Options (use `=` or prefix):
+```bash
+# Flags work the same as booleans
+--force
+--tentative
+--diskless
+--discard-my-data
+```
+
+### Enum/Numeric/String Options (either syntax works):
+```bash
+# Both syntaxes work:
+--protocol=C              # With equals
+--protocol C              # With space
+
+--timeout=50              # With equals
+--timeout 50              # With space
+
+--on-no-data-accessible=suspend-io    # With equals
+--on-no-data-accessible suspend-io    # With space
+```
+
+**Best Practice:** Use `=` for ALL options to avoid confusion and ensure consistency.
 
 ---
 
@@ -46,24 +87,25 @@ drbdsetup new-resource <resource_name> <node_id> [options]
 - `node_id` - Numeric node ID (required, must be unique in cluster)
 
 **Options** (resource-options):
-- `--cpu-mask <mask>` - CPU affinity mask
-- `--on-no-data-accessible {io-error|suspend-io}` - Action when no data accessible
-- `--auto-promote {yes|no}` - Enable automatic promotion (default from kernel)
-- `--peer-ack-window <bytes>` - Peer acknowledgement window
-- `--peer-ack-delay <ms>` - Peer acknowledgement delay (milliseconds)
-- `--twopc-timeout <1/10s>` - Two-phase commit timeout
-- `--twopc-retry-timeout <1/10s>` - Two-phase commit retry timeout
-- `--auto-promote-timeout <1/10s>` - Auto-promote timeout
-- `--max-io-depth <num>` - Maximum I/O queue depth (nr_requests)
-- `--quorum {off|majority|all|<1-31>}` - Quorum setting
-- `--on-no-quorum {io-error|suspend-io}` - Action when no quorum
-- `--quorum-minimum-redundancy {off|majority|all|<1-31>}` - Minimum redundancy
-- `--on-suspended-primary-outdated {disconnect|force-secondary}` - Action on suspended primary outdated
+- `--cpu-mask=<mask>` (STRING) - CPU affinity mask
+- `--on-no-data-accessible={io-error|suspend-io}` (ENUM) - Action when no data accessible
+- `--auto-promote={yes|no}` (BOOLEAN) - Enable automatic promotion (default: yes)
+- `--peer-ack-window=<bytes>` (NUMERIC) - Peer acknowledgement window
+- `--peer-ack-delay=<ms>` (NUMERIC) - Peer acknowledgement delay (milliseconds)
+- `--twopc-timeout=<1/10s>` (NUMERIC) - Two-phase commit timeout
+- `--twopc-retry-timeout=<1/10s>` (NUMERIC) - Two-phase commit retry timeout
+- `--auto-promote-timeout=<1/10s>` (NUMERIC) - Auto-promote timeout
+- `--max-io-depth=<num>` (NUMERIC) - Maximum I/O queue depth (nr_requests)
+- `--quorum={off|majority|all|<1-31>}` (ENUM_NUM) - Quorum setting
+- `--on-no-quorum={io-error|suspend-io}` (ENUM) - Action when no quorum
+- `--quorum-minimum-redundancy={off|majority|all|<1-31>}` (ENUM_NUM) - Minimum redundancy
+- `--on-suspended-primary-outdated={disconnect|force-secondary}` (ENUM) - Action on suspended primary outdated
 
-**Exit Behavior:**
-- Success: `0` - Resource created
-- Failure: `161` - Resource already exists
-- Failure: `152` - Permission denied
+**Exit Codes:**
+- `0` - Resource created successfully
+- `10` - Kernel error (e.g., resource already exists, permission denied)
+- `20` - Invalid arguments or netlink communication failure
+- `121` - DRBD module not loaded
 
 **Notes:**
 - Must be first command when setting up a resource
@@ -87,9 +129,11 @@ drbdsetup resource-options <resource_name> [options]
 **Flags:**
 - `.set_defaults = true` - Can set default values explicitly
 
-**Exit Behavior:**
-- Success: `0` - Options updated
-- Failure: `158` - Resource not found
+**Exit Codes:**
+- `0` - Options updated successfully
+- `10` - Kernel error (e.g., resource not found, invalid option value)
+- `20` - Invalid arguments (incorrect option syntax, excess arguments)
+- `121` - DRBD module not loaded
 
 **Notes:**
 - Can change options on a running resource (most options)
@@ -115,9 +159,10 @@ drbdsetup down {<resource_name>|all}
 - `.missing_ok = true` - Succeeds even if resource doesn't exist
 - `.warn_on_missing = true` - Warns if resource not found
 
-**Exit Behavior:**
-- Success: `0` - Resource torn down (or didn't exist)
-- Failure: rare (command is very forgiving)
+**Exit Codes:**
+- `0` - Resource torn down successfully (or didn't exist - command is very forgiving)
+- `10` - Kernel error during teardown
+- `20` - Netlink communication failure
 
 **What it does (internally):**
 1. Lists all devices in the resource
@@ -152,14 +197,15 @@ drbdsetup new-minor <resource_name> <minor> <volume> [options]
 **Context:** `CTX_RESOURCE | CTX_MINOR | CTX_VOLUME | CTX_MULTIPLE_ARGUMENTS`
 
 **Options** (device-options):
-- `--max-bio-size <bytes>` - Maximum BIO size
-- `--diskless` - Mark as intentionally diskless
-- `--block-size <bytes>` - Block size for the device
+- `--max-bio-size=<bytes>` (NUMERIC) - Maximum BIO size
+- `--diskless` (FLAG) - Mark as intentionally diskless
+- `--block-size=<bytes>` (NUMERIC) - Block size for the device
 
-**Exit Behavior:**
-- Success: `0` - Minor created
-- Failure: `161` - Minor or volume already exists
-- Failure: `158` - Resource not found
+**Exit Codes:**
+- `0` - Minor created successfully
+- `10` - Kernel error (e.g., minor/volume already exists, resource not found)
+- `20` - Invalid arguments or netlink failure
+- `121` - DRBD module not loaded
 
 **Notes:**
 - Minor number must be unique system-wide
@@ -185,34 +231,26 @@ drbdsetup attach <minor> <lower_dev> <meta_dev> <meta_idx> [options]
 - `meta_idx` - Meta-data index (or "internal", "flexible")
 
 **Options** (disk-options + changeable):
-- `--size <bytes>` - DRBD device size
-- `--on-io-error {pass_on|call-local-io-error|detach}` - I/O error handling
-- `--disk-barrier {yes|no}` - Use disk barriers
-- `--disk-flushes {yes|no}` - Use disk flushes
-- `--disk-drain {yes|no}` - Drain before barrier
-- `--md-flushes {yes|no}` - Flush meta-data
-- `--resync-after <minor>` - Resync after this other minor
-- `--al-extents <num>` - Activity log extents (default: 1237)
-- `--al-updates {yes|no}` - Enable activity log updates
-- `--discard-zeroes-if-aligned {yes|no}` - Discard optimization
-- `--disable-write-same {yes|no}` - Disable WRITE_SAME
-- `--disk-timeout <1/10s>` - Disk timeout
-- `--read-balancing {prefer-local|prefer-remote|round-robin|least-pending|when-congested-remote|*K-striping}` - Read balancing policy
-- `--rs-discard-granularity <bytes>` - Resync discard granularity
+- `--size=<bytes>` (NUMERIC) - DRBD device size
+- `--on-io-error={pass_on|call-local-io-error|detach}` (ENUM) - I/O error handling
+- `--disk-barrier={yes|no}` (BOOLEAN) - Use disk barriers
+- `--disk-flushes={yes|no}` (BOOLEAN) - Use disk flushes
+- `--disk-drain={yes|no}` (BOOLEAN) - Drain before barrier
+- `--md-flushes={yes|no}` (BOOLEAN) - Flush meta-data
+- `--resync-after=<minor>` (NUMERIC) - Resync after this other minor
+- `--al-extents=<num>` (NUMERIC) - Activity log extents (default: 1237)
+- `--al-updates={yes|no}` (BOOLEAN) - Enable activity log updates
+- `--discard-zeroes-if-aligned={yes|no}` (BOOLEAN) - Discard optimization
+- `--disable-write-same={yes|no}` (BOOLEAN) - Disable WRITE_SAME
+- `--disk-timeout=<1/10s>` (NUMERIC) - Disk timeout
+- `--read-balancing={prefer-local|prefer-remote|round-robin|least-pending|when-congested-remote|*K-striping}` (ENUM) - Read balancing policy
+- `--rs-discard-granularity=<bytes>` (NUMERIC) - Resync discard granularity
 
-**Exit Behavior:**
-- Success: `0` - Device attached
-- Failure: `104` - Cannot open backing device
-- Failure: `105` - Cannot open meta device
-- Failure: `107/108` - Device not a block device
-- Failure: `111/112` - Device too small
-- Failure: `114/115` - Device already claimed (mounted?)
-- Failure: `116` - Invalid meta-data index
-- Failure: `118` - I/O error on meta-data
-- Failure: `119` - Meta-data invalid/uninitialized
-- Failure: `124` - Already attached (detach first)
-- Failure: `127` - Minor not allocated
-- Failure: `165` - Meta-data unclean (run apply-al)
+**Exit Codes:**
+- `0` - Device attached successfully
+- `10` - Kernel error (check message for specific error: cannot open device, device too small, already claimed, meta-data invalid, etc.)
+- `20` - Invalid arguments or netlink failure
+- `121` - DRBD module not loaded
 
 **Notes:**
 - Backing device must not be in use
@@ -237,11 +275,11 @@ drbdsetup disk-options <minor> [options]
 **Flags:**
 - `.set_defaults = true` - Can explicitly set defaults
 
-**Exit Behavior:**
-- Success: `0` - Options changed
-- Failure: `138` - No disk attached
-- Failure: `149` - Cannot change during verify
-- Failure: `148` - Cannot change csums during resync
+**Exit Codes:**
+- `0` - Options changed successfully
+- `10` - Kernel error (e.g., no disk attached, cannot change during verify/resync)
+- `20` - Invalid arguments
+- `121` - DRBD module not loaded
 
 **Notes:**
 - Can change most options online
@@ -265,52 +303,52 @@ drbdsetup new-peer <resource_name> <peer_node_id> [options]
 
 **Options** (net-options, both immutable and changeable):
 **Immutable:**
-- `--transport <name>` - Transport type (tcp, rdma, etc.)
-- `--load-balance-paths {yes|no}` - Load balance across multiple paths
+- `--transport=<name>` (STRING) - Transport type (tcp, rdma, etc.)
+- `--load-balance-paths={yes|no}` (BOOLEAN) - Load balance across multiple paths
 
 **Changeable:**
-- `--protocol {A|B|C}` - Replication protocol
-- `--timeout <1/10s>` - Network timeout
-- `--max-epoch-size <num>` - Maximum epoch size
-- `--connect-int <seconds>` - Connection retry interval
-- `--ping-int <seconds>` - Keepalive ping interval
-- `--sndbuf-size <bytes>` - Send buffer size
-- `--rcvbuf-size <bytes>` - Receive buffer size
-- `--ko-count <num>` - Keepalive timeout count
-- `--allow-two-primaries {yes|no}` - Allow dual-primary
-- `--cram-hmac-alg <algorithm>` - HMAC algorithm for authentication
-- `--shared-secret <secret>` - Shared secret for authentication
-- `--after-sb-0pri {disconnect|discard-younger-primary|discard-older-primary|discard-zero-changes|discard-least-changes|discard-local|discard-remote}` - Split-brain 0-primary recovery
-- `--after-sb-1pri {disconnect|consensus|violently-as0p|discard-secondary|call-pri-lost-after-sb}` - Split-brain 1-primary recovery
-- `--after-sb-2pri {disconnect|violently-as0p|call-pri-lost-after-sb}` - Split-brain 2-primary recovery
-- `--always-asbp {yes|no}` - Always apply after-split-brain policies
-- `--rr-conflict {disconnect|violently|call-pri-lost|retry-connect|auto-discard}` - Concurrent writes resolution
-- `--ping-timeout <1/10s>` - Ping timeout
-- `--data-integrity-alg <algorithm>` - Data integrity algorithm
-- `--tcp-cork {yes|no}` - TCP_CORK optimization
-- `--on-congestion {block|pull-ahead|disconnect}` - Congestion handling
-- `--congestion-fill <bytes>` - Congestion fill threshold
-- `--congestion-extents <num>` - Congestion extents threshold
-- `--csums-alg <algorithm>` - Checksum algorithm
-- `--csums-after-crash-only {yes|no}` - Only checksum after crash
-- `--verify-alg <algorithm>` - Online verify algorithm
-- `--use-rle {yes|no}` - Use run-length encoding
-- `--socket-check-timeout <1/10s>` - Socket check timeout
-- `--fencing {dont-care|resource-only|resource-and-stonith}` - Fencing policy
-- `--max-buffers <num>` - Maximum buffers
-- `--allow-remote-read {yes|no}` - Allow reading from secondary
-- `--tls {yes|no}` - Enable TLS
-- `--tls-keyring <keyring>` - TLS keyring ID
-- `--tls-privkey <key>` - TLS private key ID
-- `--tls-certificate <cert>` - TLS certificate ID
-- `--rdma-ctrl-rcvbuf-size <bytes>` - RDMA control receive buffer
-- `--rdma-ctrl-sndbuf-size <bytes>` - RDMA control send buffer
+- `--protocol={A|B|C}` (ENUM) - Replication protocol
+- `--timeout=<1/10s>` (NUMERIC) - Network timeout
+- `--max-epoch-size=<num>` (NUMERIC) - Maximum epoch size
+- `--connect-int=<seconds>` (NUMERIC) - Connection retry interval
+- `--ping-int=<seconds>` (NUMERIC) - Keepalive ping interval
+- `--sndbuf-size=<bytes>` (NUMERIC) - Send buffer size
+- `--rcvbuf-size=<bytes>` (NUMERIC) - Receive buffer size
+- `--ko-count=<num>` (NUMERIC) - Keepalive timeout count
+- `--allow-two-primaries={yes|no}` (BOOLEAN) - Allow dual-primary
+- `--cram-hmac-alg=<algorithm>` (STRING) - HMAC algorithm for authentication
+- `--shared-secret=<secret>` (STRING) - Shared secret for authentication
+- `--after-sb-0pri={disconnect|discard-younger-primary|discard-older-primary|discard-zero-changes|discard-least-changes|discard-local|discard-remote}` (ENUM) - Split-brain 0-primary recovery
+- `--after-sb-1pri={disconnect|consensus|violently-as0p|discard-secondary|call-pri-lost-after-sb}` (ENUM) - Split-brain 1-primary recovery
+- `--after-sb-2pri={disconnect|violently-as0p|call-pri-lost-after-sb}` (ENUM) - Split-brain 2-primary recovery
+- `--always-asbp={yes|no}` (BOOLEAN) - Always apply after-split-brain policies
+- `--rr-conflict={disconnect|violently|call-pri-lost|retry-connect|auto-discard}` (ENUM) - Concurrent writes resolution
+- `--ping-timeout=<1/10s>` (NUMERIC) - Ping timeout
+- `--data-integrity-alg=<algorithm>` (STRING) - Data integrity algorithm
+- `--tcp-cork={yes|no}` (BOOLEAN) - TCP_CORK optimization
+- `--on-congestion={block|pull-ahead|disconnect}` (ENUM) - Congestion handling
+- `--congestion-fill=<bytes>` (NUMERIC) - Congestion fill threshold
+- `--congestion-extents=<num>` (NUMERIC) - Congestion extents threshold
+- `--csums-alg=<algorithm>` (STRING) - Checksum algorithm
+- `--csums-after-crash-only={yes|no}` (BOOLEAN) - Only checksum after crash
+- `--verify-alg=<algorithm>` (STRING) - Online verify algorithm
+- `--use-rle={yes|no}` (BOOLEAN) - Use run-length encoding
+- `--socket-check-timeout=<1/10s>` (NUMERIC) - Socket check timeout
+- `--fencing={dont-care|resource-only|resource-and-stonith}` (ENUM) - Fencing policy
+- `--max-buffers=<num>` (NUMERIC) - Maximum buffers
+- `--allow-remote-read={yes|no}` (BOOLEAN) - Allow reading from secondary
+- `--tls={yes|no}` (BOOLEAN) - Enable TLS
+- `--tls-keyring=<keyring>` (KEY_SERIAL) - TLS keyring ID
+- `--tls-privkey=<key>` (KEY_SERIAL) - TLS private key ID
+- `--tls-certificate=<cert>` (KEY_SERIAL) - TLS certificate ID
+- `--rdma-ctrl-rcvbuf-size=<bytes>` (NUMERIC) - RDMA control receive buffer
+- `--rdma-ctrl-sndbuf-size=<bytes>` (NUMERIC) - RDMA control send buffer
 
-**Exit Behavior:**
-- Success: `0` - Peer created
-- Failure: `158` - Resource not found
-- Failure: `561` - Invalid peer node ID
-- Failure: `562` - Failed to create transport
+**Exit Codes:**
+- `0` - Peer created successfully
+- `10` - Kernel error (e.g., resource not found, invalid peer node ID, failed to create transport)
+- `20` - Invalid arguments or netlink failure
+- `121` - DRBD module not loaded
 
 **Notes:**
 - Peer must be created before adding paths or connecting
@@ -332,11 +370,13 @@ drbdsetup del-peer <resource_name> <peer_node_id> [options]
 - `peer_node_id` - Peer's node ID to remove
 
 **Options:**
-- `--force` - Force disconnect even if not cleanly possible
+- `--force` (FLAG) - Force disconnect even if not cleanly possible
 
-**Exit Behavior:**
-- Success: `0` - Peer removed
-- Failure: `158` - Resource not found
+**Exit Codes:**
+- `0` - Peer removed successfully
+- `10` - Kernel error (e.g., resource not found, peer still connected)
+- `20` - Invalid arguments or netlink failure
+- `121` - DRBD module not loaded
 
 **Notes:**
 - Connection must be disconnected first (unless --force)
@@ -358,9 +398,11 @@ drbdsetup forget-peer <resource_name> <peer_node_id>
 
 **Options:** None (other than the peer_node_id argument)
 
-**Exit Behavior:**
-- Success: `0` - Peer forgotten
-- Failure: `158` - Resource not found
+**Exit Codes:**
+- `0` - Peer forgotten successfully
+- `10` - Kernel error (e.g., resource not found, peer still connected)
+- `20` - Invalid arguments or netlink failure
+- `121` - DRBD module not loaded
 
 **Notes:**
 - **Destructive operation** - removes peer from meta-data
@@ -386,12 +428,11 @@ drbdsetup new-path <resource_name> <peer_node_id> <local_addr> <remote_addr>
 
 **Options:** None (path parameters only)
 
-**Exit Behavior:**
-- Success: `0` - Path added
-- Failure: `102` - Local address already in use
-- Failure: `103` - Remote address already in use
-- Failure: `563` - Address pair combination already in use
-- Failure: `564` - Already exists
+**Exit Codes:**
+- `0` - Path added successfully
+- `10` - Kernel error (e.g., address already in use, path already exists)
+- `20` - Invalid address format or netlink failure
+- `121` - DRBD module not loaded
 
 **Notes:**
 - Can add multiple paths for multi-path support
@@ -416,9 +457,11 @@ drbdsetup del-path <resource_name> <peer_node_id> <local_addr> <remote_addr>
 
 **Options:** None
 
-**Exit Behavior:**
-- Success: `0` - Path removed
-- Failure: `158` - Resource/path not found
+**Exit Codes:**
+- `0` - Path removed successfully
+- `10` - Kernel error (e.g., path not found)
+- `20` - Invalid arguments or netlink failure
+- `121` - DRBD module not loaded
 
 **Notes:**
 - Cannot remove last path while connected
@@ -439,14 +482,15 @@ drbdsetup connect <resource_name> <peer_node_id> [options]
 - `peer_node_id` - Peer's node ID to connect to
 
 **Options:**
-- `--tentative` - Tentative connection (for establishing initial handshake)
-- `--discard-my-data` - Discard local data in favor of peer's
+- `--tentative` (FLAG) - Tentative connection (for establishing initial handshake)
+- `--discard-my-data` (FLAG) - Discard local data in favor of peer's
 
-**Exit Behavior:**
-- Success: `0` - Connection initiated (async - doesn't wait for established)
-- Failure: `123` - --discard-my-data not allowed when primary
-- Failure: `158` - Resource not found
-- Failure: `151` - Need to be standalone
+**Exit Codes:**
+- `0` - Connection initiated successfully (asynchronous - doesn't wait for established)
+- `10` - Kernel error (e.g., --discard-my-data not allowed when primary, resource not found, need to be standalone)
+- `11` - State change error (connection state not allowing connect)
+- `20` - Invalid arguments or netlink failure
+- `121` - DRBD module not loaded
 
 **Notes:**
 - **Asynchronous** - returns immediately, connection happens in background
@@ -469,11 +513,14 @@ drbdsetup disconnect <resource_name> <peer_node_id> [options]
 - `peer_node_id` - Peer's node ID to disconnect from
 
 **Options:**
-- `--force` - Force disconnect immediately
+- `--force` (FLAG) - Force disconnect immediately
 
-**Exit Behavior:**
-- Success: `0` - Disconnection initiated
-- Failure: `158` - Resource not found
+**Exit Codes:**
+- `0` - Disconnection initiated successfully
+- `10` - Kernel error (e.g., resource not found)
+- `11` - State change error
+- `20` - Invalid arguments or netlink failure
+- `121` - DRBD module not loaded
 
 **Notes:**
 - Without --force: graceful disconnect (waits for pending I/O)
@@ -499,12 +546,11 @@ drbdsetup net-options <resource_name> <peer_node_id> [options]
 **Flags:**
 - `.set_defaults = true` - Can set defaults explicitly
 
-**Exit Behavior:**
-- Success: `0` - Options changed
-- Failure: `163` - Protocol version 100+ required for online changes
-- Failure: `164` - Cannot clear allow-two-primaries with both primaries
-- Failure: `149` - Cannot change verify-alg during verify
-- Failure: `148` - Cannot change csums-alg during resync
+**Exit Codes:**
+- `0` - Options changed successfully
+- `10` - Kernel error (e.g., protocol version too low, cannot change during verify/resync, cannot clear allow-two-primaries)
+- `20` - Invalid arguments
+- `121` - DRBD module not loaded
 
 **Notes:**
 - Most options can be changed while connected (requires protocol 100+)
@@ -527,20 +573,22 @@ drbdsetup peer-device-options <resource_name> <peer_node_id> <volume> [options]
 - `volume` - Volume number
 
 **Options:**
-- `--resync-rate <bytes/second>` - Resync rate limit
-- `--c-plan-ahead <1/10s>` - Controller planning ahead time
-- `--c-delay-target <1/10s>` - Controller delay target
-- `--c-fill-target <bytes>` - Controller fill target
-- `--c-max-rate <bytes/second>` - Controller maximum rate
-- `--c-min-rate <bytes/second>` - Controller minimum rate
-- `--bitmap {yes|no}` - Enable/disable bitmap tracking
+- `--resync-rate=<bytes/second>` (NUMERIC) - Resync rate limit
+- `--c-plan-ahead=<1/10s>` (NUMERIC) - Controller planning ahead time
+- `--c-delay-target=<1/10s>` (NUMERIC) - Controller delay target
+- `--c-fill-target=<bytes>` (NUMERIC) - Controller fill target
+- `--c-max-rate=<bytes/second>` (NUMERIC) - Controller maximum rate
+- `--c-min-rate=<bytes/second>` (NUMERIC) - Controller minimum rate
+- `--bitmap={yes|no}` (BOOLEAN) - Enable/disable bitmap tracking
 
 **Flags:**
 - `.set_defaults = true` - Can set defaults explicitly
 
-**Exit Behavior:**
-- Success: `0` - Options changed
-- Failure: `158` - Resource not found
+**Exit Codes:**
+- `0` - Options changed successfully
+- `10` - Kernel error (e.g., resource not found, invalid option value)
+- `20` - Invalid arguments
+- `121` - DRBD module not loaded
 
 **Notes:**
 - These options control resync behavior
@@ -578,7 +626,7 @@ drbdsetup peer-device-options <resource_name> <peer_node_id> <volume> [options]
 drbdsetup new-resource myres 1
 drbdsetup new-minor myres 0 0
 drbdsetup attach 0 /dev/sda1 /dev/sda2 0
-drbdsetup new-peer myres 2
+drbdsetup new-peer myres 2 --protocol=C
 drbdsetup new-path myres 2 192.168.1.1:7788 192.168.1.2:7788
 drbdsetup connect myres 2
 ```

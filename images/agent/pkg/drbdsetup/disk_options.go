@@ -44,9 +44,9 @@ var DiskOptionsArgs = func(minor uint, opts DiskOptions) []string {
 
 	if opts.DiscardZeroesIfAligned != nil {
 		if *opts.DiscardZeroesIfAligned {
-			args = append(args, "--discard-zeroes-if-aligned", "yes")
+			args = append(args, "--discard-zeroes-if-aligned=yes")
 		} else {
-			args = append(args, "--discard-zeroes-if-aligned", "no")
+			args = append(args, "--discard-zeroes-if-aligned=no")
 		}
 	}
 

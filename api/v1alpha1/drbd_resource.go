@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,14 +37,16 @@ import (
 // +kubebuilder:printcolumn:name="Quorum",type=boolean,JSONPath=".status.quorum"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName) > 0 : !has(self.spec.lvmLogicalVolumeName) || size(self.spec.lvmLogicalVolumeName) == 0",message="lvmLogicalVolumeName is required when type is Diskful and must be empty when type is Diskless"
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf.spec.size) || self.spec.size >= oldSelf.spec.size",message="spec.size cannot be decreased"
+// +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.size) : !has(self.spec.size)",message="size is required when type is Diskful and must be empty when type is Diskless"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.spec.size) || !has(self.spec.size) || self.spec.size >= oldSelf.spec.size",message="spec.size cannot be decreased"
 type DRBDResource struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`
 
 	Spec DRBDResourceSpec `json:"spec"`
 	// +patchStrategy=merge
-	Status DRBDResourceStatus `json:"status" patchStrategy:"merge"`
+	// +optional
+	Status DRBDResourceStatus `json:"status,omitempty" patchStrategy:"merge"`
 }
 
 // GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
@@ -63,6 +66,10 @@ func (d *DRBDResource) DRBDResourceNameOnTheNode() string {
 		return d.Spec.ActualNameOnTheNode
 	}
 	return fmt.Sprintf("sdsrv-%s", d.Name)
+}
+
+func ParseDRBDResourceNameOnTheNode(s string) (string, bool) {
+	return strings.CutPrefix(s, "sdsrv-")
 }
 
 // +kubebuilder:object:generate=true
@@ -100,8 +107,9 @@ type DRBDResourceSpec struct {
 	// +optional
 	QuorumMinimumRedundancy byte `json:"quorumMinimumRedundancy,omitempty"`
 
-	// +kubebuilder:validation:Required
-	Size resource.Quantity `json:"size"`
+	// Required when type is Diskful, must be empty when type is Diskless.
+	// +optional
+	Size *resource.Quantity `json:"size,omitempty"`
 
 	// +kubebuilder:validation:Enum=Primary;Secondary
 	// +optional

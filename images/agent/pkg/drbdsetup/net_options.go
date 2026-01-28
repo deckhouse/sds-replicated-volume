@@ -45,17 +45,17 @@ var NetOptionsArgs = func(resource string, peerNodeID uint, opts NetOptions) []s
 
 	if opts.AllowTwoPrimaries != nil {
 		if *opts.AllowTwoPrimaries {
-			args = append(args, "--allow-two-primaries", "yes")
+			args = append(args, "--allow-two-primaries=yes")
 		} else {
-			args = append(args, "--allow-two-primaries", "no")
+			args = append(args, "--allow-two-primaries=no")
 		}
 	}
 
 	if opts.AllowRemoteRead != nil {
 		if *opts.AllowRemoteRead {
-			args = append(args, "--allow-remote-read", "yes")
+			args = append(args, "--allow-remote-read=yes")
 		} else {
-			args = append(args, "--allow-remote-read", "no")
+			args = append(args, "--allow-remote-read=no")
 		}
 	}
 

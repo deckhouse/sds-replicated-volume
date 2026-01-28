@@ -84,7 +84,7 @@ func (r *Reconciler) Reconcile(
 	tgtStateActions = computeTargetStateActions(iState, aState)
 
 	var patchNeeded, patchStatusNeeded, refreshActualNeeded bool
-	original := client.MergeFrom(dr)
+	original := client.MergeFrom(dr.DeepCopy())
 
 	for len(tgtStateActions) > 0 {
 		switch ta := tgtStateActions[0].(type) {
@@ -112,7 +112,7 @@ func (r *Reconciler) Reconcile(
 			}
 
 			if resetOriginalNeeded {
-				original = client.MergeFrom(dr)
+				original = client.MergeFrom(dr.DeepCopy())
 			}
 
 			// execute

@@ -205,6 +205,8 @@ spec:
                 anyOf:
                 - type: integer
                 - type: string
+                description: Required when type is Diskful, must be empty when type
+                  is Diskless.
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
               state:
@@ -232,7 +234,6 @@ spec:
             required:
             - nodeID
             - nodeName
-            - size
             - systemNetworks
             type: object
           status:
@@ -434,7 +435,6 @@ spec:
         required:
         - metadata
         - spec
-        - status
         type: object
         x-kubernetes-validations:
         - message: lvmLogicalVolumeName is required when type is Diskful and must
@@ -442,8 +442,12 @@ spec:
           rule: 'self.spec.type == ''Diskful'' ? has(self.spec.lvmLogicalVolumeName)
             && size(self.spec.lvmLogicalVolumeName) > 0 : !has(self.spec.lvmLogicalVolumeName)
             || size(self.spec.lvmLogicalVolumeName) == 0'
+        - message: size is required when type is Diskful and must be empty when type
+            is Diskless
+          rule: 'self.spec.type == ''Diskful'' ? has(self.spec.size) : !has(self.spec.size)'
         - message: spec.size cannot be decreased
-          rule: '!has(oldSelf.spec.size) || self.spec.size >= oldSelf.spec.size'
+          rule: '!has(oldSelf.spec.size) || !has(self.spec.size) || self.spec.size
+            >= oldSelf.spec.size'
     served: true
     storage: true
     subresources:

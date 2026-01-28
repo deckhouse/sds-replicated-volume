@@ -136,6 +136,11 @@ func (s *Scanner) triggerAllResources(ctx context.Context) {
 
 // triggerReconciliation sends an event to trigger reconciliation for a specific resource.
 func (s *Scanner) triggerReconciliation(ctx context.Context, resourceName string) {
+	resourceName, nameFormatValid := v1alpha1.ParseDRBDResourceNameOnTheNode(resourceName)
+	if !nameFormatValid {
+		s.log.Debug("Resource has invalid name format, will be searching by ActualNameOnTheNode", "resourceName", resourceName)
+	}
+
 	// List DRBDResources to find the one matching the resource name
 	// The DRBD resource name in the API is derived from the DRBDResource.Name
 	drList := &v1alpha1.DRBDResourceList{}
@@ -150,18 +155,14 @@ func (s *Scanner) triggerReconciliation(ctx context.Context, resourceName string
 			continue
 		}
 
-		// TODO: Match by DRBD resource name. For now, trigger all resources on this node
-		// when any event is received. The actual matching will depend on how DRBD resource
-		// names are computed from DRBDResource objects.
-		if dr.Name == resourceName {
+		if dr.Spec.ActualNameOnTheNode == resourceName || (nameFormatValid && dr.Name == resourceName) {
 			s.sendEvent(ctx, dr)
 			return
 		}
 	}
 
 	// If not found by exact name, trigger all resources (fallback for initial implementation)
-	s.log.Debug("Resource not found by name, triggering all resources on node", "resourceName", resourceName)
-	s.triggerAllResources(ctx)
+	s.log.Warn("Resource not found by name", "resourceName", resourceName)
 }
 
 // sendEvent sends a generic event to trigger reconciliation.
