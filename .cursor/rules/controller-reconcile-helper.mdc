@@ -69,7 +69,7 @@ Category-specific conventions are defined in dedicated documents referenced in *
   - the **first argument after `ctx`** if the function accepts `ctx`.
   (root object = the full API object (`*<Kind>`), not `Spec`/`Status` or other sub-structs)
 - Additional inputs (computed flags, outputs of previous compute steps) MUST appear **after `obj`** to keep dependencies explicit.
-- If a **ReconcileHelper** returns **EnsureOutcome** (in code: `flow.EnsureOutcome`), it MUST be the **first return value**.
+- If a **ReconcileHelper** returns **EnsureOutcome** (in code: `flow.EnsureOutcome`), it MUST be the **last return value**.
   - It SHOULD be the only return value for convenience, unless additional return values are clearly justified.
 
 ### Flow phase scopes

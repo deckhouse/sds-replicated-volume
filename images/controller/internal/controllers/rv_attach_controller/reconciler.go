@@ -241,7 +241,7 @@ func computeActuallyAttachedTo(replicas []v1alpha1.ReplicatedVolumeReplica) []st
 //   - If attaching is allowed, we may add new nodes from RVA set (FIFO order, assuming rvas are sorted by creationTimestamp),
 //     but we keep at most 2 nodes in desiredAttachTo.
 //   - For Local volume access, new attachments are only allowed on nodes that have a Diskful replica according to
-//     ReplicatedVolumeReplica status.actualType.
+//     ReplicatedVolumeReplica status.effectiveType.
 //   - New attachments are not allowed on nodes whose replicas are marked for deletion.
 func computeDesiredAttachTo(
 	rv *v1alpha1.ReplicatedVolume,
@@ -293,7 +293,7 @@ func computeDesiredAttachTo(
 		}
 
 		// Add to nodesWithDiskfulReplicas to check if the node has a Diskful replica.
-		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.Status.ActualType == v1alpha1.ReplicaTypeDiskful {
+		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.Status.EffectiveType == v1alpha1.ReplicaTypeDiskful {
 			nodesWithDiskfulReplicas = append(nodesWithDiskfulReplicas, rvr.Spec.NodeName)
 		}
 	}
@@ -544,7 +544,7 @@ func (r *Reconciler) reconcileRVAStatus(
 	// For Local volume access, attachment is only possible when the requested node has a Diskful replica.
 	// If this is not satisfied, keep RVA in Pending (do not move to Attaching).
 	if sc.Spec.VolumeAccess == v1alpha1.VolumeAccessLocal {
-		if replicaOnNode == nil || replicaOnNode.Status.ActualType != v1alpha1.ReplicaTypeDiskful {
+		if replicaOnNode == nil || replicaOnNode.Status.EffectiveType != v1alpha1.ReplicaTypeDiskful {
 			desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhasePending
 			desiredAttachedCondition = metav1.Condition{
 				Status:  metav1.ConditionFalse,
@@ -590,7 +590,7 @@ func (r *Reconciler) reconcileRVAStatus(
 
 	// TieBreaker replica cannot be promoted directly; it must be converted first.
 	if replicaOnNode.Spec.Type == v1alpha1.ReplicaTypeTieBreaker ||
-		replicaOnNode.Status.ActualType == v1alpha1.ReplicaTypeTieBreaker {
+		replicaOnNode.Status.EffectiveType == v1alpha1.ReplicaTypeTieBreaker {
 		desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhaseAttaching
 		desiredAttachedCondition = metav1.Condition{
 			Status:  metav1.ConditionFalse,
@@ -880,10 +880,10 @@ func (r *Reconciler) reconcileRVR(
 
 	desiredPrimary := desiredPrimaryWanted
 
-	// We only request Primary on replicas that are actually Diskful or Access (by status.actualType).
+	// We only request Primary on replicas that are actually Diskful or Access (by status.effectiveType).
 	// This prevents trying to promote TieBreaker (or not-yet-initialized replicas).
 	if desiredPrimary {
-		if rvr.Status.ActualType != v1alpha1.ReplicaTypeDiskful && rvr.Status.ActualType != v1alpha1.ReplicaTypeAccess {
+		if rvr.Status.EffectiveType != v1alpha1.ReplicaTypeDiskful && rvr.Status.EffectiveType != v1alpha1.ReplicaTypeAccess {
 			desiredPrimary = false
 		}
 	}

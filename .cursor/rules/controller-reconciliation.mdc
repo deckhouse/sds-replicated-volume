@@ -34,10 +34,22 @@ It is a *layout* convention (not a behavioral contract), but it MUST be followed
 
 - **`reconciler.go`** MUST be organized top-to-bottom in **call-graph order**, keeping helpers from **Non-I/O helper categories** close to
   the **Reconcile method** that primarily uses/owns them.
-- The file SHOULD use explicit section comments to make boundaries obvious, e.g.:
-  - `// --- Reconcile: <name>`
-  - `// --- Helpers: <name> (Non-I/O helper categories)`
-  - `// --- Single-call I/O helper categories`
+- The file MUST use explicit section comments (frames) to make boundaries obvious.
+- Frame format (MUST):
+  ```
+  // ──────────────────────────────────────────────────────────────────────────────
+  // <Section title>
+  //
+  ```
+- Each **Reconcile method** MUST have its own frame section:
+  - Root `Reconcile`: `// Reconcile`
+  - Other reconcile methods: `// Reconcile: <name>`
+- Other major sections MUST also have frames:
+  - `// Wiring / construction`
+  - `// Helpers: Reconcile (non-I/O)` (if present)
+  - `// View types` (if present)
+  - `// Single-call I/O helper categories`
+- Within a frame section, subsections MAY use `// --- <name> ---` format for grouping (e.g., grouping helpers by kind)
 
 ### 1. Wiring / construction (MUST)
 
@@ -47,7 +59,8 @@ It is a *layout* convention (not a behavioral contract), but it MUST be followed
 
 ### 2. Reconcile methods in call-graph order (MUST)
 
-- The controller-runtime `Reconcile(ctx, req)` MUST appear before any other `reconcile*` / `Reconcile*` methods.
+- Each **Reconcile method** MUST have its own frame section (see "High-level rule" above).
+- The controller-runtime `Reconcile(ctx, req)` MUST appear first (after "Wiring / construction").
 - Other **Reconcile methods** MUST be declared in the order they are called.
   - If `Reconcile` calls `reconcileA(...)` and then `reconcileB(...)`, `reconcileA` MUST appear before `reconcileB`.
   - Sibling reconciles (called from the same parent) SHOULD appear in the same order as they appear at the call site.
@@ -240,7 +253,7 @@ Examples of required protections:
   - `Reconcile pattern:` `<PatternName>`
 
   Example (required format):
-  - `// Reconcile pattern: Conditional desired evaluation`
+  - `// Reconcile pattern: Conditional target evaluation`
 
 ---
 
@@ -253,6 +266,8 @@ Reconcile methods MUST be the only place that decides:
 - where child reconciliation calls are placed relative to patching.
 
 Single-call API writes may be delegated to helpers, but **the sequencing policy lives here**.
+
+When aggregating results from sub-reconciles or ensure helpers, **Reconcile methods** MAY use `outcome.DidChange()` and `outcome.OptimisticLockRequired()` (from **ReconcileOutcome** or **EnsureOutcome**) to make patch decisions.
 
 ---
 
@@ -351,7 +366,7 @@ ComputeTarget #1 → ComputeTarget #2 → ... → if !all isInSync → ObjCopy �
 
 Use when computing the target is cheap/necessary and the up-to-date check naturally depends on the computed target.
 
-### Pattern 3: Conditional desired evaluation
+### Pattern 3: Conditional target evaluation
 
 if ! isInSync → ObjCopy → Ensure OR (ComputeTarget + Apply) → Patch
 

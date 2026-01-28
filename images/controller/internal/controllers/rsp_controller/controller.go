@@ -39,10 +39,10 @@ const RSPControllerName = "rsp-controller"
 
 // BuildController registers the RSP controller with the manager.
 // It sets up watches on ReplicatedStoragePool, Node, LVMVolumeGroup, and agent Pod resources.
-func BuildController(mgr manager.Manager, podNamespace string) error {
+func BuildController(mgr manager.Manager, agentPodNamespace string) error {
 	cl := mgr.GetClient()
 
-	rec := NewReconciler(cl, mgr.GetLogger().WithName(RSPControllerName), podNamespace)
+	rec := NewReconciler(cl, mgr.GetLogger().WithName(RSPControllerName), agentPodNamespace)
 
 	return builder.ControllerManagedBy(mgr).
 		Named(RSPControllerName).
@@ -59,8 +59,8 @@ func BuildController(mgr manager.Manager, podNamespace string) error {
 		).
 		Watches(
 			&corev1.Pod{},
-			handler.EnqueueRequestsFromMapFunc(mapAgentPodToRSP(cl, podNamespace)),
-			builder.WithPredicates(agentPodPredicates(podNamespace)...),
+			handler.EnqueueRequestsFromMapFunc(mapAgentPodToRSP(cl, agentPodNamespace)),
+			builder.WithPredicates(agentPodPredicates(agentPodNamespace)...),
 		).
 		// TODO(systemnetwork): IMPORTANT! Watch NetworkNode resources and filter eligible nodes.
 		//

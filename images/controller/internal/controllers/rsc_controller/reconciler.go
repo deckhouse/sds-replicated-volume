@@ -75,13 +75,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Reconcile migration from RSP (deprecated storagePool field).
-	outcome := r.reconcileMigrationFromRSP(rf.Ctx(), rsc)
-	if outcome.ShouldReturn() {
-		return outcome.ToCtrl()
+	if rsc.Spec.StoragePool != "" {
+		if outcome := r.reconcileMigrationFromRSP(rf.Ctx(), rsc); outcome.ShouldReturn() {
+			return outcome.ToCtrl()
+		}
 	}
 
 	// Reconcile main (finalizer management).
-	outcome = r.reconcileMain(rf.Ctx(), rsc, rvs)
+	outcome := r.reconcileMain(rf.Ctx(), rsc, rvs)
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
 	}
@@ -98,23 +99,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 // reconcileMigrationFromRSP migrates StoragePool to spec.Storage.
 //
+// Precondition: rsc.Spec.StoragePool != "" (checked by caller)
+//
 // Reconcile pattern: Target-state driven
 //
 // Logic:
-//   - If storagePool is empty → Continue (nothing to migrate)
-//   - If storagePool set AND RSP not found → set conditions (Ready=False, StoragePoolReady=False), patch status, return Done
-//   - If storagePool set AND RSP found → copy type+lvmVolumeGroups to spec.storage, clear storagePool
+//   - If RSP not found → set conditions (Ready=False, StoragePoolReady=False), patch status, return Done
+//   - If RSP found → copy type+lvmVolumeGroups to spec.storage, clear storagePool
 func (r *Reconciler) reconcileMigrationFromRSP(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 ) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "migration-from-rsp")
+	rf := flow.BeginReconcile(ctx, "migration-from-rsp", "rsp", rsc.Spec.StoragePool)
 	defer rf.OnEnd(&outcome)
-
-	// Nothing to migrate.
-	if rsc.Spec.StoragePool == "" {
-		return rf.Continue()
-	}
 
 	rsp, err := r.getRSP(rf.Ctx(), rsc.Spec.StoragePool)
 	if err != nil {
@@ -232,7 +229,9 @@ func applyFinalizer(rsc *v1alpha1.ReplicatedStorageClass, targetPresent bool) {
 	}
 }
 
-// --- Reconcile: status ---
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: status
+//
 
 // reconcileStatus reconciles the RSC status.
 //
@@ -249,7 +248,7 @@ func (r *Reconciler) reconcileStatus(
 	targetStoragePoolName := computeTargetStoragePool(rsc)
 
 	// Ensure auto-generated RSP exists and is configured.
-	outcome, rsp := r.reconcileRSP(rf.Ctx(), rsc, targetStoragePoolName)
+	rsp, outcome := r.reconcileRSP(rf.Ctx(), rsc, targetStoragePoolName)
 	if outcome.ShouldReturn() {
 		return outcome
 	}
@@ -1020,32 +1019,34 @@ func applyStoragePool(rsc *v1alpha1.ReplicatedStorageClass, targetName string) b
 	return changed
 }
 
-// --- Reconcile: RSP ---
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: ReplicatedStoragePool (RSP)
+//
 
 // reconcileRSP ensures the auto-generated RSP exists and is properly configured.
 // Creates RSP if not found, updates finalizer and usedBy if needed.
 //
-// Reconcile pattern: Conditional desired evaluation
+// Reconcile pattern: Conditional target evaluation
 func (r *Reconciler) reconcileRSP(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 	targetStoragePoolName string,
-) (outcome flow.ReconcileOutcome, rsp *v1alpha1.ReplicatedStoragePool) {
-	rf := flow.BeginReconcile(ctx, "rsp")
+) (rsp *v1alpha1.ReplicatedStoragePool, outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "rsp", "rsp", targetStoragePoolName)
 	defer rf.OnEnd(&outcome)
 
 	// Get existing RSP.
 	var err error
 	rsp, err = r.getRSP(rf.Ctx(), targetStoragePoolName)
 	if err != nil {
-		return rf.Fail(err), nil
+		return nil, rf.Fail(err)
 	}
 
 	// If RSP doesn't exist, create it.
 	if rsp == nil {
 		rsp = newRSP(targetStoragePoolName, rsc)
 		if err := r.createRSP(rf.Ctx(), rsp); err != nil {
-			return rf.Fail(err), nil
+			return nil, rf.Fail(err)
 		}
 		// Continue to ensure usedBy is set below.
 	}
@@ -1055,7 +1056,7 @@ func (r *Reconciler) reconcileRSP(
 		base := rsp.DeepCopy()
 		applyRSPFinalizer(rsp, true)
 		if err := r.patchRSP(rf.Ctx(), rsp, base, true); err != nil {
-			return rf.Fail(err), nil
+			return nil, rf.Fail(err)
 		}
 	}
 
@@ -1064,11 +1065,11 @@ func (r *Reconciler) reconcileRSP(
 		base := rsp.DeepCopy()
 		applyRSPUsedBy(rsp, rsc.Name)
 		if err := r.patchRSPStatus(rf.Ctx(), rsp, base, true); err != nil {
-			return rf.Fail(err), nil
+			return nil, rf.Fail(err)
 		}
 	}
 
-	return rf.Continue(), rsp
+	return rsp, rf.Continue()
 }
 
 // reconcileUnusedRSPs releases storage pools that are no longer used by this RSC.
@@ -1108,7 +1109,7 @@ func (r *Reconciler) reconcileUnusedRSPs(
 // reconcileRSPRelease releases the RSP from this RSC.
 // Removes RSC from usedBy, and if no more users - deletes the RSP.
 //
-// Reconcile pattern: Conditional desired evaluation
+// Reconcile pattern: Conditional target evaluation
 func (r *Reconciler) reconcileRSPRelease(
 	ctx context.Context,
 	rscName string,
@@ -1160,7 +1161,7 @@ func (r *Reconciler) reconcileRSPRelease(
 
 // --- Helpers: Reconcile (non-I/O) ---
 
-// --- Helpers: RSP ---
+// --- Helpers: ReplicatedStoragePool (RSP) ---
 
 // newRSP constructs a new RSP from RSC spec.
 func newRSP(name string, rsc *v1alpha1.ReplicatedStorageClass) *v1alpha1.ReplicatedStoragePool {
