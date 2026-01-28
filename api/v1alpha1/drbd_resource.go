@@ -17,6 +17,9 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"fmt"
+	"strings"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -24,7 +27,7 @@ import (
 // +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster,shortName=dr
+// +kubebuilder:resource:scope=Cluster,shortName=drbdr
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=".spec.state"
@@ -34,18 +37,54 @@ import (
 // +kubebuilder:printcolumn:name="Quorum",type=boolean,JSONPath=".status.quorum"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName) > 0 : !has(self.spec.lvmLogicalVolumeName) || size(self.spec.lvmLogicalVolumeName) == 0",message="lvmLogicalVolumeName is required when type is Diskful and must be empty when type is Diskless"
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf.spec.size) || self.spec.size >= oldSelf.spec.size",message="spec.size cannot be decreased"
+// +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.size) : !has(self.spec.size)",message="size is required when type is Diskful and must be empty when type is Diskless"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.spec.size) || !has(self.spec.size) || self.spec.size >= oldSelf.spec.size",message="spec.size cannot be decreased"
 type DRBDResource struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`
 
 	Spec DRBDResourceSpec `json:"spec"`
 	// +patchStrategy=merge
-	Status *DRBDResourceStatus `json:"status,omitempty" patchStrategy:"merge"`
+	// +optional
+	Status DRBDResourceStatus `json:"status,omitempty" patchStrategy:"merge"`
+}
+
+// GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
+// It returns the root object's `.status.conditions`.
+func (d *DRBDResource) GetStatusConditions() []metav1.Condition {
+	return d.Status.Conditions
+}
+
+// SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
+// It sets the root object's `.status.conditions`.
+func (d *DRBDResource) SetStatusConditions(conditions []metav1.Condition) {
+	d.Status.Conditions = conditions
+}
+
+func (d *DRBDResource) DRBDResourceNameOnTheNode() string {
+	if d.Spec.ActualNameOnTheNode != "" {
+		return d.Spec.ActualNameOnTheNode
+	}
+	return fmt.Sprintf("sdsrv-%s", d.Name)
+}
+
+func ParseDRBDResourceNameOnTheNode(s string) (string, bool) {
+	return strings.CutPrefix(s, "sdsrv-")
 }
 
 // +kubebuilder:object:generate=true
 type DRBDResourceSpec struct {
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[0-9A-Za-z.+_-]*$`
+	// +optional
+	ActualNameOnTheNode string `json:"actualNameOnTheNode,omitempty"`
+
+	// +kubebuilder:validation:Enum=Up;Down
+	// +kubebuilder:default=Up
+	// +optional
+	State DRBDResourceState `json:"state,omitempty"`
+
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
@@ -59,24 +98,22 @@ type DRBDResourceSpec struct {
 	SystemNetworks []string `json:"systemNetworks"`
 
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=31
+	// +kubebuilder:validation:Maximum=32
 	// +optional
 	Quorum byte `json:"quorum,omitempty"`
 
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=31
+	// +kubebuilder:validation:Maximum=32
 	// +optional
 	QuorumMinimumRedundancy byte `json:"quorumMinimumRedundancy,omitempty"`
 
-	// +kubebuilder:validation:Enum=Up;Down
+	// Required when type is Diskful, must be empty when type is Diskless.
 	// +optional
-	State DRBDResourceState `json:"state,omitempty"`
-
-	// +kubebuilder:validation:Required
-	Size resource.Quantity `json:"size"`
+	Size *resource.Quantity `json:"size,omitempty"`
 
 	// +kubebuilder:validation:Enum=Primary;Secondary
 	// +optional
+	// +kubebuilder:default=Secondary
 	Role DRBDRole `json:"role,omitempty"`
 
 	// +kubebuilder:default=false
@@ -207,10 +244,6 @@ type DRBDResourceStatus struct {
 	// +optional
 	Addresses []DRBDResourceAddressStatus `json:"addresses,omitempty"`
 
-	// +kubebuilder:validation:Enum=Primary;Secondary
-	// +optional
-	Role DRBDRole `json:"role,omitempty"`
-
 	// +patchStrategy=merge
 	// +optional
 	ActiveConfiguration *DRBDResourceActiveConfiguration `json:"activeConfiguration,omitempty" patchStrategy:"merge"`
@@ -228,6 +261,13 @@ type DRBDResourceStatus struct {
 
 	// +optional
 	Quorum *bool `json:"quorum,omitempty"`
+
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 }
 
 // +kubebuilder:object:generate=true
@@ -306,6 +346,7 @@ type DRBDResourcePeerStatus struct {
 // +kubebuilder:object:generate=true
 type DRBDResourcePathStatus struct {
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=64
 	SystemNetworkName string `json:"systemNetworkName"`
 
