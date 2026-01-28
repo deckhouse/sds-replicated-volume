@@ -14,7 +14,7 @@ spec:
     listKind: DRBDResourceList
     plural: drbdresources
     shortNames:
-    - dr
+    - drbdr
     singular: drbdresource
   scope: Cluster
   versions:
@@ -63,6 +63,11 @@ spec:
             type: object
           spec:
             properties:
+              actualNameOnTheNode:
+                maxLength: 253
+                minLength: 1
+                pattern: ^[0-9A-Za-z.+_-]*$
+                type: string
               allowTwoPrimaries:
                 default: false
                 type: boolean
@@ -184,14 +189,15 @@ spec:
                 - name
                 x-kubernetes-list-type: map
               quorum:
-                maximum: 31
+                maximum: 32
                 minimum: 0
                 type: integer
               quorumMinimumRedundancy:
-                maximum: 31
+                maximum: 32
                 minimum: 0
                 type: integer
               role:
+                default: Secondary
                 description: DRBDRole represents the role of a DRBD resource.
                 enum:
                 - Primary
@@ -201,9 +207,12 @@ spec:
                 anyOf:
                 - type: integer
                 - type: string
+                description: Required when type is Diskful, must be empty when type
+                  is Diskless.
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
               state:
+                default: Up
                 description: DRBDResourceState represents the desired state of a DRBD
                   resource.
                 enum:
@@ -227,7 +236,6 @@ spec:
             required:
             - nodeID
             - nodeName
-            - size
             - systemNetworks
             type: object
           status:
@@ -295,6 +303,65 @@ spec:
                   type: object
                 maxItems: 32
                 type: array
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
               device:
                 description: |-
                   Device path, e.g. /dev/drbd10012 or /dev/sds-replicated/<rvrName>
@@ -338,6 +405,7 @@ spec:
                             type: boolean
                           systemNetworkName:
                             maxLength: 64
+                            minLength: 1
                             type: string
                         required:
                         - address
@@ -365,12 +433,6 @@ spec:
                 x-kubernetes-list-type: map
               quorum:
                 type: boolean
-              role:
-                description: DRBDRole represents the role of a DRBD resource.
-                enum:
-                - Primary
-                - Secondary
-                type: string
             type: object
         required:
         - metadata
@@ -382,12 +444,16 @@ spec:
           rule: 'self.spec.type == ''Diskful'' ? has(self.spec.lvmLogicalVolumeName)
             && size(self.spec.lvmLogicalVolumeName) > 0 : !has(self.spec.lvmLogicalVolumeName)
             || size(self.spec.lvmLogicalVolumeName) == 0'
-        - message: spec.size cannot be decreased
-          rule: '!has(oldSelf.spec.size) || self.spec.size >= oldSelf.spec.size'
         - message: DRBDResource name must match its ReplicatedVolumeReplica owner
             name
           rule: '!has(self.metadata.ownerReferences) || self.metadata.ownerReferences.all(ref,
             ref.kind != ''ReplicatedVolumeReplica'' || ref.name == self.metadata.name)'
+        - message: size is required when type is Diskful and must be empty when type
+            is Diskless
+          rule: 'self.spec.type == ''Diskful'' ? has(self.spec.size) : !has(self.spec.size)'
+        - message: spec.size cannot be decreased
+          rule: '!has(oldSelf.spec.size) || !has(self.spec.size) || self.spec.size
+            >= oldSelf.spec.size'
     served: true
     storage: true
     subresources:
