@@ -50,10 +50,10 @@ type VolumeMain struct {
 	client         *kubeutils.Client
 	log            *slog.Logger
 
-	// Disable flags for sub-runners
-	disableVolumeResizer          bool
-	disableVolumeReplicaDestroyer bool
-	disableVolumeReplicaCreator   bool
+	// Enable flags for sub-runners
+	enableVolumeResizer          bool
+	enableVolumeReplicaDestroyer bool
+	enableVolumeReplicaCreator   bool
 
 	// Tracking running volumes
 	runningSubRunners atomic.Int32
@@ -88,22 +88,22 @@ func NewVolumeMain(
 	forceCleanupChan <-chan struct{},
 ) *VolumeMain {
 	return &VolumeMain{
-		rvName:                        rvName,
-		storageClass:                  cfg.StorageClassName,
-		volumeLifetime:                cfg.VolumeLifetime,
-		initialSize:                   cfg.InitialSize,
-		client:                        client,
-		log:                           slog.Default().With("runner", "volume-main", "rv_name", rvName, "storage_class", cfg.StorageClassName, "volume_lifetime", cfg.VolumeLifetime),
-		disableVolumeResizer:          cfg.DisableVolumeResizer,
-		disableVolumeReplicaDestroyer: cfg.DisableVolumeReplicaDestroyer,
-		disableVolumeReplicaCreator:   cfg.DisableVolumeReplicaCreator,
-		createdRVCount:                createdRVCount,
-		totalCreateRVTime:             totalCreateRVTime,
-		totalDeleteRVTime:             totalDeleteRVTime,
-		totalWaitForRVReadyTime:       totalWaitForRVReadyTime,
-		createRVErrorCount:            createRVErrorCount,
-		registerCheckerStats:          registerCheckerStats,
-		forceCleanupChan:              forceCleanupChan,
+		rvName:                       rvName,
+		storageClass:                 cfg.StorageClassName,
+		volumeLifetime:               cfg.VolumeLifetime,
+		initialSize:                  cfg.InitialSize,
+		client:                       client,
+		log:                          slog.Default().With("runner", "volume-main", "rv_name", rvName, "storage_class", cfg.StorageClassName, "volume_lifetime", cfg.VolumeLifetime),
+		enableVolumeResizer:          cfg.EnableVolumeResizer,
+		enableVolumeReplicaDestroyer: cfg.EnableVolumeReplicaDestroyer,
+		enableVolumeReplicaCreator:   cfg.EnableVolumeReplicaCreator,
+		createdRVCount:               createdRVCount,
+		totalCreateRVTime:            totalCreateRVTime,
+		totalDeleteRVTime:            totalDeleteRVTime,
+		totalWaitForRVReadyTime:      totalWaitForRVReadyTime,
+		createRVErrorCount:           createRVErrorCount,
+		registerCheckerStats:         registerCheckerStats,
+		forceCleanupChan:             forceCleanupChan,
 	}
 }
 
@@ -397,10 +397,10 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 	}()
 
 	// Start replica destroyer
-	if v.disableVolumeReplicaDestroyer {
+	if !v.enableVolumeReplicaDestroyer {
 		v.log.Debug("volume-replica-destroyer runner is disabled")
 	} else {
-		v.log.Debug("volume-replica-destroyer runner is enabled")
+		v.log.Info("volume-replica-destroyer runner is enabled")
 		replicaDestroyerCfg := config.VolumeReplicaDestroyerConfig{
 			Period: config.DurationMinMax{
 				Min: time.Duration(replicaDestroyerPeriodMinMax[0]) * time.Second,
@@ -421,10 +421,10 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 	}
 
 	// Start replica creator
-	if v.disableVolumeReplicaCreator {
+	if !v.enableVolumeReplicaCreator {
 		v.log.Debug("volume-replica-creator runner is disabled")
 	} else {
-		v.log.Debug("volume-replica-creator runner is enabled")
+		v.log.Info("volume-replica-creator runner is enabled")
 		replicaCreatorCfg := config.VolumeReplicaCreatorConfig{
 			Period: config.DurationMinMax{
 				Min: time.Duration(replicaCreatorPeriodMinMax[0]) * time.Second,
@@ -445,10 +445,10 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 	}
 
 	// Start resizer
-	if v.disableVolumeResizer {
+	if !v.enableVolumeResizer {
 		v.log.Debug("volume-resizer runner is disabled")
 	} else {
-		v.log.Debug("volume-resizer runner is enabled")
+		v.log.Info("volume-resizer runner is enabled")
 		volumeResizerCfg := config.VolumeResizerConfig{
 			Period: config.DurationMinMax{
 				Min: time.Duration(volumeResizerPeriodMinMax[0]) * time.Second,
