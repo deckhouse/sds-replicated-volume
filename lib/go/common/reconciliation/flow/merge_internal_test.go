@@ -22,41 +22,42 @@ import (
 	"testing"
 )
 
-func TestReconcileOutcome_ErrWithoutResult_IsClassifiedAsInvalidKind(t *testing.T) {
+func TestReconcileOutcome_ErrOnly_IsClassifiedAsFail(t *testing.T) {
+	// An outcome with error is classified as "Fail"
 	kind, _ := reconcileOutcomeKind(&ReconcileOutcome{err: errors.New("e")})
-	if kind != "invalid" {
-		t.Fatalf("expected kind=invalid, got %q", kind)
+	if kind != "Fail" {
+		t.Fatalf("expected kind=fail, got %q", kind)
 	}
 }
 
-func TestReconcileFlow_OnEnd_ErrWithoutResult_DoesNotPanic(_ *testing.T) {
+func TestReconcileFlow_OnEnd_ErrOnly_DoesNotPanic(_ *testing.T) {
 	rf := BeginReconcile(context.Background(), "p")
 	o := ReconcileOutcome{err: errors.New("e")}
 	rf.OnEnd(&o)
 }
 
-func TestMergeReconciles_RequeueIsSupported(t *testing.T) {
+func TestMergeReconciles_DoneAndRequeueIsSupported(t *testing.T) {
 	rf := BeginRootReconcile(context.Background())
-	outcome := MergeReconciles(rf.Requeue(), rf.Continue())
+	outcome := MergeReconciles(rf.DoneAndRequeue(), rf.Continue())
 
 	if !outcome.ShouldReturn() {
-		t.Fatalf("expected ShouldReturn() == true")
+		t.Fatalf("expected ShouldReturn() == true (terminal wins)")
 	}
 
 	res, err := outcome.ToCtrl()
 	if err != nil {
 		t.Fatalf("expected err to be nil, got %v", err)
 	}
-	if !res.Requeue { //nolint:staticcheck // testing deprecated Requeue field
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
 		t.Fatalf("expected Requeue to be true")
 	}
 }
 
-func TestMergeReconciles_RequeueWinsOverRequeueAfter(t *testing.T) {
+func TestMergeReconciles_DoneAndRequeueWinsOverDoneAndRequeueAfter(t *testing.T) {
 	rf := BeginRootReconcile(context.Background())
-	// Requeue() = delay 0, RequeueAfter(5) = delay 5.
-	// Minimum delay wins, so Requeue() wins.
-	outcome := MergeReconciles(rf.Requeue(), rf.RequeueAfter(5))
+	// DoneAndRequeue() = delay 0, DoneAndRequeueAfter(5) = delay 5.
+	// Minimum delay wins, so DoneAndRequeue() wins.
+	outcome := MergeReconciles(rf.DoneAndRequeue(), rf.DoneAndRequeueAfter(5))
 
 	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")
@@ -66,7 +67,46 @@ func TestMergeReconciles_RequeueWinsOverRequeueAfter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected err to be nil, got %v", err)
 	}
-	if !res.Requeue { //nolint:staticcheck // testing deprecated Requeue field
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
+		t.Fatalf("expected Requeue to be true (delay=0 wins)")
+	}
+	if res.RequeueAfter != 0 {
+		t.Fatalf("expected RequeueAfter to be 0 when Requeue is set, got %v", res.RequeueAfter)
+	}
+}
+
+func TestMergeReconciles_ContinueAndRequeueIsSupported(t *testing.T) {
+	rf := BeginRootReconcile(context.Background())
+	outcome := MergeReconciles(rf.ContinueAndRequeue(), rf.Continue())
+
+	if outcome.ShouldReturn() {
+		t.Fatalf("expected ShouldReturn() == false (non-terminal)")
+	}
+
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected err to be nil, got %v", err)
+	}
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
+		t.Fatalf("expected Requeue to be true")
+	}
+}
+
+func TestMergeReconciles_ContinueAndRequeueWinsOverContinueAndRequeueAfter(t *testing.T) {
+	rf := BeginRootReconcile(context.Background())
+	// ContinueAndRequeue() = delay 0, ContinueAndRequeueAfter(5) = delay 5.
+	// Minimum delay wins.
+	outcome := MergeReconciles(rf.ContinueAndRequeue(), rf.ContinueAndRequeueAfter(5))
+
+	if outcome.ShouldReturn() {
+		t.Fatalf("expected ShouldReturn() == false (non-terminal)")
+	}
+
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected err to be nil, got %v", err)
+	}
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
 		t.Fatalf("expected Requeue to be true (delay=0 wins)")
 	}
 	if res.RequeueAfter != 0 {
