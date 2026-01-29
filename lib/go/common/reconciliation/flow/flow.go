@@ -199,7 +199,7 @@ func getPhaseContext(ctx context.Context) (phaseContextValue, bool) {
 //
 // Use it to:
 // - get a phase-scoped ctx/logger (`Ctx()`/`Log()`),
-// - construct ReconcileOutcome values (`Continue/Done/Requeue/RequeueAfter/Fail`),
+// - construct ReconcileOutcome values (`Continue/Done/DoneAndRequeue/DoneAndRequeueAfter/ContinueAndRequeue/ContinueAndRequeueAfter/Fail`),
 // - and to standardize phase end handling via `defer rf.OnEnd(&outcome)` in non-root reconciles.
 type ReconcileFlow struct {
 	ctx context.Context
@@ -294,40 +294,69 @@ func (rf ReconcileFlow) OnEnd(out *ReconcileOutcome) {
 	rf.log.V(1).Info("phase end", fields...)
 }
 
-// Continue indicates “keep executing” within the current Reconcile method.
+// Continue indicates "keep executing" within the current Reconcile method.
 // `ShouldReturn()` is false.
 func (rf ReconcileFlow) Continue() ReconcileOutcome {
-	return ReconcileOutcome{}
+	return ReconcileOutcome{terminal: false}
 }
 
-// Done indicates “stop and return; do not requeue”.
+// Done indicates "stop and return; do not requeue".
 // `ShouldReturn()` is true.
 func (rf ReconcileFlow) Done() ReconcileOutcome {
-	return ReconcileOutcome{result: &ctrl.Result{}}
+	return ReconcileOutcome{terminal: true}
 }
 
-// Requeue indicates “stop and return; requeue immediately”.
+// DoneAndRequeue indicates "stop and return; requeue immediately".
 // `ShouldReturn()` is true.
-func (rf ReconcileFlow) Requeue() ReconcileOutcome {
-	return ReconcileOutcome{result: &ctrl.Result{Requeue: true}}
+//
+// Use this when you want to stop processing immediately and schedule an immediate requeue
+// (e.g., all changes are already persisted, or no further steps are needed).
+func (rf ReconcileFlow) DoneAndRequeue() ReconcileOutcome {
+	return ReconcileOutcome{terminal: true, requeueIntent: &ctrl.Result{Requeue: true}}
 }
 
-// RequeueAfter indicates “stop and return; requeue after d”.
+// DoneAndRequeueAfter indicates "stop and return; requeue after d".
 // `ShouldReturn()` is true.
-func (rf ReconcileFlow) RequeueAfter(d time.Duration) ReconcileOutcome {
+//
+// Use this when you want to stop processing immediately and schedule a delayed requeue
+// (e.g., all changes are already persisted, or no further steps are needed).
+func (rf ReconcileFlow) DoneAndRequeueAfter(d time.Duration) ReconcileOutcome {
 	if d <= 0 {
-		panic("flow: RequeueAfter: duration must be > 0")
+		panic("flow: DoneAndRequeueAfter: duration must be > 0")
 	}
-	return ReconcileOutcome{result: &ctrl.Result{RequeueAfter: d}}
+	return ReconcileOutcome{terminal: true, requeueIntent: &ctrl.Result{RequeueAfter: d}}
 }
 
-// Fail indicates “stop and return with error”.
+// ContinueAndRequeue indicates "remember requeue intent, but keep processing".
+// `ShouldReturn()` is false.
+//
+// Use this when you need to schedule an immediate requeue but want reconciliation
+// to continue (e.g., to run subsequent reconcile steps, persist accumulated changes,
+// or perform cleanup before returning).
+func (rf ReconcileFlow) ContinueAndRequeue() ReconcileOutcome {
+	return ReconcileOutcome{terminal: false, requeueIntent: &ctrl.Result{Requeue: true}}
+}
+
+// ContinueAndRequeueAfter indicates "remember requeue intent with delay, but keep processing".
+// `ShouldReturn()` is false.
+//
+// Use this when you need to schedule a delayed requeue but want reconciliation
+// to continue (e.g., to run subsequent reconcile steps, persist accumulated changes,
+// or perform cleanup before returning).
+func (rf ReconcileFlow) ContinueAndRequeueAfter(d time.Duration) ReconcileOutcome {
+	if d <= 0 {
+		panic("flow: ContinueAndRequeueAfter: duration must be > 0")
+	}
+	return ReconcileOutcome{terminal: false, requeueIntent: &ctrl.Result{RequeueAfter: d}}
+}
+
+// Fail indicates "stop and return with error".
 // `ShouldReturn()` is true.
 func (rf ReconcileFlow) Fail(err error) ReconcileOutcome {
 	if err == nil {
 		panic("flow: Fail: nil error")
 	}
-	return ReconcileOutcome{result: &ctrl.Result{}, err: err}
+	return ReconcileOutcome{terminal: true, err: err}
 }
 
 // Failf is a convenience wrapper around `Fail(Wrapf(...))`.
@@ -348,7 +377,7 @@ func (rf ReconcileFlow) DoneOrFail(err error) ReconcileOutcome {
 //
 // Typical usage is:
 // - declare `outcome flow.ReconcileOutcome` as a named return,
-// - return `rf.Continue()/Done()/Requeue.../Fail...`,
+// - return `rf.Continue()/Done()/DoneAndRequeue.../ContinueAndRequeue.../Fail...`,
 // - and use `outcome.ShouldReturn()` at intermediate boundaries to early-exit.
 //
 // ReconcileOutcome also supports change tracking and optimistic lock requirements,
@@ -356,8 +385,15 @@ func (rf ReconcileFlow) DoneOrFail(err error) ReconcileOutcome {
 // - use `ReportChanged()`/`ReportChangedIf(cond)` to mark changes,
 // - use `RequireOptimisticLock()` to indicate optimistic locking is needed,
 // - use `DidChange()` and `OptimisticLockRequired()` to query the state.
+//
+// Terminal vs non-terminal outcomes:
+//   - Terminal outcomes (Done*, Fail) have ShouldReturn() = true — stop processing now.
+//   - Non-terminal outcomes (Continue*) have ShouldReturn() = false — keep processing.
+//   - ContinueAndRequeue* variants remember requeue intent without stopping processing,
+//     allowing reconciliation to continue before returning.
 type ReconcileOutcome struct {
-	result         *ctrl.Result
+	terminal       bool         // true for Done*/Fail (ShouldReturn = true)
+	requeueIntent  *ctrl.Result // requeue info for ContinueAndRequeue* variants
 	err            error
 	errorLogged    bool
 	changeState    changeState
@@ -365,7 +401,10 @@ type ReconcileOutcome struct {
 }
 
 // ShouldReturn reports whether the caller should return from the current Reconcile method.
-func (o ReconcileOutcome) ShouldReturn() bool { return o.result != nil }
+//
+// Returns true only for terminal outcomes (Done*, Fail).
+// Returns false for non-terminal outcomes (Continue*), even if they have requeue intent.
+func (o ReconcileOutcome) ShouldReturn() bool { return o.terminal }
 
 // Error returns the error carried by the outcome, if any.
 func (o ReconcileOutcome) Error() error { return o.err }
@@ -384,23 +423,21 @@ func (o ReconcileOutcome) Enrichf(format string, args ...any) ReconcileOutcome {
 }
 
 // ToCtrl converts ReconcileOutcome to controller-runtime return values.
-//
-// For Continue (result=nil), this returns `(ctrl.Result{}, nil)` (or `(ctrl.Result{}, err)` if you built an invalid outcome).
-// For non-Continue outcomes, this returns the explicit ctrl.Result + error.
+// Requeue intent (if any) is reflected in ctrl.Result; error (if any) is returned as-is.
 func (o ReconcileOutcome) ToCtrl() (ctrl.Result, error) {
-	if o.result == nil {
-		return ctrl.Result{}, o.err
+	if o.requeueIntent != nil {
+		return *o.requeueIntent, o.err
 	}
-	return *o.result, o.err
+	return ctrl.Result{}, o.err
 }
 
 // MustToCtrl converts ReconcileOutcome to controller-runtime return values.
-// It panics if called on Continue.
+// It panics if called on Continue (non-terminal without requeue intent).
 func (o ReconcileOutcome) MustToCtrl() (ctrl.Result, error) {
-	if o.result == nil {
-		panic("flow: ReconcileOutcome.MustToCtrl: result is nil (Continue)")
+	if !o.terminal && o.requeueIntent == nil {
+		panic("flow: ReconcileOutcome.MustToCtrl: called on Continue (non-terminal without requeue)")
 	}
-	return *o.result, o.err
+	return o.ToCtrl()
 }
 
 // Merge combines this outcome with others and returns the merged result.
@@ -478,9 +515,10 @@ func (o ReconcileOutcome) WithChangeFrom(eo EnsureOutcome) ReconcileOutcome {
 // Use this when you intentionally want to run multiple independent steps and then aggregate the decision.
 //
 // Rules (high-level):
-// - Errors are joined via errors.Join (any error makes the merged outcome a Fail).
-// - Requeue/RequeueAfter: treat Requeue as delay=0, RequeueAfter(d) as delay=d, pick minimum delay.
-// - Done wins over Continue.
+// - Terminal outcomes win over non-terminal.
+// - Errors are joined via errors.Join (any error makes the merged outcome a Fail — terminal).
+// - Among terminals: errors first, then requeue (min delay wins), then Done.
+// - Among non-terminals: requeue intent is merged (min delay wins).
 // - Change/lock intent is merged deterministically (strongest wins).
 //
 // Example:
@@ -492,18 +530,15 @@ func MergeReconciles(outcomes ...ReconcileOutcome) ReconcileOutcome {
 		return ReconcileOutcome{}
 	}
 
-	const (
-		noDelay        time.Duration = -1 // sentinel: no requeue requested
-		immediateDelay time.Duration = 0  // Requeue() means delay=0
-	)
-
+	const noDelay time.Duration = -1
 	var (
-		hasReconcileResult bool
-		minDelay           = noDelay
-		errs               []error
-		allErrorsLogged    = true
-		maxChangeState     changeState
-		anyChangeReported  bool
+		errs              []error
+		allErrorsLogged   = true
+		maxChangeState    changeState
+		anyChangeReported bool
+		hasTerminal       bool
+		terminalDelay     = noDelay
+		nonTerminalDelay  = noDelay
 	)
 
 	for _, o := range outcomes {
@@ -511,76 +546,64 @@ func MergeReconciles(outcomes ...ReconcileOutcome) ReconcileOutcome {
 			errs = append(errs, o.err)
 			allErrorsLogged = allErrorsLogged && o.errorLogged
 		}
-
-		// Merge change tracking state.
 		anyChangeReported = anyChangeReported || o.changeReported
 		if o.changeState > maxChangeState {
 			maxChangeState = o.changeState
 		}
 
-		if o.result == nil {
-			continue
-		}
-		hasReconcileResult = true
-
-		// Compute delay for this outcome: Requeue → 0, RequeueAfter(d) → d
-		delay := noDelay
-		if o.result.Requeue { //nolint:staticcheck // handling deprecated Requeue field for backward compatibility
-			delay = immediateDelay
-		} else if o.result.RequeueAfter > 0 {
-			delay = o.result.RequeueAfter
-		}
-
-		// Pick minimum delay (noDelay means "no requeue requested")
-		if delay != noDelay {
-			if minDelay == noDelay || delay < minDelay {
-				minDelay = delay
+		delay := requeueDelay(o.requeueIntent)
+		if o.terminal {
+			hasTerminal = true
+			if delay >= 0 && (terminalDelay < 0 || delay < terminalDelay) {
+				terminalDelay = delay
 			}
+		} else if delay >= 0 && (nonTerminalDelay < 0 || delay < nonTerminalDelay) {
+			nonTerminalDelay = delay
 		}
 	}
 
-	combinedErr := errors.Join(errs...)
-
-	// 1) Fail: if there are errors.
-	if combinedErr != nil {
-		return ReconcileOutcome{
-			result:         &ctrl.Result{},
-			err:            combinedErr,
-			errorLogged:    allErrorsLogged,
-			changeState:    maxChangeState,
-			changeReported: anyChangeReported,
-		}
-	}
-
-	// 2) Requeue/RequeueAfter: minDelay wins.
-	if minDelay == immediateDelay {
-		return ReconcileOutcome{
-			result:         &ctrl.Result{Requeue: true},
-			changeState:    maxChangeState,
-			changeReported: anyChangeReported,
-		}
-	}
-	if minDelay > immediateDelay {
-		return ReconcileOutcome{
-			result:         &ctrl.Result{RequeueAfter: minDelay},
-			changeState:    maxChangeState,
-			changeReported: anyChangeReported,
-		}
-	}
-
-	// 3) Done: at least one non-nil result (no requeue requested).
-	if hasReconcileResult {
-		return ReconcileOutcome{
-			result:         &ctrl.Result{},
-			changeState:    maxChangeState,
-			changeReported: anyChangeReported,
-		}
-	}
-
-	// 4) Continue.
-	return ReconcileOutcome{
+	result := ReconcileOutcome{
 		changeState:    maxChangeState,
 		changeReported: anyChangeReported,
+	}
+	if err := errors.Join(errs...); err != nil {
+		result.terminal = true
+		result.err = err
+		result.errorLogged = allErrorsLogged
+		return result
+	}
+	if hasTerminal {
+		result.terminal = true
+		result.requeueIntent = delayToRequeueIntent(terminalDelay)
+		return result
+	}
+	result.requeueIntent = delayToRequeueIntent(nonTerminalDelay)
+	return result
+}
+
+// requeueDelay extracts delay from requeueIntent: -1 = none, 0 = immediate, >0 = delayed.
+func requeueDelay(r *ctrl.Result) time.Duration {
+	if r == nil {
+		return -1
+	}
+	if r.Requeue { //nolint:staticcheck // handling Requeue field
+		return 0
+	}
+	if r.RequeueAfter > 0 {
+		return r.RequeueAfter
+	}
+	return -1
+}
+
+// delayToRequeueIntent converts delay back to requeueIntent.
+func delayToRequeueIntent(d time.Duration) *ctrl.Result {
+	switch {
+	case d < 0:
+		return nil
+	case d == 0:
+		return &ctrl.Result{Requeue: true}
+	default:
+		return &ctrl.Result{RequeueAfter: d}
 	}
 }
 
@@ -589,27 +612,23 @@ func reconcileOutcomeKind(o *ReconcileOutcome) (kind string, requeueAfter time.D
 	if o == nil {
 		panic("flow: reconcileOutcomeKind: outcome is nil")
 	}
-
-	if o.result == nil {
-		if o.err != nil {
-			return "invalid", 0
-		}
-		return "continue", 0
-	}
-
-	if o.result.Requeue { //nolint:staticcheck // handling deprecated Requeue field for backward compatibility
-		return "requeue", 0
-	}
-
-	if o.result.RequeueAfter > 0 {
-		return "requeueAfter", o.result.RequeueAfter
-	}
-
 	if o.err != nil {
-		return "fail", 0
+		return "Fail", 0
 	}
 
-	return "done", 0
+	prefix := "Continue"
+	if o.terminal {
+		prefix = "Done"
+	}
+
+	switch delay := requeueDelay(o.requeueIntent); {
+	case delay < 0:
+		return prefix, 0
+	case delay == 0:
+		return prefix + "AndRequeue", 0
+	default:
+		return prefix + "AndRequeueAfter", delay
+	}
 }
 
 // =============================================================================

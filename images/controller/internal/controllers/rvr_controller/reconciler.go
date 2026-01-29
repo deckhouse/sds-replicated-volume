@@ -155,7 +155,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
-	return rf.Done().ToCtrl()
+	return outcome.ToCtrl()
 }
 
 // ensureAttachmentStatus ensures the RVR attachment-related status fields reflect the current DRBDR state.
@@ -513,7 +513,7 @@ func (r *Reconciler) reconcileBackingVolume(
 				applyRVRBackingVolumeReadyCondFalse(rvr,
 					v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioningFailed,
 					fmt.Sprintf("Failed to create backing volume %s: %s", intended.LLVName, computeAPIValidationErrorCauses(err)))
-				return actual.LLVNameOrEmpty(), rf.RequeueAfter(5 * time.Minute).ReportChanged()
+				return actual.LLVNameOrEmpty(), rf.ContinueAndRequeueAfter(5 * time.Minute).ReportChanged()
 			}
 			return "", rf.Failf(err, "creating LLV %s", intended.LLVName)
 		}
@@ -587,7 +587,7 @@ func (r *Reconciler) reconcileBackingVolume(
 					applyRVRBackingVolumeReadyCondFalse(rvr,
 						v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizeFailed,
 						fmt.Sprintf("Failed to resize backing volume %s: %s", intended.LLVName, computeAPIValidationErrorCauses(err)))
-					return intended.LLVName, rf.RequeueAfter(5 * time.Minute).ReportChanged()
+					return intended.LLVName, rf.ContinueAndRequeueAfter(5 * time.Minute).ReportChanged()
 				}
 				return "", rf.Failf(err, "patching LLV %s size", intendedLLV.Name)
 			}

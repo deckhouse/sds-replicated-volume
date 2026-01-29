@@ -196,12 +196,22 @@ func (r *Reconciler) reconcileFoo(ctx context.Context) (outcome flow.ReconcileOu
 ### Constructing outcomes
 
 A function that returns `flow.ReconcileOutcome` MUST construct it only via `ReconcileFlow` methods:
-- `rf.Continue()`
-- `rf.Done()`
-- `rf.Requeue()`
-- `rf.RequeueAfter(d)`
-- `rf.Fail(err)`
-- `rf.Failf(err, "...")`
+
+**Non-terminal outcomes** (`ShouldReturn() = false`):
+- `rf.Continue()` — keep processing, no requeue intent.
+- `rf.ContinueAndRequeue()` — keep processing, schedule immediate requeue after returning.
+- `rf.ContinueAndRequeueAfter(d)` — keep processing, schedule delayed requeue after returning.
+
+**Terminal outcomes** (`ShouldReturn() = true`):
+- `rf.Done()` — stop now, no requeue.
+- `rf.DoneAndRequeue()` — stop now, schedule immediate requeue.
+- `rf.DoneAndRequeueAfter(d)` — stop now, schedule delayed requeue.
+- `rf.Fail(err)` — stop now with error.
+- `rf.Failf(err, "...")` — stop now with wrapped error.
+
+**When to use `Continue*` vs `Done*` with requeue:**
+- Use `ContinueAndRequeue*` when you need to schedule a requeue but want reconciliation to continue (e.g., to run subsequent reconcile steps, persist accumulated in-memory changes, or perform cleanup before returning).
+- Use `DoneAndRequeue*` when you want to stop processing immediately and schedule a requeue (e.g., all changes are already persisted, or no further steps are needed).
 
 Code MUST NOT:
 - construct `flow.ReconcileOutcome{...}` directly,
@@ -264,9 +274,10 @@ At each call site that receives a `flow.ReconcileOutcome` that can influence con
 Use `flow.MergeReconciles(...)` or the chainable `outcome.Merge(other)` to combine outcomes when multiple independent steps must all run.
 
 Merge semantics:
-- Errors are joined via `errors.Join`.
-- Requeue/RequeueAfter: minimum delay wins.
-- Done wins over Continue.
+- Terminal outcomes (`Done*`, `Fail`) win over non-terminal outcomes (`Continue*`).
+- Errors are joined via `errors.Join` (any error makes merged outcome a `Fail` — terminal).
+- Among terminal outcomes: errors first, then requeue (minimum delay wins), then `Done`.
+- Among non-terminal outcomes: requeue intent is merged (minimum delay wins).
 - Change/lock state is merged: any changed outcome makes merged outcome changed; strongest lock requirement wins.
 
 Reviewability:

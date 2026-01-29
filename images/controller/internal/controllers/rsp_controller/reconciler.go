@@ -181,7 +181,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Schedule requeue when grace period will expire, even if nothing changed.
 	// This ensures nodes beyond grace period will be removed from EligibleNodes.
 	if worldStateExpiresAt != nil {
-		return rf.RequeueAfter(time.Until(*worldStateExpiresAt)).ToCtrl()
+		return rf.DoneAndRequeueAfter(time.Until(*worldStateExpiresAt)).ToCtrl()
 	}
 
 	return rf.Done().ToCtrl()
