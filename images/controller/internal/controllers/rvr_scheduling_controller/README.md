@@ -15,12 +15,12 @@ The controller performs intelligent replica placement by:
 ## Interactions
 
 | Direction | Resource/Controller | Relationship |
-|-----------|---------------------|--------------|
+| --------- | ------------------- | ------------ |
 | ← input | ReplicatedVolume | Reads RV spec and status (size, RSC name, desiredAttachTo) |
 | ← input | ReplicatedStorageClass | Reads topology mode and zones |
 | ← input | ReplicatedStoragePool | Reads eligible nodes list (with LVGs per node) |
 | ← input | scheduler-extender | Queries storage capacity per LVG for Diskful replicas |
-| → output | ReplicatedVolumeReplica | Assigns `spec.nodeName`, `spec.lvmVolumeGroupName`, and updates `status.conditions[Scheduled]` |
+| → output | ReplicatedVolumeReplica | Assigns `spec.nodeName`, `spec.lvmVolumeGroupName`, node name label, and updates `status.conditions[Scheduled]` |
 
 ## Algorithm
 
@@ -28,12 +28,13 @@ The controller performs intelligent replica placement by:
 
 Eligible nodes are determined by intersection of:
 
-- Nodes in zones specified by `rsc.spec.zones` (or all zones if not specified)
 - Nodes from `rsp.status.eligibleNodes` that are:
   - Ready (`nodeReady = true`)
   - Not unschedulable (`unschedulable = false`)
   - Have ready agent (`agentReady = true`)
+  - Have at least one ready LVG (`lvg.ready = true` and `lvg.unschedulable = false`)
 - Nodes not already hosting any replica of this RV
+- Nodes in zones specified by `rsc.spec.zones` (or all zones if not specified)
 
 For Diskful replicas, additional capacity filtering via scheduler-extender API is applied.
 
@@ -53,7 +54,7 @@ For Diskful replicas, the scheduler selects both the best node and the best LVG 
 
 **Examples:**
 
-```
+```text
 Example 1: Same BestScore, different LVGCount
   Node-1: lvg-1=9, lvg-2=5       → BestScore=9, Count=2, Sum=14
   Node-2: lvg-1=9                → BestScore=9, Count=1, Sum=9
@@ -74,11 +75,11 @@ Example 3: Different BestScore
 
 The controller schedules replicas using per-RVR reconciliation with error resilience:
 
-**Phase 1: Already Scheduled RVRs**
+#### Phase 1: Already Scheduled RVRs
 
 For each scheduled RVR: ensure node name label and Scheduled=True condition.
 
-**Phase 2: Prepare Diskful Candidates (once)**
+#### Phase 2: Prepare Diskful Candidates (once)
 
 1. Compute eligible nodes from RSP, excluding occupied nodes
 2. Apply topology filter based on RSC topology mode
@@ -86,28 +87,32 @@ For each scheduled RVR: ensure node name label and Scheduled=True condition.
 4. Apply attachTo bonus to preferred nodes
 5. Store candidates in SchedulingContext for use by individual RVR reconcilers
 
-**Phase 3: Unscheduled Diskful RVRs (per-RVR)**
+#### Phase 3: Unscheduled Diskful RVRs (per-RVR)
 
 For each unscheduled Diskful RVR:
+
 1. Select best candidate based on topology
 2. Apply placement (node, LVG) using canonical apply pattern
-3. Patch RVR with optimistic lock
+3. Patch RVR spec with optimistic lock
 4. On success: update SchedulingContext (mark node occupied, remove candidate)
 5. On failure: continue to next RVR (node remains available)
+6. Patch RVR status with Scheduled=True condition
 
-**Phase 4: Unscheduled TieBreaker RVRs (per-RVR)**
+#### Phase 4: Unscheduled TieBreaker RVRs (per-RVR)
 
 For each unscheduled TieBreaker RVR:
+
 1. Compute eligible nodes (no capacity scoring)
 2. Apply topology filter
 3. Select best candidate based on topology
-4. Apply placement and patch with optimistic lock
+4. Apply placement and patch spec with optimistic lock
 5. Update SchedulingContext on success
+6. Patch RVR status with Scheduled=True condition
 
 ### Topology Modes
 
 | Mode | Diskful Behavior | TieBreaker Behavior |
-|------|------------------|---------------------|
+| ------ | ------------------ | --------------------- |
 | **Ignored** | No zone constraints | No zone constraints |
 | **Zonal** | All replicas in one zone (prefer existing Diskful zone or attachTo zone) | Same zone as Diskful replicas |
 | **TransZonal** | Distribute evenly across zones | Place in zone with fewest replicas |
@@ -129,20 +134,21 @@ Reconcile (root) — per-RVR orchestration with error resilience
 │   ├── applyScheduledConditionTrue        — set Scheduled=True
 │   └── patchRVRStatus (if changed)        — patch status
 │
-├── prepareZoneCandidatesForDiskful        — compute candidates once for all Diskful
+├── prepareScoredCandidatesForDiskful      — compute candidates once for all Diskful
 │   ├── computeEligibleNodeNames           — filter eligible nodes
 │   ├── applyTopologyFilter                — filter by topology mode
 │   ├── applyCapacityFilterAndScore        — query scheduler-extender for capacity
 │   └── applyAttachToBonus                 — boost score for attachTo nodes
 │
 ├── [for each unscheduled Diskful] reconcileUnscheduledDiskfulRVR
-│   ├── selectBestCandidate                — select node+LVG based on topology
-│   ├── applyPlacement                     — set nodeName, lvmVolumeGroupName
-│   ├── patchRVR (if changed)              — patch with optimistic lock
-│   ├── SchedulingContext.MarkNodeOccupied — update context on success
-│   ├── SchedulingContext.RemoveCandidate  — remove used node from candidates
-│   ├── applyScheduledConditionTrue        — set Scheduled=True
-│   └── patchRVRStatus (if changed)        — patch status
+│   ├── selectBestCandidate                         — select node+LVG based on topology
+│   ├── applyPlacement                              — set nodeName, lvmVolumeGroupName
+│   ├── patchRVR (if changed)                       — patch with optimistic lock
+│   ├── SchedulingContext.MarkNodeOccupied          — update context on success
+│   ├── SchedulingContext.RemoveCandidate           — remove used node from candidates
+│   ├── SchedulingContext.IncrementZoneReplicaCount — for TransZonal: update zone count
+│   ├── applyScheduledConditionTrue                 — set Scheduled=True
+│   └── patchRVRStatus (if changed)                 — patch status
 │
 └── [for each unscheduled TieBreaker] reconcileUnscheduledTieBreakerRVR
     ├── computeEligibleNodeNames           — filter eligible nodes
@@ -161,75 +167,35 @@ Reconcile (root) — per-RVR orchestration with error resilience
 flowchart TD
     Start([Reconcile]) --> Prepare[prepareSchedulingContext]
     Prepare -->|RV not found| Done1([Done])
-    Prepare -->|RV not ready| SetFailed1[Set Scheduled=False on all unscheduled]
+    Prepare -->|RV not ready: no finalizer, no RSC, or size=0| SetFailed1[Set Scheduled=False on all]
     SetFailed1 --> Fail1([Fail])
 
-    Prepare --> ScheduledLoop[Phase 1: Scheduled RVRs Loop]
+    Prepare --> Phase1[Phase 1: For each scheduled RVR]
+    Phase1 --> ReconcileScheduled[reconcileScheduledRVR]
+    ReconcileScheduled --> Phase2{Unscheduled Diskful?}
 
-    subgraph ScheduledPhase [Phase 1: Already Scheduled]
-        ScheduledLoop --> NextScheduled{More Scheduled RVRs?}
-        NextScheduled -->|Yes| ReconcileScheduled[reconcileScheduledRVR]
-        ReconcileScheduled --> ApplyLabel[applyNodeNameLabelIfMissing]
-        ApplyLabel -->|changed| PatchMain1[patchRVR with optimistic lock]
-        ApplyLabel -->|no change| ApplyCond1[applyScheduledConditionTrue]
-        PatchMain1 --> ApplyCond1
-        ApplyCond1 -->|changed| PatchStatus1[patchRVRStatus]
-        ApplyCond1 -->|no change| CollectErr1[Collect error if any]
-        PatchStatus1 --> CollectErr1
-        CollectErr1 --> NextScheduled
-    end
+    Phase2 -->|No| Phase4
+    Phase2 -->|Yes| PrepareCandidates[prepareScoredCandidatesForDiskful]
+    PrepareCandidates -->|Error| MarkFailed[Set Scheduled=False on all Diskful]
+    MarkFailed --> Phase4
+    PrepareCandidates -->|OK| Phase3[Phase 3: For each unscheduled Diskful]
 
-    NextScheduled -->|No| CheckUnscheduledDiskful{Unscheduled Diskful?}
+    Phase3 --> ReconcileDiskful[reconcileUnscheduledDiskfulRVR]
+    ReconcileDiskful -->|Select candidate| PatchDiskful[Patch spec + status]
+    PatchDiskful -->|OK| UpdateCtx[Update context]
+    UpdateCtx --> Phase3
+    ReconcileDiskful -->|No candidates| SetFalse2[Set Scheduled=False]
+    SetFalse2 --> Phase3
 
-    CheckUnscheduledDiskful -->|No| TieBreakerLoop
-    CheckUnscheduledDiskful -->|Yes| PrepareCandidates[prepareZoneCandidatesForDiskful]
-    PrepareCandidates -->|Error| MarkAllDiskfulFailed[Set Scheduled=False on all Diskful]
-    MarkAllDiskfulFailed --> TieBreakerLoop
-    PrepareCandidates -->|OK| DiskfulLoop[Phase 3: Diskful RVRs Loop]
+    Phase3 -->|Done| Phase4[Phase 4: For each unscheduled TieBreaker]
+    Phase4 --> ReconcileTB[reconcileUnscheduledTieBreakerRVR]
+    ReconcileTB -->|Select candidate| PatchTB[Patch spec + status]
+    PatchTB -->|OK| UpdateCtx2[Update context]
+    UpdateCtx2 --> Phase4
+    ReconcileTB -->|No candidates| SetFalse3[Set Scheduled=False]
+    SetFalse3 --> Phase4
 
-    subgraph DiskfulPhase [Phase 3: Unscheduled Diskful]
-        DiskfulLoop --> NextDiskful{More Diskful RVRs?}
-        NextDiskful -->|Yes| SelectCandidate[selectBestCandidate]
-        SelectCandidate -->|No candidates| SetFalse2[Set Scheduled=False]
-        SetFalse2 --> CollectErr2[Collect error]
-        CollectErr2 --> NextDiskful
-        SelectCandidate -->|OK| ApplyPlacement[applyPlacement]
-        ApplyPlacement -->|changed| PatchRVR2[patchRVR with optimistic lock]
-        ApplyPlacement -->|no change| UpdateCtx[Update SchedulingContext]
-        PatchRVR2 -->|Error| CollectErr2
-        PatchRVR2 -->|OK| UpdateCtx
-        UpdateCtx --> MarkOccupied[MarkNodeOccupied + RemoveCandidate]
-        MarkOccupied --> ApplyCond2[applyScheduledConditionTrue]
-        ApplyCond2 -->|changed| PatchStatus2[patchRVRStatus]
-        ApplyCond2 -->|no change| NextDiskful
-        PatchStatus2 --> NextDiskful
-    end
-
-    NextDiskful -->|No| TieBreakerLoop[Phase 4: TieBreaker RVRs Loop]
-
-    subgraph TieBreakerPhase [Phase 4: Unscheduled TieBreaker]
-        TieBreakerLoop --> NextTieBreaker{More TieBreaker RVRs?}
-        NextTieBreaker -->|Yes| ComputeEligible[Compute eligible nodes]
-        ComputeEligible -->|None| SetFalse3[Set Scheduled=False]
-        SetFalse3 --> CollectErr3[Collect error]
-        CollectErr3 --> NextTieBreaker
-        ComputeEligible -->|OK| TopologyFilter[applyTopologyFilter]
-        TopologyFilter -->|Error| SetFalse3
-        TopologyFilter -->|OK| SelectBest[selectBestCandidateFromZones]
-        SelectBest -->|Error| SetFalse3
-        SelectBest -->|OK| ApplyPlacement3[applyPlacement]
-        ApplyPlacement3 -->|changed| PatchRVR3[patchRVR with optimistic lock]
-        ApplyPlacement3 -->|no change| UpdateCtx3[Update SchedulingContext]
-        PatchRVR3 -->|Error| CollectErr3
-        PatchRVR3 -->|OK| UpdateCtx3
-        UpdateCtx3 --> MarkOccupied3[MarkNodeOccupied]
-        MarkOccupied3 --> ApplyCond3[applyScheduledConditionTrue]
-        ApplyCond3 -->|changed| PatchStatus3[patchRVRStatus]
-        ApplyCond3 -->|no change| NextTieBreaker
-        PatchStatus3 --> NextTieBreaker
-    end
-
-    NextTieBreaker -->|No| CheckErrors{Any errors collected?}
+    Phase4 -->|Done| CheckErrors{Any errors?}
     CheckErrors -->|Yes| Requeue([RequeueAfter 30s])
     CheckErrors -->|No| Done2([Done])
 ```
@@ -241,7 +207,7 @@ flowchart TD
 Indicates whether the replica has been assigned to a node.
 
 | Status | Reason | When |
-|--------|--------|------|
+| ------ | ------ | ---- |
 | True | ReplicaScheduled | Node successfully assigned |
 | False | NoAvailableNodes | No candidate nodes available |
 | False | TopologyConstraintsFailed | Topology requirements cannot be satisfied |
@@ -251,26 +217,26 @@ Indicates whether the replica has been assigned to a node.
 ## Managed Metadata
 
 | Type | Key | Managed On | Purpose |
-|------|-----|------------|---------|
+| ---- | --- | ---------- | ------- |
 | Spec field | `spec.nodeName` | RVR | Assigned node for the replica |
 | Spec field | `spec.lvmVolumeGroupName` | RVR | Assigned LVG for Diskful replicas |
 | Spec field | `spec.lvmVolumeGroupThinPoolName` | RVR | Assigned thin pool for LVMThin storage |
-| Label | `storage.deckhouse.io/sds-replicated-volume-node-name` | RVR | Node name for indexing |
+| Label | `storage.deckhouse.io/sds-replicated-volume-node-name` | RVR | Node name for agent watch filtering |
 | Status condition | `status.conditions[Scheduled]` | RVR | Scheduling success/failure status |
 
 ## Watches
 
 | Resource | Events | Handler |
-|----------|--------|---------|
-| ReplicatedVolume | Status changes (desiredAttachTo) | Maps to all RVRs of this RV |
-| ReplicatedVolumeReplica | Generation changes, nodeName empty | Direct (primary) |
-| ReplicatedStoragePool | eligibleNodesRevision changes | Maps to RVRs via RSC lookup |
+| -------- | ------ | ------- |
+| ReplicatedVolumeReplica | Create only | EnqueueRequestForOwner (maps to owner RV) |
+| ReplicatedStoragePool | Update (only if eligibleNodes changed) | mapRSPToRV (maps to RVs with unscheduled non-Access RVRs) |
 
 ## Indexes
 
 | Index | Field | Purpose |
-|-------|-------|---------|
+| ----- | ----- | ------- |
 | RVR by RV name | `spec.replicatedVolumeName` | List all RVRs for a ReplicatedVolume |
+| RVR unscheduled | `spec.nodeName` empty | Find unscheduled RVRs for RSP event mapping |
 
 ## Data Flow
 
@@ -338,6 +304,7 @@ For Diskful replicas, the controller queries the scheduler-extender API to:
 - Get capacity scores for each LVG (used for node and LVG ranking)
 
 The extender is queried with:
+
 - LVG names and thin pool names from eligible nodes
 - Volume size and type (thick/thin) from RV spec
 
@@ -370,10 +337,25 @@ Apply functions are pure (no I/O) and return a `bool` indicating whether changes
 
 ### Error Handling
 
+**Errors causing requeue (exponential backoff):**
+
+- API patch failures (conflicts, network errors, timeouts)
+- Errors during scheduling context preparation (fetching RV, RSC, RSP)
+
+**Scheduling failures causing requeue (fixed 30s):**
+
+- No candidate nodes available from storage pool
+- No suitable zone matches topology constraints
+- All eligible nodes already occupied by other replicas
+- Scheduler extender returned empty capacity scores
+
+For scheduling failures, the controller sets `Scheduled=False` condition on the RVR and requeues after 30 seconds. This handles capacity changes that don't trigger RSP watch events (e.g., volume deleted, freeing LVG space).
+
+**Error collection behavior:**
+
 - Errors from individual RVR reconciliation are collected, not propagated immediately
 - The controller continues processing other RVRs even if one fails
 - If a patch fails due to conflict, the node remains available for subsequent RVRs
-- All collected errors result in a requeue after 30 seconds
 
 ## Special Notes
 
@@ -386,6 +368,16 @@ Apply functions are pure (no I/O) and return a `bool` indicating whether changes
 - Places each replica in the zone with fewest replicas of the same type
 - Fails if even distribution across zones is impossible
 - Ensures replicas survive zone failures
+
+Per-RVR zone distribution mechanism:
+1. `prepareScoredCandidatesForDiskful` initializes `ZoneReplicaCounts` with existing Diskful counts per zone
+2. For each unscheduled Diskful, `selectBestCandidateTransZonal` picks the zone with minimum count
+3. After successful patch, `IncrementZoneReplicaCount` updates the count immediately
+4. Next RVR sees updated counts and picks a different zone
+
+Example with 2 unscheduled Diskful and 3 zones (all starting at count=0):
+- RVR-1: zone-a=0, zone-b=0, zone-c=0 → selects zone-a → increments → zone-a=1
+- RVR-2: zone-a=1, zone-b=0, zone-c=0 → selects zone-b (minimum count)
 
 **AttachTo Preference:**
 - Nodes in `rv.status.desiredAttachTo` receive a score bonus (+1000)

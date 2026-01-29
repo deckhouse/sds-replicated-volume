@@ -37,8 +37,9 @@ type SchedulingContext struct {
 	UnscheduledTieBreaker []*v1alpha1.ReplicatedVolumeReplica
 	OccupiedNodes         map[string]struct{}
 
-	// ZoneCandidates holds scored candidates per zone (computed once for Diskful phase).
-	ZoneCandidates map[string][]NodeCandidate
+	// ScoredCandidates holds scored candidates grouped by zone/topology key (computed once for Diskful phase).
+	// For Ignored topology, all candidates are under the "Ignored" key.
+	ScoredCandidates map[string][]NodeCandidate
 
 	// SelectedZone is the zone selected for Zonal topology (determined by first Diskful).
 	SelectedZone string
@@ -64,17 +65,17 @@ func (sctx *SchedulingContext) MarkNodeOccupied(nodeName string) {
 	sctx.OccupiedNodes[nodeName] = struct{}{}
 }
 
-// RemoveCandidate removes a node from ZoneCandidates after successful scheduling.
+// RemoveCandidate removes a node from ScoredCandidates after successful scheduling.
 // This ensures the next RVR won't try to use the same node.
 func (sctx *SchedulingContext) RemoveCandidate(nodeName string) {
-	for zone, candidates := range sctx.ZoneCandidates {
+	for key, candidates := range sctx.ScoredCandidates {
 		filtered := make([]NodeCandidate, 0, len(candidates))
 		for _, c := range candidates {
 			if c.Name != nodeName {
 				filtered = append(filtered, c)
 			}
 		}
-		sctx.ZoneCandidates[zone] = filtered
+		sctx.ScoredCandidates[key] = filtered
 	}
 }
 
