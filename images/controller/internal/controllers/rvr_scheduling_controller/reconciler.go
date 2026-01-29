@@ -181,7 +181,7 @@ func (r *Reconciler) failDiskfulScheduling(rf flow.ReconcileFlow, sctx *Scheduli
 	if setErr := r.setScheduledConditionFalseOnRVRs(rf.Ctx(), sctx.UnscheduledDiskful, failureReason); setErr != nil {
 		return rf.Fail(setErr)
 	}
-	return rf.RequeueAfter(30 * time.Second)
+	return rf.DoneAndRequeueAfter(30 * time.Second)
 }
 
 // --- Reconcile: tiebreaker
@@ -236,7 +236,7 @@ func (r *Reconciler) failTieBreakerScheduling(rf flow.ReconcileFlow, sctx *Sched
 	if setErr := r.setScheduledConditionFalseOnRVRs(rf.Ctx(), sctx.UnscheduledTieBreaker, failureReason); setErr != nil {
 		return rf.Fail(setErr)
 	}
-	return rf.RequeueAfter(30 * time.Second)
+	return rf.DoneAndRequeueAfter(30 * time.Second)
 }
 
 // --- Helpers: scheduling (apply)
