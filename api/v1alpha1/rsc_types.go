@@ -45,12 +45,14 @@ type ReplicatedStorageClassList struct {
 
 // GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It returns the root object's `.status.conditions`.
-func (o *ReplicatedStorageClass) GetStatusConditions() []metav1.Condition { return o.Status.Conditions }
+func (rsc *ReplicatedStorageClass) GetStatusConditions() []metav1.Condition {
+	return rsc.Status.Conditions
+}
 
 // SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It sets the root object's `.status.conditions`.
-func (o *ReplicatedStorageClass) SetStatusConditions(conditions []metav1.Condition) {
-	o.Status.Conditions = conditions
+func (rsc *ReplicatedStorageClass) SetStatusConditions(conditions []metav1.Condition) {
+	rsc.Status.Conditions = conditions
 }
 
 // +kubebuilder:validation:XValidation:rule="!has(self.replication) || self.replication != 'None' || self.topology == 'Ignored'",message="Replication None requires topology Ignored (no replicas to distribute)."

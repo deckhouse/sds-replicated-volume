@@ -14,16 +14,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrmetadata_test
+package v1alpha1
 
 import (
-	"testing"
-
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"fmt"
+	"strings"
 )
 
-func TestRvrMetadataController(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "RvrMetadataController Suite")
+func (drbdr *DRBDResource) DRBDResourceNameOnTheNode() string {
+	if drbdr.Spec.ActualNameOnTheNode != "" {
+		return drbdr.Spec.ActualNameOnTheNode
+	}
+	return fmt.Sprintf("sdsrv-%s", drbdr.Name)
+}
+
+func ParseDRBDResourceNameOnTheNode(s string) (string, bool) {
+	return strings.CutPrefix(s, "sdsrv-")
 }

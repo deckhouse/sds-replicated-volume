@@ -17,17 +17,26 @@ limitations under the License.
 package testhelpers
 
 import (
-	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
-// WithNodeByMetadataNameIndex registers the IndexFieldNodeByMetadataName index
+// WithLLVByRVROwnerIndex registers the IndexFieldLLVByRVROwner index
 // on a fake.ClientBuilder. This is useful for tests that need to use the index.
-func WithNodeByMetadataNameIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
-	return b.WithIndex(&corev1.Node{}, indexes.IndexFieldNodeByMetadataName, func(obj client.Object) []string {
-		return []string{obj.GetName()}
+func WithLLVByRVROwnerIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
+	return b.WithIndex(&snc.LVMLogicalVolume{}, indexes.IndexFieldLLVByRVROwner, func(obj client.Object) []string {
+		llv, ok := obj.(*snc.LVMLogicalVolume)
+		if !ok {
+			return nil
+		}
+		ownerRef := metav1.GetControllerOf(llv)
+		if ownerRef == nil || ownerRef.Kind != "ReplicatedVolumeReplica" {
+			return nil
+		}
+		return []string{ownerRef.Name}
 	})
 }
