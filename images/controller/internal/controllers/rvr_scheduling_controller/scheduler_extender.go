@@ -28,20 +28,24 @@ import (
 	"os"
 )
 
-type schedulerExtenderLVG struct {
+type SchedulerExtenderClient interface {
+	QueryLVGScores(ctx context.Context, lvgs []LVGQuery, volume VolumeInfo) (map[string]int, error)
+}
+
+type LVGQuery struct {
 	Name         string `json:"name"`
 	ThinPoolName string `json:"thinPoolName,omitempty"`
 }
 
-type schedulerExtenderVolume struct {
+type VolumeInfo struct {
 	Name string `json:"name"`
 	Size int64  `json:"size"`
 	Type string `json:"type"`
 }
 
 type schedulerExtenderRequest struct {
-	LVGS   []schedulerExtenderLVG  `json:"lvgs"`
-	Volume schedulerExtenderVolume `json:"volume"`
+	LVGS   []LVGQuery `json:"lvgs"`
+	Volume VolumeInfo `json:"volume"`
 }
 
 type schedulerExtenderResponseLVG struct {
@@ -53,48 +57,36 @@ type schedulerExtenderResponse struct {
 	LVGS []schedulerExtenderResponseLVG `json:"lvgs"`
 }
 
-type SchedulerExtenderClient struct {
+type httpSchedulerExtenderClient struct {
 	httpClient *http.Client
 	url        string
 }
 
-func NewSchedulerHTTPClient() (*SchedulerExtenderClient, error) {
-	extURL := os.Getenv("SCHEDULER_EXTENDER_URL") // TODO init in the other place later
+func NewSchedulerExtenderClient() (SchedulerExtenderClient, error) {
+	extURL := os.Getenv("SCHEDULER_EXTENDER_URL")
 	if extURL == "" {
-		// No scheduler-extender URL configured — disable external capacity filtering.
 		return nil, errors.New("scheduler-extender URL is not configured")
 	}
 
-	// Parse URL to validate it
 	_, err := url.Parse(extURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid scheduler-extender URL: %w", err)
 	}
 
-	// Create HTTP client that trusts any certificate
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	httpClient := &http.Client{Transport: tr}
 
-	return &SchedulerExtenderClient{
+	return &httpSchedulerExtenderClient{
 		httpClient: httpClient,
 		url:        extURL,
 	}, nil
 }
 
-// VolumeInfo contains information about the volume to query scores for.
-type VolumeInfo struct {
-	Name string
-	Size int64
-	Type string // "thin" or "thick"
-}
-
-// queryLVGScores queries the scheduler extender for LVG scores.
-// It performs HTTP communication only and returns a map of LVG name to score.
-func (c *SchedulerExtenderClient) queryLVGScores(
+func (c *httpSchedulerExtenderClient) QueryLVGScores(
 	ctx context.Context,
-	lvgs []schedulerExtenderLVG,
+	lvgs []LVGQuery,
 	volumeInfo VolumeInfo,
 ) (map[string]int, error) {
 	if len(lvgs) == 0 {
@@ -103,7 +95,7 @@ func (c *SchedulerExtenderClient) queryLVGScores(
 
 	reqBody := schedulerExtenderRequest{
 		LVGS:   lvgs,
-		Volume: schedulerExtenderVolume(volumeInfo),
+		Volume: volumeInfo,
 	}
 
 	data, err := json.Marshal(reqBody)
@@ -132,7 +124,6 @@ func (c *SchedulerExtenderClient) queryLVGScores(
 		return nil, fmt.Errorf("unable to decode scheduler-extender response: %w", err)
 	}
 
-	// Build map of LVG name -> score from response
 	lvgScores := make(map[string]int, len(respBody.LVGS))
 	for _, lvg := range respBody.LVGS {
 		lvgScores[lvg.Name] = lvg.Score

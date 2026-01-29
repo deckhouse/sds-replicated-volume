@@ -17,152 +17,38 @@ limitations under the License.
 package rvrschedulingcontroller
 
 import (
-	"slices"
-
-	"github.com/go-logr/logr"
-
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 type SchedulingContext struct {
-	Log                           logr.Logger
-	Rv                            *v1alpha1.ReplicatedVolume
-	Rsc                           *v1alpha1.ReplicatedStorageClass
-	Rsp                           *v1alpha1.ReplicatedStoragePool
-	RvrList                       []*v1alpha1.ReplicatedVolumeReplica
-	AttachToNodes                 []string
-	NodesWithAnyReplica           map[string]struct{}
-	AttachToNodesWithoutRvReplica []string
-	UnscheduledDiskfulReplicas    []*v1alpha1.ReplicatedVolumeReplica
-	ScheduledDiskfulReplicas      []*v1alpha1.ReplicatedVolumeReplica
-	UnscheduledAccessReplicas     []*v1alpha1.ReplicatedVolumeReplica
-	UnscheduledTieBreakerReplicas []*v1alpha1.ReplicatedVolumeReplica
-	RspLvgToNodeInfoMap           map[string]LvgInfo // {lvgName: {NodeName, ThinPoolName}}
-	RspNodesWithoutReplica        []string
-	NodeNameToZone                map[string]string          // {nodeName: zoneName}
-	ZonesToNodeCandidatesMap      map[string][]NodeCandidate // {zone1: [{name: node1, score: 100}, {name: node2, score: 90}]}
-	// RVRs with nodes assigned in this reconcile
-	RVRsToSchedule []*v1alpha1.ReplicatedVolumeReplica
+	RV              *v1alpha1.ReplicatedVolume
+	RSC             *v1alpha1.ReplicatedStorageClass
+	RSP             *v1alpha1.ReplicatedStoragePool
+	EligibleNodes   []v1alpha1.ReplicatedStoragePoolEligibleNode
+	AttachToNodes   []string
+	NodeToZone      map[string]string
+	LVGToNode       map[string]LVGInfo
+	StoragePoolType string
+
+	AllRVRs               []*v1alpha1.ReplicatedVolumeReplica
+	ScheduledDiskful      []*v1alpha1.ReplicatedVolumeReplica
+	UnscheduledDiskful    []*v1alpha1.ReplicatedVolumeReplica
+	ScheduledTieBreaker   []*v1alpha1.ReplicatedVolumeReplica
+	UnscheduledTieBreaker []*v1alpha1.ReplicatedVolumeReplica
+	OccupiedNodes         map[string]struct{}
 }
 
 type NodeCandidate struct {
-	Name  string
-	Score int
+	Name         string
+	Zone         string
+	BestScore    int    // highest LVG score (primary sort key)
+	LVGCount     int    // number of suitable LVGs (secondary sort key)
+	SumScore     int    // sum of all LVG scores (tertiary sort key)
+	LVGName      string // best LVG name for this node
+	ThinPoolName string // thin pool name (if LVMThin)
 }
 
-// SelectAndRemoveBestNode sorts candidates by score (descending), selects the best one,
-// removes it from the slice, and returns the node name along with the updated slice.
-// Returns empty string and original slice if no candidates available.
-func SelectAndRemoveBestNode(candidates []NodeCandidate) (string, []NodeCandidate) {
-	if len(candidates) == 0 {
-		return "", candidates
-	}
-
-	// Sort by score descending (higher score = better)
-	slices.SortFunc(candidates, func(a, b NodeCandidate) int {
-		return b.Score - a.Score
-	})
-
-	// Select the best node and remove it from the slice
-	bestNode := candidates[0].Name
-	return bestNode, candidates[1:]
-}
-
-type LvgInfo struct {
+type LVGInfo struct {
 	NodeName     string
 	ThinPoolName string
-}
-
-// UpdateAfterScheduling updates the scheduling context after replicas have been assigned nodes.
-// It removes assigned replicas from the appropriate unscheduled list based on their type,
-// adds them to ScheduledDiskfulReplicas (for Diskful type),
-// adds the assigned nodes to NodesWithAnyReplica, and removes them from AttachToNodesWithoutRvReplica.
-func (sctx *SchedulingContext) UpdateAfterScheduling(assignedReplicas []*v1alpha1.ReplicatedVolumeReplica) {
-	if len(assignedReplicas) == 0 {
-		return
-	}
-
-	// Build sets for fast lookup in a single pass
-	assignedNames := make(map[string]struct{}, len(assignedReplicas))
-	assignedNodes := make(map[string]struct{}, len(assignedReplicas))
-	var diskfulReplicas []*v1alpha1.ReplicatedVolumeReplica
-
-	for _, rvr := range assignedReplicas {
-		assignedNames[rvr.Name] = struct{}{}
-		assignedNodes[rvr.Spec.NodeName] = struct{}{}
-		sctx.NodesWithAnyReplica[rvr.Spec.NodeName] = struct{}{}
-		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
-			diskfulReplicas = append(diskfulReplicas, rvr)
-		}
-	}
-
-	// Filter unscheduled lists
-	sctx.UnscheduledDiskfulReplicas = removeAssigned(sctx.UnscheduledDiskfulReplicas, assignedNames)
-	sctx.UnscheduledAccessReplicas = removeAssigned(sctx.UnscheduledAccessReplicas, assignedNames)
-	sctx.UnscheduledTieBreakerReplicas = removeAssigned(sctx.UnscheduledTieBreakerReplicas, assignedNames)
-
-	// Add diskful replicas to ScheduledDiskfulReplicas
-	sctx.ScheduledDiskfulReplicas = append(sctx.ScheduledDiskfulReplicas, diskfulReplicas...)
-
-	// Remove assigned nodes from AttachToNodesWithoutRvReplica
-	var remainingAttachToNodes []string
-	for _, node := range sctx.AttachToNodesWithoutRvReplica {
-		if _, assigned := assignedNodes[node]; !assigned {
-			remainingAttachToNodes = append(remainingAttachToNodes, node)
-		}
-	}
-	sctx.AttachToNodesWithoutRvReplica = remainingAttachToNodes
-
-	// Add assigned replicas to RVRsToSchedule
-	sctx.RVRsToSchedule = append(sctx.RVRsToSchedule, assignedReplicas...)
-}
-
-// removeAssigned removes replicas that are in the assigned set and returns the rest.
-func removeAssigned(replicas []*v1alpha1.ReplicatedVolumeReplica, assigned map[string]struct{}) []*v1alpha1.ReplicatedVolumeReplica {
-	var result []*v1alpha1.ReplicatedVolumeReplica
-	for _, rvr := range replicas {
-		if _, ok := assigned[rvr.Name]; !ok {
-			result = append(result, rvr)
-		}
-	}
-	return result
-}
-
-const attachToScoreBonus = 1000
-
-// ApplyAttachToBonus increases score for nodes in rv.status.desiredAttachTo.
-// This ensures attachTo nodes are preferred when scheduling Diskful replicas.
-func (sctx *SchedulingContext) ApplyAttachToBonus() {
-	if len(sctx.AttachToNodes) == 0 {
-		return
-	}
-
-	attachToSet := make(map[string]struct{}, len(sctx.AttachToNodes))
-	for _, node := range sctx.AttachToNodes {
-		attachToSet[node] = struct{}{}
-	}
-
-	for zone, candidates := range sctx.ZonesToNodeCandidatesMap {
-		for i := range candidates {
-			if _, isAttachTo := attachToSet[candidates[i].Name]; isAttachTo {
-				candidates[i].Score += attachToScoreBonus
-			}
-		}
-		sctx.ZonesToNodeCandidatesMap[zone] = candidates
-	}
-}
-
-// findZoneWithMinReplicaCount finds the zone with the minimum replica count among the given zones.
-// Returns the zone name and its replica count. If zones is empty, returns ("", -1).
-func findZoneWithMinReplicaCount(zones map[string]struct{}, zoneReplicaCount map[string]int) (string, int) {
-	var minZone string
-	minCount := -1
-	for zone := range zones {
-		count := zoneReplicaCount[zone]
-		if minCount == -1 || count < minCount {
-			minCount = count
-			minZone = zone
-		}
-	}
-	return minZone, minCount
 }

@@ -17,108 +17,64 @@ limitations under the License.
 package objutilv1
 
 import (
-	"slices"
+	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// HasMatchingOwnerRef reports whether the object has an owner reference matching the given owner.
-func HasMatchingOwnerRef(obj metav1.Object, owner MetaRuntimeObject, controller bool) bool {
-	desired := mustDesiredOwnerRef(owner, controller)
+// HasControllerRef reports whether the object is controlled by the given owner.
+func HasControllerRef(obj, owner metav1.Object) bool {
+	return metav1.IsControlledBy(obj, owner)
+}
 
+// HasOwnerRef reports whether the object has an owner reference (controller or not) from the given owner.
+func HasOwnerRef(obj, owner metav1.Object) bool {
+	return hasOwnerRefWithUID(obj, owner.GetUID())
+}
+
+// SetControllerRef ensures the object has a controller owner reference for the given owner.
+// It uses scheme to determine the owner's GVK.
+// It returns whether the ownerReferences were changed.
+func SetControllerRef(obj, owner metav1.Object, scheme *runtime.Scheme) (changed bool, err error) {
+	// Check if already controlled by this owner.
+	if metav1.IsControlledBy(obj, owner) {
+		return false, nil
+	}
+
+	// Use controllerutil to set the reference (it handles GVK lookup via scheme).
+	if err := controllerutil.SetControllerReference(owner, obj, scheme); err != nil {
+		return false, fmt.Errorf("setting controller reference: %w", err)
+	}
+
+	return true, nil
+}
+
+// SetOwnerRef ensures the object has a non-controller owner reference for the given owner.
+// It uses scheme to determine the owner's GVK.
+// It returns whether the ownerReferences were changed.
+func SetOwnerRef(obj, owner metav1.Object, scheme *runtime.Scheme) (changed bool, err error) {
+	// Check if already has owner ref with this UID.
+	if hasOwnerRefWithUID(obj, owner.GetUID()) {
+		return false, nil
+	}
+
+	// Use controllerutil to set the reference (it handles GVK lookup via scheme).
+	if err := controllerutil.SetOwnerReference(owner, obj, scheme); err != nil {
+		return false, fmt.Errorf("setting owner reference: %w", err)
+	}
+
+	return true, nil
+}
+
+// hasOwnerRefWithUID checks if obj has an owner reference with the given UID.
+func hasOwnerRefWithUID(obj metav1.Object, uid types.UID) bool {
 	for _, ref := range obj.GetOwnerReferences() {
-		if ownerRefsEqual(ref, desired) {
+		if ref.UID == uid {
 			return true
 		}
 	}
-
 	return false
-}
-
-// SetOwnerRef ensures the object has an owner reference for the given owner.
-// It returns whether the ownerReferences were changed.
-func SetOwnerRef(obj metav1.Object, owner MetaRuntimeObject, controller bool) (changed bool) {
-	desired := mustDesiredOwnerRef(owner, controller)
-
-	refs := obj.GetOwnerReferences()
-
-	idx := indexOfOwnerRef(refs, desired)
-	if idx < 0 {
-		obj.SetOwnerReferences(append(refs, desired))
-		return true
-	}
-
-	if ownerRefsEqual(refs[idx], desired) {
-		return false
-	}
-
-	newRefs := slices.Clone(refs)
-	newRefs[idx] = desired
-	obj.SetOwnerReferences(newRefs)
-	return true
-}
-
-// mustDesiredOwnerRef builds an OwnerReference for the given owner.
-//
-// We expect owner objects passed to objutilv1 helpers to have a non-empty GVK,
-// because OwnerReference requires APIVersion/Kind to be set.
-// If GVK is empty, this function panics.
-func mustDesiredOwnerRef(owner MetaRuntimeObject, controller bool) metav1.OwnerReference {
-	gvk := owner.GetObjectKind().GroupVersionKind()
-	if gvk.Empty() {
-		panic("objutilv1: owner object has empty GroupVersionKind; ensure APIVersion/Kind (GVK) is set on the owner runtime.Object")
-	}
-
-	if owner.GetName() == "" {
-		panic("objutilv1: owner object has empty name; ensure metadata.name is set on the owner")
-	}
-	if owner.GetUID() == "" {
-		panic("objutilv1: owner object has empty uid; ensure metadata.uid is set on the owner")
-	}
-
-	return metav1.OwnerReference{
-		APIVersion: gvk.GroupVersion().String(),
-		Kind:       gvk.Kind,
-		Name:       owner.GetName(),
-		UID:        owner.GetUID(),
-		Controller: boolPtr(controller),
-	}
-}
-
-func boolPtr(v bool) *bool { return &v }
-
-func ownerRefsEqual(a, b metav1.OwnerReference) bool {
-	return a.APIVersion == b.APIVersion &&
-		a.Kind == b.Kind &&
-		a.Name == b.Name &&
-		a.UID == b.UID &&
-		boolPtrEqual(a.Controller, b.Controller)
-}
-
-func boolPtrEqual(a, b *bool) bool {
-	if a == nil || b == nil {
-		return false
-	}
-	return *a == *b
-}
-
-func indexOfOwnerRef(refs []metav1.OwnerReference, desired metav1.OwnerReference) int {
-	if desired.UID != "" {
-		for i := range refs {
-			if refs[i].UID == desired.UID {
-				return i
-			}
-		}
-		return -1
-	}
-
-	for i := range refs {
-		if refs[i].APIVersion == desired.APIVersion &&
-			refs[i].Kind == desired.Kind &&
-			refs[i].Name == desired.Name {
-			return i
-		}
-	}
-
-	return -1
 }

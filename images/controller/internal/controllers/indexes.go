@@ -42,9 +42,17 @@ func RegisterIndexes(mgr manager.Manager) error {
 	if err := indexes.RegisterRVRByReplicatedVolumeName(mgr); err != nil {
 		return err
 	}
+	if err := indexes.RegisterRVRUnscheduled(mgr); err != nil {
+		return err
+	}
 
 	// Node
 	if err := indexes.RegisterNodeByMetadataName(mgr); err != nil {
+		return err
+	}
+
+	// DRBDResource
+	if err := indexes.RegisterDRBDResourceByNodeName(mgr); err != nil {
 		return err
 	}
 
@@ -66,6 +74,16 @@ func RegisterIndexes(mgr manager.Manager) error {
 		return err
 	}
 	if err := indexes.RegisterRSPByUsedByRSCName(mgr); err != nil {
+		return err
+	}
+
+	// LVMLogicalVolume (LLV)
+	if err := indexes.RegisterLLVByRVROwner(mgr); err != nil {
+		return err
+	}
+
+	// Pod
+	if err := indexes.RegisterPodByNodeName(mgr); err != nil {
 		return err
 	}
 
