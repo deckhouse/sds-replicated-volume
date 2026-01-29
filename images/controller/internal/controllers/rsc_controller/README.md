@@ -43,7 +43,7 @@ Reconcile (root) [Pure orchestration]
 ├── reconcileMain [Target-state driven]
 │   └── finalizer management
 ├── reconcileStatus [In-place reconciliation]
-│   ├── reconcileRSP [Conditional desired evaluation]
+│   ├── reconcileRSP [Conditional target evaluation]
 │   │   └── create/update auto-generated RSP
 │   ├── ensureStoragePool
 │   │   └── status.storagePoolName + StoragePoolReady condition
@@ -52,7 +52,7 @@ Reconcile (root) [Pure orchestration]
 │   └── ensureVolumeSummaryAndConditions
 │       └── status.volumes + ConfigurationRolledOut/VolumesSatisfyEligibleNodes conditions
 └── reconcileUnusedRSPs [Pure orchestration]
-    └── reconcileRSPRelease [Conditional desired evaluation]
+    └── reconcileRSPRelease [Conditional target evaluation]
         └── release RSPs no longer referenced by this RSC
 ```
 

@@ -92,21 +92,21 @@ func TestReconcileFlow_Fail_NilPanics(t *testing.T) {
 	mustPanic(t, func() { _ = rf.Fail(nil) })
 }
 
-func TestReconcileFlow_RequeueAfter_ZeroPanics(t *testing.T) {
+func TestReconcileFlow_DoneAndRequeueAfter_ZeroPanics(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
-	mustPanic(t, func() { _ = rf.RequeueAfter(0) })
+	mustPanic(t, func() { _ = rf.DoneAndRequeueAfter(0) })
 }
 
-func TestReconcileFlow_RequeueAfter_NegativePanics(t *testing.T) {
+func TestReconcileFlow_DoneAndRequeueAfter_NegativePanics(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
-	mustPanic(t, func() { _ = rf.RequeueAfter(-1 * time.Second) })
+	mustPanic(t, func() { _ = rf.DoneAndRequeueAfter(-1 * time.Second) })
 }
 
-func TestReconcileFlow_RequeueAfter_Positive(t *testing.T) {
+func TestReconcileFlow_DoneAndRequeueAfter_Positive(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
-	outcome := rf.RequeueAfter(1 * time.Second)
+	outcome := rf.DoneAndRequeueAfter(1 * time.Second)
 	if !outcome.ShouldReturn() {
-		t.Fatalf("expected ShouldReturn() == true")
+		t.Fatalf("expected ShouldReturn() == true for DoneAndRequeueAfter")
 	}
 
 	res, err := outcome.ToCtrl()
@@ -118,18 +118,60 @@ func TestReconcileFlow_RequeueAfter_Positive(t *testing.T) {
 	}
 }
 
-func TestReconcileFlow_Requeue(t *testing.T) {
+func TestReconcileFlow_DoneAndRequeue(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
-	outcome := rf.Requeue()
+	outcome := rf.DoneAndRequeue()
 	if !outcome.ShouldReturn() {
-		t.Fatalf("expected ShouldReturn() == true")
+		t.Fatalf("expected ShouldReturn() == true for DoneAndRequeue")
 	}
 
 	res, err := outcome.ToCtrl()
 	if err != nil {
 		t.Fatalf("expected err to be nil, got %v", err)
 	}
-	if !res.Requeue { //nolint:staticcheck // testing deprecated Requeue field
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
+		t.Fatalf("expected Requeue to be true")
+	}
+}
+
+func TestReconcileFlow_ContinueAndRequeueAfter_ZeroPanics(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	mustPanic(t, func() { _ = rf.ContinueAndRequeueAfter(0) })
+}
+
+func TestReconcileFlow_ContinueAndRequeueAfter_NegativePanics(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	mustPanic(t, func() { _ = rf.ContinueAndRequeueAfter(-1 * time.Second) })
+}
+
+func TestReconcileFlow_ContinueAndRequeueAfter_Positive(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	outcome := rf.ContinueAndRequeueAfter(1 * time.Second)
+	if outcome.ShouldReturn() {
+		t.Fatalf("expected ShouldReturn() == false for ContinueAndRequeueAfter")
+	}
+
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected err to be nil, got %v", err)
+	}
+	if res.RequeueAfter != 1*time.Second {
+		t.Fatalf("expected RequeueAfter to be %v, got %v", 1*time.Second, res.RequeueAfter)
+	}
+}
+
+func TestReconcileFlow_ContinueAndRequeue(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	outcome := rf.ContinueAndRequeue()
+	if outcome.ShouldReturn() {
+		t.Fatalf("expected ShouldReturn() == false for ContinueAndRequeue")
+	}
+
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected err to be nil, got %v", err)
+	}
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
 		t.Fatalf("expected Requeue to be true")
 	}
 }
@@ -145,9 +187,9 @@ func TestMergeReconciles_DoneWinsOverContinue(t *testing.T) {
 	}
 }
 
-func TestMergeReconciles_RequeueAfterChoosesSmallest(t *testing.T) {
+func TestMergeReconciles_DoneAndRequeueAfterChoosesSmallest(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
-	outcome := flow.MergeReconciles(rf.RequeueAfter(5*time.Second), rf.RequeueAfter(1*time.Second))
+	outcome := flow.MergeReconciles(rf.DoneAndRequeueAfter(5*time.Second), rf.DoneAndRequeueAfter(1*time.Second))
 	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")
 	}
@@ -157,6 +199,54 @@ func TestMergeReconciles_RequeueAfterChoosesSmallest(t *testing.T) {
 	}
 	if res.RequeueAfter != 1*time.Second {
 		t.Fatalf("expected RequeueAfter to be %v, got %v", 1*time.Second, res.RequeueAfter)
+	}
+}
+
+func TestMergeReconciles_ContinueAndRequeueAfterChoosesSmallest(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	outcome := flow.MergeReconciles(rf.ContinueAndRequeueAfter(5*time.Second), rf.ContinueAndRequeueAfter(1*time.Second))
+	if outcome.ShouldReturn() {
+		t.Fatalf("expected ShouldReturn() == false for merged ContinueAndRequeueAfter")
+	}
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected err to be nil, got %v", err)
+	}
+	if res.RequeueAfter != 1*time.Second {
+		t.Fatalf("expected RequeueAfter to be %v, got %v", 1*time.Second, res.RequeueAfter)
+	}
+}
+
+func TestMergeReconciles_TerminalWinsOverNonTerminal(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	// Terminal (Done) should win over non-terminal (ContinueAndRequeueAfter)
+	outcome := flow.MergeReconciles(rf.Done(), rf.ContinueAndRequeueAfter(1*time.Second))
+	if !outcome.ShouldReturn() {
+		t.Fatalf("expected ShouldReturn() == true (terminal wins)")
+	}
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected err to be nil, got %v", err)
+	}
+	// Done without requeue intent
+	if res.Requeue || res.RequeueAfter != 0 { //nolint:staticcheck // testing Requeue field
+		t.Fatalf("expected no requeue for Done, got Requeue=%v RequeueAfter=%v", res.Requeue, res.RequeueAfter)
+	}
+}
+
+func TestMergeReconciles_TerminalRequeueWinsOverTerminalDone(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	// DoneAndRequeue should win over Done
+	outcome := flow.MergeReconciles(rf.Done(), rf.DoneAndRequeue())
+	if !outcome.ShouldReturn() {
+		t.Fatalf("expected ShouldReturn() == true")
+	}
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected err to be nil, got %v", err)
+	}
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
+		t.Fatalf("expected Requeue to be true (requeue wins over done)")
 	}
 }
 
@@ -229,7 +319,7 @@ func TestReconcileOutcome_Enrichf_WrapsExistingError(t *testing.T) {
 
 func TestReconcileOutcome_Enrichf_DoesNotAlterReturnDecision(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
-	outcome := rf.RequeueAfter(1 * time.Second).Enrichf("x")
+	outcome := rf.DoneAndRequeueAfter(1 * time.Second).Enrichf("x")
 	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")
 	}
@@ -242,6 +332,13 @@ func TestReconcileOutcome_Enrichf_DoesNotAlterReturnDecision(t *testing.T) {
 func TestReconcileOutcome_MustToCtrl_PanicsOnContinue(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
 	mustPanic(t, func() { _, _ = rf.Continue().MustToCtrl() })
+}
+
+func TestReconcileOutcome_MustToCtrl_DoesNotPanicOnContinueWithRequeue(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	// ContinueAndRequeue has requeue intent, so MustToCtrl should not panic
+	mustNotPanic(t, func() { _, _ = rf.ContinueAndRequeue().MustToCtrl() })
+	mustNotPanic(t, func() { _, _ = rf.ContinueAndRequeueAfter(1 * time.Second).MustToCtrl() })
 }
 
 // =============================================================================
@@ -631,7 +728,7 @@ func TestReconcileFlow_OnEnd_LogsFailAsError_OnceAndMarksLogged(t *testing.T) {
 	}
 
 	m := matches[0].ContextMap()
-	if got := m["result"]; got != "fail" {
+	if got := m["result"]; got != "Fail" {
 		t.Fatalf("expected result=fail, got %v", got)
 	}
 	if got := m["hasError"]; got != true {

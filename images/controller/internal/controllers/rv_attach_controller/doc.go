@@ -57,7 +57,7 @@ limitations under the License.
 //   - Drop nodes that no longer have an active (non-deleting) RVA.
 //   - If attaching is enabled, fill remaining slots from the active RVA set (FIFO) up to 2 nodes.
 //   - For Local access, only *new* attachments are allowed on nodes with a Diskful replica,
-//     confirmed by rvr.status.actualType==Diskful (agent must initialize status first).
+//     confirmed by rvr.status.effectiveType==Diskful (agent must initialize status first).
 //   - New attachments are not allowed on nodes whose replica is marked for deletion.
 //
 // # RVA status model
