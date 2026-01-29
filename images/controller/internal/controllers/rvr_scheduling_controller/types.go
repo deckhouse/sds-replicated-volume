@@ -39,6 +39,13 @@ type SchedulingContext struct {
 
 	// ZoneCandidates holds scored candidates per zone (computed once for Diskful phase).
 	ZoneCandidates map[string][]NodeCandidate
+
+	// SelectedZone is the zone selected for Zonal topology (determined by first Diskful).
+	SelectedZone string
+
+	// ZoneReplicaCounts tracks replica counts per zone for TransZonal topology.
+	// Updated after each successful scheduling.
+	ZoneReplicaCounts map[string]int
 }
 
 // ScheduledRVRs returns all scheduled RVRs (both Diskful and TieBreaker).
@@ -69,6 +76,14 @@ func (sctx *SchedulingContext) RemoveCandidate(nodeName string) {
 		}
 		sctx.ZoneCandidates[zone] = filtered
 	}
+}
+
+// IncrementZoneReplicaCount increments the replica count for a zone (for TransZonal topology).
+func (sctx *SchedulingContext) IncrementZoneReplicaCount(zone string) {
+	if sctx.ZoneReplicaCounts == nil {
+		sctx.ZoneReplicaCounts = make(map[string]int)
+	}
+	sctx.ZoneReplicaCounts[zone]++
 }
 
 type NodeCandidate struct {
