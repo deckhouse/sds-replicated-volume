@@ -18,9 +18,9 @@ The controller performs intelligent replica placement by:
 |-----------|---------------------|--------------|
 | ← input | ReplicatedVolume | Reads RV spec and status (size, RSC name, desiredAttachTo) |
 | ← input | ReplicatedStorageClass | Reads topology mode and zones |
-| ← input | ReplicatedStoragePool | Reads eligible nodes list |
-| ← input | scheduler-extender | Queries storage capacity for Diskful replicas |
-| → output | ReplicatedVolumeReplica | Assigns `spec.nodeName` and updates `status.conditions[Scheduled]` |
+| ← input | ReplicatedStoragePool | Reads eligible nodes list (with LVGs per node) |
+| ← input | scheduler-extender | Queries storage capacity per LVG for Diskful replicas |
+| → output | ReplicatedVolumeReplica | Assigns `spec.nodeName`, `spec.lvmVolumeGroupName`, and updates `status.conditions[Scheduled]` |
 
 ## Algorithm
 
@@ -36,6 +36,39 @@ Eligible nodes are determined by intersection of:
 - Nodes not already hosting any replica of this RV
 
 For Diskful replicas, additional capacity filtering via scheduler-extender API is applied.
+
+### Node and LVG Selection Algorithm
+
+For Diskful replicas, the scheduler selects both the best node and the best LVG on that node:
+
+1. Query scheduler-extender for capacity scores of all LVGs on candidate nodes
+2. For each node, aggregate LVG scores:
+   - **BestScore** - highest LVG score on the node
+   - **LVGCount** - number of suitable LVGs with sufficient capacity
+   - **SumScore** - sum of all LVG scores
+3. Sort nodes by (BestScore DESC, LVGCount DESC, SumScore DESC):
+   - Primary: Prefer node with highest LVG score
+   - Secondary: Prefer node with more suitable LVGs (more options = better)
+   - Tertiary: Prefer node with higher total capacity
+
+**Examples:**
+
+```
+Example 1: Same BestScore, different LVGCount
+  Node-1: lvg-1=9, lvg-2=5       → BestScore=9, Count=2, Sum=14
+  Node-2: lvg-1=9                → BestScore=9, Count=1, Sum=9
+  Winner: Node-1 (same BestScore, but Count 2 > 1)
+
+Example 2: Same BestScore and LVGCount, different SumScore
+  Node-1: lvg-1=9, lvg-2=5       → BestScore=9, Count=2, Sum=14
+  Node-2: lvg-1=9, lvg-2=2       → BestScore=9, Count=2, Sum=11
+  Winner: Node-1 (same BestScore, same Count, but Sum 14 > 11)
+
+Example 3: Different BestScore
+  Node-1: lvg-1=9, lvg-2=5       → BestScore=9, Count=2, Sum=14
+  Node-2: lvg-1=10               → BestScore=10, Count=1, Sum=10
+  Winner: Node-2 (BestScore 10 > 9)
+```
 
 ### Scheduling Phases
 
@@ -164,6 +197,8 @@ Indicates whether the replica has been assigned to a node.
 | Type | Key | Managed On | Purpose |
 |------|-----|------------|---------|
 | Spec field | `spec.nodeName` | RVR | Assigned node for the replica |
+| Spec field | `spec.lvmVolumeGroupName` | RVR | Assigned LVG for Diskful replicas |
+| Spec field | `spec.lvmVolumeGroupThinPoolName` | RVR | Assigned thin pool for LVMThin storage |
 | Label | `storage.deckhouse.io/sds-replicated-volume-node-name` | RVR | Node name for indexing |
 | Status condition | `status.conditions[Scheduled]` | RVR | Scheduling success/failure status |
 
@@ -195,6 +230,7 @@ flowchart TD
 
     subgraph context [SchedulingContext]
         EligibleNodes[EligibleNodes from RSP]
+        LVGToNode[LVGToNode mapping]
         AttachTo[AttachToNodes from RV]
         Topology[Topology from RSC]
         OccupiedNodes[OccupiedNodes from existing RVRs]
@@ -203,12 +239,14 @@ flowchart TD
     subgraph scheduling [Scheduling Algorithm]
         FilterEligible[Filter eligible nodes]
         ApplyTopology[Apply topology constraints]
-        QueryCapacity[Query capacity scores]
-        SelectBest[Select best nodes]
+        QueryCapacity[Query LVG capacity scores]
+        AggregateLVG[Aggregate LVGs per node]
+        SelectBest[Select best node and LVG]
     end
 
     subgraph output [Output]
         NodeName[RVR.spec.nodeName]
+        LVGName[RVR.spec.lvmVolumeGroupName]
         NodeLabel[RVR node name label]
         ScheduledCond[RVR Scheduled condition]
     end
@@ -216,6 +254,7 @@ flowchart TD
     RV --> AttachTo
     RSC --> Topology
     RSP --> EligibleNodes
+    RSP --> LVGToNode
     RVRs --> OccupiedNodes
 
     EligibleNodes --> FilterEligible
@@ -223,11 +262,14 @@ flowchart TD
     FilterEligible --> ApplyTopology
     Topology --> ApplyTopology
     ApplyTopology --> QueryCapacity
+    LVGToNode --> QueryCapacity
     Extender --> QueryCapacity
-    QueryCapacity --> SelectBest
+    QueryCapacity --> AggregateLVG
+    AggregateLVG --> SelectBest
     AttachTo --> SelectBest
 
     SelectBest --> NodeName
+    SelectBest --> LVGName
     SelectBest --> NodeLabel
     SelectBest --> ScheduledCond
 ```
@@ -236,13 +278,14 @@ flowchart TD
 
 For Diskful replicas, the controller queries the scheduler-extender API to:
 
-- Filter nodes with sufficient storage capacity
-- Get capacity scores for ranking nodes
-- Consider LVM volume group availability
+- Filter LVGs with sufficient storage capacity
+- Get capacity scores for each LVG (used for node and LVG ranking)
 
 The extender is queried with:
 - LVG names and thin pool names from eligible nodes
 - Volume size and type (thick/thin) from RV spec
+
+The extender returns a score per LVG. LVGs without sufficient capacity are excluded from the response. The controller then aggregates these scores by node to determine the best placement.
 
 ## Special Notes
 

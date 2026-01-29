@@ -674,7 +674,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Build()
 
 			extender := &mockExtenderClient{scores: map[string]int{}}
-		rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, extender)
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, extender)
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).ToNot(HaveOccurred())
@@ -1040,11 +1040,11 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 	Context("Constraint Violation Conditions", func() {
 		It("sets Scheduled=False with appropriate reason when topology constraints fail", func(ctx SpecContext) {
 			cluster := clusterConfigs["medium-2z"]
-		eligible, scores := generateEligibleNodes(cluster)
+			eligible, scores := generateEligibleNodes(cluster)
 
-		zoneAOnlyEligible := make([]v1alpha1.ReplicatedStoragePoolEligibleNode, 0)
-		zoneAOnlyScores := make(map[string]int)
-		for _, node := range eligible {
+			zoneAOnlyEligible := make([]v1alpha1.ReplicatedStoragePoolEligibleNode, 0)
+			zoneAOnlyScores := make(map[string]int)
+			for _, node := range eligible {
 				if node.ZoneName == "zone-a" {
 					zoneAOnlyEligible = append(zoneAOnlyEligible, node)
 					for _, lvg := range node.LVMVolumeGroups {
@@ -1113,6 +1113,301 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					))
 				}
 			}
+		})
+	})
+
+	Context("Multi-LVG Selection", func() {
+		// Helper to create eligible nodes with multiple LVGs
+		createMultiLVGEligibleNodes := func(nodeConfigs []struct {
+			Name     string
+			Zone     string
+			LVGNames []string
+		}) []v1alpha1.ReplicatedStoragePoolEligibleNode {
+			var eligible []v1alpha1.ReplicatedStoragePoolEligibleNode
+			for _, nc := range nodeConfigs {
+				var lvgs []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup
+				for _, lvgName := range nc.LVGNames {
+					lvgs = append(lvgs, v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						Name:  lvgName,
+						Ready: true,
+					})
+				}
+				eligible = append(eligible, v1alpha1.ReplicatedStoragePoolEligibleNode{
+					NodeName:        nc.Name,
+					ZoneName:        nc.Zone,
+					NodeReady:       true,
+					AgentReady:      true,
+					LVMVolumeGroups: lvgs,
+				})
+			}
+			return eligible
+		}
+
+		It("should prefer node with more LVGs when BestScore is equal", func(ctx SpecContext) {
+			// Node-1 has 2 LVGs (lvg-1a=9, lvg-1b=5), Node-2 has 1 LVG (lvg-2a=9)
+			// BestScore is equal (9), but Node-1 has more LVGs (2 > 1), so Node-1 wins.
+			eligible := createMultiLVGEligibleNodes([]struct {
+				Name     string
+				Zone     string
+				LVGNames []string
+			}{
+				{Name: "node-1", Zone: "zone-a", LVGNames: []string{"lvg-1a", "lvg-1b"}},
+				{Name: "node-2", Zone: "zone-a", LVGNames: []string{"lvg-2a"}},
+			})
+			scores := map[string]int{
+				"lvg-1a": 9,
+				"lvg-1b": 5,
+				"lvg-2a": 9,
+			}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, eligible)
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			objects := []runtime.Object{rv, rsc, rsp, rvr}
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(objects...).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(Equal("node-1"), "Node with more LVGs should be selected")
+			Expect(updated.Spec.LVMVolumeGroupName).To(Equal("lvg-1a"), "Best LVG on the node should be selected")
+		})
+
+		It("should prefer node with higher SumScore when BestScore and LVGCount are equal", func(ctx SpecContext) {
+			// Node-1 has 2 LVGs (lvg-1a=9, lvg-1b=5), Node-2 has 2 LVGs (lvg-2a=9, lvg-2b=2)
+			// BestScore is equal (9), LVGCount is equal (2), but Sum(14) > Sum(11), so Node-1 wins.
+			eligible := createMultiLVGEligibleNodes([]struct {
+				Name     string
+				Zone     string
+				LVGNames []string
+			}{
+				{Name: "node-1", Zone: "zone-a", LVGNames: []string{"lvg-1a", "lvg-1b"}},
+				{Name: "node-2", Zone: "zone-a", LVGNames: []string{"lvg-2a", "lvg-2b"}},
+			})
+			scores := map[string]int{
+				"lvg-1a": 9,
+				"lvg-1b": 5,
+				"lvg-2a": 9,
+				"lvg-2b": 2,
+			}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, eligible)
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			objects := []runtime.Object{rv, rsc, rsp, rvr}
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(objects...).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(Equal("node-1"), "Node with higher SumScore should be selected")
+			Expect(updated.Spec.LVMVolumeGroupName).To(Equal("lvg-1a"), "Best LVG on the node should be selected")
+		})
+
+		It("should prefer node with higher BestScore regardless of LVGCount", func(ctx SpecContext) {
+			// Node-1 has 2 LVGs (lvg-1a=9, lvg-1b=5), Node-2 has 1 LVG (lvg-2a=10)
+			// Node-2 has higher BestScore (10 > 9), so Node-2 wins despite having fewer LVGs.
+			eligible := createMultiLVGEligibleNodes([]struct {
+				Name     string
+				Zone     string
+				LVGNames []string
+			}{
+				{Name: "node-1", Zone: "zone-a", LVGNames: []string{"lvg-1a", "lvg-1b"}},
+				{Name: "node-2", Zone: "zone-a", LVGNames: []string{"lvg-2a"}},
+			})
+			scores := map[string]int{
+				"lvg-1a": 9,
+				"lvg-1b": 5,
+				"lvg-2a": 10,
+			}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, eligible)
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			objects := []runtime.Object{rv, rsc, rsp, rvr}
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(objects...).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(Equal("node-2"), "Node with higher BestScore should be selected")
+			Expect(updated.Spec.LVMVolumeGroupName).To(Equal("lvg-2a"), "Best LVG on the node should be selected")
+		})
+
+		It("should skip LVGs without capacity (not in scores)", func(ctx SpecContext) {
+			// Node-1 has 3 LVGs but only 2 have capacity, Node-2 has 1 LVG with capacity
+			// After filtering: Node-1 has 2 LVGs, Node-2 has 1 LVG
+			// BestScore is equal (9), but Node-1 has more suitable LVGs (2 > 1)
+			eligible := createMultiLVGEligibleNodes([]struct {
+				Name     string
+				Zone     string
+				LVGNames []string
+			}{
+				{Name: "node-1", Zone: "zone-a", LVGNames: []string{"lvg-1a", "lvg-1b", "lvg-1c"}},
+				{Name: "node-2", Zone: "zone-a", LVGNames: []string{"lvg-2a"}},
+			})
+			scores := map[string]int{
+				"lvg-1a": 9,
+				"lvg-1b": 5,
+				// lvg-1c has no capacity (not in scores)
+				"lvg-2a": 9,
+			}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, eligible)
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			objects := []runtime.Object{rv, rsc, rsp, rvr}
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(objects...).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(Equal("node-1"), "Node with more suitable LVGs should be selected")
+			Expect(updated.Spec.LVMVolumeGroupName).To(Equal("lvg-1a"), "Best LVG on the node should be selected")
+		})
+
+		It("should select best LVG from the winning node", func(ctx SpecContext) {
+			// Node-1 has 3 LVGs with different scores
+			// Should select lvg-1b which has the highest score (15)
+			eligible := createMultiLVGEligibleNodes([]struct {
+				Name     string
+				Zone     string
+				LVGNames []string
+			}{
+				{Name: "node-1", Zone: "zone-a", LVGNames: []string{"lvg-1a", "lvg-1b", "lvg-1c"}},
+			})
+			scores := map[string]int{
+				"lvg-1a": 10,
+				"lvg-1b": 15,
+				"lvg-1c": 5,
+			}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, eligible)
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			objects := []runtime.Object{rv, rsc, rsp, rvr}
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(objects...).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(Equal("node-1"))
+			Expect(updated.Spec.LVMVolumeGroupName).To(Equal("lvg-1b"), "LVG with highest score should be selected")
 		})
 	})
 })

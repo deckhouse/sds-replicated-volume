@@ -39,9 +39,13 @@ type SchedulingContext struct {
 }
 
 type NodeCandidate struct {
-	Name  string
-	Zone  string
-	Score int
+	Name         string
+	Zone         string
+	BestScore    int    // highest LVG score (primary sort key)
+	LVGCount     int    // number of suitable LVGs (secondary sort key)
+	SumScore     int    // sum of all LVG scores (tertiary sort key)
+	LVGName      string // best LVG name for this node
+	ThinPoolName string // thin pool name (if LVMThin)
 }
 
 type LVGInfo struct {

@@ -250,7 +250,7 @@ func (r *Reconciler) applyTopologyFilter(
 	case topologyIgnored:
 		candidates := make([]NodeCandidate, 0, len(candidateNodes))
 		for _, nodeName := range candidateNodes {
-			candidates = append(candidates, NodeCandidate{Name: nodeName, Score: 0})
+			candidates = append(candidates, NodeCandidate{Name: nodeName})
 		}
 		return map[string][]NodeCandidate{topologyIgnored: candidates}, nil
 
@@ -364,10 +364,38 @@ func (r *Reconciler) applyCapacityFilterAndScore(
 		return nil, fmt.Errorf("%w: %v", errSchedulingNoCandidateNodes, err)
 	}
 
-	nodeScores := make(map[string]int)
+	// Aggregate LVG scores per node: find best LVG, count suitable LVGs, sum scores.
+	type nodeAggregatedLVG struct {
+		BestLVGName      string
+		BestThinPoolName string
+		BestScore        int
+		LVGCount         int
+		SumScore         int
+	}
+	nodeAggregated := make(map[string]*nodeAggregatedLVG)
+
 	for lvgName, info := range sctx.LVGToNode {
-		if score, ok := lvgScores[lvgName]; ok {
-			nodeScores[info.NodeName] = score
+		score, ok := lvgScores[lvgName]
+		if !ok {
+			continue
+		}
+		agg, exists := nodeAggregated[info.NodeName]
+		if !exists {
+			nodeAggregated[info.NodeName] = &nodeAggregatedLVG{
+				BestLVGName:      lvgName,
+				BestThinPoolName: info.ThinPoolName,
+				BestScore:        score,
+				LVGCount:         1,
+				SumScore:         score,
+			}
+			continue
+		}
+		agg.LVGCount++
+		agg.SumScore += score
+		if score > agg.BestScore {
+			agg.BestScore = score
+			agg.BestLVGName = lvgName
+			agg.BestThinPoolName = info.ThinPoolName
 		}
 	}
 
@@ -375,11 +403,15 @@ func (r *Reconciler) applyCapacityFilterAndScore(
 	for zone, candidates := range zoneCandidates {
 		var filtered []NodeCandidate
 		for _, c := range candidates {
-			if score, ok := nodeScores[c.Name]; ok {
+			if agg, ok := nodeAggregated[c.Name]; ok {
 				filtered = append(filtered, NodeCandidate{
-					Name:  c.Name,
-					Zone:  zone,
-					Score: score,
+					Name:         c.Name,
+					Zone:         zone,
+					BestScore:    agg.BestScore,
+					LVGCount:     agg.LVGCount,
+					SumScore:     agg.SumScore,
+					LVGName:      agg.BestLVGName,
+					ThinPoolName: agg.BestThinPoolName,
 				})
 			}
 		}
@@ -408,7 +440,7 @@ func applyAttachToBonus(zoneCandidates map[string][]NodeCandidate, attachToNodes
 	for zone, candidates := range zoneCandidates {
 		for i := range candidates {
 			if _, isAttachTo := attachToSet[candidates[i].Name]; isAttachTo {
-				candidates[i].Score += attachToScoreBonus
+				candidates[i].BestScore += attachToScoreBonus
 			}
 		}
 		zoneCandidates[zone] = candidates
@@ -450,8 +482,8 @@ func assignReplicasIgnoredTopology(
 
 	var assignedRVRs []*v1alpha1.ReplicatedVolumeReplica
 	for _, rvr := range unscheduledRVRs {
-		selectedNode, remaining := computeBestNode(allCandidates)
-		if selectedNode == "" {
+		selected, remaining := computeBestNode(allCandidates)
+		if selected.Name == "" {
 			if bestEffort {
 				break
 			}
@@ -459,7 +491,7 @@ func assignReplicasIgnoredTopology(
 		}
 		allCandidates = remaining
 
-		applyNodeName(rvr, selectedNode)
+		applyPlacement(rvr, selected)
 		assignedRVRs = append(assignedRVRs, rvr)
 	}
 
@@ -477,7 +509,7 @@ func assignReplicasZonalTopology(
 	for zone, candidates := range zoneCandidates {
 		totalScore := 0
 		for _, c := range candidates {
-			totalScore += c.Score
+			totalScore += c.BestScore
 		}
 		zoneScore := totalScore * len(candidates)
 		if zoneScore > bestZoneScore {
@@ -496,8 +528,8 @@ func assignReplicasZonalTopology(
 	var assignedRVRs []*v1alpha1.ReplicatedVolumeReplica
 	candidates := zoneCandidates[bestZone]
 	for _, rvr := range unscheduledRVRs {
-		selectedNode, remaining := computeBestNode(candidates)
-		if selectedNode == "" {
+		selected, remaining := computeBestNode(candidates)
+		if selected.Name == "" {
 			if bestEffort {
 				break
 			}
@@ -505,7 +537,7 @@ func assignReplicasZonalTopology(
 		}
 		candidates = remaining
 
-		applyNodeName(rvr, selectedNode)
+		applyPlacement(rvr, selected)
 		assignedRVRs = append(assignedRVRs, rvr)
 	}
 	zoneCandidates[bestZone] = candidates
@@ -554,8 +586,8 @@ func assignReplicasTransZonalTopology(
 				errSchedulingNoCandidateNodes, globalMinZone, globalMinCount)
 		}
 
-		selectedNode, remaining := computeBestNode(zoneCandidates[selectedZone])
-		if selectedNode == "" {
+		selected, remaining := computeBestNode(zoneCandidates[selectedZone])
+		if selected.Name == "" {
 			return assignedRVRs, nil
 		}
 		zoneCandidates[selectedZone] = remaining
@@ -564,7 +596,7 @@ func assignReplicasTransZonalTopology(
 			delete(availableZones, selectedZone)
 		}
 
-		applyNodeName(rvr, selectedNode)
+		applyPlacement(rvr, selected)
 		assignedRVRs = append(assignedRVRs, rvr)
 		zoneReplicaCount[selectedZone]++
 	}
@@ -660,16 +692,25 @@ func computeZoneWithMinReplicaCount(
 	return minZone, minCount
 }
 
-func computeBestNode(candidates []NodeCandidate) (string, []NodeCandidate) {
+func computeBestNode(candidates []NodeCandidate) (NodeCandidate, []NodeCandidate) {
 	if len(candidates) == 0 {
-		return "", candidates
+		return NodeCandidate{}, candidates
 	}
 
 	slices.SortFunc(candidates, func(a, b NodeCandidate) int {
-		return b.Score - a.Score
+		// Primary: BestScore descending
+		if a.BestScore != b.BestScore {
+			return b.BestScore - a.BestScore
+		}
+		// Secondary: LVGCount descending (more LVG options = better)
+		if a.LVGCount != b.LVGCount {
+			return b.LVGCount - a.LVGCount
+		}
+		// Tertiary: SumScore descending
+		return b.SumScore - a.SumScore
 	})
 
-	return candidates[0].Name, candidates[1:]
+	return candidates[0], candidates[1:]
 }
 
 func computeSchedulingFailureReason(err error) *schedulingFailureReason {
@@ -739,7 +780,7 @@ func groupCandidateNodesByZone(
 		if _, allowed := allowedZones[zone]; !allowed {
 			continue
 		}
-		result[zone] = append(result[zone], NodeCandidate{Name: nodeName, Zone: zone, Score: 0})
+		result[zone] = append(result[zone], NodeCandidate{Name: nodeName, Zone: zone})
 	}
 	return result
 }
@@ -792,9 +833,11 @@ func isRVReadyToSchedule(rv *v1alpha1.ReplicatedVolume) error {
 	return nil
 }
 
-func applyNodeName(rvr *v1alpha1.ReplicatedVolumeReplica, nodeName string) {
-	rvr.Spec.NodeName = nodeName
-	_ = obju.SetLabel(rvr, v1alpha1.NodeNameLabelKey, nodeName)
+func applyPlacement(rvr *v1alpha1.ReplicatedVolumeReplica, candidate NodeCandidate) {
+	rvr.Spec.NodeName = candidate.Name
+	rvr.Spec.LVMVolumeGroupName = candidate.LVGName
+	rvr.Spec.LVMVolumeGroupThinPoolName = candidate.ThinPoolName
+	_ = obju.SetLabel(rvr, v1alpha1.NodeNameLabelKey, candidate.Name)
 }
 
 func applyScheduledConditionTrue(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
@@ -912,6 +955,8 @@ func (r *Reconciler) updateScheduledRVRs(ctx context.Context, rvrs []*v1alpha1.R
 	for _, rvr := range rvrs {
 		base := rvr.DeepCopy()
 		base.Spec.NodeName = ""
+		base.Spec.LVMVolumeGroupName = ""
+		base.Spec.LVMVolumeGroupThinPoolName = ""
 		delete(base.Labels, v1alpha1.NodeNameLabelKey)
 
 		if err := r.patchRVR(ctx, rvr, base, false); err != nil {
