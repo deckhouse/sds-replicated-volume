@@ -17,6 +17,7 @@ limitations under the License.
 package drbd
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 
@@ -59,11 +60,14 @@ func BuildController(mgr manager.Manager) error {
 		return fmt.Errorf("adding scanner runnable: %w", err)
 	}
 
+	// Create port cache (reconciler-owned)
+	portCache := NewPortCache(context.Background(), PortRangeMin, PortRangeMax)
+
 	// Create reconciler
 	rec := NewReconciler(
 		cl,
-		log,
 		nodeName,
+		portCache,
 	)
 
 	// Build controller

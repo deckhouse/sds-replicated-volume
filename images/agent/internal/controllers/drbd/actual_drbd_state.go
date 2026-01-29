@@ -26,7 +26,8 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
 
-type ActualState interface {
+// ActualDRBDState represents the actual DRBD state observed from the system.
+type ActualDRBDState interface {
 	IsZero() bool
 
 	// ResourceName returns the DRBD resource name.
@@ -66,10 +67,9 @@ type ActualState interface {
 	Peers() []ActualPeer
 
 	// Report fills the status fields from the actual state.
-	// Returns true if any field was changed.
 	// Returns error if reporting invariants are violated (e.g., multiple volumes).
 	// Even on error, it attempts to report the rest of the fields.
-	Report(status *v1alpha1.DRBDResourceStatus) (changed bool, err error)
+	Report(status *v1alpha1.DRBDResourceStatus) error
 }
 
 type ActualVolume interface {
@@ -265,47 +265,30 @@ func (aState *actualState) Peers() []ActualPeer {
 	return peers
 }
 
-func (aState *actualState) Report(status *v1alpha1.DRBDResourceStatus) (changed bool, err error) {
+func (aState *actualState) Report(status *v1alpha1.DRBDResourceStatus) error {
 	if aState == nil {
-		return false, errors.New("unable to retrieve actual state")
+		return errors.New("unable to retrieve actual state")
 	}
 
 	if aState.status == nil && aState.show == nil {
 		// Resource doesn't exist in DRBD - broken invariant at report stage
-		err = errors.New("resource not found in DRBD")
-
 		// Reset all fields except activeConfiguration.state
-		if status.Device != "" {
-			status.Device = ""
-			changed = true
-		}
-		if status.DiskState != "" {
-			status.DiskState = ""
-			changed = true
-		}
-		if status.Quorum != nil {
-			status.Quorum = nil
-			changed = true
-		}
-		if len(status.Peers) > 0 {
-			status.Peers = nil
-			changed = true
-		}
+		status.Device = ""
+		status.DiskState = ""
+		status.Quorum = nil
+		status.Peers = nil
 
 		// Keep activeConfiguration but set state to Down
 		if status.ActiveConfiguration == nil {
 			status.ActiveConfiguration = &v1alpha1.DRBDResourceActiveConfiguration{}
-			changed = true
 		}
-		if status.ActiveConfiguration.State != v1alpha1.DRBDResourceStateDown {
-			status.ActiveConfiguration.State = v1alpha1.DRBDResourceStateDown
-			changed = true
-		}
+		status.ActiveConfiguration.State = v1alpha1.DRBDResourceStateDown
 
-		return changed, err
+		return errors.New("resource not found in DRBD")
 	}
 
 	// Invariant check: we expect exactly one volume
+	var err error
 	var volumes []drbdsetup.Device
 	if aState.status != nil {
 		volumes = aState.status.Devices
@@ -314,185 +297,114 @@ func (aState *actualState) Report(status *v1alpha1.DRBDResourceStatus) (changed 
 	if len(volumes) == 0 {
 		err = errors.Join(err, errors.New("expected 1 volume, got 0"))
 		// Clear volume-related fields to avoid obsolete state
-		if status.Device != "" {
-			status.Device = ""
-			changed = true
-		}
-		if status.DiskState != "" {
-			status.DiskState = ""
-			changed = true
-		}
-		if status.Quorum != nil {
-			status.Quorum = nil
-			changed = true
-		}
+		status.Device = ""
+		status.DiskState = ""
+		status.Quorum = nil
 	} else {
 		if len(volumes) > 1 {
 			err = errors.Join(err, fmt.Errorf("expected 1 volume, got %d", len(volumes)))
 		}
 
 		vol := &volumes[0]
-		device := fmt.Sprintf("/dev/drbd%d", vol.Minor)
-		if status.Device != device {
-			status.Device = device
-			changed = true
-		}
-
-		diskState := v1alpha1.DiskState(vol.DiskState)
-		if status.DiskState != diskState {
-			status.DiskState = diskState
-			changed = true
-		}
-
-		if !pointerEqual(status.Quorum, &vol.Quorum) {
-			status.Quorum = &vol.Quorum
-			changed = true
-		}
+		status.Device = fmt.Sprintf("/dev/drbd%d", vol.Minor)
+		status.DiskState = v1alpha1.DiskState(vol.DiskState)
+		status.Quorum = &vol.Quorum
 	}
 
 	// Report ActiveConfiguration
-	c, e := aState.reportActiveConfiguration(status, volumes)
-	changed = c || changed
-	err = errors.Join(err, e)
+	aState.reportActiveConfiguration(status, volumes)
 
 	// Report Peers
-	c = aState.reportPeers(status)
-	changed = c || changed
+	aState.reportPeers(status)
 
-	return changed, err
+	return err
 }
 
-func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResourceStatus, volumes []drbdsetup.Device) (changed bool, err error) {
+func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResourceStatus, volumes []drbdsetup.Device) {
 	if status.ActiveConfiguration == nil {
 		status.ActiveConfiguration = &v1alpha1.DRBDResourceActiveConfiguration{}
-		changed = true
 	}
 	ac := status.ActiveConfiguration
 
 	// State is Up if resource exists
-	if ac.State != v1alpha1.DRBDResourceStateUp {
-		ac.State = v1alpha1.DRBDResourceStateUp
-		changed = true
-	}
+	ac.State = v1alpha1.DRBDResourceStateUp
 
 	// Role from status
-	var role v1alpha1.DRBDRole
 	if aState.status != nil {
-		role = v1alpha1.DRBDRole(aState.status.Role)
-	}
-	if ac.Role != role {
-		ac.Role = role
-		changed = true
+		ac.Role = v1alpha1.DRBDRole(aState.status.Role)
+	} else {
+		ac.Role = ""
 	}
 
 	// Quorum from resource options
-	var quorumVal *byte
+	ac.Quorum = nil
 	if aState.show != nil {
 		quorumStr := aState.show.Options.Quorum
 		if quorumStr != "" && quorumStr != "off" {
 			if q, parseErr := strconv.ParseUint(quorumStr, 10, 8); parseErr == nil {
 				qb := byte(q)
-				quorumVal = &qb
+				ac.Quorum = &qb
 			}
 		}
 	}
-	if !pointerEqual(ac.Quorum, quorumVal) {
-		ac.Quorum = quorumVal
-		changed = true
-	}
 
 	// QuorumMinimumRedundancy from resource options
-	var qmrVal *byte
+	ac.QuorumMinimumRedundancy = nil
 	if aState.show != nil {
 		qmrStr := aState.show.Options.QuorumMinimumRedundancy
 		if qmrStr != "" && qmrStr != "off" {
 			if q, parseErr := strconv.ParseUint(qmrStr, 10, 8); parseErr == nil {
 				qb := byte(q)
-				qmrVal = &qb
+				ac.QuorumMinimumRedundancy = &qb
 			}
 		}
 	}
-	if !pointerEqual(ac.QuorumMinimumRedundancy, qmrVal) {
-		ac.QuorumMinimumRedundancy = qmrVal
-		changed = true
-	}
 
 	// AllowTwoPrimaries - get from first connection in show
-	var allowTwoPrimaries *bool
+	ac.AllowTwoPrimaries = nil
 	if aState.show != nil && len(aState.show.Connections) > 0 {
 		atp := aState.show.Connections[0].Net.AllowTwoPrimaries
-		allowTwoPrimaries = &atp
-	}
-	if !pointerEqual(ac.AllowTwoPrimaries, allowTwoPrimaries) {
-		ac.AllowTwoPrimaries = allowTwoPrimaries
-		changed = true
+		ac.AllowTwoPrimaries = &atp
 	}
 
 	// Type and Disk from first volume
 	if len(volumes) > 0 {
 		vol := &volumes[0]
 
-		var resType v1alpha1.DRBDResourceType
 		if vol.DiskState == "Diskless" {
-			resType = v1alpha1.DRBDResourceTypeDiskless
+			ac.Type = v1alpha1.DRBDResourceTypeDiskless
 		} else {
-			resType = v1alpha1.DRBDResourceTypeDiskful
-		}
-		if ac.Type != resType {
-			ac.Type = resType
-			changed = true
+			ac.Type = v1alpha1.DRBDResourceTypeDiskful
 		}
 
 		// Backing disk from show volumes
-		var backingDisk string
+		ac.Disk = ""
 		if aState.show != nil {
 			for i := range aState.show.ThisHost.Volumes {
 				if aState.show.ThisHost.Volumes[i].VolumeNr == vol.Volume {
-					backingDisk = aState.show.ThisHost.Volumes[i].BackingDisk
+					ac.Disk = aState.show.ThisHost.Volumes[i].BackingDisk
 					break
 				}
 			}
 		}
-		if ac.Disk != backingDisk {
-			ac.Disk = backingDisk
-			changed = true
-		}
 	} else {
 		// No volumes - clear volume-related fields in ac
-		if ac.Type != "" {
-			ac.Type = ""
-			changed = true
-		}
-		if ac.Disk != "" {
-			ac.Disk = ""
-			changed = true
-		}
+		ac.Type = ""
+		ac.Disk = ""
 	}
-
-	return changed, err
 }
 
-func (aState *actualState) reportPeers(status *v1alpha1.DRBDResourceStatus) (changed bool) {
+func (aState *actualState) reportPeers(status *v1alpha1.DRBDResourceStatus) {
 	if aState.status == nil || len(aState.status.Connections) == 0 {
-		if len(status.Peers) > 0 {
-			status.Peers = nil
-			return true
-		}
-		return false
+		status.Peers = nil
+		return
 	}
 
 	connections := aState.status.Connections
-
-	// Build a map of existing peers by name for efficient lookup
-	existingPeers := make(map[string]*v1alpha1.DRBDResourcePeerStatus)
-	for i := range status.Peers {
-		existingPeers[status.Peers[i].Name] = &status.Peers[i]
-	}
-
 	newPeers := make([]v1alpha1.DRBDResourcePeerStatus, 0, len(connections))
+
 	for i := range connections {
 		conn := &connections[i]
-		peerName := conn.Name
 		nodeID := uint(conn.PeerNodeID)
 
 		// Get peer disk state from first peer device
@@ -502,7 +414,7 @@ func (aState *actualState) reportPeers(status *v1alpha1.DRBDResourceStatus) (cha
 		}
 
 		peerStatus := v1alpha1.DRBDResourcePeerStatus{
-			Name:            peerName,
+			Name:            conn.Name,
 			NodeID:          &nodeID,
 			ConnectionState: v1alpha1.ConnectionState(conn.ConnectionState),
 			DiskState:       v1alpha1.DiskState(peerDiskState),
@@ -532,67 +444,12 @@ func (aState *actualState) reportPeers(status *v1alpha1.DRBDResourceStatus) (cha
 		}
 
 		newPeers = append(newPeers, peerStatus)
-
-		// Check if this peer changed
-		if existing, ok := existingPeers[peerName]; !ok || !peerStatusEqual(existing, &peerStatus) {
-			changed = true
-		}
 	}
 
-	// Check for removed peers
-	if len(newPeers) != len(status.Peers) {
-		changed = true
-	}
-
-	if changed {
-		status.Peers = newPeers
-	}
-
-	return changed
+	status.Peers = newPeers
 }
 
-func pointerEqual[T comparable](a, b *T) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
-}
-
-func peerStatusEqual(a, b *v1alpha1.DRBDResourcePeerStatus) bool {
-	if a.Name != b.Name {
-		return false
-	}
-	if !pointerEqual(a.NodeID, b.NodeID) {
-		return false
-	}
-	if a.ConnectionState != b.ConnectionState {
-		return false
-	}
-	if a.DiskState != b.DiskState {
-		return false
-	}
-	if a.Type != b.Type {
-		return false
-	}
-	if len(a.Paths) != len(b.Paths) {
-		return false
-	}
-	for i := range a.Paths {
-		if !pathStatusEqual(&a.Paths[i], &b.Paths[i]) {
-			return false
-		}
-	}
-	return true
-}
-
-func pathStatusEqual(a, b *v1alpha1.DRBDResourcePathStatus) bool {
-	return a.SystemNetworkName == b.SystemNetworkName &&
-		a.Address.IPv4 == b.Address.IPv4 &&
-		a.Address.Port == b.Address.Port &&
-		a.Established == b.Established
-}
-
-var _ ActualState = &actualState{}
+var _ ActualDRBDState = &actualState{}
 
 // actualVolume implements ActualVolume.
 type actualVolume struct {
@@ -697,7 +554,8 @@ func (p *actualPath) Established() bool {
 
 var _ ActualPath = &actualPath{}
 
-func getActualState(ctx context.Context, drbdResName string) (*actualState, error) {
+// getActualDRBDState retrieves the actual DRBD state by querying drbdsetup.
+func getActualDRBDState(ctx context.Context, drbdResName string) (*actualState, error) {
 	statusResult, err := drbdsetup.ExecuteStatus(ctx, drbdResName)
 	if err != nil {
 		return nil, fmt.Errorf("executing drbdsetup status: %w", err)

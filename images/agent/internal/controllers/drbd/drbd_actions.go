@@ -19,106 +19,22 @@ package drbd
 import (
 	"context"
 	"fmt"
-	"slices"
 
-	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdmeta"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
 
-type Action interface {
-	_action()
-}
-
-type PatchAction interface {
-	Action
-	ApplyPatch(drbdr *v1alpha1.DRBDResource) bool
-}
-
-type PatchStatusAction interface {
-	Action
-	ApplyStatusPatch(drbdr *v1alpha1.DRBDResource) bool
-}
-
-type ExecuteDRBDAction interface {
-	Action
+// DRBDAction represents a DRBD command to execute.
+type DRBDAction interface {
 	Execute(ctx context.Context) error
 }
 
-//
-
-var _ PatchAction = AddAgentFinalizerAction{}
-var _ PatchAction = RemoveAgentFinalizerAction{}
-var _ PatchStatusAction = SetAddressesAction{}
-
-var _ ExecuteDRBDAction = NewResourceAction{}
-var _ ExecuteDRBDAction = ResourceOptionsAction{}
-var _ ExecuteDRBDAction = NewMinorAction{}
-var _ ExecuteDRBDAction = CreateMetadataAction{}
-var _ ExecuteDRBDAction = AttachAction{}
-var _ ExecuteDRBDAction = DiskOptionsAction{}
-var _ ExecuteDRBDAction = NewPeerAction{}
-var _ ExecuteDRBDAction = NetOptionsAction{}
-var _ ExecuteDRBDAction = NewPathAction{}
-var _ ExecuteDRBDAction = ConnectAction{}
-var _ ExecuteDRBDAction = DisconnectAction{}
-var _ ExecuteDRBDAction = DelPathAction{}
-var _ ExecuteDRBDAction = DelPeerAction{}
-var _ ExecuteDRBDAction = DownAction{}
+// DRBDActions is a list of DRBD actions to execute.
+type DRBDActions []DRBDAction
 
 //
-
-func (AddAgentFinalizerAction) _action()    {}
-func (RemoveAgentFinalizerAction) _action() {}
-func (SetAddressesAction) _action()         {}
-func (NewResourceAction) _action()          {}
-func (ResourceOptionsAction) _action()      {}
-func (NewMinorAction) _action()             {}
-func (CreateMetadataAction) _action()       {}
-func (AttachAction) _action()               {}
-func (DiskOptionsAction) _action()          {}
-func (NewPeerAction) _action()              {}
-func (NetOptionsAction) _action()           {}
-func (NewPathAction) _action()              {}
-func (ConnectAction) _action()              {}
-func (DisconnectAction) _action()           {}
-func (DelPathAction) _action()              {}
-func (DelPeerAction) _action()              {}
-func (DownAction) _action()                 {}
-
-//
-
-type AddAgentFinalizerAction struct{}
-
-func (AddAgentFinalizerAction) ApplyPatch(drbdr *v1alpha1.DRBDResource) bool {
-	return obju.AddFinalizer(drbdr, v1alpha1.AgentFinalizer)
-}
-
-//
-
-type RemoveAgentFinalizerAction struct{}
-
-func (RemoveAgentFinalizerAction) ApplyPatch(drbdr *v1alpha1.DRBDResource) bool {
-	return obju.RemoveFinalizer(drbdr, v1alpha1.AgentFinalizer)
-}
-
-//
-
-type SetAddressesAction struct {
-	Addresses []v1alpha1.DRBDResourceAddressStatus
-}
-
-func (a SetAddressesAction) ApplyStatusPatch(drbdr *v1alpha1.DRBDResource) bool {
-	if slices.Equal(drbdr.Status.Addresses, a.Addresses) {
-		return false
-	}
-	drbdr.Status.Addresses = a.Addresses
-	return true
-}
-
-//
-// ExecuteDRBDAction implementations
+// DRBDAction implementations
 //
 
 // NewResourceAction creates a new DRBD resource.
@@ -131,8 +47,6 @@ func (a NewResourceAction) Execute(ctx context.Context) error {
 	err := drbdsetup.ExecuteNewResource(ctx, a.ResourceName, a.NodeID)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNewResourceFailed)
 }
-
-//
 
 // ResourceOptionsAction sets resource-level options.
 type ResourceOptionsAction struct {
@@ -157,8 +71,6 @@ func (a ResourceOptionsAction) Execute(ctx context.Context) error {
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonResourceOptionsFailed)
 }
 
-//
-
 // NewMinorAction creates a new DRBD device/volume within a resource.
 type NewMinorAction struct {
 	ResourceName   string
@@ -177,8 +89,6 @@ func (a NewMinorAction) Execute(ctx context.Context) error {
 	return nil
 }
 
-//
-
 // CreateMetadataAction creates DRBD metadata on a backing device.
 type CreateMetadataAction struct {
 	Minor      *uint
@@ -195,8 +105,6 @@ func (a CreateMetadataAction) Execute(ctx context.Context) error {
 	err := drbdmeta.ExecuteCreateMD(ctx, *a.Minor, a.BackingDev)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonCreateMetadataFailed)
 }
-
-//
 
 // AttachAction attaches a backing device to a volume.
 type AttachAction struct {
@@ -216,8 +124,6 @@ func (a AttachAction) Execute(ctx context.Context) error {
 	err := drbdsetup.ExecuteAttach(ctx, *a.Minor, a.LowerDev, a.MetaDev, a.MetaIdx)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonAttachFailed)
 }
-
-//
 
 // DiskOptionsAction sets disk options on an attached volume.
 type DiskOptionsAction struct {
@@ -239,8 +145,6 @@ func (a DiskOptionsAction) Execute(ctx context.Context) error {
 	})
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDiskOptionsFailed)
 }
-
-//
 
 // NewPeerAction makes a peer node known to the resource.
 type NewPeerAction struct {
@@ -266,8 +170,6 @@ func (a NewPeerAction) Execute(ctx context.Context) error {
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNewPeerFailed)
 }
 
-//
-
 // NetOptionsAction sets network options on a peer connection.
 type NetOptionsAction struct {
 	ResourceName      string
@@ -284,8 +186,6 @@ func (a NetOptionsAction) Execute(ctx context.Context) error {
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNetOptionsFailed)
 }
 
-//
-
 // NewPathAction adds a network path to a peer.
 type NewPathAction struct {
 	ResourceName string
@@ -299,8 +199,6 @@ func (a NewPathAction) Execute(ctx context.Context) error {
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNewPathFailed)
 }
 
-//
-
 // ConnectAction establishes connection to a peer.
 type ConnectAction struct {
 	ResourceName string
@@ -312,8 +210,6 @@ func (a ConnectAction) Execute(ctx context.Context) error {
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonConnectFailed)
 }
 
-//
-
 // DisconnectAction disconnects from a peer.
 type DisconnectAction struct {
 	ResourceName string
@@ -324,8 +220,6 @@ func (a DisconnectAction) Execute(ctx context.Context) error {
 	err := drbdsetup.ExecuteDisconnect(ctx, a.ResourceName, a.PeerNodeID)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDisconnectFailed)
 }
-
-//
 
 // DelPathAction removes a network path from a peer.
 type DelPathAction struct {
@@ -340,8 +234,6 @@ func (a DelPathAction) Execute(ctx context.Context) error {
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDelPathFailed)
 }
 
-//
-
 // DelPeerAction removes a peer connection.
 type DelPeerAction struct {
 	ResourceName string
@@ -352,8 +244,6 @@ func (a DelPeerAction) Execute(ctx context.Context) error {
 	err := drbdsetup.ExecuteDelPeer(ctx, a.ResourceName, a.PeerNodeID)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDelPeerFailed)
 }
-
-//
 
 // DownAction tears down a DRBD resource completely.
 type DownAction struct {

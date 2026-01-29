@@ -31,13 +31,12 @@ import (
 // PortAllocator is a function that allocates a port for a given IP address.
 type PortAllocator func(ip string) uint
 
-type IntendedState interface {
+// IntendedDRBDState represents the intended DRBD state for a resource.
+// It focuses only on DRBD-specific state, not K8S object state.
+type IntendedDRBDState interface {
 	IsZero() bool
 
 	IsUpAndNotInCleanup() bool
-
-	// Addresses returns the intended local addresses with IPs and ports.
-	Addresses() []v1alpha1.DRBDResourceAddressStatus
 
 	// ResourceName returns the DRBD resource name on the node.
 	ResourceName() string
@@ -65,6 +64,7 @@ type IntendedState interface {
 	Peers() []IntendedPeer
 }
 
+// IntendedPeer represents the intended state of a DRBD peer connection.
 type IntendedPeer interface {
 	// Name returns the peer's node name.
 	Name() string
@@ -88,6 +88,7 @@ type IntendedPeer interface {
 	Paths() []IntendedPath
 }
 
+// IntendedPath represents an intended network path to a DRBD peer.
 type IntendedPath interface {
 	// SystemNetworkName returns the system network name for this path.
 	SystemNetworkName() string
@@ -105,10 +106,9 @@ type IntendedPath interface {
 	RemotePort() uint
 }
 
-// intendedState implements IntendedState with pre-computed values.
-type intendedState struct {
+// intendedDRBDState implements IntendedDRBDState with pre-computed values.
+type intendedDRBDState struct {
 	isUpAndNotInCleanup     bool
-	addresses               []v1alpha1.DRBDResourceAddressStatus
 	resourceName            string
 	nodeID                  uint
 	resourceType            v1alpha1.DRBDResourceType
@@ -119,21 +119,20 @@ type intendedState struct {
 	peers                   []IntendedPeer
 }
 
-func (s *intendedState) IsZero() bool              { return s == nil }
-func (s *intendedState) IsUpAndNotInCleanup() bool { return s.isUpAndNotInCleanup }
-func (s *intendedState) Addresses() []v1alpha1.DRBDResourceAddressStatus {
-	return s.addresses
+func (s *intendedDRBDState) IsZero() bool              { return s == nil }
+func (s *intendedDRBDState) IsUpAndNotInCleanup() bool { return s.isUpAndNotInCleanup }
+func (s *intendedDRBDState) ResourceName() string      { return s.resourceName }
+func (s *intendedDRBDState) NodeID() uint              { return s.nodeID }
+func (s *intendedDRBDState) Type() v1alpha1.DRBDResourceType {
+	return s.resourceType
 }
-func (s *intendedState) ResourceName() string            { return s.resourceName }
-func (s *intendedState) NodeID() uint                    { return s.nodeID }
-func (s *intendedState) Type() v1alpha1.DRBDResourceType { return s.resourceType }
-func (s *intendedState) BackingDisk() string             { return s.backingDisk }
-func (s *intendedState) Quorum() byte                    { return s.quorum }
-func (s *intendedState) QuorumMinimumRedundancy() byte   { return s.quorumMinimumRedundancy }
-func (s *intendedState) AllowTwoPrimaries() bool         { return s.allowTwoPrimaries }
-func (s *intendedState) Peers() []IntendedPeer           { return s.peers }
+func (s *intendedDRBDState) BackingDisk() string           { return s.backingDisk }
+func (s *intendedDRBDState) Quorum() byte                  { return s.quorum }
+func (s *intendedDRBDState) QuorumMinimumRedundancy() byte { return s.quorumMinimumRedundancy }
+func (s *intendedDRBDState) AllowTwoPrimaries() bool       { return s.allowTwoPrimaries }
+func (s *intendedDRBDState) Peers() []IntendedPeer         { return s.peers }
 
-var _ IntendedState = (*intendedState)(nil)
+var _ IntendedDRBDState = (*intendedDRBDState)(nil)
 
 // intendedPeer implements IntendedPeer with pre-computed values.
 type intendedPeer struct {
@@ -185,60 +184,18 @@ func systemNetworkToNodeAddressType(systemNetwork string) corev1.NodeAddressType
 	}
 }
 
-// getIntendedState constructs IntendedState by querying all required resources.
-func getIntendedState(
+// computeIntendedDRBDState constructs the intended DRBD state from the DRBDResource.
+// It requires addresses to already be computed in drbdr.status.addresses.
+// The backingDisk lookup requires Kubernetes API access.
+func computeIntendedDRBDState(
 	ctx context.Context,
 	cl client.Client,
 	drbdr *v1alpha1.DRBDResource,
-	portAllocator PortAllocator,
-) (*intendedState, error) {
-	// Fetch Node to get local addresses
-	node := &corev1.Node{}
-	if err := cl.Get(ctx, client.ObjectKey{Name: drbdr.Spec.NodeName}, node); err != nil {
-		return nil, fmt.Errorf("getting Node %q: %w", drbdr.Spec.NodeName, err)
-	}
-
-	// Build address map from Node.status.addresses
-	nodeAddressesByType := make(map[corev1.NodeAddressType]string)
-	for _, addr := range node.Status.Addresses {
-		nodeAddressesByType[addr.Type] = addr.Address
-	}
-
-	// Build existing addresses map from status (keyed by system network name + IP)
-	type addrKey struct {
-		snn string
-		ip  string
-	}
-	existingPorts := make(map[addrKey]uint)
+) (*intendedDRBDState, error) {
+	// Build local addresses map from status.addresses
+	localAddresses := make(map[string]v1alpha1.DRBDAddress, len(drbdr.Status.Addresses))
 	for _, addr := range drbdr.Status.Addresses {
-		existingPorts[addrKey{snn: addr.SystemNetworkName, ip: addr.Address.IPv4}] = addr.Address.Port
-	}
-
-	// Compute intended addresses using IPs from Node and ports from status or allocator
-	addresses := make([]v1alpha1.DRBDResourceAddressStatus, 0, len(drbdr.Spec.SystemNetworks))
-	localAddresses := make(map[string]v1alpha1.DRBDAddress, len(drbdr.Spec.SystemNetworks))
-
-	for _, snn := range drbdr.Spec.SystemNetworks {
-		addrType := systemNetworkToNodeAddressType(snn)
-		ip, ok := nodeAddressesByType[addrType]
-		if !ok {
-			continue
-		}
-
-		// Reuse port if IP matches, otherwise allocate new
-		var port uint
-		if existingPort, found := existingPorts[addrKey{snn: snn, ip: ip}]; found && existingPort != 0 {
-			port = existingPort
-		} else {
-			port = portAllocator(ip)
-		}
-
-		addr := v1alpha1.DRBDAddress{IPv4: ip, Port: port}
-		addresses = append(addresses, v1alpha1.DRBDResourceAddressStatus{
-			SystemNetworkName: snn,
-			Address:           addr,
-		})
-		localAddresses[snn] = addr
+		localAddresses[addr.SystemNetworkName] = addr.Address
 	}
 
 	// Get backing disk path for diskful resources
@@ -286,9 +243,8 @@ func getIntendedState(
 		isUpAndNotInCleanup = false
 	}
 
-	return &intendedState{
+	return &intendedDRBDState{
 		isUpAndNotInCleanup:     isUpAndNotInCleanup,
-		addresses:               addresses,
 		resourceName:            drbdr.DRBDResourceNameOnTheNode(),
 		nodeID:                  drbdr.Spec.NodeID,
 		resourceType:            drbdr.Spec.Type,

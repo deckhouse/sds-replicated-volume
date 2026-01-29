@@ -28,8 +28,12 @@ const (
 	PortRangeMax = uint(7999)
 )
 
-var DefaultPortCache = NewPortCache(context.Background(), PortRangeMin, PortRangeMax)
-
+// PortCache maintains port allocators for different IP addresses.
+// It is designed to be owned by the reconciler and passed to helpers as a delegate.
+//
+// Note: The PortCache maintains port allocation across reconciliations to ensure
+// stable port assignments. This is acceptable because the cache is deterministic
+// relative to its state and produces stable outputs for the same inputs.
 type PortCache struct {
 	ctx            context.Context
 	mu             sync.Mutex
@@ -38,6 +42,7 @@ type PortCache struct {
 	allocatorsByIP map[string]portAllocator
 }
 
+// NewPortCache creates a new PortCache with the given port range.
 func NewPortCache(ctx context.Context, minPort, maxPort uint) *PortCache {
 	return &PortCache{
 		ctx:            ctx,
@@ -47,6 +52,9 @@ func NewPortCache(ctx context.Context, minPort, maxPort uint) *PortCache {
 	}
 }
 
+// Allocate returns an available port for the given IP address.
+// If the IP address has not been seen before, a new allocator is created.
+// Returns 0 if no port is available.
 func (pc *PortCache) Allocate(ip string) uint {
 	pc.mu.Lock()
 	alloc, ok := pc.allocatorsByIP[ip]

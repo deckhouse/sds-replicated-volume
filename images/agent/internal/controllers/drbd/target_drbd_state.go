@@ -24,36 +24,18 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/maps"
 )
 
-type TargetStateActions []Action
-
-func computeTargetStateActions(iState IntendedState, aState ActualState) (res TargetStateActions) {
-	// actions, which don't need neither [IntendedState], nor [ActualState]
-
-	// (none)
-
+// computeTargetDRBDActions computes the DRBD actions needed to converge
+// from actual state to intended state. It returns only DRBD-specific actions,
+// not K8S object modifications (finalizers, status).
+func computeTargetDRBDActions(iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
 	if iState.IsZero() {
 		return
 	}
 
-	// actions, which don't need [ActualState]
-
-	if iState.IsUpAndNotInCleanup() {
-		res = append(res, AddAgentFinalizerAction{})
-	} else {
-		// should always go last
-		defer func() {
-			res = append(res, RemoveAgentFinalizerAction{})
-		}()
-	}
-
-	res = append(res, SetAddressesAction{Addresses: iState.Addresses()})
-
-	// DRBD actions - require valid actual state
-	//
+	// DRBD actions require valid actual state.
 	// If aState.IsZero() is true, it means we failed to get the actual DRBD state
 	// (e.g. "drbdsetup show" failed). In this case we skip all DRBD actions since
 	// we don't know the current state to compare against.
-
 	if aState.IsZero() {
 		return res
 	}
@@ -74,7 +56,7 @@ func computeTargetStateActions(iState IntendedState, aState ActualState) (res Ta
 
 // computeBringUpActions computes actions to bring DRBD to intended state.
 // Precondition: aState is valid (not zero).
-func computeBringUpActions(iState IntendedState, aState ActualState) (res TargetStateActions) {
+func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
 	resourceName := iState.ResourceName()
 
 	// Shared minor pointer for passing between actions
@@ -170,7 +152,7 @@ func computeBringUpActions(iState IntendedState, aState ActualState) (res Target
 	return res
 }
 
-func computeResourceOptionsAction(resourceName string, iState IntendedState) (res TargetStateActions) {
+func computeResourceOptionsAction(resourceName string, iState IntendedDRBDState) (res DRBDActions) {
 	autoPromote := false
 	quorum := uint(iState.Quorum())
 	quorumMinRedundancy := uint(iState.QuorumMinimumRedundancy())
@@ -187,7 +169,7 @@ func computeResourceOptionsAction(resourceName string, iState IntendedState) (re
 	return res
 }
 
-func computeResourceOptionsActionReconcile(resourceName string, iState IntendedState, aState ActualState) (res TargetStateActions) {
+func computeResourceOptionsActionReconcile(resourceName string, iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
 	var changed bool
 	action := ResourceOptionsAction{ResourceName: resourceName}
 
@@ -238,7 +220,7 @@ func computeResourceOptionsActionReconcile(resourceName string, iState IntendedS
 	return res
 }
 
-func computeDiskOptionsAction(minor *uint) (res TargetStateActions) {
+func computeDiskOptionsAction(minor *uint) (res DRBDActions) {
 	discardZeroes := false
 	rsDiscardGran := uint(8192)
 	res = append(res, DiskOptionsAction{
@@ -249,7 +231,7 @@ func computeDiskOptionsAction(minor *uint) (res TargetStateActions) {
 	return res
 }
 
-func computeDiskOptionsActionReconcile(aState ActualState) (res TargetStateActions) {
+func computeDiskOptionsActionReconcile(aState ActualDRBDState) (res DRBDActions) {
 	for _, vol := range aState.Volumes() {
 		// Skip volumes without backing disk (diskless or no show data)
 		if vol.BackingDisk() == "" {
@@ -281,7 +263,7 @@ func computeDiskOptionsActionReconcile(aState ActualState) (res TargetStateActio
 	return res
 }
 
-func computeNetOptionsAction(resourceName string, iPeer IntendedPeer) (res TargetStateActions) {
+func computeNetOptionsAction(resourceName string, iPeer IntendedPeer) (res DRBDActions) {
 	allowTwoPrimaries := false // default, will be set from spec if needed
 	allowRemoteRead := iPeer.AllowRemoteRead()
 
@@ -294,7 +276,7 @@ func computeNetOptionsAction(resourceName string, iPeer IntendedPeer) (res Targe
 	return res
 }
 
-func computeNetOptionsActionReconcile(resourceName string, iPeer IntendedPeer, aPeer ActualPeer) (res TargetStateActions) {
+func computeNetOptionsActionReconcile(resourceName string, iPeer IntendedPeer, aPeer ActualPeer) (res DRBDActions) {
 	var changed bool
 	action := NetOptionsAction{
 		ResourceName: resourceName,
@@ -308,7 +290,7 @@ func computeNetOptionsActionReconcile(resourceName string, iPeer IntendedPeer, a
 		changed = true
 	}
 
-	// Note: AllowTwoPrimaries comes from IntendedState, not IntendedPeer
+	// Note: AllowTwoPrimaries comes from IntendedDRBDState, not IntendedPeer
 	// We'll skip it here since it requires access to iState
 
 	if changed {
@@ -324,7 +306,7 @@ func quorumMatches(intended uint, actual string) bool {
 	return actual == fmt.Sprintf("%d", intended)
 }
 
-func computePathActions(resourceName string, iPeer IntendedPeer, aPeer ActualPeer) (res TargetStateActions) {
+func computePathActions(resourceName string, iPeer IntendedPeer, aPeer ActualPeer) (res DRBDActions) {
 	peerNodeID := iPeer.NodeID()
 
 	var actualPaths []ActualPath

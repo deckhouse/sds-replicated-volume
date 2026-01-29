@@ -17,28 +17,34 @@ limitations under the License.
 package drbd
 
 import (
+	"context"
 	"errors"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
-func applyReportState(
-	aState ActualState,
+// ensureReportState updates the DRBDResource status based on the actual DRBD state
+// and any errors encountered during reconciliation.
+func ensureReportState(
+	ctx context.Context,
+	aState ActualDRBDState,
 	drbdr *v1alpha1.DRBDResource,
 	err error,
-	_ []Action,
-) bool {
-	reportChanged, reportErr := aState.Report(&drbdr.Status)
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "ensure-report-state")
+	defer ef.OnEnd(&outcome)
+
+	reportErr := aState.Report(&drbdr.Status)
 	err = errors.Join(err, reportErr)
+	applyConfiguredCondition(drbdr, err)
 
-	condChanged := applyConfiguredCondition(drbdr, err)
-
-	return reportChanged || condChanged
+	return ef.Ok()
 }
 
-func applyConfiguredCondition(drbdr *v1alpha1.DRBDResource, err error) bool {
+func applyConfiguredCondition(drbdr *v1alpha1.DRBDResource, err error) {
 	var status metav1.ConditionStatus
 	var reason, message string
 
@@ -52,7 +58,7 @@ func applyConfiguredCondition(drbdr *v1alpha1.DRBDResource, err error) bool {
 		message = err.Error()
 	}
 
-	return setCondition(drbdr, v1alpha1.DRBDResourceCondConfiguredType, status, reason, message)
+	setCondition(drbdr, v1alpha1.DRBDResourceCondConfiguredType, status, reason, message)
 }
 
 func getConfiguredReason(err error) string {
@@ -63,22 +69,19 @@ func getConfiguredReason(err error) string {
 	return v1alpha1.DRBDResourceCondConfiguredReasonFailed
 }
 
-func setCondition(drbdr *v1alpha1.DRBDResource, condType string, status metav1.ConditionStatus, reason, message string) bool {
+func setCondition(drbdr *v1alpha1.DRBDResource, condType string, status metav1.ConditionStatus, reason, message string) {
 	now := metav1.Now()
 
 	for i := range drbdr.Status.Conditions {
 		c := &drbdr.Status.Conditions[i]
 		if c.Type == condType {
-			if c.Status == status && c.Reason == reason && c.Message == message {
-				return false
-			}
-			c.Status = status
 			c.Reason = reason
 			c.Message = message
 			if c.Status != status {
+				c.Status = status
 				c.LastTransitionTime = now
 			}
-			return true
+			return
 		}
 	}
 
@@ -89,5 +92,4 @@ func setCondition(drbdr *v1alpha1.DRBDResource, condType string, status metav1.C
 		Message:            message,
 		LastTransitionTime: now,
 	})
-	return true
 }

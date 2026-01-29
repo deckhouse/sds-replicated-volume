@@ -17,6 +17,7 @@ limitations under the License.
 package drbd_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -360,8 +361,9 @@ func TestReconciler_Reconcile(t *testing.T) {
 			fakeExec.ExpectCommands(tc.expectedCommands...)
 			fakeExec.Setup(t)
 
-			// Create reconciler
-			rec := drbd.NewReconciler(cl, nil, testNodeName)
+			// Create reconciler with port cache
+			portCache := drbd.NewPortCache(context.Background(), drbd.PortRangeMin, drbd.PortRangeMax)
+			rec := drbd.NewReconciler(cl, testNodeName, portCache)
 
 			// Determine request name
 			reqName := testDRBDRName
