@@ -959,7 +959,8 @@ func (r *Reconciler) updateScheduledRVRs(ctx context.Context, rvrs []*v1alpha1.R
 		base.Spec.LVMVolumeGroupThinPoolName = ""
 		delete(base.Labels, v1alpha1.NodeNameLabelKey)
 
-		if err := r.patchRVR(ctx, rvr, base, false); err != nil {
+		// Use optimistic locking to prevent overwriting concurrent modifications.
+		if err := r.patchRVR(ctx, rvr, base, true); err != nil {
 			return err
 		}
 
