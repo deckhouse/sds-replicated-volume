@@ -61,7 +61,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return rf.Done().ToCtrl()
 }
 
-// Reconcile pattern: Conditional desired evaluation
+// Reconcile pattern: Conditional target evaluation
 func (r *Reconciler) reconcileMain(ctx context.Context, rv *v1alpha1.ReplicatedVolume) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "main")
 	defer rf.OnEnd(&outcome)

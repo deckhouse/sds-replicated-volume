@@ -16,5 +16,24 @@ limitations under the License.
 
 package v1alpha1
 
+import (
+	"strconv"
+	"strings"
+)
+
 // Place shared helpers here that do not belong to any single API object,
 // but you are sure they must live in the API package.
+
+// nodeIDFromName extracts NodeID from a name with format "prefix-N" (e.g., "pvc-xxx-5" → 5).
+// Used by ReplicatedVolumeReplica.NodeID() and ReplicatedVolumeDatameshMember.NodeID().
+func nodeIDFromName(name string) (uint8, bool) {
+	idx := strings.LastIndex(name, "-")
+	if idx < 0 {
+		return 0, false
+	}
+	id, err := strconv.ParseUint(name[idx+1:], 10, 8)
+	if err != nil {
+		return 0, false
+	}
+	return uint8(id), true
+}

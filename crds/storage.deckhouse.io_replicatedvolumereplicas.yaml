@@ -77,10 +77,23 @@ spec:
             type: object
           spec:
             properties:
+              lvmVolumeGroupName:
+                description: LVMVolumeGroupName is the LVMVolumeGroup resource name
+                  where this replica should be placed.
+                minLength: 1
+                pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
+                type: string
+              lvmVolumeGroupThinPoolName:
+                description: LVMVolumeGroupThinPoolName is the thin pool name (for
+                  LVMThin storage pools).
+                type: string
               nodeName:
                 maxLength: 253
                 minLength: 1
                 type: string
+                x-kubernetes-validations:
+                - message: nodeName is immutable once set
+                  rule: oldSelf == '' || self == oldSelf
               replicatedVolumeName:
                 maxLength: 120
                 minLength: 1
@@ -91,7 +104,7 @@ spec:
                   rule: self == oldSelf
               type:
                 description: ReplicaType enumerates possible values for ReplicatedVolumeReplica
-                  spec.type and status.actualType fields.
+                  spec.type and status.effectiveType fields.
                 enum:
                 - Diskful
                 - Access
@@ -101,16 +114,51 @@ spec:
             - replicatedVolumeName
             - type
             type: object
+            x-kubernetes-validations:
+            - message: lvmVolumeGroupName requires nodeName to be set
+              rule: size(self.lvmVolumeGroupName) == 0 || size(self.nodeName) > 0
+            - message: lvmVolumeGroupName can only be set for Diskful type
+              rule: size(self.lvmVolumeGroupName) == 0 || self.type == 'Diskful'
+            - message: lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be
+                set
+              rule: size(self.lvmVolumeGroupThinPoolName) == 0 || size(self.lvmVolumeGroupName)
+                > 0
           status:
             properties:
-              actualType:
-                description: ReplicaType enumerates possible values for ReplicatedVolumeReplica
-                  spec.type and status.actualType fields.
-                enum:
-                - Diskful
-                - Access
-                - TieBreaker
-                type: string
+              addresses:
+                items:
+                  properties:
+                    address:
+                      properties:
+                        ipv4:
+                          pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
+                          type: string
+                        port:
+                          maximum: 65535
+                          minimum: 1025
+                          type: integer
+                      required:
+                      - ipv4
+                      - port
+                      type: object
+                    systemNetworkName:
+                      maxLength: 64
+                      type: string
+                  required:
+                  - address
+                  - systemNetworkName
+                  type: object
+                maxItems: 32
+                type: array
+              backingVolumeSize:
+                anyOf:
+                - type: integer
+                - type: string
+                description: |-
+                  BackingVolumeSize is the size of the backing LVM logical volume for this replica.
+                  Only set for Diskful replicas.
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -170,6 +218,11 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              datameshRevision:
+                description: DatameshRevision is the datamesh revision this replica
+                  was configured for.
+                format: int64
+                type: integer
               drbd:
                 properties:
                   actual:
@@ -399,8 +452,19 @@ spec:
                     - writeOrdering
                     type: object
                 type: object
-              lvmLogicalVolumeName:
-                maxLength: 256
+              drbdResourceGeneration:
+                description: |-
+                  DRBDResourceGeneration is the generation of the DRBDResource that was last applied.
+                  Used to skip redundant spec comparison when the generation matches.
+                format: int64
+                type: integer
+              effectiveType:
+                description: ReplicaType enumerates possible values for ReplicatedVolumeReplica
+                  spec.type and status.effectiveType fields.
+                enum:
+                - Diskful
+                - Access
+                - TieBreaker
                 type: string
             type: object
         required:

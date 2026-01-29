@@ -16,10 +16,10 @@ limitations under the License.
 
 package v1alpha1
 
-const AgentFinalizer = "sds-replicated-volume.deckhouse.io/agent"
-
-const ControllerFinalizer = "sds-replicated-volume.deckhouse.io/controller"
-
-const RSCControllerFinalizer = "sds-replicated-volume.deckhouse.io/rsc-controller"
-
-const RVRControllerFinalizer = "sds-replicated-volume.deckhouse.io/rvr-controller"
+const (
+	// DRBDResourceCondConfiguredType indicates whether the DRBD resource is configured.
+	//
+	// Reasons describe configuration state.
+	DRBDResourceCondConfiguredType                = "Configured"
+	DRBDResourceCondConfiguredReasonInMaintenance = "InMaintenance" // Resource is in maintenance mode.
+)

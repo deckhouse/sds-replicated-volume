@@ -29,15 +29,35 @@ const (
 )
 
 const (
-	// ReplicatedVolumeReplicaCondBackingVolumeCreatedType indicates whether the backing volume has been created.
+	// ReplicatedVolumeReplicaCondBackingVolumeReadyType indicates whether the backing volume is ready.
 	//
-	// Reasons describe applicability and create/delete outcomes.
-	ReplicatedVolumeReplicaCondBackingVolumeCreatedType                              = "BackingVolumeCreated"
-	ReplicatedVolumeReplicaCondBackingVolumeCreatedReasonBackingVolumeCreationFailed = "BackingVolumeCreationFailed" // Creation failed.
-	ReplicatedVolumeReplicaCondBackingVolumeCreatedReasonBackingVolumeDeletionFailed = "BackingVolumeDeletionFailed" // Deletion failed.
-	ReplicatedVolumeReplicaCondBackingVolumeCreatedReasonBackingVolumeNotReady       = "BackingVolumeNotReady"       // Backing volume is not ready.
-	ReplicatedVolumeReplicaCondBackingVolumeCreatedReasonBackingVolumeReady          = "BackingVolumeReady"          // Backing volume is ready.
-	ReplicatedVolumeReplicaCondBackingVolumeCreatedReasonNotApplicable               = "NotApplicable"               // Not applicable for this replica type.
+	// Reasons describe applicability, provisioning/resizing progress, and outcomes.
+	ReplicatedVolumeReplicaCondBackingVolumeReadyType                             = "BackingVolumeReady"
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable              = "NotApplicable"              // Not applicable for this replica type.
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotReady                   = "NotReady"                   // Backing volume exists but become not ready.
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioning               = "Provisioning"               // Backing volume is being provisioned.
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioningFailed         = "ProvisioningFailed"         // Provisioning failed.
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonReady                      = "Ready"                      // Backing volume is ready.
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonReprovisioning             = "Reprovisioning"             // Backing volume is being reprovisioned (replacing existing).
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizeFailed               = "ResizeFailed"               // Resize failed.
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizing                   = "Resizing"                   // Backing volume is being resized.
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling          = "PendingScheduling"          // Waiting for node or storage assignment.
+	ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForReplicatedVolume = "WaitingForReplicatedVolume" // Waiting for ReplicatedVolume to be ready.
+)
+
+const (
+	// ReplicatedVolumeReplicaCondConfiguredType indicates whether the replica's DRBD resource is configured.
+	//
+	// Reasons describe configuration state or applicability.
+	ReplicatedVolumeReplicaCondConfiguredType                             = "Configured"
+	ReplicatedVolumeReplicaCondConfiguredReasonAgentNotReady              = "AgentNotReady"              // Agent is not ready.
+	ReplicatedVolumeReplicaCondConfiguredReasonApplyingConfiguration      = "ApplyingConfiguration"      // DRBD resource configuration is being applied.
+	ReplicatedVolumeReplicaCondConfiguredReasonConfigurationFailed        = "ConfigurationFailed"        // DRBD resource configuration failed.
+	ReplicatedVolumeReplicaCondConfiguredReasonConfigured                 = "Configured"                 // DRBD resource is fully configured.
+	ReplicatedVolumeReplicaCondConfiguredReasonNotApplicable              = "NotApplicable"              // Not applicable (replica is being deleted).
+	ReplicatedVolumeReplicaCondConfiguredReasonPendingDatameshJoin        = "PendingDatameshJoin"        // DRBD preconfigured, waiting for datamesh membership.
+	ReplicatedVolumeReplicaCondConfiguredReasonPendingScheduling          = "PendingScheduling"          // Waiting for node assignment.
+	ReplicatedVolumeReplicaCondConfiguredReasonWaitingForReplicatedVolume = "WaitingForReplicatedVolume" // Waiting for ReplicatedVolume to be ready.
 )
 
 const (

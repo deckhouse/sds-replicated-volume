@@ -55,11 +55,9 @@ var _ = Describe("Reconciler", func() {
 
 	Describe("Reconcile", func() {
 		It("returns Done when node does not exist", func() {
-			cl = testhelpers.WithNodeByMetadataNameIndex(
-				testhelpers.WithDRBDResourceByNodeNameIndex(
-					testhelpers.WithRSPByEligibleNodeNameIndex(
-						fake.NewClientBuilder().WithScheme(scheme),
-					),
+			cl = testhelpers.WithDRBDResourceByNodeNameIndex(
+				testhelpers.WithRSPByEligibleNodeNameIndex(
+					fake.NewClientBuilder().WithScheme(scheme),
 				),
 			).Build()
 			rec = NewReconciler(cl)
@@ -79,11 +77,9 @@ var _ = Describe("Reconciler", func() {
 					Labels: map[string]string{},
 				},
 			}
-			cl = testhelpers.WithNodeByMetadataNameIndex(
-				testhelpers.WithDRBDResourceByNodeNameIndex(
-					testhelpers.WithRSPByEligibleNodeNameIndex(
-						fake.NewClientBuilder().WithScheme(scheme).WithObjects(node),
-					),
+			cl = testhelpers.WithDRBDResourceByNodeNameIndex(
+				testhelpers.WithRSPByEligibleNodeNameIndex(
+					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node),
 				),
 			).Build()
 			rec = NewReconciler(cl)
@@ -109,11 +105,9 @@ var _ = Describe("Reconciler", func() {
 					},
 				},
 			}
-			cl = testhelpers.WithNodeByMetadataNameIndex(
-				testhelpers.WithDRBDResourceByNodeNameIndex(
-					testhelpers.WithRSPByEligibleNodeNameIndex(
-						fake.NewClientBuilder().WithScheme(scheme).WithObjects(node),
-					),
+			cl = testhelpers.WithDRBDResourceByNodeNameIndex(
+				testhelpers.WithRSPByEligibleNodeNameIndex(
+					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node),
 				),
 			).Build()
 			rec = NewReconciler(cl)
@@ -141,11 +135,9 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "drbd-1"},
 				Spec:       v1alpha1.DRBDResourceSpec{NodeName: "node-1"},
 			}
-			cl = testhelpers.WithNodeByMetadataNameIndex(
-				testhelpers.WithDRBDResourceByNodeNameIndex(
-					testhelpers.WithRSPByEligibleNodeNameIndex(
-						fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, drbdResource),
-					),
+			cl = testhelpers.WithDRBDResourceByNodeNameIndex(
+				testhelpers.WithRSPByEligibleNodeNameIndex(
+					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, drbdResource),
 				),
 			).Build()
 			rec = NewReconciler(cl)
@@ -177,11 +169,9 @@ var _ = Describe("Reconciler", func() {
 					},
 				},
 			}
-			cl = testhelpers.WithNodeByMetadataNameIndex(
-				testhelpers.WithDRBDResourceByNodeNameIndex(
-					testhelpers.WithRSPByEligibleNodeNameIndex(
-						fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsp),
-					),
+			cl = testhelpers.WithDRBDResourceByNodeNameIndex(
+				testhelpers.WithRSPByEligibleNodeNameIndex(
+					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsp),
 				),
 			).Build()
 			rec = NewReconciler(cl)
@@ -211,11 +201,9 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "drbd-1"},
 				Spec:       v1alpha1.DRBDResourceSpec{NodeName: "node-1"},
 			}
-			cl = testhelpers.WithNodeByMetadataNameIndex(
-				testhelpers.WithDRBDResourceByNodeNameIndex(
-					testhelpers.WithRSPByEligibleNodeNameIndex(
-						fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, drbdResource),
-					),
+			cl = testhelpers.WithDRBDResourceByNodeNameIndex(
+				testhelpers.WithRSPByEligibleNodeNameIndex(
+					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, drbdResource),
 				),
 			).Build()
 			rec = NewReconciler(cl)
@@ -249,11 +237,9 @@ var _ = Describe("Reconciler", func() {
 					},
 				},
 			}
-			cl = testhelpers.WithNodeByMetadataNameIndex(
-				testhelpers.WithDRBDResourceByNodeNameIndex(
-					testhelpers.WithRSPByEligibleNodeNameIndex(
-						fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsp),
-					),
+			cl = testhelpers.WithDRBDResourceByNodeNameIndex(
+				testhelpers.WithRSPByEligibleNodeNameIndex(
+					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsp),
 				),
 			).Build()
 			rec = NewReconciler(cl)
@@ -284,11 +270,9 @@ var _ = Describe("Reconciler", func() {
 				Spec:       v1alpha1.DRBDResourceSpec{NodeName: "node-1"},
 			}
 			// No RSP with this node in eligibleNodes
-			cl = testhelpers.WithNodeByMetadataNameIndex(
-				testhelpers.WithDRBDResourceByNodeNameIndex(
-					testhelpers.WithRSPByEligibleNodeNameIndex(
-						fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, drbdResource),
-					),
+			cl = testhelpers.WithDRBDResourceByNodeNameIndex(
+				testhelpers.WithRSPByEligibleNodeNameIndex(
+					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, drbdResource),
 				),
 			).Build()
 			rec = NewReconciler(cl)
@@ -323,11 +307,9 @@ var _ = Describe("Reconciler", func() {
 					},
 				},
 			}
-			cl = testhelpers.WithNodeByMetadataNameIndex(
-				testhelpers.WithDRBDResourceByNodeNameIndex(
-					testhelpers.WithRSPByEligibleNodeNameIndex(
-						fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsp),
-					),
+			cl = testhelpers.WithDRBDResourceByNodeNameIndex(
+				testhelpers.WithRSPByEligibleNodeNameIndex(
+					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsp),
 				),
 			).Build()
 			rec = NewReconciler(cl)
@@ -367,11 +349,9 @@ var _ = Describe("Reconciler", func() {
 					},
 				},
 			}
-			cl = testhelpers.WithNodeByMetadataNameIndex(
-				testhelpers.WithDRBDResourceByNodeNameIndex(
-					testhelpers.WithRSPByEligibleNodeNameIndex(
-						fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsp1, rsp2),
-					),
+			cl = testhelpers.WithDRBDResourceByNodeNameIndex(
+				testhelpers.WithRSPByEligibleNodeNameIndex(
+					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsp1, rsp2),
 				),
 			).Build()
 			rec = NewReconciler(cl)
@@ -403,11 +383,9 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "drbd-2"},
 				Spec:       v1alpha1.DRBDResourceSpec{NodeName: "node-1"},
 			}
-			cl = testhelpers.WithNodeByMetadataNameIndex(
-				testhelpers.WithDRBDResourceByNodeNameIndex(
-					testhelpers.WithRSPByEligibleNodeNameIndex(
-						fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, drbd1, drbd2),
-					),
+			cl = testhelpers.WithDRBDResourceByNodeNameIndex(
+				testhelpers.WithRSPByEligibleNodeNameIndex(
+					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, drbd1, drbd2),
 				),
 			).Build()
 			rec = NewReconciler(cl)
@@ -443,11 +421,9 @@ var _ = Describe("Reconciler", func() {
 					},
 				},
 			}
-			cl = testhelpers.WithNodeByMetadataNameIndex(
-				testhelpers.WithDRBDResourceByNodeNameIndex(
-					testhelpers.WithRSPByEligibleNodeNameIndex(
-						fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, drbdResource, rsp),
-					),
+			cl = testhelpers.WithDRBDResourceByNodeNameIndex(
+				testhelpers.WithRSPByEligibleNodeNameIndex(
+					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, drbdResource, rsp),
 				),
 			).Build()
 			rec = NewReconciler(cl)
@@ -486,11 +462,9 @@ var _ = Describe("Reconciler", func() {
 					},
 				},
 			}
-			cl = testhelpers.WithNodeByMetadataNameIndex(
-				testhelpers.WithDRBDResourceByNodeNameIndex(
-					testhelpers.WithRSPByEligibleNodeNameIndex(
-						fake.NewClientBuilder().WithScheme(scheme).WithObjects(node1, node2, rsp),
-					),
+			cl = testhelpers.WithDRBDResourceByNodeNameIndex(
+				testhelpers.WithRSPByEligibleNodeNameIndex(
+					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node1, node2, rsp),
 				),
 			).Build()
 			rec = NewReconciler(cl)

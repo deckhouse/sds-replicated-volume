@@ -166,7 +166,7 @@ This controller manages `RSP.Status` fields only and does not create external la
 | Index | Field | Purpose |
 |-------|-------|---------|
 | RSP by eligible node name | `status.eligibleNodes[].nodeName` | Find RSPs where a node is eligible |
-| LVMVolumeGroup by name | `metadata.name` | Fetch LVGs referenced by RSP |
+| RSP by LVMVolumeGroup name | `spec.lvmVolumeGroups[].name` | Find RSPs referencing a specific LVG |
 
 ## Data Flow
 

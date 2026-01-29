@@ -36,7 +36,7 @@ The controller reconciles individual nodes (not a singleton):
 
 ```
 Reconcile(nodeName)
-├── getNodeAgentLabelPresence  — check if node exists and has label (index lookup)
+├── getNodeAgentLabelPresence  — check if node exists and has label (direct Get)
 ├── getNumberOfDRBDResourcesByNode — count DRBDResources on node (index lookup)
 ├── getNumberOfRSPByEligibleNode — count RSPs with this node eligible (index lookup)
 ├── if hasLabel == shouldHaveLabel → Done (no patch needed)
@@ -85,7 +85,6 @@ and enqueues reconcile requests only for affected nodes, not for all nodes in th
 
 | Index | Field | Purpose |
 |-------|-------|---------|
-| Node by metadata.name | `metadata.name` | Efficient node existence and label check |
 | DRBDResource by node | `spec.nodeName` | Count DRBDResources per node |
 | RSP by eligible node | `status.eligibleNodes[].nodeName` | Count RSPs where node is eligible |
 
@@ -100,7 +99,6 @@ flowchart TD
     end
 
     subgraph indexes [Index Lookups]
-        NodeIndex[Node by metadata.name]
         DRBDIndex[DRBDResource by spec.nodeName]
         RSPIndex[RSP by eligibleNodeName]
     end
@@ -121,7 +119,6 @@ flowchart TD
     RSPEvents --> CountRSP
     DRBDEvents --> CountDRBD
 
-    NodeIndex --> CheckLabel
     DRBDIndex --> CountDRBD
     RSPIndex --> CountRSP
 

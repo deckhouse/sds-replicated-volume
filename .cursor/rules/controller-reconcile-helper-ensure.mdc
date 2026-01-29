@@ -266,6 +266,20 @@ func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutco
 }
 ```
 
+### Propagating change state to ReconcileOutcome
+
+To propagate change state from an **EnsureOutcome** to a **ReconcileOutcome**, use `ReconcileOutcome.WithChangeFrom(eo)`:
+
+```go
+eo := flow.MergeEnsures(ensureA(...), ensureB(...))
+if eo.Error() != nil {
+    return rf.Fail(eo.Error())
+}
+return rf.Continue().WithChangeFrom(eo)
+```
+
+See `controller-reconciliation-flow.mdc` for additional usage patterns.
+
 ---
 
 ## Error handling
