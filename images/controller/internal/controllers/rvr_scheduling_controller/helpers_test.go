@@ -17,6 +17,7 @@ limitations under the License.
 package rvrschedulingcontroller
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -560,6 +561,67 @@ func TestComputeNodeToZoneFromEligible(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := computeNodeToZoneFromEligible(tt.eligible)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestIsSchedulingError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "nil error returns false",
+			err:      nil,
+			expected: false,
+		},
+		{
+			name:     "errSchedulingPending returns true",
+			err:      errSchedulingPending,
+			expected: true,
+		},
+		{
+			name:     "errSchedulingTopologyConflict returns true",
+			err:      errSchedulingTopologyConflict,
+			expected: true,
+		},
+		{
+			name:     "errSchedulingNoCandidateNodes returns true",
+			err:      errSchedulingNoCandidateNodes,
+			expected: true,
+		},
+		{
+			name:     "wrapped errSchedulingPending returns true",
+			err:      fmt.Errorf("context: %w", errSchedulingPending),
+			expected: true,
+		},
+		{
+			name:     "wrapped errSchedulingTopologyConflict returns true",
+			err:      fmt.Errorf("context: %w", errSchedulingTopologyConflict),
+			expected: true,
+		},
+		{
+			name:     "wrapped errSchedulingNoCandidateNodes returns true",
+			err:      fmt.Errorf("context: %w", errSchedulingNoCandidateNodes),
+			expected: true,
+		},
+		{
+			name:     "generic error returns false",
+			err:      fmt.Errorf("some API error"),
+			expected: false,
+		},
+		{
+			name:     "not found error returns false",
+			err:      fmt.Errorf("resource not found"),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isSchedulingError(tt.err)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

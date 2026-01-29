@@ -17,6 +17,7 @@ limitations under the License.
 package rvrschedulingcontroller
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -47,6 +48,15 @@ var (
 	errSchedulingNoCandidateNodes = errors.New("scheduling no candidate nodes")
 	errSchedulingPending          = errors.New("scheduling pending")
 )
+
+// isSchedulingError returns true if the error is a semantic scheduling error
+// (as opposed to an I/O or API error). Only semantic errors should trigger
+// status updates on RVRs.
+func isSchedulingError(err error) bool {
+	return errors.Is(err, errSchedulingPending) ||
+		errors.Is(err, errSchedulingTopologyConflict) ||
+		errors.Is(err, errSchedulingNoCandidateNodes)
+}
 
 // --- Wiring / construction
 
@@ -84,9 +94,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Prepare scheduling context.
 	sctx, err := r.prepareSchedulingContext(rf.Ctx(), req.Name)
 	if err != nil {
-		setErr := r.setFailedScheduledConditionOnUnscheduledRVRs(rf.Ctx(), req.Name, computeSchedulingFailureReason(err))
-		if setErr != nil {
-			return rf.Fail(setErr).ToCtrl()
+		// Only update RVR status for semantic scheduling errors (Pending, TopologyConflict, NoCandidateNodes).
+		// For I/O errors (API failures), just return backoff without modifying status.
+		if isSchedulingError(err) {
+			setErr := r.setFailedScheduledConditionOnUnscheduledRVRs(rf.Ctx(), req.Name, computeSchedulingFailureReason(err))
+			if setErr != nil {
+				return rf.Fail(setErr).ToCtrl()
+			}
 		}
 		return rf.Fail(err).ToCtrl()
 	}
@@ -205,14 +219,14 @@ func (r *Reconciler) reconcileUnscheduledDiskfulRVR(ctx context.Context, sctx *S
 			// Patch failed - don't update sctx, node remains available
 			return false, err
 		}
-	}
 
-	// Patch succeeded - update scheduling context
-	sctx.MarkNodeOccupied(candidate.Name)
-	sctx.RemoveCandidate(candidate.Name)
-	sctx.ScheduledDiskful = append(sctx.ScheduledDiskful, rvr)
-	if sctx.RSC.Spec.Topology == topologyTransZonal && candidate.Zone != "" {
-		sctx.IncrementZoneReplicaCount(candidate.Zone)
+		// Patch succeeded - update scheduling context
+		sctx.MarkNodeOccupied(candidate.Name)
+		sctx.RemoveCandidate(candidate.Name)
+		sctx.ScheduledDiskful = append(sctx.ScheduledDiskful, rvr)
+		if sctx.RSC.Spec.Topology == topologyTransZonal && candidate.Zone != "" {
+			sctx.IncrementZoneReplicaCount(candidate.Zone)
+		}
 	}
 
 	// Status domain: set Scheduled=True
@@ -269,12 +283,12 @@ func (r *Reconciler) reconcileUnscheduledTieBreakerRVR(ctx context.Context, sctx
 			// Patch failed - don't update sctx, node remains available
 			return false, err
 		}
-	}
 
-	// Patch succeeded - update scheduling context
-	sctx.MarkNodeOccupied(candidate.Name)
-	if sctx.RSC.Spec.Topology == topologyTransZonal && candidate.Zone != "" {
-		sctx.IncrementZoneReplicaCount(candidate.Zone)
+		// Patch succeeded - update scheduling context
+		sctx.MarkNodeOccupied(candidate.Name)
+		if sctx.RSC.Spec.Topology == topologyTransZonal && candidate.Zone != "" {
+			sctx.IncrementZoneReplicaCount(candidate.Zone)
+		}
 	}
 
 	// Status domain: set Scheduled=True
@@ -789,15 +803,15 @@ func computeBestNode(candidates []NodeCandidate) NodeCandidate {
 
 	slices.SortFunc(candidates, func(a, b NodeCandidate) int {
 		// Primary: BestScore descending
-		if a.BestScore != b.BestScore {
-			return b.BestScore - a.BestScore
+		if c := cmp.Compare(b.BestScore, a.BestScore); c != 0 {
+			return c
 		}
 		// Secondary: LVGCount descending (more LVG options = better)
-		if a.LVGCount != b.LVGCount {
-			return b.LVGCount - a.LVGCount
+		if c := cmp.Compare(b.LVGCount, a.LVGCount); c != 0 {
+			return c
 		}
 		// Tertiary: SumScore descending
-		return b.SumScore - a.SumScore
+		return cmp.Compare(b.SumScore, a.SumScore)
 	})
 
 	return candidates[0]
@@ -918,20 +932,18 @@ func applyPlacement(rvr *v1alpha1.ReplicatedVolumeReplica, candidate NodeCandida
 
 func applyScheduledConditionTrue(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
-		Type:               v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
-		Status:             metav1.ConditionTrue,
-		Reason:             v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonReplicaScheduled,
-		ObservedGeneration: rvr.Generation,
+		Type:   v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+		Status: metav1.ConditionTrue,
+		Reason: v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonReplicaScheduled,
 	})
 }
 
 func applyScheduledConditionFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
-		Type:               v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
-		Status:             metav1.ConditionFalse,
-		Reason:             reason,
-		Message:            message,
-		ObservedGeneration: rvr.Generation,
+		Type:    v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+		Status:  metav1.ConditionFalse,
+		Reason:  reason,
+		Message: message,
 	})
 }
 
@@ -1132,7 +1144,7 @@ func (r *Reconciler) patchRVRStatus(
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	base *v1alpha1.ReplicatedVolumeReplica,
 ) error {
-	patch := client.MergeFrom(base)
+	patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
 	if err := r.cl.Status().Patch(ctx, rvr, patch); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil

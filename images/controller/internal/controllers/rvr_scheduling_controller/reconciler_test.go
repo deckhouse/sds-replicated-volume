@@ -1505,7 +1505,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 	})
 
 	Context("RSC/RSP Not Found", func() {
-		It("returns error when RSC not found", func(ctx SpecContext) {
+		It("returns error when RSC not found and does not modify RVR status", func(ctx SpecContext) {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
@@ -1537,9 +1537,14 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("ReplicatedStorageClass"))
+
+			// Verify RVR status was NOT modified (I/O error should not update status)
+			var updatedRVR v1alpha1.ReplicatedVolumeReplica
+			Expect(cl.Get(ctx, types.NamespacedName{Name: rvr.Name}, &updatedRVR)).To(Succeed())
+			Expect(updatedRVR.Status.Conditions).To(BeEmpty(), "RVR status should not be modified for API errors")
 		})
 
-		It("returns error when RSP not found", func(ctx SpecContext) {
+		It("returns error when RSP not found and does not modify RVR status", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
@@ -1580,6 +1585,11 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("ReplicatedStoragePool"))
+
+			// Verify RVR status was NOT modified (I/O error should not update status)
+			var updatedRVR v1alpha1.ReplicatedVolumeReplica
+			Expect(cl.Get(ctx, types.NamespacedName{Name: rvr.Name}, &updatedRVR)).To(Succeed())
+			Expect(updatedRVR.Status.Conditions).To(BeEmpty(), "RVR status should not be modified for API errors")
 		})
 
 		It("sets Scheduled=False when RSC has no storage pool configured", func(ctx SpecContext) {
@@ -2528,6 +2538,328 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 			updated := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
 			Expect(updated.Spec.NodeName).To(Equal("node-other"), "Node with significantly higher score should win despite attachTo bonus")
+		})
+	})
+
+	Context("Zone Insufficiency", func() {
+		It("TransZonal: fails when fewer zones than Diskful replicas needed", func(ctx SpecContext) {
+			// 2 zones but need 3 Diskful replicas - first 2 scheduled, 3rd fails
+			eligible := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				{
+					NodeName:   "node-a1",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-a1", Ready: true},
+					},
+				},
+				{
+					NodeName:   "node-b1",
+					ZoneName:   "zone-b",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-b1", Ready: true},
+					},
+				},
+			}
+			scores := map[string]int{"vg-a1": 100, "vg-b1": 90}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "TransZonal", []string{"zone-a", "zone-b"}, nil)
+			rsp.Status.EligibleNodes = eligible
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{{
+						Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
+						Status: metav1.ConditionTrue,
+					}},
+				},
+			}
+
+			// Create 3 Diskful replicas - only 2 zones available
+			rvr1 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+			rvr2 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-2"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+			rvr3 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-3"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr1, rvr2, rvr3).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			// Check that 2 replicas are scheduled (one per zone)
+			var scheduledCount int
+			var unscheduledNames []string
+			for _, name := range []string{"rvr-diskful-1", "rvr-diskful-2", "rvr-diskful-3"} {
+				updated := &v1alpha1.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKey{Name: name}, updated)).To(Succeed())
+				if updated.Spec.NodeName != "" {
+					scheduledCount++
+				} else {
+					unscheduledNames = append(unscheduledNames, name)
+					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+					Expect(cond).ToNot(BeNil())
+					Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+					Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonNoAvailableNodes))
+				}
+			}
+			Expect(scheduledCount).To(Equal(2), "Only 2 replicas should be scheduled (2 zones)")
+			Expect(len(unscheduledNames)).To(Equal(1), "One replica should be unscheduled (no more zones)")
+		})
+
+		It("TransZonal: fails when zone has no free nodes", func(ctx SpecContext) {
+			// 3 zones but zone-a already fully occupied
+			eligible := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				{
+					NodeName:   "node-a1",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-a1", Ready: true},
+					},
+				},
+				{
+					NodeName:   "node-b1",
+					ZoneName:   "zone-b",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-b1", Ready: true},
+					},
+				},
+				{
+					NodeName:   "node-c1",
+					ZoneName:   "zone-c",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-c1", Ready: true},
+					},
+				},
+			}
+			scores := map[string]int{"vg-a1": 100, "vg-b1": 90, "vg-c1": 80}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "TransZonal", []string{"zone-a", "zone-b", "zone-c"}, nil)
+			rsp.Status.EligibleNodes = eligible
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{{
+						Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
+						Status: metav1.ConditionTrue,
+					}},
+				},
+			}
+
+			// Existing replica occupies the only node in zone-a
+			existingRvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-existing"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-a1",
+				},
+			}
+
+			// Try to schedule 3 more Diskful - should fail because zone-a is exhausted
+			rvr1 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+			rvr2 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-2"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+			rvr3 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-3"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, existingRvr, rvr1, rvr2, rvr3).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			// Check results: zone-b and zone-c should be used, but 3rd replica can't find a zone
+			var scheduledCount int
+			zonesUsed := make(map[string]bool)
+			for _, name := range []string{"rvr-diskful-1", "rvr-diskful-2", "rvr-diskful-3"} {
+				updated := &v1alpha1.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKey{Name: name}, updated)).To(Succeed())
+				if updated.Spec.NodeName != "" {
+					scheduledCount++
+					for _, node := range eligible {
+						if node.NodeName == updated.Spec.NodeName {
+							zonesUsed[node.ZoneName] = true
+							break
+						}
+					}
+				} else {
+					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+					Expect(cond).ToNot(BeNil())
+					Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+					Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonNoAvailableNodes))
+				}
+			}
+			Expect(scheduledCount).To(Equal(2), "Only 2 new replicas should be scheduled (zone-b, zone-c)")
+			Expect(zonesUsed["zone-a"]).To(BeFalse(), "zone-a should not be used (already occupied)")
+			Expect(zonesUsed["zone-b"]).To(BeTrue(), "zone-b should be used")
+			Expect(zonesUsed["zone-c"]).To(BeTrue(), "zone-c should be used")
+		})
+
+		It("Zonal: fails when selected zone has no more free nodes", func(ctx SpecContext) {
+			// Zone-a has 2 nodes, existing replica on node-a1, try to schedule 2 more
+			eligible := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				{
+					NodeName:   "node-a1",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-a1", Ready: true},
+					},
+				},
+				{
+					NodeName:   "node-a2",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-a2", Ready: true},
+					},
+				},
+				{
+					NodeName:   "node-b1",
+					ZoneName:   "zone-b",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-b1", Ready: true},
+					},
+				},
+			}
+			scores := map[string]int{"vg-a1": 100, "vg-a2": 90, "vg-b1": 80}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Zonal", []string{"zone-a", "zone-b"}, nil)
+			rsp.Status.EligibleNodes = eligible
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{{
+						Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
+						Status: metav1.ConditionTrue,
+					}},
+				},
+			}
+
+			// Existing replica in zone-a locks zone selection
+			existingRvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-existing"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-a1",
+				},
+			}
+
+			// Try to schedule 2 more Diskful - zone-a has only 1 more node
+			rvr1 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+			rvr2 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-2"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, existingRvr, rvr1, rvr2).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			// rvr-diskful-1 should be scheduled to node-a2, rvr-diskful-2 should fail
+			updated1 := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated1)).To(Succeed())
+			Expect(updated1.Spec.NodeName).To(Equal("node-a2"), "First replica should be scheduled to zone-a")
+
+			updated2 := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-2"}, updated2)).To(Succeed())
+			Expect(updated2.Spec.NodeName).To(BeEmpty(), "Second replica should not be scheduled (zone-a exhausted)")
+			cond := meta.FindStatusCondition(updated2.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+			Expect(cond).ToNot(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonNoAvailableNodes))
 		})
 	})
 })
