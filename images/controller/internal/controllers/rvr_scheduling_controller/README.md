@@ -236,7 +236,7 @@ Indicates whether the replica has been assigned to a node.
 | Index | Field | Purpose |
 | ----- | ----- | ------- |
 | RVR by RV name | `spec.replicatedVolumeName` | List all RVRs for a ReplicatedVolume |
-| RVR unscheduled | `spec.nodeName` empty | Find unscheduled RVRs for RSP event mapping |
+| RVR unscheduled non-Access by RV | composite: unscheduled + non-Access + RV name | Find unscheduled Diskful/TieBreaker RVRs for a specific RV |
 | RV by RSC name | `spec.replicatedStorageClassName` | Find RVs using a specific RSC |
 
 Note: RSC names are obtained directly from `rsp.Status.UsedBy.ReplicatedStorageClassNames` (no index needed).

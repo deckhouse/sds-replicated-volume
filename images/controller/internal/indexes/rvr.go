@@ -35,10 +35,10 @@ const (
 	// ReplicatedVolumeReplica objects belonging to a specific RV.
 	IndexFieldRVRByReplicatedVolumeName = "spec.replicatedVolumeName"
 
-	// IndexFieldRVRUnscheduled is used to quickly list
-	// ReplicatedVolumeReplica objects that have no node assigned.
-	// Query with value "true" to get all unscheduled RVRs.
-	IndexFieldRVRUnscheduled = "unscheduled"
+	// IndexFieldRVRUnscheduledNonAccessByRV is used to quickly list
+	// unscheduled non-Access ReplicatedVolumeReplica objects for a specific RV.
+	// Query with RV name to get unscheduled Diskful/TieBreaker RVRs for that RV.
+	IndexFieldRVRUnscheduledNonAccessByRV = "unscheduled.nonAccess.replicatedVolumeName"
 )
 
 // RegisterRVRByNodeName registers the index for listing
@@ -87,25 +87,33 @@ func RegisterRVRByReplicatedVolumeName(mgr manager.Manager) error {
 	return nil
 }
 
-// RegisterRVRUnscheduled registers the index for listing
-// ReplicatedVolumeReplica objects that have no node assigned.
-func RegisterRVRUnscheduled(mgr manager.Manager) error {
+// RegisterRVRUnscheduledNonAccessByRV registers the index for listing
+// unscheduled non-Access ReplicatedVolumeReplica objects by RV name.
+func RegisterRVRUnscheduledNonAccessByRV(mgr manager.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(
 		context.Background(),
 		&v1alpha1.ReplicatedVolumeReplica{},
-		IndexFieldRVRUnscheduled,
+		IndexFieldRVRUnscheduledNonAccessByRV,
 		func(obj client.Object) []string {
 			rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
 			if !ok {
 				return nil
 			}
-			if rvr.Spec.NodeName == "" {
-				return []string{"true"}
+			// Only unscheduled
+			if rvr.Spec.NodeName != "" {
+				return nil
 			}
-			return nil
+			// Only non-Access replicas (Diskful, TieBreaker)
+			if rvr.Spec.Type == v1alpha1.ReplicaTypeAccess {
+				return nil
+			}
+			if rvr.Spec.ReplicatedVolumeName == "" {
+				return nil
+			}
+			return []string{rvr.Spec.ReplicatedVolumeName}
 		},
 	); err != nil {
-		return fmt.Errorf("index ReplicatedVolumeReplica by unscheduled: %w", err)
+		return fmt.Errorf("index ReplicatedVolumeReplica unscheduled non-Access by RV: %w", err)
 	}
 	return nil
 }

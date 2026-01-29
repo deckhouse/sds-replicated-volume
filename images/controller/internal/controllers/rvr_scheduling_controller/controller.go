@@ -56,7 +56,10 @@ func BuildController(mgr manager.Manager) error {
 // ReplicatedVolumes that use this RSP and have at least one unscheduled non-Access replica.
 func mapRSPToRV(cl client.Client) handler.MapFunc {
 	return func(ctx context.Context, obj client.Object) []reconcile.Request {
-		rsp := obj.(*v1alpha1.ReplicatedStoragePool)
+		rsp, ok := obj.(*v1alpha1.ReplicatedStoragePool)
+		if !ok || rsp == nil {
+			return nil
+		}
 
 		// Get RSC names directly from RSP status.
 		rscNames := rsp.Status.UsedBy.ReplicatedStorageClassNames
@@ -79,38 +82,16 @@ func mapRSPToRV(cl client.Client) handler.MapFunc {
 			}
 		}
 
-		if len(rvNames) == 0 {
-			return nil
-		}
-
-		// Get unscheduled RVRs and filter to only those belonging to RVs using this RSP.
-		var unscheduledRVRs v1alpha1.ReplicatedVolumeReplicaList
-		if err := cl.List(ctx, &unscheduledRVRs,
-			client.MatchingFields{indexes.IndexFieldRVRUnscheduled: "true"},
-			client.UnsafeDisableDeepCopy,
-		); err != nil {
-			return nil
-		}
-
-		// Collect unique RV names for non-Access replicas that belong to RVs using this RSP.
-		result := make(map[string]struct{})
-		for i := range unscheduledRVRs.Items {
-			rvr := &unscheduledRVRs.Items[i]
-			if rvr.Spec.Type == v1alpha1.ReplicaTypeAccess {
+		// For each RV, check if it has unscheduled non-Access RVRs using composite index.
+		var requests []reconcile.Request
+		for rvName := range rvNames {
+			var rvrList v1alpha1.ReplicatedVolumeReplicaList
+			if err := cl.List(ctx, &rvrList,
+				client.MatchingFields{indexes.IndexFieldRVRUnscheduledNonAccessByRV: rvName},
+				client.UnsafeDisableDeepCopy,
+			); err != nil || len(rvrList.Items) == 0 {
 				continue
 			}
-			rvName := rvr.Spec.ReplicatedVolumeName
-			if rvName == "" {
-				continue
-			}
-			// Only include if RV uses this RSP.
-			if _, ok := rvNames[rvName]; ok {
-				result[rvName] = struct{}{}
-			}
-		}
-
-		requests := make([]reconcile.Request, 0, len(result))
-		for rvName := range result {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: rvName},
 			})
