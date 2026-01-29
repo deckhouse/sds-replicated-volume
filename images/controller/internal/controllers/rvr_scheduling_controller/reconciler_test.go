@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -1408,6 +1409,1125 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
 			Expect(updated.Spec.NodeName).To(Equal("node-1"))
 			Expect(updated.Spec.LVMVolumeGroupName).To(Equal("lvg-1b"), "LVG with highest score should be selected")
+		})
+	})
+
+	Context("RV Validation Errors", func() {
+		It("sets Scheduled=False when RV has zero size", func(ctx SpecContext) {
+			cluster := clusterConfigs["small-1z"]
+			eligibleNodes, _ := generateEligibleNodes(cluster)
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, eligibleNodes)
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("0"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+
+			extender := &mockExtenderClient{scores: map[string]int{"vg-node-a1": 100}}
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, extender)
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).To(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(BeEmpty())
+			cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+			Expect(cond).ToNot(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingPending))
+		})
+
+		It("sets Scheduled=False when RV has empty ReplicatedStorageClassName", func(ctx SpecContext) {
+			cluster := clusterConfigs["small-1z"]
+			eligibleNodes, _ := generateEligibleNodes(cluster)
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, eligibleNodes)
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "",
+				},
+			}
+
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+
+			extender := &mockExtenderClient{scores: map[string]int{"vg-node-a1": 100}}
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, extender)
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).To(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(BeEmpty())
+			cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+			Expect(cond).ToNot(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingPending))
+		})
+	})
+
+	Context("RSC/RSP Not Found", func() {
+		It("returns error when RSC not found", func(ctx SpecContext) {
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-nonexistent",
+				},
+			}
+
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+
+			extender := &mockExtenderClient{scores: map[string]int{}}
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, extender)
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("ReplicatedStorageClass"))
+		})
+
+		It("returns error when RSP not found", func(ctx SpecContext) {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Topology: "Ignored",
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					StoragePoolName: "rsp-nonexistent",
+				},
+			}
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+
+			extender := &mockExtenderClient{scores: map[string]int{}}
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, extender)
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("ReplicatedStoragePool"))
+		})
+
+		It("sets Scheduled=False when RSC has no storage pool configured", func(ctx SpecContext) {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Topology: "Ignored",
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					StoragePoolName: "",
+				},
+			}
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+
+			extender := &mockExtenderClient{scores: map[string]int{}}
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, extender)
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).To(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+			Expect(cond).ToNot(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingPending))
+		})
+
+		It("returns Done when RV not found", func(ctx SpecContext) {
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				Build()
+
+			extender := &mockExtenderClient{scores: map[string]int{}}
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, extender)
+
+			result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "rv-nonexistent"}})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result.Requeue).To(BeFalse())
+			Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+		})
+	})
+
+	Context("Node and LVG Readiness", func() {
+		It("skips nodes with NodeReady=false", func(ctx SpecContext) {
+			eligible := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				{
+					NodeName:   "node-ready",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-ready", Ready: true},
+					},
+				},
+				{
+					NodeName:   "node-not-ready",
+					ZoneName:   "zone-a",
+					NodeReady:  false,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-not-ready", Ready: true},
+					},
+				},
+			}
+			scores := map[string]int{"vg-ready": 50, "vg-not-ready": 100}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, nil)
+			rsp.Status.EligibleNodes = eligible
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(Equal("node-ready"), "Should skip node with NodeReady=false")
+		})
+
+		It("skips nodes with AgentReady=false", func(ctx SpecContext) {
+			eligible := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				{
+					NodeName:   "node-agent-ready",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-agent-ready", Ready: true},
+					},
+				},
+				{
+					NodeName:   "node-agent-not-ready",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: false,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-agent-not-ready", Ready: true},
+					},
+				},
+			}
+			scores := map[string]int{"vg-agent-ready": 50, "vg-agent-not-ready": 100}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, nil)
+			rsp.Status.EligibleNodes = eligible
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(Equal("node-agent-ready"), "Should skip node with AgentReady=false")
+		})
+
+		It("skips nodes with Unschedulable=true", func(ctx SpecContext) {
+			eligible := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				{
+					NodeName:      "node-schedulable",
+					ZoneName:      "zone-a",
+					NodeReady:     true,
+					AgentReady:    true,
+					Unschedulable: false,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-schedulable", Ready: true},
+					},
+				},
+				{
+					NodeName:      "node-unschedulable",
+					ZoneName:      "zone-a",
+					NodeReady:     true,
+					AgentReady:    true,
+					Unschedulable: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-unschedulable", Ready: true},
+					},
+				},
+			}
+			scores := map[string]int{"vg-schedulable": 50, "vg-unschedulable": 100}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, nil)
+			rsp.Status.EligibleNodes = eligible
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(Equal("node-schedulable"), "Should skip node with Unschedulable=true")
+		})
+
+		It("skips LVGs with Ready=false", func(ctx SpecContext) {
+			eligible := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				{
+					NodeName:   "node-1",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-ready", Ready: true},
+						{Name: "vg-not-ready", Ready: false},
+					},
+				},
+			}
+			// vg-not-ready has higher score but should be skipped
+			scores := map[string]int{"vg-ready": 50, "vg-not-ready": 100}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, nil)
+			rsp.Status.EligibleNodes = eligible
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.LVMVolumeGroupName).To(Equal("vg-ready"), "Should skip LVG with Ready=false")
+		})
+
+		It("skips LVGs with Unschedulable=true", func(ctx SpecContext) {
+			eligible := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				{
+					NodeName:   "node-1",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-schedulable", Ready: true, Unschedulable: false},
+						{Name: "vg-unschedulable", Ready: true, Unschedulable: true},
+					},
+				},
+			}
+			// vg-unschedulable has higher score but should be skipped
+			scores := map[string]int{"vg-schedulable": 50, "vg-unschedulable": 100}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, nil)
+			rsp.Status.EligibleNodes = eligible
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.LVMVolumeGroupName).To(Equal("vg-schedulable"), "Should skip LVG with Unschedulable=true")
+		})
+	})
+
+	Context("LVMThin Storage Type", func() {
+		It("sets ThinPoolName on RVR for LVMThin storage", func(ctx SpecContext) {
+			eligible := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				{
+					NodeName:   "node-1",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-thin", Ready: true, ThinPoolName: "thin-pool-1"},
+					},
+				},
+			}
+			scores := map[string]int{"vg-thin": 100}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, nil)
+			rsp.Status.EligibleNodes = eligible
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.LVMVolumeGroupName).To(Equal("vg-thin"))
+			Expect(updated.Spec.LVMVolumeGroupThinPoolName).To(Equal("thin-pool-1"), "ThinPoolName should be set for LVMThin")
+		})
+
+		It("does not set ThinPoolName on RVR for LVM (thick) storage", func(ctx SpecContext) {
+			eligible := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				{
+					NodeName:   "node-1",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-thick", Ready: true, ThinPoolName: ""},
+					},
+				},
+			}
+			scores := map[string]int{"vg-thick": 100}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, nil)
+			rsp.Status.EligibleNodes = eligible
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.LVMVolumeGroupName).To(Equal("vg-thick"))
+			Expect(updated.Spec.LVMVolumeGroupThinPoolName).To(BeEmpty(), "ThinPoolName should be empty for LVM thick")
+		})
+	})
+
+	Context("Requeue Behavior", func() {
+		It("returns RequeueAfter(30s) on scheduling failure (no suitable nodes)", func(ctx SpecContext) {
+			cluster := clusterConfigs["small-1z"]
+			eligibleNodes, _ := generateEligibleNodes(cluster)
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", cluster.RSCZones, eligibleNodes)
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+
+			// Return empty scores - no nodes have capacity
+			extender := &mockExtenderClient{scores: map[string]int{}}
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, extender)
+
+			result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred(), "Scheduling failure should not return error")
+			Expect(result.RequeueAfter).To(Equal(30*time.Second), "Should requeue after 30s for scheduling failure")
+		})
+	})
+
+	Context("Access Replica Handling", func() {
+		It("ignores Access replicas (does not schedule them)", func(ctx SpecContext) {
+			cluster := clusterConfigs["small-1z"]
+			eligibleNodes, scores := generateEligibleNodes(cluster)
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", cluster.RSCZones, eligibleNodes)
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+
+			accessRvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-access-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeAccess,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, accessRvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+
+			extender := &mockExtenderClient{scores: scores}
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, extender)
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-access-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(BeEmpty(), "Access replica should not be scheduled")
+		})
+
+		It("Access replicas occupy nodes for other replicas", func(ctx SpecContext) {
+			cluster := clusterConfigs["small-1z"]
+			eligibleNodes, scores := generateEligibleNodes(cluster)
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", cluster.RSCZones, eligibleNodes)
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+
+			// Access replica already on node-a1 - this DOES block it
+			accessRvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-access-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeAccess,
+					NodeName:             "node-a1",
+				},
+			}
+
+			diskfulRvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, accessRvr, diskfulRvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+
+			extender := &mockExtenderClient{scores: scores}
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, extender)
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			// node-a1 is occupied by Access replica, so Diskful goes to node-a2
+			Expect(updated.Spec.NodeName).To(Equal("node-a2"), "Access replica occupies node, preventing other replicas")
+		})
+	})
+
+	Context("Label Management", func() {
+		It("sets NodeNameLabelKey on newly scheduled RVR", func(ctx SpecContext) {
+			cluster := clusterConfigs["small-1z"]
+			eligibleNodes, scores := generateEligibleNodes(cluster)
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", cluster.RSCZones, eligibleNodes)
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+
+			extender := &mockExtenderClient{scores: scores}
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, extender)
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Labels[v1alpha1.NodeNameLabelKey]).To(Equal(updated.Spec.NodeName), "NodeNameLabelKey should match scheduled node")
+		})
+
+		It("adds NodeNameLabelKey to already scheduled RVR without label", func(ctx SpecContext) {
+			cluster := clusterConfigs["small-1z"]
+			eligibleNodes, scores := generateEligibleNodes(cluster)
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", cluster.RSCZones, eligibleNodes)
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+			}
+
+			// Already scheduled but without the label
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "rvr-diskful-1",
+					Labels: map[string]string{},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-a1",
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+
+			extender := &mockExtenderClient{scores: scores}
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, extender)
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Labels[v1alpha1.NodeNameLabelKey]).To(Equal("node-a1"), "NodeNameLabelKey should be added for already scheduled RVR")
+		})
+	})
+
+	Context("Topology Edge Cases", func() {
+		It("TransZonal: round-robin for 4+ replicas across 3 zones", func(ctx SpecContext) {
+			cluster := clusterConfigs["large-3z-3n"]
+			eligibleNodes, scores := generateEligibleNodes(cluster)
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "TransZonal", cluster.RSCZones, eligibleNodes)
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{{
+						Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
+						Status: metav1.ConditionTrue,
+					}},
+				},
+			}
+
+			// Create 4 Diskful replicas to schedule
+			var rvrList []*v1alpha1.ReplicatedVolumeReplica
+			for i := 1; i <= 4; i++ {
+				rvrList = append(rvrList, &v1alpha1.ReplicatedVolumeReplica{
+					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-diskful-%d", i)},
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+						ReplicatedVolumeName: "rv-test",
+						Type:                 v1alpha1.ReplicaTypeDiskful,
+					},
+				})
+			}
+
+			objects := []runtime.Object{rv, rsc, rsp}
+			for _, rvr := range rvrList {
+				objects = append(objects, rvr)
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(objects...).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+
+			extender := &mockExtenderClient{scores: scores}
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, extender)
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			// Verify all 4 replicas scheduled
+			zonesUsed := make(map[string]int)
+			for i := 1; i <= 4; i++ {
+				updated := &v1alpha1.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKey{Name: fmt.Sprintf("rvr-diskful-%d", i)}, updated)).To(Succeed())
+				Expect(updated.Spec.NodeName).ToNot(BeEmpty(), "Replica %d should be scheduled", i)
+
+				// Find zone for node
+				for _, node := range eligibleNodes {
+					if node.NodeName == updated.Spec.NodeName {
+						zonesUsed[node.ZoneName]++
+						break
+					}
+				}
+			}
+
+			// With 4 replicas across 3 zones, one zone should have 2 replicas, others have 1
+			Expect(len(zonesUsed)).To(Equal(3), "All 3 zones should be used")
+			maxInZone := 0
+			for _, count := range zonesUsed {
+				if count > maxInZone {
+					maxInZone = count
+				}
+			}
+			Expect(maxInZone).To(Equal(2), "Max replicas in any zone should be 2 (round-robin)")
+		})
+
+		It("Zonal: zone selection is sticky for subsequent replicas", func(ctx SpecContext) {
+			cluster := clusterConfigs["medium-2z-4n"]
+			eligibleNodes, scores := generateEligibleNodes(cluster)
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Zonal", cluster.RSCZones, eligibleNodes)
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{{
+						Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
+						Status: metav1.ConditionTrue,
+					}},
+				},
+			}
+
+			// Create 3 Diskful replicas
+			var rvrList []*v1alpha1.ReplicatedVolumeReplica
+			for i := 1; i <= 3; i++ {
+				rvrList = append(rvrList, &v1alpha1.ReplicatedVolumeReplica{
+					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-diskful-%d", i)},
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+						ReplicatedVolumeName: "rv-test",
+						Type:                 v1alpha1.ReplicaTypeDiskful,
+					},
+				})
+			}
+
+			objects := []runtime.Object{rv, rsc, rsp}
+			for _, rvr := range rvrList {
+				objects = append(objects, rvr)
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(objects...).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+
+			extender := &mockExtenderClient{scores: scores}
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, extender)
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			// Verify all replicas are in the same zone
+			var scheduledZone string
+			for i := 1; i <= 3; i++ {
+				updated := &v1alpha1.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKey{Name: fmt.Sprintf("rvr-diskful-%d", i)}, updated)).To(Succeed())
+				Expect(updated.Spec.NodeName).ToNot(BeEmpty(), "Replica %d should be scheduled", i)
+
+				// Find zone for node
+				for _, node := range eligibleNodes {
+					if node.NodeName == updated.Spec.NodeName {
+						if scheduledZone == "" {
+							scheduledZone = node.ZoneName
+						} else {
+							Expect(node.ZoneName).To(Equal(scheduledZone), "All replicas should be in the same zone for Zonal topology")
+						}
+						break
+					}
+				}
+			}
+		})
+	})
+
+	Context("AttachTo Bonus", func() {
+		It("prefers attachTo nodes with score bonus", func(ctx SpecContext) {
+			eligible := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				{
+					NodeName:   "node-attachto",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-attachto", Ready: true},
+					},
+				},
+				{
+					NodeName:   "node-other",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-other", Ready: true},
+					},
+				},
+			}
+			// node-other has slightly higher score, but attachTo bonus should tip the balance
+			scores := map[string]int{"vg-attachto": 50, "vg-other": 60}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, nil)
+			rsp.Status.EligibleNodes = eligible
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DesiredAttachTo: []string{"node-attachto"},
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(Equal("node-attachto"), "AttachTo node should be preferred due to bonus")
+		})
+
+		It("attachTo bonus does not override significantly higher capacity score", func(ctx SpecContext) {
+			eligible := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				{
+					NodeName:   "node-attachto",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-attachto", Ready: true},
+					},
+				},
+				{
+					NodeName:   "node-other",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-other", Ready: true},
+					},
+				},
+			}
+			// node-other has much higher score (2000 > 50 + 1000 bonus)
+			scores := map[string]int{"vg-attachto": 50, "vg-other": 2000}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, nil)
+			rsp.Status.EligibleNodes = eligible
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DesiredAttachTo: []string{"node-attachto"},
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(Equal("node-other"), "Node with significantly higher score should win despite attachTo bonus")
 		})
 	})
 })

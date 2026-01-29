@@ -338,7 +338,7 @@ func selectBestCandidateIgnored(sctx *SchedulingContext) (NodeCandidate, error) 
 		return NodeCandidate{}, fmt.Errorf("%w: no candidates available", errSchedulingNoCandidateNodes)
 	}
 
-	best, _ := computeBestNode(allCandidates)
+	best := computeBestNode(allCandidates)
 	if best.Name == "" {
 		return NodeCandidate{}, fmt.Errorf("%w: no candidates available", errSchedulingNoCandidateNodes)
 	}
@@ -386,7 +386,7 @@ func selectBestCandidateZonal(sctx *SchedulingContext, isDiskful bool) (NodeCand
 		return NodeCandidate{}, fmt.Errorf("%w: no candidates left in zone %s", errSchedulingNoCandidateNodes, sctx.SelectedZone)
 	}
 
-	best, _ := computeBestNode(candidates)
+	best := computeBestNode(candidates)
 	if best.Name == "" {
 		return NodeCandidate{}, fmt.Errorf("%w: no candidates left in zone %s", errSchedulingNoCandidateNodes, sctx.SelectedZone)
 	}
@@ -424,7 +424,7 @@ func selectBestCandidateTransZonal(sctx *SchedulingContext) (NodeCandidate, erro
 
 	// Select best candidate from the selected zone
 	candidates := sctx.ScoredCandidates[selectedZone]
-	best, _ := computeBestNode(candidates)
+	best := computeBestNode(candidates)
 	if best.Name == "" {
 		return NodeCandidate{}, fmt.Errorf("%w: no candidates left in zone %s", errSchedulingNoCandidateNodes, selectedZone)
 	}
@@ -782,25 +782,9 @@ func computeAllowedZones(
 	return result
 }
 
-func computeZoneWithMinReplicaCount(
-	zones map[string]struct{},
-	zoneReplicaCount map[string]int,
-) (string, int) {
-	var minZone string
-	minCount := -1
-	for zone := range zones {
-		count := zoneReplicaCount[zone]
-		if minCount == -1 || count < minCount {
-			minCount = count
-			minZone = zone
-		}
-	}
-	return minZone, minCount
-}
-
-func computeBestNode(candidates []NodeCandidate) (NodeCandidate, []NodeCandidate) {
+func computeBestNode(candidates []NodeCandidate) NodeCandidate {
 	if len(candidates) == 0 {
-		return NodeCandidate{}, candidates
+		return NodeCandidate{}
 	}
 
 	slices.SortFunc(candidates, func(a, b NodeCandidate) int {
@@ -816,7 +800,7 @@ func computeBestNode(candidates []NodeCandidate) (NodeCandidate, []NodeCandidate
 		return b.SumScore - a.SumScore
 	})
 
-	return candidates[0], candidates[1:]
+	return candidates[0]
 }
 
 func computeSchedulingFailureReason(err error) *schedulingFailureReason {
@@ -1046,24 +1030,6 @@ func categorizeRVRsIntoContext(sctx *SchedulingContext, allRVRs []v1alpha1.Repli
 			}
 		}
 	}
-}
-
-func (r *Reconciler) setScheduledConditionFalseOnRVRs(
-	ctx context.Context,
-	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-	reason *schedulingFailureReason,
-) error {
-	for _, rvr := range rvrs {
-		base := rvr.DeepCopy()
-		changed := applyScheduledConditionFalse(rvr, reason.reason, reason.message)
-		if !changed {
-			continue
-		}
-		if err := r.patchRVRStatus(ctx, rvr, base); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (r *Reconciler) setFailedScheduledConditionOnUnscheduledRVRs(
