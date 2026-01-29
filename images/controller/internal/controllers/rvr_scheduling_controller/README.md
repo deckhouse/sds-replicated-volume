@@ -229,7 +229,7 @@ Indicates whether the replica has been assigned to a node.
 | Resource | Events | Handler |
 | -------- | ------ | ------- |
 | ReplicatedVolumeReplica | Create only | EnqueueRequestForOwner (maps to owner RV) |
-| ReplicatedStoragePool | Update (only if eligibleNodes changed) | mapRSPToRV (maps to RVs with unscheduled non-Access RVRs) |
+| ReplicatedStoragePool | Update (only if eligibleNodes changed) | mapRSPToRV (maps to RVs that use this RSP and have unscheduled non-Access RVRs) |
 
 ## Indexes
 
@@ -237,6 +237,9 @@ Indicates whether the replica has been assigned to a node.
 | ----- | ----- | ------- |
 | RVR by RV name | `spec.replicatedVolumeName` | List all RVRs for a ReplicatedVolume |
 | RVR unscheduled | `spec.nodeName` empty | Find unscheduled RVRs for RSP event mapping |
+| RV by RSC name | `spec.replicatedStorageClassName` | Find RVs using a specific RSC |
+
+Note: RSC names are obtained directly from `rsp.Status.UsedBy.ReplicatedStorageClassNames` (no index needed).
 
 ## Data Flow
 
@@ -360,26 +363,30 @@ For scheduling failures, the controller sets `Scheduled=False` condition on the 
 ## Special Notes
 
 **Best Zone Selection (Zonal topology):**
+
 - Chooses the zone with highest total capacity score × node count
 - Considers existing Diskful replica zones first
 - Falls back to attachTo node zones if no Diskful replicas exist
 
 **TransZonal Distribution:**
+
 - Places each replica in the zone with fewest replicas of the same type
 - Fails if even distribution across zones is impossible
-- Ensures replicas survive zone failures
 
 Per-RVR zone distribution mechanism:
+
 1. `prepareScoredCandidatesForDiskful` initializes `ZoneReplicaCounts` with existing Diskful counts per zone
 2. For each unscheduled Diskful, `selectBestCandidateTransZonal` picks the zone with minimum count
 3. After successful patch, `IncrementZoneReplicaCount` updates the count immediately
 4. Next RVR sees updated counts and picks a different zone
 
 Example with 2 unscheduled Diskful and 3 zones (all starting at count=0):
+
 - RVR-1: zone-a=0, zone-b=0, zone-c=0 → selects zone-a → increments → zone-a=1
 - RVR-2: zone-a=1, zone-b=0, zone-c=0 → selects zone-b (minimum count)
 
 **AttachTo Preference:**
+
 - Nodes in `rv.status.desiredAttachTo` receive a score bonus (+1000)
 - This makes them preferred but not required
 - Useful for co-locating replicas with workloads
