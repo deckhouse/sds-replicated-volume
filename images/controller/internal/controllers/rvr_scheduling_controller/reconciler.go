@@ -159,139 +159,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return rf.Done().ToCtrl()
 }
 
-// --- Reconcile: already-scheduled
-
-// reconcileAlreadyScheduled updates conditions on already scheduled RVRs.
-//
-// Reconcile pattern: In-place reconciliation
-func (r *Reconciler) reconcileAlreadyScheduled(ctx context.Context, sctx *SchedulingContext) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "already-scheduled")
-	defer rf.OnEnd(&outcome)
-
-	if err := r.updateScheduledConditionOnScheduledRVRs(rf.Ctx(), sctx); err != nil {
-		return rf.Fail(err)
-	}
-
-	return rf.Continue()
-}
-
-// --- Reconcile: diskful
-
-// reconcileDiskful schedules diskful replicas.
-//
-// Reconcile pattern: In-place reconciliation
-func (r *Reconciler) reconcileDiskful(ctx context.Context, sctx *SchedulingContext) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "diskful")
-	defer rf.OnEnd(&outcome)
-
-	if len(sctx.UnscheduledDiskful) == 0 {
-		return rf.Done()
-	}
-
-	candidateNodes := computeEligibleNodeNames(sctx.EligibleNodes, sctx.OccupiedNodes)
-	if len(candidateNodes) == 0 {
-		return r.failDiskfulScheduling(rf, sctx, fmt.Errorf("%w: no candidate nodes from storage pool", errSchedulingNoCandidateNodes))
-	}
-
-	zoneCandidates, err := r.applyTopologyFilter(candidateNodes, true, sctx)
-	if err != nil {
-		return r.failDiskfulScheduling(rf, sctx, err)
-	}
-
-	zoneCandidates, err = r.applyCapacityFilterAndScore(rf.Ctx(), zoneCandidates, sctx)
-	if err != nil {
-		return r.failDiskfulScheduling(rf, sctx, err)
-	}
-
-	applyAttachToBonus(zoneCandidates, sctx.AttachToNodes)
-
-	assignedRVRs, err := r.assignReplicasToNodes(
-		zoneCandidates,
-		sctx.UnscheduledDiskful,
-		sctx,
-		v1alpha1.ReplicaTypeDiskful,
-		true,
-	)
-	if err != nil {
-		return r.failDiskfulScheduling(rf, sctx, err)
-	}
-
-	if err := r.updateScheduledRVRs(rf.Ctx(), assignedRVRs); err != nil {
-		return rf.Fail(err)
-	}
-
-	updateStateAfterScheduling(sctx, assignedRVRs)
-
-	if len(sctx.UnscheduledDiskful) > 0 {
-		return r.failDiskfulScheduling(rf, sctx, fmt.Errorf("%w: not enough candidate nodes to schedule all Diskful replicas", errSchedulingNoCandidateNodes))
-	}
-
-	return rf.Done()
-}
-
-func (r *Reconciler) failDiskfulScheduling(rf flow.ReconcileFlow, sctx *SchedulingContext, err error) flow.ReconcileOutcome {
-	failureReason := computeSchedulingFailureReason(err)
-	if setErr := r.setScheduledConditionFalseOnRVRs(rf.Ctx(), sctx.UnscheduledDiskful, failureReason); setErr != nil {
-		return rf.Fail(setErr)
-	}
-	return rf.DoneAndRequeueAfter(30 * time.Second)
-}
-
-// --- Reconcile: tiebreaker
-
-// reconcileTieBreaker schedules tiebreaker replicas.
-//
-// Reconcile pattern: In-place reconciliation
-func (r *Reconciler) reconcileTieBreaker(ctx context.Context, sctx *SchedulingContext) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "tiebreaker")
-	defer rf.OnEnd(&outcome)
-
-	if len(sctx.UnscheduledTieBreaker) == 0 {
-		return rf.Done()
-	}
-
-	candidateNodes := computeEligibleNodeNames(sctx.EligibleNodes, sctx.OccupiedNodes)
-	if len(candidateNodes) == 0 {
-		return r.failTieBreakerScheduling(rf, sctx, fmt.Errorf("%w: no candidate nodes for TieBreaker", errSchedulingNoCandidateNodes))
-	}
-
-	zoneCandidates, err := r.applyTopologyFilter(candidateNodes, false, sctx)
-	if err != nil {
-		return r.failTieBreakerScheduling(rf, sctx, err)
-	}
-
-	assignedRVRs, err := r.assignReplicasToNodes(
-		zoneCandidates,
-		sctx.UnscheduledTieBreaker,
-		sctx,
-		v1alpha1.ReplicaType(""),
-		true,
-	)
-	if err != nil {
-		return r.failTieBreakerScheduling(rf, sctx, err)
-	}
-
-	if err := r.updateScheduledRVRs(rf.Ctx(), assignedRVRs); err != nil {
-		return rf.Fail(err)
-	}
-
-	updateStateAfterScheduling(sctx, assignedRVRs)
-
-	if len(sctx.UnscheduledTieBreaker) > 0 {
-		return r.failTieBreakerScheduling(rf, sctx, fmt.Errorf("%w: not enough candidate nodes to schedule all TieBreaker replicas", errSchedulingNoCandidateNodes))
-	}
-
-	return rf.Done()
-}
-
-func (r *Reconciler) failTieBreakerScheduling(rf flow.ReconcileFlow, sctx *SchedulingContext, err error) flow.ReconcileOutcome {
-	failureReason := computeSchedulingFailureReason(err)
-	if setErr := r.setScheduledConditionFalseOnRVRs(rf.Ctx(), sctx.UnscheduledTieBreaker, failureReason); setErr != nil {
-		return rf.Fail(setErr)
-	}
-	return rf.DoneAndRequeueAfter(30 * time.Second)
-}
-
 // --- Per-RVR Reconcile functions
 
 // reconcileScheduledRVR updates the Scheduled condition on an already scheduled RVR.
@@ -327,11 +194,7 @@ func (r *Reconciler) reconcileUnscheduledDiskfulRVR(ctx context.Context, sctx *S
 	// Select best candidate based on topology
 	candidate, err := r.selectBestCandidate(sctx, true)
 	if err != nil {
-		// Set Scheduled=False condition and signal scheduling failure
-		if setErr := r.setScheduledConditionFalseOnRVR(ctx, rvr, computeSchedulingFailureReason(err)); setErr != nil {
-			return false, setErr
-		}
-		return true, nil
+		return r.handleSchedulingFailure(ctx, rvr, err)
 	}
 
 	// Main domain: base -> apply -> patch
@@ -373,20 +236,14 @@ func (r *Reconciler) reconcileUnscheduledTieBreakerRVR(ctx context.Context, sctx
 	// Prepare candidates for TieBreaker (no capacity scoring needed)
 	candidateNodes := computeEligibleNodeNames(sctx.EligibleNodes, sctx.OccupiedNodes)
 	if len(candidateNodes) == 0 {
-		if setErr := r.setScheduledConditionFalseOnRVR(ctx, rvr, computeSchedulingFailureReason(
-			fmt.Errorf("%w: no candidate nodes for TieBreaker", errSchedulingNoCandidateNodes))); setErr != nil {
-			return false, setErr
-		}
-		return true, nil
+		return r.handleSchedulingFailure(ctx, rvr,
+			fmt.Errorf("%w: no candidate nodes for TieBreaker", errSchedulingNoCandidateNodes))
 	}
 
 	// Apply topology filter for TieBreaker
 	zoneCandidates, err := r.applyTopologyFilter(candidateNodes, false, sctx)
 	if err != nil {
-		if setErr := r.setScheduledConditionFalseOnRVR(ctx, rvr, computeSchedulingFailureReason(err)); setErr != nil {
-			return false, setErr
-		}
-		return true, nil
+		return r.handleSchedulingFailure(ctx, rvr, err)
 	}
 
 	// For TransZonal TieBreaker, we need to count ALL replicas (not just Diskful).
@@ -399,10 +256,7 @@ func (r *Reconciler) reconcileUnscheduledTieBreakerRVR(ctx context.Context, sctx
 	// Select best candidate
 	candidate, err := selectBestCandidateFromZones(zoneCandidates, sctx)
 	if err != nil {
-		if setErr := r.setScheduledConditionFalseOnRVR(ctx, rvr, computeSchedulingFailureReason(err)); setErr != nil {
-			return false, setErr
-		}
-		return true, nil
+		return r.handleSchedulingFailure(ctx, rvr, err)
 	}
 
 	// Main domain: base -> apply -> patch
@@ -443,6 +297,15 @@ func (r *Reconciler) setScheduledConditionFalseOnRVR(ctx context.Context, rvr *v
 		return nil
 	}
 	return r.patchRVRStatus(ctx, rvr, base)
+}
+
+// handleSchedulingFailure sets Scheduled=False on the RVR and returns (true, nil) to signal scheduling failure.
+// If setting the condition fails, returns (false, err).
+func (r *Reconciler) handleSchedulingFailure(ctx context.Context, rvr *v1alpha1.ReplicatedVolumeReplica, err error) (schedulingFailed bool, outErr error) {
+	if setErr := r.setScheduledConditionFalseOnRVR(ctx, rvr, computeSchedulingFailureReason(err)); setErr != nil {
+		return false, setErr
+	}
+	return true, nil
 }
 
 // selectBestCandidate selects the best candidate from sctx.ScoredCandidates based on topology.
@@ -531,24 +394,30 @@ func selectBestCandidateZonal(sctx *SchedulingContext, isDiskful bool) (NodeCand
 	return best, nil
 }
 
-// selectBestCandidateTransZonal selects the best candidate for TransZonal topology.
-// Places replica in the zone with minimum replica count.
-func selectBestCandidateTransZonal(sctx *SchedulingContext) (NodeCandidate, error) {
-	// Find zone with minimum replica count that has available candidates
+// selectZoneWithMinReplicaCount finds the zone with minimum replica count among zones with candidates.
+// Returns empty string if no zones have candidates.
+func selectZoneWithMinReplicaCount(zoneCandidates map[string][]NodeCandidate, replicaCounts map[string]int) string {
 	var selectedZone string
 	minCount := -1
 
-	for zone, candidates := range sctx.ScoredCandidates {
+	for zone, candidates := range zoneCandidates {
 		if len(candidates) == 0 {
 			continue
 		}
-		count := sctx.ZoneReplicaCounts[zone]
+		count := replicaCounts[zone]
 		if minCount < 0 || count < minCount {
 			minCount = count
 			selectedZone = zone
 		}
 	}
 
+	return selectedZone
+}
+
+// selectBestCandidateTransZonal selects the best candidate for TransZonal topology.
+// Places replica in the zone with minimum replica count.
+func selectBestCandidateTransZonal(sctx *SchedulingContext) (NodeCandidate, error) {
+	selectedZone := selectZoneWithMinReplicaCount(sctx.ScoredCandidates, sctx.ZoneReplicaCounts)
 	if selectedZone == "" {
 		return NodeCandidate{}, fmt.Errorf("%w: no zones with candidates for TransZonal topology", errSchedulingNoCandidateNodes)
 	}
@@ -589,19 +458,7 @@ func selectBestCandidateFromZones(zoneCandidates map[string][]NodeCandidate, sct
 		return candidates[0], nil
 
 	case topologyTransZonal:
-		// Find zone with minimum replica count
-		var selectedZone string
-		minCount := -1
-		for zone, candidates := range zoneCandidates {
-			if len(candidates) == 0 {
-				continue
-			}
-			count := sctx.ZoneReplicaCounts[zone]
-			if minCount < 0 || count < minCount {
-				minCount = count
-				selectedZone = zone
-			}
-		}
+		selectedZone := selectZoneWithMinReplicaCount(zoneCandidates, sctx.ZoneReplicaCounts)
 		if selectedZone == "" {
 			return NodeCandidate{}, fmt.Errorf("%w: no zones with candidates for TieBreaker", errSchedulingNoCandidateNodes)
 		}
@@ -853,163 +710,6 @@ func applyAttachToBonus(zoneCandidates map[string][]NodeCandidate, attachToNodes
 	}
 }
 
-func (r *Reconciler) assignReplicasToNodes(
-	zoneCandidates map[string][]NodeCandidate,
-	unscheduledRVRs []*v1alpha1.ReplicatedVolumeReplica,
-	sctx *SchedulingContext,
-	replicaTypeFilter v1alpha1.ReplicaType,
-	bestEffort bool,
-) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
-	if len(unscheduledRVRs) == 0 {
-		return nil, nil
-	}
-
-	switch sctx.RSC.Spec.Topology {
-	case topologyIgnored:
-		return assignReplicasIgnoredTopology(zoneCandidates, unscheduledRVRs, bestEffort)
-	case topologyZonal:
-		return assignReplicasZonalTopology(zoneCandidates, unscheduledRVRs, bestEffort)
-	case topologyTransZonal:
-		return assignReplicasTransZonalTopology(zoneCandidates, unscheduledRVRs, sctx, replicaTypeFilter, bestEffort)
-	default:
-		return nil, fmt.Errorf("unknown topology: %s", sctx.RSC.Spec.Topology)
-	}
-}
-
-func assignReplicasIgnoredTopology(
-	zoneCandidates map[string][]NodeCandidate,
-	unscheduledRVRs []*v1alpha1.ReplicatedVolumeReplica,
-	bestEffort bool,
-) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
-	var allCandidates []NodeCandidate
-	for _, candidates := range zoneCandidates {
-		allCandidates = append(allCandidates, candidates...)
-	}
-
-	var assignedRVRs []*v1alpha1.ReplicatedVolumeReplica
-	for _, rvr := range unscheduledRVRs {
-		selected, remaining := computeBestNode(allCandidates)
-		if selected.Name == "" {
-			if bestEffort {
-				break
-			}
-			return assignedRVRs, fmt.Errorf("%w: not enough candidate nodes for all replicas", errSchedulingNoCandidateNodes)
-		}
-		allCandidates = remaining
-
-		applyPlacement(rvr, selected)
-		assignedRVRs = append(assignedRVRs, rvr)
-	}
-
-	return assignedRVRs, nil
-}
-
-func assignReplicasZonalTopology(
-	zoneCandidates map[string][]NodeCandidate,
-	unscheduledRVRs []*v1alpha1.ReplicatedVolumeReplica,
-	bestEffort bool,
-) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
-	var bestZone string
-	bestZoneScore := -1
-
-	for zone, candidates := range zoneCandidates {
-		totalScore := 0
-		for _, c := range candidates {
-			totalScore += c.BestScore
-		}
-		zoneScore := totalScore * len(candidates)
-		if zoneScore > bestZoneScore {
-			bestZoneScore = zoneScore
-			bestZone = zone
-		}
-	}
-
-	if bestZone == "" {
-		if bestEffort {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("%w: no zones with candidates available", errSchedulingNoCandidateNodes)
-	}
-
-	var assignedRVRs []*v1alpha1.ReplicatedVolumeReplica
-	candidates := zoneCandidates[bestZone]
-	for _, rvr := range unscheduledRVRs {
-		selected, remaining := computeBestNode(candidates)
-		if selected.Name == "" {
-			if bestEffort {
-				break
-			}
-			return assignedRVRs, fmt.Errorf("%w: not enough candidate nodes in zone %s for all replicas", errSchedulingNoCandidateNodes, bestZone)
-		}
-		candidates = remaining
-
-		applyPlacement(rvr, selected)
-		assignedRVRs = append(assignedRVRs, rvr)
-	}
-	zoneCandidates[bestZone] = candidates
-
-	return assignedRVRs, nil
-}
-
-func assignReplicasTransZonalTopology(
-	zoneCandidates map[string][]NodeCandidate,
-	unscheduledRVRs []*v1alpha1.ReplicatedVolumeReplica,
-	sctx *SchedulingContext,
-	replicaTypeFilter v1alpha1.ReplicaType,
-	bestEffort bool,
-) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
-	if len(unscheduledRVRs) == 0 {
-		return nil, nil
-	}
-
-	zoneReplicaCount := computeReplicasByZone(sctx.AllRVRs, replicaTypeFilter, sctx.NodeToZone)
-	allowedZones := computeAllowedZones(nil, sctx.RSC.Spec.Zones, sctx.NodeToZone)
-
-	availableZones := make(map[string]struct{})
-	for zone, candidates := range zoneCandidates {
-		if len(candidates) > 0 {
-			availableZones[zone] = struct{}{}
-		}
-	}
-
-	var assignedRVRs []*v1alpha1.ReplicatedVolumeReplica
-	for _, rvr := range unscheduledRVRs {
-		globalMinZone, globalMinCount := computeZoneWithMinReplicaCount(allowedZones, zoneReplicaCount)
-		selectedZone, availableMinCount := computeZoneWithMinReplicaCount(availableZones, zoneReplicaCount)
-
-		if selectedZone == "" {
-			if bestEffort {
-				break
-			}
-			return assignedRVRs, fmt.Errorf("%w: no zones with available nodes to place replica", errSchedulingNoCandidateNodes)
-		}
-
-		if globalMinCount < availableMinCount {
-			if bestEffort {
-				break
-			}
-			return assignedRVRs, fmt.Errorf("%w: zone %q has %d replicas but no available nodes; replica should be placed there to maintain even distribution across zones",
-				errSchedulingNoCandidateNodes, globalMinZone, globalMinCount)
-		}
-
-		selected, remaining := computeBestNode(zoneCandidates[selectedZone])
-		if selected.Name == "" {
-			return assignedRVRs, nil
-		}
-		zoneCandidates[selectedZone] = remaining
-
-		if len(remaining) == 0 {
-			delete(availableZones, selectedZone)
-		}
-
-		applyPlacement(rvr, selected)
-		assignedRVRs = append(assignedRVRs, rvr)
-		zoneReplicaCount[selectedZone]++
-	}
-
-	return assignedRVRs, nil
-}
-
 // --- Helpers: scheduling (compute)
 
 func computeEligibleNodeNames(eligible []v1alpha1.ReplicatedStoragePoolEligibleNode, occupied map[string]struct{}) []string {
@@ -1191,34 +891,6 @@ func groupCandidateNodesByZone(
 	return result
 }
 
-func updateStateAfterScheduling(sctx *SchedulingContext, assignedRVRs []*v1alpha1.ReplicatedVolumeReplica) {
-	if len(assignedRVRs) == 0 {
-		return
-	}
-
-	assignedNames := make(map[string]struct{}, len(assignedRVRs))
-	for _, rvr := range assignedRVRs {
-		assignedNames[rvr.Name] = struct{}{}
-		sctx.OccupiedNodes[rvr.Spec.NodeName] = struct{}{}
-		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
-			sctx.ScheduledDiskful = append(sctx.ScheduledDiskful, rvr)
-		}
-	}
-
-	sctx.UnscheduledDiskful = filterOutAssigned(sctx.UnscheduledDiskful, assignedNames)
-	sctx.UnscheduledTieBreaker = filterOutAssigned(sctx.UnscheduledTieBreaker, assignedNames)
-}
-
-func filterOutAssigned(rvrs []*v1alpha1.ReplicatedVolumeReplica, assigned map[string]struct{}) []*v1alpha1.ReplicatedVolumeReplica {
-	var result []*v1alpha1.ReplicatedVolumeReplica
-	for _, rvr := range rvrs {
-		if _, ok := assigned[rvr.Name]; !ok {
-			result = append(result, rvr)
-		}
-	}
-	return result
-}
-
 func isRVReadyToSchedule(rv *v1alpha1.ReplicatedVolume) error {
 	if rv.Finalizers == nil {
 		return fmt.Errorf("%w: ReplicatedVolume has no finalizers", errSchedulingPending)
@@ -1341,6 +1013,13 @@ func (r *Reconciler) prepareSchedulingContext(
 		OccupiedNodes:   make(map[string]struct{}),
 	}
 
+	categorizeRVRsIntoContext(sctx, allRVRs)
+
+	return sctx, nil
+}
+
+// categorizeRVRsIntoContext populates sctx with categorized RVRs and occupied nodes.
+func categorizeRVRsIntoContext(sctx *SchedulingContext, allRVRs []v1alpha1.ReplicatedVolumeReplica) {
 	for i := range allRVRs {
 		rvr := &allRVRs[i]
 		if rvr.Spec.NodeName != "" {
@@ -1367,55 +1046,6 @@ func (r *Reconciler) prepareSchedulingContext(
 			}
 		}
 	}
-
-	return sctx, nil
-}
-
-func (r *Reconciler) updateScheduledRVRs(ctx context.Context, rvrs []*v1alpha1.ReplicatedVolumeReplica) error {
-	for _, rvr := range rvrs {
-		base := rvr.DeepCopy()
-		base.Spec.NodeName = ""
-		base.Spec.LVMVolumeGroupName = ""
-		base.Spec.LVMVolumeGroupThinPoolName = ""
-		delete(base.Labels, v1alpha1.NodeNameLabelKey)
-
-		// Use optimistic locking to prevent overwriting concurrent modifications.
-		if err := r.patchRVR(ctx, rvr, base, true); err != nil {
-			return err
-		}
-
-		statusBase := rvr.DeepCopy()
-		applyScheduledConditionTrue(rvr)
-		if err := r.patchRVRStatus(ctx, rvr, statusBase); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (r *Reconciler) updateScheduledConditionOnScheduledRVRs(ctx context.Context, sctx *SchedulingContext) error {
-	for _, rvr := range sctx.AllRVRs {
-		if rvr.Spec.NodeName == "" {
-			continue
-		}
-
-		base := rvr.DeepCopy()
-		labelChanged := applyNodeNameLabelIfMissing(rvr)
-		if labelChanged {
-			if err := r.patchRVR(ctx, rvr, base, false); err != nil {
-				return err
-			}
-		}
-
-		statusBase := rvr.DeepCopy()
-		condChanged := applyScheduledConditionTrue(rvr)
-		if condChanged {
-			if err := r.patchRVRStatus(ctx, rvr, statusBase); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 func (r *Reconciler) setScheduledConditionFalseOnRVRs(

@@ -35,10 +35,13 @@ const (
 	// ReplicatedVolumeReplica objects belonging to a specific RV.
 	IndexFieldRVRByReplicatedVolumeName = "spec.replicatedVolumeName"
 
-	// IndexFieldRVRUnscheduledNonAccessByRV is used to quickly list
-	// unscheduled non-Access ReplicatedVolumeReplica objects for a specific RV.
-	// Query with RV name to get unscheduled Diskful/TieBreaker RVRs for that RV.
-	IndexFieldRVRUnscheduledNonAccessByRV = "unscheduled.nonAccess.replicatedVolumeName"
+	// IndexFieldRVRUnscheduledNonAccess is used to quickly list
+	// all unscheduled non-Access ReplicatedVolumeReplica objects.
+	// Query with sentinel value "true" to get all unscheduled Diskful/TieBreaker RVRs.
+	IndexFieldRVRUnscheduledNonAccess = "unscheduled.nonAccess"
+
+	// indexValueTrue is a sentinel value for boolean-like indexes.
+	indexValueTrue = "true"
 )
 
 // RegisterRVRByNodeName registers the index for listing
@@ -87,13 +90,14 @@ func RegisterRVRByReplicatedVolumeName(mgr manager.Manager) error {
 	return nil
 }
 
-// RegisterRVRUnscheduledNonAccessByRV registers the index for listing
-// unscheduled non-Access ReplicatedVolumeReplica objects by RV name.
-func RegisterRVRUnscheduledNonAccessByRV(mgr manager.Manager) error {
+// RegisterRVRUnscheduledNonAccess registers the index for listing
+// all unscheduled non-Access ReplicatedVolumeReplica objects.
+// Use IndexValueRVRUnscheduledNonAccess() to query.
+func RegisterRVRUnscheduledNonAccess(mgr manager.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(
 		context.Background(),
 		&v1alpha1.ReplicatedVolumeReplica{},
-		IndexFieldRVRUnscheduledNonAccessByRV,
+		IndexFieldRVRUnscheduledNonAccess,
 		func(obj client.Object) []string {
 			rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
 			if !ok {
@@ -107,13 +111,21 @@ func RegisterRVRUnscheduledNonAccessByRV(mgr manager.Manager) error {
 			if rvr.Spec.Type == v1alpha1.ReplicaTypeAccess {
 				return nil
 			}
+
+			// Only RVRs that belong to a ReplicatedVolume
 			if rvr.Spec.ReplicatedVolumeName == "" {
 				return nil
 			}
-			return []string{rvr.Spec.ReplicatedVolumeName}
+			return []string{indexValueTrue}
 		},
 	); err != nil {
-		return fmt.Errorf("index ReplicatedVolumeReplica unscheduled non-Access by RV: %w", err)
+		return fmt.Errorf("index ReplicatedVolumeReplica unscheduled non-Access: %w", err)
 	}
 	return nil
+}
+
+// IndexValueRVRUnscheduledNonAccess returns the sentinel value to query
+// the IndexFieldRVRUnscheduledNonAccess index.
+func IndexValueRVRUnscheduledNonAccess() string {
+	return indexValueTrue
 }

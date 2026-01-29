@@ -54,10 +54,10 @@ func WithRVRByReplicatedVolumeNameIndex(b *fake.ClientBuilder) *fake.ClientBuild
 	})
 }
 
-// WithRVRUnscheduledNonAccessByRVIndex registers the IndexFieldRVRUnscheduledNonAccessByRV index
+// WithRVRUnscheduledNonAccessIndex registers the IndexFieldRVRUnscheduledNonAccess index
 // on a fake.ClientBuilder. This is useful for tests that need to use the index.
-func WithRVRUnscheduledNonAccessByRVIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
-	return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRUnscheduledNonAccessByRV, func(obj client.Object) []string {
+func WithRVRUnscheduledNonAccessIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
+	return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRUnscheduledNonAccess, func(obj client.Object) []string {
 		rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
 		if !ok {
 			return nil
@@ -70,9 +70,6 @@ func WithRVRUnscheduledNonAccessByRVIndex(b *fake.ClientBuilder) *fake.ClientBui
 		if rvr.Spec.Type == v1alpha1.ReplicaTypeAccess {
 			return nil
 		}
-		if rvr.Spec.ReplicatedVolumeName == "" {
-			return nil
-		}
-		return []string{rvr.Spec.ReplicatedVolumeName}
+		return []string{indexes.IndexValueRVRUnscheduledNonAccess()}
 	})
 }

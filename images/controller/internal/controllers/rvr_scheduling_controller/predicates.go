@@ -17,6 +17,7 @@ limitations under the License.
 package rvrschedulingcontroller
 
 import (
+	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -38,7 +39,7 @@ func RVRPredicates() []predicate.Predicate {
 // RSPPredicates returns predicates for ReplicatedStoragePool events.
 // Reacts to:
 //   - Create: always (new RSP may have eligibleNodes)
-//   - Update: only if eligibleNodes changed
+//   - Update: only if eligibleNodes or usedBy.replicatedStorageClassNames changed
 //   - Delete: always (RSP removed)
 //   - Generic: always (external triggers)
 func RSPPredicates() []predicate.Predicate {
@@ -50,8 +51,16 @@ func RSPPredicates() []predicate.Predicate {
 				if !okOld || !okNew || oldRSP == nil || newRSP == nil {
 					return true
 				}
-				// React only if eligibleNodes changed.
-				return !v1alpha1.EligibleNodesEqual(oldRSP.Status.EligibleNodes, newRSP.Status.EligibleNodes)
+				// React if eligibleNodes changed.
+				if !v1alpha1.EligibleNodesEqual(oldRSP.Status.EligibleNodes, newRSP.Status.EligibleNodes) {
+					return true
+				}
+				// React if usedBy.replicatedStorageClassNames changed.
+				if !sets.NewString(oldRSP.Status.UsedBy.ReplicatedStorageClassNames...).
+					Equal(sets.NewString(newRSP.Status.UsedBy.ReplicatedStorageClassNames...)) {
+					return true
+				}
+				return false
 			},
 		},
 	}

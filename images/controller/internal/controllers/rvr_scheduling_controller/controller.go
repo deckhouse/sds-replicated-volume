@@ -67,34 +67,39 @@ func mapRSPToRV(cl client.Client) handler.MapFunc {
 			return nil
 		}
 
-		// Find RVs that use these RSCs.
-		rvNames := make(map[string]struct{})
-		for _, rscName := range rscNames {
-			var rvList v1alpha1.ReplicatedVolumeList
-			if err := cl.List(ctx, &rvList,
-				client.MatchingFields{indexes.IndexFieldRVByReplicatedStorageClassName: rscName},
-				client.UnsafeDisableDeepCopy,
-			); err != nil {
-				continue
-			}
-			for i := range rvList.Items {
-				rvNames[rvList.Items[i].Name] = struct{}{}
-			}
+		// Get all unscheduled non-Access RVRs and collect unique RV names.
+		var rvrList v1alpha1.ReplicatedVolumeReplicaList
+		if err := cl.List(ctx, &rvrList,
+			client.MatchingFields{indexes.IndexFieldRVRUnscheduledNonAccess: indexes.IndexValueRVRUnscheduledNonAccess()},
+			client.UnsafeDisableDeepCopy,
+		); err != nil || len(rvrList.Items) == 0 {
+			return nil
 		}
 
-		// For each RV, check if it has unscheduled non-Access RVRs using composite index.
+		// Collect unique RV names from unscheduled RVRs.
+		rvNamesWithUnscheduled := make(map[string]struct{}, len(rvrList.Items))
+		for i := range rvrList.Items {
+			rvNamesWithUnscheduled[rvrList.Items[i].Spec.ReplicatedVolumeName] = struct{}{}
+		}
+
+		// Build set of RSC names for quick lookup.
+		rscNamesSet := make(map[string]struct{}, len(rscNames))
+		for _, rscName := range rscNames {
+			rscNamesSet[rscName] = struct{}{}
+		}
+
+		// For each unique RV with unscheduled RVRs, check if it uses one of the RSCs from this RSP.
 		var requests []reconcile.Request
-		for rvName := range rvNames {
-			var rvrList v1alpha1.ReplicatedVolumeReplicaList
-			if err := cl.List(ctx, &rvrList,
-				client.MatchingFields{indexes.IndexFieldRVRUnscheduledNonAccessByRV: rvName},
-				client.UnsafeDisableDeepCopy,
-			); err != nil || len(rvrList.Items) == 0 {
+		for rvName := range rvNamesWithUnscheduled {
+			var rv v1alpha1.ReplicatedVolume
+			if err := cl.Get(ctx, client.ObjectKey{Name: rvName}, &rv); err != nil {
 				continue
 			}
-			requests = append(requests, reconcile.Request{
-				NamespacedName: client.ObjectKey{Name: rvName},
-			})
+			if _, ok := rscNamesSet[rv.Spec.ReplicatedStorageClassName]; ok {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: client.ObjectKey{Name: rvName},
+				})
+			}
 		}
 		return requests
 	}

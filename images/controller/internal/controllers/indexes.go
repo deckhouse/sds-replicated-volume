@@ -42,7 +42,7 @@ func RegisterIndexes(mgr manager.Manager) error {
 	if err := indexes.RegisterRVRByReplicatedVolumeName(mgr); err != nil {
 		return err
 	}
-	if err := indexes.RegisterRVRUnscheduledNonAccessByRV(mgr); err != nil {
+	if err := indexes.RegisterRVRUnscheduledNonAccess(mgr); err != nil {
 		return err
 	}
 
