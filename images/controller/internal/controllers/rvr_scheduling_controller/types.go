@@ -36,6 +36,39 @@ type SchedulingContext struct {
 	ScheduledTieBreaker   []*v1alpha1.ReplicatedVolumeReplica
 	UnscheduledTieBreaker []*v1alpha1.ReplicatedVolumeReplica
 	OccupiedNodes         map[string]struct{}
+
+	// ZoneCandidates holds scored candidates per zone (computed once for Diskful phase).
+	ZoneCandidates map[string][]NodeCandidate
+}
+
+// ScheduledRVRs returns all scheduled RVRs (both Diskful and TieBreaker).
+func (sctx *SchedulingContext) ScheduledRVRs() []*v1alpha1.ReplicatedVolumeReplica {
+	result := make([]*v1alpha1.ReplicatedVolumeReplica, 0, len(sctx.ScheduledDiskful)+len(sctx.ScheduledTieBreaker))
+	result = append(result, sctx.ScheduledDiskful...)
+	result = append(result, sctx.ScheduledTieBreaker...)
+	return result
+}
+
+// MarkNodeOccupied marks a node as occupied so it won't be used for other replicas.
+func (sctx *SchedulingContext) MarkNodeOccupied(nodeName string) {
+	if sctx.OccupiedNodes == nil {
+		sctx.OccupiedNodes = make(map[string]struct{})
+	}
+	sctx.OccupiedNodes[nodeName] = struct{}{}
+}
+
+// RemoveCandidate removes a node from ZoneCandidates after successful scheduling.
+// This ensures the next RVR won't try to use the same node.
+func (sctx *SchedulingContext) RemoveCandidate(nodeName string) {
+	for zone, candidates := range sctx.ZoneCandidates {
+		filtered := make([]NodeCandidate, 0, len(candidates))
+		for _, c := range candidates {
+			if c.Name != nodeName {
+				filtered = append(filtered, c)
+			}
+		}
+		sctx.ZoneCandidates[zone] = filtered
+	}
 }
 
 type NodeCandidate struct {
