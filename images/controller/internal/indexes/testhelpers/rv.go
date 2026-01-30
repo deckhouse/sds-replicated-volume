@@ -39,3 +39,18 @@ func WithRVByReplicatedStorageClassNameIndex(b *fake.ClientBuilder) *fake.Client
 		return []string{rv.Spec.ReplicatedStorageClassName}
 	})
 }
+
+// WithRVByStoragePoolNameIndex registers the IndexFieldRVByStoragePoolName index
+// on a fake.ClientBuilder. This is useful for tests that need to use the index.
+func WithRVByStoragePoolNameIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
+	return b.WithIndex(&v1alpha1.ReplicatedVolume{}, indexes.IndexFieldRVByStoragePoolName, func(obj client.Object) []string {
+		rv, ok := obj.(*v1alpha1.ReplicatedVolume)
+		if !ok {
+			return nil
+		}
+		if rv.Status.Configuration == nil || rv.Status.Configuration.StoragePoolName == "" {
+			return nil
+		}
+		return []string{rv.Status.Configuration.StoragePoolName}
+	})
+}

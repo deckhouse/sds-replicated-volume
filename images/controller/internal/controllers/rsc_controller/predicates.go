@@ -68,7 +68,7 @@ func rspPredicates() []predicate.Predicate {
 // rvPredicates returns predicates for ReplicatedVolume events.
 // Filters to only react to changes in:
 //   - spec.replicatedStorageClassName (storage class reference)
-//   - status.storageClass (observed RSC state for acknowledgment tracking)
+//   - status.configurationObservedGeneration (observed RSC state for acknowledgment tracking)
 //   - ConfigurationReady condition
 //   - SatisfyEligibleNodes condition
 func rvPredicates() []predicate.Predicate {

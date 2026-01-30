@@ -228,6 +228,11 @@ type DRBDResourceStatus struct {
 	// +optional
 	Device string `json:"device,omitempty"`
 
+	// DeviceIOSuspended indicates whether I/O is suspended on the device.
+	// Only set when attached (device is present).
+	// +optional
+	DeviceIOSuspended *bool `json:"deviceIOSuspended,omitempty"`
+
 	// +kubebuilder:validation:MaxItems=32
 	// +optional
 	Addresses []DRBDResourceAddressStatus `json:"addresses,omitempty"`
@@ -329,6 +334,11 @@ type DRBDResourcePeerStatus struct {
 
 	// +optional
 	DiskState DiskState `json:"diskState,omitempty"`
+
+	// Role is the DRBD role of this peer (Primary or Secondary).
+	// +kubebuilder:validation:Enum=Primary;Secondary
+	// +optional
+	Role DRBDRole `json:"role,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

@@ -195,10 +195,95 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	BackingVolumeSize resource.Quantity `json:"backingVolumeSize,omitempty"`
 
+	// BackingVolumeState is the local backing volume state of this replica.
+	// +optional
+	BackingVolumeState DiskState `json:"backingVolumeState,omitempty"`
+
 	// DRBDResourceGeneration is the generation of the DRBDResource that was last applied.
 	// Used to skip redundant spec comparison when the generation matches.
 	// +optional
 	DRBDResourceGeneration int64 `json:"drbdResourceGeneration,omitempty"`
+
+	// DevicePath is the block device path when the replica is attached.
+	// Example: /dev/drbd10012.
+	// +kubebuilder:validation:MaxLength=256
+	// +optional
+	DevicePath string `json:"devicePath,omitempty"`
+
+	// DeviceIOSuspended indicates whether I/O is suspended on the device.
+	// Only set when the replica is attached.
+	// +optional
+	DeviceIOSuspended *bool `json:"deviceIOSuspended,omitempty"`
+
+	// Quorum indicates whether this replica has quorum.
+	// +optional
+	Quorum *bool `json:"quorum,omitempty"`
+
+	// QuorumSummary provides detailed quorum information.
+	// +patchStrategy=merge
+	// +optional
+	QuorumSummary *QuorumSummary `json:"quorumSummary,omitempty" patchStrategy:"merge"`
+
+	// Peers contains the status of connections to peer replicas.
+	// +patchMergeKey=name
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=32
+	// +optional
+	Peers []PeerStatus `json:"peers,omitempty" patchStrategy:"merge" patchMergeKey:"name"`
+}
+
+// QuorumSummary provides detailed quorum information for a replica.
+// +kubebuilder:object:generate=true
+type QuorumSummary struct {
+	// ConnectedVotingPeers is the number of voting peers (TieBreaker/Diskful) with established connection.
+	// +kubebuilder:default=0
+	ConnectedVotingPeers int `json:"connectedVotingPeers"`
+
+	// Quorum is the required quorum threshold.
+	// +optional
+	Quorum *int `json:"quorum,omitempty"`
+
+	// ConnectedUpToDatePeers is the number of peers with established connection and UpToDate disk.
+	// +kubebuilder:default=0
+	ConnectedUpToDatePeers int `json:"connectedUpToDatePeers"`
+
+	// QuorumMinimumRedundancy is the number of diskful UpToDate peers (including self) required for quorum.
+	// +optional
+	QuorumMinimumRedundancy *int `json:"quorumMinimumRedundancy,omitempty"`
+}
+
+// PeerStatus represents the status of a connection to a peer replica.
+// +kubebuilder:object:generate=true
+type PeerStatus struct {
+	// Name is the name of the peer ReplicatedVolumeReplica.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Name string `json:"name"`
+
+	// Type is the replica type (Diskful/TieBreaker/Access).
+	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
+	// +optional
+	Type ReplicaType `json:"type,omitempty"`
+
+	// Attached indicates whether this peer is attached on its node (and has a block device).
+	// +optional
+	Attached bool `json:"attached,omitempty"`
+
+	// ConnectionEstablishedOn lists system network names where connection to this peer is established.
+	// +kubebuilder:validation:MaxItems=16
+	// +optional
+	ConnectionEstablishedOn []string `json:"connectionEstablishedOn,omitempty"`
+
+	// ConnectionState is the DRBD connection state to this peer.
+	// +optional
+	ConnectionState ConnectionState `json:"connectionState,omitempty"`
+
+	// BackingVolumeState is the peer's backing volume state.
+	// +optional
+	BackingVolumeState DiskState `json:"backingVolumeState,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -263,19 +348,78 @@ type DRBDStatus struct {
 	Connections      []ConnectionStatus `json:"connections"`
 }
 
+// DiskState represents the state of a DRBD backing disk.
+// It reflects the disk's synchronization status and determines whether
+// application I/O can be served locally or requires peer involvement.
 type DiskState string
 
 const (
-	DiskStateDiskless     DiskState = "Diskless"
-	DiskStateAttaching    DiskState = "Attaching"
-	DiskStateDetaching    DiskState = "Detaching"
-	DiskStateFailed       DiskState = "Failed"
-	DiskStateNegotiating  DiskState = "Negotiating"
+	// DiskStateDiskless indicates no local disk is attached.
+	// The node operates without local storage (diskless client configuration),
+	// receiving and sending data only via network from peer nodes.
+	// Application I/O: only through peers.
+	DiskStateDiskless DiskState = "Diskless"
+
+	// DiskStateAttaching is a transient state when attaching a disk.
+	// DRBD is reading metadata from the local device (triggered by `drbdadm attach`).
+	// Application I/O: not allowed.
+	DiskStateAttaching DiskState = "Attaching"
+
+	// DiskStateDetaching is a transient state when detaching a disk.
+	// DRBD is completing pending operations and preparing to transition to Diskless.
+	// Application I/O: not allowed.
+	DiskStateDetaching DiskState = "Detaching"
+
+	// DiskStateFailed indicates the disk failed due to I/O errors.
+	// This is a transient state before transitioning to Diskless.
+	// After notifying peers about the failure, the node transitions to Diskless.
+	// Application I/O: not allowed.
+	DiskStateFailed DiskState = "Failed"
+
+	// DiskStateNegotiating is a late attach state where DRBD negotiates with peers
+	// to determine: who has current data, whether synchronization is needed, and
+	// in which direction. After negotiation completes, transitions to one of:
+	// Inconsistent, Outdated, Consistent, or UpToDate.
+	// Application I/O: not allowed.
+	DiskStateNegotiating DiskState = "Negotiating"
+
+	// DiskStateInconsistent indicates partially synchronized data.
+	// The node is a sync target (SyncTarget) with some blocks already synchronized
+	// and some still pending. Reading synchronized blocks is done locally;
+	// reading unsynchronized blocks is forwarded to a peer with UpToDate data.
+	// Writing requires a peer with UpToDate data.
+	// Application I/O: allowed (reads local synced blocks + forwards unsynced to peer;
+	// writes require UpToDate peer).
 	DiskStateInconsistent DiskState = "Inconsistent"
-	DiskStateOutdated     DiskState = "Outdated"
-	DiskStateUnknown      DiskState = "DUnknown"
-	DiskStateConsistent   DiskState = "Consistent"
-	DiskStateUpToDate     DiskState = "UpToDate"
+
+	// DiskStateOutdated indicates consistent but stale data.
+	// The node was disconnected from the cluster while another node performed writes.
+	// Data is consistent (not corrupted) but does not contain the latest changes.
+	// Resynchronization from an up-to-date node is required.
+	// Application I/O: only through peers (direct I/O not allowed).
+	DiskStateOutdated DiskState = "Outdated"
+
+	// DiskStateUnknown indicates unknown disk state.
+	// Used only to describe the state of a peer node when connection to it
+	// is absent or lost. Never used to describe the node's own disk.
+	// Application I/O: N/A (peer state only).
+	DiskStateUnknown DiskState = "DUnknown"
+
+	// DiskStateConsistent indicates consistent data with undetermined currency.
+	// The node knows its data is consistent but cannot determine whether it is
+	// current or outdated without peer connection. Occurs when:
+	// - Starting without connected peers
+	// - Cannot unambiguously determine who has current data
+	// Upon establishing connection, transitions to UpToDate or Outdated
+	// depending on negotiation results.
+	// Application I/O: only through peers (direct I/O not allowed).
+	DiskStateConsistent DiskState = "Consistent"
+
+	// DiskStateUpToDate indicates fully up-to-date data.
+	// This is the only state allowing full application I/O without peer involvement.
+	// The disk contains the most recent consistent data and is ready for operation.
+	// Application I/O: allowed locally (full read/write without peers).
+	DiskStateUpToDate DiskState = "UpToDate"
 )
 
 func (s DiskState) String() string {
