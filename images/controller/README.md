@@ -77,6 +77,7 @@ flowchart TB
     subgraph inputs [Inputs]
         RVR[ReplicatedVolumeReplica]
         RV[ReplicatedVolume]
+        RSP[ReplicatedStoragePool]
         AgentPod[Agent Pod]
     end
 
@@ -96,6 +97,7 @@ flowchart TB
 
     RVR --> RVRCtrl
     RV --> RVRCtrl
+    RSP --> RVRCtrl
     AgentPod --> RVRCtrl
     LLV --> RVRCtrl
     DRBDR --> RVRCtrl
@@ -123,7 +125,7 @@ Currently, `rvr_controller` operates as a standalone controller, managing:
 
 - **LVMLogicalVolume** — backing storage for diskful replicas
 - **DRBDResource** — DRBD configuration and lifecycle management
-- **RVR status** — conditions (BackingVolumeReady, Configured, Attached, BackingVolumeInSync, FullyConnected, Ready) and status fields (peers, quorum, device state)
+- **RVR status** — conditions (BackingVolumeReady, Configured, Attached, BackingVolumeInSync, FullyConnected, Ready, SatisfyEligibleNodes) and status fields (peers, quorum, device state)
 
 ### Future Architecture
 
