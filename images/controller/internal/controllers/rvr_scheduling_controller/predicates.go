@@ -17,8 +17,6 @@ limitations under the License.
 package rvrschedulingcontroller
 
 import (
-	apiequality "k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -26,6 +24,8 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
+// TODO: у rvr могут снять проставленную lvg
+// если не смогли lvg подобрать на этой ноде, то ставил scheduled false и requeue
 func RVRPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.Funcs{
@@ -52,15 +52,11 @@ func RSPPredicates() []predicate.Predicate {
 				if !okOld || !okNew || oldRSP == nil || newRSP == nil {
 					return true
 				}
-				// React if eligibleNodes changed (all fields: node names, zones, LVGs, readiness, schedulability).
-				if !apiequality.Semantic.DeepEqual(oldRSP.Status.EligibleNodes, newRSP.Status.EligibleNodes) {
+
+				if oldRSP.Status.EligibleNodesRevision != newRSP.Status.EligibleNodesRevision {
 					return true
 				}
-				// React if usedBy.replicatedStorageClassNames changed.
-				if !sets.NewString(oldRSP.Status.UsedBy.ReplicatedStorageClassNames...).
-					Equal(sets.NewString(newRSP.Status.UsedBy.ReplicatedStorageClassNames...)) {
-					return true
-				}
+
 				return false
 			},
 		},

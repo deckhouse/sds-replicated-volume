@@ -15,7 +15,7 @@ The controller performs replica placement by:
 ## Interactions
 
 | Direction | Resource/Controller | Relationship |
-| --------- | ------------------- | ------------ |
+|-----------|---------------------|--------------|
 | ← input | ReplicatedVolume | Reads RV spec and status (size, RSC name, desiredAttachTo) |
 | ← input | ReplicatedStorageClass | Reads topology mode and zones |
 | ← input | ReplicatedStoragePool | Reads eligible nodes list (with LVGs per node) |
@@ -119,7 +119,7 @@ For each unscheduled TieBreaker RVR:
 ### Topology Modes
 
 | Mode | Diskful Behavior | TieBreaker Behavior |
-| ------ | ------------------ | --------------------- |
+|------|------------------|---------------------|
 | **Ignored** | No zone constraints | No zone constraints |
 | **Zonal** | All replicas in one zone (prefer existing Diskful zone or attachTo zone) | Same zone as Diskful replicas |
 | **TransZonal** | Distribute evenly across zones | Place in zone with fewest replicas |
@@ -224,17 +224,27 @@ flowchart TD
 Indicates whether the replica has been assigned to a node.
 
 | Status | Reason | When |
-| ------ | ------ | ---- |
+|--------|--------|------|
 | True | ReplicaScheduled | Node successfully assigned |
 | False | NoAvailableNodes | No candidate nodes available |
 | False | TopologyConstraintsFailed | Topology requirements cannot be satisfied |
 | False | SchedulingPending | RV not ready for scheduling (missing finalizer, RSC, etc.) |
 | False | SchedulingFailed | Other scheduling errors |
 
+## Status Fields
+
+The controller manages the following status fields on RVR:
+
+| Field | Description | Source |
+|-------|-------------|--------|
+| `conditions[Scheduled]` | Indicates whether replica has been scheduled to a node | Set by controller after scheduling decision |
+
+Note: This controller primarily manages spec fields (`nodeName`, `lvmVolumeGroupName`, `lvmVolumeGroupThinPoolName`) and labels documented in Managed Metadata below.
+
 ## Managed Metadata
 
 | Type | Key | Managed On | Purpose |
-| ---- | --- | ---------- | ------- |
+|------|-----|------------|---------|
 | Spec field | `spec.nodeName` | RVR | Assigned node for the replica |
 | Spec field | `spec.lvmVolumeGroupName` | RVR | Assigned LVG for Diskful replicas |
 | Spec field | `spec.lvmVolumeGroupThinPoolName` | RVR | Assigned thin pool for LVMThin storage |
@@ -244,14 +254,27 @@ Indicates whether the replica has been assigned to a node.
 ## Watches
 
 | Resource | Events | Handler |
-| -------- | ------ | ------- |
+|----------|--------|---------|
 | ReplicatedVolumeReplica | Create only | EnqueueRequestForOwner (maps to owner RV) |
 | ReplicatedStoragePool | Create, Delete, Generic: always; Update: only if eligibleNodes or usedBy.replicatedStorageClassNames changed | mapRSPToRV (maps to RVs that use this RSP and have unscheduled non-Access RVRs) |
+
+### RVR Predicates
+
+- Reacts to Create events only
+- Does not react to Update/Delete/Generic events
+- Rationale: scheduling is only triggered when a new RVR is created; once scheduled, this controller does not re-schedule
+
+### RSP Predicates
+
+- Reacts to eligibleNodes changes (all fields: node names, zones, LVGs, readiness, schedulability)
+- Reacts to usedBy.replicatedStorageClassNames changes
+- On Create/Delete: always triggers
+- On Update: triggers only if eligibleNodes or usedBy.replicatedStorageClassNames differ
 
 ## Indexes
 
 | Index | Field | Purpose |
-| ----- | ----- | ------- |
+|-------|-------|---------|
 | RVR by RV name | `spec.replicatedVolumeName` | List all RVRs for a ReplicatedVolume |
 | RVR unscheduled non-Access | boolean: unscheduled + non-Access | Find all unscheduled Diskful/TieBreaker RVRs (used by RSP watch mapper) |
 
@@ -417,3 +440,157 @@ Example with 2 unscheduled Diskful and 3 zones (all starting at count=0):
 - Nodes in `rv.status.desiredAttachTo` receive a score bonus (+1000)
 - This makes them preferred but not required
 - Useful for co-locating replicas with workloads
+
+---
+
+## Detailed Algorithms
+
+### prepareScoredCandidatesForDiskful Details
+
+**Purpose**: Computes candidates with capacity scores for Diskful replicas. Called once before processing unscheduled Diskful RVRs.
+
+**Algorithm**:
+
+```mermaid
+flowchart TD
+    Start([Start]) --> ComputeEligible[Compute eligible nodes excluding occupied]
+    ComputeEligible --> CheckCandidates{Any candidates?}
+    CheckCandidates -->|No| ErrorNoCandidates[Return error: no candidate nodes]
+    ErrorNoCandidates --> End1([Done])
+
+    CheckCandidates -->|Yes| ApplyTopology[Apply topology filter]
+    ApplyTopology --> CheckZoneCandidates{Any zone candidates?}
+    CheckZoneCandidates -->|No| ErrorNoZones[Return error: topology filter failed]
+    ErrorNoZones --> End2([Done])
+
+    CheckZoneCandidates -->|Yes| BuildLVGQueries[Build LVG queries from candidates]
+    BuildLVGQueries --> QueryExtender[Query scheduler-extender for LVG scores]
+    QueryExtender --> CheckScores{Scores returned?}
+    CheckScores -->|No| ErrorNoCapacity[Return error: no capacity]
+    ErrorNoCapacity --> End3([Done])
+
+    CheckScores -->|Yes| AggregateLVG[Aggregate LVG scores per node]
+    AggregateLVG --> FilterByCapacity[Filter nodes with capacity]
+    FilterByCapacity --> ApplyBonus[Apply attachTo bonus to preferred nodes]
+    ApplyBonus --> InitZoneCounts{TransZonal topology?}
+
+    InitZoneCounts -->|Yes| InitCounts[Initialize ZoneReplicaCounts with Diskful counts]
+    InitCounts --> StoreCandidates[Store ScoredCandidates in context]
+    InitZoneCounts -->|No| StoreCandidates
+    StoreCandidates --> End4([Done])
+```
+
+**Data Flow**:
+
+| Input | Description |
+|-------|-------------|
+| `sctx.EligibleNodes` | Nodes from RSP with readiness/schedulability info |
+| `sctx.OccupiedNodes` | Nodes already hosting replicas of this RV |
+| `sctx.RSC.Spec.Topology` | Topology mode (Ignored/Zonal/TransZonal) |
+| `sctx.LVGToNode` | LVG to node mapping with thin pool info |
+| `sctx.RV.Spec.Size` | Volume size for capacity query |
+
+| Output | Description |
+|--------|-------------|
+| `sctx.ScoredCandidates` | Map of zone to scored NodeCandidate list |
+| `sctx.ZoneReplicaCounts` | Diskful replica counts per zone (TransZonal only) |
+
+---
+
+### prepareCandidatesForTieBreaker Details
+
+**Purpose**: Computes candidates for TieBreaker replicas. No capacity scoring needed. Called once before processing unscheduled TieBreaker RVRs.
+
+**Algorithm**:
+
+```mermaid
+flowchart TD
+    Start([Start]) --> ComputeEligible[Compute eligible nodes excluding occupied]
+    ComputeEligible --> CheckCandidates{Any candidates?}
+    CheckCandidates -->|No| ErrorNoCandidates[Return error: no candidates for TieBreaker]
+    ErrorNoCandidates --> End1([Done])
+
+    CheckCandidates -->|Yes| ApplyTopology[Apply topology filter]
+    ApplyTopology --> CheckZoneCandidates{Any zone candidates?}
+    CheckZoneCandidates -->|No| ErrorNoZones[Return error: topology filter failed]
+    ErrorNoZones --> End2([Done])
+
+    CheckZoneCandidates -->|Yes| StoreCandidates[Store TieBreakerCandidates in context]
+    StoreCandidates --> InitZoneCounts{TransZonal topology?}
+
+    InitZoneCounts -->|Yes| InitCounts[Initialize ZoneReplicaCounts with ALL replica counts]
+    InitCounts --> End3([Done])
+    InitZoneCounts -->|No| End3
+```
+
+**Data Flow**:
+
+| Input | Description |
+|-------|-------------|
+| `sctx.EligibleNodes` | Nodes from RSP with readiness/schedulability info |
+| `sctx.OccupiedNodes` | Nodes already hosting replicas of this RV |
+| `sctx.RSC.Spec.Topology` | Topology mode (Ignored/Zonal/TransZonal) |
+| `sctx.NodeToZone` | Node to zone mapping |
+| `sctx.AllRVRs` | All RVRs for counting replicas per zone |
+
+| Output | Description |
+|--------|-------------|
+| `sctx.TieBreakerCandidates` | Map of zone to NodeCandidate list (no scores) |
+| `sctx.ZoneReplicaCounts` | ALL replica counts per zone (TransZonal only) |
+
+---
+
+### selectBestCandidate Details
+
+**Purpose**: Selects the best candidate node based on topology mode. Handles three topology modes with different selection strategies.
+
+**Algorithm**:
+
+```mermaid
+flowchart TD
+    Start([Start]) --> CheckCandidates{ScoredCandidates empty?}
+    CheckCandidates -->|Yes| ErrorNoCandidates[Return error: no candidates]
+    ErrorNoCandidates --> End1([Done])
+
+    CheckCandidates -->|No| CheckTopology{Topology mode?}
+
+    CheckTopology -->|Ignored| IgnoredMode[Collect all candidates across zones]
+    IgnoredMode --> ComputeBestIgnored[computeBestNode: sort by BestScore, LVGCount, SumScore]
+    ComputeBestIgnored --> ReturnBest1[Return best candidate]
+    ReturnBest1 --> End2([Done])
+
+    CheckTopology -->|Zonal| ZonalMode{Zone already selected?}
+    ZonalMode -->|No| SelectBestZone[Select zone with highest capacity score × node count]
+    SelectBestZone --> StoreZone[Store SelectedZone in context]
+    StoreZone --> GetZoneCandidates1[Get candidates from selected zone]
+    ZonalMode -->|Yes| GetZoneCandidates1
+    GetZoneCandidates1 --> CheckZoneCandidates1{Zone has candidates?}
+    CheckZoneCandidates1 -->|No| ErrorNoZoneCandidates[Return error: no candidates in zone]
+    ErrorNoZoneCandidates --> End3([Done])
+    CheckZoneCandidates1 -->|Yes| ComputeBestZonal[computeBestNode in selected zone]
+    ComputeBestZonal --> ReturnBest2[Return best candidate]
+    ReturnBest2 --> End4([Done])
+
+    CheckTopology -->|TransZonal| TransZonalMode[Find zone with minimum replica count]
+    TransZonalMode --> CheckMinZone{Found zone with candidates?}
+    CheckMinZone -->|No| ErrorNoTransZonalCandidates[Return error: no zones with candidates]
+    ErrorNoTransZonalCandidates --> End5([Done])
+    CheckMinZone -->|Yes| ComputeBestTransZonal[computeBestNode in min-count zone]
+    ComputeBestTransZonal --> SetCandidateZone[Set zone on candidate]
+    SetCandidateZone --> ReturnBest3[Return best candidate]
+    ReturnBest3 --> End6([Done])
+```
+
+**Data Flow**:
+
+| Input | Description |
+|-------|-------------|
+| `sctx.ScoredCandidates` | Map of zone to scored NodeCandidate list |
+| `sctx.RSC.Spec.Topology` | Topology mode |
+| `sctx.ZoneReplicaCounts` | Replica counts per zone (TransZonal) |
+| `sctx.SelectedZone` | Previously selected zone (Zonal, after first selection) |
+
+| Output | Description |
+|--------|-------------|
+| `NodeCandidate` | Selected candidate with Name, Zone, LVGName, ThinPoolName, scores |
+| `sctx.SelectedZone` | Updated zone selection (Zonal mode, first call only) |
