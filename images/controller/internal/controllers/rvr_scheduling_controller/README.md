@@ -4,7 +4,7 @@ This controller assigns nodes to ReplicatedVolumeReplicas based on topology, sto
 
 ## Purpose
 
-The controller performs intelligent replica placement by:
+The controller performs replica placement by:
 
 - Assigning unique nodes to each replica of a ReplicatedVolume
 - Respecting topology constraints (Zonal, TransZonal, Ignored)
@@ -32,11 +32,13 @@ Eligible nodes are determined by intersection of:
   - Ready (`nodeReady = true`)
   - Not unschedulable (`unschedulable = false`)
   - Have ready agent (`agentReady = true`)
-  - Have at least one ready LVG (`lvg.ready = true` and `lvg.unschedulable = false`)
 - Nodes not already hosting any replica of this RV
 - Nodes in zones specified by `rsc.spec.zones` (or all zones if not specified)
 
-For Diskful replicas, additional capacity filtering via scheduler-extender API is applied.
+For Diskful replicas, additional filtering is applied:
+
+- LVG readiness filtering: only LVGs with `lvg.ready = true` and `lvg.unschedulable = false` are considered when building the LVG-to-node mapping
+- Capacity filtering via scheduler-extender API: only nodes with at least one LVG having sufficient capacity remain as candidates
 
 ### Node and LVG Selection Algorithm
 
@@ -119,7 +121,7 @@ For each unscheduled TieBreaker RVR:
 
 ## Reconciliation Structure
 
-```
+```text
 Reconcile (root) — per-RVR orchestration with error resilience
 ├── prepareSchedulingContext               — fetch RV, RSC, RSP, all RVRs
 │   ├── getRV                              — fetch ReplicatedVolume
@@ -353,6 +355,8 @@ Apply functions are pure (no I/O) and return a `bool` indicating whether changes
 - Scheduler extender returned empty capacity scores
 
 For scheduling failures, the controller sets `Scheduled=False` condition on the RVR and requeues after 30 seconds. This handles capacity changes that don't trigger RSP watch events (e.g., volume deleted, freeing LVG space).
+
+**Note on error precedence:** Patch/context errors take priority over scheduling failures. The fixed 30s requeue for scheduling failures only applies when there are no patch errors. If any patch errors occurred during reconciliation, the controller returns an error (triggering exponential backoff) instead of using the fixed 30s requeue.
 
 **Error collection behavior:**
 
