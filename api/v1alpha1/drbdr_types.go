@@ -50,14 +50,14 @@ type DRBDResource struct {
 
 // GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It returns the root object's `.status.conditions`.
-func (d *DRBDResource) GetStatusConditions() []metav1.Condition {
-	return d.Status.Conditions
+func (drbdr *DRBDResource) GetStatusConditions() []metav1.Condition {
+	return drbdr.Status.Conditions
 }
 
 // SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It sets the root object's `.status.conditions`.
-func (d *DRBDResource) SetStatusConditions(conditions []metav1.Condition) {
-	d.Status.Conditions = conditions
+func (drbdr *DRBDResource) SetStatusConditions(conditions []metav1.Condition) {
+	drbdr.Status.Conditions = conditions
 }
 
 // +kubebuilder:object:generate=true
