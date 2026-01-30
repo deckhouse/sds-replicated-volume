@@ -67,6 +67,12 @@ func mapRSPToRV(cl client.Client) handler.MapFunc {
 			return nil
 		}
 
+		// Build set of RSC names for quick lookup.
+		rscNamesSet := make(map[string]struct{}, len(rscNames))
+		for _, rscName := range rscNames {
+			rscNamesSet[rscName] = struct{}{}
+		}
+
 		// Get all unscheduled non-Access RVRs and collect unique RV names.
 		var rvrList v1alpha1.ReplicatedVolumeReplicaList
 		if err := cl.List(ctx, &rvrList,
@@ -80,12 +86,6 @@ func mapRSPToRV(cl client.Client) handler.MapFunc {
 		rvNamesWithUnscheduled := make(map[string]struct{}, len(rvrList.Items))
 		for i := range rvrList.Items {
 			rvNamesWithUnscheduled[rvrList.Items[i].Spec.ReplicatedVolumeName] = struct{}{}
-		}
-
-		// Build set of RSC names for quick lookup.
-		rscNamesSet := make(map[string]struct{}, len(rscNames))
-		for _, rscName := range rscNames {
-			rscNamesSet[rscName] = struct{}{}
 		}
 
 		// For each unique RV with unscheduled RVRs, check if it uses one of the RSCs from this RSP.
