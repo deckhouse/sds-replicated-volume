@@ -111,6 +111,19 @@ const (
 )
 
 const (
+	// ReplicatedVolumeReplicaCondSatisfyEligibleNodesType indicates whether the replica satisfies
+	// the eligible nodes requirements from its storage pool.
+	//
+	// Reasons describe mismatch type or confirmation of satisfaction.
+	ReplicatedVolumeReplicaCondSatisfyEligibleNodesType                         = "SatisfyEligibleNodes"
+	ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonLVMVolumeGroupMismatch = "LVMVolumeGroupMismatch" // Node is eligible, but LVMVolumeGroup is not in the allowed list for this node.
+	ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonNodeMismatch           = "NodeMismatch"           // Node is not in the eligible nodes list.
+	ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonPendingConfiguration   = "PendingConfiguration"   // Configuration not yet available (e.g., ReplicatedStoragePool not found).
+	ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied              = "Satisfied"              // Replica satisfies eligible nodes requirements.
+	ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonThinPoolMismatch       = "ThinPoolMismatch"       // Node and LVMVolumeGroup are eligible, but ThinPool is not allowed for this LVMVolumeGroup.
+)
+
+const (
 	// ReplicatedVolumeReplicaCondScheduledType indicates whether the replica has been scheduled to a node.
 	//
 	// Reasons describe scheduling outcome or failure.

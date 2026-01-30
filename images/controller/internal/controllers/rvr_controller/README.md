@@ -1,8 +1,5 @@
 # rvr_controller
 
-> **Note:** Core reconciliation logic and status reporting are fully implemented.
-> One TODO item remains: SatisfyEligibleNodes condition.
-
 This controller manages `ReplicatedVolumeReplica` (RVR) resources by reconciling their backing volumes (LVMLogicalVolume) and DRBD resources.
 
 ## Purpose
@@ -19,6 +16,7 @@ The controller reconciles `ReplicatedVolumeReplica` with:
 | Direction | Resource/Controller | Relationship |
 |-----------|---------------------|--------------|
 | ← input | ReplicatedVolume | Reads datamesh configuration (size, membership, type transitions) |
+| ← input | ReplicatedStoragePool | Reads eligible nodes for eligibility verification |
 | ← input | Pod (agent) | Checks agent readiness on target node before configuring DRBD |
 | → manages | LVMLogicalVolume | Creates/resizes/deletes backing volumes |
 | → manages | DRBDResource | Creates/configures/resizes/deletes DRBD resources |
@@ -103,7 +101,9 @@ Reconcile (root) [Pure orchestration]
 │   ├── ensureRVRStatusQuorumSummary
 │   ├── applyRVRStatusQuorum
 │   └── applyRVRReadyCond*
-├── reconcileSatisfyEligibleNodesCondition [TODO]
+├── reconcileSatisfyEligibleNodesCondition [In-place reconciliation]
+│   ├── getNodeEligibility (from RSP)
+│   └── applySatisfyEligibleNodesCond*
 └── patchRVRStatus
 ```
 
@@ -200,7 +200,7 @@ flowchart TD
         EnsureAttach --> EnsurePeers[ensurePeersStatus]
         EnsurePeers --> EnsureBV[ensureBackingVolumeStatus]
         EnsureBV --> EnsureQuorum[ensureQuorumStatus]
-        EnsureQuorum --> ReconcileSEN[reconcileSatisfyEligibleNodesCondition TODO]
+        EnsureQuorum --> ReconcileSEN[reconcileSatisfyEligibleNodesCondition]
     end
 
     ReconcileSEN --> PatchStatus[Patch RVR status if changed]
@@ -298,6 +298,19 @@ Indicates overall replica readiness for I/O (based on quorum state).
 | False | QuorumLost | Quorum is lost (quorum message) |
 | Unknown | AgentNotReady | Agent is not ready |
 | Unknown | ApplyingConfiguration | Configuration is being applied |
+
+### SatisfyEligibleNodes
+
+Indicates whether the replica satisfies the eligible nodes requirements from its storage pool.
+
+| Status | Reason | When |
+|--------|--------|------|
+| True | Satisfied | Replica satisfies eligible nodes requirements |
+| False | NodeMismatch | Node is not in the eligible nodes list |
+| False | LVMVolumeGroupMismatch | Node is eligible, but LVMVolumeGroup is not allowed for this node |
+| False | ThinPoolMismatch | Node and LVMVolumeGroup are eligible, but ThinPool is not allowed |
+| Unknown | PendingConfiguration | Configuration not yet available (RSP not found) |
+| (absent) | - | Node not yet assigned |
 
 ## Status Fields
 
