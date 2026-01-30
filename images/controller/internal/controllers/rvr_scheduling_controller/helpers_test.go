@@ -626,3 +626,182 @@ func TestIsSchedulingError(t *testing.T) {
 		})
 	}
 }
+
+func TestSelectBestCandidateForTieBreaker(t *testing.T) {
+	tests := []struct {
+		name             string
+		sctx             *SchedulingContext
+		expectedNode     string
+		expectedZone     string
+		expectedError    bool
+		expectedErrorMsg string
+	}{
+		{
+			name: "Ignored topology - returns first available",
+			sctx: &SchedulingContext{
+				RSC: &v1alpha1.ReplicatedStorageClass{
+					Spec: v1alpha1.ReplicatedStorageClassSpec{Topology: "Ignored"},
+				},
+				TieBreakerCandidates: map[string][]NodeCandidate{
+					"Ignored": {
+						{Name: "node-1"},
+						{Name: "node-2"},
+					},
+				},
+			},
+			expectedNode: "node-1",
+		},
+		{
+			name: "Zonal topology - returns first in selected zone",
+			sctx: &SchedulingContext{
+				RSC: &v1alpha1.ReplicatedStorageClass{
+					Spec: v1alpha1.ReplicatedStorageClassSpec{Topology: "Zonal"},
+				},
+				SelectedZone: "zone-a",
+				TieBreakerCandidates: map[string][]NodeCandidate{
+					"zone-a": {{Name: "node-a1"}, {Name: "node-a2"}},
+					"zone-b": {{Name: "node-b1"}},
+				},
+			},
+			expectedNode: "node-a1",
+		},
+		{
+			name: "TransZonal topology - selects zone with min replicas",
+			sctx: &SchedulingContext{
+				RSC: &v1alpha1.ReplicatedStorageClass{
+					Spec: v1alpha1.ReplicatedStorageClassSpec{Topology: "TransZonal"},
+				},
+				ZoneReplicaCounts: map[string]int{
+					"zone-a": 2,
+					"zone-b": 1,
+				},
+				TieBreakerCandidates: map[string][]NodeCandidate{
+					"zone-a": {{Name: "node-a1", Zone: "zone-a"}},
+					"zone-b": {{Name: "node-b1", Zone: "zone-b"}},
+				},
+			},
+			expectedNode: "node-b1",
+			expectedZone: "zone-b",
+		},
+		{
+			name: "empty TieBreakerCandidates - returns error",
+			sctx: &SchedulingContext{
+				RSC: &v1alpha1.ReplicatedStorageClass{
+					Spec: v1alpha1.ReplicatedStorageClassSpec{Topology: "Ignored"},
+				},
+				TieBreakerCandidates: map[string][]NodeCandidate{},
+			},
+			expectedError:    true,
+			expectedErrorMsg: "no TieBreaker candidates available",
+		},
+		{
+			name: "Zonal with no zone selected - returns error",
+			sctx: &SchedulingContext{
+				RSC: &v1alpha1.ReplicatedStorageClass{
+					Spec: v1alpha1.ReplicatedStorageClassSpec{Topology: "Zonal"},
+				},
+				SelectedZone: "",
+				TieBreakerCandidates: map[string][]NodeCandidate{
+					"zone-a": {{Name: "node-a1"}},
+				},
+			},
+			expectedError:    true,
+			expectedErrorMsg: "no zone selected",
+		},
+		{
+			name: "Zonal with empty candidates in selected zone - returns error",
+			sctx: &SchedulingContext{
+				RSC: &v1alpha1.ReplicatedStorageClass{
+					Spec: v1alpha1.ReplicatedStorageClassSpec{Topology: "Zonal"},
+				},
+				SelectedZone: "zone-a",
+				TieBreakerCandidates: map[string][]NodeCandidate{
+					"zone-a": {},
+					"zone-b": {{Name: "node-b1"}},
+				},
+			},
+			expectedError:    true,
+			expectedErrorMsg: "no candidates in zone zone-a",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := selectBestCandidateForTieBreaker(tt.sctx)
+			if tt.expectedError {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErrorMsg)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedNode, result.Name)
+				if tt.expectedZone != "" {
+					assert.Equal(t, tt.expectedZone, result.Zone)
+				}
+			}
+		})
+	}
+}
+
+func TestRemoveTieBreakerCandidate(t *testing.T) {
+	tests := []struct {
+		name       string
+		candidates map[string][]NodeCandidate
+		removeNode string
+		expected   map[string][]NodeCandidate
+	}{
+		{
+			name: "removes node from single zone",
+			candidates: map[string][]NodeCandidate{
+				"zone-a": {{Name: "node-1"}, {Name: "node-2"}},
+			},
+			removeNode: "node-1",
+			expected: map[string][]NodeCandidate{
+				"zone-a": {{Name: "node-2"}},
+			},
+		},
+		{
+			name: "removes node from multiple zones",
+			candidates: map[string][]NodeCandidate{
+				"zone-a": {{Name: "node-1"}, {Name: "node-2"}},
+				"zone-b": {{Name: "node-3"}},
+			},
+			removeNode: "node-2",
+			expected: map[string][]NodeCandidate{
+				"zone-a": {{Name: "node-1"}},
+				"zone-b": {{Name: "node-3"}},
+			},
+		},
+		{
+			name: "no-op when node not found",
+			candidates: map[string][]NodeCandidate{
+				"zone-a": {{Name: "node-1"}},
+			},
+			removeNode: "node-nonexistent",
+			expected: map[string][]NodeCandidate{
+				"zone-a": {{Name: "node-1"}},
+			},
+		},
+		{
+			name: "removes last node in zone (leaves empty slice)",
+			candidates: map[string][]NodeCandidate{
+				"zone-a": {{Name: "node-1"}},
+				"zone-b": {{Name: "node-2"}},
+			},
+			removeNode: "node-1",
+			expected: map[string][]NodeCandidate{
+				"zone-a": {},
+				"zone-b": {{Name: "node-2"}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sctx := &SchedulingContext{
+				TieBreakerCandidates: tt.candidates,
+			}
+			sctx.RemoveTieBreakerCandidate(tt.removeNode)
+			assert.Equal(t, tt.expected, sctx.TieBreakerCandidates)
+		})
+	}
+}

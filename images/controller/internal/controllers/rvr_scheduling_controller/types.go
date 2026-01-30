@@ -41,6 +41,10 @@ type SchedulingContext struct {
 	// For Ignored topology, all candidates are under the "Ignored" key.
 	ScoredCandidates map[string][]NodeCandidate
 
+	// TieBreakerCandidates holds candidates for TieBreaker phase (no capacity scores, computed once).
+	// Separate from ScoredCandidates to avoid interference with Diskful scoring.
+	TieBreakerCandidates map[string][]NodeCandidate
+
 	// SelectedZone is the zone selected for Zonal topology (determined by first Diskful).
 	SelectedZone string
 
@@ -76,6 +80,20 @@ func (sctx *SchedulingContext) RemoveCandidate(nodeName string) {
 			}
 		}
 		sctx.ScoredCandidates[key] = filtered
+	}
+}
+
+// RemoveTieBreakerCandidate removes a node from TieBreakerCandidates after successful scheduling.
+// This ensures the next TieBreaker RVR won't try to use the same node.
+func (sctx *SchedulingContext) RemoveTieBreakerCandidate(nodeName string) {
+	for key, candidates := range sctx.TieBreakerCandidates {
+		filtered := make([]NodeCandidate, 0, len(candidates))
+		for _, c := range candidates {
+			if c.Name != nodeName {
+				filtered = append(filtered, c)
+			}
+		}
+		sctx.TieBreakerCandidates[key] = filtered
 	}
 }
 

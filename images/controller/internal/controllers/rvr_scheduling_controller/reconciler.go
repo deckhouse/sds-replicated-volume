@@ -148,14 +148,32 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
-	// Phase 4: Reconcile unscheduled TieBreaker RVRs.
-	for _, rvr := range sctx.UnscheduledTieBreaker {
-		schedulingFailed, err := r.reconcileUnscheduledTieBreakerRVR(rf.Ctx(), sctx, rvr)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("RVR %s: %w", rvr.Name, err))
-		}
-		if schedulingFailed {
+	// Phase 4a: Prepare candidates for TieBreaker (if any unscheduled).
+	var tieBreakerPrepareErr error
+	if len(sctx.UnscheduledTieBreaker) > 0 {
+		tieBreakerPrepareErr = r.prepareCandidatesForTieBreaker(sctx)
+		if tieBreakerPrepareErr != nil {
+			// Mark all unscheduled TieBreaker as failed
+			failureReason := computeSchedulingFailureReason(tieBreakerPrepareErr)
+			for _, rvr := range sctx.UnscheduledTieBreaker {
+				if setErr := r.setScheduledConditionFalseOnRVR(rf.Ctx(), rvr, failureReason); setErr != nil {
+					errs = append(errs, fmt.Errorf("RVR %s: %w", rvr.Name, setErr))
+				}
+			}
 			hasSchedulingFailure = true
+		}
+	}
+
+	// Phase 4b: Reconcile unscheduled TieBreaker RVRs (only if preparation succeeded).
+	if tieBreakerPrepareErr == nil {
+		for _, rvr := range sctx.UnscheduledTieBreaker {
+			schedulingFailed, err := r.reconcileUnscheduledTieBreakerRVR(rf.Ctx(), sctx, rvr)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("RVR %s: %w", rvr.Name, err))
+			}
+			if schedulingFailed {
+				hasSchedulingFailure = true
+			}
 		}
 	}
 
@@ -247,37 +265,15 @@ func (r *Reconciler) reconcileUnscheduledDiskfulRVR(ctx context.Context, sctx *S
 // On failed patch, sctx remains unchanged (node stays available for next RVR).
 // Returns (schedulingFailed, err): schedulingFailed=true means no suitable node found but status was updated.
 func (r *Reconciler) reconcileUnscheduledTieBreakerRVR(ctx context.Context, sctx *SchedulingContext, rvr *v1alpha1.ReplicatedVolumeReplica) (schedulingFailed bool, err error) {
-	// Prepare candidates for TieBreaker (no capacity scoring needed)
-	candidateNodes := computeEligibleNodeNames(sctx.EligibleNodes, sctx.OccupiedNodes)
-	if len(candidateNodes) == 0 {
-		return r.handleSchedulingFailure(ctx, rvr,
-			fmt.Errorf("%w: no candidate nodes for TieBreaker", errSchedulingNoCandidateNodes))
-	}
-
-	// Apply topology filter for TieBreaker
-	zoneCandidates, err := r.applyTopologyFilter(candidateNodes, false, sctx)
-	if err != nil {
-		return r.handleSchedulingFailure(ctx, rvr, err)
-	}
-
-	// For TransZonal TieBreaker, we need to count ALL replicas (not just Diskful).
-	// Recompute if this is the first TieBreaker (ZoneReplicaCounts may have been set for Diskful phase).
-	if sctx.RSC.Spec.Topology == topologyTransZonal {
-		// Recompute counts including newly scheduled replicas
-		sctx.ZoneReplicaCounts = computeReplicasByZone(sctx.AllRVRs, "", sctx.NodeToZone)
-	}
-
-	// Select best candidate
-	candidate, err := selectBestCandidateFromZones(zoneCandidates, sctx)
+	// Select best candidate from precomputed TieBreakerCandidates
+	candidate, err := selectBestCandidateForTieBreaker(sctx)
 	if err != nil {
 		return r.handleSchedulingFailure(ctx, rvr, err)
 	}
 
 	// Main domain: base -> apply -> patch
-	// TieBreaker doesn't have LVG info, just node
 	base := rvr.DeepCopy()
-	tbCandidate := NodeCandidate{Name: candidate.Name, Zone: candidate.Zone}
-	mainChanged := applyPlacement(rvr, tbCandidate)
+	mainChanged := applyPlacement(rvr, candidate)
 	if mainChanged {
 		if err := r.patchRVR(ctx, rvr, base, true); err != nil {
 			// Patch failed - don't update sctx, node remains available
@@ -286,6 +282,7 @@ func (r *Reconciler) reconcileUnscheduledTieBreakerRVR(ctx context.Context, sctx
 
 		// Patch succeeded - update scheduling context
 		sctx.MarkNodeOccupied(candidate.Name)
+		sctx.RemoveTieBreakerCandidate(candidate.Name)
 		if sctx.RSC.Spec.Topology == topologyTransZonal && candidate.Zone != "" {
 			sctx.IncrementZoneReplicaCount(candidate.Zone)
 		}
@@ -447,12 +444,17 @@ func selectBestCandidateTransZonal(sctx *SchedulingContext) (NodeCandidate, erro
 	return best, nil
 }
 
-// selectBestCandidateFromZones selects the best candidate from zone candidates (for TieBreaker).
-func selectBestCandidateFromZones(zoneCandidates map[string][]NodeCandidate, sctx *SchedulingContext) (NodeCandidate, error) {
+// selectBestCandidateForTieBreaker selects the best candidate from sctx.TieBreakerCandidates based on topology.
+// TieBreaker doesn't use capacity scores, just topology-aware selection.
+func selectBestCandidateForTieBreaker(sctx *SchedulingContext) (NodeCandidate, error) {
+	if len(sctx.TieBreakerCandidates) == 0 {
+		return NodeCandidate{}, fmt.Errorf("%w: no TieBreaker candidates available", errSchedulingNoCandidateNodes)
+	}
+
 	switch sctx.RSC.Spec.Topology {
 	case topologyIgnored:
 		var allCandidates []NodeCandidate
-		for _, candidates := range zoneCandidates {
+		for _, candidates := range sctx.TieBreakerCandidates {
 			allCandidates = append(allCandidates, candidates...)
 		}
 		if len(allCandidates) == 0 {
@@ -465,18 +467,18 @@ func selectBestCandidateFromZones(zoneCandidates map[string][]NodeCandidate, sct
 		if sctx.SelectedZone == "" {
 			return NodeCandidate{}, fmt.Errorf("%w: no zone selected for TieBreaker in Zonal topology", errSchedulingNoCandidateNodes)
 		}
-		candidates := zoneCandidates[sctx.SelectedZone]
+		candidates := sctx.TieBreakerCandidates[sctx.SelectedZone]
 		if len(candidates) == 0 {
 			return NodeCandidate{}, fmt.Errorf("%w: no candidates in zone %s for TieBreaker", errSchedulingNoCandidateNodes, sctx.SelectedZone)
 		}
 		return candidates[0], nil
 
 	case topologyTransZonal:
-		selectedZone := selectZoneWithMinReplicaCount(zoneCandidates, sctx.ZoneReplicaCounts)
+		selectedZone := selectZoneWithMinReplicaCount(sctx.TieBreakerCandidates, sctx.ZoneReplicaCounts)
 		if selectedZone == "" {
 			return NodeCandidate{}, fmt.Errorf("%w: no zones with candidates for TieBreaker", errSchedulingNoCandidateNodes)
 		}
-		candidate := zoneCandidates[selectedZone][0]
+		candidate := sctx.TieBreakerCandidates[selectedZone][0]
 		candidate.Zone = selectedZone
 		return candidate, nil
 
@@ -511,6 +513,30 @@ func (r *Reconciler) prepareScoredCandidatesForDiskful(ctx context.Context, sctx
 	// Initialize ZoneReplicaCounts for TransZonal topology
 	if sctx.RSC.Spec.Topology == topologyTransZonal {
 		sctx.ZoneReplicaCounts = computeReplicasByZone(sctx.AllRVRs, v1alpha1.ReplicaTypeDiskful, sctx.NodeToZone)
+	}
+
+	return nil
+}
+
+// prepareCandidatesForTieBreaker computes candidates for TieBreaker replicas.
+// Called once before processing unscheduled TieBreaker RVRs.
+// No capacity scoring is needed for TieBreaker, only topology filtering.
+func (r *Reconciler) prepareCandidatesForTieBreaker(sctx *SchedulingContext) error {
+	candidateNodes := computeEligibleNodeNames(sctx.EligibleNodes, sctx.OccupiedNodes)
+	if len(candidateNodes) == 0 {
+		return fmt.Errorf("%w: no candidate nodes for TieBreaker", errSchedulingNoCandidateNodes)
+	}
+
+	zoneCandidates, err := r.applyTopologyFilter(candidateNodes, false, sctx)
+	if err != nil {
+		return err
+	}
+
+	sctx.TieBreakerCandidates = zoneCandidates
+
+	// Initialize ZoneReplicaCounts for TransZonal (counting ALL replicas, not just Diskful)
+	if sctx.RSC.Spec.Topology == topologyTransZonal {
+		sctx.ZoneReplicaCounts = computeReplicasByZone(sctx.AllRVRs, "", sctx.NodeToZone)
 	}
 
 	return nil
