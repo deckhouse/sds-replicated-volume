@@ -26,9 +26,15 @@ import (
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
-// IndexFieldRVByReplicatedStorageClassName is used to quickly list
-// ReplicatedVolume objects referencing a specific RSC.
-const IndexFieldRVByReplicatedStorageClassName = "spec.replicatedStorageClassName"
+const (
+	// IndexFieldRVByReplicatedStorageClassName is used to quickly list
+	// ReplicatedVolume objects referencing a specific RSC.
+	IndexFieldRVByReplicatedStorageClassName = "spec.replicatedStorageClassName"
+
+	// IndexFieldRVByStoragePoolName is used to quickly list
+	// ReplicatedVolume objects using a specific RSP.
+	IndexFieldRVByStoragePoolName = "status.configuration.storagePoolName"
+)
 
 // RegisterRVByReplicatedStorageClassName registers the index for listing
 // ReplicatedVolume objects by spec.replicatedStorageClassName.
@@ -49,6 +55,29 @@ func RegisterRVByReplicatedStorageClassName(mgr manager.Manager) error {
 		},
 	); err != nil {
 		return fmt.Errorf("index ReplicatedVolume by spec.replicatedStorageClassName: %w", err)
+	}
+	return nil
+}
+
+// RegisterRVByStoragePoolName registers the index for listing
+// ReplicatedVolume objects by status.configuration.storagePoolName.
+func RegisterRVByStoragePoolName(mgr manager.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&v1alpha1.ReplicatedVolume{},
+		IndexFieldRVByStoragePoolName,
+		func(obj client.Object) []string {
+			rv, ok := obj.(*v1alpha1.ReplicatedVolume)
+			if !ok {
+				return nil
+			}
+			if rv.Status.Configuration == nil || rv.Status.Configuration.StoragePoolName == "" {
+				return nil
+			}
+			return []string{rv.Status.Configuration.StoragePoolName}
+		},
+	); err != nil {
+		return fmt.Errorf("index ReplicatedVolume by status.configuration.storagePoolName: %w", err)
 	}
 	return nil
 }

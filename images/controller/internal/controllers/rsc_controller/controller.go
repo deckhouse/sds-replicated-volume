@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -78,7 +79,9 @@ func mapRSPToRSC(cl client.Client) handler.MapFunc {
 		if err := cl.List(ctx, &listBySpec,
 			client.MatchingFields{indexes.IndexFieldRSCByStoragePool: rsp.Name},
 			client.UnsafeDisableDeepCopy,
-		); err == nil {
+		); err != nil {
+			log.FromContext(ctx).Error(err, "mapRSPToRSC: failed to list RSCs by spec.storagePool", "rsp", rsp.Name)
+		} else {
 			for i := range listBySpec.Items {
 				seen[listBySpec.Items[i].Name] = struct{}{}
 			}
@@ -89,7 +92,9 @@ func mapRSPToRSC(cl client.Client) handler.MapFunc {
 		if err := cl.List(ctx, &listByStatus,
 			client.MatchingFields{indexes.IndexFieldRSCByStatusStoragePoolName: rsp.Name},
 			client.UnsafeDisableDeepCopy,
-		); err == nil {
+		); err != nil {
+			log.FromContext(ctx).Error(err, "mapRSPToRSC: failed to list RSCs by status.storagePoolName", "rsp", rsp.Name)
+		} else {
 			for i := range listByStatus.Items {
 				seen[listByStatus.Items[i].Name] = struct{}{}
 			}

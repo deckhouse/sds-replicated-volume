@@ -2474,6 +2474,8 @@ func applySatisfyEligibleNodesCondAbsent(rvr *v1alpha1.ReplicatedVolumeReplica) 
 }
 
 // applySatisfyEligibleNodesCondUnknown sets the SatisfyEligibleNodes condition to Unknown.
+//
+//nolint:unparam // reason kept for API consistency with other applyCond* helpers.
 func applySatisfyEligibleNodesCondUnknown(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
@@ -2494,6 +2496,8 @@ func applySatisfyEligibleNodesCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, r
 }
 
 // applySatisfyEligibleNodesCondTrue sets the SatisfyEligibleNodes condition to True.
+//
+//nolint:unparam // reason kept for API consistency with other applyCond* helpers.
 func applySatisfyEligibleNodesCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,

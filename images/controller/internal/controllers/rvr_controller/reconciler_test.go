@@ -2376,7 +2376,7 @@ var _ = Describe("applySatisfyEligibleNodesCondUnknown", func() {
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
-		Expect(cond.Reason).To(Equal("PendingConfiguration"))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonPendingConfiguration))
 		Expect(cond.Message).To(Equal("Test message"))
 	})
 
@@ -2432,7 +2432,7 @@ var _ = Describe("applySatisfyEligibleNodesCondTrue", func() {
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-		Expect(cond.Reason).To(Equal("Satisfied"))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied))
 		Expect(cond.Message).To(Equal("Test message"))
 	})
 
