@@ -384,19 +384,19 @@ var _ = Describe("rspPredicates", func() {
 	})
 })
 
-var _ = Describe("v1alpha1.EligibleNodesEqual", func() {
+var _ = Describe("eligibleNodesEqual", func() {
 	It("returns true for empty slices", func() {
 		a := []v1alpha1.ReplicatedStoragePoolEligibleNode{}
 		b := []v1alpha1.ReplicatedStoragePoolEligibleNode{}
 
-		Expect(v1alpha1.EligibleNodesEqual(a, b)).To(BeTrue())
+		Expect(eligibleNodesEqual(a, b)).To(BeTrue())
 	})
 
 	It("returns true for nil slices", func() {
 		var a []v1alpha1.ReplicatedStoragePoolEligibleNode
 		var b []v1alpha1.ReplicatedStoragePoolEligibleNode
 
-		Expect(v1alpha1.EligibleNodesEqual(a, b)).To(BeTrue())
+		Expect(eligibleNodesEqual(a, b)).To(BeTrue())
 	})
 
 	It("returns true for equal slices", func() {
@@ -409,7 +409,7 @@ var _ = Describe("v1alpha1.EligibleNodesEqual", func() {
 			{NodeName: "node-2"},
 		}
 
-		Expect(v1alpha1.EligibleNodesEqual(a, b)).To(BeTrue())
+		Expect(eligibleNodesEqual(a, b)).To(BeTrue())
 	})
 
 	It("returns false for different lengths", func() {
@@ -421,7 +421,7 @@ var _ = Describe("v1alpha1.EligibleNodesEqual", func() {
 			{NodeName: "node-2"},
 		}
 
-		Expect(v1alpha1.EligibleNodesEqual(a, b)).To(BeFalse())
+		Expect(eligibleNodesEqual(a, b)).To(BeFalse())
 	})
 
 	It("returns false for different node names", func() {
@@ -434,7 +434,7 @@ var _ = Describe("v1alpha1.EligibleNodesEqual", func() {
 			{NodeName: "node-3"},
 		}
 
-		Expect(v1alpha1.EligibleNodesEqual(a, b)).To(BeFalse())
+		Expect(eligibleNodesEqual(a, b)).To(BeFalse())
 	})
 
 	It("ignores other fields in EligibleNode (only compares NodeName)", func() {
@@ -445,7 +445,7 @@ var _ = Describe("v1alpha1.EligibleNodesEqual", func() {
 			{NodeName: "node-1", ZoneName: "zone-b"},
 		}
 
-		Expect(v1alpha1.EligibleNodesEqual(a, b)).To(BeTrue())
+		Expect(eligibleNodesEqual(a, b)).To(BeTrue())
 	})
 })
 

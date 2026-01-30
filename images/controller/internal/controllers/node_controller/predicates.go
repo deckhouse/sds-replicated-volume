@@ -63,10 +63,24 @@ func rspPredicates() []predicate.Predicate {
 				}
 
 				// React only if eligibleNodes changed.
-				return !v1alpha1.EligibleNodesEqual(oldRSP.Status.EligibleNodes, newRSP.Status.EligibleNodes)
+				return !eligibleNodesEqual(oldRSP.Status.EligibleNodes, newRSP.Status.EligibleNodes)
 			},
 		},
 	}
+}
+
+// eligibleNodesEqual compares two eligibleNodes slices by node names only.
+// Precondition: both slices are sorted by NodeName (RSP controller guarantees this).
+func eligibleNodesEqual(a, b []v1alpha1.ReplicatedStoragePoolEligibleNode) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].NodeName != b[i].NodeName {
+			return false
+		}
+	}
+	return true
 }
 
 // drbdResourcePredicates returns predicates for DRBDResource events.
