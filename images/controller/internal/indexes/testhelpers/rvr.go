@@ -68,3 +68,23 @@ func WithRVRByRVAndNodeIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
 		return []string{indexes.RVRByRVAndNodeKey(rvr.Spec.ReplicatedVolumeName, rvr.Spec.NodeName)}
 	})
 }
+
+// WithRVRUnscheduledNonAccessIndex registers the IndexFieldRVRUnscheduledNonAccess index
+// on a fake.ClientBuilder. This is useful for tests that need to use the index.
+func WithRVRUnscheduledNonAccessIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
+	return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRUnscheduledNonAccess, func(obj client.Object) []string {
+		rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+		if !ok {
+			return nil
+		}
+		// Only unscheduled
+		if rvr.Spec.NodeName != "" {
+			return nil
+		}
+		// Only non-Access replicas (Diskful, TieBreaker)
+		if rvr.Spec.Type == v1alpha1.ReplicaTypeAccess {
+			return nil
+		}
+		return []string{indexes.IndexValueRVRUnscheduledNonAccess()}
+	})
+}

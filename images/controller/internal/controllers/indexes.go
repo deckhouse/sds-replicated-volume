@@ -48,6 +48,9 @@ func RegisterIndexes(mgr manager.Manager) error {
 	if err := indexes.RegisterRVRByRVAndNode(mgr); err != nil {
 		return err
 	}
+	if err := indexes.RegisterRVRUnscheduledNonAccess(mgr); err != nil {
+		return err
+	}
 
 	// DRBDResource
 	if err := indexes.RegisterDRBDResourceByNodeName(mgr); err != nil {
