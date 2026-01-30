@@ -43,20 +43,24 @@ Reconcile (root) [Pure orchestration]
 ├── reconcileMain [Target-state driven]
 │   └── finalizer management
 ├── reconcileStatus [In-place reconciliation]
-│   ├── reconcileRSP [Conditional target evaluation]
+│   ├── reconcileRSP [Conditional target evaluation] (details)
 │   │   └── create/update auto-generated RSP
-│   ├── ensureStoragePool
+│   ├── ensureStoragePool (details)
 │   │   └── status.storagePoolName + StoragePoolReady condition
-│   ├── ensureConfiguration
+│   ├── ensureConfiguration (details)
 │   │   └── status.configuration + Ready condition
-│   └── ensureVolumeSummaryAndConditions
+│   └── ensureVolumeSummaryAndConditions (details)
 │       └── status.volumes + ConfigurationRolledOut/VolumesSatisfyEligibleNodes conditions
 └── reconcileUnusedRSPs [Pure orchestration]
-    └── reconcileRSPRelease [Conditional target evaluation]
+    └── reconcileRSPRelease [Conditional target evaluation] (details)
         └── release RSPs no longer referenced by this RSC
 ```
 
+Links to detailed algorithms: [`reconcileRSP`](#reconcilersp-details), [`ensureStoragePool`](#ensurestoragepool-details), [`ensureConfiguration`](#ensureconfiguration-details), [`ensureVolumeSummaryAndConditions`](#ensurevolumesummaryandconditions-details), [`reconcileRSPRelease`](#reconcilersp-release-details)
+
 ## Algorithm Flow
+
+High-level overview of the reconciliation flow. See [Detailed Algorithms](#detailed-algorithms) for method-specific diagrams.
 
 ```mermaid
 flowchart TD
@@ -65,36 +69,16 @@ flowchart TD
     GetRSC --> GetRVs[Get RVs by RSC]
 
     GetRVs --> Migration[reconcileMigrationFromRSP]
-    Migration -->|storagePool empty| Main
-    Migration -->|RSP not found| SetMigrationFailed[Set Ready=False, StoragePoolReady=False]
-    SetMigrationFailed --> Done2([Done])
-    Migration -->|RSP found| MigrateStorage[Copy RSP config to spec.storage]
-    MigrateStorage --> Main
+    Migration -->|Done/Continue| Main[reconcileMain]
+    Main --> Status[reconcileStatus]
 
-    Main[reconcileMain] --> CheckFinalizer{Finalizer check}
-    CheckFinalizer -->|Add/Remove| PatchMain[Patch main]
-    CheckFinalizer -->|No change| Status
-    PatchMain -->|Finalizer removed| Done3([Done])
-    PatchMain --> Status
-
-    Status[reconcileStatus] --> ReconcileRSP[reconcileRSP]
-    ReconcileRSP -->|RSP not exists| CreateRSP[Create RSP]
-    CreateRSP --> EnsureRSPMain[Ensure RSP finalizer and usedBy]
-    ReconcileRSP -->|RSP exists| EnsureRSPMain
-
-    EnsureRSPMain --> EnsureStoragePool[ensureStoragePool]
+    Status --> ReconcileRSP[reconcileRSP]
+    ReconcileRSP --> EnsureStoragePool[ensureStoragePool]
     EnsureStoragePool --> EnsureConfig[ensureConfiguration]
-
-    EnsureConfig -->|StoragePoolReady != True| SetWaiting[Ready=False WaitingForStoragePool]
-    EnsureConfig -->|Eligible nodes invalid| SetInvalid[Ready=False InsufficientEligibleNodes]
-    EnsureConfig -->|Valid| SetReady[Ready=True, update configuration]
-    SetWaiting --> EnsureVolumes
-    SetInvalid --> EnsureVolumes
-    SetReady --> EnsureVolumes
-
-    EnsureVolumes[ensureVolumeSummaryAndConditions] --> Changed{Changed?}
-    Changed -->|Yes| PatchStatus[Patch status]
-    Changed -->|No| ReleaseRSPs
+    EnsureConfig --> EnsureVolumes[ensureVolumeSummaryAndConditions]
+    EnsureVolumes --> PatchDecision{Changed?}
+    PatchDecision -->|Yes| PatchStatus[Patch status]
+    PatchDecision -->|No| ReleaseRSPs
     PatchStatus --> ReleaseRSPs
 
     ReleaseRSPs[reconcileUnusedRSPs] --> EndNode([Done])
@@ -254,3 +238,187 @@ flowchart TD
     EnsureVols -->|ConfigurationRolledOut| Conds
     EnsureVols -->|VolumesSatisfyEligibleNodes| Conds
 ```
+
+---
+
+## Detailed Algorithms
+
+### ensureStoragePool Details
+
+**Purpose:** Updates `status.storagePoolName`, `status.storagePoolBasedOnGeneration`, and the `StoragePoolReady` condition.
+
+**Algorithm:**
+
+```mermaid
+flowchart TD
+    Start([ensureStoragePool]) --> ApplyPool[Apply storagePoolName and generation]
+    ApplyPool --> CheckRSP{RSP exists?}
+    CheckRSP -->|No| SetNotFound[StoragePoolReady=False StoragePoolNotFound]
+    CheckRSP -->|Yes| CopyCondition[Copy Ready condition from RSP]
+    SetNotFound --> End([Return changed])
+    CopyCondition --> End
+```
+
+**Data Flow:**
+
+| Input | Output |
+|-------|--------|
+| `targetStoragePoolName` | `status.storagePoolName` |
+| `rsc.Generation` | `status.storagePoolBasedOnGeneration` |
+| `rsp.Ready` condition | `StoragePoolReady` condition |
+
+### ensureConfiguration Details
+
+**Purpose:** Validates eligible nodes against topology/replication requirements, updates `status.configuration`, `status.configurationGeneration`, `status.storagePoolEligibleNodesRevision`, and the `Ready` condition.
+
+**Algorithm:**
+
+```mermaid
+flowchart TD
+    Start([ensureConfiguration]) --> CheckGen{StoragePoolBasedOnGeneration == Generation?}
+    CheckGen -->|No| Panic[PANIC: caller bug]
+    CheckGen -->|Yes| CheckSPReady{StoragePoolReady == True?}
+    CheckSPReady -->|No| SetWaiting[Ready=False WaitingForStoragePool]
+    SetWaiting --> End([Return])
+    CheckSPReady -->|Yes| CheckRevision{EligibleNodesRevision changed?}
+    CheckRevision -->|Yes| Validate[Validate eligible nodes]
+    CheckRevision -->|No| CheckConfigSync
+    Validate -->|Invalid| SetInvalid[Ready=False InsufficientEligibleNodes]
+    SetInvalid --> End
+    Validate -->|Valid| UpdateRevision[Update StoragePoolEligibleNodesRevision]
+    UpdateRevision --> CheckConfigSync{ConfigurationGeneration == Generation?}
+    CheckConfigSync -->|Yes| End
+    CheckConfigSync -->|No| ApplyConfig[Apply new configuration]
+    ApplyConfig --> SetReady[Ready=True]
+    SetReady --> End
+```
+
+**Data Flow:**
+
+| Input | Output |
+|-------|--------|
+| `rsp.Status.EligibleNodes` | Validated against topology/replication |
+| `rsp.Status.EligibleNodesRevision` | `status.storagePoolEligibleNodesRevision` |
+| `rsc.Spec` (topology, replication, etc.) | `status.configuration` |
+| `rsc.Generation` | `status.configurationGeneration` |
+| Validation result | `Ready` condition |
+
+### ensureVolumeSummaryAndConditions Details
+
+**Purpose:** Computes volume statistics from RVs and sets `ConfigurationRolledOut` and `VolumesSatisfyEligibleNodes` conditions.
+
+**Algorithm:**
+
+```mermaid
+flowchart TD
+    Start([ensureVolumeSummaryAndConditions]) --> ComputeSummary[Compute volume summary from RVs]
+    ComputeSummary --> ApplySummary[Apply summary to status.volumes]
+
+    ApplySummary --> CheckConflicts{InConflictWithEligibleNodes > 0?}
+    CheckConflicts -->|Yes| CheckResolutionStrategy{RollingRepair enabled?}
+    CheckResolutionStrategy -->|Yes| SetConflictInProgress[VolumesSatisfyEligibleNodes=False ConflictResolutionInProgress]
+    CheckResolutionStrategy -->|No| SetManualResolution[VolumesSatisfyEligibleNodes=False ManualConflictResolution]
+    CheckConflicts -->|No| SetAllSatisfy[VolumesSatisfyEligibleNodes=True]
+
+    SetConflictInProgress --> CheckPending
+    SetManualResolution --> CheckPending
+    SetAllSatisfy --> CheckPending
+
+    CheckPending{PendingObservation > 0?}
+    CheckPending -->|Yes| SetNotObserved[ConfigurationRolledOut=Unknown]
+    SetNotObserved --> End([Return])
+    CheckPending -->|No| CheckStale{StaleConfiguration > 0?}
+
+    CheckStale -->|Yes| CheckRolloutStrategy{RollingUpdate enabled?}
+    CheckRolloutStrategy -->|Yes| SetRolloutInProgress[ConfigurationRolledOut=False InProgress]
+    CheckRolloutStrategy -->|No| SetRolloutDisabled[ConfigurationRolledOut=False Disabled]
+    CheckStale -->|No| SetRolledOut[ConfigurationRolledOut=True]
+
+    SetRolloutInProgress --> End
+    SetRolloutDisabled --> End
+    SetRolledOut --> End
+```
+
+**Data Flow:**
+
+| Input | Output |
+|-------|--------|
+| RV list | `status.volumes.total` |
+| RV conditions | `status.volumes.aligned`, `staleConfiguration`, `inConflictWithEligibleNodes` |
+| RV acknowledgment state | `status.volumes.pendingObservation` |
+| RV storage pool names | `status.volumes.usedStoragePoolNames` |
+| Volume counters + strategy | `ConfigurationRolledOut` condition |
+| Conflict counters + strategy | `VolumesSatisfyEligibleNodes` condition |
+
+### reconcileRSP Details
+
+**Purpose:** Ensures the auto-generated RSP exists with proper finalizer and usedBy tracking.
+
+**Algorithm:**
+
+```mermaid
+flowchart TD
+    Start([reconcileRSP]) --> GetRSP[Get RSP by name]
+    GetRSP -->|Error| Fail([Fail])
+    GetRSP -->|Not found| CreateRSP[Create new RSP]
+    CreateRSP -->|Error| Fail
+    CreateRSP --> CheckFinalizer
+    GetRSP -->|Found| CheckFinalizer{Has finalizer?}
+
+    CheckFinalizer -->|No| AddFinalizer[Add finalizer + Patch main]
+    AddFinalizer -->|Error| Fail
+    AddFinalizer --> CheckUsedBy
+    CheckFinalizer -->|Yes| CheckUsedBy{RSC in usedBy?}
+
+    CheckUsedBy -->|No| AddUsedBy[Add to usedBy + Patch status]
+    AddUsedBy -->|Error| Fail
+    AddUsedBy --> End([Return RSP])
+    CheckUsedBy -->|Yes| End
+```
+
+**Data Flow:**
+
+| Input | Output |
+|-------|--------|
+| `targetStoragePoolName` | RSP lookup/creation |
+| `rsc.Spec.Storage` | RSP spec (type, lvmVolumeGroups) |
+| `rsc.Spec.Zones`, `NodeLabelSelector`, `SystemNetworkNames` | RSP spec |
+| `rsc.Name` | RSP label + `status.usedBy` |
+
+### reconcileRSP Release Details
+
+**Purpose:** Releases an RSP that is no longer used by this RSC. Removes RSC from usedBy and deletes the RSP if no more users.
+
+**Algorithm:**
+
+```mermaid
+flowchart TD
+    Start([reconcileRSPRelease]) --> GetRSP[Get RSP by name]
+    GetRSP -->|Error| Fail([Fail])
+    GetRSP -->|Not found| End([Continue])
+    GetRSP -->|Found| CheckUsedBy{RSC in usedBy?}
+
+    CheckUsedBy -->|No| End
+    CheckUsedBy -->|Yes| RemoveUsedBy[Remove RSC from usedBy + Patch status]
+    RemoveUsedBy -->|Error| Fail
+
+    RemoveUsedBy --> CheckEmpty{usedBy empty?}
+    CheckEmpty -->|No| End
+    CheckEmpty -->|Yes| CheckFinalizer{Has finalizer?}
+
+    CheckFinalizer -->|Yes| RemoveFinalizer[Remove finalizer + Patch main]
+    RemoveFinalizer -->|Error| Fail
+    RemoveFinalizer --> DeleteRSP[Delete RSP]
+    CheckFinalizer -->|No| DeleteRSP
+
+    DeleteRSP -->|Error| Fail
+    DeleteRSP --> End
+```
+
+**Data Flow:**
+
+| Input | Action |
+|-------|--------|
+| `rspName` | RSP lookup |
+| `rscName` | Remove from `status.usedBy.replicatedStorageClassNames` |
+| Empty usedBy | Triggers RSP deletion |

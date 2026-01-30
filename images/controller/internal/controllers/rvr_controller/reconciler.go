@@ -153,7 +153,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		outcome = outcome.WithChangeFrom(eo)
 
 		// Reconcile the SatisfyEligibleNodes condition.
-		outcome = outcome.Merge(r.reconcileSatisfyEligibleNodesCondition(rf.Ctx(), rvr, drbdr))
+		outcome = outcome.Merge(r.reconcileSatisfyEligibleNodesCondition(rf.Ctx(), rvr, rv))
 		if outcome.ShouldReturn() {
 			return outcome.ToCtrl()
 		}
@@ -2327,21 +2327,184 @@ func applyRVRDRBDResourceGeneration(rvr *v1alpha1.ReplicatedVolumeReplica, gen i
 
 // reconcileSatisfyEligibleNodesCondition reconciles the RVR SatisfyEligibleNodes condition.
 //
-// Reconcile pattern: TODO
+// Reconcile pattern: In-place reconciliation
 func (r *Reconciler) reconcileSatisfyEligibleNodesCondition(
 	ctx context.Context,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
-	drbdr *v1alpha1.DRBDResource,
+	rv *v1alpha1.ReplicatedVolume,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "satisfy-eligible-nodes")
 	defer rf.OnEnd(&outcome)
 
-	// TODO: implement
+	changed := false
 
-	_ = rvr
-	_ = drbdr
+	// Guard: node not selected — remove condition (not applicable).
+	if rvr.Spec.NodeName == "" {
+		changed = applySatisfyEligibleNodesCondAbsent(rvr) || changed
+		return rf.Continue().ReportChangedIf(changed)
+	}
 
-	return rf.Continue()
+	// Guard: no RV or no Configuration — condition Unknown.
+	if rv == nil || rv.Status.Configuration == nil || rv.Status.Configuration.StoragePoolName == "" {
+		changed = applySatisfyEligibleNodesCondUnknown(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonPendingConfiguration,
+			"Configuration not yet available") || changed
+		return rf.Continue().ReportChangedIf(changed)
+	}
+
+	// Get eligible node entry from RSP.
+	eligibleNode, err := r.getNodeEligibility(rf.Ctx(), rv.Status.Configuration.StoragePoolName, rvr.Spec.NodeName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// RSP not found — cannot verify eligibility.
+			changed = applySatisfyEligibleNodesCondUnknown(rvr,
+				v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonPendingConfiguration,
+				"ReplicatedStoragePool not found") || changed
+			return rf.Continue().ReportChangedIf(changed)
+		}
+		return rf.Fail(err)
+	}
+
+	// Node not in eligible nodes list.
+	if eligibleNode == nil {
+		changed = applySatisfyEligibleNodesCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonNodeMismatch,
+			"Node is not in the eligible nodes list according to ReplicatedStoragePool") || changed
+		return rf.Continue().ReportChangedIf(changed)
+	}
+
+	// Check LVMVolumeGroup and ThinPool (only for Diskful).
+	var lvg *v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup
+	if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.Spec.LVMVolumeGroupName != "" {
+		// First, check if LVMVolumeGroup exists in eligible node (by name only).
+		lvg = findLVGInEligibleNodeByName(eligibleNode, rvr.Spec.LVMVolumeGroupName)
+		if lvg == nil {
+			changed = applySatisfyEligibleNodesCondFalse(rvr,
+				v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonLVMVolumeGroupMismatch,
+				"Node is eligible, but LVMVolumeGroup is not in the allowed list for this node according to ReplicatedStoragePool") || changed
+			return rf.Continue().ReportChangedIf(changed)
+		}
+
+		// Then, check ThinPool if specified.
+		if rvr.Spec.LVMVolumeGroupThinPoolName != "" {
+			lvg = findLVGInEligibleNode(eligibleNode, rvr.Spec.LVMVolumeGroupName, rvr.Spec.LVMVolumeGroupThinPoolName)
+			if lvg == nil {
+				changed = applySatisfyEligibleNodesCondFalse(rvr,
+					v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonThinPoolMismatch,
+					"Node and LVMVolumeGroup are eligible, but ThinPool is not in the allowed list for this LVMVolumeGroup according to ReplicatedStoragePool") || changed
+				return rf.Continue().ReportChangedIf(changed)
+			}
+		}
+	}
+
+	// Collect warnings.
+	warnings := collectEligibilityWarnings(eligibleNode, lvg)
+
+	// All checks passed — condition True.
+	message := "Replica satisfies eligible nodes requirements"
+	if warnings != "" {
+		message += ", however note that currently " + warnings
+	}
+	changed = applySatisfyEligibleNodesCondTrue(rvr,
+		v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied,
+		message) || changed
+
+	return rf.Continue().ReportChangedIf(changed)
+}
+
+// findLVGInEligibleNodeByName finds an LVMVolumeGroup by name only in the eligible node.
+func findLVGInEligibleNodeByName(node *v1alpha1.ReplicatedStoragePoolEligibleNode, lvgName string) *v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup {
+	for i := range node.LVMVolumeGroups {
+		if node.LVMVolumeGroups[i].Name == lvgName {
+			return &node.LVMVolumeGroups[i]
+		}
+	}
+	return nil
+}
+
+// findLVGInEligibleNode finds an LVMVolumeGroup by name and thin pool name in the eligible node.
+func findLVGInEligibleNode(node *v1alpha1.ReplicatedStoragePoolEligibleNode, lvgName, thinPoolName string) *v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup {
+	for i := range node.LVMVolumeGroups {
+		if node.LVMVolumeGroups[i].Name == lvgName && node.LVMVolumeGroups[i].ThinPoolName == thinPoolName {
+			return &node.LVMVolumeGroups[i]
+		}
+	}
+	return nil
+}
+
+// collectEligibilityWarnings collects warnings about node/LVG readiness.
+func collectEligibilityWarnings(node *v1alpha1.ReplicatedStoragePoolEligibleNode, lvg *v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup) string {
+	var warnings []string
+
+	if node.Unschedulable {
+		warnings = append(warnings, "node is unschedulable")
+	}
+	if !node.NodeReady {
+		warnings = append(warnings, "node is not ready")
+	}
+	if !node.AgentReady {
+		warnings = append(warnings, "agent is not ready")
+	}
+
+	if lvg != nil {
+		if lvg.Unschedulable {
+			warnings = append(warnings, "LVMVolumeGroup is unschedulable")
+		}
+		if !lvg.Ready {
+			warnings = append(warnings, "LVMVolumeGroup is not ready")
+		}
+	}
+
+	// Join warnings with commas and "and" before the last element (serial comma per CMOS).
+	switch len(warnings) {
+	case 0:
+		return ""
+	case 1:
+		return warnings[0]
+	case 2:
+		return warnings[0] + " and " + warnings[1]
+	default:
+		return strings.Join(warnings[:len(warnings)-1], ", ") + ", and " + warnings[len(warnings)-1]
+	}
+}
+
+// applySatisfyEligibleNodesCondAbsent removes the SatisfyEligibleNodes condition.
+func applySatisfyEligibleNodesCondAbsent(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+	return obju.RemoveStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+}
+
+// applySatisfyEligibleNodesCondUnknown sets the SatisfyEligibleNodes condition to Unknown.
+//
+//nolint:unparam // reason kept for API consistency with other applyCond* helpers.
+func applySatisfyEligibleNodesCondUnknown(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+	return obju.SetStatusCondition(rvr, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
+		Status:  metav1.ConditionUnknown,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// applySatisfyEligibleNodesCondFalse sets the SatisfyEligibleNodes condition to False.
+func applySatisfyEligibleNodesCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+	return obju.SetStatusCondition(rvr, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
+		Status:  metav1.ConditionFalse,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// applySatisfyEligibleNodesCondTrue sets the SatisfyEligibleNodes condition to True.
+//
+//nolint:unparam // reason kept for API consistency with other applyCond* helpers.
+func applySatisfyEligibleNodesCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+	return obju.SetStatusCondition(rvr, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
+		Status:  metav1.ConditionTrue,
+		Reason:  reason,
+		Message: message,
+	})
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2503,6 +2666,31 @@ func (r *Reconciler) deleteDRBDR(ctx context.Context, drbdr *v1alpha1.DRBDResour
 
 func (r *Reconciler) createDRBDR(ctx context.Context, drbdr *v1alpha1.DRBDResource) error {
 	return r.cl.Create(ctx, drbdr)
+}
+
+// --- ReplicatedStoragePool (RSP) ---
+
+// getNodeEligibility fetches the eligible node entry for the given node from RSP.
+// Returns (nil, nil) if node not in eligibleNodes or eligibleNodes is empty.
+func (r *Reconciler) getNodeEligibility(
+	ctx context.Context,
+	rspName string,
+	nodeName string,
+) (*v1alpha1.ReplicatedStoragePoolEligibleNode, error) {
+	var unsafeRSP v1alpha1.ReplicatedStoragePool
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: rspName}, &unsafeRSP, client.UnsafeDisableDeepCopy); err != nil {
+		return nil, err
+	}
+
+	for i := range unsafeRSP.Status.EligibleNodes {
+		if unsafeRSP.Status.EligibleNodes[i].NodeName == nodeName {
+			// Return a copy to avoid aliasing with cache.
+			result := unsafeRSP.Status.EligibleNodes[i]
+			return &result, nil
+		}
+	}
+
+	return nil, nil
 }
 
 // --- Node ---
