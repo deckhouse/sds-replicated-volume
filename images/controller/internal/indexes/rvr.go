@@ -34,14 +34,6 @@ const (
 	// IndexFieldRVRByReplicatedVolumeName is used to quickly list
 	// ReplicatedVolumeReplica objects belonging to a specific RV.
 	IndexFieldRVRByReplicatedVolumeName = "spec.replicatedVolumeName"
-
-	// IndexFieldRVRUnscheduledNonAccess is used to quickly list
-	// all unscheduled non-Access ReplicatedVolumeReplica objects.
-	// Query with sentinel value "true" to get all unscheduled Diskful/TieBreaker RVRs.
-	IndexFieldRVRUnscheduledNonAccess = "unscheduled.nonAccess"
-
-	// indexValueTrue is a sentinel value for boolean-like indexes.
-	indexValueTrue = "true"
 )
 
 // RegisterRVRByNodeName registers the index for listing
@@ -88,44 +80,4 @@ func RegisterRVRByReplicatedVolumeName(mgr manager.Manager) error {
 		return fmt.Errorf("index ReplicatedVolumeReplica by spec.replicatedVolumeName: %w", err)
 	}
 	return nil
-}
-
-// RegisterRVRUnscheduledNonAccess registers the index for listing
-// all unscheduled non-Access ReplicatedVolumeReplica objects.
-// Use IndexValueRVRUnscheduledNonAccess() to query.
-func RegisterRVRUnscheduledNonAccess(mgr manager.Manager) error {
-	if err := mgr.GetFieldIndexer().IndexField(
-		context.Background(),
-		&v1alpha1.ReplicatedVolumeReplica{},
-		IndexFieldRVRUnscheduledNonAccess,
-		func(obj client.Object) []string {
-			rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
-			if !ok {
-				return nil
-			}
-			// Only unscheduled
-			if rvr.Spec.NodeName != "" {
-				return nil
-			}
-			// Only non-Access replicas (Diskful, TieBreaker)
-			if rvr.Spec.Type == v1alpha1.ReplicaTypeAccess {
-				return nil
-			}
-
-			// Only RVRs that belong to a ReplicatedVolume
-			if rvr.Spec.ReplicatedVolumeName == "" {
-				return nil
-			}
-			return []string{indexValueTrue}
-		},
-	); err != nil {
-		return fmt.Errorf("index ReplicatedVolumeReplica unscheduled non-Access: %w", err)
-	}
-	return nil
-}
-
-// IndexValueRVRUnscheduledNonAccess returns the sentinel value to query
-// the IndexFieldRVRUnscheduledNonAccess index.
-func IndexValueRVRUnscheduledNonAccess() string {
-	return indexValueTrue
 }
