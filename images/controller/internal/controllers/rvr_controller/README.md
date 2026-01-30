@@ -1,7 +1,7 @@
 # rvr_controller
 
-> **Note:** Core reconciliation logic (backing volume and DRBD resource lifecycle) is fully implemented.
-> TODO items remaining are informational status fields only (attachment status, peers status, disk status, quorum status).
+> **Note:** Core reconciliation logic and status reporting are fully implemented.
+> One TODO item remains: SatisfyEligibleNodes condition.
 
 This controller manages `ReplicatedVolumeReplica` (RVR) resources by reconciling their backing volumes (LVMLogicalVolume) and DRBD resources.
 
@@ -86,10 +86,24 @@ Reconcile (root) [Pure orchestration]
 │   ├── computeActualDRBDRConfigured → ApplyingConfiguration / ConfigurationFailed
 │   ├── applyRVRAddresses
 │   └── applyRVRConfiguredCondTrue Configured / applyRVRConfiguredCondFalse PendingDatameshJoin
-├── ensureAttachmentStatus [TODO - informational]
-├── ensurePeersStatus [TODO - informational]
-├── ensureDiskStatus [TODO - informational]
-├── ensureQuorumStatus [TODO - informational]
+├── ensureAttachmentStatus
+│   ├── computeIntendedEffectiveType
+│   ├── applyRVRAttachedCond*
+│   ├── applyRVRDevicePath
+│   └── applyRVRDeviceIOSuspended
+├── ensurePeersStatus
+│   ├── ensureRVRStatusPeers (O(m+n) merge)
+│   └── applyRVRFullyConnectedCond*
+├── ensureBackingVolumeStatus
+│   ├── computeHasUpToDatePeer
+│   ├── computeHasConnectedAttachedPeer
+│   ├── applyRVRBackingVolumeInSyncCond*
+│   └── applyRVRBackingVolumeState
+├── ensureQuorumStatus
+│   ├── ensureRVRStatusQuorumSummary
+│   ├── applyRVRStatusQuorum
+│   └── applyRVRReadyCond*
+├── reconcileSatisfyEligibleNodesCondition [TODO]
 └── patchRVRStatus
 ```
 
@@ -172,16 +186,25 @@ flowchart TD
     CheckDatameshMember -->|No| SetConfiguredPendingJoin[Configured=False PendingDatameshJoin]
     CheckDatameshMember -->|Yes| SetConfiguredTrue[Configured=True]
 
-    SetConfiguredNA --> PatchStatus
-    SetConfiguredPending --> PatchStatus
-    SetConfiguredWaitingRV --> PatchStatus
-    SetConfiguredAgentNotReady --> PatchStatus
-    SetConfiguredApplying --> PatchStatus
-    SetConfiguredFailed --> PatchStatus
-    SetConfiguredPendingJoin --> PatchStatus
-    SetConfiguredTrue --> PatchStatus
+    SetConfiguredNA --> EnsureStatus
+    SetConfiguredPending --> EnsureStatus
+    SetConfiguredWaitingRV --> EnsureStatus
+    SetConfiguredAgentNotReady --> EnsureStatus
+    SetConfiguredApplying --> EnsureStatus
+    SetConfiguredFailed --> EnsureStatus
+    SetConfiguredPendingJoin --> EnsureStatus
+    SetConfiguredTrue --> EnsureStatus
 
-    PatchStatus[Patch RVR status if changed] --> EndNode([Done])
+    subgraph StatusEnsure [Status Ensure]
+        EnsureStatus[Ensure status fields] --> EnsureAttach[ensureAttachmentStatus]
+        EnsureAttach --> EnsurePeers[ensurePeersStatus]
+        EnsurePeers --> EnsureBV[ensureBackingVolumeStatus]
+        EnsureBV --> EnsureQuorum[ensureQuorumStatus]
+        EnsureQuorum --> ReconcileSEN[reconcileSatisfyEligibleNodesCondition TODO]
+    end
+
+    ReconcileSEN --> PatchStatus[Patch RVR status if changed]
+    PatchStatus --> EndNode([Done])
 ```
 
 ## Conditions
@@ -218,16 +241,63 @@ Indicates whether the replica's DRBD resource is configured.
 | False | PendingScheduling | Waiting for node assignment |
 | False | WaitingForReplicatedVolume | Waiting for ReplicatedVolume to be ready |
 
-### Planned Conditions (TODO)
+### Attached
 
-These informational conditions will be implemented to report observational status:
+Indicates whether the replica is attached (primary) and ready for I/O.
 
-| Condition | Purpose |
-|-----------|---------|
-| Attached | Whether the replica is attached (primary) |
-| FullyConnected | Whether the replica has established connections to all peers |
-| DiskInSync | Whether the local disk is in sync with peers |
-| Ready | Overall replica readiness for I/O (combines quorum and other states) |
+| Status | Reason | When |
+|--------|--------|------|
+| True | Attached | Attached and ready for I/O |
+| True | DetachmentFailed | Expected detached but still attached |
+| False | AttachmentFailed | Expected attached but not attached |
+| False | IOSuspended | Attached but I/O is suspended |
+| Unknown | AgentNotReady | Agent is not ready |
+| Unknown | ApplyingConfiguration | Configuration is being applied |
+| (absent) | - | No DRBDR exists or not applicable |
+
+### BackingVolumeInSync
+
+Indicates whether the local backing volume is in sync with peers.
+
+| Status | Reason | When |
+|--------|--------|------|
+| True | InSync | Disk is fully up-to-date |
+| False | Attaching | Disk is being attached |
+| False | Detaching | Disk is being detached |
+| False | DiskFailed | Disk failed due to I/O errors |
+| False | NoDisk | No local disk attached |
+| False | Synchronizing | Disk is synchronizing |
+| False | SynchronizationBlocked | Sync blocked awaiting peer |
+| False | UnknownState | Unknown disk state |
+| Unknown | AgentNotReady | Agent is not ready |
+| Unknown | ApplyingConfiguration | Configuration is being applied |
+| (absent) | - | Diskless replica or no DRBDR |
+
+### FullyConnected
+
+Indicates whether the replica has established connections to all peers.
+
+| Status | Reason | When |
+|--------|--------|------|
+| True | FullyConnected | Fully connected to all peers on all paths |
+| True | ConnectedToAllPeers | All peers connected but not all paths established |
+| False | NoPeers | No peers configured |
+| False | NotConnected | Not connected to any peer |
+| False | PartiallyConnected | Connected to some but not all peers |
+| Unknown | AgentNotReady | Agent is not ready |
+| (absent) | - | No DRBDR exists or not applicable |
+
+### Ready
+
+Indicates overall replica readiness for I/O (based on quorum state).
+
+| Status | Reason | When |
+|--------|--------|------|
+| True | Ready | Ready for I/O (quorum message) |
+| False | Deleting | Replica is being deleted |
+| False | QuorumLost | Quorum is lost (quorum message) |
+| Unknown | AgentNotReady | Agent is not ready |
+| Unknown | ApplyingConfiguration | Configuration is being applied |
 
 ## Status Fields
 
@@ -235,19 +305,39 @@ The controller manages the following status fields on RVR:
 
 | Field | Description | Source |
 |-------|-------------|--------|
-| `backingVolumeSize` | Size of the backing LVM logical volume (Diskful only) | From target LLV spec |
-| `effectiveType` | Current effective replica type (may differ from spec during transitions) | Computed from datamesh member state |
-| `datameshRevision` | Datamesh revision this replica was configured for | From RV status |
-| `drbdResourceGeneration` | Generation of the DRBDResource that was last applied | From DRBDR metadata |
 | `addresses` | DRBD addresses assigned to this replica | From DRBDR status |
+| `backingVolumeSize` | Size of the backing LVM logical volume (Diskful only) | From target LLV spec |
+| `backingVolumeState` | Local disk state (UpToDate/Outdated/etc.) | From DRBDR status |
+| `datameshRevision` | Datamesh revision this replica was configured for | From RV status |
+| `deviceIOSuspended` | Whether I/O is suspended on the device | From DRBDR status |
+| `devicePath` | Block device path when attached (e.g., /dev/drbd10012) | From DRBDR status |
+| `drbdResourceGeneration` | Generation of the DRBDResource that was last applied | From DRBDR metadata |
+| `effectiveType` | Current effective replica type (may differ from spec during transitions) | Computed from datamesh member state |
+| `peers` | Peer connectivity status | Merged from datamesh + DRBDR |
+| `quorum` | Whether this replica has quorum | From DRBDR status |
+| `quorumSummary` | Detailed quorum info (voting peers, thresholds) | Computed from DRBDR + peers |
 
-### Planned Status Fields (TODO)
+### PeerStatus
+
+Each entry in `peers` contains:
 
 | Field | Description |
 |-------|-------------|
-| `peers` | Peer connectivity information (name, type, attached, established networks, connectionState, diskState) |
-| `quorumSummary` | Quorum state summary (quorum M/N, data quorum J/K) |
-| `diskState` | Local disk state from DRBD |
+| `name` | Peer RVR name |
+| `type` | Replica type (Diskful/TieBreaker/Access), empty if orphan |
+| `attached` | Whether peer is attached (primary) |
+| `connectionEstablishedOn` | System networks with established connection |
+| `connectionState` | DRBD connection state |
+| `backingVolumeState` | Peer's disk state |
+
+### QuorumSummary
+
+| Field | Description |
+|-------|-------------|
+| `connectedVotingPeers` | Count of connected voting peers |
+| `quorum` | Quorum threshold |
+| `connectedUpToDatePeers` | Count of connected UpToDate peers |
+| `quorumMinimumRedundancy` | Minimum UpToDate nodes required |
 
 ## Backing Volume Management
 
@@ -365,6 +455,13 @@ flowchart TD
         ReconcileDRBD[reconcileDRBDResource]
     end
 
+    subgraph statusEnsure [Status Ensure]
+        EnsureAttach[ensureAttachmentStatus]
+        EnsurePeers[ensurePeersStatus]
+        EnsureBVStatus[ensureBackingVolumeStatus]
+        EnsureQuorum[ensureQuorumStatus]
+    end
+
     subgraph outputs [Outputs]
         RVRMeta[RVR metadata]
         RVRStatusConds[RVR.status.conditions]
@@ -387,4 +484,19 @@ flowchart TD
     ReconcileDRBD --> DRBDRManaged
     ReconcileDRBD -->|Configured| RVRStatusConds
     ReconcileDRBD -->|effectiveType, datameshRevision, addresses| RVRStatusFields
+
+    DRBDR --> EnsureAttach
+    DRBDR --> EnsurePeers
+    DRBDR --> EnsureBVStatus
+    DRBDR --> EnsureQuorum
+    RVStatus --> EnsurePeers
+
+    EnsureAttach -->|Attached| RVRStatusConds
+    EnsureAttach -->|devicePath, deviceIOSuspended| RVRStatusFields
+    EnsurePeers -->|FullyConnected| RVRStatusConds
+    EnsurePeers -->|peers| RVRStatusFields
+    EnsureBVStatus -->|BackingVolumeInSync| RVRStatusConds
+    EnsureBVStatus -->|backingVolumeState| RVRStatusFields
+    EnsureQuorum -->|Ready| RVRStatusConds
+    EnsureQuorum -->|quorum, quorumSummary| RVRStatusFields
 ```
