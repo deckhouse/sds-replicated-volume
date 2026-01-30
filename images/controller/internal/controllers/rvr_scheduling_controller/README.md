@@ -100,16 +100,21 @@ For each unscheduled Diskful RVR:
 5. On failure: continue to next RVR (node remains available)
 6. Patch RVR status with Scheduled=True condition
 
-#### Phase 4: Unscheduled TieBreaker RVRs (per-RVR)
+#### Phase 4a: Prepare TieBreaker Candidates (once)
+
+1. Compute eligible nodes from RSP, excluding occupied nodes (no capacity scoring)
+2. Apply topology filter based on RSC topology mode
+3. Store candidates in SchedulingContext for use by individual RVR reconcilers
+4. Initialize ZoneReplicaCounts with ALL replica counts (for TransZonal topology)
+
+#### Phase 4b: Unscheduled TieBreaker RVRs (per-RVR)
 
 For each unscheduled TieBreaker RVR:
 
-1. Compute eligible nodes (no capacity scoring)
-2. Apply topology filter
-3. Select best candidate based on topology
-4. Apply placement and patch spec with optimistic lock
-5. Update SchedulingContext on success
-6. Patch RVR status with Scheduled=True condition
+1. Select best candidate based on topology (from pre-computed TieBreakerCandidates)
+2. Apply placement and patch spec with optimistic lock
+3. Update SchedulingContext on success
+4. Patch RVR status with Scheduled=True condition
 
 ### Topology Modes
 
@@ -152,13 +157,17 @@ Reconcile (root) — per-RVR orchestration with error resilience
 │   ├── applyScheduledConditionTrue                 — set Scheduled=True
 │   └── patchRVRStatus (if changed)                 — patch status
 │
+├── prepareCandidatesForTieBreaker        — compute candidates once for all TieBreaker
+│   ├── computeEligibleNodeNames           — filter eligible nodes
+│   └── applyTopologyFilter                — filter by topology mode
+│
 └── [for each unscheduled TieBreaker] reconcileUnscheduledTieBreakerRVR
-    ├── computeEligibleNodeNames           — filter eligible nodes
-    ├── applyTopologyFilter                — filter by topology mode
-    ├── selectBestCandidateFromZones       — select node based on topology
+    ├── selectBestCandidateForTieBreaker   — select node based on topology
     ├── applyPlacement                     — set nodeName
     ├── patchRVR (if changed)              — patch with optimistic lock
     ├── SchedulingContext.MarkNodeOccupied — update context on success
+    ├── SchedulingContext.RemoveTieBreakerCandidate — remove used node from candidates
+    ├── SchedulingContext.IncrementZoneReplicaCount — for TransZonal: update zone count
     ├── applyScheduledConditionTrue        — set Scheduled=True
     └── patchRVRStatus (if changed)        — patch status
 ```
@@ -176,10 +185,10 @@ flowchart TD
     Phase1 --> ReconcileScheduled[reconcileScheduledRVR]
     ReconcileScheduled --> Phase2{Unscheduled Diskful?}
 
-    Phase2 -->|No| Phase4
+    Phase2 -->|No| Phase4a
     Phase2 -->|Yes| PrepareCandidates[prepareScoredCandidatesForDiskful]
     PrepareCandidates -->|Error| MarkFailed[Set Scheduled=False on all Diskful]
-    MarkFailed --> Phase4
+    MarkFailed --> Phase4a
     PrepareCandidates -->|OK| Phase3[Phase 3: For each unscheduled Diskful]
 
     Phase3 --> ReconcileDiskful[reconcileUnscheduledDiskfulRVR]
@@ -189,15 +198,21 @@ flowchart TD
     ReconcileDiskful -->|No candidates| SetFalse2[Set Scheduled=False]
     SetFalse2 --> Phase3
 
-    Phase3 -->|Done| Phase4[Phase 4: For each unscheduled TieBreaker]
-    Phase4 --> ReconcileTB[reconcileUnscheduledTieBreakerRVR]
+    Phase3 -->|Done| Phase4a{Unscheduled TieBreaker?}
+    Phase4a -->|No| CheckErrors
+    Phase4a -->|Yes| PrepareTBCandidates[prepareCandidatesForTieBreaker]
+    PrepareTBCandidates -->|Error| MarkTBFailed[Set Scheduled=False on all TieBreaker]
+    MarkTBFailed --> CheckErrors
+    PrepareTBCandidates -->|OK| Phase4b[Phase 4b: For each unscheduled TieBreaker]
+
+    Phase4b --> ReconcileTB[reconcileUnscheduledTieBreakerRVR]
     ReconcileTB -->|Select candidate| PatchTB[Patch spec + status]
     PatchTB -->|OK| UpdateCtx2[Update context]
-    UpdateCtx2 --> Phase4
+    UpdateCtx2 --> Phase4b
     ReconcileTB -->|No candidates| SetFalse3[Set Scheduled=False]
-    SetFalse3 --> Phase4
+    SetFalse3 --> Phase4b
 
-    Phase4 -->|Done| CheckErrors{Any errors?}
+    Phase4b -->|Done| CheckErrors{Any errors?}
     CheckErrors -->|Yes| Requeue([RequeueAfter 30s])
     CheckErrors -->|No| Done2([Done])
 ```
@@ -231,15 +246,14 @@ Indicates whether the replica has been assigned to a node.
 | Resource | Events | Handler |
 | -------- | ------ | ------- |
 | ReplicatedVolumeReplica | Create only | EnqueueRequestForOwner (maps to owner RV) |
-| ReplicatedStoragePool | Update (only if eligibleNodes changed) | mapRSPToRV (maps to RVs that use this RSP and have unscheduled non-Access RVRs) |
+| ReplicatedStoragePool | Create, Delete, Generic: always; Update: only if eligibleNodes or usedBy.replicatedStorageClassNames changed | mapRSPToRV (maps to RVs that use this RSP and have unscheduled non-Access RVRs) |
 
 ## Indexes
 
 | Index | Field | Purpose |
 | ----- | ----- | ------- |
 | RVR by RV name | `spec.replicatedVolumeName` | List all RVRs for a ReplicatedVolume |
-| RVR unscheduled non-Access by RV | composite: unscheduled + non-Access + RV name | Find unscheduled Diskful/TieBreaker RVRs for a specific RV |
-| RV by RSC name | `spec.replicatedStorageClassName` | Find RVs using a specific RSC |
+| RVR unscheduled non-Access | boolean: unscheduled + non-Access | Find all unscheduled Diskful/TieBreaker RVRs (used by RSP watch mapper) |
 
 Note: RSC names are obtained directly from `rsp.Status.UsedBy.ReplicatedStorageClassNames` (no index needed).
 
@@ -379,8 +393,17 @@ For scheduling failures, the controller sets `Scheduled=False` condition on the 
 
 Per-RVR zone distribution mechanism:
 
-1. `prepareScoredCandidatesForDiskful` initializes `ZoneReplicaCounts` with existing Diskful counts per zone
+**For Diskful replicas:**
+
+1. `prepareScoredCandidatesForDiskful` initializes `ZoneReplicaCounts` with existing **Diskful** counts per zone
 2. For each unscheduled Diskful, `selectBestCandidateTransZonal` picks the zone with minimum count
+3. After successful patch, `IncrementZoneReplicaCount` updates the count immediately
+4. Next RVR sees updated counts and picks a different zone
+
+**For TieBreaker replicas:**
+
+1. `prepareCandidatesForTieBreaker` initializes `ZoneReplicaCounts` with **ALL** replica counts per zone (Diskful + TieBreaker)
+2. For each unscheduled TieBreaker, `selectBestCandidateForTieBreaker` picks the zone with minimum count
 3. After successful patch, `IncrementZoneReplicaCount` updates the count immediately
 4. Next RVR sees updated counts and picks a different zone
 
