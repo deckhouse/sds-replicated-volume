@@ -159,6 +159,10 @@ spec:
                   Only set for Diskful replicas.
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
+              backingVolumeState:
+                description: BackingVolumeState is the local backing volume state
+                  of this replica.
+                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -223,6 +227,17 @@ spec:
                   was configured for.
                 format: int64
                 type: integer
+              deviceIOSuspended:
+                description: |-
+                  DeviceIOSuspended indicates whether I/O is suspended on the device.
+                  Only set when the replica is attached.
+                type: boolean
+              devicePath:
+                description: |-
+                  DevicePath is the block device path when the replica is attached.
+                  Example: /dev/drbd10012.
+                maxLength: 256
+                type: string
               drbd:
                 properties:
                   actual:
@@ -352,6 +367,10 @@ spec:
                                   peerClient:
                                     type: boolean
                                   peerDiskState:
+                                    description: |-
+                                      DiskState represents the state of a DRBD backing disk.
+                                      It reflects the disk's synchronization status and determines whether
+                                      application I/O can be served locally or requires peer involvement.
                                     type: string
                                   percentInSync:
                                     type: string
@@ -396,6 +415,10 @@ spec:
                             client:
                               type: boolean
                             diskState:
+                              description: |-
+                                DiskState represents the state of a DRBD backing disk.
+                                It reflects the disk's synchronization status and determines whether
+                                application I/O can be served locally or requires peer involvement.
                               type: string
                             minor:
                               type: integer
@@ -466,6 +489,78 @@ spec:
                 - Access
                 - TieBreaker
                 type: string
+              peers:
+                description: Peers contains the status of connections to peer replicas.
+                items:
+                  description: PeerStatus represents the status of a connection to
+                    a peer replica.
+                  properties:
+                    attached:
+                      description: Attached indicates whether this peer is attached
+                        on its node (and has a block device).
+                      type: boolean
+                    backingVolumeState:
+                      description: BackingVolumeState is the peer's backing volume
+                        state.
+                      type: string
+                    connectionEstablishedOn:
+                      description: ConnectionEstablishedOn lists system network names
+                        where connection to this peer is established.
+                      items:
+                        type: string
+                      maxItems: 16
+                      type: array
+                    connectionState:
+                      description: ConnectionState is the DRBD connection state to
+                        this peer.
+                      type: string
+                    name:
+                      description: Name is the name of the peer ReplicatedVolumeReplica.
+                      maxLength: 253
+                      minLength: 1
+                      type: string
+                    type:
+                      description: Type is the replica type (Diskful/TieBreaker/Access).
+                      enum:
+                      - Diskful
+                      - Access
+                      - TieBreaker
+                      type: string
+                  required:
+                  - name
+                  type: object
+                maxItems: 32
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              quorum:
+                description: Quorum indicates whether this replica has quorum.
+                type: boolean
+              quorumSummary:
+                description: QuorumSummary provides detailed quorum information.
+                properties:
+                  connectedUpToDatePeers:
+                    default: 0
+                    description: ConnectedUpToDatePeers is the number of peers with
+                      established connection and UpToDate disk.
+                    type: integer
+                  connectedVotingPeers:
+                    default: 0
+                    description: ConnectedVotingPeers is the number of voting peers
+                      (TieBreaker/Diskful) with established connection.
+                    type: integer
+                  quorum:
+                    description: Quorum is the required quorum threshold.
+                    type: integer
+                  quorumMinimumRedundancy:
+                    description: QuorumMinimumRedundancy is the number of diskful
+                      UpToDate peers (including self) required for quorum.
+                    type: integer
+                required:
+                - connectedUpToDatePeers
+                - connectedVotingPeers
+                type: object
             type: object
         required:
         - metadata

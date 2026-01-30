@@ -34,6 +34,11 @@ const (
 	// IndexFieldRVRByReplicatedVolumeName is used to quickly list
 	// ReplicatedVolumeReplica objects belonging to a specific RV.
 	IndexFieldRVRByReplicatedVolumeName = "spec.replicatedVolumeName"
+
+	// IndexFieldRVRByRVAndNode is a composite index for quickly finding
+	// a ReplicatedVolumeReplica by both replicatedVolumeName and nodeName.
+	// Key format: "<replicatedVolumeName>/<nodeName>"
+	IndexFieldRVRByRVAndNode = "spec.replicatedVolumeName+nodeName"
 )
 
 // RegisterRVRByNodeName registers the index for listing
@@ -80,4 +85,32 @@ func RegisterRVRByReplicatedVolumeName(mgr manager.Manager) error {
 		return fmt.Errorf("index ReplicatedVolumeReplica by spec.replicatedVolumeName: %w", err)
 	}
 	return nil
+}
+
+// RegisterRVRByRVAndNode registers the composite index for finding
+// ReplicatedVolumeReplica objects by both replicatedVolumeName and nodeName.
+func RegisterRVRByRVAndNode(mgr manager.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&v1alpha1.ReplicatedVolumeReplica{},
+		IndexFieldRVRByRVAndNode,
+		func(obj client.Object) []string {
+			rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+			if !ok {
+				return nil
+			}
+			if rvr.Spec.ReplicatedVolumeName == "" || rvr.Spec.NodeName == "" {
+				return nil
+			}
+			return []string{RVRByRVAndNodeKey(rvr.Spec.ReplicatedVolumeName, rvr.Spec.NodeName)}
+		},
+	); err != nil {
+		return fmt.Errorf("index ReplicatedVolumeReplica by replicatedVolumeName+nodeName: %w", err)
+	}
+	return nil
+}
+
+// RVRByRVAndNodeKey builds the composite key for IndexFieldRVRByRVAndNode.
+func RVRByRVAndNodeKey(rvName, nodeName string) string {
+	return rvName + "/" + nodeName
 }

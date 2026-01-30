@@ -636,6 +636,168 @@ var _ = Describe("agentPodPredicates", func() {
 	})
 })
 
+var _ = Describe("rspPredicates", func() {
+	Describe("CreateFunc", func() {
+		It("returns true always", func() {
+			predicates := rspPredicates()
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			}
+			for _, p := range predicates {
+				if fp, ok := p.(predicate.TypedFuncs[client.Object]); ok && fp.CreateFunc != nil {
+					e := event.TypedCreateEvent[client.Object]{Object: rsp}
+					Expect(fp.CreateFunc(e)).To(BeTrue())
+				}
+			}
+		})
+	})
+
+	Describe("DeleteFunc", func() {
+		It("returns true always", func() {
+			predicates := rspPredicates()
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			}
+			for _, p := range predicates {
+				if fp, ok := p.(predicate.TypedFuncs[client.Object]); ok && fp.DeleteFunc != nil {
+					e := event.TypedDeleteEvent[client.Object]{Object: rsp}
+					Expect(fp.DeleteFunc(e)).To(BeTrue())
+				}
+			}
+		})
+	})
+
+	Describe("UpdateFunc", func() {
+		var preds []func(event.TypedUpdateEvent[client.Object]) bool
+
+		BeforeEach(func() {
+			predicates := rspPredicates()
+			preds = make([]func(event.TypedUpdateEvent[client.Object]) bool, 0)
+			for _, p := range predicates {
+				if fp, ok := p.(predicate.TypedFuncs[client.Object]); ok && fp.UpdateFunc != nil {
+					preds = append(preds, fp.UpdateFunc)
+				}
+			}
+		})
+
+		It("returns true when EligibleNodesRevision changes", func() {
+			oldRSP := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodesRevision: 1,
+				},
+			}
+			newRSP := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodesRevision: 2,
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRSP,
+				ObjectNew: newRSP,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns false when EligibleNodesRevision unchanged", func() {
+			oldRSP := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodesRevision: 1,
+				},
+			}
+			newRSP := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodesRevision: 1,
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRSP,
+				ObjectNew: newRSP,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeFalse())
+			}
+		})
+
+		It("returns false when other status fields change but EligibleNodesRevision unchanged", func() {
+			oldRSP := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodesRevision: 1,
+					Phase:                 "Ready",
+				},
+			}
+			newRSP := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodesRevision: 1,
+					Phase:                 "NotReady",
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRSP,
+				ObjectNew: newRSP,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeFalse())
+			}
+		})
+
+		It("returns true on type assertion failure (conservative)", func() {
+			oldNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node-1"},
+			}
+			newNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node-1"},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldNode,
+				ObjectNew: newNode,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when old is nil (conservative)", func() {
+			newRSP := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: nil,
+				ObjectNew: newRSP,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when new is nil (conservative)", func() {
+			oldRSP := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRSP,
+				ObjectNew: nil,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+	})
+})
+
 var _ = Describe("Helper functions", func() {
 	Describe("isPodReady", func() {
 		It("returns true when PodReady=True", func() {

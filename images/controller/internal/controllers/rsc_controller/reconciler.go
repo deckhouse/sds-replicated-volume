@@ -1363,8 +1363,11 @@ func (r *Reconciler) patchRSPStatus(
 
 // deleteRSP deletes an RSP.
 func (r *Reconciler) deleteRSP(ctx context.Context, rsp *v1alpha1.ReplicatedStoragePool) error {
-	return r.cl.Delete(ctx, rsp, client.Preconditions{
+	if rsp.DeletionTimestamp != nil {
+		return nil
+	}
+	return client.IgnoreNotFound(r.cl.Delete(ctx, rsp, client.Preconditions{
 		UID:             &rsp.UID,
 		ResourceVersion: &rsp.ResourceVersion,
-	})
+	}))
 }

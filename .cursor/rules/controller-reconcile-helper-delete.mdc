@@ -63,6 +63,25 @@ func (r *Reconciler) deleteEK(
 ) error
 ```
 
+### Recommended implementation pattern (SHOULD)
+
+Delete helpers SHOULD:
+1. Skip the API call if the object is already marked for deletion (`DeletionTimestamp != nil`).
+2. Treat `NotFound` as success using `client.IgnoreNotFound`.
+
+```go
+func (r *Reconciler) deleteEK(ctx context.Context, obj *v1alpha1.ExampleKind) error {
+    if obj.DeletionTimestamp != nil {
+        return nil
+    }
+    return client.IgnoreNotFound(r.cl.Delete(ctx, obj))
+}
+```
+
+Rationale:
+- Checking `DeletionTimestamp` avoids unnecessary API calls when the object is already pending deletion (e.g., blocked by finalizers from other controllers).
+- `client.IgnoreNotFound` makes the delete idempotent: if the object was deleted between the caller's read and this delete call, the helper succeeds silently.
+
 ---
 
 ## Receivers

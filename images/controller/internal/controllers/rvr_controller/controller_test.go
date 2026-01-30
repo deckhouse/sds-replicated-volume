@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -29,6 +30,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
@@ -136,6 +139,205 @@ var _ = Describe("mapRVToRVRs", func() {
 		requests := mapFunc(context.Background(), rv)
 
 		Expect(requests).To(BeNil())
+	})
+})
+
+var _ = Describe("eligibleNodeLVGEqual", func() {
+	It("returns true for identical LVGs", func() {
+		a := v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+			Name:          "lvg-1",
+			ThinPoolName:  "thin-1",
+			Unschedulable: false,
+			Ready:         true,
+		}
+		b := v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+			Name:          "lvg-1",
+			ThinPoolName:  "thin-1",
+			Unschedulable: false,
+			Ready:         true,
+		}
+		Expect(eligibleNodeLVGEqual(a, b)).To(BeTrue())
+	})
+
+	It("returns false when Name differs", func() {
+		a := v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{Name: "lvg-1"}
+		b := v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{Name: "lvg-2"}
+		Expect(eligibleNodeLVGEqual(a, b)).To(BeFalse())
+	})
+
+	It("returns false when ThinPoolName differs", func() {
+		a := v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{Name: "lvg-1", ThinPoolName: "thin-1"}
+		b := v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{Name: "lvg-1", ThinPoolName: "thin-2"}
+		Expect(eligibleNodeLVGEqual(a, b)).To(BeFalse())
+	})
+
+	It("returns false when Unschedulable differs", func() {
+		a := v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{Name: "lvg-1", Unschedulable: false}
+		b := v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{Name: "lvg-1", Unschedulable: true}
+		Expect(eligibleNodeLVGEqual(a, b)).To(BeFalse())
+	})
+
+	It("returns false when Ready differs", func() {
+		a := v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{Name: "lvg-1", Ready: true}
+		b := v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{Name: "lvg-1", Ready: false}
+		Expect(eligibleNodeLVGEqual(a, b)).To(BeFalse())
+	})
+})
+
+var _ = Describe("eligibleNodeEqual", func() {
+	It("returns true for identical nodes", func() {
+		a := v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: false,
+			NodeReady:     true,
+			AgentReady:    true,
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+				{Name: "lvg-1", Ready: true},
+			},
+		}
+		b := v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: false,
+			NodeReady:     true,
+			AgentReady:    true,
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+				{Name: "lvg-1", Ready: true},
+			},
+		}
+		Expect(eligibleNodeEqual(a, b)).To(BeTrue())
+	})
+
+	It("returns true for nodes with empty LVMVolumeGroups", func() {
+		a := v1alpha1.ReplicatedStoragePoolEligibleNode{NodeName: "node-1"}
+		b := v1alpha1.ReplicatedStoragePoolEligibleNode{NodeName: "node-1"}
+		Expect(eligibleNodeEqual(a, b)).To(BeTrue())
+	})
+
+	It("returns false when NodeName differs", func() {
+		a := v1alpha1.ReplicatedStoragePoolEligibleNode{NodeName: "node-1"}
+		b := v1alpha1.ReplicatedStoragePoolEligibleNode{NodeName: "node-2"}
+		Expect(eligibleNodeEqual(a, b)).To(BeFalse())
+	})
+
+	It("returns false when Unschedulable differs", func() {
+		a := v1alpha1.ReplicatedStoragePoolEligibleNode{NodeName: "node-1", Unschedulable: false}
+		b := v1alpha1.ReplicatedStoragePoolEligibleNode{NodeName: "node-1", Unschedulable: true}
+		Expect(eligibleNodeEqual(a, b)).To(BeFalse())
+	})
+
+	It("returns false when NodeReady differs", func() {
+		a := v1alpha1.ReplicatedStoragePoolEligibleNode{NodeName: "node-1", NodeReady: true}
+		b := v1alpha1.ReplicatedStoragePoolEligibleNode{NodeName: "node-1", NodeReady: false}
+		Expect(eligibleNodeEqual(a, b)).To(BeFalse())
+	})
+
+	It("returns false when AgentReady differs", func() {
+		a := v1alpha1.ReplicatedStoragePoolEligibleNode{NodeName: "node-1", AgentReady: true}
+		b := v1alpha1.ReplicatedStoragePoolEligibleNode{NodeName: "node-1", AgentReady: false}
+		Expect(eligibleNodeEqual(a, b)).To(BeFalse())
+	})
+
+	It("returns false when LVMVolumeGroups count differs", func() {
+		a := v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:        "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{{Name: "lvg-1"}},
+		}
+		b := v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:        "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{},
+		}
+		Expect(eligibleNodeEqual(a, b)).To(BeFalse())
+	})
+
+	It("returns false when LVMVolumeGroup content differs", func() {
+		a := v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:        "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{{Name: "lvg-1", Ready: true}},
+		}
+		b := v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:        "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{{Name: "lvg-1", Ready: false}},
+		}
+		Expect(eligibleNodeEqual(a, b)).To(BeFalse())
+	})
+})
+
+var _ = Describe("computeChangedEligibleNodes", func() {
+	It("returns empty for two empty lists", func() {
+		changed := computeChangedEligibleNodes(nil, nil)
+		Expect(changed).To(BeEmpty())
+	})
+
+	It("returns all added nodes", func() {
+		newNodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-1"},
+			{NodeName: "node-2"},
+		}
+		changed := computeChangedEligibleNodes(nil, newNodes)
+		Expect(changed).To(ConsistOf("node-1", "node-2"))
+	})
+
+	It("returns all removed nodes", func() {
+		oldNodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-1"},
+			{NodeName: "node-2"},
+		}
+		changed := computeChangedEligibleNodes(oldNodes, nil)
+		Expect(changed).To(ConsistOf("node-1", "node-2"))
+	})
+
+	It("returns empty when lists are identical", func() {
+		nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-1", NodeReady: true},
+			{NodeName: "node-2", NodeReady: true},
+		}
+		changed := computeChangedEligibleNodes(nodes, nodes)
+		Expect(changed).To(BeEmpty())
+	})
+
+	It("returns modified node", func() {
+		oldNodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-1", NodeReady: true},
+			{NodeName: "node-2", NodeReady: true},
+		}
+		newNodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-1", NodeReady: true},
+			{NodeName: "node-2", NodeReady: false}, // Changed.
+		}
+		changed := computeChangedEligibleNodes(oldNodes, newNodes)
+		Expect(changed).To(ConsistOf("node-2"))
+	})
+
+	It("returns added, removed, and modified nodes", func() {
+		oldNodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-1", NodeReady: true},
+			{NodeName: "node-2", NodeReady: true},
+			{NodeName: "node-3", NodeReady: true},
+		}
+		newNodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-2", NodeReady: false}, // Modified.
+			{NodeName: "node-3", NodeReady: true},  // Unchanged.
+			{NodeName: "node-4", NodeReady: true},  // Added.
+		}
+		// node-1 removed, node-2 modified, node-4 added.
+		changed := computeChangedEligibleNodes(oldNodes, newNodes)
+		Expect(changed).To(ConsistOf("node-1", "node-2", "node-4"))
+	})
+
+	It("handles interleaved additions and removals correctly", func() {
+		oldNodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-a"},
+			{NodeName: "node-c"},
+			{NodeName: "node-e"},
+		}
+		newNodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-b"},
+			{NodeName: "node-c"},
+			{NodeName: "node-d"},
+		}
+		// node-a removed, node-b added, node-c unchanged, node-d added, node-e removed.
+		changed := computeChangedEligibleNodes(oldNodes, newNodes)
+		Expect(changed).To(ConsistOf("node-a", "node-b", "node-d", "node-e"))
 	})
 })
 
@@ -314,3 +516,324 @@ var _ = Describe("mapAgentPodToRVRs", func() {
 		Expect(requests).To(BeNil())
 	})
 })
+
+var _ = Describe("rspEventHandler", func() {
+	var scheme *runtime.Scheme
+	var queue *fakeQueue
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		Expect(corev1.AddToScheme(scheme)).To(Succeed())
+		queue = &fakeQueue{}
+	})
+
+	Describe("Create", func() {
+		It("enqueues all RVRs for RVs using the RSP", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+						{NodeName: "node-1"},
+						{NodeName: "node-2"},
+					},
+				},
+			}
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						StoragePoolName: "rsp-1",
+					},
+				},
+			}
+			rvr1 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					NodeName:             "node-1",
+				},
+			}
+			rvr2 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					NodeName:             "node-2",
+				},
+			}
+			rvrOther := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-other"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-other",
+					NodeName:             "node-1",
+				},
+			}
+
+			cl := testhelpers.WithRVByStoragePoolNameIndex(
+				testhelpers.WithRVRByReplicatedVolumeNameIndex(
+					fake.NewClientBuilder().
+						WithScheme(scheme).
+						WithObjects(rsp, rv, rvr1, rvr2, rvrOther),
+				),
+			).Build()
+
+			handler := newRSPEventHandler(cl).(*rspEventHandler)
+			handler.Create(context.Background(), event.CreateEvent{Object: rsp}, queue)
+
+			Expect(queue.items).To(HaveLen(2))
+			names := []string{queue.items[0].Name, queue.items[1].Name}
+			Expect(names).To(ContainElements("rvr-1", "rvr-2"))
+		})
+
+		It("does nothing when no RVs use the RSP", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-unused"},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+						{NodeName: "node-1"},
+					},
+				},
+			}
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						StoragePoolName: "other-rsp",
+					},
+				},
+			}
+
+			cl := testhelpers.WithRVByStoragePoolNameIndex(
+				testhelpers.WithRVRByReplicatedVolumeNameIndex(
+					fake.NewClientBuilder().
+						WithScheme(scheme).
+						WithObjects(rsp, rv),
+				),
+			).Build()
+
+			handler := newRSPEventHandler(cl).(*rspEventHandler)
+			handler.Create(context.Background(), event.CreateEvent{Object: rsp}, queue)
+
+			Expect(queue.items).To(BeEmpty())
+		})
+
+		It("does nothing for non-RSP object", func() {
+			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+			handler := newRSPEventHandler(cl).(*rspEventHandler)
+			handler.Create(context.Background(), event.CreateEvent{Object: &corev1.Node{}}, queue)
+
+			Expect(queue.items).To(BeEmpty())
+		})
+	})
+
+	Describe("Update", func() {
+		It("enqueues RVRs only on changed nodes", func() {
+			oldRSP := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+						{NodeName: "node-1", NodeReady: true},
+						{NodeName: "node-2", NodeReady: true},
+					},
+				},
+			}
+			newRSP := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+						{NodeName: "node-1", NodeReady: true},
+						{NodeName: "node-2", NodeReady: false}, // Changed.
+					},
+				},
+			}
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						StoragePoolName: "rsp-1",
+					},
+				},
+			}
+			rvr1 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					NodeName:             "node-1",
+				},
+			}
+			rvr2 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					NodeName:             "node-2",
+				},
+			}
+
+			cl := testhelpers.WithRVByStoragePoolNameIndex(
+				testhelpers.WithRVRByRVAndNodeIndex(
+					fake.NewClientBuilder().
+						WithScheme(scheme).
+						WithObjects(newRSP, rv, rvr1, rvr2),
+				),
+			).Build()
+
+			handler := newRSPEventHandler(cl).(*rspEventHandler)
+			handler.Update(context.Background(), event.UpdateEvent{ObjectOld: oldRSP, ObjectNew: newRSP}, queue)
+
+			// Only rvr-2 on node-2 should be enqueued.
+			Expect(queue.items).To(HaveLen(1))
+			Expect(queue.items[0].Name).To(Equal("rvr-2"))
+		})
+
+		It("does nothing when no eligible nodes changed", func() {
+			oldRSP := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+						{NodeName: "node-1", NodeReady: true},
+					},
+				},
+			}
+			newRSP := oldRSP.DeepCopy()
+
+			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+			handler := newRSPEventHandler(cl).(*rspEventHandler)
+			handler.Update(context.Background(), event.UpdateEvent{ObjectOld: oldRSP, ObjectNew: newRSP}, queue)
+
+			Expect(queue.items).To(BeEmpty())
+		})
+
+		It("enqueues RVRs on added nodes", func() {
+			oldRSP := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+						{NodeName: "node-1"},
+					},
+				},
+			}
+			newRSP := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+						{NodeName: "node-1"},
+						{NodeName: "node-2"}, // Added.
+					},
+				},
+			}
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						StoragePoolName: "rsp-1",
+					},
+				},
+			}
+			rvr2 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					NodeName:             "node-2",
+				},
+			}
+
+			cl := testhelpers.WithRVByStoragePoolNameIndex(
+				testhelpers.WithRVRByRVAndNodeIndex(
+					fake.NewClientBuilder().
+						WithScheme(scheme).
+						WithObjects(newRSP, rv, rvr2),
+				),
+			).Build()
+
+			handler := newRSPEventHandler(cl).(*rspEventHandler)
+			handler.Update(context.Background(), event.UpdateEvent{ObjectOld: oldRSP, ObjectNew: newRSP}, queue)
+
+			Expect(queue.items).To(HaveLen(1))
+			Expect(queue.items[0].Name).To(Equal("rvr-2"))
+		})
+
+		It("does nothing for non-RSP object", func() {
+			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+			handler := newRSPEventHandler(cl).(*rspEventHandler)
+			handler.Update(context.Background(), event.UpdateEvent{
+				ObjectOld: &corev1.Node{},
+				ObjectNew: &corev1.Node{},
+			}, queue)
+
+			Expect(queue.items).To(BeEmpty())
+		})
+	})
+
+	Describe("Delete", func() {
+		It("enqueues all RVRs for RVs using the RSP", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+						{NodeName: "node-1"},
+					},
+				},
+			}
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						StoragePoolName: "rsp-1",
+					},
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					NodeName:             "node-1",
+				},
+			}
+
+			cl := testhelpers.WithRVByStoragePoolNameIndex(
+				testhelpers.WithRVRByReplicatedVolumeNameIndex(
+					fake.NewClientBuilder().
+						WithScheme(scheme).
+						WithObjects(rsp, rv, rvr),
+				),
+			).Build()
+
+			handler := newRSPEventHandler(cl).(*rspEventHandler)
+			handler.Delete(context.Background(), event.DeleteEvent{Object: rsp}, queue)
+
+			Expect(queue.items).To(HaveLen(1))
+			Expect(queue.items[0].Name).To(Equal("rvr-1"))
+		})
+
+		It("does nothing for non-RSP object", func() {
+			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+			handler := newRSPEventHandler(cl).(*rspEventHandler)
+			handler.Delete(context.Background(), event.DeleteEvent{Object: &corev1.Node{}}, queue)
+
+			Expect(queue.items).To(BeEmpty())
+		})
+	})
+})
+
+// fakeQueue implements workqueue.TypedRateLimitingInterface for testing.
+type fakeQueue struct {
+	items []reconcile.Request
+}
+
+func (q *fakeQueue) Add(item reconcile.Request)     { q.items = append(q.items, item) }
+func (q *fakeQueue) Len() int                       { return len(q.items) }
+func (q *fakeQueue) Get() (reconcile.Request, bool) { return reconcile.Request{}, false }
+func (q *fakeQueue) Done(reconcile.Request)         {}
+func (q *fakeQueue) ShutDown()                      {}
+func (q *fakeQueue) ShutDownWithDrain()             {}
+func (q *fakeQueue) ShuttingDown() bool             { return false }
+func (q *fakeQueue) AddAfter(item reconcile.Request, _ time.Duration) {
+	q.items = append(q.items, item)
+}
+func (q *fakeQueue) AddRateLimited(reconcile.Request)  {}
+func (q *fakeQueue) Forget(reconcile.Request)          {}
+func (q *fakeQueue) NumRequeues(reconcile.Request) int { return 0 }

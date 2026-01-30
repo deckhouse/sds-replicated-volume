@@ -146,3 +146,24 @@ func isPodReady(pod *corev1.Pod) bool {
 	}
 	return false
 }
+
+// rspPredicates returns predicates for ReplicatedStoragePool events.
+// Filters to react only to eligibleNodes changes (using EligibleNodesRevision).
+// The actual per-node change detection is done in the EventHandler.
+func rspPredicates() []predicate.Predicate {
+	return []predicate.Predicate{
+		predicate.TypedFuncs[client.Object]{
+			CreateFunc: func(event.TypedCreateEvent[client.Object]) bool { return true },
+			DeleteFunc: func(event.TypedDeleteEvent[client.Object]) bool { return true },
+			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				oldRSP, okOld := e.ObjectOld.(*v1alpha1.ReplicatedStoragePool)
+				newRSP, okNew := e.ObjectNew.(*v1alpha1.ReplicatedStoragePool)
+				if !okOld || !okNew || oldRSP == nil || newRSP == nil {
+					return true
+				}
+				// React only if EligibleNodesRevision changed.
+				return oldRSP.Status.EligibleNodesRevision != newRSP.Status.EligibleNodesRevision
+			},
+		},
+	}
+}
