@@ -23,50 +23,37 @@ import (
 // +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster,shortName=dro
+// +kubebuilder:resource:scope=Cluster,shortName=drbdnop
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
-// +kubebuilder:printcolumn:name="Resource",type=string,JSONPath=".spec.drbdResourceName"
+// +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=".spec.type"
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
-type DRBDResourceOperation struct {
+type DRBDNodeOperation struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`
 
-	Spec DRBDResourceOperationSpec `json:"spec"`
+	Spec DRBDNodeOperationSpec `json:"spec"`
 	// +patchStrategy=merge
-	Status *DRBDResourceOperationStatus `json:"status,omitempty" patchStrategy:"merge"`
+	Status *DRBDNodeOperationStatus `json:"status,omitempty" patchStrategy:"merge"`
 }
 
 // +kubebuilder:object:generate=true
-type DRBDResourceOperationSpec struct {
+type DRBDNodeOperationSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	// +kubebuilder:validation:Pattern=`^[0-9A-Za-z.+_-]*$`
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="drbdResourceName is immutable"
-	DRBDResourceName string `json:"drbdResourceName"`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeName is immutable"
+	NodeName string `json:"nodeName"`
 
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=CreateNewUUID;ForcePrimary;Invalidate;Outdate;Verify;CreateSnapshot
+	// +kubebuilder:validation:Enum=UpdateDRBD
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="type is immutable"
-	Type DRBDResourceOperationType `json:"type"`
-
-	// Parameters for CreateNewUUID operation. Immutable once set.
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="createNewUUID is immutable"
-	// +optional
-	CreateNewUUID *CreateNewUUIDParams `json:"createNewUUID,omitempty"`
+	Type DRBDNodeOperationType `json:"type"`
 }
 
 // +kubebuilder:object:generate=true
-type CreateNewUUIDParams struct {
-	// +kubebuilder:default=false
-	// +optional
-	ClearBitmap bool `json:"clearBitmap,omitempty"`
-}
-
-// +kubebuilder:object:generate=true
-type DRBDResourceOperationStatus struct {
+type DRBDNodeOperationStatus struct {
 	// +optional
 	Phase DRBDOperationPhase `json:"phase,omitempty"`
 
@@ -81,25 +68,19 @@ type DRBDResourceOperationStatus struct {
 	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
 }
 
-// DRBDOperationPhase represents the phase of a DRBD operation.
-type DRBDOperationPhase string
-
-const (
-	// DRBDOperationPhasePending indicates the operation is pending.
-	DRBDOperationPhasePending DRBDOperationPhase = "Pending"
-	// DRBDOperationPhaseRunning indicates the operation is running.
-	DRBDOperationPhaseRunning DRBDOperationPhase = "Running"
-	// DRBDOperationPhaseSucceeded indicates the operation completed successfully.
-	DRBDOperationPhaseSucceeded DRBDOperationPhase = "Succeeded"
-	// DRBDOperationPhaseFailed indicates the operation failed.
-	DRBDOperationPhaseFailed DRBDOperationPhase = "Failed"
-)
-
 // +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster
-type DRBDResourceOperationList struct {
+type DRBDNodeOperationList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
-	Items           []DRBDResourceOperation `json:"items"`
+	Items           []DRBDNodeOperation `json:"items"`
 }
+
+// DRBDNodeOperationType represents the type of operation to perform on a DRBD node.
+type DRBDNodeOperationType string
+
+const (
+	// DRBDNodeOperationUpdateDRBD updates DRBD on the node.
+	DRBDNodeOperationUpdateDRBD DRBDNodeOperationType = "UpdateDRBD"
+)

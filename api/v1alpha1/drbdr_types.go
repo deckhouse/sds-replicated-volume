@@ -50,14 +50,14 @@ type DRBDResource struct {
 
 // GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It returns the root object's `.status.conditions`.
-func (drbdr *DRBDResource) GetStatusConditions() []metav1.Condition {
-	return drbdr.Status.Conditions
+func (d *DRBDResource) GetStatusConditions() []metav1.Condition {
+	return d.Status.Conditions
 }
 
 // SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It sets the root object's `.status.conditions`.
-func (drbdr *DRBDResource) SetStatusConditions(conditions []metav1.Condition) {
-	drbdr.Status.Conditions = conditions
+func (d *DRBDResource) SetStatusConditions(conditions []metav1.Condition) {
+	d.Status.Conditions = conditions
 }
 
 // +kubebuilder:object:generate=true
@@ -363,3 +363,45 @@ type DRBDResourceList struct {
 	metav1.ListMeta `json:"metadata"`
 	Items           []DRBDResource `json:"items"`
 }
+
+// DRBDResourceState represents the desired state of a DRBD resource.
+type DRBDResourceState string
+
+const (
+	// DRBDResourceStateUp indicates the resource should be up.
+	DRBDResourceStateUp DRBDResourceState = "Up"
+	// DRBDResourceStateDown indicates the resource should be down.
+	DRBDResourceStateDown DRBDResourceState = "Down"
+)
+
+// DRBDRole represents the role of a DRBD resource.
+type DRBDRole string
+
+const (
+	// DRBDRolePrimary indicates the resource is primary.
+	DRBDRolePrimary DRBDRole = "Primary"
+	// DRBDRoleSecondary indicates the resource is secondary.
+	DRBDRoleSecondary DRBDRole = "Secondary"
+)
+
+// DRBDResourceType represents the type of a DRBD resource.
+type DRBDResourceType string
+
+const (
+	// DRBDResourceTypeDiskful indicates a diskful resource that stores data.
+	DRBDResourceTypeDiskful DRBDResourceType = "Diskful"
+	// DRBDResourceTypeDiskless indicates a diskless resource.
+	DRBDResourceTypeDiskless DRBDResourceType = "Diskless"
+)
+
+// DRBDProtocol represents the DRBD replication protocol.
+type DRBDProtocol string
+
+const (
+	// DRBDProtocolA is asynchronous replication protocol.
+	DRBDProtocolA DRBDProtocol = "A"
+	// DRBDProtocolB is memory synchronous (semi-synchronous) replication protocol.
+	DRBDProtocolB DRBDProtocol = "B"
+	// DRBDProtocolC is synchronous replication protocol.
+	DRBDProtocolC DRBDProtocol = "C"
+)
