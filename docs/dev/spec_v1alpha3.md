@@ -252,8 +252,8 @@ RVA — это ресурс «намерения публикации» тома
     - `reason`: `NoQuorumStatus`, `QuorumStatus`.
   - `type=DiskIOSuspended`
     - `reason`: `DiskIONotSuspendedStatus`, `DiskIOSuspendedUnknownReason`, `DiskIOSuspendedByUser`, `DiskIOSuspendedNoData`, `DiskIOSuspendedFencing`, `DiskIOSuspendedQuorum`.
-- `actualType` (Enum: `Diskful` | `Access` | `TieBreaker`)
-  - Обновляется контроллерами; используется **rvr-volume-controller** для удаления LLV при `spec.type!=Diskful` только когда `actualType==spec.type`.
+- `effectiveType` (Enum: `Diskful` | `Access` | `TieBreaker`)
+  - Обновляется контроллерами; используется **rvr-volume-controller** для удаления LLV при `spec.type!=Diskful` только когда `effectiveType==spec.type`.
 - `drbd.config`
   - `nodeId` (0..7)
     - Обновляет: **rvr-status-config-node-id-controller** (уникален в пределах RV).
@@ -665,7 +665,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
   Всем LLV под управлением проставляется `metadata.ownerReference`, указывающий на RVR.
 2. Обеспечить проставление значения в свойства `rvr.status.lvmLogicalVolumeName`, указывающее на соответствующую LLV, готовую к использованию.
 3. Обеспечить отсутствие LLV диска у RVR с `rvr.spec.type!=Diskful`, но только когда
-фактический тип (`rvr.status.actualType`) соответствует целевому `rvr.spec.type`.
+фактический тип (`rvr.status.effectiveType`) соответствует целевому `rvr.spec.type`.
 4. Обеспечить сброс свойства `rvr.status.lvmLogicalVolumeName` после удаления LLV.
 
 ### Вывод
@@ -693,7 +693,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 
 - количество rvr `rvr.status.conditions[type=Ready].status == rvr.status.conditions[type=FullyConnected].status == True`
 (исключая ту, которую собираются удалить) больше, либо равно `rv.status.drbd.config.quorum`
-- присутствует необходимое количество `rvr.status.actualType==Diskful && rvr.status.conditions[type=Ready].status==True && rvr.metadata.deletionTimestamp==nil` реплик, в
+- присутствует необходимое количество `rvr.status.effectiveType==Diskful && rvr.status.conditions[type=Ready].status==True && rvr.metadata.deletionTimestamp==nil` реплик, в
 соответствии с `rsc.spec.replication`
 - удаляемая реплика не является фактически опубликованной, т.е. её нода не в `rv.status.actuallyAttachedTo`
 

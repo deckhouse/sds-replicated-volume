@@ -40,7 +40,7 @@ type DRBDActions []DRBDAction
 // NewResourceAction creates a new DRBD resource.
 type NewResourceAction struct {
 	ResourceName string
-	NodeID       uint
+	NodeID       uint8
 }
 
 func (a NewResourceAction) Execute(ctx context.Context) error {
@@ -149,7 +149,7 @@ func (a DiskOptionsAction) Execute(ctx context.Context) error {
 // NewPeerAction makes a peer node known to the resource.
 type NewPeerAction struct {
 	ResourceName string
-	PeerNodeID   uint
+	PeerNodeID   uint8
 	Protocol     string // A, B, or C
 	SharedSecret string
 	CRAMHMACAlg  string // HMAC algorithm for authentication
@@ -173,7 +173,7 @@ func (a NewPeerAction) Execute(ctx context.Context) error {
 // NetOptionsAction sets network options on a peer connection.
 type NetOptionsAction struct {
 	ResourceName      string
-	PeerNodeID        uint
+	PeerNodeID        uint8
 	AllowTwoPrimaries *bool
 	AllowRemoteRead   *bool
 }
@@ -189,7 +189,7 @@ func (a NetOptionsAction) Execute(ctx context.Context) error {
 // NewPathAction adds a network path to a peer.
 type NewPathAction struct {
 	ResourceName string
-	PeerNodeID   uint
+	PeerNodeID   uint8
 	LocalAddr    string // "ip:port" format
 	RemoteAddr   string // "ip:port" format
 }
@@ -202,7 +202,7 @@ func (a NewPathAction) Execute(ctx context.Context) error {
 // ConnectAction establishes connection to a peer.
 type ConnectAction struct {
 	ResourceName string
-	PeerNodeID   uint
+	PeerNodeID   uint8
 }
 
 func (a ConnectAction) Execute(ctx context.Context) error {
@@ -213,7 +213,7 @@ func (a ConnectAction) Execute(ctx context.Context) error {
 // DisconnectAction disconnects from a peer.
 type DisconnectAction struct {
 	ResourceName string
-	PeerNodeID   uint
+	PeerNodeID   uint8
 }
 
 func (a DisconnectAction) Execute(ctx context.Context) error {
@@ -224,7 +224,7 @@ func (a DisconnectAction) Execute(ctx context.Context) error {
 // DelPathAction removes a network path from a peer.
 type DelPathAction struct {
 	ResourceName string
-	PeerNodeID   uint
+	PeerNodeID   uint8
 	LocalAddr    string // "ip:port" format
 	RemoteAddr   string // "ip:port" format
 }
@@ -237,7 +237,7 @@ func (a DelPathAction) Execute(ctx context.Context) error {
 // DelPeerAction removes a peer connection.
 type DelPeerAction struct {
 	ResourceName string
-	PeerNodeID   uint
+	PeerNodeID   uint8
 }
 
 func (a DelPeerAction) Execute(ctx context.Context) error {

@@ -31,7 +31,7 @@ var (
 )
 
 // ConnectArgs returns the arguments for drbdsetup connect command.
-var ConnectArgs = func(resource string, peerNodeID uint) []string {
+var ConnectArgs = func(resource string, peerNodeID uint8) []string {
 	return []string{
 		"connect", resource,
 		strconv.FormatUint(uint64(peerNodeID), 10),
@@ -39,7 +39,7 @@ var ConnectArgs = func(resource string, peerNodeID uint) []string {
 }
 
 // ExecuteConnect establishes connection to a peer.
-func ExecuteConnect(ctx context.Context, resource string, peerNodeID uint) error {
+func ExecuteConnect(ctx context.Context, resource string, peerNodeID uint8) error {
 	args := ConnectArgs(resource, peerNodeID)
 	cmd := ExecCommandContext(ctx, Command, args...)
 
@@ -63,7 +63,7 @@ func ExecuteConnect(ctx context.Context, resource string, peerNodeID uint) error
 }
 
 // DisconnectArgs returns the arguments for drbdsetup disconnect command.
-var DisconnectArgs = func(resource string, peerNodeID uint) []string {
+var DisconnectArgs = func(resource string, peerNodeID uint8) []string {
 	return []string{
 		"disconnect", resource,
 		strconv.FormatUint(uint64(peerNodeID), 10),
@@ -71,7 +71,7 @@ var DisconnectArgs = func(resource string, peerNodeID uint) []string {
 }
 
 // ExecuteDisconnect disconnects from a peer.
-func ExecuteDisconnect(ctx context.Context, resource string, peerNodeID uint) error {
+func ExecuteDisconnect(ctx context.Context, resource string, peerNodeID uint8) error {
 	args := DisconnectArgs(resource, peerNodeID)
 	cmd := ExecCommandContext(ctx, Command, args...)
 

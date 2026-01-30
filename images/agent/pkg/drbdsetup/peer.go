@@ -40,7 +40,7 @@ type NewPeerOptions struct {
 }
 
 // NewPeerArgs returns the arguments for drbdsetup new-peer command.
-var NewPeerArgs = func(resource string, peerNodeID uint, opts *NewPeerOptions) []string {
+var NewPeerArgs = func(resource string, peerNodeID uint8, opts *NewPeerOptions) []string {
 	args := []string{
 		"new-peer", resource,
 		strconv.FormatUint(uint64(peerNodeID), 10),
@@ -63,7 +63,7 @@ var NewPeerArgs = func(resource string, peerNodeID uint, opts *NewPeerOptions) [
 }
 
 // ExecuteNewPeer makes a peer node known to the resource.
-func ExecuteNewPeer(ctx context.Context, resource string, peerNodeID uint, opts *NewPeerOptions) error {
+func ExecuteNewPeer(ctx context.Context, resource string, peerNodeID uint8, opts *NewPeerOptions) error {
 	args := NewPeerArgs(resource, peerNodeID, opts)
 	cmd := ExecCommandContext(ctx, Command, args...)
 
@@ -87,7 +87,7 @@ func ExecuteNewPeer(ctx context.Context, resource string, peerNodeID uint, opts 
 }
 
 // DelPeerArgs returns the arguments for drbdsetup del-peer command.
-var DelPeerArgs = func(resource string, peerNodeID uint) []string {
+var DelPeerArgs = func(resource string, peerNodeID uint8) []string {
 	return []string{
 		"del-peer", resource,
 		strconv.FormatUint(uint64(peerNodeID), 10),
@@ -95,7 +95,7 @@ var DelPeerArgs = func(resource string, peerNodeID uint) []string {
 }
 
 // ExecuteDelPeer removes a peer connection.
-func ExecuteDelPeer(ctx context.Context, resource string, peerNodeID uint) error {
+func ExecuteDelPeer(ctx context.Context, resource string, peerNodeID uint8) error {
 	args := DelPeerArgs(resource, peerNodeID)
 	cmd := ExecCommandContext(ctx, Command, args...)
 

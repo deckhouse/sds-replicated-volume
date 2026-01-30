@@ -33,7 +33,7 @@ var (
 
 // NewPathArgs returns the arguments for drbdsetup new-path command.
 // localAddr and remoteAddr should be in format "ip:port" (e.g., "192.168.1.1:7788").
-var NewPathArgs = func(resource string, peerNodeID uint, localAddr, remoteAddr string) []string {
+var NewPathArgs = func(resource string, peerNodeID uint8, localAddr, remoteAddr string) []string {
 	return []string{
 		"new-path", resource,
 		strconv.FormatUint(uint64(peerNodeID), 10),
@@ -43,7 +43,7 @@ var NewPathArgs = func(resource string, peerNodeID uint, localAddr, remoteAddr s
 }
 
 // ExecuteNewPath adds a network path (address pair) to a peer.
-func ExecuteNewPath(ctx context.Context, resource string, peerNodeID uint, localAddr, remoteAddr string) error {
+func ExecuteNewPath(ctx context.Context, resource string, peerNodeID uint8, localAddr, remoteAddr string) error {
 	args := NewPathArgs(resource, peerNodeID, localAddr, remoteAddr)
 	cmd := ExecCommandContext(ctx, Command, args...)
 
@@ -69,7 +69,7 @@ func ExecuteNewPath(ctx context.Context, resource string, peerNodeID uint, local
 }
 
 // DelPathArgs returns the arguments for drbdsetup del-path command.
-var DelPathArgs = func(resource string, peerNodeID uint, localAddr, remoteAddr string) []string {
+var DelPathArgs = func(resource string, peerNodeID uint8, localAddr, remoteAddr string) []string {
 	return []string{
 		"del-path", resource,
 		strconv.FormatUint(uint64(peerNodeID), 10),
@@ -79,7 +79,7 @@ var DelPathArgs = func(resource string, peerNodeID uint, localAddr, remoteAddr s
 }
 
 // ExecuteDelPath removes a network path from a peer.
-func ExecuteDelPath(ctx context.Context, resource string, peerNodeID uint, localAddr, remoteAddr string) error {
+func ExecuteDelPath(ctx context.Context, resource string, peerNodeID uint8, localAddr, remoteAddr string) error {
 	args := DelPathArgs(resource, peerNodeID, localAddr, remoteAddr)
 	cmd := ExecCommandContext(ctx, Command, args...)
 

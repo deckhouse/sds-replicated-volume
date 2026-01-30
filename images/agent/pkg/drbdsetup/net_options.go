@@ -37,7 +37,7 @@ type NetOptions struct {
 }
 
 // NetOptionsArgs returns arguments for drbdsetup net-options command.
-var NetOptionsArgs = func(resource string, peerNodeID uint, opts NetOptions) []string {
+var NetOptionsArgs = func(resource string, peerNodeID uint8, opts NetOptions) []string {
 	args := []string{
 		"net-options", resource,
 		strconv.FormatUint(uint64(peerNodeID), 10),
@@ -63,7 +63,7 @@ var NetOptionsArgs = func(resource string, peerNodeID uint, opts NetOptions) []s
 }
 
 // ExecuteNetOptions changes network options on an existing connection.
-func ExecuteNetOptions(ctx context.Context, resource string, peerNodeID uint, opts NetOptions) error {
+func ExecuteNetOptions(ctx context.Context, resource string, peerNodeID uint8, opts NetOptions) error {
 	args := NetOptionsArgs(resource, peerNodeID, opts)
 	cmd := ExecCommandContext(ctx, Command, args...)
 

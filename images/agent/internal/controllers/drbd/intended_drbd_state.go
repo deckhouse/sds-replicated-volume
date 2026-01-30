@@ -37,7 +37,7 @@ type IntendedDRBDState interface {
 	ResourceName() string
 
 	// NodeID returns this node's ID for the resource.
-	NodeID() uint
+	NodeID() uint8
 
 	// Type returns the resource type (Diskful or Diskless).
 	Type() v1alpha1.DRBDResourceType
@@ -65,7 +65,7 @@ type IntendedPeer interface {
 	Name() string
 
 	// NodeID returns the peer's node ID.
-	NodeID() uint
+	NodeID() uint8
 
 	// Protocol returns the replication protocol (A, B, or C).
 	Protocol() v1alpha1.DRBDProtocol
@@ -105,7 +105,7 @@ type IntendedPath interface {
 type intendedDRBDState struct {
 	isUpAndNotInCleanup     bool
 	resourceName            string
-	nodeID                  uint
+	nodeID                  uint8
 	resourceType            v1alpha1.DRBDResourceType
 	backingDisk             string
 	quorum                  byte
@@ -117,7 +117,7 @@ type intendedDRBDState struct {
 func (s *intendedDRBDState) IsZero() bool              { return s == nil }
 func (s *intendedDRBDState) IsUpAndNotInCleanup() bool { return s.isUpAndNotInCleanup }
 func (s *intendedDRBDState) ResourceName() string      { return s.resourceName }
-func (s *intendedDRBDState) NodeID() uint              { return s.nodeID }
+func (s *intendedDRBDState) NodeID() uint8             { return s.nodeID }
 func (s *intendedDRBDState) Type() v1alpha1.DRBDResourceType {
 	return s.resourceType
 }
@@ -132,7 +132,7 @@ var _ IntendedDRBDState = (*intendedDRBDState)(nil)
 // intendedPeer implements IntendedPeer with pre-computed values.
 type intendedPeer struct {
 	name            string
-	nodeID          uint
+	nodeID          uint8
 	protocol        v1alpha1.DRBDProtocol
 	sharedSecret    string
 	sharedSecretAlg v1alpha1.SharedSecretAlg
@@ -141,7 +141,7 @@ type intendedPeer struct {
 }
 
 func (p *intendedPeer) Name() string                              { return p.name }
-func (p *intendedPeer) NodeID() uint                              { return p.nodeID }
+func (p *intendedPeer) NodeID() uint8                             { return p.nodeID }
 func (p *intendedPeer) Protocol() v1alpha1.DRBDProtocol           { return p.protocol }
 func (p *intendedPeer) SharedSecret() string                      { return p.sharedSecret }
 func (p *intendedPeer) SharedSecretAlg() v1alpha1.SharedSecretAlg { return p.sharedSecretAlg }

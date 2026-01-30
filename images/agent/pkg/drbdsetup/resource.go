@@ -29,12 +29,12 @@ var (
 )
 
 // NewResourceArgs returns the arguments for drbdsetup new-resource command.
-var NewResourceArgs = func(resource string, nodeID uint) []string {
+var NewResourceArgs = func(resource string, nodeID uint8) []string {
 	return []string{"new-resource", resource, strconv.FormatUint(uint64(nodeID), 10)}
 }
 
 // ExecuteNewResource creates a new DRBD resource.
-func ExecuteNewResource(ctx context.Context, resource string, nodeID uint) error {
+func ExecuteNewResource(ctx context.Context, resource string, nodeID uint8) error {
 	args := NewResourceArgs(resource, nodeID)
 	cmd := ExecCommandContext(ctx, Command, args...)
 

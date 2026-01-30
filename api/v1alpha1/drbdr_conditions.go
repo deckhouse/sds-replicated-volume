@@ -40,4 +40,5 @@ const (
 	DRBDResourceCondConfiguredReasonNewResourceFailed     = "NewResourceFailed"
 	DRBDResourceCondConfiguredReasonResourceOptionsFailed = "ResourceOptionsFailed"
 	DRBDResourceCondConfiguredReasonStateQueryFailed      = "StateQueryFailed"
+	DRBDResourceCondConfiguredReasonInMaintenance         = "InMaintenance"
 )

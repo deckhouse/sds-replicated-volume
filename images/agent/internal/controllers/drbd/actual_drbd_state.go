@@ -97,7 +97,7 @@ type ActualVolume interface {
 
 type ActualPeer interface {
 	// NodeID returns the peer's node ID.
-	NodeID() uint
+	NodeID() uint8
 
 	// Name returns the peer's name.
 	Name() string
@@ -491,8 +491,8 @@ type actualPeer struct {
 	showConnection *drbdsetup.ShowConnection
 }
 
-func (p *actualPeer) NodeID() uint {
-	return uint(p.connection.PeerNodeID)
+func (p *actualPeer) NodeID() uint8 {
+	return uint8(p.connection.PeerNodeID)
 }
 
 func (p *actualPeer) Name() string {

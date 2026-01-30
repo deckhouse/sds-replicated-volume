@@ -40,27 +40,34 @@ type SizeMinMax struct {
 	Max resource.Quantity
 }
 
+// Float64MinMax represents a float64 range with min and max values
+type Float64MinMax struct {
+	Min float64
+	Max float64
+}
+
 // MultiVolumeConfig configures the multivolume orchestrator
 type MultiVolumeConfig struct {
-	StorageClasses                []string
-	MaxVolumes                    int
-	VolumeStep                    StepMinMax
-	StepPeriod                    DurationMinMax
-	VolumePeriod                  DurationMinMax
-	DisablePodDestroyer           bool
-	DisableVolumeResizer          bool
-	DisableVolumeReplicaDestroyer bool
-	DisableVolumeReplicaCreator   bool
+	StorageClasses               []string
+	MaxVolumes                   int
+	VolumeStep                   StepMinMax
+	StepPeriod                   DurationMinMax
+	VolumePeriod                 DurationMinMax
+	EnablePodDestroyer           bool
+	EnableVolumeResizer          bool
+	EnableVolumeReplicaDestroyer bool
+	EnableVolumeReplicaCreator   bool
+	ChaosDebugMode               bool
 }
 
 // VolumeMainConfig configures the volume-main goroutine
 type VolumeMainConfig struct {
-	StorageClassName              string
-	VolumeLifetime                time.Duration
-	InitialSize                   resource.Quantity
-	DisableVolumeResizer          bool
-	DisableVolumeReplicaDestroyer bool
-	DisableVolumeReplicaCreator   bool
+	StorageClassName             string
+	VolumeLifetime               time.Duration
+	InitialSize                  resource.Quantity
+	EnableVolumeResizer          bool
+	EnableVolumeReplicaDestroyer bool
+	EnableVolumeReplicaCreator   bool
 }
 
 // VolumeAttacherConfig configures the volume-attacher goroutine
@@ -90,4 +97,23 @@ type PodDestroyerConfig struct {
 	LabelSelector string
 	PodCount      StepMinMax
 	Period        DurationMinMax
+}
+
+// ChaosNetworkBlockerConfig configures the chaos-network-blocker goroutine
+type ChaosNetworkBlockerConfig struct {
+	Period           DurationMinMax
+	IncidentDuration DurationMinMax
+	GroupSize        int // Target size for one of the partition groups (0 = split in half)
+}
+
+// ChaosNetworkDegraderConfig configures the chaos-network-degrader goroutine
+type ChaosNetworkDegraderConfig struct {
+	Period           DurationMinMax
+	IncidentDuration DurationMinMax
+	LossPercent      float64 // Packet loss percentage (single value, not range)
+}
+
+// ChaosVMReboterConfig configures the chaos-vm-reboter goroutine
+type ChaosVMReboterConfig struct {
+	Period DurationMinMax
 }

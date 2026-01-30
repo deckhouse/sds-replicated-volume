@@ -22,9 +22,11 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/chaos"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/runners"
@@ -94,17 +96,30 @@ func main() {
 		close(forceCleanupChan) // Broadcast: all readers will get notification simultaneously
 	}()
 
+	// ----------- chaos ---------------------
+	// Setup chaos engineering if enabled
+	chaosEnabled := opt.EnableChaosNetBlock ||
+		opt.EnableChaosNetDegrade || opt.EnableChaosVMReboot
+
+	var chaosCleanup func()
+	if chaosEnabled {
+		chaosCleanup = setupChaosRunners(ctx, log, opt, kubeClient, forceCleanupChan)
+		defer chaosCleanup()
+	}
+	// ----------- chaos ---------------------
+
 	// Create multivolume config
 	cfg := config.MultiVolumeConfig{
-		StorageClasses:                opt.StorageClasses,
-		MaxVolumes:                    opt.MaxVolumes,
-		VolumeStep:                    config.StepMinMax{Min: opt.VolumeStepMin, Max: opt.VolumeStepMax},
-		StepPeriod:                    config.DurationMinMax{Min: opt.StepPeriodMin, Max: opt.StepPeriodMax},
-		VolumePeriod:                  config.DurationMinMax{Min: opt.VolumePeriodMin, Max: opt.VolumePeriodMax},
-		DisablePodDestroyer:           opt.DisablePodDestroyer,
-		DisableVolumeResizer:          opt.DisableVolumeResizer,
-		DisableVolumeReplicaDestroyer: opt.DisableVolumeReplicaDestroyer,
-		DisableVolumeReplicaCreator:   opt.DisableVolumeReplicaCreator,
+		StorageClasses:               opt.StorageClasses,
+		MaxVolumes:                   opt.MaxVolumes,
+		VolumeStep:                   config.StepMinMax{Min: opt.VolumeStepMin, Max: opt.VolumeStepMax},
+		StepPeriod:                   config.DurationMinMax{Min: opt.StepPeriodMin, Max: opt.StepPeriodMax},
+		VolumePeriod:                 config.DurationMinMax{Min: opt.VolumePeriodMin, Max: opt.VolumePeriodMax},
+		EnablePodDestroyer:           opt.EnablePodDestroyer,
+		EnableVolumeResizer:          opt.EnableVolumeResizer,
+		EnableVolumeReplicaDestroyer: opt.EnableVolumeReplicaDestroyer,
+		EnableVolumeReplicaCreator:   opt.EnableVolumeReplicaCreator,
+		ChaosDebugMode:               opt.ChaosDebugMode,
 	}
 
 	multiVolume := runners.NewMultiVolume(cfg, kubeClient, forceCleanupChan)
@@ -177,4 +192,105 @@ func printCheckerStats(stats []*runners.CheckerStats) {
 	fmt.Fprintf(os.Stdout, "Stable (0 transitions):        %d\n", stableCount)
 	fmt.Fprintf(os.Stdout, "Recovered (even transitions):  %d\n", recoveredCount)
 	fmt.Fprintf(os.Stdout, "Broken (odd transitions):      %d\n", brokenCount)
+}
+
+// setupChaosRunners initializes and starts chaos engineering runners
+// Returns a cleanup function that should be called on shutdown
+func setupChaosRunners(
+	ctx context.Context,
+	log *slog.Logger,
+	opt Opt,
+	kubeClient *kubeutils.Client,
+	forceCleanupChan <-chan struct{},
+) func() {
+	log.Info("setting up chaos engineering runners")
+
+	// Create parent cluster client
+	parentClient, err := chaos.NewParentClient(opt.ParentKubeconfig, opt.VMNamespace)
+	if err != nil {
+		log.Error("failed to create parent cluster client", "error", err)
+		return func() {}
+	}
+
+	// Create network block manager (uses parent cluster client)
+	networkBlockMgr := chaos.NewNetworkBlockManager(parentClient)
+
+	// Create network degrade manager (uses child cluster client)
+	networkDegradeMgr := chaos.NewNetworkDegradeManager(kubeClient.Client())
+
+	// Create VM reboot manager (uses parent cluster client)
+	vmRebootMgr := chaos.NewVMRebootManager(parentClient)
+
+	// Cleanup stale resources from previous runs
+	log.Info("cleaning up stale chaos resources from previous runs")
+
+	if stalePolicies, err := networkBlockMgr.CleanupStaleChaosPolicies(ctx); err != nil {
+		log.Warn("failed to cleanup stale network block policies", "error", err)
+	} else if stalePolicies > 0 {
+		log.Info("cleaned up stale network block policies", "count", stalePolicies)
+	}
+
+	if staleVMOps, err := vmRebootMgr.CleanupStaleVMOperations(ctx); err != nil {
+		log.Warn("failed to cleanup stale VMOperations", "error", err)
+	} else if staleVMOps > 0 {
+		log.Info("cleaned up stale VMOperations", "count", staleVMOps)
+	}
+
+	// Common timing config
+	period := config.DurationMinMax{Min: opt.ChaosPeriodMin, Max: opt.ChaosPeriodMax}
+	incidentDuration := config.DurationMinMax{Min: opt.ChaosIncidentMin, Max: opt.ChaosIncidentMax}
+
+	// Track running chaos goroutines
+	var wg sync.WaitGroup
+
+	// Start network blocker
+	if opt.EnableChaosNetBlock {
+		cfg := config.ChaosNetworkBlockerConfig{
+			Period:           period,
+			IncidentDuration: incidentDuration,
+			GroupSize:        opt.ChaosPartitionGroupSize,
+		}
+		blocker := runners.NewChaosNetworkBlocker(cfg, networkBlockMgr, parentClient, forceCleanupChan)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = blocker.Run(ctx)
+		}()
+	}
+
+	// Start network degrader
+	if opt.EnableChaosNetDegrade {
+		cfg := config.ChaosNetworkDegraderConfig{
+			Period:           period,
+			IncidentDuration: incidentDuration,
+			LossPercent:      opt.ChaosLossPercent,
+		}
+		degrader := runners.NewChaosNetworkDegrader(cfg, networkDegradeMgr, parentClient, forceCleanupChan)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = degrader.Run(ctx)
+		}()
+	}
+
+	// Start VM reboter
+	if opt.EnableChaosVMReboot {
+		cfg := config.ChaosVMReboterConfig{
+			Period: period,
+		}
+		reboter := runners.NewChaosVMReboter(cfg, vmRebootMgr, parentClient, forceCleanupChan)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = reboter.Run(ctx)
+		}()
+	}
+
+	// Return cleanup function
+	return func() {
+		// Each runner is responsible for cleaning up its own resources
+
+		// Wait for all chaos goroutines to finish
+		wg.Wait()
+	}
 }

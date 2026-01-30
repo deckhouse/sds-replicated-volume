@@ -490,7 +490,7 @@ func showCmd(resourceName string, result *drbdsetup.ShowResource) *fakedrbdsetup
 	}
 }
 
-func newResourceCmd(resourceName string, nodeID uint) *fakedrbdsetup.ExpectedCmd {
+func newResourceCmd(resourceName string, nodeID uint8) *fakedrbdsetup.ExpectedCmd {
 	return &fakedrbdsetup.ExpectedCmd{
 		Name:         drbdsetup.Command,
 		Args:         drbdsetup.NewResourceArgs(resourceName, nodeID),
@@ -508,7 +508,7 @@ func newMinorCmd(resourceName string, minor, volume uint) *fakedrbdsetup.Expecte
 	}
 }
 
-func disconnectCmd(resourceName string, peerNodeID uint) *fakedrbdsetup.ExpectedCmd {
+func disconnectCmd(resourceName string, peerNodeID uint8) *fakedrbdsetup.ExpectedCmd {
 	return &fakedrbdsetup.ExpectedCmd{
 		Name:         drbdsetup.Command,
 		Args:         drbdsetup.DisconnectArgs(resourceName, peerNodeID),
@@ -517,7 +517,7 @@ func disconnectCmd(resourceName string, peerNodeID uint) *fakedrbdsetup.Expected
 	}
 }
 
-func delPeerCmd(resourceName string, peerNodeID uint) *fakedrbdsetup.ExpectedCmd {
+func delPeerCmd(resourceName string, peerNodeID uint8) *fakedrbdsetup.ExpectedCmd {
 	return &fakedrbdsetup.ExpectedCmd{
 		Name:         drbdsetup.Command,
 		Args:         drbdsetup.DelPeerArgs(resourceName, peerNodeID),
