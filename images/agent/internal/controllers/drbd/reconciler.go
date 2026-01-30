@@ -106,7 +106,7 @@ func (r *Reconciler) Reconcile(
 
 	iState := computeIntendedDRBDState(drbdr, backingDisk)
 
-	aState, aErr := observeActualDRBDState(rf.Ctx(), drbdr.DRBDResourceNameOnTheNode())
+	aState, aErr := observeActualDRBDState(rf.Ctx(), DRBDResourceNameOnTheNode(drbdr))
 	aErr = ConfiguredReasonError(aErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 
 	// Compute and execute DRBD actions
@@ -115,7 +115,7 @@ func (r *Reconciler) Reconcile(
 
 	// Refresh actual state if DRBD state was changed
 	if refreshNeeded {
-		aState, aErr2 = observeActualDRBDState(rf.Ctx(), drbdr.DRBDResourceNameOnTheNode())
+		aState, aErr2 = observeActualDRBDState(rf.Ctx(), DRBDResourceNameOnTheNode(drbdr))
 		aErr2 = ConfiguredReasonError(aErr2, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 	}
 

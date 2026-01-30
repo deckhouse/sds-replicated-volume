@@ -229,7 +229,7 @@ func computeIntendedDRBDState(
 
 	return &intendedDRBDState{
 		isUpAndNotInCleanup:     isUpAndNotInCleanup,
-		resourceName:            drbdr.DRBDResourceNameOnTheNode(),
+		resourceName:            DRBDResourceNameOnTheNode(drbdr),
 		nodeID:                  drbdr.Spec.NodeID,
 		resourceType:            drbdr.Spec.Type,
 		backingDisk:             backingDisk,

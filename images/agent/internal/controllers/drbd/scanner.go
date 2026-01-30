@@ -136,7 +136,7 @@ func (s *Scanner) triggerAllResources(ctx context.Context) {
 
 // triggerReconciliation sends an event to trigger reconciliation for a specific resource.
 func (s *Scanner) triggerReconciliation(ctx context.Context, resourceName string) {
-	resourceName, nameFormatValid := v1alpha1.ParseDRBDResourceNameOnTheNode(resourceName)
+	resourceName, nameFormatValid := ParseDRBDResourceNameOnTheNode(resourceName)
 	if !nameFormatValid {
 		s.log.Debug("Resource has invalid name format, will be searching by ActualNameOnTheNode", "resourceName", resourceName)
 	}

@@ -16,6 +16,13 @@ limitations under the License.
 
 package drbd
 
+import (
+	"fmt"
+	"strings"
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+)
+
 const (
 	// ControllerName is the stable name for the DRBD controller.
 	// Used in .Named(...) for controller-runtime builder.
@@ -24,3 +31,14 @@ const (
 	// ScannerName is the name of the DRBD scanner component.
 	ScannerName = "drbd-scanner"
 )
+
+func DRBDResourceNameOnTheNode(drbdr *v1alpha1.DRBDResource) string {
+	if drbdr.Spec.ActualNameOnTheNode != "" {
+		return drbdr.Spec.ActualNameOnTheNode
+	}
+	return fmt.Sprintf("sdsrv-%s", drbdr.Name)
+}
+
+func ParseDRBDResourceNameOnTheNode(s string) (string, bool) {
+	return strings.CutPrefix(s, "sdsrv-")
+}
