@@ -490,6 +490,239 @@ var _ = Describe("findLLVByName", func() {
 	})
 })
 
+var _ = Describe("findLVGInEligibleNodeByName", func() {
+	It("returns nil when LVG not found", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName: "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+				{Name: "lvg-other"},
+			},
+		}
+
+		Expect(findLVGInEligibleNodeByName(node, "lvg-1")).To(BeNil())
+	})
+
+	It("returns nil for empty LVMVolumeGroups", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:        "node-1",
+			LVMVolumeGroups: nil,
+		}
+
+		Expect(findLVGInEligibleNodeByName(node, "lvg-1")).To(BeNil())
+	})
+
+	It("returns pointer to found LVG by name", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName: "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+				{Name: "lvg-1", ThinPoolName: "tp-1"},
+				{Name: "lvg-2", ThinPoolName: "tp-2"},
+			},
+		}
+
+		result := findLVGInEligibleNodeByName(node, "lvg-1")
+
+		Expect(result).NotTo(BeNil())
+		Expect(result.Name).To(Equal("lvg-1"))
+		Expect(result.ThinPoolName).To(Equal("tp-1"))
+	})
+
+	It("returns pointer to slice element (same memory)", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName: "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+				{Name: "lvg-1"},
+			},
+		}
+
+		result := findLVGInEligibleNodeByName(node, "lvg-1")
+
+		Expect(result).To(BeIdenticalTo(&node.LVMVolumeGroups[0]))
+	})
+})
+
+var _ = Describe("findLVGInEligibleNode", func() {
+	It("returns nil when LVG not found", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName: "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+				{Name: "lvg-other", ThinPoolName: "tp-1"},
+			},
+		}
+
+		Expect(findLVGInEligibleNode(node, "lvg-1", "tp-1")).To(BeNil())
+	})
+
+	It("returns nil when name matches but thinPoolName does not", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName: "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+				{Name: "lvg-1", ThinPoolName: "tp-other"},
+			},
+		}
+
+		Expect(findLVGInEligibleNode(node, "lvg-1", "tp-1")).To(BeNil())
+	})
+
+	It("returns nil for empty LVMVolumeGroups", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:        "node-1",
+			LVMVolumeGroups: nil,
+		}
+
+		Expect(findLVGInEligibleNode(node, "lvg-1", "tp-1")).To(BeNil())
+	})
+
+	It("returns pointer to found LVG when both name and thinPoolName match", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName: "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+				{Name: "lvg-1", ThinPoolName: "tp-1"},
+				{Name: "lvg-1", ThinPoolName: "tp-2"},
+				{Name: "lvg-2", ThinPoolName: "tp-1"},
+			},
+		}
+
+		result := findLVGInEligibleNode(node, "lvg-1", "tp-2")
+
+		Expect(result).NotTo(BeNil())
+		Expect(result.Name).To(Equal("lvg-1"))
+		Expect(result.ThinPoolName).To(Equal("tp-2"))
+	})
+
+	It("returns pointer to slice element (same memory)", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName: "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+				{Name: "lvg-1", ThinPoolName: "tp-1"},
+			},
+		}
+
+		result := findLVGInEligibleNode(node, "lvg-1", "tp-1")
+
+		Expect(result).To(BeIdenticalTo(&node.LVMVolumeGroups[0]))
+	})
+})
+
+var _ = Describe("collectEligibilityWarnings", func() {
+	It("returns empty string when no warnings", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: false,
+			NodeReady:     true,
+			AgentReady:    true,
+		}
+
+		result := collectEligibilityWarnings(node, nil)
+
+		Expect(result).To(BeEmpty())
+	})
+
+	It("returns single warning without 'and'", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: true,
+			NodeReady:     true,
+			AgentReady:    true,
+		}
+
+		result := collectEligibilityWarnings(node, nil)
+
+		Expect(result).To(Equal("node is unschedulable"))
+	})
+
+	It("returns two warnings joined with 'and'", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: true,
+			NodeReady:     false,
+			AgentReady:    true,
+		}
+
+		result := collectEligibilityWarnings(node, nil)
+
+		Expect(result).To(Equal("node is unschedulable and node is not ready"))
+	})
+
+	It("returns 3+ warnings with serial comma", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: true,
+			NodeReady:     false,
+			AgentReady:    false,
+		}
+
+		result := collectEligibilityWarnings(node, nil)
+
+		Expect(result).To(Equal("node is unschedulable, node is not ready, and agent is not ready"))
+	})
+
+	It("collects all node warnings", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: true,
+			NodeReady:     false,
+			AgentReady:    false,
+		}
+
+		result := collectEligibilityWarnings(node, nil)
+
+		Expect(result).To(ContainSubstring("node is unschedulable"))
+		Expect(result).To(ContainSubstring("node is not ready"))
+		Expect(result).To(ContainSubstring("agent is not ready"))
+	})
+
+	It("collects LVG warnings", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: false,
+			NodeReady:     true,
+			AgentReady:    true,
+		}
+		lvg := &v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+			Name:          "lvg-1",
+			Unschedulable: true,
+			Ready:         false,
+		}
+
+		result := collectEligibilityWarnings(node, lvg)
+
+		Expect(result).To(Equal("LVMVolumeGroup is unschedulable and LVMVolumeGroup is not ready"))
+	})
+
+	It("collects both node and LVG warnings", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: true,
+			NodeReady:     true,
+			AgentReady:    true,
+		}
+		lvg := &v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+			Name:          "lvg-1",
+			Unschedulable: false,
+			Ready:         false,
+		}
+
+		result := collectEligibilityWarnings(node, lvg)
+
+		Expect(result).To(Equal("node is unschedulable and LVMVolumeGroup is not ready"))
+	})
+
+	It("handles nil LVG (only node warnings)", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: true,
+			NodeReady:     true,
+			AgentReady:    true,
+		}
+
+		result := collectEligibilityWarnings(node, nil)
+
+		Expect(result).To(Equal("node is unschedulable"))
+		Expect(result).NotTo(ContainSubstring("LVMVolumeGroup"))
+	})
+})
+
 var _ = Describe("computeAPIValidationErrorCauses", func() {
 	It("returns error message for non-StatusError", func() {
 		err := newTestError("some error")
@@ -2103,6 +2336,115 @@ var _ = Describe("applyRVRDRBDResourceGeneration", func() {
 
 		Expect(changed).To(BeTrue())
 		Expect(rvr.Status.DRBDResourceGeneration).To(Equal(int64(0)))
+	})
+})
+
+var _ = Describe("applySatisfyEligibleNodesCondAbsent", func() {
+	It("removes condition when present", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		// First set the condition.
+		applySatisfyEligibleNodesCondTrue(rvr, "Satisfied", "Test")
+
+		changed := applySatisfyEligibleNodesCondAbsent(rvr)
+
+		Expect(changed).To(BeTrue())
+		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)).To(BeNil())
+	})
+
+	It("returns false when condition already absent", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applySatisfyEligibleNodesCondAbsent(rvr)
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applySatisfyEligibleNodesCondUnknown", func() {
+	It("sets condition to Unknown", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applySatisfyEligibleNodesCondUnknown(rvr, "PendingConfiguration", "Test message")
+
+		Expect(changed).To(BeTrue())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(cond.Reason).To(Equal("PendingConfiguration"))
+		Expect(cond.Message).To(Equal("Test message"))
+	})
+
+	It("returns false when condition already set to same value", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		applySatisfyEligibleNodesCondUnknown(rvr, "PendingConfiguration", "Test message")
+
+		changed := applySatisfyEligibleNodesCondUnknown(rvr, "PendingConfiguration", "Test message")
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applySatisfyEligibleNodesCondFalse", func() {
+	It("sets condition to False", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applySatisfyEligibleNodesCondFalse(rvr, "NodeMismatch", "Test message")
+
+		Expect(changed).To(BeTrue())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal("NodeMismatch"))
+		Expect(cond.Message).To(Equal("Test message"))
+	})
+
+	It("returns false when condition already set to same value", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		applySatisfyEligibleNodesCondFalse(rvr, "NodeMismatch", "Test message")
+
+		changed := applySatisfyEligibleNodesCondFalse(rvr, "NodeMismatch", "Test message")
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applySatisfyEligibleNodesCondTrue", func() {
+	It("sets condition to True", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applySatisfyEligibleNodesCondTrue(rvr, "Satisfied", "Test message")
+
+		Expect(changed).To(BeTrue())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal("Satisfied"))
+		Expect(cond.Message).To(Equal("Test message"))
+	})
+
+	It("returns false when condition already set to same value", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		applySatisfyEligibleNodesCondTrue(rvr, "Satisfied", "Test message")
+
+		changed := applySatisfyEligibleNodesCondTrue(rvr, "Satisfied", "Test message")
+
+		Expect(changed).To(BeFalse())
 	})
 })
 
@@ -4807,6 +5149,410 @@ var _ = Describe("deleteLLV", func() {
 		err := rec.deleteLLV(ctx, llv)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(deleteCalled).To(BeTrue(), "delete should be called for LLV without DeletionTimestamp")
+	})
+})
+
+var _ = Describe("reconcileSatisfyEligibleNodesCondition", func() {
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
+	})
+
+	It("removes condition when node not selected", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "", // Not selected.
+			},
+		}
+		// Pre-set condition.
+		applySatisfyEligibleNodesCondTrue(rvr, "Satisfied", "Test")
+
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		outcome := rec.reconcileSatisfyEligibleNodesCondition(ctx, rvr, nil)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)).To(BeNil())
+	})
+
+	It("sets condition to Unknown when RV is nil", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+			},
+		}
+
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		outcome := rec.reconcileSatisfyEligibleNodesCondition(ctx, rvr, nil)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonPendingConfiguration))
+	})
+
+	It("sets condition to Unknown when RV has no Configuration", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: nil,
+			},
+		}
+
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		outcome := rec.reconcileSatisfyEligibleNodesCondition(ctx, rvr, rv)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonPendingConfiguration))
+	})
+
+	It("sets condition to Unknown when RSP not found", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					StoragePoolName: "rsp-missing",
+				},
+			},
+		}
+
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		outcome := rec.reconcileSatisfyEligibleNodesCondition(ctx, rvr, rv)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonPendingConfiguration))
+		Expect(cond.Message).To(ContainSubstring("ReplicatedStoragePool not found"))
+	})
+
+	It("sets condition to False when node not in eligibleNodes", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					StoragePoolName: "rsp-1",
+				},
+			},
+		}
+		rsp := &v1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			Status: v1alpha1.ReplicatedStoragePoolStatus{
+				EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+					{NodeName: "node-other"},
+				},
+			},
+		}
+
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rsp).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		outcome := rec.reconcileSatisfyEligibleNodesCondition(ctx, rvr, rv)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonNodeMismatch))
+	})
+
+	It("sets condition to False when Diskful LVMVolumeGroup not found", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					StoragePoolName: "rsp-1",
+				},
+			},
+		}
+		rsp := &v1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			Status: v1alpha1.ReplicatedStoragePoolStatus{
+				EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+					{
+						NodeName:   "node-1",
+						NodeReady:  true,
+						AgentReady: true,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+							{Name: "lvg-other", Ready: true},
+						},
+					},
+				},
+			},
+		}
+
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rsp).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		outcome := rec.reconcileSatisfyEligibleNodesCondition(ctx, rvr, rv)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonLVMVolumeGroupMismatch))
+	})
+
+	It("sets condition to False when ThinPool not found", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:                   "node-1",
+				Type:                       v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName:         "lvg-1",
+				LVMVolumeGroupThinPoolName: "tp-1",
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					StoragePoolName: "rsp-1",
+				},
+			},
+		}
+		rsp := &v1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			Status: v1alpha1.ReplicatedStoragePoolStatus{
+				EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+					{
+						NodeName:   "node-1",
+						NodeReady:  true,
+						AgentReady: true,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+							{Name: "lvg-1", ThinPoolName: "tp-other", Ready: true},
+						},
+					},
+				},
+			},
+		}
+
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rsp).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		outcome := rec.reconcileSatisfyEligibleNodesCondition(ctx, rvr, rv)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonThinPoolMismatch))
+	})
+
+	It("sets condition to True when all checks pass (Diskless)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+				Type:     v1alpha1.ReplicaTypeAccess,
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					StoragePoolName: "rsp-1",
+				},
+			},
+		}
+		rsp := &v1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			Status: v1alpha1.ReplicatedStoragePoolStatus{
+				EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+					{
+						NodeName:   "node-1",
+						NodeReady:  true,
+						AgentReady: true,
+					},
+				},
+			},
+		}
+
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rsp).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		outcome := rec.reconcileSatisfyEligibleNodesCondition(ctx, rvr, rv)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied))
+		Expect(cond.Message).To(Equal("Replica satisfies eligible nodes requirements"))
+	})
+
+	It("sets condition to True when all checks pass (Diskful with ThinPool)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:                   "node-1",
+				Type:                       v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName:         "lvg-1",
+				LVMVolumeGroupThinPoolName: "tp-1",
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					StoragePoolName: "rsp-1",
+				},
+			},
+		}
+		rsp := &v1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			Status: v1alpha1.ReplicatedStoragePoolStatus{
+				EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+					{
+						NodeName:   "node-1",
+						NodeReady:  true,
+						AgentReady: true,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+							{Name: "lvg-1", ThinPoolName: "tp-1", Ready: true},
+						},
+					},
+				},
+			},
+		}
+
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rsp).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		outcome := rec.reconcileSatisfyEligibleNodesCondition(ctx, rvr, rv)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied))
+	})
+
+	It("sets condition to True with warnings when node is unschedulable", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+				Type:     v1alpha1.ReplicaTypeAccess,
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					StoragePoolName: "rsp-1",
+				},
+			},
+		}
+		rsp := &v1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			Status: v1alpha1.ReplicatedStoragePoolStatus{
+				EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+					{
+						NodeName:      "node-1",
+						NodeReady:     true,
+						AgentReady:    true,
+						Unschedulable: true, // Warning.
+					},
+				},
+			},
+		}
+
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rsp).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		outcome := rec.reconcileSatisfyEligibleNodesCondition(ctx, rvr, rv)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied))
+		Expect(cond.Message).To(ContainSubstring("however note that currently"))
+		Expect(cond.Message).To(ContainSubstring("node is unschedulable"))
+	})
+
+	It("sets condition to True with warnings when LVMVolumeGroup is not ready", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					StoragePoolName: "rsp-1",
+				},
+			},
+		}
+		rsp := &v1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			Status: v1alpha1.ReplicatedStoragePoolStatus{
+				EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+					{
+						NodeName:   "node-1",
+						NodeReady:  true,
+						AgentReady: true,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+							{Name: "lvg-1", Ready: false}, // Warning.
+						},
+					},
+				},
+			},
+		}
+
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rsp).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		outcome := rec.reconcileSatisfyEligibleNodesCondition(ctx, rvr, rv)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Message).To(ContainSubstring("LVMVolumeGroup is not ready"))
 	})
 })
 
