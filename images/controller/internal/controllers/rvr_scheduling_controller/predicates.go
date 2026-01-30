@@ -17,6 +17,7 @@ limitations under the License.
 package rvrschedulingcontroller
 
 import (
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -51,8 +52,8 @@ func RSPPredicates() []predicate.Predicate {
 				if !okOld || !okNew || oldRSP == nil || newRSP == nil {
 					return true
 				}
-				// React if eligibleNodes or their LVGs changed.
-				if !eligibleNodesDeepEqual(oldRSP.Status.EligibleNodes, newRSP.Status.EligibleNodes) {
+				// React if eligibleNodes changed (all fields: node names, zones, LVGs, readiness, schedulability).
+				if !apiequality.Semantic.DeepEqual(oldRSP.Status.EligibleNodes, newRSP.Status.EligibleNodes) {
 					return true
 				}
 				// React if usedBy.replicatedStorageClassNames changed.
@@ -64,36 +65,4 @@ func RSPPredicates() []predicate.Predicate {
 			},
 		},
 	}
-}
-
-// eligibleNodesDeepEqual compares two eligibleNodes slices by node names and LVG names.
-// Precondition: both slices are sorted by NodeName, and LVMVolumeGroups within each node
-// are sorted by Name (RSP controller guarantees this).
-func eligibleNodesDeepEqual(a, b []v1alpha1.ReplicatedStoragePoolEligibleNode) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].NodeName != b[i].NodeName {
-			return false
-		}
-		if !eligibleNodeLVGsEqual(a[i].LVMVolumeGroups, b[i].LVMVolumeGroups) {
-			return false
-		}
-	}
-	return true
-}
-
-// eligibleNodeLVGsEqual compares two LVMVolumeGroups slices by Name only.
-// Precondition: both slices are sorted by Name (RSP controller guarantees this).
-func eligibleNodeLVGsEqual(a, b []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].Name != b[i].Name {
-			return false
-		}
-	}
-	return true
 }
