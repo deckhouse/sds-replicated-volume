@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
@@ -65,8 +66,8 @@ func (r *Reconciler) Reconcile(
 		return rf.Done().ToCtrl()
 	}
 
-	// Get Node
-	node, err := r.getCurrentNode(rf.Ctx(), drbdr.Spec.NodeName)
+	// Get Node (required)
+	node, err := r.getRequiredCurrentNode(rf.Ctx())
 	if err != nil {
 		return rf.Fail(err).ToCtrl()
 	}
@@ -83,33 +84,50 @@ func (r *Reconciler) Reconcile(
 	addrErr := ensureAddresses(rf.Ctx(), drbdr, node, r.portCache.Allocate).Error()
 
 	// Phase 3: DRBD convergence
-	var iErr, aErr, aErr2, drbdErr error
+	var llvErr, lvgErr, aErr, aErr2, drbdErr error
 
-	iState, iErr := computeIntendedDRBDState(rf.Ctx(), r.cl, drbdr)
-	iErr = ConfiguredReasonError(iErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
+	// Get backing disk path for diskful resources
+	var backingDisk string
+	if drbdr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful {
+		var llv *snc.LVMLogicalVolume
+		llv, llvErr = r.getLVMLogicalVolume(rf.Ctx(), drbdr.Spec.LVMLogicalVolumeName)
+		llvErr = ConfiguredReasonError(llvErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 
-	aState, aErr := getActualDRBDState(rf.Ctx(), drbdr.DRBDResourceNameOnTheNode())
+		if llv != nil {
+			var lvg *snc.LVMVolumeGroup
+			lvg, lvgErr = r.getLVMVolumeGroup(rf.Ctx(), llv.Spec.LVMVolumeGroupName)
+			lvgErr = ConfiguredReasonError(lvgErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
+
+			if lvg != nil {
+				backingDisk = v1alpha1.SprintDRBDDisk(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+			}
+		}
+	}
+
+	iState := computeIntendedDRBDState(drbdr, backingDisk)
+
+	aState, aErr := observeActualDRBDState(rf.Ctx(), drbdr.DRBDResourceNameOnTheNode())
 	aErr = ConfiguredReasonError(aErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 
 	// Compute and execute DRBD actions
 	targetActions := computeTargetDRBDActions(iState, aState)
-	refreshNeeded, drbdErr := r.convergeDRBDState(rf.Ctx(), targetActions)
+	refreshNeeded, drbdErr := convergeDRBDState(rf.Ctx(), targetActions)
 
 	// Refresh actual state if DRBD state was changed
 	if refreshNeeded {
-		aState, aErr2 = getActualDRBDState(rf.Ctx(), drbdr.DRBDResourceNameOnTheNode())
+		aState, aErr2 = observeActualDRBDState(rf.Ctx(), drbdr.DRBDResourceNameOnTheNode())
 		aErr2 = ConfiguredReasonError(aErr2, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 	}
 
 	// Phase 4: Report and status patch
-	reconcileErr := errors.Join(addrErr, iErr, aErr, aErr2, drbdErr)
+	reconcileErr := errors.Join(addrErr, llvErr, lvgErr, aErr, aErr2, drbdErr)
 	if ensureOutcome := ensureReportState(rf.Ctx(), aState, drbdr, reconcileErr); ensureOutcome.Error() != nil {
 		reconcileErr = errors.Join(reconcileErr, ensureOutcome.Error())
 	}
 
 	// Patch status if changed
 	if !equality.Semantic.DeepEqual(base.Status, drbdr.Status) {
-		statusPatchErr := r.patchDRBDRStatus(rf.Ctx(), drbdr, base)
+		statusPatchErr := r.patchDRBDRStatus(rf.Ctx(), drbdr, base, false)
 		// Ignore "not found" error if object was being deleted
 		if statusPatchErr != nil && !(drbdr.DeletionTimestamp != nil && client.IgnoreNotFound(statusPatchErr) == nil) {
 			reconcileErr = errors.Join(reconcileErr, statusPatchErr)
@@ -155,13 +173,46 @@ func (r *Reconciler) getCurrentNodeDRBDR(
 	return dr, true, nil
 }
 
-// getCurrentNode gets the Node object by name.
-func (r *Reconciler) getCurrentNode(ctx context.Context, nodeName string) (*corev1.Node, error) {
+// getRequiredCurrentNode gets the Node object by name.
+// Returns error if the Node is not found (required resource).
+func (r *Reconciler) getRequiredCurrentNode(ctx context.Context) (*corev1.Node, error) {
 	node := &corev1.Node{}
-	if err := r.cl.Get(ctx, client.ObjectKey{Name: nodeName}, node); err != nil {
-		return nil, flow.Wrapf(err, "getting Node %q", nodeName)
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: r.nodeName}, node); err != nil {
+		return nil, flow.Wrapf(err, "getting Node %q", r.nodeName)
 	}
 	return node, nil
+}
+
+// getLVMLogicalVolume gets the LVMLogicalVolume by name.
+// Returns (nil, nil) if not found.
+func (r *Reconciler) getLVMLogicalVolume(ctx context.Context, name string) (*snc.LVMLogicalVolume, error) {
+	if name == "" {
+		return nil, nil
+	}
+	llv := &snc.LVMLogicalVolume{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, llv); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			return nil, nil
+		}
+		return nil, flow.Wrapf(err, "getting LVMLogicalVolume %q", name)
+	}
+	return llv, nil
+}
+
+// getLVMVolumeGroup gets the LVMVolumeGroup by name.
+// Returns (nil, nil) if not found.
+func (r *Reconciler) getLVMVolumeGroup(ctx context.Context, name string) (*snc.LVMVolumeGroup, error) {
+	if name == "" {
+		return nil, nil
+	}
+	lvg := &snc.LVMVolumeGroup{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, lvg); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			return nil, nil
+		}
+		return nil, flow.Wrapf(err, "getting LVMVolumeGroup %q", name)
+	}
+	return lvg, nil
 }
 
 // reconcileFinalizer adds or removes the agent finalizer based on resource state.
@@ -235,15 +286,21 @@ func (r *Reconciler) patchDRBDR(
 // patchDRBDRStatus patches the status subresource.
 func (r *Reconciler) patchDRBDRStatus(
 	ctx context.Context,
-	drbdr *v1alpha1.DRBDResource,
-	base *v1alpha1.DRBDResource,
+	obj, base *v1alpha1.DRBDResource,
+	optimisticLock bool,
 ) error {
-	return r.cl.Status().Patch(ctx, drbdr, client.MergeFrom(base))
+	var patch client.Patch
+	if optimisticLock {
+		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
+	} else {
+		patch = client.MergeFrom(base)
+	}
+	return r.cl.Status().Patch(ctx, obj, patch)
 }
 
 // convergeDRBDState executes DRBD actions to converge to the target state.
 // Returns whether DRBD state was changed (requiring a refresh) and any error.
-func (r *Reconciler) convergeDRBDState(ctx context.Context, actions DRBDActions) (refreshNeeded bool, err error) {
+func convergeDRBDState(ctx context.Context, actions DRBDActions) (refreshNeeded bool, err error) {
 	for _, action := range actions {
 		if err := action.Execute(ctx); err != nil {
 			return refreshNeeded, err

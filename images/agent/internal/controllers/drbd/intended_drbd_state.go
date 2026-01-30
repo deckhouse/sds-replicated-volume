@@ -17,13 +17,8 @@ limitations under the License.
 package drbd
 
 import (
-	"context"
-	"fmt"
-
 	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
@@ -186,26 +181,15 @@ func systemNetworkToNodeAddressType(systemNetwork string) corev1.NodeAddressType
 
 // computeIntendedDRBDState constructs the intended DRBD state from the DRBDResource.
 // It requires addresses to already be computed in drbdr.status.addresses.
-// The backingDisk lookup requires Kubernetes API access.
+// The backingDisk parameter should be pre-fetched by the caller for diskful resources.
 func computeIntendedDRBDState(
-	ctx context.Context,
-	cl client.Client,
 	drbdr *v1alpha1.DRBDResource,
-) (*intendedDRBDState, error) {
+	backingDisk string,
+) *intendedDRBDState {
 	// Build local addresses map from status.addresses
 	localAddresses := make(map[string]v1alpha1.DRBDAddress, len(drbdr.Status.Addresses))
 	for _, addr := range drbdr.Status.Addresses {
 		localAddresses[addr.SystemNetworkName] = addr.Address
-	}
-
-	// Get backing disk path for diskful resources
-	var backingDisk string
-	if drbdr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful && drbdr.Spec.LVMLogicalVolumeName != "" {
-		var err error
-		backingDisk, err = getBackingDiskPath(ctx, cl, drbdr.Spec.LVMLogicalVolumeName)
-		if err != nil {
-			return nil, fmt.Errorf("getting backing disk path: %w", err)
-		}
 	}
 
 	// Build peers
@@ -253,21 +237,5 @@ func computeIntendedDRBDState(
 		quorumMinimumRedundancy: drbdr.Spec.QuorumMinimumRedundancy,
 		allowTwoPrimaries:       drbdr.Spec.AllowTwoPrimaries,
 		peers:                   peers,
-	}, nil
-}
-
-// getBackingDiskPath looks up LVMLogicalVolume and LVMVolumeGroup to construct
-// the backing disk path in the format /dev/<vg>/<lv>.
-func getBackingDiskPath(ctx context.Context, cl client.Client, llvName string) (string, error) {
-	llv := &snc.LVMLogicalVolume{}
-	if err := cl.Get(ctx, client.ObjectKey{Name: llvName}, llv); err != nil {
-		return "", fmt.Errorf("getting LVMLogicalVolume %q: %w", llvName, err)
 	}
-
-	lvg := &snc.LVMVolumeGroup{}
-	if err := cl.Get(ctx, client.ObjectKey{Name: llv.Spec.LVMVolumeGroupName}, lvg); err != nil {
-		return "", fmt.Errorf("getting LVMVolumeGroup %q: %w", llv.Spec.LVMVolumeGroupName, err)
-	}
-
-	return v1alpha1.SprintDRBDDisk(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode), nil
 }

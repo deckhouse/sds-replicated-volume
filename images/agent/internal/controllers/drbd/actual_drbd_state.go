@@ -554,8 +554,8 @@ func (p *actualPath) Established() bool {
 
 var _ ActualPath = &actualPath{}
 
-// getActualDRBDState retrieves the actual DRBD state by querying drbdsetup.
-func getActualDRBDState(ctx context.Context, drbdResName string) (*actualState, error) {
+// observeActualDRBDState retrieves the actual DRBD state by querying drbdsetup.
+func observeActualDRBDState(ctx context.Context, drbdResName string) (*actualState, error) {
 	statusResult, err := drbdsetup.ExecuteStatus(ctx, drbdResName)
 	if err != nil {
 		return nil, fmt.Errorf("executing drbdsetup status: %w", err)
