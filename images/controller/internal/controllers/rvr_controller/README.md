@@ -405,7 +405,7 @@ The backing volume size is taken from `rv.Status.Datamesh.Size` (after DRBD over
 
 ## Watches
 
-The controller watches five event sources:
+The controller watches six event sources:
 
 | Resource | Events | Handler |
 |----------|--------|---------|
@@ -413,6 +413,7 @@ The controller watches five event sources:
 | LVMLogicalVolume | All fields (Status, Spec, Labels, Finalizers, OwnerRefs) | Owns() |
 | DRBDResource | All fields | Owns() |
 | ReplicatedVolume | DatameshRevision changes, ReplicatedStorageClassName changes | mapRVToRVRs |
+| ReplicatedStoragePool | EligibleNodes changes (per-node) | rspEventHandler |
 | Pod (agent) | Ready condition changes, Create/Delete | mapAgentPodToRVRs |
 
 ### RVR Predicates
@@ -435,6 +436,21 @@ Intentionally empty: we need to react to all DRBDResource fields.
 - Reacts to Spec.ReplicatedStorageClassName changes (for labels)
 - Does not react to Create/Delete (RVRs handle their own lifecycle)
 
+### RSP Predicates
+
+- Reacts to eligibleNodes changes (compares old and new lists)
+- On Create/Delete: always triggers
+- On Update: triggers only if eligibleNodes differ
+
+### RSP EventHandler
+
+Custom EventHandler that computes changed nodes and enqueues only RVRs on those nodes:
+- On Create: enqueues all RVRs on all eligible nodes
+- On Update: computes nodes that were added/removed/modified, enqueues RVRs on those nodes
+- On Delete: enqueues all RVRs that were on eligible nodes
+
+Uses composite index to efficiently find RVRs by (replicatedVolumeName, nodeName).
+
 ### Agent Pod Predicates
 
 - Filters to Pods in the agent namespace with label `app=agent`
@@ -448,6 +464,8 @@ Intentionally empty: we need to react to all DRBDResource fields.
 | `IndexFieldLLVByRVROwner` | `metadata.ownerReferences.rvr` | List LVMLogicalVolumes owned by RVR |
 | `IndexFieldRVRByReplicatedVolumeName` | `spec.replicatedVolumeName` | Map ReplicatedVolume events to RVRs |
 | `IndexFieldRVRByNodeName` | `spec.nodeName` | Map agent Pod events to RVRs on the same node |
+| `IndexFieldRVRByRVAndNode` | `spec.replicatedVolumeName+nodeName` | Find RVR by RV and node (composite) |
+| `IndexFieldRVByStoragePoolName` | `status.configuration.storagePoolName` | Find RVs using a specific RSP |
 | `IndexFieldPodByNodeName` | `spec.nodeName` | Find agent Pod on a specific node |
 
 ## Data Flow
