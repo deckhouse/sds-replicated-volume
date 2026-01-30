@@ -21,11 +21,17 @@ const (
 	//
 	// Reasons describe attachment state, progress, or applicability.
 	ReplicatedVolumeReplicaCondAttachedType                          = "Attached"
-	ReplicatedVolumeReplicaCondAttachedReasonAttached                = "Attached"                // Attached (primary).
-	ReplicatedVolumeReplicaCondAttachedReasonPending                 = "Pending"                 // Waiting to become primary/attach.
+	ReplicatedVolumeReplicaCondAttachedReasonAgentNotReady           = "AgentNotReady"           // Agent is not ready.
+	ReplicatedVolumeReplicaCondAttachedReasonApplyingConfiguration   = "ApplyingConfiguration"   // Configuration is being applied.
+	ReplicatedVolumeReplicaCondAttachedReasonAttached                = "Attached"                // Attached and ready for I/O.
 	ReplicatedVolumeReplicaCondAttachedReasonAttachingNotApplicable  = "AttachingNotApplicable"  // Not applicable for this replica type.
 	ReplicatedVolumeReplicaCondAttachedReasonAttachingNotInitialized = "AttachingNotInitialized" // Not enough status to decide.
-	ReplicatedVolumeReplicaCondAttachedReasonDetached                = "Detached"                // Detached (secondary).
+	ReplicatedVolumeReplicaCondAttachedReasonAttachmentFailed        = "AttachmentFailed"        // Expected to be attached, but not attached.
+	ReplicatedVolumeReplicaCondAttachedReasonDetached                = "Detached"                // Detached.
+	ReplicatedVolumeReplicaCondAttachedReasonDetachmentFailed        = "DetachmentFailed"        // Expected to be detached, but still attached.
+	ReplicatedVolumeReplicaCondAttachedReasonIOSuspended             = "IOSuspended"             // Attached but I/O is suspended.
+	ReplicatedVolumeReplicaCondAttachedReasonNotApplicable           = "NotApplicable"           // No DRBDR exists.
+	ReplicatedVolumeReplicaCondAttachedReasonPending                 = "Pending"                 // Waiting to become attached.
 )
 
 const (
@@ -61,11 +67,47 @@ const (
 )
 
 const (
+	// ReplicatedVolumeReplicaCondBackingVolumeInSyncType indicates whether the replica's backing volume is in sync.
+	//
+	// Reasons describe sync state or applicability.
+	ReplicatedVolumeReplicaCondBackingVolumeInSyncType                         = "BackingVolumeInSync"
+	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonAgentNotReady          = "AgentNotReady"          // Agent is not ready.
+	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonApplyingConfiguration  = "ApplyingConfiguration"  // Configuration is being applied.
+	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonAttaching              = "Attaching"              // Disk is being attached.
+	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonDetaching              = "Detaching"              // Disk is being detached.
+	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonDiskFailed             = "DiskFailed"             // Disk failed due to I/O errors.
+	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonInSync                 = "InSync"                 // Disk is fully up-to-date.
+	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonNoDisk                 = "NoDisk"                 // Local disk is not present.
+	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonSynchronizationBlocked = "SynchronizationBlocked" // Sync blocked, awaiting peer.
+	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonSynchronizing          = "Synchronizing"          // Disk is synchronizing.
+	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonUnknownState           = "UnknownState"           // Disk state is unknown.
+)
+
+const (
+	// ReplicatedVolumeReplicaCondFullyConnectedType indicates whether the replica is fully connected to all peers.
+	//
+	// Reasons describe connection state or applicability.
+	ReplicatedVolumeReplicaCondFullyConnectedType                        = "FullyConnected"
+	ReplicatedVolumeReplicaCondFullyConnectedReasonAgentNotReady         = "AgentNotReady"         // Agent is not ready.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonApplyingConfiguration = "ApplyingConfiguration" // Configuration is being applied.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonConnectedToAllPeers   = "ConnectedToAllPeers"   // All peers are connected but not all paths are established.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonFullyConnected        = "FullyConnected"        // Fully connected to all peers on all paths.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonNoPeers               = "NoPeers"               // No peers configured.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonNotApplicable         = "NotApplicable"         // No DRBDR exists.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonNotConnected          = "NotConnected"          // Not connected to any peer.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected    = "PartiallyConnected"    // Connected to some but not all peers.
+)
+
+const (
 	// ReplicatedVolumeReplicaCondReadyType indicates whether the replica is ready for I/O.
 	//
 	// Reasons describe why it is not ready, or confirm it is ready.
-	ReplicatedVolumeReplicaCondReadyType        = "Ready"
-	ReplicatedVolumeReplicaCondReadyReasonReady = "Ready" // Ready for I/O.
+	ReplicatedVolumeReplicaCondReadyType                        = "Ready"
+	ReplicatedVolumeReplicaCondReadyReasonAgentNotReady         = "AgentNotReady"         // Agent is not ready.
+	ReplicatedVolumeReplicaCondReadyReasonApplyingConfiguration = "ApplyingConfiguration" // Configuration is being applied.
+	ReplicatedVolumeReplicaCondReadyReasonDeleting              = "Deleting"              // Replica is being deleted.
+	ReplicatedVolumeReplicaCondReadyReasonQuorumLost            = "QuorumLost"            // Quorum is lost.
+	ReplicatedVolumeReplicaCondReadyReasonReady                 = "Ready"                 // Ready for I/O.
 )
 
 const (

@@ -368,7 +368,16 @@ spec:
                   Only present on primary
                 maxLength: 256
                 type: string
+              deviceIOSuspended:
+                description: |-
+                  DeviceIOSuspended indicates whether I/O is suspended on the device.
+                  Only set when attached (device is present).
+                type: boolean
               diskState:
+                description: |-
+                  DiskState represents the state of a DRBD backing disk.
+                  It reflects the disk's synchronization status and determines whether
+                  application I/O can be served locally or requires peer involvement.
                 type: string
               peers:
                 items:
@@ -376,6 +385,10 @@ spec:
                     connectionState:
                       type: string
                     diskState:
+                      description: |-
+                        DiskState represents the state of a DRBD backing disk.
+                        It reflects the disk's synchronization status and determines whether
+                        application I/O can be served locally or requires peer involvement.
                       type: string
                     name:
                       maxLength: 253
@@ -416,6 +429,13 @@ spec:
                       x-kubernetes-list-map-keys:
                       - systemNetworkName
                       x-kubernetes-list-type: map
+                    role:
+                      description: Role is the DRBD role of this peer (Primary or
+                        Secondary).
+                      enum:
+                      - Primary
+                      - Secondary
+                      type: string
                     type:
                       description: DRBDResourceType represents the type of a DRBD
                         resource.
