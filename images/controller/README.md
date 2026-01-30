@@ -20,7 +20,7 @@ This controller operates separately from the infrastructure controllers, managin
 
 | Controller | Primary Resource | Purpose |
 |------------|------------------|---------|
-| [rvr_controller](internal/controllers/rvr_controller/README.md) | ReplicatedVolumeReplica | Manages backing volumes (LLV) and DRBD resources |
+| [rvr_controller](internal/controllers/rvr_controller/README.md) | ReplicatedVolumeReplica | Manages backing volumes (LLV), DRBD resources, and reports replica status |
 
 ## Architecture
 
@@ -90,15 +90,19 @@ flowchart TB
     end
 
     subgraph status [Managed State]
-        RVRStatus[RVR.status]
+        Conditions[RVR conditions]
+        StatusFields[RVR status fields]
     end
 
     RVR --> RVRCtrl
     RV --> RVRCtrl
     AgentPod --> RVRCtrl
+    LLV --> RVRCtrl
+    DRBDR --> RVRCtrl
     RVRCtrl -->|creates/resizes/deletes| LLV
     RVRCtrl -->|creates/configures/deletes| DRBDR
-    RVRCtrl --> RVRStatus
+    RVRCtrl --> Conditions
+    RVRCtrl --> StatusFields
 ```
 
 ## Dependency Chains
@@ -119,6 +123,7 @@ Currently, `rvr_controller` operates as a standalone controller, managing:
 
 - **LVMLogicalVolume** — backing storage for diskful replicas
 - **DRBDResource** — DRBD configuration and lifecycle management
+- **RVR status** — conditions (BackingVolumeReady, Configured, Attached, BackingVolumeInSync, FullyConnected, Ready) and status fields (peers, quorum, device state)
 
 ### Future Architecture
 
