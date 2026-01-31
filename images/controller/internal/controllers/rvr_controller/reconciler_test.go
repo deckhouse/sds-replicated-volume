@@ -39,6 +39,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -6170,10 +6171,10 @@ var _ = Describe("ensureAttachmentStatus", func() {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ensurePeersStatus tests
+// ensureStatusPeers + ensureConditionFullyConnected tests
 //
 
-var _ = Describe("ensurePeersStatus", func() {
+var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 	var (
 		ctx context.Context
 		rvr *v1alpha1.ReplicatedVolumeReplica
@@ -6195,7 +6196,10 @@ var _ = Describe("ensurePeersStatus", func() {
 		})
 		rvr.Status.Peers = []v1alpha1.PeerStatus{{Name: "peer-1"}}
 
-		outcome := ensurePeersStatus(ctx, rvr, nil, nil, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, nil),
+			ensureConditionFullyConnected(ctx, rvr, nil, nil, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
@@ -6215,7 +6219,10 @@ var _ = Describe("ensurePeersStatus", func() {
 			},
 		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)).To(BeNil())
@@ -6225,7 +6232,7 @@ var _ = Describe("ensurePeersStatus", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
-					{Name: "peer-1", ConnectionState: v1alpha1.ConnectionStateConnected},
+					{Name: "peer-1", Type: v1alpha1.DRBDResourceTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnected},
 				},
 			},
 		}
@@ -6235,15 +6242,22 @@ var _ = Describe("ensurePeersStatus", func() {
 				{Name: "rvr-1"}, // self is member
 			},
 		}
+		rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1"},
+		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, false) // agent not ready
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, false), // agent not ready
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonAgentNotReady))
-		Expect(rvr.Status.Peers).To(BeEmpty())
+		// ensureStatusPeers now populates peers even when agent is not ready
+		Expect(rvr.Status.Peers).To(HaveLen(1))
 	})
 
 	It("sets NoPeers when merged peers list is empty", func() {
@@ -6257,8 +6271,14 @@ var _ = Describe("ensurePeersStatus", func() {
 				{Name: "rvr-1"}, // only self, no peers
 			},
 		}
+		rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1"},
+		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
@@ -6271,8 +6291,8 @@ var _ = Describe("ensurePeersStatus", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
-					{Name: "peer-1", ConnectionState: v1alpha1.ConnectionStateConnecting},
-					{Name: "peer-2", ConnectionState: ""},
+					{Name: "peer-1", Type: v1alpha1.DRBDResourceTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnecting},
+					{Name: "peer-2", Type: v1alpha1.DRBDResourceTypeDiskful, ConnectionState: ""},
 				},
 			},
 		}
@@ -6284,8 +6304,14 @@ var _ = Describe("ensurePeersStatus", func() {
 			},
 			SystemNetworkNames: []string{"net-1"},
 		}
+		rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1"},
+		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
@@ -6300,6 +6326,7 @@ var _ = Describe("ensurePeersStatus", func() {
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
 					{
 						Name:            "peer-1",
+						Type:            v1alpha1.DRBDResourceTypeDiskful,
 						ConnectionState: v1alpha1.ConnectionStateConnected,
 						Paths: []v1alpha1.DRBDResourcePathStatus{
 							{SystemNetworkName: "net-1", Established: true},
@@ -6316,8 +6343,15 @@ var _ = Describe("ensurePeersStatus", func() {
 			},
 			SystemNetworkNames: []string{"net-1", "net-2"},
 		}
+		rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1"},
+			{SystemNetworkName: "net-2"},
+		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
@@ -6332,6 +6366,7 @@ var _ = Describe("ensurePeersStatus", func() {
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
 					{
 						Name:            "peer-1",
+						Type:            v1alpha1.DRBDResourceTypeDiskful,
 						ConnectionState: v1alpha1.ConnectionStateConnected,
 						Paths: []v1alpha1.DRBDResourcePathStatus{
 							{SystemNetworkName: "net-1", Established: true},
@@ -6348,8 +6383,15 @@ var _ = Describe("ensurePeersStatus", func() {
 			},
 			SystemNetworkNames: []string{"net-1", "net-2"},
 		}
+		rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1"},
+			{SystemNetworkName: "net-2"},
+		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
@@ -6364,6 +6406,7 @@ var _ = Describe("ensurePeersStatus", func() {
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
 					{
 						Name:            "peer-1",
+						Type:            v1alpha1.DRBDResourceTypeDiskful,
 						ConnectionState: v1alpha1.ConnectionStateConnected,
 						Paths: []v1alpha1.DRBDResourcePathStatus{
 							{SystemNetworkName: "net-1", Established: true},
@@ -6371,6 +6414,7 @@ var _ = Describe("ensurePeersStatus", func() {
 					},
 					{
 						Name:            "peer-2",
+						Type:            v1alpha1.DRBDResourceTypeDiskful,
 						ConnectionState: v1alpha1.ConnectionStateConnecting,
 					},
 				},
@@ -6384,8 +6428,14 @@ var _ = Describe("ensurePeersStatus", func() {
 			},
 			SystemNetworkNames: []string{"net-1"},
 		}
+		rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1"},
+		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
@@ -6401,6 +6451,7 @@ var _ = Describe("ensurePeersStatus", func() {
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
 					{
 						Name:            "peer-1",
+						Type:            v1alpha1.DRBDResourceTypeDiskful,
 						ConnectionState: v1alpha1.ConnectionStateConnected,
 						Paths: []v1alpha1.DRBDResourcePathStatus{
 							{SystemNetworkName: "net-1", Established: true},
@@ -6416,8 +6467,14 @@ var _ = Describe("ensurePeersStatus", func() {
 			},
 			SystemNetworkNames: []string{"net-1"},
 		}
+		rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1"},
+		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
@@ -6433,6 +6490,7 @@ var _ = Describe("ensurePeersStatus", func() {
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
 					{
 						Name:            "peer-1",
+						Type:            v1alpha1.DRBDResourceTypeDiskful,
 						ConnectionState: v1alpha1.ConnectionStateConnected,
 						Paths: []v1alpha1.DRBDResourcePathStatus{
 							{SystemNetworkName: "net-1", Established: true},
@@ -6450,27 +6508,39 @@ var _ = Describe("ensurePeersStatus", func() {
 		}
 
 		// First call
-		outcome1 := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome1 := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 		Expect(outcome1.Error()).NotTo(HaveOccurred())
 		Expect(outcome1.DidChange()).To(BeTrue())
 
 		// Second call should report no change
-		outcome2 := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome2 := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
 		Expect(outcome2.DidChange()).To(BeFalse())
 	})
 
-	It("merges peers from datamesh members and drbdr peers", func() {
+	It("populates peers from drbdr with computed types", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
 					{
 						Name:            "peer-1",
+						Type:            v1alpha1.DRBDResourceTypeDiskful,
 						ConnectionState: v1alpha1.ConnectionStateConnected,
 						DiskState:       v1alpha1.DiskStateUpToDate,
 						Paths: []v1alpha1.DRBDResourcePathStatus{
 							{SystemNetworkName: "net-1", Established: true},
 						},
+					},
+					{
+						Name:            "peer-2",
+						Type:            v1alpha1.DRBDResourceTypeDiskless,
+						AllowRemoteRead: true, // TieBreaker
 					},
 				},
 			},
@@ -6478,29 +6548,31 @@ var _ = Describe("ensurePeersStatus", func() {
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
 			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
 				{Name: "peer-1", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "peer-2", Type: v1alpha1.ReplicaTypeTieBreaker}, // in datamesh but not in drbdr yet
+				{Name: "peer-2", Type: v1alpha1.ReplicaTypeTieBreaker},
 				{Name: "rvr-1"},
 			},
 			SystemNetworkNames: []string{"net-1"},
 		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(rvr.Status.Peers).To(HaveLen(2))
 
-		// peer-1: from both sources
+		// peer-1: Diskful
 		peer1 := findPeerByName(rvr.Status.Peers, "peer-1")
 		Expect(peer1).NotTo(BeNil())
 		Expect(peer1.Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
 		Expect(peer1.ConnectionState).To(Equal(v1alpha1.ConnectionStateConnected))
 		Expect(peer1.BackingVolumeState).To(Equal(v1alpha1.DiskStateUpToDate))
 
-		// peer-2: only from datamesh (pending connection)
+		// peer-2: TieBreaker (Diskless + AllowRemoteRead=true)
 		peer2 := findPeerByName(rvr.Status.Peers, "peer-2")
 		Expect(peer2).NotTo(BeNil())
 		Expect(peer2.Type).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
-		Expect(peer2.ConnectionState).To(BeEmpty()) // not connected yet
 	})
 })
 
@@ -6827,67 +6899,6 @@ var _ = Describe("applyRVRStatusQuorum", func() {
 	})
 })
 
-var _ = Describe("applyRVRStatusPeers", func() {
-	var rvr *v1alpha1.ReplicatedVolumeReplica
-
-	BeforeEach(func() {
-		rvr = &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-	})
-
-	It("sets peers from nil", func() {
-		peers := []v1alpha1.PeerStatus{
-			{Name: "peer-1", Type: v1alpha1.ReplicaTypeDiskful},
-		}
-		changed := applyRVRStatusPeers(rvr, peers)
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.Peers).To(HaveLen(1))
-		Expect(rvr.Status.Peers[0].Name).To(Equal("peer-1"))
-	})
-
-	It("clears peers to nil", func() {
-		rvr.Status.Peers = []v1alpha1.PeerStatus{
-			{Name: "peer-1"},
-		}
-		changed := applyRVRStatusPeers(rvr, nil)
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.Peers).To(BeNil())
-	})
-
-	It("is idempotent for empty", func() {
-		changed := applyRVRStatusPeers(rvr, nil)
-		Expect(changed).To(BeFalse())
-	})
-
-	It("is idempotent for same value using DeepEqual", func() {
-		peers := []v1alpha1.PeerStatus{
-			{
-				Name:                    "peer-1",
-				Type:                    v1alpha1.ReplicaTypeDiskful,
-				ConnectionState:         v1alpha1.ConnectionStateConnected,
-				ConnectionEstablishedOn: []string{"net-1", "net-2"},
-			},
-		}
-		applyRVRStatusPeers(rvr, peers)
-		changed := applyRVRStatusPeers(rvr, peers)
-		Expect(changed).To(BeFalse())
-	})
-
-	It("detects change in nested slice", func() {
-		peers := []v1alpha1.PeerStatus{
-			{Name: "peer-1", ConnectionEstablishedOn: []string{"net-1"}},
-		}
-		applyRVRStatusPeers(rvr, peers)
-
-		newPeers := []v1alpha1.PeerStatus{
-			{Name: "peer-1", ConnectionEstablishedOn: []string{"net-1", "net-2"}},
-		}
-		changed := applyRVRStatusPeers(rvr, newPeers)
-		Expect(changed).To(BeTrue())
-	})
-})
-
 var _ = Describe("applyRVRBackingVolumeReadyCondAbsent", func() {
 	var rvr *v1alpha1.ReplicatedVolumeReplica
 
@@ -7100,93 +7111,88 @@ var _ = Describe("ensureRVRStatusQuorumSummary", func() {
 	})
 })
 
-var _ = Describe("ensureRVRStatusPeers", func() {
-	var rvr *v1alpha1.ReplicatedVolumeReplica
+var _ = Describe("ensureStatusPeers (logic)", func() {
+	var (
+		ctx context.Context
+		rvr *v1alpha1.ReplicatedVolumeReplica
+	)
 
 	BeforeEach(func() {
+		ctx = logr.NewContext(context.Background(), logr.Discard())
 		rvr = &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
 	})
 
-	It("merges datamesh members and drbdr peers correctly (O(m+n) merge)", func() {
-		drbdrPeers := []v1alpha1.DRBDResourcePeerStatus{
-			{Name: "peer-1", ConnectionState: v1alpha1.ConnectionStateConnected, DiskState: v1alpha1.DiskStateUpToDate},
-			{Name: "peer-3", ConnectionState: v1alpha1.ConnectionStateConnecting},
-		}
-		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "peer-1", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "peer-2", Type: v1alpha1.ReplicaTypeTieBreaker}, // not in drbdr yet
-				{Name: "rvr-1"}, // self
+	It("computes Type from drbdr peer fields", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "peer-1", Type: v1alpha1.DRBDResourceTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnected, DiskState: v1alpha1.DiskStateUpToDate},
+					{Name: "peer-2", Type: v1alpha1.DRBDResourceTypeDiskless, AllowRemoteRead: true},  // TieBreaker
+					{Name: "peer-3", Type: v1alpha1.DRBDResourceTypeDiskless, AllowRemoteRead: false}, // Access
+				},
 			},
 		}
 
-		changed := ensureRVRStatusPeers(rvr, drbdrPeers, datamesh, "rvr-1")
-		Expect(changed).To(BeTrue())
+		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
 		Expect(rvr.Status.Peers).To(HaveLen(3))
 
-		// peer-1: from both sources
+		// peer-1: Diskful
 		peer1 := findPeerByName(rvr.Status.Peers, "peer-1")
 		Expect(peer1).NotTo(BeNil())
 		Expect(peer1.Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
 		Expect(peer1.ConnectionState).To(Equal(v1alpha1.ConnectionStateConnected))
 
-		// peer-2: only from datamesh
+		// peer-2: TieBreaker (Diskless + AllowRemoteRead=true)
 		peer2 := findPeerByName(rvr.Status.Peers, "peer-2")
 		Expect(peer2).NotTo(BeNil())
 		Expect(peer2.Type).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
-		Expect(peer2.ConnectionState).To(BeEmpty())
 
-		// peer-3: only from drbdr (orphan)
+		// peer-3: Access (Diskless + AllowRemoteRead=false)
 		peer3 := findPeerByName(rvr.Status.Peers, "peer-3")
 		Expect(peer3).NotTo(BeNil())
-		Expect(peer3.Type).To(BeEmpty()) // orphan has empty type
+		Expect(peer3.Type).To(Equal(v1alpha1.ReplicaTypeAccess))
 	})
 
-	It("excludes self from peers", func() {
-		drbdrPeers := []v1alpha1.DRBDResourcePeerStatus{
-			{Name: "peer-1"},
-		}
-		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "peer-1"},
-				{Name: "rvr-1"}, // self
+	It("mirrors drbdr.Status.Peers order", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "peer-3", Type: v1alpha1.DRBDResourceTypeDiskful},
+					{Name: "peer-1", Type: v1alpha1.DRBDResourceTypeDiskful},
+					{Name: "peer-2", Type: v1alpha1.DRBDResourceTypeDiskful},
+				},
 			},
 		}
 
-		changed := ensureRVRStatusPeers(rvr, drbdrPeers, datamesh, "rvr-1")
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.Peers).To(HaveLen(1))
-		Expect(rvr.Status.Peers[0].Name).To(Equal("peer-1"))
+		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Peers).To(HaveLen(3))
+		// Order mirrors drbdr.Status.Peers
+		Expect(rvr.Status.Peers[0].Name).To(Equal("peer-3"))
+		Expect(rvr.Status.Peers[1].Name).To(Equal("peer-1"))
+		Expect(rvr.Status.Peers[2].Name).To(Equal("peer-2"))
 	})
 
-	It("handles nil datamesh gracefully", func() {
-		drbdrPeers := []v1alpha1.DRBDResourcePeerStatus{
-			{Name: "peer-1", ConnectionState: v1alpha1.ConnectionStateConnected},
-		}
-
-		changed := ensureRVRStatusPeers(rvr, drbdrPeers, nil, "rvr-1")
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.Peers).To(HaveLen(1))
-		Expect(rvr.Status.Peers[0].Name).To(Equal("peer-1"))
-		Expect(rvr.Status.Peers[0].Type).To(BeEmpty()) // no datamesh = no type
-	})
-
-	It("returns false when unchanged (idempotent)", func() {
-		drbdrPeers := []v1alpha1.DRBDResourcePeerStatus{
-			{Name: "peer-1", ConnectionState: v1alpha1.ConnectionStateConnected},
-		}
-		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "peer-1", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "rvr-1"},
+	It("returns no change when unchanged (idempotent)", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "peer-1", Type: v1alpha1.DRBDResourceTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnected},
+				},
 			},
 		}
 
-		ensureRVRStatusPeers(rvr, drbdrPeers, datamesh, "rvr-1")
-		changed := ensureRVRStatusPeers(rvr, drbdrPeers, datamesh, "rvr-1")
-		Expect(changed).To(BeFalse())
+		outcome1 := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome1.DidChange()).To(BeTrue())
+
+		outcome2 := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
 	})
 
 	It("trims excess peers from previous state", func() {
@@ -7197,13 +7203,32 @@ var _ = Describe("ensureRVRStatusPeers", func() {
 		}
 
 		// Now only 1 peer
-		drbdrPeers := []v1alpha1.DRBDResourcePeerStatus{
-			{Name: "peer-1"},
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "peer-1", Type: v1alpha1.DRBDResourceTypeDiskful},
+				},
+			},
 		}
 
-		changed := ensureRVRStatusPeers(rvr, drbdrPeers, nil, "rvr-1")
-		Expect(changed).To(BeTrue())
+		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
 		Expect(rvr.Status.Peers).To(HaveLen(1))
+	})
+
+	It("clears peers when drbdr has no peers", func() {
+		rvr.Status.Peers = []v1alpha1.PeerStatus{{Name: "peer-1"}}
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{},
+			},
+		}
+
+		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Peers).To(BeEmpty())
 	})
 })
 
