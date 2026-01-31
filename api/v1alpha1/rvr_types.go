@@ -190,6 +190,21 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	BackingVolume *BackingVolume `json:"backingVolume,omitempty" patchStrategy:"merge"`
 
+	// DatameshRevision is the datamesh revision for which the replica was fully configured.
+	//
+	// "Configured" means:
+	//   - DRBD was configured to match the intended state derived from this datamesh revision.
+	//   - Backing volume (if Diskful) was configured: exists and matches intended LVG/ThinPool/Size.
+	//   - Backing volume (if Diskful) is ready: reported ready and actual size >= intended size.
+	//   - Agent confirmed successful configuration.
+	//
+	// Note: "configured" does NOT mean:
+	//   - DRBD connections are established (happens asynchronously after configuration).
+	//   - Backing volume is synchronized (resync happens asynchronously if the volume was newly added).
+	//
+	// +optional
+	DatameshRevision int64 `json:"datameshRevision,omitempty"`
+
 	// DevicePath is the block device path when the replica is attached.
 	// Example: /dev/drbd10012.
 	// +kubebuilder:validation:MaxLength=256

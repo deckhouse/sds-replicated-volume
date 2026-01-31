@@ -80,8 +80,9 @@ Reconcile (root) [Pure orchestration]
 │   ├── createDRBDR (computeTargetDRBDRSpec) / patchDRBDR
 │   ├── applyRVRDRBDRReconciliationCache
 │   ├── getAgentReady → applyRVRConfiguredCondFalse AgentNotReady
-│   ├── computeActualDRBDRConfigured → ApplyingConfiguration / ConfigurationFailed
+│   ├── check DRBDR Configured condition → ApplyingConfiguration / ConfigurationFailed
 │   ├── applyRVRAddresses
+│   ├── targetType != intendedType → applyRVRConfiguredCondFalse WaitingForBackingVolume
 │   └── applyRVRConfiguredCondTrue Configured / applyRVRConfiguredCondFalse PendingDatameshJoin
 ├── ensureAttachmentStatus ← details
 │   ├── computeIntendedType
@@ -177,6 +178,7 @@ Indicates whether the replica's DRBD resource is configured.
 | False | NotApplicable | Replica is being deleted |
 | False | PendingDatameshJoin | DRBD preconfigured, waiting for datamesh membership |
 | False | PendingScheduling | Waiting for node assignment |
+| False | WaitingForBackingVolume | Waiting for backing volume (creating, resizing, or replacing) |
 | False | WaitingForReplicatedVolume | Waiting for ReplicatedVolume to be ready |
 
 ### Attached
@@ -188,10 +190,15 @@ Indicates whether the replica is attached (primary) and ready for I/O.
 | True | Attached | Attached and ready for I/O |
 | True | DetachmentFailed | Expected detached but still attached |
 | False | AttachmentFailed | Expected attached but not attached |
+| False | Detached | Normally detached |
 | False | IOSuspended | Attached but I/O is suspended |
+| False | NotApplicable | No DRBDR exists |
+| False | Pending | Waiting to become attached |
 | Unknown | AgentNotReady | Agent is not ready |
 | Unknown | ApplyingConfiguration | Configuration is being applied |
-| (absent) | - | No DRBDR exists or not applicable |
+| Unknown | AttachingNotApplicable | Not applicable for this replica type |
+| Unknown | AttachingNotInitialized | Not enough status to decide |
+| (absent) | - | DRBDR does not exist or not relevant for attachment |
 
 ### BackingVolumeInSync
 
@@ -258,9 +265,11 @@ The controller manages the following status fields on RVR:
 |-------|-------------|--------|
 | `addresses` | DRBD addresses assigned to this replica | From DRBDR status |
 | `backingVolume` | Backing volume info (size, state, LVG name, thin pool) | From DRBDR + LLV status |
-| `drbdrReconciliationCache` | Cache of target configuration that DRBDR spec was last applied for | Computed |
+| `datameshRevision` | Datamesh revision for which the replica was fully configured | Set when Configured=True |
 | `deviceIOSuspended` | Whether I/O is suspended on the device | From DRBDR status |
 | `devicePath` | Block device path when attached (e.g., /dev/drbd10012) | From DRBDR status |
+| `drbd` | DRBD-specific status info (config, actual, status) | From RVR spec + DRBDR |
+| `drbdrReconciliationCache` | Cache of target configuration that DRBDR spec was last applied for | Computed |
 | `peers` | Peer connectivity status | Merged from datamesh + DRBDR |
 | `quorum` | Whether this replica has quorum | From DRBDR status |
 | `quorumSummary` | Detailed quorum info (voting peers, thresholds) | Computed from DRBDR + peers |
@@ -553,7 +562,7 @@ flowchart TD
 |--------|-------------|
 | `LVMLogicalVolume` | Created/patched/deleted backing volume |
 | `BackingVolumeReady` condition | Reports LLV lifecycle state |
-| `status.backingVolumeSize` | Actual size of the backing volume |
+| `targetBV`, `intendedBV` | Backing volume pointers for reconcileDRBDResource |
 
 ---
 
@@ -582,7 +591,7 @@ flowchart TD
     CheckRV -->|Yes| ComputeTarget[Compute target DRBDR spec]
     ComputeTarget --> CheckDRBDRExists{DRBDR exists?}
     CheckDRBDRExists -->|No| CreateDRBDR[Create DRBDR]
-    CreateDRBDR --> UpdateStatus1[Update RVR status fields]
+    CreateDRBDR --> UpdateStatus1[Update reconciliation cache]
 
     CheckDRBDRExists -->|Yes| CheckNeedsUpdate{Spec needs update?}
     CheckNeedsUpdate -->|Yes| PatchDRBDR[Patch DRBDR]
@@ -596,14 +605,28 @@ flowchart TD
     CheckAgent -->|Yes| CheckState{DRBDR state?}
     CheckState -->|Pending| SetApplying[Configured=False ApplyingConfiguration]
     CheckState -->|Failed| SetFailed[Configured=False ConfigurationFailed]
-    CheckState -->|True| CheckMember{Datamesh member?}
+    CheckState -->|True| CopyAddresses[Copy addresses to RVR status]
 
     SetApplying --> End5([Done])
     SetFailed --> End6([Done])
 
+    CopyAddresses --> CheckTargetType{targetType != intendedType?}
+    CheckTargetType -->|Yes| SetWaitBV1[Configured=False WaitingForBackingVolume]
+    SetWaitBV1 --> End9([Done])
+
+    CheckTargetType -->|No| CheckBVMatch{BV LVG/ThinPool match?}
+    CheckBVMatch -->|No| SetWaitBV2[Configured=False WaitingForBackingVolume]
+    SetWaitBV2 --> End10([Done])
+
+    CheckBVMatch -->|Yes| CheckResize{BV resize pending?}
+    CheckResize -->|Yes| SetWaitBV3[Configured=False WaitingForBackingVolume]
+    SetWaitBV3 --> End11([Done])
+
+    CheckResize -->|No| CheckMember{Datamesh member?}
     CheckMember -->|No| SetPendingJoin[Configured=False PendingDatameshJoin]
-    CheckMember -->|Yes| SetConfigured[Configured=True]
+    CheckMember -->|Yes| RecordRevision[Record DatameshRevision]
     SetPendingJoin --> End7([Done])
+    RecordRevision --> SetConfigured[Configured=True]
     SetConfigured --> End8([Done])
 ```
 
@@ -613,17 +636,16 @@ flowchart TD
 |-------|-------------|
 | `rvr.Spec` | Node name, replica type, LVG/thin pool for diskful |
 | `rv.Status.Datamesh` | System networks, members, size, type transitions |
-| `targetLLVName` | LLV name from reconcileBackingVolume |
+| `targetBV`, `intendedBV` | Backing volume pointers from reconcileBackingVolume |
 | `agent Pod` | Agent readiness on target node |
 
 | Output | Description |
 |--------|-------------|
 | `DRBDResource` | Created/patched/deleted DRBD resource |
 | `Configured` condition | Reports DRBD configuration state |
-| `status.effectiveType` | Current effective replica type |
-| `status.datameshRevision` | Datamesh revision this replica was configured for |
-| `status.drbdResourceGeneration` | DRBDR generation that was last applied |
 | `status.addresses` | DRBD addresses assigned to this replica |
+| `status.datameshRevision` | Datamesh revision for which replica was fully configured |
+| `status.drbdrReconciliationCache` | Cache of target configuration (datameshRevision, drbdrGeneration, rvrType) |
 
 ---
 

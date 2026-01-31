@@ -199,6 +199,71 @@ var _ = Describe("computeActualBackingVolume", func() {
 	})
 })
 
+var _ = Describe("backingVolume.Equal", func() {
+	It("returns true when both are nil", func() {
+		var a, b *backingVolume
+		Expect(a.Equal(b)).To(BeTrue())
+	})
+
+	It("returns false when first is nil and second is not", func() {
+		var a *backingVolume
+		b := &backingVolume{LLVName: "llv-1"}
+		Expect(a.Equal(b)).To(BeFalse())
+	})
+
+	It("returns false when first is not nil and second is nil", func() {
+		a := &backingVolume{LLVName: "llv-1"}
+		var b *backingVolume
+		Expect(a.Equal(b)).To(BeFalse())
+	})
+
+	It("returns true when all fields are equal", func() {
+		a := &backingVolume{
+			LLVName:            "llv-1",
+			LVMVolumeGroupName: "lvg-1",
+			ThinPoolName:       "tp-1",
+			Size:               resource.MustParse("10Gi"),
+		}
+		b := &backingVolume{
+			LLVName:            "llv-1",
+			LVMVolumeGroupName: "lvg-1",
+			ThinPoolName:       "tp-1",
+			Size:               resource.MustParse("10Gi"),
+		}
+		Expect(a.Equal(b)).To(BeTrue())
+	})
+
+	It("returns false when LLVName differs", func() {
+		a := &backingVolume{LLVName: "llv-1", LVMVolumeGroupName: "lvg-1", Size: resource.MustParse("10Gi")}
+		b := &backingVolume{LLVName: "llv-2", LVMVolumeGroupName: "lvg-1", Size: resource.MustParse("10Gi")}
+		Expect(a.Equal(b)).To(BeFalse())
+	})
+
+	It("returns false when LVMVolumeGroupName differs", func() {
+		a := &backingVolume{LLVName: "llv-1", LVMVolumeGroupName: "lvg-1", Size: resource.MustParse("10Gi")}
+		b := &backingVolume{LLVName: "llv-1", LVMVolumeGroupName: "lvg-2", Size: resource.MustParse("10Gi")}
+		Expect(a.Equal(b)).To(BeFalse())
+	})
+
+	It("returns false when ThinPoolName differs", func() {
+		a := &backingVolume{LLVName: "llv-1", ThinPoolName: "tp-1", Size: resource.MustParse("10Gi")}
+		b := &backingVolume{LLVName: "llv-1", ThinPoolName: "tp-2", Size: resource.MustParse("10Gi")}
+		Expect(a.Equal(b)).To(BeFalse())
+	})
+
+	It("returns false when Size differs", func() {
+		a := &backingVolume{LLVName: "llv-1", Size: resource.MustParse("10Gi")}
+		b := &backingVolume{LLVName: "llv-1", Size: resource.MustParse("20Gi")}
+		Expect(a.Equal(b)).To(BeFalse())
+	})
+
+	It("returns true for thick volumes with empty ThinPoolName", func() {
+		a := &backingVolume{LLVName: "llv-1", LVMVolumeGroupName: "lvg-1", ThinPoolName: "", Size: resource.MustParse("10Gi")}
+		b := &backingVolume{LLVName: "llv-1", LVMVolumeGroupName: "lvg-1", ThinPoolName: "", Size: resource.MustParse("10Gi")}
+		Expect(a.Equal(b)).To(BeTrue())
+	})
+})
+
 var _ = Describe("computeIntendedBackingVolume", func() {
 	var rv *v1alpha1.ReplicatedVolume
 
@@ -1625,96 +1690,6 @@ var _ = Describe("buildDRBDRPeerPaths", func() {
 // ──────────────────────────────────────────────────────────────────────────────
 // DRBDR Compute helpers tests
 //
-
-var _ = Describe("computeActualDRBDRConfigured", func() {
-	It("panics for nil drbdr", func() {
-		Expect(func() {
-			computeActualDRBDRConfigured(nil)
-		}).To(Panic())
-	})
-
-	It("returns Pending when Configured condition is not set", func() {
-		drbdr := &v1alpha1.DRBDResource{
-			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1"},
-		}
-
-		state, msg := computeActualDRBDRConfigured(drbdr)
-
-		Expect(state).To(Equal(DRBDRConfiguredStatePending))
-		Expect(msg).To(ContainSubstring("not set yet"))
-	})
-
-	It("returns Pending when ObservedGeneration does not match Generation", func() {
-		drbdr := &v1alpha1.DRBDResource{
-			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1", Generation: 2},
-			Status: v1alpha1.DRBDResourceStatus{
-				Conditions: []metav1.Condition{
-					{
-						Type:               v1alpha1.DRBDResourceCondConfiguredType,
-						Status:             metav1.ConditionTrue,
-						ObservedGeneration: 1, // Intentionally mismatched
-					},
-				},
-			},
-		}
-
-		state, msg := computeActualDRBDRConfigured(drbdr)
-
-		Expect(state).To(Equal(DRBDRConfiguredStatePending))
-		Expect(msg).To(ContainSubstring("generation: 2"))
-		Expect(msg).To(ContainSubstring("observedGeneration: 1"))
-	})
-
-	It("returns Pending when DRBD is in maintenance mode", func() {
-		drbdr := &v1alpha1.DRBDResource{
-			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1", Generation: 1},
-		}
-		obju.SetStatusCondition(drbdr, metav1.Condition{
-			Type:               v1alpha1.DRBDResourceCondConfiguredType,
-			Status:             metav1.ConditionFalse,
-			Reason:             v1alpha1.DRBDResourceCondConfiguredReasonInMaintenance,
-			ObservedGeneration: 1,
-		})
-
-		state, msg := computeActualDRBDRConfigured(drbdr)
-
-		Expect(state).To(Equal(DRBDRConfiguredStatePending))
-		Expect(msg).To(ContainSubstring("maintenance"))
-	})
-
-	It("returns True when Configured condition is True and ObservedGeneration matches", func() {
-		drbdr := &v1alpha1.DRBDResource{
-			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1", Generation: 1},
-		}
-		obju.SetStatusCondition(drbdr, metav1.Condition{
-			Type:               v1alpha1.DRBDResourceCondConfiguredType,
-			Status:             metav1.ConditionTrue,
-			ObservedGeneration: 1,
-		})
-
-		state, msg := computeActualDRBDRConfigured(drbdr)
-
-		Expect(state).To(Equal(DRBDRConfiguredStateTrue))
-		Expect(msg).To(BeEmpty())
-	})
-
-	It("returns False when Configured condition is False and ObservedGeneration matches", func() {
-		drbdr := &v1alpha1.DRBDResource{
-			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1", Generation: 1},
-		}
-		obju.SetStatusCondition(drbdr, metav1.Condition{
-			Type:               v1alpha1.DRBDResourceCondConfiguredType,
-			Status:             metav1.ConditionFalse,
-			Reason:             "SomeError",
-			ObservedGeneration: 1,
-		})
-
-		state, msg := computeActualDRBDRConfigured(drbdr)
-
-		Expect(state).To(Equal(DRBDRConfiguredStateFalse))
-		Expect(msg).To(ContainSubstring("SomeError"))
-	})
-})
 
 var _ = Describe("computeIntendedType", func() {
 	It("returns RVR spec type when member is nil", func() {
