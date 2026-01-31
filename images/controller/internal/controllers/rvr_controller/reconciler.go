@@ -34,6 +34,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	nodeutil "k8s.io/component-helpers/node/util"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -146,7 +147,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			ensureConditionFullyConnected(rf.Ctx(), rvr, drbdr, datamesh, agentReady),
 			ensureStatusBackingVolume(rf.Ctx(), rvr, drbdr, llvs),
 			ensureConditionBackingVolumeInSync(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
-			ensureQuorumStatus(rf.Ctx(), rvr, drbdr, agentReady, drbdrConfigurationPending),
+			ensureStatusQuorum(rf.Ctx(), rvr, drbdr),
+			ensureConditionReady(rf.Ctx(), rvr, drbdr, agentReady, drbdrConfigurationPending),
 		)
 		if eo.Error() != nil {
 			return rf.Failf(eo.Error(), "ensuring status").ToCtrl()
@@ -708,15 +710,80 @@ func computeHasAnyAttachedPeer(peers []v1alpha1.PeerStatus) bool {
 	return false
 }
 
-// ensureQuorumStatus ensures the RVR quorum-related status fields reflect the current DRBDR state.
-func ensureQuorumStatus(
+// ensureStatusQuorum ensures the RVR quorum-related status fields reflect the current DRBDR state.
+func ensureStatusQuorum(
+	ctx context.Context,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	drbdr *v1alpha1.DRBDResource,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "status-quorum")
+	defer ef.OnEnd(&outcome)
+
+	changed := false
+
+	// When drbdr is nil, clear both fields.
+	if drbdr == nil {
+		if rvr.Status.QuorumSummary != nil {
+			rvr.Status.QuorumSummary = nil
+			changed = true
+		}
+		if rvr.Status.Quorum != nil {
+			rvr.Status.Quorum = nil
+			changed = true
+		}
+		return ef.Ok().ReportChangedIf(changed)
+	}
+
+	summary := &v1alpha1.QuorumSummary{}
+
+	// Count connected voting/UpToDate peers.
+	for i := range rvr.Status.Peers {
+		p := &rvr.Status.Peers[i]
+		if p.ConnectionState != v1alpha1.ConnectionStateConnected {
+			continue
+		}
+		if p.Type == v1alpha1.ReplicaTypeDiskful || p.Type == v1alpha1.ReplicaTypeTieBreaker {
+			summary.ConnectedVotingPeers++
+		}
+		if p.BackingVolumeState == v1alpha1.DiskStateUpToDate {
+			summary.ConnectedUpToDatePeers++
+		}
+	}
+
+	// Copy quorum thresholds from drbdr.status.activeConfiguration.
+	if ac := drbdr.Status.ActiveConfiguration; ac != nil {
+		if ac.Quorum != nil {
+			summary.Quorum = ptr.To(int(*ac.Quorum))
+		}
+		if ac.QuorumMinimumRedundancy != nil {
+			summary.QuorumMinimumRedundancy = ptr.To(int(*ac.QuorumMinimumRedundancy))
+		}
+	}
+
+	// Update QuorumSummary if it has changed.
+	if rvr.Status.QuorumSummary == nil || *rvr.Status.QuorumSummary != *summary {
+		rvr.Status.QuorumSummary = summary
+		changed = true
+	}
+
+	// Update Quorum if it has changed.
+	if !ptr.Equal(rvr.Status.Quorum, drbdr.Status.Quorum) {
+		rvr.Status.Quorum = drbdr.Status.Quorum
+		changed = true
+	}
+
+	return ef.Ok().ReportChangedIf(changed)
+}
+
+// ensureConditionReady ensures the RVR Ready condition reflects the current DRBDR quorum state.
+func ensureConditionReady(
 	ctx context.Context,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	drbdr *v1alpha1.DRBDResource,
 	agentReady bool,
 	drbdrConfigurationPending bool,
 ) (outcome flow.EnsureOutcome) {
-	ef := flow.BeginEnsure(ctx, "quorum-status")
+	ef := flow.BeginEnsure(ctx, "condition-ready")
 	defer ef.OnEnd(&outcome)
 
 	changed := false
@@ -726,8 +793,6 @@ func ensureQuorumStatus(
 		changed = applyRVRReadyCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondReadyReasonDeleting,
 			"Replica is being deleted") || changed
-		changed = applyRVRStatusQuorum(rvr, nil) || changed
-		changed = ensureRVRStatusQuorumSummary(rvr, nil) || changed // nil clears optional fields (quorum, quorumMinimumRedundancy)
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
@@ -736,8 +801,6 @@ func ensureQuorumStatus(
 		changed = applyRVRReadyCondUnknown(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondReadyReasonAgentNotReady,
 			"Agent is not ready") || changed
-		changed = applyRVRStatusQuorum(rvr, nil) || changed
-		changed = ensureRVRStatusQuorumSummary(rvr, nil) || changed // nil clears optional fields (quorum, quorumMinimumRedundancy)
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
@@ -746,21 +809,26 @@ func ensureQuorumStatus(
 		changed = applyRVRReadyCondUnknown(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondReadyReasonApplyingConfiguration,
 			"Configuration is being applied") || changed
-		changed = applyRVRStatusQuorum(rvr, nil) || changed
-		changed = ensureRVRStatusQuorumSummary(rvr, nil) || changed // nil clears optional fields (quorum, quorumMinimumRedundancy)
 		return ef.Ok().ReportChangedIf(changed)
 	}
-
-	// Fill quorumSummary from rvr.Status.Peers and drbdr.Status.ActiveConfiguration.
-	changed = ensureRVRStatusQuorumSummary(rvr, drbdr) || changed
-
-	// Copy quorum from drbdr.Status.Quorum.
-	changed = applyRVRStatusQuorum(rvr, drbdr.Status.Quorum) || changed
 
 	// Build message with quorum info: "quorum: M/N, data quorum: J/K"
 	// M = connectedVotingPeers, N = quorum threshold (or "unknown")
 	// J = connectedUpToDatePeers, K = quorumMinimumRedundancy (or "unknown")
-	msg := buildQuorumMessage(rvr.Status.QuorumSummary)
+	msg := "quorum: unknown"
+	if qs := rvr.Status.QuorumSummary; qs != nil {
+		quorumStr := "unknown"
+		if qs.Quorum != nil {
+			quorumStr = strconv.Itoa(*qs.Quorum)
+		}
+		qmrStr := "unknown"
+		if qs.QuorumMinimumRedundancy != nil {
+			qmrStr = strconv.Itoa(*qs.QuorumMinimumRedundancy)
+		}
+		msg = fmt.Sprintf("quorum: %d/%s, data quorum: %d/%s",
+			qs.ConnectedVotingPeers, quorumStr,
+			qs.ConnectedUpToDatePeers, qmrStr)
+	}
 
 	// Set Ready condition based on drbdr.Status.Quorum.
 	if drbdr.Status.Quorum == nil || !*drbdr.Status.Quorum {
@@ -774,27 +842,6 @@ func ensureQuorumStatus(
 	}
 
 	return ef.Ok().ReportChangedIf(changed)
-}
-
-// buildQuorumMessage builds a human-readable quorum status message.
-func buildQuorumMessage(qs *v1alpha1.QuorumSummary) string {
-	if qs == nil {
-		return "quorum: unknown"
-	}
-
-	quorumStr := "unknown"
-	if qs.Quorum != nil {
-		quorumStr = strconv.Itoa(*qs.Quorum)
-	}
-
-	qmrStr := "unknown"
-	if qs.QuorumMinimumRedundancy != nil {
-		qmrStr = strconv.Itoa(*qs.QuorumMinimumRedundancy)
-	}
-
-	return fmt.Sprintf("quorum: %d/%s, data quorum: %d/%s",
-		qs.ConnectedVotingPeers, quorumStr,
-		qs.ConnectedUpToDatePeers, qmrStr)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2228,67 +2275,6 @@ func applyRVRBackingVolumeStatus(
 	}
 
 	rvr.Status.BackingVolume = &target
-	return true
-}
-
-// applyRVRStatusQuorum sets Quorum on RVR status.
-func applyRVRStatusQuorum(rvr *v1alpha1.ReplicatedVolumeReplica, quorum *bool) bool {
-	if (rvr.Status.Quorum == nil) == (quorum == nil) {
-		if quorum == nil || *rvr.Status.Quorum == *quorum {
-			return false
-		}
-	}
-	rvr.Status.Quorum = quorum
-	return true
-}
-
-// ensureRVRStatusQuorumSummary computes and sets QuorumSummary on RVR status based on rvr.status.peers and drbdr.status.activeConfiguration.
-//
-// Exception: This helper intentionally omits a phase scope and returns bool instead of flow.EnsureOutcome
-// for simplicity — the computation is straightforward and phase logging would add noise without value.
-func ensureRVRStatusQuorumSummary(rvr *v1alpha1.ReplicatedVolumeReplica, drbdr *v1alpha1.DRBDResource) bool {
-	// Compute connectedVotingPeers and connectedUpToDatePeers from rvr.Status.Peers.
-	var connectedVotingPeers, connectedUpToDatePeers int
-	for i := range rvr.Status.Peers {
-		p := &rvr.Status.Peers[i]
-		if p.ConnectionState != v1alpha1.ConnectionStateConnected {
-			continue
-		}
-		// Voting peers: Diskful or TieBreaker with established connection.
-		if p.Type == v1alpha1.ReplicaTypeDiskful || p.Type == v1alpha1.ReplicaTypeTieBreaker {
-			connectedVotingPeers++
-		}
-		// UpToDate peers: connected and UpToDate disk.
-		if p.BackingVolumeState == v1alpha1.DiskStateUpToDate {
-			connectedUpToDatePeers++
-		}
-	}
-
-	// Get quorum and quorumMinimumRedundancy from drbdr.status.activeConfiguration.
-	var quorum, quorumMinimumRedundancy *int
-	if drbdr != nil && drbdr.Status.ActiveConfiguration != nil {
-		if drbdr.Status.ActiveConfiguration.Quorum != nil {
-			v := int(*drbdr.Status.ActiveConfiguration.Quorum)
-			quorum = &v
-		}
-		if drbdr.Status.ActiveConfiguration.QuorumMinimumRedundancy != nil {
-			v := int(*drbdr.Status.ActiveConfiguration.QuorumMinimumRedundancy)
-			quorumMinimumRedundancy = &v
-		}
-	}
-
-	summary := &v1alpha1.QuorumSummary{
-		ConnectedVotingPeers:    connectedVotingPeers,
-		Quorum:                  quorum,
-		ConnectedUpToDatePeers:  connectedUpToDatePeers,
-		QuorumMinimumRedundancy: quorumMinimumRedundancy,
-	}
-
-	// Compare with current value.
-	if rvr.Status.QuorumSummary != nil && *rvr.Status.QuorumSummary == *summary {
-		return false
-	}
-	rvr.Status.QuorumSummary = summary
 	return true
 }
 

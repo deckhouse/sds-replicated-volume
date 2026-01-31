@@ -98,9 +98,10 @@ Reconcile (root) [Pure orchestration]
 │   ├── computeHasUpToDatePeer
 │   ├── computeHasConnectedAttachedPeer
 │   └── applyRVRBackingVolumeInSyncCond*
-├── ensureQuorumStatus ← details
+├── ensureStatusQuorum ← details
 │   ├── ensureRVRStatusQuorumSummary
-│   ├── applyRVRStatusQuorum
+│   └── applyRVRStatusQuorum
+├── ensureConditionReady ← details
 │   └── applyRVRReadyCond*
 ├── reconcileSatisfyEligibleNodesCondition [In-place reconciliation] ← details
 │   ├── getNodeEligibility (from RSP)
@@ -108,7 +109,7 @@ Reconcile (root) [Pure orchestration]
 └── patchRVRStatus
 ```
 
-Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureAttachmentStatus`](#ensureattachmentstatus-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeInSync`](#ensureconditionbackingvolumeinsync-details), [`ensureQuorumStatus`](#ensurequorumstatus-details), [`reconcileSatisfyEligibleNodesCondition`](#reconcilesatisfyeligiblenodescondition-details)
+Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureAttachmentStatus`](#ensureattachmentstatus-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeInSync`](#ensureconditionbackingvolumeinsync-details), [`ensureStatusQuorum`](#ensurestatusquorum-details), [`ensureConditionReady`](#ensureconditionready-details), [`reconcileSatisfyEligibleNodesCondition`](#reconcilesatisfyeligiblenodescondition-details)
 
 ## Algorithm Flow
 
@@ -135,8 +136,9 @@ flowchart TD
         Peers --> PeersCond[ensureConditionFullyConnected]
         PeersCond --> BVStatus[ensureStatusBackingVolume]
         BVStatus --> BVInSync[ensureConditionBackingVolumeInSync]
-        BVInSync --> Quorum[ensureQuorumStatus]
-        Quorum --> SEN[reconcileSatisfyEligibleNodesCondition]
+        BVInSync --> StatusQuorum[ensureStatusQuorum]
+        StatusQuorum --> CondReady[ensureConditionReady]
+        CondReady --> SEN[reconcileSatisfyEligibleNodesCondition]
     end
 
     SEN --> Patch[Patch RVR status]
@@ -446,7 +448,8 @@ flowchart TD
         EnsureCondFC[ensureConditionFullyConnected]
         EnsureBVStatus[ensureStatusBackingVolume]
         EnsureBVInSync[ensureConditionBackingVolumeInSync]
-        EnsureQuorum[ensureQuorumStatus]
+        EnsureStatusQuorum[ensureStatusQuorum]
+        EnsureCondReady[ensureConditionReady]
     end
 
     subgraph outputs [Outputs]
@@ -930,9 +933,39 @@ flowchart TD
 
 ---
 
-### ensureQuorumStatus Details
+### ensureStatusQuorum Details
 
-**Purpose**: Reports quorum status and overall replica readiness.
+**Purpose**: Populates the `rvr.Status.Quorum` and `rvr.Status.QuorumSummary` fields from DRBDR state.
+
+**Algorithm**:
+
+```mermaid
+flowchart TD
+    Start([Start]) --> ComputeSummary[Compute quorumSummary from peers + DRBDR]
+    ComputeSummary --> CopyQuorum[Copy quorum from drbdr.Status.Quorum]
+    CopyQuorum --> End([Done])
+
+    note1[When drbdr is nil, fields are cleared]
+```
+
+**Data Flow**:
+
+| Input | Description |
+|-------|-------------|
+| `drbdr.Status.Quorum` | Quorum flag from DRBD (nil clears the field) |
+| `drbdr.Status.ActiveConfiguration` | Quorum and QMR thresholds |
+| `rvr.Status.Peers` | Peer states for voting/UpToDate counts |
+
+| Output | Description |
+|--------|-------------|
+| `status.quorum` | Quorum flag |
+| `status.quorumSummary` | Detailed quorum info |
+
+---
+
+### ensureConditionReady Details
+
+**Purpose**: Reports overall replica readiness via the `Ready` condition.
 
 **Algorithm**:
 
@@ -940,22 +973,17 @@ flowchart TD
 flowchart TD
     Start([Start]) --> CheckDelete{RVR being deleted<br/>or no DRBDR?}
     CheckDelete -->|Yes| SetDeleting[False: Deleting]
-    SetDeleting --> ClearQuorum1[Clear quorum fields]
-    ClearQuorum1 --> End1([Done])
+    SetDeleting --> End1([Done])
 
     CheckDelete -->|No| CheckAgent{Agent ready?}
     CheckAgent -->|No| SetUnknown1[Unknown: AgentNotReady]
-    SetUnknown1 --> ClearQuorum2[Clear quorum fields]
-    ClearQuorum2 --> End2([Done])
+    SetUnknown1 --> End2([Done])
 
     CheckAgent -->|Yes| CheckPending{Configuration pending?}
     CheckPending -->|Yes| SetUnknown2[Unknown: ApplyingConfiguration]
-    SetUnknown2 --> ClearQuorum3[Clear quorum fields]
-    ClearQuorum3 --> End3([Done])
+    SetUnknown2 --> End3([Done])
 
-    CheckPending -->|No| ComputeSummary[Compute quorumSummary from peers + DRBDR]
-    ComputeSummary --> CopyQuorum[Copy quorum from drbdr.Status.Quorum]
-    CopyQuorum --> BuildMessage[Build quorum message]
+    CheckPending -->|No| BuildMessage[Build quorum message from rvr.Status.QuorumSummary]
     BuildMessage --> CheckQuorum{Has quorum?}
 
     CheckQuorum -->|No| SetFalse[False: QuorumLost]
@@ -970,11 +998,8 @@ flowchart TD
 | Input | Description |
 |-------|-------------|
 | `drbdr.Status.Quorum` | Quorum flag from DRBD |
-| `drbdr.Status.ActiveConfiguration` | Quorum and QMR thresholds |
-| `rvr.Status.Peers` | Peer states for voting/UpToDate counts |
+| `rvr.Status.QuorumSummary` | Quorum summary for message building |
 
 | Output | Description |
 |--------|-------------|
 | `Ready` condition | Reports overall readiness |
-| `status.quorum` | Quorum flag |
-| `status.quorumSummary` | Detailed quorum info |
