@@ -6864,41 +6864,6 @@ var _ = Describe("applyRVRDeviceIOSuspended", func() {
 	})
 })
 
-var _ = Describe("applyRVRStatusQuorum", func() {
-	var rvr *v1alpha1.ReplicatedVolumeReplica
-
-	BeforeEach(func() {
-		rvr = &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-	})
-
-	It("sets quorum from nil", func() {
-		changed := applyRVRStatusQuorum(rvr, boolPtr(true))
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.Quorum).NotTo(BeNil())
-		Expect(*rvr.Status.Quorum).To(BeTrue())
-	})
-
-	It("clears quorum to nil", func() {
-		rvr.Status.Quorum = boolPtr(true)
-		changed := applyRVRStatusQuorum(rvr, nil)
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.Quorum).To(BeNil())
-	})
-
-	It("is idempotent for nil", func() {
-		changed := applyRVRStatusQuorum(rvr, nil)
-		Expect(changed).To(BeFalse())
-	})
-
-	It("is idempotent for same value", func() {
-		applyRVRStatusQuorum(rvr, boolPtr(true))
-		changed := applyRVRStatusQuorum(rvr, boolPtr(true))
-		Expect(changed).To(BeFalse())
-	})
-})
-
 var _ = Describe("applyRVRBackingVolumeReadyCondAbsent", func() {
 	var rvr *v1alpha1.ReplicatedVolumeReplica
 
@@ -6996,120 +6961,6 @@ var _ = Describe("computeHasAnyAttachedPeer", func() {
 // ──────────────────────────────────────────────────────────────────────────────
 // Other helper functions tests
 //
-
-var _ = Describe("buildQuorumMessage", func() {
-	It("returns 'quorum: unknown' for nil QuorumSummary", func() {
-		Expect(buildQuorumMessage(nil)).To(Equal("quorum: unknown"))
-	})
-
-	It("formats correctly with both quorum and qmr present", func() {
-		qs := &v1alpha1.QuorumSummary{
-			ConnectedVotingPeers:    2,
-			Quorum:                  intPtr(3),
-			ConnectedUpToDatePeers:  1,
-			QuorumMinimumRedundancy: intPtr(2),
-		}
-		msg := buildQuorumMessage(qs)
-		Expect(msg).To(Equal("quorum: 2/3, data quorum: 1/2"))
-	})
-
-	It("formats with 'unknown' when quorum is nil", func() {
-		qs := &v1alpha1.QuorumSummary{
-			ConnectedVotingPeers:    2,
-			Quorum:                  nil,
-			ConnectedUpToDatePeers:  1,
-			QuorumMinimumRedundancy: intPtr(2),
-		}
-		msg := buildQuorumMessage(qs)
-		Expect(msg).To(Equal("quorum: 2/unknown, data quorum: 1/2"))
-	})
-
-	It("formats with 'unknown' when qmr is nil", func() {
-		qs := &v1alpha1.QuorumSummary{
-			ConnectedVotingPeers:    2,
-			Quorum:                  intPtr(3),
-			ConnectedUpToDatePeers:  1,
-			QuorumMinimumRedundancy: nil,
-		}
-		msg := buildQuorumMessage(qs)
-		Expect(msg).To(Equal("quorum: 2/3, data quorum: 1/unknown"))
-	})
-})
-
-var _ = Describe("ensureRVRStatusQuorumSummary", func() {
-	var rvr *v1alpha1.ReplicatedVolumeReplica
-
-	BeforeEach(func() {
-		rvr = &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-	})
-
-	It("clears QuorumSummary when drbdr is nil", func() {
-		rvr.Status.QuorumSummary = &v1alpha1.QuorumSummary{
-			ConnectedVotingPeers: 2,
-		}
-		changed := ensureRVRStatusQuorumSummary(rvr, nil)
-		Expect(changed).To(BeTrue())
-		// QuorumSummary is set to a zero-value struct when drbdr is nil
-		Expect(rvr.Status.QuorumSummary).NotTo(BeNil())
-		Expect(rvr.Status.QuorumSummary.ConnectedVotingPeers).To(Equal(0))
-	})
-
-	It("computes connectedVotingPeers from Diskful/TieBreaker peers", func() {
-		rvr.Status.Peers = []v1alpha1.PeerStatus{
-			{Name: "peer-1", Type: v1alpha1.ReplicaTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnected},
-			{Name: "peer-2", Type: v1alpha1.ReplicaTypeTieBreaker, ConnectionState: v1alpha1.ConnectionStateConnected},
-			{Name: "peer-3", Type: v1alpha1.ReplicaTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnecting},
-		}
-		drbdr := &v1alpha1.DRBDResource{
-			Status: v1alpha1.DRBDResourceStatus{
-				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{},
-			},
-		}
-		changed := ensureRVRStatusQuorumSummary(rvr, drbdr)
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.QuorumSummary.ConnectedVotingPeers).To(Equal(2))
-	})
-
-	It("computes connectedUpToDatePeers correctly", func() {
-		rvr.Status.Peers = []v1alpha1.PeerStatus{
-			{Name: "peer-1", ConnectionState: v1alpha1.ConnectionStateConnected, BackingVolumeState: v1alpha1.DiskStateUpToDate},
-			{Name: "peer-2", ConnectionState: v1alpha1.ConnectionStateConnected, BackingVolumeState: v1alpha1.DiskStateInconsistent},
-			{Name: "peer-3", ConnectionState: v1alpha1.ConnectionStateConnecting, BackingVolumeState: v1alpha1.DiskStateUpToDate},
-		}
-		drbdr := &v1alpha1.DRBDResource{}
-		changed := ensureRVRStatusQuorumSummary(rvr, drbdr)
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.QuorumSummary.ConnectedUpToDatePeers).To(Equal(1))
-	})
-
-	It("copies quorum/qmr from drbdr.Status.ActiveConfiguration", func() {
-		drbdr := &v1alpha1.DRBDResource{
-			Status: v1alpha1.DRBDResourceStatus{
-				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
-					Quorum:                  bytePtr(3),
-					QuorumMinimumRedundancy: bytePtr(2),
-				},
-			},
-		}
-		changed := ensureRVRStatusQuorumSummary(rvr, drbdr)
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.QuorumSummary.Quorum).NotTo(BeNil())
-		Expect(*rvr.Status.QuorumSummary.Quorum).To(Equal(3))
-		Expect(rvr.Status.QuorumSummary.QuorumMinimumRedundancy).NotTo(BeNil())
-		Expect(*rvr.Status.QuorumSummary.QuorumMinimumRedundancy).To(Equal(2))
-	})
-
-	It("returns false when unchanged (idempotent)", func() {
-		// Use drbdr without quorum values to avoid pointer comparison issues
-		// (QuorumSummary has *int fields that create new pointers each call)
-		drbdr := &v1alpha1.DRBDResource{}
-		ensureRVRStatusQuorumSummary(rvr, drbdr)
-		changed := ensureRVRStatusQuorumSummary(rvr, drbdr)
-		Expect(changed).To(BeFalse())
-	})
-})
 
 var _ = Describe("ensureStatusPeers (logic)", func() {
 	var (
@@ -7233,10 +7084,10 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ensureQuorumStatus tests
+// ensureStatusQuorum tests
 //
 
-var _ = Describe("ensureQuorumStatus", func() {
+var _ = Describe("ensureStatusQuorum", func() {
 	var (
 		ctx context.Context
 		rvr *v1alpha1.ReplicatedVolumeReplica
@@ -7249,122 +7100,30 @@ var _ = Describe("ensureQuorumStatus", func() {
 		}
 	})
 
-	It("sets Ready=False Deleting when RVR should not exist", func() {
-		now := metav1.Now()
-		rvr.DeletionTimestamp = &now
-		rvr.Finalizers = []string{v1alpha1.RVRControllerFinalizer}
-
-		drbdr := &v1alpha1.DRBDResource{
-			Status: v1alpha1.DRBDResourceStatus{
-				Quorum: boolPtr(true),
-			},
+	It("clears quorum status when drbdr is nil", func() {
+		rvr.Status.Quorum = boolPtr(true)
+		rvr.Status.QuorumSummary = &v1alpha1.QuorumSummary{
+			ConnectedVotingPeers:   1,
+			ConnectedUpToDatePeers: 1,
 		}
 
-		outcome := ensureQuorumStatus(ctx, rvr, drbdr, true, false)
+		outcome := ensureStatusQuorum(ctx, rvr, nil)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
-		Expect(cond).NotTo(BeNil())
-		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonDeleting))
 		Expect(rvr.Status.Quorum).To(BeNil())
+		Expect(rvr.Status.QuorumSummary).To(BeNil())
 	})
 
-	It("sets Ready=False Deleting when drbdr is nil", func() {
-		outcome := ensureQuorumStatus(ctx, rvr, nil, true, false)
-
-		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
-		Expect(cond).NotTo(BeNil())
-		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonDeleting))
-	})
-
-	It("sets Ready=Unknown AgentNotReady when agent not ready", func() {
+	It("copies quorum from drbdr.Status.Quorum", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Quorum: boolPtr(true),
 			},
 		}
 
-		outcome := ensureQuorumStatus(ctx, rvr, drbdr, false, false)
+		outcome := ensureStatusQuorum(ctx, rvr, drbdr)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
-		Expect(cond).NotTo(BeNil())
-		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonAgentNotReady))
-		Expect(rvr.Status.Quorum).To(BeNil())
-	})
-
-	It("sets Ready=Unknown ApplyingConfiguration when config pending", func() {
-		drbdr := &v1alpha1.DRBDResource{
-			Status: v1alpha1.DRBDResourceStatus{
-				Quorum: boolPtr(true),
-			},
-		}
-
-		outcome := ensureQuorumStatus(ctx, rvr, drbdr, true, true)
-
-		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
-		Expect(cond).NotTo(BeNil())
-		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonApplyingConfiguration))
-	})
-
-	It("sets Ready=False QuorumLost when quorum is nil", func() {
-		drbdr := &v1alpha1.DRBDResource{
-			Status: v1alpha1.DRBDResourceStatus{
-				Quorum: nil,
-			},
-		}
-
-		outcome := ensureQuorumStatus(ctx, rvr, drbdr, true, false)
-
-		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
-		Expect(cond).NotTo(BeNil())
-		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumLost))
-	})
-
-	It("sets Ready=False QuorumLost when quorum is false", func() {
-		drbdr := &v1alpha1.DRBDResource{
-			Status: v1alpha1.DRBDResourceStatus{
-				Quorum: boolPtr(false),
-			},
-		}
-
-		outcome := ensureQuorumStatus(ctx, rvr, drbdr, true, false)
-
-		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
-		Expect(cond).NotTo(BeNil())
-		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumLost))
-		Expect(rvr.Status.Quorum).NotTo(BeNil())
-		Expect(*rvr.Status.Quorum).To(BeFalse())
-	})
-
-	It("sets Ready=True Ready when quorum is true", func() {
-		drbdr := &v1alpha1.DRBDResource{
-			Status: v1alpha1.DRBDResourceStatus{
-				Quorum: boolPtr(true),
-				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
-					Quorum:                  bytePtr(2),
-					QuorumMinimumRedundancy: bytePtr(1),
-				},
-			},
-		}
-
-		outcome := ensureQuorumStatus(ctx, rvr, drbdr, true, false)
-
-		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
-		Expect(cond).NotTo(BeNil())
-		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady))
 		Expect(rvr.Status.Quorum).NotTo(BeNil())
 		Expect(*rvr.Status.Quorum).To(BeTrue())
 	})
@@ -7394,7 +7153,7 @@ var _ = Describe("ensureQuorumStatus", func() {
 			},
 		}
 
-		outcome := ensureQuorumStatus(ctx, rvr, drbdr, true, false)
+		outcome := ensureStatusQuorum(ctx, rvr, drbdr)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(rvr.Status.QuorumSummary).NotTo(BeNil())
@@ -7416,12 +7175,158 @@ var _ = Describe("ensureQuorumStatus", func() {
 		}
 
 		// First call
-		outcome1 := ensureQuorumStatus(ctx, rvr, drbdr, true, false)
+		outcome1 := ensureStatusQuorum(ctx, rvr, drbdr)
 		Expect(outcome1.Error()).NotTo(HaveOccurred())
 		Expect(outcome1.DidChange()).To(BeTrue())
 
 		// Second call should report no change
-		outcome2 := ensureQuorumStatus(ctx, rvr, drbdr, true, false)
+		outcome2 := ensureStatusQuorum(ctx, rvr, drbdr)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ensureConditionReady tests
+//
+
+var _ = Describe("ensureConditionReady", func() {
+	var (
+		ctx context.Context
+		rvr *v1alpha1.ReplicatedVolumeReplica
+	)
+
+	BeforeEach(func() {
+		ctx = logr.NewContext(context.Background(), logr.Discard())
+		rvr = &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+	})
+
+	It("sets Ready=False Deleting when RVR should not exist", func() {
+		now := metav1.Now()
+		rvr.DeletionTimestamp = &now
+		rvr.Finalizers = []string{v1alpha1.RVRControllerFinalizer}
+
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Quorum: boolPtr(true),
+			},
+		}
+
+		outcome := ensureConditionReady(ctx, rvr, drbdr, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonDeleting))
+	})
+
+	It("sets Ready=False Deleting when drbdr is nil", func() {
+		outcome := ensureConditionReady(ctx, rvr, nil, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonDeleting))
+	})
+
+	It("sets Ready=Unknown AgentNotReady when agent not ready", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Quorum: boolPtr(true),
+			},
+		}
+
+		outcome := ensureConditionReady(ctx, rvr, drbdr, false, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonAgentNotReady))
+	})
+
+	It("sets Ready=Unknown ApplyingConfiguration when config pending", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Quorum: boolPtr(true),
+			},
+		}
+
+		outcome := ensureConditionReady(ctx, rvr, drbdr, true, true)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonApplyingConfiguration))
+	})
+
+	It("sets Ready=False QuorumLost when quorum is nil", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Quorum: nil,
+			},
+		}
+
+		outcome := ensureConditionReady(ctx, rvr, drbdr, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumLost))
+	})
+
+	It("sets Ready=False QuorumLost when quorum is false", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Quorum: boolPtr(false),
+			},
+		}
+
+		outcome := ensureConditionReady(ctx, rvr, drbdr, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumLost))
+	})
+
+	It("sets Ready=True Ready when quorum is true", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Quorum: boolPtr(true),
+			},
+		}
+
+		outcome := ensureConditionReady(ctx, rvr, drbdr, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady))
+	})
+
+	It("returns no change when already in sync", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Quorum: boolPtr(true),
+			},
+		}
+
+		// First call
+		outcome1 := ensureConditionReady(ctx, rvr, drbdr, true, false)
+		Expect(outcome1.Error()).NotTo(HaveOccurred())
+		Expect(outcome1.DidChange()).To(BeTrue())
+
+		// Second call should report no change
+		outcome2 := ensureConditionReady(ctx, rvr, drbdr, true, false)
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
 		Expect(outcome2.DidChange()).To(BeFalse())
 	})
