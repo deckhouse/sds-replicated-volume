@@ -177,18 +177,12 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 
-	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
-	EffectiveType ReplicaType `json:"effectiveType,omitempty"`
-
 	// +patchStrategy=merge
 	DRBD *DRBD `json:"drbd,omitempty" patchStrategy:"merge"`
 
 	// +kubebuilder:validation:MaxItems=32
 	// +optional
 	Addresses []DRBDResourceAddressStatus `json:"addresses,omitempty"`
-
-	// DatameshRevision is the datamesh revision this replica was configured for.
-	DatameshRevision int64 `json:"datameshRevision,omitempty"`
 
 	// BackingVolumeSize is the size of the backing LVM logical volume for this replica.
 	// Only set for Diskful replicas.
@@ -198,11 +192,6 @@ type ReplicatedVolumeReplicaStatus struct {
 	// BackingVolumeState is the local backing volume state of this replica.
 	// +optional
 	BackingVolumeState DiskState `json:"backingVolumeState,omitempty"`
-
-	// DRBDResourceGeneration is the generation of the DRBDResource that was last applied.
-	// Used to skip redundant spec comparison when the generation matches.
-	// +optional
-	DRBDResourceGeneration int64 `json:"drbdResourceGeneration,omitempty"`
 
 	// DevicePath is the block device path when the replica is attached.
 	// Example: /dev/drbd10012.
@@ -232,6 +221,11 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +kubebuilder:validation:MaxItems=32
 	// +optional
 	Peers []PeerStatus `json:"peers,omitempty" patchStrategy:"merge" patchMergeKey:"name"`
+
+	// DRBDRReconciliationCache holds cached values for DRBDResource reconciliation optimization.
+	// +patchStrategy=merge
+	// +optional
+	DRBDRReconciliationCache DRBDRReconciliationCache `json:"drbdrReconciliationCache,omitempty" patchStrategy:"merge"`
 }
 
 // QuorumSummary provides detailed quorum information for a replica.
@@ -284,6 +278,23 @@ type PeerStatus struct {
 	// BackingVolumeState is the peer's backing volume state.
 	// +optional
 	BackingVolumeState DiskState `json:"backingVolumeState,omitempty"`
+}
+
+// DRBDRReconciliationCache holds cached values used to optimize DRBDResource reconciliation.
+// These fields track the TARGET configuration that was last computed for DRBDR spec,
+// NOT the actual state that DRBDR has applied. They allow the controller to skip
+// redundant spec comparisons when the input parameters have not changed.
+// +kubebuilder:object:generate=true
+type DRBDRReconciliationCache struct {
+	// DatameshRevision is the datamesh revision for which DRBDResource spec was last computed.
+	DatameshRevision int64 `json:"datameshRevision,omitempty"`
+
+	// DRBDRGeneration is the DRBDResource generation at the time DRBDResource spec was last computed.
+	DRBDRGeneration int64 `json:"drbdrGeneration,omitempty"`
+
+	// RVRType is the effective replica type for which DRBDResource spec was last computed.
+	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
+	RVRType ReplicaType `json:"rvrType,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

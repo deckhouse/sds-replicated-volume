@@ -75,17 +75,16 @@ Reconcile (root) [Pure orchestration]
 ├── reconcileDRBDResource [In-place reconciliation] ← details
 │   ├── rvrShouldNotExist → deleteDRBDR + applyRVRConfiguredCondFalse NotApplicable
 │   ├── node not assigned → applyRVRConfiguredCondFalse PendingScheduling
-│   ├── RV not ready → applyRVRConfiguredCondFalse WaitingForReplicatedVolume
-│   ├── computeIntendedEffectiveType / computeTargetEffectiveType
-│   ├── computeTargetDRBDRSpec (type, size, peers)
-│   ├── createDRBDR / patchDRBDR
-│   ├── applyRVRDatameshRevision / applyRVRDRBDResourceGeneration / applyRVREffectiveType
+│   ├── RV/datamesh not ready → applyRVRConfiguredCondFalse WaitingForReplicatedVolume
+│   ├── computeIntendedType / computeTargetType / computeTargetDRBDRReconciliationCache
+│   ├── createDRBDR (computeTargetDRBDRSpec) / patchDRBDR
+│   ├── applyRVRDRBDRReconciliationCache
 │   ├── getAgentReady → applyRVRConfiguredCondFalse AgentNotReady
 │   ├── computeActualDRBDRConfigured → ApplyingConfiguration / ConfigurationFailed
 │   ├── applyRVRAddresses
 │   └── applyRVRConfiguredCondTrue Configured / applyRVRConfiguredCondFalse PendingDatameshJoin
 ├── ensureAttachmentStatus ← details
-│   ├── computeIntendedEffectiveType
+│   ├── computeIntendedType
 │   ├── applyRVRAttachedCond*
 │   ├── applyRVRDevicePath
 │   └── applyRVRDeviceIOSuspended

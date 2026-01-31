@@ -387,8 +387,8 @@ func ensureBackingVolumeStatus(
 
 	// Determine if condition is relevant.
 	// Condition is relevant only for Diskful replicas that are members of the datamesh.
-	intendedEffectiveType := computeIntendedEffectiveType(rvr, datameshMember)
-	conditionRelevant := datameshMember != nil && intendedEffectiveType == v1alpha1.ReplicaTypeDiskful
+	intendedType := computeIntendedType(rvr, datameshMember)
+	conditionRelevant := datameshMember != nil && intendedType == v1alpha1.ReplicaTypeDiskful
 
 	// Guard: no DRBDR or condition not relevant — remove it.
 	if drbdr == nil || !conditionRelevant {
@@ -1453,7 +1453,6 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 	}
 
 	datamesh := &rv.Status.Datamesh
-	datameshRevision := rv.Status.DatameshRevision
 
 	// 5. No system networks in datamesh — DRBD needs networks to communicate.
 	// If datamesh is initialized, system networks should already be set,
@@ -1466,13 +1465,14 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 	}
 
 	member := datamesh.FindMemberByName(rvr.Name)
-	intendedEffectiveType := computeIntendedEffectiveType(rvr, member)
-	targetEffectiveType := computeTargetEffectiveType(intendedEffectiveType, targetLLVName)
+	intendedType := computeIntendedType(rvr, member)
+	targetType := computeTargetType(intendedType, targetLLVName)
+	targetDRBDRReconciliationCache := computeTargetDRBDRReconciliationCache(rv.Status.DatameshRevision, drbdr.Generation, targetType)
 
 	// 6. Create or update DRBDR.
 	if drbdr == nil {
 		// Compute target DRBDR spec.
-		targetSpec := computeTargetDRBDRSpec(rvr, drbdr, datamesh, member, targetLLVName, targetEffectiveType)
+		targetSpec := computeTargetDRBDRSpec(rvr, drbdr, datamesh, member, targetLLVName, targetType)
 
 		// Create new DRBDResource.
 		newObj, err := newDRBDR(r.scheme, rvr, targetSpec)
@@ -1487,14 +1487,12 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		// We need to check DRBDR spec if any of the tracked values changed since last reconciliation:
 		// - DRBDResource.Generation (DRBDR was modified externally)
 		// - DatameshRevision (datamesh configuration changed)
-		// - EffectiveType (replica type changed, e.g. diskful -> tiebreaker due to missing disk)
-		specMayNeedUpdate := drbdr.Generation != rvr.Status.DRBDResourceGeneration ||
-			rvr.Status.DatameshRevision != datameshRevision ||
-			rvr.Status.EffectiveType != targetEffectiveType
+		// - RVRType (replica type changed, e.g. diskful -> tiebreaker due to missing disk)
+		specMayNeedUpdate := rvr.Status.DRBDRReconciliationCache != targetDRBDRReconciliationCache
 
 		if specMayNeedUpdate {
 			// Compute target DRBDR spec.
-			targetSpec := computeTargetDRBDRSpec(rvr, drbdr, datamesh, member, targetLLVName, targetEffectiveType)
+			targetSpec := computeTargetDRBDRSpec(rvr, drbdr, datamesh, member, targetLLVName, targetType)
 
 			// Compare and potentially apply changes.
 			// DeepEqual handles resource.Quantity and nested structs correctly.
@@ -1509,12 +1507,9 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		}
 	}
 
-	// 7. Update rvr.status fields. Further we require optimistic lock for this step.
-	changed := applyRVRDatameshRevision(rvr, rv.Status.DatameshRevision)
-	changed = applyRVRDRBDResourceGeneration(rvr, drbdr.Generation) || changed
-	changed = applyRVREffectiveType(rvr, targetEffectiveType) || changed
-
-	// =====================================================
+	// 7. Cache target configuration to skip redundant spec comparisons on next reconcile.
+	//    Further we always require optimistic lock.
+	changed := applyRVRDRBDRReconciliationCache(rvr, targetDRBDRReconciliationCache)
 
 	// 8. Check if the agent is ready on the node.
 	nodeName := rvr.Spec.NodeName
@@ -1553,10 +1548,10 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
 	}
 
-	// At this point targetEffectiveType must equal intendedEffectiveType.
+	// At this point targetType must equal intendedType.
 	// If not, our reconciliation logic has a bug.
-	if targetEffectiveType != intendedEffectiveType {
-		panic(fmt.Sprintf("targetEffectiveType (%s) != intendedEffectiveType (%s)", targetEffectiveType, intendedEffectiveType))
+	if targetType != intendedType {
+		panic(fmt.Sprintf("targetType (%s) != intendedType (%s)", targetType, intendedType))
 	}
 
 	// 10. DRBDR is configured — copy addresses to RVR status.
@@ -1633,12 +1628,12 @@ func computeActualDRBDRConfigured(drbdr *v1alpha1.DRBDResource) (DRBDRConfigured
 	return DRBDRConfiguredStateFalse, fmt.Sprintf("DRBD configuration failed (reason: %s)", cond.Reason)
 }
 
-// computeIntendedEffectiveType returns the intended effective replica type.
+// computeIntendedType returns the intended replica type.
 // If member is nil, returns rvr.Spec.Type.
 // During transitions, uses TieBreaker as intermediate type:
 // - ToDiskful but not yet Diskful → TieBreaker (disk is being prepared)
 // - Diskful with ToDiskless → TieBreaker (data is being moved away)
-func computeIntendedEffectiveType(rvr *v1alpha1.ReplicatedVolumeReplica, member *v1alpha1.ReplicatedVolumeDatameshMember) v1alpha1.ReplicaType {
+func computeIntendedType(rvr *v1alpha1.ReplicatedVolumeReplica, member *v1alpha1.ReplicatedVolumeDatameshMember) v1alpha1.ReplicaType {
 	if member == nil {
 		return rvr.Spec.Type
 	}
@@ -1652,14 +1647,28 @@ func computeIntendedEffectiveType(rvr *v1alpha1.ReplicatedVolumeReplica, member 
 	return member.Type
 }
 
-// computeTargetEffectiveType returns the target effective replica type.
+// computeTargetType returns the target replica type.
 // If intended is Diskful but there's no backing volume, returns TieBreaker.
 // Otherwise returns the intended type.
-func computeTargetEffectiveType(intendedEffectiveType v1alpha1.ReplicaType, targetLLVName string) v1alpha1.ReplicaType {
-	if intendedEffectiveType == v1alpha1.ReplicaTypeDiskful && targetLLVName == "" {
+func computeTargetType(intendedType v1alpha1.ReplicaType, targetLLVName string) v1alpha1.ReplicaType {
+	if intendedType == v1alpha1.ReplicaTypeDiskful && targetLLVName == "" {
 		return v1alpha1.ReplicaTypeTieBreaker
 	}
-	return intendedEffectiveType
+	return intendedType
+}
+
+// computeTargetDRBDRReconciliationCache returns the target reconciliation cache
+// for the current reconciliation iteration.
+func computeTargetDRBDRReconciliationCache(
+	datameshRevision int64,
+	drbdrGeneration int64,
+	rvrType v1alpha1.ReplicaType,
+) v1alpha1.DRBDRReconciliationCache {
+	return v1alpha1.DRBDRReconciliationCache{
+		DatameshRevision: datameshRevision,
+		DRBDRGeneration:  drbdrGeneration,
+		RVRType:          rvrType,
+	}
 }
 
 // computeTargetDRBDRType converts ReplicaType to DRBDResourceType.
@@ -1710,7 +1719,7 @@ func computeTargetDRBDRSpec(
 	datamesh *v1alpha1.ReplicatedVolumeDatamesh,
 	member *v1alpha1.ReplicatedVolumeDatameshMember,
 	targetLLVName string,
-	targetEffectiveType v1alpha1.ReplicaType,
+	targetType v1alpha1.ReplicaType,
 ) v1alpha1.DRBDResourceSpec {
 	// Start from existing spec (preserves immutable and user-controlled fields) or create new.
 	var spec v1alpha1.DRBDResourceSpec
@@ -1726,7 +1735,7 @@ func computeTargetDRBDRSpec(
 	}
 
 	// Fill mutable fields.
-	spec.Type = computeDRBDRType(targetEffectiveType)
+	spec.Type = computeDRBDRType(targetType)
 	spec.SystemNetworks = slices.Clone(datamesh.SystemNetworkNames)
 	spec.State = v1alpha1.DRBDResourceStateUp
 
@@ -2285,21 +2294,16 @@ func applyRVRBackingVolumeSize(rvr *v1alpha1.ReplicatedVolumeReplica, size resou
 	return true
 }
 
-// applyRVREffectiveType sets EffectiveType on RVR status.
-func applyRVREffectiveType(rvr *v1alpha1.ReplicatedVolumeReplica, effectiveType v1alpha1.ReplicaType) bool {
-	if rvr.Status.EffectiveType == effectiveType {
+// applyRVRDRBDRReconciliationCache updates the DRBDResource reconciliation cache
+// with the target values computed during this reconciliation.
+func applyRVRDRBDRReconciliationCache(
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	target v1alpha1.DRBDRReconciliationCache,
+) bool {
+	if rvr.Status.DRBDRReconciliationCache == target {
 		return false
 	}
-	rvr.Status.EffectiveType = effectiveType
-	return true
-}
-
-// applyRVRDatameshRevision sets DatameshRevision on RVR status.
-func applyRVRDatameshRevision(rvr *v1alpha1.ReplicatedVolumeReplica, revision int64) bool {
-	if rvr.Status.DatameshRevision == revision {
-		return false
-	}
-	rvr.Status.DatameshRevision = revision
+	rvr.Status.DRBDRReconciliationCache = target
 	return true
 }
 
@@ -2309,15 +2313,6 @@ func applyRVRAddresses(rvr *v1alpha1.ReplicatedVolumeReplica, addresses []v1alph
 		return false
 	}
 	rvr.Status.Addresses = slices.Clone(addresses)
-	return true
-}
-
-// applyRVRDRBDResourceGeneration sets DRBDResourceGeneration on RVR status.
-func applyRVRDRBDResourceGeneration(rvr *v1alpha1.ReplicatedVolumeReplica, gen int64) bool {
-	if rvr.Status.DRBDResourceGeneration == gen {
-		return false
-	}
-	rvr.Status.DRBDResourceGeneration = gen
 	return true
 }
 
