@@ -150,19 +150,33 @@ spec:
                   type: object
                 maxItems: 32
                 type: array
-              backingVolumeSize:
-                anyOf:
-                - type: integer
-                - type: string
+              backingVolume:
                 description: |-
-                  BackingVolumeSize is the size of the backing LVM logical volume for this replica.
+                  BackingVolume contains information about the backing LVM logical volume.
                   Only set for Diskful replicas.
-                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                x-kubernetes-int-or-string: true
-              backingVolumeState:
-                description: BackingVolumeState is the local backing volume state
-                  of this replica.
-                type: string
+                properties:
+                  lvmVolumeGroupName:
+                    description: LVMVolumeGroupName is the name of the LVM volume
+                      group.
+                    maxLength: 253
+                    type: string
+                  lvmVolumeGroupThinPoolName:
+                    description: |-
+                      LVMVolumeGroupThinPoolName is the name of the thin pool within the LVM volume group.
+                      Empty if the backing volume is not on a thin pool.
+                    maxLength: 253
+                    type: string
+                  size:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: Size is the size of the backing LVM logical volume.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  state:
+                    description: State is the local backing volume state.
+                    type: string
+                type: object
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current

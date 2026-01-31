@@ -184,14 +184,11 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	Addresses []DRBDResourceAddressStatus `json:"addresses,omitempty"`
 
-	// BackingVolumeSize is the size of the backing LVM logical volume for this replica.
+	// BackingVolume contains information about the backing LVM logical volume.
 	// Only set for Diskful replicas.
+	// +patchStrategy=merge
 	// +optional
-	BackingVolumeSize resource.Quantity `json:"backingVolumeSize,omitempty"`
-
-	// BackingVolumeState is the local backing volume state of this replica.
-	// +optional
-	BackingVolumeState DiskState `json:"backingVolumeState,omitempty"`
+	BackingVolume *BackingVolume `json:"backingVolume,omitempty" patchStrategy:"merge"`
 
 	// DevicePath is the block device path when the replica is attached.
 	// Example: /dev/drbd10012.
@@ -226,6 +223,29 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +patchStrategy=merge
 	// +optional
 	DRBDRReconciliationCache DRBDRReconciliationCache `json:"drbdrReconciliationCache,omitempty" patchStrategy:"merge"`
+}
+
+// BackingVolume contains information about the backing LVM logical volume.
+// +kubebuilder:object:generate=true
+type BackingVolume struct {
+	// Size is the size of the backing LVM logical volume.
+	// +optional
+	Size *resource.Quantity `json:"size,omitempty"`
+
+	// State is the local backing volume state.
+	// +optional
+	State DiskState `json:"state,omitempty"`
+
+	// LVMVolumeGroupName is the name of the LVM volume group.
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	LVMVolumeGroupName string `json:"lvmVolumeGroupName,omitempty"`
+
+	// LVMVolumeGroupThinPoolName is the name of the thin pool within the LVM volume group.
+	// Empty if the backing volume is not on a thin pool.
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	LVMVolumeGroupThinPoolName string `json:"lvmVolumeGroupThinPoolName,omitempty"`
 }
 
 // QuorumSummary provides detailed quorum information for a replica.
