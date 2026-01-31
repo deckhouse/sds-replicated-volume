@@ -24,12 +24,9 @@ import (
 	nodecontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/node_controller"
 	rsccontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rsc_controller"
 	rspcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rsp_controller"
-	rvattachcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_attach_controller"
 	rvcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller"
-	rvdeletepropagation "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_delete_propagation"
 	rvrcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_controller"
 	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
-	rvrtiebreakercount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_tie_breaker_count"
 )
 
 // BuildAll builds all controllers.
@@ -43,11 +40,8 @@ func BuildAll(mgr manager.Manager, podNamespace string) error {
 
 	// Controllers that don't need podNamespace.
 	builders := []func(mgr manager.Manager) error{
-		rvrtiebreakercount.BuildController,
 		rvcontroller.BuildController,
-		rvdeletepropagation.BuildController,
 		rvrschedulingcontroller.BuildController,
-		rvattachcontroller.BuildController,
 		rsccontroller.BuildController,
 		nodecontroller.BuildController,
 	}
