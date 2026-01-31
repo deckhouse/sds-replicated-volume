@@ -111,13 +111,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Reconcile the backing volume (LVMLogicalVolume).
-	targetLLVName, outcome := r.reconcileBackingVolume(rf.Ctx(), rvr, &llvs, rv, drbdr)
+	targetBV, intendedBV, outcome := r.reconcileBackingVolume(rf.Ctx(), rvr, &llvs, rv, drbdr)
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
 	}
 
 	// Reconcile the DRBD resource.
-	drbdr, ro := r.reconcileDRBDResource(rf.Ctx(), rvr, rv, drbdr, targetLLVName)
+	drbdr, ro := r.reconcileDRBDResource(rf.Ctx(), rvr, rv, drbdr, targetBV, intendedBV)
 	outcome = outcome.Merge(ro)
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
@@ -143,11 +143,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		// Ensure RVR status fields reflect the current DRBDR state.
 		eo := flow.MergeEnsures(
 			ensureAttachmentStatus(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
+
+			// Ensure status fields.
 			ensureStatusPeers(rf.Ctx(), rvr, drbdr),
-			ensureConditionFullyConnected(rf.Ctx(), rvr, drbdr, datamesh, agentReady),
 			ensureStatusBackingVolume(rf.Ctx(), rvr, drbdr, llvs),
-			ensureConditionBackingVolumeInSync(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
 			ensureStatusQuorum(rf.Ctx(), rvr, drbdr),
+
+			// Ensure conditions.
+			ensureConditionFullyConnected(rf.Ctx(), rvr, drbdr, datamesh, agentReady),
+			ensureConditionBackingVolumeInSync(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
 			ensureConditionReady(rf.Ctx(), rvr, drbdr, agentReady, drbdrConfigurationPending),
 		)
 		if eo.Error() != nil {
@@ -970,7 +974,7 @@ func (r *Reconciler) reconcileBackingVolume(
 	llvs *[]snc.LVMLogicalVolume,
 	rv *v1alpha1.ReplicatedVolume,
 	drbdr *v1alpha1.DRBDResource,
-) (targetLLVName string, outcome flow.ReconcileOutcome) {
+) (targetBV, intendedBV *backingVolume, outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "backing-volume")
 	defer rf.OnEnd(&outcome)
 
@@ -979,27 +983,27 @@ func (r *Reconciler) reconcileBackingVolume(
 		if len(*llvs) > 0 {
 			deletingNames, ro := r.reconcileLLVsDeletion(rf.Ctx(), llvs, nil)
 			if ro.ShouldReturn() {
-				return "", ro
+				return nil, nil, ro
 			}
 			// rvr can be nil here if it was already deleted; nothing to update in that case.
 			if rvr == nil {
-				return "", rf.Continue()
+				return nil, nil, rf.Continue()
 			}
 			// Still deleting — set condition False.
 			changed := applyRVRBackingVolumeReadyCondFalse(rvr,
 				v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable,
 				fmt.Sprintf("Replica is being deleted; deleting backing volumes: %s", strings.Join(deletingNames, ", ")))
-			return "", rf.Continue().ReportChangedIf(changed)
+			return nil, nil, rf.Continue().ReportChangedIf(changed)
 		}
 
 		// All LLVs deleted.
 		// If rvr is nil (already deleted), just return.
 		if rvr == nil {
-			return "", rf.Continue()
+			return nil, nil, rf.Continue()
 		}
 		// Remove condition entirely.
 		changed := applyRVRBackingVolumeReadyCondAbsent(rvr)
-		return "", rf.Continue().ReportChangedIf(changed)
+		return nil, nil, rf.Continue().ReportChangedIf(changed)
 	}
 
 	// 2. Compute actual state.
@@ -1011,7 +1015,7 @@ func (r *Reconciler) reconcileBackingVolume(
 		changed := applyRVRBackingVolumeReadyCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForReplicatedVolume,
 			"ReplicatedVolume not found")
-		return actual.LLVNameOrEmpty(), rf.Continue().ReportChangedIf(changed)
+		return actual, nil, rf.Continue().ReportChangedIf(changed)
 	}
 
 	// 4. Datamesh not initialized yet — wait for RV controller to set it up.
@@ -1021,7 +1025,7 @@ func (r *Reconciler) reconcileBackingVolume(
 		changed := applyRVRBackingVolumeReadyCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForReplicatedVolume,
 			"Datamesh is not initialized yet")
-		return actual.LLVNameOrEmpty(), rf.Continue().ReportChangedIf(changed)
+		return actual, nil, rf.Continue().ReportChangedIf(changed)
 	}
 
 	// 5. Compute intended state.
@@ -1032,17 +1036,17 @@ func (r *Reconciler) reconcileBackingVolume(
 		if len(*llvs) > 0 {
 			deletingNames, ro := r.reconcileLLVsDeletion(rf.Ctx(), llvs, nil)
 			if ro.ShouldReturn() {
-				return "", ro
+				return nil, nil, ro
 			}
 			// Still deleting — set condition False.
 			changed := applyRVRBackingVolumeReadyCondFalse(rvr, reason,
 				fmt.Sprintf("%s; deleting backing volumes: %s", message, strings.Join(deletingNames, ", ")))
-			return "", rf.Continue().ReportChangedIf(changed)
+			return nil, nil, rf.Continue().ReportChangedIf(changed)
 		}
 
 		// All LLVs deleted — remove condition entirely.
 		changed := applyRVRBackingVolumeReadyCondAbsent(rvr)
-		return "", rf.Continue().ReportChangedIf(changed)
+		return nil, nil, rf.Continue().ReportChangedIf(changed)
 	}
 
 	// 7. Find the intended LLV in the list.
@@ -1052,7 +1056,7 @@ func (r *Reconciler) reconcileBackingVolume(
 	if intendedLLV == nil {
 		llv, err := newLLV(r.scheme, rvr, rv, intended)
 		if err != nil {
-			return "", rf.Failf(err, "constructing LLV %s", intended.LLVName)
+			return nil, nil, rf.Failf(err, "constructing LLV %s", intended.LLVName)
 		}
 
 		if err := r.createLLV(rf.Ctx(), llv); err != nil {
@@ -1064,9 +1068,9 @@ func (r *Reconciler) reconcileBackingVolume(
 				applyRVRBackingVolumeReadyCondFalse(rvr,
 					v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioningFailed,
 					fmt.Sprintf("Failed to create backing volume %s: %s", intended.LLVName, computeAPIValidationErrorCauses(err)))
-				return actual.LLVNameOrEmpty(), rf.ContinueAndRequeueAfter(5 * time.Minute).ReportChanged()
+				return actual, intended, rf.ContinueAndRequeueAfter(5 * time.Minute).ReportChanged()
 			}
-			return "", rf.Failf(err, "creating LLV %s", intended.LLVName)
+			return nil, nil, rf.Failf(err, "creating LLV %s", intended.LLVName)
 		}
 
 		// Add newly created LLV to the slice for further processing.
@@ -1083,8 +1087,8 @@ func (r *Reconciler) reconcileBackingVolume(
 		}
 		changed := applyRVRBackingVolumeReadyCondFalse(rvr, reason, message)
 
-		// Return actual LLV name if exists, otherwise empty.
-		return actual.LLVNameOrEmpty(), rf.Continue().ReportChangedIf(changed)
+		// Return actual BV as target.
+		return actual, intended, rf.Continue().ReportChangedIf(changed)
 	}
 
 	// 9. Ensure metadata (ownerRef, finalizer, label) on the intended LLV.
@@ -1093,10 +1097,10 @@ func (r *Reconciler) reconcileBackingVolume(
 	if !isLLVMetadataInSync(rvr, rv, intendedLLV) {
 		base := intendedLLV.DeepCopy()
 		if _, err := applyLLVMetadata(r.scheme, rvr, rv, intendedLLV); err != nil {
-			return "", rf.Failf(err, "applying LLV %s metadata", intendedLLV.Name)
+			return nil, nil, rf.Failf(err, "applying LLV %s metadata", intendedLLV.Name)
 		}
 		if err := r.patchLLV(rf.Ctx(), intendedLLV, base, true); err != nil {
-			return "", rf.Failf(err, "patching LLV %s metadata", intendedLLV.Name)
+			return nil, nil, rf.Failf(err, "patching LLV %s metadata", intendedLLV.Name)
 		}
 	}
 
@@ -1118,7 +1122,7 @@ func (r *Reconciler) reconcileBackingVolume(
 			message = fmt.Sprintf("Waiting for backing volume %s to become ready", intended.LLVName)
 		}
 		changed := applyRVRBackingVolumeReadyCondFalse(rvr, reason, message)
-		return actual.LLVNameOrEmpty(), rf.Continue().ReportChangedIf(changed)
+		return actual, intended, rf.Continue().ReportChangedIf(changed)
 	}
 
 	// 11. Resize if needed: LLV is ready, but size may need to grow.
@@ -1138,9 +1142,9 @@ func (r *Reconciler) reconcileBackingVolume(
 					applyRVRBackingVolumeReadyCondFalse(rvr,
 						v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizeFailed,
 						fmt.Sprintf("Failed to resize backing volume %s: %s", intended.LLVName, computeAPIValidationErrorCauses(err)))
-					return intended.LLVName, rf.ContinueAndRequeueAfter(5 * time.Minute).ReportChanged()
+					return actual, intended, rf.ContinueAndRequeueAfter(5 * time.Minute).ReportChanged()
 				}
-				return "", rf.Failf(err, "patching LLV %s size", intendedLLV.Name)
+				return nil, nil, rf.Failf(err, "patching LLV %s size", intendedLLV.Name)
 			}
 		}
 
@@ -1148,7 +1152,7 @@ func (r *Reconciler) reconcileBackingVolume(
 			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizing,
 			fmt.Sprintf("Resizing backing volume %s from %s to %s", intended.LLVName, actualSize.String(), intended.Size.String()))
 
-		return actual.LLVNameOrEmpty(), rf.Continue().ReportChangedIf(changed)
+		return actual, intended, rf.Continue().ReportChangedIf(changed)
 	}
 
 	// 12. Fully ready: delete obsolete LLVs and set condition to Ready.
@@ -1159,13 +1163,13 @@ func (r *Reconciler) reconcileBackingVolume(
 		var ro flow.ReconcileOutcome
 		deletingNames, ro := r.reconcileLLVsDeletion(rf.Ctx(), llvs, []string{intended.LLVName})
 		if ro.ShouldReturn() {
-			return "", ro
+			return nil, nil, ro
 		}
 		message = fmt.Sprintf("%s; deleting obsolete: %s", message, strings.Join(deletingNames, ", "))
 	}
 	changed := applyRVRBackingVolumeReadyCondTrue(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonReady, message)
 
-	return intended.LLVName, rf.Continue().ReportChangedIf(changed)
+	return intended, intended, rf.Continue().ReportChangedIf(changed)
 }
 
 // rvrShouldNotExist returns true if RV is absent or RV is being deleted
@@ -1200,6 +1204,20 @@ func (bv *backingVolume) LLVNameOrEmpty() string {
 		return ""
 	}
 	return bv.LLVName
+}
+
+// Equal returns true if bv and other are equal (both nil, or all fields match).
+func (bv *backingVolume) Equal(other *backingVolume) bool {
+	if bv == nil && other == nil {
+		return true
+	}
+	if bv == nil || other == nil {
+		return false
+	}
+	return bv.LLVName == other.LLVName &&
+		bv.LVMVolumeGroupName == other.LVMVolumeGroupName &&
+		bv.ThinPoolName == other.ThinPoolName &&
+		bv.Size.Cmp(other.Size) == 0
 }
 
 // computeActualBackingVolume extracts the actual backing volume state from DRBDResource and LLVs.
@@ -1320,6 +1338,8 @@ func computeIntendedBackingVolume(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1a
 			return nil, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling,
 				"Waiting for storage assignment"
 		}
+
+		// TODO: validate that ThinPool presence/absence matches RSP type.
 
 		// Use RVR spec configuration.
 		bv.LVMVolumeGroupName = rvr.Spec.LVMVolumeGroupName
@@ -1559,7 +1579,7 @@ func applyLLVMetadata(scheme *runtime.Scheme, rvr *v1alpha1.ReplicatedVolumeRepl
 //
 
 // Reconcile pattern: In-place reconciliation
-func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.ReplicatedVolume, drbdr *v1alpha1.DRBDResource, targetLLVName string) (_ *v1alpha1.DRBDResource, outcome flow.ReconcileOutcome) {
+func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.ReplicatedVolume, drbdr *v1alpha1.DRBDResource, targetBV, intendedBV *backingVolume) (_ *v1alpha1.DRBDResource, outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "drbd-resource")
 	defer rf.OnEnd(&outcome)
 
@@ -1641,13 +1661,13 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 
 	member := datamesh.FindMemberByName(rvr.Name)
 	intendedType := computeIntendedType(rvr, member)
-	targetType := computeTargetType(intendedType, targetLLVName)
+	targetType := computeTargetType(intendedType, targetBV.LLVNameOrEmpty())
 
 	// 6. Create or update DRBDR.
 	var targetDRBDRReconciliationCache v1alpha1.DRBDRReconciliationCache
 	if drbdr == nil {
 		// Compute target DRBDR spec.
-		targetSpec := computeTargetDRBDRSpec(rvr, drbdr, datamesh, member, targetLLVName, targetType)
+		targetSpec := computeTargetDRBDRSpec(rvr, drbdr, datamesh, member, targetBV.LLVNameOrEmpty(), targetType)
 
 		// Create new DRBDResource.
 		newObj, err := newDRBDR(r.scheme, rvr, targetSpec)
@@ -1670,7 +1690,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 
 		if specMayNeedUpdate {
 			// Compute target DRBDR spec.
-			targetSpec := computeTargetDRBDRSpec(rvr, drbdr, datamesh, member, targetLLVName, targetType)
+			targetSpec := computeTargetDRBDRSpec(rvr, drbdr, datamesh, member, targetBV.LLVNameOrEmpty(), targetType)
 
 			// Compare and potentially apply changes.
 			// DeepEqual handles resource.Quantity and nested structs correctly.
@@ -1714,23 +1734,42 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 	}
 
 	// 9. Check DRBDR configuration status.
-	state, msg := computeActualDRBDRConfigured(drbdr)
-	if state == DRBDRConfiguredStatePending {
+	configuredCond := obju.GetStatusCondition(drbdr, v1alpha1.DRBDResourceCondConfiguredType)
+
+	// 9a. Configured condition not set yet — waiting for agent to respond.
+	if configuredCond == nil {
+		changed = applyRVRConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonApplyingConfiguration,
+			"Waiting for agent to respond (Configured condition is not set yet)") || changed
+		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+	}
+
+	// 9b. Agent hasn't processed the current generation yet.
+	if configuredCond.ObservedGeneration != drbdr.Generation {
+		msg := fmt.Sprintf("Waiting for agent to respond (generation: %d, observedGeneration: %d)",
+			drbdr.Generation, configuredCond.ObservedGeneration)
 		changed = applyRVRConfiguredCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonApplyingConfiguration, msg) || changed
 		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
 	}
-	if state == DRBDRConfiguredStateFalse {
+
+	// 9c. DRBDR is in maintenance mode.
+	if configuredCond.Reason == v1alpha1.DRBDResourceCondConfiguredReasonInMaintenance {
+		changed = applyRVRConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonApplyingConfiguration,
+			"DRBD is in maintenance mode") || changed
+		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+	}
+
+	// 9d. DRBDR configuration failed.
+	if configuredCond.Status != metav1.ConditionTrue {
+		msg := fmt.Sprintf("DRBD configuration failed (reason: %s)", configuredCond.Reason)
 		changed = applyRVRConfiguredCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigurationFailed, msg) || changed
 		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
 	}
 
-	// At this point targetType must equal intendedType.
-	// If not, our reconciliation logic has a bug.
-	if targetType != intendedType {
-		panic(fmt.Sprintf("targetType (%s) != intendedType (%s)", targetType, intendedType))
-	}
+	// At this point DRBDR is configured (Configured condition is True).
 
 	// 10. DRBDR is configured — copy addresses to RVR status.
 	if len(rvr.Status.Addresses) == 0 {
@@ -1741,7 +1780,48 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 	}
 	changed = applyRVRAddresses(rvr, drbdr.Status.Addresses) || changed
 
-	// 11. If not a datamesh member — DRBD is preconfigured, waiting for membership.
+	// 11. If targetType != intendedType, DRBDR is configured as TieBreaker
+	// but we want Diskful — waiting for backing volume to become ready.
+	// This happens when LLV is not yet ready and we preconfigured DRBDR as TieBreaker.
+	// Once LLV becomes ready, targetLLVName will be set and targetType will match intendedType.
+	if targetType != intendedType {
+		changed = applyRVRConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonWaitingForBackingVolume,
+			"DRBD preconfigured as TieBreaker, waiting for backing volume to become ready") || changed
+		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+	}
+
+	// 12. Check if backing volume matches intended configuration.
+	if intendedBV != nil && targetBV != nil {
+		// 12a. Check if LVG or ThinPool changed — wait for backing volume replacement.
+		// This can happen when LVG or ThinPool was changed in RVR spec (before datamesh membership)
+		// or in datamesh (after membership).
+		if targetBV.LVMVolumeGroupName != intendedBV.LVMVolumeGroupName ||
+			targetBV.ThinPoolName != intendedBV.ThinPoolName {
+			formatBV := func(bv *backingVolume) string {
+				if bv.ThinPoolName == "" {
+					return fmt.Sprintf("LVG %q without thinpool", bv.LVMVolumeGroupName)
+				}
+				return fmt.Sprintf("LVG %q with thinpool %q", bv.LVMVolumeGroupName, bv.ThinPoolName)
+			}
+			msg := fmt.Sprintf("Backing volume replacement pending: current %s, expected %s",
+				formatBV(targetBV), formatBV(intendedBV))
+			changed = applyRVRConfiguredCondFalse(rvr,
+				v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonWaitingForBackingVolume, msg) || changed
+			return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+		}
+
+		// 12b. Check if backing volume needs resize.
+		if targetBV.Size.Cmp(intendedBV.Size) < 0 {
+			msg := fmt.Sprintf("Backing volume resize pending: current size %s, expected size %s",
+				targetBV.Size.String(), intendedBV.Size.String())
+			changed = applyRVRConfiguredCondFalse(rvr,
+				v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonWaitingForBackingVolume, msg) || changed
+			return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+		}
+	}
+
+	// 13. If not a datamesh member — DRBD is preconfigured, waiting for membership.
 	if member == nil {
 		changed = applyRVRConfiguredCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingDatameshJoin,
@@ -1749,61 +1829,35 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
 	}
 
-	// 12. We are a datamesh member — fully configured.
+	// Invariant: at this point backing volume must be either not needed or fully ready.
+	//
+	// - Not needed (diskless replica): both targetBV and intendedBV are nil.
+	// - Fully ready: backing volume exists, matches intended configuration (LVG, ThinPool, Size),
+	//   and is attached to DRBDR — targetBV equals intendedBV.
+	//
+	// Any in-progress state (creating, resizing, replacing) would have returned earlier.
+	if !targetBV.Equal(intendedBV) {
+		panic(fmt.Sprintf("BUG: targetBV and intendedBV must be equal, got targetBV=%+v, intendedBV=%+v", targetBV, intendedBV))
+	}
+
+	// 14. Replica is fully configured to the current datamesh revision — record DatameshRevision.
+	//
+	// At this point, the replica is fully configured for the current datamesh revision:
+	//   - DRBD was configured to match the intended state derived from this datamesh revision.
+	//   - Backing volume (if Diskful) was configured: exists and matches intended LVG/ThinPool/Size.
+	//   - Backing volume (if Diskful) is ready: reported ready and actual size >= intended size.
+	//   - Agent confirmed successful configuration.
+	//
+	// Note: "configured" does NOT mean:
+	//   - DRBD connections are established (happens asynchronously after configuration).
+	//   - Backing volume is synchronized (resync happens asynchronously if the volume was newly added).
+	if rvr.Status.DatameshRevision != rv.Status.DatameshRevision {
+		rvr.Status.DatameshRevision = rv.Status.DatameshRevision
+		changed = true
+	}
 	changed = applyRVRConfiguredCondTrue(rvr,
 		v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured, "Configured") || changed
 	return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
-}
-
-// DRBDRConfiguredState represents the configuration state of a DRBDResource.
-type DRBDRConfiguredState int
-
-const (
-	// DRBDRConfiguredStateTrue means the DRBDResource is fully configured
-	// (Configured condition is True and ObservedGeneration matches Generation).
-	DRBDRConfiguredStateTrue DRBDRConfiguredState = iota
-	// DRBDRConfiguredStateFalse means the DRBDResource configuration failed
-	// (Configured condition is False and ObservedGeneration matches Generation).
-	DRBDRConfiguredStateFalse
-	// DRBDRConfiguredStatePending means the agent hasn't processed the current generation yet
-	// (no Configured condition or ObservedGeneration doesn't match Generation).
-	DRBDRConfiguredStatePending
-)
-
-// computeActualDRBDRConfigured returns the configuration state of a DRBDResource and a message:
-// - DRBDRConfiguredStateTrue: configured successfully
-// - DRBDRConfiguredStateFalse: configuration failed (message contains error from condition)
-// - DRBDRConfiguredStatePending: waiting for agent to process or resource is in maintenance mode
-func computeActualDRBDRConfigured(drbdr *v1alpha1.DRBDResource) (DRBDRConfiguredState, string) {
-	if drbdr == nil {
-		panic("computeActualDRBDRConfigured: drbdr is nil")
-	}
-	cond := obju.GetStatusCondition(drbdr, v1alpha1.DRBDResourceCondConfiguredType)
-
-	// DRBDResource was just created and hasn't been processed by the agent yet.
-	if cond == nil {
-		return DRBDRConfiguredStatePending, "Waiting for agent to respond (Configured condition is not set yet)"
-	}
-
-	// We just made changes to the DRBDResourceand the agent hasn't processed them yet.
-	if cond.ObservedGeneration != drbdr.Generation {
-		return DRBDRConfiguredStatePending, fmt.Sprintf(
-			"Waiting for agent to respond (generation: %d, observedGeneration: %d)",
-			drbdr.Generation, cond.ObservedGeneration)
-	}
-
-	// DRBDResource is in maintenance mode.
-	if cond.Reason == v1alpha1.DRBDResourceCondConfiguredReasonInMaintenance {
-		return DRBDRConfiguredStatePending, "DRBD is in maintenance mode"
-	}
-
-	// DRBDResource is successfully configured.
-	if cond.Status == metav1.ConditionTrue {
-		return DRBDRConfiguredStateTrue, ""
-	}
-
-	// DRBDResource configuration failed.
-	return DRBDRConfiguredStateFalse, fmt.Sprintf("DRBD configuration failed (reason: %s)", cond.Reason)
 }
 
 // computeIntendedType returns the intended replica type.

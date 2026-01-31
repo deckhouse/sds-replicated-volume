@@ -236,6 +236,21 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              datameshRevision:
+                description: |-
+                  DatameshRevision is the datamesh revision for which the replica was fully configured.
+
+                  "Configured" means:
+                    - DRBD was configured to match the intended state derived from this datamesh revision.
+                    - Backing volume (if Diskful) was configured: exists and matches intended LVG/ThinPool/Size.
+                    - Backing volume (if Diskful) is ready: reported ready and actual size >= intended size.
+                    - Agent confirmed successful configuration.
+
+                  Note: "configured" does NOT mean:
+                    - DRBD connections are established (happens asynchronously after configuration).
+                    - Backing volume is synchronized (resync happens asynchronously if the volume was newly added).
+                format: int64
+                type: integer
               deviceIOSuspended:
                 description: |-
                   DeviceIOSuspended indicates whether I/O is suspended on the device.
