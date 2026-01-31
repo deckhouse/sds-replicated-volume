@@ -222,11 +222,6 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              datameshRevision:
-                description: DatameshRevision is the datamesh revision this replica
-                  was configured for.
-                format: int64
-                type: integer
               deviceIOSuspended:
                 description: |-
                   DeviceIOSuspended indicates whether I/O is suspended on the device.
@@ -475,20 +470,29 @@ spec:
                     - writeOrdering
                     type: object
                 type: object
-              drbdResourceGeneration:
-                description: |-
-                  DRBDResourceGeneration is the generation of the DRBDResource that was last applied.
-                  Used to skip redundant spec comparison when the generation matches.
-                format: int64
-                type: integer
-              effectiveType:
-                description: ReplicaType enumerates possible values for ReplicatedVolumeReplica
-                  spec.type and status.effectiveType fields.
-                enum:
-                - Diskful
-                - Access
-                - TieBreaker
-                type: string
+              drbdrReconciliationCache:
+                description: DRBDRReconciliationCache holds cached values for DRBDResource
+                  reconciliation optimization.
+                properties:
+                  datameshRevision:
+                    description: DatameshRevision is the datamesh revision for which
+                      DRBDResource spec was last computed.
+                    format: int64
+                    type: integer
+                  drbdrGeneration:
+                    description: DRBDRGeneration is the DRBDResource generation at
+                      the time DRBDResource spec was last computed.
+                    format: int64
+                    type: integer
+                  rvrType:
+                    description: RVRType is the effective replica type for which DRBDResource
+                      spec was last computed.
+                    enum:
+                    - Diskful
+                    - Access
+                    - TieBreaker
+                    type: string
+                type: object
               peers:
                 description: Peers contains the status of connections to peer replicas.
                 items:

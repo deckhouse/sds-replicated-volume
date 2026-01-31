@@ -1715,7 +1715,7 @@ var _ = Describe("computeActualDRBDRConfigured", func() {
 	})
 })
 
-var _ = Describe("computeIntendedEffectiveType", func() {
+var _ = Describe("computeIntendedType", func() {
 	It("returns RVR spec type when member is nil", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
@@ -1723,7 +1723,7 @@ var _ = Describe("computeIntendedEffectiveType", func() {
 			},
 		}
 
-		result := computeIntendedEffectiveType(rvr, nil)
+		result := computeIntendedType(rvr, nil)
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeDiskful))
 	})
@@ -1735,7 +1735,7 @@ var _ = Describe("computeIntendedEffectiveType", func() {
 			},
 		}
 
-		result := computeIntendedEffectiveType(rvr, nil)
+		result := computeIntendedType(rvr, nil)
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeAccess))
 	})
@@ -1746,7 +1746,7 @@ var _ = Describe("computeIntendedEffectiveType", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		result := computeIntendedEffectiveType(rvr, member)
+		result := computeIntendedType(rvr, member)
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeDiskful))
 	})
@@ -1758,7 +1758,7 @@ var _ = Describe("computeIntendedEffectiveType", func() {
 			TypeTransition: v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskless,
 		}
 
-		result := computeIntendedEffectiveType(rvr, member)
+		result := computeIntendedType(rvr, member)
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
 	})
@@ -1770,33 +1770,33 @@ var _ = Describe("computeIntendedEffectiveType", func() {
 			TypeTransition: v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskful,
 		}
 
-		result := computeIntendedEffectiveType(rvr, member)
+		result := computeIntendedType(rvr, member)
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
 	})
 })
 
-var _ = Describe("computeTargetEffectiveType", func() {
+var _ = Describe("computeTargetType", func() {
 	It("returns intended type when target LLV name is present", func() {
-		result := computeTargetEffectiveType(v1alpha1.ReplicaTypeDiskful, "llv-1")
+		result := computeTargetType(v1alpha1.ReplicaTypeDiskful, "llv-1")
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeDiskful))
 	})
 
 	It("returns TieBreaker when intended is Diskful but no backing volume", func() {
-		result := computeTargetEffectiveType(v1alpha1.ReplicaTypeDiskful, "")
+		result := computeTargetType(v1alpha1.ReplicaTypeDiskful, "")
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
 	})
 
 	It("returns intended type when intended is not Diskful and no backing volume", func() {
-		result := computeTargetEffectiveType(v1alpha1.ReplicaTypeAccess, "")
+		result := computeTargetType(v1alpha1.ReplicaTypeAccess, "")
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeAccess))
 	})
 
 	It("returns TieBreaker type as-is when no backing volume", func() {
-		result := computeTargetEffectiveType(v1alpha1.ReplicaTypeTieBreaker, "")
+		result := computeTargetType(v1alpha1.ReplicaTypeTieBreaker, "")
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
 	})
@@ -1863,7 +1863,7 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 		Expect(spec.NodeID).To(Equal(uint8(99)))
 	})
 
-	It("sets Type based on targetEffectiveType", func() {
+	It("sets Type based on targetType", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
 			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
@@ -2182,55 +2182,145 @@ var _ = Describe("applyRVRBackingVolumeSize", func() {
 	})
 })
 
-var _ = Describe("applyRVREffectiveType", func() {
-	It("sets effective type when different", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
+var _ = Describe("computeTargetDRBDRReconciliationCache", func() {
+	It("returns cache with provided values", func() {
+		cache := computeTargetDRBDRReconciliationCache(5, 3, v1alpha1.ReplicaTypeDiskful)
 
-		changed := applyRVREffectiveType(rvr, v1alpha1.ReplicaTypeDiskful)
-
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.EffectiveType).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(cache.DatameshRevision).To(Equal(int64(5)))
+		Expect(cache.DRBDRGeneration).To(Equal(int64(3)))
+		Expect(cache.RVRType).To(Equal(v1alpha1.ReplicaTypeDiskful))
 	})
 
-	It("returns false when type is same", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				EffectiveType: v1alpha1.ReplicaTypeDiskful,
-			},
-		}
+	It("handles zero values", func() {
+		cache := computeTargetDRBDRReconciliationCache(0, 0, "")
 
-		changed := applyRVREffectiveType(rvr, v1alpha1.ReplicaTypeDiskful)
-
-		Expect(changed).To(BeFalse())
+		Expect(cache.DatameshRevision).To(Equal(int64(0)))
+		Expect(cache.DRBDRGeneration).To(Equal(int64(0)))
+		Expect(cache.RVRType).To(Equal(v1alpha1.ReplicaType("")))
 	})
 })
 
-var _ = Describe("applyRVRDatameshRevision", func() {
-	It("sets revision when different", func() {
+var _ = Describe("applyRVRDRBDRReconciliationCache", func() {
+	It("sets all fields when different", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
+		target := v1alpha1.DRBDRReconciliationCache{
+			DatameshRevision: 5,
+			DRBDRGeneration:  3,
+			RVRType:          v1alpha1.ReplicaTypeDiskful,
+		}
 
-		changed := applyRVRDatameshRevision(rvr, 5)
+		changed := applyRVRDRBDRReconciliationCache(rvr, target)
 
 		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DatameshRevision).To(Equal(int64(5)))
+		Expect(rvr.Status.DRBDRReconciliationCache).To(Equal(target))
 	})
 
-	It("returns false when revision is same", func() {
+	It("returns false when all fields are same", func() {
+		target := v1alpha1.DRBDRReconciliationCache{
+			DatameshRevision: 5,
+			DRBDRGeneration:  3,
+			RVRType:          v1alpha1.ReplicaTypeDiskful,
+		}
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DatameshRevision: 5,
+				DRBDRReconciliationCache: target,
 			},
 		}
 
-		changed := applyRVRDatameshRevision(rvr, 5)
+		changed := applyRVRDRBDRReconciliationCache(rvr, target)
 
 		Expect(changed).To(BeFalse())
+	})
+
+	It("returns true when only datamesh revision differs", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DRBDRReconciliationCache: v1alpha1.DRBDRReconciliationCache{
+					DatameshRevision: 4,
+					DRBDRGeneration:  3,
+					RVRType:          v1alpha1.ReplicaTypeDiskful,
+				},
+			},
+		}
+		target := v1alpha1.DRBDRReconciliationCache{
+			DatameshRevision: 5,
+			DRBDRGeneration:  3,
+			RVRType:          v1alpha1.ReplicaTypeDiskful,
+		}
+
+		changed := applyRVRDRBDRReconciliationCache(rvr, target)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DRBDRReconciliationCache).To(Equal(target))
+	})
+
+	It("returns true when only drbdr generation differs", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DRBDRReconciliationCache: v1alpha1.DRBDRReconciliationCache{
+					DatameshRevision: 5,
+					DRBDRGeneration:  2,
+					RVRType:          v1alpha1.ReplicaTypeDiskful,
+				},
+			},
+		}
+		target := v1alpha1.DRBDRReconciliationCache{
+			DatameshRevision: 5,
+			DRBDRGeneration:  3,
+			RVRType:          v1alpha1.ReplicaTypeDiskful,
+		}
+
+		changed := applyRVRDRBDRReconciliationCache(rvr, target)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DRBDRReconciliationCache).To(Equal(target))
+	})
+
+	It("returns true when only rvr type differs", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DRBDRReconciliationCache: v1alpha1.DRBDRReconciliationCache{
+					DatameshRevision: 5,
+					DRBDRGeneration:  3,
+					RVRType:          v1alpha1.ReplicaTypeAccess,
+				},
+			},
+		}
+		target := v1alpha1.DRBDRReconciliationCache{
+			DatameshRevision: 5,
+			DRBDRGeneration:  3,
+			RVRType:          v1alpha1.ReplicaTypeDiskful,
+		}
+
+		changed := applyRVRDRBDRReconciliationCache(rvr, target)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DRBDRReconciliationCache).To(Equal(target))
+	})
+
+	It("handles zero values", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DRBDRReconciliationCache: v1alpha1.DRBDRReconciliationCache{
+					DatameshRevision: 5,
+					DRBDRGeneration:  3,
+					RVRType:          v1alpha1.ReplicaTypeDiskful,
+				},
+			},
+		}
+		target := v1alpha1.DRBDRReconciliationCache{}
+
+		changed := applyRVRDRBDRReconciliationCache(rvr, target)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DRBDRReconciliationCache).To(Equal(target))
 	})
 })
 
@@ -2296,46 +2386,6 @@ var _ = Describe("applyRVRAddresses", func() {
 		addresses[0].Address.IPv4 = "10.0.0.2"
 		// RVR should not be affected
 		Expect(rvr.Status.Addresses[0].Address.IPv4).To(Equal("10.0.0.1"))
-	})
-})
-
-var _ = Describe("applyRVRDRBDResourceGeneration", func() {
-	It("sets generation when different", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-
-		changed := applyRVRDRBDResourceGeneration(rvr, 3)
-
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DRBDResourceGeneration).To(Equal(int64(3)))
-	})
-
-	It("returns false when generation is same", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DRBDResourceGeneration: 3,
-			},
-		}
-
-		changed := applyRVRDRBDResourceGeneration(rvr, 3)
-
-		Expect(changed).To(BeFalse())
-	})
-
-	It("handles zero generation", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DRBDResourceGeneration: 3,
-			},
-		}
-
-		changed := applyRVRDRBDResourceGeneration(rvr, 0)
-
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DRBDResourceGeneration).To(Equal(int64(0)))
 	})
 })
 
@@ -2994,7 +3044,7 @@ var _ = Describe("patchRVRStatus", func() {
 		rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 		base := rvr.DeepCopy()
-		rvr.Status.EffectiveType = v1alpha1.ReplicaTypeDiskful
+		rvr.Status.DRBDRReconciliationCache.RVRType = v1alpha1.ReplicaTypeDiskful
 
 		err := rec.patchRVRStatus(ctx, rvr, base, false)
 
@@ -3003,7 +3053,7 @@ var _ = Describe("patchRVRStatus", func() {
 		// Verify status was updated
 		var updated v1alpha1.ReplicatedVolumeReplica
 		Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, &updated)).To(Succeed())
-		Expect(updated.Status.EffectiveType).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(updated.Status.DRBDRReconciliationCache.RVRType).To(Equal(v1alpha1.ReplicaTypeDiskful))
 	})
 
 	It("patches with optimistic lock when requested", func() {
@@ -3014,7 +3064,7 @@ var _ = Describe("patchRVRStatus", func() {
 		rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 		base := rvr.DeepCopy()
-		rvr.Status.EffectiveType = v1alpha1.ReplicaTypeDiskful
+		rvr.Status.DRBDRReconciliationCache.RVRType = v1alpha1.ReplicaTypeDiskful
 
 		err := rec.patchRVRStatus(ctx, rvr, base, true)
 
