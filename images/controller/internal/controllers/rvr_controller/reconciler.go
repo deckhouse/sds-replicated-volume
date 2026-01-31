@@ -21,7 +21,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash/fnv"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -143,7 +142,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		// Ensure RVR status fields reflect the current DRBDR state.
 		eo := flow.MergeEnsures(
 			ensureAttachmentStatus(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
-			ensurePeersStatus(rf.Ctx(), rvr, drbdr, datamesh, agentReady),
+			ensureStatusPeers(rf.Ctx(), rvr, drbdr),
+			ensureConditionFullyConnected(rf.Ctx(), rvr, drbdr, datamesh, agentReady),
 			ensureBackingVolumeStatus(rf.Ctx(), rvr, drbdr, llvs),
 			ensureBackingVolumeInSyncCond(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
 			ensureQuorumStatus(rf.Ctx(), rvr, drbdr, agentReady, drbdrConfigurationPending),
@@ -256,26 +256,144 @@ func ensureAttachmentStatus(
 	return ef.Ok().ReportChangedIf(changed)
 }
 
-// ensurePeersStatus ensures the RVR peers-related status fields reflect the current DRBDR state.
-func ensurePeersStatus(
+// ensureStatusPeers ensures the RVR status.peers field reflects the current DRBDR state.
+//
+// This function updates rvr.Status.Peers in-place based solely on drbdr.Status.Peers:
+//   - Each drbdr peer becomes a peer entry (connection state, disk state, etc.)
+//   - Type is computed from drbdr peer:
+//   - Diskful → Diskful
+//   - Diskless + AllowRemoteRead=false → Access
+//   - Diskless + AllowRemoteRead=true → TieBreaker
+//
+// The order of rvr.Status.Peers mirrors drbdr.Status.Peers.
+func ensureStatusPeers(
+	ctx context.Context,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	drbdr *v1alpha1.DRBDResource,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "status-peers")
+	defer ef.OnEnd(&outcome)
+
+	changed := false
+
+	// Guard: no DRBDR or no peers → clear rvr.Status.Peers.
+	if drbdr == nil || len(drbdr.Status.Peers) == 0 {
+		if len(rvr.Status.Peers) > 0 {
+			rvr.Status.Peers = nil
+			changed = true
+		}
+		return ef.Ok().ReportChangedIf(changed)
+	}
+
+	drbdrPeers := drbdr.Status.Peers
+	n := len(drbdrPeers)
+
+	// Ensure rvr.Status.Peers has the right length.
+	if cap(rvr.Status.Peers) < n {
+		// Need to grow capacity.
+		newPeers := make([]v1alpha1.PeerStatus, n)
+		copy(newPeers, rvr.Status.Peers)
+		rvr.Status.Peers = newPeers
+	}
+	if len(rvr.Status.Peers) != n {
+		rvr.Status.Peers = rvr.Status.Peers[:n]
+		changed = true
+	}
+
+	// Update each position in-place (order mirrors drbdr.Status.Peers).
+	for i := range drbdrPeers {
+		src := &drbdrPeers[i]
+		dst := &rvr.Status.Peers[i]
+
+		// Compute target Type from drbdr peer.
+		var targetType v1alpha1.ReplicaType
+		switch src.Type {
+		case v1alpha1.DRBDResourceTypeDiskful:
+			targetType = v1alpha1.ReplicaTypeDiskful
+		case v1alpha1.DRBDResourceTypeDiskless:
+			if src.AllowRemoteRead {
+				targetType = v1alpha1.ReplicaTypeTieBreaker
+			} else {
+				targetType = v1alpha1.ReplicaTypeAccess
+			}
+		}
+
+		// Compute target Attached.
+		targetAttached := src.Role == v1alpha1.DRBDRolePrimary
+
+		// Update fields, tracking changes.
+		if dst.Name != src.Name {
+			dst.Name = src.Name
+			changed = true
+		}
+		if dst.Type != targetType {
+			dst.Type = targetType
+			changed = true
+		}
+		if dst.Attached != targetAttached {
+			dst.Attached = targetAttached
+			changed = true
+		}
+
+		// Update ConnectionEstablishedOn in-place (order mirrors drbdr paths).
+		establishedCount := 0
+		for _, path := range src.Paths {
+			if path.Established {
+				establishedCount++
+			}
+		}
+		if cap(dst.ConnectionEstablishedOn) < establishedCount {
+			newConnOn := make([]string, establishedCount)
+			copy(newConnOn, dst.ConnectionEstablishedOn)
+			dst.ConnectionEstablishedOn = newConnOn
+		}
+		if len(dst.ConnectionEstablishedOn) != establishedCount {
+			dst.ConnectionEstablishedOn = dst.ConnectionEstablishedOn[:establishedCount]
+			changed = true
+		}
+		j := 0
+		for _, path := range src.Paths {
+			if path.Established {
+				if dst.ConnectionEstablishedOn[j] != path.SystemNetworkName {
+					dst.ConnectionEstablishedOn[j] = path.SystemNetworkName
+					changed = true
+				}
+				j++
+			}
+		}
+		if dst.ConnectionState != src.ConnectionState {
+			dst.ConnectionState = src.ConnectionState
+			changed = true
+		}
+		if dst.BackingVolumeState != src.DiskState {
+			dst.BackingVolumeState = src.DiskState
+			changed = true
+		}
+	}
+
+	return ef.Ok().ReportChangedIf(changed)
+}
+
+// ensureConditionFullyConnected ensures the RVR FullyConnected condition reflects the current peer connectivity.
+func ensureConditionFullyConnected(
 	ctx context.Context,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	drbdr *v1alpha1.DRBDResource,
 	datamesh *v1alpha1.ReplicatedVolumeDatamesh,
 	agentReady bool,
 ) (outcome flow.EnsureOutcome) {
-	ef := flow.BeginEnsure(ctx, "peers-status")
+	ef := flow.BeginEnsure(ctx, "condition-fully-connected")
 	defer ef.OnEnd(&outcome)
 
 	changed := false
 
 	// Guard: Condition not relevant.
 	// - no DRBDR exists, OR
-	// - not a datamesh member AND no drbdr peers
+	// - not a datamesh member AND no drbdr peers, OR
+	// - no addresses configured (no system networks to check against)
 	isMember := datamesh != nil && datamesh.FindMemberByName(rvr.Name) != nil
-	if drbdr == nil || (!isMember && len(drbdr.Status.Peers) == 0) {
+	if drbdr == nil || (!isMember && len(drbdr.Status.Peers) == 0) || len(rvr.Status.Addresses) == 0 {
 		changed = applyRVRFullyConnectedCondAbsent(rvr) || changed
-		changed = applyRVRStatusPeers(rvr, nil) || changed
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
@@ -284,41 +402,28 @@ func ensurePeersStatus(
 		changed = applyRVRFullyConnectedCondUnknown(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonAgentNotReady,
 			"Agent is not ready") || changed
-		changed = applyRVRStatusPeers(rvr, nil) || changed
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
-	// Ensure peers status by merging datamesh.Members and drbdr.Status.Peers.
-	changed = ensureRVRStatusPeers(rvr, drbdr.Status.Peers, datamesh, rvr.Name) || changed
-
-	// Evaluate FullyConnected condition based on merged peers.
-	// Note: rvr.Status.Peers now contains the merged list from datamesh + drbdr.
-	// Peers with empty ConnectionState are pending (not yet in drbdr).
-	rvrPeers := rvr.Status.Peers
-	if len(rvrPeers) == 0 {
+	// Guard: no peers.
+	if len(rvr.Status.Peers) == 0 {
 		changed = applyRVRFullyConnectedCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonNoPeers,
 			"No peers configured") || changed
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
-	// Get expected system network names from datamesh.
-	var systemNetworkNames []string
-	if datamesh != nil {
-		systemNetworkNames = datamesh.SystemNetworkNames
-	}
-
 	// Count connection states from merged peers.
 	// Empty ConnectionState means peer is pending (not in drbdr) → count as not connected.
 	var fullyConnected, partiallyConnected, notConnected int
-	for i := range rvrPeers {
-		p := &rvrPeers[i]
+	for i := range rvr.Status.Peers {
+		p := &rvr.Status.Peers[i]
 		if p.ConnectionState == v1alpha1.ConnectionStateConnected {
 			// Check if all system networks are established.
-			// Fully connected = all systemNetworkNames present in ConnectionEstablishedOn.
-			allEstablished := len(systemNetworkNames) > 0
-			for _, sn := range systemNetworkNames {
-				if !slices.Contains(p.ConnectionEstablishedOn, sn) {
+			// Fully connected = all addresses present in ConnectionEstablishedOn.
+			allEstablished := len(rvr.Status.Addresses) > 0
+			for _, addr := range rvr.Status.Addresses {
+				if !slices.Contains(p.ConnectionEstablishedOn, addr.SystemNetworkName) {
 					allEstablished = false
 					break
 				}
@@ -334,7 +439,7 @@ func ensurePeersStatus(
 		}
 	}
 
-	totalPeers := len(rvrPeers)
+	totalPeers := len(rvr.Status.Peers)
 	connectedPeers := fullyConnected + partiallyConnected
 
 	// Special case: not a datamesh member but has connections.
@@ -2185,168 +2290,6 @@ func ensureRVRStatusQuorumSummary(rvr *v1alpha1.ReplicatedVolumeReplica, drbdr *
 	}
 	rvr.Status.QuorumSummary = summary
 	return true
-}
-
-// applyRVRStatusPeers sets Peers on RVR status.
-func applyRVRStatusPeers(rvr *v1alpha1.ReplicatedVolumeReplica, peers []v1alpha1.PeerStatus) bool {
-	if len(rvr.Status.Peers) == 0 && len(peers) == 0 {
-		return false
-	}
-	// Use DeepEqual for slice of structs with nested slices.
-	if reflect.DeepEqual(rvr.Status.Peers, peers) {
-		return false
-	}
-	rvr.Status.Peers = peers
-	return true
-}
-
-// ensureRVRStatusPeers performs O(m+n) merge of datamesh.Members and drbdr.Status.Peers
-// into rvr.Status.Peers. It reuses the backing array when possible to minimize allocations.
-//
-// Semantics of empty fields:
-//   - Type empty: peer not in datamesh (orphan, being removed)
-//   - ConnectionState empty: peer not in drbdr.Status.Peers (pending connection)
-//
-// Panics if either source is not sorted by Name (invariant).
-//
-// Exception: This helper intentionally omits a phase scope and returns bool instead of flow.EnsureOutcome
-// for simplicity — the computation is straightforward and phase logging would add noise without value.
-func ensureRVRStatusPeers(
-	rvr *v1alpha1.ReplicatedVolumeReplica,
-	drbdrPeers []v1alpha1.DRBDResourcePeerStatus,
-	datamesh *v1alpha1.ReplicatedVolumeDatamesh,
-	selfName string,
-) (changed bool) {
-	// Get members from datamesh (nil-safe).
-	var members []v1alpha1.ReplicatedVolumeDatameshMember
-	if datamesh != nil {
-		members = datamesh.Members
-	}
-
-	// Assert sorted invariants (panic if violated).
-	for i := 1; i < len(members); i++ {
-		if members[i-1].Name >= members[i].Name {
-			panic("datamesh.Members not sorted by Name")
-		}
-	}
-	for i := 1; i < len(drbdrPeers); i++ {
-		if drbdrPeers[i-1].Name >= drbdrPeers[i].Name {
-			panic("drbdr.Status.Peers not sorted by Name")
-		}
-	}
-
-	// O(m+n) merge with lazy capacity growth.
-	dst := &rvr.Status.Peers
-	i, j, k := 0, 0, 0
-
-	for {
-		// Skip self in members.
-		for i < len(members) && members[i].Name == selfName {
-			i++
-		}
-		if i >= len(members) && j >= len(drbdrPeers) {
-			break
-		}
-
-		// Ensure capacity (append grows backing array as needed).
-		if k >= len(*dst) {
-			*dst = append(*dst, v1alpha1.PeerStatus{})
-			changed = true
-		}
-		p := &(*dst)[k]
-		k++
-
-		// Pick next from merge.
-		var name string
-		var member *v1alpha1.ReplicatedVolumeDatameshMember
-		var peer *v1alpha1.DRBDResourcePeerStatus
-
-		switch {
-		case i >= len(members):
-			name, peer = drbdrPeers[j].Name, &drbdrPeers[j]
-			j++
-		case j >= len(drbdrPeers):
-			name, member = members[i].Name, &members[i]
-			i++
-		case members[i].Name < drbdrPeers[j].Name:
-			name, member = members[i].Name, &members[i]
-			i++
-		case members[i].Name > drbdrPeers[j].Name:
-			name, peer = drbdrPeers[j].Name, &drbdrPeers[j]
-			j++
-		default:
-			name, member, peer = members[i].Name, &members[i], &drbdrPeers[j]
-			i++
-			j++
-		}
-
-		// Update Name.
-		if p.Name != name {
-			p.Name = name
-			changed = true
-		}
-
-		// Update Type (from datamesh; empty if orphan).
-		var targetType v1alpha1.ReplicaType
-		if member != nil {
-			targetType = member.Type
-		}
-		if p.Type != targetType {
-			p.Type = targetType
-			changed = true
-		}
-
-		// Update DRBD-sourced fields (empty if pending connection).
-		if peer != nil {
-			if targetAttached := peer.Role == v1alpha1.DRBDRolePrimary; p.Attached != targetAttached {
-				p.Attached = targetAttached
-				changed = true
-			}
-			connOn := p.ConnectionEstablishedOn[:0]
-			for x := range peer.Paths {
-				if peer.Paths[x].Established {
-					connOn = append(connOn, peer.Paths[x].SystemNetworkName)
-				}
-			}
-			slices.Sort(connOn)
-			if !slices.Equal(p.ConnectionEstablishedOn, connOn) {
-				p.ConnectionEstablishedOn = connOn
-				changed = true
-			}
-			if p.ConnectionState != peer.ConnectionState {
-				p.ConnectionState = peer.ConnectionState
-				changed = true
-			}
-			if p.BackingVolumeState != peer.DiskState {
-				p.BackingVolumeState = peer.DiskState
-				changed = true
-			}
-		} else {
-			if p.Attached {
-				p.Attached = false
-				changed = true
-			}
-			if len(p.ConnectionEstablishedOn) > 0 {
-				p.ConnectionEstablishedOn = p.ConnectionEstablishedOn[:0]
-				changed = true
-			}
-			if p.ConnectionState != "" {
-				p.ConnectionState = ""
-				changed = true
-			}
-			if p.BackingVolumeState != "" {
-				p.BackingVolumeState = ""
-				changed = true
-			}
-		}
-	}
-
-	// Trim excess.
-	if len(*dst) > k {
-		*dst = (*dst)[:k]
-		changed = true
-	}
-	return changed
 }
 
 // applyRVRDRBDRReconciliationCache updates the DRBDResource reconciliation cache

@@ -396,6 +396,10 @@ spec:
               peers:
                 items:
                   properties:
+                    allowRemoteRead:
+                      description: AllowRemoteRead indicates whether reads are allowed
+                        from this peer.
+                      type: boolean
                     connectionState:
                       type: string
                     diskState:

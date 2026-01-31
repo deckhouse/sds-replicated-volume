@@ -88,8 +88,9 @@ Reconcile (root) [Pure orchestration]
 │   ├── applyRVRAttachedCond*
 │   ├── applyRVRDevicePath
 │   └── applyRVRDeviceIOSuspended
-├── ensurePeersStatus ← details
-│   ├── ensureRVRStatusPeers (O(m+n) merge)
+├── ensureStatusPeers ← details
+│   └── mirrors drbdr.Status.Peers to rvr.Status.Peers
+├── ensureConditionFullyConnected ← details
 │   └── applyRVRFullyConnectedCond*
 ├── ensureBackingVolumeStatus ← details
 │   └── applyRVRBackingVolumeStatus
@@ -107,7 +108,7 @@ Reconcile (root) [Pure orchestration]
 └── patchRVRStatus
 ```
 
-Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureAttachmentStatus`](#ensureattachmentstatus-details), [`ensurePeersStatus`](#ensurepeersstatus-details), [`ensureBackingVolumeStatus`](#ensurebackingvolumestatus-details), [`ensureBackingVolumeInSyncCond`](#ensurebackingvolumeinsyncond-details), [`ensureQuorumStatus`](#ensurequorumstatus-details), [`reconcileSatisfyEligibleNodesCondition`](#reconcilesatisfyeligiblenodescondition-details)
+Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureAttachmentStatus`](#ensureattachmentstatus-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureBackingVolumeStatus`](#ensurebackingvolumestatus-details), [`ensureBackingVolumeInSyncCond`](#ensurebackingvolumeinsyncond-details), [`ensureQuorumStatus`](#ensurequorumstatus-details), [`reconcileSatisfyEligibleNodesCondition`](#reconcilesatisfyeligiblenodescondition-details)
 
 ## Algorithm Flow
 
@@ -130,8 +131,9 @@ flowchart TD
 
     subgraph StatusBlock [Status Ensure]
         Attach[ensureAttachmentStatus]
-        Attach --> Peers[ensurePeersStatus]
-        Peers --> BVStatus[ensureBackingVolumeStatus]
+        Attach --> Peers[ensureStatusPeers]
+        Peers --> PeersCond[ensureConditionFullyConnected]
+        PeersCond --> BVStatus[ensureBackingVolumeStatus]
         BVStatus --> BVInSync[ensureBackingVolumeInSyncCond]
         BVInSync --> Quorum[ensureQuorumStatus]
         Quorum --> SEN[reconcileSatisfyEligibleNodesCondition]
@@ -440,7 +442,8 @@ flowchart TD
 
     subgraph statusEnsure [Status Ensure]
         EnsureAttach[ensureAttachmentStatus]
-        EnsurePeers[ensurePeersStatus]
+        EnsureStatusPeers[ensureStatusPeers]
+        EnsureCondFC[ensureConditionFullyConnected]
         EnsureBVStatus[ensureBackingVolumeStatus]
         EnsureBVInSync[ensureBackingVolumeInSyncCond]
         EnsureQuorum[ensureQuorumStatus]
@@ -469,17 +472,17 @@ flowchart TD
     ReconcileDRBD -->|drbdrReconciliationCache, addresses| RVRStatusFields
 
     DRBDR --> EnsureAttach
-    DRBDR --> EnsurePeers
+    DRBDR --> EnsureStatusPeers
+    DRBDR --> EnsureCondFC
     DRBDR --> EnsureBVStatus
     DRBDR --> EnsureBVInSync
     DRBDR --> EnsureQuorum
-    RVStatus --> EnsurePeers
     LLVs --> EnsureBVStatus
 
     EnsureAttach -->|Attached| RVRStatusConds
     EnsureAttach -->|devicePath, deviceIOSuspended| RVRStatusFields
-    EnsurePeers -->|FullyConnected| RVRStatusConds
-    EnsurePeers -->|peers| RVRStatusFields
+    EnsureStatusPeers -->|peers| RVRStatusFields
+    EnsureCondFC -->|FullyConnected| RVRStatusConds
     EnsureBVStatus -->|backingVolume| RVRStatusFields
     EnsureBVInSync -->|BackingVolumeInSync| RVRStatusConds
     EnsureQuorum -->|Ready| RVRStatusConds
@@ -732,29 +735,58 @@ flowchart TD
 
 ---
 
-### ensurePeersStatus Details
+### ensureStatusPeers Details
 
-**Purpose**: Reports peer connectivity status. Merges datamesh members with DRBDR peer status.
+**Purpose**: Mirrors DRBDR peer status to RVR status. Populates `rvr.Status.Peers` directly from `drbdr.Status.Peers`.
 
 **Algorithm**:
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> CheckRelevant{DRBDR exists AND<br/>is member or has peers?}
-    CheckRelevant -->|No| RemoveAll[Remove condition, clear peers]
-    RemoveAll --> End1([Done])
+    Start([Start]) --> CheckDRBDR{DRBDR exists AND<br/>has peers?}
+    CheckDRBDR -->|No| ClearPeers[Clear rvr.Status.Peers]
+    ClearPeers --> End1([Done])
+
+    CheckDRBDR -->|Yes| MirrorPeers[Mirror drbdr.Status.Peers to rvr.Status.Peers]
+    MirrorPeers --> ComputeType["Compute Type from drbdr peer:<br/>Diskful → Diskful<br/>Diskless + AllowRemoteRead=false → Access<br/>Diskless + AllowRemoteRead=true → TieBreaker"]
+    ComputeType --> ComputeAttached[Compute Attached from Role=Primary]
+    ComputeAttached --> CopyFields[Copy ConnectionState, DiskState, Paths]
+    CopyFields --> End2([Done])
+```
+
+**Data Flow**:
+
+| Input | Description |
+|-------|-------------|
+| `drbdr.Status.Peers` | Peer status from DRBD |
+
+| Output | Description |
+|--------|-------------|
+| `status.peers[]` | Mirrored peer status list |
+
+---
+
+### ensureConditionFullyConnected Details
+
+**Purpose**: Reports peer connectivity status via the `FullyConnected` condition. Uses `rvr.Status.Addresses` to determine expected system networks.
+
+**Algorithm**:
+
+```mermaid
+flowchart TD
+    Start([Start]) --> CheckRelevant{DRBDR exists AND<br/>is member or has peers AND<br/>has addresses?}
+    CheckRelevant -->|No| RemoveCond[Remove FullyConnected condition]
+    RemoveCond --> End1([Done])
 
     CheckRelevant -->|Yes| CheckAgent{Agent ready?}
-    CheckAgent -->|No| SetUnknown[Unknown: AgentNotReady, clear peers]
+    CheckAgent -->|No| SetUnknown[Unknown: AgentNotReady]
     SetUnknown --> End2([Done])
 
-    CheckAgent -->|Yes| MergePeers["Merge datamesh.Members + drbdr.Status.Peers"]
-    MergePeers --> CheckPeers{Any peers?}
-
+    CheckAgent -->|Yes| CheckPeers{Any peers in rvr.Status.Peers?}
     CheckPeers -->|No| SetFalse1[False: NoPeers]
     SetFalse1 --> End3([Done])
 
-    CheckPeers -->|Yes| CountConnections[Count fully/partially/not connected]
+    CheckPeers -->|Yes| CountConnections["Count fully/partially/not connected<br/>using rvr.Status.Addresses"]
     CountConnections --> EvalState{Evaluate connectivity}
 
     EvalState -->|All fully connected| SetTrue1[True: FullyConnected]
@@ -772,14 +804,13 @@ flowchart TD
 
 | Input | Description |
 |-------|-------------|
-| `drbdr.Status.Peers` | Connection state from DRBD |
-| `datamesh.Members` | Expected peers from datamesh |
-| `datamesh.SystemNetworkNames` | Expected network paths |
+| `rvr.Status.Peers` | Peer status (from ensureStatusPeers) |
+| `rvr.Status.Addresses` | Expected system network names |
+| `datamesh` | Datamesh membership check |
 
 | Output | Description |
 |--------|-------------|
 | `FullyConnected` condition | Reports peer connectivity |
-| `status.peers[]` | Merged peer status list |
 
 ---
 

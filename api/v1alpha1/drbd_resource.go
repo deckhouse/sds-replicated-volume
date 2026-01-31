@@ -329,6 +329,10 @@ type DRBDResourcePeerStatus struct {
 	// +optional
 	Type DRBDResourceType `json:"type,omitempty"`
 
+	// AllowRemoteRead indicates whether reads are allowed from this peer.
+	// +optional
+	AllowRemoteRead bool `json:"allowRemoteRead,omitempty"`
+
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=31
 	// +optional
