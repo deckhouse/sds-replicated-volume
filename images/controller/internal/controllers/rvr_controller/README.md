@@ -92,9 +92,9 @@ Reconcile (root) [Pure orchestration]
 │   └── mirrors drbdr.Status.Peers to rvr.Status.Peers
 ├── ensureConditionFullyConnected ← details
 │   └── applyRVRFullyConnectedCond*
-├── ensureBackingVolumeStatus ← details
+├── ensureStatusBackingVolume ← details
 │   └── applyRVRBackingVolumeStatus
-├── ensureBackingVolumeInSyncCond ← details
+├── ensureConditionBackingVolumeInSync ← details
 │   ├── computeHasUpToDatePeer
 │   ├── computeHasConnectedAttachedPeer
 │   └── applyRVRBackingVolumeInSyncCond*
@@ -108,7 +108,7 @@ Reconcile (root) [Pure orchestration]
 └── patchRVRStatus
 ```
 
-Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureAttachmentStatus`](#ensureattachmentstatus-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureBackingVolumeStatus`](#ensurebackingvolumestatus-details), [`ensureBackingVolumeInSyncCond`](#ensurebackingvolumeinsyncond-details), [`ensureQuorumStatus`](#ensurequorumstatus-details), [`reconcileSatisfyEligibleNodesCondition`](#reconcilesatisfyeligiblenodescondition-details)
+Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureAttachmentStatus`](#ensureattachmentstatus-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeInSync`](#ensureconditionbackingvolumeinsync-details), [`ensureQuorumStatus`](#ensurequorumstatus-details), [`reconcileSatisfyEligibleNodesCondition`](#reconcilesatisfyeligiblenodescondition-details)
 
 ## Algorithm Flow
 
@@ -133,8 +133,8 @@ flowchart TD
         Attach[ensureAttachmentStatus]
         Attach --> Peers[ensureStatusPeers]
         Peers --> PeersCond[ensureConditionFullyConnected]
-        PeersCond --> BVStatus[ensureBackingVolumeStatus]
-        BVStatus --> BVInSync[ensureBackingVolumeInSyncCond]
+        PeersCond --> BVStatus[ensureStatusBackingVolume]
+        BVStatus --> BVInSync[ensureConditionBackingVolumeInSync]
         BVInSync --> Quorum[ensureQuorumStatus]
         Quorum --> SEN[reconcileSatisfyEligibleNodesCondition]
     end
@@ -444,8 +444,8 @@ flowchart TD
         EnsureAttach[ensureAttachmentStatus]
         EnsureStatusPeers[ensureStatusPeers]
         EnsureCondFC[ensureConditionFullyConnected]
-        EnsureBVStatus[ensureBackingVolumeStatus]
-        EnsureBVInSync[ensureBackingVolumeInSyncCond]
+        EnsureBVStatus[ensureStatusBackingVolume]
+        EnsureBVInSync[ensureConditionBackingVolumeInSync]
         EnsureQuorum[ensureQuorumStatus]
     end
 
@@ -814,7 +814,7 @@ flowchart TD
 
 ---
 
-### ensureBackingVolumeStatus Details
+### ensureStatusBackingVolume Details
 
 **Purpose**: Populates the `rvr.Status.BackingVolume` struct fields (size, state, LVM volume group info) from DRBDR and LLV status.
 
@@ -861,7 +861,7 @@ flowchart TD
 
 ---
 
-### ensureBackingVolumeInSyncCond Details
+### ensureConditionBackingVolumeInSync Details
 
 **Purpose**: Reports local disk synchronization state for diskful replicas via the `BackingVolumeInSync` condition.
 

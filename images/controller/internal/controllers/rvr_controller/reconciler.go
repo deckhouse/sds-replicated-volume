@@ -144,8 +144,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			ensureAttachmentStatus(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
 			ensureStatusPeers(rf.Ctx(), rvr, drbdr),
 			ensureConditionFullyConnected(rf.Ctx(), rvr, drbdr, datamesh, agentReady),
-			ensureBackingVolumeStatus(rf.Ctx(), rvr, drbdr, llvs),
-			ensureBackingVolumeInSyncCond(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
+			ensureStatusBackingVolume(rf.Ctx(), rvr, drbdr, llvs),
+			ensureConditionBackingVolumeInSync(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
 			ensureQuorumStatus(rf.Ctx(), rvr, drbdr, agentReady, drbdrConfigurationPending),
 		)
 		if eo.Error() != nil {
@@ -477,14 +477,14 @@ func ensureConditionFullyConnected(
 	return ef.Ok().ReportChangedIf(changed)
 }
 
-// ensureBackingVolumeStatus ensures the RVR backing volume status fields reflect the current DRBDR state.
-func ensureBackingVolumeStatus(
+// ensureStatusBackingVolume ensures the RVR backing volume status fields reflect the current DRBDR state.
+func ensureStatusBackingVolume(
 	ctx context.Context,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	drbdr *v1alpha1.DRBDResource,
 	llvs []snc.LVMLogicalVolume,
 ) (outcome flow.EnsureOutcome) {
-	ef := flow.BeginEnsure(ctx, "backing-volume-status")
+	ef := flow.BeginEnsure(ctx, "status-backing-volume")
 	defer ef.OnEnd(&outcome)
 
 	changed := false
@@ -515,8 +515,8 @@ func ensureBackingVolumeStatus(
 	return ef.Ok().ReportChangedIf(changed).RequireOptimisticLock()
 }
 
-// ensureBackingVolumeInSyncCond ensures the RVR BackingVolumeInSync condition reflects the current DRBDR state.
-func ensureBackingVolumeInSyncCond(
+// ensureConditionBackingVolumeInSync ensures the RVR BackingVolumeInSync condition reflects the current DRBDR state.
+func ensureConditionBackingVolumeInSync(
 	ctx context.Context,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	drbdr *v1alpha1.DRBDResource,
@@ -524,7 +524,7 @@ func ensureBackingVolumeInSyncCond(
 	agentReady bool,
 	drbdrConfigurationPending bool,
 ) (outcome flow.EnsureOutcome) {
-	ef := flow.BeginEnsure(ctx, "backing-volume-in-sync-cond")
+	ef := flow.BeginEnsure(ctx, "condition-backing-volume-in-sync")
 	defer ef.OnEnd(&outcome)
 
 	changed := false

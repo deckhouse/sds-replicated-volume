@@ -3585,7 +3585,7 @@ var _ = Describe("Reconciler", func() {
 		// Note: This test verifies that applyRVRBackingVolumeReadyCondAbsent is called
 		// during deletion path. The integration test for the full flow is covered by
 		// the "deletes LLVs when RVR is being deleted" test above.
-		// See ensureBackingVolumeStatus and applyRVRBackingVolumeReadyCondAbsent unit tests
+		// See ensureStatusBackingVolume and applyRVRBackingVolumeReadyCondAbsent unit tests
 		// for condition removal logic verification.
 
 		It("creates LLV when RVR needs backing volume", func() {
@@ -7428,10 +7428,10 @@ var _ = Describe("ensureQuorumStatus", func() {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ensureBackingVolumeStatus tests
+// ensureStatusBackingVolume tests
 //
 
-var _ = Describe("ensureBackingVolumeStatus", func() {
+var _ = Describe("ensureStatusBackingVolume", func() {
 	var (
 		ctx  context.Context
 		rvr  *v1alpha1.ReplicatedVolumeReplica
@@ -7465,7 +7465,7 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			State: v1alpha1.DiskStateUpToDate,
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, nil, nil)
+		outcome := ensureStatusBackingVolume(ctx, rvr, nil, nil)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
@@ -7483,7 +7483,7 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			},
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, drbdr, llvs)
+		outcome := ensureStatusBackingVolume(ctx, rvr, drbdr, llvs)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(rvr.Status.BackingVolume).NotTo(BeNil())
@@ -7503,7 +7503,7 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			},
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, drbdr, llvs)
+		outcome := ensureStatusBackingVolume(ctx, rvr, drbdr, llvs)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(rvr.Status.BackingVolume).To(BeNil())
@@ -7520,7 +7520,7 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			},
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, drbdr, llvs)
+		outcome := ensureStatusBackingVolume(ctx, rvr, drbdr, llvs)
 
 		Expect(outcome.Error()).To(HaveOccurred())
 		Expect(outcome.Error().Error()).To(ContainSubstring("not found"))
@@ -7538,22 +7538,22 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 		}
 
 		// First call
-		outcome1 := ensureBackingVolumeStatus(ctx, rvr, drbdr, llvs)
+		outcome1 := ensureStatusBackingVolume(ctx, rvr, drbdr, llvs)
 		Expect(outcome1.Error()).NotTo(HaveOccurred())
 		Expect(outcome1.DidChange()).To(BeTrue())
 
 		// Second call should report no change
-		outcome2 := ensureBackingVolumeStatus(ctx, rvr, drbdr, llvs)
+		outcome2 := ensureStatusBackingVolume(ctx, rvr, drbdr, llvs)
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
 		Expect(outcome2.DidChange()).To(BeFalse())
 	})
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ensureBackingVolumeInSyncCond tests
+// ensureConditionBackingVolumeInSync tests
 //
 
-var _ = Describe("ensureBackingVolumeInSyncCond", func() {
+var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 	var (
 		ctx context.Context
 		rvr *v1alpha1.ReplicatedVolumeReplica
@@ -7581,7 +7581,7 @@ var _ = Describe("ensureBackingVolumeInSyncCond", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeInSyncCond(ctx, rvr, nil, member, true, false)
+		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, nil, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
@@ -7595,7 +7595,7 @@ var _ = Describe("ensureBackingVolumeInSyncCond", func() {
 			},
 		}
 
-		outcome := ensureBackingVolumeInSyncCond(ctx, rvr, drbdr, nil, true, false)
+		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, nil, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)).To(BeNil())
@@ -7612,7 +7612,7 @@ var _ = Describe("ensureBackingVolumeInSyncCond", func() {
 			Type: v1alpha1.ReplicaTypeTieBreaker, // not Diskful
 		}
 
-		outcome := ensureBackingVolumeInSyncCond(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)).To(BeNil())
@@ -7629,7 +7629,7 @@ var _ = Describe("ensureBackingVolumeInSyncCond", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeInSyncCond(ctx, rvr, drbdr, member, false, false)
+		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, false, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
@@ -7649,7 +7649,7 @@ var _ = Describe("ensureBackingVolumeInSyncCond", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeInSyncCond(ctx, rvr, drbdr, member, true, true)
+		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, true)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
@@ -7672,7 +7672,7 @@ var _ = Describe("ensureBackingVolumeInSyncCond", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeInSyncCond(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
@@ -7696,7 +7696,7 @@ var _ = Describe("ensureBackingVolumeInSyncCond", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeInSyncCond(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
@@ -7719,7 +7719,7 @@ var _ = Describe("ensureBackingVolumeInSyncCond", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeInSyncCond(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
@@ -7742,7 +7742,7 @@ var _ = Describe("ensureBackingVolumeInSyncCond", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeInSyncCond(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
@@ -7764,7 +7764,7 @@ var _ = Describe("ensureBackingVolumeInSyncCond", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeInSyncCond(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
@@ -7786,7 +7786,7 @@ var _ = Describe("ensureBackingVolumeInSyncCond", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeInSyncCond(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
@@ -7812,7 +7812,7 @@ var _ = Describe("ensureBackingVolumeInSyncCond", func() {
 			{Name: "peer-1", BackingVolumeState: v1alpha1.DiskStateInconsistent},
 		}
 
-		outcome := ensureBackingVolumeInSyncCond(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
@@ -7844,7 +7844,7 @@ var _ = Describe("ensureBackingVolumeInSyncCond", func() {
 			},
 		}
 
-		outcome := ensureBackingVolumeInSyncCond(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
@@ -7874,7 +7874,7 @@ var _ = Describe("ensureBackingVolumeInSyncCond", func() {
 			},
 		}
 
-		outcome := ensureBackingVolumeInSyncCond(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
@@ -7897,7 +7897,7 @@ var _ = Describe("ensureBackingVolumeInSyncCond", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeInSyncCond(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
@@ -7921,12 +7921,12 @@ var _ = Describe("ensureBackingVolumeInSyncCond", func() {
 		}
 
 		// First call
-		outcome1 := ensureBackingVolumeInSyncCond(ctx, rvr, drbdr, member, true, false)
+		outcome1 := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
 		Expect(outcome1.Error()).NotTo(HaveOccurred())
 		Expect(outcome1.DidChange()).To(BeTrue())
 
 		// Second call should report no change
-		outcome2 := ensureBackingVolumeInSyncCond(ctx, rvr, drbdr, member, true, false)
+		outcome2 := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
 		Expect(outcome2.DidChange()).To(BeFalse())
 	})
@@ -7943,7 +7943,7 @@ var _ = Describe("ensureBackingVolumeInSyncCond", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeInSyncCond(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).To(HaveOccurred())
 		Expect(outcome.Error().Error()).To(ContainSubstring("ActiveConfiguration is nil"))
