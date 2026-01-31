@@ -92,10 +92,11 @@ Reconcile (root) [Pure orchestration]
 │   ├── ensureRVRStatusPeers (O(m+n) merge)
 │   └── applyRVRFullyConnectedCond*
 ├── ensureBackingVolumeStatus ← details
+│   └── applyRVRBackingVolumeStatus
+├── ensureBackingVolumeInSyncCond ← details
 │   ├── computeHasUpToDatePeer
 │   ├── computeHasConnectedAttachedPeer
-│   ├── applyRVRBackingVolumeInSyncCond*
-│   └── applyRVRBackingVolumeState
+│   └── applyRVRBackingVolumeInSyncCond*
 ├── ensureQuorumStatus ← details
 │   ├── ensureRVRStatusQuorumSummary
 │   ├── applyRVRStatusQuorum
@@ -106,7 +107,7 @@ Reconcile (root) [Pure orchestration]
 └── patchRVRStatus
 ```
 
-Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureAttachmentStatus`](#ensureattachmentstatus-details), [`ensurePeersStatus`](#ensurepeersstatus-details), [`ensureBackingVolumeStatus`](#ensurebackingvolumestatus-details), [`ensureQuorumStatus`](#ensurequorumstatus-details), [`reconcileSatisfyEligibleNodesCondition`](#reconcilesatisfyeligiblenodescondition-details)
+Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureAttachmentStatus`](#ensureattachmentstatus-details), [`ensurePeersStatus`](#ensurepeersstatus-details), [`ensureBackingVolumeStatus`](#ensurebackingvolumestatus-details), [`ensureBackingVolumeInSyncCond`](#ensurebackingvolumeinsyncond-details), [`ensureQuorumStatus`](#ensurequorumstatus-details), [`reconcileSatisfyEligibleNodesCondition`](#reconcilesatisfyeligiblenodescondition-details)
 
 ## Algorithm Flow
 
@@ -131,7 +132,8 @@ flowchart TD
         Attach[ensureAttachmentStatus]
         Attach --> Peers[ensurePeersStatus]
         Peers --> BVStatus[ensureBackingVolumeStatus]
-        BVStatus --> Quorum[ensureQuorumStatus]
+        BVStatus --> BVInSync[ensureBackingVolumeInSyncCond]
+        BVInSync --> Quorum[ensureQuorumStatus]
         Quorum --> SEN[reconcileSatisfyEligibleNodesCondition]
     end
 
@@ -251,16 +253,34 @@ The controller manages the following status fields on RVR:
 | Field | Description | Source |
 |-------|-------------|--------|
 | `addresses` | DRBD addresses assigned to this replica | From DRBDR status |
-| `backingVolumeSize` | Size of the backing LVM logical volume (Diskful only) | From target LLV spec |
-| `backingVolumeState` | Local disk state (UpToDate/Outdated/etc.) | From DRBDR status |
-| `datameshRevision` | Datamesh revision this replica was configured for | From RV status |
+| `backingVolume` | Backing volume info (size, state, LVG name, thin pool) | From DRBDR + LLV status |
+| `drbdrReconciliationCache` | Cache of target configuration that DRBDR spec was last applied for | Computed |
 | `deviceIOSuspended` | Whether I/O is suspended on the device | From DRBDR status |
 | `devicePath` | Block device path when attached (e.g., /dev/drbd10012) | From DRBDR status |
-| `drbdResourceGeneration` | Generation of the DRBDResource that was last applied | From DRBDR metadata |
-| `effectiveType` | Current effective replica type (may differ from spec during transitions) | Computed from datamesh member state |
 | `peers` | Peer connectivity status | Merged from datamesh + DRBDR |
 | `quorum` | Whether this replica has quorum | From DRBDR status |
 | `quorumSummary` | Detailed quorum info (voting peers, thresholds) | Computed from DRBDR + peers |
+
+### BackingVolume
+
+The `backingVolume` field is a nested struct with information about the backing LVM logical volume. Only set for Diskful replicas.
+
+| Field | Description |
+|-------|-------------|
+| `size` | Size of the backing LVM logical volume |
+| `state` | Local disk state (UpToDate/Outdated/etc.) |
+| `lvmVolumeGroupName` | Name of the LVM volume group |
+| `lvmVolumeGroupThinPoolName` | Thin pool name (empty if thick provisioned) |
+
+### DRBDRReconciliationCache
+
+The `drbdrReconciliationCache` field caches the target configuration that DRBDR spec was last applied for. These fields are used to optimize controller operation by avoiding redundant computations and DRBDR spec updates. **Important**: these fields reflect the *target* revision, not the revision that DRBDR has actually transitioned to.
+
+| Field | Description |
+|-------|-------------|
+| `datameshRevision` | Datamesh revision this replica was configured for |
+| `drbdrGeneration` | Generation of the DRBDResource that was last targeted |
+| `rvrType` | RVR type (Diskful/TieBreaker/Access) that was last targeted |
 
 ### PeerStatus
 
@@ -422,6 +442,7 @@ flowchart TD
         EnsureAttach[ensureAttachmentStatus]
         EnsurePeers[ensurePeersStatus]
         EnsureBVStatus[ensureBackingVolumeStatus]
+        EnsureBVInSync[ensureBackingVolumeInSyncCond]
         EnsureQuorum[ensureQuorumStatus]
     end
 
@@ -443,23 +464,24 @@ flowchart TD
     ReconcileMeta --> RVRMeta
     ReconcileBV --> LLVManaged
     ReconcileBV -->|BackingVolumeReady| RVRStatusConds
-    ReconcileBV -->|backingVolumeSize| RVRStatusFields
     ReconcileDRBD --> DRBDRManaged
     ReconcileDRBD -->|Configured| RVRStatusConds
-    ReconcileDRBD -->|effectiveType, datameshRevision, addresses| RVRStatusFields
+    ReconcileDRBD -->|drbdrReconciliationCache, addresses| RVRStatusFields
 
     DRBDR --> EnsureAttach
     DRBDR --> EnsurePeers
     DRBDR --> EnsureBVStatus
+    DRBDR --> EnsureBVInSync
     DRBDR --> EnsureQuorum
     RVStatus --> EnsurePeers
+    LLVs --> EnsureBVStatus
 
     EnsureAttach -->|Attached| RVRStatusConds
     EnsureAttach -->|devicePath, deviceIOSuspended| RVRStatusFields
     EnsurePeers -->|FullyConnected| RVRStatusConds
     EnsurePeers -->|peers| RVRStatusFields
-    EnsureBVStatus -->|BackingVolumeInSync| RVRStatusConds
-    EnsureBVStatus -->|backingVolumeState| RVRStatusFields
+    EnsureBVStatus -->|backingVolume| RVRStatusFields
+    EnsureBVInSync -->|BackingVolumeInSync| RVRStatusConds
     EnsureQuorum -->|Ready| RVRStatusConds
     EnsureQuorum -->|quorum, quorumSummary| RVRStatusFields
 ```
@@ -763,15 +785,62 @@ flowchart TD
 
 ### ensureBackingVolumeStatus Details
 
-**Purpose**: Reports local disk synchronization state for diskful replicas.
+**Purpose**: Populates the `rvr.Status.BackingVolume` struct fields (size, state, LVM volume group info) from DRBDR and LLV status.
 
 **Algorithm**:
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> CheckRelevant{DRBDR exists AND<br/>diskful datamesh member?}
-    CheckRelevant -->|No| RemoveAll[Remove condition, clear state]
-    RemoveAll --> End1([Done])
+    Start([Start]) --> CheckDRBDR{DRBDR exists?}
+    CheckDRBDR -->|No| ClearBV[Clear backingVolume]
+    ClearBV --> End1([Done])
+
+    CheckDRBDR -->|Yes| CheckActive{ActiveConfiguration exists?}
+    CheckActive -->|No| ClearBV2[Clear backingVolume]
+    ClearBV2 --> End2([Done])
+
+    CheckActive -->|Yes| GetLLVName[Get lvmLogicalVolumeName from ActiveConfiguration]
+    GetLLVName --> CheckEmpty{Name empty?}
+    CheckEmpty -->|Yes| ApplyFromDRBDR[Apply backingVolume from DRBDR only]
+    ApplyFromDRBDR --> End3([Done])
+
+    CheckEmpty -->|No| FindLLV{Find LLV by name}
+    FindLLV -->|Not found| Error[Return error: inconsistent state]
+    Error --> End4([Done])
+
+    FindLLV -->|Found| ApplyFull[Apply backingVolume with LLV info]
+    ApplyFull --> End5([Done])
+```
+
+**Data Flow**:
+
+| Input | Description |
+|-------|-------------|
+| `drbdr.Status.DiskState` | Local disk state from DRBD |
+| `drbdr.Status.ActiveConfiguration.LVMLogicalVolumeName` | Name of the backing LLV |
+| `llvs` | List of LVMLogicalVolumes on this node |
+| `llv.Status.ActualSize` | Actual size of the backing LLV |
+
+| Output | Description |
+|--------|-------------|
+| `status.backingVolume.size` | Size of the backing LVM logical volume |
+| `status.backingVolume.state` | Local disk state (UpToDate/Outdated/etc.) |
+| `status.backingVolume.lvmVolumeGroupName` | LVG name |
+| `status.backingVolume.lvmVolumeGroupThinPoolName` | Thin pool name (if applicable) |
+
+---
+
+### ensureBackingVolumeInSyncCond Details
+
+**Purpose**: Reports local disk synchronization state for diskful replicas via the `BackingVolumeInSync` condition.
+
+**Algorithm**:
+
+```mermaid
+flowchart TD
+    Start([Start]) --> CheckRelevant{DRBDR exists AND<br/>diskful member OR<br/>has backingVolume?}
+    CheckRelevant -->|No| RemoveCond[Remove BackingVolumeInSync condition]
+    RemoveCond --> End1([Done])
 
     CheckRelevant -->|Yes| CheckAgent{Agent ready?}
     CheckAgent -->|No| SetUnknown1[Unknown: AgentNotReady]
@@ -781,10 +850,16 @@ flowchart TD
     CheckPending -->|Yes| SetUnknown2[Unknown: ApplyingConfiguration]
     SetUnknown2 --> End3([Done])
 
-    CheckPending -->|No| GetDiskState[Get drbdr.Status.DiskState]
+    CheckPending -->|No| CheckActive{ActiveConfiguration exists?}
+    CheckActive -->|No| Error[Return error: bug in agent]
+    Error --> End6([Done])
+
+    CheckActive -->|Yes| GetDiskState[Get drbdr.Status.DiskState]
     GetDiskState --> EvalState{Evaluate disk state}
 
     EvalState -->|UpToDate| SetTrue[True: InSync]
+    SetTrue --> End4([Done])
+
     EvalState -->|Diskless| SetFalse1[False: NoDisk]
     EvalState -->|Attaching| SetFalse2[False: Attaching]
     EvalState -->|Detaching| SetFalse3[False: Detaching]
@@ -798,17 +873,14 @@ flowchart TD
     IOCheck -->|No| SetBlocked2[False: SynchronizationBlocked]
     IOCheck -->|Yes| SetSyncing[False: Synchronizing]
 
-    SetTrue --> UpdateState[Update backingVolumeState]
-    SetFalse1 --> UpdateState
-    SetFalse2 --> UpdateState
-    SetFalse3 --> UpdateState
-    SetFalse4 --> UpdateState
-    SetFalse5 --> UpdateState
-    SetBlocked1 --> UpdateState
-    SetBlocked2 --> UpdateState
-    SetSyncing --> UpdateState
-
-    UpdateState --> End4([Done])
+    SetFalse1 --> End5([Done])
+    SetFalse2 --> End5
+    SetFalse3 --> End5
+    SetFalse4 --> End5
+    SetFalse5 --> End5
+    SetBlocked1 --> End5
+    SetBlocked2 --> End5
+    SetSyncing --> End5
 ```
 
 **Data Flow**:
@@ -818,11 +890,12 @@ flowchart TD
 | `drbdr.Status.DiskState` | Local disk state from DRBD |
 | `drbdr.Status.ActiveConfiguration.Role` | Local attachment state |
 | `rvr.Status.Peers` | Peer states for sync availability check |
+| `rvr.Status.BackingVolume` | Current backing volume info (for relevance check) |
+| `datameshMember` | Whether this replica is a datamesh member |
 
 | Output | Description |
 |--------|-------------|
 | `BackingVolumeInSync` condition | Reports disk sync state |
-| `status.backingVolumeState` | Raw disk state value |
 
 ---
 
