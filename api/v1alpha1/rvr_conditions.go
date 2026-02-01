@@ -19,19 +19,14 @@ package v1alpha1
 const (
 	// ReplicatedVolumeReplicaCondAttachedType indicates whether the replica is attached.
 	//
-	// Reasons describe attachment state, progress, or applicability.
-	ReplicatedVolumeReplicaCondAttachedType                          = "Attached"
-	ReplicatedVolumeReplicaCondAttachedReasonAgentNotReady           = "AgentNotReady"           // Agent is not ready.
-	ReplicatedVolumeReplicaCondAttachedReasonApplyingConfiguration   = "ApplyingConfiguration"   // Configuration is being applied.
-	ReplicatedVolumeReplicaCondAttachedReasonAttached                = "Attached"                // Attached and ready for I/O.
-	ReplicatedVolumeReplicaCondAttachedReasonAttachingNotApplicable  = "AttachingNotApplicable"  // Not applicable for this replica type.
-	ReplicatedVolumeReplicaCondAttachedReasonAttachingNotInitialized = "AttachingNotInitialized" // Not enough status to decide.
-	ReplicatedVolumeReplicaCondAttachedReasonAttachmentFailed        = "AttachmentFailed"        // Expected to be attached, but not attached.
-	ReplicatedVolumeReplicaCondAttachedReasonDetached                = "Detached"                // Detached.
-	ReplicatedVolumeReplicaCondAttachedReasonDetachmentFailed        = "DetachmentFailed"        // Expected to be detached, but still attached.
-	ReplicatedVolumeReplicaCondAttachedReasonIOSuspended             = "IOSuspended"             // Attached but I/O is suspended.
-	ReplicatedVolumeReplicaCondAttachedReasonNotApplicable           = "NotApplicable"           // No DRBDR exists.
-	ReplicatedVolumeReplicaCondAttachedReasonPending                 = "Pending"                 // Waiting to become attached.
+	// Reasons describe attachment state or progress.
+	ReplicatedVolumeReplicaCondAttachedType                        = "Attached"
+	ReplicatedVolumeReplicaCondAttachedReasonAgentNotReady         = "AgentNotReady"         // Agent is not ready.
+	ReplicatedVolumeReplicaCondAttachedReasonApplyingConfiguration = "ApplyingConfiguration" // Configuration is being applied.
+	ReplicatedVolumeReplicaCondAttachedReasonAttached              = "Attached"              // Attached and ready for I/O.
+	ReplicatedVolumeReplicaCondAttachedReasonAttachmentFailed      = "AttachmentFailed"      // Expected to be attached, but not attached.
+	ReplicatedVolumeReplicaCondAttachedReasonDetachmentFailed      = "DetachmentFailed"      // Expected to be detached, but still attached.
+	ReplicatedVolumeReplicaCondAttachedReasonIOSuspended           = "IOSuspended"           // Attached but I/O is suspended.
 )
 
 const (
@@ -52,35 +47,70 @@ const (
 )
 
 const (
-	// ReplicatedVolumeReplicaCondConfiguredType indicates whether the replica's DRBD resource is configured.
+	// ReplicatedVolumeReplicaCondDRBDConfiguredType indicates whether the replica's DRBD is fully configured
+	// for the current datamesh revision.
+	//
+	// "DRBDConfigured" (Status=True) means:
+	//   - DRBD was configured to match the intended state derived from this datamesh revision.
+	//   - Backing volume (if Diskful) was configured: exists and matches intended LVG/ThinPool/Size.
+	//   - Backing volume (if Diskful) is ready: reported ready and actual size >= intended size.
+	//   - DRBD agent confirmed successful configuration.
+	//
+	// Note: "configured" does NOT mean:
+	//   - DRBD connections are established (happens asynchronously after configuration).
+	//   - Backing volume is synchronized (resync happens asynchronously if the volume was newly added).
 	//
 	// Reasons describe configuration state or applicability.
-	ReplicatedVolumeReplicaCondConfiguredType                             = "Configured"
-	ReplicatedVolumeReplicaCondConfiguredReasonAgentNotReady              = "AgentNotReady"              // Agent is not ready.
-	ReplicatedVolumeReplicaCondConfiguredReasonApplyingConfiguration      = "ApplyingConfiguration"      // DRBD resource configuration is being applied.
-	ReplicatedVolumeReplicaCondConfiguredReasonConfigurationFailed        = "ConfigurationFailed"        // DRBD resource configuration failed.
-	ReplicatedVolumeReplicaCondConfiguredReasonConfigured                 = "Configured"                 // DRBD resource is fully configured.
-	ReplicatedVolumeReplicaCondConfiguredReasonNotApplicable              = "NotApplicable"              // Not applicable (replica is being deleted).
-	ReplicatedVolumeReplicaCondConfiguredReasonPendingDatameshJoin        = "PendingDatameshJoin"        // DRBD preconfigured, waiting for datamesh membership.
-	ReplicatedVolumeReplicaCondConfiguredReasonPendingScheduling          = "PendingScheduling"          // Waiting for node assignment.
-	ReplicatedVolumeReplicaCondConfiguredReasonWaitingForReplicatedVolume = "WaitingForReplicatedVolume" // Waiting for ReplicatedVolume to be ready.
+	ReplicatedVolumeReplicaCondDRBDConfiguredType                             = "DRBDConfigured"
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady              = "AgentNotReady"              // Agent is not ready.
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration      = "ApplyingConfiguration"      // Agent is applying DRBD configuration.
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigurationFailed        = "ConfigurationFailed"        // Agent failed to apply DRBD configuration.
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured                 = "Configured"                 // Replica is fully configured for the current datamesh revision.
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonNotApplicable              = "NotApplicable"              // Not applicable (replica is being deleted).
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingDatameshJoin        = "PendingDatameshJoin"        // DRBD preconfigured; waiting for datamesh membership.
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingScheduling          = "PendingScheduling"          // Waiting for node assignment.
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForBackingVolume    = "WaitingForBackingVolume"    // Waiting for backing volume (creating, resizing, or replacing).
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForReplicatedVolume = "WaitingForReplicatedVolume" // Waiting for ReplicatedVolume datamesh to be initialized.
 )
 
 const (
-	// ReplicatedVolumeReplicaCondBackingVolumeInSyncType indicates whether the replica's backing volume is in sync.
+	// ReplicatedVolumeReplicaCondBackingVolumeUpToDateType indicates whether the replica's backing volume is up-to-date.
 	//
 	// Reasons describe sync state or applicability.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncType                         = "BackingVolumeInSync"
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonAgentNotReady          = "AgentNotReady"          // Agent is not ready.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonApplyingConfiguration  = "ApplyingConfiguration"  // Configuration is being applied.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonAttaching              = "Attaching"              // Disk is being attached.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonDetaching              = "Detaching"              // Disk is being detached.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonDiskFailed             = "DiskFailed"             // Disk failed due to I/O errors.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonInSync                 = "InSync"                 // Disk is fully up-to-date.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonNoDisk                 = "NoDisk"                 // Local disk is not present.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonSynchronizationBlocked = "SynchronizationBlocked" // Sync blocked, awaiting peer.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonSynchronizing          = "Synchronizing"          // Disk is synchronizing.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonUnknownState           = "UnknownState"           // Disk state is unknown.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateType                         = "BackingVolumeUpToDate"
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAgentNotReady          = "AgentNotReady"          // Agent is not ready.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonApplyingConfiguration  = "ApplyingConfiguration"  // Agent is applying DRBD configuration.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAttaching              = "Attaching"              // Backing volume is being attached.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonDetaching              = "Detaching"              // Backing volume is being detached.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonFailed                 = "Failed"                 // Backing volume failed due to I/O errors.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUpToDate               = "UpToDate"               // Backing volume is fully up-to-date.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAbsent                 = "Absent"                 // Backing volume is not present.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizationBlocked = "SynchronizationBlocked" // Sync blocked, awaiting peer.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizing          = "Synchronizing"          // Backing volume is synchronizing.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUnknownState           = "UnknownState"           // Backing volume state is unknown.
+)
+
+const (
+	// ReplicatedVolumeReplicaCondConfiguredType indicates whether the replica configuration
+	// matches the intended state from spec.
+	//
+	// True: replica is a datamesh member and its actual configuration matches spec.
+	// False: there are pending changes (join/leave/role change/backing volume change)
+	//        or prerequisites are not met (scheduling, eligibility).
+	// Unknown: configuration data is not yet available.
+	// Absent: replica is being deleted and is no longer a datamesh member.
+	//
+	// Reasons describe the pending operation or blocking condition.
+	ReplicatedVolumeReplicaCondConfiguredType                             = "Configured"
+	ReplicatedVolumeReplicaCondConfiguredReasonConfigured                 = "Configured"                 // Replica is configured as intended.
+	ReplicatedVolumeReplicaCondConfiguredReasonNodeNotEligible            = "NodeNotEligible"            // Node is not in the eligible nodes list of the storage pool.
+	ReplicatedVolumeReplicaCondConfiguredReasonPendingBackingVolumeChange = "PendingBackingVolumeChange" // Waiting to change backing volume.
+	ReplicatedVolumeReplicaCondConfiguredReasonPendingConfiguration       = "PendingConfiguration"       // Configuration data is not yet available (e.g., RSP not found).
+	ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin                = "PendingJoin"                // Waiting to join the datamesh.
+	ReplicatedVolumeReplicaCondConfiguredReasonPendingLeave               = "PendingLeave"               // Waiting to leave the datamesh (during deletion).
+	ReplicatedVolumeReplicaCondConfiguredReasonPendingRoleChange          = "PendingRoleChange"          // Waiting to change role in the datamesh.
+	ReplicatedVolumeReplicaCondConfiguredReasonPendingScheduling          = "PendingScheduling"          // Waiting for node or storage assignment.
+	ReplicatedVolumeReplicaCondConfiguredReasonStorageNotEligible         = "StorageNotEligible"         // Intended storage (LVG/ThinPool) is not eligible on the node.
 )
 
 const (
