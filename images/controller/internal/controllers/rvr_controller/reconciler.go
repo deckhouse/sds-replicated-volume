@@ -2094,6 +2094,12 @@ func computeTargetDRBDRPeers(datamesh *v1alpha1.ReplicatedVolumeDatamesh, self *
 			Paths:           buildDRBDRPeerPaths(m.Addresses),
 		})
 	}
+
+	// Sort peers by Name for deterministic output (in case if datamesh.Members is not ordered by Name).
+	slices.SortFunc(peers, func(a, b v1alpha1.DRBDResourcePeer) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+
 	return peers
 }
 

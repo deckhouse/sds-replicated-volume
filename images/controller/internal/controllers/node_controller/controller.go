@@ -100,37 +100,43 @@ func enqueueNodesFromRSP(q workqueue.TypedRateLimitingInterface[reconcile.Reques
 }
 
 // enqueueEligibleNodesDelta enqueues reconcile requests for nodes that were added or removed.
-// Precondition: both oldNodes and newNodes are sorted by NodeName (RSP controller guarantees this).
+//
+// Uses EligibleNodesSortedIndex to handle potentially unsorted input safely.
+// In the common case (already sorted), this adds only O(n) overhead with zero allocations.
 func enqueueEligibleNodesDelta(
 	q workqueue.TypedRateLimitingInterface[reconcile.Request],
 	oldNodes, newNodes []v1alpha1.ReplicatedStoragePoolEligibleNode,
 ) {
+	// Build sorted indices — O(n) if already sorted, O(n log n) otherwise.
+	oldIdx := v1alpha1.NewEligibleNodesSortedIndex(oldNodes)
+	newIdx := v1alpha1.NewEligibleNodesSortedIndex(newNodes)
+
 	// Merge-style traversal of two sorted lists to find delta.
 	i, j := 0, 0
-	for i < len(oldNodes) || j < len(newNodes) {
+	for i < oldIdx.Len() || j < newIdx.Len() {
 		switch {
-		case i >= len(oldNodes):
+		case i >= oldIdx.Len():
 			// Remaining newNodes are all added.
-			if newNodes[j].NodeName != "" {
-				q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: newNodes[j].NodeName}})
+			if name := newIdx.NodeName(j); name != "" {
+				q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: name}})
 			}
 			j++
-		case j >= len(newNodes):
+		case j >= newIdx.Len():
 			// Remaining oldNodes are all removed.
-			if oldNodes[i].NodeName != "" {
-				q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: oldNodes[i].NodeName}})
+			if name := oldIdx.NodeName(i); name != "" {
+				q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: name}})
 			}
 			i++
-		case oldNodes[i].NodeName < newNodes[j].NodeName:
+		case oldIdx.NodeName(i) < newIdx.NodeName(j):
 			// Node was removed.
-			if oldNodes[i].NodeName != "" {
-				q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: oldNodes[i].NodeName}})
+			if name := oldIdx.NodeName(i); name != "" {
+				q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: name}})
 			}
 			i++
-		case oldNodes[i].NodeName > newNodes[j].NodeName:
+		case oldIdx.NodeName(i) > newIdx.NodeName(j):
 			// Node was added.
-			if newNodes[j].NodeName != "" {
-				q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: newNodes[j].NodeName}})
+			if name := newIdx.NodeName(j); name != "" {
+				q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: name}})
 			}
 			j++
 		default:
