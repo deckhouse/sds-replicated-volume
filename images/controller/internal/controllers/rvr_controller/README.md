@@ -61,6 +61,7 @@ Reconcile (root) [Pure orchestration]
 ├── getDRBDR
 ├── getLLVs
 ├── getRV
+├── getRSPEligibilityView (RSP type, eligible node data)
 ├── reconcileMetadata [Target-state driven]
 │   ├── isRVRMetadataInSync
 │   ├── applyRVRMetadata (finalizer + labels)
@@ -101,13 +102,14 @@ Reconcile (root) [Pure orchestration]
 ├── ensureStatusQuorum ← details
 ├── ensureConditionReady ← details
 │   └── applyReadyCond*
-├── reconcileSatisfyEligibleNodesCondition [In-place reconciliation] ← details
-│   ├── getNodeEligibility (from RSP)
+├── ensureConditionSatisfyEligibleNodes [EnsureReconcileHelper] ← details
+│   ├── computeEligibilityWarnings
+│   ├── findLVGInEligibleNode / findLVGInEligibleNodeByName
 │   └── applySatisfyEligibleNodesCond*
 └── patchRVRStatus
 ```
 
-Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureStatusAddressesAndType`](#ensurestatusaddressesandtype-details), [`ensureStatusAttachment`](#ensurestatusattachment-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionAttached`](#ensureconditionattached-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeUpToDate`](#ensureconditionbackingvolumeinsync-details), [`ensureStatusQuorum`](#ensurestatusquorum-details), [`ensureConditionReady`](#ensureconditionready-details), [`reconcileSatisfyEligibleNodesCondition`](#reconcilesatisfyeligiblenodescondition-details)
+Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureStatusAddressesAndType`](#ensurestatusaddressesandtype-details), [`ensureStatusAttachment`](#ensurestatusattachment-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionAttached`](#ensureconditionattached-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeUpToDate`](#ensureconditionbackingvolumeinsync-details), [`ensureStatusQuorum`](#ensurestatusquorum-details), [`ensureConditionReady`](#ensureconditionready-details), [`ensureConditionSatisfyEligibleNodes`](#ensureconditionsatisfyeligiblenodes-details)
 
 ## Algorithm Flow
 
@@ -138,7 +140,7 @@ flowchart TD
         CondAttach --> PeersCond[ensureConditionFullyConnected]
         PeersCond --> BVInSync[ensureConditionBackingVolumeUpToDate]
         BVInSync --> CondReady[ensureConditionReady]
-        CondReady --> SEN[reconcileSatisfyEligibleNodesCondition]
+        CondReady --> SEN[ensureConditionSatisfyEligibleNodes]
     end
 
     SEN --> Patch[Patch RVR status]
@@ -446,6 +448,7 @@ flowchart TD
         LLVs[LVMLogicalVolumes]
         DRBDR[DRBDResource]
         AgentPod[Agent Pod]
+        RSP[ReplicatedStoragePool]
     end
 
     subgraph reconcilers [Reconcilers]
@@ -455,6 +458,7 @@ flowchart TD
     end
 
     subgraph statusEnsure [Status Ensure]
+        EnsureStatusAddrType[ensureStatusAddressesAndType]
         EnsureStatusAttach[ensureStatusAttachment]
         EnsureStatusPeers[ensureStatusPeers]
         EnsureBVStatus[ensureStatusBackingVolume]
@@ -463,6 +467,7 @@ flowchart TD
         EnsureCondFC[ensureConditionFullyConnected]
         EnsureBVInSync[ensureConditionBackingVolumeUpToDate]
         EnsureCondReady[ensureConditionReady]
+        EnsureCondSEN[ensureConditionSatisfyEligibleNodes]
     end
 
     subgraph outputs [Outputs]
@@ -479,6 +484,8 @@ flowchart TD
     LLVs --> ReconcileBV
     DRBDR --> ReconcileDRBD
     AgentPod --> ReconcileDRBD
+    RSP --> ReconcileBV
+    RSP --> EnsureCondSEN
 
     ReconcileMeta --> RVRMeta
     ReconcileBV --> LLVManaged
@@ -507,6 +514,7 @@ flowchart TD
     EnsureCondFC -->|FullyConnected| RVRStatusConds
     EnsureBVInSync -->|BackingVolumeUpToDate| RVRStatusConds
     EnsureCondReady -->|Ready| RVRStatusConds
+    EnsureCondSEN -->|SatisfyEligibleNodes| RVRStatusConds
 ```
 
 ---
@@ -532,7 +540,11 @@ flowchart TD
     WaitRV --> End2([Done])
 
     CheckRV -->|Yes| ComputeIntended[Compute intended backing volume]
-    ComputeIntended --> CheckNeed{Backing volume needed?}
+    ComputeIntended --> CheckRSPElig{RSP eligibility valid?}
+    CheckRSPElig -->|No| SetPendingRSP[BackingVolumeReady=False PendingScheduling]
+    SetPendingRSP --> EndRSP([Done])
+
+    CheckRSPElig -->|Yes| CheckNeed{Backing volume needed?}
     CheckNeed -->|No| DeleteLLVs[Delete all LLVs]
     DeleteLLVs --> RemoveCond[Remove BackingVolumeReady condition]
     RemoveCond --> End3([Done])
@@ -565,6 +577,7 @@ flowchart TD
 | `rv.Status.Datamesh` | Target size (after DRBD overhead adjustment), membership state |
 | `drbdr.Spec.LVMLogicalVolumeName` | Currently referenced LLV (actual state) |
 | `llvs[]` | List of LLVs owned by this RVR |
+| `rspView` | RSP eligibility view (node eligibility, RSP type, LVG list) |
 
 | Output | Description |
 |--------|-------------|
@@ -656,9 +669,9 @@ flowchart TD
 
 ---
 
-### reconcileSatisfyEligibleNodesCondition Details
+### ensureConditionSatisfyEligibleNodes Details
 
-**Purpose**: Verifies that the replica's node, LVMVolumeGroup, and ThinPool satisfy the eligible nodes requirements from the ReplicatedStoragePool.
+**Purpose**: Verifies that the replica's node, LVMVolumeGroup, and ThinPool satisfy the eligible nodes requirements from the ReplicatedStoragePool. This is a non-I/O EnsureReconcileHelper that receives pre-fetched RSP eligibility data.
 
 **Algorithm**:
 
@@ -672,17 +685,16 @@ flowchart TD
     CheckConfig -->|No| SetUnknown1[Unknown: PendingConfiguration]
     SetUnknown1 --> End2([Done])
 
-    CheckConfig -->|Yes| GetRSP[Get RSP eligibleNodes for node]
-    GetRSP --> CheckRSPFound{RSP found?}
-    CheckRSPFound -->|No| SetUnknown2[Unknown: PendingConfiguration]
+    CheckConfig -->|Yes| CheckRSPView{rspView available?}
+    CheckRSPView -->|No| SetUnknown2[Unknown: PendingConfiguration]
     SetUnknown2 --> End3([Done])
 
-    CheckRSPFound -->|Yes| CheckNodeInList{Node in eligibleNodes?}
+    CheckRSPView -->|Yes| CheckNodeInList{Node in eligibleNodes?}
     CheckNodeInList -->|No| SetFalse1[False: NodeMismatch]
     SetFalse1 --> End4([Done])
 
     CheckNodeInList -->|Yes| CheckDiskful{Diskful with LVG?}
-    CheckDiskful -->|No| CollectWarnings[Collect warnings]
+    CheckDiskful -->|No| CollectWarnings[computeEligibilityWarnings]
 
     CheckDiskful -->|Yes| CheckLVG{LVG in eligible node?}
     CheckLVG -->|No| SetFalse2[False: LVMVolumeGroupMismatch]
@@ -705,8 +717,8 @@ flowchart TD
 | Input | Description |
 |-------|-------------|
 | `rvr.Spec` | Node name, LVG name, thin pool name, replica type |
-| `rv.Status.Configuration.StoragePoolName` | RSP name |
-| `RSP.Status.EligibleNodes` | List of eligible nodes with LVG details |
+| `rv` | ReplicatedVolume (for configuration availability check) |
+| `rspView` | Pre-fetched RSP eligibility view (from Reconcile via getRSPEligibilityView) |
 
 | Output | Description |
 |--------|-------------|
