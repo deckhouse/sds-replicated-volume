@@ -10,7 +10,7 @@ env:
   GOPROXY: ${{ secrets.GOPROXY }}
   SOURCE_REPO: ${{ secrets.SOURCE_REPO }}
   SOURCE_REPO_SSH_KEY: ${{ secrets.SOURCE_REPO_SSH_KEY }}
-  BASE_IMAGES_VERSION: "v0.5.47"
+  BASE_IMAGES_VERSION: "v0.5.50"
 
 on:
   #pull_request:

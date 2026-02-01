@@ -1,0 +1,12 @@
+name: Svace analyze
+
+on:
+  schedule:
+    - cron: "0 14 * * 6" # Regular static analysis
+
+jobs:
+  build_dev:
+    uses: ./.github/workflows/build_dev.yml
+    secrets: inherit
+    with:
+      svace_enabled: true
