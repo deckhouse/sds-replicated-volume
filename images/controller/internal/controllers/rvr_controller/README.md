@@ -94,7 +94,6 @@ Reconcile (root) [Pure orchestration]
 ├── ensureConditionFullyConnected ← details
 │   └── applyFullyConnectedCond*
 ├── ensureStatusBackingVolume ← details
-│   └── applyRVRBackingVolumeStatus
 ├── ensureConditionBackingVolumeUpToDate ← details
 │   ├── computeHasUpToDatePeer
 │   ├── computeHasConnectedAttachedPeer
