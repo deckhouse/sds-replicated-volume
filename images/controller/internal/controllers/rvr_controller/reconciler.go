@@ -571,14 +571,15 @@ func ensureConditionBackingVolumeUpToDate(
 		return ef.Errf("drbdr.Status.ActiveConfiguration is nil after configuration is no longer pending")
 	}
 
-	// weAttached indicates whether this replica is serving application I/O (Primary role).
+	// servingIO indicates that this replica is attached on the node and serving application I/O
+	// (in DRBD this is the Primary role).
 	// Used to provide detailed messages about where I/O is being handled.
-	weAttached := drbdr.Status.ActiveConfiguration.Role == v1alpha1.DRBDRolePrimary
+	servingIO := drbdr.Status.ActiveConfiguration.Role == v1alpha1.DRBDRolePrimary
 
 	// UpToDate is the only state with True condition — handle it separately.
 	if drbdr.Status.DiskState == v1alpha1.DiskStateUpToDate {
 		var message string
-		if weAttached {
+		if servingIO {
 			message = "Backing volume is fully up-to-date; application I/O served locally"
 		} else {
 			message = "Backing volume is fully up-to-date"
@@ -596,7 +597,7 @@ func ensureConditionBackingVolumeUpToDate(
 	switch drbdr.Status.DiskState {
 	case v1alpha1.DiskStateDiskless:
 		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAbsent
-		if weAttached {
+		if servingIO {
 			message = "No backing volume; application I/O forwarded to peers"
 		} else {
 			message = "No backing volume attached"
@@ -604,7 +605,7 @@ func ensureConditionBackingVolumeUpToDate(
 
 	case v1alpha1.DiskStateAttaching:
 		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAttaching
-		if weAttached {
+		if servingIO {
 			message = "Backing volume is being attached; reading metadata from local device; application I/O forwarded to peers"
 		} else {
 			message = "Backing volume is being attached; reading metadata from local device"
@@ -612,7 +613,7 @@ func ensureConditionBackingVolumeUpToDate(
 
 	case v1alpha1.DiskStateDetaching:
 		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonDetaching
-		if weAttached {
+		if servingIO {
 			message = "Backing volume is being detached; application I/O transitioning to peers"
 		} else {
 			message = "Backing volume is being detached"
@@ -620,7 +621,7 @@ func ensureConditionBackingVolumeUpToDate(
 
 	case v1alpha1.DiskStateFailed:
 		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonFailed
-		if weAttached {
+		if servingIO {
 			message = "Backing volume failed due to I/O errors; application I/O transitioning to peers"
 		} else {
 			message = "Backing volume failed due to I/O errors"
@@ -632,7 +633,7 @@ func ensureConditionBackingVolumeUpToDate(
 		hasUpToDatePeer := computeHasUpToDatePeer(rvr.Status.Peers)
 		hasConnectedAttachedPeer := computeHasConnectedAttachedPeer(rvr.Status.Peers)
 		hasAnyAttachedPeer := computeHasAnyAttachedPeer(rvr.Status.Peers)
-		ioAvailable := weAttached || hasConnectedAttachedPeer || !hasAnyAttachedPeer
+		ioAvailable := servingIO || hasConnectedAttachedPeer || !hasAnyAttachedPeer
 
 		if !hasUpToDatePeer {
 			reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizationBlocked
@@ -649,25 +650,25 @@ func ensureConditionBackingVolumeUpToDate(
 		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizing
 		switch drbdr.Status.DiskState {
 		case v1alpha1.DiskStateInconsistent:
-			if weAttached {
+			if servingIO {
 				message = "Backing volume partially synchronized; local reads from synced blocks, others forwarded to peer"
 			} else {
 				message = "Backing volume partially synchronized; sync in progress"
 			}
 		case v1alpha1.DiskStateOutdated:
-			if weAttached {
+			if servingIO {
 				message = "Backing volume data outdated; application I/O forwarded to up-to-date peer during resync"
 			} else {
 				message = "Backing volume data outdated; resynchronization in progress"
 			}
 		case v1alpha1.DiskStateNegotiating:
-			if weAttached {
+			if servingIO {
 				message = "Negotiating sync direction; application I/O forwarded to peers"
 			} else {
 				message = "Negotiating synchronization direction with peers"
 			}
 		case v1alpha1.DiskStateConsistent:
-			if weAttached {
+			if servingIO {
 				message = "Backing volume consistent, determining currency; application I/O forwarded to peers"
 			} else {
 				message = "Backing volume consistent; awaiting peer negotiation to determine if up-to-date"
