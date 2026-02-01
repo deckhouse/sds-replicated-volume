@@ -37,8 +37,8 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
       type: string
-    - jsonPath: .status.conditions[?(@.type=='Configured')].status
-      name: Configured
+    - jsonPath: .status.conditions[?(@.type=='DRBDConfigured')].status
+      name: DRBDConfigured
       type: string
     - jsonPath: .status.conditions[?(@.type=='DataInitialized')].status
       name: DataInitialized

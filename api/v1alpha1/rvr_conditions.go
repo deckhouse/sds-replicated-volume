@@ -52,10 +52,10 @@ const (
 )
 
 const (
-	// ReplicatedVolumeReplicaCondConfiguredType indicates whether the replica is fully configured
+	// ReplicatedVolumeReplicaCondDRBDConfiguredType indicates whether the replica's DRBD is fully configured
 	// for the current datamesh revision.
 	//
-	// "Configured" (Status=True) means:
+	// "DRBDConfigured" (Status=True) means:
 	//   - DRBD was configured to match the intended state derived from this datamesh revision.
 	//   - Backing volume (if Diskful) was configured: exists and matches intended LVG/ThinPool/Size.
 	//   - Backing volume (if Diskful) is ready: reported ready and actual size >= intended size.
@@ -66,16 +66,16 @@ const (
 	//   - Backing volume is synchronized (resync happens asynchronously if the volume was newly added).
 	//
 	// Reasons describe configuration state or applicability.
-	ReplicatedVolumeReplicaCondConfiguredType                             = "Configured"
-	ReplicatedVolumeReplicaCondConfiguredReasonAgentNotReady              = "AgentNotReady"              // Agent is not ready.
-	ReplicatedVolumeReplicaCondConfiguredReasonApplyingConfiguration      = "ApplyingConfiguration"      // Agent is applying DRBD configuration.
-	ReplicatedVolumeReplicaCondConfiguredReasonConfigurationFailed        = "ConfigurationFailed"        // Agent failed to apply DRBDconfiguration.
-	ReplicatedVolumeReplicaCondConfiguredReasonConfigured                 = "Configured"                 // Replica is fully configured for the current datamesh revision.
-	ReplicatedVolumeReplicaCondConfiguredReasonNotApplicable              = "NotApplicable"              // Not applicable (replica is being deleted).
-	ReplicatedVolumeReplicaCondConfiguredReasonPendingDatameshJoin        = "PendingDatameshJoin"        // DRBD preconfigured; waiting for datamesh membership.
-	ReplicatedVolumeReplicaCondConfiguredReasonPendingScheduling          = "PendingScheduling"          // Waiting for node assignment.
-	ReplicatedVolumeReplicaCondConfiguredReasonWaitingForBackingVolume    = "WaitingForBackingVolume"    // Waiting for backing volume (creating, resizing, or replacing).
-	ReplicatedVolumeReplicaCondConfiguredReasonWaitingForReplicatedVolume = "WaitingForReplicatedVolume" // Waiting for ReplicatedVolume datamesh to be initialized.
+	ReplicatedVolumeReplicaCondDRBDConfiguredType                             = "DRBDConfigured"
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady              = "AgentNotReady"              // Agent is not ready.
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration      = "ApplyingConfiguration"      // Agent is applying DRBD configuration.
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigurationFailed        = "ConfigurationFailed"        // Agent failed to apply DRBD configuration.
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured                 = "Configured"                 // Replica is fully configured for the current datamesh revision.
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonNotApplicable              = "NotApplicable"              // Not applicable (replica is being deleted).
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingDatameshJoin        = "PendingDatameshJoin"        // DRBD preconfigured; waiting for datamesh membership.
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingScheduling          = "PendingScheduling"          // Waiting for node assignment.
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForBackingVolume    = "WaitingForBackingVolume"    // Waiting for backing volume (creating, resizing, or replacing).
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForReplicatedVolume = "WaitingForReplicatedVolume" // Waiting for ReplicatedVolume datamesh to be initialized.
 )
 
 const (

@@ -125,11 +125,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	if rvr != nil {
 		// compute agentReady and drbdrConfigurationPending
-		configuredCond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		drbdConfiguredCond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
 		var agentReady, drbdrConfigurationPending bool
-		if configuredCond != nil {
-			agentReady = configuredCond.Reason != v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonAgentNotReady
-			drbdrConfigurationPending = configuredCond.Reason == v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonApplyingConfiguration
+		if drbdConfiguredCond != nil {
+			agentReady = drbdConfiguredCond.Reason != v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady
+			drbdrConfigurationPending = drbdConfiguredCond.Reason == v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration
 		}
 
 		// Find datamesh and datamesh member for this RVR.
@@ -198,7 +198,7 @@ func ensureAttachmentStatus(
 
 	// Guard: Condition not relevant (no DRBDR OR (not intended AND not actual)).
 	if drbdr == nil || (!intendedAttached && !actualAttached) {
-		changed = applyRVRAttachedCondAbsent(rvr) || changed
+		changed = applyAttachedCondAbsent(rvr) || changed
 		changed = applyRVRDevicePath(rvr, "") || changed
 		changed = applyRVRDeviceIOSuspended(rvr, nil) || changed
 		return ef.Ok().ReportChangedIf(changed)
@@ -208,7 +208,7 @@ func ensureAttachmentStatus(
 
 	// Guard: agent not ready.
 	if !agentReady {
-		changed = applyRVRAttachedCondUnknown(rvr,
+		changed = applyAttachedCondUnknown(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAgentNotReady,
 			"Agent is not ready") || changed
 		// DevicePath/DeviceIOSuspended not changed.
@@ -217,7 +217,7 @@ func ensureAttachmentStatus(
 
 	// Guard: configuration is being applied.
 	if drbdrConfigurationPending {
-		changed = applyRVRAttachedCondUnknown(rvr,
+		changed = applyAttachedCondUnknown(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonApplyingConfiguration,
 			"Configuration is being applied") || changed
 		// DevicePath/DeviceIOSuspended not changed.
@@ -228,31 +228,31 @@ func ensureAttachmentStatus(
 	switch {
 	case intendedAttached && !actualAttached:
 		// Expected attached, but not attached.
-		changed = applyRVRAttachedCondFalse(rvr,
+		changed = applyAttachedCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAttachmentFailed,
-			"Expected to be attached, but not attached; see Configured condition") || changed
+			"Expected to be attached, but not attached; see DRBDConfigured condition") || changed
 		changed = applyRVRDevicePath(rvr, "") || changed
 		changed = applyRVRDeviceIOSuspended(rvr, nil) || changed
 
 	case !intendedAttached && actualAttached:
 		// Should be detached, but still attached.
-		changed = applyRVRAttachedCondTrue(rvr,
+		changed = applyAttachedCondTrue(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonDetachmentFailed,
-			"Expected to be detached, but still attached; see Configured condition") || changed
+			"Expected to be detached, but still attached; see DRBDConfigured condition") || changed
 		changed = applyRVRDevicePath(rvr, drbdr.Status.Device) || changed
 		changed = applyRVRDeviceIOSuspended(rvr, drbdr.Status.DeviceIOSuspended) || changed
 
 	case actualAttached && drbdr.Status.DeviceIOSuspended != nil && *drbdr.Status.DeviceIOSuspended:
 		// Attached but I/O is suspended.
-		changed = applyRVRAttachedCondFalse(rvr,
+		changed = applyAttachedCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonIOSuspended,
-			"Attached, but I/O is suspended; see Ready and Configured conditions") || changed
+			"Attached, but I/O is suspended; see Ready and DRBDConfigured conditions") || changed
 		changed = applyRVRDevicePath(rvr, drbdr.Status.Device) || changed
 		changed = applyRVRDeviceIOSuspended(rvr, drbdr.Status.DeviceIOSuspended) || changed
 
 	default:
 		// intendedAttached AND actualAttached AND I/O not suspended — all good.
-		changed = applyRVRAttachedCondTrue(rvr,
+		changed = applyAttachedCondTrue(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAttached,
 			"Attached and ready for I/O") || changed
 		changed = applyRVRDevicePath(rvr, drbdr.Status.Device) || changed
@@ -399,13 +399,13 @@ func ensureConditionFullyConnected(
 	// - no addresses configured (no system networks to check against)
 	isMember := datamesh != nil && datamesh.FindMemberByName(rvr.Name) != nil
 	if drbdr == nil || (!isMember && len(drbdr.Status.Peers) == 0) || len(rvr.Status.Addresses) == 0 {
-		changed = applyRVRFullyConnectedCondAbsent(rvr) || changed
+		changed = applyFullyConnectedCondAbsent(rvr) || changed
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
 	// Guard: agent not ready.
 	if !agentReady {
-		changed = applyRVRFullyConnectedCondUnknown(rvr,
+		changed = applyFullyConnectedCondUnknown(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonAgentNotReady,
 			"Agent is not ready") || changed
 		return ef.Ok().ReportChangedIf(changed)
@@ -413,7 +413,7 @@ func ensureConditionFullyConnected(
 
 	// Guard: no peers.
 	if len(rvr.Status.Peers) == 0 {
-		changed = applyRVRFullyConnectedCondFalse(rvr,
+		changed = applyFullyConnectedCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonNoPeers,
 			"No peers configured") || changed
 		return ef.Ok().ReportChangedIf(changed)
@@ -450,7 +450,7 @@ func ensureConditionFullyConnected(
 
 	// Special case: not a datamesh member but has connections.
 	if !isMember && connectedPeers > 0 {
-		changed = applyRVRFullyConnectedCondFalse(rvr,
+		changed = applyFullyConnectedCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected,
 			fmt.Sprintf("Connected to %d peers, but should not be connected to any (not a datamesh member)", connectedPeers)) || changed
 		return ef.Ok().ReportChangedIf(changed)
@@ -459,22 +459,22 @@ func ensureConditionFullyConnected(
 	switch {
 	case fullyConnected == totalPeers:
 		// All peers fully connected on all paths.
-		changed = applyRVRFullyConnectedCondTrue(rvr,
+		changed = applyFullyConnectedCondTrue(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonFullyConnected,
 			"Fully connected to all peers on all paths") || changed
 	case notConnected == totalPeers:
 		// Not connected to any peer.
-		changed = applyRVRFullyConnectedCondFalse(rvr,
+		changed = applyFullyConnectedCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonNotConnected,
 			"Not connected to any peer") || changed
 	case notConnected == 0:
 		// All peers connected but not all paths established.
-		changed = applyRVRFullyConnectedCondTrue(rvr,
+		changed = applyFullyConnectedCondTrue(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonConnectedToAllPeers,
 			fmt.Sprintf("Connected to all %d peers, but not all paths are established", totalPeers)) || changed
 	default:
 		// Partially connected.
-		changed = applyRVRFullyConnectedCondFalse(rvr,
+		changed = applyFullyConnectedCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected,
 			fmt.Sprintf("Connected to %d of %d peers (%d fully, %d partially, %d not connected)",
 				connectedPeers, totalPeers, fullyConnected, partiallyConnected, notConnected)) || changed
@@ -545,13 +545,13 @@ func ensureConditionBackingVolumeInSync(
 
 	// Guard: no DRBDR or condition not relevant — remove it.
 	if drbdr == nil || !conditionRelevant {
-		changed = applyRVRBackingVolumeInSyncCondAbsent(rvr) || changed
+		changed = applyBackingVolumeInSyncCondAbsent(rvr) || changed
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
 	// Guard: agent not ready.
 	if !agentReady {
-		changed = applyRVRBackingVolumeInSyncCondUnknown(rvr,
+		changed = applyBackingVolumeInSyncCondUnknown(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonAgentNotReady,
 			"Agent is not ready") || changed
 		return ef.Ok().ReportChangedIf(changed)
@@ -559,7 +559,7 @@ func ensureConditionBackingVolumeInSync(
 
 	// Guard: configuration is being applied.
 	if drbdrConfigurationPending {
-		changed = applyRVRBackingVolumeInSyncCondUnknown(rvr,
+		changed = applyBackingVolumeInSyncCondUnknown(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonApplyingConfiguration,
 			"Configuration is being applied") || changed
 		return ef.Ok().ReportChangedIf(changed)
@@ -583,7 +583,7 @@ func ensureConditionBackingVolumeInSync(
 		} else {
 			message = "Disk is fully up-to-date"
 		}
-		changed = applyRVRBackingVolumeInSyncCondTrue(rvr,
+		changed = applyBackingVolumeInSyncCondTrue(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonInSync,
 			message) || changed
 		return ef.Ok().ReportChangedIf(changed)
@@ -679,7 +679,7 @@ func ensureConditionBackingVolumeInSync(
 		message = fmt.Sprintf("Unknown disk state: %s", drbdr.Status.DiskState)
 	}
 
-	changed = applyRVRBackingVolumeInSyncCondFalse(rvr, reason, message) || changed
+	changed = applyBackingVolumeInSyncCondFalse(rvr, reason, message) || changed
 	return ef.Ok().ReportChangedIf(changed)
 }
 
@@ -794,7 +794,7 @@ func ensureConditionReady(
 
 	// Guard: RVR is being deleted (drbdr == nil implies deletion).
 	if rvrShouldNotExist(rvr) || drbdr == nil {
-		changed = applyRVRReadyCondFalse(rvr,
+		changed = applyReadyCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondReadyReasonDeleting,
 			"Replica is being deleted") || changed
 		return ef.Ok().ReportChangedIf(changed)
@@ -802,7 +802,7 @@ func ensureConditionReady(
 
 	// Guard: agent not ready.
 	if !agentReady {
-		changed = applyRVRReadyCondUnknown(rvr,
+		changed = applyReadyCondUnknown(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondReadyReasonAgentNotReady,
 			"Agent is not ready") || changed
 		return ef.Ok().ReportChangedIf(changed)
@@ -810,7 +810,7 @@ func ensureConditionReady(
 
 	// Guard: configuration is being applied.
 	if drbdrConfigurationPending {
-		changed = applyRVRReadyCondUnknown(rvr,
+		changed = applyReadyCondUnknown(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondReadyReasonApplyingConfiguration,
 			"Configuration is being applied") || changed
 		return ef.Ok().ReportChangedIf(changed)
@@ -836,11 +836,11 @@ func ensureConditionReady(
 
 	// Set Ready condition based on drbdr.Status.Quorum.
 	if drbdr.Status.Quorum == nil || !*drbdr.Status.Quorum {
-		changed = applyRVRReadyCondFalse(rvr,
+		changed = applyReadyCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumLost,
 			msg) || changed
 	} else {
-		changed = applyRVRReadyCondTrue(rvr,
+		changed = applyReadyCondTrue(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
 			msg) || changed
 	}
@@ -990,7 +990,7 @@ func (r *Reconciler) reconcileBackingVolume(
 				return nil, nil, rf.Continue()
 			}
 			// Still deleting — set condition False.
-			changed := applyRVRBackingVolumeReadyCondFalse(rvr,
+			changed := applyBackingVolumeReadyCondFalse(rvr,
 				v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable,
 				fmt.Sprintf("Replica is being deleted; deleting backing volumes: %s", strings.Join(deletingNames, ", ")))
 			return nil, nil, rf.Continue().ReportChangedIf(changed)
@@ -1002,7 +1002,7 @@ func (r *Reconciler) reconcileBackingVolume(
 			return nil, nil, rf.Continue()
 		}
 		// Remove condition entirely.
-		changed := applyRVRBackingVolumeReadyCondAbsent(rvr)
+		changed := applyBackingVolumeReadyCondAbsent(rvr)
 		return nil, nil, rf.Continue().ReportChangedIf(changed)
 	}
 
@@ -1012,7 +1012,7 @@ func (r *Reconciler) reconcileBackingVolume(
 	// 3. ReplicatedVolume not found — stop reconciliation and wait for it to appear.
 	// Without RV we cannot determine datamesh state.
 	if rv == nil {
-		changed := applyRVRBackingVolumeReadyCondFalse(rvr,
+		changed := applyBackingVolumeReadyCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForReplicatedVolume,
 			"ReplicatedVolume not found")
 		return actual, nil, rf.Continue().ReportChangedIf(changed)
@@ -1022,7 +1022,7 @@ func (r *Reconciler) reconcileBackingVolume(
 	// Normally datamesh is already initialized by the time RVR is created,
 	// but we check for non-standard usage scenarios (e.g., RVR created before RV) and general correctness.
 	if rv.Status.DatameshRevision == 0 {
-		changed := applyRVRBackingVolumeReadyCondFalse(rvr,
+		changed := applyBackingVolumeReadyCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForReplicatedVolume,
 			"Datamesh is not initialized yet")
 		return actual, nil, rf.Continue().ReportChangedIf(changed)
@@ -1039,13 +1039,13 @@ func (r *Reconciler) reconcileBackingVolume(
 				return nil, nil, ro
 			}
 			// Still deleting — set condition False.
-			changed := applyRVRBackingVolumeReadyCondFalse(rvr, reason,
+			changed := applyBackingVolumeReadyCondFalse(rvr, reason,
 				fmt.Sprintf("%s; deleting backing volumes: %s", message, strings.Join(deletingNames, ", ")))
 			return nil, nil, rf.Continue().ReportChangedIf(changed)
 		}
 
 		// All LLVs deleted — remove condition entirely.
-		changed := applyRVRBackingVolumeReadyCondAbsent(rvr)
+		changed := applyBackingVolumeReadyCondAbsent(rvr)
 		return nil, nil, rf.Continue().ReportChangedIf(changed)
 	}
 
@@ -1065,7 +1065,7 @@ func (r *Reconciler) reconcileBackingVolume(
 			// for safety reasons (e.g., schema changes in sds-node-configurator).
 			if apierrors.IsInvalid(err) {
 				rf.Log().Error(err, "Failed to create backing volume", "llvName", intended.LLVName)
-				applyRVRBackingVolumeReadyCondFalse(rvr,
+				applyBackingVolumeReadyCondFalse(rvr,
 					v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioningFailed,
 					fmt.Sprintf("Failed to create backing volume %s: %s", intended.LLVName, computeAPIValidationErrorCauses(err)))
 				return actual, intended, rf.ContinueAndRequeueAfter(5 * time.Minute).ReportChanged()
@@ -1085,7 +1085,7 @@ func (r *Reconciler) reconcileBackingVolume(
 			reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioning
 			message = fmt.Sprintf("Creating backing volume %s", intended.LLVName)
 		}
-		changed := applyRVRBackingVolumeReadyCondFalse(rvr, reason, message)
+		changed := applyBackingVolumeReadyCondFalse(rvr, reason, message)
 
 		// Return actual BV as target.
 		return actual, intended, rf.Continue().ReportChangedIf(changed)
@@ -1121,7 +1121,7 @@ func (r *Reconciler) reconcileBackingVolume(
 			reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioning
 			message = fmt.Sprintf("Waiting for backing volume %s to become ready", intended.LLVName)
 		}
-		changed := applyRVRBackingVolumeReadyCondFalse(rvr, reason, message)
+		changed := applyBackingVolumeReadyCondFalse(rvr, reason, message)
 		return actual, intended, rf.Continue().ReportChangedIf(changed)
 	}
 
@@ -1139,7 +1139,7 @@ func (r *Reconciler) reconcileBackingVolume(
 				// for safety reasons (e.g., schema changes in sds-node-configurator).
 				if apierrors.IsInvalid(err) {
 					rf.Log().Error(err, "Failed to resize backing volume", "llvName", intended.LLVName)
-					applyRVRBackingVolumeReadyCondFalse(rvr,
+					applyBackingVolumeReadyCondFalse(rvr,
 						v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizeFailed,
 						fmt.Sprintf("Failed to resize backing volume %s: %s", intended.LLVName, computeAPIValidationErrorCauses(err)))
 					return actual, intended, rf.ContinueAndRequeueAfter(5 * time.Minute).ReportChanged()
@@ -1148,7 +1148,7 @@ func (r *Reconciler) reconcileBackingVolume(
 			}
 		}
 
-		changed := applyRVRBackingVolumeReadyCondFalse(rvr,
+		changed := applyBackingVolumeReadyCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizing,
 			fmt.Sprintf("Resizing backing volume %s from %s to %s", intended.LLVName, actualSize.String(), intended.Size.String()))
 
@@ -1167,7 +1167,7 @@ func (r *Reconciler) reconcileBackingVolume(
 		}
 		message = fmt.Sprintf("%s; deleting obsolete: %s", message, strings.Join(deletingNames, ", "))
 	}
-	changed := applyRVRBackingVolumeReadyCondTrue(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonReady, message)
+	changed := applyBackingVolumeReadyCondTrue(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonReady, message)
 
 	return intended, intended, rf.Continue().ReportChangedIf(changed)
 }
@@ -1601,7 +1601,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 			}
 		}
 
-		// Set Configured condition on RVR.
+		// Set DRBDConfigured condition on RVR.
 		changed := false
 		if rvr != nil {
 			var message string
@@ -1610,8 +1610,8 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 			} else {
 				message = fmt.Sprintf("Replica is being deleted; waiting for DRBD resource %s to be deleted", drbdr.Name)
 			}
-			changed = applyRVRConfiguredCondFalse(rvr,
-				v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonNotApplicable, message)
+			changed = applyDRBDConfiguredCondFalse(rvr,
+				v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonNotApplicable, message)
 		}
 
 		// DRBDR may still exist in the API (e.g., blocked by finalizers),
@@ -1622,8 +1622,8 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 	// 2. Node not assigned yet — cannot configure DRBD without a node.
 	// Note: Per API validation, NodeName is immutable once set. We rely on this invariant below.
 	if rvr.Spec.NodeName == "" {
-		changed := applyRVRConfiguredCondFalse(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingScheduling,
+		changed := applyDRBDConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingScheduling,
 			"Waiting for node assignment")
 		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
@@ -1631,8 +1631,8 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 	// 3. ReplicatedVolume not found — stop reconciliation and wait for it to appear.
 	// Without RV we cannot determine datamesh state, system networks, peers, etc.
 	if rv == nil {
-		changed := applyRVRConfiguredCondFalse(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonWaitingForReplicatedVolume,
+		changed := applyDRBDConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForReplicatedVolume,
 			"ReplicatedVolume not found")
 		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
@@ -1641,8 +1641,8 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 	// Normally datamesh is already initialized by the time RVR is created,
 	// but we check for non-standard usage scenarios (e.g., RVR created before RV) and general correctness.
 	if rv.Status.DatameshRevision == 0 {
-		changed := applyRVRConfiguredCondFalse(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonWaitingForReplicatedVolume,
+		changed := applyDRBDConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForReplicatedVolume,
 			"Datamesh is not initialized yet")
 		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
@@ -1653,8 +1653,8 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 	// If datamesh is initialized, system networks should already be set,
 	// but we check for non-standard scenarios and general correctness.
 	if len(datamesh.SystemNetworkNames) == 0 {
-		changed := applyRVRConfiguredCondFalse(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonWaitingForReplicatedVolume,
+		changed := applyDRBDConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForReplicatedVolume,
 			"No system networks in datamesh")
 		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
@@ -1728,44 +1728,44 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 			nodeState = "NotReady"
 		}
 		msg := fmt.Sprintf("Agent is not ready on node %s (node status: %s)", nodeName, nodeState)
-		changed = applyRVRConfiguredCondFalse(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonAgentNotReady, msg) || changed
+		changed = applyDRBDConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady, msg) || changed
 		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
 	}
 
 	// 9. Check DRBDR configuration status.
-	configuredCond := obju.GetStatusCondition(drbdr, v1alpha1.DRBDResourceCondConfiguredType)
+	drbdrConfiguredCond := obju.GetStatusCondition(drbdr, v1alpha1.DRBDResourceCondConfiguredType)
 
 	// 9a. Configured condition not set yet — waiting for agent to respond.
-	if configuredCond == nil {
-		changed = applyRVRConfiguredCondFalse(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonApplyingConfiguration,
+	if drbdrConfiguredCond == nil {
+		changed = applyDRBDConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration,
 			"Waiting for agent to respond (Configured condition is not set yet)") || changed
 		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
 	}
 
 	// 9b. Agent hasn't processed the current generation yet.
-	if configuredCond.ObservedGeneration != drbdr.Generation {
+	if drbdrConfiguredCond.ObservedGeneration != drbdr.Generation {
 		msg := fmt.Sprintf("Waiting for agent to respond (generation: %d, observedGeneration: %d)",
-			drbdr.Generation, configuredCond.ObservedGeneration)
-		changed = applyRVRConfiguredCondFalse(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonApplyingConfiguration, msg) || changed
+			drbdr.Generation, drbdrConfiguredCond.ObservedGeneration)
+		changed = applyDRBDConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration, msg) || changed
 		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
 	}
 
 	// 9c. DRBDR is in maintenance mode.
-	if configuredCond.Reason == v1alpha1.DRBDResourceCondConfiguredReasonInMaintenance {
-		changed = applyRVRConfiguredCondFalse(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonApplyingConfiguration,
+	if drbdrConfiguredCond.Reason == v1alpha1.DRBDResourceCondConfiguredReasonInMaintenance {
+		changed = applyDRBDConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration,
 			"DRBD is in maintenance mode") || changed
 		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
 	}
 
 	// 9d. DRBDR configuration failed.
-	if configuredCond.Status != metav1.ConditionTrue {
-		msg := fmt.Sprintf("DRBD configuration failed (reason: %s)", configuredCond.Reason)
-		changed = applyRVRConfiguredCondFalse(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigurationFailed, msg) || changed
+	if drbdrConfiguredCond.Status != metav1.ConditionTrue {
+		msg := fmt.Sprintf("DRBD configuration failed (reason: %s)", drbdrConfiguredCond.Reason)
+		changed = applyDRBDConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigurationFailed, msg) || changed
 		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
 	}
 
@@ -1773,8 +1773,8 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 
 	// 10. DRBDR is configured — copy addresses to RVR status.
 	if len(rvr.Status.Addresses) == 0 {
-		changed = applyRVRConfiguredCondFalse(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonApplyingConfiguration,
+		changed = applyDRBDConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration,
 			"Waiting for DRBD addresses") || changed
 		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
 	}
@@ -1785,8 +1785,8 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 	// This happens when LLV is not yet ready and we preconfigured DRBDR as TieBreaker.
 	// Once LLV becomes ready, targetLLVName will be set and targetType will match intendedType.
 	if targetType != intendedType {
-		changed = applyRVRConfiguredCondFalse(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonWaitingForBackingVolume,
+		changed = applyDRBDConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForBackingVolume,
 			"DRBD preconfigured as TieBreaker, waiting for backing volume to become ready") || changed
 		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
 	}
@@ -1806,8 +1806,8 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 			}
 			msg := fmt.Sprintf("Backing volume replacement pending: current %s, expected %s",
 				formatBV(targetBV), formatBV(intendedBV))
-			changed = applyRVRConfiguredCondFalse(rvr,
-				v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonWaitingForBackingVolume, msg) || changed
+			changed = applyDRBDConfiguredCondFalse(rvr,
+				v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForBackingVolume, msg) || changed
 			return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
 		}
 
@@ -1815,16 +1815,16 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		if targetBV.Size.Cmp(intendedBV.Size) < 0 {
 			msg := fmt.Sprintf("Backing volume resize pending: current size %s, expected size %s",
 				targetBV.Size.String(), intendedBV.Size.String())
-			changed = applyRVRConfiguredCondFalse(rvr,
-				v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonWaitingForBackingVolume, msg) || changed
+			changed = applyDRBDConfiguredCondFalse(rvr,
+				v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForBackingVolume, msg) || changed
 			return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
 		}
 	}
 
 	// 13. If not a datamesh member — DRBD is preconfigured, waiting for membership.
 	if member == nil {
-		changed = applyRVRConfiguredCondFalse(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingDatameshJoin,
+		changed = applyDRBDConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingDatameshJoin,
 			"DRBD preconfigured, waiting for datamesh membership") || changed
 		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
 	}
@@ -1855,8 +1855,8 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		rvr.Status.DatameshRevision = rv.Status.DatameshRevision
 		changed = true
 	}
-	changed = applyRVRConfiguredCondTrue(rvr,
-		v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured, "Configured") || changed
+	changed = applyDRBDConfiguredCondTrue(rvr,
+		v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured, "Configured") || changed
 	return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
 }
 
@@ -2087,28 +2087,28 @@ func buildDRBDRPeerPaths(addresses []v1alpha1.DRBDResourceAddressStatus) []v1alp
 	return paths
 }
 
-// applyRVRConfiguredCondFalse sets the Configured condition to False on RVR.
-func applyRVRConfiguredCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+// applyDRBDConfiguredCondFalse sets the DRBDConfigured condition to False on RVR.
+func applyDRBDConfiguredCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
-		Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+		Type:    v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
 		Status:  metav1.ConditionFalse,
 		Reason:  reason,
 		Message: message,
 	})
 }
 
-// applyRVRConfiguredCondTrue sets the Configured condition to True on RVR.
-func applyRVRConfiguredCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+// applyDRBDConfiguredCondTrue sets the DRBDConfigured condition to True on RVR.
+func applyDRBDConfiguredCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
-		Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+		Type:    v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
 		Status:  metav1.ConditionTrue,
 		Reason:  reason,
 		Message: message,
 	})
 }
 
-// applyRVRBackingVolumeReadyCondFalse sets the BackingVolumeReady condition to False on RVR.
-func applyRVRBackingVolumeReadyCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+// applyBackingVolumeReadyCondFalse sets the BackingVolumeReady condition to False on RVR.
+func applyBackingVolumeReadyCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
 		Status:  metav1.ConditionFalse,
@@ -2117,8 +2117,8 @@ func applyRVRBackingVolumeReadyCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, 
 	})
 }
 
-// applyRVRBackingVolumeReadyCondTrue sets the BackingVolumeReady condition to True on RVR.
-func applyRVRBackingVolumeReadyCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+// applyBackingVolumeReadyCondTrue sets the BackingVolumeReady condition to True on RVR.
+func applyBackingVolumeReadyCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
 		Status:  metav1.ConditionTrue,
@@ -2127,13 +2127,13 @@ func applyRVRBackingVolumeReadyCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, r
 	})
 }
 
-// applyRVRBackingVolumeReadyCondAbsent removes the BackingVolumeReady condition from RVR.
-func applyRVRBackingVolumeReadyCondAbsent(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+// applyBackingVolumeReadyCondAbsent removes the BackingVolumeReady condition from RVR.
+func applyBackingVolumeReadyCondAbsent(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 	return obju.RemoveStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
 }
 
-// applyRVRAttachedCondFalse sets the Attached condition to False on RVR.
-func applyRVRAttachedCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+// applyAttachedCondFalse sets the Attached condition to False on RVR.
+func applyAttachedCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeReplicaCondAttachedType,
 		Status:  metav1.ConditionFalse,
@@ -2142,8 +2142,8 @@ func applyRVRAttachedCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, me
 	})
 }
 
-// applyRVRAttachedCondUnknown sets the Attached condition to Unknown on RVR.
-func applyRVRAttachedCondUnknown(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+// applyAttachedCondUnknown sets the Attached condition to Unknown on RVR.
+func applyAttachedCondUnknown(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeReplicaCondAttachedType,
 		Status:  metav1.ConditionUnknown,
@@ -2152,8 +2152,8 @@ func applyRVRAttachedCondUnknown(rvr *v1alpha1.ReplicatedVolumeReplica, reason, 
 	})
 }
 
-// applyRVRAttachedCondTrue sets the Attached condition to True on RVR.
-func applyRVRAttachedCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+// applyAttachedCondTrue sets the Attached condition to True on RVR.
+func applyAttachedCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeReplicaCondAttachedType,
 		Status:  metav1.ConditionTrue,
@@ -2162,17 +2162,17 @@ func applyRVRAttachedCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, mes
 	})
 }
 
-// applyRVRAttachedCondAbsent removes the Attached condition from RVR.
-func applyRVRAttachedCondAbsent(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+// applyAttachedCondAbsent removes the Attached condition from RVR.
+func applyAttachedCondAbsent(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 	return obju.RemoveStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 }
 
-// applyRVRBackingVolumeInSyncCondFalse sets the BackingVolumeInSync condition to False on RVR.
-func applyRVRBackingVolumeInSyncCondAbsent(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+// applyBackingVolumeInSyncCondFalse sets the BackingVolumeInSync condition to False on RVR.
+func applyBackingVolumeInSyncCondAbsent(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 	return obju.RemoveStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
 }
 
-func applyRVRBackingVolumeInSyncCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+func applyBackingVolumeInSyncCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType,
 		Status:  metav1.ConditionTrue,
@@ -2181,7 +2181,7 @@ func applyRVRBackingVolumeInSyncCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, 
 	})
 }
 
-func applyRVRBackingVolumeInSyncCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+func applyBackingVolumeInSyncCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType,
 		Status:  metav1.ConditionFalse,
@@ -2190,8 +2190,8 @@ func applyRVRBackingVolumeInSyncCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica,
 	})
 }
 
-// applyRVRBackingVolumeInSyncCondUnknown sets the BackingVolumeInSync condition to Unknown on RVR.
-func applyRVRBackingVolumeInSyncCondUnknown(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+// applyBackingVolumeInSyncCondUnknown sets the BackingVolumeInSync condition to Unknown on RVR.
+func applyBackingVolumeInSyncCondUnknown(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType,
 		Status:  metav1.ConditionUnknown,
@@ -2200,8 +2200,8 @@ func applyRVRBackingVolumeInSyncCondUnknown(rvr *v1alpha1.ReplicatedVolumeReplic
 	})
 }
 
-// applyRVRFullyConnectedCondFalse sets the FullyConnected condition to False on RVR.
-func applyRVRFullyConnectedCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+// applyFullyConnectedCondFalse sets the FullyConnected condition to False on RVR.
+func applyFullyConnectedCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
 		Status:  metav1.ConditionFalse,
@@ -2210,8 +2210,8 @@ func applyRVRFullyConnectedCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reas
 	})
 }
 
-// applyRVRFullyConnectedCondTrue sets the FullyConnected condition to True on RVR.
-func applyRVRFullyConnectedCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+// applyFullyConnectedCondTrue sets the FullyConnected condition to True on RVR.
+func applyFullyConnectedCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
 		Status:  metav1.ConditionTrue,
@@ -2220,8 +2220,8 @@ func applyRVRFullyConnectedCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reaso
 	})
 }
 
-// applyRVRFullyConnectedCondUnknown sets the FullyConnected condition to Unknown on RVR.
-func applyRVRFullyConnectedCondUnknown(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+// applyFullyConnectedCondUnknown sets the FullyConnected condition to Unknown on RVR.
+func applyFullyConnectedCondUnknown(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
 		Status:  metav1.ConditionUnknown,
@@ -2230,13 +2230,13 @@ func applyRVRFullyConnectedCondUnknown(rvr *v1alpha1.ReplicatedVolumeReplica, re
 	})
 }
 
-// applyRVRFullyConnectedCondAbsent removes the FullyConnected condition from RVR.
-func applyRVRFullyConnectedCondAbsent(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+// applyFullyConnectedCondAbsent removes the FullyConnected condition from RVR.
+func applyFullyConnectedCondAbsent(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 	return obju.RemoveStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
 }
 
-// applyRVRReadyCondFalse sets the Ready condition to False on RVR.
-func applyRVRReadyCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+// applyReadyCondFalse sets the Ready condition to False on RVR.
+func applyReadyCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeReplicaCondReadyType,
 		Status:  metav1.ConditionTrue,
@@ -2245,7 +2245,7 @@ func applyRVRReadyCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, messag
 	})
 }
 
-func applyRVRReadyCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+func applyReadyCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeReplicaCondReadyType,
 		Status:  metav1.ConditionFalse,
@@ -2254,8 +2254,8 @@ func applyRVRReadyCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, messa
 	})
 }
 
-// applyRVRReadyCondUnknown sets the Ready condition to Unknown on RVR.
-func applyRVRReadyCondUnknown(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+// applyReadyCondUnknown sets the Ready condition to Unknown on RVR.
+func applyReadyCondUnknown(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeReplicaCondReadyType,
 		Status:  metav1.ConditionUnknown,

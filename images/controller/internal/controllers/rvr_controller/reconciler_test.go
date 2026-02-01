@@ -1350,13 +1350,13 @@ var _ = Describe("applyLLVMetadata", func() {
 	})
 })
 
-var _ = Describe("applyRVRBackingVolumeReadyCondFalse", func() {
+var _ = Describe("applyBackingVolumeReadyCondFalse", func() {
 	It("sets condition to False", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
 
-		changed := applyRVRBackingVolumeReadyCondFalse(rvr, "TestReason", "Test message")
+		changed := applyBackingVolumeReadyCondFalse(rvr, "TestReason", "Test message")
 
 		Expect(changed).To(BeTrue())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
@@ -1377,19 +1377,19 @@ var _ = Describe("applyRVRBackingVolumeReadyCondFalse", func() {
 			Message: "Test message",
 		})
 
-		changed := applyRVRBackingVolumeReadyCondFalse(rvr, "TestReason", "Test message")
+		changed := applyBackingVolumeReadyCondFalse(rvr, "TestReason", "Test message")
 
 		Expect(changed).To(BeFalse())
 	})
 })
 
-var _ = Describe("applyRVRBackingVolumeReadyCondTrue", func() {
+var _ = Describe("applyBackingVolumeReadyCondTrue", func() {
 	It("sets condition to True", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
 
-		changed := applyRVRBackingVolumeReadyCondTrue(rvr, "Ready", "Backing volume is ready")
+		changed := applyBackingVolumeReadyCondTrue(rvr, "Ready", "Backing volume is ready")
 
 		Expect(changed).To(BeTrue())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
@@ -1400,16 +1400,16 @@ var _ = Describe("applyRVRBackingVolumeReadyCondTrue", func() {
 	})
 })
 
-var _ = Describe("applyRVRConfiguredCondFalse", func() {
+var _ = Describe("applyDRBDConfiguredCondFalse", func() {
 	It("sets condition to False", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
 
-		changed := applyRVRConfiguredCondFalse(rvr, "TestReason", "Test message")
+		changed := applyDRBDConfiguredCondFalse(rvr, "TestReason", "Test message")
 
 		Expect(changed).To(BeTrue())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal("TestReason"))
@@ -2085,16 +2085,16 @@ var _ = Describe("computeTargetDRBDRPeers", func() {
 // Additional Apply helpers tests
 //
 
-var _ = Describe("applyRVRConfiguredCondTrue", func() {
+var _ = Describe("applyDRBDConfiguredCondTrue", func() {
 	It("sets condition to True", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
 
-		changed := applyRVRConfiguredCondTrue(rvr, "TestReason", "Test message")
+		changed := applyDRBDConfiguredCondTrue(rvr, "TestReason", "Test message")
 
 		Expect(changed).To(BeTrue())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		Expect(cond.Reason).To(Equal("TestReason"))
@@ -2106,13 +2106,13 @@ var _ = Describe("applyRVRConfiguredCondTrue", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
 		obju.SetStatusCondition(rvr, metav1.Condition{
-			Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+			Type:    v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
 			Status:  metav1.ConditionTrue,
 			Reason:  "TestReason",
 			Message: "Test message",
 		})
 
-		changed := applyRVRConfiguredCondTrue(rvr, "TestReason", "Test message")
+		changed := applyDRBDConfiguredCondTrue(rvr, "TestReason", "Test message")
 
 		Expect(changed).To(BeFalse())
 	})
@@ -3557,10 +3557,10 @@ var _ = Describe("Reconciler", func() {
 			Expect(llvList.Items).To(BeEmpty())
 		})
 
-		// Note: This test verifies that applyRVRBackingVolumeReadyCondAbsent is called
+		// Note: This test verifies that applyBackingVolumeReadyCondAbsent is called
 		// during deletion path. The integration test for the full flow is covered by
 		// the "deletes LLVs when RVR is being deleted" test above.
-		// See ensureStatusBackingVolume and applyRVRBackingVolumeReadyCondAbsent unit tests
+		// See ensureStatusBackingVolume and applyBackingVolumeReadyCondAbsent unit tests
 		// for condition removal logic verification.
 
 		It("creates LLV when RVR needs backing volume", func() {
@@ -6573,9 +6573,9 @@ var _ = Describe("Attached condition apply helpers", func() {
 		}
 	})
 
-	Describe("applyRVRAttachedCondFalse", func() {
+	Describe("applyAttachedCondFalse", func() {
 		It("sets condition to False", func() {
-			changed := applyRVRAttachedCondFalse(rvr, "TestReason", "Test message")
+			changed := applyAttachedCondFalse(rvr, "TestReason", "Test message")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
@@ -6583,53 +6583,53 @@ var _ = Describe("Attached condition apply helpers", func() {
 		})
 
 		It("is idempotent", func() {
-			applyRVRAttachedCondFalse(rvr, "TestReason", "Test message")
-			changed := applyRVRAttachedCondFalse(rvr, "TestReason", "Test message")
+			applyAttachedCondFalse(rvr, "TestReason", "Test message")
+			changed := applyAttachedCondFalse(rvr, "TestReason", "Test message")
 			Expect(changed).To(BeFalse())
 		})
 	})
 
-	Describe("applyRVRAttachedCondUnknown", func() {
+	Describe("applyAttachedCondUnknown", func() {
 		It("sets condition to Unknown", func() {
-			changed := applyRVRAttachedCondUnknown(rvr, "TestReason", "Test message")
+			changed := applyAttachedCondUnknown(rvr, "TestReason", "Test message")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 			Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
 		})
 
 		It("is idempotent", func() {
-			applyRVRAttachedCondUnknown(rvr, "TestReason", "Test message")
-			changed := applyRVRAttachedCondUnknown(rvr, "TestReason", "Test message")
+			applyAttachedCondUnknown(rvr, "TestReason", "Test message")
+			changed := applyAttachedCondUnknown(rvr, "TestReason", "Test message")
 			Expect(changed).To(BeFalse())
 		})
 	})
 
-	Describe("applyRVRAttachedCondTrue", func() {
+	Describe("applyAttachedCondTrue", func() {
 		It("sets condition to True", func() {
-			changed := applyRVRAttachedCondTrue(rvr, "TestReason", "Test message")
+			changed := applyAttachedCondTrue(rvr, "TestReason", "Test message")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		})
 
 		It("is idempotent", func() {
-			applyRVRAttachedCondTrue(rvr, "TestReason", "Test message")
-			changed := applyRVRAttachedCondTrue(rvr, "TestReason", "Test message")
+			applyAttachedCondTrue(rvr, "TestReason", "Test message")
+			changed := applyAttachedCondTrue(rvr, "TestReason", "Test message")
 			Expect(changed).To(BeFalse())
 		})
 	})
 
-	Describe("applyRVRAttachedCondAbsent", func() {
+	Describe("applyAttachedCondAbsent", func() {
 		It("removes the condition", func() {
-			applyRVRAttachedCondTrue(rvr, "TestReason", "Test message")
-			changed := applyRVRAttachedCondAbsent(rvr)
+			applyAttachedCondTrue(rvr, "TestReason", "Test message")
+			changed := applyAttachedCondAbsent(rvr)
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 			Expect(cond).To(BeNil())
 		})
 
 		It("is idempotent when condition absent", func() {
-			changed := applyRVRAttachedCondAbsent(rvr)
+			changed := applyAttachedCondAbsent(rvr)
 			Expect(changed).To(BeFalse())
 		})
 	})
@@ -6644,36 +6644,36 @@ var _ = Describe("BackingVolumeInSync condition apply helpers", func() {
 		}
 	})
 
-	Describe("applyRVRBackingVolumeInSyncCondAbsent", func() {
+	Describe("applyBackingVolumeInSyncCondAbsent", func() {
 		It("removes the condition", func() {
-			applyRVRBackingVolumeInSyncCondTrue(rvr, "TestReason", "Test")
-			changed := applyRVRBackingVolumeInSyncCondAbsent(rvr)
+			applyBackingVolumeInSyncCondTrue(rvr, "TestReason", "Test")
+			changed := applyBackingVolumeInSyncCondAbsent(rvr)
 			Expect(changed).To(BeTrue())
 			Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)).To(BeNil())
 		})
 	})
 
-	Describe("applyRVRBackingVolumeInSyncCondTrue", func() {
+	Describe("applyBackingVolumeInSyncCondTrue", func() {
 		It("sets condition to True", func() {
-			changed := applyRVRBackingVolumeInSyncCondTrue(rvr, "TestReason", "Test")
+			changed := applyBackingVolumeInSyncCondTrue(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		})
 	})
 
-	Describe("applyRVRBackingVolumeInSyncCondFalse", func() {
+	Describe("applyBackingVolumeInSyncCondFalse", func() {
 		It("sets condition to False", func() {
-			changed := applyRVRBackingVolumeInSyncCondFalse(rvr, "TestReason", "Test")
+			changed := applyBackingVolumeInSyncCondFalse(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		})
 	})
 
-	Describe("applyRVRBackingVolumeInSyncCondUnknown", func() {
+	Describe("applyBackingVolumeInSyncCondUnknown", func() {
 		It("sets condition to Unknown", func() {
-			changed := applyRVRBackingVolumeInSyncCondUnknown(rvr, "TestReason", "Test")
+			changed := applyBackingVolumeInSyncCondUnknown(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
 			Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
@@ -6690,37 +6690,37 @@ var _ = Describe("FullyConnected condition apply helpers", func() {
 		}
 	})
 
-	Describe("applyRVRFullyConnectedCondFalse", func() {
+	Describe("applyFullyConnectedCondFalse", func() {
 		It("sets condition to False", func() {
-			changed := applyRVRFullyConnectedCondFalse(rvr, "TestReason", "Test")
+			changed := applyFullyConnectedCondFalse(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		})
 	})
 
-	Describe("applyRVRFullyConnectedCondTrue", func() {
+	Describe("applyFullyConnectedCondTrue", func() {
 		It("sets condition to True", func() {
-			changed := applyRVRFullyConnectedCondTrue(rvr, "TestReason", "Test")
+			changed := applyFullyConnectedCondTrue(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		})
 	})
 
-	Describe("applyRVRFullyConnectedCondUnknown", func() {
+	Describe("applyFullyConnectedCondUnknown", func() {
 		It("sets condition to Unknown", func() {
-			changed := applyRVRFullyConnectedCondUnknown(rvr, "TestReason", "Test")
+			changed := applyFullyConnectedCondUnknown(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
 			Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
 		})
 	})
 
-	Describe("applyRVRFullyConnectedCondAbsent", func() {
+	Describe("applyFullyConnectedCondAbsent", func() {
 		It("removes the condition", func() {
-			applyRVRFullyConnectedCondTrue(rvr, "TestReason", "Test")
-			changed := applyRVRFullyConnectedCondAbsent(rvr)
+			applyFullyConnectedCondTrue(rvr, "TestReason", "Test")
+			changed := applyFullyConnectedCondAbsent(rvr)
 			Expect(changed).To(BeTrue())
 			Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)).To(BeNil())
 		})
@@ -6736,27 +6736,27 @@ var _ = Describe("Ready condition apply helpers", func() {
 		}
 	})
 
-	Describe("applyRVRReadyCondTrue", func() {
+	Describe("applyReadyCondTrue", func() {
 		It("sets condition to True", func() {
-			changed := applyRVRReadyCondTrue(rvr, "TestReason", "Test")
+			changed := applyReadyCondTrue(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		})
 	})
 
-	Describe("applyRVRReadyCondFalse", func() {
+	Describe("applyReadyCondFalse", func() {
 		It("sets condition to False", func() {
-			changed := applyRVRReadyCondFalse(rvr, "TestReason", "Test")
+			changed := applyReadyCondFalse(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		})
 	})
 
-	Describe("applyRVRReadyCondUnknown", func() {
+	Describe("applyReadyCondUnknown", func() {
 		It("sets condition to Unknown", func() {
-			changed := applyRVRReadyCondUnknown(rvr, "TestReason", "Test")
+			changed := applyReadyCondUnknown(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
 			Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
@@ -6839,7 +6839,7 @@ var _ = Describe("applyRVRDeviceIOSuspended", func() {
 	})
 })
 
-var _ = Describe("applyRVRBackingVolumeReadyCondAbsent", func() {
+var _ = Describe("applyBackingVolumeReadyCondAbsent", func() {
 	var rvr *v1alpha1.ReplicatedVolumeReplica
 
 	BeforeEach(func() {
@@ -6849,14 +6849,14 @@ var _ = Describe("applyRVRBackingVolumeReadyCondAbsent", func() {
 	})
 
 	It("removes the condition", func() {
-		applyRVRBackingVolumeReadyCondTrue(rvr, "TestReason", "Test")
-		changed := applyRVRBackingVolumeReadyCondAbsent(rvr)
+		applyBackingVolumeReadyCondTrue(rvr, "TestReason", "Test")
+		changed := applyBackingVolumeReadyCondAbsent(rvr)
 		Expect(changed).To(BeTrue())
 		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)).To(BeNil())
 	})
 
 	It("is idempotent when condition absent", func() {
-		changed := applyRVRBackingVolumeReadyCondAbsent(rvr)
+		changed := applyBackingVolumeReadyCondAbsent(rvr)
 		Expect(changed).To(BeFalse())
 	})
 })
