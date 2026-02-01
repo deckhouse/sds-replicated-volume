@@ -91,6 +91,29 @@ const (
 )
 
 const (
+	// ReplicatedVolumeReplicaCondConfiguredType indicates whether the replica configuration
+	// matches the intended state from spec.
+	//
+	// True: replica is a datamesh member and its actual configuration matches spec.
+	// False: there are pending changes (join/leave/role change/backing volume change)
+	//        or prerequisites are not met (scheduling, eligibility).
+	// Unknown: configuration data is not yet available.
+	// Absent: replica is being deleted and is no longer a datamesh member.
+	//
+	// Reasons describe the pending operation or blocking condition.
+	ReplicatedVolumeReplicaCondConfiguredType                             = "Configured"
+	ReplicatedVolumeReplicaCondConfiguredReasonConfigured                 = "Configured"                 // Replica is configured as intended.
+	ReplicatedVolumeReplicaCondConfiguredReasonNodeNotEligible            = "NodeNotEligible"            // Node is not in the eligible nodes list of the storage pool.
+	ReplicatedVolumeReplicaCondConfiguredReasonPendingBackingVolumeChange = "PendingBackingVolumeChange" // Waiting to change backing volume.
+	ReplicatedVolumeReplicaCondConfiguredReasonPendingConfiguration       = "PendingConfiguration"       // Configuration data is not yet available (e.g., RSP not found).
+	ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin                = "PendingJoin"                // Waiting to join the datamesh.
+	ReplicatedVolumeReplicaCondConfiguredReasonPendingLeave               = "PendingLeave"               // Waiting to leave the datamesh (during deletion).
+	ReplicatedVolumeReplicaCondConfiguredReasonPendingRoleChange          = "PendingRoleChange"          // Waiting to change role in the datamesh.
+	ReplicatedVolumeReplicaCondConfiguredReasonPendingScheduling          = "PendingScheduling"          // Waiting for node or storage assignment.
+	ReplicatedVolumeReplicaCondConfiguredReasonStorageNotEligible         = "StorageNotEligible"         // Intended storage (LVG/ThinPool) is not eligible on the node.
+)
+
+const (
 	// ReplicatedVolumeReplicaCondFullyConnectedType indicates whether the replica is fully connected to all peers.
 	//
 	// Reasons describe connection state or applicability.

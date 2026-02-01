@@ -163,7 +163,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			ensureStatusPeers(rf.Ctx(), rvr, drbdr),
 			ensureStatusBackingVolume(rf.Ctx(), rvr, drbdr, llvs),
 			ensureStatusQuorum(rf.Ctx(), rvr, drbdr),
-			// ensureDatameshPending
 
 			// Ensure conditions.
 			ensureConditionAttached(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
@@ -171,6 +170,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			ensureConditionBackingVolumeUpToDate(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
 			ensureConditionReady(rf.Ctx(), rvr, drbdr, agentReady, drbdrConfigurationPending),
 			ensureConditionSatisfyEligibleNodes(rf.Ctx(), rvr, rv, rspView),
+
+			// Ensure datamesh pending and configured condition.
+			ensureStatusDatameshPendingAndConfiguredCond(rf.Ctx(), rvr, rspView),
 		)
 		if eo.Error() != nil {
 			return rf.Failf(eo.Error(), "ensuring status").ToCtrl()
@@ -1143,6 +1145,77 @@ func applySatisfyEligibleNodesCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, re
 	})
 }
 
+// ensureStatusDatameshPendingAndConfiguredCond determines what datamesh operation is pending
+// (join, leave, role change, or backing volume change) by comparing rvr.Spec to rvr.Status,
+// and updates status.datameshPending and the Configured condition accordingly.
+func ensureStatusDatameshPendingAndConfiguredCond(
+	ctx context.Context,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	rspView *rspEligibilityView,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "status-datamesh-pending-and-configured-cond")
+	defer ef.OnEnd(&outcome)
+
+	changed := false
+
+	// Compute target (single call for both status fields).
+	target, condReason, condMessage := computeTargetDatameshPending(rvr, rspView)
+
+	// Apply datameshPending.
+	changed = applyDatameshPending(rvr, target) || changed
+
+	// Apply Configured condition.
+	if condReason == "" {
+		changed = applyConfiguredCondAbsent(rvr) || changed
+	} else {
+		switch condReason {
+		case v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured:
+			changed = applyConfiguredCondTrue(rvr, condReason, condMessage) || changed
+		case v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingConfiguration:
+			changed = applyConfiguredCondUnknown(rvr, condReason, condMessage) || changed
+		default:
+			changed = applyConfiguredCondFalse(rvr, condReason, condMessage) || changed
+		}
+	}
+
+	return ef.Ok().ReportChangedIf(changed)
+}
+
+// applyConfiguredCondAbsent removes the Configured condition.
+func applyConfiguredCondAbsent(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+	return obju.RemoveStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+}
+
+// applyConfiguredCondUnknown sets the Configured condition to Unknown.
+func applyConfiguredCondUnknown(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+	return obju.SetStatusCondition(rvr, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+		Status:  metav1.ConditionUnknown,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// applyConfiguredCondFalse sets the Configured condition to False.
+func applyConfiguredCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+	return obju.SetStatusCondition(rvr, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+		Status:  metav1.ConditionFalse,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// applyConfiguredCondTrue sets the Configured condition to True.
+func applyConfiguredCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+	return obju.SetStatusCondition(rvr, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+		Status:  metav1.ConditionTrue,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Reconcile: metadata (finalizers + labels)
 //
@@ -1636,58 +1709,16 @@ func computeIntendedBackingVolume(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1a
 		}
 
 		// Validate RSP eligibility and storage assignment.
-		lvgName := rvr.Spec.LVMVolumeGroupName
-		thinPool := rvr.Spec.LVMVolumeGroupThinPoolName
-
-		// Check RSP eligibility view availability.
-		if rspView == nil {
-			return nil, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForReplicatedVolume,
-				"Waiting for RSP eligibility information"
-		}
-
-		// Check if node is eligible in RSP.
-		if rspView.EligibleNode == nil {
-			return nil, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling,
-				fmt.Sprintf("Node %q is not eligible in RSP", rvr.Spec.NodeName)
-		}
-
-		// Validate ThinPool presence/absence matches RSP type.
-		switch rspView.Type {
-		case v1alpha1.ReplicatedStoragePoolTypeLVM:
-			if thinPool != "" {
-				return nil, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling,
-					fmt.Sprintf("ThinPool %q specified but RSP type is LVM (thick); waiting for correct storage assignment", thinPool)
+		code, msg := rspView.isStorageEligible(rvr.Spec.LVMVolumeGroupName, rvr.Spec.LVMVolumeGroupThinPoolName)
+		if code != storageEligibilityOK {
+			var reason string
+			switch code {
+			case storageEligibilityRSPNotAvailable:
+				reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForReplicatedVolume
+			default:
+				reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling
 			}
-		case v1alpha1.ReplicatedStoragePoolTypeLVMThin:
-			if thinPool == "" {
-				return nil, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling,
-					"ThinPool not specified but RSP type is LVMThin; waiting for correct storage assignment"
-			}
-		}
-
-		// Check if storage (LVG, or LVG+ThinPool for LVMThin) is in eligible node's list.
-		storageEligible := false
-		for _, lvg := range rspView.EligibleNode.LVMVolumeGroups {
-			if lvg.Name == lvgName {
-				// For LVM (thick): just check LVG name match.
-				// For LVMThin: also check ThinPool name match.
-				if rspView.Type == v1alpha1.ReplicatedStoragePoolTypeLVM {
-					storageEligible = true
-					break
-				}
-				if lvg.ThinPoolName == thinPool {
-					storageEligible = true
-					break
-				}
-			}
-		}
-		if !storageEligible {
-			if rspView.Type == v1alpha1.ReplicatedStoragePoolTypeLVMThin {
-				return nil, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling,
-					fmt.Sprintf("LVG %q with ThinPool %q is not eligible on node %q", lvgName, thinPool, rvr.Spec.NodeName)
-			}
-			return nil, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling,
-				fmt.Sprintf("LVG %q is not eligible on node %q", lvgName, rvr.Spec.NodeName)
+			return nil, reason, msg
 		}
 
 		// Use RVR spec configuration.
@@ -2251,6 +2282,186 @@ func computeTargetDRBDRReconciliationCache(
 	}
 }
 
+// computeTargetDatameshPending computes the target datameshPending field based on
+// rvr.Spec (intended state), rvr.Status (actual state), and eligibility in RSP.
+//
+// Returns (target, condReason, condMessage) where:
+//   - target is the target datameshPending value (nil means no pending operation)
+//   - condReason is the Configured condition reason
+//   - condMessage is the Configured condition message
+//
+// The condReason/condMessage are always set: when target is nil, they indicate
+// why there's no pending operation (either configured or blocked).
+func computeTargetDatameshPending(
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	rspView *rspEligibilityView,
+) (target *v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending, condReason, condMessage string) {
+	// Check if being deleted.
+	if rvr.DeletionTimestamp != nil {
+		if rvr.Status.DatameshRevision != 0 {
+			// Currently a datamesh member - need to leave.
+			return &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+					Member: ptr.To(false),
+				}, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingLeave,
+				"Deletion in progress, waiting to leave datamesh"
+		}
+		// Not a member - nothing to do (condition will be removed).
+		return nil, "", ""
+	}
+
+	// Check if scheduled.
+	if rvr.Spec.NodeName == "" {
+		return nil, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingScheduling,
+			"Waiting for node assignment"
+	}
+
+	// Check if Diskful needs LVG.
+	if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.Spec.LVMVolumeGroupName == "" {
+		return nil, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingScheduling,
+			"Waiting for storage assignment"
+	}
+
+	// Check RSP availability.
+	if rspView == nil {
+		return nil, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingConfiguration,
+			"Waiting for storage pool configuration"
+	}
+
+	// Check node eligibility.
+	if rspView.EligibleNode == nil {
+		return nil, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonNodeNotEligible,
+			fmt.Sprintf("Node %q is not eligible in storage pool", rvr.Spec.NodeName)
+	}
+
+	// Check storage eligibility for Diskful.
+	if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
+		code, msg := rspView.isStorageEligible(rvr.Spec.LVMVolumeGroupName, rvr.Spec.LVMVolumeGroupThinPoolName)
+		if code != storageEligibilityOK {
+			var reason string
+			switch code {
+			case storageEligibilityRSPNotAvailable:
+				reason = v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingConfiguration
+			case storageEligibilityNodeNotEligible:
+				reason = v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonNodeNotEligible
+			default:
+				reason = v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonStorageNotEligible
+			}
+			return nil, reason, msg
+		}
+	}
+
+	// Check if already a datamesh member.
+	isMember := rvr.Status.DatameshRevision != 0
+
+	if !isMember {
+		// Not a member - need to join.
+		pending := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+			Member: ptr.To(true),
+			Role:   rvr.Spec.Type,
+		}
+		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
+			pending.LVMVolumeGroupName = rvr.Spec.LVMVolumeGroupName
+			pending.ThinPoolName = rvr.Spec.LVMVolumeGroupThinPoolName
+		}
+		return pending, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin,
+			fmt.Sprintf("Waiting to join datamesh as %s", rvr.Spec.Type)
+	}
+
+	// Already a member - check if state is in sync.
+	// Compare types: Spec.Type (Diskful/Access/TieBreaker) vs Status.Type (Diskful/Diskless).
+	var typeInSync bool
+	switch rvr.Spec.Type {
+	case v1alpha1.ReplicaTypeDiskful:
+		typeInSync = rvr.Status.Type == v1alpha1.DRBDResourceTypeDiskful
+	case v1alpha1.ReplicaTypeAccess, v1alpha1.ReplicaTypeTieBreaker:
+		typeInSync = rvr.Status.Type == v1alpha1.DRBDResourceTypeDiskless
+	}
+
+	if !typeInSync {
+		// Type differs - need role change.
+		pending := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+			Role: rvr.Spec.Type,
+		}
+		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
+			pending.LVMVolumeGroupName = rvr.Spec.LVMVolumeGroupName
+			pending.ThinPoolName = rvr.Spec.LVMVolumeGroupThinPoolName
+		}
+		return pending, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingRoleChange,
+			fmt.Sprintf("Waiting to change role to %s", rvr.Spec.Type)
+	}
+
+	// Type matches - for Diskful, check backing volume.
+	if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
+		bvInSync := rvr.Status.BackingVolume != nil &&
+			rvr.Status.BackingVolume.LVMVolumeGroupName == rvr.Spec.LVMVolumeGroupName &&
+			rvr.Status.BackingVolume.LVMVolumeGroupThinPoolName == rvr.Spec.LVMVolumeGroupThinPoolName
+		if !bvInSync {
+			// Backing volume differs - need BV change.
+			pending := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+				LVMVolumeGroupName: rvr.Spec.LVMVolumeGroupName,
+				ThinPoolName:       rvr.Spec.LVMVolumeGroupThinPoolName,
+			}
+			storageDesc := rvr.Spec.LVMVolumeGroupName
+			if rvr.Spec.LVMVolumeGroupThinPoolName != "" {
+				storageDesc += "/" + rvr.Spec.LVMVolumeGroupThinPoolName
+			}
+			return pending, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingBackingVolumeChange,
+				fmt.Sprintf("Waiting to change backing volume to %s", storageDesc)
+		}
+	}
+
+	// Everything is in sync - no pending operation.
+	return nil, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured,
+		"Replica is configured as intended"
+}
+
+// applyDatameshPending applies the target datameshPending to rvr.Status in-place.
+// Returns true if the field was changed.
+func applyDatameshPending(rvr *v1alpha1.ReplicatedVolumeReplica, target *v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending) bool {
+	changed := false
+	current := rvr.Status.DatameshPending
+
+	// Handle target == nil case.
+	if target == nil {
+		if current != nil {
+			rvr.Status.DatameshPending = nil
+			changed = true
+		}
+		return changed
+	}
+
+	// Target is not nil — ensure current exists.
+	if current == nil {
+		rvr.Status.DatameshPending = &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{}
+		current = rvr.Status.DatameshPending
+		changed = true
+	}
+
+	// Compare and update each field.
+	if !ptr.Equal(current.Member, target.Member) {
+		if target.Member != nil {
+			current.Member = ptr.To(*target.Member)
+		} else {
+			current.Member = nil
+		}
+		changed = true
+	}
+	if current.Role != target.Role {
+		current.Role = target.Role
+		changed = true
+	}
+	if current.LVMVolumeGroupName != target.LVMVolumeGroupName {
+		current.LVMVolumeGroupName = target.LVMVolumeGroupName
+		changed = true
+	}
+	if current.ThinPoolName != target.ThinPoolName {
+		current.ThinPoolName = target.ThinPoolName
+		changed = true
+	}
+
+	return changed
+}
+
 // computeTargetDRBDRType converts ReplicaType to DRBDResourceType.
 // Diskful → Diskful, Access/TieBreaker → Diskless.
 func computeDRBDRType(replicaType v1alpha1.ReplicaType) v1alpha1.DRBDResourceType {
@@ -2658,6 +2869,72 @@ type rspEligibilityView struct {
 	// Type is the RSP type (LVM or LVMThin).
 	// Empty if RSP was not found.
 	Type v1alpha1.ReplicatedStoragePoolType
+}
+
+// storageEligibilityCode represents the result of storage eligibility check.
+type storageEligibilityCode int
+
+const (
+	storageEligibilityOK                  storageEligibilityCode = iota
+	storageEligibilityRSPNotAvailable                            // rspView == nil
+	storageEligibilityNodeNotEligible                            // rspView.EligibleNode == nil
+	storageEligibilityTypeMismatch                               // ThinPool specified but RSP is LVM (or vice versa)
+	storageEligibilityLVGNotEligible                             // LVG not in eligible node's list
+	storageEligibilityThinPoolNotEligible                        // LVG found but ThinPool not in list
+)
+
+// isStorageEligible checks if the given LVG+ThinPool combination is eligible.
+// Returns (code, message) where code != storageEligibilityOK means not eligible.
+// Safe to call on nil receiver.
+func (v *rspEligibilityView) isStorageEligible(lvgName, thinPool string) (storageEligibilityCode, string) {
+	// Check RSP eligibility view availability.
+	if v == nil {
+		return storageEligibilityRSPNotAvailable, "Waiting for RSP eligibility information"
+	}
+
+	// Check if node is eligible in RSP.
+	if v.EligibleNode == nil {
+		return storageEligibilityNodeNotEligible, "Node is not eligible in RSP"
+	}
+
+	// Validate ThinPool presence/absence matches RSP type.
+	switch v.Type {
+	case v1alpha1.ReplicatedStoragePoolTypeLVM:
+		if thinPool != "" {
+			return storageEligibilityTypeMismatch,
+				fmt.Sprintf("ThinPool %q specified but RSP type is LVM (thick); waiting for correct storage assignment", thinPool)
+		}
+	case v1alpha1.ReplicatedStoragePoolTypeLVMThin:
+		if thinPool == "" {
+			return storageEligibilityTypeMismatch,
+				"ThinPool not specified but RSP type is LVMThin; waiting for correct storage assignment"
+		}
+	}
+
+	// Check if storage (LVG, or LVG+ThinPool for LVMThin) is in eligible node's list.
+	for _, lvg := range v.EligibleNode.LVMVolumeGroups {
+		if lvg.Name == lvgName {
+			// For LVM (thick): just check LVG name match.
+			// For LVMThin: also check ThinPool name match.
+			if v.Type == v1alpha1.ReplicatedStoragePoolTypeLVM {
+				return storageEligibilityOK, ""
+			}
+			if lvg.ThinPoolName == thinPool {
+				return storageEligibilityOK, ""
+			}
+			// LVG found but ThinPool doesn't match.
+			return storageEligibilityThinPoolNotEligible,
+				fmt.Sprintf("LVG %q found but ThinPool %q is not eligible on node", lvgName, thinPool)
+		}
+	}
+
+	// LVG not found.
+	if v.Type == v1alpha1.ReplicatedStoragePoolTypeLVMThin {
+		return storageEligibilityLVGNotEligible,
+			fmt.Sprintf("LVG %q with ThinPool %q is not eligible on node", lvgName, thinPool)
+	}
+	return storageEligibilityLVGNotEligible,
+		fmt.Sprintf("LVG %q is not eligible on node", lvgName)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
