@@ -125,7 +125,7 @@ Currently, `rvr_controller` operates as a standalone controller, managing:
 
 - **LVMLogicalVolume** — backing storage for diskful replicas
 - **DRBDResource** — DRBD configuration and lifecycle management
-- **RVR status** — conditions (BackingVolumeReady, Configured, Attached, BackingVolumeInSync, FullyConnected, Ready, SatisfyEligibleNodes) and status fields (peers, quorum, device state)
+- **RVR status** — conditions (BackingVolumeReady, Configured, Attached, BackingVolumeUpToDate, FullyConnected, Ready, SatisfyEligibleNodes) and status fields (peers, quorum, device state)
 
 ### Future Architecture
 
