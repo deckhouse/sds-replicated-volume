@@ -151,7 +151,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 			// Ensure conditions.
 			ensureConditionFullyConnected(rf.Ctx(), rvr, drbdr, datamesh, agentReady),
-			ensureConditionBackingVolumeInSync(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
+			ensureConditionBackingVolumeUpToDate(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
 			ensureConditionReady(rf.Ctx(), rvr, drbdr, agentReady, drbdrConfigurationPending),
 		)
 		if eo.Error() != nil {
@@ -521,8 +521,8 @@ func ensureStatusBackingVolume(
 	return ef.Ok().ReportChangedIf(changed).RequireOptimisticLock()
 }
 
-// ensureConditionBackingVolumeInSync ensures the RVR BackingVolumeInSync condition reflects the current DRBDR state.
-func ensureConditionBackingVolumeInSync(
+// ensureConditionBackingVolumeUpToDate ensures the RVR BackingVolumeUpToDate condition reflects the current DRBDR state.
+func ensureConditionBackingVolumeUpToDate(
 	ctx context.Context,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	drbdr *v1alpha1.DRBDResource,
@@ -535,7 +535,7 @@ func ensureConditionBackingVolumeInSync(
 
 	changed := false
 
-	// Determine if the BackingVolumeInSync condition is relevant.
+	// Determine if the BackingVolumeUpToDate condition is relevant.
 	// The condition is relevant only for datamesh members (if not a member, the peer is not
 	// connected and the disk cannot be synchronized by definition), AND when a backing volume
 	// either should exist (intendedType == Diskful) or actually exists (rvr.Status.BackingVolume != nil).
@@ -545,22 +545,22 @@ func ensureConditionBackingVolumeInSync(
 
 	// Guard: no DRBDR or condition not relevant — remove it.
 	if drbdr == nil || !conditionRelevant {
-		changed = applyBackingVolumeInSyncCondAbsent(rvr) || changed
+		changed = applyBackingVolumeUpToDateCondAbsent(rvr) || changed
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
 	// Guard: agent not ready.
 	if !agentReady {
-		changed = applyBackingVolumeInSyncCondUnknown(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonAgentNotReady,
+		changed = applyBackingVolumeUpToDateCondUnknown(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAgentNotReady,
 			"Agent is not ready") || changed
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
 	// Guard: configuration is being applied.
 	if drbdrConfigurationPending {
-		changed = applyBackingVolumeInSyncCondUnknown(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonApplyingConfiguration,
+		changed = applyBackingVolumeUpToDateCondUnknown(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonApplyingConfiguration,
 			"Configuration is being applied") || changed
 		return ef.Ok().ReportChangedIf(changed)
 	}
@@ -579,12 +579,12 @@ func ensureConditionBackingVolumeInSync(
 	if drbdr.Status.DiskState == v1alpha1.DiskStateUpToDate {
 		var message string
 		if weAttached {
-			message = "Disk is fully up-to-date; application I/O served locally"
+			message = "Backing volume is fully up-to-date; application I/O served locally"
 		} else {
-			message = "Disk is fully up-to-date"
+			message = "Backing volume is fully up-to-date"
 		}
-		changed = applyBackingVolumeInSyncCondTrue(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonInSync,
+		changed = applyBackingVolumeUpToDateCondTrue(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUpToDate,
 			message) || changed
 		return ef.Ok().ReportChangedIf(changed)
 	}
@@ -595,35 +595,35 @@ func ensureConditionBackingVolumeInSync(
 
 	switch drbdr.Status.DiskState {
 	case v1alpha1.DiskStateDiskless:
-		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonNoDisk
+		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAbsent
 		if weAttached {
-			message = "No local disk; application I/O forwarded to peers"
+			message = "No backing volume; application I/O forwarded to peers"
 		} else {
-			message = "No local disk attached"
+			message = "No backing volume attached"
 		}
 
 	case v1alpha1.DiskStateAttaching:
-		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonAttaching
+		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAttaching
 		if weAttached {
-			message = "Disk is being attached; reading metadata from local device; application I/O forwarded to peers"
+			message = "Backing volume is being attached; reading metadata from local device; application I/O forwarded to peers"
 		} else {
-			message = "Disk is being attached; reading metadata from local device"
+			message = "Backing volume is being attached; reading metadata from local device"
 		}
 
 	case v1alpha1.DiskStateDetaching:
-		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonDetaching
+		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonDetaching
 		if weAttached {
-			message = "Disk is being detached; application I/O transitioning to peers"
+			message = "Backing volume is being detached; application I/O transitioning to peers"
 		} else {
-			message = "Disk is being detached"
+			message = "Backing volume is being detached"
 		}
 
 	case v1alpha1.DiskStateFailed:
-		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonDiskFailed
+		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonFailed
 		if weAttached {
-			message = "Disk failed due to I/O errors; application I/O transitioning to peers"
+			message = "Backing volume failed due to I/O errors; application I/O transitioning to peers"
 		} else {
-			message = "Disk failed due to I/O errors"
+			message = "Backing volume failed due to I/O errors"
 		}
 
 	case v1alpha1.DiskStateInconsistent, v1alpha1.DiskStateOutdated,
@@ -635,30 +635,30 @@ func ensureConditionBackingVolumeInSync(
 		ioAvailable := weAttached || hasConnectedAttachedPeer || !hasAnyAttachedPeer
 
 		if !hasUpToDatePeer {
-			reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonSynchronizationBlocked
+			reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizationBlocked
 			message = "Synchronization blocked: no peer with up-to-date data available"
 			break
 		}
 		if !ioAvailable {
-			reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonSynchronizationBlocked
+			reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizationBlocked
 			message = "Synchronization blocked: awaiting connection to attached peer"
 			break
 		}
 
 		// Synchronization can proceed — provide state-specific message.
-		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonSynchronizing
+		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizing
 		switch drbdr.Status.DiskState {
 		case v1alpha1.DiskStateInconsistent:
 			if weAttached {
-				message = "Disk partially synchronized; local reads from synced blocks, others forwarded to peer"
+				message = "Backing volume partially synchronized; local reads from synced blocks, others forwarded to peer"
 			} else {
-				message = "Disk partially synchronized; sync in progress"
+				message = "Backing volume partially synchronized; sync in progress"
 			}
 		case v1alpha1.DiskStateOutdated:
 			if weAttached {
-				message = "Disk data outdated; application I/O forwarded to up-to-date peer during resync"
+				message = "Backing volume data outdated; application I/O forwarded to up-to-date peer during resync"
 			} else {
-				message = "Disk data outdated; resynchronization in progress"
+				message = "Backing volume data outdated; resynchronization in progress"
 			}
 		case v1alpha1.DiskStateNegotiating:
 			if weAttached {
@@ -668,18 +668,18 @@ func ensureConditionBackingVolumeInSync(
 			}
 		case v1alpha1.DiskStateConsistent:
 			if weAttached {
-				message = "Disk consistent, determining currency; application I/O forwarded to peers"
+				message = "Backing volume consistent, determining currency; application I/O forwarded to peers"
 			} else {
-				message = "Disk consistent; awaiting peer negotiation to determine if up-to-date"
+				message = "Backing volume consistent; awaiting peer negotiation to determine if up-to-date"
 			}
 		}
 
 	default:
-		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonUnknownState
-		message = fmt.Sprintf("Unknown disk state: %s", drbdr.Status.DiskState)
+		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUnknownState
+		message = fmt.Sprintf("Unknown backing volume state: %s", drbdr.Status.DiskState)
 	}
 
-	changed = applyBackingVolumeInSyncCondFalse(rvr, reason, message) || changed
+	changed = applyBackingVolumeUpToDateCondFalse(rvr, reason, message) || changed
 	return ef.Ok().ReportChangedIf(changed)
 }
 
@@ -2167,33 +2167,33 @@ func applyAttachedCondAbsent(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 	return obju.RemoveStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 }
 
-// applyBackingVolumeInSyncCondFalse sets the BackingVolumeInSync condition to False on RVR.
-func applyBackingVolumeInSyncCondAbsent(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-	return obju.RemoveStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+// applyBackingVolumeUpToDateCondFalse sets the BackingVolumeUpToDate condition to False on RVR.
+func applyBackingVolumeUpToDateCondAbsent(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+	return obju.RemoveStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 }
 
-func applyBackingVolumeInSyncCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+func applyBackingVolumeUpToDateCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
-		Type:    v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType,
+		Type:    v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType,
 		Status:  metav1.ConditionTrue,
 		Reason:  reason,
 		Message: message,
 	})
 }
 
-func applyBackingVolumeInSyncCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+func applyBackingVolumeUpToDateCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
-		Type:    v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType,
+		Type:    v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType,
 		Status:  metav1.ConditionFalse,
 		Reason:  reason,
 		Message: message,
 	})
 }
 
-// applyBackingVolumeInSyncCondUnknown sets the BackingVolumeInSync condition to Unknown on RVR.
-func applyBackingVolumeInSyncCondUnknown(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
+// applyBackingVolumeUpToDateCondUnknown sets the BackingVolumeUpToDate condition to Unknown on RVR.
+func applyBackingVolumeUpToDateCondUnknown(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {
 	return obju.SetStatusCondition(rvr, metav1.Condition{
-		Type:    v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType,
+		Type:    v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType,
 		Status:  metav1.ConditionUnknown,
 		Reason:  reason,
 		Message: message,
