@@ -339,6 +339,24 @@ var _ = Describe("computeChangedEligibleNodes", func() {
 		changed := computeChangedEligibleNodes(oldNodes, newNodes)
 		Expect(changed).To(ConsistOf("node-a", "node-b", "node-d", "node-e"))
 	})
+
+	It("handles unsorted input correctly (builds sorted index)", func() {
+		// Unsorted old nodes.
+		oldNodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-c", NodeReady: true},
+			{NodeName: "node-a", NodeReady: true},
+			{NodeName: "node-b", NodeReady: true},
+		}
+		// Unsorted new nodes with modifications.
+		newNodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-b", NodeReady: false}, // Modified.
+			{NodeName: "node-d", NodeReady: true},  // Added.
+			{NodeName: "node-a", NodeReady: true},  // Unchanged.
+		}
+		// node-c removed, node-b modified, node-d added.
+		changed := computeChangedEligibleNodes(oldNodes, newNodes)
+		Expect(changed).To(ConsistOf("node-c", "node-b", "node-d"))
+	})
 })
 
 var _ = Describe("mapAgentPodToRVRs", func() {

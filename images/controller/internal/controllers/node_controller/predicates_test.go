@@ -447,6 +447,38 @@ var _ = Describe("eligibleNodesEqual", func() {
 
 		Expect(eligibleNodesEqual(a, b)).To(BeTrue())
 	})
+
+	It("returns true for equal unsorted slices (builds sorted index)", func() {
+		// Same nodes but in different order.
+		a := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-3"},
+			{NodeName: "node-1"},
+			{NodeName: "node-2"},
+		}
+		b := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-2"},
+			{NodeName: "node-3"},
+			{NodeName: "node-1"},
+		}
+
+		Expect(eligibleNodesEqual(a, b)).To(BeTrue())
+	})
+
+	It("returns false for different unsorted slices (builds sorted index)", func() {
+		// Different nodes in unsorted order.
+		a := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-3"},
+			{NodeName: "node-1"},
+			{NodeName: "node-2"},
+		}
+		b := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-2"},
+			{NodeName: "node-4"}, // Different.
+			{NodeName: "node-1"},
+		}
+
+		Expect(eligibleNodesEqual(a, b)).To(BeFalse())
+	})
 })
 
 var _ = Describe("drbdResourcePredicates", func() {
