@@ -2,7 +2,7 @@ name: Svace analyze
 
 on:
   schedule:
-    - cron: "0 14 * * 6" # Regular static analysis
+    - cron: "0 18 * * 6" # Regular static analysis
 
 jobs:
   build_dev:
