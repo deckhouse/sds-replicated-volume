@@ -2141,7 +2141,7 @@ var _ = Describe("applyRVRDRBDRReconciliationCache", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
-		target := v1alpha1.DRBDRReconciliationCache{
+		target := v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 			DatameshRevision: 5,
 			DRBDRGeneration:  3,
 			RVRType:          v1alpha1.ReplicaTypeDiskful,
@@ -2154,7 +2154,7 @@ var _ = Describe("applyRVRDRBDRReconciliationCache", func() {
 	})
 
 	It("returns false when all fields are same", func() {
-		target := v1alpha1.DRBDRReconciliationCache{
+		target := v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 			DatameshRevision: 5,
 			DRBDRGeneration:  3,
 			RVRType:          v1alpha1.ReplicaTypeDiskful,
@@ -2175,14 +2175,14 @@ var _ = Describe("applyRVRDRBDRReconciliationCache", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DRBDRReconciliationCache: v1alpha1.DRBDRReconciliationCache{
+				DRBDRReconciliationCache: v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 					DatameshRevision: 4,
 					DRBDRGeneration:  3,
 					RVRType:          v1alpha1.ReplicaTypeDiskful,
 				},
 			},
 		}
-		target := v1alpha1.DRBDRReconciliationCache{
+		target := v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 			DatameshRevision: 5,
 			DRBDRGeneration:  3,
 			RVRType:          v1alpha1.ReplicaTypeDiskful,
@@ -2198,14 +2198,14 @@ var _ = Describe("applyRVRDRBDRReconciliationCache", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DRBDRReconciliationCache: v1alpha1.DRBDRReconciliationCache{
+				DRBDRReconciliationCache: v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 					DatameshRevision: 5,
 					DRBDRGeneration:  2,
 					RVRType:          v1alpha1.ReplicaTypeDiskful,
 				},
 			},
 		}
-		target := v1alpha1.DRBDRReconciliationCache{
+		target := v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 			DatameshRevision: 5,
 			DRBDRGeneration:  3,
 			RVRType:          v1alpha1.ReplicaTypeDiskful,
@@ -2221,14 +2221,14 @@ var _ = Describe("applyRVRDRBDRReconciliationCache", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DRBDRReconciliationCache: v1alpha1.DRBDRReconciliationCache{
+				DRBDRReconciliationCache: v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 					DatameshRevision: 5,
 					DRBDRGeneration:  3,
 					RVRType:          v1alpha1.ReplicaTypeAccess,
 				},
 			},
 		}
-		target := v1alpha1.DRBDRReconciliationCache{
+		target := v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 			DatameshRevision: 5,
 			DRBDRGeneration:  3,
 			RVRType:          v1alpha1.ReplicaTypeDiskful,
@@ -2244,14 +2244,14 @@ var _ = Describe("applyRVRDRBDRReconciliationCache", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DRBDRReconciliationCache: v1alpha1.DRBDRReconciliationCache{
+				DRBDRReconciliationCache: v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 					DatameshRevision: 5,
 					DRBDRGeneration:  3,
 					RVRType:          v1alpha1.ReplicaTypeDiskful,
 				},
 			},
 		}
-		target := v1alpha1.DRBDRReconciliationCache{}
+		target := v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{}
 
 		changed := applyRVRDRBDRReconciliationCache(rvr, target)
 
@@ -6093,7 +6093,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 			Status: metav1.ConditionTrue,
 			Reason: "PreviousReason",
 		})
-		rvr.Status.Peers = []v1alpha1.PeerStatus{{Name: "peer-1"}}
+		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{{Name: "peer-1"}}
 
 		outcome := flow.MergeEnsures(
 			ensureStatusPeers(ctx, rvr, nil),
@@ -6475,7 +6475,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 	})
 })
 
-func findPeerByName(peers []v1alpha1.PeerStatus, name string) *v1alpha1.PeerStatus {
+func findPeerByName(peers []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus, name string) *v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus {
 	for i := range peers {
 		if peers[i].Name == name {
 			return &peers[i]
@@ -6795,11 +6795,11 @@ var _ = Describe("applyBackingVolumeReadyCondAbsent", func() {
 var _ = Describe("computeHasUpToDatePeer", func() {
 	It("returns false for empty peers", func() {
 		Expect(computeHasUpToDatePeer(nil)).To(BeFalse())
-		Expect(computeHasUpToDatePeer([]v1alpha1.PeerStatus{})).To(BeFalse())
+		Expect(computeHasUpToDatePeer([]v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{})).To(BeFalse())
 	})
 
 	It("returns false when no peer has UpToDate", func() {
-		peers := []v1alpha1.PeerStatus{
+		peers := []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{Name: "peer-1", BackingVolumeState: v1alpha1.DiskStateInconsistent},
 			{Name: "peer-2", BackingVolumeState: v1alpha1.DiskStateOutdated},
 		}
@@ -6807,7 +6807,7 @@ var _ = Describe("computeHasUpToDatePeer", func() {
 	})
 
 	It("returns true when at least one peer has UpToDate", func() {
-		peers := []v1alpha1.PeerStatus{
+		peers := []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{Name: "peer-1", BackingVolumeState: v1alpha1.DiskStateInconsistent},
 			{Name: "peer-2", BackingVolumeState: v1alpha1.DiskStateUpToDate},
 		}
@@ -6818,11 +6818,11 @@ var _ = Describe("computeHasUpToDatePeer", func() {
 var _ = Describe("computeHasConnectedAttachedPeer", func() {
 	It("returns false for empty peers", func() {
 		Expect(computeHasConnectedAttachedPeer(nil)).To(BeFalse())
-		Expect(computeHasConnectedAttachedPeer([]v1alpha1.PeerStatus{})).To(BeFalse())
+		Expect(computeHasConnectedAttachedPeer([]v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{})).To(BeFalse())
 	})
 
 	It("returns false when no peer is attached and connected", func() {
-		peers := []v1alpha1.PeerStatus{
+		peers := []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{Name: "peer-1", Attached: true, ConnectionEstablishedOn: nil},              // attached but not connected
 			{Name: "peer-2", Attached: false, ConnectionEstablishedOn: []string{"net"}}, // connected but not attached
 		}
@@ -6830,7 +6830,7 @@ var _ = Describe("computeHasConnectedAttachedPeer", func() {
 	})
 
 	It("returns true when at least one peer is attached with connections", func() {
-		peers := []v1alpha1.PeerStatus{
+		peers := []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{Name: "peer-1", Attached: true, ConnectionEstablishedOn: []string{"net-1"}},
 		}
 		Expect(computeHasConnectedAttachedPeer(peers)).To(BeTrue())
@@ -6840,11 +6840,11 @@ var _ = Describe("computeHasConnectedAttachedPeer", func() {
 var _ = Describe("computeHasAnyAttachedPeer", func() {
 	It("returns false for empty peers", func() {
 		Expect(computeHasAnyAttachedPeer(nil)).To(BeFalse())
-		Expect(computeHasAnyAttachedPeer([]v1alpha1.PeerStatus{})).To(BeFalse())
+		Expect(computeHasAnyAttachedPeer([]v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{})).To(BeFalse())
 	})
 
 	It("returns false when no peer is attached", func() {
-		peers := []v1alpha1.PeerStatus{
+		peers := []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{Name: "peer-1", Attached: false},
 			{Name: "peer-2", Attached: false},
 		}
@@ -6852,7 +6852,7 @@ var _ = Describe("computeHasAnyAttachedPeer", func() {
 	})
 
 	It("returns true when at least one peer is attached", func() {
-		peers := []v1alpha1.PeerStatus{
+		peers := []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{Name: "peer-1", Attached: false},
 			{Name: "peer-2", Attached: true},
 		}
@@ -6950,7 +6950,7 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 
 	It("trims excess peers from previous state", func() {
 		// Start with 2 peers
-		rvr.Status.Peers = []v1alpha1.PeerStatus{
+		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{Name: "peer-1"},
 			{Name: "peer-2"},
 		}
@@ -6971,7 +6971,7 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 	})
 
 	It("clears peers when drbdr has no peers", func() {
-		rvr.Status.Peers = []v1alpha1.PeerStatus{{Name: "peer-1"}}
+		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{{Name: "peer-1"}}
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Peers: []v1alpha1.DRBDResourcePeerStatus{},
@@ -7004,7 +7004,7 @@ var _ = Describe("ensureStatusQuorum", func() {
 
 	It("clears quorum status when drbdr is nil", func() {
 		rvr.Status.Quorum = boolPtr(true)
-		rvr.Status.QuorumSummary = &v1alpha1.QuorumSummary{
+		rvr.Status.QuorumSummary = &v1alpha1.ReplicatedVolumeReplicaStatusQuorumSummary{
 			ConnectedVotingPeers:   1,
 			ConnectedUpToDatePeers: 1,
 		}
@@ -7030,7 +7030,7 @@ var _ = Describe("ensureStatusQuorum", func() {
 		Expect(*rvr.Status.Quorum).To(BeTrue())
 	})
 
-	It("fills QuorumSummary correctly from peers and drbdr", func() {
+	It("fills ReplicatedVolumeReplicaStatusQuorumSummary correctly from peers and drbdr", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Quorum: boolPtr(true),
@@ -7041,7 +7041,7 @@ var _ = Describe("ensureStatusQuorum", func() {
 			},
 		}
 		// Set up peers with different states
-		rvr.Status.Peers = []v1alpha1.PeerStatus{
+		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{
 				Name:               "peer-1",
 				Type:               v1alpha1.ReplicaTypeDiskful,
@@ -7268,7 +7268,7 @@ var _ = Describe("ensureStatusBackingVolume", func() {
 	})
 
 	It("clears backingVolume when drbdr is nil", func() {
-		rvr.Status.BackingVolume = &v1alpha1.BackingVolume{
+		rvr.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
 			State: v1alpha1.DiskStateUpToDate,
 		}
 
@@ -7615,7 +7615,7 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 		// No peers with UpToDate disk
-		rvr.Status.Peers = []v1alpha1.PeerStatus{
+		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{Name: "peer-1", BackingVolumeState: v1alpha1.DiskStateInconsistent},
 		}
 
@@ -7642,7 +7642,7 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 		// Peer has up-to-date data but is attached and not connected
-		rvr.Status.Peers = []v1alpha1.PeerStatus{
+		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{
 				Name:               "peer-1",
 				BackingVolumeState: v1alpha1.DiskStateUpToDate,
@@ -7673,7 +7673,7 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 			Name: "rvr-1",
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
-		rvr.Status.Peers = []v1alpha1.PeerStatus{
+		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{
 				Name:               "peer-1",
 				BackingVolumeState: v1alpha1.DiskStateUpToDate,

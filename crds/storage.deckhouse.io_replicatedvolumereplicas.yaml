@@ -256,6 +256,53 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              datameshPending:
+                description: |-
+                  DatameshPending describes the pending datamesh membership state for this replica.
+
+                  This field contains changes that have been validated and are ready from the RVR's
+                  perspective, waiting to be applied to the datamesh. The controller sets this field
+                  only after all prerequisites are satisfied.
+
+                  For example, member=true will not be set until scheduling completes: the spec.nodeName,
+                  spec.lvmVolumeGroupName, and spec.lvmVolumeGroupThinPoolName fields must be populated
+                  and validated before the replica can be marked as a pending datamesh member.
+                properties:
+                  lvmVolumeGroupName:
+                    description: LVMVolumeGroupName is the LVMVolumeGroup resource
+                      name for Diskful replicas.
+                    minLength: 1
+                    pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
+                    type: string
+                  member:
+                    description: Member indicates whether this replica should be a
+                      datamesh member.
+                    type: boolean
+                  role:
+                    description: Role is the intended role when Member is true.
+                    enum:
+                    - Diskful
+                    - Access
+                    - TieBreaker
+                    type: string
+                  thinPoolName:
+                    description: ThinPoolName is the thin pool name (optional, for
+                      LVMThin storage pools).
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: when member is false, role/lvmVolumeGroupName/thinPoolName
+                    must not be set
+                  rule: '!has(self.member) || self.member == true || (!has(self.role)
+                    && !has(self.lvmVolumeGroupName) && !has(self.thinPoolName))'
+                - message: when member is true, role is required
+                  rule: '!has(self.member) || self.member == false || has(self.role)'
+                - message: lvmVolumeGroupName is required when role is Diskful
+                  rule: '!has(self.role) || self.role != ''Diskful'' || has(self.lvmVolumeGroupName)'
+                - message: lvmVolumeGroupName must not be set when role is not Diskful
+                  rule: '!has(self.role) || self.role == ''Diskful'' || !has(self.lvmVolumeGroupName)'
+                - message: thinPoolName requires lvmVolumeGroupName to be set
+                  rule: '!has(self.thinPoolName) || has(self.lvmVolumeGroupName)'
               datameshRevision:
                 description: |-
                   DatameshRevision is the datamesh revision for which the replica was fully configured.
@@ -534,8 +581,8 @@ spec:
               peers:
                 description: Peers contains the status of connections to peer replicas.
                 items:
-                  description: PeerStatus represents the status of a connection to
-                    a peer replica.
+                  description: ReplicatedVolumeReplicaStatusPeerStatus represents
+                    the status of a connection to a peer replica.
                   properties:
                     attached:
                       description: Attached indicates whether this peer is attached
