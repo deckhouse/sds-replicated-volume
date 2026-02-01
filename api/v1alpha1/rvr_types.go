@@ -157,11 +157,26 @@ type ReplicaType string
 // Replica type values for [ReplicatedVolumeReplica] spec.type field.
 const (
 	// ReplicaTypeDiskful represents a diskful replica that stores data on disk.
+	// Diskful replicas are the primary quorum participants. They participate in quorum
+	// only when their backing volume is present and connected; otherwise they act as
+	// implicit tiebreakers. They contribute to quorumMinimumRedundancy only when their
+	// backing volume state is UpToDate.
 	ReplicaTypeDiskful ReplicaType = "Diskful"
-	// ReplicaTypeAccess represents a diskless replica for data access.
-	ReplicaTypeAccess ReplicaType = "Access"
-	// ReplicaTypeTieBreaker represents a diskless replica for quorum.
+
+	// ReplicaTypeTieBreaker represents a diskless replica that can provide a tie-breaking
+	// vote to maintain quorum. TieBreakers do not participate in quorum under normal
+	// conditions. They contribute a vote only when the total number of diskful nodes
+	// participating in quorum is even and exactly one vote is needed to maintain (not
+	// obtain) quorum; in that case, the majority of tiebreakers can provide the required
+	// vote. TieBreakers can also be used for volume access if the StorageClass permits
+	// it via volumeAccess settings.
 	ReplicaTypeTieBreaker ReplicaType = "TieBreaker"
+
+	// ReplicaTypeAccess represents a diskless replica used solely for volume attachment.
+	// Access replicas do not store data and do not participate in quorum in any way.
+	// Their only purpose is to allow attaching the volume on additional nodes when
+	// the StorageClass permits it via volumeAccess settings.
+	ReplicaTypeAccess ReplicaType = "Access"
 )
 
 func (t ReplicaType) String() string {
