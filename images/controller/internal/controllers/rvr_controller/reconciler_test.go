@@ -6635,7 +6635,7 @@ var _ = Describe("Attached condition apply helpers", func() {
 	})
 })
 
-var _ = Describe("BackingVolumeInSync condition apply helpers", func() {
+var _ = Describe("BackingVolumeUpToDate condition apply helpers", func() {
 	var rvr *v1alpha1.ReplicatedVolumeReplica
 
 	BeforeEach(func() {
@@ -6644,38 +6644,38 @@ var _ = Describe("BackingVolumeInSync condition apply helpers", func() {
 		}
 	})
 
-	Describe("applyBackingVolumeInSyncCondAbsent", func() {
+	Describe("applyBackingVolumeUpToDateCondAbsent", func() {
 		It("removes the condition", func() {
-			applyBackingVolumeInSyncCondTrue(rvr, "TestReason", "Test")
-			changed := applyBackingVolumeInSyncCondAbsent(rvr)
+			applyBackingVolumeUpToDateCondTrue(rvr, "TestReason", "Test")
+			changed := applyBackingVolumeUpToDateCondAbsent(rvr)
 			Expect(changed).To(BeTrue())
-			Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)).To(BeNil())
+			Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)).To(BeNil())
 		})
 	})
 
-	Describe("applyBackingVolumeInSyncCondTrue", func() {
+	Describe("applyBackingVolumeUpToDateCondTrue", func() {
 		It("sets condition to True", func() {
-			changed := applyBackingVolumeInSyncCondTrue(rvr, "TestReason", "Test")
+			changed := applyBackingVolumeUpToDateCondTrue(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
-			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		})
 	})
 
-	Describe("applyBackingVolumeInSyncCondFalse", func() {
+	Describe("applyBackingVolumeUpToDateCondFalse", func() {
 		It("sets condition to False", func() {
-			changed := applyBackingVolumeInSyncCondFalse(rvr, "TestReason", "Test")
+			changed := applyBackingVolumeUpToDateCondFalse(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
-			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		})
 	})
 
-	Describe("applyBackingVolumeInSyncCondUnknown", func() {
+	Describe("applyBackingVolumeUpToDateCondUnknown", func() {
 		It("sets condition to Unknown", func() {
-			changed := applyBackingVolumeInSyncCondUnknown(rvr, "TestReason", "Test")
+			changed := applyBackingVolumeUpToDateCondUnknown(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
-			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 			Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
 		})
 	})
@@ -7430,10 +7430,10 @@ var _ = Describe("ensureStatusBackingVolume", func() {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ensureConditionBackingVolumeInSync tests
+// ensureConditionBackingVolumeUpToDate tests
 //
 
-var _ = Describe("ensureConditionBackingVolumeInSync", func() {
+var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 	var (
 		ctx context.Context
 		rvr *v1alpha1.ReplicatedVolumeReplica
@@ -7451,7 +7451,7 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 
 	It("removes condition when drbdr is nil", func() {
 		obju.SetStatusCondition(rvr, metav1.Condition{
-			Type:   v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType,
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType,
 			Status: metav1.ConditionTrue,
 			Reason: "PreviousReason",
 		})
@@ -7461,11 +7461,11 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, nil, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, nil, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
-		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)).To(BeNil())
+		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)).To(BeNil())
 	})
 
 	It("removes condition when not a datamesh member", func() {
@@ -7475,10 +7475,10 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 			},
 		}
 
-		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, nil, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, nil, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)).To(BeNil())
+		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)).To(BeNil())
 	})
 
 	It("removes condition when effectiveType is not Diskful", func() {
@@ -7492,10 +7492,10 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 			Type: v1alpha1.ReplicaTypeTieBreaker, // not Diskful
 		}
 
-		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)).To(BeNil())
+		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)).To(BeNil())
 	})
 
 	It("sets Unknown when agent not ready", func() {
@@ -7509,13 +7509,13 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, false, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, false, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonAgentNotReady))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAgentNotReady))
 	})
 
 	It("sets Unknown when configuration pending", func() {
@@ -7529,13 +7529,13 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, true)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, true)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonApplyingConfiguration))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonApplyingConfiguration))
 	})
 
 	It("sets True with InSync for DiskStateUpToDate when attached", func() {
@@ -7552,13 +7552,13 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonInSync))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUpToDate))
 		Expect(cond.Message).To(ContainSubstring("served locally"))
 	})
 
@@ -7576,12 +7576,12 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonInSync))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUpToDate))
 		Expect(cond.Message).NotTo(ContainSubstring("served locally"))
 	})
 
@@ -7599,12 +7599,12 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonNoDisk))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAbsent))
 		Expect(cond.Message).To(ContainSubstring("forwarded to peers"))
 	})
 
@@ -7622,12 +7622,12 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonAttaching))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAttaching))
 	})
 
 	It("sets False with Detaching for DiskStateDetaching", func() {
@@ -7644,12 +7644,12 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonDetaching))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonDetaching))
 	})
 
 	It("sets False with DiskFailed for DiskStateFailed", func() {
@@ -7666,12 +7666,12 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonDiskFailed))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonFailed))
 	})
 
 	It("sets SynchronizationBlocked when no peer with up-to-date data", func() {
@@ -7692,12 +7692,12 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 			{Name: "peer-1", BackingVolumeState: v1alpha1.DiskStateInconsistent},
 		}
 
-		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonSynchronizationBlocked))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizationBlocked))
 		Expect(cond.Message).To(ContainSubstring("no peer with up-to-date data"))
 	})
 
@@ -7724,12 +7724,12 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 			},
 		}
 
-		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonSynchronizationBlocked))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizationBlocked))
 		Expect(cond.Message).To(ContainSubstring("awaiting connection"))
 	})
 
@@ -7754,12 +7754,12 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 			},
 		}
 
-		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonSynchronizing))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizing))
 		Expect(cond.Message).To(ContainSubstring("partially synchronized"))
 	})
 
@@ -7777,12 +7777,12 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonUnknownState))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUnknownState))
 		Expect(cond.Message).To(ContainSubstring("SomeUnknownState"))
 	})
 
@@ -7801,12 +7801,12 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 		}
 
 		// First call
-		outcome1 := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
+		outcome1 := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 		Expect(outcome1.Error()).NotTo(HaveOccurred())
 		Expect(outcome1.DidChange()).To(BeTrue())
 
 		// Second call should report no change
-		outcome2 := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
+		outcome2 := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
 		Expect(outcome2.DidChange()).To(BeFalse())
 	})
@@ -7823,7 +7823,7 @@ var _ = Describe("ensureConditionBackingVolumeInSync", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureConditionBackingVolumeInSync(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).To(HaveOccurred())
 		Expect(outcome.Error().Error()).To(ContainSubstring("ActiveConfiguration is nil"))

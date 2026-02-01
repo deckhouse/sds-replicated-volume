@@ -79,20 +79,20 @@ const (
 )
 
 const (
-	// ReplicatedVolumeReplicaCondBackingVolumeInSyncType indicates whether the replica's backing volume is in sync.
+	// ReplicatedVolumeReplicaCondBackingVolumeUpToDateType indicates whether the replica's backing volume is up-to-date.
 	//
 	// Reasons describe sync state or applicability.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncType                         = "BackingVolumeInSync"
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonAgentNotReady          = "AgentNotReady"          // Agent is not ready.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonApplyingConfiguration  = "ApplyingConfiguration"  // Configuration is being applied.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonAttaching              = "Attaching"              // Disk is being attached.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonDetaching              = "Detaching"              // Disk is being detached.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonDiskFailed             = "DiskFailed"             // Disk failed due to I/O errors.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonInSync                 = "InSync"                 // Disk is fully up-to-date.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonNoDisk                 = "NoDisk"                 // Local disk is not present.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonSynchronizationBlocked = "SynchronizationBlocked" // Sync blocked, awaiting peer.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonSynchronizing          = "Synchronizing"          // Disk is synchronizing.
-	ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonUnknownState           = "UnknownState"           // Disk state is unknown.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateType                         = "BackingVolumeUpToDate"
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAgentNotReady          = "AgentNotReady"          // Agent is not ready.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonApplyingConfiguration  = "ApplyingConfiguration"  // Agent is applying DRBD configuration.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAttaching              = "Attaching"              // Backing volume is being attached.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonDetaching              = "Detaching"              // Backing volume is being detached.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonFailed                 = "Failed"                 // Backing volume failed due to I/O errors.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUpToDate               = "UpToDate"               // Backing volume is fully up-to-date.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAbsent                 = "Absent"                 // Backing volume is not present.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizationBlocked = "SynchronizationBlocked" // Sync blocked, awaiting peer.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizing          = "Synchronizing"          // Backing volume is synchronizing.
+	ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUnknownState           = "UnknownState"           // Backing volume state is unknown.
 )
 
 const (
