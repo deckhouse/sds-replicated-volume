@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -688,6 +689,331 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 	})
 })
 
+var _ = Describe("computeTargetDatameshPending", func() {
+	It("returns PendingLeave when deleting and is datamesh member", func() {
+		now := metav1.Now()
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rvr-1",
+				DeletionTimestamp: &now,
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1, // Is a member.
+			},
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, nil)
+
+		Expect(target).NotTo(BeNil())
+		Expect(*target.Member).To(BeFalse())
+		Expect(target.Role).To(BeEmpty())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingLeave))
+		Expect(message).To(ContainSubstring("Deletion"))
+	})
+
+	It("returns nil reason when deleting and not a datamesh member", func() {
+		now := metav1.Now()
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rvr-1",
+				DeletionTimestamp: &now,
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 0, // Not a member.
+			},
+		}
+
+		target, reason, _ := computeTargetDatameshPending(rvr, nil)
+
+		Expect(target).To(BeNil())
+		Expect(reason).To(BeEmpty())
+	})
+
+	It("returns PendingScheduling when NodeName is empty", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "", // Not scheduled.
+			},
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, nil)
+
+		Expect(target).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingScheduling))
+		Expect(message).To(ContainSubstring("node"))
+	})
+
+	It("returns PendingScheduling when Diskful has no LVMVolumeGroupName", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "", // Not assigned.
+			},
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, nil)
+
+		Expect(target).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingScheduling))
+		Expect(message).To(ContainSubstring("storage"))
+	})
+
+	It("returns PendingConfiguration when rspView is nil", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, nil)
+
+		Expect(target).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingConfiguration))
+		Expect(message).To(ContainSubstring("storage pool"))
+	})
+
+	It("returns NodeNotEligible when node is not in eligible list", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: nil, // Node not eligible.
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, rspView)
+
+		Expect(target).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonNodeNotEligible))
+		Expect(message).To(ContainSubstring("node-1"))
+	})
+
+	It("returns StorageNotEligible when LVG is not eligible", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-missing",
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1"}, // Different LVG.
+				},
+			},
+		}
+
+		target, reason, _ := computeTargetDatameshPending(rvr, rspView)
+
+		Expect(target).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonStorageNotEligible))
+	})
+
+	It("returns PendingJoin for Diskful non-member", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:                   "node-1",
+				Type:                       v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName:         "lvg-1",
+				LVMVolumeGroupThinPoolName: "tp-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 0, // Not a member.
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1", ThinPoolName: "tp-1"},
+				},
+			},
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, rspView)
+
+		Expect(target).NotTo(BeNil())
+		Expect(*target.Member).To(BeTrue())
+		Expect(target.Role).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(target.LVMVolumeGroupName).To(Equal("lvg-1"))
+		Expect(target.ThinPoolName).To(Equal("tp-1"))
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin))
+		Expect(message).To(ContainSubstring("Diskful"))
+	})
+
+	It("returns PendingJoin for Access non-member", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+				Type:     v1alpha1.ReplicaTypeAccess,
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 0, // Not a member.
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+			},
+		}
+
+		target, reason, _ := computeTargetDatameshPending(rvr, rspView)
+
+		Expect(target).NotTo(BeNil())
+		Expect(*target.Member).To(BeTrue())
+		Expect(target.Role).To(Equal(v1alpha1.ReplicaTypeAccess))
+		Expect(target.LVMVolumeGroupName).To(BeEmpty())
+		Expect(target.ThinPoolName).To(BeEmpty())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin))
+	})
+
+	It("returns PendingRoleChange when type not in sync", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful, // Want Diskful.
+				LVMVolumeGroupName: "lvg-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1,                                 // Is a member.
+				Type:             v1alpha1.DRBDResourceTypeDiskless, // Currently Diskless.
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1"},
+				},
+			},
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, rspView)
+
+		Expect(target).NotTo(BeNil())
+		Expect(target.Member).To(BeNil())
+		Expect(target.Role).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(target.LVMVolumeGroupName).To(Equal("lvg-1"))
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingRoleChange))
+		Expect(message).To(ContainSubstring("role"))
+	})
+
+	It("returns PendingBackingVolumeChange when BV not in sync", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:                   "node-1",
+				Type:                       v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName:         "lvg-new", // Want new LVG.
+				LVMVolumeGroupThinPoolName: "tp-new",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1,
+				Type:             v1alpha1.DRBDResourceTypeDiskful, // Type matches.
+				BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+					LVMVolumeGroupName:         "lvg-old", // Old LVG.
+					LVMVolumeGroupThinPoolName: "tp-old",
+				},
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-new", ThinPoolName: "tp-new"},
+				},
+			},
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, rspView)
+
+		Expect(target).NotTo(BeNil())
+		Expect(target.Member).To(BeNil())
+		Expect(target.Role).To(BeEmpty())
+		Expect(target.LVMVolumeGroupName).To(Equal("lvg-new"))
+		Expect(target.ThinPoolName).To(Equal("tp-new"))
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingBackingVolumeChange))
+		Expect(message).To(ContainSubstring("backing volume"))
+	})
+
+	It("returns Configured when all in sync", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:                   "node-1",
+				Type:                       v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName:         "lvg-1",
+				LVMVolumeGroupThinPoolName: "tp-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1,
+				Type:             v1alpha1.DRBDResourceTypeDiskful, // Type matches.
+				BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+					LVMVolumeGroupName:         "lvg-1", // LVG matches.
+					LVMVolumeGroupThinPoolName: "tp-1",  // TP matches.
+				},
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1", ThinPoolName: "tp-1"},
+				},
+			},
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, rspView)
+
+		Expect(target).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured))
+		Expect(message).To(ContainSubstring("configured"))
+	})
+
+	It("returns Configured for Access member with matching type", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+				Type:     v1alpha1.ReplicaTypeAccess,
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1,
+				Type:             v1alpha1.DRBDResourceTypeDiskless, // Access → Diskless.
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+			},
+		}
+
+		target, reason, _ := computeTargetDatameshPending(rvr, rspView)
+
+		Expect(target).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured))
+	})
+})
+
 var _ = Describe("computeLLVName", func() {
 	It("produces deterministic output", func() {
 		name1 := computeLLVName("rvr-1", "lvg-1", "thinpool-1")
@@ -1336,6 +1662,158 @@ var _ = Describe("isLLVReady", func() {
 // Apply functions tests
 //
 
+var _ = Describe("applyDatameshPending", func() {
+	It("clears datameshPending when target is nil and current exists", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+					Role: v1alpha1.ReplicaTypeDiskful,
+				},
+			},
+		}
+
+		changed := applyDatameshPending(rvr, nil)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DatameshPending).To(BeNil())
+	})
+
+	It("returns false when both target and current are nil", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshPending: nil,
+			},
+		}
+
+		changed := applyDatameshPending(rvr, nil)
+
+		Expect(changed).To(BeFalse())
+		Expect(rvr.Status.DatameshPending).To(BeNil())
+	})
+
+	It("creates datameshPending when target exists and current is nil", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshPending: nil,
+			},
+		}
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+			Member: ptr.To(true),
+			Role:   v1alpha1.ReplicaTypeDiskful,
+		}
+
+		changed := applyDatameshPending(rvr, target)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DatameshPending).NotTo(BeNil())
+		Expect(*rvr.Status.DatameshPending.Member).To(BeTrue())
+		Expect(rvr.Status.DatameshPending.Role).To(Equal(v1alpha1.ReplicaTypeDiskful))
+	})
+
+	It("returns false when current matches target (idempotent)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+					Member:             ptr.To(true),
+					Role:               v1alpha1.ReplicaTypeDiskful,
+					LVMVolumeGroupName: "lvg-1",
+					ThinPoolName:       "tp-1",
+				},
+			},
+		}
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+			Member:             ptr.To(true),
+			Role:               v1alpha1.ReplicaTypeDiskful,
+			LVMVolumeGroupName: "lvg-1",
+			ThinPoolName:       "tp-1",
+		}
+
+		changed := applyDatameshPending(rvr, target)
+
+		Expect(changed).To(BeFalse())
+	})
+
+	It("updates Member field when it differs", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+					Member: ptr.To(true),
+				},
+			},
+		}
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+			Member: ptr.To(false),
+		}
+
+		changed := applyDatameshPending(rvr, target)
+
+		Expect(changed).To(BeTrue())
+		Expect(*rvr.Status.DatameshPending.Member).To(BeFalse())
+	})
+
+	It("updates Role field when it differs", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+					Role: v1alpha1.ReplicaTypeAccess,
+				},
+			},
+		}
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+			Role: v1alpha1.ReplicaTypeDiskful,
+		}
+
+		changed := applyDatameshPending(rvr, target)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DatameshPending.Role).To(Equal(v1alpha1.ReplicaTypeDiskful))
+	})
+
+	It("updates LVMVolumeGroupName field when it differs", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+					LVMVolumeGroupName: "lvg-old",
+				},
+			},
+		}
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+			LVMVolumeGroupName: "lvg-new",
+		}
+
+		changed := applyDatameshPending(rvr, target)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DatameshPending.LVMVolumeGroupName).To(Equal("lvg-new"))
+	})
+
+	It("updates ThinPoolName field when it differs", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+					ThinPoolName: "tp-old",
+				},
+			},
+		}
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+			ThinPoolName: "tp-new",
+		}
+
+		changed := applyDatameshPending(rvr, target)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DatameshPending.ThinPoolName).To(Equal("tp-new"))
+	})
+})
+
 var _ = Describe("applyRVRMetadata", func() {
 	It("adds finalizer when targetFinalizerPresent is true", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
@@ -1427,6 +1905,147 @@ var _ = Describe("applyRVRMetadata", func() {
 		}
 
 		changed := applyRVRMetadata(rvr, rv, true, "lvg-1")
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applyConfiguredCondAbsent", func() {
+	It("removes Configured condition when it exists", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		// Pre-set condition.
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+			Status:  metav1.ConditionTrue,
+			Reason:  v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured,
+			Message: "Test",
+		})
+
+		changed := applyConfiguredCondAbsent(rvr)
+
+		Expect(changed).To(BeTrue())
+		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)).To(BeNil())
+	})
+
+	It("returns false when condition already absent (idempotent)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applyConfiguredCondAbsent(rvr)
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applyConfiguredCondUnknown", func() {
+	It("sets Configured condition to Unknown", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applyConfiguredCondUnknown(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingConfiguration,
+			"Waiting for config")
+
+		Expect(changed).To(BeTrue())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingConfiguration))
+		Expect(cond.Message).To(Equal("Waiting for config"))
+	})
+
+	It("returns false when condition already matches (idempotent)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+			Status:  metav1.ConditionUnknown,
+			Reason:  v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingConfiguration,
+			Message: "Waiting for config",
+		})
+
+		changed := applyConfiguredCondUnknown(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingConfiguration,
+			"Waiting for config")
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applyConfiguredCondFalse", func() {
+	It("sets Configured condition to False", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applyConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin,
+			"Waiting to join")
+
+		Expect(changed).To(BeTrue())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin))
+		Expect(cond.Message).To(Equal("Waiting to join"))
+	})
+
+	It("returns false when condition already matches (idempotent)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin,
+			Message: "Waiting to join",
+		})
+
+		changed := applyConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin,
+			"Waiting to join")
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applyConfiguredCondTrue", func() {
+	It("sets Configured condition to True", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applyConfiguredCondTrue(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured,
+			"Replica is configured")
+
+		Expect(changed).To(BeTrue())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured))
+		Expect(cond.Message).To(Equal("Replica is configured"))
+	})
+
+	It("returns false when condition already matches (idempotent)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+			Status:  metav1.ConditionTrue,
+			Reason:  v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured,
+			Message: "Replica is configured",
+		})
+
+		changed := applyConfiguredCondTrue(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured,
+			"Replica is configured")
 
 		Expect(changed).To(BeFalse())
 	})
@@ -5326,6 +5945,188 @@ var _ = Describe("deleteLLV", func() {
 		err := rec.deleteLLV(ctx, llv)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(deleteCalled).To(BeTrue(), "delete should be called for LLV without DeletionTimestamp")
+	})
+})
+
+var _ = Describe("ensureStatusDatameshPendingAndConfiguredCond", func() {
+	var ctx context.Context
+
+	BeforeEach(func() {
+		ctx = context.Background()
+	})
+
+	It("sets PendingJoin for non-member replica", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 0, // Not a member.
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1"},
+				},
+			},
+		}
+
+		outcome := ensureStatusDatameshPendingAndConfiguredCond(ctx, rvr, rspView)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+
+		// Check datameshPending.
+		Expect(rvr.Status.DatameshPending).NotTo(BeNil())
+		Expect(*rvr.Status.DatameshPending.Member).To(BeTrue())
+		Expect(rvr.Status.DatameshPending.Role).To(Equal(v1alpha1.ReplicaTypeDiskful))
+
+		// Check Configured condition.
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin))
+	})
+
+	It("sets PendingLeave for deleting member", func() {
+		now := metav1.Now()
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rvr-1",
+				DeletionTimestamp: &now,
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1, // Is a member.
+			},
+		}
+
+		outcome := ensureStatusDatameshPendingAndConfiguredCond(ctx, rvr, nil)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+
+		// Check datameshPending.
+		Expect(rvr.Status.DatameshPending).NotTo(BeNil())
+		Expect(*rvr.Status.DatameshPending.Member).To(BeFalse())
+
+		// Check Configured condition.
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingLeave))
+	})
+
+	It("sets Configured=True and clears datameshPending when all in sync", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1,
+				Type:             v1alpha1.DRBDResourceTypeDiskful, // Type matches.
+				BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+					LVMVolumeGroupName: "lvg-1", // BV matches.
+				},
+				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+					Role: v1alpha1.ReplicaTypeDiskful, // Stale pending.
+				},
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1"},
+				},
+			},
+		}
+
+		outcome := ensureStatusDatameshPendingAndConfiguredCond(ctx, rvr, rspView)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+
+		// Check datameshPending is cleared.
+		Expect(rvr.Status.DatameshPending).To(BeNil())
+
+		// Check Configured condition.
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured))
+	})
+
+	It("sets PendingScheduling when node not assigned", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "", // Not scheduled.
+			},
+		}
+
+		outcome := ensureStatusDatameshPendingAndConfiguredCond(ctx, rvr, nil)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+
+		// Check datameshPending is nil.
+		Expect(rvr.Status.DatameshPending).To(BeNil())
+
+		// Check Configured condition.
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingScheduling))
+	})
+
+	It("returns changed=false when already in desired state (idempotent)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1,
+				Type:             v1alpha1.DRBDResourceTypeDiskful,
+				BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+					LVMVolumeGroupName: "lvg-1",
+				},
+				DatameshPending: nil, // Already cleared.
+			},
+		}
+		// Pre-set condition to match expected.
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+			Status:  metav1.ConditionTrue,
+			Reason:  v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured,
+			Message: "Replica is configured as intended",
+		})
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1"},
+				},
+			},
+		}
+
+		outcome := ensureStatusDatameshPendingAndConfiguredCond(ctx, rvr, rspView)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
 	})
 })
 
