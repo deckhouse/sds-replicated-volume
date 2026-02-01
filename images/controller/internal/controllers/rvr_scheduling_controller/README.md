@@ -16,11 +16,10 @@ The controller performs replica placement by:
 
 | Direction | Resource/Controller | Relationship |
 |-----------|---------------------|--------------|
-| ← input | ReplicatedVolume | Reads RV spec and status (size, RSC name, desiredAttachTo) |
-| ← input | ReplicatedStorageClass | Reads topology mode and zones |
-| ← input | ReplicatedStoragePool | Reads eligible nodes list (with LVGs per node) |
+| ← input | ReplicatedVolume | Reads RV spec and status (size, desiredAttachTo, configuration with topology/storagePoolName) |
+| ← input | ReplicatedStoragePool | Reads eligible nodes list (with LVGs per node), zones, and pool type |
 | ← input | scheduler-extender | Queries storage capacity per LVG for Diskful replicas |
-| → output | ReplicatedVolumeReplica | Assigns `spec.nodeName`, `spec.lvmVolumeGroupName`, node name label, and updates `status.conditions[Scheduled]` |
+| → output | ReplicatedVolumeReplica | Assigns `spec.nodeName`, `spec.lvmVolumeGroupName`, and updates `status.conditions[Scheduled]` |
 
 ## Algorithm
 
@@ -33,7 +32,7 @@ Eligible nodes are determined by intersection of:
   - Not unschedulable (`unschedulable = false`)
   - Have ready agent (`agentReady = true`)
 - Nodes not already hosting any replica of this RV
-- Nodes in zones specified by `rsc.spec.zones` (or all zones if not specified)
+- Nodes in zones specified by `rsp.spec.zones` (or all zones if not specified)
 
 For Diskful replicas, additional filtering is applied:
 
@@ -79,12 +78,12 @@ The controller schedules replicas using per-RVR reconciliation with error resili
 
 #### Phase 1: Already Scheduled RVRs
 
-For each scheduled RVR: ensure node name label and Scheduled=True condition.
+For each scheduled RVR: ensure Scheduled=True condition.
 
 #### Phase 2: Prepare Diskful Candidates (once)
 
 1. Compute eligible nodes from RSP, excluding occupied nodes
-2. Apply topology filter based on RSC topology mode
+2. Apply topology filter based on rv.Status.Configuration.Topology
 3. Query scheduler-extender for storage capacity scores (once for all Diskful)
 4. Apply attachTo bonus to preferred nodes
 5. Store candidates in SchedulingContext for use by individual RVR reconcilers
@@ -103,7 +102,7 @@ For each unscheduled Diskful RVR:
 #### Phase 4a: Prepare TieBreaker Candidates (once)
 
 1. Compute eligible nodes from RSP, excluding occupied nodes (no capacity scoring)
-2. Apply topology filter based on RSC topology mode
+2. Apply topology filter based on rv.Status.Configuration.Topology
 3. Store candidates in SchedulingContext for use by individual RVR reconcilers
 4. Initialize ZoneReplicaCounts with ALL replica counts (for TransZonal topology)
 
@@ -126,22 +125,19 @@ For each unscheduled TieBreaker RVR:
 
 ## Reconciliation Structure
 
-```text
+<!-- ```log -->
 Reconcile (root) — per-RVR orchestration with error resilience
-├── prepareSchedulingContext               — fetch RV, RSC, RSP, all RVRs
+├── prepareSchedulingContext               — fetch RV, RSP, all RVRs
 │   ├── getRV                              — fetch ReplicatedVolume
-│   ├── isRVReadyToSchedule                — validate RV has finalizer and required fields
-│   ├── getRSC                             — fetch ReplicatedStorageClass
-│   ├── getRSP                             — fetch ReplicatedStoragePool
-│   └── listRVRsByRV                       — list all RVRs for this RV
+│   ├── isRVReadyToSchedule                — validate RV has finalizer and configuration
+│   ├── getRSP                             — fetch ReplicatedStoragePool (using rv.Status.Configuration.StoragePoolName)
+│   └── getRVRsByRVName                    — list all RVRs for this RV
 │
 ├── [for each scheduled RVR] reconcileScheduledRVR
-│   ├── applyNodeNameLabelIfMissing        — ensure node name label exists
-│   ├── patchRVR (if changed)              — patch with optimistic lock
 │   ├── applyScheduledConditionTrue        — set Scheduled=True
 │   └── patchRVRStatus (if changed)        — patch status
 │
-├── prepareScoredCandidatesForDiskful      — compute candidates once for all Diskful
+├── computeScoredCandidatesForDiskful      — compute candidates once for all Diskful
 │   ├── computeEligibleNodeNames           — filter eligible nodes
 │   ├── applyTopologyFilter                — filter by topology mode
 │   ├── applyCapacityFilterAndScore        — query scheduler-extender for capacity
@@ -157,7 +153,7 @@ Reconcile (root) — per-RVR orchestration with error resilience
 │   ├── applyScheduledConditionTrue                 — set Scheduled=True
 │   └── patchRVRStatus (if changed)                 — patch status
 │
-├── prepareCandidatesForTieBreaker        — compute candidates once for all TieBreaker
+├── computeCandidatesForTieBreaker        — compute candidates once for all TieBreaker
 │   ├── computeEligibleNodeNames           — filter eligible nodes
 │   └── applyTopologyFilter                — filter by topology mode
 │
@@ -170,7 +166,7 @@ Reconcile (root) — per-RVR orchestration with error resilience
     ├── SchedulingContext.IncrementZoneReplicaCount — for TransZonal: update zone count
     ├── applyScheduledConditionTrue        — set Scheduled=True
     └── patchRVRStatus (if changed)        — patch status
-```
+<!-- ``` -->
 
 ## Algorithm Flow
 
@@ -178,7 +174,7 @@ Reconcile (root) — per-RVR orchestration with error resilience
 flowchart TD
     Start([Reconcile]) --> Prepare[prepareSchedulingContext]
     Prepare -->|RV not found| Done1([Done])
-    Prepare -->|RV not ready: no finalizer, no RSC, or size=0| SetFailed1[Set Scheduled=False on all]
+    Prepare -->|RV not ready: no finalizer, no configuration, or size=0| SetFailed1[Set Scheduled=False on all]
     SetFailed1 --> Fail1([Fail])
 
     Prepare --> Phase1[Phase 1: For each scheduled RVR]
@@ -186,7 +182,7 @@ flowchart TD
     ReconcileScheduled --> Phase2{Unscheduled Diskful?}
 
     Phase2 -->|No| Phase4a
-    Phase2 -->|Yes| PrepareCandidates[prepareScoredCandidatesForDiskful]
+    Phase2 -->|Yes| PrepareCandidates[computeScoredCandidatesForDiskful]
     PrepareCandidates -->|Error| MarkFailed[Set Scheduled=False on all Diskful]
     MarkFailed --> Phase4a
     PrepareCandidates -->|OK| Phase3[Phase 3: For each unscheduled Diskful]
@@ -200,7 +196,7 @@ flowchart TD
 
     Phase3 -->|Done| Phase4a{Unscheduled TieBreaker?}
     Phase4a -->|No| CheckErrors
-    Phase4a -->|Yes| PrepareTBCandidates[prepareCandidatesForTieBreaker]
+    Phase4a -->|Yes| PrepareTBCandidates[computeCandidatesForTieBreaker]
     PrepareTBCandidates -->|Error| MarkTBFailed[Set Scheduled=False on all TieBreaker]
     MarkTBFailed --> CheckErrors
     PrepareTBCandidates -->|OK| Phase4b[Phase 4b: For each unscheduled TieBreaker]
@@ -228,7 +224,7 @@ Indicates whether the replica has been assigned to a node.
 | True | ReplicaScheduled | Node successfully assigned |
 | False | NoAvailableNodes | No candidate nodes available |
 | False | TopologyConstraintsFailed | Topology requirements cannot be satisfied |
-| False | SchedulingPending | RV not ready for scheduling (missing finalizer, RSC, etc.) |
+| False | SchedulingPending | RV not ready for scheduling (missing finalizer, configuration, etc.) |
 | False | SchedulingFailed | Other scheduling errors |
 
 ## Status Fields
@@ -248,7 +244,6 @@ Note: This controller primarily manages spec fields (`nodeName`, `lvmVolumeGroup
 | Spec field | `spec.nodeName` | RVR | Assigned node for the replica |
 | Spec field | `spec.lvmVolumeGroupName` | RVR | Assigned LVG for Diskful replicas |
 | Spec field | `spec.lvmVolumeGroupThinPoolName` | RVR | Assigned thin pool for LVMThin storage |
-| Label | `storage.deckhouse.io/sds-replicated-volume-node-name` | RVR | Node name for agent watch filtering |
 | Status condition | `status.conditions[Scheduled]` | RVR | Scheduling success/failure status |
 
 ## Watches
@@ -256,7 +251,7 @@ Note: This controller primarily manages spec fields (`nodeName`, `lvmVolumeGroup
 | Resource | Events | Handler |
 |----------|--------|---------|
 | ReplicatedVolumeReplica | Create only | EnqueueRequestForOwner (maps to owner RV) |
-| ReplicatedStoragePool | Create, Delete, Generic: always; Update: only if eligibleNodes or usedBy.replicatedStorageClassNames changed | mapRSPToRV (maps to RVs that use this RSP and have unscheduled non-Access RVRs) |
+| ReplicatedStoragePool | Create, Delete, Generic: always; Update: only if eligibleNodes or usedBy.replicatedStorageClassNames changed | mapRSPToRV (lists RVs by storage pool, filters by UnscheduledRVRsCount > 0) |
 
 ### RVR Predicates
 
@@ -276,9 +271,7 @@ Note: This controller primarily manages spec fields (`nodeName`, `lvmVolumeGroup
 | Index | Field | Purpose |
 |-------|-------|---------|
 | RVR by RV name | `spec.replicatedVolumeName` | List all RVRs for a ReplicatedVolume |
-| RVR unscheduled non-Access | boolean: unscheduled + non-Access | Find all unscheduled Diskful/TieBreaker RVRs (used by RSP watch mapper) |
-
-Note: RSC names are obtained directly from `rsp.Status.UsedBy.ReplicatedStorageClassNames` (no index needed).
+| RV by storage pool name | `status.configuration.storagePoolName` | Find RVs using a specific RSP (used by RSP watch mapper) |
 
 ## Data Flow
 
@@ -286,7 +279,6 @@ Note: RSC names are obtained directly from `rsp.Status.UsedBy.ReplicatedStorageC
 flowchart TD
     subgraph inputs [Inputs]
         RV[ReplicatedVolume]
-        RSC[ReplicatedStorageClass]
         RSP[ReplicatedStoragePool]
         RVRs[ReplicatedVolumeReplicas]
         Extender[Scheduler Extender]
@@ -296,7 +288,8 @@ flowchart TD
         EligibleNodes[EligibleNodes from RSP]
         LVGToNode[LVGToNode mapping]
         AttachTo[AttachToNodes from RV]
-        Topology[Topology from RSC]
+        Topology[Topology from rv.Status.Configuration]
+        Zones[Zones from RSP]
         OccupiedNodes[OccupiedNodes from existing RVRs]
     end
 
@@ -311,20 +304,21 @@ flowchart TD
     subgraph output [Output]
         NodeName[RVR.spec.nodeName]
         LVGName[RVR.spec.lvmVolumeGroupName]
-        NodeLabel[RVR node name label]
         ScheduledCond[RVR Scheduled condition]
     end
 
     RV --> AttachTo
-    RSC --> Topology
+    RV --> Topology
     RSP --> EligibleNodes
     RSP --> LVGToNode
+    RSP --> Zones
     RVRs --> OccupiedNodes
 
     EligibleNodes --> FilterEligible
     OccupiedNodes --> FilterEligible
     FilterEligible --> ApplyTopology
     Topology --> ApplyTopology
+    Zones --> ApplyTopology
     ApplyTopology --> QueryCapacity
     LVGToNode --> QueryCapacity
     Extender --> QueryCapacity
@@ -334,7 +328,6 @@ flowchart TD
 
     SelectBest --> NodeName
     SelectBest --> LVGName
-    SelectBest --> NodeLabel
     SelectBest --> ScheduledCond
 ```
 
@@ -382,7 +375,7 @@ Apply functions are pure (no I/O) and return a `bool` indicating whether changes
 **Errors causing requeue (exponential backoff):**
 
 - API patch failures (conflicts, network errors, timeouts)
-- Errors during scheduling context preparation (fetching RV, RSC, RSP)
+- Errors during scheduling context preparation (fetching RV, RSP)
 
 **Scheduling failures causing requeue (fixed 30s):**
 
@@ -418,14 +411,14 @@ Per-RVR zone distribution mechanism:
 
 **For Diskful replicas:**
 
-1. `prepareScoredCandidatesForDiskful` initializes `ZoneReplicaCounts` with existing **Diskful** counts per zone
+1. `computeScoredCandidatesForDiskful` initializes `ZoneReplicaCounts` with existing **Diskful** counts per zone
 2. For each unscheduled Diskful, `selectBestCandidateTransZonal` picks the zone with minimum count
 3. After successful patch, `IncrementZoneReplicaCount` updates the count immediately
 4. Next RVR sees updated counts and picks a different zone
 
 **For TieBreaker replicas:**
 
-1. `prepareCandidatesForTieBreaker` initializes `ZoneReplicaCounts` with **ALL** replica counts per zone (Diskful + TieBreaker)
+1. `computeCandidatesForTieBreaker` initializes `ZoneReplicaCounts` with **ALL** replica counts per zone (Diskful + TieBreaker)
 2. For each unscheduled TieBreaker, `selectBestCandidateForTieBreaker` picks the zone with minimum count
 3. After successful patch, `IncrementZoneReplicaCount` updates the count immediately
 4. Next RVR sees updated counts and picks a different zone
@@ -445,7 +438,7 @@ Example with 2 unscheduled Diskful and 3 zones (all starting at count=0):
 
 ## Detailed Algorithms
 
-### prepareScoredCandidatesForDiskful Details
+### computeScoredCandidatesForDiskful Details
 
 **Purpose**: Computes candidates with capacity scores for Diskful replicas. Called once before processing unscheduled Diskful RVRs.
 
@@ -486,7 +479,7 @@ flowchart TD
 |-------|-------------|
 | `sctx.EligibleNodes` | Nodes from RSP with readiness/schedulability info |
 | `sctx.OccupiedNodes` | Nodes already hosting replicas of this RV |
-| `sctx.RSC.Spec.Topology` | Topology mode (Ignored/Zonal/TransZonal) |
+| `sctx.Topology` | Topology mode (Ignored/Zonal/TransZonal) |
 | `sctx.LVGToNode` | LVG to node mapping with thin pool info |
 | `sctx.RV.Spec.Size` | Volume size for capacity query |
 
@@ -497,7 +490,7 @@ flowchart TD
 
 ---
 
-### prepareCandidatesForTieBreaker Details
+### computeCandidatesForTieBreaker Details
 
 **Purpose**: Computes candidates for TieBreaker replicas. No capacity scoring needed. Called once before processing unscheduled TieBreaker RVRs.
 
@@ -529,7 +522,7 @@ flowchart TD
 |-------|-------------|
 | `sctx.EligibleNodes` | Nodes from RSP with readiness/schedulability info |
 | `sctx.OccupiedNodes` | Nodes already hosting replicas of this RV |
-| `sctx.RSC.Spec.Topology` | Topology mode (Ignored/Zonal/TransZonal) |
+| `sctx.Topology` | Topology mode (Ignored/Zonal/TransZonal) |
 | `sctx.NodeToZone` | Node to zone mapping |
 | `sctx.AllRVRs` | All RVRs for counting replicas per zone |
 
@@ -586,7 +579,7 @@ flowchart TD
 | Input | Description |
 |-------|-------------|
 | `sctx.ScoredCandidates` | Map of zone to scored NodeCandidate list |
-| `sctx.RSC.Spec.Topology` | Topology mode |
+| `sctx.Topology` | Topology mode |
 | `sctx.ZoneReplicaCounts` | Replica counts per zone (TransZonal) |
 | `sctx.SelectedZone` | Previously selected zone (Zonal, after first selection) |
 

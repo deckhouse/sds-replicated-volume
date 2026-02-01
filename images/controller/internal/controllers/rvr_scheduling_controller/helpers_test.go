@@ -639,9 +639,7 @@ func TestSelectBestCandidateForTieBreaker(t *testing.T) {
 		{
 			name: "Ignored topology - returns first available",
 			sctx: &SchedulingContext{
-				RSC: &v1alpha1.ReplicatedStorageClass{
-					Spec: v1alpha1.ReplicatedStorageClassSpec{Topology: "Ignored"},
-				},
+				Topology: "Ignored",
 				TieBreakerCandidates: map[string][]NodeCandidate{
 					"Ignored": {
 						{Name: "node-1"},
@@ -654,9 +652,7 @@ func TestSelectBestCandidateForTieBreaker(t *testing.T) {
 		{
 			name: "Zonal topology - returns first in selected zone",
 			sctx: &SchedulingContext{
-				RSC: &v1alpha1.ReplicatedStorageClass{
-					Spec: v1alpha1.ReplicatedStorageClassSpec{Topology: "Zonal"},
-				},
+				Topology:     "Zonal",
 				SelectedZone: "zone-a",
 				TieBreakerCandidates: map[string][]NodeCandidate{
 					"zone-a": {{Name: "node-a1"}, {Name: "node-a2"}},
@@ -668,9 +664,7 @@ func TestSelectBestCandidateForTieBreaker(t *testing.T) {
 		{
 			name: "TransZonal topology - selects zone with min replicas",
 			sctx: &SchedulingContext{
-				RSC: &v1alpha1.ReplicatedStorageClass{
-					Spec: v1alpha1.ReplicatedStorageClassSpec{Topology: "TransZonal"},
-				},
+				Topology: "TransZonal",
 				ZoneReplicaCounts: map[string]int{
 					"zone-a": 2,
 					"zone-b": 1,
@@ -686,9 +680,7 @@ func TestSelectBestCandidateForTieBreaker(t *testing.T) {
 		{
 			name: "empty TieBreakerCandidates - returns error",
 			sctx: &SchedulingContext{
-				RSC: &v1alpha1.ReplicatedStorageClass{
-					Spec: v1alpha1.ReplicatedStorageClassSpec{Topology: "Ignored"},
-				},
+				Topology:             "Ignored",
 				TieBreakerCandidates: map[string][]NodeCandidate{},
 			},
 			expectedError:    true,
@@ -697,9 +689,7 @@ func TestSelectBestCandidateForTieBreaker(t *testing.T) {
 		{
 			name: "Zonal with no zone selected - returns error",
 			sctx: &SchedulingContext{
-				RSC: &v1alpha1.ReplicatedStorageClass{
-					Spec: v1alpha1.ReplicatedStorageClassSpec{Topology: "Zonal"},
-				},
+				Topology:     "Zonal",
 				SelectedZone: "",
 				TieBreakerCandidates: map[string][]NodeCandidate{
 					"zone-a": {{Name: "node-a1"}},
@@ -711,9 +701,7 @@ func TestSelectBestCandidateForTieBreaker(t *testing.T) {
 		{
 			name: "Zonal with empty candidates in selected zone - returns error",
 			sctx: &SchedulingContext{
-				RSC: &v1alpha1.ReplicatedStorageClass{
-					Spec: v1alpha1.ReplicatedStorageClassSpec{Topology: "Zonal"},
-				},
+				Topology:     "Zonal",
 				SelectedZone: "zone-a",
 				TieBreakerCandidates: map[string][]NodeCandidate{
 					"zone-a": {},

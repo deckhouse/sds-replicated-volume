@@ -22,8 +22,9 @@ import (
 
 type SchedulingContext struct {
 	RV              *v1alpha1.ReplicatedVolume
-	RSC             *v1alpha1.ReplicatedStorageClass
 	RSP             *v1alpha1.ReplicatedStoragePool
+	Topology        v1alpha1.ReplicatedStorageClassTopology // from rv.Status.Configuration.Topology
+	Zones           []string                                // from rsp.Spec.Zones
 	EligibleNodes   []v1alpha1.ReplicatedStoragePoolEligibleNode
 	AttachToNodes   []string
 	NodeToZone      map[string]string

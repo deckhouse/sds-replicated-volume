@@ -121,7 +121,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Phase 2: Prepare zone candidates for Diskful (compute capacity scores once).
 	var diskfulPrepareErr error
 	if len(sctx.UnscheduledDiskful) > 0 {
-		diskfulPrepareErr = r.prepareScoredCandidatesForDiskful(rf.Ctx(), sctx)
+		diskfulPrepareErr = r.computeScoredCandidatesForDiskful(rf.Ctx(), sctx)
 		if diskfulPrepareErr != nil {
 			// Mark all unscheduled Diskful as failed
 			failureReason := computeSchedulingFailureReason(diskfulPrepareErr)
@@ -151,7 +151,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Phase 4a: Prepare candidates for TieBreaker (if any unscheduled).
 	var tieBreakerPrepareErr error
 	if len(sctx.UnscheduledTieBreaker) > 0 {
-		tieBreakerPrepareErr = r.prepareCandidatesForTieBreaker(sctx)
+		tieBreakerPrepareErr = r.computeCandidatesForTieBreaker(sctx)
 		if tieBreakerPrepareErr != nil {
 			// Mark all unscheduled TieBreaker as failed
 			failureReason := computeSchedulingFailureReason(tieBreakerPrepareErr)
@@ -196,20 +196,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 // reconcileScheduledRVR updates the Scheduled condition on an already scheduled RVR.
 // Uses canonical apply pattern: base -> apply -> patch (only if changed).
 func (r *Reconciler) reconcileScheduledRVR(ctx context.Context, _ *SchedulingContext, rvr *v1alpha1.ReplicatedVolumeReplica) error {
-	// Main domain: ensure node name label exists
-	base := rvr.DeepCopy()
-	mainChanged := applyNodeNameLabelIfMissing(rvr)
-	if mainChanged {
-		if err := r.patchRVR(ctx, rvr, base, true); err != nil {
-			return err
-		}
-	}
-
 	// Status domain: ensure Scheduled=True condition
-	statusBase := rvr.DeepCopy()
-	statusChanged := applyScheduledConditionTrue(rvr)
-	if statusChanged {
-		if err := r.patchRVRStatus(ctx, rvr, statusBase); err != nil {
+	base := rvr.DeepCopy()
+	changed := applyScheduledConditionTrue(rvr)
+	if changed {
+		if err := r.patchRVRStatus(ctx, rvr, base); err != nil {
 			return err
 		}
 	}
@@ -242,7 +233,7 @@ func (r *Reconciler) reconcileUnscheduledDiskfulRVR(ctx context.Context, sctx *S
 		sctx.MarkNodeOccupied(candidate.Name)
 		sctx.RemoveCandidate(candidate.Name)
 		sctx.ScheduledDiskful = append(sctx.ScheduledDiskful, rvr)
-		if sctx.RSC.Spec.Topology == topologyTransZonal && candidate.Zone != "" {
+		if sctx.Topology == topologyTransZonal && candidate.Zone != "" {
 			sctx.IncrementZoneReplicaCount(candidate.Zone)
 		}
 	}
@@ -283,7 +274,7 @@ func (r *Reconciler) reconcileUnscheduledTieBreakerRVR(ctx context.Context, sctx
 		// Patch succeeded - update scheduling context
 		sctx.MarkNodeOccupied(candidate.Name)
 		sctx.RemoveTieBreakerCandidate(candidate.Name)
-		if sctx.RSC.Spec.Topology == topologyTransZonal && candidate.Zone != "" {
+		if sctx.Topology == topologyTransZonal && candidate.Zone != "" {
 			sctx.IncrementZoneReplicaCount(candidate.Zone)
 		}
 	}
@@ -326,7 +317,7 @@ func (r *Reconciler) selectBestCandidate(sctx *SchedulingContext, isDiskful bool
 		return NodeCandidate{}, fmt.Errorf("%w: no zone candidates available", errSchedulingNoCandidateNodes)
 	}
 
-	switch sctx.RSC.Spec.Topology {
+	switch sctx.Topology {
 	case topologyIgnored:
 		return selectBestCandidateIgnored(sctx)
 	case topologyZonal:
@@ -334,7 +325,7 @@ func (r *Reconciler) selectBestCandidate(sctx *SchedulingContext, isDiskful bool
 	case topologyTransZonal:
 		return selectBestCandidateTransZonal(sctx)
 	default:
-		return NodeCandidate{}, fmt.Errorf("unknown topology: %s", sctx.RSC.Spec.Topology)
+		return NodeCandidate{}, fmt.Errorf("unknown topology: %s", sctx.Topology)
 	}
 }
 
@@ -451,7 +442,7 @@ func selectBestCandidateForTieBreaker(sctx *SchedulingContext) (NodeCandidate, e
 		return NodeCandidate{}, fmt.Errorf("%w: no TieBreaker candidates available", errSchedulingNoCandidateNodes)
 	}
 
-	switch sctx.RSC.Spec.Topology {
+	switch sctx.Topology {
 	case topologyIgnored:
 		var allCandidates []NodeCandidate
 		for _, candidates := range sctx.TieBreakerCandidates {
@@ -483,14 +474,14 @@ func selectBestCandidateForTieBreaker(sctx *SchedulingContext) (NodeCandidate, e
 		return candidate, nil
 
 	default:
-		return NodeCandidate{}, fmt.Errorf("unknown topology: %s", sctx.RSC.Spec.Topology)
+		return NodeCandidate{}, fmt.Errorf("unknown topology: %s", sctx.Topology)
 	}
 }
 
-// prepareScoredCandidatesForDiskful computes candidates with capacity scores.
+// computeScoredCandidatesForDiskful computes candidates with capacity scores.
 // Called once before processing unscheduled Diskful RVRs.
 // Candidates are grouped by zone (or by "Ignored" key for Ignored topology).
-func (r *Reconciler) prepareScoredCandidatesForDiskful(ctx context.Context, sctx *SchedulingContext) error {
+func (r *Reconciler) computeScoredCandidatesForDiskful(ctx context.Context, sctx *SchedulingContext) error {
 	candidateNodes := computeEligibleNodeNames(sctx.EligibleNodes, sctx.OccupiedNodes)
 	if len(candidateNodes) == 0 {
 		return fmt.Errorf("%w: no candidate nodes from storage pool", errSchedulingNoCandidateNodes)
@@ -511,17 +502,17 @@ func (r *Reconciler) prepareScoredCandidatesForDiskful(ctx context.Context, sctx
 	sctx.ScoredCandidates = zoneCandidates
 
 	// Initialize ZoneReplicaCounts for TransZonal topology
-	if sctx.RSC.Spec.Topology == topologyTransZonal {
+	if sctx.Topology == topologyTransZonal {
 		sctx.ZoneReplicaCounts = computeReplicasByZone(sctx.AllRVRs, v1alpha1.ReplicaTypeDiskful, sctx.NodeToZone)
 	}
 
 	return nil
 }
 
-// prepareCandidatesForTieBreaker computes candidates for TieBreaker replicas.
+// computeCandidatesForTieBreaker computes candidates for TieBreaker replicas.
 // Called once before processing unscheduled TieBreaker RVRs.
 // No capacity scoring is needed for TieBreaker, only topology filtering.
-func (r *Reconciler) prepareCandidatesForTieBreaker(sctx *SchedulingContext) error {
+func (r *Reconciler) computeCandidatesForTieBreaker(sctx *SchedulingContext) error {
 	candidateNodes := computeEligibleNodeNames(sctx.EligibleNodes, sctx.OccupiedNodes)
 	if len(candidateNodes) == 0 {
 		return fmt.Errorf("%w: no candidate nodes for TieBreaker", errSchedulingNoCandidateNodes)
@@ -535,7 +526,7 @@ func (r *Reconciler) prepareCandidatesForTieBreaker(sctx *SchedulingContext) err
 	sctx.TieBreakerCandidates = zoneCandidates
 
 	// Initialize ZoneReplicaCounts for TransZonal (counting ALL replicas, not just Diskful)
-	if sctx.RSC.Spec.Topology == topologyTransZonal {
+	if sctx.Topology == topologyTransZonal {
 		sctx.ZoneReplicaCounts = computeReplicasByZone(sctx.AllRVRs, "", sctx.NodeToZone)
 	}
 
@@ -549,7 +540,7 @@ func (r *Reconciler) applyTopologyFilter(
 	isDiskfulPhase bool,
 	sctx *SchedulingContext,
 ) (map[string][]NodeCandidate, error) {
-	switch sctx.RSC.Spec.Topology {
+	switch sctx.Topology {
 	case topologyIgnored:
 		candidates := make([]NodeCandidate, 0, len(candidateNodes))
 		for _, nodeName := range candidateNodes {
@@ -561,11 +552,11 @@ func (r *Reconciler) applyTopologyFilter(
 		return r.applyZonalTopologyFilter(candidateNodes, isDiskfulPhase, sctx)
 
 	case topologyTransZonal:
-		allowedZones := computeAllowedZones(nil, sctx.RSC.Spec.Zones, sctx.NodeToZone)
+		allowedZones := computeAllowedZones(nil, sctx.Zones, sctx.NodeToZone)
 		return groupCandidateNodesByZone(candidateNodes, allowedZones, sctx.NodeToZone), nil
 
 	default:
-		return nil, fmt.Errorf("unknown RSC topology: %s", sctx.RSC.Spec.Topology)
+		return nil, fmt.Errorf("unknown topology: %s", sctx.Topology)
 	}
 }
 
@@ -611,7 +602,7 @@ func (r *Reconciler) applyZonalTopologyFilter(
 		}
 	}
 
-	allowedZones := computeAllowedZones(targetZones, sctx.RSC.Spec.Zones, sctx.NodeToZone)
+	allowedZones := computeAllowedZones(targetZones, sctx.Zones, sctx.NodeToZone)
 	result := groupCandidateNodesByZone(candidateNodes, allowedZones, sctx.NodeToZone)
 
 	if len(result) == 0 {
@@ -645,7 +636,7 @@ func (r *Reconciler) applyCapacityFilterAndScore(
 	}
 
 	if len(lvgQueries) == 0 {
-		return nil, fmt.Errorf("%w: no candidate nodes have LVGs from storage pool %s", errSchedulingNoCandidateNodes, sctx.RSC.Status.StoragePoolName)
+		return nil, fmt.Errorf("%w: no candidate nodes have LVGs from storage pool %s", errSchedulingNoCandidateNodes, sctx.RSP.Name)
 	}
 
 	var volType string
@@ -924,8 +915,8 @@ func isRVReadyToSchedule(rv *v1alpha1.ReplicatedVolume) error {
 		return fmt.Errorf("%w: ReplicatedVolume is missing controller finalizer", errSchedulingPending)
 	}
 
-	if rv.Spec.ReplicatedStorageClassName == "" {
-		return fmt.Errorf("%w: ReplicatedStorageClassName is not specified in ReplicatedVolume spec", errSchedulingPending)
+	if rv.Status.Configuration == nil {
+		return fmt.Errorf("%w: ReplicatedVolume has no configuration in status", errSchedulingPending)
 	}
 
 	if rv.Spec.Size.IsZero() {
@@ -950,9 +941,6 @@ func applyPlacement(rvr *v1alpha1.ReplicatedVolumeReplica, candidate NodeCandida
 		rvr.Spec.LVMVolumeGroupThinPoolName = candidate.ThinPoolName
 		changed = true
 	}
-	if obju.SetLabel(rvr, v1alpha1.NodeNameLabelKey, candidate.Name) {
-		changed = true
-	}
 	return changed
 }
 
@@ -971,13 +959,6 @@ func applyScheduledConditionFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason,
 		Reason:  reason,
 		Message: message,
 	})
-}
-
-func applyNodeNameLabelIfMissing(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-	if rvr.Spec.NodeName == "" {
-		return false
-	}
-	return obju.SetLabel(rvr, v1alpha1.NodeNameLabelKey, rvr.Spec.NodeName)
 }
 
 type schedulingFailureReason struct {
@@ -1003,21 +984,18 @@ func (r *Reconciler) prepareSchedulingContext(
 		return nil, err
 	}
 
-	rsc, err := r.getRSC(ctx, rv.Spec.ReplicatedStorageClassName)
+	// Get storage pool name from rv.Status.Configuration
+	storagePoolName := rv.Status.Configuration.StoragePoolName
+	if storagePoolName == "" {
+		return nil, fmt.Errorf("%w: RV %s has no storage pool configured yet", errSchedulingPending, rv.Name)
+	}
+
+	rsp, err := r.getRSP(ctx, storagePoolName)
 	if err != nil {
 		return nil, err
 	}
 
-	if rsc.Status.StoragePoolName == "" {
-		return nil, fmt.Errorf("%w: RSC %s has no storage pool configured yet", errSchedulingPending, rsc.Name)
-	}
-
-	rsp, err := r.getRSP(ctx, rsc.Status.StoragePoolName)
-	if err != nil {
-		return nil, err
-	}
-
-	allRVRs, err := r.listRVRsByRV(ctx, rv.Name)
+	allRVRs, err := r.getRVRsByRVName(ctx, rv.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -1025,8 +1003,9 @@ func (r *Reconciler) prepareSchedulingContext(
 	eligible := rsp.Status.EligibleNodes
 	sctx := &SchedulingContext{
 		RV:              rv,
-		RSC:             rsc,
 		RSP:             rsp,
+		Topology:        rv.Status.Configuration.Topology,
+		Zones:           rsp.Spec.Zones,
 		EligibleNodes:   eligible,
 		AttachToNodes:   computeAttachToNodes(rv),
 		NodeToZone:      computeNodeToZoneFromEligible(eligible),
@@ -1052,7 +1031,7 @@ func categorizeRVRsIntoContext(sctx *SchedulingContext, allRVRs []v1alpha1.Repli
 		}
 		sctx.AllRVRs = append(sctx.AllRVRs, rvr)
 
-		scheduled := rvr.Spec.NodeName != ""
+		scheduled := isRVRFullyScheduled(rvr, sctx.StoragePoolType)
 		switch rvr.Spec.Type {
 		case v1alpha1.ReplicaTypeDiskful:
 			if scheduled {
@@ -1070,12 +1049,31 @@ func categorizeRVRsIntoContext(sctx *SchedulingContext, allRVRs []v1alpha1.Repli
 	}
 }
 
+// isRVRFullyScheduled returns true if the RVR has all required scheduling fields set.
+// For Diskful replicas: nodeName + lvmVolumeGroupName + (thinPoolName if LVMThin).
+// For TieBreaker replicas: just nodeName (diskless, no LVG needed).
+// For Access replicas: just nodeName (diskless, no LVG needed).
+func isRVRFullyScheduled(rvr *v1alpha1.ReplicatedVolumeReplica, storagePoolType string) bool {
+	if rvr.Spec.NodeName == "" {
+		return false
+	}
+	if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
+		if rvr.Spec.LVMVolumeGroupName == "" {
+			return false
+		}
+		if storagePoolType == "LVMThin" && rvr.Spec.LVMVolumeGroupThinPoolName == "" {
+			return false
+		}
+	}
+	return true
+}
+
 func (r *Reconciler) setFailedScheduledConditionOnUnscheduledRVRs(
 	ctx context.Context,
 	rvName string,
 	reason *schedulingFailureReason,
 ) error {
-	allRVRs, err := r.listRVRsByRV(ctx, rvName)
+	allRVRs, err := r.getRVRsByRVName(ctx, rvName)
 	if err != nil {
 		return err
 	}
@@ -1112,16 +1110,6 @@ func (r *Reconciler) getRV(ctx context.Context, name string) (*v1alpha1.Replicat
 	return rv, nil
 }
 
-// --- Single-call I/O helpers: RSC
-
-func (r *Reconciler) getRSC(ctx context.Context, name string) (*v1alpha1.ReplicatedStorageClass, error) {
-	rsc := &v1alpha1.ReplicatedStorageClass{}
-	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, rsc); err != nil {
-		return nil, fmt.Errorf("unable to get ReplicatedStorageClass %s: %w", name, err)
-	}
-	return rsc, nil
-}
-
 // --- Single-call I/O helpers: RSP
 
 func (r *Reconciler) getRSP(ctx context.Context, name string) (*v1alpha1.ReplicatedStoragePool, error) {
@@ -1134,7 +1122,7 @@ func (r *Reconciler) getRSP(ctx context.Context, name string) (*v1alpha1.Replica
 
 // --- Single-call I/O helpers: RVR
 
-func (r *Reconciler) listRVRsByRV(ctx context.Context, rvName string) ([]v1alpha1.ReplicatedVolumeReplica, error) {
+func (r *Reconciler) getRVRsByRVName(ctx context.Context, rvName string) ([]v1alpha1.ReplicatedVolumeReplica, error) {
 	list := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, list, client.MatchingFields{
 		indexes.IndexFieldRVRByReplicatedVolumeName: rvName,
