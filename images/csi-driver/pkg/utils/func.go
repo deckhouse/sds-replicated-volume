@@ -362,13 +362,13 @@ func GetReplicatedVolumeReplicaForNode(ctx context.Context, kc client.Client, vo
 
 // GetDRBDDevicePath gets DRBD device path from ReplicatedVolumeReplica status
 func GetDRBDDevicePath(rvr *srv.ReplicatedVolumeReplica) (string, error) {
-	if rvr.Status.DRBD == nil ||
-		rvr.Status.DRBD.Status == nil || len(rvr.Status.DRBD.Status.Devices) == 0 {
-		return "", fmt.Errorf("DRBD status not available or no devices found")
+	if rvr.Status.Attachment == nil {
+		return "", fmt.Errorf("replica is not attached")
 	}
-
-	minor := rvr.Status.DRBD.Status.Devices[0].Minor
-	return fmt.Sprintf("/dev/drbd%d", minor), nil
+	if rvr.Status.Attachment.DevicePath == "" {
+		return "", fmt.Errorf("device path not available")
+	}
+	return rvr.Status.Attachment.DevicePath, nil
 }
 
 // ExpandReplicatedVolume expands a ReplicatedVolume
