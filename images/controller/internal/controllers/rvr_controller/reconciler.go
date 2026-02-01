@@ -568,11 +568,17 @@ func ensureStatusBackingVolume(
 	// the corresponding LLV to populate size, VG name, and thin pool. If the referenced LLV
 	// is not found, we fail — this indicates an inconsistent state.
 	// If DRBDR is nil, we clear the backingVolume status entirely.
-	if drbdr != nil {
+	if drbdr == nil {
+		// No DRBDR -> clear BackingVolume entirely.
+		if rvr.Status.BackingVolume != nil {
+			rvr.Status.BackingVolume = nil
+			changed = true
+		}
+	} else {
+		// Find the LLV referenced by DRBDR active configuration.
 		var llv *snc.LVMLogicalVolume
 		if drbdr.Status.ActiveConfiguration != nil {
 			llvName := drbdr.Status.ActiveConfiguration.LVMLogicalVolumeName
-
 			if llvName != "" {
 				llv = findLLVByName(llvs, llvName)
 				if llv == nil {
@@ -581,9 +587,41 @@ func ensureStatusBackingVolume(
 			}
 		}
 
-		changed = applyRVRBackingVolumeStatus(rvr, drbdr, llv) || changed
-	} else {
-		changed = applyRVRBackingVolumeStatus(rvr, nil, nil) || changed
+		if llv == nil {
+			// DRBDR exists but no LLV -> clear BackingVolume.
+			if rvr.Status.BackingVolume != nil {
+				rvr.Status.BackingVolume = nil
+				changed = true
+			}
+		} else {
+			// Build the target BackingVolume from LLV + DRBDR.
+			target := v1alpha1.BackingVolume{
+				LVMVolumeGroupName: llv.Spec.LVMVolumeGroupName,
+				State:              drbdr.Status.DiskState,
+			}
+			if llv.Spec.Thin != nil {
+				target.LVMVolumeGroupThinPoolName = llv.Spec.Thin.PoolName
+			}
+			if llv.Status != nil && !llv.Status.ActualSize.IsZero() {
+				target.Size = &llv.Status.ActualSize
+			}
+
+			// Compare and apply.
+			needsUpdate := true
+			if rvr.Status.BackingVolume != nil {
+				current := rvr.Status.BackingVolume
+				sizeEqual := (current.Size == nil && target.Size == nil) ||
+					(current.Size != nil && target.Size != nil && current.Size.Cmp(*target.Size) == 0)
+				needsUpdate = current.State != target.State ||
+					current.LVMVolumeGroupName != target.LVMVolumeGroupName ||
+					current.LVMVolumeGroupThinPoolName != target.LVMVolumeGroupThinPoolName ||
+					!sizeEqual
+			}
+			if needsUpdate {
+				rvr.Status.BackingVolume = &target
+				changed = true
+			}
+		}
 	}
 
 	return ef.Ok().ReportChangedIf(changed).RequireOptimisticLock()
@@ -2349,54 +2387,6 @@ func applyRVRAttachment(rvr *v1alpha1.ReplicatedVolumeReplica, attachment *v1alp
 		return false
 	}
 	rvr.Status.Attachment = attachment
-	return true
-}
-
-// applyRVRBackingVolumeStatus sets all BackingVolume fields on RVR status.
-// If llv is nil, clears BackingVolume entirely.
-// If llv is provided, populates Size, State, LVMVolumeGroupName, and LVMVolumeGroupThinPoolName.
-func applyRVRBackingVolumeStatus(
-	rvr *v1alpha1.ReplicatedVolumeReplica,
-	drbdr *v1alpha1.DRBDResource,
-	llv *snc.LVMLogicalVolume,
-) bool {
-	// If no LLV, clear BackingVolume entirely.
-	if llv == nil {
-		if rvr.Status.BackingVolume == nil {
-			return false
-		}
-		rvr.Status.BackingVolume = nil
-		return true
-	}
-
-	// Build the target BackingVolume.
-	target := v1alpha1.BackingVolume{
-		LVMVolumeGroupName: llv.Spec.LVMVolumeGroupName,
-	}
-	if llv.Spec.Thin != nil {
-		target.LVMVolumeGroupThinPoolName = llv.Spec.Thin.PoolName
-	}
-	if llv.Status != nil && !llv.Status.ActualSize.IsZero() {
-		target.Size = &llv.Status.ActualSize
-	}
-	if drbdr != nil {
-		target.State = drbdr.Status.DiskState
-	}
-
-	// Compare and apply.
-	if rvr.Status.BackingVolume != nil {
-		current := rvr.Status.BackingVolume
-		sizeEqual := (current.Size == nil && target.Size == nil) ||
-			(current.Size != nil && target.Size != nil && current.Size.Cmp(*target.Size) == 0)
-		if current.State == target.State &&
-			current.LVMVolumeGroupName == target.LVMVolumeGroupName &&
-			current.LVMVolumeGroupThinPoolName == target.LVMVolumeGroupThinPoolName &&
-			sizeEqual {
-			return false
-		}
-	}
-
-	rvr.Status.BackingVolume = &target
 	return true
 }
 
