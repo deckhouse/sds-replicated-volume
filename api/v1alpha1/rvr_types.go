@@ -177,9 +177,6 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 
-	// +patchStrategy=merge
-	DRBD *DRBD `json:"drbd,omitempty" patchStrategy:"merge"`
-
 	// +kubebuilder:validation:MaxItems=32
 	// +optional
 	Addresses []DRBDResourceAddressStatus `json:"addresses,omitempty"`
@@ -470,68 +467,6 @@ type ReplicatedVolumeReplicaStatusDatameshPending struct {
 	ThinPoolName string `json:"thinPoolName,omitempty"`
 }
 
-// +kubebuilder:object:generate=true
-type DRBD struct {
-	// +patchStrategy=merge
-	Config *DRBDConfig `json:"config,omitempty" patchStrategy:"merge"`
-	// +patchStrategy=merge
-	Actual *DRBDActual `json:"actual,omitempty" patchStrategy:"merge"`
-	// +patchStrategy=merge
-	Status *DRBDStatus `json:"status,omitempty" patchStrategy:"merge"`
-}
-
-// +kubebuilder:object:generate=true
-type DRBDConfig struct {
-	// +optional
-	Address *Address `json:"address,omitempty"`
-
-	// Peers contains information about other replicas in the same ReplicatedVolume.
-	// The key in this map is the node name where the peer replica is located.
-	// +optional
-	Peers map[string]Peer `json:"peers,omitempty"`
-
-	// PeersInitialized indicates that Peers has been calculated.
-	// This field is used to distinguish between no peers and not yet calculated.
-	// +optional
-	PeersInitialized bool `json:"peersInitialized,omitempty"`
-
-	// +optional
-	Primary *bool `json:"primary,omitempty"`
-}
-
-// +kubebuilder:object:generate=true
-type DRBDActual struct {
-	// +optional
-	// +kubebuilder:validation:Pattern=`^(/[a-zA-Z0-9/.+_-]+)?$`
-	// +kubebuilder:validation:MaxLength=256
-	Disk string `json:"disk,omitempty"`
-
-	// +optional
-	// +kubebuilder:default=false
-	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
-
-	// +optional
-	// +kubebuilder:default=false
-	InitialSyncCompleted bool `json:"initialSyncCompleted,omitempty"`
-}
-
-// +kubebuilder:object:generate=true
-type DRBDStatus struct {
-	Name string `json:"name"`
-	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
-	NodeId           int                `json:"nodeId"`
-	Role             string             `json:"role"`
-	Suspended        bool               `json:"suspended"`
-	SuspendedUser    bool               `json:"suspendedUser"`
-	SuspendedNoData  bool               `json:"suspendedNoData"`
-	SuspendedFencing bool               `json:"suspendedFencing"`
-	SuspendedQuorum  bool               `json:"suspendedQuorum"`
-	ForceIOFailures  bool               `json:"forceIOFailures"`
-	WriteOrdering    string             `json:"writeOrdering"`
-	Devices          []DeviceStatus     `json:"devices"`
-	Connections      []ConnectionStatus `json:"connections"`
-}
-
 // DiskState represents the state of a DRBD backing disk.
 // It reflects the disk's synchronization status and determines whether
 // application I/O can be served locally or requires peer involvement.
@@ -734,82 +669,6 @@ func ParseConnectionState(s string) ConnectionState {
 	}
 }
 
-// +kubebuilder:object:generate=true
-type DeviceStatus struct {
-	Volume    int       `json:"volume"`
-	Minor     int       `json:"minor"`
-	DiskState DiskState `json:"diskState"`
-	Client    bool      `json:"client"`
-	Open      bool      `json:"open"`
-	Quorum    bool      `json:"quorum"`
-	Size      int       `json:"size"`
-}
-
-// +kubebuilder:object:generate=true
-type ConnectionStatus struct {
-	//nolint:revive // var-naming: PeerNodeId kept for API compatibility with JSON tag
-	PeerNodeId      int                `json:"peerNodeId"`
-	Name            string             `json:"name"`
-	ConnectionState ConnectionState    `json:"connectionState"`
-	Congested       bool               `json:"congested"`
-	Peerrole        string             `json:"peerRole"`
-	TLS             bool               `json:"tls"`
-	Paths           []PathStatus       `json:"paths"`
-	PeerDevices     []PeerDeviceStatus `json:"peerDevices"`
-}
-
-// +kubebuilder:object:generate=true
-type PathStatus struct {
-	ThisHost    HostStatus `json:"thisHost"`
-	RemoteHost  HostStatus `json:"remoteHost"`
-	Established bool       `json:"established"`
-}
-
-// +kubebuilder:object:generate=true
-type HostStatus struct {
-	Address string `json:"address"`
-	Port    int    `json:"port"`
-	Family  string `json:"family"`
-}
-
-// +kubebuilder:object:generate=true
-type PeerDeviceStatus struct {
-	Volume                 int              `json:"volume"`
-	ReplicationState       ReplicationState `json:"replicationState"`
-	PeerDiskState          DiskState        `json:"peerDiskState"`
-	PeerClient             bool             `json:"peerClient"`
-	ResyncSuspended        string           `json:"resyncSuspended"`
-	OutOfSync              int              `json:"outOfSync"`
-	HasSyncDetails         bool             `json:"hasSyncDetails"`
-	HasOnlineVerifyDetails bool             `json:"hasOnlineVerifyDetails"`
-	PercentInSync          string           `json:"percentInSync"`
-}
-
-// +kubebuilder:object:generate=true
-type Peer struct {
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=7
-	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
-	NodeId uint `json:"nodeId"`
-
-	// +kubebuilder:validation:Required
-	Address Address `json:"address"`
-
-	// +kubebuilder:default=false
-	Diskless bool `json:"diskless,omitempty"`
-}
-
-// +kubebuilder:object:generate=true
-type Address struct {
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Pattern=`^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`
-	IPv4 string `json:"ipv4"`
-
-	// +kubebuilder:validation:Minimum=1025
-	// +kubebuilder:validation:Maximum=65535
-	Port uint `json:"port"`
-}
-
 // DRBD node ID constants for ReplicatedVolumeReplica
 const (
 	// RVRMinNodeID is the minimum valid node ID for DRBD configuration in ReplicatedVolumeReplica
@@ -834,21 +693,4 @@ func FormatValidNodeIDRange() string {
 	b.WriteString(strconv.FormatUint(uint64(RVRMaxNodeID), 10))
 	b.WriteByte(']')
 	return b.String()
-}
-
-func SprintDRBDDisk(actualVGNameOnTheNode, actualLVNameOnTheNode string) string {
-	return fmt.Sprintf("/dev/%s/%s", actualVGNameOnTheNode, actualLVNameOnTheNode)
-}
-
-func ParseDRBDDisk(disk string) (actualVGNameOnTheNode, actualLVNameOnTheNode string, err error) {
-	parts := strings.Split(disk, "/")
-	if len(parts) != 4 || parts[0] != "" || parts[1] != "dev" ||
-		len(parts[2]) == 0 || len(parts[3]) == 0 {
-		return "", "",
-			fmt.Errorf(
-				"parsing DRBD Disk: expected format '/dev/{actualVGNameOnTheNode}/{actualLVNameOnTheNode}', got '%s'",
-				disk,
-			)
-	}
-	return parts[2], parts[3], nil
 }
