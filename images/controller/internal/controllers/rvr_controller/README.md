@@ -81,9 +81,10 @@ Reconcile (root) [Pure orchestration]
 │   ├── applyRVRDRBDRReconciliationCache
 │   ├── getAgentReady → applyDRBDConfiguredCondFalse AgentNotReady
 │   ├── check DRBDR DRBDConfigured condition → ApplyingConfiguration / ConfigurationFailed
-│   ├── applyRVRAddresses
 │   ├── targetType != intendedType → applyDRBDConfiguredCondFalse WaitingForBackingVolume
 │   └── applyDRBDConfiguredCondTrue Configured / applyDRBDConfiguredCondFalse PendingDatameshJoin
+├── ensureStatusAddressesAndType ← details
+│   └── updates rvr.Status.Addresses and rvr.Status.Type from DRBDR
 ├── ensureStatusAttachment ← details
 │   └── applyRVRAttachment
 ├── ensureStatusPeers ← details
@@ -107,7 +108,7 @@ Reconcile (root) [Pure orchestration]
 └── patchRVRStatus
 ```
 
-Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureStatusAttachment`](#ensurestatusattachment-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionAttached`](#ensureconditionattached-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeUpToDate`](#ensureconditionbackingvolumeinsync-details), [`ensureStatusQuorum`](#ensurestatusquorum-details), [`ensureConditionReady`](#ensureconditionready-details), [`reconcileSatisfyEligibleNodesCondition`](#reconcilesatisfyeligiblenodescondition-details)
+Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureStatusAddressesAndType`](#ensurestatusaddressesandtype-details), [`ensureStatusAttachment`](#ensurestatusattachment-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionAttached`](#ensureconditionattached-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeUpToDate`](#ensureconditionbackingvolumeinsync-details), [`ensureStatusQuorum`](#ensurestatusquorum-details), [`ensureConditionReady`](#ensureconditionready-details), [`reconcileSatisfyEligibleNodesCondition`](#reconcilesatisfyeligiblenodescondition-details)
 
 ## Algorithm Flow
 
@@ -129,7 +130,8 @@ flowchart TD
     DRBDR --> StatusBlock
 
     subgraph StatusBlock [Status Ensure]
-        StatusAttach[ensureStatusAttachment]
+        AddrType[ensureStatusAddressesAndType]
+        AddrType --> StatusAttach[ensureStatusAttachment]
         StatusAttach --> Peers[ensureStatusPeers]
         Peers --> BVStatus[ensureStatusBackingVolume]
         BVStatus --> StatusQuorum[ensureStatusQuorum]
@@ -258,6 +260,7 @@ The controller manages the following status fields on RVR:
 |-------|-------------|--------|
 | `addresses` | DRBD addresses assigned to this replica | From DRBDR status |
 | `attachment` | Device attachment info (device path, I/O suspended) | From DRBDR status |
+| `type` | Observed DRBD type (Diskful/Diskless) | From DRBDR status.activeConfiguration.type |
 | `backingVolume` | Backing volume info (size, state, LVG name, thin pool) | From DRBDR + LLV status |
 | `datameshRevision` | Datamesh revision for which the replica was fully configured | Set when DRBDConfigured=True |
 | `drbd` | DRBD-specific status info (config, actual, status) | From RVR spec + DRBDR |
@@ -483,8 +486,9 @@ flowchart TD
     ReconcileBV -->|BackingVolumeReady| RVRStatusConds
     ReconcileDRBD --> DRBDRManaged
     ReconcileDRBD -->|DRBDConfigured| RVRStatusConds
-    ReconcileDRBD -->|drbdrReconciliationCache, addresses| RVRStatusFields
+    ReconcileDRBD -->|drbdrReconciliationCache| RVRStatusFields
 
+    DRBDR --> EnsureStatusAddrType
     DRBDR --> EnsureStatusAttach
     DRBDR --> EnsureStatusPeers
     DRBDR --> EnsureBVStatus
@@ -495,6 +499,7 @@ flowchart TD
     DRBDR --> EnsureCondReady
     LLVs --> EnsureBVStatus
 
+    EnsureStatusAddrType -->|addresses, type| RVRStatusFields
     EnsureStatusAttach -->|attachment| RVRStatusFields
     EnsureStatusPeers -->|peers| RVRStatusFields
     EnsureBVStatus -->|backingVolume| RVRStatusFields
@@ -609,12 +614,12 @@ flowchart TD
     CheckAgent -->|Yes| CheckState{DRBDR state?}
     CheckState -->|Pending| SetApplying[DRBDConfigured=False ApplyingConfiguration]
     CheckState -->|Failed| SetFailed[DRBDConfigured=False ConfigurationFailed]
-    CheckState -->|True| CopyAddresses[Copy addresses to RVR status]
+    CheckState -->|True| CheckTargetType
 
     SetApplying --> End5([Done])
     SetFailed --> End6([Done])
 
-    CopyAddresses --> CheckTargetType{targetType != intendedType?}
+    CheckTargetType{targetType != intendedType?}
     CheckTargetType -->|Yes| SetWaitBV1[DRBDConfigured=False WaitingForBackingVolume]
     SetWaitBV1 --> End9([Done])
 
@@ -647,7 +652,6 @@ flowchart TD
 |--------|-------------|
 | `DRBDResource` | Created/patched/deleted DRBD resource |
 | `DRBDConfigured` condition | Reports DRBD configuration state |
-| `status.addresses` | DRBD addresses assigned to this replica |
 | `status.datameshRevision` | Datamesh revision for which replica was fully configured |
 | `status.drbdrReconciliationCache` | Cache of target configuration (datameshRevision, drbdrGeneration, rvrType) |
 
@@ -708,6 +712,37 @@ flowchart TD
 | Output | Description |
 |--------|-------------|
 | `SatisfyEligibleNodes` condition | Reports eligibility verification result |
+
+---
+
+### ensureStatusAddressesAndType Details
+
+**Purpose**: Updates the `status.addresses` and `status.type` fields from DRBDR status.
+
+**Algorithm**:
+
+```mermaid
+flowchart TD
+    Start([Start]) --> CheckDRBDR{DRBDR exists?}
+    CheckDRBDR -->|No| ClearFields[Clear addresses and type]
+    ClearFields --> End1([Done])
+
+    CheckDRBDR -->|Yes| ApplyAddresses[Apply addresses from drbdr.Status.Addresses]
+    ApplyAddresses --> ApplyType[Apply type from drbdr.Status.ActiveConfiguration.Type]
+    ApplyType --> End2([Done])
+```
+
+**Data Flow**:
+
+| Input | Description |
+|-------|-------------|
+| `drbdr.Status.Addresses` | DRBD addresses assigned to this replica |
+| `drbdr.Status.ActiveConfiguration.Type` | Observed DRBD type (Diskful/Diskless) |
+
+| Output | Description |
+|--------|-------------|
+| `status.addresses` | DRBD addresses (cloned from DRBDR) |
+| `status.type` | Observed DRBD type (Access/TieBreaker appear as Diskless) |
 
 ---
 
@@ -784,7 +819,7 @@ flowchart TD
 | Input | Description |
 |-------|-------------|
 | `drbdr.Status.ActiveConfiguration.Role` | Actual attachment state |
-| `datameshMember.Role` | Intended attachment state |
+| `datameshMember.Attached` | Intended attachment state |
 | `drbdr.Status.DeviceIOSuspended` | I/O suspension flag |
 
 | Output | Description |
