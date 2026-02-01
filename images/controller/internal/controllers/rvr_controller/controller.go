@@ -254,34 +254,40 @@ func (h *rspEventHandler) enqueueRVRsForRSPAndNodes(
 
 // computeChangedEligibleNodes returns node names where eligibleNodes entry changed
 // (added, removed, or modified).
-// Precondition: both oldNodes and newNodes are sorted by NodeName.
+//
+// Uses EligibleNodesSortedIndex to handle potentially unsorted input safely.
+// In the common case (already sorted), this adds only O(n) overhead with zero allocations.
 func computeChangedEligibleNodes(oldNodes, newNodes []v1alpha1.ReplicatedStoragePoolEligibleNode) []string {
+	// Build sorted indices — O(n) if already sorted, O(n log n) otherwise.
+	oldIdx := v1alpha1.NewEligibleNodesSortedIndex(oldNodes)
+	newIdx := v1alpha1.NewEligibleNodesSortedIndex(newNodes)
+
 	var changed []string
 
 	// Merge-style traversal of two sorted lists.
 	i, j := 0, 0
-	for i < len(oldNodes) || j < len(newNodes) {
+	for i < oldIdx.Len() || j < newIdx.Len() {
 		switch {
-		case i >= len(oldNodes):
+		case i >= oldIdx.Len():
 			// Remaining newNodes are added.
-			changed = append(changed, newNodes[j].NodeName)
+			changed = append(changed, newIdx.NodeName(j))
 			j++
-		case j >= len(newNodes):
+		case j >= newIdx.Len():
 			// Remaining oldNodes are removed.
-			changed = append(changed, oldNodes[i].NodeName)
+			changed = append(changed, oldIdx.NodeName(i))
 			i++
-		case oldNodes[i].NodeName < newNodes[j].NodeName:
+		case oldIdx.NodeName(i) < newIdx.NodeName(j):
 			// Node removed.
-			changed = append(changed, oldNodes[i].NodeName)
+			changed = append(changed, oldIdx.NodeName(i))
 			i++
-		case oldNodes[i].NodeName > newNodes[j].NodeName:
+		case oldIdx.NodeName(i) > newIdx.NodeName(j):
 			// Node added.
-			changed = append(changed, newNodes[j].NodeName)
+			changed = append(changed, newIdx.NodeName(j))
 			j++
 		default:
 			// Same node — check if modified.
-			if !eligibleNodeEqual(oldNodes[i], newNodes[j]) {
-				changed = append(changed, oldNodes[i].NodeName)
+			if !eligibleNodeEqual(*oldIdx.At(i), *newIdx.At(j)) {
+				changed = append(changed, oldIdx.NodeName(i))
 			}
 			i++
 			j++

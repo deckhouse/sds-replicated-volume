@@ -172,6 +172,25 @@ var _ = Describe("enqueueEligibleNodesDelta", func() {
 
 		Expect(requestNames(q.items)).To(ConsistOf("node-2"))
 	})
+
+	It("handles unsorted input correctly (builds sorted index)", func() {
+		// Unsorted old nodes.
+		oldNodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-c"},
+			{NodeName: "node-a"},
+			{NodeName: "node-b"},
+		}
+		// Unsorted new nodes with changes.
+		newNodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-b"},
+			{NodeName: "node-d"}, // Added.
+			{NodeName: "node-a"},
+		}
+		// node-c removed, node-d added.
+		enqueueEligibleNodesDelta(q, oldNodes, newNodes)
+
+		Expect(requestNames(q.items)).To(ConsistOf("node-c", "node-d"))
+	})
 })
 
 var _ = Describe("mapDRBDResourceToNode", func() {

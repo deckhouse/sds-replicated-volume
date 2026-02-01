@@ -41,3 +41,18 @@ Anything that may change the working tree, git history, or touches external syst
 - If edits touch CRD types (`api/v1alpha1`), run `bash hack/generate_code.sh` **only after confirmation**.
 - Prefer tasks/commands above over ad-hoc custom pipelines to keep CI parity.
 
+## Prepare for commit
+
+When the user asks to "prepare for commit" (or similar: "pre-commit checks", "run all checks before commit"), run the following commands in order:
+
+```bash
+go work sync && \
+bash hack/go-mod-tidy && \
+bash hack/generate_code.sh && \
+bash hack/run-linter.sh && \
+bash hack/run-tests.sh
+```
+
+Since this batch includes commands that modify the working tree (`go-mod-tidy`, `generate_code.sh`), the agent MUST ask for confirmation before running.
+
+If any command fails, stop and report the error.
