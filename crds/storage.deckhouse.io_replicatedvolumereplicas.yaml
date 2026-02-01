@@ -150,6 +150,26 @@ spec:
                   type: object
                 maxItems: 32
                 type: array
+              attachment:
+                description: |-
+                  Attachment contains information about the device attachment state.
+                  Only set when the replica is attached on the node.
+                properties:
+                  devicePath:
+                    description: |-
+                      DevicePath is the block device path when the replica is attached.
+                      Example: /dev/drbd10012.
+                    maxLength: 256
+                    minLength: 1
+                    type: string
+                  ioSuspended:
+                    description: IOSuspended indicates whether I/O is suspended on
+                      the device.
+                    type: boolean
+                required:
+                - devicePath
+                - ioSuspended
+                type: object
               backingVolume:
                 description: |-
                   BackingVolume contains information about the backing LVM logical volume.
@@ -251,17 +271,6 @@ spec:
                     - Backing volume is synchronized (resync happens asynchronously if the volume was newly added).
                 format: int64
                 type: integer
-              deviceIOSuspended:
-                description: |-
-                  DeviceIOSuspended indicates whether I/O is suspended on the device.
-                  Only set when the replica is attached.
-                type: boolean
-              devicePath:
-                description: |-
-                  DevicePath is the block device path when the replica is attached.
-                  Example: /dev/drbd10012.
-                maxLength: 256
-                type: string
               drbd:
                 properties:
                   actual:

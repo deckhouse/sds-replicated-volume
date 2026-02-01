@@ -84,13 +84,12 @@ Reconcile (root) [Pure orchestration]
 │   ├── applyRVRAddresses
 │   ├── targetType != intendedType → applyDRBDConfiguredCondFalse WaitingForBackingVolume
 │   └── applyDRBDConfiguredCondTrue Configured / applyDRBDConfiguredCondFalse PendingDatameshJoin
-├── ensureAttachmentStatus ← details
-│   ├── computeIntendedType
-│   ├── applyAttachedCond*
-│   ├── applyRVRDevicePath
-│   └── applyRVRDeviceIOSuspended
+├── ensureStatusAttachment ← details
+│   └── applyRVRAttachment
 ├── ensureStatusPeers ← details
 │   └── mirrors drbdr.Status.Peers to rvr.Status.Peers
+├── ensureConditionAttached ← details
+│   └── applyAttachedCond*
 ├── ensureConditionFullyConnected ← details
 │   └── applyFullyConnectedCond*
 ├── ensureStatusBackingVolume ← details
@@ -108,7 +107,7 @@ Reconcile (root) [Pure orchestration]
 └── patchRVRStatus
 ```
 
-Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureAttachmentStatus`](#ensureattachmentstatus-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeUpToDate`](#ensureconditionbackingvolumeinsync-details), [`ensureStatusQuorum`](#ensurestatusquorum-details), [`ensureConditionReady`](#ensureconditionready-details), [`reconcileSatisfyEligibleNodesCondition`](#reconcilesatisfyeligiblenodescondition-details)
+Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureStatusAttachment`](#ensurestatusattachment-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionAttached`](#ensureconditionattached-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeUpToDate`](#ensureconditionbackingvolumeinsync-details), [`ensureStatusQuorum`](#ensurestatusquorum-details), [`ensureConditionReady`](#ensureconditionready-details), [`reconcileSatisfyEligibleNodesCondition`](#reconcilesatisfyeligiblenodescondition-details)
 
 ## Algorithm Flow
 
@@ -130,13 +129,14 @@ flowchart TD
     DRBDR --> StatusBlock
 
     subgraph StatusBlock [Status Ensure]
-        Attach[ensureAttachmentStatus]
-        Attach --> Peers[ensureStatusPeers]
-        Peers --> PeersCond[ensureConditionFullyConnected]
-        PeersCond --> BVStatus[ensureStatusBackingVolume]
-        BVStatus --> BVInSync[ensureConditionBackingVolumeUpToDate]
-        BVInSync --> StatusQuorum[ensureStatusQuorum]
-        StatusQuorum --> CondReady[ensureConditionReady]
+        StatusAttach[ensureStatusAttachment]
+        StatusAttach --> Peers[ensureStatusPeers]
+        Peers --> BVStatus[ensureStatusBackingVolume]
+        BVStatus --> StatusQuorum[ensureStatusQuorum]
+        StatusQuorum --> CondAttach[ensureConditionAttached]
+        CondAttach --> PeersCond[ensureConditionFullyConnected]
+        PeersCond --> BVInSync[ensureConditionBackingVolumeUpToDate]
+        BVInSync --> CondReady[ensureConditionReady]
         CondReady --> SEN[reconcileSatisfyEligibleNodesCondition]
     end
 
@@ -188,14 +188,9 @@ Indicates whether the replica is attached (primary) and ready for I/O.
 | True | Attached | Attached and ready for I/O |
 | True | DetachmentFailed | Expected detached but still attached |
 | False | AttachmentFailed | Expected attached but not attached |
-| False | Detached | Normally detached |
 | False | IOSuspended | Attached but I/O is suspended |
-| False | NotApplicable | No DRBDR exists |
-| False | Pending | Waiting to become attached |
 | Unknown | AgentNotReady | Agent is not ready |
 | Unknown | ApplyingConfiguration | Configuration is being applied |
-| Unknown | AttachingNotApplicable | Not applicable for this replica type |
-| Unknown | AttachingNotInitialized | Not enough status to decide |
 | (absent) | - | DRBDR does not exist or not relevant for attachment |
 
 ### BackingVolumeUpToDate
@@ -262,15 +257,23 @@ The controller manages the following status fields on RVR:
 | Field | Description | Source |
 |-------|-------------|--------|
 | `addresses` | DRBD addresses assigned to this replica | From DRBDR status |
+| `attachment` | Device attachment info (device path, I/O suspended) | From DRBDR status |
 | `backingVolume` | Backing volume info (size, state, LVG name, thin pool) | From DRBDR + LLV status |
 | `datameshRevision` | Datamesh revision for which the replica was fully configured | Set when DRBDConfigured=True |
-| `deviceIOSuspended` | Whether I/O is suspended on the device | From DRBDR status |
-| `devicePath` | Block device path when attached (e.g., /dev/drbd10012) | From DRBDR status |
 | `drbd` | DRBD-specific status info (config, actual, status) | From RVR spec + DRBDR |
 | `drbdrReconciliationCache` | Cache of target configuration that DRBDR spec was last applied for | Computed |
 | `peers` | Peer connectivity status | Merged from datamesh + DRBDR |
 | `quorum` | Whether this replica has quorum | From DRBDR status |
 | `quorumSummary` | Detailed quorum info (voting peers, thresholds) | Computed from DRBDR + peers |
+
+### Attachment
+
+The `attachment` field is a nested struct with device attachment information. Only set when the replica is attached.
+
+| Field | Description |
+|-------|-------------|
+| `devicePath` | Block device path (e.g., /dev/drbd10012) |
+| `ioSuspended` | Whether I/O is suspended on the device |
 
 ### BackingVolume
 
@@ -450,12 +453,13 @@ flowchart TD
     end
 
     subgraph statusEnsure [Status Ensure]
-        EnsureAttach[ensureAttachmentStatus]
+        EnsureStatusAttach[ensureStatusAttachment]
         EnsureStatusPeers[ensureStatusPeers]
-        EnsureCondFC[ensureConditionFullyConnected]
         EnsureBVStatus[ensureStatusBackingVolume]
-        EnsureBVInSync[ensureConditionBackingVolumeUpToDate]
         EnsureStatusQuorum[ensureStatusQuorum]
+        EnsureCondAttach[ensureConditionAttached]
+        EnsureCondFC[ensureConditionFullyConnected]
+        EnsureBVInSync[ensureConditionBackingVolumeUpToDate]
         EnsureCondReady[ensureConditionReady]
     end
 
@@ -481,22 +485,24 @@ flowchart TD
     ReconcileDRBD -->|DRBDConfigured| RVRStatusConds
     ReconcileDRBD -->|drbdrReconciliationCache, addresses| RVRStatusFields
 
-    DRBDR --> EnsureAttach
+    DRBDR --> EnsureStatusAttach
     DRBDR --> EnsureStatusPeers
-    DRBDR --> EnsureCondFC
     DRBDR --> EnsureBVStatus
+    DRBDR --> EnsureStatusQuorum
+    DRBDR --> EnsureCondAttach
+    DRBDR --> EnsureCondFC
     DRBDR --> EnsureBVInSync
-    DRBDR --> EnsureQuorum
+    DRBDR --> EnsureCondReady
     LLVs --> EnsureBVStatus
 
-    EnsureAttach -->|Attached| RVRStatusConds
-    EnsureAttach -->|devicePath, deviceIOSuspended| RVRStatusFields
+    EnsureStatusAttach -->|attachment| RVRStatusFields
     EnsureStatusPeers -->|peers| RVRStatusFields
-    EnsureCondFC -->|FullyConnected| RVRStatusConds
     EnsureBVStatus -->|backingVolume| RVRStatusFields
+    EnsureStatusQuorum -->|quorum, quorumSummary| RVRStatusFields
+    EnsureCondAttach -->|Attached| RVRStatusConds
+    EnsureCondFC -->|FullyConnected| RVRStatusConds
     EnsureBVInSync -->|BackingVolumeUpToDate| RVRStatusConds
-    EnsureQuorum -->|Ready| RVRStatusConds
-    EnsureQuorum -->|quorum, quorumSummary| RVRStatusFields
+    EnsureCondReady -->|Ready| RVRStatusConds
 ```
 
 ---
@@ -705,17 +711,52 @@ flowchart TD
 
 ---
 
-### ensureAttachmentStatus Details
+### ensureStatusAttachment Details
 
-**Purpose**: Reports whether the replica is attached (primary) and ready for I/O. Updates device path and I/O suspension status.
+**Purpose**: Updates the `status.attachment` field with device path and I/O suspension status.
+
+**Algorithm**:
+
+```mermaid
+flowchart TD
+    Start([Start]) --> CheckGuards{Agent ready AND<br/>config not pending?}
+    CheckGuards -->|No| KeepAsIs[Keep attachment unchanged]
+    KeepAsIs --> End1([Done])
+
+    CheckGuards -->|Yes| CheckAttached{Actual attached?<br/>Role=Primary}
+    CheckAttached -->|No| ClearAttach[Clear status.attachment]
+    ClearAttach --> End2([Done])
+
+    CheckAttached -->|Yes| SetAttach[Set status.attachment<br/>with device path and IOSuspended]
+    SetAttach --> End3([Done])
+```
+
+**Data Flow**:
+
+| Input | Description |
+|-------|-------------|
+| `drbdr.Status.ActiveConfiguration.Role` | Actual attachment state |
+| `drbdr.Status.Device` | Device path when attached |
+| `drbdr.Status.DeviceIOSuspended` | I/O suspension flag |
+
+| Output | Description |
+|--------|-------------|
+| `status.attachment.devicePath` | Block device path |
+| `status.attachment.ioSuspended` | I/O suspension status |
+
+---
+
+### ensureConditionAttached Details
+
+**Purpose**: Reports whether the replica is attached (primary) and ready for I/O.
 
 **Algorithm**:
 
 ```mermaid
 flowchart TD
     Start([Start]) --> CheckRelevant{DRBDR exists AND<br/>intended or actual attached?}
-    CheckRelevant -->|No| RemoveAll[Remove condition, clear device fields]
-    RemoveAll --> End1([Done])
+    CheckRelevant -->|No| RemoveCond[Remove condition]
+    RemoveCond --> End1([Done])
 
     CheckRelevant -->|Yes| CheckAgent{Agent ready?}
     CheckAgent -->|No| SetUnknown1[Unknown: AgentNotReady]
@@ -732,13 +773,10 @@ flowchart TD
     EvalState -->|Attached, IO suspended| SetFalse2[False: IOSuspended]
     EvalState -->|Attached, IO ok| SetTrue2[True: Attached]
 
-    SetFalse1 --> UpdateFields1[Clear device fields]
-    SetTrue1 --> UpdateFields2[Set device fields from DRBDR]
-    SetFalse2 --> UpdateFields2
-    SetTrue2 --> UpdateFields2
-
-    UpdateFields1 --> End4([Done])
-    UpdateFields2 --> End5([Done])
+    SetFalse1 --> End4([Done])
+    SetTrue1 --> End5([Done])
+    SetFalse2 --> End6([Done])
+    SetTrue2 --> End7([Done])
 ```
 
 **Data Flow**:
@@ -747,14 +785,11 @@ flowchart TD
 |-------|-------------|
 | `drbdr.Status.ActiveConfiguration.Role` | Actual attachment state |
 | `datameshMember.Role` | Intended attachment state |
-| `drbdr.Status.Device` | Device path when attached |
 | `drbdr.Status.DeviceIOSuspended` | I/O suspension flag |
 
 | Output | Description |
 |--------|-------------|
 | `Attached` condition | Reports attachment state |
-| `status.devicePath` | Block device path |
-| `status.deviceIOSuspended` | I/O suspension status |
 
 ---
 
