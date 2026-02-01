@@ -142,14 +142,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 		// Ensure RVR status fields reflect the current DRBDR state.
 		eo := flow.MergeEnsures(
-			ensureAttachmentStatus(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
-
 			// Ensure status fields.
+			ensureStatusAttachment(rf.Ctx(), rvr, drbdr, agentReady, drbdrConfigurationPending),
 			ensureStatusPeers(rf.Ctx(), rvr, drbdr),
 			ensureStatusBackingVolume(rf.Ctx(), rvr, drbdr, llvs),
 			ensureStatusQuorum(rf.Ctx(), rvr, drbdr),
 
 			// Ensure conditions.
+			ensureConditionAttached(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
 			ensureConditionFullyConnected(rf.Ctx(), rvr, drbdr, datamesh, agentReady),
 			ensureConditionBackingVolumeUpToDate(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
 			ensureConditionReady(rf.Ctx(), rvr, drbdr, agentReady, drbdrConfigurationPending),
@@ -176,8 +176,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return outcome.ToCtrl()
 }
 
-// ensureAttachmentStatus ensures the RVR attachment-related status fields reflect the current DRBDR state.
-func ensureAttachmentStatus(
+// ensureConditionAttached ensures the RVR Attached condition reflects the current DRBDR state.
+func ensureConditionAttached(
 	ctx context.Context,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	drbdr *v1alpha1.DRBDResource,
@@ -185,7 +185,7 @@ func ensureAttachmentStatus(
 	agentReady bool,
 	drbdrConfigurationPending bool,
 ) (outcome flow.EnsureOutcome) {
-	ef := flow.BeginEnsure(ctx, "attachment-status")
+	ef := flow.BeginEnsure(ctx, "condition-attached")
 	defer ef.OnEnd(&outcome)
 
 	changed := false
@@ -199,8 +199,6 @@ func ensureAttachmentStatus(
 	// Guard: Condition not relevant (no DRBDR OR (not intended AND not actual)).
 	if drbdr == nil || (!intendedAttached && !actualAttached) {
 		changed = applyAttachedCondAbsent(rvr) || changed
-		changed = applyRVRDevicePath(rvr, "") || changed
-		changed = applyRVRDeviceIOSuspended(rvr, nil) || changed
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
@@ -211,7 +209,6 @@ func ensureAttachmentStatus(
 		changed = applyAttachedCondUnknown(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAgentNotReady,
 			"Agent is not ready") || changed
-		// DevicePath/DeviceIOSuspended not changed.
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
@@ -220,7 +217,6 @@ func ensureAttachmentStatus(
 		changed = applyAttachedCondUnknown(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonApplyingConfiguration,
 			"Configuration is being applied") || changed
-		// DevicePath/DeviceIOSuspended not changed.
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
@@ -231,34 +227,59 @@ func ensureAttachmentStatus(
 		changed = applyAttachedCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAttachmentFailed,
 			"Expected to be attached, but not attached; see DRBDConfigured condition") || changed
-		changed = applyRVRDevicePath(rvr, "") || changed
-		changed = applyRVRDeviceIOSuspended(rvr, nil) || changed
 
 	case !intendedAttached && actualAttached:
 		// Should be detached, but still attached.
 		changed = applyAttachedCondTrue(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonDetachmentFailed,
 			"Expected to be detached, but still attached; see DRBDConfigured condition") || changed
-		changed = applyRVRDevicePath(rvr, drbdr.Status.Device) || changed
-		changed = applyRVRDeviceIOSuspended(rvr, drbdr.Status.DeviceIOSuspended) || changed
 
 	case actualAttached && drbdr.Status.DeviceIOSuspended != nil && *drbdr.Status.DeviceIOSuspended:
 		// Attached but I/O is suspended.
 		changed = applyAttachedCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonIOSuspended,
 			"Attached, but I/O is suspended; see Ready and DRBDConfigured conditions") || changed
-		changed = applyRVRDevicePath(rvr, drbdr.Status.Device) || changed
-		changed = applyRVRDeviceIOSuspended(rvr, drbdr.Status.DeviceIOSuspended) || changed
 
 	default:
 		// intendedAttached AND actualAttached AND I/O not suspended — all good.
 		changed = applyAttachedCondTrue(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAttached,
 			"Attached and ready for I/O") || changed
-		changed = applyRVRDevicePath(rvr, drbdr.Status.Device) || changed
-		changed = applyRVRDeviceIOSuspended(rvr, drbdr.Status.DeviceIOSuspended) || changed
 	}
 
+	return ef.Ok().ReportChangedIf(changed)
+}
+
+// ensureStatusAttachment ensures the RVR Attachment status field reflects the current DRBDR state.
+func ensureStatusAttachment(
+	ctx context.Context,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	drbdr *v1alpha1.DRBDResource,
+	agentReady bool,
+	drbdrConfigurationPending bool,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "status-attachment")
+	defer ef.OnEnd(&outcome)
+
+	// Guard: agent not ready or configuration pending — keep attachment as is.
+	if !agentReady || drbdrConfigurationPending {
+		return ef.Ok()
+	}
+
+	// Compute actual attached state.
+	actualAttached := drbdr != nil &&
+		drbdr.Status.ActiveConfiguration != nil &&
+		drbdr.Status.ActiveConfiguration.Role == v1alpha1.DRBDRolePrimary
+
+	var attachment *v1alpha1.ReplicatedVolumeReplicaStatusAttachment
+	if actualAttached {
+		attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  drbdr.Status.Device,
+			IOSuspended: drbdr.Status.DeviceIOSuspended != nil && *drbdr.Status.DeviceIOSuspended,
+		}
+	}
+
+	changed := applyRVRAttachment(rvr, attachment)
 	return ef.Ok().ReportChangedIf(changed)
 }
 
@@ -530,7 +551,7 @@ func ensureConditionBackingVolumeUpToDate(
 	agentReady bool,
 	drbdrConfigurationPending bool,
 ) (outcome flow.EnsureOutcome) {
-	ef := flow.BeginEnsure(ctx, "condition-backing-volume-in-sync")
+	ef := flow.BeginEnsure(ctx, "condition-backing-volume-up-to-date")
 	defer ef.OnEnd(&outcome)
 
 	changed := false
@@ -2265,23 +2286,13 @@ func applyReadyCondUnknown(rvr *v1alpha1.ReplicatedVolumeReplica, reason, messag
 	})
 }
 
-// applyRVRDevicePath sets DevicePath on RVR status.
-func applyRVRDevicePath(rvr *v1alpha1.ReplicatedVolumeReplica, path string) bool {
-	if rvr.Status.DevicePath == path {
+// applyRVRAttachment sets Attachment on RVR status.
+// If attachment is nil, clears the Attachment field.
+func applyRVRAttachment(rvr *v1alpha1.ReplicatedVolumeReplica, attachment *v1alpha1.ReplicatedVolumeReplicaStatusAttachment) bool {
+	if ptr.Equal(rvr.Status.Attachment, attachment) {
 		return false
 	}
-	rvr.Status.DevicePath = path
-	return true
-}
-
-// applyRVRDeviceIOSuspended sets DeviceIOSuspended on RVR status.
-func applyRVRDeviceIOSuspended(rvr *v1alpha1.ReplicatedVolumeReplica, suspended *bool) bool {
-	if (rvr.Status.DeviceIOSuspended == nil) == (suspended == nil) {
-		if suspended == nil || *rvr.Status.DeviceIOSuspended == *suspended {
-			return false
-		}
-	}
-	rvr.Status.DeviceIOSuspended = suspended
+	rvr.Status.Attachment = attachment
 	return true
 }
 

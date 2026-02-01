@@ -5903,10 +5903,10 @@ var _ = Describe("reconcileLLVsDeletion", func() {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ensureAttachmentStatus tests
+// ensureConditionAttached tests
 //
 
-var _ = Describe("ensureAttachmentStatus", func() {
+var _ = Describe("ensureConditionAttached", func() {
 	var (
 		ctx context.Context
 		rvr *v1alpha1.ReplicatedVolumeReplica
@@ -5919,23 +5919,18 @@ var _ = Describe("ensureAttachmentStatus", func() {
 		}
 	})
 
-	It("removes condition and clears fields when drbdr is nil", func() {
-		// Set up existing condition and fields
+	It("removes condition when drbdr is nil", func() {
 		obju.SetStatusCondition(rvr, metav1.Condition{
 			Type:   v1alpha1.ReplicatedVolumeReplicaCondAttachedType,
 			Status: metav1.ConditionTrue,
 			Reason: "PreviousReason",
 		})
-		rvr.Status.DevicePath = "/dev/drbd1000"
-		rvr.Status.DeviceIOSuspended = boolPtr(false)
 
-		outcome := ensureAttachmentStatus(ctx, rvr, nil, nil, true, false)
+		outcome := ensureConditionAttached(ctx, rvr, nil, nil, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
 		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)).To(BeNil())
-		Expect(rvr.Status.DevicePath).To(BeEmpty())
-		Expect(rvr.Status.DeviceIOSuspended).To(BeNil())
 	})
 
 	It("removes condition when neither intended nor actual attached", func() {
@@ -5950,13 +5945,13 @@ var _ = Describe("ensureAttachmentStatus", func() {
 			Role: v1alpha1.DRBDRoleSecondary,
 		}
 
-		outcome := ensureAttachmentStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)).To(BeNil())
 	})
 
-	It("sets Unknown when agent not ready with intendedAttached", func() {
+	It("sets Unknown when agent not ready", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
@@ -5965,13 +5960,12 @@ var _ = Describe("ensureAttachmentStatus", func() {
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRolePrimary, // intended attached
+			Role: v1alpha1.DRBDRolePrimary,
 		}
 
-		outcome := ensureAttachmentStatus(ctx, rvr, drbdr, member, false, false) // agent not ready
+		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, false, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		Expect(outcome.DidChange()).To(BeTrue())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
@@ -5990,7 +5984,7 @@ var _ = Describe("ensureAttachmentStatus", func() {
 			Role: v1alpha1.DRBDRolePrimary,
 		}
 
-		outcome := ensureAttachmentStatus(ctx, rvr, drbdr, member, true, true) // config pending
+		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, true)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
@@ -5999,60 +5993,55 @@ var _ = Describe("ensureAttachmentStatus", func() {
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonApplyingConfiguration))
 	})
 
-	It("sets False with AttachmentFailed when intended attached but not actual", func() {
+	It("sets False with AttachmentFailed when intended but not actual", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
-					Role: v1alpha1.DRBDRoleSecondary, // not attached
+					Role: v1alpha1.DRBDRoleSecondary,
 				},
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRolePrimary, // intended attached
+			Role: v1alpha1.DRBDRolePrimary,
 		}
 
-		outcome := ensureAttachmentStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAttachmentFailed))
-		Expect(rvr.Status.DevicePath).To(BeEmpty())
-		Expect(rvr.Status.DeviceIOSuspended).To(BeNil())
 	})
 
-	It("sets True with DetachmentFailed when not intended but actual attached", func() {
+	It("sets True with DetachmentFailed when not intended but actual", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Device:            "/dev/drbd1000",
 				DeviceIOSuspended: boolPtr(false),
 				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
-					Role: v1alpha1.DRBDRolePrimary, // actual attached
+					Role: v1alpha1.DRBDRolePrimary,
 				},
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRoleSecondary, // not intended attached
+			Role: v1alpha1.DRBDRoleSecondary,
 		}
 
-		outcome := ensureAttachmentStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonDetachmentFailed))
-		Expect(rvr.Status.DevicePath).To(Equal("/dev/drbd1000"))
-		Expect(rvr.Status.DeviceIOSuspended).NotTo(BeNil())
-		Expect(*rvr.Status.DeviceIOSuspended).To(BeFalse())
 	})
 
 	It("sets False with IOSuspended when attached but I/O suspended", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Device:            "/dev/drbd1000",
-				DeviceIOSuspended: boolPtr(true), // I/O suspended
+				DeviceIOSuspended: boolPtr(true),
 				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
 					Role: v1alpha1.DRBDRolePrimary,
 				},
@@ -6062,18 +6051,16 @@ var _ = Describe("ensureAttachmentStatus", func() {
 			Role: v1alpha1.DRBDRolePrimary,
 		}
 
-		outcome := ensureAttachmentStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonIOSuspended))
-		Expect(rvr.Status.DevicePath).To(Equal("/dev/drbd1000"))
-		Expect(*rvr.Status.DeviceIOSuspended).To(BeTrue())
 	})
 
-	It("sets True with Attached when both intended and actual attached", func() {
+	It("sets True with Attached when both intended and actual", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Device:            "/dev/drbd1000",
@@ -6087,7 +6074,7 @@ var _ = Describe("ensureAttachmentStatus", func() {
 			Role: v1alpha1.DRBDRolePrimary,
 		}
 
-		outcome := ensureAttachmentStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
@@ -6095,11 +6082,9 @@ var _ = Describe("ensureAttachmentStatus", func() {
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAttached))
 		Expect(cond.Message).To(ContainSubstring("ready for I/O"))
-		Expect(rvr.Status.DevicePath).To(Equal("/dev/drbd1000"))
-		Expect(*rvr.Status.DeviceIOSuspended).To(BeFalse())
 	})
 
-	It("returns no change when already in sync", func() {
+	It("is idempotent", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Device:            "/dev/drbd1000",
@@ -6113,35 +6098,168 @@ var _ = Describe("ensureAttachmentStatus", func() {
 			Role: v1alpha1.DRBDRolePrimary,
 		}
 
-		// First call to set up state
-		outcome1 := ensureAttachmentStatus(ctx, rvr, drbdr, member, true, false)
+		outcome1 := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
 		Expect(outcome1.Error()).NotTo(HaveOccurred())
 		Expect(outcome1.DidChange()).To(BeTrue())
 
-		// Second call should report no change
-		outcome2 := ensureAttachmentStatus(ctx, rvr, drbdr, member, true, false)
+		outcome2 := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
 		Expect(outcome2.DidChange()).To(BeFalse())
 	})
+})
 
-	It("sets True with Attached when actual attached without member (nil member)", func() {
+// ──────────────────────────────────────────────────────────────────────────────
+// ensureStatusAttachment tests
+//
+
+var _ = Describe("ensureStatusAttachment", func() {
+	var (
+		ctx context.Context
+		rvr *v1alpha1.ReplicatedVolumeReplica
+	)
+
+	BeforeEach(func() {
+		ctx = logr.NewContext(context.Background(), logr.Discard())
+		rvr = &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+	})
+
+	It("clears attachment when drbdr is nil", func() {
+		rvr.Status.Attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
+		}
+
+		outcome := ensureStatusAttachment(ctx, rvr, nil, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Attachment).To(BeNil())
+	})
+
+	It("clears attachment when not actual attached", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role: v1alpha1.DRBDRoleSecondary,
+				},
+			},
+		}
+		rvr.Status.Attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
+		}
+
+		outcome := ensureStatusAttachment(ctx, rvr, drbdr, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Attachment).To(BeNil())
+	})
+
+	It("keeps attachment unchanged when agent not ready", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Device:            "/dev/drbd1000",
 				DeviceIOSuspended: boolPtr(false),
 				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
-					Role: v1alpha1.DRBDRolePrimary, // actual attached
+					Role: v1alpha1.DRBDRolePrimary,
+				},
+			},
+		}
+		rvr.Status.Attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd999",
+			IOSuspended: true,
+		}
+
+		outcome := ensureStatusAttachment(ctx, rvr, drbdr, false, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rvr.Status.Attachment.DevicePath).To(Equal("/dev/drbd999"))
+		Expect(rvr.Status.Attachment.IOSuspended).To(BeTrue())
+	})
+
+	It("keeps attachment unchanged when configuration pending", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Device:            "/dev/drbd1000",
+				DeviceIOSuspended: boolPtr(false),
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role: v1alpha1.DRBDRolePrimary,
+				},
+			},
+		}
+		rvr.Status.Attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd999",
+			IOSuspended: true,
+		}
+
+		outcome := ensureStatusAttachment(ctx, rvr, drbdr, true, true)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rvr.Status.Attachment.DevicePath).To(Equal("/dev/drbd999"))
+	})
+
+	It("sets attachment when actual attached", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Device:            "/dev/drbd1000",
+				DeviceIOSuspended: boolPtr(false),
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role: v1alpha1.DRBDRolePrimary,
 				},
 			},
 		}
 
-		outcome := ensureAttachmentStatus(ctx, rvr, drbdr, nil, true, false)
+		outcome := ensureStatusAttachment(ctx, rvr, drbdr, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
-		Expect(cond).NotTo(BeNil())
-		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonDetachmentFailed))
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Attachment).NotTo(BeNil())
+		Expect(rvr.Status.Attachment.DevicePath).To(Equal("/dev/drbd1000"))
+		Expect(rvr.Status.Attachment.IOSuspended).To(BeFalse())
+	})
+
+	It("sets IOSuspended=true when I/O is suspended", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Device:            "/dev/drbd1000",
+				DeviceIOSuspended: boolPtr(true),
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role: v1alpha1.DRBDRolePrimary,
+				},
+			},
+		}
+
+		outcome := ensureStatusAttachment(ctx, rvr, drbdr, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(rvr.Status.Attachment).NotTo(BeNil())
+		Expect(rvr.Status.Attachment.DevicePath).To(Equal("/dev/drbd1000"))
+		Expect(rvr.Status.Attachment.IOSuspended).To(BeTrue())
+	})
+
+	It("is idempotent", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Device:            "/dev/drbd1000",
+				DeviceIOSuspended: boolPtr(false),
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role: v1alpha1.DRBDRolePrimary,
+				},
+			},
+		}
+
+		outcome1 := ensureStatusAttachment(ctx, rvr, drbdr, true, false)
+		Expect(outcome1.Error()).NotTo(HaveOccurred())
+		Expect(outcome1.DidChange()).To(BeTrue())
+
+		outcome2 := ensureStatusAttachment(ctx, rvr, drbdr, true, false)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
 	})
 })
 
@@ -6768,7 +6886,7 @@ var _ = Describe("Ready condition apply helpers", func() {
 // Status field apply helpers tests
 //
 
-var _ = Describe("applyRVRDevicePath", func() {
+var _ = Describe("applyRVRAttachment", func() {
 	var rvr *v1alpha1.ReplicatedVolumeReplica
 
 	BeforeEach(func() {
@@ -6777,65 +6895,68 @@ var _ = Describe("applyRVRDevicePath", func() {
 		}
 	})
 
-	It("sets path and returns true", func() {
-		changed := applyRVRDevicePath(rvr, "/dev/drbd1000")
+	It("sets attachment from nil and returns true", func() {
+		changed := applyRVRAttachment(rvr, &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
+		})
 		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DevicePath).To(Equal("/dev/drbd1000"))
+		Expect(rvr.Status.Attachment).NotTo(BeNil())
+		Expect(rvr.Status.Attachment.DevicePath).To(Equal("/dev/drbd1000"))
+		Expect(rvr.Status.Attachment.IOSuspended).To(BeFalse())
 	})
 
-	It("clears path when empty string", func() {
-		rvr.Status.DevicePath = "/dev/drbd1000"
-		changed := applyRVRDevicePath(rvr, "")
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DevicePath).To(BeEmpty())
-	})
-
-	It("is idempotent", func() {
-		applyRVRDevicePath(rvr, "/dev/drbd1000")
-		changed := applyRVRDevicePath(rvr, "/dev/drbd1000")
-		Expect(changed).To(BeFalse())
-	})
-})
-
-var _ = Describe("applyRVRDeviceIOSuspended", func() {
-	var rvr *v1alpha1.ReplicatedVolumeReplica
-
-	BeforeEach(func() {
-		rvr = &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+	It("clears attachment when nil", func() {
+		rvr.Status.Attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
 		}
-	})
-
-	It("sets value from nil", func() {
-		changed := applyRVRDeviceIOSuspended(rvr, boolPtr(true))
+		changed := applyRVRAttachment(rvr, nil)
 		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DeviceIOSuspended).NotTo(BeNil())
-		Expect(*rvr.Status.DeviceIOSuspended).To(BeTrue())
-	})
-
-	It("clears value to nil", func() {
-		rvr.Status.DeviceIOSuspended = boolPtr(true)
-		changed := applyRVRDeviceIOSuspended(rvr, nil)
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DeviceIOSuspended).To(BeNil())
+		Expect(rvr.Status.Attachment).To(BeNil())
 	})
 
 	It("is idempotent for nil", func() {
-		changed := applyRVRDeviceIOSuspended(rvr, nil)
+		changed := applyRVRAttachment(rvr, nil)
 		Expect(changed).To(BeFalse())
 	})
 
 	It("is idempotent for same value", func() {
-		applyRVRDeviceIOSuspended(rvr, boolPtr(false))
-		changed := applyRVRDeviceIOSuspended(rvr, boolPtr(false))
+		applyRVRAttachment(rvr, &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
+		})
+		changed := applyRVRAttachment(rvr, &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
+		})
 		Expect(changed).To(BeFalse())
 	})
 
-	It("changes value from true to false", func() {
-		rvr.Status.DeviceIOSuspended = boolPtr(true)
-		changed := applyRVRDeviceIOSuspended(rvr, boolPtr(false))
+	It("updates DevicePath", func() {
+		rvr.Status.Attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
+		}
+		changed := applyRVRAttachment(rvr, &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd2000",
+			IOSuspended: false,
+		})
 		Expect(changed).To(BeTrue())
-		Expect(*rvr.Status.DeviceIOSuspended).To(BeFalse())
+		Expect(rvr.Status.Attachment.DevicePath).To(Equal("/dev/drbd2000"))
+	})
+
+	It("updates IOSuspended", func() {
+		rvr.Status.Attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
+		}
+		changed := applyRVRAttachment(rvr, &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: true,
+		})
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.Attachment.IOSuspended).To(BeTrue())
 	})
 })
 

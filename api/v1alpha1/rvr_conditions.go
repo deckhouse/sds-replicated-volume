@@ -19,19 +19,14 @@ package v1alpha1
 const (
 	// ReplicatedVolumeReplicaCondAttachedType indicates whether the replica is attached.
 	//
-	// Reasons describe attachment state, progress, or applicability.
-	ReplicatedVolumeReplicaCondAttachedType                          = "Attached"
-	ReplicatedVolumeReplicaCondAttachedReasonAgentNotReady           = "AgentNotReady"           // Agent is not ready.
-	ReplicatedVolumeReplicaCondAttachedReasonApplyingConfiguration   = "ApplyingConfiguration"   // Configuration is being applied.
-	ReplicatedVolumeReplicaCondAttachedReasonAttached                = "Attached"                // Attached and ready for I/O.
-	ReplicatedVolumeReplicaCondAttachedReasonAttachingNotApplicable  = "AttachingNotApplicable"  // Not applicable for this replica type.
-	ReplicatedVolumeReplicaCondAttachedReasonAttachingNotInitialized = "AttachingNotInitialized" // Not enough status to decide.
-	ReplicatedVolumeReplicaCondAttachedReasonAttachmentFailed        = "AttachmentFailed"        // Expected to be attached, but not attached.
-	ReplicatedVolumeReplicaCondAttachedReasonDetached                = "Detached"                // Detached.
-	ReplicatedVolumeReplicaCondAttachedReasonDetachmentFailed        = "DetachmentFailed"        // Expected to be detached, but still attached.
-	ReplicatedVolumeReplicaCondAttachedReasonIOSuspended             = "IOSuspended"             // Attached but I/O is suspended.
-	ReplicatedVolumeReplicaCondAttachedReasonNotApplicable           = "NotApplicable"           // No DRBDR exists.
-	ReplicatedVolumeReplicaCondAttachedReasonPending                 = "Pending"                 // Waiting to become attached.
+	// Reasons describe attachment state or progress.
+	ReplicatedVolumeReplicaCondAttachedType                        = "Attached"
+	ReplicatedVolumeReplicaCondAttachedReasonAgentNotReady         = "AgentNotReady"         // Agent is not ready.
+	ReplicatedVolumeReplicaCondAttachedReasonApplyingConfiguration = "ApplyingConfiguration" // Configuration is being applied.
+	ReplicatedVolumeReplicaCondAttachedReasonAttached              = "Attached"              // Attached and ready for I/O.
+	ReplicatedVolumeReplicaCondAttachedReasonAttachmentFailed      = "AttachmentFailed"      // Expected to be attached, but not attached.
+	ReplicatedVolumeReplicaCondAttachedReasonDetachmentFailed      = "DetachmentFailed"      // Expected to be detached, but still attached.
+	ReplicatedVolumeReplicaCondAttachedReasonIOSuspended           = "IOSuspended"           // Attached but I/O is suspended.
 )
 
 const (

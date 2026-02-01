@@ -205,16 +205,11 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	DatameshRevision int64 `json:"datameshRevision,omitempty"`
 
-	// DevicePath is the block device path when the replica is attached.
-	// Example: /dev/drbd10012.
-	// +kubebuilder:validation:MaxLength=256
+	// Attachment contains information about the device attachment state.
+	// Only set when the replica is attached on the node.
+	// +patchStrategy=merge
 	// +optional
-	DevicePath string `json:"devicePath,omitempty"`
-
-	// DeviceIOSuspended indicates whether I/O is suspended on the device.
-	// Only set when the replica is attached.
-	// +optional
-	DeviceIOSuspended *bool `json:"deviceIOSuspended,omitempty"`
+	Attachment *ReplicatedVolumeReplicaStatusAttachment `json:"attachment,omitempty" patchStrategy:"merge"`
 
 	// Quorum indicates whether this replica has quorum.
 	// +optional
@@ -238,6 +233,19 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +patchStrategy=merge
 	// +optional
 	DRBDRReconciliationCache DRBDRReconciliationCache `json:"drbdrReconciliationCache,omitempty" patchStrategy:"merge"`
+}
+
+// ReplicatedVolumeReplicaStatusAttachment contains information about the device attachment state.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeReplicaStatusAttachment struct {
+	// DevicePath is the block device path when the replica is attached.
+	// Example: /dev/drbd10012.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=256
+	DevicePath string `json:"devicePath"`
+
+	// IOSuspended indicates whether I/O is suspended on the device.
+	IOSuspended bool `json:"ioSuspended"`
 }
 
 // BackingVolume contains information about the backing LVM logical volume.
