@@ -143,6 +143,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		// Ensure RVR status fields reflect the current DRBDR state.
 		eo := flow.MergeEnsures(
 			// Ensure status fields.
+			ensureStatusAddressesAndType(rf.Ctx(), rvr, drbdr),
 			ensureStatusAttachment(rf.Ctx(), rvr, drbdr, agentReady, drbdrConfigurationPending),
 			ensureStatusPeers(rf.Ctx(), rvr, drbdr),
 			ensureStatusBackingVolume(rf.Ctx(), rvr, drbdr, llvs),
@@ -280,6 +281,52 @@ func ensureStatusAttachment(
 	}
 
 	changed := applyRVRAttachment(rvr, attachment)
+	return ef.Ok().ReportChangedIf(changed)
+}
+
+// ensureStatusAddressesAndType ensures the RVR status Addresses and Type fields
+// reflect the current DRBDR state.
+func ensureStatusAddressesAndType(
+	ctx context.Context,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	drbdr *v1alpha1.DRBDResource,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "status-addresses-and-type")
+	defer ef.OnEnd(&outcome)
+
+	changed := false
+
+	// Guard: no DRBDR -> clear addresses and type.
+	if drbdr == nil {
+		if len(rvr.Status.Addresses) > 0 {
+			rvr.Status.Addresses = nil
+			changed = true
+		}
+		if rvr.Status.Type != "" {
+			rvr.Status.Type = ""
+			changed = true
+		}
+		return ef.Ok().ReportChangedIf(changed)
+	}
+
+	// Apply addresses from DRBDR status.
+	if !slices.Equal(rvr.Status.Addresses, drbdr.Status.Addresses) {
+		rvr.Status.Addresses = slices.Clone(drbdr.Status.Addresses)
+		changed = true
+	}
+
+	// Apply type from DRBDR active configuration.
+	// Note: Access and TieBreaker both appear as Diskless here because they cannot be
+	// distinguished from the replica's own status.
+	var typ v1alpha1.DRBDResourceType
+	if drbdr.Status.ActiveConfiguration != nil {
+		typ = drbdr.Status.ActiveConfiguration.Type
+	}
+	if rvr.Status.Type != typ {
+		rvr.Status.Type = typ
+		changed = true
+	}
+
 	return ef.Ok().ReportChangedIf(changed)
 }
 
@@ -1793,14 +1840,13 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 
 	// At this point DRBDR is configured (Configured condition is True).
 
-	// 10. DRBDR is configured — copy addresses to RVR status.
+	// 10. DRBDR is configured — check addresses are populated.
 	if len(rvr.Status.Addresses) == 0 {
 		changed = applyDRBDConfiguredCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration,
 			"Waiting for DRBD addresses") || changed
 		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
 	}
-	changed = applyRVRAddresses(rvr, drbdr.Status.Addresses) || changed
 
 	// 11. If targetType != intendedType, DRBDR is configured as TieBreaker
 	// but we want Diskful — waiting for backing volume to become ready.
@@ -2364,15 +2410,6 @@ func applyRVRDRBDRReconciliationCache(
 		return false
 	}
 	rvr.Status.DRBDRReconciliationCache = target
-	return true
-}
-
-// applyRVRAddresses sets Addresses on RVR status.
-func applyRVRAddresses(rvr *v1alpha1.ReplicatedVolumeReplica, addresses []v1alpha1.DRBDResourceAddressStatus) bool {
-	if slices.Equal(rvr.Status.Addresses, addresses) {
-		return false
-	}
-	rvr.Status.Addresses = slices.Clone(addresses)
 	return true
 }
 

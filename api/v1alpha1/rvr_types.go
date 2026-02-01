@@ -184,6 +184,19 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	Addresses []DRBDResourceAddressStatus `json:"addresses,omitempty"`
 
+	// Type reflects the currently observed DRBD configuration type
+	// from drbdr.Status.ActiveConfiguration.Type.
+	//
+	// This is the observed DRBD type (Diskful or Diskless), not the intended spec.type
+	// which can be Diskful/Diskless/Access/TieBreaker.
+	//
+	// Note: Access and TieBreaker both appear as Diskless here because they cannot be
+	// distinguished from the replica's own status. The difference is only visible
+	// in how other replicas treat this replica's vote in quorum calculation.
+	// +kubebuilder:validation:Enum=Diskful;Diskless
+	// +optional
+	Type DRBDResourceType `json:"type,omitempty"`
+
 	// BackingVolume contains information about the backing LVM logical volume.
 	// Only set for Diskful replicas.
 	// +patchStrategy=merge
