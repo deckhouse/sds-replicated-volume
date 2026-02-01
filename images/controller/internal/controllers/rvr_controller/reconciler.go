@@ -365,7 +365,7 @@ func ensureStatusPeers(
 	// Ensure rvr.Status.Peers has the right length.
 	if cap(rvr.Status.Peers) < n {
 		// Need to grow capacity.
-		newPeers := make([]v1alpha1.PeerStatus, n)
+		newPeers := make([]v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus, n)
 		copy(newPeers, rvr.Status.Peers)
 		rvr.Status.Peers = newPeers
 	}
@@ -595,7 +595,7 @@ func ensureStatusBackingVolume(
 			}
 		} else {
 			// Build the target BackingVolume from LLV + DRBDR.
-			target := v1alpha1.BackingVolume{
+			target := v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
 				LVMVolumeGroupName: llv.Spec.LVMVolumeGroupName,
 				State:              drbdr.Status.DiskState,
 			}
@@ -792,7 +792,7 @@ func ensureConditionBackingVolumeUpToDate(
 
 // computeHasUpToDatePeer returns true if any peer has UpToDate disk.
 // Note: if peer is not connected, its BackingVolumeState won't be UpToDate.
-func computeHasUpToDatePeer(peers []v1alpha1.PeerStatus) bool {
+func computeHasUpToDatePeer(peers []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
 	for i := range peers {
 		if peers[i].BackingVolumeState == v1alpha1.DiskStateUpToDate {
 			return true
@@ -802,7 +802,7 @@ func computeHasUpToDatePeer(peers []v1alpha1.PeerStatus) bool {
 }
 
 // computeHasConnectedAttachedPeer returns true if any peer is attached and connected.
-func computeHasConnectedAttachedPeer(peers []v1alpha1.PeerStatus) bool {
+func computeHasConnectedAttachedPeer(peers []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
 	for i := range peers {
 		if peers[i].Attached && len(peers[i].ConnectionEstablishedOn) > 0 {
 			return true
@@ -812,7 +812,7 @@ func computeHasConnectedAttachedPeer(peers []v1alpha1.PeerStatus) bool {
 }
 
 // computeHasAnyAttachedPeer returns true if any peer is attached.
-func computeHasAnyAttachedPeer(peers []v1alpha1.PeerStatus) bool {
+func computeHasAnyAttachedPeer(peers []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
 	for i := range peers {
 		if peers[i].Attached {
 			return true
@@ -845,7 +845,7 @@ func ensureStatusQuorum(
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
-	summary := &v1alpha1.QuorumSummary{}
+	summary := &v1alpha1.ReplicatedVolumeReplicaStatusQuorumSummary{}
 
 	// Count connected voting/UpToDate peers.
 	for i := range rvr.Status.Peers {
@@ -1771,7 +1771,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 	targetType := computeTargetType(intendedType, targetBV.LLVNameOrEmpty())
 
 	// 6. Create or update DRBDR.
-	var targetDRBDRReconciliationCache v1alpha1.DRBDRReconciliationCache
+	var targetDRBDRReconciliationCache v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache
 	if drbdr == nil {
 		// Compute target DRBDR spec.
 		targetSpec := computeTargetDRBDRSpec(rvr, drbdr, datamesh, member, targetBV.LLVNameOrEmpty(), targetType)
@@ -2001,8 +2001,8 @@ func computeTargetDRBDRReconciliationCache(
 	datameshRevision int64,
 	drbdrGeneration int64,
 	rvrType v1alpha1.ReplicaType,
-) v1alpha1.DRBDRReconciliationCache {
-	return v1alpha1.DRBDRReconciliationCache{
+) v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache {
+	return v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 		DatameshRevision: datameshRevision,
 		DRBDRGeneration:  drbdrGeneration,
 		RVRType:          rvrType,
@@ -2394,7 +2394,7 @@ func applyRVRAttachment(rvr *v1alpha1.ReplicatedVolumeReplica, attachment *v1alp
 // with the target values computed during this reconciliation.
 func applyRVRDRBDRReconciliationCache(
 	rvr *v1alpha1.ReplicatedVolumeReplica,
-	target v1alpha1.DRBDRReconciliationCache,
+	target v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache,
 ) bool {
 	if rvr.Status.DRBDRReconciliationCache == target {
 		return false

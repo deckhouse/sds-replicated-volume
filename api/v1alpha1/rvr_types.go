@@ -201,7 +201,21 @@ type ReplicatedVolumeReplicaStatus struct {
 	// Only set for Diskful replicas.
 	// +patchStrategy=merge
 	// +optional
-	BackingVolume *BackingVolume `json:"backingVolume,omitempty" patchStrategy:"merge"`
+	BackingVolume *ReplicatedVolumeReplicaStatusBackingVolume `json:"backingVolume,omitempty" patchStrategy:"merge"`
+
+	// DatameshPending describes the pending datamesh membership state for this replica.
+	//
+	// This field contains changes that have been validated and are ready from the RVR's
+	// perspective, waiting to be applied to the datamesh. The controller sets this field
+	// only after all prerequisites are satisfied.
+	//
+	// For example, member=true will not be set until scheduling completes: the spec.nodeName,
+	// spec.lvmVolumeGroupName, and spec.lvmVolumeGroupThinPoolName fields must be populated
+	// and validated before the replica can be marked as a pending datamesh member.
+	//
+	// +patchStrategy=merge
+	// +optional
+	DatameshPending *ReplicatedVolumeReplicaStatusDatameshPending `json:"datameshPending,omitempty" patchStrategy:"merge"`
 
 	// DatameshRevision is the datamesh revision for which the replica was fully configured.
 	//
@@ -231,7 +245,7 @@ type ReplicatedVolumeReplicaStatus struct {
 	// QuorumSummary provides detailed quorum information.
 	// +patchStrategy=merge
 	// +optional
-	QuorumSummary *QuorumSummary `json:"quorumSummary,omitempty" patchStrategy:"merge"`
+	QuorumSummary *ReplicatedVolumeReplicaStatusQuorumSummary `json:"quorumSummary,omitempty" patchStrategy:"merge"`
 
 	// Peers contains the status of connections to peer replicas.
 	// +patchMergeKey=name
@@ -240,12 +254,12 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +listMapKey=name
 	// +kubebuilder:validation:MaxItems=32
 	// +optional
-	Peers []PeerStatus `json:"peers,omitempty" patchStrategy:"merge" patchMergeKey:"name"`
+	Peers []ReplicatedVolumeReplicaStatusPeerStatus `json:"peers,omitempty" patchStrategy:"merge" patchMergeKey:"name"`
 
 	// DRBDRReconciliationCache holds cached values for DRBDResource reconciliation optimization.
 	// +patchStrategy=merge
 	// +optional
-	DRBDRReconciliationCache DRBDRReconciliationCache `json:"drbdrReconciliationCache,omitempty" patchStrategy:"merge"`
+	DRBDRReconciliationCache ReplicatedVolumeReplicaStatusDRBDRReconciliationCache `json:"drbdrReconciliationCache,omitempty" patchStrategy:"merge"`
 }
 
 // ReplicatedVolumeReplicaStatusAttachment contains information about the device attachment state.
@@ -261,9 +275,9 @@ type ReplicatedVolumeReplicaStatusAttachment struct {
 	IOSuspended bool `json:"ioSuspended"`
 }
 
-// BackingVolume contains information about the backing LVM logical volume.
+// ReplicatedVolumeReplicaStatusBackingVolume contains information about the backing LVM logical volume.
 // +kubebuilder:object:generate=true
-type BackingVolume struct {
+type ReplicatedVolumeReplicaStatusBackingVolume struct {
 	// Size is the size of the backing LVM logical volume.
 	// +optional
 	Size *resource.Quantity `json:"size,omitempty"`
@@ -284,9 +298,9 @@ type BackingVolume struct {
 	LVMVolumeGroupThinPoolName string `json:"lvmVolumeGroupThinPoolName,omitempty"`
 }
 
-// QuorumSummary provides detailed quorum information for a replica.
+// ReplicatedVolumeReplicaStatusQuorumSummary provides detailed quorum information for a replica.
 // +kubebuilder:object:generate=true
-type QuorumSummary struct {
+type ReplicatedVolumeReplicaStatusQuorumSummary struct {
 	// ConnectedVotingPeers is the number of voting peers (TieBreaker/Diskful) with established connection.
 	// +kubebuilder:default=0
 	ConnectedVotingPeers int `json:"connectedVotingPeers"`
@@ -304,9 +318,9 @@ type QuorumSummary struct {
 	QuorumMinimumRedundancy *int `json:"quorumMinimumRedundancy,omitempty"`
 }
 
-// PeerStatus represents the status of a connection to a peer replica.
+// ReplicatedVolumeReplicaStatusPeerStatus represents the status of a connection to a peer replica.
 // +kubebuilder:object:generate=true
-type PeerStatus struct {
+type ReplicatedVolumeReplicaStatusPeerStatus struct {
 	// Name is the name of the peer ReplicatedVolumeReplica.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
@@ -336,12 +350,12 @@ type PeerStatus struct {
 	BackingVolumeState DiskState `json:"backingVolumeState,omitempty"`
 }
 
-// DRBDRReconciliationCache holds cached values used to optimize DRBDResource reconciliation.
+// ReplicatedVolumeReplicaStatusDRBDRReconciliationCache holds cached values used to optimize DRBDResource reconciliation.
 // These fields track the TARGET configuration that was last computed for DRBDR spec,
 // NOT the actual state that DRBDR has applied. They allow the controller to skip
 // redundant spec comparisons when the input parameters have not changed.
 // +kubebuilder:object:generate=true
-type DRBDRReconciliationCache struct {
+type ReplicatedVolumeReplicaStatusDRBDRReconciliationCache struct {
 	// DatameshRevision is the datamesh revision for which DRBDResource spec was last computed.
 	DatameshRevision int64 `json:"datameshRevision,omitempty"`
 
@@ -351,6 +365,109 @@ type DRBDRReconciliationCache struct {
 	// RVRType is the effective replica type for which DRBDResource spec was last computed.
 	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
 	RVRType ReplicaType `json:"rvrType,omitempty"`
+}
+
+// ReplicatedVolumeReplicaStatusDatameshPending describes pending datamesh changes for this replica.
+//
+// This field contains changes that have been validated and are ready from the RVR's
+// perspective, waiting to be applied to the datamesh. The controller sets this field
+// only after all prerequisites are satisfied (e.g., scheduling completed, spec fields
+// populated and validated).
+//
+// # Supported Operations
+//
+// 1. Datamesh Join (member=true): Add this replica to the datamesh with specified role.
+//   - Role is required when joining.
+//   - For Diskful role: lvmVolumeGroupName is required, thinPoolName is optional.
+//   - For TieBreaker/Access roles: no backing volume fields allowed.
+//
+// 2. Datamesh Leave (member=false): Remove this replica from the datamesh.
+//   - No other fields allowed when leaving.
+//
+// 3. Role Change (member=nil, role set): Change the role of an existing datamesh member.
+//   - For change to Diskful: lvmVolumeGroupName required, thinPoolName optional.
+//   - For change to TieBreaker/Access: no backing volume fields allowed.
+//
+// 4. Backing Volume Change (member=nil, role=nil): Replace backing volume for existing Diskful.
+//   - Used when migrating storage (e.g., between LVGs or between thick/thin).
+//   - Only lvmVolumeGroupName (and optionally thinPoolName) is set, no role.
+//   - Implies the replica is already Diskful and remains Diskful.
+//
+// # Field Combinations and Their Meanings
+//
+// Join as Diskful on thin pool:
+//
+//	member: true, role: Diskful, lvmVolumeGroupName: "vg-1", thinPoolName: "tp-1"
+//
+// Join as Diskful on thick LVM:
+//
+//	member: true, role: Diskful, lvmVolumeGroupName: "vg-1"
+//
+// Join as TieBreaker (diskless quorum voter):
+//
+//	member: true, role: TieBreaker
+//
+// Join as Access (diskless data accessor):
+//
+//	member: true, role: Access
+//
+// Leave datamesh:
+//
+//	member: false
+//
+// Change role to Diskful:
+//
+//	role: Diskful, lvmVolumeGroupName: "vg-2", thinPoolName: "tp-2"
+//
+// Change role to TieBreaker:
+//
+//	role: TieBreaker
+//
+// Change role to Access:
+//
+//	role: Access
+//
+// Replace backing volume for existing Diskful (migrate from thin to thick):
+//
+//	lvmVolumeGroupName: "vg-thick"
+//
+// Replace backing volume for existing Diskful (migrate from thick to thin):
+//
+//	lvmVolumeGroupName: "vg-thin", thinPoolName: "tp-1"
+//
+// Replace backing volume for existing Diskful (migrate between LVGs):
+//
+//	lvmVolumeGroupName: "vg-new", thinPoolName: "tp-1"
+//
+// No pending changes (field is nil or absent):
+//
+//	datameshPending: nil
+//
+// +kubebuilder:object:generate=true
+// +kubebuilder:validation:XValidation:rule="!has(self.member) || self.member == true || (!has(self.role) && !has(self.lvmVolumeGroupName) && !has(self.thinPoolName))",message="when member is false, role/lvmVolumeGroupName/thinPoolName must not be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.member) || self.member == false || has(self.role)",message="when member is true, role is required"
+// +kubebuilder:validation:XValidation:rule="!has(self.role) || self.role != 'Diskful' || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupName is required when role is Diskful"
+// +kubebuilder:validation:XValidation:rule="!has(self.role) || self.role == 'Diskful' || !has(self.lvmVolumeGroupName)",message="lvmVolumeGroupName must not be set when role is not Diskful"
+// +kubebuilder:validation:XValidation:rule="!has(self.thinPoolName) || has(self.lvmVolumeGroupName)",message="thinPoolName requires lvmVolumeGroupName to be set"
+type ReplicatedVolumeReplicaStatusDatameshPending struct {
+	// Member indicates whether this replica should be a datamesh member.
+	// +optional
+	Member *bool `json:"member,omitempty"`
+
+	// Role is the intended role when Member is true.
+	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
+	// +optional
+	Role ReplicaType `json:"role,omitempty"`
+
+	// LVMVolumeGroupName is the LVMVolumeGroup resource name for Diskful replicas.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$`
+	// +optional
+	LVMVolumeGroupName string `json:"lvmVolumeGroupName,omitempty"`
+
+	// ThinPoolName is the thin pool name (optional, for LVMThin storage pools).
+	// +optional
+	ThinPoolName string `json:"thinPoolName,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
