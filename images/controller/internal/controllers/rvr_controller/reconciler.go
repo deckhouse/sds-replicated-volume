@@ -191,7 +191,7 @@ func ensureConditionAttached(
 	changed := false
 
 	// Compute flags.
-	intendedAttached := datameshMember != nil && datameshMember.Role == v1alpha1.DRBDRolePrimary
+	intendedAttached := datameshMember != nil && datameshMember.Attached
 	actualAttached := drbdr != nil &&
 		drbdr.Status.ActiveConfiguration != nil &&
 		drbdr.Status.ActiveConfiguration.Role == v1alpha1.DRBDRolePrimary
@@ -2016,8 +2016,12 @@ func computeTargetDRBDRSpec(
 		spec.Peers = nil
 	} else {
 		// Datamesh determines the role for each member and whether multiple primaries are allowed.
-		spec.Role = member.Role
-		spec.AllowTwoPrimaries = datamesh.AllowTwoPrimaries
+		if member.Attached {
+			spec.Role = v1alpha1.DRBDRolePrimary
+		} else {
+			spec.Role = v1alpha1.DRBDRoleSecondary
+		}
+		spec.AllowTwoPrimaries = datamesh.AllowMultiattach
 
 		// Quorum: diskless node quorum depends on connection to enough UpToDate diskful nodes that have quorum.
 		if spec.Type == v1alpha1.DRBDResourceTypeDiskless {

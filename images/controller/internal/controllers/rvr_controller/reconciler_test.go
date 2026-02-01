@@ -1915,8 +1915,8 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Name: "pvc-abc-1",
-			Role: v1alpha1.DRBDRolePrimary,
+			Name:     "pvc-abc-1",
+			Attached: true,
 		}
 
 		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "", v1alpha1.ReplicaTypeAccess)
@@ -5942,7 +5942,7 @@ var _ = Describe("ensureConditionAttached", func() {
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRoleSecondary,
+			Attached: false,
 		}
 
 		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
@@ -5960,7 +5960,7 @@ var _ = Describe("ensureConditionAttached", func() {
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRolePrimary,
+			Attached: true,
 		}
 
 		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, false, false)
@@ -5981,7 +5981,7 @@ var _ = Describe("ensureConditionAttached", func() {
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRolePrimary,
+			Attached: true,
 		}
 
 		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, true)
@@ -6002,7 +6002,7 @@ var _ = Describe("ensureConditionAttached", func() {
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRolePrimary,
+			Attached: true,
 		}
 
 		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
@@ -6025,7 +6025,7 @@ var _ = Describe("ensureConditionAttached", func() {
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRoleSecondary,
+			Attached: false,
 		}
 
 		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
@@ -6048,7 +6048,7 @@ var _ = Describe("ensureConditionAttached", func() {
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRolePrimary,
+			Attached: true,
 		}
 
 		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
@@ -6071,7 +6071,7 @@ var _ = Describe("ensureConditionAttached", func() {
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRolePrimary,
+			Attached: true,
 		}
 
 		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
@@ -6095,7 +6095,7 @@ var _ = Describe("ensureConditionAttached", func() {
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRolePrimary,
+			Attached: true,
 		}
 
 		outcome1 := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
