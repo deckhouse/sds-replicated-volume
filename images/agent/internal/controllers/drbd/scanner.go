@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -31,24 +30,18 @@ import (
 // Scanner listens for DRBD events via drbdsetup events2 and triggers
 // reconciliation of DRBDResource objects by sending events to the controller.
 type Scanner struct {
-	log      *slog.Logger
-	cl       client.Client
-	nodeName string
-	eventCh  chan event.GenericEvent
+	log     *slog.Logger
+	eventCh chan event.GenericEvent
 }
 
 // NewScanner creates a new Scanner.
 func NewScanner(
-	cl client.Client,
 	log *slog.Logger,
-	nodeName string,
 	eventCh chan event.GenericEvent,
 ) *Scanner {
 	return &Scanner{
-		log:      log.With("name", ScannerName),
-		cl:       cl,
-		nodeName: nodeName,
-		eventCh:  eventCh,
+		log:     log.With("name", ScannerName),
+		eventCh: eventCh,
 	}
 }
 
@@ -82,27 +75,48 @@ func (s *Scanner) runEventsLoop(ctx context.Context) error {
 	var err error
 	var online bool
 
+	// Accumulate DRBD resource names during initial state dump to deduplicate
+	pending := make(map[string]struct{})
+
+	// processName handles a single DRBD resource name - either triggers immediately or accumulates
+	processName := func(drbdName string) {
+		if online {
+			s.triggerReconciliation(ctx, drbdName)
+		} else {
+			pending[drbdName] = struct{}{}
+		}
+	}
+
 	for ev := range drbdsetup.ExecuteEvents2(ctx, &err) {
 		switch tev := ev.(type) {
 		case *drbdsetup.Event:
+			s.log.Debug("DRBD event received", "kind", tev.Kind, "object", tev.Object, "state", tev.State)
+
 			// Check for "exists -" which indicates initial state dump is complete
 			if !online && tev.Kind == "exists" && tev.Object == "-" {
 				online = true
-				s.log.Info("DRBD events online, triggering full reconciliation")
-				// Trigger reconciliation for all resources on this node
-				s.triggerAllResources(ctx)
+				s.log.Info("DRBD events online", "pendingResources", len(pending))
+				// Trigger reconciliation for all accumulated resources
+				for drbdName := range pending {
+					s.triggerReconciliation(ctx, drbdName)
+				}
+				pending = nil // Free memory
 				continue
 			}
 
-			// Extract resource name from event
-			resourceName, ok := tev.State["name"]
+			// Process "name" field (present in most events)
+			drbdName, ok := tev.State["name"]
 			if !ok {
-				s.log.Debug("Skipping event without name", "event", tev)
 				continue
 			}
+			processName(drbdName)
 
-			s.log.Debug("DRBD event received", "kind", tev.Kind, "object", tev.Object, "resource", resourceName)
-			s.triggerReconciliation(ctx, resourceName)
+			// For rename events, also process "new_name"
+			if tev.Kind == "rename" {
+				if newName, ok := tev.State["new_name"]; ok {
+					processName(newName)
+				}
+			}
 
 		case *drbdsetup.UnparsedEvent:
 			s.log.Warn("Unparsed event", "error", tev.Err, "line", tev.RawEventLine)
@@ -116,65 +130,27 @@ func (s *Scanner) runEventsLoop(ctx context.Context) error {
 	return nil
 }
 
-// triggerAllResources lists all DRBDResource objects for this node and triggers reconciliation.
-func (s *Scanner) triggerAllResources(ctx context.Context) {
-	drList := &v1alpha1.DRBDResourceList{}
-	if err := s.cl.List(ctx, drList); err != nil {
-		s.log.Error("Failed to list DRBDResources", "error", err)
-		return
-	}
+// triggerReconciliation sends an event to trigger reconciliation for a specific DRBD resource.
+// It derives the K8S name from the DRBD name and always triggers reconciliation.
+// The reconciler handles finding the actual K8S object or performing orphan cleanup.
+func (s *Scanner) triggerReconciliation(ctx context.Context, drbdName string) {
+	// Derive K8S name from DRBD name using helper
+	k8sName, _ := ParseDRBDResourceNameOnTheNode(drbdName)
 
-	for i := range drList.Items {
-		dr := &drList.Items[i]
-		if dr.Spec.NodeName != s.nodeName {
-			continue
-		}
+	// Create synthetic object to trigger reconciliation
+	dr := &v1alpha1.DRBDResource{}
+	dr.Name = k8sName
 
-		s.sendEvent(ctx, dr)
-	}
-}
-
-// triggerReconciliation sends an event to trigger reconciliation for a specific resource.
-func (s *Scanner) triggerReconciliation(ctx context.Context, resourceName string) {
-	resourceName, nameFormatValid := ParseDRBDResourceNameOnTheNode(resourceName)
-	if !nameFormatValid {
-		s.log.Debug("Resource has invalid name format, will be searching by ActualNameOnTheNode", "resourceName", resourceName)
-	}
-
-	// List DRBDResources to find the one matching the resource name
-	// The DRBD resource name in the API is derived from the DRBDResource.Name
-	drList := &v1alpha1.DRBDResourceList{}
-	if err := s.cl.List(ctx, drList); err != nil {
-		s.log.Error("Failed to list DRBDResources", "error", err)
-		return
-	}
-
-	for i := range drList.Items {
-		dr := &drList.Items[i]
-		if dr.Spec.NodeName != s.nodeName {
-			continue
-		}
-
-		if dr.Spec.ActualNameOnTheNode == resourceName || (nameFormatValid && dr.Name == resourceName) {
-			s.sendEvent(ctx, dr)
-			return
-		}
-	}
-
-	// If not found by exact name, trigger all resources (fallback for initial implementation)
-	s.log.Warn("Resource not found by name", "resourceName", resourceName)
+	s.sendEvent(ctx, dr)
 }
 
 // sendEvent sends a generic event to trigger reconciliation.
+// Blocks until the event is sent or context is cancelled.
 func (s *Scanner) sendEvent(ctx context.Context, dr *v1alpha1.DRBDResource) {
 	select {
 	case s.eventCh <- event.GenericEvent{Object: dr}:
 		s.log.Debug("Triggered reconciliation", "name", dr.Name)
 	case <-ctx.Done():
-		return
-	default:
-		// Channel full, skip this resource this time
-		s.log.Warn("Event channel full, skipping resource", "name", dr.Name)
 	}
 }
 

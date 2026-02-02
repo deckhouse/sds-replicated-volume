@@ -19,6 +19,7 @@ package drbd
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -29,6 +30,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -64,6 +66,10 @@ func (r *Reconciler) Reconcile(
 		return rf.Fail(err).ToCtrl()
 	}
 	if !ok {
+		// K8S object not found by Name - check for orphan/rename scenario
+		if outcome := r.reconcileOrphanDRBD(rf.Ctx(), req.Name); outcome.ShouldReturn() {
+			return outcome.ToCtrl()
+		}
 		return rf.Done().ToCtrl()
 	}
 
@@ -323,4 +329,77 @@ func convergeDRBDState(ctx context.Context, actions DRBDActions, maintenanceMode
 // formatLVMDevicePath formats the path to an LVM logical volume device.
 func formatLVMDevicePath(vgName, lvName string) string {
 	return "/dev/" + vgName + "/" + lvName
+}
+
+// getDRBDRsOnNode lists all DRBDResource objects on this node using the field index.
+// Returns empty slice if none found. Order is unspecified.
+func (r *Reconciler) getDRBDRsOnNode(ctx context.Context) ([]v1alpha1.DRBDResource, error) {
+	list := &v1alpha1.DRBDResourceList{}
+	if err := r.cl.List(ctx, list, client.MatchingFields{
+		indexes.IndexFieldDRBDRByNodeName: r.nodeName,
+	}); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+// reconcileOrphanDRBD handles DRBD resources that have no matching K8S object by Name.
+// It searches by ActualNameOnTheNode and either renames or tears down the DRBD resource.
+func (r *Reconciler) reconcileOrphanDRBD(ctx context.Context, k8sName string) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "reconcile-orphan-drbd")
+	defer rf.OnEnd(&outcome)
+
+	// Derive DRBD name from K8S name using helper
+	drbdName := DRBDNameFromK8SName(k8sName)
+
+	// List all DRBDRs on this node (using index)
+	drbdrs, err := r.getDRBDRsOnNode(rf.Ctx())
+	if err != nil {
+		return rf.Fail(flow.Wrapf(err, "listing DRBDResources on node"))
+	}
+
+	// Find matches by ActualNameOnTheNode
+	var matches []v1alpha1.DRBDResource
+	for _, dr := range drbdrs {
+		if dr.Spec.ActualNameOnTheNode == drbdName {
+			matches = append(matches, dr)
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		// Orphan: no K8S object owns this DRBD resource - tear it down
+		rf.Log().Info("Cleaning up orphan DRBD resource", "drbdName", drbdName)
+		downAction := DownAction{ResourceName: drbdName}
+		if err := downAction.Execute(rf.Ctx()); err != nil {
+			return rf.Fail(err)
+		}
+		return rf.Done()
+
+	case 1:
+		// Rename: K8S object exists with ActualNameOnTheNode matching this DRBD name
+		dr := &matches[0]
+		newName := DRBDNameFromK8SName(dr.Name)
+		rf.Log().Info("Renaming DRBD resource to standard name", "from", drbdName, "to", newName)
+
+		// 1. Rename DRBD resource
+		renameAction := RenameAction{OldName: drbdName, NewName: newName}
+		if err := renameAction.Execute(rf.Ctx()); err != nil {
+			return rf.Fail(err)
+		}
+
+		// 2. Clear ActualNameOnTheNode
+		base := dr.DeepCopy()
+		dr.Spec.ActualNameOnTheNode = ""
+		if err := r.patchDRBDR(rf.Ctx(), dr, base, false); err != nil {
+			return rf.Fail(err)
+		}
+
+		return rf.Done()
+
+	default:
+		// Multiple K8S objects claim this DRBD name - configuration error
+		return rf.Fail(fmt.Errorf("multiple DRBDResources (%d) have ActualNameOnTheNode=%q on node %q",
+			len(matches), drbdName, r.nodeName))
+	}
 }

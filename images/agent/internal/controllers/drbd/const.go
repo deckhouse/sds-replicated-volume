@@ -17,7 +17,6 @@ limitations under the License.
 package drbd
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -30,15 +29,27 @@ const (
 
 	// ScannerName is the name of the DRBD scanner component.
 	ScannerName = "drbd-scanner"
+
+	// drbdNamePrefix is the prefix used for standard DRBD resource names.
+	drbdNamePrefix = "sdsrv-"
 )
 
+// DRBDNameFromK8SName returns the standard DRBD resource name for a K8S name.
+func DRBDNameFromK8SName(k8sName string) string {
+	return drbdNamePrefix + k8sName
+}
+
+// DRBDResourceNameOnTheNode returns the DRBD resource name to use on the node.
+// If ActualNameOnTheNode is set, it returns that; otherwise returns the standard name.
 func DRBDResourceNameOnTheNode(drbdr *v1alpha1.DRBDResource) string {
 	if drbdr.Spec.ActualNameOnTheNode != "" {
 		return drbdr.Spec.ActualNameOnTheNode
 	}
-	return fmt.Sprintf("sdsrv-%s", drbdr.Name)
+	return DRBDNameFromK8SName(drbdr.Name)
 }
 
+// ParseDRBDResourceNameOnTheNode extracts the K8S name from a standard DRBD resource name.
+// Returns the K8S name and true if the name has the standard prefix, or the original name and false otherwise.
 func ParseDRBDResourceNameOnTheNode(s string) (string, bool) {
-	return strings.CutPrefix(s, "sdsrv-")
+	return strings.CutPrefix(s, drbdNamePrefix)
 }

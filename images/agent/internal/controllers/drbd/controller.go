@@ -30,10 +30,16 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
 )
 
 // BuildController creates and registers the DRBD controller and scanner with the manager.
 func BuildController(mgr manager.Manager) error {
+	// Register field indexes
+	if err := indexes.RegisterDRBDRByNodeName(mgr); err != nil {
+		return fmt.Errorf("registering DRBDR index: %w", err)
+	}
+
 	cfg, err := env.GetConfig()
 	if err != nil {
 		return fmt.Errorf("getting config: %w", err)
@@ -49,9 +55,7 @@ func BuildController(mgr manager.Manager) error {
 
 	// Create scanner
 	scanner := NewScanner(
-		cl,
 		log,
-		nodeName,
 		eventCh,
 	)
 

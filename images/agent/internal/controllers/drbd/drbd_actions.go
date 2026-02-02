@@ -323,3 +323,18 @@ func (a DownAction) Execute(ctx context.Context) error {
 func (a DownAction) String() string {
 	return fmt.Sprintf("Down(resource=%s)", a.ResourceName)
 }
+
+// RenameAction renames a DRBD resource locally.
+type RenameAction struct {
+	OldName string
+	NewName string
+}
+
+func (a RenameAction) Execute(ctx context.Context) error {
+	err := drbdsetup.ExecuteRename(ctx, a.OldName, a.NewName)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonRenameFailed)
+}
+
+func (a RenameAction) String() string {
+	return fmt.Sprintf("Rename(from=%s, to=%s)", a.OldName, a.NewName)
+}

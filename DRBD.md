@@ -50,9 +50,14 @@ Each command documents its specific exit codes below. Exit code `10` indicates a
 ```bash
 # Flags work the same as booleans
 --force
+--overwrite-data-of-peer
 --tentative
 --diskless
 --discard-my-data
+--clear-bitmap
+--force-resync
+--assume-peer-has-space
+--assume-clean
 ```
 
 ### Enum/Numeric/String Options (either syntax works):
@@ -284,6 +289,99 @@ drbdsetup disk-options <minor> [options]
 **Notes:**
 - Can change most options online
 - Some changes may require specific states
+
+---
+
+### `detach`
+**Purpose:** Detach the backing device from a replicated device
+
+**Synopsis:**
+```bash
+drbdsetup detach <minor> [options]
+```
+
+**Arguments:**
+- `minor` - Device minor number
+
+**Options:**
+- `--force` (FLAG) - Force detach, fails pending I/O immediately
+- `--diskless` (FLAG) - Mark volume as permanently diskless (intentional diskless client)
+
+**Exit Codes:**
+- `0` - Device detached successfully
+- `10` - Kernel error (e.g., cannot detach last copy of data)
+- `11` - State change error (device state doesn't allow detach)
+- `20` - Invalid arguments or netlink failure
+- `121` - DRBD module not loaded
+
+**Notes:**
+- Without --force: waits for pending I/O to complete
+- With --force: returns immediately, pending I/O fails, device enters Failed state until I/O completes
+- --diskless converts from "temporarily diskless" to "intentionally diskless client"
+- Cannot detach if it would leave no up-to-date copy of the data
+
+---
+
+## ROLE MANAGEMENT
+
+### `primary`
+**Purpose:** Change the role of a node in a resource to primary
+
+**Synopsis:**
+```bash
+drbdsetup primary <resource_name> [options]
+```
+
+**Arguments:**
+- `resource_name` - Resource name
+
+**Options:**
+- `--force` (FLAG) - Force promotion even without up-to-date data
+- `--overwrite-data-of-peer` (FLAG) - Alias for --force (backward compatibility)
+
+**Exit Codes:**
+- `0` - Role changed to primary successfully
+- `10` - Kernel error
+- `11` - State change error (generic state transition failure)
+- `17` - State change error: No up-to-date disk available
+- `20` - Invalid arguments or netlink failure
+- `121` - DRBD module not loaded
+
+**Notes:**
+- Allows mounting or opening devices for writing
+- DRBD normally allows only one primary node at a time (unless --allow-two-primaries is set)
+- **--force is dangerous:** Can lead to split-brain scenarios and data divergence
+- When force-promoting an Inconsistent device, verify data integrity before use
+- If --allow-two-primaries is set, external coordination (cluster manager) required
+
+---
+
+### `secondary`
+**Purpose:** Change the role of a node in a resource to secondary
+
+**Synopsis:**
+```bash
+drbdsetup secondary <resource_name> [options]
+```
+
+**Arguments:**
+- `resource_name` - Resource name
+
+**Options:**
+- `--force` (FLAG) - Force demotion, terminates all pending and new I/O with errors
+
+**Exit Codes:**
+- `0` - Role changed to secondary successfully
+- `10` - Kernel error
+- `11` - State change error (device in use, cannot demote)
+- `20` - Invalid arguments or netlink failure
+- `121` - DRBD module not loaded
+
+**Notes:**
+- Fails if any device in the resource is in use (mounted, open for writing)
+- **--force is dangerous:** Returns immediately but causes all I/O to fail with errors
+- After forced demotion, unmount any filesystems and wait for `force-io-failures` flag to clear (check via `drbdsetup status` or `events2`)
+- Device cannot be used until `force-io-failures` returns to `no`
 
 ---
 
@@ -597,16 +695,124 @@ drbdsetup peer-device-options <resource_name> <peer_node_id> <volume> [options]
 
 ---
 
+## DEVICE OPERATIONS
+
+### `resize`
+**Purpose:** Resize a replicated device after growing backing devices
+
+**Synopsis:**
+```bash
+drbdsetup resize <minor> [options]
+```
+
+**Arguments:**
+- `minor` - Device minor number
+
+**Options:**
+- `--size=<bytes>` (NUMERIC) - New size in bytes (default: size of backing device)
+- `--assume-peer-has-space` (FLAG) - Don't wait for confirmation that peers have grown their backing devices
+- `--assume-clean` (FLAG) - Assume new space is identical on all nodes (skip resync of new space)
+- `--al-stripes=<num>` (NUMERIC) - Change activity log stripes during resize
+- `--al-stripe-size-kB=<num>` (NUMERIC) - Change activity log stripe size during resize
+
+**Exit Codes:**
+- `0` - Resize completed successfully
+- `10` - Kernel error (e.g., backing device not grown, peer doesn't have space)
+- `11` - State change error (e.g., resize not allowed during resync, need one primary node)
+- `20` - Invalid arguments or netlink failure
+- `121` - DRBD module not loaded
+
+**Notes:**
+- Run this command after growing backing devices on all nodes
+- By default, new space is marked out-of-sync and will be resynced
+- **--assume-clean is dangerous:** Only use if you know new space is identical (e.g., extended with zeros on all nodes)
+- **--assume-peer-has-space is risky:** Peer may run out of space during writes
+- One node must be Primary for resize to work
+- Cannot resize during active resync
+
+---
+
+### `new-current-uuid`
+**Purpose:** Generate a new current UUID
+
+**Synopsis:**
+```bash
+drbdsetup new-current-uuid <minor> [options]
+```
+
+**Arguments:**
+- `minor` - Device minor number
+
+**Options:**
+- `--clear-bitmap` (FLAG) - Clear sync bitmap (skip initial resync)
+- `--force-resync` (FLAG) - Force resync from this node to peers
+
+**Exit Codes:**
+- `0` - New UUID generated successfully
+- `10` - Kernel error (e.g., wrong disk state, need protocol C)
+- `11` - State change error
+- `20` - Invalid arguments or netlink failure
+- `121` - DRBD module not loaded
+
+**Notes:**
+- **Three use cases:**
+  1. **Skip initial resync:** `--clear-bitmap` on "Just Created" metadata - marks all nodes UpToDate
+  2. **Force initial resync:** `--force-resync` on "Just Created" metadata - makes this node the source
+  3. **Bootstrap single node:** For creating additional nodes from a copy
+- Requires "Just Created" metadata for --clear-bitmap and --force-resync
+- **--clear-bitmap scenario:** After `drbdadm create-md` on all nodes, do initial handshake, then call with --clear-bitmap
+- **Bootstrap scenario:** On running primary: (1) new-current-uuid --clear-bitmap, (2) copy disk/metadata, (3) new-current-uuid
+- Changes data generation identifiers, affecting resync decisions
+
+---
+
+## ADVANCED OPERATIONS
+
+### `rename-resource`
+**Purpose:** Rename a resource on the local node
+
+**Synopsis:**
+```bash
+drbdsetup rename-resource <resource_name> <new_name>
+```
+
+**Arguments:**
+- `resource_name` - Current resource name
+- `new_name` - New resource name
+
+**Options:** None
+
+**Exit Codes:**
+- `0` - Resource renamed successfully
+- `10` - Kernel error (e.g., resource not found, new name already exists)
+- `20` - Invalid arguments or netlink failure
+- `121` - DRBD module not loaded
+
+**Notes:**
+- **Local operation only** - doesn't affect peer nodes
+- DRBD protocol has no concept of resource names
+- **Strongly recommended:** Run same command on all nodes for consistency
+- Emits a `rename` event on the `events2` stream
+- Resource can have different names on different nodes (technically possible but not recommended)
+
+---
+
 ## SUMMARY TABLE
 
 | Command | Context | Arguments | Key Options | Notes |
 |---------|---------|-----------|-------------|-------|
 | `new-resource` | Resource | name, node_id | resource options | Creates resource object |
 | `resource-options` | Resource | name | resource options | Modifies existing resource |
+| `rename-resource` | Resource | name, new_name | none | Renames resource locally |
 | `down` | Resource | name\|all | none | All-in-one teardown |
 | `new-minor` | Minor | name, minor, vol | device options | Creates /dev/drbd<N> |
 | `attach` | Minor | minor, lower, meta, idx | disk options | Attaches backing storage |
+| `detach` | Minor | minor | --force, --diskless | Detaches backing storage |
 | `disk-options` | Minor | minor | disk options | Changes disk settings |
+| `primary` | Resource | name | --force | Promotes to primary role |
+| `secondary` | Resource | name | --force | Demotes to secondary role |
+| `resize` | Minor | minor | size, assume flags | Grows device size |
+| `new-current-uuid` | Minor | minor | --clear-bitmap, --force-resync | Manages UUID/resync |
 | `new-peer` | Peer | name, node_id | net options | Defines peer node |
 | `del-peer` | Peer | name, node_id | --force | Removes peer config |
 | `forget-peer` | Resource | name, node_id | none | Clears from metadata |
@@ -621,7 +827,7 @@ drbdsetup peer-device-options <resource_name> <peer_node_id> <volume> [options]
 
 ## TYPICAL COMMAND SEQUENCES
 
-**Full resource setup:**
+**Full resource setup and promotion:**
 ```bash
 drbdsetup new-resource myres 1
 drbdsetup new-minor myres 0 0
@@ -629,6 +835,8 @@ drbdsetup attach 0 /dev/sda1 /dev/sda2 0
 drbdsetup new-peer myres 2 --protocol=C
 drbdsetup new-path myres 2 192.168.1.1:7788 192.168.1.2:7788
 drbdsetup connect myres 2
+# After sync completes:
+drbdsetup primary myres
 ```
 
 **Full resource teardown:**
@@ -638,10 +846,33 @@ drbdsetup down myres  # Simple: everything in one command
 
 **Manual teardown (equivalent to down):**
 ```bash
+drbdsetup secondary myres      # Demote if primary
 drbdsetup disconnect myres 2
 drbdsetup detach 0
 drbdsetup del-minor 0
 drbdsetup del-resource myres
 ```
 
-This guide covers all the commands you requested with complete argument, option, exit code, and behavioral information drawn directly from the source code.
+**Resize a device:**
+```bash
+# 1. Grow backing devices on all nodes
+# 2. On one node (must have a primary):
+drbdsetup resize 0
+# New space will be resynced automatically
+```
+
+**Skip initial resync (both nodes):**
+```bash
+# On both nodes:
+drbdadm create-md myres/0
+drbdsetup new-resource myres 1  # (node 2 uses node_id 2)
+drbdsetup new-minor myres 0 0
+drbdsetup attach 0 /dev/sda1 /dev/sda2 0
+drbdsetup new-peer myres 2 --protocol=C
+drbdsetup new-path myres 2 192.168.1.1:7788 192.168.1.2:7788
+drbdsetup connect myres 2
+# After handshake, on one node:
+drbdsetup new-current-uuid 0 --clear-bitmap
+```
+
+This guide covers all the commands with complete argument, option, exit code, and behavioral information drawn directly from the source code.

@@ -38,6 +38,7 @@ const (
 	DRBDResourceCondConfiguredReasonNewPathFailed         = "NewPathFailed"
 	DRBDResourceCondConfiguredReasonNewPeerFailed         = "NewPeerFailed"
 	DRBDResourceCondConfiguredReasonNewResourceFailed     = "NewResourceFailed"
+	DRBDResourceCondConfiguredReasonRenameFailed          = "RenameFailed"
 	DRBDResourceCondConfiguredReasonResourceOptionsFailed = "ResourceOptionsFailed"
 	DRBDResourceCondConfiguredReasonStateQueryFailed      = "StateQueryFailed"
 	DRBDResourceCondConfiguredReasonInMaintenance         = "InMaintenance"

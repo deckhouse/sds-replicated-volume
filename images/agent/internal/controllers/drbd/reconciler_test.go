@@ -35,6 +35,7 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbd"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	fakedrbdsetup "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup/fake"
@@ -83,16 +84,24 @@ func TestReconciler_Reconcile(t *testing.T) {
 	}
 
 	testCases := []reconcileTestCase{
-		// Basic cases - resource lookup
+		// Basic cases - resource lookup and orphan cleanup
 		{
-			name:             "resource not found - no action",
-			drbdr:            nil,
-			expectedCommands: []*fakedrbdsetup.ExpectedCmd{},
+			name:  "resource not found - orphan cleanup",
+			drbdr: nil,
+			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
+				// When DRBD event triggers reconciliation but no K8S object exists,
+				// we clean up the orphan DRBD resource
+				downCmd(testDRBDResName),
+			},
 		},
 		{
-			name:             "resource belongs to different node - skip",
-			drbdr:            drbdrOnNode(testOtherNode, v1alpha1.DRBDResourceStateUp),
-			expectedCommands: []*fakedrbdsetup.ExpectedCmd{},
+			name:  "resource belongs to different node - orphan cleanup",
+			drbdr: drbdrOnNode(testOtherNode, v1alpha1.DRBDResourceStateUp),
+			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
+				// When DRBD event triggers reconciliation but K8S object is for different node,
+				// we clean up the orphan DRBD resource on this node
+				downCmd(testDRBDResName),
+			},
 		},
 
 		// State=Up cases - verifies correct drbdsetup command sequence
@@ -343,7 +352,14 @@ func TestReconciler_Reconcile(t *testing.T) {
 			// Build client with objects
 			clientBuilder := fake.NewClientBuilder().
 				WithScheme(sch).
-				WithStatusSubresource(&v1alpha1.DRBDResource{})
+				WithStatusSubresource(&v1alpha1.DRBDResource{}).
+				WithIndex(&v1alpha1.DRBDResource{}, indexes.IndexFieldDRBDRByNodeName, func(obj client.Object) []string {
+					dr, ok := obj.(*v1alpha1.DRBDResource)
+					if !ok || dr.Spec.NodeName == "" {
+						return nil
+					}
+					return []string{dr.Spec.NodeName}
+				})
 
 			objs := tc.objs
 			if tc.drbdr != nil {
@@ -521,6 +537,15 @@ func delPeerCmd(resourceName string, peerNodeID uint8) *fakedrbdsetup.ExpectedCm
 	return &fakedrbdsetup.ExpectedCmd{
 		Name:         drbdsetup.Command,
 		Args:         drbdsetup.DelPeerArgs(resourceName, peerNodeID),
+		ResultOutput: []byte{},
+		ResultErr:    nil,
+	}
+}
+
+func downCmd(resourceName string) *fakedrbdsetup.ExpectedCmd {
+	return &fakedrbdsetup.ExpectedCmd{
+		Name:         drbdsetup.Command,
+		Args:         drbdsetup.DownArgs(resourceName),
 		ResultOutput: []byte{},
 		ResultErr:    nil,
 	}
