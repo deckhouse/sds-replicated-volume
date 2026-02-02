@@ -173,10 +173,10 @@ spec:
                 description: Datamesh is the computed datamesh configuration for the
                   volume.
                 properties:
-                  allowTwoPrimaries:
+                  allowMultiattach:
                     default: false
-                    description: AllowTwoPrimaries enables two primaries mode for
-                      the datamesh.
+                    description: AllowMultiattach enables multiattach mode for the
+                      datamesh.
                     type: boolean
                   members:
                     description: Members is the list of datamesh members.
@@ -212,6 +212,11 @@ spec:
                           maxItems: 16
                           minItems: 1
                           type: array
+                        attached:
+                          default: false
+                          description: Attached indicates whether this member should
+                            be attached (Primary in DRBD terms).
+                          type: boolean
                         lvmVolumeGroupName:
                           description: LVMVolumeGroupName is the LVMVolumeGroup resource
                             name where this replica should be placed.
@@ -233,9 +238,6 @@ spec:
                             the member is located.
                           minLength: 1
                           type: string
-                        role:
-                          description: Role is the DRBD role of this member.
-                          type: string
                         type:
                           description: Type is the member type (Diskful, Access, or
                             TieBreaker).
@@ -252,6 +254,7 @@ spec:
                           type: string
                       required:
                       - addresses
+                      - attached
                       - name
                       - nodeName
                       - type
@@ -324,7 +327,7 @@ spec:
                     maxItems: 16
                     type: array
                 required:
-                - allowTwoPrimaries
+                - allowMultiattach
                 - members
                 - quorum
                 - quorumMinimumRedundancy

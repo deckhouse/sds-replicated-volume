@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -39,6 +40,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -198,6 +200,71 @@ var _ = Describe("computeActualBackingVolume", func() {
 	})
 })
 
+var _ = Describe("backingVolume.Equal", func() {
+	It("returns true when both are nil", func() {
+		var a, b *backingVolume
+		Expect(a.Equal(b)).To(BeTrue())
+	})
+
+	It("returns false when first is nil and second is not", func() {
+		var a *backingVolume
+		b := &backingVolume{LLVName: "llv-1"}
+		Expect(a.Equal(b)).To(BeFalse())
+	})
+
+	It("returns false when first is not nil and second is nil", func() {
+		a := &backingVolume{LLVName: "llv-1"}
+		var b *backingVolume
+		Expect(a.Equal(b)).To(BeFalse())
+	})
+
+	It("returns true when all fields are equal", func() {
+		a := &backingVolume{
+			LLVName:            "llv-1",
+			LVMVolumeGroupName: "lvg-1",
+			ThinPoolName:       "tp-1",
+			Size:               resource.MustParse("10Gi"),
+		}
+		b := &backingVolume{
+			LLVName:            "llv-1",
+			LVMVolumeGroupName: "lvg-1",
+			ThinPoolName:       "tp-1",
+			Size:               resource.MustParse("10Gi"),
+		}
+		Expect(a.Equal(b)).To(BeTrue())
+	})
+
+	It("returns false when LLVName differs", func() {
+		a := &backingVolume{LLVName: "llv-1", LVMVolumeGroupName: "lvg-1", Size: resource.MustParse("10Gi")}
+		b := &backingVolume{LLVName: "llv-2", LVMVolumeGroupName: "lvg-1", Size: resource.MustParse("10Gi")}
+		Expect(a.Equal(b)).To(BeFalse())
+	})
+
+	It("returns false when LVMVolumeGroupName differs", func() {
+		a := &backingVolume{LLVName: "llv-1", LVMVolumeGroupName: "lvg-1", Size: resource.MustParse("10Gi")}
+		b := &backingVolume{LLVName: "llv-1", LVMVolumeGroupName: "lvg-2", Size: resource.MustParse("10Gi")}
+		Expect(a.Equal(b)).To(BeFalse())
+	})
+
+	It("returns false when ThinPoolName differs", func() {
+		a := &backingVolume{LLVName: "llv-1", ThinPoolName: "tp-1", Size: resource.MustParse("10Gi")}
+		b := &backingVolume{LLVName: "llv-1", ThinPoolName: "tp-2", Size: resource.MustParse("10Gi")}
+		Expect(a.Equal(b)).To(BeFalse())
+	})
+
+	It("returns false when Size differs", func() {
+		a := &backingVolume{LLVName: "llv-1", Size: resource.MustParse("10Gi")}
+		b := &backingVolume{LLVName: "llv-1", Size: resource.MustParse("20Gi")}
+		Expect(a.Equal(b)).To(BeFalse())
+	})
+
+	It("returns true for thick volumes with empty ThinPoolName", func() {
+		a := &backingVolume{LLVName: "llv-1", LVMVolumeGroupName: "lvg-1", ThinPoolName: "", Size: resource.MustParse("10Gi")}
+		b := &backingVolume{LLVName: "llv-1", LVMVolumeGroupName: "lvg-1", ThinPoolName: "", Size: resource.MustParse("10Gi")}
+		Expect(a.Equal(b)).To(BeTrue())
+	})
+})
+
 var _ = Describe("computeIntendedBackingVolume", func() {
 	var rv *v1alpha1.ReplicatedVolume
 
@@ -216,7 +283,7 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 
 	It("panics for nil RVR", func() {
 		Expect(func() {
-			computeIntendedBackingVolume(nil, rv, nil)
+			computeIntendedBackingVolume(nil, rv, nil, nil)
 		}).To(PanicWith("computeIntendedBackingVolume: rvr is nil"))
 	})
 
@@ -225,7 +292,7 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
 		Expect(func() {
-			computeIntendedBackingVolume(rvr, nil, nil)
+			computeIntendedBackingVolume(rvr, nil, nil, nil)
 		}).To(PanicWith("computeIntendedBackingVolume: rv is nil"))
 	})
 
@@ -237,7 +304,7 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			{Name: "rvr-1", Type: v1alpha1.ReplicaTypeAccess},
 		}
 
-		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil)
+		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
 		Expect(intended).To(BeNil())
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
 	})
@@ -254,7 +321,7 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			},
 		}
 
-		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil)
+		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
 		Expect(intended).To(BeNil())
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
 	})
@@ -267,7 +334,7 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			{Name: "rvr-1", Type: v1alpha1.ReplicaTypeDiskful, LVMVolumeGroupName: ""},
 		}
 
-		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil)
+		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
 		Expect(intended).To(BeNil())
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling))
 	})
@@ -284,7 +351,7 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			},
 		}
 
-		bv, reason, _ := computeIntendedBackingVolume(rvr, rv, nil)
+		bv, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
 
 		Expect(bv).NotTo(BeNil())
 		Expect(reason).To(BeEmpty())
@@ -307,7 +374,7 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			},
 		}
 
-		bv, _, _ := computeIntendedBackingVolume(rvr, rv, nil)
+		bv, _, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
 
 		Expect(bv).NotTo(BeNil())
 		Expect(bv.LVMVolumeGroupName).To(Equal("lvg-1"))
@@ -322,7 +389,7 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			},
 		}
 
-		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil)
+		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
 		Expect(intended).To(BeNil())
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
 	})
@@ -337,7 +404,7 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			},
 		}
 
-		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil)
+		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
 		Expect(intended).To(BeNil())
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling))
 	})
@@ -352,9 +419,24 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			},
 		}
 
-		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil)
+		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
 		Expect(intended).To(BeNil())
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling))
+	})
+
+	It("returns WaitingForReplicatedVolume for non-member without rspView", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				NodeName:           "node-1",
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+
+		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
+		Expect(intended).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonWaitingForReplicatedVolume))
 	})
 
 	It("returns backing volume for non-member (diskful, complete config)", func() {
@@ -366,8 +448,17 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 				LVMVolumeGroupName: "lvg-1",
 			},
 		}
+		rspView := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1"},
+				},
+			},
+		}
 
-		bv, _, _ := computeIntendedBackingVolume(rvr, rv, nil)
+		bv, _, _ := computeIntendedBackingVolume(rvr, rv, nil, rspView)
 
 		Expect(bv).NotTo(BeNil())
 		Expect(bv.LVMVolumeGroupName).To(Equal("lvg-1"))
@@ -391,7 +482,7 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			ThinPoolName:       "",
 		}
 
-		bv, _, _ := computeIntendedBackingVolume(rvr, rv, actual)
+		bv, _, _ := computeIntendedBackingVolume(rvr, rv, actual, nil)
 
 		Expect(bv).NotTo(BeNil())
 		Expect(bv.LLVName).To(Equal("llv-old-name"))
@@ -413,11 +504,513 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 			LVMVolumeGroupName: "lvg-old",
 		}
 
-		bv, _, _ := computeIntendedBackingVolume(rvr, rv, actual)
+		bv, _, _ := computeIntendedBackingVolume(rvr, rv, actual, nil)
 
 		Expect(bv).NotTo(BeNil())
 		Expect(bv.LLVName).NotTo(Equal("llv-old-name"))
 		Expect(bv.LLVName).To(HavePrefix("rvr-1-"))
+	})
+
+	// RSP eligibility validation tests (non-member only)
+	It("returns PendingScheduling for non-member when node is not eligible in RSP", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				NodeName:           "node-1",
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+		rspView := &rspEligibilityView{
+			Type:         v1alpha1.ReplicatedStoragePoolTypeLVM,
+			EligibleNode: nil, // node not eligible
+		}
+
+		intended, reason, message := computeIntendedBackingVolume(rvr, rv, nil, rspView)
+		Expect(intended).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling))
+		Expect(message).To(ContainSubstring("not eligible in RSP"))
+	})
+
+	It("returns PendingScheduling for non-member when LVG is not in eligible node list", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				NodeName:           "node-1",
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+		rspView := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-other"}, // different LVG
+				},
+			},
+		}
+
+		intended, reason, message := computeIntendedBackingVolume(rvr, rv, nil, rspView)
+		Expect(intended).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling))
+		Expect(message).To(ContainSubstring("LVG"))
+		Expect(message).To(ContainSubstring("not eligible"))
+	})
+
+	It("returns PendingScheduling for non-member with LVMThin when ThinPool is not in eligible node list", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type:                       v1alpha1.ReplicaTypeDiskful,
+				NodeName:                   "node-1",
+				LVMVolumeGroupName:         "lvg-1",
+				LVMVolumeGroupThinPoolName: "thinpool-1",
+			},
+		}
+		rspView := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1", ThinPoolName: "thinpool-other"}, // different ThinPool
+				},
+			},
+		}
+
+		intended, reason, message := computeIntendedBackingVolume(rvr, rv, nil, rspView)
+		Expect(intended).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling))
+		Expect(message).To(ContainSubstring("ThinPool"))
+		Expect(message).To(ContainSubstring("not eligible"))
+	})
+
+	// ThinPool validation tests (non-member only)
+	It("returns nil for non-member with ThinPool specified but RSP type is LVM", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type:                       v1alpha1.ReplicaTypeDiskful,
+				NodeName:                   "node-1",
+				LVMVolumeGroupName:         "lvg-1",
+				LVMVolumeGroupThinPoolName: "thinpool-1",
+			},
+		}
+		rspView := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVM, // LVM (thick)
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1"},
+				},
+			},
+		}
+
+		intended, reason, message := computeIntendedBackingVolume(rvr, rv, nil, rspView)
+		Expect(intended).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling))
+		Expect(message).To(ContainSubstring("ThinPool"))
+		Expect(message).To(ContainSubstring("LVM (thick)"))
+	})
+
+	It("returns nil for non-member with ThinPool not specified but RSP type is LVMThin", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				NodeName:           "node-1",
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+		rspView := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVMThin, // LVMThin but no ThinPool in RVR
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1", ThinPoolName: "thinpool-1"},
+				},
+			},
+		}
+
+		intended, reason, message := computeIntendedBackingVolume(rvr, rv, nil, rspView)
+		Expect(intended).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling))
+		Expect(message).To(ContainSubstring("ThinPool not specified"))
+		Expect(message).To(ContainSubstring("LVMThin"))
+	})
+
+	It("returns backing volume for non-member with valid LVM config (no ThinPool)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				NodeName:           "node-1",
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+		rspView := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1"},
+				},
+			},
+		}
+
+		bv, _, _ := computeIntendedBackingVolume(rvr, rv, nil, rspView)
+		Expect(bv).NotTo(BeNil())
+		Expect(bv.ThinPoolName).To(BeEmpty())
+	})
+
+	It("returns backing volume for non-member with valid LVMThin config (with ThinPool)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type:                       v1alpha1.ReplicaTypeDiskful,
+				NodeName:                   "node-1",
+				LVMVolumeGroupName:         "lvg-1",
+				LVMVolumeGroupThinPoolName: "thinpool-1",
+			},
+		}
+		rspView := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1", ThinPoolName: "thinpool-1"},
+				},
+			},
+		}
+
+		bv, _, _ := computeIntendedBackingVolume(rvr, rv, nil, rspView)
+		Expect(bv).NotTo(BeNil())
+		Expect(bv.ThinPoolName).To(Equal("thinpool-1"))
+	})
+})
+
+var _ = Describe("computeTargetDatameshPending", func() {
+	It("returns PendingLeave when deleting and is datamesh member", func() {
+		now := metav1.Now()
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rvr-1",
+				DeletionTimestamp: &now,
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1, // Is a member.
+			},
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, nil)
+
+		Expect(target).NotTo(BeNil())
+		Expect(*target.Member).To(BeFalse())
+		Expect(target.Role).To(BeEmpty())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingLeave))
+		Expect(message).To(ContainSubstring("Deletion"))
+	})
+
+	It("returns nil reason when deleting and not a datamesh member", func() {
+		now := metav1.Now()
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rvr-1",
+				DeletionTimestamp: &now,
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 0, // Not a member.
+			},
+		}
+
+		target, reason, _ := computeTargetDatameshPending(rvr, nil)
+
+		Expect(target).To(BeNil())
+		Expect(reason).To(BeEmpty())
+	})
+
+	It("returns PendingScheduling when NodeName is empty", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "", // Not scheduled.
+			},
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, nil)
+
+		Expect(target).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingScheduling))
+		Expect(message).To(ContainSubstring("node"))
+	})
+
+	It("returns PendingScheduling when Diskful has no LVMVolumeGroupName", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "", // Not assigned.
+			},
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, nil)
+
+		Expect(target).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingScheduling))
+		Expect(message).To(ContainSubstring("storage"))
+	})
+
+	It("returns PendingConfiguration when rspView is nil", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, nil)
+
+		Expect(target).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingConfiguration))
+		Expect(message).To(ContainSubstring("storage pool"))
+	})
+
+	It("returns NodeNotEligible when node is not in eligible list", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: nil, // Node not eligible.
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, rspView)
+
+		Expect(target).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonNodeNotEligible))
+		Expect(message).To(ContainSubstring("node-1"))
+	})
+
+	It("returns StorageNotEligible when LVG is not eligible", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-missing",
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1"}, // Different LVG.
+				},
+			},
+		}
+
+		target, reason, _ := computeTargetDatameshPending(rvr, rspView)
+
+		Expect(target).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonStorageNotEligible))
+	})
+
+	It("returns PendingJoin for Diskful non-member", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:                   "node-1",
+				Type:                       v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName:         "lvg-1",
+				LVMVolumeGroupThinPoolName: "tp-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 0, // Not a member.
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1", ThinPoolName: "tp-1"},
+				},
+			},
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, rspView)
+
+		Expect(target).NotTo(BeNil())
+		Expect(*target.Member).To(BeTrue())
+		Expect(target.Role).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(target.LVMVolumeGroupName).To(Equal("lvg-1"))
+		Expect(target.ThinPoolName).To(Equal("tp-1"))
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin))
+		Expect(message).To(ContainSubstring("Diskful"))
+	})
+
+	It("returns PendingJoin for Access non-member", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+				Type:     v1alpha1.ReplicaTypeAccess,
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 0, // Not a member.
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+			},
+		}
+
+		target, reason, _ := computeTargetDatameshPending(rvr, rspView)
+
+		Expect(target).NotTo(BeNil())
+		Expect(*target.Member).To(BeTrue())
+		Expect(target.Role).To(Equal(v1alpha1.ReplicaTypeAccess))
+		Expect(target.LVMVolumeGroupName).To(BeEmpty())
+		Expect(target.ThinPoolName).To(BeEmpty())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin))
+	})
+
+	It("returns PendingRoleChange when type not in sync", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful, // Want Diskful.
+				LVMVolumeGroupName: "lvg-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1,                                 // Is a member.
+				Type:             v1alpha1.DRBDResourceTypeDiskless, // Currently Diskless.
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1"},
+				},
+			},
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, rspView)
+
+		Expect(target).NotTo(BeNil())
+		Expect(target.Member).To(BeNil())
+		Expect(target.Role).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(target.LVMVolumeGroupName).To(Equal("lvg-1"))
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingRoleChange))
+		Expect(message).To(ContainSubstring("role"))
+	})
+
+	It("returns PendingBackingVolumeChange when BV not in sync", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:                   "node-1",
+				Type:                       v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName:         "lvg-new", // Want new LVG.
+				LVMVolumeGroupThinPoolName: "tp-new",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1,
+				Type:             v1alpha1.DRBDResourceTypeDiskful, // Type matches.
+				BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+					LVMVolumeGroupName:         "lvg-old", // Old LVG.
+					LVMVolumeGroupThinPoolName: "tp-old",
+				},
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-new", ThinPoolName: "tp-new"},
+				},
+			},
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, rspView)
+
+		Expect(target).NotTo(BeNil())
+		Expect(target.Member).To(BeNil())
+		Expect(target.Role).To(BeEmpty())
+		Expect(target.LVMVolumeGroupName).To(Equal("lvg-new"))
+		Expect(target.ThinPoolName).To(Equal("tp-new"))
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingBackingVolumeChange))
+		Expect(message).To(ContainSubstring("backing volume"))
+	})
+
+	It("returns Configured when all in sync", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:                   "node-1",
+				Type:                       v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName:         "lvg-1",
+				LVMVolumeGroupThinPoolName: "tp-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1,
+				Type:             v1alpha1.DRBDResourceTypeDiskful, // Type matches.
+				BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+					LVMVolumeGroupName:         "lvg-1", // LVG matches.
+					LVMVolumeGroupThinPoolName: "tp-1",  // TP matches.
+				},
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1", ThinPoolName: "tp-1"},
+				},
+			},
+		}
+
+		target, reason, message := computeTargetDatameshPending(rvr, rspView)
+
+		Expect(target).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured))
+		Expect(message).To(ContainSubstring("configured"))
+	})
+
+	It("returns Configured for Access member with matching type", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+				Type:     v1alpha1.ReplicaTypeAccess,
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1,
+				Type:             v1alpha1.DRBDResourceTypeDiskless, // Access → Diskless.
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+			},
+		}
+
+		target, reason, _ := computeTargetDatameshPending(rvr, rspView)
+
+		Expect(target).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured))
 	})
 })
 
@@ -487,6 +1080,239 @@ var _ = Describe("findLLVByName", func() {
 		result := findLLVByName(llvs, "llv-1")
 
 		Expect(result).To(BeIdenticalTo(&llvs[0]))
+	})
+})
+
+var _ = Describe("findLVGInEligibleNodeByName", func() {
+	It("returns nil when LVG not found", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName: "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+				{Name: "lvg-other"},
+			},
+		}
+
+		Expect(findLVGInEligibleNodeByName(node, "lvg-1")).To(BeNil())
+	})
+
+	It("returns nil for empty LVMVolumeGroups", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:        "node-1",
+			LVMVolumeGroups: nil,
+		}
+
+		Expect(findLVGInEligibleNodeByName(node, "lvg-1")).To(BeNil())
+	})
+
+	It("returns pointer to found LVG by name", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName: "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+				{Name: "lvg-1", ThinPoolName: "tp-1"},
+				{Name: "lvg-2", ThinPoolName: "tp-2"},
+			},
+		}
+
+		result := findLVGInEligibleNodeByName(node, "lvg-1")
+
+		Expect(result).NotTo(BeNil())
+		Expect(result.Name).To(Equal("lvg-1"))
+		Expect(result.ThinPoolName).To(Equal("tp-1"))
+	})
+
+	It("returns pointer to slice element (same memory)", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName: "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+				{Name: "lvg-1"},
+			},
+		}
+
+		result := findLVGInEligibleNodeByName(node, "lvg-1")
+
+		Expect(result).To(BeIdenticalTo(&node.LVMVolumeGroups[0]))
+	})
+})
+
+var _ = Describe("findLVGInEligibleNode", func() {
+	It("returns nil when LVG not found", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName: "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+				{Name: "lvg-other", ThinPoolName: "tp-1"},
+			},
+		}
+
+		Expect(findLVGInEligibleNode(node, "lvg-1", "tp-1")).To(BeNil())
+	})
+
+	It("returns nil when name matches but thinPoolName does not", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName: "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+				{Name: "lvg-1", ThinPoolName: "tp-other"},
+			},
+		}
+
+		Expect(findLVGInEligibleNode(node, "lvg-1", "tp-1")).To(BeNil())
+	})
+
+	It("returns nil for empty LVMVolumeGroups", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:        "node-1",
+			LVMVolumeGroups: nil,
+		}
+
+		Expect(findLVGInEligibleNode(node, "lvg-1", "tp-1")).To(BeNil())
+	})
+
+	It("returns pointer to found LVG when both name and thinPoolName match", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName: "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+				{Name: "lvg-1", ThinPoolName: "tp-1"},
+				{Name: "lvg-1", ThinPoolName: "tp-2"},
+				{Name: "lvg-2", ThinPoolName: "tp-1"},
+			},
+		}
+
+		result := findLVGInEligibleNode(node, "lvg-1", "tp-2")
+
+		Expect(result).NotTo(BeNil())
+		Expect(result.Name).To(Equal("lvg-1"))
+		Expect(result.ThinPoolName).To(Equal("tp-2"))
+	})
+
+	It("returns pointer to slice element (same memory)", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName: "node-1",
+			LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+				{Name: "lvg-1", ThinPoolName: "tp-1"},
+			},
+		}
+
+		result := findLVGInEligibleNode(node, "lvg-1", "tp-1")
+
+		Expect(result).To(BeIdenticalTo(&node.LVMVolumeGroups[0]))
+	})
+})
+
+var _ = Describe("computeEligibilityWarnings", func() {
+	It("returns empty string when no warnings", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: false,
+			NodeReady:     true,
+			AgentReady:    true,
+		}
+
+		result := computeEligibilityWarnings(node, nil)
+
+		Expect(result).To(BeEmpty())
+	})
+
+	It("returns single warning without 'and'", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: true,
+			NodeReady:     true,
+			AgentReady:    true,
+		}
+
+		result := computeEligibilityWarnings(node, nil)
+
+		Expect(result).To(Equal("node is unschedulable"))
+	})
+
+	It("returns two warnings joined with 'and'", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: true,
+			NodeReady:     false,
+			AgentReady:    true,
+		}
+
+		result := computeEligibilityWarnings(node, nil)
+
+		Expect(result).To(Equal("node is unschedulable and node is not ready"))
+	})
+
+	It("returns 3+ warnings with serial comma", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: true,
+			NodeReady:     false,
+			AgentReady:    false,
+		}
+
+		result := computeEligibilityWarnings(node, nil)
+
+		Expect(result).To(Equal("node is unschedulable, node is not ready, and agent is not ready"))
+	})
+
+	It("collects all node warnings", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: true,
+			NodeReady:     false,
+			AgentReady:    false,
+		}
+
+		result := computeEligibilityWarnings(node, nil)
+
+		Expect(result).To(ContainSubstring("node is unschedulable"))
+		Expect(result).To(ContainSubstring("node is not ready"))
+		Expect(result).To(ContainSubstring("agent is not ready"))
+	})
+
+	It("collects LVG warnings", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: false,
+			NodeReady:     true,
+			AgentReady:    true,
+		}
+		lvg := &v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+			Name:          "lvg-1",
+			Unschedulable: true,
+			Ready:         false,
+		}
+
+		result := computeEligibilityWarnings(node, lvg)
+
+		Expect(result).To(Equal("LVMVolumeGroup is unschedulable and LVMVolumeGroup is not ready"))
+	})
+
+	It("collects both node and LVG warnings", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: true,
+			NodeReady:     true,
+			AgentReady:    true,
+		}
+		lvg := &v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+			Name:          "lvg-1",
+			Unschedulable: false,
+			Ready:         false,
+		}
+
+		result := computeEligibilityWarnings(node, lvg)
+
+		Expect(result).To(Equal("node is unschedulable and LVMVolumeGroup is not ready"))
+	})
+
+	It("handles nil LVG (only node warnings)", func() {
+		node := &v1alpha1.ReplicatedStoragePoolEligibleNode{
+			NodeName:      "node-1",
+			Unschedulable: true,
+			NodeReady:     true,
+			AgentReady:    true,
+		}
+
+		result := computeEligibilityWarnings(node, nil)
+
+		Expect(result).To(Equal("node is unschedulable"))
+		Expect(result).NotTo(ContainSubstring("LVMVolumeGroup"))
 	})
 })
 
@@ -836,6 +1662,158 @@ var _ = Describe("isLLVReady", func() {
 // Apply functions tests
 //
 
+var _ = Describe("applyDatameshPending", func() {
+	It("clears datameshPending when target is nil and current exists", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+					Role: v1alpha1.ReplicaTypeDiskful,
+				},
+			},
+		}
+
+		changed := applyDatameshPending(rvr, nil)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DatameshPending).To(BeNil())
+	})
+
+	It("returns false when both target and current are nil", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshPending: nil,
+			},
+		}
+
+		changed := applyDatameshPending(rvr, nil)
+
+		Expect(changed).To(BeFalse())
+		Expect(rvr.Status.DatameshPending).To(BeNil())
+	})
+
+	It("creates datameshPending when target exists and current is nil", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshPending: nil,
+			},
+		}
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+			Member: ptr.To(true),
+			Role:   v1alpha1.ReplicaTypeDiskful,
+		}
+
+		changed := applyDatameshPending(rvr, target)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DatameshPending).NotTo(BeNil())
+		Expect(*rvr.Status.DatameshPending.Member).To(BeTrue())
+		Expect(rvr.Status.DatameshPending.Role).To(Equal(v1alpha1.ReplicaTypeDiskful))
+	})
+
+	It("returns false when current matches target (idempotent)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+					Member:             ptr.To(true),
+					Role:               v1alpha1.ReplicaTypeDiskful,
+					LVMVolumeGroupName: "lvg-1",
+					ThinPoolName:       "tp-1",
+				},
+			},
+		}
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+			Member:             ptr.To(true),
+			Role:               v1alpha1.ReplicaTypeDiskful,
+			LVMVolumeGroupName: "lvg-1",
+			ThinPoolName:       "tp-1",
+		}
+
+		changed := applyDatameshPending(rvr, target)
+
+		Expect(changed).To(BeFalse())
+	})
+
+	It("updates Member field when it differs", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+					Member: ptr.To(true),
+				},
+			},
+		}
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+			Member: ptr.To(false),
+		}
+
+		changed := applyDatameshPending(rvr, target)
+
+		Expect(changed).To(BeTrue())
+		Expect(*rvr.Status.DatameshPending.Member).To(BeFalse())
+	})
+
+	It("updates Role field when it differs", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+					Role: v1alpha1.ReplicaTypeAccess,
+				},
+			},
+		}
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+			Role: v1alpha1.ReplicaTypeDiskful,
+		}
+
+		changed := applyDatameshPending(rvr, target)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DatameshPending.Role).To(Equal(v1alpha1.ReplicaTypeDiskful))
+	})
+
+	It("updates LVMVolumeGroupName field when it differs", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+					LVMVolumeGroupName: "lvg-old",
+				},
+			},
+		}
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+			LVMVolumeGroupName: "lvg-new",
+		}
+
+		changed := applyDatameshPending(rvr, target)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DatameshPending.LVMVolumeGroupName).To(Equal("lvg-new"))
+	})
+
+	It("updates ThinPoolName field when it differs", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+					ThinPoolName: "tp-old",
+				},
+			},
+		}
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+			ThinPoolName: "tp-new",
+		}
+
+		changed := applyDatameshPending(rvr, target)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DatameshPending.ThinPoolName).To(Equal("tp-new"))
+	})
+})
+
 var _ = Describe("applyRVRMetadata", func() {
 	It("adds finalizer when targetFinalizerPresent is true", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
@@ -927,6 +1905,147 @@ var _ = Describe("applyRVRMetadata", func() {
 		}
 
 		changed := applyRVRMetadata(rvr, rv, true, "lvg-1")
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applyConfiguredCondAbsent", func() {
+	It("removes Configured condition when it exists", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		// Pre-set condition.
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+			Status:  metav1.ConditionTrue,
+			Reason:  v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured,
+			Message: "Test",
+		})
+
+		changed := applyConfiguredCondAbsent(rvr)
+
+		Expect(changed).To(BeTrue())
+		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)).To(BeNil())
+	})
+
+	It("returns false when condition already absent (idempotent)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applyConfiguredCondAbsent(rvr)
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applyConfiguredCondUnknown", func() {
+	It("sets Configured condition to Unknown", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applyConfiguredCondUnknown(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingConfiguration,
+			"Waiting for config")
+
+		Expect(changed).To(BeTrue())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingConfiguration))
+		Expect(cond.Message).To(Equal("Waiting for config"))
+	})
+
+	It("returns false when condition already matches (idempotent)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+			Status:  metav1.ConditionUnknown,
+			Reason:  v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingConfiguration,
+			Message: "Waiting for config",
+		})
+
+		changed := applyConfiguredCondUnknown(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingConfiguration,
+			"Waiting for config")
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applyConfiguredCondFalse", func() {
+	It("sets Configured condition to False", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applyConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin,
+			"Waiting to join")
+
+		Expect(changed).To(BeTrue())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin))
+		Expect(cond.Message).To(Equal("Waiting to join"))
+	})
+
+	It("returns false when condition already matches (idempotent)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin,
+			Message: "Waiting to join",
+		})
+
+		changed := applyConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin,
+			"Waiting to join")
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applyConfiguredCondTrue", func() {
+	It("sets Configured condition to True", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applyConfiguredCondTrue(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured,
+			"Replica is configured")
+
+		Expect(changed).To(BeTrue())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured))
+		Expect(cond.Message).To(Equal("Replica is configured"))
+	})
+
+	It("returns false when condition already matches (idempotent)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+			Status:  metav1.ConditionTrue,
+			Reason:  v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured,
+			Message: "Replica is configured",
+		})
+
+		changed := applyConfiguredCondTrue(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured,
+			"Replica is configured")
 
 		Expect(changed).To(BeFalse())
 	})
@@ -1051,13 +2170,13 @@ var _ = Describe("applyLLVMetadata", func() {
 	})
 })
 
-var _ = Describe("applyRVRBackingVolumeReadyCondFalse", func() {
+var _ = Describe("applyBackingVolumeReadyCondFalse", func() {
 	It("sets condition to False", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
 
-		changed := applyRVRBackingVolumeReadyCondFalse(rvr, "TestReason", "Test message")
+		changed := applyBackingVolumeReadyCondFalse(rvr, "TestReason", "Test message")
 
 		Expect(changed).To(BeTrue())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
@@ -1078,19 +2197,19 @@ var _ = Describe("applyRVRBackingVolumeReadyCondFalse", func() {
 			Message: "Test message",
 		})
 
-		changed := applyRVRBackingVolumeReadyCondFalse(rvr, "TestReason", "Test message")
+		changed := applyBackingVolumeReadyCondFalse(rvr, "TestReason", "Test message")
 
 		Expect(changed).To(BeFalse())
 	})
 })
 
-var _ = Describe("applyRVRBackingVolumeReadyCondTrue", func() {
+var _ = Describe("applyBackingVolumeReadyCondTrue", func() {
 	It("sets condition to True", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
 
-		changed := applyRVRBackingVolumeReadyCondTrue(rvr, "Ready", "Backing volume is ready")
+		changed := applyBackingVolumeReadyCondTrue(rvr, "Ready", "Backing volume is ready")
 
 		Expect(changed).To(BeTrue())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
@@ -1101,16 +2220,16 @@ var _ = Describe("applyRVRBackingVolumeReadyCondTrue", func() {
 	})
 })
 
-var _ = Describe("applyRVRConfiguredCondFalse", func() {
+var _ = Describe("applyDRBDConfiguredCondFalse", func() {
 	It("sets condition to False", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
 
-		changed := applyRVRConfiguredCondFalse(rvr, "TestReason", "Test message")
+		changed := applyDRBDConfiguredCondFalse(rvr, "TestReason", "Test message")
 
 		Expect(changed).To(BeTrue())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal("TestReason"))
@@ -1392,97 +2511,7 @@ var _ = Describe("buildDRBDRPeerPaths", func() {
 // DRBDR Compute helpers tests
 //
 
-var _ = Describe("computeActualDRBDRConfigured", func() {
-	It("panics for nil drbdr", func() {
-		Expect(func() {
-			computeActualDRBDRConfigured(nil)
-		}).To(Panic())
-	})
-
-	It("returns Pending when Configured condition is not set", func() {
-		drbdr := &v1alpha1.DRBDResource{
-			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1"},
-		}
-
-		state, msg := computeActualDRBDRConfigured(drbdr)
-
-		Expect(state).To(Equal(DRBDRConfiguredStatePending))
-		Expect(msg).To(ContainSubstring("not set yet"))
-	})
-
-	It("returns Pending when ObservedGeneration does not match Generation", func() {
-		drbdr := &v1alpha1.DRBDResource{
-			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1", Generation: 2},
-			Status: v1alpha1.DRBDResourceStatus{
-				Conditions: []metav1.Condition{
-					{
-						Type:               v1alpha1.DRBDResourceCondConfiguredType,
-						Status:             metav1.ConditionTrue,
-						ObservedGeneration: 1, // Intentionally mismatched
-					},
-				},
-			},
-		}
-
-		state, msg := computeActualDRBDRConfigured(drbdr)
-
-		Expect(state).To(Equal(DRBDRConfiguredStatePending))
-		Expect(msg).To(ContainSubstring("generation: 2"))
-		Expect(msg).To(ContainSubstring("observedGeneration: 1"))
-	})
-
-	It("returns Pending when DRBD is in maintenance mode", func() {
-		drbdr := &v1alpha1.DRBDResource{
-			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1", Generation: 1},
-		}
-		obju.SetStatusCondition(drbdr, metav1.Condition{
-			Type:               v1alpha1.DRBDResourceCondConfiguredType,
-			Status:             metav1.ConditionFalse,
-			Reason:             v1alpha1.DRBDResourceCondConfiguredReasonInMaintenance,
-			ObservedGeneration: 1,
-		})
-
-		state, msg := computeActualDRBDRConfigured(drbdr)
-
-		Expect(state).To(Equal(DRBDRConfiguredStatePending))
-		Expect(msg).To(ContainSubstring("maintenance"))
-	})
-
-	It("returns True when Configured condition is True and ObservedGeneration matches", func() {
-		drbdr := &v1alpha1.DRBDResource{
-			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1", Generation: 1},
-		}
-		obju.SetStatusCondition(drbdr, metav1.Condition{
-			Type:               v1alpha1.DRBDResourceCondConfiguredType,
-			Status:             metav1.ConditionTrue,
-			ObservedGeneration: 1,
-		})
-
-		state, msg := computeActualDRBDRConfigured(drbdr)
-
-		Expect(state).To(Equal(DRBDRConfiguredStateTrue))
-		Expect(msg).To(BeEmpty())
-	})
-
-	It("returns False when Configured condition is False and ObservedGeneration matches", func() {
-		drbdr := &v1alpha1.DRBDResource{
-			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1", Generation: 1},
-		}
-		obju.SetStatusCondition(drbdr, metav1.Condition{
-			Type:               v1alpha1.DRBDResourceCondConfiguredType,
-			Status:             metav1.ConditionFalse,
-			Reason:             "SomeError",
-			ObservedGeneration: 1,
-		})
-
-		state, msg := computeActualDRBDRConfigured(drbdr)
-
-		Expect(state).To(Equal(DRBDRConfiguredStateFalse))
-		Expect(msg).To(ContainSubstring("SomeError"))
-	})
-})
-
-var _ = Describe("computeIntendedEffectiveType", func() {
+var _ = Describe("computeIntendedType", func() {
 	It("returns RVR spec type when member is nil", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
@@ -1490,7 +2519,7 @@ var _ = Describe("computeIntendedEffectiveType", func() {
 			},
 		}
 
-		result := computeIntendedEffectiveType(rvr, nil)
+		result := computeIntendedType(rvr, nil)
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeDiskful))
 	})
@@ -1502,7 +2531,7 @@ var _ = Describe("computeIntendedEffectiveType", func() {
 			},
 		}
 
-		result := computeIntendedEffectiveType(rvr, nil)
+		result := computeIntendedType(rvr, nil)
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeAccess))
 	})
@@ -1513,7 +2542,7 @@ var _ = Describe("computeIntendedEffectiveType", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		result := computeIntendedEffectiveType(rvr, member)
+		result := computeIntendedType(rvr, member)
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeDiskful))
 	})
@@ -1525,7 +2554,7 @@ var _ = Describe("computeIntendedEffectiveType", func() {
 			TypeTransition: v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskless,
 		}
 
-		result := computeIntendedEffectiveType(rvr, member)
+		result := computeIntendedType(rvr, member)
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
 	})
@@ -1537,33 +2566,33 @@ var _ = Describe("computeIntendedEffectiveType", func() {
 			TypeTransition: v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskful,
 		}
 
-		result := computeIntendedEffectiveType(rvr, member)
+		result := computeIntendedType(rvr, member)
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
 	})
 })
 
-var _ = Describe("computeTargetEffectiveType", func() {
+var _ = Describe("computeTargetType", func() {
 	It("returns intended type when target LLV name is present", func() {
-		result := computeTargetEffectiveType(v1alpha1.ReplicaTypeDiskful, "llv-1")
+		result := computeTargetType(v1alpha1.ReplicaTypeDiskful, "llv-1")
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeDiskful))
 	})
 
 	It("returns TieBreaker when intended is Diskful but no backing volume", func() {
-		result := computeTargetEffectiveType(v1alpha1.ReplicaTypeDiskful, "")
+		result := computeTargetType(v1alpha1.ReplicaTypeDiskful, "")
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
 	})
 
 	It("returns intended type when intended is not Diskful and no backing volume", func() {
-		result := computeTargetEffectiveType(v1alpha1.ReplicaTypeAccess, "")
+		result := computeTargetType(v1alpha1.ReplicaTypeAccess, "")
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeAccess))
 	})
 
 	It("returns TieBreaker type as-is when no backing volume", func() {
-		result := computeTargetEffectiveType(v1alpha1.ReplicaTypeTieBreaker, "")
+		result := computeTargetType(v1alpha1.ReplicaTypeTieBreaker, "")
 
 		Expect(result).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
 	})
@@ -1630,7 +2659,7 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 		Expect(spec.NodeID).To(Equal(uint8(99)))
 	})
 
-	It("sets Type based on targetEffectiveType", func() {
+	It("sets Type based on targetType", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
 			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
@@ -1706,8 +2735,8 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Name: "pvc-abc-1",
-			Role: v1alpha1.DRBDRolePrimary,
+			Name:     "pvc-abc-1",
+			Attached: true,
 		}
 
 		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "", v1alpha1.ReplicaTypeAccess)
@@ -1876,16 +2905,16 @@ var _ = Describe("computeTargetDRBDRPeers", func() {
 // Additional Apply helpers tests
 //
 
-var _ = Describe("applyRVRConfiguredCondTrue", func() {
+var _ = Describe("applyDRBDConfiguredCondTrue", func() {
 	It("sets condition to True", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
 
-		changed := applyRVRConfiguredCondTrue(rvr, "TestReason", "Test message")
+		changed := applyDRBDConfiguredCondTrue(rvr, "TestReason", "Test message")
 
 		Expect(changed).To(BeTrue())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		Expect(cond.Reason).To(Equal("TestReason"))
@@ -1897,212 +2926,266 @@ var _ = Describe("applyRVRConfiguredCondTrue", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
 		obju.SetStatusCondition(rvr, metav1.Condition{
-			Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+			Type:    v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
 			Status:  metav1.ConditionTrue,
 			Reason:  "TestReason",
 			Message: "Test message",
 		})
 
-		changed := applyRVRConfiguredCondTrue(rvr, "TestReason", "Test message")
+		changed := applyDRBDConfiguredCondTrue(rvr, "TestReason", "Test message")
 
 		Expect(changed).To(BeFalse())
 	})
 })
 
-var _ = Describe("applyRVRBackingVolumeSize", func() {
-	It("sets size when different", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
+var _ = Describe("computeTargetDRBDRReconciliationCache", func() {
+	It("returns cache with provided values", func() {
+		cache := computeTargetDRBDRReconciliationCache(5, 3, v1alpha1.ReplicaTypeDiskful)
 
-		changed := applyRVRBackingVolumeSize(rvr, resource.MustParse("10Gi"))
-
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.BackingVolumeSize.String()).To(Equal("10Gi"))
+		Expect(cache.DatameshRevision).To(Equal(int64(5)))
+		Expect(cache.DRBDRGeneration).To(Equal(int64(3)))
+		Expect(cache.RVRType).To(Equal(v1alpha1.ReplicaTypeDiskful))
 	})
 
-	It("returns false when size is same", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				BackingVolumeSize: resource.MustParse("10Gi"),
-			},
-		}
+	It("handles zero values", func() {
+		cache := computeTargetDRBDRReconciliationCache(0, 0, "")
 
-		changed := applyRVRBackingVolumeSize(rvr, resource.MustParse("10Gi"))
-
-		Expect(changed).To(BeFalse())
-	})
-
-	It("can set zero quantity to clear size", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				BackingVolumeSize: resource.MustParse("10Gi"),
-			},
-		}
-
-		changed := applyRVRBackingVolumeSize(rvr, resource.Quantity{})
-
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.BackingVolumeSize.IsZero()).To(BeTrue())
+		Expect(cache.DatameshRevision).To(Equal(int64(0)))
+		Expect(cache.DRBDRGeneration).To(Equal(int64(0)))
+		Expect(cache.RVRType).To(Equal(v1alpha1.ReplicaType("")))
 	})
 })
 
-var _ = Describe("applyRVREffectiveType", func() {
-	It("sets effective type when different", func() {
+var _ = Describe("applyRVRDRBDRReconciliationCache", func() {
+	It("sets all fields when different", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
+		target := v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
+			DatameshRevision: 5,
+			DRBDRGeneration:  3,
+			RVRType:          v1alpha1.ReplicaTypeDiskful,
+		}
 
-		changed := applyRVREffectiveType(rvr, v1alpha1.ReplicaTypeDiskful)
+		changed := applyRVRDRBDRReconciliationCache(rvr, target)
 
 		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.EffectiveType).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(rvr.Status.DRBDRReconciliationCache).To(Equal(target))
 	})
 
-	It("returns false when type is same", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				EffectiveType: v1alpha1.ReplicaTypeDiskful,
-			},
-		}
-
-		changed := applyRVREffectiveType(rvr, v1alpha1.ReplicaTypeDiskful)
-
-		Expect(changed).To(BeFalse())
-	})
-})
-
-var _ = Describe("applyRVRDatameshRevision", func() {
-	It("sets revision when different", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-
-		changed := applyRVRDatameshRevision(rvr, 5)
-
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DatameshRevision).To(Equal(int64(5)))
-	})
-
-	It("returns false when revision is same", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DatameshRevision: 5,
-			},
-		}
-
-		changed := applyRVRDatameshRevision(rvr, 5)
-
-		Expect(changed).To(BeFalse())
-	})
-})
-
-var _ = Describe("applyRVRAddresses", func() {
-	It("sets addresses when different", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-		addresses := []v1alpha1.DRBDResourceAddressStatus{
-			{SystemNetworkName: "net-1", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
-		}
-
-		changed := applyRVRAddresses(rvr, addresses)
-
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.Addresses).To(HaveLen(1))
-		Expect(rvr.Status.Addresses[0].Address.IPv4).To(Equal("10.0.0.1"))
-	})
-
-	It("returns false when addresses are same", func() {
-		addresses := []v1alpha1.DRBDResourceAddressStatus{
-			{SystemNetworkName: "net-1", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
+	It("returns false when all fields are same", func() {
+		target := v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
+			DatameshRevision: 5,
+			DRBDRGeneration:  3,
+			RVRType:          v1alpha1.ReplicaTypeDiskful,
 		}
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				Addresses: addresses,
+				DRBDRReconciliationCache: target,
 			},
 		}
 
-		changed := applyRVRAddresses(rvr, addresses)
+		changed := applyRVRDRBDRReconciliationCache(rvr, target)
 
 		Expect(changed).To(BeFalse())
 	})
 
-	It("sets nil addresses", func() {
+	It("returns true when only datamesh revision differs", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				Addresses: []v1alpha1.DRBDResourceAddressStatus{
-					{SystemNetworkName: "net-1", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
+				DRBDRReconciliationCache: v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
+					DatameshRevision: 4,
+					DRBDRGeneration:  3,
+					RVRType:          v1alpha1.ReplicaTypeDiskful,
 				},
 			},
 		}
+		target := v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
+			DatameshRevision: 5,
+			DRBDRGeneration:  3,
+			RVRType:          v1alpha1.ReplicaTypeDiskful,
+		}
 
-		changed := applyRVRAddresses(rvr, nil)
+		changed := applyRVRDRBDRReconciliationCache(rvr, target)
 
 		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.Addresses).To(BeNil())
+		Expect(rvr.Status.DRBDRReconciliationCache).To(Equal(target))
 	})
 
-	It("clones addresses to avoid aliasing", func() {
+	It("returns true when only drbdr generation differs", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DRBDRReconciliationCache: v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
+					DatameshRevision: 5,
+					DRBDRGeneration:  2,
+					RVRType:          v1alpha1.ReplicaTypeDiskful,
+				},
+			},
 		}
-		addresses := []v1alpha1.DRBDResourceAddressStatus{
-			{SystemNetworkName: "net-1", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
+		target := v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
+			DatameshRevision: 5,
+			DRBDRGeneration:  3,
+			RVRType:          v1alpha1.ReplicaTypeDiskful,
 		}
 
-		_ = applyRVRAddresses(rvr, addresses)
+		changed := applyRVRDRBDRReconciliationCache(rvr, target)
 
-		// Modify original slice
-		addresses[0].Address.IPv4 = "10.0.0.2"
-		// RVR should not be affected
-		Expect(rvr.Status.Addresses[0].Address.IPv4).To(Equal("10.0.0.1"))
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DRBDRReconciliationCache).To(Equal(target))
+	})
+
+	It("returns true when only rvr type differs", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DRBDRReconciliationCache: v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
+					DatameshRevision: 5,
+					DRBDRGeneration:  3,
+					RVRType:          v1alpha1.ReplicaTypeAccess,
+				},
+			},
+		}
+		target := v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
+			DatameshRevision: 5,
+			DRBDRGeneration:  3,
+			RVRType:          v1alpha1.ReplicaTypeDiskful,
+		}
+
+		changed := applyRVRDRBDRReconciliationCache(rvr, target)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DRBDRReconciliationCache).To(Equal(target))
+	})
+
+	It("handles zero values", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DRBDRReconciliationCache: v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
+					DatameshRevision: 5,
+					DRBDRGeneration:  3,
+					RVRType:          v1alpha1.ReplicaTypeDiskful,
+				},
+			},
+		}
+		target := v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{}
+
+		changed := applyRVRDRBDRReconciliationCache(rvr, target)
+
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.DRBDRReconciliationCache).To(Equal(target))
 	})
 })
 
-var _ = Describe("applyRVRDRBDResourceGeneration", func() {
-	It("sets generation when different", func() {
+var _ = Describe("applySatisfyEligibleNodesCondAbsent", func() {
+	It("removes condition when present", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
+		// First set the condition.
+		applySatisfyEligibleNodesCondTrue(rvr, "Satisfied", "Test")
 
-		changed := applyRVRDRBDResourceGeneration(rvr, 3)
+		changed := applySatisfyEligibleNodesCondAbsent(rvr)
 
 		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DRBDResourceGeneration).To(Equal(int64(3)))
+		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)).To(BeNil())
 	})
 
-	It("returns false when generation is same", func() {
+	It("returns false when condition already absent", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DRBDResourceGeneration: 3,
-			},
 		}
 
-		changed := applyRVRDRBDResourceGeneration(rvr, 3)
+		changed := applySatisfyEligibleNodesCondAbsent(rvr)
 
 		Expect(changed).To(BeFalse())
 	})
+})
 
-	It("handles zero generation", func() {
+var _ = Describe("applySatisfyEligibleNodesCondUnknown", func() {
+	It("sets condition to Unknown", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DRBDResourceGeneration: 3,
-			},
 		}
 
-		changed := applyRVRDRBDResourceGeneration(rvr, 0)
+		changed := applySatisfyEligibleNodesCondUnknown(rvr, "PendingConfiguration", "Test message")
 
 		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DRBDResourceGeneration).To(Equal(int64(0)))
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonPendingConfiguration))
+		Expect(cond.Message).To(Equal("Test message"))
+	})
+
+	It("returns false when condition already set to same value", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		applySatisfyEligibleNodesCondUnknown(rvr, "PendingConfiguration", "Test message")
+
+		changed := applySatisfyEligibleNodesCondUnknown(rvr, "PendingConfiguration", "Test message")
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applySatisfyEligibleNodesCondFalse", func() {
+	It("sets condition to False", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applySatisfyEligibleNodesCondFalse(rvr, "NodeMismatch", "Test message")
+
+		Expect(changed).To(BeTrue())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal("NodeMismatch"))
+		Expect(cond.Message).To(Equal("Test message"))
+	})
+
+	It("returns false when condition already set to same value", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		applySatisfyEligibleNodesCondFalse(rvr, "NodeMismatch", "Test message")
+
+		changed := applySatisfyEligibleNodesCondFalse(rvr, "NodeMismatch", "Test message")
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applySatisfyEligibleNodesCondTrue", func() {
+	It("sets condition to True", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applySatisfyEligibleNodesCondTrue(rvr, "Satisfied", "Test message")
+
+		Expect(changed).To(BeTrue())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied))
+		Expect(cond.Message).To(Equal("Test message"))
+	})
+
+	It("returns false when condition already set to same value", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		applySatisfyEligibleNodesCondTrue(rvr, "Satisfied", "Test message")
+
+		changed := applySatisfyEligibleNodesCondTrue(rvr, "Satisfied", "Test message")
+
+		Expect(changed).To(BeFalse())
 	})
 })
 
@@ -2652,7 +3735,7 @@ var _ = Describe("patchRVRStatus", func() {
 		rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 		base := rvr.DeepCopy()
-		rvr.Status.EffectiveType = v1alpha1.ReplicaTypeDiskful
+		rvr.Status.DRBDRReconciliationCache.RVRType = v1alpha1.ReplicaTypeDiskful
 
 		err := rec.patchRVRStatus(ctx, rvr, base, false)
 
@@ -2661,7 +3744,7 @@ var _ = Describe("patchRVRStatus", func() {
 		// Verify status was updated
 		var updated v1alpha1.ReplicatedVolumeReplica
 		Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, &updated)).To(Succeed())
-		Expect(updated.Status.EffectiveType).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(updated.Status.DRBDRReconciliationCache.RVRType).To(Equal(v1alpha1.ReplicaTypeDiskful))
 	})
 
 	It("patches with optimistic lock when requested", func() {
@@ -2672,7 +3755,7 @@ var _ = Describe("patchRVRStatus", func() {
 		rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 		base := rvr.DeepCopy()
-		rvr.Status.EffectiveType = v1alpha1.ReplicaTypeDiskful
+		rvr.Status.DRBDRReconciliationCache.RVRType = v1alpha1.ReplicaTypeDiskful
 
 		err := rec.patchRVRStatus(ctx, rvr, base, true)
 
@@ -3100,10 +4183,10 @@ var _ = Describe("Reconciler", func() {
 			Expect(llvList.Items).To(BeEmpty())
 		})
 
-		// Note: This test verifies that applyRVRBackingVolumeReadyCondAbsent is called
+		// Note: This test verifies that applyBackingVolumeReadyCondAbsent is called
 		// during deletion path. The integration test for the full flow is covered by
 		// the "deletes LLVs when RVR is being deleted" test above.
-		// See ensureBackingVolumeStatus and applyRVRBackingVolumeReadyCondAbsent unit tests
+		// See ensureStatusBackingVolume and applyBackingVolumeReadyCondAbsent unit tests
 		// for condition removal logic verification.
 
 		It("creates LLV when RVR needs backing volume", func() {
@@ -3549,6 +4632,13 @@ var _ = Describe("Reconciler", func() {
 				Spec: v1alpha1.DRBDResourceSpec{
 					LVMLogicalVolumeName: llvName,
 				},
+				Status: v1alpha1.DRBDResourceStatus{
+					DiskState: v1alpha1.DiskStateUpToDate,
+					ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+						Role:                 v1alpha1.DRBDRoleSecondary,
+						LVMLogicalVolumeName: llvName,
+					},
+				},
 			}
 
 			cl := testhelpers.WithLLVByRVROwnerIndex(
@@ -3858,16 +4948,23 @@ var _ = Describe("Reconciler", func() {
 				},
 			}
 			// DRBDResource references old LLV
+			oldLLVName := computeLLVName("rvr-1", "lvg-1", "")
 			drbdr := &v1alpha1.DRBDResource{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "rvr-1",
 				},
 				Spec: v1alpha1.DRBDResourceSpec{
-					LVMLogicalVolumeName: computeLLVName("rvr-1", "lvg-1", ""),
+					LVMLogicalVolumeName: oldLLVName,
+				},
+				Status: v1alpha1.DRBDResourceStatus{
+					DiskState: v1alpha1.DiskStateUpToDate,
+					ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+						Role:                 v1alpha1.DRBDRoleSecondary,
+						LVMLogicalVolumeName: oldLLVName,
+					},
 				},
 			}
 			// Old LLV on lvg-1
-			oldLLVName := computeLLVName("rvr-1", "lvg-1", "")
 			oldLLV := &snc.LVMLogicalVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       oldLLVName,
@@ -3926,10 +5023,30 @@ var _ = Describe("Reconciler", func() {
 
 		It("creates new LLV during reprovisioning when RVR is NOT a datamesh member (LVG change via RVR spec)", func() {
 			// RVR is NOT in datamesh members, so intended is computed from RVR spec
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Spec: v1alpha1.ReplicatedStoragePoolSpec{
+					Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+				},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+						{
+							NodeName: "node-1",
+							LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+								{Name: "lvg-1"},
+								{Name: "lvg-2"}, // New LVG must be eligible
+							},
+						},
+					},
+				},
+			}
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					DatameshRevision: 1,
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						StoragePoolName: "rsp-1",
+					},
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
 						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
@@ -3998,8 +5115,8 @@ var _ = Describe("Reconciler", func() {
 			cl := testhelpers.WithLLVByRVROwnerIndex(
 				fake.NewClientBuilder().
 					WithScheme(scheme).
-					WithObjects(rv, rvr, drbdr, oldLLV).
-					WithStatusSubresource(rvr, rv, drbdr, oldLLV),
+					WithObjects(rv, rvr, drbdr, oldLLV, rsp).
+					WithStatusSubresource(rvr, rv, drbdr, oldLLV, rsp),
 			).Build()
 			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
@@ -4295,6 +5412,13 @@ var _ = Describe("Reconciler", func() {
 				Spec: v1alpha1.DRBDResourceSpec{
 					LVMLogicalVolumeName: "llv-from-drbdr",
 				},
+				Status: v1alpha1.DRBDResourceStatus{
+					DiskState: v1alpha1.DiskStateUpToDate,
+					ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+						Role:                 v1alpha1.DRBDRoleSecondary,
+						LVMLogicalVolumeName: "llv-from-drbdr",
+					},
+				},
 			}
 			// LLV referenced by DRBDResource
 			llv := &snc.LVMLogicalVolume{
@@ -4375,6 +5499,13 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha1.DRBDResourceSpec{
 					LVMLogicalVolumeName: "", // Empty
+				},
+				Status: v1alpha1.DRBDResourceStatus{
+					DiskState: v1alpha1.DiskStateDiskless,
+					ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+						Role:                 v1alpha1.DRBDRoleSecondary,
+						LVMLogicalVolumeName: "", // No backing volume configured
+					},
 				},
 			}
 			// LLV owned by RVR (will be found via index)
@@ -4461,6 +5592,13 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha1.DRBDResourceSpec{
 					LVMLogicalVolumeName: "llv-not-owned",
+				},
+				Status: v1alpha1.DRBDResourceStatus{
+					DiskState: v1alpha1.DiskStateUpToDate,
+					ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+						Role:                 v1alpha1.DRBDRoleSecondary,
+						LVMLogicalVolumeName: "llv-not-owned",
+					},
 				},
 			}
 			// LLV NOT owned by RVR (no ownerRef), but referenced by DRBDResource
@@ -4810,6 +5948,527 @@ var _ = Describe("deleteLLV", func() {
 	})
 })
 
+var _ = Describe("ensureStatusDatameshPendingAndConfiguredCond", func() {
+	var ctx context.Context
+
+	BeforeEach(func() {
+		ctx = context.Background()
+	})
+
+	It("sets PendingJoin for non-member replica", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 0, // Not a member.
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1"},
+				},
+			},
+		}
+
+		outcome := ensureStatusDatameshPendingAndConfiguredCond(ctx, rvr, rspView)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+
+		// Check datameshPending.
+		Expect(rvr.Status.DatameshPending).NotTo(BeNil())
+		Expect(*rvr.Status.DatameshPending.Member).To(BeTrue())
+		Expect(rvr.Status.DatameshPending.Role).To(Equal(v1alpha1.ReplicaTypeDiskful))
+
+		// Check Configured condition.
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin))
+	})
+
+	It("sets PendingLeave for deleting member", func() {
+		now := metav1.Now()
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rvr-1",
+				DeletionTimestamp: &now,
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1, // Is a member.
+			},
+		}
+
+		outcome := ensureStatusDatameshPendingAndConfiguredCond(ctx, rvr, nil)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+
+		// Check datameshPending.
+		Expect(rvr.Status.DatameshPending).NotTo(BeNil())
+		Expect(*rvr.Status.DatameshPending.Member).To(BeFalse())
+
+		// Check Configured condition.
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingLeave))
+	})
+
+	It("sets Configured=True and clears datameshPending when all in sync", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1,
+				Type:             v1alpha1.DRBDResourceTypeDiskful, // Type matches.
+				BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+					LVMVolumeGroupName: "lvg-1", // BV matches.
+				},
+				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+					Role: v1alpha1.ReplicaTypeDiskful, // Stale pending.
+				},
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1"},
+				},
+			},
+		}
+
+		outcome := ensureStatusDatameshPendingAndConfiguredCond(ctx, rvr, rspView)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+
+		// Check datameshPending is cleared.
+		Expect(rvr.Status.DatameshPending).To(BeNil())
+
+		// Check Configured condition.
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured))
+	})
+
+	It("sets PendingScheduling when node not assigned", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "", // Not scheduled.
+			},
+		}
+
+		outcome := ensureStatusDatameshPendingAndConfiguredCond(ctx, rvr, nil)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+
+		// Check datameshPending is nil.
+		Expect(rvr.Status.DatameshPending).To(BeNil())
+
+		// Check Configured condition.
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingScheduling))
+	})
+
+	It("returns changed=false when already in desired state (idempotent)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1,
+				Type:             v1alpha1.DRBDResourceTypeDiskful,
+				BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+					LVMVolumeGroupName: "lvg-1",
+				},
+				DatameshPending: nil, // Already cleared.
+			},
+		}
+		// Pre-set condition to match expected.
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+			Status:  metav1.ConditionTrue,
+			Reason:  v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured,
+			Message: "Replica is configured as intended",
+		})
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1"},
+				},
+			},
+		}
+
+		outcome := ensureStatusDatameshPendingAndConfiguredCond(ctx, rvr, rspView)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+	})
+})
+
+var _ = Describe("ensureConditionSatisfyEligibleNodes", func() {
+	var ctx context.Context
+
+	BeforeEach(func() {
+		ctx = context.Background()
+	})
+
+	It("removes condition when node not selected", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "", // Not selected.
+			},
+		}
+		// Pre-set condition.
+		applySatisfyEligibleNodesCondTrue(rvr, "Satisfied", "Test")
+
+		outcome := ensureConditionSatisfyEligibleNodes(ctx, rvr, nil, nil)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)).To(BeNil())
+	})
+
+	It("sets condition to Unknown when RV is nil", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+			},
+		}
+
+		outcome := ensureConditionSatisfyEligibleNodes(ctx, rvr, nil, nil)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonPendingConfiguration))
+	})
+
+	It("sets condition to Unknown when RV has no Configuration", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: nil,
+			},
+		}
+
+		outcome := ensureConditionSatisfyEligibleNodes(ctx, rvr, rv, nil)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonPendingConfiguration))
+	})
+
+	It("sets condition to Unknown when RSP not found (nil rspView)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					StoragePoolName: "rsp-missing",
+				},
+			},
+		}
+
+		outcome := ensureConditionSatisfyEligibleNodes(ctx, rvr, rv, nil)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonPendingConfiguration))
+		Expect(cond.Message).To(ContainSubstring("ReplicatedStoragePool not found"))
+	})
+
+	It("sets condition to False when node not in eligibleNodes", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					StoragePoolName: "rsp-1",
+				},
+			},
+		}
+		// rspView with nil EligibleNode means node not found in RSP.
+		rspView := &rspEligibilityView{
+			Type:         v1alpha1.ReplicatedStoragePoolTypeLVM,
+			EligibleNode: nil,
+		}
+
+		outcome := ensureConditionSatisfyEligibleNodes(ctx, rvr, rv, rspView)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonNodeMismatch))
+	})
+
+	It("sets condition to False when Diskful LVMVolumeGroup not found", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					StoragePoolName: "rsp-1",
+				},
+			},
+		}
+		rspView := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName:   "node-1",
+				NodeReady:  true,
+				AgentReady: true,
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-other", Ready: true},
+				},
+			},
+		}
+
+		outcome := ensureConditionSatisfyEligibleNodes(ctx, rvr, rv, rspView)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonLVMVolumeGroupMismatch))
+	})
+
+	It("sets condition to False when ThinPool not found", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:                   "node-1",
+				Type:                       v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName:         "lvg-1",
+				LVMVolumeGroupThinPoolName: "tp-1",
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					StoragePoolName: "rsp-1",
+				},
+			},
+		}
+		rspView := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName:   "node-1",
+				NodeReady:  true,
+				AgentReady: true,
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1", ThinPoolName: "tp-other", Ready: true},
+				},
+			},
+		}
+
+		outcome := ensureConditionSatisfyEligibleNodes(ctx, rvr, rv, rspView)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonThinPoolMismatch))
+	})
+
+	It("sets condition to True when all checks pass (Diskless)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+				Type:     v1alpha1.ReplicaTypeAccess,
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					StoragePoolName: "rsp-1",
+				},
+			},
+		}
+		rspView := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName:   "node-1",
+				NodeReady:  true,
+				AgentReady: true,
+			},
+		}
+
+		outcome := ensureConditionSatisfyEligibleNodes(ctx, rvr, rv, rspView)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied))
+		Expect(cond.Message).To(Equal("Replica satisfies eligible nodes requirements"))
+	})
+
+	It("sets condition to True when all checks pass (Diskful with ThinPool)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:                   "node-1",
+				Type:                       v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName:         "lvg-1",
+				LVMVolumeGroupThinPoolName: "tp-1",
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					StoragePoolName: "rsp-1",
+				},
+			},
+		}
+		rspView := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName:   "node-1",
+				NodeReady:  true,
+				AgentReady: true,
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1", ThinPoolName: "tp-1", Ready: true},
+				},
+			},
+		}
+
+		outcome := ensureConditionSatisfyEligibleNodes(ctx, rvr, rv, rspView)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied))
+	})
+
+	It("sets condition to True with warnings when node is unschedulable", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName: "node-1",
+				Type:     v1alpha1.ReplicaTypeAccess,
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					StoragePoolName: "rsp-1",
+				},
+			},
+		}
+		rspView := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName:      "node-1",
+				NodeReady:     true,
+				AgentReady:    true,
+				Unschedulable: true, // Warning.
+			},
+		}
+
+		outcome := ensureConditionSatisfyEligibleNodes(ctx, rvr, rv, rspView)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied))
+		Expect(cond.Message).To(ContainSubstring("however note that currently"))
+		Expect(cond.Message).To(ContainSubstring("node is unschedulable"))
+	})
+
+	It("sets condition to True with warnings when LVMVolumeGroup is not ready", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					StoragePoolName: "rsp-1",
+				},
+			},
+		}
+		rspView := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName:   "node-1",
+				NodeReady:  true,
+				AgentReady: true,
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1", Ready: false}, // Warning.
+				},
+			},
+		}
+
+		outcome := ensureConditionSatisfyEligibleNodes(ctx, rvr, rv, rspView)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Message).To(ContainSubstring("LVMVolumeGroup is not ready"))
+	})
+})
+
 var _ = Describe("reconcileLLVsDeletion", func() {
 	var (
 		scheme *runtime.Scheme
@@ -5007,10 +6666,10 @@ var _ = Describe("reconcileLLVsDeletion", func() {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ensureAttachmentStatus tests
+// ensureConditionAttached tests
 //
 
-var _ = Describe("ensureAttachmentStatus", func() {
+var _ = Describe("ensureConditionAttached", func() {
 	var (
 		ctx context.Context
 		rvr *v1alpha1.ReplicatedVolumeReplica
@@ -5023,23 +6682,18 @@ var _ = Describe("ensureAttachmentStatus", func() {
 		}
 	})
 
-	It("removes condition and clears fields when drbdr is nil", func() {
-		// Set up existing condition and fields
+	It("removes condition when drbdr is nil", func() {
 		obju.SetStatusCondition(rvr, metav1.Condition{
 			Type:   v1alpha1.ReplicatedVolumeReplicaCondAttachedType,
 			Status: metav1.ConditionTrue,
 			Reason: "PreviousReason",
 		})
-		rvr.Status.DevicePath = "/dev/drbd1000"
-		rvr.Status.DeviceIOSuspended = boolPtr(false)
 
-		outcome := ensureAttachmentStatus(ctx, rvr, nil, nil, true, false)
+		outcome := ensureConditionAttached(ctx, rvr, nil, nil, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
 		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)).To(BeNil())
-		Expect(rvr.Status.DevicePath).To(BeEmpty())
-		Expect(rvr.Status.DeviceIOSuspended).To(BeNil())
 	})
 
 	It("removes condition when neither intended nor actual attached", func() {
@@ -5051,16 +6705,16 @@ var _ = Describe("ensureAttachmentStatus", func() {
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRoleSecondary,
+			Attached: false,
 		}
 
-		outcome := ensureAttachmentStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)).To(BeNil())
 	})
 
-	It("sets Unknown when agent not ready with intendedAttached", func() {
+	It("sets Unknown when agent not ready", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
@@ -5069,13 +6723,12 @@ var _ = Describe("ensureAttachmentStatus", func() {
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRolePrimary, // intended attached
+			Attached: true,
 		}
 
-		outcome := ensureAttachmentStatus(ctx, rvr, drbdr, member, false, false) // agent not ready
+		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, false, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		Expect(outcome.DidChange()).To(BeTrue())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
@@ -5091,10 +6744,10 @@ var _ = Describe("ensureAttachmentStatus", func() {
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRolePrimary,
+			Attached: true,
 		}
 
-		outcome := ensureAttachmentStatus(ctx, rvr, drbdr, member, true, true) // config pending
+		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, true)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
@@ -5103,81 +6756,74 @@ var _ = Describe("ensureAttachmentStatus", func() {
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonApplyingConfiguration))
 	})
 
-	It("sets False with AttachmentFailed when intended attached but not actual", func() {
+	It("sets False with AttachmentFailed when intended but not actual", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
-					Role: v1alpha1.DRBDRoleSecondary, // not attached
+					Role: v1alpha1.DRBDRoleSecondary,
 				},
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRolePrimary, // intended attached
+			Attached: true,
 		}
 
-		outcome := ensureAttachmentStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAttachmentFailed))
-		Expect(rvr.Status.DevicePath).To(BeEmpty())
-		Expect(rvr.Status.DeviceIOSuspended).To(BeNil())
 	})
 
-	It("sets True with DetachmentFailed when not intended but actual attached", func() {
+	It("sets True with DetachmentFailed when not intended but actual", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Device:            "/dev/drbd1000",
 				DeviceIOSuspended: boolPtr(false),
 				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
-					Role: v1alpha1.DRBDRolePrimary, // actual attached
+					Role: v1alpha1.DRBDRolePrimary,
 				},
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRoleSecondary, // not intended attached
+			Attached: false,
 		}
 
-		outcome := ensureAttachmentStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonDetachmentFailed))
-		Expect(rvr.Status.DevicePath).To(Equal("/dev/drbd1000"))
-		Expect(rvr.Status.DeviceIOSuspended).NotTo(BeNil())
-		Expect(*rvr.Status.DeviceIOSuspended).To(BeFalse())
 	})
 
 	It("sets False with IOSuspended when attached but I/O suspended", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Device:            "/dev/drbd1000",
-				DeviceIOSuspended: boolPtr(true), // I/O suspended
+				DeviceIOSuspended: boolPtr(true),
 				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
 					Role: v1alpha1.DRBDRolePrimary,
 				},
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRolePrimary,
+			Attached: true,
 		}
 
-		outcome := ensureAttachmentStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonIOSuspended))
-		Expect(rvr.Status.DevicePath).To(Equal("/dev/drbd1000"))
-		Expect(*rvr.Status.DeviceIOSuspended).To(BeTrue())
 	})
 
-	It("sets True with Attached when both intended and actual attached", func() {
+	It("sets True with Attached when both intended and actual", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Device:            "/dev/drbd1000",
@@ -5188,10 +6834,10 @@ var _ = Describe("ensureAttachmentStatus", func() {
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRolePrimary,
+			Attached: true,
 		}
 
-		outcome := ensureAttachmentStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
@@ -5199,11 +6845,9 @@ var _ = Describe("ensureAttachmentStatus", func() {
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAttached))
 		Expect(cond.Message).To(ContainSubstring("ready for I/O"))
-		Expect(rvr.Status.DevicePath).To(Equal("/dev/drbd1000"))
-		Expect(*rvr.Status.DeviceIOSuspended).To(BeFalse())
 	})
 
-	It("returns no change when already in sync", func() {
+	It("is idempotent", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Device:            "/dev/drbd1000",
@@ -5214,46 +6858,179 @@ var _ = Describe("ensureAttachmentStatus", func() {
 			},
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Role: v1alpha1.DRBDRolePrimary,
+			Attached: true,
 		}
 
-		// First call to set up state
-		outcome1 := ensureAttachmentStatus(ctx, rvr, drbdr, member, true, false)
+		outcome1 := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
 		Expect(outcome1.Error()).NotTo(HaveOccurred())
 		Expect(outcome1.DidChange()).To(BeTrue())
 
-		// Second call should report no change
-		outcome2 := ensureAttachmentStatus(ctx, rvr, drbdr, member, true, false)
+		outcome2 := ensureConditionAttached(ctx, rvr, drbdr, member, true, false)
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
 		Expect(outcome2.DidChange()).To(BeFalse())
 	})
+})
 
-	It("sets True with Attached when actual attached without member (nil member)", func() {
+// ──────────────────────────────────────────────────────────────────────────────
+// ensureStatusAttachment tests
+//
+
+var _ = Describe("ensureStatusAttachment", func() {
+	var (
+		ctx context.Context
+		rvr *v1alpha1.ReplicatedVolumeReplica
+	)
+
+	BeforeEach(func() {
+		ctx = logr.NewContext(context.Background(), logr.Discard())
+		rvr = &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+	})
+
+	It("clears attachment when drbdr is nil", func() {
+		rvr.Status.Attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
+		}
+
+		outcome := ensureStatusAttachment(ctx, rvr, nil, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Attachment).To(BeNil())
+	})
+
+	It("clears attachment when not actual attached", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role: v1alpha1.DRBDRoleSecondary,
+				},
+			},
+		}
+		rvr.Status.Attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
+		}
+
+		outcome := ensureStatusAttachment(ctx, rvr, drbdr, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Attachment).To(BeNil())
+	})
+
+	It("keeps attachment unchanged when agent not ready", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Device:            "/dev/drbd1000",
 				DeviceIOSuspended: boolPtr(false),
 				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
-					Role: v1alpha1.DRBDRolePrimary, // actual attached
+					Role: v1alpha1.DRBDRolePrimary,
+				},
+			},
+		}
+		rvr.Status.Attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd999",
+			IOSuspended: true,
+		}
+
+		outcome := ensureStatusAttachment(ctx, rvr, drbdr, false, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rvr.Status.Attachment.DevicePath).To(Equal("/dev/drbd999"))
+		Expect(rvr.Status.Attachment.IOSuspended).To(BeTrue())
+	})
+
+	It("keeps attachment unchanged when configuration pending", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Device:            "/dev/drbd1000",
+				DeviceIOSuspended: boolPtr(false),
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role: v1alpha1.DRBDRolePrimary,
+				},
+			},
+		}
+		rvr.Status.Attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd999",
+			IOSuspended: true,
+		}
+
+		outcome := ensureStatusAttachment(ctx, rvr, drbdr, true, true)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rvr.Status.Attachment.DevicePath).To(Equal("/dev/drbd999"))
+	})
+
+	It("sets attachment when actual attached", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Device:            "/dev/drbd1000",
+				DeviceIOSuspended: boolPtr(false),
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role: v1alpha1.DRBDRolePrimary,
 				},
 			},
 		}
 
-		outcome := ensureAttachmentStatus(ctx, rvr, drbdr, nil, true, false)
+		outcome := ensureStatusAttachment(ctx, rvr, drbdr, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
-		Expect(cond).NotTo(BeNil())
-		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonDetachmentFailed))
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Attachment).NotTo(BeNil())
+		Expect(rvr.Status.Attachment.DevicePath).To(Equal("/dev/drbd1000"))
+		Expect(rvr.Status.Attachment.IOSuspended).To(BeFalse())
+	})
+
+	It("sets IOSuspended=true when I/O is suspended", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Device:            "/dev/drbd1000",
+				DeviceIOSuspended: boolPtr(true),
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role: v1alpha1.DRBDRolePrimary,
+				},
+			},
+		}
+
+		outcome := ensureStatusAttachment(ctx, rvr, drbdr, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(rvr.Status.Attachment).NotTo(BeNil())
+		Expect(rvr.Status.Attachment.DevicePath).To(Equal("/dev/drbd1000"))
+		Expect(rvr.Status.Attachment.IOSuspended).To(BeTrue())
+	})
+
+	It("is idempotent", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Device:            "/dev/drbd1000",
+				DeviceIOSuspended: boolPtr(false),
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role: v1alpha1.DRBDRolePrimary,
+				},
+			},
+		}
+
+		outcome1 := ensureStatusAttachment(ctx, rvr, drbdr, true, false)
+		Expect(outcome1.Error()).NotTo(HaveOccurred())
+		Expect(outcome1.DidChange()).To(BeTrue())
+
+		outcome2 := ensureStatusAttachment(ctx, rvr, drbdr, true, false)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
 	})
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ensurePeersStatus tests
+// ensureStatusPeers + ensureConditionFullyConnected tests
 //
 
-var _ = Describe("ensurePeersStatus", func() {
+var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 	var (
 		ctx context.Context
 		rvr *v1alpha1.ReplicatedVolumeReplica
@@ -5273,9 +7050,12 @@ var _ = Describe("ensurePeersStatus", func() {
 			Status: metav1.ConditionTrue,
 			Reason: "PreviousReason",
 		})
-		rvr.Status.Peers = []v1alpha1.PeerStatus{{Name: "peer-1"}}
+		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{{Name: "peer-1"}}
 
-		outcome := ensurePeersStatus(ctx, rvr, nil, nil, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, nil),
+			ensureConditionFullyConnected(ctx, rvr, nil, nil, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
@@ -5295,7 +7075,10 @@ var _ = Describe("ensurePeersStatus", func() {
 			},
 		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)).To(BeNil())
@@ -5305,7 +7088,7 @@ var _ = Describe("ensurePeersStatus", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
-					{Name: "peer-1", ConnectionState: v1alpha1.ConnectionStateConnected},
+					{Name: "peer-1", Type: v1alpha1.DRBDResourceTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnected},
 				},
 			},
 		}
@@ -5315,15 +7098,22 @@ var _ = Describe("ensurePeersStatus", func() {
 				{Name: "rvr-1"}, // self is member
 			},
 		}
+		rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1"},
+		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, false) // agent not ready
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, false), // agent not ready
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonAgentNotReady))
-		Expect(rvr.Status.Peers).To(BeEmpty())
+		// ensureStatusPeers now populates peers even when agent is not ready
+		Expect(rvr.Status.Peers).To(HaveLen(1))
 	})
 
 	It("sets NoPeers when merged peers list is empty", func() {
@@ -5337,8 +7127,14 @@ var _ = Describe("ensurePeersStatus", func() {
 				{Name: "rvr-1"}, // only self, no peers
 			},
 		}
+		rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1"},
+		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
@@ -5351,8 +7147,8 @@ var _ = Describe("ensurePeersStatus", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
-					{Name: "peer-1", ConnectionState: v1alpha1.ConnectionStateConnecting},
-					{Name: "peer-2", ConnectionState: ""},
+					{Name: "peer-1", Type: v1alpha1.DRBDResourceTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnecting},
+					{Name: "peer-2", Type: v1alpha1.DRBDResourceTypeDiskful, ConnectionState: ""},
 				},
 			},
 		}
@@ -5364,8 +7160,14 @@ var _ = Describe("ensurePeersStatus", func() {
 			},
 			SystemNetworkNames: []string{"net-1"},
 		}
+		rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1"},
+		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
@@ -5380,6 +7182,7 @@ var _ = Describe("ensurePeersStatus", func() {
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
 					{
 						Name:            "peer-1",
+						Type:            v1alpha1.DRBDResourceTypeDiskful,
 						ConnectionState: v1alpha1.ConnectionStateConnected,
 						Paths: []v1alpha1.DRBDResourcePathStatus{
 							{SystemNetworkName: "net-1", Established: true},
@@ -5396,8 +7199,15 @@ var _ = Describe("ensurePeersStatus", func() {
 			},
 			SystemNetworkNames: []string{"net-1", "net-2"},
 		}
+		rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1"},
+			{SystemNetworkName: "net-2"},
+		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
@@ -5412,6 +7222,7 @@ var _ = Describe("ensurePeersStatus", func() {
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
 					{
 						Name:            "peer-1",
+						Type:            v1alpha1.DRBDResourceTypeDiskful,
 						ConnectionState: v1alpha1.ConnectionStateConnected,
 						Paths: []v1alpha1.DRBDResourcePathStatus{
 							{SystemNetworkName: "net-1", Established: true},
@@ -5428,8 +7239,15 @@ var _ = Describe("ensurePeersStatus", func() {
 			},
 			SystemNetworkNames: []string{"net-1", "net-2"},
 		}
+		rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1"},
+			{SystemNetworkName: "net-2"},
+		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
@@ -5444,6 +7262,7 @@ var _ = Describe("ensurePeersStatus", func() {
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
 					{
 						Name:            "peer-1",
+						Type:            v1alpha1.DRBDResourceTypeDiskful,
 						ConnectionState: v1alpha1.ConnectionStateConnected,
 						Paths: []v1alpha1.DRBDResourcePathStatus{
 							{SystemNetworkName: "net-1", Established: true},
@@ -5451,6 +7270,7 @@ var _ = Describe("ensurePeersStatus", func() {
 					},
 					{
 						Name:            "peer-2",
+						Type:            v1alpha1.DRBDResourceTypeDiskful,
 						ConnectionState: v1alpha1.ConnectionStateConnecting,
 					},
 				},
@@ -5464,8 +7284,14 @@ var _ = Describe("ensurePeersStatus", func() {
 			},
 			SystemNetworkNames: []string{"net-1"},
 		}
+		rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1"},
+		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
@@ -5481,6 +7307,7 @@ var _ = Describe("ensurePeersStatus", func() {
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
 					{
 						Name:            "peer-1",
+						Type:            v1alpha1.DRBDResourceTypeDiskful,
 						ConnectionState: v1alpha1.ConnectionStateConnected,
 						Paths: []v1alpha1.DRBDResourcePathStatus{
 							{SystemNetworkName: "net-1", Established: true},
@@ -5496,8 +7323,14 @@ var _ = Describe("ensurePeersStatus", func() {
 			},
 			SystemNetworkNames: []string{"net-1"},
 		}
+		rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1"},
+		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
@@ -5513,6 +7346,7 @@ var _ = Describe("ensurePeersStatus", func() {
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
 					{
 						Name:            "peer-1",
+						Type:            v1alpha1.DRBDResourceTypeDiskful,
 						ConnectionState: v1alpha1.ConnectionStateConnected,
 						Paths: []v1alpha1.DRBDResourcePathStatus{
 							{SystemNetworkName: "net-1", Established: true},
@@ -5530,27 +7364,39 @@ var _ = Describe("ensurePeersStatus", func() {
 		}
 
 		// First call
-		outcome1 := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome1 := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 		Expect(outcome1.Error()).NotTo(HaveOccurred())
 		Expect(outcome1.DidChange()).To(BeTrue())
 
 		// Second call should report no change
-		outcome2 := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome2 := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
 		Expect(outcome2.DidChange()).To(BeFalse())
 	})
 
-	It("merges peers from datamesh members and drbdr peers", func() {
+	It("populates peers from drbdr with computed types", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
 					{
 						Name:            "peer-1",
+						Type:            v1alpha1.DRBDResourceTypeDiskful,
 						ConnectionState: v1alpha1.ConnectionStateConnected,
 						DiskState:       v1alpha1.DiskStateUpToDate,
 						Paths: []v1alpha1.DRBDResourcePathStatus{
 							{SystemNetworkName: "net-1", Established: true},
 						},
+					},
+					{
+						Name:            "peer-2",
+						Type:            v1alpha1.DRBDResourceTypeDiskless,
+						AllowRemoteRead: true, // TieBreaker
 					},
 				},
 			},
@@ -5558,33 +7404,35 @@ var _ = Describe("ensurePeersStatus", func() {
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
 			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
 				{Name: "peer-1", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "peer-2", Type: v1alpha1.ReplicaTypeTieBreaker}, // in datamesh but not in drbdr yet
+				{Name: "peer-2", Type: v1alpha1.ReplicaTypeTieBreaker},
 				{Name: "rvr-1"},
 			},
 			SystemNetworkNames: []string{"net-1"},
 		}
 
-		outcome := ensurePeersStatus(ctx, rvr, drbdr, datamesh, true)
+		outcome := flow.MergeEnsures(
+			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
+		)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(rvr.Status.Peers).To(HaveLen(2))
 
-		// peer-1: from both sources
+		// peer-1: Diskful
 		peer1 := findPeerByName(rvr.Status.Peers, "peer-1")
 		Expect(peer1).NotTo(BeNil())
 		Expect(peer1.Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
 		Expect(peer1.ConnectionState).To(Equal(v1alpha1.ConnectionStateConnected))
 		Expect(peer1.BackingVolumeState).To(Equal(v1alpha1.DiskStateUpToDate))
 
-		// peer-2: only from datamesh (pending connection)
+		// peer-2: TieBreaker (Diskless + AllowRemoteRead=true)
 		peer2 := findPeerByName(rvr.Status.Peers, "peer-2")
 		Expect(peer2).NotTo(BeNil())
 		Expect(peer2.Type).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
-		Expect(peer2.ConnectionState).To(BeEmpty()) // not connected yet
 	})
 })
 
-func findPeerByName(peers []v1alpha1.PeerStatus, name string) *v1alpha1.PeerStatus {
+func findPeerByName(peers []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus, name string) *v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus {
 	for i := range peers {
 		if peers[i].Name == name {
 			return &peers[i]
@@ -5606,9 +7454,9 @@ var _ = Describe("Attached condition apply helpers", func() {
 		}
 	})
 
-	Describe("applyRVRAttachedCondFalse", func() {
+	Describe("applyAttachedCondFalse", func() {
 		It("sets condition to False", func() {
-			changed := applyRVRAttachedCondFalse(rvr, "TestReason", "Test message")
+			changed := applyAttachedCondFalse(rvr, "TestReason", "Test message")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
@@ -5616,59 +7464,59 @@ var _ = Describe("Attached condition apply helpers", func() {
 		})
 
 		It("is idempotent", func() {
-			applyRVRAttachedCondFalse(rvr, "TestReason", "Test message")
-			changed := applyRVRAttachedCondFalse(rvr, "TestReason", "Test message")
+			applyAttachedCondFalse(rvr, "TestReason", "Test message")
+			changed := applyAttachedCondFalse(rvr, "TestReason", "Test message")
 			Expect(changed).To(BeFalse())
 		})
 	})
 
-	Describe("applyRVRAttachedCondUnknown", func() {
+	Describe("applyAttachedCondUnknown", func() {
 		It("sets condition to Unknown", func() {
-			changed := applyRVRAttachedCondUnknown(rvr, "TestReason", "Test message")
+			changed := applyAttachedCondUnknown(rvr, "TestReason", "Test message")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 			Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
 		})
 
 		It("is idempotent", func() {
-			applyRVRAttachedCondUnknown(rvr, "TestReason", "Test message")
-			changed := applyRVRAttachedCondUnknown(rvr, "TestReason", "Test message")
+			applyAttachedCondUnknown(rvr, "TestReason", "Test message")
+			changed := applyAttachedCondUnknown(rvr, "TestReason", "Test message")
 			Expect(changed).To(BeFalse())
 		})
 	})
 
-	Describe("applyRVRAttachedCondTrue", func() {
+	Describe("applyAttachedCondTrue", func() {
 		It("sets condition to True", func() {
-			changed := applyRVRAttachedCondTrue(rvr, "TestReason", "Test message")
+			changed := applyAttachedCondTrue(rvr, "TestReason", "Test message")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		})
 
 		It("is idempotent", func() {
-			applyRVRAttachedCondTrue(rvr, "TestReason", "Test message")
-			changed := applyRVRAttachedCondTrue(rvr, "TestReason", "Test message")
+			applyAttachedCondTrue(rvr, "TestReason", "Test message")
+			changed := applyAttachedCondTrue(rvr, "TestReason", "Test message")
 			Expect(changed).To(BeFalse())
 		})
 	})
 
-	Describe("applyRVRAttachedCondAbsent", func() {
+	Describe("applyAttachedCondAbsent", func() {
 		It("removes the condition", func() {
-			applyRVRAttachedCondTrue(rvr, "TestReason", "Test message")
-			changed := applyRVRAttachedCondAbsent(rvr)
+			applyAttachedCondTrue(rvr, "TestReason", "Test message")
+			changed := applyAttachedCondAbsent(rvr)
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 			Expect(cond).To(BeNil())
 		})
 
 		It("is idempotent when condition absent", func() {
-			changed := applyRVRAttachedCondAbsent(rvr)
+			changed := applyAttachedCondAbsent(rvr)
 			Expect(changed).To(BeFalse())
 		})
 	})
 })
 
-var _ = Describe("BackingVolumeInSync condition apply helpers", func() {
+var _ = Describe("BackingVolumeUpToDate condition apply helpers", func() {
 	var rvr *v1alpha1.ReplicatedVolumeReplica
 
 	BeforeEach(func() {
@@ -5677,38 +7525,38 @@ var _ = Describe("BackingVolumeInSync condition apply helpers", func() {
 		}
 	})
 
-	Describe("applyRVRBackingVolumeInSyncCondAbsent", func() {
+	Describe("applyBackingVolumeUpToDateCondAbsent", func() {
 		It("removes the condition", func() {
-			applyRVRBackingVolumeInSyncCondTrue(rvr, "TestReason", "Test")
-			changed := applyRVRBackingVolumeInSyncCondAbsent(rvr)
+			applyBackingVolumeUpToDateCondTrue(rvr, "TestReason", "Test")
+			changed := applyBackingVolumeUpToDateCondAbsent(rvr)
 			Expect(changed).To(BeTrue())
-			Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)).To(BeNil())
+			Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)).To(BeNil())
 		})
 	})
 
-	Describe("applyRVRBackingVolumeInSyncCondTrue", func() {
+	Describe("applyBackingVolumeUpToDateCondTrue", func() {
 		It("sets condition to True", func() {
-			changed := applyRVRBackingVolumeInSyncCondTrue(rvr, "TestReason", "Test")
+			changed := applyBackingVolumeUpToDateCondTrue(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
-			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		})
 	})
 
-	Describe("applyRVRBackingVolumeInSyncCondFalse", func() {
+	Describe("applyBackingVolumeUpToDateCondFalse", func() {
 		It("sets condition to False", func() {
-			changed := applyRVRBackingVolumeInSyncCondFalse(rvr, "TestReason", "Test")
+			changed := applyBackingVolumeUpToDateCondFalse(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
-			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		})
 	})
 
-	Describe("applyRVRBackingVolumeInSyncCondUnknown", func() {
+	Describe("applyBackingVolumeUpToDateCondUnknown", func() {
 		It("sets condition to Unknown", func() {
-			changed := applyRVRBackingVolumeInSyncCondUnknown(rvr, "TestReason", "Test")
+			changed := applyBackingVolumeUpToDateCondUnknown(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
-			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 			Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
 		})
 	})
@@ -5723,37 +7571,37 @@ var _ = Describe("FullyConnected condition apply helpers", func() {
 		}
 	})
 
-	Describe("applyRVRFullyConnectedCondFalse", func() {
+	Describe("applyFullyConnectedCondFalse", func() {
 		It("sets condition to False", func() {
-			changed := applyRVRFullyConnectedCondFalse(rvr, "TestReason", "Test")
+			changed := applyFullyConnectedCondFalse(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		})
 	})
 
-	Describe("applyRVRFullyConnectedCondTrue", func() {
+	Describe("applyFullyConnectedCondTrue", func() {
 		It("sets condition to True", func() {
-			changed := applyRVRFullyConnectedCondTrue(rvr, "TestReason", "Test")
+			changed := applyFullyConnectedCondTrue(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		})
 	})
 
-	Describe("applyRVRFullyConnectedCondUnknown", func() {
+	Describe("applyFullyConnectedCondUnknown", func() {
 		It("sets condition to Unknown", func() {
-			changed := applyRVRFullyConnectedCondUnknown(rvr, "TestReason", "Test")
+			changed := applyFullyConnectedCondUnknown(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)
 			Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
 		})
 	})
 
-	Describe("applyRVRFullyConnectedCondAbsent", func() {
+	Describe("applyFullyConnectedCondAbsent", func() {
 		It("removes the condition", func() {
-			applyRVRFullyConnectedCondTrue(rvr, "TestReason", "Test")
-			changed := applyRVRFullyConnectedCondAbsent(rvr)
+			applyFullyConnectedCondTrue(rvr, "TestReason", "Test")
+			changed := applyFullyConnectedCondAbsent(rvr)
 			Expect(changed).To(BeTrue())
 			Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType)).To(BeNil())
 		})
@@ -5769,27 +7617,27 @@ var _ = Describe("Ready condition apply helpers", func() {
 		}
 	})
 
-	Describe("applyRVRReadyCondTrue", func() {
+	Describe("applyReadyCondTrue", func() {
 		It("sets condition to True", func() {
-			changed := applyRVRReadyCondTrue(rvr, "TestReason", "Test")
+			changed := applyReadyCondTrue(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		})
 	})
 
-	Describe("applyRVRReadyCondFalse", func() {
+	Describe("applyReadyCondFalse", func() {
 		It("sets condition to False", func() {
-			changed := applyRVRReadyCondFalse(rvr, "TestReason", "Test")
+			changed := applyReadyCondFalse(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		})
 	})
 
-	Describe("applyRVRReadyCondUnknown", func() {
+	Describe("applyReadyCondUnknown", func() {
 		It("sets condition to Unknown", func() {
-			changed := applyRVRReadyCondUnknown(rvr, "TestReason", "Test")
+			changed := applyReadyCondUnknown(rvr, "TestReason", "Test")
 			Expect(changed).To(BeTrue())
 			cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
 			Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
@@ -5801,7 +7649,7 @@ var _ = Describe("Ready condition apply helpers", func() {
 // Status field apply helpers tests
 //
 
-var _ = Describe("applyRVRDevicePath", func() {
+var _ = Describe("applyRVRAttachment", func() {
 	var rvr *v1alpha1.ReplicatedVolumeReplica
 
 	BeforeEach(func() {
@@ -5810,194 +7658,72 @@ var _ = Describe("applyRVRDevicePath", func() {
 		}
 	})
 
-	It("sets path and returns true", func() {
-		changed := applyRVRDevicePath(rvr, "/dev/drbd1000")
+	It("sets attachment from nil and returns true", func() {
+		changed := applyRVRAttachment(rvr, &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
+		})
 		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DevicePath).To(Equal("/dev/drbd1000"))
+		Expect(rvr.Status.Attachment).NotTo(BeNil())
+		Expect(rvr.Status.Attachment.DevicePath).To(Equal("/dev/drbd1000"))
+		Expect(rvr.Status.Attachment.IOSuspended).To(BeFalse())
 	})
 
-	It("clears path when empty string", func() {
-		rvr.Status.DevicePath = "/dev/drbd1000"
-		changed := applyRVRDevicePath(rvr, "")
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DevicePath).To(BeEmpty())
-	})
-
-	It("is idempotent", func() {
-		applyRVRDevicePath(rvr, "/dev/drbd1000")
-		changed := applyRVRDevicePath(rvr, "/dev/drbd1000")
-		Expect(changed).To(BeFalse())
-	})
-})
-
-var _ = Describe("applyRVRDeviceIOSuspended", func() {
-	var rvr *v1alpha1.ReplicatedVolumeReplica
-
-	BeforeEach(func() {
-		rvr = &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+	It("clears attachment when nil", func() {
+		rvr.Status.Attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
 		}
-	})
-
-	It("sets value from nil", func() {
-		changed := applyRVRDeviceIOSuspended(rvr, boolPtr(true))
+		changed := applyRVRAttachment(rvr, nil)
 		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DeviceIOSuspended).NotTo(BeNil())
-		Expect(*rvr.Status.DeviceIOSuspended).To(BeTrue())
-	})
-
-	It("clears value to nil", func() {
-		rvr.Status.DeviceIOSuspended = boolPtr(true)
-		changed := applyRVRDeviceIOSuspended(rvr, nil)
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DeviceIOSuspended).To(BeNil())
+		Expect(rvr.Status.Attachment).To(BeNil())
 	})
 
 	It("is idempotent for nil", func() {
-		changed := applyRVRDeviceIOSuspended(rvr, nil)
+		changed := applyRVRAttachment(rvr, nil)
 		Expect(changed).To(BeFalse())
 	})
 
 	It("is idempotent for same value", func() {
-		applyRVRDeviceIOSuspended(rvr, boolPtr(false))
-		changed := applyRVRDeviceIOSuspended(rvr, boolPtr(false))
+		applyRVRAttachment(rvr, &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
+		})
+		changed := applyRVRAttachment(rvr, &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
+		})
 		Expect(changed).To(BeFalse())
 	})
 
-	It("changes value from true to false", func() {
-		rvr.Status.DeviceIOSuspended = boolPtr(true)
-		changed := applyRVRDeviceIOSuspended(rvr, boolPtr(false))
+	It("updates DevicePath", func() {
+		rvr.Status.Attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
+		}
+		changed := applyRVRAttachment(rvr, &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd2000",
+			IOSuspended: false,
+		})
 		Expect(changed).To(BeTrue())
-		Expect(*rvr.Status.DeviceIOSuspended).To(BeFalse())
+		Expect(rvr.Status.Attachment.DevicePath).To(Equal("/dev/drbd2000"))
+	})
+
+	It("updates IOSuspended", func() {
+		rvr.Status.Attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
+		}
+		changed := applyRVRAttachment(rvr, &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: true,
+		})
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.Attachment.IOSuspended).To(BeTrue())
 	})
 })
 
-var _ = Describe("applyRVRBackingVolumeState", func() {
-	var rvr *v1alpha1.ReplicatedVolumeReplica
-
-	BeforeEach(func() {
-		rvr = &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-	})
-
-	It("sets disk state", func() {
-		changed := applyRVRBackingVolumeState(rvr, v1alpha1.DiskStateUpToDate)
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.BackingVolumeState).To(Equal(v1alpha1.DiskStateUpToDate))
-	})
-
-	It("is idempotent", func() {
-		applyRVRBackingVolumeState(rvr, v1alpha1.DiskStateUpToDate)
-		changed := applyRVRBackingVolumeState(rvr, v1alpha1.DiskStateUpToDate)
-		Expect(changed).To(BeFalse())
-	})
-
-	It("clears state to empty", func() {
-		rvr.Status.BackingVolumeState = v1alpha1.DiskStateUpToDate
-		changed := applyRVRBackingVolumeState(rvr, "")
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.BackingVolumeState).To(BeEmpty())
-	})
-})
-
-var _ = Describe("applyRVRStatusQuorum", func() {
-	var rvr *v1alpha1.ReplicatedVolumeReplica
-
-	BeforeEach(func() {
-		rvr = &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-	})
-
-	It("sets quorum from nil", func() {
-		changed := applyRVRStatusQuorum(rvr, boolPtr(true))
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.Quorum).NotTo(BeNil())
-		Expect(*rvr.Status.Quorum).To(BeTrue())
-	})
-
-	It("clears quorum to nil", func() {
-		rvr.Status.Quorum = boolPtr(true)
-		changed := applyRVRStatusQuorum(rvr, nil)
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.Quorum).To(BeNil())
-	})
-
-	It("is idempotent for nil", func() {
-		changed := applyRVRStatusQuorum(rvr, nil)
-		Expect(changed).To(BeFalse())
-	})
-
-	It("is idempotent for same value", func() {
-		applyRVRStatusQuorum(rvr, boolPtr(true))
-		changed := applyRVRStatusQuorum(rvr, boolPtr(true))
-		Expect(changed).To(BeFalse())
-	})
-})
-
-var _ = Describe("applyRVRStatusPeers", func() {
-	var rvr *v1alpha1.ReplicatedVolumeReplica
-
-	BeforeEach(func() {
-		rvr = &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-	})
-
-	It("sets peers from nil", func() {
-		peers := []v1alpha1.PeerStatus{
-			{Name: "peer-1", Type: v1alpha1.ReplicaTypeDiskful},
-		}
-		changed := applyRVRStatusPeers(rvr, peers)
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.Peers).To(HaveLen(1))
-		Expect(rvr.Status.Peers[0].Name).To(Equal("peer-1"))
-	})
-
-	It("clears peers to nil", func() {
-		rvr.Status.Peers = []v1alpha1.PeerStatus{
-			{Name: "peer-1"},
-		}
-		changed := applyRVRStatusPeers(rvr, nil)
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.Peers).To(BeNil())
-	})
-
-	It("is idempotent for empty", func() {
-		changed := applyRVRStatusPeers(rvr, nil)
-		Expect(changed).To(BeFalse())
-	})
-
-	It("is idempotent for same value using DeepEqual", func() {
-		peers := []v1alpha1.PeerStatus{
-			{
-				Name:                    "peer-1",
-				Type:                    v1alpha1.ReplicaTypeDiskful,
-				ConnectionState:         v1alpha1.ConnectionStateConnected,
-				ConnectionEstablishedOn: []string{"net-1", "net-2"},
-			},
-		}
-		applyRVRStatusPeers(rvr, peers)
-		changed := applyRVRStatusPeers(rvr, peers)
-		Expect(changed).To(BeFalse())
-	})
-
-	It("detects change in nested slice", func() {
-		peers := []v1alpha1.PeerStatus{
-			{Name: "peer-1", ConnectionEstablishedOn: []string{"net-1"}},
-		}
-		applyRVRStatusPeers(rvr, peers)
-
-		newPeers := []v1alpha1.PeerStatus{
-			{Name: "peer-1", ConnectionEstablishedOn: []string{"net-1", "net-2"}},
-		}
-		changed := applyRVRStatusPeers(rvr, newPeers)
-		Expect(changed).To(BeTrue())
-	})
-})
-
-var _ = Describe("applyRVRBackingVolumeReadyCondAbsent", func() {
+var _ = Describe("applyBackingVolumeReadyCondAbsent", func() {
 	var rvr *v1alpha1.ReplicatedVolumeReplica
 
 	BeforeEach(func() {
@@ -6007,14 +7733,14 @@ var _ = Describe("applyRVRBackingVolumeReadyCondAbsent", func() {
 	})
 
 	It("removes the condition", func() {
-		applyRVRBackingVolumeReadyCondTrue(rvr, "TestReason", "Test")
-		changed := applyRVRBackingVolumeReadyCondAbsent(rvr)
+		applyBackingVolumeReadyCondTrue(rvr, "TestReason", "Test")
+		changed := applyBackingVolumeReadyCondAbsent(rvr)
 		Expect(changed).To(BeTrue())
 		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)).To(BeNil())
 	})
 
 	It("is idempotent when condition absent", func() {
-		changed := applyRVRBackingVolumeReadyCondAbsent(rvr)
+		changed := applyBackingVolumeReadyCondAbsent(rvr)
 		Expect(changed).To(BeFalse())
 	})
 })
@@ -6026,11 +7752,11 @@ var _ = Describe("applyRVRBackingVolumeReadyCondAbsent", func() {
 var _ = Describe("computeHasUpToDatePeer", func() {
 	It("returns false for empty peers", func() {
 		Expect(computeHasUpToDatePeer(nil)).To(BeFalse())
-		Expect(computeHasUpToDatePeer([]v1alpha1.PeerStatus{})).To(BeFalse())
+		Expect(computeHasUpToDatePeer([]v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{})).To(BeFalse())
 	})
 
 	It("returns false when no peer has UpToDate", func() {
-		peers := []v1alpha1.PeerStatus{
+		peers := []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{Name: "peer-1", BackingVolumeState: v1alpha1.DiskStateInconsistent},
 			{Name: "peer-2", BackingVolumeState: v1alpha1.DiskStateOutdated},
 		}
@@ -6038,7 +7764,7 @@ var _ = Describe("computeHasUpToDatePeer", func() {
 	})
 
 	It("returns true when at least one peer has UpToDate", func() {
-		peers := []v1alpha1.PeerStatus{
+		peers := []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{Name: "peer-1", BackingVolumeState: v1alpha1.DiskStateInconsistent},
 			{Name: "peer-2", BackingVolumeState: v1alpha1.DiskStateUpToDate},
 		}
@@ -6049,11 +7775,11 @@ var _ = Describe("computeHasUpToDatePeer", func() {
 var _ = Describe("computeHasConnectedAttachedPeer", func() {
 	It("returns false for empty peers", func() {
 		Expect(computeHasConnectedAttachedPeer(nil)).To(BeFalse())
-		Expect(computeHasConnectedAttachedPeer([]v1alpha1.PeerStatus{})).To(BeFalse())
+		Expect(computeHasConnectedAttachedPeer([]v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{})).To(BeFalse())
 	})
 
 	It("returns false when no peer is attached and connected", func() {
-		peers := []v1alpha1.PeerStatus{
+		peers := []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{Name: "peer-1", Attached: true, ConnectionEstablishedOn: nil},              // attached but not connected
 			{Name: "peer-2", Attached: false, ConnectionEstablishedOn: []string{"net"}}, // connected but not attached
 		}
@@ -6061,7 +7787,7 @@ var _ = Describe("computeHasConnectedAttachedPeer", func() {
 	})
 
 	It("returns true when at least one peer is attached with connections", func() {
-		peers := []v1alpha1.PeerStatus{
+		peers := []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{Name: "peer-1", Attached: true, ConnectionEstablishedOn: []string{"net-1"}},
 		}
 		Expect(computeHasConnectedAttachedPeer(peers)).To(BeTrue())
@@ -6071,11 +7797,11 @@ var _ = Describe("computeHasConnectedAttachedPeer", func() {
 var _ = Describe("computeHasAnyAttachedPeer", func() {
 	It("returns false for empty peers", func() {
 		Expect(computeHasAnyAttachedPeer(nil)).To(BeFalse())
-		Expect(computeHasAnyAttachedPeer([]v1alpha1.PeerStatus{})).To(BeFalse())
+		Expect(computeHasAnyAttachedPeer([]v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{})).To(BeFalse())
 	})
 
 	It("returns false when no peer is attached", func() {
-		peers := []v1alpha1.PeerStatus{
+		peers := []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{Name: "peer-1", Attached: false},
 			{Name: "peer-2", Attached: false},
 		}
@@ -6083,7 +7809,7 @@ var _ = Describe("computeHasAnyAttachedPeer", func() {
 	})
 
 	It("returns true when at least one peer is attached", func() {
-		peers := []v1alpha1.PeerStatus{
+		peers := []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{Name: "peer-1", Attached: false},
 			{Name: "peer-2", Attached: true},
 		}
@@ -6095,278 +7821,235 @@ var _ = Describe("computeHasAnyAttachedPeer", func() {
 // Other helper functions tests
 //
 
-var _ = Describe("buildQuorumMessage", func() {
-	It("returns 'quorum: unknown' for nil QuorumSummary", func() {
-		Expect(buildQuorumMessage(nil)).To(Equal("quorum: unknown"))
-	})
-
-	It("formats correctly with both quorum and qmr present", func() {
-		qs := &v1alpha1.QuorumSummary{
-			ConnectedVotingPeers:    2,
-			Quorum:                  intPtr(3),
-			ConnectedUpToDatePeers:  1,
-			QuorumMinimumRedundancy: intPtr(2),
-		}
-		msg := buildQuorumMessage(qs)
-		Expect(msg).To(Equal("quorum: 2/3, data quorum: 1/2"))
-	})
-
-	It("formats with 'unknown' when quorum is nil", func() {
-		qs := &v1alpha1.QuorumSummary{
-			ConnectedVotingPeers:    2,
-			Quorum:                  nil,
-			ConnectedUpToDatePeers:  1,
-			QuorumMinimumRedundancy: intPtr(2),
-		}
-		msg := buildQuorumMessage(qs)
-		Expect(msg).To(Equal("quorum: 2/unknown, data quorum: 1/2"))
-	})
-
-	It("formats with 'unknown' when qmr is nil", func() {
-		qs := &v1alpha1.QuorumSummary{
-			ConnectedVotingPeers:    2,
-			Quorum:                  intPtr(3),
-			ConnectedUpToDatePeers:  1,
-			QuorumMinimumRedundancy: nil,
-		}
-		msg := buildQuorumMessage(qs)
-		Expect(msg).To(Equal("quorum: 2/3, data quorum: 1/unknown"))
-	})
-})
-
-var _ = Describe("applyBackingVolumeSyncMessage", func() {
-	var rvr *v1alpha1.ReplicatedVolumeReplica
+var _ = Describe("ensureStatusPeers (logic)", func() {
+	var (
+		ctx context.Context
+		rvr *v1alpha1.ReplicatedVolumeReplica
+	)
 
 	BeforeEach(func() {
+		ctx = logr.NewContext(context.Background(), logr.Discard())
 		rvr = &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
 	})
 
-	It("returns correct message for Inconsistent (attached)", func() {
-		changed := applyBackingVolumeSyncMessage(rvr, v1alpha1.DiskStateInconsistent, true)
-		Expect(changed).To(BeTrue())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonSynchronizing))
-		Expect(cond.Message).To(ContainSubstring("local reads"))
-	})
-
-	It("returns correct message for Inconsistent (not attached)", func() {
-		changed := applyBackingVolumeSyncMessage(rvr, v1alpha1.DiskStateInconsistent, false)
-		Expect(changed).To(BeTrue())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
-		Expect(cond.Message).To(ContainSubstring("in progress"))
-	})
-
-	It("returns correct message for Outdated (attached)", func() {
-		changed := applyBackingVolumeSyncMessage(rvr, v1alpha1.DiskStateOutdated, true)
-		Expect(changed).To(BeTrue())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
-		Expect(cond.Message).To(ContainSubstring("forwarded to up-to-date peer"))
-	})
-
-	It("returns correct message for Negotiating (not attached)", func() {
-		changed := applyBackingVolumeSyncMessage(rvr, v1alpha1.DiskStateNegotiating, false)
-		Expect(changed).To(BeTrue())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
-		Expect(cond.Message).To(ContainSubstring("Negotiating synchronization direction"))
-	})
-
-	It("returns correct message for Consistent", func() {
-		changed := applyBackingVolumeSyncMessage(rvr, v1alpha1.DiskStateConsistent, false)
-		Expect(changed).To(BeTrue())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
-		Expect(cond.Message).To(ContainSubstring("consistent"))
-	})
-})
-
-var _ = Describe("ensureRVRStatusQuorumSummary", func() {
-	var rvr *v1alpha1.ReplicatedVolumeReplica
-
-	BeforeEach(func() {
-		rvr = &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-	})
-
-	It("clears QuorumSummary when drbdr is nil", func() {
-		rvr.Status.QuorumSummary = &v1alpha1.QuorumSummary{
-			ConnectedVotingPeers: 2,
-		}
-		changed := ensureRVRStatusQuorumSummary(rvr, nil)
-		Expect(changed).To(BeTrue())
-		// QuorumSummary is set to a zero-value struct when drbdr is nil
-		Expect(rvr.Status.QuorumSummary).NotTo(BeNil())
-		Expect(rvr.Status.QuorumSummary.ConnectedVotingPeers).To(Equal(0))
-	})
-
-	It("computes connectedVotingPeers from Diskful/TieBreaker peers", func() {
-		rvr.Status.Peers = []v1alpha1.PeerStatus{
-			{Name: "peer-1", Type: v1alpha1.ReplicaTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnected},
-			{Name: "peer-2", Type: v1alpha1.ReplicaTypeTieBreaker, ConnectionState: v1alpha1.ConnectionStateConnected},
-			{Name: "peer-3", Type: v1alpha1.ReplicaTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnecting},
-		}
+	It("computes Type from drbdr peer fields", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
-				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{},
-			},
-		}
-		changed := ensureRVRStatusQuorumSummary(rvr, drbdr)
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.QuorumSummary.ConnectedVotingPeers).To(Equal(2))
-	})
-
-	It("computes connectedUpToDatePeers correctly", func() {
-		rvr.Status.Peers = []v1alpha1.PeerStatus{
-			{Name: "peer-1", ConnectionState: v1alpha1.ConnectionStateConnected, BackingVolumeState: v1alpha1.DiskStateUpToDate},
-			{Name: "peer-2", ConnectionState: v1alpha1.ConnectionStateConnected, BackingVolumeState: v1alpha1.DiskStateInconsistent},
-			{Name: "peer-3", ConnectionState: v1alpha1.ConnectionStateConnecting, BackingVolumeState: v1alpha1.DiskStateUpToDate},
-		}
-		drbdr := &v1alpha1.DRBDResource{}
-		changed := ensureRVRStatusQuorumSummary(rvr, drbdr)
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.QuorumSummary.ConnectedUpToDatePeers).To(Equal(1))
-	})
-
-	It("copies quorum/qmr from drbdr.Status.ActiveConfiguration", func() {
-		drbdr := &v1alpha1.DRBDResource{
-			Status: v1alpha1.DRBDResourceStatus{
-				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
-					Quorum:                  bytePtr(3),
-					QuorumMinimumRedundancy: bytePtr(2),
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "peer-1", Type: v1alpha1.DRBDResourceTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnected, DiskState: v1alpha1.DiskStateUpToDate},
+					{Name: "peer-2", Type: v1alpha1.DRBDResourceTypeDiskless, AllowRemoteRead: true},  // TieBreaker
+					{Name: "peer-3", Type: v1alpha1.DRBDResourceTypeDiskless, AllowRemoteRead: false}, // Access
 				},
 			},
 		}
-		changed := ensureRVRStatusQuorumSummary(rvr, drbdr)
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.QuorumSummary.Quorum).NotTo(BeNil())
-		Expect(*rvr.Status.QuorumSummary.Quorum).To(Equal(3))
-		Expect(rvr.Status.QuorumSummary.QuorumMinimumRedundancy).NotTo(BeNil())
-		Expect(*rvr.Status.QuorumSummary.QuorumMinimumRedundancy).To(Equal(2))
-	})
 
-	It("returns false when unchanged (idempotent)", func() {
-		// Use drbdr without quorum values to avoid pointer comparison issues
-		// (QuorumSummary has *int fields that create new pointers each call)
-		drbdr := &v1alpha1.DRBDResource{}
-		ensureRVRStatusQuorumSummary(rvr, drbdr)
-		changed := ensureRVRStatusQuorumSummary(rvr, drbdr)
-		Expect(changed).To(BeFalse())
-	})
-})
-
-var _ = Describe("ensureRVRStatusPeers", func() {
-	var rvr *v1alpha1.ReplicatedVolumeReplica
-
-	BeforeEach(func() {
-		rvr = &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-	})
-
-	It("merges datamesh members and drbdr peers correctly (O(m+n) merge)", func() {
-		drbdrPeers := []v1alpha1.DRBDResourcePeerStatus{
-			{Name: "peer-1", ConnectionState: v1alpha1.ConnectionStateConnected, DiskState: v1alpha1.DiskStateUpToDate},
-			{Name: "peer-3", ConnectionState: v1alpha1.ConnectionStateConnecting},
-		}
-		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "peer-1", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "peer-2", Type: v1alpha1.ReplicaTypeTieBreaker}, // not in drbdr yet
-				{Name: "rvr-1"}, // self
-			},
-		}
-
-		changed := ensureRVRStatusPeers(rvr, drbdrPeers, datamesh, "rvr-1")
-		Expect(changed).To(BeTrue())
+		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
 		Expect(rvr.Status.Peers).To(HaveLen(3))
 
-		// peer-1: from both sources
+		// peer-1: Diskful
 		peer1 := findPeerByName(rvr.Status.Peers, "peer-1")
 		Expect(peer1).NotTo(BeNil())
 		Expect(peer1.Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
 		Expect(peer1.ConnectionState).To(Equal(v1alpha1.ConnectionStateConnected))
 
-		// peer-2: only from datamesh
+		// peer-2: TieBreaker (Diskless + AllowRemoteRead=true)
 		peer2 := findPeerByName(rvr.Status.Peers, "peer-2")
 		Expect(peer2).NotTo(BeNil())
 		Expect(peer2.Type).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
-		Expect(peer2.ConnectionState).To(BeEmpty())
 
-		// peer-3: only from drbdr (orphan)
+		// peer-3: Access (Diskless + AllowRemoteRead=false)
 		peer3 := findPeerByName(rvr.Status.Peers, "peer-3")
 		Expect(peer3).NotTo(BeNil())
-		Expect(peer3.Type).To(BeEmpty()) // orphan has empty type
+		Expect(peer3.Type).To(Equal(v1alpha1.ReplicaTypeAccess))
 	})
 
-	It("excludes self from peers", func() {
-		drbdrPeers := []v1alpha1.DRBDResourcePeerStatus{
-			{Name: "peer-1"},
-		}
-		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "peer-1"},
-				{Name: "rvr-1"}, // self
+	It("mirrors drbdr.Status.Peers order", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "peer-3", Type: v1alpha1.DRBDResourceTypeDiskful},
+					{Name: "peer-1", Type: v1alpha1.DRBDResourceTypeDiskful},
+					{Name: "peer-2", Type: v1alpha1.DRBDResourceTypeDiskful},
+				},
 			},
 		}
 
-		changed := ensureRVRStatusPeers(rvr, drbdrPeers, datamesh, "rvr-1")
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.Peers).To(HaveLen(1))
-		Expect(rvr.Status.Peers[0].Name).To(Equal("peer-1"))
+		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Peers).To(HaveLen(3))
+		// Order mirrors drbdr.Status.Peers
+		Expect(rvr.Status.Peers[0].Name).To(Equal("peer-3"))
+		Expect(rvr.Status.Peers[1].Name).To(Equal("peer-1"))
+		Expect(rvr.Status.Peers[2].Name).To(Equal("peer-2"))
 	})
 
-	It("handles nil datamesh gracefully", func() {
-		drbdrPeers := []v1alpha1.DRBDResourcePeerStatus{
-			{Name: "peer-1", ConnectionState: v1alpha1.ConnectionStateConnected},
-		}
-
-		changed := ensureRVRStatusPeers(rvr, drbdrPeers, nil, "rvr-1")
-		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.Peers).To(HaveLen(1))
-		Expect(rvr.Status.Peers[0].Name).To(Equal("peer-1"))
-		Expect(rvr.Status.Peers[0].Type).To(BeEmpty()) // no datamesh = no type
-	})
-
-	It("returns false when unchanged (idempotent)", func() {
-		drbdrPeers := []v1alpha1.DRBDResourcePeerStatus{
-			{Name: "peer-1", ConnectionState: v1alpha1.ConnectionStateConnected},
-		}
-		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "peer-1", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "rvr-1"},
+	It("returns no change when unchanged (idempotent)", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "peer-1", Type: v1alpha1.DRBDResourceTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnected},
+				},
 			},
 		}
 
-		ensureRVRStatusPeers(rvr, drbdrPeers, datamesh, "rvr-1")
-		changed := ensureRVRStatusPeers(rvr, drbdrPeers, datamesh, "rvr-1")
-		Expect(changed).To(BeFalse())
+		outcome1 := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome1.DidChange()).To(BeTrue())
+
+		outcome2 := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
 	})
 
 	It("trims excess peers from previous state", func() {
 		// Start with 2 peers
-		rvr.Status.Peers = []v1alpha1.PeerStatus{
+		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{Name: "peer-1"},
 			{Name: "peer-2"},
 		}
 
 		// Now only 1 peer
-		drbdrPeers := []v1alpha1.DRBDResourcePeerStatus{
-			{Name: "peer-1"},
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "peer-1", Type: v1alpha1.DRBDResourceTypeDiskful},
+				},
+			},
 		}
 
-		changed := ensureRVRStatusPeers(rvr, drbdrPeers, nil, "rvr-1")
-		Expect(changed).To(BeTrue())
+		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
 		Expect(rvr.Status.Peers).To(HaveLen(1))
+	})
+
+	It("clears peers when drbdr has no peers", func() {
+		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{{Name: "peer-1"}}
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{},
+			},
+		}
+
+		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Peers).To(BeEmpty())
 	})
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ensureQuorumStatus tests
+// ensureStatusQuorum tests
 //
 
-var _ = Describe("ensureQuorumStatus", func() {
+var _ = Describe("ensureStatusQuorum", func() {
+	var (
+		ctx context.Context
+		rvr *v1alpha1.ReplicatedVolumeReplica
+	)
+
+	BeforeEach(func() {
+		ctx = logr.NewContext(context.Background(), logr.Discard())
+		rvr = &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+	})
+
+	It("clears quorum status when drbdr is nil", func() {
+		rvr.Status.Quorum = boolPtr(true)
+		rvr.Status.QuorumSummary = &v1alpha1.ReplicatedVolumeReplicaStatusQuorumSummary{
+			ConnectedVotingPeers:   1,
+			ConnectedUpToDatePeers: 1,
+		}
+
+		outcome := ensureStatusQuorum(ctx, rvr, nil)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(rvr.Status.Quorum).To(BeNil())
+		Expect(rvr.Status.QuorumSummary).To(BeNil())
+	})
+
+	It("copies quorum from drbdr.Status.Quorum", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Quorum: boolPtr(true),
+			},
+		}
+
+		outcome := ensureStatusQuorum(ctx, rvr, drbdr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(rvr.Status.Quorum).NotTo(BeNil())
+		Expect(*rvr.Status.Quorum).To(BeTrue())
+	})
+
+	It("fills ReplicatedVolumeReplicaStatusQuorumSummary correctly from peers and drbdr", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Quorum: boolPtr(true),
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Quorum:                  bytePtr(2),
+					QuorumMinimumRedundancy: bytePtr(1),
+				},
+			},
+		}
+		// Set up peers with different states
+		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+			{
+				Name:               "peer-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				ConnectionState:    v1alpha1.ConnectionStateConnected,
+				BackingVolumeState: v1alpha1.DiskStateUpToDate,
+			},
+			{
+				Name:            "peer-2",
+				Type:            v1alpha1.ReplicaTypeTieBreaker,
+				ConnectionState: v1alpha1.ConnectionStateConnected,
+			},
+		}
+
+		outcome := ensureStatusQuorum(ctx, rvr, drbdr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(rvr.Status.QuorumSummary).NotTo(BeNil())
+		// peer-1 (Diskful) + peer-2 (TieBreaker) = 2 voting peers connected
+		Expect(rvr.Status.QuorumSummary.ConnectedVotingPeers).To(Equal(2))
+		// peer-1 has UpToDate = 1 up-to-date peer
+		Expect(rvr.Status.QuorumSummary.ConnectedUpToDatePeers).To(Equal(1))
+		Expect(rvr.Status.QuorumSummary.Quorum).NotTo(BeNil())
+		Expect(*rvr.Status.QuorumSummary.Quorum).To(Equal(2))
+		Expect(rvr.Status.QuorumSummary.QuorumMinimumRedundancy).NotTo(BeNil())
+		Expect(*rvr.Status.QuorumSummary.QuorumMinimumRedundancy).To(Equal(1))
+	})
+
+	It("returns no change when already in sync", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Quorum: boolPtr(true),
+			},
+		}
+
+		// First call
+		outcome1 := ensureStatusQuorum(ctx, rvr, drbdr)
+		Expect(outcome1.Error()).NotTo(HaveOccurred())
+		Expect(outcome1.DidChange()).To(BeTrue())
+
+		// Second call should report no change
+		outcome2 := ensureStatusQuorum(ctx, rvr, drbdr)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ensureConditionReady tests
+//
+
+var _ = Describe("ensureConditionReady", func() {
 	var (
 		ctx context.Context
 		rvr *v1alpha1.ReplicatedVolumeReplica
@@ -6390,18 +8073,17 @@ var _ = Describe("ensureQuorumStatus", func() {
 			},
 		}
 
-		outcome := ensureQuorumStatus(ctx, rvr, drbdr, true, false)
+		outcome := ensureConditionReady(ctx, rvr, drbdr, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonDeleting))
-		Expect(rvr.Status.Quorum).To(BeNil())
 	})
 
 	It("sets Ready=False Deleting when drbdr is nil", func() {
-		outcome := ensureQuorumStatus(ctx, rvr, nil, true, false)
+		outcome := ensureConditionReady(ctx, rvr, nil, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
@@ -6417,14 +8099,13 @@ var _ = Describe("ensureQuorumStatus", func() {
 			},
 		}
 
-		outcome := ensureQuorumStatus(ctx, rvr, drbdr, false, false)
+		outcome := ensureConditionReady(ctx, rvr, drbdr, false, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonAgentNotReady))
-		Expect(rvr.Status.Quorum).To(BeNil())
 	})
 
 	It("sets Ready=Unknown ApplyingConfiguration when config pending", func() {
@@ -6434,7 +8115,7 @@ var _ = Describe("ensureQuorumStatus", func() {
 			},
 		}
 
-		outcome := ensureQuorumStatus(ctx, rvr, drbdr, true, true)
+		outcome := ensureConditionReady(ctx, rvr, drbdr, true, true)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
@@ -6450,7 +8131,7 @@ var _ = Describe("ensureQuorumStatus", func() {
 			},
 		}
 
-		outcome := ensureQuorumStatus(ctx, rvr, drbdr, true, false)
+		outcome := ensureConditionReady(ctx, rvr, drbdr, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
@@ -6466,76 +8147,29 @@ var _ = Describe("ensureQuorumStatus", func() {
 			},
 		}
 
-		outcome := ensureQuorumStatus(ctx, rvr, drbdr, true, false)
+		outcome := ensureConditionReady(ctx, rvr, drbdr, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumLost))
-		Expect(rvr.Status.Quorum).NotTo(BeNil())
-		Expect(*rvr.Status.Quorum).To(BeFalse())
 	})
 
 	It("sets Ready=True Ready when quorum is true", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Quorum: boolPtr(true),
-				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
-					Quorum:                  bytePtr(2),
-					QuorumMinimumRedundancy: bytePtr(1),
-				},
 			},
 		}
 
-		outcome := ensureQuorumStatus(ctx, rvr, drbdr, true, false)
+		outcome := ensureConditionReady(ctx, rvr, drbdr, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady))
-		Expect(rvr.Status.Quorum).NotTo(BeNil())
-		Expect(*rvr.Status.Quorum).To(BeTrue())
-	})
-
-	It("fills QuorumSummary correctly from peers and drbdr", func() {
-		drbdr := &v1alpha1.DRBDResource{
-			Status: v1alpha1.DRBDResourceStatus{
-				Quorum: boolPtr(true),
-				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
-					Quorum:                  bytePtr(2),
-					QuorumMinimumRedundancy: bytePtr(1),
-				},
-			},
-		}
-		// Set up peers with different states
-		rvr.Status.Peers = []v1alpha1.PeerStatus{
-			{
-				Name:               "peer-1",
-				Type:               v1alpha1.ReplicaTypeDiskful,
-				ConnectionState:    v1alpha1.ConnectionStateConnected,
-				BackingVolumeState: v1alpha1.DiskStateUpToDate,
-			},
-			{
-				Name:            "peer-2",
-				Type:            v1alpha1.ReplicaTypeTieBreaker,
-				ConnectionState: v1alpha1.ConnectionStateConnected,
-			},
-		}
-
-		outcome := ensureQuorumStatus(ctx, rvr, drbdr, true, false)
-
-		Expect(outcome.Error()).NotTo(HaveOccurred())
-		Expect(rvr.Status.QuorumSummary).NotTo(BeNil())
-		// peer-1 (Diskful) + peer-2 (TieBreaker) = 2 voting peers connected
-		Expect(rvr.Status.QuorumSummary.ConnectedVotingPeers).To(Equal(2))
-		// peer-1 has UpToDate = 1 up-to-date peer
-		Expect(rvr.Status.QuorumSummary.ConnectedUpToDatePeers).To(Equal(1))
-		Expect(rvr.Status.QuorumSummary.Quorum).NotTo(BeNil())
-		Expect(*rvr.Status.QuorumSummary.Quorum).To(Equal(2))
-		Expect(rvr.Status.QuorumSummary.QuorumMinimumRedundancy).NotTo(BeNil())
-		Expect(*rvr.Status.QuorumSummary.QuorumMinimumRedundancy).To(Equal(1))
 	})
 
 	It("returns no change when already in sync", func() {
@@ -6546,22 +8180,144 @@ var _ = Describe("ensureQuorumStatus", func() {
 		}
 
 		// First call
-		outcome1 := ensureQuorumStatus(ctx, rvr, drbdr, true, false)
+		outcome1 := ensureConditionReady(ctx, rvr, drbdr, true, false)
 		Expect(outcome1.Error()).NotTo(HaveOccurred())
 		Expect(outcome1.DidChange()).To(BeTrue())
 
 		// Second call should report no change
-		outcome2 := ensureQuorumStatus(ctx, rvr, drbdr, true, false)
+		outcome2 := ensureConditionReady(ctx, rvr, drbdr, true, false)
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
 		Expect(outcome2.DidChange()).To(BeFalse())
 	})
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ensureBackingVolumeStatus tests
+// ensureStatusBackingVolume tests
 //
 
-var _ = Describe("ensureBackingVolumeStatus", func() {
+var _ = Describe("ensureStatusBackingVolume", func() {
+	var (
+		ctx  context.Context
+		rvr  *v1alpha1.ReplicatedVolumeReplica
+		llvs []snc.LVMLogicalVolume
+	)
+
+	BeforeEach(func() {
+		ctx = logr.NewContext(context.Background(), logr.Discard())
+		rvr = &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type: v1alpha1.ReplicaTypeDiskful,
+			},
+		}
+		// Default LLV for tests that reach normal path.
+		llvs = []snc.LVMLogicalVolume{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "llv-1"},
+				Spec: snc.LVMLogicalVolumeSpec{
+					LVMVolumeGroupName: "vg-1",
+				},
+				Status: &snc.LVMLogicalVolumeStatus{
+					ActualSize: resource.MustParse("10Gi"),
+				},
+			},
+		}
+	})
+
+	It("clears backingVolume when drbdr is nil", func() {
+		rvr.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+			State: v1alpha1.DiskStateUpToDate,
+		}
+
+		outcome := ensureStatusBackingVolume(ctx, rvr, nil, nil)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.BackingVolume).To(BeNil())
+	})
+
+	It("populates backingVolume fields from drbdr and llv", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				DiskState: v1alpha1.DiskStateUpToDate,
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role:                 v1alpha1.DRBDRolePrimary,
+					LVMLogicalVolumeName: "llv-1",
+				},
+			},
+		}
+
+		outcome := ensureStatusBackingVolume(ctx, rvr, drbdr, llvs)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(rvr.Status.BackingVolume).NotTo(BeNil())
+		Expect(rvr.Status.BackingVolume.State).To(Equal(v1alpha1.DiskStateUpToDate))
+		Expect(rvr.Status.BackingVolume.LVMVolumeGroupName).To(Equal("vg-1"))
+		Expect(rvr.Status.BackingVolume.Size.String()).To(Equal("10Gi"))
+	})
+
+	It("clears backingVolume when LVMLogicalVolumeName is empty", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				DiskState: v1alpha1.DiskStateUpToDate,
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role:                 v1alpha1.DRBDRoleSecondary,
+					LVMLogicalVolumeName: "", // empty — no backing volume configured
+				},
+			},
+		}
+
+		outcome := ensureStatusBackingVolume(ctx, rvr, drbdr, llvs)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(rvr.Status.BackingVolume).To(BeNil())
+	})
+
+	It("returns error when active LLV not found", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				DiskState: v1alpha1.DiskStateUpToDate,
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role:                 v1alpha1.DRBDRoleSecondary,
+					LVMLogicalVolumeName: "non-existent-llv",
+				},
+			},
+		}
+
+		outcome := ensureStatusBackingVolume(ctx, rvr, drbdr, llvs)
+
+		Expect(outcome.Error()).To(HaveOccurred())
+		Expect(outcome.Error().Error()).To(ContainSubstring("not found"))
+	})
+
+	It("returns no change when already up to date", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				DiskState: v1alpha1.DiskStateUpToDate,
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role:                 v1alpha1.DRBDRoleSecondary,
+					LVMLogicalVolumeName: "llv-1",
+				},
+			},
+		}
+
+		// First call
+		outcome1 := ensureStatusBackingVolume(ctx, rvr, drbdr, llvs)
+		Expect(outcome1.Error()).NotTo(HaveOccurred())
+		Expect(outcome1.DidChange()).To(BeTrue())
+
+		// Second call should report no change
+		outcome2 := ensureStatusBackingVolume(ctx, rvr, drbdr, llvs)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ensureConditionBackingVolumeUpToDate tests
+//
+
+var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 	var (
 		ctx context.Context
 		rvr *v1alpha1.ReplicatedVolumeReplica
@@ -6578,25 +8334,22 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 	})
 
 	It("removes condition when drbdr is nil", func() {
-		// Set up existing condition
 		obju.SetStatusCondition(rvr, metav1.Condition{
-			Type:   v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType,
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType,
 			Status: metav1.ConditionTrue,
 			Reason: "PreviousReason",
 		})
-		rvr.Status.BackingVolumeState = v1alpha1.DiskStateUpToDate
 
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
 			Name: "rvr-1",
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, nil, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, nil, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
-		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)).To(BeNil())
-		Expect(rvr.Status.BackingVolumeState).To(BeEmpty())
+		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)).To(BeNil())
 	})
 
 	It("removes condition when not a datamesh member", func() {
@@ -6606,10 +8359,10 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			},
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, drbdr, nil, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, nil, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)).To(BeNil())
+		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)).To(BeNil())
 	})
 
 	It("removes condition when effectiveType is not Diskful", func() {
@@ -6623,10 +8376,10 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			Type: v1alpha1.ReplicaTypeTieBreaker, // not Diskful
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)).To(BeNil())
+		Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)).To(BeNil())
 	})
 
 	It("sets Unknown when agent not ready", func() {
@@ -6640,13 +8393,13 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, drbdr, member, false, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, false, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonAgentNotReady))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAgentNotReady))
 	})
 
 	It("sets Unknown when configuration pending", func() {
@@ -6660,13 +8413,13 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, drbdr, member, true, true)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, true)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonApplyingConfiguration))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonApplyingConfiguration))
 	})
 
 	It("sets True with InSync for DiskStateUpToDate when attached", func() {
@@ -6683,15 +8436,14 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonInSync))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUpToDate))
 		Expect(cond.Message).To(ContainSubstring("served locally"))
-		Expect(rvr.Status.BackingVolumeState).To(Equal(v1alpha1.DiskStateUpToDate))
 	})
 
 	It("sets True with InSync for DiskStateUpToDate when not attached", func() {
@@ -6708,12 +8460,12 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonInSync))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUpToDate))
 		Expect(cond.Message).NotTo(ContainSubstring("served locally"))
 	})
 
@@ -6731,12 +8483,12 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonNoDisk))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAbsent))
 		Expect(cond.Message).To(ContainSubstring("forwarded to peers"))
 	})
 
@@ -6754,12 +8506,12 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonAttaching))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAttaching))
 	})
 
 	It("sets False with Detaching for DiskStateDetaching", func() {
@@ -6776,12 +8528,12 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonDetaching))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonDetaching))
 	})
 
 	It("sets False with DiskFailed for DiskStateFailed", func() {
@@ -6798,12 +8550,12 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonDiskFailed))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonFailed))
 	})
 
 	It("sets SynchronizationBlocked when no peer with up-to-date data", func() {
@@ -6820,16 +8572,16 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 		// No peers with UpToDate disk
-		rvr.Status.Peers = []v1alpha1.PeerStatus{
+		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{Name: "peer-1", BackingVolumeState: v1alpha1.DiskStateInconsistent},
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonSynchronizationBlocked))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizationBlocked))
 		Expect(cond.Message).To(ContainSubstring("no peer with up-to-date data"))
 	})
 
@@ -6847,7 +8599,7 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 		// Peer has up-to-date data but is attached and not connected
-		rvr.Status.Peers = []v1alpha1.PeerStatus{
+		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{
 				Name:               "peer-1",
 				BackingVolumeState: v1alpha1.DiskStateUpToDate,
@@ -6856,12 +8608,12 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			},
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonSynchronizationBlocked))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizationBlocked))
 		Expect(cond.Message).To(ContainSubstring("awaiting connection"))
 	})
 
@@ -6878,7 +8630,7 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			Name: "rvr-1",
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
-		rvr.Status.Peers = []v1alpha1.PeerStatus{
+		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{
 				Name:               "peer-1",
 				BackingVolumeState: v1alpha1.DiskStateUpToDate,
@@ -6886,12 +8638,12 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			},
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonSynchronizing))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizing))
 		Expect(cond.Message).To(ContainSubstring("partially synchronized"))
 	})
 
@@ -6909,12 +8661,12 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 			Type: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		outcome := ensureBackingVolumeStatus(ctx, rvr, drbdr, member, true, false)
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncType)
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeInSyncReasonUnknownState))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUnknownState))
 		Expect(cond.Message).To(ContainSubstring("SomeUnknownState"))
 	})
 
@@ -6933,14 +8685,32 @@ var _ = Describe("ensureBackingVolumeStatus", func() {
 		}
 
 		// First call
-		outcome1 := ensureBackingVolumeStatus(ctx, rvr, drbdr, member, true, false)
+		outcome1 := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 		Expect(outcome1.Error()).NotTo(HaveOccurred())
 		Expect(outcome1.DidChange()).To(BeTrue())
 
 		// Second call should report no change
-		outcome2 := ensureBackingVolumeStatus(ctx, rvr, drbdr, member, true, false)
+		outcome2 := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
 		Expect(outcome2.DidChange()).To(BeFalse())
+	})
+
+	It("returns error when ActiveConfiguration is nil after configuration is no longer pending", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				DiskState:           v1alpha1.DiskStateUpToDate,
+				ActiveConfiguration: nil,
+			},
+		}
+		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+			Name: "rvr-1",
+			Type: v1alpha1.ReplicaTypeDiskful,
+		}
+
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
+
+		Expect(outcome.Error()).To(HaveOccurred())
+		Expect(outcome.Error().Error()).To(ContainSubstring("ActiveConfiguration is nil"))
 	})
 })
 

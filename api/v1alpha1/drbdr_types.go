@@ -295,11 +295,24 @@ type DRBDResourceActiveConfiguration struct {
 	// +optional
 	AllowTwoPrimaries *bool `json:"allowTwoPrimaries,omitempty"`
 
+	// Type is the current effective DRBD configuration (diskful or diskless).
+	// This reflects how DRBD is configured, not the transient disk state
+	// (which could be DISKLESS, ATTACHING, DETACHING, etc.).
 	// +kubebuilder:validation:Enum=Diskful;Diskless
 	// +optional
 	Type DRBDResourceType `json:"type,omitempty"`
 
-	// Disk path, e.g. /dev/...
+	// LVMLogicalVolumeName is the LVM logical volume name currently configured in DRBD.
+	// This reflects the actual backing volume that DRBD is using, not the desired spec value.
+	// DRBD itself stores the block device path (e.g. /dev/vg/lv), and this field is
+	// reverse-computed from that path to the LVMLogicalVolume name.
+	// +kubebuilder:validation:MaxLength=128
+	// +optional
+	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName,omitempty"`
+
+	// Disk is the block device path currently configured in DRBD (e.g. /dev/vg/lv).
+	// This is the actual value from DRBD configuration, from which LVMLogicalVolumeName
+	// is reverse-computed.
 	// +kubebuilder:validation:MaxLength=256
 	// +optional
 	Disk string `json:"disk,omitempty"`
@@ -315,6 +328,10 @@ type DRBDResourcePeerStatus struct {
 	// +kubebuilder:validation:Enum=Diskful;Diskless
 	// +optional
 	Type DRBDResourceType `json:"type,omitempty"`
+
+	// AllowRemoteRead indicates whether reads are allowed from this peer.
+	// +optional
+	AllowRemoteRead bool `json:"allowRemoteRead,omitempty"`
 
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=31

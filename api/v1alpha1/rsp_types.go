@@ -16,7 +16,12 @@ limitations under the License.
 
 package v1alpha1
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	"slices"
+	"sort"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
 
 // ReplicatedStoragePool is a Kubernetes Custom Resource that defines a configuration for Linstor Storage-pools.
 // +kubebuilder:object:generate=true
@@ -233,4 +238,74 @@ type ReplicatedStoragePoolEligibleNodeLVMVolumeGroup struct {
 	Unschedulable bool `json:"unschedulable"`
 	// Ready indicates whether the LVMVolumeGroup (and its thin pool, if applicable) is ready.
 	Ready bool `json:"ready"`
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// EligibleNodesSortedIndex
+//
+
+// EligibleNodesSortedIndex provides sorted access to EligibleNodes by NodeName.
+// It lazily builds a sorting index only if the input slice is not already sorted,
+// avoiding allocations in the common case.
+//
+// Zero value is not usable; create via NewEligibleNodesSortedIndex.
+//
+// +kubebuilder:object:generate=false
+type EligibleNodesSortedIndex struct {
+	nodes   []ReplicatedStoragePoolEligibleNode
+	indices []int // nil if already sorted (identity mapping)
+}
+
+// NewEligibleNodesSortedIndex creates a sorted index for the given nodes.
+// If nodes are already sorted by NodeName, no allocation occurs (O(n) check only).
+// If not sorted, builds and sorts an index slice (O(n log n), O(n) int allocations).
+func NewEligibleNodesSortedIndex(nodes []ReplicatedStoragePoolEligibleNode) EligibleNodesSortedIndex {
+	// Check if already sorted — O(n), zero allocations.
+	sorted := slices.IsSortedFunc(nodes, func(a, b ReplicatedStoragePoolEligibleNode) int {
+		if a.NodeName < b.NodeName {
+			return -1
+		}
+		if a.NodeName > b.NodeName {
+			return 1
+		}
+		return 0
+	})
+
+	if sorted {
+		return EligibleNodesSortedIndex{nodes: nodes, indices: nil}
+	}
+
+	// Build index slice — O(n) allocations.
+	indices := make([]int, len(nodes))
+	for i := range indices {
+		indices[i] = i
+	}
+
+	// Sort index by NodeName — O(n log n).
+	sort.Slice(indices, func(i, j int) bool {
+		return nodes[indices[i]].NodeName < nodes[indices[j]].NodeName
+	})
+
+	return EligibleNodesSortedIndex{nodes: nodes, indices: indices}
+}
+
+// Len returns the number of nodes.
+func (s EligibleNodesSortedIndex) Len() int {
+	return len(s.nodes)
+}
+
+// NodeName returns the node name at sorted position i.
+func (s EligibleNodesSortedIndex) NodeName(i int) string {
+	if s.indices == nil {
+		return s.nodes[i].NodeName
+	}
+	return s.nodes[s.indices[i]].NodeName
+}
+
+// At returns pointer to node at sorted position i.
+func (s EligibleNodesSortedIndex) At(i int) *ReplicatedStoragePoolEligibleNode {
+	if s.indices == nil {
+		return &s.nodes[i]
+	}
+	return &s.nodes[s.indices[i]]
 }

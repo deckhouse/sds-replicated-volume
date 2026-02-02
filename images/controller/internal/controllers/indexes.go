@@ -29,6 +29,9 @@ func RegisterIndexes(mgr manager.Manager) error {
 	if err := indexes.RegisterRVByReplicatedStorageClassName(mgr); err != nil {
 		return err
 	}
+	if err := indexes.RegisterRVByStoragePoolName(mgr); err != nil {
+		return err
+	}
 
 	// ReplicatedVolumeAttachment (RVA)
 	if err := indexes.RegisterRVAByReplicatedVolumeName(mgr); err != nil {
@@ -40,6 +43,9 @@ func RegisterIndexes(mgr manager.Manager) error {
 		return err
 	}
 	if err := indexes.RegisterRVRByReplicatedVolumeName(mgr); err != nil {
+		return err
+	}
+	if err := indexes.RegisterRVRByRVAndNode(mgr); err != nil {
 		return err
 	}
 

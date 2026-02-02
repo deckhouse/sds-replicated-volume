@@ -70,13 +70,20 @@ func rspPredicates() []predicate.Predicate {
 }
 
 // eligibleNodesEqual compares two eligibleNodes slices by node names only.
-// Precondition: both slices are sorted by NodeName (RSP controller guarantees this).
+//
+// Uses EligibleNodesSortedIndex to handle potentially unsorted input safely.
+// In the common case (already sorted), this adds only O(n) overhead with zero allocations.
 func eligibleNodesEqual(a, b []v1alpha1.ReplicatedStoragePoolEligibleNode) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for i := range a {
-		if a[i].NodeName != b[i].NodeName {
+
+	// Build sorted indices — O(n) if already sorted, O(n log n) otherwise.
+	aIdx := v1alpha1.NewEligibleNodesSortedIndex(a)
+	bIdx := v1alpha1.NewEligibleNodesSortedIndex(b)
+
+	for i := range aIdx.Len() {
+		if aIdx.NodeName(i) != bIdx.NodeName(i) {
 			return false
 		}
 	}

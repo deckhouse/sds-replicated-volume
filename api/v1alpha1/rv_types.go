@@ -137,9 +137,9 @@ type ReplicatedVolumeDatamesh struct {
 	// +optional
 	SharedSecretAlg SharedSecretAlg `json:"sharedSecretAlg,omitempty"`
 
-	// AllowTwoPrimaries enables two primaries mode for the datamesh.
+	// AllowMultiattach enables multiattach mode for the datamesh.
 	// +kubebuilder:default=false
-	AllowTwoPrimaries bool `json:"allowTwoPrimaries"`
+	AllowMultiattach bool `json:"allowMultiattach"`
 	// Size is the desired size of the volume.
 	// +kubebuilder:validation:Required
 	Size resource.Quantity `json:"size"`
@@ -211,9 +211,9 @@ type ReplicatedVolumeDatameshMember struct {
 	// +kubebuilder:validation:Enum=ToDiskful;ToDiskless
 	// +optional
 	TypeTransition ReplicatedVolumeDatameshMemberTypeTransition `json:"typeTransition,omitempty"`
-	// Role is the DRBD role of this member.
-	// +optional
-	Role DRBDRole `json:"role,omitempty"`
+	// Attached indicates whether this member should be attached (Primary in DRBD terms).
+	// +kubebuilder:default=false
+	Attached bool `json:"attached"`
 	// NodeName is the Kubernetes node name where the member is located.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
