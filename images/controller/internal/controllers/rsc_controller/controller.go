@@ -59,7 +59,7 @@ func BuildController(mgr manager.Manager) error {
 		Watches(
 			&v1alpha1.ReplicatedVolumeOperation{},
 			handler.EnqueueRequestsFromMapFunc(mapRVOToRSC()),
-			builder.WithPredicates(RVOPredicates()...),
+			builder.WithPredicates(rvoPredicates()...),
 		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(rec)

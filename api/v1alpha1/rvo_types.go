@@ -52,14 +52,14 @@ type ReplicatedVolumeOperationList struct {
 
 // GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It returns the root object's `.status.conditions`.
-func (o *ReplicatedVolumeOperation) GetStatusConditions() []metav1.Condition {
-	return o.Status.Conditions
+func (rvo *ReplicatedVolumeOperation) GetStatusConditions() []metav1.Condition {
+	return rvo.Status.Conditions
 }
 
 // SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It sets the root object's `.status.conditions`.
-func (o *ReplicatedVolumeOperation) SetStatusConditions(conditions []metav1.Condition) {
-	o.Status.Conditions = conditions
+func (rvo *ReplicatedVolumeOperation) SetStatusConditions(conditions []metav1.Condition) {
+	rvo.Status.Conditions = conditions
 }
 
 // ReplicatedVolumeOperationSpec defines the desired state of a ReplicatedVolumeOperation.

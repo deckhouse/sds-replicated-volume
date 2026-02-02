@@ -102,10 +102,10 @@ func rvPredicates() []predicate.Predicate {
 	}
 }
 
-// RVOPredicates returns predicates for ReplicatedVolumeOperation events.
+// rvoPredicates returns predicates for ReplicatedVolumeOperation events.
 // Filters to only react to changes in:
 //   - Completed condition (status changes)
-func RVOPredicates() []predicate.Predicate {
+func rvoPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.Funcs{
 			GenericFunc: func(event.TypedGenericEvent[client.Object]) bool { return false },
