@@ -23,6 +23,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -74,6 +75,9 @@ func (r *Reconciler) Reconcile(
 
 	base := drbdr.DeepCopy()
 
+	// Check maintenance mode
+	maintenanceMode := drbdr.Spec.Maintenance == v1alpha1.MaintenanceModeNoResourceReconciliation
+
 	// Phase 1: Ensure finalizer (adds if needed for up resources)
 	if outcome := r.reconcileFinalizer(rf.Ctx(), drbdr, base, true); outcome.ShouldReturn() {
 		return outcome.ToCtrl()
@@ -111,7 +115,7 @@ func (r *Reconciler) Reconcile(
 
 	// Compute and execute DRBD actions
 	targetActions := computeTargetDRBDActions(iState, aState)
-	refreshNeeded, drbdErr := convergeDRBDState(rf.Ctx(), targetActions)
+	refreshNeeded, drbdErr := convergeDRBDState(rf.Ctx(), targetActions, maintenanceMode)
 
 	// Refresh actual state if DRBD state was changed
 	if refreshNeeded {
@@ -121,7 +125,7 @@ func (r *Reconciler) Reconcile(
 
 	// Phase 4: Report and status patch
 	reconcileErr := errors.Join(addrErr, llvErr, lvgErr, aErr, aErr2, drbdErr)
-	if ensureOutcome := ensureReportState(rf.Ctx(), aState, drbdr, reconcileErr); ensureOutcome.Error() != nil {
+	if ensureOutcome := ensureReportState(rf.Ctx(), aState, drbdr, reconcileErr, maintenanceMode); ensureOutcome.Error() != nil {
 		reconcileErr = errors.Join(reconcileErr, ensureOutcome.Error())
 	}
 
@@ -300,8 +304,14 @@ func (r *Reconciler) patchDRBDRStatus(
 
 // convergeDRBDState executes DRBD actions to converge to the target state.
 // Returns whether DRBD state was changed (requiring a refresh) and any error.
-func convergeDRBDState(ctx context.Context, actions DRBDActions) (refreshNeeded bool, err error) {
+// When maintenanceMode is true, actions are logged but not executed.
+func convergeDRBDState(ctx context.Context, actions DRBDActions, maintenanceMode bool) (refreshNeeded bool, err error) {
+	log := log.FromContext(ctx)
 	for _, action := range actions {
+		log.Info("DRBD action", "action", action.String(), "maintenanceMode", maintenanceMode)
+		if maintenanceMode {
+			continue
+		}
 		if err := action.Execute(ctx); err != nil {
 			return refreshNeeded, err
 		}

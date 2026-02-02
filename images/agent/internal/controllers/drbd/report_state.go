@@ -33,29 +33,35 @@ func ensureReportState(
 	aState ActualDRBDState,
 	drbdr *v1alpha1.DRBDResource,
 	err error,
+	maintenanceMode bool,
 ) (outcome flow.EnsureOutcome) {
 	ef := flow.BeginEnsure(ctx, "ensure-report-state")
 	defer ef.OnEnd(&outcome)
 
 	reportErr := aState.Report(&drbdr.Status)
 	err = errors.Join(err, reportErr)
-	applyConfiguredCondition(drbdr, err)
+	applyConfiguredCondition(drbdr, err, maintenanceMode)
 
 	return ef.Ok()
 }
 
-func applyConfiguredCondition(drbdr *v1alpha1.DRBDResource, err error) {
+func applyConfiguredCondition(drbdr *v1alpha1.DRBDResource, err error, maintenanceMode bool) {
 	var status metav1.ConditionStatus
 	var reason, message string
 
-	if err == nil {
-		status = metav1.ConditionTrue
-		reason = v1alpha1.DRBDResourceCondConfiguredReasonConfigured
-		message = ""
-	} else {
+	switch {
+	case err != nil:
 		status = metav1.ConditionFalse
 		reason = getConfiguredReason(err)
 		message = err.Error()
+	case maintenanceMode:
+		status = metav1.ConditionFalse
+		reason = v1alpha1.DRBDResourceCondConfiguredReasonInMaintenance
+		message = "DRBD resource reconciliation is paused due to maintenance mode"
+	default:
+		status = metav1.ConditionTrue
+		reason = v1alpha1.DRBDResourceCondConfiguredReasonConfigured
+		message = ""
 	}
 
 	setCondition(drbdr, v1alpha1.DRBDResourceCondConfiguredType, status, reason, message)
