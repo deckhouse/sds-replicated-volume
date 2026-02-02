@@ -125,95 +125,71 @@ For each unscheduled TieBreaker RVR:
 
 ## Reconciliation Structure
 
-<!-- ```log -->
-Reconcile (root) — per-RVR orchestration with error resilience
-├── prepareSchedulingContext               — fetch RV, RSP, all RVRs
-│   ├── getRV                              — fetch ReplicatedVolume
-│   ├── isRVReadyToSchedule                — validate RV has finalizer and configuration
-│   ├── getRSP                             — fetch ReplicatedStoragePool (using rv.Status.Configuration.StoragePoolName)
-│   ├── getRVRsByRVName                    — list all RVRs for this RV
-│   └── categorizeRVRsIntoContext          — categorize RVRs into scheduled/unscheduled groups
-│
+```
+Reconcile (root) [Per-RVR orchestration with error resilience]
+├── prepareSchedulingContext
+│   ├── getRV
+│   ├── isRVReadyToSchedule
+│   ├── getRSP
+│   ├── getRVRsByRVName
+│   └── categorizeRVRsIntoContext
 ├── [for each scheduled RVR] reconcileScheduledRVR
-│   ├── applyScheduledConditionTrue        — set Scheduled=True
-│   └── patchRVRStatus (if changed)        — patch status
-│
-├── computeScoredCandidatesForDiskful      — compute candidates once for all Diskful
-│   ├── computeEligibleNodeNames           — filter eligible nodes
-│   ├── applyTopologyFilter                — filter by topology mode
-│   ├── applyCapacityFilterAndScore        — query scheduler-extender for capacity
-│   └── applyAttachToBonus                 — boost score for attachTo nodes
-│
-├── [for each unscheduled Diskful] reconcileUnscheduledDiskfulRVR
-│   ├── computeCandidateForNode (if RVR has node)   — find LVG on existing node
-│   ├── computeBestCandidate (if RVR has no node)   — select node+LVG based on topology
-│   ├── applyPlacement                              — set nodeName, lvmVolumeGroupName, thinPoolName
-│   ├── patchRVR (if changed)                       — patch with optimistic lock
-│   ├── SchedulingContext.MarkNodeOccupied          — update context on success
-│   ├── SchedulingContext.RemoveCandidate           — remove used node from candidates
-│   ├── SchedulingContext.AddToScheduledDiskful     — move RVR to scheduled list
-│   ├── SchedulingContext.IncrementZoneReplicaCount — for TransZonal: update zone count
-│   ├── applyScheduledConditionTrue                 — set Scheduled=True
-│   └── patchRVRStatus (if changed)                 — patch status
-│
-├── computeCandidatesForTieBreaker        — compute candidates once for all TieBreaker
-│   ├── computeEligibleNodeNames           — filter eligible nodes
-│   └── applyTopologyFilter                — filter by topology mode
-│
-└── [for each unscheduled TieBreaker] reconcileUnscheduledTieBreakerRVR
-    ├── computeBestCandidateForTieBreaker  — select node based on topology
-    ├── applyPlacement                     — set nodeName
-    ├── patchRVR (if changed)              — patch with optimistic lock
-    ├── SchedulingContext.MarkNodeOccupied — update context on success
-    ├── SchedulingContext.RemoveTieBreakerCandidate — remove used node from candidates
-    ├── SchedulingContext.IncrementZoneReplicaCount — for TransZonal: update zone count
-    ├── applyScheduledConditionTrue        — set Scheduled=True
-    └── patchRVRStatus (if changed)        — patch status
-<!-- ``` -->
+│   ├── applyScheduledConditionTrue
+│   └── patchRVRStatus
+├── computeScoredCandidatesForDiskful ← details
+│   ├── computeEligibleNodeNames
+│   ├── applyTopologyFilter
+│   ├── applyCapacityFilterAndScore
+│   └── applyAttachToBonus
+├── [for each unscheduled Diskful] reconcileUnscheduledDiskfulRVR ← details
+│   ├── computeCandidateForNode / computeBestCandidate
+│   ├── applyPlacement
+│   ├── patchRVR
+│   ├── SchedulingContext updates
+│   ├── applyScheduledConditionTrue
+│   └── patchRVRStatus
+├── computeCandidatesForTieBreaker ← details
+│   ├── computeEligibleNodeNames
+│   └── applyTopologyFilter
+└── [for each unscheduled TieBreaker] reconcileUnscheduledTieBreakerRVR ← details
+    ├── computeBestCandidateForTieBreaker
+    ├── applyPlacement
+    ├── patchRVR
+    ├── SchedulingContext updates
+    ├── applyScheduledConditionTrue
+    └── patchRVRStatus
+```
+
+Links to detailed algorithms: [`computeScoredCandidatesForDiskful`](#computescoredcandidatesfordiskful-details), [`reconcileUnscheduledDiskfulRVR`](#reconcileunscheduleddiskfulrvr-details), [`computeCandidatesForTieBreaker`](#computecandidatesfortiebreaker-details), [`reconcileUnscheduledTieBreakerRVR`](#reconcileunscheduledtiebreakerrvr-details), [`computeBestCandidate`](#computebestcandidate-details)
 
 ## Algorithm Flow
 
+High-level overview of reconciliation phases. See [Detailed Algorithms](#detailed-algorithms) for step-by-step breakdowns.
+
 ```mermaid
 flowchart TD
-    Start([Reconcile]) --> Prepare[prepareSchedulingContext]
+    Start([Reconcile RV]) --> Prepare[prepareSchedulingContext]
     Prepare -->|RV not found| Done1([Done])
-    Prepare -->|RV not ready: no finalizer, no configuration, or size=0| SetFailed1[Set Scheduled=False on all]
-    SetFailed1 --> Fail1([Fail])
 
-    Prepare --> Phase1[Phase 1: For each scheduled RVR]
-    Phase1 --> ReconcileScheduled[reconcileScheduledRVR]
-    ReconcileScheduled --> Phase2{Unscheduled Diskful?}
+    Prepare --> Phase1[Phase 1: Reconcile scheduled RVRs]
+    Phase1 --> DiskfulBlock
 
-    Phase2 -->|No| Phase4a
-    Phase2 -->|Yes| PrepareCandidates[computeScoredCandidatesForDiskful]
-    PrepareCandidates -->|Error| MarkFailed[Set Scheduled=False on all Diskful]
-    MarkFailed --> Phase4a
-    PrepareCandidates -->|OK| Phase3[Phase 3: For each unscheduled Diskful]
+    subgraph DiskfulBlock [Diskful Scheduling]
+        ComputeDiskful[computeScoredCandidatesForDiskful]
+        ComputeDiskful --> ReconcileDiskful[reconcileUnscheduledDiskfulRVR per RVR]
+    end
 
-    Phase3 --> ReconcileDiskful[reconcileUnscheduledDiskfulRVR]
-    ReconcileDiskful -->|Select candidate| PatchDiskful[Patch spec + status]
-    PatchDiskful -->|OK| UpdateCtx[Update context]
-    UpdateCtx --> Phase3
-    ReconcileDiskful -->|No candidates| SetFalse2[Set Scheduled=False]
-    SetFalse2 --> Phase3
+    DiskfulBlock --> TieBreakerBlock
 
-    Phase3 -->|Done| Phase4a{Unscheduled TieBreaker?}
-    Phase4a -->|No| CheckErrors
-    Phase4a -->|Yes| PrepareTBCandidates[computeCandidatesForTieBreaker]
-    PrepareTBCandidates -->|Error| MarkTBFailed[Set Scheduled=False on all TieBreaker]
-    MarkTBFailed --> CheckErrors
-    PrepareTBCandidates -->|OK| Phase4b[Phase 4b: For each unscheduled TieBreaker]
+    subgraph TieBreakerBlock [TieBreaker Scheduling]
+        ComputeTB[computeCandidatesForTieBreaker]
+        ComputeTB --> ReconcileTB[reconcileUnscheduledTieBreakerRVR per RVR]
+    end
 
-    Phase4b --> ReconcileTB[reconcileUnscheduledTieBreakerRVR]
-    ReconcileTB -->|Select candidate| PatchTB[Patch spec + status]
-    PatchTB -->|OK| UpdateCtx2[Update context]
-    UpdateCtx2 --> Phase4b
-    ReconcileTB -->|No candidates| SetFalse3[Set Scheduled=False]
-    SetFalse3 --> Phase4b
-
-    Phase4b -->|Done| CheckErrors{Any errors?}
-    CheckErrors -->|Yes| Requeue([RequeueAfter 30s])
-    CheckErrors -->|No| Done2([Done])
+    TieBreakerBlock --> CheckErrors{Any errors?}
+    CheckErrors -->|Patch errors| Backoff([Exponential backoff])
+    CheckErrors -->|Scheduling failures| Requeue([RequeueAfter 30s])
+    CheckErrors -->|No errors| Done2([Done])
 ```
 
 ## Conditions
@@ -401,46 +377,6 @@ For scheduling failures, the controller sets `Scheduled=False` condition on the 
 - The controller continues processing other RVRs even if one fails
 - If a patch fails due to conflict, the node remains available for subsequent RVRs
 
-## Special Notes
-
-**Best Zone Selection (Zonal topology):**
-
-- Chooses the zone with highest total capacity score × node count
-- Considers existing Diskful replica zones first
-- Falls back to attachTo node zones if no Diskful replicas exist
-
-**TransZonal Distribution:**
-
-- Places each replica in the zone with fewest replicas of the same type
-- Fails if even distribution across zones is impossible
-
-Per-RVR zone distribution mechanism:
-
-**For Diskful replicas:**
-
-1. `computeScoredCandidatesForDiskful` initializes `ZoneReplicaCounts` with existing **Diskful** counts per zone
-2. For each unscheduled Diskful, `selectBestCandidateTransZonal` picks the zone with minimum count
-3. After successful patch, `IncrementZoneReplicaCount` updates the count immediately
-4. Next RVR sees updated counts and picks a different zone
-
-**For TieBreaker replicas:**
-
-1. `computeCandidatesForTieBreaker` initializes `ZoneReplicaCounts` with **ALL** replica counts per zone (Diskful + TieBreaker)
-2. For each unscheduled TieBreaker, `computeBestCandidateForTieBreaker` picks the zone with minimum count
-3. After successful patch, `IncrementZoneReplicaCount` updates the count immediately
-4. Next RVR sees updated counts and picks a different zone
-
-Example with 2 unscheduled Diskful and 3 zones (all starting at count=0):
-
-- RVR-1: zone-a=0, zone-b=0, zone-c=0 → selects zone-a → increments → zone-a=1
-- RVR-2: zone-a=1, zone-b=0, zone-c=0 → selects zone-b (minimum count)
-
-**AttachTo Preference:**
-
-- Nodes in `rv.status.desiredAttachTo` receive a score bonus (+1000)
-- This makes them preferred but not required
-- Useful for co-locating replicas with workloads
-
 ---
 
 ## Detailed Algorithms
@@ -454,7 +390,8 @@ Example with 2 unscheduled Diskful and 3 zones (all starting at count=0):
 ```mermaid
 flowchart TD
     Start([Start]) --> ComputeEligible[Compute eligible nodes excluding occupied]
-    ComputeEligible --> CheckCandidates{Any candidates?}
+    ComputeEligible --> AddReserved[Add back nodes needing LVG scheduling]
+    AddReserved --> CheckCandidates{Any candidates?}
     CheckCandidates -->|No| ErrorNoCandidates[Return error: no candidate nodes]
     ErrorNoCandidates --> End1([Done])
 
@@ -463,19 +400,16 @@ flowchart TD
     CheckZoneCandidates -->|No| ErrorNoZones[Return error: topology filter failed]
     ErrorNoZones --> End2([Done])
 
-    CheckZoneCandidates -->|Yes| BuildLVGQueries[Build LVG queries from candidates]
-    BuildLVGQueries --> QueryExtender[Query scheduler-extender for LVG scores]
+    CheckZoneCandidates -->|Yes| QueryExtender[Query scheduler-extender for LVG scores]
     QueryExtender --> CheckScores{Scores returned?}
     CheckScores -->|No| ErrorNoCapacity[Return error: no capacity]
     ErrorNoCapacity --> End3([Done])
 
     CheckScores -->|Yes| AggregateLVG[Aggregate LVG scores per node]
-    AggregateLVG --> FilterByCapacity[Filter nodes with capacity]
-    FilterByCapacity --> ApplyBonus[Apply attachTo bonus to preferred nodes]
-    ApplyBonus --> InitZoneCounts{TransZonal topology?}
-
-    InitZoneCounts -->|Yes| InitCounts[Initialize ZoneReplicaCounts with Diskful counts]
-    InitCounts --> StoreCandidates[Store ScoredCandidates in context]
+    AggregateLVG --> ApplyBonus[Apply attachTo bonus]
+    ApplyBonus --> InitZoneCounts{TransZonal?}
+    InitZoneCounts -->|Yes| InitCounts[Initialize ZoneReplicaCounts]
+    InitCounts --> StoreCandidates[Store ScoredCandidates]
     InitZoneCounts -->|No| StoreCandidates
     StoreCandidates --> End4([Done])
 ```
@@ -486,6 +420,7 @@ flowchart TD
 |-------|-------------|
 | `sctx.EligibleNodes` | Nodes from RSP with readiness/schedulability info |
 | `sctx.OccupiedNodes` | Nodes already hosting replicas of this RV |
+| `sctx.UnscheduledDiskful` | RVRs that may have node but need LVG |
 | `sctx.Topology` | Topology mode (Ignored/Zonal/TransZonal) |
 | `sctx.LVGToNode` | LVG to node mapping with thin pool info |
 | `sctx.RV.Spec.Size` | Volume size for capacity query |
@@ -493,7 +428,57 @@ flowchart TD
 | Output | Description |
 |--------|-------------|
 | `sctx.ScoredCandidates` | Map of zone to scored NodeCandidate list |
+| `sctx.NodesReservedForLVGScheduling` | Nodes that have owning RVRs needing LVG |
 | `sctx.ZoneReplicaCounts` | Diskful replica counts per zone (TransZonal only) |
+
+---
+
+### reconcileUnscheduledDiskfulRVR Details
+
+**Purpose**: Schedules a single Diskful RVR. Handles two cases: RVR with existing node (needs LVG only) and RVR without node (needs both).
+
+**Algorithm**:
+
+```mermaid
+flowchart TD
+    Start([Start]) --> CheckNode{RVR has NodeName?}
+
+    CheckNode -->|Yes| FindLVG[computeCandidateForNode]
+    FindLVG -->|Not found| SetFalse1[Scheduled=False NoAvailableLVGOnNode]
+    SetFalse1 --> ReturnFailed1([schedulingFailed=true])
+
+    CheckNode -->|No| SelectBest[computeBestCandidate]
+    SelectBest -->|Error| SetFalse2[Scheduled=False with reason]
+    SetFalse2 --> ReturnFailed2([schedulingFailed=true])
+
+    FindLVG -->|Found| ApplyPlacement[applyPlacement: node, LVG, thinPool]
+    SelectBest -->|Found| ApplyPlacement
+
+    ApplyPlacement --> CheckChanged{Spec changed?}
+    CheckChanged -->|No| UpdateStatus
+    CheckChanged -->|Yes| PatchSpec[patchRVR with optimistic lock]
+    PatchSpec -->|Error| ReturnErr([Return error])
+    PatchSpec -->|OK| UpdateContext[Update SchedulingContext]
+    UpdateContext --> UpdateStatus[applyScheduledConditionTrue]
+    UpdateStatus --> PatchStatus[patchRVRStatus]
+    PatchStatus --> ReturnOK([schedulingFailed=false])
+```
+
+**Data Flow**:
+
+| Input | Description |
+|-------|-------------|
+| `rvr` | ReplicatedVolumeReplica to schedule |
+| `sctx.ScoredCandidates` | Pre-computed candidates with LVG scores |
+| `sctx.NodesReservedForLVGScheduling` | Nodes reserved for their owning RVRs |
+
+| Output | Description |
+|--------|-------------|
+| `rvr.Spec.NodeName` | Assigned node |
+| `rvr.Spec.LVMVolumeGroupName` | Assigned LVG |
+| `rvr.Spec.LVMVolumeGroupThinPoolName` | Assigned thin pool (if LVMThin) |
+| `rvr.Status.Conditions[Scheduled]` | Scheduling result |
+| `sctx` updates | OccupiedNodes, ScoredCandidates, ZoneReplicaCounts |
 
 ---
 
@@ -507,18 +492,17 @@ flowchart TD
 flowchart TD
     Start([Start]) --> ComputeEligible[Compute eligible nodes excluding occupied]
     ComputeEligible --> CheckCandidates{Any candidates?}
-    CheckCandidates -->|No| ErrorNoCandidates[Return error: no candidates for TieBreaker]
+    CheckCandidates -->|No| ErrorNoCandidates[Return error: no candidates]
     ErrorNoCandidates --> End1([Done])
 
     CheckCandidates -->|Yes| ApplyTopology[Apply topology filter]
     ApplyTopology --> CheckZoneCandidates{Any zone candidates?}
-    CheckZoneCandidates -->|No| ErrorNoZones[Return error: topology filter failed]
+    CheckZoneCandidates -->|No| ErrorNoZones[Return error: topology failed]
     ErrorNoZones --> End2([Done])
 
-    CheckZoneCandidates -->|Yes| StoreCandidates[Store TieBreakerCandidates in context]
-    StoreCandidates --> InitZoneCounts{TransZonal topology?}
-
-    InitZoneCounts -->|Yes| InitCounts[Initialize ZoneReplicaCounts with ALL replica counts]
+    CheckZoneCandidates -->|Yes| StoreCandidates[Store TieBreakerCandidates]
+    StoreCandidates --> InitZoneCounts{TransZonal?}
+    InitZoneCounts -->|Yes| InitCounts[Initialize ZoneReplicaCounts with ALL replicas]
     InitCounts --> End3([Done])
     InitZoneCounts -->|No| End3
 ```
@@ -540,45 +524,80 @@ flowchart TD
 
 ---
 
-### selectBestCandidate Details
+### reconcileUnscheduledTieBreakerRVR Details
 
-**Purpose**: Selects the best candidate node based on topology mode. Handles three topology modes with different selection strategies.
+**Purpose**: Schedules a single TieBreaker RVR. TieBreaker replicas only need node assignment, no LVG.
 
 **Algorithm**:
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> CheckCandidates{ScoredCandidates empty?}
-    CheckCandidates -->|Yes| ErrorNoCandidates[Return error: no candidates]
+    Start([Start]) --> SelectBest[computeBestCandidateForTieBreaker]
+    SelectBest -->|Error| SetFalse[Scheduled=False with reason]
+    SetFalse --> ReturnFailed([schedulingFailed=true])
+
+    SelectBest -->|Found| ApplyPlacement[applyPlacement: node only]
+    ApplyPlacement --> CheckChanged{Spec changed?}
+    CheckChanged -->|No| UpdateStatus
+    CheckChanged -->|Yes| PatchSpec[patchRVR with optimistic lock]
+    PatchSpec -->|Error| ReturnErr([Return error])
+    PatchSpec -->|OK| UpdateContext[Update SchedulingContext]
+    UpdateContext --> UpdateStatus[applyScheduledConditionTrue]
+    UpdateStatus --> PatchStatus[patchRVRStatus]
+    PatchStatus --> ReturnOK([schedulingFailed=false])
+```
+
+**Data Flow**:
+
+| Input | Description |
+|-------|-------------|
+| `rvr` | ReplicatedVolumeReplica to schedule |
+| `sctx.TieBreakerCandidates` | Pre-computed candidates |
+| `sctx.Topology` | Topology mode |
+| `sctx.ZoneReplicaCounts` | For TransZonal zone selection |
+
+| Output | Description |
+|--------|-------------|
+| `rvr.Spec.NodeName` | Assigned node |
+| `rvr.Status.Conditions[Scheduled]` | Scheduling result |
+| `sctx` updates | OccupiedNodes, TieBreakerCandidates, ZoneReplicaCounts |
+
+---
+
+### computeBestCandidate Details
+
+**Purpose**: Selects the best candidate node+LVG based on topology mode. Excludes nodes reserved for LVG-only scheduling.
+
+**Algorithm**:
+
+```mermaid
+flowchart TD
+    Start([Start]) --> FilterReserved[Filter out NodesReservedForLVGScheduling]
+    FilterReserved --> CheckCandidates{Any candidates?}
+    CheckCandidates -->|No| ErrorNoCandidates[Return error: no candidates]
     ErrorNoCandidates --> End1([Done])
 
-    CheckCandidates -->|No| CheckTopology{Topology mode?}
+    CheckCandidates -->|Yes| CheckTopology{Topology mode?}
 
-    CheckTopology -->|Ignored| IgnoredMode[Collect all candidates across zones]
-    IgnoredMode --> ComputeBestIgnored[computeBestNode: sort by BestScore, LVGCount, SumScore]
-    ComputeBestIgnored --> ReturnBest1[Return best candidate]
+    CheckTopology -->|Ignored| IgnoredMode[Collect all candidates]
+    IgnoredMode --> ComputeBest1[Sort by BestScore, LVGCount, SumScore]
+    ComputeBest1 --> ReturnBest1[Return best]
     ReturnBest1 --> End2([Done])
 
-    CheckTopology -->|Zonal| ZonalMode{Zone already selected?}
-    ZonalMode -->|No| SelectBestZone[Select zone with highest capacity score × node count]
-    SelectBestZone --> StoreZone[Store SelectedZone in context]
-    StoreZone --> GetZoneCandidates1[Get candidates from selected zone]
-    ZonalMode -->|Yes| GetZoneCandidates1
-    GetZoneCandidates1 --> CheckZoneCandidates1{Zone has candidates?}
-    CheckZoneCandidates1 -->|No| ErrorNoZoneCandidates[Return error: no candidates in zone]
-    ErrorNoZoneCandidates --> End3([Done])
-    CheckZoneCandidates1 -->|Yes| ComputeBestZonal[computeBestNode in selected zone]
-    ComputeBestZonal --> ReturnBest2[Return best candidate]
-    ReturnBest2 --> End4([Done])
+    CheckTopology -->|Zonal| ZonalMode{Zone selected?}
+    ZonalMode -->|No| SelectZone[Select zone: highest score × count]
+    SelectZone --> StoreZone[Store SelectedZone]
+    StoreZone --> GetCandidates1[Get zone candidates]
+    ZonalMode -->|Yes| GetCandidates1
+    GetCandidates1 --> ComputeBest2[Sort by BestScore, LVGCount, SumScore]
+    ComputeBest2 --> ReturnBest2[Return best]
+    ReturnBest2 --> End3([Done])
 
-    CheckTopology -->|TransZonal| TransZonalMode[Find zone with minimum replica count]
-    TransZonalMode --> CheckMinZone{Found zone with candidates?}
-    CheckMinZone -->|No| ErrorNoTransZonalCandidates[Return error: no zones with candidates]
-    ErrorNoTransZonalCandidates --> End5([Done])
-    CheckMinZone -->|Yes| ComputeBestTransZonal[computeBestNode in min-count zone]
-    ComputeBestTransZonal --> SetCandidateZone[Set zone on candidate]
-    SetCandidateZone --> ReturnBest3[Return best candidate]
-    ReturnBest3 --> End6([Done])
+    CheckTopology -->|TransZonal| FindMinZone[Find zone with min replica count]
+    FindMinZone --> ComputeBest3[Sort by BestScore, LVGCount, SumScore]
+    ComputeBest3 --> SetZone[Set zone on candidate]
+    SetZone --> ReturnBest3[Return best]
+    ReturnBest3 --> End4([Done])
 ```
 
 **Data Flow**:
@@ -586,11 +605,55 @@ flowchart TD
 | Input | Description |
 |-------|-------------|
 | `sctx.ScoredCandidates` | Map of zone to scored NodeCandidate list |
+| `sctx.NodesReservedForLVGScheduling` | Nodes to exclude from selection |
 | `sctx.Topology` | Topology mode |
 | `sctx.ZoneReplicaCounts` | Replica counts per zone (TransZonal) |
-| `sctx.SelectedZone` | Previously selected zone (Zonal, after first selection) |
+| `sctx.SelectedZone` | Previously selected zone (Zonal) |
 
 | Output | Description |
 |--------|-------------|
 | `NodeCandidate` | Selected candidate with Name, Zone, LVGName, ThinPoolName, scores |
 | `sctx.SelectedZone` | Updated zone selection (Zonal mode, first call only) |
+
+---
+
+### TransZonal Zone Distribution
+
+Per-RVR zone distribution mechanism for even replica placement:
+
+**For Diskful replicas:**
+
+1. `computeScoredCandidatesForDiskful` initializes `ZoneReplicaCounts` with existing Diskful counts
+2. For each RVR, `computeBestCandidateTransZonal` picks zone with minimum count
+3. After successful patch, `IncrementZoneReplicaCount` updates immediately
+4. Next RVR sees updated counts, picks different zone
+
+**For TieBreaker replicas:**
+
+1. `computeCandidatesForTieBreaker` initializes `ZoneReplicaCounts` with ALL replica counts
+2. For each RVR, `computeBestCandidateForTieBreaker` picks zone with minimum count
+3. After successful patch, `IncrementZoneReplicaCount` updates immediately
+4. Next RVR sees updated counts, picks different zone
+
+**Example** (2 unscheduled Diskful, 3 zones):
+
+- RVR-1: zone-a=0, zone-b=0, zone-c=0 → selects zone-a → zone-a=1
+- RVR-2: zone-a=1, zone-b=0, zone-c=0 → selects zone-b
+
+---
+
+### AttachTo Bonus
+
+Nodes in `rv.status.desiredAttachTo` receive a score bonus (+1000). This makes them preferred but not required — useful for co-locating replicas with workloads.
+
+---
+
+### Zonal Zone Selection
+
+Best zone selection algorithm for Zonal topology:
+
+1. Calculate score for each zone: `totalCapacityScore × nodeCount`
+2. Select zone with highest score
+3. Store selection in `sctx.SelectedZone` for subsequent replicas
+
+The selection is sticky: once a zone is selected for the first Diskful replica, all subsequent replicas use the same zone.
