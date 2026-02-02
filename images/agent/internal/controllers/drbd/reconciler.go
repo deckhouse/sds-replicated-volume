@@ -103,7 +103,7 @@ func (r *Reconciler) Reconcile(
 			lvgErr = ConfiguredReasonError(lvgErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 
 			if lvg != nil {
-				backingDisk = v1alpha1.SprintDRBDDisk(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+				backingDisk = formatLVMDevicePath(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 			}
 		}
 	}
@@ -318,4 +318,9 @@ func convergeDRBDState(ctx context.Context, actions DRBDActions, maintenanceMode
 		refreshNeeded = true
 	}
 	return refreshNeeded, nil
+}
+
+// formatLVMDevicePath formats the path to an LVM logical volume device.
+func formatLVMDevicePath(vgName, lvName string) string {
+	return "/dev/" + vgName + "/" + lvName
 }
