@@ -205,29 +205,32 @@ type ReplicatedVolumeDatameshMember struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=140
 	Name string `json:"name"`
+
 	// Type is the member type (Diskful, Access, or TieBreaker).
 	// +kubebuilder:validation:Required
 	Type ReplicaType `json:"type"`
+
 	// TypeTransition indicates the desired type transition for this member.
 	// +kubebuilder:validation:Enum=ToDiskful;ToDiskless
 	// +optional
 	TypeTransition ReplicatedVolumeDatameshMemberTypeTransition `json:"typeTransition,omitempty"`
-	// Attached indicates whether this member should be attached (Primary in DRBD terms).
-	// +kubebuilder:default=false
-	Attached bool `json:"attached"`
+
 	// NodeName is the Kubernetes node name where the member is located.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	NodeName string `json:"nodeName"`
+
 	// Zone is the zone where the member is located.
 	// +kubebuilder:validation:MaxLength=64
 	// +optional
 	Zone string `json:"zone,omitempty"`
+
 	// Addresses is the list of DRBD addresses for this member.
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
 	Addresses []DRBDResourceAddressStatus `json:"addresses"`
+
 	// LVMVolumeGroupName is the LVMVolumeGroup resource name where this replica should be placed.
 	// +optional
 	// +kubebuilder:validation:MinLength=1
@@ -238,11 +241,27 @@ type ReplicatedVolumeDatameshMember struct {
 	// +kubebuilder:validation:MaxLength=64
 	// +optional
 	LVMVolumeGroupThinPoolName string `json:"lvmVolumeGroupThinPoolName,omitempty"`
+
+	// Attached indicates whether this member should be attached (Primary in DRBD terms).
+	// +kubebuilder:default=false
+	Attached bool `json:"attached"`
+
+	nodeID            uint8 `json:"-"`
+	nodeIDinitialized bool  `json:"-"`
 }
 
 // NodeID extracts NodeID from the member name (e.g., "pvc-xxx-5" → 5).
+// Result is cached after first successful call.
 func (m *ReplicatedVolumeDatameshMember) NodeID() (uint8, bool) {
-	return nodeIDFromName(m.Name)
+	if m.nodeIDinitialized {
+		return m.nodeID, true
+	}
+	id, ok := nodeIDFromName(m.Name)
+	if ok {
+		m.nodeID = id
+		m.nodeIDinitialized = true
+	}
+	return id, ok
 }
 
 // ReplicatedVolumeDatameshMemberTypeTransition enumerates possible type transitions for datamesh members.

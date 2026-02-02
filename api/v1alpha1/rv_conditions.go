@@ -17,16 +17,6 @@ limitations under the License.
 package v1alpha1
 
 const (
-	// ReplicatedVolumeCondBackingVolumeCreatedType indicates whether backing volumes exist for all diskful replicas.
-	//
-	// Reasons describe readiness and waiting conditions for backing volumes.
-	ReplicatedVolumeCondBackingVolumeCreatedType                           = "BackingVolumeCreated"
-	ReplicatedVolumeCondBackingVolumeCreatedReasonAllBackingVolumesReady   = "AllBackingVolumesReady"   // All backing volumes are ready.
-	ReplicatedVolumeCondBackingVolumeCreatedReasonBackingVolumesNotReady   = "BackingVolumesNotReady"   // Some backing volumes are not ready.
-	ReplicatedVolumeCondBackingVolumeCreatedReasonWaitingForBackingVolumes = "WaitingForBackingVolumes" // Backing volumes are not yet observable/created.
-)
-
-const (
 	// ReplicatedVolumeCondConfigurationReadyType indicates whether the volume's configuration
 	// matches the storage class configuration.
 	//
@@ -35,7 +25,7 @@ const (
 	ReplicatedVolumeCondConfigurationReadyReasonConfigurationRolloutInProgress = "ConfigurationRolloutInProgress" // Configuration rollout is in progress.
 	ReplicatedVolumeCondConfigurationReadyReasonReady                          = "Ready"                          // Configuration matches storage class.
 	ReplicatedVolumeCondConfigurationReadyReasonStaleConfiguration             = "StaleConfiguration"             // Configuration does not match storage class (stale).
-	ReplicatedVolumeCondConfigurationReadyReasonStorageClassNotFound           = "StorageClassNotFound"           // Referenced storage class does not exist.
+	ReplicatedVolumeCondConfigurationReadyReasonWaitingForStorageClass         = "WaitingForStorageClass"         // Waiting for storage class to be ready.
 )
 
 const (
@@ -43,49 +33,20 @@ const (
 	//
 	// Reasons describe configuration progress / mismatch.
 	ReplicatedVolumeCondConfiguredType                          = "Configured"
-	ReplicatedVolumeCondConfiguredReasonAllReplicasConfigured   = "AllReplicasConfigured"   // All replicas are configured.
 	ReplicatedVolumeCondConfiguredReasonConfigurationInProgress = "ConfigurationInProgress" // Configuration is still in progress.
-	ReplicatedVolumeCondConfiguredReasonReplicasNotConfigured   = "ReplicasNotConfigured"   // Some replicas are not configured yet.
+
+// ReplicatedVolumeCondConfiguredReasonAllReplicasConfigured = "AllReplicasConfigured" // All replicas are configured.
+// ReplicatedVolumeCondConfiguredReasonReplicasNotConfigured = "ReplicasNotConfigured" // Some replicas are not configured yet.
 )
 
 const (
-	// ReplicatedVolumeCondDataQuorumType indicates whether the volume has data quorum (diskful replicas).
-	//
-	// Reasons describe data quorum state (reached/degraded/lost).
-	ReplicatedVolumeCondDataQuorumType                     = "DataQuorum"
-	ReplicatedVolumeCondDataQuorumReasonDataQuorumDegraded = "DataQuorumDegraded" // Data quorum is reached but degraded.
-	ReplicatedVolumeCondDataQuorumReasonDataQuorumLost     = "DataQuorumLost"     // Data quorum is lost.
-	ReplicatedVolumeCondDataQuorumReasonDataQuorumReached  = "DataQuorumReached"  // Data quorum is reached.
-)
-
-const (
-	// ReplicatedVolumeCondInitializedType indicates whether enough replicas are initialized.
-	//
-	// Reasons describe initialization progress and waiting conditions.
-	ReplicatedVolumeCondInitializedType                           = "Initialized"
-	ReplicatedVolumeCondInitializedReasonInitializationInProgress = "InitializationInProgress" // Initialization is still in progress.
-	ReplicatedVolumeCondInitializedReasonInitialized              = "Initialized"              // Initialization requirements are met.
-	ReplicatedVolumeCondInitializedReasonWaitingForReplicas       = "WaitingForReplicas"       // Waiting for replicas to appear/initialize.
-)
-
-const (
-	// ReplicatedVolumeCondIOReadyType indicates whether the volume has enough IOReady replicas.
-	//
-	// Reasons describe why IO is ready or blocked due to replica readiness.
-	ReplicatedVolumeCondIOReadyType                              = "IOReady"
-	ReplicatedVolumeCondIOReadyReasonIOReady                     = "IOReady"                     // IO is ready.
-	ReplicatedVolumeCondIOReadyReasonInsufficientIOReadyReplicas = "InsufficientIOReadyReplicas" // Not enough IOReady replicas.
-	ReplicatedVolumeCondIOReadyReasonNoIOReadyReplicas           = "NoIOReadyReplicas"           // No replicas are IOReady.
+	// ReplicatedVolumeCondIOReadyType indicates whether the volume is ready for I/O operations.
+	ReplicatedVolumeCondIOReadyType = "IOReady"
 )
 
 const (
 	// ReplicatedVolumeCondQuorumType indicates whether the volume has quorum.
-	//
-	// Reasons describe quorum state (reached/degraded/lost).
-	ReplicatedVolumeCondQuorumType                 = "Quorum"
-	ReplicatedVolumeCondQuorumReasonQuorumDegraded = "QuorumDegraded" // Quorum is reached but degraded.
-	ReplicatedVolumeCondQuorumReasonQuorumLost     = "QuorumLost"     // Quorum is lost.
-	ReplicatedVolumeCondQuorumReasonQuorumReached  = "QuorumReached"  // Quorum is reached.
+	ReplicatedVolumeCondQuorumType = "Quorum"
 )
 
 const (
