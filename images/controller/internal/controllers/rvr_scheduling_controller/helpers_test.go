@@ -398,7 +398,7 @@ func TestSelectZoneWithMinReplicaCount(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := selectZoneWithMinReplicaCount(tt.zoneCandidates, tt.replicaCounts)
+			result := computeZoneWithMinReplicaCount(tt.zoneCandidates, tt.replicaCounts)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -715,7 +715,7 @@ func TestSelectBestCandidateForTieBreaker(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := selectBestCandidateForTieBreaker(tt.sctx)
+			result, err := computeBestCandidateForTieBreaker(tt.sctx)
 			if tt.expectedError {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.expectedErrorMsg)

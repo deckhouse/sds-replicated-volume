@@ -19,7 +19,7 @@ The controller performs replica placement by:
 | ← input | ReplicatedVolume | Reads RV spec and status (size, desiredAttachTo, configuration with topology/storagePoolName) |
 | ← input | ReplicatedStoragePool | Reads eligible nodes list (with LVGs per node), zones, and pool type |
 | ← input | scheduler-extender | Queries storage capacity per LVG for Diskful replicas |
-| → output | ReplicatedVolumeReplica | Assigns `spec.nodeName`, `spec.lvmVolumeGroupName`, and updates `status.conditions[Scheduled]` |
+| → output | ReplicatedVolumeReplica | Assigns `spec.nodeName`, `spec.lvmVolumeGroupName`, `spec.lvmVolumeGroupThinPoolName`, and updates `status.conditions[Scheduled]` |
 
 ## Algorithm
 
@@ -131,7 +131,8 @@ Reconcile (root) — per-RVR orchestration with error resilience
 │   ├── getRV                              — fetch ReplicatedVolume
 │   ├── isRVReadyToSchedule                — validate RV has finalizer and configuration
 │   ├── getRSP                             — fetch ReplicatedStoragePool (using rv.Status.Configuration.StoragePoolName)
-│   └── getRVRsByRVName                    — list all RVRs for this RV
+│   ├── getRVRsByRVName                    — list all RVRs for this RV
+│   └── categorizeRVRsIntoContext          — categorize RVRs into scheduled/unscheduled groups
 │
 ├── [for each scheduled RVR] reconcileScheduledRVR
 │   ├── applyScheduledConditionTrue        — set Scheduled=True
@@ -144,11 +145,13 @@ Reconcile (root) — per-RVR orchestration with error resilience
 │   └── applyAttachToBonus                 — boost score for attachTo nodes
 │
 ├── [for each unscheduled Diskful] reconcileUnscheduledDiskfulRVR
-│   ├── selectBestCandidate                         — select node+LVG based on topology
-│   ├── applyPlacement                              — set nodeName, lvmVolumeGroupName
+│   ├── computeCandidateForNode (if RVR has node)   — find LVG on existing node
+│   ├── computeBestCandidate (if RVR has no node)   — select node+LVG based on topology
+│   ├── applyPlacement                              — set nodeName, lvmVolumeGroupName, thinPoolName
 │   ├── patchRVR (if changed)                       — patch with optimistic lock
 │   ├── SchedulingContext.MarkNodeOccupied          — update context on success
 │   ├── SchedulingContext.RemoveCandidate           — remove used node from candidates
+│   ├── SchedulingContext.AddToScheduledDiskful     — move RVR to scheduled list
 │   ├── SchedulingContext.IncrementZoneReplicaCount — for TransZonal: update zone count
 │   ├── applyScheduledConditionTrue                 — set Scheduled=True
 │   └── patchRVRStatus (if changed)                 — patch status
@@ -158,7 +161,7 @@ Reconcile (root) — per-RVR orchestration with error resilience
 │   └── applyTopologyFilter                — filter by topology mode
 │
 └── [for each unscheduled TieBreaker] reconcileUnscheduledTieBreakerRVR
-    ├── selectBestCandidateForTieBreaker   — select node based on topology
+    ├── computeBestCandidateForTieBreaker  — select node based on topology
     ├── applyPlacement                     — set nodeName
     ├── patchRVR (if changed)              — patch with optimistic lock
     ├── SchedulingContext.MarkNodeOccupied — update context on success
@@ -222,6 +225,7 @@ Indicates whether the replica has been assigned to a node.
 | Status | Reason | When |
 |--------|--------|------|
 | True | ReplicaScheduled | Node successfully assigned |
+| False | NoAvailableLVGOnNode | Node is assigned but no suitable LVG found on it |
 | False | NoAvailableNodes | No candidate nodes available |
 | False | TopologyConstraintsFailed | Topology requirements cannot be satisfied |
 | False | SchedulingPending | RV not ready for scheduling (missing finalizer, configuration, etc.) |
@@ -250,21 +254,23 @@ Note: This controller primarily manages spec fields (`nodeName`, `lvmVolumeGroup
 
 | Resource | Events | Handler |
 |----------|--------|---------|
-| ReplicatedVolumeReplica | Create only | EnqueueRequestForOwner (maps to owner RV) |
-| ReplicatedStoragePool | Create, Delete, Generic: always; Update: only if eligibleNodes or usedBy.replicatedStorageClassNames changed | mapRSPToRV (lists RVs by storage pool, filters by UnscheduledRVRsCount > 0) |
+| ReplicatedVolumeReplica | Create; Update: only if Diskful needs LVG scheduling | EnqueueRequestForOwner (maps to owner RV) |
+| ReplicatedStoragePool | Create, Delete, Generic: always; Update: only if eligibleNodesRevision changed | mapRSPToRV (lists RVs by storage pool, filters by UnscheduledRVRsCount > 0) |
 
 ### RVR Predicates
 
-- Reacts to Create events only
-- Does not react to Update/Delete/Generic events
-- Rationale: scheduling is only triggered when a new RVR is created; once scheduled, this controller does not re-schedule
+- Reacts to Create events
+- Reacts to Update events when Diskful RVR needs LVG scheduling:
+  - LVG was cleared (had LVG → no LVG)
+  - ThinPool was cleared (for LVMThin)
+  - Became Diskful but missing LVG/ThinPool (transition from Diskless)
+- Does not react to Delete/Generic events
 
 ### RSP Predicates
 
-- Reacts to eligibleNodes changes (all fields: node names, zones, LVGs, readiness, schedulability)
-- Reacts to usedBy.replicatedStorageClassNames changes
+- Reacts to eligibleNodesRevision changes (covers all eligibleNodes changes: node names, zones, LVGs, readiness, schedulability)
 - On Create/Delete: always triggers
-- On Update: triggers only if eligibleNodes or usedBy.replicatedStorageClassNames differ
+- On Update: triggers only if eligibleNodesRevision differs
 
 ## Indexes
 
@@ -290,6 +296,7 @@ flowchart TD
         AttachTo[AttachToNodes from RV]
         Topology[Topology from rv.Status.Configuration]
         Zones[Zones from RSP]
+        StoragePoolType[StoragePoolType: LVM or LVMThin]
         OccupiedNodes[OccupiedNodes from existing RVRs]
     end
 
@@ -419,7 +426,7 @@ Per-RVR zone distribution mechanism:
 **For TieBreaker replicas:**
 
 1. `computeCandidatesForTieBreaker` initializes `ZoneReplicaCounts` with **ALL** replica counts per zone (Diskful + TieBreaker)
-2. For each unscheduled TieBreaker, `selectBestCandidateForTieBreaker` picks the zone with minimum count
+2. For each unscheduled TieBreaker, `computeBestCandidateForTieBreaker` picks the zone with minimum count
 3. After successful patch, `IncrementZoneReplicaCount` updates the count immediately
 4. Next RVR sees updated counts and picks a different zone
 

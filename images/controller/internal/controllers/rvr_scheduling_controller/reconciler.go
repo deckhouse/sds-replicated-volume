@@ -46,6 +46,7 @@ const (
 var (
 	errSchedulingTopologyConflict = errors.New("scheduling topology conflict")
 	errSchedulingNoCandidateNodes = errors.New("scheduling no candidate nodes")
+	errSchedulingNoLVGOnNode      = errors.New("scheduling no LVG on node")
 	errSchedulingPending          = errors.New("scheduling pending")
 )
 
@@ -55,7 +56,8 @@ var (
 func isSchedulingError(err error) bool {
 	return errors.Is(err, errSchedulingPending) ||
 		errors.Is(err, errSchedulingTopologyConflict) ||
-		errors.Is(err, errSchedulingNoCandidateNodes)
+		errors.Is(err, errSchedulingNoCandidateNodes) ||
+		errors.Is(err, errSchedulingNoLVGOnNode)
 }
 
 // --- Wiring / construction
@@ -214,8 +216,15 @@ func (r *Reconciler) reconcileScheduledRVR(ctx context.Context, _ *SchedulingCon
 // On failed patch, sctx remains unchanged (node stays available for next RVR).
 // Returns (schedulingFailed, err): schedulingFailed=true means no suitable node found but status was updated.
 func (r *Reconciler) reconcileUnscheduledDiskfulRVR(ctx context.Context, sctx *SchedulingContext, rvr *v1alpha1.ReplicatedVolumeReplica) (schedulingFailed bool, err error) {
-	// Select best candidate based on topology
-	candidate, err := r.selectBestCandidate(sctx, true)
+	var candidate NodeCandidate
+
+	if rvr.Spec.NodeName != "" {
+		// RVR already has node - find LVG on that specific node only
+		candidate, err = r.computeCandidateForNode(sctx, rvr.Spec.NodeName)
+	} else {
+		// Standard flow - select best node+LVG based on topology
+		candidate, err = r.computeBestCandidate(sctx, true)
+	}
 	if err != nil {
 		return r.handleSchedulingFailure(ctx, rvr, err)
 	}
@@ -257,7 +266,7 @@ func (r *Reconciler) reconcileUnscheduledDiskfulRVR(ctx context.Context, sctx *S
 // Returns (schedulingFailed, err): schedulingFailed=true means no suitable node found but status was updated.
 func (r *Reconciler) reconcileUnscheduledTieBreakerRVR(ctx context.Context, sctx *SchedulingContext, rvr *v1alpha1.ReplicatedVolumeReplica) (schedulingFailed bool, err error) {
 	// Select best candidate from precomputed TieBreakerCandidates
-	candidate, err := selectBestCandidateForTieBreaker(sctx)
+	candidate, err := computeBestCandidateForTieBreaker(sctx)
 	if err != nil {
 		return r.handleSchedulingFailure(ctx, rvr, err)
 	}
@@ -310,30 +319,70 @@ func (r *Reconciler) handleSchedulingFailure(ctx context.Context, rvr *v1alpha1.
 	return true, nil
 }
 
-// selectBestCandidate selects the best candidate from sctx.ScoredCandidates based on topology.
+// computeBestCandidate selects the best candidate from sctx.ScoredCandidates based on topology.
 // For Zonal topology, it also sets sctx.SelectedZone on first call.
-func (r *Reconciler) selectBestCandidate(sctx *SchedulingContext, isDiskful bool) (NodeCandidate, error) {
+// Excludes nodes in NodesReservedForLVGScheduling (those are only for their owning RVRs).
+func (r *Reconciler) computeBestCandidate(sctx *SchedulingContext, isDiskful bool) (NodeCandidate, error) {
 	if len(sctx.ScoredCandidates) == 0 {
 		return NodeCandidate{}, fmt.Errorf("%w: no zone candidates available", errSchedulingNoCandidateNodes)
 	}
 
+	// Filter out nodes reserved for LVG-only scheduling (they have owning RVRs).
+	candidates := filterOutReservedNodes(sctx.ScoredCandidates, sctx.NodesReservedForLVGScheduling)
+	if len(candidates) == 0 {
+		return NodeCandidate{}, fmt.Errorf("%w: no candidates available after filtering reserved nodes", errSchedulingNoCandidateNodes)
+	}
+
 	switch sctx.Topology {
 	case topologyIgnored:
-		return selectBestCandidateIgnored(sctx)
+		return computeBestCandidateIgnored(candidates)
 	case topologyZonal:
-		return selectBestCandidateZonal(sctx, isDiskful)
+		return computeBestCandidateZonal(candidates, sctx, isDiskful)
 	case topologyTransZonal:
-		return selectBestCandidateTransZonal(sctx)
+		return computeBestCandidateTransZonal(candidates, sctx)
 	default:
 		return NodeCandidate{}, fmt.Errorf("unknown topology: %s", sctx.Topology)
 	}
 }
 
-// selectBestCandidateIgnored selects the best candidate across all zones (no zone constraints).
-func selectBestCandidateIgnored(sctx *SchedulingContext) (NodeCandidate, error) {
-	var allCandidates []NodeCandidate
+// filterOutReservedNodes creates a new map excluding nodes that are reserved for LVG scheduling.
+func filterOutReservedNodes(candidates map[string][]NodeCandidate, reserved map[string]struct{}) map[string][]NodeCandidate {
+	if len(reserved) == 0 {
+		return candidates
+	}
+	result := make(map[string][]NodeCandidate)
+	for zone, zoneCanidates := range candidates {
+		var filtered []NodeCandidate
+		for _, c := range zoneCanidates {
+			if _, isReserved := reserved[c.Name]; !isReserved {
+				filtered = append(filtered, c)
+			}
+		}
+		if len(filtered) > 0 {
+			result[zone] = filtered
+		}
+	}
+	return result
+}
+
+// computeCandidateForNode finds the LVG candidate on a specific node.
+// Used when RVR already has a node assigned but needs LVG selection.
+func (r *Reconciler) computeCandidateForNode(sctx *SchedulingContext, nodeName string) (NodeCandidate, error) {
 	for _, candidates := range sctx.ScoredCandidates {
-		allCandidates = append(allCandidates, candidates...)
+		for _, c := range candidates {
+			if c.Name == nodeName {
+				return c, nil
+			}
+		}
+	}
+	return NodeCandidate{}, fmt.Errorf("%w: no suitable LVG found on node %s", errSchedulingNoLVGOnNode, nodeName)
+}
+
+// computeBestCandidateIgnored selects the best candidate across all zones (no zone constraints).
+func computeBestCandidateIgnored(candidates map[string][]NodeCandidate) (NodeCandidate, error) {
+	var allCandidates []NodeCandidate
+	for _, zoneCandidates := range candidates {
+		allCandidates = append(allCandidates, zoneCandidates...)
 	}
 
 	if len(allCandidates) == 0 {
@@ -348,9 +397,9 @@ func selectBestCandidateIgnored(sctx *SchedulingContext) (NodeCandidate, error) 
 	return best, nil
 }
 
-// selectBestCandidateZonal selects the best candidate for Zonal topology.
+// computeBestCandidateZonal selects the best candidate for Zonal topology.
 // On first call, determines and stores the best zone in sctx.SelectedZone.
-func selectBestCandidateZonal(sctx *SchedulingContext, isDiskful bool) (NodeCandidate, error) {
+func computeBestCandidateZonal(candidates map[string][]NodeCandidate, sctx *SchedulingContext, isDiskful bool) (NodeCandidate, error) {
 	// Determine zone if not yet selected
 	if sctx.SelectedZone == "" {
 		if !isDiskful {
@@ -360,15 +409,15 @@ func selectBestCandidateZonal(sctx *SchedulingContext, isDiskful bool) (NodeCand
 		// Select best zone based on capacity scores
 		var bestZone string
 		bestZoneScore := -1
-		for zone, candidates := range sctx.ScoredCandidates {
-			if len(candidates) == 0 {
+		for zone, zoneCandidates := range candidates {
+			if len(zoneCandidates) == 0 {
 				continue
 			}
 			totalScore := 0
-			for _, c := range candidates {
+			for _, c := range zoneCandidates {
 				totalScore += c.BestScore
 			}
-			zoneScore := totalScore * len(candidates)
+			zoneScore := totalScore * len(zoneCandidates)
 			if zoneScore > bestZoneScore {
 				bestZoneScore = zoneScore
 				bestZone = zone
@@ -383,12 +432,12 @@ func selectBestCandidateZonal(sctx *SchedulingContext, isDiskful bool) (NodeCand
 	}
 
 	// Select best candidate from the selected zone
-	candidates := sctx.ScoredCandidates[sctx.SelectedZone]
-	if len(candidates) == 0 {
+	zoneCandidates := candidates[sctx.SelectedZone]
+	if len(zoneCandidates) == 0 {
 		return NodeCandidate{}, fmt.Errorf("%w: no candidates left in zone %s", errSchedulingNoCandidateNodes, sctx.SelectedZone)
 	}
 
-	best := computeBestNode(candidates)
+	best := computeBestNode(zoneCandidates)
 	if best.Name == "" {
 		return NodeCandidate{}, fmt.Errorf("%w: no candidates left in zone %s", errSchedulingNoCandidateNodes, sctx.SelectedZone)
 	}
@@ -396,9 +445,9 @@ func selectBestCandidateZonal(sctx *SchedulingContext, isDiskful bool) (NodeCand
 	return best, nil
 }
 
-// selectZoneWithMinReplicaCount finds the zone with minimum replica count among zones with candidates.
+// computeZoneWithMinReplicaCount finds the zone with minimum replica count among zones with candidates.
 // Returns empty string if no zones have candidates.
-func selectZoneWithMinReplicaCount(zoneCandidates map[string][]NodeCandidate, replicaCounts map[string]int) string {
+func computeZoneWithMinReplicaCount(zoneCandidates map[string][]NodeCandidate, replicaCounts map[string]int) string {
 	var selectedZone string
 	minCount := -1
 
@@ -416,17 +465,17 @@ func selectZoneWithMinReplicaCount(zoneCandidates map[string][]NodeCandidate, re
 	return selectedZone
 }
 
-// selectBestCandidateTransZonal selects the best candidate for TransZonal topology.
+// computeBestCandidateTransZonal selects the best candidate for TransZonal topology.
 // Places replica in the zone with minimum replica count.
-func selectBestCandidateTransZonal(sctx *SchedulingContext) (NodeCandidate, error) {
-	selectedZone := selectZoneWithMinReplicaCount(sctx.ScoredCandidates, sctx.ZoneReplicaCounts)
+func computeBestCandidateTransZonal(candidates map[string][]NodeCandidate, sctx *SchedulingContext) (NodeCandidate, error) {
+	selectedZone := computeZoneWithMinReplicaCount(candidates, sctx.ZoneReplicaCounts)
 	if selectedZone == "" {
 		return NodeCandidate{}, fmt.Errorf("%w: no zones with candidates for TransZonal topology", errSchedulingNoCandidateNodes)
 	}
 
 	// Select best candidate from the selected zone
-	candidates := sctx.ScoredCandidates[selectedZone]
-	best := computeBestNode(candidates)
+	zoneCandidates := candidates[selectedZone]
+	best := computeBestNode(zoneCandidates)
 	if best.Name == "" {
 		return NodeCandidate{}, fmt.Errorf("%w: no candidates left in zone %s", errSchedulingNoCandidateNodes, selectedZone)
 	}
@@ -435,9 +484,9 @@ func selectBestCandidateTransZonal(sctx *SchedulingContext) (NodeCandidate, erro
 	return best, nil
 }
 
-// selectBestCandidateForTieBreaker selects the best candidate from sctx.TieBreakerCandidates based on topology.
+// computeBestCandidateForTieBreaker selects the best candidate from sctx.TieBreakerCandidates based on topology.
 // TieBreaker doesn't use capacity scores, just topology-aware selection.
-func selectBestCandidateForTieBreaker(sctx *SchedulingContext) (NodeCandidate, error) {
+func computeBestCandidateForTieBreaker(sctx *SchedulingContext) (NodeCandidate, error) {
 	if len(sctx.TieBreakerCandidates) == 0 {
 		return NodeCandidate{}, fmt.Errorf("%w: no TieBreaker candidates available", errSchedulingNoCandidateNodes)
 	}
@@ -465,7 +514,7 @@ func selectBestCandidateForTieBreaker(sctx *SchedulingContext) (NodeCandidate, e
 		return candidates[0], nil
 
 	case topologyTransZonal:
-		selectedZone := selectZoneWithMinReplicaCount(sctx.TieBreakerCandidates, sctx.ZoneReplicaCounts)
+		selectedZone := computeZoneWithMinReplicaCount(sctx.TieBreakerCandidates, sctx.ZoneReplicaCounts)
 		if selectedZone == "" {
 			return NodeCandidate{}, fmt.Errorf("%w: no zones with candidates for TieBreaker", errSchedulingNoCandidateNodes)
 		}
@@ -483,6 +532,19 @@ func selectBestCandidateForTieBreaker(sctx *SchedulingContext) (NodeCandidate, e
 // Candidates are grouped by zone (or by "Ignored" key for Ignored topology).
 func (r *Reconciler) computeScoredCandidatesForDiskful(ctx context.Context, sctx *SchedulingContext) error {
 	candidateNodes := computeEligibleNodeNames(sctx.EligibleNodes, sctx.OccupiedNodes)
+
+	// Add back nodes of RVRs that have node but need LVG selection.
+	// These nodes are in OccupiedNodes but the RVR on them needs to find an LVG.
+	// Track them separately so getBestCandidate excludes them (only their owning
+	// RVR should use them via getCandidateForNode).
+	sctx.NodesReservedForLVGScheduling = make(map[string]struct{})
+	for _, rvr := range sctx.UnscheduledDiskful {
+		if rvr.Spec.NodeName != "" && !slices.Contains(candidateNodes, rvr.Spec.NodeName) {
+			candidateNodes = append(candidateNodes, rvr.Spec.NodeName)
+			sctx.NodesReservedForLVGScheduling[rvr.Spec.NodeName] = struct{}{}
+		}
+	}
+
 	if len(candidateNodes) == 0 {
 		return fmt.Errorf("%w: no candidate nodes from storage pool", errSchedulingNoCandidateNodes)
 	}
@@ -839,6 +901,8 @@ func computeSchedulingFailureReason(err error) *schedulingFailureReason {
 	switch {
 	case errors.Is(err, errSchedulingTopologyConflict):
 		reason = v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonTopologyConstraintsFailed
+	case errors.Is(err, errSchedulingNoLVGOnNode):
+		reason = v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonNoAvailableLVGOnNode
 	case errors.Is(err, errSchedulingNoCandidateNodes):
 		reason = v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonNoAvailableNodes
 	case errors.Is(err, errSchedulingPending):

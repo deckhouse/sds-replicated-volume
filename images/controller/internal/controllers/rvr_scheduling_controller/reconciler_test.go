@@ -320,6 +320,13 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 					ReplicatedVolumeName: "rv-test",
 					Type:                 existing.Type,
 					NodeName:             existing.NodeName,
+					// For Diskful replicas to be considered "fully scheduled", they need LVMVolumeGroupName
+					LVMVolumeGroupName: func() string {
+						if existing.Type == v1alpha1.ReplicaTypeDiskful && existing.NodeName != "" {
+							return fmt.Sprintf("vg-%s", existing.NodeName)
+						}
+						return ""
+					}(),
 				},
 			}
 			rvrList = append(rvrList, rvr)
@@ -691,6 +698,12 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
+				},
 			}
 			rvr := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
@@ -734,6 +747,12 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
 				},
 			}
 			rvr := &v1alpha1.ReplicatedVolumeReplica{
@@ -793,6 +812,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
 				},
 			}
 
@@ -870,6 +895,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
+				},
 			}
 
 			deletingTime := metav1.Now()
@@ -928,6 +959,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
+				},
 			}
 
 			deletingTime := metav1.Now()
@@ -976,6 +1013,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
+				},
 			}
 
 			existingRvr := &v1alpha1.ReplicatedVolumeReplica{
@@ -984,6 +1027,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					ReplicatedVolumeName: "rv-test",
 					Type:                 v1alpha1.ReplicaTypeDiskful,
 					NodeName:             "node-a1",
+					LVMVolumeGroupName:   "vg-node-a1",
 				},
 			}
 
@@ -1037,6 +1081,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
 				},
 			}
 
@@ -1099,6 +1149,10 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					ReplicatedStorageClassName: "rsc-test",
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "TransZonal",
+						StoragePoolName: "rsp-test",
+					},
 					Conditions: []metav1.Condition{{
 						Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
 						Status: metav1.ConditionTrue,
@@ -1203,6 +1257,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
+				},
 			}
 			rvr := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
@@ -1257,6 +1317,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
+				},
 			}
 			rvr := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
@@ -1309,6 +1375,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
 				},
 			}
 			rvr := &v1alpha1.ReplicatedVolumeReplica{
@@ -1365,6 +1437,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
+				},
 			}
 			rvr := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
@@ -1416,6 +1494,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
 				},
 			}
 			rvr := &v1alpha1.ReplicatedVolumeReplica{
@@ -1536,8 +1620,8 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 		})
 	})
 
-	Context("RSC/RSP Not Found", func() {
-		It("returns error when RSC not found and does not modify RVR status", func(ctx SpecContext) {
+	Context("RSP Not Found", func() {
+		It("returns error when RSP not found and does not modify RVR status (configuration points to nonexistent RSP)", func(ctx SpecContext) {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
@@ -1545,7 +1629,13 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
-					ReplicatedStorageClassName: "rsc-nonexistent",
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-nonexistent",
+					},
 				},
 			}
 
@@ -1568,54 +1658,6 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("ReplicatedStorageClass"))
-
-			// Verify RVR status was NOT modified (I/O error should not update status)
-			var updatedRVR v1alpha1.ReplicatedVolumeReplica
-			Expect(cl.Get(ctx, types.NamespacedName{Name: rvr.Name}, &updatedRVR)).To(Succeed())
-			Expect(updatedRVR.Status.Conditions).To(BeEmpty(), "RVR status should not be modified for API errors")
-		})
-
-		It("returns error when RSP not found and does not modify RVR status", func(ctx SpecContext) {
-			rsc := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Topology: "Ignored",
-				},
-				Status: v1alpha1.ReplicatedStorageClassStatus{
-					StoragePoolName: "rsp-nonexistent",
-				},
-			}
-			rv := &v1alpha1.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:       "rv-test",
-					Finalizers: []string{v1alpha1.ControllerFinalizer},
-				},
-				Spec: v1alpha1.ReplicatedVolumeSpec{
-					Size:                       resource.MustParse("10Gi"),
-					ReplicatedStorageClassName: "rsc-test",
-				},
-			}
-
-			rvr := &v1alpha1.ReplicatedVolumeReplica{
-				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
-				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
-					ReplicatedVolumeName: "rv-test",
-					Type:                 v1alpha1.ReplicaTypeDiskful,
-				},
-			}
-
-			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
-				WithScheme(scheme)).
-				WithRuntimeObjects(rv, rsc, rvr).
-				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
-				Build()
-
-			extender := &mockExtenderClient{scores: map[string]int{}}
-			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, extender)
-
-			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("ReplicatedStoragePool"))
 
 			// Verify RVR status was NOT modified (I/O error should not update status)
@@ -1624,16 +1666,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 			Expect(updatedRVR.Status.Conditions).To(BeEmpty(), "RVR status should not be modified for API errors")
 		})
 
-		It("sets Scheduled=False when RSC has no storage pool configured", func(ctx SpecContext) {
-			rsc := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Topology: "Ignored",
-				},
-				Status: v1alpha1.ReplicatedStorageClassStatus{
-					StoragePoolName: "",
-				},
-			}
+		It("sets Scheduled=False when configuration has empty storage pool name", func(ctx SpecContext) {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
@@ -1642,6 +1675,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "",
+					},
 				},
 			}
 
@@ -1655,7 +1694,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 
 			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme)).
-				WithRuntimeObjects(rv, rsc, rvr).
+				WithRuntimeObjects(rv, rvr).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
 
@@ -1664,7 +1703,9 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("no storage pool configured"))
 
+			// Verify RVR status was modified (scheduling pending error should set Scheduled=False)
 			updated := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
 			cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
@@ -1723,6 +1764,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
+				},
 			}
 			rvr := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
@@ -1780,6 +1827,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
 				},
 			}
 			rvr := &v1alpha1.ReplicatedVolumeReplica{
@@ -1841,6 +1894,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
+				},
 			}
 			rvr := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
@@ -1891,6 +1950,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
 				},
 			}
 			rvr := &v1alpha1.ReplicatedVolumeReplica{
@@ -1943,6 +2008,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
+				},
 			}
 			rvr := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
@@ -1994,6 +2065,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
+				},
 			}
 			rvr := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
@@ -2044,6 +2121,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
+				},
 			}
 			rvr := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
@@ -2084,6 +2167,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
 				},
 			}
 
@@ -2126,6 +2215,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
+				},
 			}
 
 			accessRvr := &v1alpha1.ReplicatedVolumeReplica{
@@ -2166,6 +2261,12 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
 				},
 			}
 
@@ -2222,6 +2323,10 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					ReplicatedStorageClassName: "rsc-test",
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "TransZonal",
+						StoragePoolName: "rsp-test",
+					},
 					Conditions: []metav1.Condition{{
 						Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
 						Status: metav1.ConditionTrue,
@@ -2300,6 +2405,10 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					ReplicatedStorageClassName: "rsc-test",
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Zonal",
+						StoragePoolName: "rsp-test",
+					},
 					Conditions: []metav1.Condition{{
 						Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
 						Status: metav1.ConditionTrue,
@@ -2395,6 +2504,10 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					ReplicatedStorageClassName: "rsc-test",
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
 					DesiredAttachTo: []string{"node-attachto"},
 				},
 			}
@@ -2457,6 +2570,10 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					ReplicatedStorageClassName: "rsc-test",
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
 					DesiredAttachTo: []string{"node-attachto"},
 				},
 			}
@@ -2521,6 +2638,10 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					ReplicatedStorageClassName: "rsc-test",
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "TransZonal",
+						StoragePoolName: "rsp-test",
+					},
 					Conditions: []metav1.Condition{{
 						Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
 						Status: metav1.ConditionTrue,
@@ -2626,6 +2747,10 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					ReplicatedStorageClassName: "rsc-test",
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "TransZonal",
+						StoragePoolName: "rsp-test",
+					},
 					Conditions: []metav1.Condition{{
 						Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
 						Status: metav1.ConditionTrue,
@@ -2748,6 +2873,10 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					ReplicatedStorageClassName: "rsc-test",
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Zonal",
+						StoragePoolName: "rsp-test",
+					},
 					Conditions: []metav1.Condition{{
 						Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
 						Status: metav1.ConditionTrue,
@@ -2762,6 +2891,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					ReplicatedVolumeName: "rv-test",
 					Type:                 v1alpha1.ReplicaTypeDiskful,
 					NodeName:             "node-a1",
+					LVMVolumeGroupName:   "vg-a1",
 				},
 			}
 
@@ -2803,6 +2933,326 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 			Expect(cond).ToNot(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonNoAvailableNodes))
+		})
+	})
+
+	Context("RVR with Node but No LVG", func() {
+		It("schedules LVG on existing node when RVR has NodeName but no LVMVolumeGroupName", func(ctx SpecContext) {
+			// Setup: 2 nodes, each with LVG
+			eligible := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				{
+					NodeName:   "node-a",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-a", Ready: true},
+					},
+				},
+				{
+					NodeName:   "node-b",
+					ZoneName:   "zone-b",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-b", Ready: true},
+					},
+				},
+			}
+			scores := map[string]int{"vg-a": 100, "vg-b": 90}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, nil)
+			rsp.Status.EligibleNodes = eligible
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
+					Conditions: []metav1.Condition{{
+						Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
+						Status: metav1.ConditionTrue,
+					}},
+				},
+			}
+
+			// RVR with NodeName set but no LVMVolumeGroupName
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-needs-lvg"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-b", // Already has node
+					// LVMVolumeGroupName is empty - needs scheduling
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			// RVR should get LVG on its existing node (node-b)
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-needs-lvg"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(Equal("node-b"), "NodeName should remain unchanged")
+			Expect(updated.Spec.LVMVolumeGroupName).To(Equal("vg-b"), "Should get LVG from its node")
+
+			cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+			Expect(cond).ToNot(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		})
+
+		It("sets Scheduled=False with NoAvailableLVGOnNode when no suitable LVG on assigned node", func(ctx SpecContext) {
+			// Setup: node-a has LVG, node-b has NO suitable LVG
+			eligible := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				{
+					NodeName:   "node-a",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-a", Ready: true},
+					},
+				},
+				{
+					NodeName:   "node-b",
+					ZoneName:   "zone-b",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-b", Ready: false}, // LVG not ready
+					},
+				},
+			}
+			// Only vg-a has capacity
+			scores := map[string]int{"vg-a": 100}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, nil)
+			rsp.Status.EligibleNodes = eligible
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
+					Conditions: []metav1.Condition{{
+						Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
+						Status: metav1.ConditionTrue,
+					}},
+				},
+			}
+
+			// RVR assigned to node-b which has no suitable LVG
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-no-lvg"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-b",
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-no-lvg"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(Equal("node-b"), "NodeName should remain unchanged")
+			Expect(updated.Spec.LVMVolumeGroupName).To(BeEmpty(), "LVG should not be set")
+
+			cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+			Expect(cond).ToNot(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonNoAvailableLVGOnNode))
+		})
+
+		It("does not allow other RVRs to use node reserved for LVG scheduling", func(ctx SpecContext) {
+			// Setup: 2 nodes
+			eligible := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				{
+					NodeName:   "node-a",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-a", Ready: true},
+					},
+				},
+				{
+					NodeName:   "node-b",
+					ZoneName:   "zone-b",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-b", Ready: true},
+					},
+				},
+			}
+			scores := map[string]int{"vg-a": 100, "vg-b": 90}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, nil)
+			rsp.Status.EligibleNodes = eligible
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
+					Conditions: []metav1.Condition{{
+						Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
+						Status: metav1.ConditionTrue,
+					}},
+				},
+			}
+
+			// RVR-1 has node-a but no LVG (needs LVG scheduling)
+			rvr1 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-needs-lvg"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-a",
+				},
+			}
+
+			// RVR-2 is completely new (needs both node and LVG)
+			rvr2 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-new"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr1, rvr2).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			// RVR-1 should get LVG on node-a
+			updated1 := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-needs-lvg"}, updated1)).To(Succeed())
+			Expect(updated1.Spec.NodeName).To(Equal("node-a"))
+			Expect(updated1.Spec.LVMVolumeGroupName).To(Equal("vg-a"))
+
+			// RVR-2 should go to node-b (not node-a which is reserved)
+			updated2 := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-new"}, updated2)).To(Succeed())
+			Expect(updated2.Spec.NodeName).To(Equal("node-b"), "New RVR should not use node-a which is reserved")
+			Expect(updated2.Spec.LVMVolumeGroupName).To(Equal("vg-b"))
+		})
+
+		It("schedules ThinPoolName on existing node for LVMThin storage", func(ctx SpecContext) {
+			// Setup: LVMThin storage pool (ThinPoolName comes from eligible node)
+			eligible := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				{
+					NodeName:   "node-a",
+					ZoneName:   "zone-a",
+					NodeReady:  true,
+					AgentReady: true,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+						{Name: "vg-a", ThinPoolName: "thin-a", Ready: true},
+					},
+				},
+			}
+			scores := map[string]int{"vg-a": 100}
+
+			rsc, rsp := generateRSCAndRSP("rsc-test", "rsp-test", "Ignored", nil, nil)
+			rsp.Status.EligibleNodes = eligible
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        "Ignored",
+						StoragePoolName: "rsp-test",
+					},
+					Conditions: []metav1.Condition{{
+						Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
+						Status: metav1.ConditionTrue,
+					}},
+				},
+			}
+
+			// RVR with NodeName but no LVMVolumeGroupName and no ThinPoolName
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-needs-thinpool"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-a",
+					// LVMVolumeGroupName is empty
+					// LVMVolumeGroupThinPoolName is empty
+				},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
+				WithRuntimeObjects(rv, rsc, rsp, rvr).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec := rvrschedulingcontroller.NewReconcilerWithExtender(cl, &mockExtenderClient{scores: scores})
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-needs-thinpool"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(Equal("node-a"))
+			Expect(updated.Spec.LVMVolumeGroupName).To(Equal("vg-a"))
+			Expect(updated.Spec.LVMVolumeGroupThinPoolName).To(Equal("thin-a"), "Should get ThinPoolName from eligible node")
+
+			cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+			Expect(cond).ToNot(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		})
 	})
 })

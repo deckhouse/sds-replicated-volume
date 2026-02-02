@@ -52,6 +52,11 @@ type SchedulingContext struct {
 	// ZoneReplicaCounts tracks replica counts per zone for TransZonal topology.
 	// Updated after each successful scheduling.
 	ZoneReplicaCounts map[string]int
+
+	// NodesReservedForLVGScheduling contains nodes that are assigned to RVRs
+	// but need LVG selection. These nodes should only be available to their
+	// owning RVR via getCandidateForNode, not to other RVRs via getBestCandidate.
+	NodesReservedForLVGScheduling map[string]struct{}
 }
 
 // ScheduledRVRs returns all scheduled RVRs (both Diskful and TieBreaker).

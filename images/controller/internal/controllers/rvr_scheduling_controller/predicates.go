@@ -24,17 +24,56 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
-// TODO: у rvr могут снять проставленную lvg
-// если не смогли lvg подобрать на этой ноде, то ставил scheduled false и requeue
+// RVRPredicates returns predicates for ReplicatedVolumeReplica events.
+// Reacts to:
+//   - Create: always (new RVR needs scheduling)
+//   - Update: only if Diskful RVR needs LVG scheduling (LVG/ThinPool cleared or became Diskful)
+//   - Delete: never (scheduling controller doesn't handle deletion)
+//   - Generic: never
 func RVRPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.Funcs{
 			CreateFunc:  func(_ event.TypedCreateEvent[client.Object]) bool { return true },
-			UpdateFunc:  func(_ event.TypedUpdateEvent[client.Object]) bool { return false },
+			UpdateFunc:  rvrNeedsLVGScheduling,
 			DeleteFunc:  func(_ event.TypedDeleteEvent[client.Object]) bool { return false },
 			GenericFunc: func(_ event.TypedGenericEvent[client.Object]) bool { return false },
 		},
 	}
+}
+
+// rvrNeedsLVGScheduling returns true if a Diskful RVR needs LVG scheduling.
+// This happens when:
+//   - Case 1: LVG or ThinPool was cleared on an existing Diskful RVR
+//   - Case 2: RVR transitioned from Diskless to Diskful but missing LVG/ThinPool
+func rvrNeedsLVGScheduling(e event.TypedUpdateEvent[client.Object]) bool {
+	oldRVR, okOld := e.ObjectOld.(*v1alpha1.ReplicatedVolumeReplica)
+	newRVR, okNew := e.ObjectNew.(*v1alpha1.ReplicatedVolumeReplica)
+	if !okOld || !okNew || oldRVR == nil || newRVR == nil {
+		return false
+	}
+
+	// Case 1: LVG/ThinPool was cleared on Diskful
+	if newRVR.Spec.Type == v1alpha1.ReplicaTypeDiskful {
+		// LVG cleared (had LVG -> no LVG)
+		if oldRVR.Spec.LVMVolumeGroupName != "" && newRVR.Spec.LVMVolumeGroupName == "" {
+			return true
+		}
+		// ThinPool cleared (for LVMThin)
+		if oldRVR.Spec.LVMVolumeGroupThinPoolName != "" && newRVR.Spec.LVMVolumeGroupThinPoolName == "" {
+			return true
+		}
+	}
+
+	// Case 2: Became Diskful but needs LVG/ThinPool scheduling
+	// (transition from Diskless types like TieBreaker/Access)
+	if oldRVR.Spec.Type != v1alpha1.ReplicaTypeDiskful &&
+		newRVR.Spec.Type == v1alpha1.ReplicaTypeDiskful &&
+		newRVR.Spec.NodeName != "" &&
+		(newRVR.Spec.LVMVolumeGroupName == "" || newRVR.Spec.LVMVolumeGroupThinPoolName == "") {
+		return true
+	}
+
+	return false
 }
 
 // RSPPredicates returns predicates for ReplicatedStoragePool events.
