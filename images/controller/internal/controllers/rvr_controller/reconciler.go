@@ -3009,7 +3009,12 @@ func (r *Reconciler) deleteDRBDR(ctx context.Context, drbdr *v1alpha1.DRBDResour
 	if drbdr.DeletionTimestamp != nil {
 		return nil
 	}
-	return client.IgnoreNotFound(r.cl.Delete(ctx, drbdr))
+	if err := client.IgnoreNotFound(r.cl.Delete(ctx, drbdr)); err != nil {
+		return err
+	}
+	now := metav1.Now()
+	drbdr.DeletionTimestamp = &now
+	return nil
 }
 
 // --- ReplicatedStoragePool (RSP) ---
@@ -3125,7 +3130,12 @@ func (r *Reconciler) deleteLLV(ctx context.Context, llv *snc.LVMLogicalVolume) e
 	if llv.DeletionTimestamp != nil {
 		return nil
 	}
-	return client.IgnoreNotFound(r.cl.Delete(ctx, llv))
+	if err := client.IgnoreNotFound(r.cl.Delete(ctx, llv)); err != nil {
+		return err
+	}
+	now := metav1.Now()
+	llv.DeletionTimestamp = &now
+	return nil
 }
 
 // --- Node ---
