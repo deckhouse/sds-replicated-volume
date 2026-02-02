@@ -265,7 +265,7 @@ func isRVReadyToSchedule(rv *v1alpha1.ReplicatedVolume) error {
 		return fmt.Errorf("%w: ReplicatedVolume has no finalizers", errSchedulingPending)
 	}
 
-	if !slices.Contains(rv.Finalizers, v1alpha1.ControllerFinalizer) {
+	if !slices.Contains(rv.Finalizers, v1alpha1.RVControllerFinalizer) {
 		return fmt.Errorf("%w: ReplicatedVolume is missing controller finalizer", errSchedulingPending)
 	}
 

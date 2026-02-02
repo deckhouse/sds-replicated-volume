@@ -19,11 +19,11 @@ package rvcontroller_test
 import (
 	"context"
 	"errors"
-	"reflect"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -32,8 +32,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 func TestRvControllerReconciler(t *testing.T) {
@@ -49,240 +51,1003 @@ func Requeue() OmegaMatcher {
 	return Not(Equal(reconcile.Result{}))
 }
 
-func InterceptGet[T client.Object](intercept func(T) error) interceptor.Funcs {
-	var zero T
-	tType := reflect.TypeOf(zero)
-	if tType == nil {
-		panic("cannot determine type")
-	}
+// newClientBuilder creates a fake.ClientBuilder with required indexes.
+func newClientBuilder(scheme *runtime.Scheme) *fake.ClientBuilder {
+	b := fake.NewClientBuilder().WithScheme(scheme)
+	b = testhelpers.WithRVAByReplicatedVolumeNameIndex(b)
+	b = testhelpers.WithRVRByReplicatedVolumeNameIndex(b)
+	return b
+}
 
-	return interceptor.Funcs{
-		Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-			if reflect.TypeOf(obj).AssignableTo(tType) {
-				return intercept(obj.(T))
-			}
-			return client.Get(ctx, key, obj, opts...)
-		},
-		List: func(ctx context.Context, client client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-			if reflect.TypeOf(list).Elem().Elem().AssignableTo(tType) {
-				items := reflect.ValueOf(list).Elem().FieldByName("Items")
-				if items.IsValid() && items.Kind() == reflect.Slice {
-					for i := 0; i < items.Len(); i++ {
-						item := items.Index(i).Addr().Interface().(T)
-						if err := intercept(item); err != nil {
-							return err
-						}
-					}
-				}
-			}
-			return client.List(ctx, list, opts...)
+// newRSCWithConfiguration creates a RSC with valid configuration for tests.
+func newRSCWithConfiguration(name string) *v1alpha1.ReplicatedStorageClass {
+	return &v1alpha1.ReplicatedStorageClass{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Status: v1alpha1.ReplicatedStorageClassStatus{
+			ConfigurationGeneration: 1,
+			Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+				Topology:        v1alpha1.TopologyIgnored,
+				Replication:     v1alpha1.ReplicationNone,
+				VolumeAccess:    v1alpha1.VolumeAccessLocal,
+				StoragePoolName: "test-pool",
+			},
 		},
 	}
 }
 
 var _ = Describe("Reconciler", func() {
 	var (
-		clientBuilder *fake.ClientBuilder
-		scheme        *runtime.Scheme
-	)
-	var (
-		cl  client.WithWatch
-		rec *rvcontroller.Reconciler
+		scheme *runtime.Scheme
 	)
 
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
-		clientBuilder = fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithStatusSubresource(&v1alpha1.ReplicatedVolume{})
-		cl = nil
-		rec = nil
 	})
 
-	JustBeforeEach(func() {
-		cl = clientBuilder.Build()
-		rec = rvcontroller.NewReconciler(cl)
-	})
+	Describe("Reconcile", func() {
+		It("returns no error when ReplicatedVolume does not exist", func(ctx SpecContext) {
+			cl := newClientBuilder(scheme).Build()
+			rec := rvcontroller.NewReconciler(cl)
 
-	Describe("Reconcile (metadata)", func() {
-		type tc struct {
-			name       string
-			objects    []client.Object
-			reqName    string
-			wantLabels map[string]string
-		}
+			result, err := rec.Reconcile(ctx, RequestFor(&v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "non-existent"},
+			}))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).ToNot(Requeue())
+		})
 
-		DescribeTable(
-			"updates labels",
-			func(ctx SpecContext, tt tc) {
-				localCl := fake.NewClientBuilder().
-					WithScheme(scheme).
-					WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
-					WithObjects(tt.objects...).
-					Build()
-				localRec := rvcontroller.NewReconciler(localCl)
+		It("adds finalizer and label to new RV", func(ctx SpecContext) {
+			rsc := newRSCWithConfiguration("rsc-1")
 
-				_, err := localRec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: tt.reqName}})
-				Expect(err).NotTo(HaveOccurred())
-
-				rv := &v1alpha1.ReplicatedVolume{}
-				Expect(localCl.Get(ctx, client.ObjectKey{Name: tt.reqName}, rv)).To(Succeed())
-
-				for k, want := range tt.wantLabels {
-					Expect(rv.Labels).To(HaveKeyWithValue(k, want))
-				}
-			},
-			Entry("adds label when rsc specified", tc{
-				name: "adds label when rsc specified",
-				objects: []client.Object{
-					&v1alpha1.ReplicatedVolume{
-						ObjectMeta: metav1.ObjectMeta{Name: "rv-with-rsc", ResourceVersion: "1"},
-						Spec:       v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "my-storage-class"},
-					},
-				},
-				reqName: "rv-with-rsc",
-				wantLabels: map[string]string{
-					v1alpha1.ReplicatedStorageClassLabelKey: "my-storage-class",
-				},
-			}),
-			Entry("does not change label if already set correctly", tc{
-				name: "does not change label if already set correctly",
-				objects: []client.Object{
-					&v1alpha1.ReplicatedVolume{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:            "rv-with-label",
-							ResourceVersion: "1",
-							Labels: map[string]string{
-								v1alpha1.ReplicatedStorageClassLabelKey: "existing-class",
-							},
-						},
-						Spec: v1alpha1.ReplicatedVolumeSpec{
-							ReplicatedStorageClassName: "existing-class",
-						},
-					},
-				},
-				reqName: "rv-with-label",
-				wantLabels: map[string]string{
-					v1alpha1.ReplicatedStorageClassLabelKey: "existing-class",
-				},
-			}),
-		)
-	})
-
-	It("returns no error when ReplicatedVolume does not exist", func(ctx SpecContext) {
-		Expect(rec.Reconcile(ctx, RequestFor(&v1alpha1.ReplicatedVolume{
-			ObjectMeta: metav1.ObjectMeta{Name: "non-existent"},
-		}))).ToNot(Requeue(), "should ignore NotFound errors")
-	})
-
-	When("RV created", func() {
-		var rv *v1alpha1.ReplicatedVolume
-
-		BeforeEach(func() {
-			rv = &v1alpha1.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "volume-1",
-				},
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
-					Size:                       resource.MustParse("1Gi"),
-					ReplicatedStorageClassName: "my-storage-class",
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
 				},
 			}
-		})
 
-		JustBeforeEach(func(ctx SpecContext) {
-			if rv != nil {
-				Expect(cl.Create(ctx, rv)).To(Succeed(), "should create ReplicatedVolume")
-			}
-		})
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsc).
+				WithStatusSubresource(rv, rsc).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
 
-		When("Get fails with non-NotFound error", func() {
-			var testError error
-
-			BeforeEach(func() {
-				testError = errors.New("internal server error")
-				clientBuilder = clientBuilder.WithInterceptorFuncs(
-					InterceptGet(func(_ *v1alpha1.ReplicatedVolume) error {
-						return testError
-					}),
-				)
-			})
-
-			It("should fail if getting ReplicatedVolume failed with non-NotFound error", func(ctx SpecContext) {
-				_, err := rec.Reconcile(ctx, RequestFor(rv))
-				Expect(err).To(HaveOccurred(), "should return error when Get fails")
-				Expect(errors.Is(err, testError)).To(BeTrue(), "returned error should wrap the original Get error")
-			})
-		})
-
-		It("sets label on RV", func(ctx SpecContext) {
-			By("Reconciling ReplicatedVolume")
-			result, err := rec.Reconcile(ctx, RequestFor(rv))
-			Expect(err).NotTo(HaveOccurred(), "reconciliation should succeed")
-			Expect(result).ToNot(Requeue(), "should not requeue after successful reconciliation")
-
-			By("Verifying label was set")
-			updatedRV := &v1alpha1.ReplicatedVolume{}
-			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
-			Expect(updatedRV.Labels).To(HaveKeyWithValue(v1alpha1.ReplicatedStorageClassLabelKey, "my-storage-class"))
-		})
-
-		When("label already set correctly", func() {
-			BeforeEach(func() {
-				rv.Labels = map[string]string{
-					v1alpha1.ReplicatedStorageClassLabelKey: "my-storage-class",
-				}
-			})
-
-			It("is idempotent and does not modify RV", func(ctx SpecContext) {
-				By("Reconciling multiple times")
-				for i := 0; i < 3; i++ {
-					result, err := rec.Reconcile(ctx, RequestFor(rv))
-					Expect(err).NotTo(HaveOccurred(), "reconciliation should succeed")
-					Expect(result).ToNot(Requeue(), "should not requeue")
-				}
-
-				By("Verifying label remains unchanged")
-				updatedRV := &v1alpha1.ReplicatedVolume{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-				Expect(updatedRV.Labels).To(HaveKeyWithValue(v1alpha1.ReplicatedStorageClassLabelKey, "my-storage-class"))
-			})
-		})
-	})
-
-	When("Patch fails with non-NotFound error", func() {
-		var rv *v1alpha1.ReplicatedVolume
-		var testError error
-
-		BeforeEach(func() {
-			rv = &v1alpha1.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "volume-patch-1",
-				},
-				Spec: v1alpha1.ReplicatedVolumeSpec{
-					ReplicatedStorageClassName: "my-storage-class",
-				},
-			}
-			testError = errors.New("failed to patch")
-			clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
-				Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-					if _, ok := obj.(*v1alpha1.ReplicatedVolume); ok {
-						return testError
-					}
-					return cl.Patch(ctx, obj, patch, opts...)
-				},
-			})
-		})
-
-		JustBeforeEach(func(ctx SpecContext) {
-			Expect(cl.Create(ctx, rv)).To(Succeed(), "should create ReplicatedVolume")
-		})
-
-		It("should fail if patching ReplicatedVolume failed with non-NotFound error", func(ctx SpecContext) {
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
-			Expect(err).To(HaveOccurred(), "should return error when Patch fails")
-			Expect(errors.Is(err, testError)).To(BeTrue(), "returned error should wrap the original Patch error")
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(obju.HasFinalizer(&updated, v1alpha1.RVControllerFinalizer)).To(BeTrue())
+			Expect(obju.HasLabelValue(&updated, v1alpha1.ReplicatedStorageClassLabelKey, "rsc-1")).To(BeTrue())
+		})
+
+		It("is idempotent when finalizer and label already set", func(ctx SpecContext) {
+			rsc := newRSCWithConfiguration("rsc-1")
+
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsc).
+				WithStatusSubresource(rv, rsc).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			// Reconcile multiple times
+			for i := 0; i < 3; i++ {
+				result, err := rec.Reconcile(ctx, RequestFor(rv))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result).ToNot(Requeue())
+			}
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(obju.HasFinalizer(&updated, v1alpha1.RVControllerFinalizer)).To(BeTrue())
+			Expect(obju.HasLabelValue(&updated, v1alpha1.ReplicatedStorageClassLabelKey, "rsc-1")).To(BeTrue())
+		})
+
+		It("removes finalizer when RV is being deleted and has no children", func(ctx SpecContext) {
+			now := metav1.Now()
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rv-1",
+					DeletionTimestamp: &now,
+					Finalizers:        []string{v1alpha1.RVControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv).
+				WithStatusSubresource(rv).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			result, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).ToNot(Requeue())
+
+			// When finalizer is removed from an object with DeletionTimestamp,
+			// the fake client automatically deletes the object.
+			var updated v1alpha1.ReplicatedVolume
+			err = cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)
+			Expect(apierrors.IsNotFound(err)).To(BeTrue(), "expected NotFound after finalizer removal")
+		})
+
+		It("keeps finalizer when RV is being deleted but has RVAs", func(ctx SpecContext) {
+			rsc := newRSCWithConfiguration("rsc-1")
+
+			now := metav1.Now()
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rv-1",
+					DeletionTimestamp: &now,
+					Finalizers:        []string{v1alpha1.RVControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+			}
+
+			rva := &v1alpha1.ReplicatedVolumeAttachment{
+				ObjectMeta: metav1.ObjectMeta{Name: "rva-1"},
+				Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+					ReplicatedVolumeName: "rv-1",
+					NodeName:             "node-1",
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rva, rsc).
+				WithStatusSubresource(rv, rva, rsc).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			result, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).ToNot(Requeue())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(obju.HasFinalizer(&updated, v1alpha1.RVControllerFinalizer)).To(BeTrue())
+		})
+
+		It("keeps finalizer when RV is being deleted but has RVRs", func(ctx SpecContext) {
+			rsc := newRSCWithConfiguration("rsc-1")
+
+			now := metav1.Now()
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rv-1",
+					DeletionTimestamp: &now,
+					Finalizers:        []string{v1alpha1.RVControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+			}
+
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rvr, rsc).
+				WithStatusSubresource(rv, rvr, rsc).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			result, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).ToNot(Requeue())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(obju.HasFinalizer(&updated, v1alpha1.RVControllerFinalizer)).To(BeTrue())
+		})
+
+		It("keeps finalizer when RV is being deleted but has both RVAs and RVRs", func(ctx SpecContext) {
+			rsc := newRSCWithConfiguration("rsc-1")
+
+			now := metav1.Now()
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rv-1",
+					DeletionTimestamp: &now,
+					Finalizers:        []string{v1alpha1.RVControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+			}
+
+			rva := &v1alpha1.ReplicatedVolumeAttachment{
+				ObjectMeta: metav1.ObjectMeta{Name: "rva-1"},
+				Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+					ReplicatedVolumeName: "rv-1",
+					NodeName:             "node-1",
+				},
+			}
+
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rva, rvr, rsc).
+				WithStatusSubresource(rv, rva, rvr, rsc).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			result, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).ToNot(Requeue())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(obju.HasFinalizer(&updated, v1alpha1.RVControllerFinalizer)).To(BeTrue())
+		})
+	})
+
+	Describe("Error handling", func() {
+		It("returns error when Get fails", func(ctx SpecContext) {
+			testError := errors.New("get failed")
+			cl := newClientBuilder(scheme).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						if _, ok := obj.(*v1alpha1.ReplicatedVolume); ok {
+							return testError
+						}
+						return cl.Get(ctx, key, obj, opts...)
+					},
+				}).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rv-1"}})
+			Expect(err).To(HaveOccurred())
+			Expect(errors.Is(err, testError)).To(BeTrue())
+		})
+
+		It("returns error when listing RVAs fails", func(ctx SpecContext) {
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+			}
+
+			testError := errors.New("list RVAs failed")
+			cl := newClientBuilder(scheme).
+				WithObjects(rv).
+				WithStatusSubresource(rv).
+				WithInterceptorFuncs(interceptor.Funcs{
+					List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						if _, ok := list.(*v1alpha1.ReplicatedVolumeAttachmentList); ok {
+							return testError
+						}
+						return cl.List(ctx, list, opts...)
+					},
+				}).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).To(HaveOccurred())
+			Expect(errors.Is(err, testError)).To(BeTrue())
+		})
+
+		It("returns error when listing RVRs fails", func(ctx SpecContext) {
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+			}
+
+			testError := errors.New("list RVRs failed")
+			cl := newClientBuilder(scheme).
+				WithObjects(rv).
+				WithStatusSubresource(rv).
+				WithInterceptorFuncs(interceptor.Funcs{
+					List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						if _, ok := list.(*v1alpha1.ReplicatedVolumeReplicaList); ok {
+							return testError
+						}
+						return cl.List(ctx, list, opts...)
+					},
+				}).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).To(HaveOccurred())
+			Expect(errors.Is(err, testError)).To(BeTrue())
+		})
+
+		It("returns error when Patch fails", func(ctx SpecContext) {
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+			}
+
+			testError := errors.New("patch failed")
+			cl := newClientBuilder(scheme).
+				WithObjects(rv).
+				WithStatusSubresource(rv).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+						if _, ok := obj.(*v1alpha1.ReplicatedVolume); ok {
+							return testError
+						}
+						return cl.Patch(ctx, obj, patch, opts...)
+					},
+				}).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).To(HaveOccurred())
+			Expect(errors.Is(err, testError)).To(BeTrue())
+		})
+	})
+
+	Describe("Label updates", func() {
+		It("updates label when storage class name changes", func(ctx SpecContext) {
+			rsc := newRSCWithConfiguration("new-rsc")
+
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "old-rsc",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "new-rsc",
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsc).
+				WithStatusSubresource(rv, rsc).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(obju.HasLabelValue(&updated, v1alpha1.ReplicatedStorageClassLabelKey, "new-rsc")).To(BeTrue())
+		})
+	})
+
+	Describe("Configuration initialization", func() {
+		It("initializes configuration from RSC and sets ConfigurationReady to Ready", func(ctx SpecContext) {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					ConfigurationGeneration: 5,
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        v1alpha1.TopologyTransZonal,
+						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
+						StoragePoolName: "pool-1",
+					},
+				},
+			}
+
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsc).
+				WithStatusSubresource(rv, rsc).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(updated.Status.Configuration).NotTo(BeNil())
+			Expect(updated.Status.Configuration.Topology).To(Equal(v1alpha1.TopologyTransZonal))
+			Expect(updated.Status.Configuration.Replication).To(Equal(v1alpha1.ReplicationConsistencyAndAvailability))
+			Expect(updated.Status.Configuration.VolumeAccess).To(Equal(v1alpha1.VolumeAccessPreferablyLocal))
+			Expect(updated.Status.Configuration.StoragePoolName).To(Equal("pool-1"))
+			Expect(updated.Status.ConfigurationGeneration).To(Equal(int64(5)))
+
+			// Check ConfigurationReady condition.
+			cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondConfigurationReadyType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonReady))
+		})
+
+		It("sets WaitingForStorageClass condition when RSC has no configuration", func(ctx SpecContext) {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Status:     v1alpha1.ReplicatedStorageClassStatus{},
+			}
+
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsc).
+				WithStatusSubresource(rv, rsc).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+			// Check ConfigurationReady condition.
+			cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondConfigurationReadyType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonWaitingForStorageClass))
+			Expect(cond.Message).To(ContainSubstring("configuration not ready"))
+		})
+
+		It("sets WaitingForStorageClass condition when RSC does not exist", func(ctx SpecContext) {
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv).
+				WithStatusSubresource(rv).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+			// Check ConfigurationReady condition.
+			cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondConfigurationReadyType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonWaitingForStorageClass))
+			Expect(cond.Message).To(ContainSubstring("not found"))
+		})
+
+		It("sets StaleConfiguration condition when generation does not match RSC", func(ctx SpecContext) {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					ConfigurationGeneration: 10,
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        v1alpha1.TopologyZonal,
+						Replication:     v1alpha1.ReplicationAvailability,
+						VolumeAccess:    v1alpha1.VolumeAccessAny,
+						StoragePoolName: "new-pool",
+					},
+				},
+			}
+
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					ConfigurationGeneration: 5,
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        v1alpha1.TopologyTransZonal,
+						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
+						StoragePoolName: "old-pool",
+					},
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsc).
+				WithStatusSubresource(rv, rsc).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			// Should still have the original configuration (not overwritten).
+			Expect(updated.Status.Configuration).NotTo(BeNil())
+			Expect(updated.Status.Configuration.Topology).To(Equal(v1alpha1.TopologyTransZonal))
+			Expect(updated.Status.Configuration.StoragePoolName).To(Equal("old-pool"))
+			Expect(updated.Status.ConfigurationGeneration).To(Equal(int64(5)))
+
+			// Check ConfigurationReady condition - should be StaleConfiguration.
+			cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondConfigurationReadyType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonStaleConfiguration))
+		})
+
+		It("sets Ready condition when generation matches RSC", func(ctx SpecContext) {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					ConfigurationGeneration: 5,
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        v1alpha1.TopologyTransZonal,
+						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
+						StoragePoolName: "pool-1",
+					},
+				},
+			}
+
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					ConfigurationGeneration: 5,
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        v1alpha1.TopologyTransZonal,
+						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
+						StoragePoolName: "pool-1",
+					},
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsc).
+				WithStatusSubresource(rv, rsc).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+			// Check ConfigurationReady condition - should be Ready.
+			cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondConfigurationReadyType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonReady))
+		})
+
+		It("returns error when getRSC fails", func(ctx SpecContext) {
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+			}
+
+			testError := errors.New("get RSC failed")
+			cl := newClientBuilder(scheme).
+				WithObjects(rv).
+				WithStatusSubresource(rv).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						if _, ok := obj.(*v1alpha1.ReplicatedStorageClass); ok {
+							return testError
+						}
+						return cl.Get(ctx, key, obj, opts...)
+					},
+				}).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).To(HaveOccurred())
+			Expect(errors.Is(err, testError)).To(BeTrue())
+		})
+
+		It("sets ConfigurationRolloutInProgress when ConfigurationGeneration is 0", func(ctx SpecContext) {
+			rsc := newRSCWithConfiguration("rsc-1")
+
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					// ConfigurationGeneration is 0 (not set).
+					Configuration: rsc.Status.Configuration.DeepCopy(),
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsc).
+				WithStatusSubresource(rv, rsc).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+			// Should be ConfigurationRolloutInProgress.
+			cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondConfigurationReadyType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonConfigurationRolloutInProgress))
+		})
+	})
+
+	Describe("Deletion", func() {
+		It("does not delete RV if there are attached members", func(ctx SpecContext) {
+			now := metav1.Now()
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rv-1",
+					DeletionTimestamp: &now,
+					Finalizers:        []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+							{Name: "rvr-1", Attached: true}, // Attached member.
+						},
+					},
+				},
+			}
+
+			// Need actual RVR object to keep the finalizer in reconcileMetadata.
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rvr-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+			}
+
+			rsc := newRSCWithConfiguration("rsc-1")
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rvr, rsc).
+				WithStatusSubresource(rv, rvr, rsc).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			// RV should still exist with finalizer (not deleted due to attached member).
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(obju.HasFinalizer(&updated, v1alpha1.RVControllerFinalizer)).To(BeTrue())
+
+			// RVR should NOT be deleted (still has finalizer).
+			var updatedRVR v1alpha1.ReplicatedVolumeReplica
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), &updatedRVR)).To(Succeed())
+			Expect(obju.HasFinalizer(&updatedRVR, v1alpha1.RVControllerFinalizer)).To(BeTrue())
+		})
+
+		It("deletes RVRs and clears members when RV is being deleted with no attached members", func(ctx SpecContext) {
+			now := metav1.Now()
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rv-1",
+					DeletionTimestamp: &now,
+					Finalizers:        []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+							{Name: "rvr-1", Attached: false},
+							{Name: "rvr-2", Attached: false},
+						},
+					},
+				},
+			}
+
+			rvr1 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rvr-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+			}
+
+			rvr2 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rvr-2",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-2",
+					LVMVolumeGroupName:   "lvg-2",
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rvr1, rvr2).
+				WithStatusSubresource(rv, rvr1, rvr2).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			// RVRs should have finalizers removed and be deleted.
+			var updatedRVR1 v1alpha1.ReplicatedVolumeReplica
+			err = cl.Get(ctx, client.ObjectKeyFromObject(rvr1), &updatedRVR1)
+			Expect(apierrors.IsNotFound(err) || updatedRVR1.DeletionTimestamp != nil).To(BeTrue(),
+				"RVR should be deleted or have DeletionTimestamp")
+
+			var updatedRVR2 v1alpha1.ReplicatedVolumeReplica
+			err = cl.Get(ctx, client.ObjectKeyFromObject(rvr2), &updatedRVR2)
+			Expect(apierrors.IsNotFound(err) || updatedRVR2.DeletionTimestamp != nil).To(BeTrue(),
+				"RVR should be deleted or have DeletionTimestamp")
+
+			// RV datamesh members should be cleared.
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(updated.Status.Datamesh.Members).To(BeEmpty())
+		})
+
+		It("updates RVA conditions when RV is being deleted", func(ctx SpecContext) {
+			now := metav1.Now()
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rv-1",
+					DeletionTimestamp: &now,
+					Finalizers:        []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+			}
+
+			rva := &v1alpha1.ReplicatedVolumeAttachment{
+				ObjectMeta: metav1.ObjectMeta{Name: "rva-1"},
+				Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+					ReplicatedVolumeName: "rv-1",
+					NodeName:             "node-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeAttachmentStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:   v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
+							Status: metav1.ConditionTrue,
+							Reason: v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached,
+						},
+						{
+							Type:   v1alpha1.ReplicatedVolumeAttachmentCondReadyType,
+							Status: metav1.ConditionTrue,
+							Reason: v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonReady,
+						},
+						{
+							Type:   v1alpha1.ReplicatedVolumeAttachmentCondReplicaReadyType,
+							Status: metav1.ConditionTrue,
+							Reason: "Ready",
+						},
+					},
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rva).
+				WithStatusSubresource(rv, rva).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			// RVA should have updated conditions.
+			var updated v1alpha1.ReplicatedVolumeAttachment
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva), &updated)).To(Succeed())
+
+			// Should have exactly 2 conditions.
+			Expect(updated.Status.Conditions).To(HaveLen(2))
+
+			// Attached condition should be False with WaitingForReplicatedVolume.
+			attachedCond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
+			Expect(attachedCond).NotTo(BeNil())
+			Expect(attachedCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(attachedCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolume))
+
+			// Ready condition should be False with NotAttached.
+			readyCond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeAttachmentCondReadyType)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonNotAttached))
+		})
+
+		It("does not process deletion if RV has other finalizers", func(ctx SpecContext) {
+			now := metav1.Now()
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rv-1",
+					DeletionTimestamp: &now,
+					Finalizers: []string{
+						v1alpha1.RVControllerFinalizer,
+						"other-controller/finalizer", // Another finalizer.
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+							{Name: "rvr-1", Attached: false},
+						},
+					},
+				},
+			}
+
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rvr-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+			}
+
+			rsc := newRSCWithConfiguration("rsc-1")
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rvr, rsc).
+				WithStatusSubresource(rv, rvr, rsc).
+				Build()
+			rec := rvcontroller.NewReconciler(cl)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			// RVR should NOT be deleted (still has finalizer).
+			var updatedRVR v1alpha1.ReplicatedVolumeReplica
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), &updatedRVR)).To(Succeed())
+			Expect(obju.HasFinalizer(&updatedRVR, v1alpha1.RVControllerFinalizer)).To(BeTrue())
+
+			// Datamesh members should NOT be cleared.
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(updated.Status.Datamesh.Members).NotTo(BeEmpty())
 		})
 	})
 })
