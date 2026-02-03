@@ -14,12 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvcontroller_test
+package rvcontroller
 
 import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -27,14 +28,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
-	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	rvcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
@@ -88,7 +89,7 @@ var _ = Describe("Reconciler", func() {
 	Describe("Reconcile", func() {
 		It("returns no error when ReplicatedVolume does not exist", func(ctx SpecContext) {
 			cl := newClientBuilder(scheme).Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			result, err := rec.Reconcile(ctx, RequestFor(&v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "non-existent"},
@@ -112,7 +113,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rv, rsc).
 				WithStatusSubresource(rv, rsc).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).NotTo(HaveOccurred())
@@ -144,7 +145,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rv, rsc).
 				WithStatusSubresource(rv, rsc).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			// Reconcile multiple times
 			for i := 0; i < 3; i++ {
@@ -180,7 +181,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rv).
 				WithStatusSubresource(rv).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			result, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).NotTo(HaveOccurred())
@@ -224,7 +225,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rv, rva, rsc).
 				WithStatusSubresource(rv, rva, rsc).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			result, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).NotTo(HaveOccurred())
@@ -268,7 +269,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rv, rvr, rsc).
 				WithStatusSubresource(rv, rvr, rsc).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			result, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).NotTo(HaveOccurred())
@@ -320,7 +321,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rv, rva, rvr, rsc).
 				WithStatusSubresource(rv, rva, rvr, rsc).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			result, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).NotTo(HaveOccurred())
@@ -345,7 +346,7 @@ var _ = Describe("Reconciler", func() {
 					},
 				}).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rv-1"}})
 			Expect(err).To(HaveOccurred())
@@ -374,7 +375,7 @@ var _ = Describe("Reconciler", func() {
 					},
 				}).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).To(HaveOccurred())
@@ -403,7 +404,7 @@ var _ = Describe("Reconciler", func() {
 					},
 				}).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).To(HaveOccurred())
@@ -432,7 +433,7 @@ var _ = Describe("Reconciler", func() {
 					},
 				}).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).To(HaveOccurred())
@@ -462,7 +463,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rv, rsc).
 				WithStatusSubresource(rv, rsc).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).NotTo(HaveOccurred())
@@ -506,7 +507,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rv, rsc).
 				WithStatusSubresource(rv, rsc).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).NotTo(HaveOccurred())
@@ -551,7 +552,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rv, rsc).
 				WithStatusSubresource(rv, rsc).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).NotTo(HaveOccurred())
@@ -586,7 +587,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rv).
 				WithStatusSubresource(rv).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).NotTo(HaveOccurred())
@@ -643,7 +644,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rv, rsc).
 				WithStatusSubresource(rv, rsc).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).NotTo(HaveOccurred())
@@ -704,7 +705,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rv, rsc).
 				WithStatusSubresource(rv, rsc).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).NotTo(HaveOccurred())
@@ -741,7 +742,7 @@ var _ = Describe("Reconciler", func() {
 					},
 				}).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).To(HaveOccurred())
@@ -773,7 +774,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rv, rsc).
 				WithStatusSubresource(rv, rsc).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).NotTo(HaveOccurred())
@@ -831,7 +832,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rv, rvr, rsc).
 				WithStatusSubresource(rv, rvr, rsc).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).NotTo(HaveOccurred())
@@ -899,7 +900,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rv, rvr1, rvr2).
 				WithStatusSubresource(rv, rvr1, rvr2).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).NotTo(HaveOccurred())
@@ -966,7 +967,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rv, rva).
 				WithStatusSubresource(rv, rva).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).NotTo(HaveOccurred())
@@ -1034,7 +1035,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rv, rvr, rsc).
 				WithStatusSubresource(rv, rvr, rsc).
 				Build()
-			rec := rvcontroller.NewReconciler(cl)
+			rec := NewReconciler(cl)
 
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).NotTo(HaveOccurred())
@@ -1049,5 +1050,258 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
 			Expect(updated.Status.Datamesh.Members).NotTo(BeEmpty())
 		})
+	})
+})
+
+var _ = Describe("ensureDatameshPendingReplicaTransitions", func() {
+	mkRVR := func(name string, pending *v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition) v1alpha1.ReplicatedVolumeReplica {
+		return v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshPendingTransition: pending,
+			},
+		}
+	}
+
+	mkPending := func(role v1alpha1.ReplicaType) *v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition {
+		return &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
+			Member: ptr.To(true),
+			Role:   role,
+		}
+	}
+
+	mkRVEntry := func(name string, pending v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition, firstObserved time.Time) v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition {
+		return v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+			Name:            name,
+			Transition:      pending,
+			FirstObservedAt: metav1.NewTime(firstObserved),
+		}
+	}
+
+	It("adds new entry when RVR has pending transition", func(ctx SpecContext) {
+		rv := &v1alpha1.ReplicatedVolume{}
+		rvrs := []v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rvr-1", mkPending(v1alpha1.ReplicaTypeDiskful)),
+		}
+
+		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rv.Status.DatameshPendingReplicaTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Name).To(Equal("rvr-1"))
+		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Transition.Member).To(Equal(ptr.To(true)))
+		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Transition.Role).To(Equal(v1alpha1.ReplicaTypeDiskful))
+	})
+
+	It("removes entry when RVR no longer has pending transition", func(ctx SpecContext) {
+		oldTime := time.Now().Add(-1 * time.Hour)
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					mkRVEntry("rvr-1", v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
+						Member: ptr.To(true),
+						Role:   v1alpha1.ReplicaTypeDiskful,
+					}, oldTime),
+				},
+			},
+		}
+		// RVR with nil transition (no pending anymore).
+		rvrs := []v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rvr-1", nil),
+		}
+
+		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rv.Status.DatameshPendingReplicaTransitions).To(BeEmpty())
+	})
+
+	It("updates entry when transition changed", func(ctx SpecContext) {
+		oldTime := time.Now().Add(-1 * time.Hour)
+		oldPending := v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
+			Member: ptr.To(true),
+			Role:   v1alpha1.ReplicaTypeDiskful,
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					{
+						Name:            "rvr-1",
+						Message:         "old message should be cleared",
+						Transition:      oldPending,
+						FirstObservedAt: metav1.NewTime(oldTime),
+					},
+				},
+			},
+		}
+		// New transition with different role.
+		newPending := mkPending(v1alpha1.ReplicaTypeAccess)
+		rvrs := []v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rvr-1", newPending),
+		}
+
+		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rv.Status.DatameshPendingReplicaTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Name).To(Equal("rvr-1"))
+		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Transition.Role).To(Equal(v1alpha1.ReplicaTypeAccess))
+		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Message).To(BeEmpty())                      // Message cleared.
+		Expect(rv.Status.DatameshPendingReplicaTransitions[0].FirstObservedAt.Time).NotTo(Equal(oldTime)) // Timestamp updated.
+	})
+
+	It("sorts unsorted existing entries and marks changed", func(ctx SpecContext) {
+		oldTime := time.Now().Add(-1 * time.Hour)
+		pending := v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
+			Member: ptr.To(true),
+			Role:   v1alpha1.ReplicaTypeDiskful,
+		}
+		// Entries are not sorted by name.
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					mkRVEntry("rvr-2", pending, oldTime),
+					mkRVEntry("rvr-1", pending, oldTime),
+				},
+			},
+		}
+		rvrs := []v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rvr-1", mkPending(v1alpha1.ReplicaTypeDiskful)),
+			mkRVR("rvr-2", mkPending(v1alpha1.ReplicaTypeDiskful)),
+		}
+
+		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rv.Status.DatameshPendingReplicaTransitions).To(HaveLen(2))
+		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Name).To(Equal("rvr-1"))
+		Expect(rv.Status.DatameshPendingReplicaTransitions[1].Name).To(Equal("rvr-2"))
+	})
+
+	It("no change when already in sync (idempotent)", func(ctx SpecContext) {
+		pending := v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
+			Member: ptr.To(true),
+			Role:   v1alpha1.ReplicaTypeDiskful,
+		}
+		oldTime := time.Now().Add(-1 * time.Hour)
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					{
+						Name:            "rvr-1",
+						Transition:      pending,
+						FirstObservedAt: metav1.NewTime(oldTime),
+					},
+				},
+			},
+		}
+		rvrs := []v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rvr-1", mkPending(v1alpha1.ReplicaTypeDiskful)),
+		}
+
+		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rv.Status.DatameshPendingReplicaTransitions).To(HaveLen(1))
+		// FirstObservedAt should be preserved.
+		Expect(rv.Status.DatameshPendingReplicaTransitions[0].FirstObservedAt.Time).To(Equal(oldTime))
+	})
+
+	It("handles multiple RVRs with mixed add/remove/update", func(ctx SpecContext) {
+		oldTime := time.Now().Add(-1 * time.Hour)
+		// Existing entries: rvr-1 (will update), rvr-2 (will remove), rvr-4 (will keep).
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					mkRVEntry("rvr-1", v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
+						Member: ptr.To(true),
+						Role:   v1alpha1.ReplicaTypeDiskful,
+					}, oldTime),
+					mkRVEntry("rvr-2", v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
+						Member: ptr.To(true),
+						Role:   v1alpha1.ReplicaTypeDiskful,
+					}, oldTime),
+					mkRVEntry("rvr-4", v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
+						Member: ptr.To(true),
+						Role:   v1alpha1.ReplicaTypeDiskful,
+					}, oldTime),
+				},
+			},
+		}
+		// rvr-1: update role to Access.
+		// rvr-2: nil transition (removed).
+		// rvr-3: new entry (added).
+		// rvr-4: unchanged.
+		rvrs := []v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rvr-1", mkPending(v1alpha1.ReplicaTypeAccess)), // Update.
+			mkRVR("rvr-2", nil), // Remove.
+			mkRVR("rvr-3", mkPending(v1alpha1.ReplicaTypeTieBreaker)), // Add.
+			mkRVR("rvr-4", mkPending(v1alpha1.ReplicaTypeDiskful)),    // Keep.
+		}
+
+		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rv.Status.DatameshPendingReplicaTransitions).To(HaveLen(3))
+
+		// Check rvr-1: updated.
+		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Name).To(Equal("rvr-1"))
+		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Transition.Role).To(Equal(v1alpha1.ReplicaTypeAccess))
+
+		// Check rvr-3: added.
+		Expect(rv.Status.DatameshPendingReplicaTransitions[1].Name).To(Equal("rvr-3"))
+		Expect(rv.Status.DatameshPendingReplicaTransitions[1].Transition.Role).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
+
+		// Check rvr-4: kept (should have preserved timestamp).
+		Expect(rv.Status.DatameshPendingReplicaTransitions[2].Name).To(Equal("rvr-4"))
+		Expect(rv.Status.DatameshPendingReplicaTransitions[2].FirstObservedAt.Time).To(Equal(oldTime))
+	})
+
+	It("handles empty RVR list", func(ctx SpecContext) {
+		oldTime := time.Now().Add(-1 * time.Hour)
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					mkRVEntry("rvr-1", v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
+						Member: ptr.To(true),
+						Role:   v1alpha1.ReplicaTypeDiskful,
+					}, oldTime),
+				},
+			},
+		}
+		rvrs := []v1alpha1.ReplicatedVolumeReplica{}
+
+		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rv.Status.DatameshPendingReplicaTransitions).To(BeEmpty())
+	})
+
+	It("handles empty existing entries", func(ctx SpecContext) {
+		rv := &v1alpha1.ReplicatedVolume{}
+		rvrs := []v1alpha1.ReplicatedVolumeReplica{}
+
+		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rv.Status.DatameshPendingReplicaTransitions).To(BeEmpty())
+	})
+
+	It("skips RVRs with nil transition during merge", func(ctx SpecContext) {
+		rv := &v1alpha1.ReplicatedVolume{}
+		// Mixed: some with transition, some without.
+		rvrs := []v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rvr-1", nil), // Skip.
+			mkRVR("rvr-2", mkPending(v1alpha1.ReplicaTypeDiskful)), // Add.
+			mkRVR("rvr-3", nil), // Skip.
+			mkRVR("rvr-4", mkPending(v1alpha1.ReplicaTypeAccess)), // Add.
+		}
+
+		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rv.Status.DatameshPendingReplicaTransitions).To(HaveLen(2))
+		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Name).To(Equal("rvr-2"))
+		Expect(rv.Status.DatameshPendingReplicaTransitions[1].Name).To(Equal("rvr-4"))
 	})
 })

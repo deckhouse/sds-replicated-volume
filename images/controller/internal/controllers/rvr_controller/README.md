@@ -106,15 +106,15 @@ Reconcile (root) [Pure orchestration]
 │   ├── computeEligibilityWarnings
 │   ├── findLVGInEligibleNode / findLVGInEligibleNodeByName
 │   └── applySatisfyEligibleNodesCond*
-├── ensureStatusDatameshPendingAndConfiguredCond [EnsureReconcileHelper] ← details
-│   ├── computeTargetDatameshPending
+├── ensureStatusDatameshPendingTransitionAndConfiguredCond [EnsureReconcileHelper] ← details
+│   ├── computeTargetDatameshPendingTransition
 │   ├── rspEligibilityView.isStorageEligible (shared with computeIntendedBackingVolume)
-│   ├── applyDatameshPending
+│   ├── applyDatameshPendingTransition
 │   └── applyConfiguredCond*
 └── patchRVRStatus
 ```
 
-Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureStatusAddressesAndType`](#ensurestatusaddressesandtype-details), [`ensureStatusAttachment`](#ensurestatusattachment-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionAttached`](#ensureconditionattached-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeUpToDate`](#ensureconditionbackingvolumeinsync-details), [`ensureStatusQuorum`](#ensurestatusquorum-details), [`ensureConditionReady`](#ensureconditionready-details), [`ensureConditionSatisfyEligibleNodes`](#ensureconditionsatisfyeligiblenodes-details), [`ensureStatusDatameshPendingAndConfiguredCond`](#ensurestatusdatameshpendingandconfiguredcond-details)
+Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureStatusAddressesAndType`](#ensurestatusaddressesandtype-details), [`ensureStatusAttachment`](#ensurestatusattachment-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionAttached`](#ensureconditionattached-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeUpToDate`](#ensureconditionbackingvolumeinsync-details), [`ensureStatusQuorum`](#ensurestatusquorum-details), [`ensureConditionReady`](#ensureconditionready-details), [`ensureConditionSatisfyEligibleNodes`](#ensureconditionsatisfyeligiblenodes-details), [`ensureStatusDatameshPendingTransitionAndConfiguredCond`](#ensurestatusdatameshpendingandconfiguredcond-details)
 
 ## Algorithm Flow
 
@@ -141,7 +141,7 @@ flowchart TD
         StatusAttach --> Peers[ensureStatusPeers]
         Peers --> BVStatus[ensureStatusBackingVolume]
         BVStatus --> StatusQuorum[ensureStatusQuorum]
-        StatusQuorum --> DmPendingAndCond[ensureStatusDatameshPendingAndConfiguredCond]
+        StatusQuorum --> DmPendingAndCond[ensureStatusDatameshPendingTransitionAndConfiguredCond]
         DmPendingAndCond --> CondAttach[ensureConditionAttached]
         CondAttach --> PeersCond[ensureConditionFullyConnected]
         PeersCond --> BVInSync[ensureConditionBackingVolumeUpToDate]
@@ -303,7 +303,7 @@ The controller manages the following status fields on RVR:
 | `attachment` | Device attachment info (device path, I/O suspended) | From DRBDR status |
 | `type` | Observed DRBD type (Diskful/Diskless) | From DRBDR status.activeConfiguration.type |
 | `backingVolume` | Backing volume info (size, state, LVG name, thin pool) | From DRBDR + LLV status |
-| `datameshPending` | Pending datamesh operation (join/leave/role change/BV change) | Computed from spec vs status |
+| `datameshPendingTransition` | Pending datamesh transitions (join/leave/role change/BV change) | Computed from spec vs status |
 | `datameshRevision` | Datamesh revision for which the replica was fully configured | Set when DRBDConfigured=True |
 | `drbd` | DRBD-specific status info (config, actual, status) | From RVR spec + DRBDR |
 | `drbdrReconciliationCache` | Cache of target configuration that DRBDR spec was last applied for | Computed |
@@ -363,9 +363,9 @@ Each entry in `peers` contains:
 | `connectedUpToDatePeers` | Count of connected UpToDate peers |
 | `quorumMinimumRedundancy` | Minimum UpToDate nodes required |
 
-### DatameshPending
+### DatameshPendingTransition
 
-The `datameshPending` field describes pending datamesh operations. Only set when there's a pending change.
+The `datameshPendingTransition` field describes pending datamesh transition. Only set when there's a pending change.
 
 | Field | Description |
 |-------|-------------|
@@ -526,7 +526,7 @@ flowchart TD
         EnsureStatusPeers[ensureStatusPeers]
         EnsureBVStatus[ensureStatusBackingVolume]
         EnsureStatusQuorum[ensureStatusQuorum]
-        EnsureDmPendingAndCond[ensureStatusDatameshPendingAndConfiguredCond]
+        EnsureDmPendingAndCond[ensureStatusDatameshPendingTransitionAndConfiguredCond]
         EnsureCondAttach[ensureConditionAttached]
         EnsureCondFC[ensureConditionFullyConnected]
         EnsureBVInSync[ensureConditionBackingVolumeUpToDate]
@@ -579,7 +579,7 @@ flowchart TD
     EnsureBVInSync -->|BackingVolumeUpToDate| RVRStatusConds
     EnsureCondReady -->|Ready| RVRStatusConds
     EnsureCondSEN -->|SatisfyEligibleNodes| RVRStatusConds
-    EnsureDmPendingAndCond -->|datameshPending| RVRStatusFields
+    EnsureDmPendingAndCond -->|datameshPendingTransition| RVRStatusFields
     EnsureDmPendingAndCond -->|Configured| RVRStatusConds
     RSP --> EnsureDmPendingAndCond
 ```
@@ -1174,13 +1174,15 @@ flowchart TD
 
 ---
 
-### ensureStatusDatameshPendingAndConfiguredCond Details
+### ensureStatusDatameshPendingTransitionAndConfiguredCond Details
 
-**Purpose**: Populates both `rvr.Status.DatameshPending` field and the `Configured` condition based on comparison of `rvr.Spec` (intended) vs `rvr.Status` (actual) and eligibility checks.
+**Purpose**: Populates both `rvr.Status.DatameshPendingTransition` field and the `Configured` condition based on comparison of `rvr.Spec` (intended) vs `rvr.Status` (actual) and eligibility checks.
 
-This function combines two logically related status updates to avoid duplicate `computeTargetDatameshPending` calls.
+This function combines two logically related status updates to avoid duplicate `computeTargetDatameshPendingTransition` calls.
 
-**Algorithm (computeTargetDatameshPending)**:
+**RV Message Enrichment**: When a pending transition exists (`target != nil`) and the parent `ReplicatedVolume` has a matching entry in `rv.Status.DatameshPendingReplicaTransitions` for this replica, the message from that entry is appended to the condition message with a `"; "` separator. This allows the RV controller to provide additional context about the overall datamesh transition progress.
+
+**Algorithm (computeTargetDatameshPendingTransition)**:
 
 ```mermaid
 flowchart TD
@@ -1237,7 +1239,7 @@ flowchart TD
 
 **Algorithm (Configured condition application)**:
 
-The `Configured` condition is set based on the `condReason` returned from `computeTargetDatameshPending`:
+The `Configured` condition is set based on the `condReason` returned from `computeTargetDatameshPendingTransition`:
 
 - If `condReason` is empty → remove condition (non-member being deleted)
 - If `condReason` is `Configured` → set `True`
@@ -1252,9 +1254,11 @@ The `Configured` condition is set based on the `condReason` returned from `compu
 | `rvr.Status.DatameshRevision` | Whether replica is a datamesh member (!=0 means member) |
 | `rvr.Status.Type` | Actual DRBD type (Diskful/Diskless) |
 | `rvr.Status.BackingVolume` | Actual backing volume info |
+| `rv` | Parent ReplicatedVolume (optional, used for message enrichment) |
+| `rv.Status.DatameshPendingReplicaTransitions` | RV-level pending transitions with messages |
 | `rspView` | RSP eligibility view (node eligibility, LVG list) |
 
 | Output | Description |
 |--------|-------------|
-| `status.datameshPending` | Pending operation (nil if none) |
-| `Configured` condition | Reports whether config matches intent |
+| `status.datameshPendingTransition` | Pending operation (nil if none) |
+| `Configured` condition | Reports whether config matches intent (message may include RV context) |

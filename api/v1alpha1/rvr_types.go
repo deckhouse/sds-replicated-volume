@@ -23,6 +23,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 // ReplicatedVolumeReplica is a Kubernetes Custom Resource that represents a replica of a ReplicatedVolume.
@@ -239,7 +240,7 @@ type ReplicatedVolumeReplicaStatus struct {
 	//
 	// +patchStrategy=merge
 	// +optional
-	DatameshPending *ReplicatedVolumeReplicaStatusDatameshPending `json:"datameshPending,omitempty" patchStrategy:"merge"`
+	DatameshPendingTransition *ReplicatedVolumeReplicaStatusDatameshPendingTransition `json:"datameshPendingTransition,omitempty" patchStrategy:"merge"`
 
 	// DatameshRevision is the datamesh revision for which the replica was fully configured.
 	//
@@ -391,7 +392,7 @@ type ReplicatedVolumeReplicaStatusDRBDRReconciliationCache struct {
 	RVRType ReplicaType `json:"rvrType,omitempty"`
 }
 
-// ReplicatedVolumeReplicaStatusDatameshPending describes pending datamesh changes for this replica.
+// ReplicatedVolumeReplicaStatusDatameshPendingTransition describes pending datamesh changes for this replica.
 //
 // This field contains changes that have been validated and are ready from the RVR's
 // perspective, waiting to be applied to the datamesh. The controller sets this field
@@ -473,7 +474,7 @@ type ReplicatedVolumeReplicaStatusDRBDRReconciliationCache struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.role) || self.role != 'Diskful' || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupName is required when role is Diskful"
 // +kubebuilder:validation:XValidation:rule="!has(self.role) || self.role == 'Diskful' || !has(self.lvmVolumeGroupName)",message="lvmVolumeGroupName must not be set when role is not Diskful"
 // +kubebuilder:validation:XValidation:rule="!has(self.thinPoolName) || has(self.lvmVolumeGroupName)",message="thinPoolName requires lvmVolumeGroupName to be set"
-type ReplicatedVolumeReplicaStatusDatameshPending struct {
+type ReplicatedVolumeReplicaStatusDatameshPendingTransition struct {
 	// Member indicates whether this replica should be a datamesh member.
 	// +optional
 	Member *bool `json:"member,omitempty"`
@@ -492,6 +493,17 @@ type ReplicatedVolumeReplicaStatusDatameshPending struct {
 	// ThinPoolName is the thin pool name (optional, for LVMThin storage pools).
 	// +optional
 	ThinPoolName string `json:"thinPoolName,omitempty"`
+}
+
+// Equals returns true if all fields match.
+func (t *ReplicatedVolumeReplicaStatusDatameshPendingTransition) Equals(other *ReplicatedVolumeReplicaStatusDatameshPendingTransition) bool {
+	if t == nil || other == nil {
+		return t == other
+	}
+	return ptr.Equal(t.Member, other.Member) &&
+		t.Role == other.Role &&
+		t.LVMVolumeGroupName == other.LVMVolumeGroupName &&
+		t.ThinPoolName == other.ThinPoolName
 }
 
 // DiskState represents the state of a DRBD backing disk.

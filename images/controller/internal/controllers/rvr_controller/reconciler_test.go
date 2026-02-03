@@ -689,7 +689,7 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 	})
 })
 
-var _ = Describe("computeTargetDatameshPending", func() {
+var _ = Describe("computeTargetDatameshPendingTransition", func() {
 	It("returns PendingLeave when deleting and is datamesh member", func() {
 		now := metav1.Now()
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
@@ -705,7 +705,7 @@ var _ = Describe("computeTargetDatameshPending", func() {
 			},
 		}
 
-		target, reason, message := computeTargetDatameshPending(rvr, nil)
+		target, reason, message := computeTargetDatameshPendingTransition(rvr, nil)
 
 		Expect(target).NotTo(BeNil())
 		Expect(*target.Member).To(BeFalse())
@@ -726,7 +726,7 @@ var _ = Describe("computeTargetDatameshPending", func() {
 			},
 		}
 
-		target, reason, _ := computeTargetDatameshPending(rvr, nil)
+		target, reason, _ := computeTargetDatameshPendingTransition(rvr, nil)
 
 		Expect(target).To(BeNil())
 		Expect(reason).To(BeEmpty())
@@ -740,7 +740,7 @@ var _ = Describe("computeTargetDatameshPending", func() {
 			},
 		}
 
-		target, reason, message := computeTargetDatameshPending(rvr, nil)
+		target, reason, message := computeTargetDatameshPendingTransition(rvr, nil)
 
 		Expect(target).To(BeNil())
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingScheduling))
@@ -757,7 +757,7 @@ var _ = Describe("computeTargetDatameshPending", func() {
 			},
 		}
 
-		target, reason, message := computeTargetDatameshPending(rvr, nil)
+		target, reason, message := computeTargetDatameshPendingTransition(rvr, nil)
 
 		Expect(target).To(BeNil())
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingScheduling))
@@ -774,7 +774,7 @@ var _ = Describe("computeTargetDatameshPending", func() {
 			},
 		}
 
-		target, reason, message := computeTargetDatameshPending(rvr, nil)
+		target, reason, message := computeTargetDatameshPendingTransition(rvr, nil)
 
 		Expect(target).To(BeNil())
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingConfiguration))
@@ -794,7 +794,7 @@ var _ = Describe("computeTargetDatameshPending", func() {
 			EligibleNode: nil, // Node not eligible.
 		}
 
-		target, reason, message := computeTargetDatameshPending(rvr, rspView)
+		target, reason, message := computeTargetDatameshPendingTransition(rvr, rspView)
 
 		Expect(target).To(BeNil())
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonNodeNotEligible))
@@ -819,7 +819,7 @@ var _ = Describe("computeTargetDatameshPending", func() {
 			},
 		}
 
-		target, reason, _ := computeTargetDatameshPending(rvr, rspView)
+		target, reason, _ := computeTargetDatameshPendingTransition(rvr, rspView)
 
 		Expect(target).To(BeNil())
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonStorageNotEligible))
@@ -847,7 +847,7 @@ var _ = Describe("computeTargetDatameshPending", func() {
 			},
 		}
 
-		target, reason, message := computeTargetDatameshPending(rvr, rspView)
+		target, reason, message := computeTargetDatameshPendingTransition(rvr, rspView)
 
 		Expect(target).NotTo(BeNil())
 		Expect(*target.Member).To(BeTrue())
@@ -875,7 +875,7 @@ var _ = Describe("computeTargetDatameshPending", func() {
 			},
 		}
 
-		target, reason, _ := computeTargetDatameshPending(rvr, rspView)
+		target, reason, _ := computeTargetDatameshPendingTransition(rvr, rspView)
 
 		Expect(target).NotTo(BeNil())
 		Expect(*target.Member).To(BeTrue())
@@ -907,7 +907,7 @@ var _ = Describe("computeTargetDatameshPending", func() {
 			},
 		}
 
-		target, reason, message := computeTargetDatameshPending(rvr, rspView)
+		target, reason, message := computeTargetDatameshPendingTransition(rvr, rspView)
 
 		Expect(target).NotTo(BeNil())
 		Expect(target.Member).To(BeNil())
@@ -944,7 +944,7 @@ var _ = Describe("computeTargetDatameshPending", func() {
 			},
 		}
 
-		target, reason, message := computeTargetDatameshPending(rvr, rspView)
+		target, reason, message := computeTargetDatameshPendingTransition(rvr, rspView)
 
 		Expect(target).NotTo(BeNil())
 		Expect(target.Member).To(BeNil())
@@ -982,7 +982,7 @@ var _ = Describe("computeTargetDatameshPending", func() {
 			},
 		}
 
-		target, reason, message := computeTargetDatameshPending(rvr, rspView)
+		target, reason, message := computeTargetDatameshPendingTransition(rvr, rspView)
 
 		Expect(target).To(BeNil())
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured))
@@ -1007,7 +1007,7 @@ var _ = Describe("computeTargetDatameshPending", func() {
 			},
 		}
 
-		target, reason, _ := computeTargetDatameshPending(rvr, rspView)
+		target, reason, _ := computeTargetDatameshPendingTransition(rvr, rspView)
 
 		Expect(target).To(BeNil())
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigured))
@@ -1662,62 +1662,62 @@ var _ = Describe("isLLVReady", func() {
 // Apply functions tests
 //
 
-var _ = Describe("applyDatameshPending", func() {
+var _ = Describe("applyDatameshPendingTransition", func() {
 	It("clears datameshPending when target is nil and current exists", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+				DatameshPendingTransition: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
 					Role: v1alpha1.ReplicaTypeDiskful,
 				},
 			},
 		}
 
-		changed := applyDatameshPending(rvr, nil)
+		changed := applyDatameshPendingTransition(rvr, nil)
 
 		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DatameshPending).To(BeNil())
+		Expect(rvr.Status.DatameshPendingTransition).To(BeNil())
 	})
 
 	It("returns false when both target and current are nil", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DatameshPending: nil,
+				DatameshPendingTransition: nil,
 			},
 		}
 
-		changed := applyDatameshPending(rvr, nil)
+		changed := applyDatameshPendingTransition(rvr, nil)
 
 		Expect(changed).To(BeFalse())
-		Expect(rvr.Status.DatameshPending).To(BeNil())
+		Expect(rvr.Status.DatameshPendingTransition).To(BeNil())
 	})
 
 	It("creates datameshPending when target exists and current is nil", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DatameshPending: nil,
+				DatameshPendingTransition: nil,
 			},
 		}
-		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
 			Member: ptr.To(true),
 			Role:   v1alpha1.ReplicaTypeDiskful,
 		}
 
-		changed := applyDatameshPending(rvr, target)
+		changed := applyDatameshPendingTransition(rvr, target)
 
 		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DatameshPending).NotTo(BeNil())
-		Expect(*rvr.Status.DatameshPending.Member).To(BeTrue())
-		Expect(rvr.Status.DatameshPending.Role).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(rvr.Status.DatameshPendingTransition).NotTo(BeNil())
+		Expect(*rvr.Status.DatameshPendingTransition.Member).To(BeTrue())
+		Expect(rvr.Status.DatameshPendingTransition.Role).To(Equal(v1alpha1.ReplicaTypeDiskful))
 	})
 
 	It("returns false when current matches target (idempotent)", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+				DatameshPendingTransition: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
 					Member:             ptr.To(true),
 					Role:               v1alpha1.ReplicaTypeDiskful,
 					LVMVolumeGroupName: "lvg-1",
@@ -1725,14 +1725,14 @@ var _ = Describe("applyDatameshPending", func() {
 				},
 			},
 		}
-		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
 			Member:             ptr.To(true),
 			Role:               v1alpha1.ReplicaTypeDiskful,
 			LVMVolumeGroupName: "lvg-1",
 			ThinPoolName:       "tp-1",
 		}
 
-		changed := applyDatameshPending(rvr, target)
+		changed := applyDatameshPendingTransition(rvr, target)
 
 		Expect(changed).To(BeFalse())
 	})
@@ -1741,76 +1741,76 @@ var _ = Describe("applyDatameshPending", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+				DatameshPendingTransition: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
 					Member: ptr.To(true),
 				},
 			},
 		}
-		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
 			Member: ptr.To(false),
 		}
 
-		changed := applyDatameshPending(rvr, target)
+		changed := applyDatameshPendingTransition(rvr, target)
 
 		Expect(changed).To(BeTrue())
-		Expect(*rvr.Status.DatameshPending.Member).To(BeFalse())
+		Expect(*rvr.Status.DatameshPendingTransition.Member).To(BeFalse())
 	})
 
 	It("updates Role field when it differs", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+				DatameshPendingTransition: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
 					Role: v1alpha1.ReplicaTypeAccess,
 				},
 			},
 		}
-		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
 			Role: v1alpha1.ReplicaTypeDiskful,
 		}
 
-		changed := applyDatameshPending(rvr, target)
+		changed := applyDatameshPendingTransition(rvr, target)
 
 		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DatameshPending.Role).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(rvr.Status.DatameshPendingTransition.Role).To(Equal(v1alpha1.ReplicaTypeDiskful))
 	})
 
 	It("updates LVMVolumeGroupName field when it differs", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+				DatameshPendingTransition: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
 					LVMVolumeGroupName: "lvg-old",
 				},
 			},
 		}
-		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
 			LVMVolumeGroupName: "lvg-new",
 		}
 
-		changed := applyDatameshPending(rvr, target)
+		changed := applyDatameshPendingTransition(rvr, target)
 
 		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DatameshPending.LVMVolumeGroupName).To(Equal("lvg-new"))
+		Expect(rvr.Status.DatameshPendingTransition.LVMVolumeGroupName).To(Equal("lvg-new"))
 	})
 
 	It("updates ThinPoolName field when it differs", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+				DatameshPendingTransition: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
 					ThinPoolName: "tp-old",
 				},
 			},
 		}
-		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+		target := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
 			ThinPoolName: "tp-new",
 		}
 
-		changed := applyDatameshPending(rvr, target)
+		changed := applyDatameshPendingTransition(rvr, target)
 
 		Expect(changed).To(BeTrue())
-		Expect(rvr.Status.DatameshPending.ThinPoolName).To(Equal("tp-new"))
+		Expect(rvr.Status.DatameshPendingTransition.ThinPoolName).To(Equal("tp-new"))
 	})
 })
 
@@ -5948,7 +5948,7 @@ var _ = Describe("deleteLLV", func() {
 	})
 })
 
-var _ = Describe("ensureStatusDatameshPendingAndConfiguredCond", func() {
+var _ = Describe("ensureStatusDatameshPendingTransitionAndConfiguredCond", func() {
 	var ctx context.Context
 
 	BeforeEach(func() {
@@ -5976,15 +5976,15 @@ var _ = Describe("ensureStatusDatameshPendingAndConfiguredCond", func() {
 			},
 		}
 
-		outcome := ensureStatusDatameshPendingAndConfiguredCond(ctx, rvr, rspView)
+		outcome := ensureStatusDatameshPendingTransitionAndConfiguredCond(ctx, rvr, nil, rspView)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
 
 		// Check datameshPending.
-		Expect(rvr.Status.DatameshPending).NotTo(BeNil())
-		Expect(*rvr.Status.DatameshPending.Member).To(BeTrue())
-		Expect(rvr.Status.DatameshPending.Role).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(rvr.Status.DatameshPendingTransition).NotTo(BeNil())
+		Expect(*rvr.Status.DatameshPendingTransition.Member).To(BeTrue())
+		Expect(rvr.Status.DatameshPendingTransition.Role).To(Equal(v1alpha1.ReplicaTypeDiskful))
 
 		// Check Configured condition.
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
@@ -6008,14 +6008,14 @@ var _ = Describe("ensureStatusDatameshPendingAndConfiguredCond", func() {
 			},
 		}
 
-		outcome := ensureStatusDatameshPendingAndConfiguredCond(ctx, rvr, nil)
+		outcome := ensureStatusDatameshPendingTransitionAndConfiguredCond(ctx, rvr, nil, nil)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
 
 		// Check datameshPending.
-		Expect(rvr.Status.DatameshPending).NotTo(BeNil())
-		Expect(*rvr.Status.DatameshPending.Member).To(BeFalse())
+		Expect(rvr.Status.DatameshPendingTransition).NotTo(BeNil())
+		Expect(*rvr.Status.DatameshPendingTransition.Member).To(BeFalse())
 
 		// Check Configured condition.
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
@@ -6038,7 +6038,7 @@ var _ = Describe("ensureStatusDatameshPendingAndConfiguredCond", func() {
 				BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
 					LVMVolumeGroupName: "lvg-1", // BV matches.
 				},
-				DatameshPending: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPending{
+				DatameshPendingTransition: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
 					Role: v1alpha1.ReplicaTypeDiskful, // Stale pending.
 				},
 			},
@@ -6052,13 +6052,13 @@ var _ = Describe("ensureStatusDatameshPendingAndConfiguredCond", func() {
 			},
 		}
 
-		outcome := ensureStatusDatameshPendingAndConfiguredCond(ctx, rvr, rspView)
+		outcome := ensureStatusDatameshPendingTransitionAndConfiguredCond(ctx, rvr, nil, rspView)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
 
 		// Check datameshPending is cleared.
-		Expect(rvr.Status.DatameshPending).To(BeNil())
+		Expect(rvr.Status.DatameshPendingTransition).To(BeNil())
 
 		// Check Configured condition.
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
@@ -6075,13 +6075,13 @@ var _ = Describe("ensureStatusDatameshPendingAndConfiguredCond", func() {
 			},
 		}
 
-		outcome := ensureStatusDatameshPendingAndConfiguredCond(ctx, rvr, nil)
+		outcome := ensureStatusDatameshPendingTransitionAndConfiguredCond(ctx, rvr, nil, nil)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
 
 		// Check datameshPending is nil.
-		Expect(rvr.Status.DatameshPending).To(BeNil())
+		Expect(rvr.Status.DatameshPendingTransition).To(BeNil())
 
 		// Check Configured condition.
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
@@ -6104,7 +6104,7 @@ var _ = Describe("ensureStatusDatameshPendingAndConfiguredCond", func() {
 				BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
 					LVMVolumeGroupName: "lvg-1",
 				},
-				DatameshPending: nil, // Already cleared.
+				DatameshPendingTransition: nil, // Already cleared.
 			},
 		}
 		// Pre-set condition to match expected.
@@ -6123,10 +6123,104 @@ var _ = Describe("ensureStatusDatameshPendingAndConfiguredCond", func() {
 			},
 		}
 
-		outcome := ensureStatusDatameshPendingAndConfiguredCond(ctx, rvr, rspView)
+		outcome := ensureStatusDatameshPendingTransitionAndConfiguredCond(ctx, rvr, nil, rspView)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeFalse())
+	})
+
+	It("appends RV datamesh pending replica transition message to condition", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 0, // Not a member.
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					{
+						Name:    "rvr-1",
+						Message: "Waiting for DRBD resource creation",
+					},
+					{
+						Name:    "rvr-other",
+						Message: "Other replica message",
+					},
+				},
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1"},
+				},
+			},
+		}
+
+		outcome := ensureStatusDatameshPendingTransitionAndConfiguredCond(ctx, rvr, rv, rspView)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+
+		// Check Configured condition message includes RV message.
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Message).To(ContainSubstring("; Waiting for DRBD resource creation"))
+		Expect(cond.Message).NotTo(ContainSubstring("Other replica message"))
+	})
+
+	It("does not append RV message when no pending transition", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				NodeName:           "node-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1,
+				Type:             v1alpha1.DRBDResourceTypeDiskful,
+				BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+					LVMVolumeGroupName: "lvg-1",
+				},
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					{
+						Name:    "rvr-1",
+						Message: "Should not appear",
+					},
+				},
+			},
+		}
+		rspView := &rspEligibilityView{
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1"},
+				},
+			},
+		}
+
+		outcome := ensureStatusDatameshPendingTransitionAndConfiguredCond(ctx, rvr, rv, rspView)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+
+		// Check Configured condition message does NOT include RV message (no pending transition).
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Message).NotTo(ContainSubstring("Should not appear"))
 	})
 })
 
