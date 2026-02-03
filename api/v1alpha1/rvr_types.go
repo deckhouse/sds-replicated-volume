@@ -57,9 +57,6 @@ type ReplicatedVolumeReplica struct {
 
 	// +patchStrategy=merge
 	Status ReplicatedVolumeReplicaStatus `json:"status,omitempty" patchStrategy:"merge"`
-
-	nodeID            uint8 `json:"-"`
-	nodeIDinitialized bool  `json:"-"`
 }
 
 // +kubebuilder:object:generate=true
@@ -84,17 +81,9 @@ func (rvr *ReplicatedVolumeReplica) SetStatusConditions(conditions []metav1.Cond
 }
 
 // NodeID extracts NodeID from the RVR name (e.g., "pvc-xxx-5" → 5).
-// Result is cached after first successful call.
-func (rvr *ReplicatedVolumeReplica) NodeID() (uint8, bool) {
-	if rvr.nodeIDinitialized {
-		return rvr.nodeID, true
-	}
-	id, ok := nodeIDFromName(rvr.Name)
-	if ok {
-		rvr.nodeID = id
-		rvr.nodeIDinitialized = true
-	}
-	return id, ok
+// Result is cached after first successful call
+func (rvr *ReplicatedVolumeReplica) NodeID() uint8 {
+	return nodeIDFromName(rvr.Name)
 }
 
 // SetNameWithNodeID sets the RVR name using the ReplicatedVolumeName and the given NodeID.
@@ -113,12 +102,7 @@ func (rvr *ReplicatedVolumeReplica) ChooseNewName(otherRVRs []ReplicatedVolumeRe
 		if otherRVR.Spec.ReplicatedVolumeName != rvr.Spec.ReplicatedVolumeName {
 			continue
 		}
-
-		id, ok := otherRVR.NodeID()
-		if !ok {
-			continue
-		}
-		reserved |= 1 << id
+		reserved |= 1 << otherRVR.NodeID()
 	}
 
 	for i := RVRMinNodeID; i <= RVRMaxNodeID; i++ {

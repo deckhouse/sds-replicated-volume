@@ -133,8 +133,10 @@ type ReplicatedVolumeStatus struct {
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeDatameshPendingReplicaTransition struct {
 	// Name is the replica name.
+	// Must have format "prefix-N" where N is 0-31.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^.+-([0-9]|[12][0-9]|3[01])$`
 	Name string `json:"name"`
 
 	// Message is an optional human-readable message about the transition state and progress.
@@ -148,6 +150,11 @@ type ReplicatedVolumeDatameshPendingReplicaTransition struct {
 	// FirstObservedAt is the timestamp when this transition was first observed.
 	// +kubebuilder:validation:Required
 	FirstObservedAt metav1.Time `json:"firstObservedAt"`
+}
+
+// NodeID extracts NodeID from the replica name (e.g., "pvc-xxx-5" → 5).
+func (t *ReplicatedVolumeDatameshPendingReplicaTransition) NodeID() uint8 {
+	return nodeIDFromName(t.Name)
 }
 
 // ReplicatedVolumeDatameshTransition represents an active datamesh transition.
@@ -305,23 +312,11 @@ type ReplicatedVolumeDatameshMember struct {
 	// Attached indicates whether this member should be attached (Primary in DRBD terms).
 	// +kubebuilder:default=false
 	Attached bool `json:"attached"`
-
-	nodeID            uint8 `json:"-"`
-	nodeIDinitialized bool  `json:"-"`
 }
 
 // NodeID extracts NodeID from the member name (e.g., "pvc-xxx-5" → 5).
-// Result is cached after first successful call.
-func (m *ReplicatedVolumeDatameshMember) NodeID() (uint8, bool) {
-	if m.nodeIDinitialized {
-		return m.nodeID, true
-	}
-	id, ok := nodeIDFromName(m.Name)
-	if ok {
-		m.nodeID = id
-		m.nodeIDinitialized = true
-	}
-	return id, ok
+func (m *ReplicatedVolumeDatameshMember) NodeID() uint8 {
+	return nodeIDFromName(m.Name)
 }
 
 // ReplicatedVolumeDatameshMemberTypeTransition enumerates possible type transitions for datamesh members.

@@ -16,24 +16,34 @@ limitations under the License.
 
 package v1alpha1
 
-import (
-	"strconv"
-	"strings"
-)
-
 // Place shared helpers here that do not belong to any single API object,
 // but you are sure they must live in the API package.
 
 // nodeIDFromName extracts NodeID from a name with format "prefix-N" (e.g., "pvc-xxx-5" → 5).
-// Used by ReplicatedVolumeReplica.NodeID() and ReplicatedVolumeDatameshMember.NodeID().
-func nodeIDFromName(name string) (uint8, bool) {
-	idx := strings.LastIndex(name, "-")
-	if idx < 0 {
-		return 0, false
+// Used by ReplicatedVolumeReplica.NodeID(), ReplicatedVolumeDatameshMember.NodeID(),
+// and ReplicatedVolumeDatameshPendingReplicaTransition.NodeID().
+//
+// IMPORTANT: This function assumes the name is already validated by kubebuilder markers.
+// Only use with validated names (ending with -0 to -31).
+func nodeIDFromName(name string) uint8 {
+	l := len(name)
+	if l < 3 { // minimum "a-0"
+		panic("nodeIDFromName: name too short: " + name)
 	}
-	id, err := strconv.ParseUint(name[idx+1:], 10, 8)
-	if err != nil {
-		return 0, false
+
+	last := name[l-1]
+	if last < '0' || last > '9' {
+		panic("nodeIDFromName: no digit suffix: " + name)
 	}
-	return uint8(id), true
+	v := last - '0'
+
+	if c := name[l-2]; c >= '0' && c <= '9' {
+		v = (c-'0')*10 + v
+	}
+
+	if v > 31 {
+		panic("nodeIDFromName: node ID out of range: " + name)
+	}
+
+	return v
 }
