@@ -34,6 +34,7 @@ const (
 	DRBDResourceCondConfiguredReasonDiskOptionsFailed     = "DiskOptionsFailed"
 	DRBDResourceCondConfiguredReasonDownFailed            = "DownFailed"
 	DRBDResourceCondConfiguredReasonFailed                = "Failed"
+	DRBDResourceCondConfiguredReasonForgetPeerFailed      = "ForgetPeerFailed"
 	DRBDResourceCondConfiguredReasonNetOptionsFailed      = "NetOptionsFailed"
 	DRBDResourceCondConfiguredReasonNewMinorFailed        = "NewMinorFailed"
 	DRBDResourceCondConfiguredReasonNewPathFailed         = "NewPathFailed"

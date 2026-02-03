@@ -114,7 +114,7 @@ func ExecuteDelPeer(ctx context.Context, resource string, peerNodeID uint8) erro
 }
 
 // ForgetPeerArgs returns the arguments for drbdsetup forget-peer command.
-var ForgetPeerArgs = func(resource string, peerNodeID uint) []string {
+var ForgetPeerArgs = func(resource string, peerNodeID uint8) []string {
 	return []string{
 		"forget-peer", resource,
 		strconv.FormatUint(uint64(peerNodeID), 10),
@@ -122,7 +122,7 @@ var ForgetPeerArgs = func(resource string, peerNodeID uint) []string {
 }
 
 // ExecuteForgetPeer removes all references to a peer from meta-data.
-func ExecuteForgetPeer(ctx context.Context, resource string, peerNodeID uint) error {
+func ExecuteForgetPeer(ctx context.Context, resource string, peerNodeID uint8) error {
 	args := ForgetPeerArgs(resource, peerNodeID)
 	cmd := ExecCommandContext(ctx, Command, args...)
 

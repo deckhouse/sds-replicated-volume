@@ -310,6 +310,21 @@ func (a DelPeerAction) String() string {
 	return fmt.Sprintf("DelPeer(resource=%s, peerNodeID=%d)", a.ResourceName, a.PeerNodeID)
 }
 
+// ForgetPeerAction removes all references to a peer from meta-data.
+type ForgetPeerAction struct {
+	ResourceName string
+	PeerNodeID   uint8
+}
+
+func (a ForgetPeerAction) Execute(ctx context.Context) error {
+	err := drbdsetup.ExecuteForgetPeer(ctx, a.ResourceName, a.PeerNodeID)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonForgetPeerFailed)
+}
+
+func (a ForgetPeerAction) String() string {
+	return fmt.Sprintf("ForgetPeer(resource=%s, peerNodeID=%d)", a.ResourceName, a.PeerNodeID)
+}
+
 // DownAction tears down a DRBD resource completely.
 type DownAction struct {
 	ResourceName string

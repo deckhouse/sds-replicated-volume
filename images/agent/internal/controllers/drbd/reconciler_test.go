@@ -319,9 +319,10 @@ func TestReconciler_Reconcile(t *testing.T) {
 						{PeerNodeID: 1, Net: drbdsetup.ShowNet{Protocol: "C"}},
 					},
 				}),
-				// Stale peer (in actual but not in intended spec): disconnect + del-peer
+				// Stale peer (in actual but not in intended spec): disconnect + del-peer + forget-peer
 				disconnectCmd(testDRBDResName, 1),
 				delPeerCmd(testDRBDResName, 1),
+				forgetPeerCmd(testDRBDResName, 1),
 				// Refresh after actions
 				statusCmd(testDRBDResName, configuredStatus(testDRBDResName)),
 				showCmd(testDRBDResName, &drbdsetup.ShowResource{
@@ -552,6 +553,15 @@ func delPeerCmd(resourceName string, peerNodeID uint8) *fakedrbdsetup.ExpectedCm
 	return &fakedrbdsetup.ExpectedCmd{
 		Name:         drbdsetup.Command,
 		Args:         drbdsetup.DelPeerArgs(resourceName, peerNodeID),
+		ResultOutput: []byte{},
+		ResultErr:    nil,
+	}
+}
+
+func forgetPeerCmd(resourceName string, peerNodeID uint8) *fakedrbdsetup.ExpectedCmd {
+	return &fakedrbdsetup.ExpectedCmd{
+		Name:         drbdsetup.Command,
+		Args:         drbdsetup.ForgetPeerArgs(resourceName, peerNodeID),
 		ResultOutput: []byte{},
 		ResultErr:    nil,
 	}

@@ -163,6 +163,10 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 			ResourceName: resourceName,
 			PeerNodeID:   nodeID,
 		})
+		res = append(res, ForgetPeerAction{
+			ResourceName: resourceName,
+			PeerNodeID:   nodeID,
+		})
 	}
 
 	// Resize action (only for diskful resources with existing volumes)
