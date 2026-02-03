@@ -165,6 +165,12 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 		})
 	}
 
+	// Resize action (only for diskful resources with existing volumes)
+	res = append(res, computeResizeAction(iState, aState)...)
+
+	// Role change actions (should happen last, after everything is configured)
+	res = append(res, computeRoleAction(resourceName, iState, aState)...)
+
 	return res
 }
 
@@ -375,4 +381,56 @@ func pathKey(localAddr, remoteAddr string) string {
 // formatAddr formats IP and port as "ip:port".
 func formatAddr(ip string, port uint) string {
 	return fmt.Sprintf("%s:%d", ip, port)
+}
+
+// computeResizeAction computes resize action if the intended size is larger than actual.
+func computeResizeAction(iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
+	// Skip if diskless or no intended size
+	if iState.Type() != v1alpha1.DRBDResourceTypeDiskful || iState.Size() == 0 {
+		return
+	}
+
+	// Need an existing volume to resize
+	if len(aState.Volumes()) == 0 {
+		return
+	}
+
+	actualVol := aState.Volumes()[0]
+	actualSize := actualVol.Size()
+	intendedSize := iState.Size()
+
+	// Only resize if intended size is larger (CEL validation prevents decrease)
+	if intendedSize > actualSize {
+		minor := uint(actualVol.Minor())
+		res = append(res, ResizeAction{
+			Minor:     &minor,
+			SizeBytes: intendedSize,
+		})
+	}
+
+	return
+}
+
+// computeRoleAction computes role change action if actual role differs from intended.
+func computeRoleAction(resourceName string, iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
+	intendedRole := iState.Role()
+	actualRole := aState.Role()
+
+	// If intended role is Primary and actual is not Primary
+	if intendedRole == v1alpha1.DRBDRolePrimary && actualRole != "Primary" {
+		res = append(res, PrimaryAction{
+			ResourceName: resourceName,
+			Force:        false,
+		})
+	}
+
+	// If intended role is Secondary and actual is not Secondary
+	if intendedRole == v1alpha1.DRBDRoleSecondary && actualRole != "Secondary" {
+		res = append(res, SecondaryAction{
+			ResourceName: resourceName,
+			Force:        false,
+		})
+	}
+
+	return
 }

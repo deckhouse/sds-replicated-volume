@@ -55,6 +55,12 @@ type IntendedDRBDState interface {
 	// AllowTwoPrimaries returns whether dual-primary mode is allowed.
 	AllowTwoPrimaries() bool
 
+	// Role returns the intended role (Primary or Secondary).
+	Role() v1alpha1.DRBDRole
+
+	// Size returns the intended size in bytes. 0 for diskless resources.
+	Size() int64
+
 	// Peers returns the list of intended peer configurations.
 	Peers() []IntendedPeer
 }
@@ -111,6 +117,8 @@ type intendedDRBDState struct {
 	quorum                  byte
 	quorumMinimumRedundancy byte
 	allowTwoPrimaries       bool
+	role                    v1alpha1.DRBDRole
+	sizeBytes               int64
 	peers                   []IntendedPeer
 }
 
@@ -125,6 +133,8 @@ func (s *intendedDRBDState) BackingDisk() string           { return s.backingDis
 func (s *intendedDRBDState) Quorum() byte                  { return s.quorum }
 func (s *intendedDRBDState) QuorumMinimumRedundancy() byte { return s.quorumMinimumRedundancy }
 func (s *intendedDRBDState) AllowTwoPrimaries() bool       { return s.allowTwoPrimaries }
+func (s *intendedDRBDState) Role() v1alpha1.DRBDRole       { return s.role }
+func (s *intendedDRBDState) Size() int64                   { return s.sizeBytes }
 func (s *intendedDRBDState) Peers() []IntendedPeer         { return s.peers }
 
 var _ IntendedDRBDState = (*intendedDRBDState)(nil)
@@ -227,6 +237,12 @@ func computeIntendedDRBDState(
 		isUpAndNotInCleanup = false
 	}
 
+	// Compute size in bytes for diskful resources
+	var sizeBytes int64
+	if drbdr.Spec.Size != nil {
+		sizeBytes = drbdr.Spec.Size.Value()
+	}
+
 	return &intendedDRBDState{
 		isUpAndNotInCleanup:     isUpAndNotInCleanup,
 		resourceName:            DRBDResourceNameOnTheNode(drbdr),
@@ -236,6 +252,8 @@ func computeIntendedDRBDState(
 		quorum:                  drbdr.Spec.Quorum,
 		quorumMinimumRedundancy: drbdr.Spec.QuorumMinimumRedundancy,
 		allowTwoPrimaries:       drbdr.Spec.AllowTwoPrimaries,
+		role:                    drbdr.Spec.Role,
+		sizeBytes:               sizeBytes,
 		peers:                   peers,
 	}
 }

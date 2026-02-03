@@ -39,8 +39,11 @@ const (
 	DRBDResourceCondConfiguredReasonNewPathFailed         = "NewPathFailed"
 	DRBDResourceCondConfiguredReasonNewPeerFailed         = "NewPeerFailed"
 	DRBDResourceCondConfiguredReasonNewResourceFailed     = "NewResourceFailed"
+	DRBDResourceCondConfiguredReasonPrimaryFailed         = "PrimaryFailed"
 	DRBDResourceCondConfiguredReasonRenameFailed          = "RenameFailed"
+	DRBDResourceCondConfiguredReasonResizeFailed          = "ResizeFailed"
 	DRBDResourceCondConfiguredReasonResourceOptionsFailed = "ResourceOptionsFailed"
+	DRBDResourceCondConfiguredReasonSecondaryFailed       = "SecondaryFailed"
 	DRBDResourceCondConfiguredReasonStateQueryFailed      = "StateQueryFailed"
 	DRBDResourceCondConfiguredReasonInMaintenance         = "InMaintenance"
 )

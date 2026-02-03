@@ -362,3 +362,58 @@ func (a RenameAction) Execute(ctx context.Context) error {
 func (a RenameAction) String() string {
 	return fmt.Sprintf("Rename(from=%s, to=%s)", a.OldName, a.NewName)
 }
+
+// PrimaryAction promotes a DRBD resource to primary role.
+type PrimaryAction struct {
+	ResourceName string
+	Force        bool
+}
+
+func (a PrimaryAction) Execute(ctx context.Context) error {
+	err := drbdsetup.ExecutePrimary(ctx, a.ResourceName, a.Force)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonPrimaryFailed)
+}
+
+func (a PrimaryAction) String() string {
+	return fmt.Sprintf("Primary(resource=%s, force=%t)", a.ResourceName, a.Force)
+}
+
+// SecondaryAction demotes a DRBD resource to secondary role.
+type SecondaryAction struct {
+	ResourceName string
+	Force        bool
+}
+
+func (a SecondaryAction) Execute(ctx context.Context) error {
+	err := drbdsetup.ExecuteSecondary(ctx, a.ResourceName, a.Force)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonSecondaryFailed)
+}
+
+func (a SecondaryAction) String() string {
+	return fmt.Sprintf("Secondary(resource=%s, force=%t)", a.ResourceName, a.Force)
+}
+
+// ResizeAction resizes a DRBD device.
+type ResizeAction struct {
+	Minor     *uint
+	SizeBytes int64
+}
+
+func (a ResizeAction) Execute(ctx context.Context) error {
+	if a.Minor == nil {
+		return ConfiguredReasonError(
+			fmt.Errorf("ResizeAction: minor not set"),
+			v1alpha1.DRBDResourceCondConfiguredReasonResizeFailed,
+		)
+	}
+	err := drbdsetup.ExecuteResize(ctx, *a.Minor, a.SizeBytes)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonResizeFailed)
+}
+
+func (a ResizeAction) String() string {
+	minor := "<nil>"
+	if a.Minor != nil {
+		minor = fmt.Sprintf("%d", *a.Minor)
+	}
+	return fmt.Sprintf("Resize(minor=%s, sizeBytes=%d)", minor, a.SizeBytes)
+}

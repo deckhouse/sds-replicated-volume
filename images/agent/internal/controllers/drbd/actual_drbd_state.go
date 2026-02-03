@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
@@ -89,6 +91,9 @@ type ActualVolume interface {
 
 	// HasQuorum returns true if this volume has quorum.
 	HasQuorum() bool
+
+	// Size returns the device size in bytes.
+	Size() int64
 
 	// DiscardZeroesIfAligned returns the discard-zeroes-if-aligned setting.
 	DiscardZeroesIfAligned() bool
@@ -231,11 +236,14 @@ func (aState *actualState) Volumes() []ActualVolume {
 	volumes := make([]ActualVolume, 0, len(aState.status.Devices))
 	for i := range aState.status.Devices {
 		dev := &aState.status.Devices[i]
+		// DRBD reports size in KiB, convert to bytes
+		sizeBytes := int64(dev.Size) * 1024
 		volumes = append(volumes, &actualVolume{
 			minor:      dev.Minor,
 			volumeNr:   dev.Volume,
 			diskState:  dev.DiskState,
 			hasQuorum:  dev.Quorum,
+			sizeBytes:  sizeBytes,
 			showVolume: showVolumes[dev.Volume],
 		})
 	}
@@ -369,7 +377,7 @@ func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResour
 		ac.AllowTwoPrimaries = &atp
 	}
 
-	// Type from first volume
+	// Type and Size from first volume
 	// LVMLogicalVolumeName is set by the reconciler after reverse-lookup
 	// from the backing disk path. This Report() method does not set it.
 	if len(volumes) > 0 {
@@ -377,12 +385,18 @@ func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResour
 
 		if vol.DiskState == "Diskless" {
 			ac.Type = v1alpha1.DRBDResourceTypeDiskless
+			ac.Size = nil
 		} else {
 			ac.Type = v1alpha1.DRBDResourceTypeDiskful
+			// DRBD reports size in KiB, convert to bytes for resource.Quantity
+			sizeBytes := int64(vol.Size) * 1024
+			sizeQuantity := resource.NewQuantity(sizeBytes, resource.BinarySI)
+			ac.Size = sizeQuantity
 		}
 	} else {
 		// No volumes - clear volume-related fields in ac
 		ac.Type = ""
+		ac.Size = nil
 	}
 }
 
@@ -456,12 +470,14 @@ type actualVolume struct {
 	volumeNr   int
 	diskState  string
 	hasQuorum  bool
+	sizeBytes  int64
 	showVolume *drbdsetup.ShowVolume
 }
 
 func (v *actualVolume) Minor() int      { return v.minor }
 func (v *actualVolume) VolumeNr() int   { return v.volumeNr }
 func (v *actualVolume) HasQuorum() bool { return v.hasQuorum }
+func (v *actualVolume) Size() int64     { return v.sizeBytes }
 func (v *actualVolume) BackingDisk() string {
 	if v.showVolume != nil {
 		return v.showVolume.BackingDisk
