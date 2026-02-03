@@ -17,8 +17,10 @@ limitations under the License.
 package rvcontroller
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -74,7 +76,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Failf(err, "listing ReplicatedVolumeAttachments").ToCtrl()
 	}
 
-	rvrs, err := r.getRVRs(rf.Ctx(), req.Name)
+	rvrs, err := r.getRVRsSorted(rf.Ctx(), req.Name)
 	if err != nil {
 		return rf.Failf(err, "listing ReplicatedVolumeReplicas").ToCtrl()
 	}
@@ -92,11 +94,28 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	base := rv.DeepCopy()
 
-	// Reconcile RV status: configuration and condition.
-	outcome = outcome.WithChangeFrom(ensureRVConfiguration(rf.Ctx(), rv, rsc))
-	if outcome.ShouldReturn() {
-		return outcome.ToCtrl()
+	// Preparatory actions.
+	eo := flow.MergeEnsures(
+		ensureRVConfiguration(rf.Ctx(), rv, rsc),
+		ensureDatameshPendingReplicaTransitions(rf.Ctx(), rv, rvrs),
+	)
+	if eo.Error() != nil {
+		return rf.Fail(eo.Error()).ToCtrl()
 	}
+	outcome = outcome.WithChangeFrom(eo)
+
+	if rv.Status.Configuration != nil {
+		_ = rv // TODO Main logic will be here
+	}
+
+	// Ensure conditions.
+	eo = flow.MergeEnsures(
+		ensureConditionConfigurationReady(rf.Ctx(), rv, rsc),
+	)
+	if eo.Error() != nil {
+		return rf.Fail(eo.Error()).ToCtrl()
+	}
+	outcome = outcome.WithChangeFrom(eo)
 
 	if outcome.DidChange() {
 		if err := r.patchRVStatus(rf.Ctx(), rv, base, outcome.OptimisticLockRequired()); err != nil {
@@ -184,7 +203,7 @@ func applyRVMetadata(rv *v1alpha1.ReplicatedVolume, targetFinalizerPresent bool)
 	return changed
 }
 
-// ensureRVConfiguration ensures RV configuration is initialized from RSC and sets ConfigurationReady condition.
+// ensureRVConfiguration initializes rv.Status.Configuration from RSC.
 func ensureRVConfiguration(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
@@ -195,20 +214,9 @@ func ensureRVConfiguration(
 
 	changed := false
 
-	// Guard: RSC not found.
-	if rsc == nil {
-		changed = applyConfigurationReadyCondFalse(rv,
-			v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonWaitingForStorageClass,
-			fmt.Sprintf("ReplicatedStorageClass %q not found", rv.Spec.ReplicatedStorageClassName)) || changed
-		return ef.Ok().ReportChangedIf(changed)
-	}
-
-	// Guard: RSC has no configuration.
-	if rsc.Status.Configuration == nil {
-		changed = applyConfigurationReadyCondFalse(rv,
-			v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonWaitingForStorageClass,
-			fmt.Sprintf("ReplicatedStorageClass %q configuration not ready", rsc.Name)) || changed
-		return ef.Ok().ReportChangedIf(changed)
+	// Guard: RSC not found or has no configuration.
+	if rsc == nil || rsc.Status.Configuration == nil {
+		return ef.Ok()
 	}
 
 	// Initialize configuration if not set.
@@ -218,11 +226,41 @@ func ensureRVConfiguration(
 		changed = true
 	}
 
-	// If ConfigurationGeneration is not set, configuration rollout is in progress.
+	return ef.Ok().ReportChangedIf(changed)
+}
+
+// ensureConditionConfigurationReady sets the ConfigurationReady condition.
+func ensureConditionConfigurationReady(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rsc *v1alpha1.ReplicatedStorageClass,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "cond-configuration-ready")
+	defer ef.OnEnd(&outcome)
+
+	changed := false
+
+	// RSC not found.
+	if rsc == nil {
+		changed = applyConfigurationReadyCondFalse(rv,
+			v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonWaitingForStorageClass,
+			fmt.Sprintf("ReplicatedStorageClass %q not found", rv.Spec.ReplicatedStorageClassName))
+		return ef.Ok().ReportChangedIf(changed)
+	}
+
+	// RSC has no configuration.
+	if rsc.Status.Configuration == nil {
+		changed = applyConfigurationReadyCondFalse(rv,
+			v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonWaitingForStorageClass,
+			fmt.Sprintf("ReplicatedStorageClass %q configuration not ready", rsc.Name))
+		return ef.Ok().ReportChangedIf(changed)
+	}
+
+	// ConfigurationGeneration not set = rollout in progress.
 	if rv.Status.ConfigurationGeneration == 0 {
 		changed = applyConfigurationReadyCondFalse(rv,
 			v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonConfigurationRolloutInProgress,
-			"") || changed
+			"")
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
@@ -230,12 +268,12 @@ func ensureRVConfiguration(
 	if rv.Status.ConfigurationGeneration == rsc.Status.ConfigurationGeneration {
 		changed = applyConfigurationReadyCondTrue(rv,
 			v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonReady,
-			"Configuration matches storage class") || changed
+			"Configuration matches storage class")
 	} else {
 		changed = applyConfigurationReadyCondFalse(rv,
 			v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonStaleConfiguration,
 			fmt.Sprintf("Configuration generation %d does not match storage class generation %d",
-				rv.Status.ConfigurationGeneration, rsc.Status.ConfigurationGeneration)) || changed
+				rv.Status.ConfigurationGeneration, rsc.Status.ConfigurationGeneration))
 	}
 
 	return ef.Ok().ReportChangedIf(changed)
@@ -259,6 +297,102 @@ func applyConfigurationReadyCondFalse(rv *v1alpha1.ReplicatedVolume, reason, mes
 		Reason:  reason,
 		Message: message,
 	})
+}
+
+// ensureDatameshPendingReplicaTransitions synchronizes rv.Status.DatameshPendingReplicaTransitions
+// with the current DatameshPendingTransition from each RVR.
+// Both lists are kept sorted by name for determinism.
+// Uses sorted merge-in-place algorithm (no map allocation).
+func ensureDatameshPendingReplicaTransitions(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []v1alpha1.ReplicatedVolumeReplica,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "datamesh-pending-replica-transitions")
+	defer ef.OnEnd(&outcome)
+
+	changed := false
+	existing := rv.Status.DatameshPendingReplicaTransitions
+
+	// Step 1: Ensure existing entries are sorted by name.
+	if !slices.IsSortedFunc(existing, func(a, b v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition) int {
+		return cmp.Compare(a.Name, b.Name)
+	}) {
+		slices.SortFunc(existing, func(a, b v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition) int {
+			return cmp.Compare(a.Name, b.Name)
+		})
+		changed = true
+	}
+
+	// Step 2: Merge-in-place with two pointers.
+	// rvrs are already sorted by caller (getRVRsSorted).
+	result := make([]v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition, 0, len(existing)+len(rvrs))
+	i, j := 0, 0
+
+	for i < len(existing) && j < len(rvrs) {
+		// Skip rvrs with nil transition.
+		if rvrs[j].Status.DatameshPendingTransition == nil {
+			j++
+			continue
+		}
+
+		existingName := existing[i].Name
+		rvrName := rvrs[j].Name
+
+		switch cmp.Compare(existingName, rvrName) {
+		case -1: // existingName < rvrName: entry removed
+			changed = true
+			i++
+		case 1: // existingName > rvrName: new entry
+			changed = true
+			result = append(result, v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+				Name:            rvrName,
+				Transition:      *rvrs[j].Status.DatameshPendingTransition.DeepCopy(),
+				FirstObservedAt: metav1.Now(),
+			})
+			j++
+		case 0: // equal names
+			if existing[i].Transition.Equals(rvrs[j].Status.DatameshPendingTransition) {
+				// Keep as-is.
+				result = append(result, existing[i])
+			} else {
+				// Update: copy transition, clear Message, set new FirstObservedAt.
+				changed = true
+				result = append(result, v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					Name:            rvrName,
+					Transition:      *rvrs[j].Status.DatameshPendingTransition.DeepCopy(),
+					FirstObservedAt: metav1.Now(),
+				})
+			}
+			i++
+			j++
+		}
+	}
+
+	// Drain remaining rv entries (removed).
+	if i < len(existing) {
+		changed = true
+	}
+
+	// Drain remaining rvrs with non-nil transition (added).
+	for j < len(rvrs) {
+		if rvrs[j].Status.DatameshPendingTransition != nil {
+			changed = true
+			result = append(result, v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+				Name:            rvrs[j].Name,
+				Transition:      *rvrs[j].Status.DatameshPendingTransition.DeepCopy(),
+				FirstObservedAt: metav1.Now(),
+			})
+		}
+		j++
+	}
+
+	// Assign result only if changed.
+	if changed {
+		rv.Status.DatameshPendingReplicaTransitions = result
+	}
+
+	return ef.Ok().ReportChangedIf(changed)
 }
 
 // rvShouldNotExist returns true if RV should be deleted:
@@ -466,13 +600,16 @@ func (r *Reconciler) patchRVAStatus(ctx context.Context, obj, base *v1alpha1.Rep
 
 // --- RVR ---
 
-func (r *Reconciler) getRVRs(ctx context.Context, rvName string) ([]v1alpha1.ReplicatedVolumeReplica, error) {
+func (r *Reconciler) getRVRsSorted(ctx context.Context, rvName string) ([]v1alpha1.ReplicatedVolumeReplica, error) {
 	var list v1alpha1.ReplicatedVolumeReplicaList
 	if err := r.cl.List(ctx, &list,
 		client.MatchingFields{indexes.IndexFieldRVRByReplicatedVolumeName: rvName},
 	); err != nil {
 		return nil, err
 	}
+	slices.SortFunc(list.Items, func(a, b v1alpha1.ReplicatedVolumeReplica) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
 	return list.Items, nil
 }
 

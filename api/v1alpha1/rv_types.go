@@ -117,6 +117,69 @@ type ReplicatedVolumeStatus struct {
 	// Datamesh is the computed datamesh configuration for the volume.
 	// +patchStrategy=merge
 	Datamesh ReplicatedVolumeDatamesh `json:"datamesh" patchStrategy:"merge"`
+
+	// DatameshTransitions is the list of active datamesh transitions.
+	// +listType=atomic
+	// +optional
+	DatameshTransitions []ReplicatedVolumeDatameshTransition `json:"datameshTransitions,omitempty"`
+
+	// DatameshPendingReplicaTransitions is the list of pending replica transitions.
+	// +listType=atomic
+	// +optional
+	DatameshPendingReplicaTransitions []ReplicatedVolumeDatameshPendingReplicaTransition `json:"datameshPendingReplicaTransitions,omitempty"`
+}
+
+// ReplicatedVolumeDatameshPendingReplicaTransition represents a pending transition for a single replica.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeDatameshPendingReplicaTransition struct {
+	// Name is the replica name.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Message is an optional human-readable message about the transition state and progress.
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Transition is the pending datamesh transition details from the replica.
+	// +kubebuilder:validation:Required
+	Transition ReplicatedVolumeReplicaStatusDatameshPendingTransition `json:"transition"`
+
+	// FirstObservedAt is the timestamp when this transition was first observed.
+	// +kubebuilder:validation:Required
+	FirstObservedAt metav1.Time `json:"firstObservedAt"`
+}
+
+// ReplicatedVolumeDatameshTransition represents an active datamesh transition.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeDatameshTransition struct {
+	// Type is the transition type.
+	// +kubebuilder:validation:Required
+	Type ReplicatedVolumeDatameshTransitionType `json:"type"`
+
+	// DatameshRevision is the datamesh revision when this transition was introduced.
+	// +kubebuilder:validation:Required
+	DatameshRevision int64 `json:"datameshRevision"`
+
+	// Message is an optional human-readable message about the transition.
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// StartedAt is the timestamp when this transition started.
+	// +kubebuilder:validation:Required
+	StartedAt metav1.Time `json:"startedAt"`
+}
+
+// ReplicatedVolumeDatameshTransitionType enumerates possible datamesh transition types.
+type ReplicatedVolumeDatameshTransitionType string
+
+const (
+	// ReplicatedVolumeDatameshTransitionTypeInitialize indicates initial datamesh setup.
+	ReplicatedVolumeDatameshTransitionTypeInitialize ReplicatedVolumeDatameshTransitionType = "Initialize"
+)
+
+func (t ReplicatedVolumeDatameshTransitionType) String() string {
+	return string(t)
 }
 
 // ReplicatedVolumeDatamesh holds datamesh configuration for the volume.
@@ -145,11 +208,8 @@ type ReplicatedVolumeDatamesh struct {
 	Size resource.Quantity `json:"size"`
 	// Members is the list of datamesh members.
 	// +kubebuilder:validation:MaxItems=24
-	// +patchMergeKey=name
-	// +patchStrategy=merge
-	// +listType=map
-	// +listMapKey=name
-	Members []ReplicatedVolumeDatameshMember `json:"members" patchStrategy:"merge" patchMergeKey:"name"`
+	// +listType=atomic
+	Members []ReplicatedVolumeDatameshMember `json:"members"`
 	// Quorum is the quorum value for the datamesh.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=13

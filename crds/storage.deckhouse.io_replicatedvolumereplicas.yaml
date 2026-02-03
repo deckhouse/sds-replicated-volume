@@ -257,7 +257,7 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              datameshPending:
+              datameshPendingTransition:
                 description: |-
                   DatameshPending describes the pending datamesh membership state for this replica.
 

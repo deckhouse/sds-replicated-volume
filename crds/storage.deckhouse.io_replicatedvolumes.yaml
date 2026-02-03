@@ -289,9 +289,7 @@ spec:
                           > 0
                     maxItems: 24
                     type: array
-                    x-kubernetes-list-map-keys:
-                    - name
-                    x-kubernetes-list-type: map
+                    x-kubernetes-list-type: atomic
                   quorum:
                     default: 0
                     description: Quorum is the quorum value for the datamesh.
@@ -340,11 +338,108 @@ spec:
                 - size
                 - systemNetworkNames
                 type: object
+              datameshPendingReplicaTransitions:
+                description: DatameshPendingReplicaTransitions is the list of pending
+                  replica transitions.
+                items:
+                  description: ReplicatedVolumeDatameshPendingReplicaTransition represents
+                    a pending transition for a single replica.
+                  properties:
+                    firstObservedAt:
+                      description: FirstObservedAt is the timestamp when this transition
+                        was first observed.
+                      format: date-time
+                      type: string
+                    message:
+                      description: Message is an optional human-readable message about
+                        the transition state and progress.
+                      type: string
+                    name:
+                      description: Name is the replica name.
+                      minLength: 1
+                      type: string
+                    transition:
+                      description: Transition is the pending datamesh transition details
+                        from the replica.
+                      properties:
+                        lvmVolumeGroupName:
+                          description: LVMVolumeGroupName is the LVMVolumeGroup resource
+                            name for Diskful replicas.
+                          minLength: 1
+                          pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
+                          type: string
+                        member:
+                          description: Member indicates whether this replica should
+                            be a datamesh member.
+                          type: boolean
+                        role:
+                          description: Role is the intended role when Member is true.
+                          enum:
+                          - Diskful
+                          - Access
+                          - TieBreaker
+                          type: string
+                        thinPoolName:
+                          description: ThinPoolName is the thin pool name (optional,
+                            for LVMThin storage pools).
+                          type: string
+                      type: object
+                      x-kubernetes-validations:
+                      - message: when member is false, role/lvmVolumeGroupName/thinPoolName
+                          must not be set
+                        rule: '!has(self.member) || self.member == true || (!has(self.role)
+                          && !has(self.lvmVolumeGroupName) && !has(self.thinPoolName))'
+                      - message: when member is true, role is required
+                        rule: '!has(self.member) || self.member == false || has(self.role)'
+                      - message: lvmVolumeGroupName is required when role is Diskful
+                        rule: '!has(self.role) || self.role != ''Diskful'' || has(self.lvmVolumeGroupName)'
+                      - message: lvmVolumeGroupName must not be set when role is not
+                          Diskful
+                        rule: '!has(self.role) || self.role == ''Diskful'' || !has(self.lvmVolumeGroupName)'
+                      - message: thinPoolName requires lvmVolumeGroupName to be set
+                        rule: '!has(self.thinPoolName) || has(self.lvmVolumeGroupName)'
+                  required:
+                  - firstObservedAt
+                  - name
+                  - transition
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
               datameshRevision:
                 description: DatameshRevision is a counter incremented when datamesh
                   configuration changes.
                 format: int64
                 type: integer
+              datameshTransitions:
+                description: DatameshTransitions is the list of active datamesh transitions.
+                items:
+                  description: ReplicatedVolumeDatameshTransition represents an active
+                    datamesh transition.
+                  properties:
+                    datameshRevision:
+                      description: DatameshRevision is the datamesh revision when
+                        this transition was introduced.
+                      format: int64
+                      type: integer
+                    message:
+                      description: Message is an optional human-readable message about
+                        the transition.
+                      type: string
+                    startedAt:
+                      description: StartedAt is the timestamp when this transition
+                        started.
+                      format: date-time
+                      type: string
+                    type:
+                      description: Type is the transition type.
+                      type: string
+                  required:
+                  - datameshRevision
+                  - startedAt
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
               desiredAttachTo:
                 description: |-
                   DesiredAttachTo is the desired set of nodes where the volume should be attached (up to 2 nodes).
