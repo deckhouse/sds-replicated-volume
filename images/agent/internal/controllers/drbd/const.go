@@ -27,6 +27,10 @@ const (
 	// Used in .Named(...) for controller-runtime builder.
 	ControllerName = "drbd-controller"
 
+	// OperationControllerName is the stable name for the DRBD operation controller.
+	// Used in .Named(...) for controller-runtime builder.
+	OperationControllerName = "drbd-operation-controller"
+
 	// ScannerName is the name of the DRBD scanner component.
 	ScannerName = "drbd-scanner"
 
