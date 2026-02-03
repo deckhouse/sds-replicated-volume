@@ -18,7 +18,6 @@ package rvrcontroller
 
 import (
 	"context"
-	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/workqueue"
@@ -34,6 +33,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/nodeidset"
 )
 
 const RVRControllerName = "rvr-controller"
@@ -120,7 +120,7 @@ func (h *rvEventHandler) Update(ctx context.Context, e event.UpdateEvent, q work
 	}
 
 	// Collect affected node IDs from multiple independent changes.
-	var nodeIDs NodeIDSet
+	var nodeIDs nodeidset.NodeIDSet
 
 	// DatameshRevision changed (non-initial): enqueue members from old OR new datamesh.
 	if oldRV.Status.DatameshRevision != newRV.Status.DatameshRevision {
@@ -180,9 +180,9 @@ func (h *rvEventHandler) enqueueAllRVRs(ctx context.Context, rvName string, q wo
 }
 
 // enqueueRVRsByNodeIDs enqueues RVRs by constructing names from RV name and node IDs.
-func (h *rvEventHandler) enqueueRVRsByNodeIDs(rvName string, nodeIDs NodeIDSet, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+func (h *rvEventHandler) enqueueRVRsByNodeIDs(rvName string, nodeIDs nodeidset.NodeIDSet, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 	nodeIDs.ForEach(func(id uint8) {
-		q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: fmt.Sprintf("%s-%d", rvName, id)}})
+		q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: v1alpha1.FormatReplicatedVolumeReplicaName(rvName, id)}})
 	})
 }
 
