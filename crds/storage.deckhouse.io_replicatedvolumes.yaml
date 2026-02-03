@@ -355,8 +355,11 @@ spec:
                         the transition state and progress.
                       type: string
                     name:
-                      description: Name is the replica name.
+                      description: |-
+                        Name is the replica name.
+                        Must have format "prefix-N" where N is 0-31.
                       minLength: 1
+                      pattern: ^.+-([0-9]|[12][0-9]|3[01])$
                       type: string
                     transition:
                       description: Transition is the pending datamesh transition details

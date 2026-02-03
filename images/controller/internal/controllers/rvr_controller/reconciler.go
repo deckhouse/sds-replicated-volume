@@ -2530,12 +2530,8 @@ func computeTargetDRBDRSpec(
 	if drbdr != nil {
 		spec = *drbdr.Spec.DeepCopy()
 	} else {
-		nodeID, ok := rvr.NodeID()
-		if !ok {
-			panic("invalid RVR name: cannot extract NodeID from " + rvr.Name)
-		}
 		spec.NodeName = rvr.Spec.NodeName
-		spec.NodeID = nodeID
+		spec.NodeID = rvr.NodeID()
 	}
 
 	// Fill mutable fields.
@@ -2624,12 +2620,8 @@ func computeTargetDRBDRPeers(datamesh *v1alpha1.ReplicatedVolumeDatamesh, self *
 		peerIsAccess := m.Type == v1alpha1.ReplicaTypeAccess
 		allowRemoteRead := !peerIsAccess
 
-		// Extract NodeID from the member name. This should never panic because
-		// member name format is validated by API.
-		nodeID, ok := m.NodeID()
-		if !ok {
-			panic("m.NodeID() failed for member " + m.Name)
-		}
+		// Extract NodeID from the member name (validated by API).
+		nodeID := m.NodeID()
 
 		// Peer type: if treated as Diskful, use Diskful; otherwise Diskless.
 		peerType := v1alpha1.DRBDResourceTypeDiskless
