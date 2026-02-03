@@ -244,13 +244,6 @@ spec:
                 properties:
                   allowTwoPrimaries:
                     type: boolean
-                  disk:
-                    description: |-
-                      Disk is the block device path currently configured in DRBD (e.g. /dev/vg/lv).
-                      This is the actual value from DRBD configuration, from which LVMLogicalVolumeName
-                      is reverse-computed.
-                    maxLength: 256
-                    type: string
                   lvmLogicalVolumeName:
                     description: |-
                       LVMLogicalVolumeName is the LVM logical volume name currently configured in DRBD.
@@ -482,10 +475,6 @@ spec:
           rule: 'self.spec.type == ''Diskful'' ? has(self.spec.lvmLogicalVolumeName)
             && size(self.spec.lvmLogicalVolumeName) > 0 : !has(self.spec.lvmLogicalVolumeName)
             || size(self.spec.lvmLogicalVolumeName) == 0'
-        - message: DRBDResource name must match its ReplicatedVolumeReplica owner
-            name
-          rule: '!has(self.metadata.ownerReferences) || self.metadata.ownerReferences.all(ref,
-            ref.kind != ''ReplicatedVolumeReplica'' || ref.name == self.metadata.name)'
         - message: size is required when type is Diskful and must be empty when type
             is Diskless
           rule: 'self.spec.type == ''Diskful'' ? has(self.spec.size) : !has(self.spec.size)'
