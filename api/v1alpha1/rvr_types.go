@@ -17,10 +17,6 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"fmt"
-	"strconv"
-	"strings"
-
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -86,9 +82,26 @@ func (rvr *ReplicatedVolumeReplica) NodeID() uint8 {
 	return nodeIDFromName(rvr.Name)
 }
 
+// nodeIDSuffixes is a lookup table for nodeID (0-31) to "-N" suffix conversion.
+var nodeIDSuffixes = [32]string{
+	"-0", "-1", "-2", "-3", "-4", "-5", "-6", "-7",
+	"-8", "-9", "-10", "-11", "-12", "-13", "-14", "-15",
+	"-16", "-17", "-18", "-19", "-20", "-21", "-22", "-23",
+	"-24", "-25", "-26", "-27", "-28", "-29", "-30", "-31",
+}
+
+// FormatReplicatedVolumeReplicaName returns the RVR name for the given RV name and nodeID.
+// Panics if nodeID > 31.
+func FormatReplicatedVolumeReplicaName(rvName string, nodeID uint8) string {
+	if nodeID > 31 {
+		panic("nodeID must be in range 0-31")
+	}
+	return rvName + nodeIDSuffixes[nodeID]
+}
+
 // SetNameWithNodeID sets the RVR name using the ReplicatedVolumeName and the given NodeID.
 func (rvr *ReplicatedVolumeReplica) SetNameWithNodeID(nodeID uint8) {
-	rvr.Name = fmt.Sprintf("%s-%d", rvr.Spec.ReplicatedVolumeName, nodeID)
+	rvr.Name = FormatReplicatedVolumeReplicaName(rvr.Spec.ReplicatedVolumeName, nodeID)
 }
 
 // ChooseNewName selects the first available NodeID and sets the RVR name.
@@ -703,17 +716,4 @@ const (
 // IsValidNodeID checks if nodeID is within valid range [RVRMinNodeID; RVRMaxNodeID].
 func IsValidNodeID(nodeID uint8) bool {
 	return nodeID >= RVRMinNodeID && nodeID <= RVRMaxNodeID
-}
-
-// FormatValidNodeIDRange returns a formatted string representing the valid nodeID range.
-// faster than fmt.Sprintf("%d; %d", RVRMinNodeID, RVRMaxNodeID) because it avoids allocation and copying of the string.
-func FormatValidNodeIDRange() string {
-	var b strings.Builder
-	b.Grow(10) // Pre-allocate: "[0; 31]" = 8 bytes, but allocate a bit more
-	b.WriteByte('[')
-	b.WriteString(strconv.FormatUint(uint64(RVRMinNodeID), 10))
-	b.WriteString("; ")
-	b.WriteString(strconv.FormatUint(uint64(RVRMaxNodeID), 10))
-	b.WriteByte(']')
-	return b.String()
 }

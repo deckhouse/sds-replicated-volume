@@ -314,17 +314,15 @@ func ensureDatameshPendingReplicaTransitions(
 	changed := false
 	existing := rv.Status.DatameshPendingReplicaTransitions
 
-	// Step 1: Ensure existing entries are sorted by name.
-	if !slices.IsSortedFunc(existing, func(a, b v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition) int {
+	// Ensure existing entries are sorted by name for the merge algorithm below.
+	// Note: sorting does not mark changed=true intentionally. Order is semantically
+	// irrelevant for the API, so a mere reorder is not a reason to patch. If a real
+	// content change occurs, the patch will persist the correctly sorted value.
+	slices.SortFunc(existing, func(a, b v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition) int {
 		return cmp.Compare(a.Name, b.Name)
-	}) {
-		slices.SortFunc(existing, func(a, b v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition) int {
-			return cmp.Compare(a.Name, b.Name)
-		})
-		changed = true
-	}
+	})
 
-	// Step 2: Merge-in-place with two pointers.
+	// Merge-in-place with two pointers.
 	// rvrs are already sorted by caller (getRVRsSorted).
 	result := make([]v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition, 0, len(existing)+len(rvrs))
 	i, j := 0, 0
