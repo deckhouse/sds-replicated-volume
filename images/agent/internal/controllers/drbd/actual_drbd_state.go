@@ -20,7 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
@@ -445,6 +447,13 @@ func (aState *actualState) reportPeers(status *v1alpha1.DRBDResourceStatus) {
 
 		newPeers = append(newPeers, peerStatus)
 	}
+
+	slices.SortStableFunc(
+		newPeers,
+		func(a v1alpha1.DRBDResourcePeerStatus, b v1alpha1.DRBDResourcePeerStatus) int {
+			return strings.Compare(a.Name, b.Name)
+		},
+	)
 
 	status.Peers = newPeers
 }
