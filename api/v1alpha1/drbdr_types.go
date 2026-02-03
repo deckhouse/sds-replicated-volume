@@ -34,7 +34,6 @@ import (
 // +kubebuilder:printcolumn:name="Quorum",type=boolean,JSONPath=".status.quorum"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName) > 0 : !has(self.spec.lvmLogicalVolumeName) || size(self.spec.lvmLogicalVolumeName) == 0",message="lvmLogicalVolumeName is required when type is Diskful and must be empty when type is Diskless"
-// +kubebuilder:validation:XValidation:rule="!has(self.metadata.ownerReferences) || self.metadata.ownerReferences.all(ref, ref.kind != 'ReplicatedVolumeReplica' || ref.name == self.metadata.name)",message="DRBDResource name must match its ReplicatedVolumeReplica owner name"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.size) : !has(self.spec.size)",message="size is required when type is Diskful and must be empty when type is Diskless"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.spec.size) || !has(self.spec.size) || self.spec.size >= oldSelf.spec.size",message="spec.size cannot be decreased"
 type DRBDResource struct {
@@ -309,13 +308,6 @@ type DRBDResourceActiveConfiguration struct {
 	// +kubebuilder:validation:MaxLength=128
 	// +optional
 	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName,omitempty"`
-
-	// Disk is the block device path currently configured in DRBD (e.g. /dev/vg/lv).
-	// This is the actual value from DRBD configuration, from which LVMLogicalVolumeName
-	// is reverse-computed.
-	// +kubebuilder:validation:MaxLength=256
-	// +optional
-	Disk string `json:"disk,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
