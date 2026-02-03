@@ -29,6 +29,7 @@ const (
 	DRBDResourceCondConfiguredReasonCreateMetadataFailed  = "CreateMetadataFailed"
 	DRBDResourceCondConfiguredReasonDelPathFailed         = "DelPathFailed"
 	DRBDResourceCondConfiguredReasonDelPeerFailed         = "DelPeerFailed"
+	DRBDResourceCondConfiguredReasonDetachFailed          = "DetachFailed"
 	DRBDResourceCondConfiguredReasonDisconnectFailed      = "DisconnectFailed"
 	DRBDResourceCondConfiguredReasonDiskOptionsFailed     = "DiskOptionsFailed"
 	DRBDResourceCondConfiguredReasonDownFailed            = "DownFailed"

@@ -324,6 +324,30 @@ func (a DownAction) String() string {
 	return fmt.Sprintf("Down(resource=%s)", a.ResourceName)
 }
 
+// DetachAction detaches the backing device from a volume.
+type DetachAction struct {
+	Minor *uint
+}
+
+func (a DetachAction) Execute(ctx context.Context) error {
+	if a.Minor == nil {
+		return ConfiguredReasonError(
+			fmt.Errorf("DetachAction: minor not set"),
+			v1alpha1.DRBDResourceCondConfiguredReasonDetachFailed,
+		)
+	}
+	err := drbdsetup.ExecuteDetach(ctx, *a.Minor)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDetachFailed)
+}
+
+func (a DetachAction) String() string {
+	minor := "<nil>"
+	if a.Minor != nil {
+		minor = fmt.Sprintf("%d", *a.Minor)
+	}
+	return fmt.Sprintf("Detach(minor=%s)", minor)
+}
+
 // RenameAction renames a DRBD resource locally.
 type RenameAction struct {
 	OldName string

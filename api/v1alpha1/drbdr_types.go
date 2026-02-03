@@ -308,13 +308,6 @@ type DRBDResourceActiveConfiguration struct {
 	// +kubebuilder:validation:MaxLength=128
 	// +optional
 	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName,omitempty"`
-
-	// Disk is the block device path currently configured in DRBD (e.g. /dev/vg/lv).
-	// This is the actual value from DRBD configuration, from which LVMLogicalVolumeName
-	// is reverse-computed.
-	// +kubebuilder:validation:MaxLength=256
-	// +optional
-	Disk string `json:"disk,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

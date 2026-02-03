@@ -244,13 +244,6 @@ spec:
                 properties:
                   allowTwoPrimaries:
                     type: boolean
-                  disk:
-                    description: |-
-                      Disk is the block device path currently configured in DRBD (e.g. /dev/vg/lv).
-                      This is the actual value from DRBD configuration, from which LVMLogicalVolumeName
-                      is reverse-computed.
-                    maxLength: 256
-                    type: string
                   lvmLogicalVolumeName:
                     description: |-
                       LVMLogicalVolumeName is the LVM logical volume name currently configured in DRBD.

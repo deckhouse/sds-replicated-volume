@@ -39,6 +39,12 @@ func BuildController(mgr manager.Manager) error {
 	if err := indexes.RegisterDRBDRByNodeName(mgr); err != nil {
 		return fmt.Errorf("registering DRBDR index: %w", err)
 	}
+	if err := indexes.RegisterLVGByNodeName(mgr); err != nil {
+		return fmt.Errorf("registering LVG index: %w", err)
+	}
+	if err := indexes.RegisterLLVByLVGName(mgr); err != nil {
+		return fmt.Errorf("registering LLV index: %w", err)
+	}
 
 	cfg, err := env.GetConfig()
 	if err != nil {

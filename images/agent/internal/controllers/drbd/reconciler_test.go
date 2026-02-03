@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbd"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
@@ -359,6 +360,20 @@ func TestReconciler_Reconcile(t *testing.T) {
 						return nil
 					}
 					return []string{dr.Spec.NodeName}
+				}).
+				WithIndex(&snc.LVMVolumeGroup{}, indexes.IndexFieldLVGByNodeName, func(obj client.Object) []string {
+					lvg, ok := obj.(*snc.LVMVolumeGroup)
+					if !ok || len(lvg.Status.Nodes) == 0 {
+						return nil
+					}
+					return []string{lvg.Status.Nodes[0].Name}
+				}).
+				WithIndex(&snc.LVMLogicalVolume{}, indexes.IndexFieldLLVByLVGName, func(obj client.Object) []string {
+					llv, ok := obj.(*snc.LVMLogicalVolume)
+					if !ok || llv.Spec.LVMVolumeGroupName == "" {
+						return nil
+					}
+					return []string{llv.Spec.LVMVolumeGroupName}
 				})
 
 			objs := tc.objs

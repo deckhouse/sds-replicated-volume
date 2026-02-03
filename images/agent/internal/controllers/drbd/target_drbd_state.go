@@ -97,6 +97,22 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 		}
 	} else {
 		// Resource exists - reconcile options
+
+		// Check if disk needs to be changed (detach before attach)
+		if len(aState.Volumes()) > 0 {
+			actualVol := aState.Volumes()[0]
+			actualDisk := actualVol.BackingDisk()
+			intendedDisk := iState.BackingDisk()
+
+			// Detach if:
+			// 1. Currently has a disk attached (actualDisk != "")
+			// 2. AND intended disk is different (including going diskless)
+			if actualDisk != "" && actualDisk != intendedDisk {
+				minor := uint(actualVol.Minor())
+				res = append(res, DetachAction{Minor: &minor})
+			}
+		}
+
 		res = append(res, computeResourceOptionsActionReconcile(resourceName, iState, aState)...)
 		res = append(res, computeDiskOptionsActionReconcile(aState)...)
 	}

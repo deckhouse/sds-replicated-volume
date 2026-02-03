@@ -369,7 +369,9 @@ func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResour
 		ac.AllowTwoPrimaries = &atp
 	}
 
-	// Type and Disk from first volume
+	// Type from first volume
+	// LVMLogicalVolumeName is set by the reconciler after reverse-lookup
+	// from the backing disk path. This Report() method does not set it.
 	if len(volumes) > 0 {
 		vol := &volumes[0]
 
@@ -378,21 +380,9 @@ func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResour
 		} else {
 			ac.Type = v1alpha1.DRBDResourceTypeDiskful
 		}
-
-		// Backing disk from show volumes
-		ac.Disk = ""
-		if aState.show != nil {
-			for i := range aState.show.ThisHost.Volumes {
-				if aState.show.ThisHost.Volumes[i].VolumeNr == vol.Volume {
-					ac.Disk = aState.show.ThisHost.Volumes[i].BackingDisk
-					break
-				}
-			}
-		}
 	} else {
 		// No volumes - clear volume-related fields in ac
 		ac.Type = ""
-		ac.Disk = ""
 	}
 }
 
