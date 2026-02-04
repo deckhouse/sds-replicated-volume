@@ -119,17 +119,13 @@ func (h *rvEventHandler) Update(ctx context.Context, e event.UpdateEvent, q work
 		return
 	}
 
-	// Collect affected node IDs from multiple independent changes.
-	var nodeIDs nodeidset.NodeIDSet
+	// Collect affected replicas from multiple independent changes.
+	var replicas nodeidset.NodeIDSet
 
 	// DatameshRevision changed (non-initial): enqueue members from old OR new datamesh.
 	if oldRV.Status.DatameshRevision != newRV.Status.DatameshRevision {
-		for i := range oldRV.Status.Datamesh.Members {
-			nodeIDs.Add(oldRV.Status.Datamesh.Members[i].NodeID())
-		}
-		for i := range newRV.Status.Datamesh.Members {
-			nodeIDs.Add(newRV.Status.Datamesh.Members[i].NodeID())
-		}
+		replicas = nodeidset.FromAll(oldRV.Status.Datamesh.Members).
+			Union(nodeidset.FromAll(newRV.Status.Datamesh.Members))
 	}
 
 	// DatameshPendingReplicaTransitions messages changed: enqueue affected replicas.
@@ -139,28 +135,28 @@ func (h *rvEventHandler) Update(ctx context.Context, e event.UpdateEvent, q work
 	for i < len(oldTx) || j < len(newTx) {
 		switch {
 		case i >= len(oldTx):
-			nodeIDs.Add(newTx[j].NodeID())
+			replicas.Add(newTx[j].NodeID())
 			j++
 		case j >= len(newTx):
-			nodeIDs.Add(oldTx[i].NodeID())
+			replicas.Add(oldTx[i].NodeID())
 			i++
 		case oldTx[i].Name < newTx[j].Name:
-			nodeIDs.Add(oldTx[i].NodeID())
+			replicas.Add(oldTx[i].NodeID())
 			i++
 		case oldTx[i].Name > newTx[j].Name:
-			nodeIDs.Add(newTx[j].NodeID())
+			replicas.Add(newTx[j].NodeID())
 			j++
 		default:
 			if oldTx[i].Message != newTx[j].Message {
-				nodeIDs.Add(oldTx[i].NodeID())
+				replicas.Add(oldTx[i].NodeID())
 			}
 			i++
 			j++
 		}
 	}
 
-	if !nodeIDs.IsEmpty() {
-		h.enqueueRVRsByNodeIDs(newRV.Name, nodeIDs, q)
+	if !replicas.IsEmpty() {
+		h.enqueueRVRsByNodeIDs(newRV.Name, replicas, q)
 	}
 }
 
@@ -181,9 +177,9 @@ func (h *rvEventHandler) enqueueAllRVRs(ctx context.Context, rvName string, q wo
 
 // enqueueRVRsByNodeIDs enqueues RVRs by constructing names from RV name and node IDs.
 func (h *rvEventHandler) enqueueRVRsByNodeIDs(rvName string, nodeIDs nodeidset.NodeIDSet, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-	nodeIDs.ForEach(func(id uint8) {
+	for id := range nodeIDs.All() {
 		q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: v1alpha1.FormatReplicatedVolumeReplicaName(rvName, id)}})
-	})
+	}
 }
 
 // mapAgentPodToRVRs maps an agent pod to ReplicatedVolumeReplica resources on the same node.
