@@ -39,7 +39,7 @@ const (
 func BuildController(mgr manager.Manager) error {
 	cl := mgr.GetClient()
 
-	rec := NewReconciler(cl)
+	rec := NewReconciler(cl, mgr.GetScheme())
 
 	return builder.ControllerManagedBy(mgr).
 		Named(RVControllerName).
@@ -59,6 +59,7 @@ func BuildController(mgr manager.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(mapRVRToRV),
 			builder.WithPredicates(rvrPredicates()...),
 		).
+		Owns(&v1alpha1.DRBDResourceOperation{}, builder.WithPredicates(drbdrOpPredicates()...)).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(rec)
 }

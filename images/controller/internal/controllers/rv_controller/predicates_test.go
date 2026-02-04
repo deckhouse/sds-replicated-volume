@@ -142,6 +142,71 @@ var _ = Describe("rvPredicates", func() {
 			}
 		})
 
+		It("returns true when nil ObjectNew", func() {
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: &v1alpha1.ReplicatedVolume{
+					ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				},
+				ObjectNew: nil,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when ReplicatedStorageClassLabelKey appears", func() {
+			oldRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Generation: 1,
+				},
+			}
+			newRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Generation: 1,
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+					},
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRV,
+				ObjectNew: newRV,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when ReplicatedStorageClassLabelKey disappears", func() {
+			oldRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Generation: 1,
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+					},
+				},
+			}
+			newRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Generation: 1,
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRV,
+				ObjectNew: newRV,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
 		It("returns false when only status changes", func() {
 			oldRV := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
@@ -250,6 +315,24 @@ var _ = Describe("rscPredicates", func() {
 				Expect(pred(e)).To(BeFalse())
 			}
 		})
+
+		It("returns true when type assertion fails (conservative)", func() {
+			// Pass a non-RSC object.
+			oldObj := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			}
+			newObj := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldObj,
+				ObjectNew: newObj,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
 	})
 })
 
@@ -336,6 +419,272 @@ var _ = Describe("rvaPredicates", func() {
 			e := event.TypedUpdateEvent[client.Object]{
 				ObjectOld: oldRVA,
 				ObjectNew: newRVA,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeFalse())
+			}
+		})
+
+		It("returns true when type assertion fails (conservative)", func() {
+			// DRBDResourceOperation does not implement StatusConditionObject.
+			oldObj := &v1alpha1.DRBDResourceOperation{
+				ObjectMeta: metav1.ObjectMeta{Name: "op-1"},
+				Spec: v1alpha1.DRBDResourceOperationSpec{
+					DRBDResourceName: "res-1",
+					Type:             v1alpha1.DRBDResourceOperationCreateNewUUID,
+				},
+			}
+			newObj := &v1alpha1.DRBDResourceOperation{
+				ObjectMeta: metav1.ObjectMeta{Name: "op-1"},
+				Spec: v1alpha1.DRBDResourceOperationSpec{
+					DRBDResourceName: "res-1",
+					Type:             v1alpha1.DRBDResourceOperationCreateNewUUID,
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldObj,
+				ObjectNew: newObj,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+	})
+})
+
+var _ = Describe("drbdrOpPredicates", func() {
+	Describe("CreateFunc", func() {
+		var preds []func(event.TypedCreateEvent[client.Object]) bool
+
+		BeforeEach(func() {
+			predicates := drbdrOpPredicates()
+			preds = make([]func(event.TypedCreateEvent[client.Object]) bool, 0)
+			for _, p := range predicates {
+				if fp, ok := p.(predicate.TypedFuncs[client.Object]); ok && fp.CreateFunc != nil {
+					preds = append(preds, fp.CreateFunc)
+				}
+			}
+		})
+
+		It("returns true when name ends with -formation", func() {
+			e := event.TypedCreateEvent[client.Object]{
+				Object: &v1alpha1.DRBDResourceOperation{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "rv-1-formation",
+					},
+				},
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns false when name does not end with -formation", func() {
+			e := event.TypedCreateEvent[client.Object]{
+				Object: &v1alpha1.DRBDResourceOperation{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "rv-1-resize",
+					},
+				},
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeFalse())
+			}
+		})
+	})
+
+	Describe("UpdateFunc", func() {
+		var preds []func(event.TypedUpdateEvent[client.Object]) bool
+
+		BeforeEach(func() {
+			predicates := drbdrOpPredicates()
+			preds = make([]func(event.TypedUpdateEvent[client.Object]) bool, 0)
+			for _, p := range predicates {
+				if fp, ok := p.(predicate.TypedFuncs[client.Object]); ok && fp.UpdateFunc != nil {
+					preds = append(preds, fp.UpdateFunc)
+				}
+			}
+		})
+
+		It("returns false when name does not end with -formation", func() {
+			oldOp := &v1alpha1.DRBDResourceOperation{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1-resize",
+					Generation: 1,
+				},
+			}
+			newOp := &v1alpha1.DRBDResourceOperation{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1-resize",
+					Generation: 2,
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldOp,
+				ObjectNew: newOp,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeFalse())
+			}
+		})
+
+		It("returns true when Generation changes", func() {
+			oldOp := &v1alpha1.DRBDResourceOperation{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1-formation",
+					Generation: 1,
+				},
+			}
+			newOp := &v1alpha1.DRBDResourceOperation{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1-formation",
+					Generation: 2,
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldOp,
+				ObjectNew: newOp,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when Status.Phase changes", func() {
+			oldOp := &v1alpha1.DRBDResourceOperation{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rv-1-formation",
+				},
+				Status: &v1alpha1.DRBDResourceOperationStatus{
+					Phase: v1alpha1.DRBDOperationPhasePending,
+				},
+			}
+			newOp := &v1alpha1.DRBDResourceOperation{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rv-1-formation",
+				},
+				Status: &v1alpha1.DRBDResourceOperationStatus{
+					Phase: v1alpha1.DRBDOperationPhaseRunning,
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldOp,
+				ObjectNew: newOp,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when type assertion fails (conservative)", func() {
+			// Pass a non-DRBDResourceOperation object with a "-formation" name.
+			oldObj := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rv-1-formation",
+				},
+			}
+			newObj := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rv-1-formation",
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldObj,
+				ObjectNew: newObj,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns false when both Status are nil and Generation is the same", func() {
+			oldOp := &v1alpha1.DRBDResourceOperation{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rv-1-formation",
+				},
+			}
+			newOp := &v1alpha1.DRBDResourceOperation{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rv-1-formation",
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldOp,
+				ObjectNew: newOp,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeFalse())
+			}
+		})
+
+		It("returns true when old Status is nil and new Status has Phase", func() {
+			oldOp := &v1alpha1.DRBDResourceOperation{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rv-1-formation",
+				},
+			}
+			newOp := &v1alpha1.DRBDResourceOperation{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rv-1-formation",
+				},
+				Status: &v1alpha1.DRBDResourceOperationStatus{
+					Phase: v1alpha1.DRBDOperationPhasePending,
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldOp,
+				ObjectNew: newOp,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+	})
+
+	Describe("DeleteFunc", func() {
+		var preds []func(event.TypedDeleteEvent[client.Object]) bool
+
+		BeforeEach(func() {
+			predicates := drbdrOpPredicates()
+			preds = make([]func(event.TypedDeleteEvent[client.Object]) bool, 0)
+			for _, p := range predicates {
+				if fp, ok := p.(predicate.TypedFuncs[client.Object]); ok && fp.DeleteFunc != nil {
+					preds = append(preds, fp.DeleteFunc)
+				}
+			}
+		})
+
+		It("returns true when name ends with -formation", func() {
+			e := event.TypedDeleteEvent[client.Object]{
+				Object: &v1alpha1.DRBDResourceOperation{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "rv-1-formation",
+					},
+				},
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns false when name does not end with -formation", func() {
+			e := event.TypedDeleteEvent[client.Object]{
+				Object: &v1alpha1.DRBDResourceOperation{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "rv-1-resize",
+					},
+				},
 			}
 
 			for _, pred := range preds {
@@ -458,6 +807,24 @@ var _ = Describe("rvrPredicates", func() {
 
 			for _, pred := range preds {
 				Expect(pred(e)).To(BeFalse())
+			}
+		})
+
+		It("returns true when type assertion fails (conservative)", func() {
+			// Pass a non-RVR object.
+			oldObj := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			}
+			newObj := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldObj,
+				ObjectNew: newObj,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
 			}
 		})
 	})
