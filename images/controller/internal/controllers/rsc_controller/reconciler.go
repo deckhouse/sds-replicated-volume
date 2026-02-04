@@ -1372,7 +1372,6 @@ func (r *Reconciler) deleteRSP(ctx context.Context, rsp *v1alpha1.ReplicatedStor
 	})); err != nil {
 		return err
 	}
-	now := metav1.Now()
-	rsp.DeletionTimestamp = &now
+	rsp.DeletionTimestamp = ptr.To(metav1.Now())
 	return nil
 }

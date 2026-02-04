@@ -80,8 +80,7 @@ func (r *Reconciler) deleteEK(ctx context.Context, obj *v1alpha1.ExampleKind) er
     if err := client.IgnoreNotFound(r.cl.Delete(ctx, obj)); err != nil {
         return err
     }
-    now := metav1.Now()
-    obj.DeletionTimestamp = &now
+    obj.DeletionTimestamp = ptr.To(metav1.Now())
     return nil
 }
 ```
@@ -222,8 +221,7 @@ func (r *Reconciler) deleteEK(ctx context.Context, obj *v1alpha1.EK) error {
     if err := client.IgnoreNotFound(r.cl.Delete(ctx, obj)); err != nil {
         return err
     }
-    now := metav1.Now()
-    obj.DeletionTimestamp = &now
+    obj.DeletionTimestamp = ptr.To(metav1.Now())
     return nil
 }
 ```
