@@ -1,0 +1,4 @@
+Changes:
+  - Corrections in documentation
+  - Reworking manifestos
+  - Added a ban on ordering RWX volumes for all except the virtualization module
