@@ -443,6 +443,10 @@ spec:
                       x-kubernetes-list-map-keys:
                       - systemNetworkName
                       x-kubernetes-list-type: map
+                    replicationState:
+                      description: ReplicationState is the DRBD replication state
+                        with this peer.
+                      type: string
                     role:
                       description: Role is the DRBD role of this peer (Primary or
                         Secondary).

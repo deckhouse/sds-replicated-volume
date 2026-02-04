@@ -279,29 +279,29 @@ spec:
                     description: Member indicates whether this replica should be a
                       datamesh member.
                     type: boolean
-                  role:
-                    description: Role is the intended role when Member is true.
+                  thinPoolName:
+                    description: ThinPoolName is the thin pool name (optional, for
+                      LVMThin storage pools).
+                    type: string
+                  type:
+                    description: Type is the intended type when Member is true.
                     enum:
                     - Diskful
                     - Access
                     - TieBreaker
                     type: string
-                  thinPoolName:
-                    description: ThinPoolName is the thin pool name (optional, for
-                      LVMThin storage pools).
-                    type: string
                 type: object
                 x-kubernetes-validations:
-                - message: when member is false, role/lvmVolumeGroupName/thinPoolName
+                - message: when member is false, type/lvmVolumeGroupName/thinPoolName
                     must not be set
-                  rule: '!has(self.member) || self.member == true || (!has(self.role)
+                  rule: '!has(self.member) || self.member == true || (!has(self.type)
                     && !has(self.lvmVolumeGroupName) && !has(self.thinPoolName))'
-                - message: when member is true, role is required
-                  rule: '!has(self.member) || self.member == false || has(self.role)'
-                - message: lvmVolumeGroupName is required when role is Diskful
-                  rule: '!has(self.role) || self.role != ''Diskful'' || has(self.lvmVolumeGroupName)'
-                - message: lvmVolumeGroupName must not be set when role is not Diskful
-                  rule: '!has(self.role) || self.role == ''Diskful'' || !has(self.lvmVolumeGroupName)'
+                - message: when member is true, type is required
+                  rule: '!has(self.member) || self.member == false || has(self.type)'
+                - message: lvmVolumeGroupName is required when type is Diskful
+                  rule: '!has(self.type) || self.type != ''Diskful'' || has(self.lvmVolumeGroupName)'
+                - message: lvmVolumeGroupName must not be set when type is not Diskful
+                  rule: '!has(self.type) || self.type == ''Diskful'' || !has(self.lvmVolumeGroupName)'
                 - message: thinPoolName requires lvmVolumeGroupName to be set
                   rule: '!has(self.thinPoolName) || has(self.lvmVolumeGroupName)'
               datameshRevision:
@@ -368,9 +368,16 @@ spec:
                         this peer.
                       type: string
                     name:
-                      description: Name is the name of the peer ReplicatedVolumeReplica.
+                      description: |-
+                        Name is the name of the peer ReplicatedVolumeReplica.
+                        Must have format "prefix-N" where N is 0-31.
                       maxLength: 253
                       minLength: 1
+                      pattern: ^.+-([0-9]|[12][0-9]|3[01])$
+                      type: string
+                    replicationState:
+                      description: ReplicationState is the DRBD replication state
+                        with this peer.
                       type: string
                     type:
                       description: Type is the replica type (Diskful/TieBreaker/Access).
@@ -393,15 +400,21 @@ spec:
               quorumSummary:
                 description: QuorumSummary provides detailed quorum information.
                 properties:
+                  connectedDiskfulPeers:
+                    default: 0
+                    description: ConnectedDiskfulPeers is the number of Diskful peers
+                      with established connection.
+                    type: integer
+                  connectedTieBreakerPeers:
+                    default: 0
+                    description: |-
+                      ConnectedTieBreakerPeers is the number of TieBreaker peers with established connection.
+                      TieBreakers only contribute to quorum under specific edge conditions.
+                    type: integer
                   connectedUpToDatePeers:
                     default: 0
                     description: ConnectedUpToDatePeers is the number of peers with
                       established connection and UpToDate disk.
-                    type: integer
-                  connectedVotingPeers:
-                    default: 0
-                    description: ConnectedVotingPeers is the number of voting peers
-                      (TieBreaker/Diskful) with established connection.
                     type: integer
                   quorum:
                     description: Quorum is the required quorum threshold.
@@ -411,8 +424,9 @@ spec:
                       UpToDate peers (including self) required for quorum.
                     type: integer
                 required:
+                - connectedDiskfulPeers
+                - connectedTieBreakerPeers
                 - connectedUpToDatePeers
-                - connectedVotingPeers
                 type: object
               type:
                 description: |-

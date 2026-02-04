@@ -373,6 +373,7 @@ func ensureStatusPeers(
 	}
 
 	drbdrPeers := drbdr.Status.Peers
+	rvNamePrefix := rvr.Spec.ReplicatedVolumeName + "-"
 	n := len(drbdrPeers)
 
 	// Ensure rvr.Status.Peers has the right length.
@@ -391,6 +392,14 @@ func ensureStatusPeers(
 	for i := range drbdrPeers {
 		src := &drbdrPeers[i]
 		dst := &rvr.Status.Peers[i]
+
+		// Guard: foreign peer (peer not belonging to this ReplicatedVolume).
+		// DRBDR spec.peers is derived from RV datamesh members, so foreign peers should never
+		// appear. If they do, it indicates a serious misconfiguration. This check also ensures
+		// that NodeID() (which extracts the numeric suffix from peer name) works correctly.
+		if !strings.HasPrefix(src.Name, rvNamePrefix) {
+			return ef.Errf("foreign peer detected: %s", src.Name)
+		}
 
 		// Compute target Type from drbdr peer.
 		var targetType v1alpha1.ReplicaType
@@ -690,10 +699,10 @@ func ensureConditionBackingVolumeUpToDate(
 		return ef.Errf("drbdr.Status.ActiveConfiguration is nil after configuration is no longer pending")
 	}
 
-	// servingIO indicates that this replica is attached on the node and serving application I/O
-	// (in DRBD this is the Primary role).
+	// servingIO indicates that this replica is actively serving application I/O:
+	// the DRBD device is Primary (attached and accepting I/O) and device I/O is not suspended.
 	// Used to provide detailed messages about where I/O is being handled.
-	servingIO := drbdr.Status.ActiveConfiguration.Role == v1alpha1.DRBDRolePrimary
+	servingIO := drbdr.Status.ActiveConfiguration.Role == v1alpha1.DRBDRolePrimary && drbdr.Status.DeviceIOSuspended != nil && !*drbdr.Status.DeviceIOSuspended
 
 	// UpToDate is the only state with True condition — handle it separately.
 	if drbdr.Status.DiskState == v1alpha1.DiskStateUpToDate {
@@ -723,7 +732,7 @@ func ensureConditionBackingVolumeUpToDate(
 		}
 
 	case v1alpha1.DiskStateAttaching:
-		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAttaching
+		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAbsent
 		if servingIO {
 			message = "Backing volume is being attached; reading metadata from local device; application I/O forwarded to peers"
 		} else {
@@ -731,7 +740,7 @@ func ensureConditionBackingVolumeUpToDate(
 		}
 
 	case v1alpha1.DiskStateDetaching:
-		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonDetaching
+		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAbsent
 		if servingIO {
 			message = "Backing volume is being detached; application I/O transitioning to peers"
 		} else {
@@ -746,92 +755,91 @@ func ensureConditionBackingVolumeUpToDate(
 			message = "Backing volume failed due to I/O errors"
 		}
 
-	case v1alpha1.DiskStateInconsistent, v1alpha1.DiskStateOutdated,
-		v1alpha1.DiskStateNegotiating, v1alpha1.DiskStateConsistent:
-		// States requiring synchronization — check peer availability first.
-		hasUpToDatePeer := computeHasUpToDatePeer(rvr.Status.Peers)
-		hasConnectedAttachedPeer := computeHasConnectedAttachedPeer(rvr.Status.Peers)
-		hasAnyAttachedPeer := computeHasAnyAttachedPeer(rvr.Status.Peers)
-		ioAvailable := servingIO || hasConnectedAttachedPeer || !hasAnyAttachedPeer
+	case v1alpha1.DiskStateNegotiating:
+		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUnknown
+		if servingIO {
+			message = "Backing volume state is not yet determined; negotiating with peers after attach; application I/O forwarded to peers"
+		} else {
+			message = "Backing volume state is not yet determined; negotiating with peers after attach"
+		}
 
+	case v1alpha1.DiskStateOutdated:
+		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonRequiresSynchronization
+		if servingIO {
+			message = "Backing volume data is outdated; awaiting resynchronization from up-to-date peer; application I/O forwarded to peers"
+		} else {
+			message = "Backing volume data is outdated; awaiting resynchronization from up-to-date peer"
+		}
+
+	case v1alpha1.DiskStateConsistent:
+		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUnknown
+		message = "Backing volume data was consistent; peer connection required to confirm up-to-date status"
+		if servingIO {
+			ef.Log().Error(nil, "unexpected: servingIO is true while disk state is Consistent; this should not happen")
+		}
+
+	case v1alpha1.DiskStateInconsistent:
+		syncPeerIdx := slices.IndexFunc(rvr.Status.Peers, func(p v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
+			return p.ReplicationState == v1alpha1.ReplicationStateSyncTarget
+		})
+		if syncPeerIdx >= 0 {
+			reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizing
+			peerName := rvr.Status.Peers[syncPeerIdx].Name
+			if servingIO {
+				message = fmt.Sprintf("Backing volume is synchronizing from peer %s; application I/O forwarded to peers", peerName)
+			} else {
+				message = fmt.Sprintf("Backing volume is synchronizing from peer %s", peerName)
+			}
+			break
+		}
+
+		establishedPeerIdx := slices.IndexFunc(rvr.Status.Peers, func(p v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
+			return p.BackingVolumeState == v1alpha1.DiskStateUpToDate && p.ReplicationState == v1alpha1.ReplicationStateEstablished
+		})
+		if establishedPeerIdx >= 0 {
+			// Synchronization completed with this peer, but there is no connection
+			// to an attached peer — DRBD considers this "unstable" replication.
+			// The local disk will not transition to UpToDate until a connection
+			// with an attached up-to-date peer is established.
+			reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizing
+			peerName := rvr.Status.Peers[establishedPeerIdx].Name
+			message = fmt.Sprintf("Backing volume synchronized via intermediate peer %s, but no direct connection to an attached peer; cannot transition to UpToDate until a direct peer connection is established", peerName)
+			if servingIO {
+				ef.Log().Error(nil, "unexpected: servingIO is true while synchronized via intermediate peer; this should not happen")
+			}
+			break
+		}
+
+		hasUpToDatePeer := slices.ContainsFunc(rvr.Status.Peers, func(p v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
+			return p.BackingVolumeState == v1alpha1.DiskStateUpToDate
+		})
 		if !hasUpToDatePeer {
-			reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizationBlocked
-			message = "Synchronization blocked: no peer with up-to-date data available"
-			break
-		}
-		if !ioAvailable {
-			reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizationBlocked
-			message = "Synchronization blocked: awaiting connection to attached peer"
+			reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonRequiresSynchronization
+			message = "Backing volume requires synchronization, but no up-to-date peers are available"
+			if servingIO {
+				ef.Log().Error(nil, "unexpected: servingIO is true while no up-to-date peers are available; this should not happen")
+			}
 			break
 		}
 
-		// Synchronization can proceed — provide state-specific message.
-		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizing
-		switch drbdr.Status.DiskState {
-		case v1alpha1.DiskStateInconsistent:
-			if servingIO {
-				message = "Backing volume partially synchronized; local reads from synced blocks, others forwarded to peer"
-			} else {
-				message = "Backing volume partially synchronized; sync in progress"
-			}
-		case v1alpha1.DiskStateOutdated:
-			if servingIO {
-				message = "Backing volume data outdated; application I/O forwarded to up-to-date peer during resync"
-			} else {
-				message = "Backing volume data outdated; resynchronization in progress"
-			}
-		case v1alpha1.DiskStateNegotiating:
-			if servingIO {
-				message = "Negotiating sync direction; application I/O forwarded to peers"
-			} else {
-				message = "Negotiating synchronization direction with peers"
-			}
-		case v1alpha1.DiskStateConsistent:
-			if servingIO {
-				message = "Backing volume consistent, determining currency; application I/O forwarded to peers"
-			} else {
-				message = "Backing volume consistent; awaiting peer negotiation to determine if up-to-date"
-			}
+		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonRequiresSynchronization
+		if servingIO {
+			message = "Backing volume requires synchronization from an up-to-date peer; application I/O forwarded to peers"
+		} else {
+			message = "Backing volume requires synchronization from an up-to-date peer"
 		}
 
 	default:
-		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUnknownState
-		message = fmt.Sprintf("Unknown backing volume state: %s", drbdr.Status.DiskState)
+		reason = v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUnknown
+		if servingIO {
+			message = fmt.Sprintf("Unknown backing volume state: %s; application I/O forwarded to peers", drbdr.Status.DiskState)
+		} else {
+			message = fmt.Sprintf("Unknown backing volume state: %s", drbdr.Status.DiskState)
+		}
 	}
 
 	changed = applyBackingVolumeUpToDateCondFalse(rvr, reason, message) || changed
 	return ef.Ok().ReportChangedIf(changed)
-}
-
-// computeHasUpToDatePeer returns true if any peer has UpToDate disk.
-// Note: if peer is not connected, its BackingVolumeState won't be UpToDate.
-func computeHasUpToDatePeer(peers []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
-	for i := range peers {
-		if peers[i].BackingVolumeState == v1alpha1.DiskStateUpToDate {
-			return true
-		}
-	}
-	return false
-}
-
-// computeHasConnectedAttachedPeer returns true if any peer is attached and connected.
-func computeHasConnectedAttachedPeer(peers []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
-	for i := range peers {
-		if peers[i].Attached && len(peers[i].ConnectionEstablishedOn) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-// computeHasAnyAttachedPeer returns true if any peer is attached.
-func computeHasAnyAttachedPeer(peers []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
-	for i := range peers {
-		if peers[i].Attached {
-			return true
-		}
-	}
-	return false
 }
 
 // ensureStatusQuorum ensures the RVR quorum-related status fields reflect the current DRBDR state.
@@ -860,14 +868,17 @@ func ensureStatusQuorum(
 
 	summary := &v1alpha1.ReplicatedVolumeReplicaStatusQuorumSummary{}
 
-	// Count connected voting/UpToDate peers.
+	// Count connected Diskful/TieBreaker/UpToDate peers.
 	for i := range rvr.Status.Peers {
 		p := &rvr.Status.Peers[i]
 		if p.ConnectionState != v1alpha1.ConnectionStateConnected {
 			continue
 		}
-		if p.Type == v1alpha1.ReplicaTypeDiskful || p.Type == v1alpha1.ReplicaTypeTieBreaker {
-			summary.ConnectedVotingPeers++
+		switch p.Type {
+		case v1alpha1.ReplicaTypeDiskful:
+			summary.ConnectedDiskfulPeers++
+		case v1alpha1.ReplicaTypeTieBreaker:
+			summary.ConnectedTieBreakerPeers++
 		}
 		if p.BackingVolumeState == v1alpha1.DiskStateUpToDate {
 			summary.ConnectedUpToDatePeers++
@@ -936,8 +947,9 @@ func ensureConditionReady(
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
-	// Build message with quorum info: "quorum: M/N, data quorum: J/K"
-	// M = connectedVotingPeers, N = quorum threshold (or "unknown")
+	// Build message with quorum info: "quorum: diskful M/N + tie-breakers T, data quorum: J/K"
+	// M = connectedDiskfulPeers, N = quorum threshold (or "unknown")
+	// T = connectedTieBreakerPeers
 	// J = connectedUpToDatePeers, K = quorumMinimumRedundancy (or "unknown")
 	msg := "quorum: unknown"
 	if qs := rvr.Status.QuorumSummary; qs != nil {
@@ -949,8 +961,8 @@ func ensureConditionReady(
 		if qs.QuorumMinimumRedundancy != nil {
 			qmrStr = strconv.Itoa(*qs.QuorumMinimumRedundancy)
 		}
-		msg = fmt.Sprintf("quorum: %d/%s, data quorum: %d/%s",
-			qs.ConnectedVotingPeers, quorumStr,
+		msg = fmt.Sprintf("quorum: diskful %d/%s + tie-breakers %d, data quorum: %d/%s",
+			qs.ConnectedDiskfulPeers, quorumStr, qs.ConnectedTieBreakerPeers,
 			qs.ConnectedUpToDatePeers, qmrStr)
 	}
 
@@ -2370,7 +2382,7 @@ func computeTargetDatameshPendingTransition(
 		// Not a member - need to join.
 		pending := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
 			Member: ptr.To(true),
-			Role:   rvr.Spec.Type,
+			Type:   rvr.Spec.Type,
 		}
 		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
 			pending.LVMVolumeGroupName = rvr.Spec.LVMVolumeGroupName
@@ -2391,9 +2403,9 @@ func computeTargetDatameshPendingTransition(
 	}
 
 	if !typeInSync {
-		// Type differs - need role change.
+		// Type differs - need type change.
 		pending := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-			Role: rvr.Spec.Type,
+			Type: rvr.Spec.Type,
 		}
 		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
 			pending.LVMVolumeGroupName = rvr.Spec.LVMVolumeGroupName
@@ -2459,8 +2471,8 @@ func applyDatameshPendingTransition(rvr *v1alpha1.ReplicatedVolumeReplica, targe
 		}
 		changed = true
 	}
-	if current.Role != target.Role {
-		current.Role = target.Role
+	if current.Type != target.Type {
+		current.Type = target.Type
 		changed = true
 	}
 	if current.LVMVolumeGroupName != target.LVMVolumeGroupName {

@@ -375,30 +375,30 @@ spec:
                           description: Member indicates whether this replica should
                             be a datamesh member.
                           type: boolean
-                        role:
-                          description: Role is the intended role when Member is true.
+                        thinPoolName:
+                          description: ThinPoolName is the thin pool name (optional,
+                            for LVMThin storage pools).
+                          type: string
+                        type:
+                          description: Type is the intended type when Member is true.
                           enum:
                           - Diskful
                           - Access
                           - TieBreaker
                           type: string
-                        thinPoolName:
-                          description: ThinPoolName is the thin pool name (optional,
-                            for LVMThin storage pools).
-                          type: string
                       type: object
                       x-kubernetes-validations:
-                      - message: when member is false, role/lvmVolumeGroupName/thinPoolName
+                      - message: when member is false, type/lvmVolumeGroupName/thinPoolName
                           must not be set
-                        rule: '!has(self.member) || self.member == true || (!has(self.role)
+                        rule: '!has(self.member) || self.member == true || (!has(self.type)
                           && !has(self.lvmVolumeGroupName) && !has(self.thinPoolName))'
-                      - message: when member is true, role is required
-                        rule: '!has(self.member) || self.member == false || has(self.role)'
-                      - message: lvmVolumeGroupName is required when role is Diskful
-                        rule: '!has(self.role) || self.role != ''Diskful'' || has(self.lvmVolumeGroupName)'
-                      - message: lvmVolumeGroupName must not be set when role is not
+                      - message: when member is true, type is required
+                        rule: '!has(self.member) || self.member == false || has(self.type)'
+                      - message: lvmVolumeGroupName is required when type is Diskful
+                        rule: '!has(self.type) || self.type != ''Diskful'' || has(self.lvmVolumeGroupName)'
+                      - message: lvmVolumeGroupName must not be set when type is not
                           Diskful
-                        rule: '!has(self.role) || self.role == ''Diskful'' || !has(self.lvmVolumeGroupName)'
+                        rule: '!has(self.type) || self.type == ''Diskful'' || !has(self.lvmVolumeGroupName)'
                       - message: thinPoolName requires lvmVolumeGroupName to be set
                         rule: '!has(self.thinPoolName) || has(self.lvmVolumeGroupName)'
                   required:
@@ -420,10 +420,27 @@ spec:
                     datamesh transition.
                   properties:
                     datameshRevision:
-                      description: DatameshRevision is the datamesh revision when
-                        this transition was introduced.
+                      description: |-
+                        DatameshRevision is the datamesh revision when this transition was introduced.
+                        Zero means unset. For Formation transitions, must be absent (zero).
                       format: int64
                       type: integer
+                    formation:
+                      description: |-
+                        Formation holds formation-specific details.
+                        Required when type is "Formation"; must not be set otherwise.
+                      properties:
+                        phase:
+                          default: Preconfigure
+                          description: Phase is the current formation phase.
+                          enum:
+                          - Preconfigure
+                          - EstablishConnectivity
+                          - BootstrapData
+                          type: string
+                      required:
+                      - phase
+                      type: object
                     message:
                       description: Message is an optional human-readable message about
                         the transition.
@@ -437,10 +454,18 @@ spec:
                       description: Type is the transition type.
                       type: string
                   required:
-                  - datameshRevision
                   - startedAt
                   - type
                   type: object
+                  x-kubernetes-validations:
+                  - message: formation is required when type is Formation
+                    rule: self.type != 'Formation' || has(self.formation)
+                  - message: formation is only allowed when type is Formation
+                    rule: '!has(self.formation) || self.type == ''Formation'''
+                  - message: datameshRevision must be absent (or zero) when type is
+                      Formation
+                    rule: self.type != 'Formation' || !has(self.datameshRevision)
+                      || self.datameshRevision == 0
                 type: array
                 x-kubernetes-list-type: atomic
               desiredAttachTo:

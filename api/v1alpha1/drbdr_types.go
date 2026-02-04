@@ -345,6 +345,10 @@ type DRBDResourcePeerStatus struct {
 	// +optional
 	DiskState DiskState `json:"diskState,omitempty"`
 
+	// ReplicationState is the DRBD replication state with this peer.
+	// +optional
+	ReplicationState ReplicationState `json:"replicationState,omitempty"`
+
 	// Role is the DRBD role of this peer (Primary or Secondary).
 	// +kubebuilder:validation:Enum=Primary;Secondary
 	// +optional

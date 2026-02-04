@@ -159,14 +159,19 @@ func (t ReplicatedVolumeDatameshPendingReplicaTransition) NodeID() uint8 {
 
 // ReplicatedVolumeDatameshTransition represents an active datamesh transition.
 // +kubebuilder:object:generate=true
+//
+//	+kubebuilder:validation:XValidation:rule="self.type != 'Formation' || has(self.formation)",message="formation is required when type is Formation"
+//	+kubebuilder:validation:XValidation:rule="!has(self.formation) || self.type == 'Formation'",message="formation is only allowed when type is Formation"
+//	+kubebuilder:validation:XValidation:rule="self.type != 'Formation' || !has(self.datameshRevision) || self.datameshRevision == 0",message="datameshRevision must be absent (or zero) when type is Formation"
 type ReplicatedVolumeDatameshTransition struct {
 	// Type is the transition type.
 	// +kubebuilder:validation:Required
 	Type ReplicatedVolumeDatameshTransitionType `json:"type"`
 
 	// DatameshRevision is the datamesh revision when this transition was introduced.
-	// +kubebuilder:validation:Required
-	DatameshRevision int64 `json:"datameshRevision"`
+	// Zero means unset. For Formation transitions, must be absent (zero).
+	// +optional
+	DatameshRevision int64 `json:"datameshRevision,omitempty"`
 
 	// Message is an optional human-readable message about the transition.
 	// +optional
@@ -175,18 +180,47 @@ type ReplicatedVolumeDatameshTransition struct {
 	// StartedAt is the timestamp when this transition started.
 	// +kubebuilder:validation:Required
 	StartedAt metav1.Time `json:"startedAt"`
+
+	// Formation holds formation-specific details.
+	// Required when type is "Formation"; must not be set otherwise.
+	// +optional
+	Formation *ReplicatedVolumeDatameshTransitionFormation `json:"formation,omitempty"`
 }
 
 // ReplicatedVolumeDatameshTransitionType enumerates possible datamesh transition types.
 type ReplicatedVolumeDatameshTransitionType string
 
 const (
-	// ReplicatedVolumeDatameshTransitionTypeInitialize indicates initial datamesh setup.
-	ReplicatedVolumeDatameshTransitionTypeInitialize ReplicatedVolumeDatameshTransitionType = "Initialize"
+	// ReplicatedVolumeDatameshTransitionTypeFormation indicates initial datamesh formation.
+	ReplicatedVolumeDatameshTransitionTypeFormation ReplicatedVolumeDatameshTransitionType = "Formation"
 )
 
 func (t ReplicatedVolumeDatameshTransitionType) String() string {
 	return string(t)
+}
+
+// ReplicatedVolumeFormationPhase enumerates formation sub-phases.
+type ReplicatedVolumeFormationPhase string
+
+const (
+	// ReplicatedVolumeFormationPhasePreconfigure is the initial phase where replicas are being created and preconfigured.
+	ReplicatedVolumeFormationPhasePreconfigure ReplicatedVolumeFormationPhase = "Preconfigure"
+	// ReplicatedVolumeFormationPhaseEstablishConnectivity is the phase where replicas establish DRBD connectivity.
+	ReplicatedVolumeFormationPhaseEstablishConnectivity ReplicatedVolumeFormationPhase = "EstablishConnectivity"
+	// ReplicatedVolumeFormationPhaseBootstrapData is the phase where initial data synchronization is bootstrapped.
+	ReplicatedVolumeFormationPhaseBootstrapData ReplicatedVolumeFormationPhase = "BootstrapData"
+)
+
+func (p ReplicatedVolumeFormationPhase) String() string { return string(p) }
+
+// ReplicatedVolumeDatameshTransitionFormation holds formation-specific transition details.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeDatameshTransitionFormation struct {
+	// Phase is the current formation phase.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:default="Preconfigure"
+	// +kubebuilder:validation:Enum=Preconfigure;EstablishConnectivity;BootstrapData
+	Phase ReplicatedVolumeFormationPhase `json:"phase"`
 }
 
 // ReplicatedVolumeDatamesh holds datamesh configuration for the volume.

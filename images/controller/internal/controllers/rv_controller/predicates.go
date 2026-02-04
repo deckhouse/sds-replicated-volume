@@ -18,6 +18,7 @@ package rvcontroller
 
 import (
 	"slices"
+	"strings"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -117,6 +118,52 @@ func rvaPredicates() []predicate.Predicate {
 				}
 
 				return false
+			},
+		},
+	}
+}
+
+// drbdrOpPredicates returns predicates for DRBDResourceOperation events.
+// Only passes events for operations whose name ends with "-formation".
+// Reacts to:
+// - Create/Delete events (formation operation appeared or was removed)
+// - Status.Phase changes (operation progress: Pending -> Running -> Succeeded/Failed)
+// - Generation changes (spec was modified, need to re-validate parameters)
+func drbdrOpPredicates() []predicate.Predicate {
+	return []predicate.Predicate{
+		predicate.TypedFuncs[client.Object]{
+			CreateFunc: func(e event.TypedCreateEvent[client.Object]) bool {
+				return strings.HasSuffix(e.Object.GetName(), "-formation")
+			},
+			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				if !strings.HasSuffix(e.ObjectNew.GetName(), "-formation") {
+					return false
+				}
+
+				// React to Generation change (spec was modified, need to re-validate parameters).
+				if e.ObjectNew.GetGeneration() != e.ObjectOld.GetGeneration() {
+					return true
+				}
+
+				// React to Status.Phase change (operation progress).
+				oldDROp, okOld := e.ObjectOld.(*v1alpha1.DRBDResourceOperation)
+				newDROp, okNew := e.ObjectNew.(*v1alpha1.DRBDResourceOperation)
+				if !okOld || !okNew || oldDROp == nil || newDROp == nil {
+					return true
+				}
+
+				oldPhase := v1alpha1.DRBDOperationPhase("")
+				newPhase := v1alpha1.DRBDOperationPhase("")
+				if oldDROp.Status != nil {
+					oldPhase = oldDROp.Status.Phase
+				}
+				if newDROp.Status != nil {
+					newPhase = newDROp.Status.Phase
+				}
+				return oldPhase != newPhase
+			},
+			DeleteFunc: func(e event.TypedDeleteEvent[client.Object]) bool {
+				return strings.HasSuffix(e.Object.GetName(), "-formation")
 			},
 		},
 	}

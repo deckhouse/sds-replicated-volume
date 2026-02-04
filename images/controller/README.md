@@ -14,13 +14,16 @@ These controllers are tightly coupled and manage storage class configuration and
 | [rsc_controller](internal/controllers/rsc_controller/README.md) | ReplicatedStorageClass | Manages RSP, validates configuration, aggregates volume stats |
 | [node_controller](internal/controllers/node_controller/README.md) | Node | Manages agent node labels based on RSP eligibility and DRBDResources |
 
-### Volume Replica Controller
+### Volume Lifecycle Controllers
 
-This controller operates separately from the infrastructure controllers, managing individual volume replicas and their backing storage.
+These controllers manage the full volume lifecycle — from datamesh formation to individual replica management.
 
 | Controller | Primary Resource | Purpose |
 |------------|------------------|---------|
+| [rv_controller](internal/controllers/rv_controller/README.md) | ReplicatedVolume | Orchestrates datamesh formation, manages configuration, deletion |
 | [rvr_controller](internal/controllers/rvr_controller/README.md) | ReplicatedVolumeReplica | Manages backing volumes (LLV), DRBD resources, and reports replica status |
+
+<!-- TODO: add rvr_scheduling_controller (assigns nodes to replicas based on topology and storage capacity) once its README is written -->
 
 ## Architecture
 
@@ -70,41 +73,48 @@ flowchart TB
     NodeCtrl --> NodeLabel
 ```
 
-### Volume Replica
+### Volume Lifecycle
 
 ```mermaid
 flowchart TB
     subgraph inputs [Inputs]
-        RVR[ReplicatedVolumeReplica]
-        RV[ReplicatedVolume]
+        RSC[ReplicatedStorageClass]
         RSP[ReplicatedStoragePool]
-        AgentPod[Agent Pod]
     end
 
-    subgraph controller [Controller]
+    subgraph volumeResources [Volume Resources]
+        RV[ReplicatedVolume]
+        RVR[ReplicatedVolumeReplica]
+        RVA[ReplicatedVolumeAttachment]
+    end
+
+    subgraph controllers [Controllers]
+        RVCtrl[rv_controller]
         RVRCtrl[rvr_controller]
     end
 
     subgraph managed [Managed Resources]
         LLV[LVMLogicalVolume]
         DRBDR[DRBDResource]
+        DRBDROp[DRBDResourceOperation]
     end
 
-    subgraph status [Managed State]
-        Conditions[RVR conditions]
-        StatusFields[RVR status fields]
-    end
+    RSC --> RVCtrl
+    RSP --> RVCtrl
+    RV --> RVCtrl
+    RVR --> RVCtrl
+    RVA --> RVCtrl
+    RVCtrl -->|creates/deletes| RVR
+    RVCtrl -->|creates| DRBDROp
+    RVCtrl -->|"updates conditions (deletion)"| RVA
 
     RVR --> RVRCtrl
     RV --> RVRCtrl
     RSP --> RVRCtrl
-    AgentPod --> RVRCtrl
     LLV --> RVRCtrl
     DRBDR --> RVRCtrl
     RVRCtrl -->|creates/resizes/deletes| LLV
     RVRCtrl -->|creates/configures/deletes| DRBDR
-    RVRCtrl --> Conditions
-    RVRCtrl --> StatusFields
 ```
 
 ## Dependency Chains
@@ -119,20 +129,17 @@ Controllers have a logical dependency order:
 
 Each controller reconciles independently, reacting to changes in its watched resources.
 
-### Volume Replica Chain
+### Volume Lifecycle Chain
 
-Currently, `rvr_controller` operates as a standalone controller, managing:
-
-- **LVMLogicalVolume** — backing storage for diskful replicas
-- **DRBDResource** — DRBD configuration and lifecycle management
-- **RVR status** — conditions (BackingVolumeReady, Configured, Attached, BackingVolumeUpToDate, FullyConnected, Ready, SatisfyEligibleNodes) and status fields (peers, quorum, device state)
-
-### Future Architecture
-
-When `rv_controller` is fully implemented, the complete dependency chain will be:
+The volume lifecycle controllers form a chain that connects storage infrastructure to physical DRBD resources:
 
 ```
-(RSC + RSP) → RV → RVR → (LLV, DRBDResource)
+(RSC + RSP) → RV (rv_controller) → RVR (rvr_controller) → (LLV, DRBDResource)
 ```
 
-This will connect the storage infrastructure layer with the volume replica layer through ReplicatedVolume.
+1. **rv_controller** — reads RSC configuration and RSP eligible nodes; orchestrates datamesh formation (3-phase: preconfigure, establish connectivity, bootstrap data); manages RVR creation/deletion and RV status
+2. **rvr_controller** — manages backing volumes (LVMLogicalVolume) and DRBD resources (DRBDResource) for each replica; reports replica conditions and status
+
+<!-- TODO: add rvr_scheduling_controller to the chain (assigns nodes to unscheduled RVRs between rv_controller and rvr_controller) -->
+
+Each controller reconciles independently, reacting to changes in its watched resources.
