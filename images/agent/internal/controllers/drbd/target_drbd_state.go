@@ -94,7 +94,7 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 				MetaIdx:  "internal",
 			})
 			// Set disk options
-			res = append(res, computeDiskOptionsAction(&allocatedMinor)...)
+			res = append(res, computeDiskOptionsAction(&allocatedMinor, iState)...)
 		}
 	} else {
 		// Resource exists - reconcile options
@@ -115,7 +115,7 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 		}
 
 		res = append(res, computeResourceOptionsActionReconcile(resourceName, iState, aState)...)
-		res = append(res, computeDiskOptionsActionReconcile(aState)...)
+		res = append(res, computeDiskOptionsActionReconcile(iState, aState)...)
 	}
 
 	toAdd, existing, toRemove := maps.IntersectItersKeyFunc(
@@ -133,7 +133,7 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 			Protocol:     string(iPeer.Protocol()),
 			SharedSecret: iPeer.SharedSecret(),
 			CRAMHMACAlg:  string(iPeer.SharedSecretAlg()),
-			RRConflict:   "retry-connect",
+			RRConflict:   iPeer.RRConflict(),
 		})
 		// Set net options
 		res = append(res, computeNetOptionsAction(resourceName, iPeer, iState.AllowTwoPrimaries())...)
@@ -186,16 +186,16 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 }
 
 func computeResourceOptionsAction(resourceName string, iState IntendedDRBDState) (res DRBDActions) {
-	autoPromote := false
+	autoPromote := iState.AutoPromote()
 	quorum := uint(iState.Quorum())
 	quorumMinRedundancy := uint(iState.QuorumMinimumRedundancy())
 
 	res = append(res, ResourceOptionsAction{
 		ResourceName:               resourceName,
 		AutoPromote:                &autoPromote,
-		OnNoQuorum:                 "suspend-io",
-		OnNoDataAccessible:         "suspend-io",
-		OnSuspendedPrimaryOutdated: "force-secondary",
+		OnNoQuorum:                 iState.OnNoQuorum(),
+		OnNoDataAccessible:         iState.OnNoDataAccessible(),
+		OnSuspendedPrimaryOutdated: iState.OnSuspendedPrimaryOutdated(),
 		Quorum:                     &quorum,
 		QuorumMinimumRedundancy:    &quorumMinRedundancy,
 	})
@@ -223,27 +223,27 @@ func computeResourceOptionsActionReconcile(resourceName string, iState IntendedD
 	}
 
 	// Check auto-promote
-	if aState.AutoPromote() {
-		autoPromote := false
+	if iState.AutoPromote() != aState.AutoPromote() {
+		autoPromote := iState.AutoPromote()
 		action.AutoPromote = &autoPromote
 		changed = true
 	}
 
 	// Check on-no-quorum
-	if aState.OnNoQuorum() != "suspend-io" {
-		action.OnNoQuorum = "suspend-io"
+	if iState.OnNoQuorum() != aState.OnNoQuorum() {
+		action.OnNoQuorum = iState.OnNoQuorum()
 		changed = true
 	}
 
 	// Check on-no-data-accessible
-	if aState.OnNoDataAccessible() != "suspend-io" {
-		action.OnNoDataAccessible = "suspend-io"
+	if iState.OnNoDataAccessible() != aState.OnNoDataAccessible() {
+		action.OnNoDataAccessible = iState.OnNoDataAccessible()
 		changed = true
 	}
 
 	// Check on-suspended-primary-outdated
-	if aState.OnSuspendedPrimaryOutdated() != "force-secondary" {
-		action.OnSuspendedPrimaryOutdated = "force-secondary"
+	if iState.OnSuspendedPrimaryOutdated() != aState.OnSuspendedPrimaryOutdated() {
+		action.OnSuspendedPrimaryOutdated = iState.OnSuspendedPrimaryOutdated()
 		changed = true
 	}
 
@@ -253,9 +253,9 @@ func computeResourceOptionsActionReconcile(resourceName string, iState IntendedD
 	return res
 }
 
-func computeDiskOptionsAction(minor *uint) (res DRBDActions) {
-	discardZeroes := false
-	rsDiscardGran := uint(8192)
+func computeDiskOptionsAction(minor *uint, iState IntendedDRBDState) (res DRBDActions) {
+	discardZeroes := iState.DiscardZeroesIfAligned()
+	rsDiscardGran := iState.RsDiscardGranularity()
 	res = append(res, DiskOptionsAction{
 		Minor:                  minor,
 		DiscardZeroesIfAligned: &discardZeroes,
@@ -264,7 +264,7 @@ func computeDiskOptionsAction(minor *uint) (res DRBDActions) {
 	return res
 }
 
-func computeDiskOptionsActionReconcile(aState ActualDRBDState) (res DRBDActions) {
+func computeDiskOptionsActionReconcile(iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
 	for _, vol := range aState.Volumes() {
 		// Skip volumes without backing disk (diskless or no show data)
 		if vol.BackingDisk() == "" {
@@ -276,15 +276,15 @@ func computeDiskOptionsActionReconcile(aState ActualDRBDState) (res DRBDActions)
 		action := DiskOptionsAction{Minor: &minor}
 
 		// Check discard-zeroes-if-aligned
-		if vol.DiscardZeroesIfAligned() {
-			discardZeroes := false
+		if iState.DiscardZeroesIfAligned() != vol.DiscardZeroesIfAligned() {
+			discardZeroes := iState.DiscardZeroesIfAligned()
 			action.DiscardZeroesIfAligned = &discardZeroes
 			changed = true
 		}
 
 		// Check rs-discard-granularity
-		if vol.RsDiscardGranularity() != "8192" {
-			rsDiscardGran := uint(8192)
+		if fmt.Sprintf("%d", iState.RsDiscardGranularity()) != vol.RsDiscardGranularity() {
+			rsDiscardGran := iState.RsDiscardGranularity()
 			action.RsDiscardGranularity = &rsDiscardGran
 			changed = true
 		}

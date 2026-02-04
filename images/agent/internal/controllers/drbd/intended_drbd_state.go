@@ -63,6 +63,24 @@ type IntendedDRBDState interface {
 
 	// Peers returns the list of intended peer configurations.
 	Peers() []IntendedPeer
+
+	// AutoPromote returns the intended auto-promote setting. Always false.
+	AutoPromote() bool
+
+	// OnNoQuorum returns the intended on-no-quorum action. Always "suspend-io".
+	OnNoQuorum() string
+
+	// OnNoDataAccessible returns the intended on-no-data-accessible action. Always "suspend-io".
+	OnNoDataAccessible() string
+
+	// OnSuspendedPrimaryOutdated returns the intended action. Always "force-secondary".
+	OnSuspendedPrimaryOutdated() string
+
+	// DiscardZeroesIfAligned returns the intended setting. Always false.
+	DiscardZeroesIfAligned() bool
+
+	// RsDiscardGranularity returns the intended rs-discard-granularity. Always 8192.
+	RsDiscardGranularity() uint
 }
 
 // IntendedPeer represents the intended state of a DRBD peer connection.
@@ -84,6 +102,9 @@ type IntendedPeer interface {
 
 	// AllowRemoteRead returns whether reading from this peer is allowed.
 	AllowRemoteRead() bool
+
+	// RRConflict returns the intended rr-conflict policy. Always "retry-connect".
+	RRConflict() string
 
 	// Paths returns the network paths to this peer.
 	Paths() []IntendedPath
@@ -137,6 +158,16 @@ func (s *intendedDRBDState) Role() v1alpha1.DRBDRole       { return s.role }
 func (s *intendedDRBDState) Size() int64                   { return s.sizeBytes }
 func (s *intendedDRBDState) Peers() []IntendedPeer         { return s.peers }
 
+// Hardcoded resource options defaults
+func (s *intendedDRBDState) AutoPromote() bool                  { return false }
+func (s *intendedDRBDState) OnNoQuorum() string                 { return "suspend-io" }
+func (s *intendedDRBDState) OnNoDataAccessible() string         { return "suspend-io" }
+func (s *intendedDRBDState) OnSuspendedPrimaryOutdated() string { return "force-secondary" }
+
+// Hardcoded disk options defaults
+func (s *intendedDRBDState) DiscardZeroesIfAligned() bool { return false }
+func (s *intendedDRBDState) RsDiscardGranularity() uint   { return 8192 } // TODO: DETECT AUTOMATICALLY FROM LVM
+
 var _ IntendedDRBDState = (*intendedDRBDState)(nil)
 
 // intendedPeer implements IntendedPeer with pre-computed values.
@@ -156,6 +187,7 @@ func (p *intendedPeer) Protocol() v1alpha1.DRBDProtocol           { return p.pro
 func (p *intendedPeer) SharedSecret() string                      { return p.sharedSecret }
 func (p *intendedPeer) SharedSecretAlg() v1alpha1.SharedSecretAlg { return p.sharedSecretAlg }
 func (p *intendedPeer) AllowRemoteRead() bool                     { return p.allowRemoteRead }
+func (p *intendedPeer) RRConflict() string                        { return "retry-connect" }
 func (p *intendedPeer) Paths() []IntendedPath                     { return p.paths }
 
 var _ IntendedPeer = (*intendedPeer)(nil)
