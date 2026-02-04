@@ -134,7 +134,7 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 			RRConflict:   "retry-connect",
 		})
 		// Set net options
-		res = append(res, computeNetOptionsAction(resourceName, iPeer)...)
+		res = append(res, computeNetOptionsAction(resourceName, iPeer, iState.AllowTwoPrimaries())...)
 		res = append(res, computePathActions(resourceName, iPeer, nil)...)
 		res = append(res, ConnectAction{
 			ResourceName: resourceName,
@@ -144,7 +144,7 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 
 	for nodeID, pair := range existing {
 		// Reconcile net options
-		res = append(res, computeNetOptionsActionReconcile(resourceName, pair.Left, pair.Right)...)
+		res = append(res, computeNetOptionsActionReconcile(resourceName, pair.Left, pair.Right, iState.AllowTwoPrimaries())...)
 		res = append(res, computePathActions(resourceName, pair.Left, pair.Right)...)
 		if !isConnected(pair.Right) {
 			res = append(res, ConnectAction{
@@ -289,8 +289,7 @@ func computeDiskOptionsActionReconcile(aState ActualDRBDState) (res DRBDActions)
 	return res
 }
 
-func computeNetOptionsAction(resourceName string, iPeer IntendedPeer) (res DRBDActions) {
-	allowTwoPrimaries := false // default, will be set from spec if needed
+func computeNetOptionsAction(resourceName string, iPeer IntendedPeer, allowTwoPrimaries bool) (res DRBDActions) {
 	allowRemoteRead := iPeer.AllowRemoteRead()
 
 	res = append(res, NetOptionsAction{
@@ -302,11 +301,17 @@ func computeNetOptionsAction(resourceName string, iPeer IntendedPeer) (res DRBDA
 	return res
 }
 
-func computeNetOptionsActionReconcile(resourceName string, iPeer IntendedPeer, aPeer ActualPeer) (res DRBDActions) {
+func computeNetOptionsActionReconcile(resourceName string, iPeer IntendedPeer, aPeer ActualPeer, allowTwoPrimaries bool) (res DRBDActions) {
 	var changed bool
 	action := NetOptionsAction{
 		ResourceName: resourceName,
 		PeerNodeID:   iPeer.NodeID(),
+	}
+
+	// Check allow-two-primaries
+	if allowTwoPrimaries != aPeer.AllowTwoPrimaries() {
+		action.AllowTwoPrimaries = &allowTwoPrimaries
+		changed = true
 	}
 
 	// Check allow-remote-read
@@ -315,9 +320,6 @@ func computeNetOptionsActionReconcile(resourceName string, iPeer IntendedPeer, a
 		action.AllowRemoteRead = &allowRemoteRead
 		changed = true
 	}
-
-	// Note: AllowTwoPrimaries comes from IntendedDRBDState, not IntendedPeer
-	// We'll skip it here since it requires access to iState
 
 	if changed {
 		res = append(res, action)
