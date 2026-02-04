@@ -40,7 +40,7 @@ func ensureReportState(
 	ef := flow.BeginEnsure(ctx, "ensure-report-state")
 	defer ef.OnEnd(&outcome)
 
-	reportErr := aState.Report(&drbdr.Status)
+	reportErr := aState.Report(drbdr)
 	err = errors.Join(err, reportErr)
 	applyConfiguredCondition(drbdr, err, maintenanceMode)
 

@@ -74,7 +74,8 @@ type ActualDRBDState interface {
 	// Report fills the status fields from the actual state.
 	// Returns error if reporting invariants are violated (e.g., multiple volumes).
 	// Even on error, it attempts to report the rest of the fields.
-	Report(status *v1alpha1.DRBDResourceStatus) error
+	// The drbdr is used to look up peer names from spec and access status.Addresses.
+	Report(drbdr *v1alpha1.DRBDResource) error
 }
 
 type ActualVolume interface {
@@ -285,10 +286,12 @@ func (aState *actualState) Peers() []ActualPeer {
 	return peers
 }
 
-func (aState *actualState) Report(status *v1alpha1.DRBDResourceStatus) error {
+func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 	if aState == nil {
 		return errors.New("unable to retrieve actual state")
 	}
+
+	status := &drbdr.Status
 
 	if aState.status == nil && aState.show == nil {
 		// Resource doesn't exist in DRBD - this is valid when resource is Down
@@ -335,7 +338,7 @@ func (aState *actualState) Report(status *v1alpha1.DRBDResourceStatus) error {
 	aState.reportActiveConfiguration(status, volumes)
 
 	// Report Peers
-	aState.reportPeers(status)
+	aState.reportPeers(drbdr)
 
 	return err
 }
@@ -410,7 +413,9 @@ func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResour
 	}
 }
 
-func (aState *actualState) reportPeers(status *v1alpha1.DRBDResourceStatus) {
+func (aState *actualState) reportPeers(drbdr *v1alpha1.DRBDResource) {
+	status := &drbdr.Status
+
 	if aState.status == nil || len(aState.status.Connections) == 0 {
 		status.Peers = nil
 		return
@@ -423,6 +428,15 @@ func (aState *actualState) reportPeers(status *v1alpha1.DRBDResourceStatus) {
 		conn := &connections[i]
 		nodeID := uint(conn.PeerNodeID)
 
+		// Look up peer name from spec by NodeID, fall back to actual connection name
+		peerName := conn.Name
+		for j := range drbdr.Spec.Peers {
+			if uint(drbdr.Spec.Peers[j].NodeID) == nodeID {
+				peerName = drbdr.Spec.Peers[j].Name
+				break
+			}
+		}
+
 		// Get peer disk state from first peer device
 		var peerDiskState string
 		if len(conn.PeerDevices) > 0 {
@@ -430,8 +444,8 @@ func (aState *actualState) reportPeers(status *v1alpha1.DRBDResourceStatus) {
 		}
 
 		peerStatus := v1alpha1.DRBDResourcePeerStatus{
-			Name:            conn.Name,
-			NodeID:          &nodeID,
+			Name:            peerName,
+			NodeID:          nodeID,
 			ConnectionState: v1alpha1.ConnectionState(conn.ConnectionState),
 			DiskState:       v1alpha1.DiskState(peerDiskState),
 		}

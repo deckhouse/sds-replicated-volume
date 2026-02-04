@@ -240,13 +240,13 @@ type DRBDResourceStatus struct {
 	// +optional
 	ActiveConfiguration *DRBDResourceActiveConfiguration `json:"activeConfiguration,omitempty" patchStrategy:"merge"`
 
-	// +patchMergeKey=name
+	// +patchMergeKey=nodeID
 	// +patchStrategy=merge
 	// +listType=map
-	// +listMapKey=name
+	// +listMapKey=nodeID
 	// +kubebuilder:validation:MaxItems=31
 	// +optional
-	Peers []DRBDResourcePeerStatus `json:"peers,omitempty" patchStrategy:"merge" patchMergeKey:"name"`
+	Peers []DRBDResourcePeerStatus `json:"peers,omitempty" patchStrategy:"merge" patchMergeKey:"nodeID"`
 
 	// +optional
 	DiskState DiskState `json:"diskState,omitempty"`
@@ -325,10 +325,10 @@ type DRBDResourcePeerStatus struct {
 	// +optional
 	AllowRemoteRead bool `json:"allowRemoteRead,omitempty"`
 
+	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=31
-	// +optional
-	NodeID *uint `json:"nodeID,omitempty"`
+	NodeID uint `json:"nodeID"`
 
 	// +patchMergeKey=systemNetworkName
 	// +patchStrategy=merge

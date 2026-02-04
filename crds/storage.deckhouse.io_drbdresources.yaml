@@ -456,11 +456,12 @@ spec:
                       type: string
                   required:
                   - name
+                  - nodeID
                   type: object
                 maxItems: 31
                 type: array
                 x-kubernetes-list-map-keys:
-                - name
+                - nodeID
                 x-kubernetes-list-type: map
               quorum:
                 type: boolean
