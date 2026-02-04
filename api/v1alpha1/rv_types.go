@@ -153,7 +153,7 @@ type ReplicatedVolumeDatameshPendingReplicaTransition struct {
 }
 
 // NodeID extracts NodeID from the replica name (e.g., "pvc-xxx-5" → 5).
-func (t *ReplicatedVolumeDatameshPendingReplicaTransition) NodeID() uint8 {
+func (t ReplicatedVolumeDatameshPendingReplicaTransition) NodeID() uint8 {
 	return nodeIDFromName(t.Name)
 }
 
@@ -315,7 +315,7 @@ type ReplicatedVolumeDatameshMember struct {
 }
 
 // NodeID extracts NodeID from the member name (e.g., "pvc-xxx-5" → 5).
-func (m *ReplicatedVolumeDatameshMember) NodeID() uint8 {
+func (m ReplicatedVolumeDatameshMember) NodeID() uint8 {
 	return nodeIDFromName(m.Name)
 }
 
