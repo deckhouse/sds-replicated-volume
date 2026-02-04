@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"math/bits"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -106,26 +108,23 @@ func (rvr *ReplicatedVolumeReplica) SetNameWithNodeID(nodeID uint8) {
 
 // ChooseNewName selects the first available NodeID and sets the RVR name.
 // Returns false if all NodeIDs (0-31) are already taken by other RVRs.
-func (rvr *ReplicatedVolumeReplica) ChooseNewName(otherRVRs []ReplicatedVolumeReplica) bool {
+func (rvr *ReplicatedVolumeReplica) ChooseNewName(otherRVRs []*ReplicatedVolumeReplica) bool {
 	// Bitmask for reserved NodeIDs (0-31 fit in uint32).
 	var reserved uint32
 
-	for i := range otherRVRs {
-		otherRVR := &otherRVRs[i]
+	for _, otherRVR := range otherRVRs {
 		if otherRVR.Spec.ReplicatedVolumeName != rvr.Spec.ReplicatedVolumeName {
 			continue
 		}
 		reserved |= 1 << otherRVR.NodeID()
 	}
 
-	for i := RVRMinNodeID; i <= RVRMaxNodeID; i++ {
-		if reserved&(1<<i) == 0 {
-			rvr.SetNameWithNodeID(i)
-			return true
-		}
+	free := ^reserved
+	if free == 0 {
+		return false
 	}
-
-	return false
+	rvr.SetNameWithNodeID(uint8(bits.TrailingZeros32(free)))
+	return true
 }
 
 // +kubebuilder:object:generate=true
