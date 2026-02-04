@@ -147,7 +147,10 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 		// Reconcile net options
 		res = append(res, computeNetOptionsActionReconcile(resourceName, pair.Left, pair.Right, iState.AllowTwoPrimaries())...)
 		res = append(res, computePathActions(resourceName, pair.Left, pair.Right)...)
-		if !isConnected(pair.Right) {
+		// Connect is only valid when peer is in StandAlone state.
+		// Any other state means connection is either active, in progress, or in error recovery,
+		// and calling connect will fail with "Device has a net-config".
+		if pair.Right.ConnectionState() == v1alpha1.ConnectionStateStandAlone.String() {
 			res = append(res, ConnectAction{
 				ResourceName: resourceName,
 				PeerNodeID:   nodeID,
@@ -371,13 +374,6 @@ func computePathActions(resourceName string, iPeer IntendedPeer, aPeer ActualPee
 	}
 
 	return res
-}
-
-func isConnected(aPeer ActualPeer) bool {
-	if aPeer == nil {
-		return false
-	}
-	return aPeer.ConnectionState() == v1alpha1.ConnectionStateConnected.String()
 }
 
 // pathKey creates a unique key for a path.

@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 
+	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -438,8 +439,17 @@ func (aState *actualState) reportPeers(status *v1alpha1.DRBDResourceStatus) {
 			peerStatus.Paths = make([]v1alpha1.DRBDResourcePathStatus, 0, len(conn.Paths))
 			for j := range conn.Paths {
 				path := &conn.Paths[j]
+				// Look up SystemNetworkName from status.Addresses by IP
+				addr, found := uiter.Find(slices.Values(status.Addresses), func(a v1alpha1.DRBDResourceAddressStatus) bool {
+					return a.Address.IPv4 == path.ThisHost.Address
+				})
+				if !found {
+					// Path IP not found in addresses - skip this path.
+					// This can happen with stale data or manual DRBD configuration.
+					continue
+				}
 				peerStatus.Paths = append(peerStatus.Paths, v1alpha1.DRBDResourcePathStatus{
-					SystemNetworkName: "",
+					SystemNetworkName: addr.SystemNetworkName,
 					Address: v1alpha1.DRBDAddress{
 						IPv4: path.ThisHost.Address,
 						Port: uint(path.ThisHost.Port),
