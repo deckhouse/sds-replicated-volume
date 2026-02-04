@@ -116,6 +116,15 @@ type ActualPeer interface {
 	// PeerDiskState returns the peer's disk state for volume 0.
 	PeerDiskState() string
 
+	// Protocol returns the replication protocol (A, B, or C).
+	Protocol() string
+
+	// SharedSecret returns the shared secret for authentication.
+	SharedSecret() string
+
+	// SharedSecretAlg returns the HMAC algorithm for shared secret.
+	SharedSecretAlg() string
+
 	// AllowTwoPrimaries returns the allow-two-primaries setting.
 	AllowTwoPrimaries() bool
 
@@ -531,6 +540,27 @@ func (p *actualPeer) ConnectionState() string {
 func (p *actualPeer) PeerDiskState() string {
 	if len(p.connection.PeerDevices) > 0 {
 		return p.connection.PeerDevices[0].PeerDiskState
+	}
+	return ""
+}
+
+func (p *actualPeer) Protocol() string {
+	if p.showConnection != nil {
+		return p.showConnection.Net.Protocol
+	}
+	return ""
+}
+
+func (p *actualPeer) SharedSecret() string {
+	if p.showConnection != nil {
+		return p.showConnection.Net.SharedSecret
+	}
+	return ""
+}
+
+func (p *actualPeer) SharedSecretAlg() string {
+	if p.showConnection != nil {
+		return p.showConnection.Net.CRAMHMACAlg
 	}
 	return ""
 }

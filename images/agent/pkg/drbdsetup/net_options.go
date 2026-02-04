@@ -32,6 +32,9 @@ var (
 
 // NetOptions contains options for drbdsetup net-options command.
 type NetOptions struct {
+	Protocol          *string
+	SharedSecret      *string
+	CRAMHMACAlg       *string
 	AllowTwoPrimaries *bool
 	AllowRemoteRead   *bool
 }
@@ -41,6 +44,18 @@ var NetOptionsArgs = func(resource string, peerNodeID uint8, opts NetOptions) []
 	args := []string{
 		"net-options", resource,
 		strconv.FormatUint(uint64(peerNodeID), 10),
+	}
+
+	if opts.Protocol != nil {
+		args = append(args, "--protocol="+*opts.Protocol)
+	}
+
+	if opts.SharedSecret != nil {
+		args = append(args, "--shared-secret="+*opts.SharedSecret)
+	}
+
+	if opts.CRAMHMACAlg != nil {
+		args = append(args, "--cram-hmac-alg="+*opts.CRAMHMACAlg)
 	}
 
 	if opts.AllowTwoPrimaries != nil {

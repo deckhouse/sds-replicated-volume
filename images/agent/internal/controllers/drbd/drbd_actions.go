@@ -214,12 +214,18 @@ func (a NewPeerAction) String() string {
 type NetOptionsAction struct {
 	ResourceName      string
 	PeerNodeID        uint8
+	Protocol          *string
+	SharedSecret      *string
+	CRAMHMACAlg       *string
 	AllowTwoPrimaries *bool
 	AllowRemoteRead   *bool
 }
 
 func (a NetOptionsAction) Execute(ctx context.Context) error {
 	err := drbdsetup.ExecuteNetOptions(ctx, a.ResourceName, a.PeerNodeID, drbdsetup.NetOptions{
+		Protocol:          a.Protocol,
+		SharedSecret:      a.SharedSecret,
+		CRAMHMACAlg:       a.CRAMHMACAlg,
 		AllowTwoPrimaries: a.AllowTwoPrimaries,
 		AllowRemoteRead:   a.AllowRemoteRead,
 	})

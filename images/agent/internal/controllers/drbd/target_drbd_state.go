@@ -19,6 +19,7 @@ package drbd
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/maps"
@@ -144,13 +145,15 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 	}
 
 	for nodeID, pair := range existing {
-		// Reconcile net options
-		res = append(res, computeNetOptionsActionReconcile(resourceName, pair.Left, pair.Right, iState.AllowTwoPrimaries())...)
-		res = append(res, computePathActions(resourceName, pair.Left, pair.Right)...)
+		iPeer, aPeer := pair.Left, pair.Right
+
+		// Reconcile net options (protocol, shared-secret, cram-hmac-alg, allow-two-primaries, allow-remote-read)
+		res = append(res, computeNetOptionsActionReconcile(resourceName, iPeer, aPeer, iState.AllowTwoPrimaries())...)
+		res = append(res, computePathActions(resourceName, iPeer, aPeer)...)
 		// Connect is only valid when peer is in StandAlone state.
 		// Any other state means connection is either active, in progress, or in error recovery,
 		// and calling connect will fail with "Device has a net-config".
-		if pair.Right.ConnectionState() == v1alpha1.ConnectionStateStandAlone.String() {
+		if aPeer.ConnectionState() == v1alpha1.ConnectionStateStandAlone.String() {
 			res = append(res, ConnectAction{
 				ResourceName: resourceName,
 				PeerNodeID:   nodeID,
@@ -310,6 +313,27 @@ func computeNetOptionsActionReconcile(resourceName string, iPeer IntendedPeer, a
 	action := NetOptionsAction{
 		ResourceName: resourceName,
 		PeerNodeID:   iPeer.NodeID(),
+	}
+
+	// Check protocol
+	if string(iPeer.Protocol()) != aPeer.Protocol() {
+		protocol := string(iPeer.Protocol())
+		action.Protocol = &protocol
+		changed = true
+	}
+
+	// Check shared-secret
+	if iPeer.SharedSecret() != aPeer.SharedSecret() {
+		sharedSecret := iPeer.SharedSecret()
+		action.SharedSecret = &sharedSecret
+		changed = true
+	}
+
+	// Check cram-hmac-alg (case-insensitive because DRBD normalizes to lowercase)
+	if !strings.EqualFold(string(iPeer.SharedSecretAlg()), aPeer.SharedSecretAlg()) {
+		cramHMACAlg := strings.ToLower(string(iPeer.SharedSecretAlg()))
+		action.CRAMHMACAlg = &cramHMACAlg
+		changed = true
 	}
 
 	// Check allow-two-primaries
