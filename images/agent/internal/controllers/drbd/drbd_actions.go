@@ -187,6 +187,7 @@ func (a DiskOptionsAction) String() string {
 type NewPeerAction struct {
 	ResourceName string
 	PeerNodeID   uint8
+	PeerName     string // Connection name (mandatory for --_name)
 	Protocol     string // A, B, or C
 	SharedSecret string
 	CRAMHMACAlg  string // HMAC algorithm for authentication
@@ -194,21 +195,19 @@ type NewPeerAction struct {
 }
 
 func (a NewPeerAction) Execute(ctx context.Context) error {
-	var opts *drbdsetup.NewPeerOptions
-	if a.Protocol != "" || a.SharedSecret != "" || a.CRAMHMACAlg != "" || a.RRConflict != "" {
-		opts = &drbdsetup.NewPeerOptions{
-			Protocol:     a.Protocol,
-			SharedSecret: a.SharedSecret,
-			CRAMHMACAlg:  a.CRAMHMACAlg,
-			RRConflict:   a.RRConflict,
-		}
+	opts := &drbdsetup.NewPeerOptions{
+		Name:         a.PeerName,
+		Protocol:     a.Protocol,
+		SharedSecret: a.SharedSecret,
+		CRAMHMACAlg:  a.CRAMHMACAlg,
+		RRConflict:   a.RRConflict,
 	}
 	err := drbdsetup.ExecuteNewPeer(ctx, a.ResourceName, a.PeerNodeID, opts)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNewPeerFailed)
 }
 
 func (a NewPeerAction) String() string {
-	return fmt.Sprintf("NewPeer(resource=%s, peerNodeID=%d)", a.ResourceName, a.PeerNodeID)
+	return fmt.Sprintf("NewPeer(resource=%s, peerNodeID=%d, peerName=%s)", a.ResourceName, a.PeerNodeID, a.PeerName)
 }
 
 // NetOptionsAction sets network options on a peer connection.

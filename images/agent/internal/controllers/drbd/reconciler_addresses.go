@@ -43,6 +43,11 @@ type IntendedPort struct {
 // and the Node's addresses. It returns the networks and IPs that should be used,
 // ignoring ports.
 func computeIntendedIPs(drbdr *v1alpha1.DRBDResource, node *corev1.Node) []IntendedIP {
+	// No addresses for down resources
+	if drbdr.Spec.State == v1alpha1.DRBDResourceStateDown {
+		return nil
+	}
+
 	// Build address map from Node.status.addresses
 	nodeAddressesByType := make(map[corev1.NodeAddressType]string)
 	for _, addr := range node.Status.Addresses {

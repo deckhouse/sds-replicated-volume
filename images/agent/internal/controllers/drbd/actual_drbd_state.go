@@ -281,7 +281,7 @@ func (aState *actualState) Report(status *v1alpha1.DRBDResourceStatus) error {
 	}
 
 	if aState.status == nil && aState.show == nil {
-		// Resource doesn't exist in DRBD - broken invariant at report stage
+		// Resource doesn't exist in DRBD - this is valid when resource is Down
 		// Reset all fields except activeConfiguration.state
 		status.Device = ""
 		status.DiskState = ""
@@ -294,7 +294,7 @@ func (aState *actualState) Report(status *v1alpha1.DRBDResourceStatus) error {
 		}
 		status.ActiveConfiguration.State = v1alpha1.DRBDResourceStateDown
 
-		return errors.New("resource not found in DRBD")
+		return nil
 	}
 
 	// Invariant check: we expect exactly one volume

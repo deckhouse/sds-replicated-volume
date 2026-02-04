@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 var (
@@ -33,6 +34,7 @@ var (
 
 // NewPeerOptions contains optional parameters for new-peer command.
 type NewPeerOptions struct {
+	Name         string // Connection name (MANDATORY - used for --_name)
 	Protocol     string // A, B, or C
 	SharedSecret string
 	CRAMHMACAlg  string // Required for shared-secret to work (e.g., "sha256", "sha1")
@@ -46,6 +48,10 @@ var NewPeerArgs = func(resource string, peerNodeID uint8, opts *NewPeerOptions) 
 		strconv.FormatUint(uint64(peerNodeID), 10),
 	}
 	if opts != nil {
+		// --_name is mandatory for new-peer
+		if opts.Name != "" {
+			args = append(args, "--_name="+opts.Name)
+		}
 		if opts.Protocol != "" {
 			args = append(args, "--protocol", opts.Protocol)
 		}
@@ -53,7 +59,8 @@ var NewPeerArgs = func(resource string, peerNodeID uint8, opts *NewPeerOptions) 
 			args = append(args, "--shared-secret", opts.SharedSecret)
 		}
 		if opts.CRAMHMACAlg != "" {
-			args = append(args, "--cram-hmac-alg", opts.CRAMHMACAlg)
+			// DRBD expects lowercase algorithm names (from /proc/crypto)
+			args = append(args, "--cram-hmac-alg", strings.ToLower(opts.CRAMHMACAlg))
 		}
 		if opts.RRConflict != "" {
 			args = append(args, "--rr-conflict", opts.RRConflict)

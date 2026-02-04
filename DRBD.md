@@ -18,10 +18,15 @@ Based on my analysis of the DRBD source code, here's a comprehensive **Caller's 
 - **`11`** - State change error (generic SS_ error)
 - **`16`** - State change error: No local disk
 - **`17`** - State change error: No up-to-date disk
-- **`20`** - Userspace error (OTHER_ERROR - invalid arguments, parsing errors, netlink failures, etc.)
-- **`121`** - DRBD kernel module not loaded
+- **`20`** - Userspace error (OTHER_ERROR - invalid arguments, parsing errors, netlink failures, **module cannot be loaded**, etc.)
 
 Each command documents its specific exit codes below. Exit code `10` indicates a kernel error - check kernel logs or error message for the specific error code (102-170 range).
+
+### Special Module Loading Behavior
+
+When DRBD kernel module cannot be loaded (`modprobe drbd` fails):
+- **Teardown commands** (`down`, `secondary`, `disconnect`, `detach`) → Exit `0` (idempotent - already "down")
+- **All other commands** → Exit `20` (cannot operate without module)
 
 ---
 
@@ -77,6 +82,32 @@ Each command documents its specific exit codes below. Exit code `10` indicates a
 
 ---
 
+## HIDDEN MANDATORY OPTIONS
+
+**CRITICAL:** Some options are required by the kernel protocol but not obviously documented because `drbdadm` auto-generates them.
+
+### `--_name` (Connection Name)
+
+**Required for:** `new-peer` command only
+
+**Error if omitted:** 
+```
+Failure: (126) UnknownMandatoryTag
+additional info from kernel:
+name missing
+```
+
+**Value:** A unique identifier for the connection (e.g., peer hostname, explicit connection name from config)
+
+**Example:**
+```bash
+drbdsetup new-peer myres 2 --_name=peer-node --protocol=C
+```
+
+**Why it exists:** The DRBD 9 kernel protocol requires a connection name field marked as DRBD_GENLA_F_MANDATORY. The `drbdadm` tool automatically generates this from your configuration file (using either the explicit connection name or the peer hostname), but when calling `drbdsetup` directly, you must provide it explicitly.
+
+---
+
 ## RESOURCE MANAGEMENT
 
 ### `new-resource`
@@ -109,8 +140,7 @@ drbdsetup new-resource <resource_name> <node_id> [options]
 **Exit Codes:**
 - `0` - Resource created successfully
 - `10` - Kernel error (e.g., resource already exists, permission denied)
-- `20` - Invalid arguments or netlink communication failure
-- `121` - DRBD module not loaded
+- `20` - Invalid arguments, netlink communication failure, or module cannot be loaded
 
 **Notes:**
 - Must be first command when setting up a resource
@@ -137,8 +167,7 @@ drbdsetup resource-options <resource_name> [options]
 **Exit Codes:**
 - `0` - Options updated successfully
 - `10` - Kernel error (e.g., resource not found, invalid option value)
-- `20` - Invalid arguments (incorrect option syntax, excess arguments)
-- `121` - DRBD module not loaded
+- `20` - Invalid arguments (incorrect option syntax, excess arguments), or module cannot be loaded
 
 **Notes:**
 - Can change options on a running resource (most options)
@@ -165,7 +194,7 @@ drbdsetup down {<resource_name>|all}
 - `.warn_on_missing = true` - Warns if resource not found
 
 **Exit Codes:**
-- `0` - Resource torn down successfully (or didn't exist - command is very forgiving)
+- `0` - Resource torn down successfully (or didn't exist, or module not loaded - command is very forgiving)
 - `10` - Kernel error during teardown
 - `20` - Netlink communication failure
 
@@ -209,8 +238,7 @@ drbdsetup new-minor <resource_name> <minor> <volume> [options]
 **Exit Codes:**
 - `0` - Minor created successfully
 - `10` - Kernel error (e.g., minor/volume already exists, resource not found)
-- `20` - Invalid arguments or netlink failure
-- `121` - DRBD module not loaded
+- `20` - Invalid arguments, netlink failure, or module cannot be loaded
 
 **Notes:**
 - Minor number must be unique system-wide
@@ -254,8 +282,7 @@ drbdsetup attach <minor> <lower_dev> <meta_dev> <meta_idx> [options]
 **Exit Codes:**
 - `0` - Device attached successfully
 - `10` - Kernel error (check message for specific error: cannot open device, device too small, already claimed, meta-data invalid, etc.)
-- `20` - Invalid arguments or netlink failure
-- `121` - DRBD module not loaded
+- `20` - Invalid arguments, netlink failure, or module cannot be loaded
 
 **Notes:**
 - Backing device must not be in use
@@ -283,8 +310,7 @@ drbdsetup disk-options <minor> [options]
 **Exit Codes:**
 - `0` - Options changed successfully
 - `10` - Kernel error (e.g., no disk attached, cannot change during verify/resync)
-- `20` - Invalid arguments
-- `121` - DRBD module not loaded
+- `20` - Invalid arguments or module cannot be loaded
 
 **Notes:**
 - Can change most options online
@@ -308,11 +334,10 @@ drbdsetup detach <minor> [options]
 - `--diskless` (FLAG) - Mark volume as permanently diskless (intentional diskless client)
 
 **Exit Codes:**
-- `0` - Device detached successfully
+- `0` - Device detached successfully (or module not loaded - idempotent)
 - `10` - Kernel error (e.g., cannot detach last copy of data)
 - `11` - State change error (device state doesn't allow detach)
 - `20` - Invalid arguments or netlink failure
-- `121` - DRBD module not loaded
 
 **Notes:**
 - Without --force: waits for pending I/O to complete
@@ -344,8 +369,7 @@ drbdsetup primary <resource_name> [options]
 - `10` - Kernel error
 - `11` - State change error (generic state transition failure)
 - `17` - State change error: No up-to-date disk available
-- `20` - Invalid arguments or netlink failure
-- `121` - DRBD module not loaded
+- `20` - Invalid arguments, netlink failure, or module cannot be loaded
 
 **Notes:**
 - Allows mounting or opening devices for writing
@@ -371,11 +395,10 @@ drbdsetup secondary <resource_name> [options]
 - `--force` (FLAG) - Force demotion, terminates all pending and new I/O with errors
 
 **Exit Codes:**
-- `0` - Role changed to secondary successfully
+- `0` - Role changed to secondary successfully (or module not loaded - idempotent)
 - `10` - Kernel error
 - `11` - State change error (device in use, cannot demote)
 - `20` - Invalid arguments or netlink failure
-- `121` - DRBD module not loaded
 
 **Notes:**
 - Fails if any device in the resource is in use (mounted, open for writing)
@@ -392,19 +415,21 @@ drbdsetup secondary <resource_name> [options]
 
 **Synopsis:**
 ```bash
-drbdsetup new-peer <resource_name> <peer_node_id> [options]
+drbdsetup new-peer <resource_name> <peer_node_id> --_name=<connection_name> [options]
 ```
 
 **Arguments:**
 - `resource_name` - Resource name
 - `peer_node_id` - Peer's node ID
 
-**Options** (net-options, both immutable and changeable):
-**Immutable:**
+**Required Options:**
+- `--_name=<connection_name>` (STRING) **[MANDATORY]** - Connection name identifier
+
+**Immutable Options:**
 - `--transport=<name>` (STRING) - Transport type (tcp, rdma, etc.)
 - `--load-balance-paths={yes|no}` (BOOLEAN) - Load balance across multiple paths
 
-**Changeable:**
+**Changeable Options:**
 - `--protocol={A|B|C}` (ENUM) - Replication protocol
 - `--timeout=<1/10s>` (NUMERIC) - Network timeout
 - `--max-epoch-size=<num>` (NUMERIC) - Maximum epoch size
@@ -444,11 +469,16 @@ drbdsetup new-peer <resource_name> <peer_node_id> [options]
 
 **Exit Codes:**
 - `0` - Peer created successfully
-- `10` - Kernel error (e.g., resource not found, invalid peer node ID, failed to create transport)
-- `20` - Invalid arguments or netlink failure
-- `121` - DRBD module not loaded
+- `10` - Kernel error including:
+  - `126` (ERR_MANDATORY_TAG) - "UnknownMandatoryTag" with "name missing" → Missing `--_name` option
+  - Resource not found, invalid peer node ID, failed to create transport
+- `20` - Invalid arguments, netlink failure, or module cannot be loaded
 
 **Notes:**
+- **CRITICAL:** Must specify `--_name=<connection_name>` - this is a hidden mandatory field
+  - Connection name can be: explicit name from config, peer hostname, or any unique identifier
+  - `drbdadm` auto-generates this, but `drbdsetup` requires it explicitly
+  - Omitting it causes: "Failure: (126) UnknownMandatoryTag" with "name missing"
 - Peer must be created before adding paths or connecting
 - Transport is immutable after peer creation
 - Peer node ID must match configuration on peer node
@@ -473,8 +503,7 @@ drbdsetup del-peer <resource_name> <peer_node_id> [options]
 **Exit Codes:**
 - `0` - Peer removed successfully
 - `10` - Kernel error (e.g., resource not found, peer still connected)
-- `20` - Invalid arguments or netlink failure
-- `121` - DRBD module not loaded
+- `20` - Invalid arguments, netlink failure, or module cannot be loaded
 
 **Notes:**
 - Connection must be disconnected first (unless --force)
@@ -499,8 +528,7 @@ drbdsetup forget-peer <resource_name> <peer_node_id>
 **Exit Codes:**
 - `0` - Peer forgotten successfully
 - `10` - Kernel error (e.g., resource not found, peer still connected)
-- `20` - Invalid arguments or netlink failure
-- `121` - DRBD module not loaded
+- `20` - Invalid arguments, netlink failure, or module cannot be loaded
 
 **Notes:**
 - **Destructive operation** - removes peer from meta-data
@@ -529,8 +557,7 @@ drbdsetup new-path <resource_name> <peer_node_id> <local_addr> <remote_addr>
 **Exit Codes:**
 - `0` - Path added successfully
 - `10` - Kernel error (e.g., address already in use, path already exists)
-- `20` - Invalid address format or netlink failure
-- `121` - DRBD module not loaded
+- `20` - Invalid address format, netlink failure, or module cannot be loaded
 
 **Notes:**
 - Can add multiple paths for multi-path support
@@ -558,8 +585,7 @@ drbdsetup del-path <resource_name> <peer_node_id> <local_addr> <remote_addr>
 **Exit Codes:**
 - `0` - Path removed successfully
 - `10` - Kernel error (e.g., path not found)
-- `20` - Invalid arguments or netlink failure
-- `121` - DRBD module not loaded
+- `20` - Invalid arguments, netlink failure, or module cannot be loaded
 
 **Notes:**
 - Cannot remove last path while connected
@@ -587,8 +613,7 @@ drbdsetup connect <resource_name> <peer_node_id> [options]
 - `0` - Connection initiated successfully (asynchronous - doesn't wait for established)
 - `10` - Kernel error (e.g., --discard-my-data not allowed when primary, resource not found, need to be standalone)
 - `11` - State change error (connection state not allowing connect)
-- `20` - Invalid arguments or netlink failure
-- `121` - DRBD module not loaded
+- `20` - Invalid arguments, netlink failure, or module cannot be loaded
 
 **Notes:**
 - **Asynchronous** - returns immediately, connection happens in background
@@ -614,11 +639,10 @@ drbdsetup disconnect <resource_name> <peer_node_id> [options]
 - `--force` (FLAG) - Force disconnect immediately
 
 **Exit Codes:**
-- `0` - Disconnection initiated successfully
+- `0` - Disconnection initiated successfully (or module not loaded - idempotent)
 - `10` - Kernel error (e.g., resource not found)
 - `11` - State change error
 - `20` - Invalid arguments or netlink failure
-- `121` - DRBD module not loaded
 
 **Notes:**
 - Without --force: graceful disconnect (waits for pending I/O)
@@ -647,8 +671,7 @@ drbdsetup net-options <resource_name> <peer_node_id> [options]
 **Exit Codes:**
 - `0` - Options changed successfully
 - `10` - Kernel error (e.g., protocol version too low, cannot change during verify/resync, cannot clear allow-two-primaries)
-- `20` - Invalid arguments
-- `121` - DRBD module not loaded
+- `20` - Invalid arguments or module cannot be loaded
 
 **Notes:**
 - Most options can be changed while connected (requires protocol 100+)
@@ -685,8 +708,7 @@ drbdsetup peer-device-options <resource_name> <peer_node_id> <volume> [options]
 **Exit Codes:**
 - `0` - Options changed successfully
 - `10` - Kernel error (e.g., resource not found, invalid option value)
-- `20` - Invalid arguments
-- `121` - DRBD module not loaded
+- `20` - Invalid arguments or module cannot be loaded
 
 **Notes:**
 - These options control resync behavior
@@ -719,8 +741,7 @@ drbdsetup resize <minor> [options]
 - `0` - Resize completed successfully
 - `10` - Kernel error (e.g., backing device not grown, peer doesn't have space)
 - `11` - State change error (e.g., resize not allowed during resync, need one primary node)
-- `20` - Invalid arguments or netlink failure
-- `121` - DRBD module not loaded
+- `20` - Invalid arguments, netlink failure, or module cannot be loaded
 
 **Notes:**
 - Run this command after growing backing devices on all nodes
@@ -751,8 +772,7 @@ drbdsetup new-current-uuid <minor> [options]
 - `0` - New UUID generated successfully
 - `10` - Kernel error (e.g., wrong disk state, need protocol C)
 - `11` - State change error
-- `20` - Invalid arguments or netlink failure
-- `121` - DRBD module not loaded
+- `20` - Invalid arguments, netlink failure, or module cannot be loaded
 
 **Notes:**
 - **Three use cases:**
@@ -785,8 +805,7 @@ drbdsetup rename-resource <resource_name> <new_name>
 **Exit Codes:**
 - `0` - Resource renamed successfully
 - `10` - Kernel error (e.g., resource not found, new name already exists)
-- `20` - Invalid arguments or netlink failure
-- `121` - DRBD module not loaded
+- `20` - Invalid arguments, netlink failure, or module cannot be loaded
 
 **Notes:**
 - **Local operation only** - doesn't affect peer nodes
@@ -813,7 +832,7 @@ drbdsetup rename-resource <resource_name> <new_name>
 | `secondary` | Resource | name | --force | Demotes to secondary role |
 | `resize` | Minor | minor | size, assume flags | Grows device size |
 | `new-current-uuid` | Minor | minor | --clear-bitmap, --force-resync | Manages UUID/resync |
-| `new-peer` | Peer | name, node_id | net options | Defines peer node |
+| `new-peer` | Peer | name, node_id | --_name (required!), net options | Defines peer node |
 | `del-peer` | Peer | name, node_id | --force | Removes peer config |
 | `forget-peer` | Resource | name, node_id | none | Clears from metadata |
 | `new-path` | Peer | name, node_id, local, remote | none | Adds network path |
@@ -832,7 +851,7 @@ drbdsetup rename-resource <resource_name> <new_name>
 drbdsetup new-resource myres 1
 drbdsetup new-minor myres 0 0
 drbdsetup attach 0 /dev/sda1 /dev/sda2 0
-drbdsetup new-peer myres 2 --protocol=C
+drbdsetup new-peer myres 2 --_name=peer-node --protocol=C
 drbdsetup new-path myres 2 192.168.1.1:7788 192.168.1.2:7788
 drbdsetup connect myres 2
 # After sync completes:
@@ -868,7 +887,7 @@ drbdadm create-md myres/0
 drbdsetup new-resource myres 1  # (node 2 uses node_id 2)
 drbdsetup new-minor myres 0 0
 drbdsetup attach 0 /dev/sda1 /dev/sda2 0
-drbdsetup new-peer myres 2 --protocol=C
+drbdsetup new-peer myres 2 --_name=peer-node --protocol=C
 drbdsetup new-path myres 2 192.168.1.1:7788 192.168.1.2:7788
 drbdsetup connect myres 2
 # After handshake, on one node:

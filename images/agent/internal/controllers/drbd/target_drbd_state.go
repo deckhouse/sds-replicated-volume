@@ -128,6 +128,7 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 		res = append(res, NewPeerAction{
 			ResourceName: resourceName,
 			PeerNodeID:   nodeID,
+			PeerName:     iPeer.Name(),
 			Protocol:     string(iPeer.Protocol()),
 			SharedSecret: iPeer.SharedSecret(),
 			CRAMHMACAlg:  string(iPeer.SharedSecretAlg()),
