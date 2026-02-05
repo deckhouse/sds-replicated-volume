@@ -23,25 +23,24 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
 
 // Scanner listens for DRBD events via drbdsetup events2 and triggers
 // reconciliation of DRBDResource objects by sending events to the controller.
 type Scanner struct {
-	log     *slog.Logger
-	eventCh chan event.GenericEvent
+	log       *slog.Logger
+	requestCh chan<- event.TypedGenericEvent[DRBDReconcileRequest]
 }
 
 // NewScanner creates a new Scanner.
 func NewScanner(
 	log *slog.Logger,
-	eventCh chan event.GenericEvent,
+	requestCh chan<- event.TypedGenericEvent[DRBDReconcileRequest],
 ) *Scanner {
 	return &Scanner{
-		log:     log.With("name", ScannerName),
-		eventCh: eventCh,
+		log:       log.With("name", ScannerName),
+		requestCh: requestCh,
 	}
 }
 
@@ -130,26 +129,24 @@ func (s *Scanner) runEventsLoop(ctx context.Context) error {
 	return nil
 }
 
-// triggerReconciliation sends an event to trigger reconciliation for a specific DRBD resource.
-// It derives the K8S name from the DRBD name and always triggers reconciliation.
-// The reconciler handles finding the actual K8S object or performing orphan cleanup.
+// triggerReconciliation sends a request to trigger reconciliation for a specific DRBD resource.
+// If the DRBD name has the standard "sdsrv-" prefix, it derives the K8S name and sends a Name-based request.
+// If the DRBD name does not have the prefix, it sends an ActualNameOnTheNode-based request for orphan/rename handling.
 func (s *Scanner) triggerReconciliation(ctx context.Context, drbdName string) {
-	// Derive K8S name from DRBD name using helper
-	k8sName, _ := ParseDRBDResourceNameOnTheNode(drbdName)
+	var req DRBDReconcileRequest
 
-	// Create synthetic object to trigger reconciliation
-	dr := &v1alpha1.DRBDResource{}
-	dr.Name = k8sName
+	// If DRBD name has standard prefix, we can derive K8S name
+	if k8sName, hasPrefix := ParseDRBDResourceNameOnTheNode(drbdName); hasPrefix {
+		req.Name = k8sName
+		s.log.Debug("Triggered reconciliation (by k8s name)", "name", k8sName)
+	} else {
+		// No prefix - use ActualNameOnTheNode for orphan/rename handling
+		req.ActualNameOnTheNode = drbdName
+		s.log.Debug("Triggered reconciliation (by actual name)", "actualNameOnTheNode", drbdName)
+	}
 
-	s.sendEvent(ctx, dr)
-}
-
-// sendEvent sends a generic event to trigger reconciliation.
-// Blocks until the event is sent or context is cancelled.
-func (s *Scanner) sendEvent(ctx context.Context, dr *v1alpha1.DRBDResource) {
 	select {
-	case s.eventCh <- event.GenericEvent{Object: dr}:
-		s.log.Debug("Triggered reconciliation", "name", dr.Name)
+	case s.requestCh <- event.TypedGenericEvent[DRBDReconcileRequest]{Object: req}:
 	case <-ctx.Done():
 	}
 }

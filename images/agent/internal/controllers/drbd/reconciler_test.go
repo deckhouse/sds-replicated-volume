@@ -28,10 +28,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -85,24 +83,21 @@ func TestReconciler_Reconcile(t *testing.T) {
 	}
 
 	testCases := []reconcileTestCase{
-		// Basic cases - resource lookup and orphan cleanup
+		// Basic cases - resource lookup
 		{
-			name:  "resource not found - orphan cleanup",
+			name:  "resource not found by name - returns done (no orphan cleanup)",
 			drbdr: nil,
-			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
-				// When DRBD event triggers reconciliation but no K8S object exists,
-				// we clean up the orphan DRBD resource
-				downCmd(testDRBDResName),
-			},
+			// When reconcile is triggered by K8S name but object doesn't exist,
+			// we just return Done (orphan cleanup requires ActualNameOnTheNode)
+			expectedCommands: []*fakedrbdsetup.ExpectedCmd{},
 		},
 		{
-			name:  "resource belongs to different node - orphan cleanup",
+			name:  "resource belongs to different node - returns done (filtered by predicates)",
 			drbdr: drbdrOnNode(testOtherNode, v1alpha1.DRBDResourceStateUp),
-			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
-				// When DRBD event triggers reconciliation but K8S object is for different node,
-				// we clean up the orphan DRBD resource on this node
-				downCmd(testDRBDResName),
-			},
+			// When reconcile is triggered for a resource on different node,
+			// getDRBDRByName returns the object, but reconcileDRBDR checks
+			// node ownership and returns done (predicates should filter this normally)
+			expectedCommands: []*fakedrbdsetup.ExpectedCmd{},
 		},
 
 		// State=Up cases - verifies correct drbdsetup command sequence
@@ -134,7 +129,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			},
 			postCheck: func(t *testing.T, cl client.Client) {
 				dr := &v1alpha1.DRBDResource{}
-				if err := cl.Get(t.Context(), types.NamespacedName{Name: testDRBDRName}, dr); err != nil {
+				if err := cl.Get(t.Context(), client.ObjectKey{Name: testDRBDRName}, dr); err != nil {
 					t.Fatalf("failed to get DRBDResource: %v", err)
 				}
 				expectFinalizers(t, dr.Finalizers, v1alpha1.AgentFinalizer)
@@ -178,23 +173,13 @@ func TestReconciler_Reconcile(t *testing.T) {
 			},
 		},
 
-		// Custom DRBD resource name - returns configured resource to avoid action execution
+		// Custom DRBD resource name - triggers rename flow
 		{
-			name:  "custom drbd resource name - uses actualNameOnTheNode for drbdsetup",
+			name:  "custom drbd resource name - triggers rename to standard name",
 			drbdr: drbdrWithCustomName(testNodeName, testCustomDRBDName),
 			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
-				statusCmd(testCustomDRBDName, configuredStatus(testCustomDRBDName)),
-				showCmd(testCustomDRBDName, &drbdsetup.ShowResource{
-					Resource: testCustomDRBDName,
-					Options: drbdsetup.ShowOptions{
-						AutoPromote:                false,
-						Quorum:                     "off",
-						QuorumMinimumRedundancy:    "off",
-						OnNoQuorum:                 "suspend-io",
-						OnNoDataAccessible:         "suspend-io",
-						OnSuspendedPrimaryOutdated: "force-secondary",
-					},
-				}),
+				// When ActualNameOnTheNode is set, we rename from custom to standard name
+				renameCmd(testCustomDRBDName, testDRBDResName),
 			},
 		},
 
@@ -406,9 +391,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			// Run reconcile
 			_, err := rec.Reconcile(
 				t.Context(),
-				reconcile.Request{
-					NamespacedName: types.NamespacedName{Name: reqName},
-				},
+				drbd.DRBDReconcileRequest{Name: reqName},
 			)
 
 			// Check error
@@ -571,6 +554,15 @@ func downCmd(resourceName string) *fakedrbdsetup.ExpectedCmd {
 	return &fakedrbdsetup.ExpectedCmd{
 		Name:         drbdsetup.Command,
 		Args:         drbdsetup.DownArgs(resourceName),
+		ResultOutput: []byte{},
+		ResultErr:    nil,
+	}
+}
+
+func renameCmd(oldName, newName string) *fakedrbdsetup.ExpectedCmd {
+	return &fakedrbdsetup.ExpectedCmd{
+		Name:         drbdsetup.Command,
+		Args:         drbdsetup.RenameArgs(oldName, newName),
 		ResultOutput: []byte{},
 		ResultErr:    nil,
 	}

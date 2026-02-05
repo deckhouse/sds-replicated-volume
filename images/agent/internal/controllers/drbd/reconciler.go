@@ -30,6 +30,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -40,7 +41,7 @@ type Reconciler struct {
 	portCache *PortCache
 }
 
-var _ reconcile.Reconciler = (*Reconciler)(nil)
+var _ reconcile.TypedReconciler[DRBDReconcileRequest] = (*Reconciler)(nil)
 
 // NewReconciler creates a new Reconciler.
 func NewReconciler(cl client.Client, nodeName string, portCache *PortCache) *Reconciler {
@@ -51,30 +52,97 @@ func NewReconciler(cl client.Client, nodeName string, portCache *PortCache) *Rec
 	}
 }
 
-// Reconcile reconciles a DRBDResource.
+// Reconcile reconciles a DRBDResource based on the request type.
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
-	req reconcile.Request,
+	req DRBDReconcileRequest,
 ) (reconcile.Result, error) {
 	rf := flow.BeginRootReconcile(ctx)
-	rf.Log().V(1).Info("Reconciling DRBDResource", "name", req.Name)
 
-	// Get DRBDResource
-	drbdr, ok, err := r.getCurrentNodeDRBDR(rf.Ctx(), req)
+	// Edge case: scanner found non-prefixed DRBD resource
+	if req.ActualNameOnTheNode != "" {
+		return r.reconcileByActualName(rf.Ctx(), req.ActualNameOnTheNode).ToCtrl()
+	}
+
+	// Main scenario: reconcile by K8S name
+	rf.Log().V(1).Info("Reconciling DRBDResource", "name", req.Name)
+	drbdr, ok, err := r.getDRBDRByName(rf.Ctx(), req.Name)
 	if err != nil {
 		return rf.Fail(err).ToCtrl()
 	}
 	if !ok {
-		// K8S object not found by Name - check for orphan/rename scenario
-		if outcome := r.reconcileOrphanDRBD(rf.Ctx(), req.Name); outcome.ShouldReturn() {
-			return outcome.ToCtrl()
-		}
+		return rf.Done().ToCtrl() // Deleted
+	}
+
+	// Skip if resource belongs to different node (predicates should filter this normally)
+	if drbdr.Spec.NodeName != r.nodeName {
+		rf.Log().V(1).Info("DRBDResource belongs to different node, skipping", "nodeName", drbdr.Spec.NodeName)
 		return rf.Done().ToCtrl()
 	}
 
+	return r.reconcileDRBDR(rf.Ctx(), drbdr).ToCtrl()
+}
+
+// reconcileByActualName handles requests with ActualNameOnTheNode (non-prefixed DRBD resources).
+// Either finds the owning DRBDResource and reconciles it, or tears down orphan.
+//
+// Reconcile pattern: Pure orchestration
+func (r *Reconciler) reconcileByActualName(
+	ctx context.Context,
+	actualName string,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "by-actual-name", "actualNameOnTheNode", actualName)
+	defer rf.OnEnd(&outcome)
+
+	// Find K8S resource that has this ActualNameOnTheNode
+	drbdrs, err := r.getDRBDRsOnNode(rf.Ctx())
+	if err != nil {
+		return rf.Fail(err)
+	}
+
+	var matches []v1alpha1.DRBDResource
+	for i := range drbdrs {
+		if drbdrs[i].Spec.ActualNameOnTheNode == actualName {
+			matches = append(matches, drbdrs[i])
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		// Orphan - no K8S object owns this DRBD resource, tear it down
+		outcome = r.reconcileOrphanDRBD(rf.Ctx(), actualName)
+		return
+	case 1:
+		outcome = r.reconcileDRBDR(rf.Ctx(), &matches[0])
+		return
+	default:
+		return rf.Fail(fmt.Errorf("multiple DRBDResources (%d) have ActualNameOnTheNode=%q on node %q",
+			len(matches), actualName, r.nodeName))
+	}
+}
+
+// reconcileDRBDR performs the main reconciliation for a DRBDResource.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileDRBDR(
+	ctx context.Context,
+	drbdr *v1alpha1.DRBDResource,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "drbdr", "name", drbdr.Name)
+	defer rf.OnEnd(&outcome)
+
+	// Phase 0: Handle ActualNameOnTheNode rename if set
+	if drbdr.Spec.ActualNameOnTheNode != "" {
+		outcome = r.reconcileActualNameOnTheNode(rf.Ctx(), drbdr)
+		return
+	}
+
 	// Phase 1: Ensure finalizer (adds if needed for up resources)
-	if outcome := r.reconcileFinalizer(rf.Ctx(), drbdr, true); outcome.ShouldReturn() {
-		return outcome.ToCtrl()
+	if finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, true); finalizerOutcome.ShouldReturn() {
+		if finalizerOutcome.Error() != nil {
+			return rf.Fail(finalizerOutcome.Error())
+		}
+		return rf.Done()
 	}
 
 	// Phase 2: Ensure addresses in status (in-memory only, no patch yet)
@@ -82,7 +150,7 @@ func (r *Reconciler) Reconcile(
 	statusBase := drbdr.DeepCopy()
 	node, err := r.getRequiredCurrentNode(rf.Ctx())
 	if err != nil {
-		return rf.Fail(err).ToCtrl()
+		return rf.Fail(err)
 	}
 	addrErr := ensureAddresses(rf.Ctx(), drbdr, node, r.portCache.Allocate).Error()
 
@@ -141,9 +209,94 @@ func (r *Reconciler) Reconcile(
 	}
 
 	if reconcileErr != nil {
-		return rf.Fail(reconcileErr).ToCtrl()
+		return rf.Fail(reconcileErr)
 	}
-	return rf.Done().ToCtrl()
+	return rf.Done()
+}
+
+// reconcileOrphanDRBD handles DRBD resources with no matching K8S object.
+// actualName is the actual DRBD name on the node to tear down.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileOrphanDRBD(
+	ctx context.Context,
+	actualName string,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "orphan-drbd", "actualNameOnTheNode", actualName)
+	defer rf.OnEnd(&outcome)
+
+	rf.Log().Info("Cleaning up orphan DRBD resource")
+
+	downAction := DownAction{ResourceName: actualName}
+	if err := downAction.Execute(rf.Ctx()); err != nil {
+		return rf.Fail(err)
+	}
+	return rf.Done()
+}
+
+// reconcileActualNameOnTheNode handles renaming DRBD resource from ActualNameOnTheNode to standard name.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileActualNameOnTheNode(
+	ctx context.Context,
+	drbdr *v1alpha1.DRBDResource,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "actual-name-on-the-node")
+	defer rf.OnEnd(&outcome)
+
+	oldName := drbdr.Spec.ActualNameOnTheNode
+	newName := DRBDNameFromK8SName(drbdr.Name)
+
+	rf.Log().Info("Renaming DRBD resource", "from", oldName, "to", newName)
+
+	err := drbdsetup.ExecuteRename(rf.Ctx(), oldName, newName)
+
+	switch {
+	case err == nil:
+		// Rename succeeded - clear ActualNameOnTheNode
+		outcome = r.reconcileClearActualName(rf.Ctx(), drbdr)
+		return
+
+	case errors.Is(err, drbdsetup.ErrRenameUnknownResource):
+		// Old name doesn't exist - check if new name exists (rename might have succeeded before)
+		status, statusErr := drbdsetup.ExecuteStatus(rf.Ctx(), newName)
+		if statusErr != nil {
+			return rf.Fail(statusErr)
+		}
+		if len(status) == 0 {
+			// Neither old nor new name exists - error
+			return rf.Failf(err, "DRBD resource not found: oldName=%s, newName=%s", oldName, newName)
+		}
+		// New name exists - rename succeeded previously, clear ActualNameOnTheNode
+		rf.Log().Info("DRBD resource already renamed", "newName", newName)
+		outcome = r.reconcileClearActualName(rf.Ctx(), drbdr)
+		return
+
+	case errors.Is(err, drbdsetup.ErrRenameAlreadyExists):
+		// Both names exist - configuration error
+		return rf.Failf(err, "both DRBD resource names exist: oldName=%s, newName=%s", oldName, newName)
+
+	default:
+		return rf.Fail(err)
+	}
+}
+
+// reconcileClearActualName patches the spec to clear ActualNameOnTheNode.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileClearActualName(
+	ctx context.Context,
+	drbdr *v1alpha1.DRBDResource,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "clear-actual-name")
+	defer rf.OnEnd(&outcome)
+
+	base := drbdr.DeepCopy()
+	drbdr.Spec.ActualNameOnTheNode = ""
+	if err := r.patchDRBDR(rf.Ctx(), drbdr, base, false); err != nil {
+		return rf.Fail(err)
+	}
+	return rf.Done()
 }
 
 // patchLLV patches an LVMLogicalVolume (main patch domain).
@@ -397,65 +550,4 @@ func computeLLVNameFromDiskPath(
 	}
 
 	return ""
-}
-
-// reconcileOrphanDRBD handles DRBD resources that have no matching K8S object by Name.
-// It searches by ActualNameOnTheNode and either renames or tears down the DRBD resource.
-func (r *Reconciler) reconcileOrphanDRBD(ctx context.Context, k8sName string) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "reconcile-orphan-drbd")
-	defer rf.OnEnd(&outcome)
-
-	// Derive DRBD name from K8S name using helper
-	drbdName := DRBDNameFromK8SName(k8sName)
-
-	// List all DRBDRs on this node (using index)
-	drbdrs, err := r.getDRBDRsOnNode(rf.Ctx())
-	if err != nil {
-		return rf.Fail(flow.Wrapf(err, "listing DRBDResources on node"))
-	}
-
-	// Find matches by ActualNameOnTheNode
-	var matches []v1alpha1.DRBDResource
-	for _, dr := range drbdrs {
-		if dr.Spec.ActualNameOnTheNode == drbdName {
-			matches = append(matches, dr)
-		}
-	}
-
-	switch len(matches) {
-	case 0:
-		// Orphan: no K8S object owns this DRBD resource - tear it down
-		rf.Log().Info("Cleaning up orphan DRBD resource", "drbdName", drbdName)
-		downAction := DownAction{ResourceName: drbdName}
-		if err := downAction.Execute(rf.Ctx()); err != nil {
-			return rf.Fail(err)
-		}
-		return rf.Done()
-
-	case 1:
-		// Rename: K8S object exists with ActualNameOnTheNode matching this DRBD name
-		dr := &matches[0]
-		newName := DRBDNameFromK8SName(dr.Name)
-		rf.Log().Info("Renaming DRBD resource to standard name", "from", drbdName, "to", newName)
-
-		// 1. Rename DRBD resource
-		renameAction := RenameAction{OldName: drbdName, NewName: newName}
-		if err := renameAction.Execute(rf.Ctx()); err != nil {
-			return rf.Fail(err)
-		}
-
-		// 2. Clear ActualNameOnTheNode
-		base := dr.DeepCopy()
-		dr.Spec.ActualNameOnTheNode = ""
-		if err := r.patchDRBDR(rf.Ctx(), dr, base, false); err != nil {
-			return rf.Fail(err)
-		}
-
-		return rf.Done()
-
-	default:
-		// Multiple K8S objects claim this DRBD name - configuration error
-		return rf.Fail(fmt.Errorf("multiple DRBDResources (%d) have ActualNameOnTheNode=%q on node %q",
-			len(matches), drbdName, r.nodeName))
-	}
 }

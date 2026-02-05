@@ -133,3 +133,16 @@ func (r *Reconciler) getDRBDRsOnNode(ctx context.Context) ([]v1alpha1.DRBDResour
 	}
 	return list.Items, nil
 }
+
+// getDRBDRByName fetches a DRBDResource by K8S name.
+// Returns (nil, false, nil) if not found.
+func (r *Reconciler) getDRBDRByName(ctx context.Context, name string) (*v1alpha1.DRBDResource, bool, error) {
+	var drbdr v1alpha1.DRBDResource
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, &drbdr); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	return &drbdr, true, nil
+}

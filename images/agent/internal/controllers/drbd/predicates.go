@@ -31,27 +31,18 @@ func drbdrPredicates(nodeName string) []predicate.Predicate {
 		predicate.Funcs{
 			CreateFunc: func(e event.TypedCreateEvent[client.Object]) bool {
 				dr, ok := e.Object.(*v1alpha1.DRBDResource)
-				if !ok {
-					return false
-				}
-				return dr.Spec.NodeName == nodeName
+				return ok && dr.Spec.NodeName == nodeName
 			},
 			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
 				dr, ok := e.ObjectNew.(*v1alpha1.DRBDResource)
-				if !ok {
-					return false
-				}
-				return dr.Spec.NodeName == nodeName
+				return ok && dr.Spec.NodeName == nodeName
 			},
-			DeleteFunc: func(_ event.TypedDeleteEvent[client.Object]) bool {
-				return false
+			DeleteFunc: func(e event.TypedDeleteEvent[client.Object]) bool {
+				dr, ok := e.Object.(*v1alpha1.DRBDResource)
+				return ok && dr.Spec.NodeName == nodeName
 			},
 			GenericFunc: func(e event.TypedGenericEvent[client.Object]) bool {
-				dr, ok := e.Object.(*v1alpha1.DRBDResource)
-				if !ok {
-					return false
-				}
-				return dr.Spec.NodeName == nodeName
+				return false
 			},
 		},
 	}

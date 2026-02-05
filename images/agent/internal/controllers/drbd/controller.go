@@ -22,6 +22,7 @@ import (
 	"log/slog"
 
 	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -63,17 +64,11 @@ func BuildController(mgr manager.Manager) error {
 		return origExec(ctx, name, arg...)
 	}
 
-	// Create event channel for scanner to trigger reconciliations
-	// Buffer size allows scanner to queue events without blocking
-	eventCh := make(chan event.GenericEvent, 100)
+	// Create internal request channel (scanner sends here)
+	requestCh := make(chan event.TypedGenericEvent[DRBDReconcileRequest], 100)
 
-	// Create scanner
-	scanner := NewScanner(
-		log.With("name", ScannerName),
-		eventCh,
-	)
-
-	// Add scanner as a runnable
+	// Create scanner with new channel type
+	scanner := NewScanner(log.With("name", ScannerName), requestCh)
 	if err := mgr.Add(scanner); err != nil {
 		return fmt.Errorf("adding scanner runnable: %w", err)
 	}
@@ -81,25 +76,31 @@ func BuildController(mgr manager.Manager) error {
 	// Create port cache (reconciler-owned)
 	portCache := NewPortCache(context.Background(), PortRangeMin, PortRangeMax)
 
-	// Create reconciler
-	rec := NewReconciler(
-		cl,
-		nodeName,
-		portCache,
-	)
+	// Create reconciler (implements reconcile.TypedReconciler[DRBDReconcileRequest])
+	rec := NewReconciler(cl, nodeName, portCache)
 
-	// Build DRBD resource controller
-	if err := builder.ControllerManagedBy(mgr).
+	// Build DRBD resource controller with TypedReconciler
+	if err := builder.TypedControllerManagedBy[DRBDReconcileRequest](mgr).
 		Named(ControllerName).
-		For(
+		// Watch DRBDResource and map to DRBDReconcileRequest{Name: ...}
+		// Predicates already filter by nodeName, so map func just converts
+		Watches(
 			&v1alpha1.DRBDResource{},
+			handler.TypedEnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []DRBDReconcileRequest {
+				dr := obj.(*v1alpha1.DRBDResource)
+				return []DRBDReconcileRequest{{Name: dr.Name}}
+			}),
 			builder.WithPredicates(drbdrPredicates(nodeName)...),
 		).
-		// Watch for events from the scanner
+		// Watch internal channel (scanner events) - maps *DRBDReconcileRequest to DRBDReconcileRequest
 		WatchesRawSource(
-			source.Channel(eventCh, &handler.EnqueueRequestForObject{}),
+			source.TypedChannel(requestCh, handler.TypedEnqueueRequestsFromMapFunc(
+				func(_ context.Context, req DRBDReconcileRequest) []DRBDReconcileRequest {
+					return []DRBDReconcileRequest{req}
+				},
+			)),
 		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.TypedOptions[DRBDReconcileRequest]{MaxConcurrentReconciles: 10}).
 		Complete(rec); err != nil {
 		return fmt.Errorf("building DRBD resource controller: %w", err)
 	}
@@ -112,7 +113,7 @@ func BuildController(mgr manager.Manager) error {
 			&v1alpha1.DRBDResourceOperation{},
 			builder.WithPredicates(operationPredicates()...),
 		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 5}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Complete(opRec); err != nil {
 		return fmt.Errorf("building DRBD operation controller: %w", err)
 	}
