@@ -28,16 +28,19 @@ var RenameArgs = func(oldName, newName string) []string {
 
 // ExecuteRename renames a DRBD resource locally.
 // This is a local operation only - it doesn't affect peer nodes.
-func ExecuteRename(ctx context.Context, oldName, newName string) error {
+func ExecuteRename(ctx context.Context, oldName, newName string) (err error) {
 	args := RenameArgs(oldName, newName)
 	cmd := ExecCommandContext(ctx, Command, args...)
 
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
+
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf(
-			"running command %s %v: %w; output: %q",
-			Command, args, err, string(out),
-		)
+		return withOutput(err, out)
 	}
 
 	return nil

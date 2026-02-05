@@ -31,16 +31,19 @@ var DetachArgs = func(minor uint) []string {
 }
 
 // ExecuteDetach detaches the backing device from a replicated device.
-func ExecuteDetach(ctx context.Context, minor uint) error {
+func ExecuteDetach(ctx context.Context, minor uint) (err error) {
 	args := DetachArgs(minor)
 	cmd := ExecCommandContext(ctx, Command, args...)
 
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
+
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf(
-			"running command %s %v: %w; output: %q",
-			Command, args, err, string(out),
-		)
+		return withOutput(err, out)
 	}
 
 	return nil

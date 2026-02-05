@@ -31,6 +31,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
 
 // BuildController creates and registers the DRBD controller and scanner with the manager.
@@ -55,13 +56,20 @@ func BuildController(mgr manager.Manager) error {
 	log := slog.Default()
 	nodeName := cfg.NodeName()
 
+	// Set up drbdsetup command logging
+	origExec := drbdsetup.ExecCommandContext
+	drbdsetup.ExecCommandContext = func(ctx context.Context, name string, arg ...string) drbdsetup.Cmd {
+		log.Info("executing drbdsetup command", "command", name, "args", arg)
+		return origExec(ctx, name, arg...)
+	}
+
 	// Create event channel for scanner to trigger reconciliations
 	// Buffer size allows scanner to queue events without blocking
 	eventCh := make(chan event.GenericEvent, 100)
 
 	// Create scanner
 	scanner := NewScanner(
-		log,
+		log.With("name", ScannerName),
 		eventCh,
 	)
 
