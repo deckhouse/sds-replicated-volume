@@ -192,6 +192,7 @@ spec:
                               address:
                                 properties:
                                   ipv4:
+                                    maxLength: 15
                                     pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
                                     type: string
                                   port:
@@ -220,22 +221,26 @@ spec:
                         lvmVolumeGroupName:
                           description: LVMVolumeGroupName is the LVMVolumeGroup resource
                             name where this replica should be placed.
+                          maxLength: 253
                           minLength: 1
                           pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
                           type: string
                         lvmVolumeGroupThinPoolName:
                           description: LVMVolumeGroupThinPoolName is the thin pool
                             name (for LVMThin storage pools).
+                          maxLength: 64
                           type: string
                         name:
                           description: |-
                             Name is the member name (used as list map key).
                             Must have format "prefix-N" where N is 0-31.
+                          maxLength: 140
                           minLength: 1
                           type: string
                         nodeName:
                           description: NodeName is the Kubernetes node name where
                             the member is located.
+                          maxLength: 253
                           minLength: 1
                           type: string
                         type:
@@ -251,6 +256,7 @@ spec:
                           type: string
                         zone:
                           description: Zone is the zone where the member is located.
+                          maxLength: 64
                           type: string
                       required:
                       - addresses

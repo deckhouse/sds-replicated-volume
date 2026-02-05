@@ -203,6 +203,7 @@ type ReplicatedVolumeDatameshMember struct {
 	// Must have format "prefix-N" where N is 0-31.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=140
 	Name string `json:"name"`
 	// Type is the member type (Diskful, Access, or TieBreaker).
 	// +kubebuilder:validation:Required
@@ -217,8 +218,10 @@ type ReplicatedVolumeDatameshMember struct {
 	// NodeName is the Kubernetes node name where the member is located.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	NodeName string `json:"nodeName"`
 	// Zone is the zone where the member is located.
+	// +kubebuilder:validation:MaxLength=64
 	// +optional
 	Zone string `json:"zone,omitempty"`
 	// Addresses is the list of DRBD addresses for this member.
@@ -228,9 +231,11 @@ type ReplicatedVolumeDatameshMember struct {
 	// LVMVolumeGroupName is the LVMVolumeGroup resource name where this replica should be placed.
 	// +optional
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$`
 	LVMVolumeGroupName string `json:"lvmVolumeGroupName,omitempty"`
 	// LVMVolumeGroupThinPoolName is the thin pool name (for LVMThin storage pools).
+	// +kubebuilder:validation:MaxLength=64
 	// +optional
 	LVMVolumeGroupThinPoolName string `json:"lvmVolumeGroupThinPoolName,omitempty"`
 }
