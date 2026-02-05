@@ -6,6 +6,12 @@ alwaysApply: true
 - Formatting & style (MUST):
   - Match existing formatting and indentation exactly.
 
+- License headers (MUST):
+  - Each manually written source code file (not produced by code generators, not copied from other repositories) MUST have a license header at the top.
+  - Use the template from `hack/boilerplate.txt`.
+  - Replace `YEAR` with the current year (based on system time) when creating a new file.
+  - Once set, the year MUST NOT be changed in subsequent edits to the file.
+
 - Change hygiene / cleanup (MUST):
   - If I create a file and later replace it with a correct alternative, I MUST remove the now-invalid file(s) in the same change.
 
@@ -29,6 +35,7 @@ alwaysApply: true
 
 - When making a commit (MUST):
   - ALWAYS sign off (prefer `git commit -s`).
+  - Do NOT add `Co-authored-by`, `Authored-by`, or any other trailer signatures. The only valid signature is `Signed-off-by` with user credentials.
 
 - API development / design / review (MUST):
   - When developing, designing, or reviewing API types under `api/v*/`, you MUST consult and follow the API-specific `.mdc` rules in `.cursor/rules/`:
