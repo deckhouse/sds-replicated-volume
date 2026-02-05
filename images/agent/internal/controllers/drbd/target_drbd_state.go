@@ -57,67 +57,33 @@ func computeTargetDRBDActions(iState IntendedDRBDState, aState ActualDRBDState) 
 
 // computeBringUpActions computes actions to bring DRBD to intended state.
 // Precondition: aState is valid (not zero).
+// Uses convergent pattern: each section ensures its component exists and is configured correctly,
+// regardless of whether the resource was just created or already existed.
 func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
 	resourceName := iState.ResourceName()
 
-	// Shared minor pointer for passing between actions
+	// Shared minor pointer for passing between actions when creating new minor
 	var allocatedMinor uint
 
+	// 1. Ensure resource exists
 	if !aState.ResourceExists() {
-		// Resource doesn't exist - create it
 		res = append(res, NewResourceAction{
 			ResourceName: resourceName,
 			NodeID:       iState.NodeID(),
 		})
-
-		// Set resource options
-		res = append(res, computeResourceOptionsAction(resourceName, iState)...)
-
-		// Create volume/minor
-		res = append(res, NewMinorAction{
-			ResourceName:   resourceName,
-			Volume:         0,
-			AllocatedMinor: &allocatedMinor,
-		})
-
-		// Attach backing storage for diskful resources
-		if iState.Type() == v1alpha1.DRBDResourceTypeDiskful && iState.BackingDisk() != "" {
-			// Create metadata first
-			res = append(res, CreateMetadataAction{
-				Minor:      &allocatedMinor,
-				BackingDev: iState.BackingDisk(),
-			})
-			res = append(res, AttachAction{
-				Minor:    &allocatedMinor,
-				LowerDev: iState.BackingDisk(),
-				MetaDev:  "internal",
-				MetaIdx:  "internal",
-			})
-			// Set disk options
-			res = append(res, computeDiskOptionsAction(&allocatedMinor, iState)...)
-		}
-	} else {
-		// Resource exists - reconcile options
-
-		// Check if disk needs to be changed (detach before attach)
-		if len(aState.Volumes()) > 0 {
-			actualVol := aState.Volumes()[0]
-			actualDisk := actualVol.BackingDisk()
-			intendedDisk := iState.BackingDisk()
-
-			// Detach if:
-			// 1. Currently has a disk attached (actualDisk != "")
-			// 2. AND intended disk is different (including going diskless)
-			if actualDisk != "" && actualDisk != intendedDisk {
-				minor := uint(actualVol.Minor())
-				res = append(res, DetachAction{Minor: &minor})
-			}
-		}
-
-		res = append(res, computeResourceOptionsActionReconcile(resourceName, iState, aState)...)
-		res = append(res, computeDiskOptionsActionReconcile(iState, aState)...)
 	}
 
+	// 2. Reconcile resource options (handles both new and existing)
+	res = append(res, computeResourceOptions(resourceName, iState, aState)...)
+
+	// 3. Compute minor actions (create if missing)
+	minor, minorActions := computeMinorActions(resourceName, &allocatedMinor, aState)
+	res = append(res, minorActions...)
+
+	// 4. Handle disk (detach if changing, attach if missing, reconcile options)
+	res = append(res, computeDiskActions(minor, iState, aState)...)
+
+	// 5. Peers
 	toAdd, existing, toRemove := maps.IntersectItersKeyFunc(
 		slices.Values(iState.Peers()),
 		IntendedPeer.NodeID,
@@ -183,6 +149,68 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 	res = append(res, computeRoleAction(resourceName, iState, aState)...)
 
 	return res
+}
+
+// computeMinorActions returns a pointer to the minor number and any actions needed to create it.
+// If a volume already exists, returns its minor; otherwise returns the allocatedMinor pointer
+// that will be filled by NewMinorAction during execution.
+func computeMinorActions(resourceName string, allocatedMinor *uint, aState ActualDRBDState) (*uint, DRBDActions) {
+	if len(aState.Volumes()) > 0 {
+		m := uint(aState.Volumes()[0].Minor())
+		return &m, nil
+	}
+	return allocatedMinor, DRBDActions{NewMinorAction{
+		ResourceName:   resourceName,
+		Volume:         0,
+		AllocatedMinor: allocatedMinor,
+	}}
+}
+
+// computeDiskActions handles all disk-related actions: detach, attach, and options.
+// It ensures the disk state converges to the intended state.
+func computeDiskActions(minor *uint, iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
+	actualDisk := ""
+	if len(aState.Volumes()) > 0 {
+		actualDisk = aState.Volumes()[0].BackingDisk()
+	}
+	intendedDisk := iState.BackingDisk()
+
+	// Detach if disk is different (including going diskless)
+	if actualDisk != "" && actualDisk != intendedDisk {
+		res = append(res, DetachAction{Minor: minor})
+		return // Don't attach in same cycle as detach
+	}
+
+	// Attach if needed (diskful with backing disk, but no current disk)
+	if actualDisk == "" && intendedDisk != "" && iState.Type() == v1alpha1.DRBDResourceTypeDiskful {
+		res = append(res, CreateMetadataAction{
+			Minor:      minor,
+			BackingDev: intendedDisk,
+		})
+		res = append(res, AttachAction{
+			Minor:    minor,
+			LowerDev: intendedDisk,
+			MetaDev:  "internal",
+			MetaIdx:  "internal",
+		})
+		res = append(res, computeDiskOptionsAction(minor, iState)...)
+		return
+	}
+
+	// Reconcile disk options for existing attached disk
+	if actualDisk != "" {
+		res = append(res, computeDiskOptionsActionReconcile(iState, aState)...)
+	}
+
+	return
+}
+
+// computeResourceOptions dispatches to full-set or reconcile variant based on resource existence.
+func computeResourceOptions(resourceName string, iState IntendedDRBDState, aState ActualDRBDState) DRBDActions {
+	if !aState.ResourceExists() {
+		return computeResourceOptionsAction(resourceName, iState)
+	}
+	return computeResourceOptionsActionReconcile(resourceName, iState, aState)
 }
 
 func computeResourceOptionsAction(resourceName string, iState IntendedDRBDState) (res DRBDActions) {
