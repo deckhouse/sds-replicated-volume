@@ -37,22 +37,25 @@ var SecondaryArgs = func(resource string, force bool) []string {
 }
 
 // ExecuteSecondary changes the role of a node in a resource to secondary.
-func ExecuteSecondary(ctx context.Context, resource string, force bool) error {
+func ExecuteSecondary(ctx context.Context, resource string, force bool) (err error) {
 	args := SecondaryArgs(resource, force)
 	cmd := ExecCommandContext(ctx, Command, args...)
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		switch errToExitCode(err) {
 		case 11:
-			return ErrSecondaryDeviceInUse
+			err = ErrSecondaryDeviceInUse
 		case 158:
-			return ErrSecondaryResourceNotFound
+			err = ErrSecondaryResourceNotFound
 		}
-		return fmt.Errorf(
-			"running command %s %v: %w; output: %q",
-			Command, args, err, string(out),
-		)
+		return withOutput(err, out)
 	}
 
 	return nil

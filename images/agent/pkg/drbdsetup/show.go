@@ -159,13 +159,19 @@ var ShowArgs = func(resourceName string, showDefaults bool) []string {
 
 // ExecuteShow executes drbdsetup show --json and parses the output.
 // Pass empty resourceName to query all resources.
-func ExecuteShow(ctx context.Context, resourceName string, showDefaults bool) ([]ShowResource, error) {
+func ExecuteShow(ctx context.Context, resourceName string, showDefaults bool) (res []ShowResource, err error) {
 	args := ShowArgs(resourceName, showDefaults)
 	cmd := ExecCommandContext(ctx, Command, args...)
 
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("running command: %w; output: %q", err, string(output))
+		return nil, withOutput(err, output)
 	}
 
 	var results []ShowResource

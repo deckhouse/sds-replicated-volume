@@ -78,26 +78,29 @@ var NetOptionsArgs = func(resource string, peerNodeID uint8, opts NetOptions) []
 }
 
 // ExecuteNetOptions changes network options on an existing connection.
-func ExecuteNetOptions(ctx context.Context, resource string, peerNodeID uint8, opts NetOptions) error {
+func ExecuteNetOptions(ctx context.Context, resource string, peerNodeID uint8, opts NetOptions) (err error) {
 	args := NetOptionsArgs(resource, peerNodeID, opts)
 	cmd := ExecCommandContext(ctx, Command, args...)
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		switch errToExitCode(err) {
 		case 163:
-			return ErrNetOptionsProtocolVersion
+			err = ErrNetOptionsProtocolVersion
 		case 164:
-			return ErrNetOptionsClearTwoPrimaries
+			err = ErrNetOptionsClearTwoPrimaries
 		case 149:
-			return ErrNetOptionsVerifyAlgDuringSync
+			err = ErrNetOptionsVerifyAlgDuringSync
 		case 148:
-			return ErrNetOptionsCSumsAlgDuringSync
+			err = ErrNetOptionsCSumsAlgDuringSync
 		}
-		return fmt.Errorf(
-			"running command %s %v: %w; output: %q",
-			Command, args, err, string(out),
-		)
+		return withOutput(err, out)
 	}
 
 	return nil

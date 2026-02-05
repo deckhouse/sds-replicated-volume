@@ -423,6 +423,12 @@ func computeResizeAction(iState IntendedDRBDState, aState ActualDRBDState) (res 
 	}
 
 	actualVol := aState.Volumes()[0]
+
+	// Skip resize if volume has no backing disk or is diskless (not yet attached)
+	if actualVol.BackingDisk() == "" || actualVol.DiskState() == "Diskless" {
+		return
+	}
+
 	actualSize := actualVol.Size()
 	intendedSize := iState.Size()
 

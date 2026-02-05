@@ -34,22 +34,25 @@ var NewResourceArgs = func(resource string, nodeID uint8) []string {
 }
 
 // ExecuteNewResource creates a new DRBD resource.
-func ExecuteNewResource(ctx context.Context, resource string, nodeID uint8) error {
+func ExecuteNewResource(ctx context.Context, resource string, nodeID uint8) (err error) {
 	args := NewResourceArgs(resource, nodeID)
 	cmd := ExecCommandContext(ctx, Command, args...)
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		switch errToExitCode(err) {
 		case 161:
-			return ErrNewResourceAlreadyExists
+			err = ErrNewResourceAlreadyExists
 		case 152:
-			return ErrNewResourcePermissionDenied
+			err = ErrNewResourcePermissionDenied
 		}
-		return fmt.Errorf(
-			"running command %s %v: %w; output: %q",
-			Command, args, err, string(out),
-		)
+		return withOutput(err, out)
 	}
 
 	return nil

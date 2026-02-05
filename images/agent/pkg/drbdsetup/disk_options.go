@@ -58,24 +58,27 @@ var DiskOptionsArgs = func(minor uint, opts DiskOptions) []string {
 }
 
 // ExecuteDiskOptions changes disk options on an attached device.
-func ExecuteDiskOptions(ctx context.Context, minor uint, opts DiskOptions) error {
+func ExecuteDiskOptions(ctx context.Context, minor uint, opts DiskOptions) (err error) {
 	args := DiskOptionsArgs(minor, opts)
 	cmd := ExecCommandContext(ctx, Command, args...)
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		switch errToExitCode(err) {
 		case 138:
-			return ErrDiskOptionsNoDiskAttached
+			err = ErrDiskOptionsNoDiskAttached
 		case 149:
-			return ErrDiskOptionsDuringVerify
+			err = ErrDiskOptionsDuringVerify
 		case 148:
-			return ErrDiskOptionsCSumsDuringResync
+			err = ErrDiskOptionsCSumsDuringResync
 		}
-		return fmt.Errorf(
-			"running command %s %v: %w; output: %q",
-			Command, args, err, string(out),
-		)
+		return withOutput(err, out)
 	}
 
 	return nil

@@ -39,24 +39,27 @@ var ConnectArgs = func(resource string, peerNodeID uint8) []string {
 }
 
 // ExecuteConnect establishes connection to a peer.
-func ExecuteConnect(ctx context.Context, resource string, peerNodeID uint8) error {
+func ExecuteConnect(ctx context.Context, resource string, peerNodeID uint8) (err error) {
 	args := ConnectArgs(resource, peerNodeID)
 	cmd := ExecCommandContext(ctx, Command, args...)
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		switch errToExitCode(err) {
 		case 123:
-			return ErrConnectDiscardNotAllowed
+			err = ErrConnectDiscardNotAllowed
 		case 158:
-			return ErrConnectResourceNotFound
+			err = ErrConnectResourceNotFound
 		case 151:
-			return ErrConnectNeedStandalone
+			err = ErrConnectNeedStandalone
 		}
-		return fmt.Errorf(
-			"running command %s %v: %w; output: %q",
-			Command, args, err, string(out),
-		)
+		return withOutput(err, out)
 	}
 
 	return nil
@@ -71,19 +74,22 @@ var DisconnectArgs = func(resource string, peerNodeID uint8) []string {
 }
 
 // ExecuteDisconnect disconnects from a peer.
-func ExecuteDisconnect(ctx context.Context, resource string, peerNodeID uint8) error {
+func ExecuteDisconnect(ctx context.Context, resource string, peerNodeID uint8) (err error) {
 	args := DisconnectArgs(resource, peerNodeID)
 	cmd := ExecCommandContext(ctx, Command, args...)
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if errToExitCode(err) == 158 {
-			return ErrDisconnectResourceNotFound
+			err = ErrDisconnectResourceNotFound
 		}
-		return fmt.Errorf(
-			"running command %s %v: %w; output: %q",
-			Command, args, err, string(out),
-		)
+		return withOutput(err, out)
 	}
 
 	return nil

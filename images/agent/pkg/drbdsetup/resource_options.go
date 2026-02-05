@@ -81,19 +81,22 @@ var ResourceOptionsArgs = func(resource string, opts ResourceOptions) []string {
 }
 
 // ExecuteResourceOptions changes options of an existing resource.
-func ExecuteResourceOptions(ctx context.Context, resource string, opts ResourceOptions) error {
+func ExecuteResourceOptions(ctx context.Context, resource string, opts ResourceOptions) (err error) {
 	args := ResourceOptionsArgs(resource, opts)
 	cmd := ExecCommandContext(ctx, Command, args...)
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if errToExitCode(err) == 158 {
-			return ErrResourceOptionsResourceNotFound
+			err = ErrResourceOptionsResourceNotFound
 		}
-		return fmt.Errorf(
-			"running command %s %v: %w; output: %q",
-			Command, args, err, string(out),
-		)
+		return withOutput(err, out)
 	}
 
 	return nil

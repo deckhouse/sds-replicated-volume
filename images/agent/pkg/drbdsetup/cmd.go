@@ -18,6 +18,7 @@ package drbdsetup
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os/exec"
 )
@@ -64,4 +65,12 @@ func errToExitCode(err error) int {
 	}
 
 	return 0
+}
+
+// withOutput wraps an error with command output if present.
+func withOutput(err error, out []byte) error {
+	if len(out) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w; output: %q", err, string(out))
 }

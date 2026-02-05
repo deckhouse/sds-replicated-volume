@@ -47,22 +47,25 @@ var NewCurrentUUIDArgs = func(minor uint, clearBitmap, forceResync bool) []strin
 // ExecuteNewCurrentUUID generates a new current UUID for a DRBD device.
 // clearBitmap: skip initial resync (marks all nodes UpToDate)
 // forceResync: force resync from this node to peers
-func ExecuteNewCurrentUUID(ctx context.Context, minor uint, clearBitmap, forceResync bool) error {
+func ExecuteNewCurrentUUID(ctx context.Context, minor uint, clearBitmap, forceResync bool) (err error) {
 	args := NewCurrentUUIDArgs(minor, clearBitmap, forceResync)
 	cmd := ExecCommandContext(ctx, Command, args...)
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		switch errToExitCode(err) {
 		case 10:
-			return ErrNewCurrentUUIDWrongDiskState
+			err = ErrNewCurrentUUIDWrongDiskState
 		case 11:
-			return ErrNewCurrentUUIDStateChangeError
+			err = ErrNewCurrentUUIDStateChangeError
 		}
-		return fmt.Errorf(
-			"running command %s %v: %w; output: %q",
-			Command, args, err, string(out),
-		)
+		return withOutput(err, out)
 	}
 
 	return nil

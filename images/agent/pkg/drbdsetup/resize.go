@@ -45,24 +45,27 @@ var ResizeArgs = func(minor uint, sizeBytes int64) []string {
 
 // ExecuteResize resizes a replicated device after growing backing devices.
 // sizeBytes is the new size in bytes. If 0, DRBD uses the size of the backing device.
-func ExecuteResize(ctx context.Context, minor uint, sizeBytes int64) error {
+func ExecuteResize(ctx context.Context, minor uint, sizeBytes int64) (err error) {
 	args := ResizeArgs(minor, sizeBytes)
 	cmd := ExecCommandContext(ctx, Command, args...)
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		switch errToExitCode(err) {
 		case 10:
-			return ErrResizeBackingNotGrown
+			err = ErrResizeBackingNotGrown
 		case 11:
-			return ErrResizeNeedPrimary
+			err = ErrResizeNeedPrimary
 		case 158:
-			return ErrResizeResourceNotFound
+			err = ErrResizeResourceNotFound
 		}
-		return fmt.Errorf(
-			"running command %s %v: %w; output: %q",
-			Command, args, err, string(out),
-		)
+		return withOutput(err, out)
 	}
 
 	return nil

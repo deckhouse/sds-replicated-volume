@@ -97,15 +97,15 @@ func (r *OperationReconciler) Reconcile(
 	case v1alpha1.DRBDResourceOperationCreateNewUUID:
 		opErr = r.executeCreateNewUUID(rf.Ctx(), op, drbdr)
 	case v1alpha1.DRBDResourceOperationForcePrimary:
-		opErr = fmt.Errorf("ForcePrimary operation not implemented")
+		opErr = fmt.Errorf("'ForcePrimary' operation not implemented")
 	case v1alpha1.DRBDResourceOperationInvalidate:
-		opErr = fmt.Errorf("Invalidate operation not implemented")
+		opErr = fmt.Errorf("'Invalidate' operation not implemented")
 	case v1alpha1.DRBDResourceOperationOutdate:
-		opErr = fmt.Errorf("Outdate operation not implemented")
+		opErr = fmt.Errorf("'Outdate' operation not implemented")
 	case v1alpha1.DRBDResourceOperationVerify:
-		opErr = fmt.Errorf("Verify operation not implemented")
+		opErr = fmt.Errorf("'Verify' operation not implemented")
 	case v1alpha1.DRBDResourceOperationCreateSnapshot:
-		opErr = fmt.Errorf("CreateSnapshot operation not implemented")
+		opErr = fmt.Errorf("'CreateSnapshot' operation not implemented")
 	default:
 		opErr = fmt.Errorf("unknown operation type: %s", op.Spec.Type)
 	}

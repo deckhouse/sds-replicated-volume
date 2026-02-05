@@ -55,22 +55,25 @@ var NewMinorArgs = func(resource string, minor uint, volume uint) []string {
 }
 
 // ExecuteNewMinor creates a new DRBD device/volume within a resource.
-func ExecuteNewMinor(ctx context.Context, resource string, minor uint, volume uint) error {
+func ExecuteNewMinor(ctx context.Context, resource string, minor uint, volume uint) (err error) {
 	args := NewMinorArgs(resource, minor, volume)
 	cmd := ExecCommandContext(ctx, Command, args...)
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		switch errToExitCode(err) {
 		case 161:
-			return ErrNewMinorAlreadyExists
+			err = ErrNewMinorAlreadyExists
 		case 158:
-			return ErrNewMinorResourceNotFound
+			err = ErrNewMinorResourceNotFound
 		}
-		return fmt.Errorf(
-			"running command %s %v: %w; output: %q",
-			Command, args, err, string(out),
-		)
+		return withOutput(err, out)
 	}
 
 	return nil

@@ -37,22 +37,25 @@ var PrimaryArgs = func(resource string, force bool) []string {
 }
 
 // ExecutePrimary changes the role of a node in a resource to primary.
-func ExecutePrimary(ctx context.Context, resource string, force bool) error {
+func ExecutePrimary(ctx context.Context, resource string, force bool) (err error) {
 	args := PrimaryArgs(resource, force)
 	cmd := ExecCommandContext(ctx, Command, args...)
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		switch errToExitCode(err) {
 		case 17:
-			return ErrPrimaryNoUpToDateDisk
+			err = ErrPrimaryNoUpToDateDisk
 		case 158:
-			return ErrPrimaryResourceNotFound
+			err = ErrPrimaryResourceNotFound
 		}
-		return fmt.Errorf(
-			"running command %s %v: %w; output: %q",
-			Command, args, err, string(out),
-		)
+		return withOutput(err, out)
 	}
 
 	return nil

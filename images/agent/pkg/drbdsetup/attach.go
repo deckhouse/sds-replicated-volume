@@ -51,40 +51,43 @@ var AttachArgs = func(minor uint, lowerDev, metaDev, metaIdx string) []string {
 }
 
 // ExecuteAttach attaches a backing device and meta-data device to a volume.
-func ExecuteAttach(ctx context.Context, minor uint, lowerDev, metaDev, metaIdx string) error {
+func ExecuteAttach(ctx context.Context, minor uint, lowerDev, metaDev, metaIdx string) (err error) {
 	args := AttachArgs(minor, lowerDev, metaDev, metaIdx)
 	cmd := ExecCommandContext(ctx, Command, args...)
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		switch errToExitCode(err) {
 		case 104:
-			return ErrAttachCannotOpenBackingDevice
+			err = ErrAttachCannotOpenBackingDevice
 		case 105:
-			return ErrAttachCannotOpenMetaDevice
+			err = ErrAttachCannotOpenMetaDevice
 		case 107, 108:
-			return ErrAttachNotBlockDevice
+			err = ErrAttachNotBlockDevice
 		case 111, 112:
-			return ErrAttachDeviceTooSmall
+			err = ErrAttachDeviceTooSmall
 		case 114, 115:
-			return ErrAttachDeviceClaimed
+			err = ErrAttachDeviceClaimed
 		case 116:
-			return ErrAttachInvalidMetaDataIndex
+			err = ErrAttachInvalidMetaDataIndex
 		case 118:
-			return ErrAttachMetaDataIOError
+			err = ErrAttachMetaDataIOError
 		case 119:
-			return ErrAttachMetaDataInvalid
+			err = ErrAttachMetaDataInvalid
 		case 124:
-			return ErrAttachAlreadyAttached
+			err = ErrAttachAlreadyAttached
 		case 127:
-			return ErrAttachMinorNotAllocated
+			err = ErrAttachMinorNotAllocated
 		case 165:
-			return ErrAttachMetaDataUnclean
+			err = ErrAttachMetaDataUnclean
 		}
-		return fmt.Errorf(
-			"running command %s %v: %w; output: %q",
-			Command, args, err, string(out),
-		)
+		return withOutput(err, out)
 	}
 
 	return nil

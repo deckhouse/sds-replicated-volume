@@ -43,26 +43,29 @@ var NewPathArgs = func(resource string, peerNodeID uint8, localAddr, remoteAddr 
 }
 
 // ExecuteNewPath adds a network path (address pair) to a peer.
-func ExecuteNewPath(ctx context.Context, resource string, peerNodeID uint8, localAddr, remoteAddr string) error {
+func ExecuteNewPath(ctx context.Context, resource string, peerNodeID uint8, localAddr, remoteAddr string) (err error) {
 	args := NewPathArgs(resource, peerNodeID, localAddr, remoteAddr)
 	cmd := ExecCommandContext(ctx, Command, args...)
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		switch errToExitCode(err) {
 		case 102:
-			return ErrNewPathLocalAddrInUse
+			err = ErrNewPathLocalAddrInUse
 		case 103:
-			return ErrNewPathRemoteAddrInUse
+			err = ErrNewPathRemoteAddrInUse
 		case 563:
-			return ErrNewPathAddrPairInUse
+			err = ErrNewPathAddrPairInUse
 		case 564:
-			return ErrNewPathAlreadyExists
+			err = ErrNewPathAlreadyExists
 		}
-		return fmt.Errorf(
-			"running command %s %v: %w; output: %q",
-			Command, args, err, string(out),
-		)
+		return withOutput(err, out)
 	}
 
 	return nil
@@ -79,19 +82,22 @@ var DelPathArgs = func(resource string, peerNodeID uint8, localAddr, remoteAddr 
 }
 
 // ExecuteDelPath removes a network path from a peer.
-func ExecuteDelPath(ctx context.Context, resource string, peerNodeID uint8, localAddr, remoteAddr string) error {
+func ExecuteDelPath(ctx context.Context, resource string, peerNodeID uint8, localAddr, remoteAddr string) (err error) {
 	args := DelPathArgs(resource, peerNodeID, localAddr, remoteAddr)
 	cmd := ExecCommandContext(ctx, Command, args...)
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if errToExitCode(err) == 158 {
-			return ErrDelPathNotFound
+			err = ErrDelPathNotFound
 		}
-		return fmt.Errorf(
-			"running command %s %v: %w; output: %q",
-			Command, args, err, string(out),
-		)
+		return withOutput(err, out)
 	}
 
 	return nil
