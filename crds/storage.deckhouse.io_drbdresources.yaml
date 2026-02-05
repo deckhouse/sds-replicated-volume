@@ -119,6 +119,7 @@ spec:
                           address:
                             properties:
                               ipv4:
+                                maxLength: 15
                                 pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
                                 type: string
                               port:
@@ -291,6 +292,7 @@ spec:
                     address:
                       properties:
                         ipv4:
+                          maxLength: 15
                           pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
                           type: string
                         port:
@@ -415,6 +417,7 @@ spec:
                           address:
                             properties:
                               ipv4:
+                                maxLength: 15
                                 pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
                                 type: string
                               port:
@@ -456,11 +459,12 @@ spec:
                       type: string
                   required:
                   - name
+                  - nodeID
                   type: object
                 maxItems: 31
                 type: array
                 x-kubernetes-list-map-keys:
-                - name
+                - nodeID
                 x-kubernetes-list-type: map
               quorum:
                 type: boolean
