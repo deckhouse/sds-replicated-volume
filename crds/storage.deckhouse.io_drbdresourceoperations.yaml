@@ -14,7 +14,7 @@ spec:
     listKind: DRBDResourceOperationList
     plural: drbdresourceoperations
     shortNames:
-    - dro
+    - drbdrop
     singular: drbdresourceoperation
   scope: Cluster
   versions:

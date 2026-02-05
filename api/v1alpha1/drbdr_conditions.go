@@ -19,7 +19,32 @@ package v1alpha1
 const (
 	// DRBDResourceCondConfiguredType indicates whether the DRBD resource is configured.
 	//
-	// Reasons describe configuration state.
-	DRBDResourceCondConfiguredType                = "Configured"
-	DRBDResourceCondConfiguredReasonInMaintenance = "InMaintenance" // Resource is in maintenance mode.
+	// Status=True means the resource is fully configured and matches the intended state.
+	// Status=False means configuration failed; see Reason for the failing step.
+	DRBDResourceCondConfiguredType = "Configured"
+
+	DRBDResourceCondConfiguredReasonAttachFailed          = "AttachFailed"
+	DRBDResourceCondConfiguredReasonConfigured            = "Configured"
+	DRBDResourceCondConfiguredReasonConnectFailed         = "ConnectFailed"
+	DRBDResourceCondConfiguredReasonCreateMetadataFailed  = "CreateMetadataFailed"
+	DRBDResourceCondConfiguredReasonDelPathFailed         = "DelPathFailed"
+	DRBDResourceCondConfiguredReasonDelPeerFailed         = "DelPeerFailed"
+	DRBDResourceCondConfiguredReasonDetachFailed          = "DetachFailed"
+	DRBDResourceCondConfiguredReasonDisconnectFailed      = "DisconnectFailed"
+	DRBDResourceCondConfiguredReasonDiskOptionsFailed     = "DiskOptionsFailed"
+	DRBDResourceCondConfiguredReasonDownFailed            = "DownFailed"
+	DRBDResourceCondConfiguredReasonFailed                = "Failed"
+	DRBDResourceCondConfiguredReasonForgetPeerFailed      = "ForgetPeerFailed"
+	DRBDResourceCondConfiguredReasonNetOptionsFailed      = "NetOptionsFailed"
+	DRBDResourceCondConfiguredReasonNewMinorFailed        = "NewMinorFailed"
+	DRBDResourceCondConfiguredReasonNewPathFailed         = "NewPathFailed"
+	DRBDResourceCondConfiguredReasonNewPeerFailed         = "NewPeerFailed"
+	DRBDResourceCondConfiguredReasonNewResourceFailed     = "NewResourceFailed"
+	DRBDResourceCondConfiguredReasonPrimaryFailed         = "PrimaryFailed"
+	DRBDResourceCondConfiguredReasonRenameFailed          = "RenameFailed"
+	DRBDResourceCondConfiguredReasonResizeFailed          = "ResizeFailed"
+	DRBDResourceCondConfiguredReasonResourceOptionsFailed = "ResourceOptionsFailed"
+	DRBDResourceCondConfiguredReasonSecondaryFailed       = "SecondaryFailed"
+	DRBDResourceCondConfiguredReasonStateQueryFailed      = "StateQueryFailed"
+	DRBDResourceCondConfiguredReasonInMaintenance         = "InMaintenance"
 )

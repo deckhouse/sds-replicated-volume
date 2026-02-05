@@ -264,11 +264,11 @@ spec:
                 x-kubernetes-validations:
                 - message: thinPoolName is required for each lvmVolumeGroups entry
                     when type is LVMThin
-                  rule: self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, g.thinPoolName
-                    != ”)
+                  rule: self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, size(g.thinPoolName)
+                    > 0)
                 - message: thinPoolName must not be specified when type is LVM
                   rule: self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName)
-                    || g.thinPoolName == ”)
+                    || size(g.thinPoolName) == 0)
               storagePool:
                 description: |-
                   StoragePool is the name of a ReplicatedStoragePool resource.
@@ -276,7 +276,7 @@ spec:
                 type: string
                 x-kubernetes-validations:
                 - message: StoragePool cannot be added or changed, only removed
-                  rule: '!has(self) || (has(oldSelf) && self == oldSelf)'
+                  rule: size(self) == 0 || self == oldSelf
               systemNetworkNames:
                 default:
                 - Internal
