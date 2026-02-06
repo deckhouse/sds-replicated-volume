@@ -52,6 +52,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ReplicatedVolumeAttachmentList{},
 		&ReplicatedVolumeReplica{},
 		&ReplicatedVolumeReplicaList{},
+		&ReplicatedVolumeOperation{},
+		&ReplicatedVolumeOperationList{},
 		&DRBDResource{},
 		&DRBDResourceList{},
 		&DRBDResourceOperation{},

@@ -56,8 +56,33 @@ func BuildController(mgr manager.Manager) error {
 			rvEventHandler(),
 			builder.WithPredicates(rvPredicates()...),
 		).
+		Watches(
+			&v1alpha1.ReplicatedVolumeOperation{},
+			handler.EnqueueRequestsFromMapFunc(mapRVOToRSC()),
+			builder.WithPredicates(rvoPredicates()...),
+		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(rec)
+}
+
+// mapRVOToRSC maps a ReplicatedVolumeOperation to its owner RSC via ownerReferences.
+func mapRVOToRSC() handler.MapFunc {
+	return func(_ context.Context, obj client.Object) []reconcile.Request {
+		rvo, ok := obj.(*v1alpha1.ReplicatedVolumeOperation)
+		if !ok || rvo == nil {
+			return nil
+		}
+
+		for _, ref := range rvo.OwnerReferences {
+			if ref.APIVersion == v1alpha1.SchemeGroupVersion.String() &&
+				ref.Kind == "ReplicatedStorageClass" {
+				return []reconcile.Request{{
+					NamespacedName: client.ObjectKey{Name: ref.Name},
+				}}
+			}
+		}
+		return nil
+	}
 }
 
 // mapRSPToRSC maps a ReplicatedStoragePool to all ReplicatedStorageClass resources that reference it.
