@@ -190,7 +190,7 @@ func computeDiskActions(minor *uint, iState IntendedDRBDState, aState ActualDRBD
 		res = append(res, AttachAction{
 			Minor:    minor,
 			LowerDev: intendedDisk,
-			MetaDev:  "internal",
+			MetaDev:  intendedDisk, // same device for internal metadata
 			MetaIdx:  "internal",
 		})
 		res = append(res, computeDiskOptionsAction(minor, iState)...)

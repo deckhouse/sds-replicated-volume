@@ -57,7 +57,7 @@ var CreateMDArgs = func(minor uint, backingDev string) []string {
 		"internal",
 		"create-md",
 		"--force",
-		"--max-peers=31",
+		"31", // number-of-bitmap-slots (positional argument for v09 create-md)
 	}
 }
 
