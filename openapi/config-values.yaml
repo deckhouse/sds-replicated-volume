@@ -29,10 +29,6 @@ properties:
         default: 7999
         description: |
           DRBD ports range end
-  enableThinProvisioning:
-    type: boolean
-    default: false
-    description: Allow thin LVM volumes usage
   dataNodes:
     type: object
     description: Settings for Linstor on nodes with data
