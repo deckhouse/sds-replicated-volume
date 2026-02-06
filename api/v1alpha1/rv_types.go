@@ -117,6 +117,9 @@ type ReplicatedVolumeStatus struct {
 	// Datamesh is the computed datamesh configuration for the volume.
 	// +patchStrategy=merge
 	Datamesh ReplicatedVolumeDatamesh `json:"datamesh" patchStrategy:"merge"`
+
+	// UnscheduledRVRsCount is the number of unscheduled RVRs for the volume.
+	UnscheduledRVRsCount int `json:"unscheduledRVRsCount"`
 }
 
 // ReplicatedVolumeDatamesh holds datamesh configuration for the volume.
