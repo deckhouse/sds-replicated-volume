@@ -28,8 +28,9 @@ import (
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=".spec.state"
-// +kubebuilder:printcolumn:name="Role",type=string,JSONPath=".status.role"
-// +kubebuilder:printcolumn:name="Type",type=string,JSONPath=".spec.type"
+// +kubebuilder:printcolumn:name="Role",type=string,JSONPath=".status.activeConfiguration.role"
+// +kubebuilder:printcolumn:name="Replication",type=string,JSONPath=".status.replicationState"
+// +kubebuilder:printcolumn:name="Type",type=string,JSONPath=".status.activeConfiguration.type"
 // +kubebuilder:printcolumn:name="DiskState",type=string,JSONPath=".status.diskState"
 // +kubebuilder:printcolumn:name="Quorum",type=boolean,JSONPath=".status.quorum"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
@@ -254,6 +255,11 @@ type DRBDResourceStatus struct {
 
 	// +optional
 	Quorum *bool `json:"quorum,omitempty"`
+
+	// ReplicationState is the actual replication state from DRBD (e.g. Established, SyncSource).
+	// Taken from the first peer connection when present; empty when no peers or resource down.
+	// +optional
+	ReplicationState ReplicationState `json:"replicationState,omitempty"`
 
 	// +patchMergeKey=type
 	// +patchStrategy=merge

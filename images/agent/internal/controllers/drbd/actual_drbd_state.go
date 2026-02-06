@@ -300,6 +300,7 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 		status.DiskState = ""
 		status.Quorum = nil
 		status.Peers = nil
+		status.ReplicationState = ""
 
 		// Keep activeConfiguration but set state to Down
 		if status.ActiveConfiguration == nil {
@@ -340,7 +341,36 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 	// Report Peers
 	aState.reportPeers(drbdr)
 
+	// ReplicationState from first peer connection (volume 0)
+	parsed, replErr := aState.replicationStateFromActual()
+	status.ReplicationState = parsed
+	if replErr != nil {
+		err = errors.Join(err, replErr)
+	}
+
 	return err
+}
+
+// replicationStateFromActual returns the replication state from the first peer connection (volume 0).
+// Returns (empty, nil) when there are no connections or no peer devices.
+// Returns (empty, non-nil) when the raw value is unknown (reported as non-critical error).
+func (aState *actualState) replicationStateFromActual() (v1alpha1.ReplicationState, error) {
+	if aState.status == nil || len(aState.status.Connections) == 0 {
+		return "", nil
+	}
+	conn := &aState.status.Connections[0]
+	if len(conn.PeerDevices) == 0 {
+		return "", nil
+	}
+	raw := conn.PeerDevices[0].ReplicationState
+	if raw == "" {
+		return "", nil
+	}
+	parsed := v1alpha1.ParseReplicationState(raw)
+	if parsed == "" {
+		return "", fmt.Errorf("unknown replication state: %q", raw)
+	}
+	return parsed, nil
 }
 
 func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResourceStatus, volumes []drbdsetup.Device) {
