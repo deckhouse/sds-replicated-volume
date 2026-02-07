@@ -291,3 +291,373 @@ func TestAreConditionsEqualByStatus_AllTypesWhenEmpty(t *testing.T) {
 		t.Fatalf("expected not equal when any condition Status differs")
 	}
 }
+
+func TestConditionSemanticallyEqual(t *testing.T) {
+	base := &metav1.Condition{
+		Type:               "Ready",
+		Status:             metav1.ConditionTrue,
+		Reason:             "OK",
+		Message:            "all good",
+		ObservedGeneration: 1,
+		LastTransitionTime: metav1.NewTime(time.Unix(100, 0).UTC()),
+	}
+
+	// Identical conditions are equal.
+	same := &metav1.Condition{
+		Type:               "Ready",
+		Status:             metav1.ConditionTrue,
+		Reason:             "OK",
+		Message:            "all good",
+		ObservedGeneration: 1,
+		LastTransitionTime: metav1.NewTime(time.Unix(999, 0).UTC()), // Different LTT
+	}
+	if !objutilv1.ConditionSemanticallyEqual(base, same) {
+		t.Fatalf("expected equal when only LastTransitionTime differs")
+	}
+
+	// Different Type -> not equal.
+	diffType := &metav1.Condition{Type: "Other", Status: metav1.ConditionTrue, Reason: "OK", Message: "all good", ObservedGeneration: 1}
+	if objutilv1.ConditionSemanticallyEqual(base, diffType) {
+		t.Fatalf("expected not equal when Type differs")
+	}
+
+	// Different Status -> not equal.
+	diffStatus := &metav1.Condition{Type: "Ready", Status: metav1.ConditionFalse, Reason: "OK", Message: "all good", ObservedGeneration: 1}
+	if objutilv1.ConditionSemanticallyEqual(base, diffStatus) {
+		t.Fatalf("expected not equal when Status differs")
+	}
+
+	// Different Reason -> not equal.
+	diffReason := &metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "Other", Message: "all good", ObservedGeneration: 1}
+	if objutilv1.ConditionSemanticallyEqual(base, diffReason) {
+		t.Fatalf("expected not equal when Reason differs")
+	}
+
+	// Different Message -> not equal.
+	diffMessage := &metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK", Message: "different", ObservedGeneration: 1}
+	if objutilv1.ConditionSemanticallyEqual(base, diffMessage) {
+		t.Fatalf("expected not equal when Message differs")
+	}
+
+	// Different ObservedGeneration -> not equal.
+	diffOG := &metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK", Message: "all good", ObservedGeneration: 2}
+	if objutilv1.ConditionSemanticallyEqual(base, diffOG) {
+		t.Fatalf("expected not equal when ObservedGeneration differs")
+	}
+
+	// nil handling.
+	if !objutilv1.ConditionSemanticallyEqual(nil, nil) {
+		t.Fatalf("expected nil==nil to be equal")
+	}
+	if objutilv1.ConditionSemanticallyEqual(base, nil) {
+		t.Fatalf("expected non-nil != nil")
+	}
+	if objutilv1.ConditionSemanticallyEqual(nil, base) {
+		t.Fatalf("expected nil != non-nil")
+	}
+}
+
+func TestIsStatusConditionPresentAndTrue(t *testing.T) {
+	obj := &testConditionedObject{}
+	obj.SetGeneration(1)
+
+	// Condition not present -> false.
+	if objutilv1.IsStatusConditionPresentAndTrue(obj, "Ready") {
+		t.Fatalf("expected false when condition not present")
+	}
+
+	// Condition present and True -> true.
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK"})
+	if !objutilv1.IsStatusConditionPresentAndTrue(obj, "Ready") {
+		t.Fatalf("expected true when condition is True")
+	}
+
+	// Condition present but False -> false.
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionFalse, Reason: "NotOK"})
+	if objutilv1.IsStatusConditionPresentAndTrue(obj, "Ready") {
+		t.Fatalf("expected false when condition is False")
+	}
+
+	// Condition present but Unknown -> false.
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionUnknown, Reason: "Pending"})
+	if objutilv1.IsStatusConditionPresentAndTrue(obj, "Ready") {
+		t.Fatalf("expected false when condition is Unknown")
+	}
+}
+
+func TestIsStatusConditionPresentAndFalse(t *testing.T) {
+	obj := &testConditionedObject{}
+	obj.SetGeneration(1)
+
+	// Condition not present -> false.
+	if objutilv1.IsStatusConditionPresentAndFalse(obj, "Ready") {
+		t.Fatalf("expected false when condition not present")
+	}
+
+	// Condition present and False -> true.
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionFalse, Reason: "NotOK"})
+	if !objutilv1.IsStatusConditionPresentAndFalse(obj, "Ready") {
+		t.Fatalf("expected true when condition is False")
+	}
+
+	// Condition present but True -> false.
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK"})
+	if objutilv1.IsStatusConditionPresentAndFalse(obj, "Ready") {
+		t.Fatalf("expected false when condition is True")
+	}
+
+	// Condition present but Unknown -> false.
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionUnknown, Reason: "Pending"})
+	if objutilv1.IsStatusConditionPresentAndFalse(obj, "Ready") {
+		t.Fatalf("expected false when condition is Unknown")
+	}
+}
+
+func TestHasStatusCondition(t *testing.T) {
+	obj := &testConditionedObject{}
+	obj.SetGeneration(1)
+
+	if objutilv1.HasStatusCondition(obj, "Ready") {
+		t.Fatalf("expected false when condition not present")
+	}
+
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK"})
+	if !objutilv1.HasStatusCondition(obj, "Ready") {
+		t.Fatalf("expected true when condition present")
+	}
+
+	if objutilv1.HasStatusCondition(obj, "Other") {
+		t.Fatalf("expected false for different condition type")
+	}
+}
+
+func TestGetStatusCondition(t *testing.T) {
+	obj := &testConditionedObject{}
+	obj.SetGeneration(1)
+
+	if objutilv1.GetStatusCondition(obj, "Ready") != nil {
+		t.Fatalf("expected nil when condition not present")
+	}
+
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK", Message: "all good"})
+	cond := objutilv1.GetStatusCondition(obj, "Ready")
+	if cond == nil {
+		t.Fatalf("expected condition to be returned")
+	}
+	if cond.Type != "Ready" || cond.Status != metav1.ConditionTrue || cond.Reason != "OK" || cond.Message != "all good" {
+		t.Fatalf("unexpected condition values: %+v", cond)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Fluent API tests
+// ----------------------------------------------------------------------------
+
+func TestStatusConditionChecker_Present(t *testing.T) {
+	obj := &testConditionedObject{}
+	obj.SetGeneration(1)
+
+	// Condition not present -> Eval returns false.
+	if objutilv1.StatusCondition(obj, "Ready").Present().Eval() {
+		t.Fatalf("expected false when condition not present")
+	}
+
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK"})
+	if !objutilv1.StatusCondition(obj, "Ready").Present().Eval() {
+		t.Fatalf("expected true when condition present")
+	}
+}
+
+func TestStatusConditionChecker_StatusEqual(t *testing.T) {
+	obj := &testConditionedObject{}
+	obj.SetGeneration(1)
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK"})
+
+	if !objutilv1.StatusCondition(obj, "Ready").StatusEqual(metav1.ConditionTrue).Eval() {
+		t.Fatalf("expected true when status matches")
+	}
+	if objutilv1.StatusCondition(obj, "Ready").StatusEqual(metav1.ConditionFalse).Eval() {
+		t.Fatalf("expected false when status differs")
+	}
+	if objutilv1.StatusCondition(obj, "Ready").StatusEqual(metav1.ConditionUnknown).Eval() {
+		t.Fatalf("expected false when status differs")
+	}
+
+	// Condition not present -> always false.
+	if objutilv1.StatusCondition(obj, "Missing").StatusEqual(metav1.ConditionTrue).Eval() {
+		t.Fatalf("expected false when condition not present")
+	}
+}
+
+func TestStatusConditionChecker_IsTrueIsFalse(t *testing.T) {
+	obj := &testConditionedObject{}
+	obj.SetGeneration(1)
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK"})
+
+	if !objutilv1.StatusCondition(obj, "Ready").IsTrue().Eval() {
+		t.Fatalf("expected IsTrue to return true")
+	}
+	if objutilv1.StatusCondition(obj, "Ready").IsFalse().Eval() {
+		t.Fatalf("expected IsFalse to return false")
+	}
+
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionFalse, Reason: "NotOK"})
+	if objutilv1.StatusCondition(obj, "Ready").IsTrue().Eval() {
+		t.Fatalf("expected IsTrue to return false")
+	}
+	if !objutilv1.StatusCondition(obj, "Ready").IsFalse().Eval() {
+		t.Fatalf("expected IsFalse to return true")
+	}
+}
+
+func TestStatusConditionChecker_ReasonEqual(t *testing.T) {
+	obj := &testConditionedObject{}
+	obj.SetGeneration(1)
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK"})
+
+	if !objutilv1.StatusCondition(obj, "Ready").ReasonEqual("OK").Eval() {
+		t.Fatalf("expected true when reason matches")
+	}
+	if objutilv1.StatusCondition(obj, "Ready").ReasonEqual("Other").Eval() {
+		t.Fatalf("expected false when reason differs")
+	}
+
+	// Condition not present -> always false.
+	if objutilv1.StatusCondition(obj, "Missing").ReasonEqual("OK").Eval() {
+		t.Fatalf("expected false when condition not present")
+	}
+}
+
+func TestStatusConditionChecker_MessageEqual(t *testing.T) {
+	obj := &testConditionedObject{}
+	obj.SetGeneration(1)
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK", Message: "all good"})
+
+	if !objutilv1.StatusCondition(obj, "Ready").MessageEqual("all good").Eval() {
+		t.Fatalf("expected true when message matches")
+	}
+	if objutilv1.StatusCondition(obj, "Ready").MessageEqual("different").Eval() {
+		t.Fatalf("expected false when message differs")
+	}
+	if objutilv1.StatusCondition(obj, "Ready").MessageEqual("").Eval() {
+		t.Fatalf("expected false when message is empty but condition has message")
+	}
+
+	// Condition not present -> always false.
+	if objutilv1.StatusCondition(obj, "Missing").MessageEqual("all good").Eval() {
+		t.Fatalf("expected false when condition not present")
+	}
+}
+
+func TestStatusConditionChecker_MessageContains(t *testing.T) {
+	obj := &testConditionedObject{}
+	obj.SetGeneration(1)
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK", Message: "all good stuff"})
+
+	if !objutilv1.StatusCondition(obj, "Ready").MessageContains("good").Eval() {
+		t.Fatalf("expected true when message contains substring")
+	}
+	if !objutilv1.StatusCondition(obj, "Ready").MessageContains("all good stuff").Eval() {
+		t.Fatalf("expected true when message equals substring")
+	}
+	if objutilv1.StatusCondition(obj, "Ready").MessageContains("bad").Eval() {
+		t.Fatalf("expected false when message does not contain substring")
+	}
+
+	// Condition not present -> always false.
+	if objutilv1.StatusCondition(obj, "Missing").MessageContains("good").Eval() {
+		t.Fatalf("expected false when condition not present")
+	}
+}
+
+func TestStatusConditionChecker_ObservedGenerationCurrent(t *testing.T) {
+	obj := &testConditionedObject{}
+	obj.SetGeneration(1)
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK"})
+
+	if !objutilv1.StatusCondition(obj, "Ready").ObservedGenerationCurrent().Eval() {
+		t.Fatalf("expected true when ObservedGeneration matches Generation")
+	}
+
+	// Bump generation without updating condition.
+	obj.SetGeneration(2)
+	if objutilv1.StatusCondition(obj, "Ready").ObservedGenerationCurrent().Eval() {
+		t.Fatalf("expected false when ObservedGeneration is stale")
+	}
+
+	// Update condition to match new generation.
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK"})
+	if !objutilv1.StatusCondition(obj, "Ready").ObservedGenerationCurrent().Eval() {
+		t.Fatalf("expected true after updating condition")
+	}
+
+	// Condition not present -> always false.
+	if objutilv1.StatusCondition(obj, "Missing").ObservedGenerationCurrent().Eval() {
+		t.Fatalf("expected false when condition not present")
+	}
+}
+
+func TestStatusConditionChecker_ChainedChecks(t *testing.T) {
+	obj := &testConditionedObject{}
+	obj.SetGeneration(1)
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK", Message: "all good"})
+
+	// All checks pass.
+	if !objutilv1.StatusCondition(obj, "Ready").
+		Present().
+		IsTrue().
+		ReasonEqual("OK").
+		MessageEqual("all good").
+		ObservedGenerationCurrent().
+		Eval() {
+		t.Fatalf("expected true when all checks pass")
+	}
+
+	// One check fails in the middle.
+	if objutilv1.StatusCondition(obj, "Ready").
+		Present().
+		IsTrue().
+		ReasonEqual("Wrong"). // fails here
+		MessageEqual("all good").
+		ObservedGenerationCurrent().
+		Eval() {
+		t.Fatalf("expected false when one check fails")
+	}
+
+	// First check fails.
+	if objutilv1.StatusCondition(obj, "Missing").
+		Present(). // fails here
+		IsTrue().
+		ReasonEqual("OK").
+		Eval() {
+		t.Fatalf("expected false when first check fails")
+	}
+}
+
+func TestAreConditions_NilObjects(t *testing.T) {
+	obj := &testConditionedObject{}
+	obj.SetGeneration(1)
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK"})
+
+	// nil == nil.
+	if !objutilv1.AreConditionsSemanticallyEqual(nil, nil) {
+		t.Fatalf("expected nil==nil to be equal")
+	}
+	if !objutilv1.AreConditionsEqualByStatus(nil, nil) {
+		t.Fatalf("expected nil==nil to be equal")
+	}
+
+	// non-nil != nil.
+	if objutilv1.AreConditionsSemanticallyEqual(obj, nil) {
+		t.Fatalf("expected non-nil != nil")
+	}
+	if objutilv1.AreConditionsSemanticallyEqual(nil, obj) {
+		t.Fatalf("expected nil != non-nil")
+	}
+	if objutilv1.AreConditionsEqualByStatus(obj, nil) {
+		t.Fatalf("expected non-nil != nil")
+	}
+	if objutilv1.AreConditionsEqualByStatus(nil, obj) {
+		t.Fatalf("expected nil != non-nil")
+	}
+}

@@ -42,103 +42,293 @@ func TestRVRController(t *testing.T) {
 	RunSpecs(t, "rvr_controller Suite")
 }
 
-var _ = Describe("mapRVToRVRs", func() {
+var _ = Describe("rvEventHandler", func() {
 	var scheme *runtime.Scheme
+	var queue *fakeQueue
 
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 		Expect(corev1.AddToScheme(scheme)).To(Succeed())
+		queue = &fakeQueue{}
 	})
 
-	It("returns requests for RVRs belonging to the RV", func() {
-		rv := &v1alpha1.ReplicatedVolume{
-			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
-		}
-		rvr1 := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-1"},
-		}
-		rvr2 := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
-			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-1"},
-		}
-		rvrOther := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-other"},
-			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-other"},
-		}
-
-		cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(
-			fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithObjects(rv, rvr1, rvr2, rvrOther),
-		).Build()
-
-		mapFunc := mapRVToRVRs(cl)
-		requests := mapFunc(context.Background(), rv)
-
-		Expect(requests).To(HaveLen(2))
-		names := []string{requests[0].Name, requests[1].Name}
-		Expect(names).To(ContainElements("rvr-1", "rvr-2"))
-	})
-
-	It("returns empty slice when no RVRs belong to the RV", func() {
-		rv := &v1alpha1.ReplicatedVolume{
-			ObjectMeta: metav1.ObjectMeta{Name: "rv-unused"},
-		}
-		rvrOther := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-other"},
-			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-other"},
-		}
-
-		cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(
-			fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithObjects(rv, rvrOther),
-		).Build()
-
-		mapFunc := mapRVToRVRs(cl)
-		requests := mapFunc(context.Background(), rv)
-
-		Expect(requests).To(BeEmpty())
-	})
-
-	It("returns nil for non-RV object", func() {
-		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
-
-		mapFunc := mapRVToRVRs(cl)
-		requests := mapFunc(context.Background(), &corev1.Node{})
-
-		Expect(requests).To(BeNil())
-	})
-
-	It("returns nil for nil object", func() {
-		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
-
-		mapFunc := mapRVToRVRs(cl)
-		requests := mapFunc(context.Background(), nil)
-
-		Expect(requests).To(BeNil())
-	})
-
-	It("returns nil when List fails", func() {
-		rv := &v1alpha1.ReplicatedVolume{
-			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
-		}
-
-		cl := fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithInterceptorFuncs(interceptor.Funcs{
-				List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList, _ ...client.ListOption) error {
-					return errors.New("list error")
+	Describe("Update with DatameshRevision change", func() {
+		It("enqueues all RVRs when old revision is 0 (initial setup)", func() {
+			oldRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 0,
 				},
-			}).
-			Build()
+			}
+			newRV := oldRV.DeepCopy()
+			newRV.Status.DatameshRevision = 1
+			newRV.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+				{Name: "rv-1-0"},
+				{Name: "rv-1-1"},
+			}
 
-		mapFunc := mapRVToRVRs(cl)
-		requests := mapFunc(context.Background(), rv)
+			rvr0 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1-0"},
+				Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-1"},
+			}
+			rvr1 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1-1"},
+				Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-1"},
+			}
+			rvrOther := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-other-0"},
+				Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-other"},
+			}
 
-		Expect(requests).To(BeNil())
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(
+				fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(newRV, rvr0, rvr1, rvrOther),
+			).Build()
+
+			handler := newRVEventHandler(cl).(*rvEventHandler)
+			handler.Update(context.Background(), event.UpdateEvent{ObjectOld: oldRV, ObjectNew: newRV}, queue)
+
+			Expect(queue.items).To(HaveLen(2))
+			names := []string{queue.items[0].Name, queue.items[1].Name}
+			Expect(names).To(ContainElements("rv-1-0", "rv-1-1"))
+		})
+
+		It("enqueues only members from old/new datamesh when revision changes non-zero->non-zero", func() {
+			oldRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
+					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+							{Name: "rv-1-0"},
+							{Name: "rv-1-1"},
+						},
+					},
+				},
+			}
+			newRV := oldRV.DeepCopy()
+			newRV.Status.DatameshRevision = 2
+			newRV.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+				{Name: "rv-1-1"},
+				{Name: "rv-1-2"}, // Added.
+			}
+
+			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+			handler := newRVEventHandler(cl).(*rvEventHandler)
+			handler.Update(context.Background(), event.UpdateEvent{ObjectOld: oldRV, ObjectNew: newRV}, queue)
+
+			// Should enqueue node IDs 0, 1, 2 (union of old and new members).
+			Expect(queue.items).To(HaveLen(3))
+			names := []string{queue.items[0].Name, queue.items[1].Name, queue.items[2].Name}
+			Expect(names).To(ContainElements("rv-1-0", "rv-1-1", "rv-1-2"))
+		})
+	})
+
+	Describe("Update with ReplicatedStorageClassName change", func() {
+		It("enqueues all RVRs when ReplicatedStorageClassName changes", func() {
+			oldRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					ReplicatedStorageClassName: "rsc-old",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
+				},
+			}
+			newRV := oldRV.DeepCopy()
+			newRV.Spec.ReplicatedStorageClassName = "rsc-new"
+
+			rvr0 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1-0"},
+				Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-1"},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(
+				fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(newRV, rvr0),
+			).Build()
+
+			handler := newRVEventHandler(cl).(*rvEventHandler)
+			handler.Update(context.Background(), event.UpdateEvent{ObjectOld: oldRV, ObjectNew: newRV}, queue)
+
+			Expect(queue.items).To(HaveLen(1))
+			Expect(queue.items[0].Name).To(Equal("rv-1-0"))
+		})
+	})
+
+	Describe("Update with DatameshPendingReplicaTransitions message change", func() {
+		It("enqueues only affected RVRs when message changes", func() {
+			oldRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
+					DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+						{Name: "rv-1-0", Message: "old message"},
+						{Name: "rv-1-1", Message: "unchanged"},
+					},
+				},
+			}
+			newRV := oldRV.DeepCopy()
+			newRV.Status.DatameshPendingReplicaTransitions[0].Message = "new message"
+
+			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+			handler := newRVEventHandler(cl).(*rvEventHandler)
+			handler.Update(context.Background(), event.UpdateEvent{ObjectOld: oldRV, ObjectNew: newRV}, queue)
+
+			// Only rv-1-0 should be enqueued (message changed).
+			Expect(queue.items).To(HaveLen(1))
+			Expect(queue.items[0].Name).To(Equal("rv-1-0"))
+		})
+
+		It("enqueues RVRs for added transitions", func() {
+			oldRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
+					DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+						{Name: "rv-1-0", Message: "msg"},
+					},
+				},
+			}
+			newRV := oldRV.DeepCopy()
+			newRV.Status.DatameshPendingReplicaTransitions = append(
+				newRV.Status.DatameshPendingReplicaTransitions,
+				v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{Name: "rv-1-1", Message: "new"},
+			)
+
+			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+			handler := newRVEventHandler(cl).(*rvEventHandler)
+			handler.Update(context.Background(), event.UpdateEvent{ObjectOld: oldRV, ObjectNew: newRV}, queue)
+
+			// Only rv-1-1 should be enqueued (added).
+			Expect(queue.items).To(HaveLen(1))
+			Expect(queue.items[0].Name).To(Equal("rv-1-1"))
+		})
+
+		It("enqueues nothing when no changes", func() {
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
+					DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+						{Name: "rv-1-0", Message: "msg"},
+					},
+				},
+			}
+
+			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+			handler := newRVEventHandler(cl).(*rvEventHandler)
+			handler.Update(context.Background(), event.UpdateEvent{ObjectOld: rv, ObjectNew: rv.DeepCopy()}, queue)
+
+			Expect(queue.items).To(BeEmpty())
+		})
+	})
+
+	Describe("Update with combined changes", func() {
+		It("enqueues union of datamesh members and message-changed replicas", func() {
+			oldRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
+					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+							{Name: "rv-1-0"},
+							{Name: "rv-1-1"},
+						},
+					},
+					DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+						{Name: "rv-1-3", Message: "old message"},
+					},
+				},
+			}
+			newRV := oldRV.DeepCopy()
+			newRV.Status.DatameshRevision = 2
+			newRV.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+				{Name: "rv-1-1"},
+				{Name: "rv-1-2"}, // Added to datamesh.
+			}
+			// Message also changed for pending replica (not in datamesh).
+			newRV.Status.DatameshPendingReplicaTransitions[0].Message = "new message"
+
+			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+			handler := newRVEventHandler(cl).(*rvEventHandler)
+			handler.Update(context.Background(), event.UpdateEvent{ObjectOld: oldRV, ObjectNew: newRV}, queue)
+
+			// Should enqueue:
+			// - node IDs 0, 1, 2 from datamesh (union of old/new members)
+			// - node ID 3 from message change
+			Expect(queue.items).To(HaveLen(4))
+			names := make([]string, len(queue.items))
+			for i, item := range queue.items {
+				names[i] = item.Name
+			}
+			Expect(names).To(ContainElements("rv-1-0", "rv-1-1", "rv-1-2", "rv-1-3"))
+		})
+	})
+
+	Describe("Create/Delete/Generic", func() {
+		It("enqueues all RVRs on Create", func() {
+			rv := &v1alpha1.ReplicatedVolume{ObjectMeta: metav1.ObjectMeta{Name: "rv-1"}}
+			rvr0 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1-0"},
+				Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-1"},
+			}
+			rvr1 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1-1"},
+				Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-1"},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(
+				fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(rv, rvr0, rvr1),
+			).Build()
+
+			handler := newRVEventHandler(cl).(*rvEventHandler)
+			handler.Create(context.Background(), event.CreateEvent{Object: rv}, queue)
+
+			Expect(queue.items).To(HaveLen(2))
+			names := []string{queue.items[0].Name, queue.items[1].Name}
+			Expect(names).To(ContainElements("rv-1-0", "rv-1-1"))
+		})
+
+		It("enqueues all RVRs on Delete", func() {
+			rv := &v1alpha1.ReplicatedVolume{ObjectMeta: metav1.ObjectMeta{Name: "rv-1"}}
+			rvr0 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1-0"},
+				Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-1"},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(
+				fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(rv, rvr0),
+			).Build()
+
+			handler := newRVEventHandler(cl).(*rvEventHandler)
+			handler.Delete(context.Background(), event.DeleteEvent{Object: rv}, queue)
+
+			Expect(queue.items).To(HaveLen(1))
+			Expect(queue.items[0].Name).To(Equal("rv-1-0"))
+		})
+
+		It("does nothing on Generic", func() {
+			rv := &v1alpha1.ReplicatedVolume{ObjectMeta: metav1.ObjectMeta{Name: "rv-1"}}
+			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+			handler := newRVEventHandler(cl).(*rvEventHandler)
+			handler.Generic(context.Background(), event.GenericEvent{Object: rv}, queue)
+
+			Expect(queue.items).To(BeEmpty())
+		})
 	})
 })
 
