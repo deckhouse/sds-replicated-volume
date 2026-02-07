@@ -97,6 +97,10 @@ spec:
               level: s0
               type: spc_t
           env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             - name: SLOGH_CONFIG_PATH
               value: "/etc/config/slogh.cfg"
             - name: SCHEDULER_EXTENDER_URL
