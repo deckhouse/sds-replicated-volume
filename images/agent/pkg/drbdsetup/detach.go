@@ -19,11 +19,20 @@ package drbdsetup
 import (
 	"context"
 	"fmt"
+	"strconv"
 )
 
-// ExecuteDown brings down a DRBD resource.
-func ExecuteDown(ctx context.Context, resource string) (err error) {
-	args := DownArgs(resource)
+// DetachArgs returns the arguments for drbdsetup detach command.
+var DetachArgs = func(minor uint) []string {
+	return []string{
+		"detach",
+		strconv.FormatUint(uint64(minor), 10),
+	}
+}
+
+// ExecuteDetach detaches the backing device from a replicated device.
+func ExecuteDetach(ctx context.Context, minor uint) (err error) {
+	args := DetachArgs(minor)
 	cmd := ExecCommandContext(ctx, Command, args...)
 
 	defer func() {

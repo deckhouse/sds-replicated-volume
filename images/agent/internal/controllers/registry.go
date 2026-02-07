@@ -20,11 +20,14 @@ import (
 	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbd"
 )
 
 var registry []func(mgr manager.Manager) error
 
 func init() {
+	registry = append(registry, drbd.BuildController)
 	// ...
 }
 

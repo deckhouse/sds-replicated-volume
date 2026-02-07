@@ -18,12 +18,27 @@ package drbdsetup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
-// ExecuteDown brings down a DRBD resource.
-func ExecuteDown(ctx context.Context, resource string) (err error) {
-	args := DownArgs(resource)
+var (
+	ErrPrimaryNoUpToDateDisk   = errors.New("no up-to-date disk available")
+	ErrPrimaryResourceNotFound = errors.New("resource not found")
+)
+
+// PrimaryArgs returns the arguments for drbdsetup primary command.
+var PrimaryArgs = func(resource string, force bool) []string {
+	args := []string{"primary", resource}
+	if force {
+		args = append(args, "--force")
+	}
+	return args
+}
+
+// ExecutePrimary changes the role of a node in a resource to primary.
+func ExecutePrimary(ctx context.Context, resource string, force bool) (err error) {
+	args := PrimaryArgs(resource, force)
 	cmd := ExecCommandContext(ctx, Command, args...)
 
 	defer func() {
@@ -34,6 +49,12 @@ func ExecuteDown(ctx context.Context, resource string) (err error) {
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		switch errToExitCode(err) {
+		case 17:
+			err = ErrPrimaryNoUpToDateDisk
+		case 158:
+			err = ErrPrimaryResourceNotFound
+		}
 		return withOutput(err, out)
 	}
 
