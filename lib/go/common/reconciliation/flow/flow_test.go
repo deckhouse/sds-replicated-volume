@@ -361,49 +361,6 @@ func TestEnsureOutcome_DidChange(t *testing.T) {
 	}
 }
 
-func TestEnsureOutcome_OptimisticLockRequired(t *testing.T) {
-	ef := flow.BeginEnsure(context.Background(), "test")
-	var outcome flow.EnsureOutcome
-	defer ef.OnEnd(&outcome)
-
-	if ef.Ok().OptimisticLockRequired() {
-		t.Fatalf("expected OptimisticLockRequired() == false for Ok()")
-	}
-
-	if ef.Ok().ReportChanged().OptimisticLockRequired() {
-		t.Fatalf("expected OptimisticLockRequired() == false after ReportChanged()")
-	}
-
-	o := ef.Ok().ReportChanged().RequireOptimisticLock()
-	if !o.OptimisticLockRequired() {
-		t.Fatalf("expected OptimisticLockRequired() == true after ReportChanged().RequireOptimisticLock()")
-	}
-}
-
-func TestEnsureOutcome_RequireOptimisticLock_PanicsWithoutChangeReported(t *testing.T) {
-	ef := flow.BeginEnsure(context.Background(), "test")
-	var outcome flow.EnsureOutcome
-	defer ef.OnEnd(&outcome)
-
-	mustPanic(t, func() { _ = ef.Ok().RequireOptimisticLock() })
-}
-
-func TestEnsureOutcome_RequireOptimisticLock_DoesNotPanicAfterReportChangedIfFalse(t *testing.T) {
-	ef := flow.BeginEnsure(context.Background(), "test")
-	var outcome flow.EnsureOutcome
-	defer ef.OnEnd(&outcome)
-
-	mustNotPanic(t, func() { _ = ef.Ok().ReportChangedIf(false).RequireOptimisticLock() })
-
-	o := ef.Ok().ReportChangedIf(false).RequireOptimisticLock()
-	if o.OptimisticLockRequired() {
-		t.Fatalf("expected OptimisticLockRequired() == false when no change was reported")
-	}
-	if o.DidChange() {
-		t.Fatalf("expected DidChange() == false when no change was reported")
-	}
-}
-
 func TestEnsureOutcome_Error(t *testing.T) {
 	ef := flow.BeginEnsure(context.Background(), "test")
 	var outcome flow.EnsureOutcome
@@ -458,46 +415,16 @@ func TestMergeEnsures_ChangeTracking_DidChange(t *testing.T) {
 	if !o.DidChange() {
 		t.Fatalf("expected merged outcome to report DidChange() == true")
 	}
-	if o.OptimisticLockRequired() {
-		t.Fatalf("expected merged outcome to not require optimistic lock")
-	}
 }
 
-func TestMergeEnsures_ChangeTracking_OptimisticLockRequired(t *testing.T) {
-	ef := flow.BeginEnsure(context.Background(), "test")
-	var outcome flow.EnsureOutcome
-	defer ef.OnEnd(&outcome)
-
-	o := flow.MergeEnsures(
-		ef.Ok().ReportChanged(),
-		ef.Ok().ReportChanged().RequireOptimisticLock(),
-	)
-	if !o.DidChange() {
-		t.Fatalf("expected merged outcome to report DidChange() == true")
-	}
-	if !o.OptimisticLockRequired() {
-		t.Fatalf("expected merged outcome to require optimistic lock")
-	}
-}
-
-func TestMergeEnsures_ChangeTracking_ChangeReportedOr(t *testing.T) {
+func TestMergeEnsures_ChangeTracking_AllUnchanged(t *testing.T) {
 	ef := flow.BeginEnsure(context.Background(), "test")
 	var outcome flow.EnsureOutcome
 	defer ef.OnEnd(&outcome)
 
 	o := flow.MergeEnsures(ef.Ok(), ef.Ok().ReportChangedIf(false))
-
-	// ReportChangedIf(false) does not report a semantic change, but it does report that change tracking was used.
 	if o.DidChange() {
 		t.Fatalf("expected merged outcome DidChange() == false")
-	}
-
-	// This call should not panic because MergeEnsures ORs the changeReported flag, even if no semantic change happened.
-	mustNotPanic(t, func() { _ = o.RequireOptimisticLock() })
-
-	o = o.RequireOptimisticLock()
-	if o.OptimisticLockRequired() {
-		t.Fatalf("expected OptimisticLockRequired() == false when no change was reported")
 	}
 }
 
@@ -835,7 +762,7 @@ func TestEnsureFlow_OnEnd_LogsChangeTrackingFields(t *testing.T) {
 	ctx := log.IntoContext(context.Background(), l)
 	ef := flow.BeginEnsure(ctx, "ensure-test")
 
-	outcome := ef.Ok().ReportChanged().RequireOptimisticLock()
+	outcome := ef.Ok().ReportChanged()
 	ef.OnEnd(&outcome)
 
 	// Find V(1) "phase end" log (no error, so Debug level in zap for V(1).Info)
@@ -852,9 +779,6 @@ func TestEnsureFlow_OnEnd_LogsChangeTrackingFields(t *testing.T) {
 	m := matches[0].ContextMap()
 	if got := m["changed"]; got != true {
 		t.Fatalf("expected changed=true, got %v", got)
-	}
-	if got := m["optimisticLock"]; got != true {
-		t.Fatalf("expected optimisticLock=true, got %v", got)
 	}
 	if got := m["hasError"]; got != false {
 		t.Fatalf("expected hasError=false, got %v", got)

@@ -267,7 +267,7 @@ Reconcile methods MUST be the only place that decides:
 
 Single-call API writes may be delegated to helpers, but **the sequencing policy lives here**.
 
-When aggregating results from sub-reconciles or ensure helpers, **Reconcile methods** MAY use `outcome.DidChange()` and `outcome.OptimisticLockRequired()` (from **ReconcileOutcome** or **EnsureOutcome**) to make patch decisions.
+When aggregating results from sub-reconciles or ensure helpers, **Reconcile methods** MAY use `outcome.DidChange()` (from **ReconcileOutcome** or **EnsureOutcome**) to decide whether to patch.
 
 ---
 

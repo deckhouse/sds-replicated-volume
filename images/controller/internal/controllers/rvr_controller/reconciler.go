@@ -182,7 +182,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Patch the RVR status if changed.
 	if outcome.DidChange() && rvr != nil {
-		if err := r.patchRVRStatus(rf.Ctx(), rvr, base, outcome.OptimisticLockRequired()); err != nil {
+		if err := r.patchRVRStatus(rf.Ctx(), rvr, base); err != nil {
 			return rf.Fail(err).ToCtrl()
 		}
 	}
@@ -646,7 +646,7 @@ func ensureStatusBackingVolume(
 		}
 	}
 
-	return ef.Ok().ReportChangedIf(changed).RequireOptimisticLock()
+	return ef.Ok().ReportChangedIf(changed)
 }
 
 // ensureConditionBackingVolumeUpToDate ensures the RVR BackingVolumeUpToDate condition reflects the current DRBDR state.
@@ -1283,7 +1283,7 @@ func (r *Reconciler) reconcileMetadata(
 	base := rvr.DeepCopy()
 	applyRVRMetadata(rvr, rv, targetFinalizerPresent, actualLVGName)
 
-	if err := r.patchRVR(rf.Ctx(), rvr, base, true); err != nil {
+	if err := r.patchRVR(rf.Ctx(), rvr, base); err != nil {
 		return rf.Fail(err)
 	}
 
@@ -1493,7 +1493,7 @@ func (r *Reconciler) reconcileBackingVolume(
 		if _, err := applyLLVMetadata(r.scheme, rvr, rv, intendedLLV); err != nil {
 			return nil, nil, rf.Failf(err, "applying LLV %s metadata", intendedLLV.Name)
 		}
-		if err := r.patchLLV(rf.Ctx(), intendedLLV, base, true); err != nil {
+		if err := r.patchLLV(rf.Ctx(), intendedLLV, base); err != nil {
 			return nil, nil, rf.Failf(err, "patching LLV %s metadata", intendedLLV.Name)
 		}
 	}
@@ -1527,7 +1527,7 @@ func (r *Reconciler) reconcileBackingVolume(
 		if intendedLLV.Spec.Size != intended.Size.String() {
 			base := intendedLLV.DeepCopy()
 			intendedLLV.Spec.Size = intended.Size.String()
-			if err := r.patchLLV(rf.Ctx(), intendedLLV, base, true); err != nil {
+			if err := r.patchLLV(rf.Ctx(), intendedLLV, base); err != nil {
 				// Handle validation errors specially: log, set condition and requeue.
 				// LVMLogicalVolume is not our API, so we treat validation errors as recoverable
 				// for safety reasons (e.g., schema changes in sds-node-configurator).
@@ -1904,7 +1904,7 @@ func (r *Reconciler) reconcileLLVsDeletion(
 		if obju.HasFinalizer(llv, v1alpha1.RVRControllerFinalizer) {
 			base := llv.DeepCopy()
 			obju.RemoveFinalizer(llv, v1alpha1.RVRControllerFinalizer)
-			if err := r.patchLLV(rf.Ctx(), llv, base, false); err != nil {
+			if err := r.patchLLV(rf.Ctx(), llv, base); err != nil {
 				return deletingNames, rf.Failf(err, "patching LLV %s", llv.Name)
 			}
 		}
@@ -1995,7 +1995,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 			if obju.HasFinalizer(drbdr, v1alpha1.RVRControllerFinalizer) {
 				base := drbdr.DeepCopy()
 				obju.RemoveFinalizer(drbdr, v1alpha1.RVRControllerFinalizer)
-				if err := r.patchDRBDR(rf.Ctx(), drbdr, base, false); err != nil {
+				if err := r.patchDRBDR(rf.Ctx(), drbdr, base); err != nil {
 					return drbdr, rf.Failf(err, "patching DRBDResource %s", drbdr.Name)
 				}
 			}
@@ -2103,7 +2103,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 			if !equality.Semantic.DeepEqual(drbdr.Spec, targetSpec) {
 				base := drbdr.DeepCopy()
 				drbdr.Spec = targetSpec
-				if err := r.patchDRBDR(rf.Ctx(), drbdr, base, true); err != nil {
+				if err := r.patchDRBDR(rf.Ctx(), drbdr, base); err != nil {
 					return drbdr, rf.Failf(err, "patching DRBDResource")
 				}
 			}
@@ -2135,7 +2135,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		msg := fmt.Sprintf("Agent is not ready on node %s (node status: %s)", nodeName, nodeState)
 		changed = applyDRBDConfiguredCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady, msg) || changed
-		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
 	// 9. Check DRBDR configuration status.
@@ -2146,7 +2146,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		changed = applyDRBDConfiguredCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration,
 			"Waiting for agent to respond (Configured condition is not set yet)") || changed
-		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
 	// 9b. Agent hasn't processed the current generation yet.
@@ -2155,7 +2155,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 			drbdr.Generation, drbdrConfiguredCond.ObservedGeneration)
 		changed = applyDRBDConfiguredCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration, msg) || changed
-		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
 	// 9c. DRBDR is in maintenance mode.
@@ -2163,7 +2163,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		changed = applyDRBDConfiguredCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration,
 			"DRBD is in maintenance mode") || changed
-		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
 	// 9d. DRBDR configuration failed.
@@ -2171,7 +2171,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		msg := fmt.Sprintf("DRBD configuration failed (reason: %s)", drbdrConfiguredCond.Reason)
 		changed = applyDRBDConfiguredCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigurationFailed, msg) || changed
-		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
 	// At this point DRBDR is configured (Configured condition is True).
@@ -2181,7 +2181,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		changed = applyDRBDConfiguredCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration,
 			"Waiting for DRBD addresses") || changed
-		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
 	// 11. If targetType != intendedType, DRBDR is configured as TieBreaker
@@ -2192,7 +2192,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		changed = applyDRBDConfiguredCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForBackingVolume,
 			"DRBD preconfigured as TieBreaker, waiting for backing volume to become ready") || changed
-		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
 	// 12. Check if backing volume matches intended configuration.
@@ -2212,7 +2212,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 				formatBV(targetBV), formatBV(intendedBV))
 			changed = applyDRBDConfiguredCondFalse(rvr,
 				v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForBackingVolume, msg) || changed
-			return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+			return drbdr, rf.Continue().ReportChangedIf(changed)
 		}
 
 		// 12b. Check if backing volume needs resize.
@@ -2221,7 +2221,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 				targetBV.Size.String(), intendedBV.Size.String())
 			changed = applyDRBDConfiguredCondFalse(rvr,
 				v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForBackingVolume, msg) || changed
-			return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+			return drbdr, rf.Continue().ReportChangedIf(changed)
 		}
 	}
 
@@ -2230,7 +2230,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		changed = applyDRBDConfiguredCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingDatameshJoin,
 			"DRBD preconfigured, waiting for datamesh membership") || changed
-		return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
 	// Invariant: at this point backing volume must be either not needed or fully ready.
@@ -2261,7 +2261,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 	}
 	changed = applyDRBDConfiguredCondTrue(rvr,
 		v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured, "Configured") || changed
-	return drbdr, rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+	return drbdr, rf.Continue().ReportChangedIf(changed)
 }
 
 // computeIntendedType returns the intended replica type.
@@ -2973,24 +2973,12 @@ func (r *Reconciler) getRVR(ctx context.Context, name string) (*v1alpha1.Replica
 	return &rvr, nil
 }
 
-func (r *Reconciler) patchRVR(ctx context.Context, obj, base *v1alpha1.ReplicatedVolumeReplica, optimisticLock bool) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Patch(ctx, obj, patch)
+func (r *Reconciler) patchRVR(ctx context.Context, obj, base *v1alpha1.ReplicatedVolumeReplica) error {
+	return r.cl.Patch(ctx, obj, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
-func (r *Reconciler) patchRVRStatus(ctx context.Context, obj, base *v1alpha1.ReplicatedVolumeReplica, optimisticLock bool) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Status().Patch(ctx, obj, patch)
+func (r *Reconciler) patchRVRStatus(ctx context.Context, obj, base *v1alpha1.ReplicatedVolumeReplica) error {
+	return r.cl.Status().Patch(ctx, obj, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 // --- DRBDResource (DRBDR) ---
@@ -3012,14 +3000,8 @@ func (r *Reconciler) createDRBDR(ctx context.Context, drbdr *v1alpha1.DRBDResour
 	return r.cl.Create(ctx, drbdr)
 }
 
-func (r *Reconciler) patchDRBDR(ctx context.Context, obj, base *v1alpha1.DRBDResource, optimisticLock bool) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Patch(ctx, obj, patch)
+func (r *Reconciler) patchDRBDR(ctx context.Context, obj, base *v1alpha1.DRBDResource) error {
+	return r.cl.Patch(ctx, obj, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 func (r *Reconciler) deleteDRBDR(ctx context.Context, drbdr *v1alpha1.DRBDResource) error {
@@ -3132,14 +3114,8 @@ func (r *Reconciler) createLLV(ctx context.Context, llv *snc.LVMLogicalVolume) e
 	return r.cl.Create(ctx, llv)
 }
 
-func (r *Reconciler) patchLLV(ctx context.Context, obj, base *snc.LVMLogicalVolume, optimisticLock bool) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Patch(ctx, obj, patch)
+func (r *Reconciler) patchLLV(ctx context.Context, obj, base *snc.LVMLogicalVolume) error {
+	return r.cl.Patch(ctx, obj, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 func (r *Reconciler) deleteLLV(ctx context.Context, llv *snc.LVMLogicalVolume) error {
