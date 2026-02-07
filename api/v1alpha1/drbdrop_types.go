@@ -59,10 +59,15 @@ type DRBDResourceOperationSpec struct {
 }
 
 // +kubebuilder:object:generate=true
+//
+//	+kubebuilder:validation:XValidation:rule="!(self.clearBitmap && self.forceResync)",message="clearBitmap and forceResync are mutually exclusive"
 type CreateNewUUIDParams struct {
 	// +kubebuilder:default=false
 	// +optional
 	ClearBitmap bool `json:"clearBitmap,omitempty"`
+	// +kubebuilder:default=false
+	// +optional
+	ForceResync bool `json:"forceResync,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

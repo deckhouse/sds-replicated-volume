@@ -18,6 +18,7 @@ package objutilv1
 
 import (
 	"slices"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -124,31 +125,20 @@ func AreConditionsEqualByStatus(a, b StatusConditionObject, condTypes ...string)
 	return areConditionsEqual(a, b, condTypes, ConditionEqualByStatus)
 }
 
-// IsStatusConditionPresentAndEqual reports whether `.status.conditions` contains the condition type with the given status.
-func IsStatusConditionPresentAndEqual(obj StatusConditionObject, condType string, condStatus metav1.ConditionStatus) bool {
+// isStatusConditionPresentAndEqual reports whether `.status.conditions` contains the condition type with the given status.
+func isStatusConditionPresentAndStatusEqual(obj StatusConditionObject, condType string, condStatus metav1.ConditionStatus) bool {
 	actual := meta.FindStatusCondition(obj.GetStatusConditions(), condType)
 	return actual != nil && actual.Status == condStatus
 }
 
 // IsStatusConditionPresentAndTrue is a convenience wrapper for IsStatusConditionPresentAndEqual(..., ConditionTrue).
 func IsStatusConditionPresentAndTrue(obj StatusConditionObject, condType string) bool {
-	return IsStatusConditionPresentAndEqual(obj, condType, metav1.ConditionTrue)
+	return isStatusConditionPresentAndStatusEqual(obj, condType, metav1.ConditionTrue)
 }
 
 // IsStatusConditionPresentAndFalse is a convenience wrapper for IsStatusConditionPresentAndEqual(..., ConditionFalse).
 func IsStatusConditionPresentAndFalse(obj StatusConditionObject, condType string) bool {
-	return IsStatusConditionPresentAndEqual(obj, condType, metav1.ConditionFalse)
-}
-
-// IsStatusConditionPresentAndSemanticallyEqual reports whether the condition with the same Type is present and semantically equal.
-func IsStatusConditionPresentAndSemanticallyEqual(obj StatusConditionObject, expected metav1.Condition) bool {
-	// This is consistent with SetStatusCondition, so we can use Generation from the object.
-	if expected.ObservedGeneration == 0 {
-		expected.ObservedGeneration = obj.GetGeneration()
-	}
-
-	actual := meta.FindStatusCondition(obj.GetStatusConditions(), expected.Type)
-	return actual != nil && ConditionSemanticallyEqual(actual, &expected)
+	return isStatusConditionPresentAndStatusEqual(obj, condType, metav1.ConditionFalse)
 }
 
 // HasStatusCondition reports whether `.status.conditions` contains the given condition type.
@@ -208,4 +198,97 @@ func RemoveStatusCondition(obj StatusConditionObject, condType string) (changed 
 		obj.SetStatusConditions(conds)
 	}
 	return changed
+}
+
+// ----------------------------------------------------------------------------
+// Fluent API for condition checks
+// ----------------------------------------------------------------------------
+
+// StatusConditionChecker provides a fluent API for checking status conditions.
+//
+// Example:
+//
+//	ok := StatusCondition(obj, condType).
+//	    StatusEqual(metav1.ConditionTrue).
+//	    ReasonEqual("Foo").
+//	    ObservedGenerationCurrent().
+//	    Eval()
+type StatusConditionChecker struct {
+	obj    StatusConditionObject
+	cond   *metav1.Condition
+	result bool
+}
+
+// StatusCondition starts a fluent condition check chain.
+//
+// The chain evaluates to true if the condition is present and all checks pass.
+// If the condition is not present, all checks will fail.
+func StatusCondition(obj StatusConditionObject, condType string) *StatusConditionChecker {
+	cond := meta.FindStatusCondition(obj.GetStatusConditions(), condType)
+	return &StatusConditionChecker{
+		obj:    obj,
+		cond:   cond,
+		result: cond != nil,
+	}
+}
+
+// Present checks that the condition exists.
+func (c *StatusConditionChecker) Present() *StatusConditionChecker {
+	// result is already false if cond == nil
+	return c
+}
+
+// StatusEqual checks that the condition status equals the given value.
+func (c *StatusConditionChecker) StatusEqual(status metav1.ConditionStatus) *StatusConditionChecker {
+	if c.result {
+		c.result = c.cond.Status == status
+	}
+	return c
+}
+
+// IsTrue is a shortcut for StatusEqual(metav1.ConditionTrue).
+func (c *StatusConditionChecker) IsTrue() *StatusConditionChecker {
+	return c.StatusEqual(metav1.ConditionTrue)
+}
+
+// IsFalse is a shortcut for StatusEqual(metav1.ConditionFalse).
+func (c *StatusConditionChecker) IsFalse() *StatusConditionChecker {
+	return c.StatusEqual(metav1.ConditionFalse)
+}
+
+// ReasonEqual checks that the condition reason equals the given value.
+func (c *StatusConditionChecker) ReasonEqual(reason string) *StatusConditionChecker {
+	if c.result {
+		c.result = c.cond.Reason == reason
+	}
+	return c
+}
+
+// MessageEqual checks that the condition message equals the given value.
+func (c *StatusConditionChecker) MessageEqual(message string) *StatusConditionChecker {
+	if c.result {
+		c.result = c.cond.Message == message
+	}
+	return c
+}
+
+// MessageContains checks that the condition message contains the given substring.
+func (c *StatusConditionChecker) MessageContains(substr string) *StatusConditionChecker {
+	if c.result {
+		c.result = strings.Contains(c.cond.Message, substr)
+	}
+	return c
+}
+
+// ObservedGenerationCurrent checks that ObservedGeneration equals the object's Generation.
+func (c *StatusConditionChecker) ObservedGenerationCurrent() *StatusConditionChecker {
+	if c.result {
+		c.result = c.cond.ObservedGeneration == c.obj.GetGeneration()
+	}
+	return c
+}
+
+// Eval returns the result of all checks.
+func (c *StatusConditionChecker) Eval() bool {
+	return c.result
 }

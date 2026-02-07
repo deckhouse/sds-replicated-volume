@@ -1,5 +1,5 @@
 ---
-description: Contracts for DeleteReconcileHelper (delete<Kind>) functions: exactly one Kubernetes API Delete call for one object, deterministic handling, and no object/status mutation. Apply when writing delete* helpers in reconciler*.go, and when deciding deletion semantics and ordering. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+description: Contracts for DeleteReconcileHelper (delete<Kind>) functions: exactly one Kubernetes API Delete call for one object, deterministic handling, and required DeletionTimestamp marking after successful delete. Apply when writing delete* helpers in reconciler*.go, and when deciding deletion semantics and ordering. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
 globs: images/controller/internal/controllers/**/reconciler*.go
 alwaysApply: false
 ---
@@ -18,10 +18,12 @@ Common terminology and rules for any **ReconcileHelper** live in `controller-rec
 
 Summary only; if anything differs, follow normative sections below.
 
-- **DeleteReconcileHelpers** (`delete<Kind>`) are **single-call I/O helpers**: they perform exactly **one** **Kubernetes API I/O** write — `Delete(...)` — for exactly one **object** (or treat NotFound as “already absent”, depending on policy).
+- **DeleteReconcileHelpers** (`delete<Kind>`) are **single-call I/O helpers**: they perform exactly **one** **Kubernetes API I/O** write — `Delete(...)` — for exactly one **object**, treating `NotFound` as success (`client.IgnoreNotFound`).
 - They MUST NOT perform any other **Kubernetes API I/O** calls (`Get/List/Create/Update/Patch`), MUST NOT call **DeepCopy**, and MUST NOT execute patches or make **patch ordering** / **patch type decision** decisions.
-- They MUST NOT mutate the **object** as part of deletion (no “marking”, no finalizer edits, no status writes — no publishing **report** and no persisting **controller-owned state**); any prerequisite mutations (e.g., finalizer removal) are done by **Reconcile methods** via a **separate** ensure/apply + patch step **before** calling delete.
-- Everything they control MUST be deterministic (no time/random/env-driven behavior; consistent NotFound handling).
+- They MUST check `DeletionTimestamp` **before** calling Delete (skip if already set).
+- They MUST set `DeletionTimestamp` on the object **after** a successful Delete call (the only allowed mutation).
+- They MUST NOT mutate the **object** in any other way (no finalizer edits, no status writes — no publishing **report** and no persisting **controller-owned state**); any prerequisite mutations (e.g., finalizer removal) are done by **Reconcile methods** via a **separate** ensure/apply + patch step **before** calling delete.
+- Everything they control MUST be deterministic (consistent NotFound handling); `metav1.Now()` is allowed only for setting `DeletionTimestamp` after delete.
 
 ---
 
@@ -63,24 +65,45 @@ func (r *Reconciler) deleteEK(
 ) error
 ```
 
-### Recommended implementation pattern (SHOULD)
+### Required implementation pattern (MUST)
 
-Delete helpers SHOULD:
+Delete helpers MUST:
 1. Skip the API call if the object is already marked for deletion (`DeletionTimestamp != nil`).
 2. Treat `NotFound` as success using `client.IgnoreNotFound`.
+3. Set `DeletionTimestamp` on the object after a successful Delete call.
 
 ```go
 func (r *Reconciler) deleteEK(ctx context.Context, obj *v1alpha1.ExampleKind) error {
     if obj.DeletionTimestamp != nil {
         return nil
     }
-    return client.IgnoreNotFound(r.cl.Delete(ctx, obj))
+    if err := client.IgnoreNotFound(r.cl.Delete(ctx, obj)); err != nil {
+        return err
+    }
+    obj.DeletionTimestamp = ptr.To(metav1.Now())
+    return nil
 }
 ```
 
 Rationale:
 - Checking `DeletionTimestamp` avoids unnecessary API calls when the object is already pending deletion (e.g., blocked by finalizers from other controllers).
 - `client.IgnoreNotFound` makes the delete idempotent: if the object was deleted between the caller's read and this delete call, the helper succeeds silently.
+- Setting `DeletionTimestamp` after Delete enables downstream reconciliation logic to correctly treat the object as "deleting" without additional API calls or waiting for cache sync (see "Why set DeletionTimestamp locally" below).
+
+### Why set DeletionTimestamp locally
+
+The controller-runtime `Delete` method does **not** update the passed object in memory — it calls `.Error()` instead of `.Into(obj)`, discarding the API response body. After a successful Delete:
+
+- The object in memory has stale state (no `DeletionTimestamp`, old `ResourceVersion`).
+- The informer cache may take time to sync.
+- Immediate requeue sees stale cache.
+
+Setting `DeletionTimestamp` locally after Delete is:
+
+- **Academically impure**: the object becomes "not real" — it has a stale `ResourceVersion` and a synthetic timestamp (from `metav1.Now()`, not from API server).
+- **Practically safe and useful**: downstream logic can correctly treat the object as "deleting"; any accidental `Patch`/`Update` on this object will fail with `NotFound` or `Conflict` — these are expected errors that reconciliation already handles.
+
+This is the **only** allowed mutation in delete helpers. The synthetic timestamp value is acceptable because downstream logic only checks `!= nil`, not the actual time.
 
 ---
 
@@ -94,7 +117,8 @@ Rationale:
 
 **DeleteReconcileHelpers** MAY do the following:
 
-- controller-runtime client usage to execute exactly **one** Kubernetes API call: `Delete(...)`.
+- controller-runtime client usage to execute exactly **one** Kubernetes API call: `Delete(...)`;
+- `metav1.Now()` **only** for setting `DeletionTimestamp` after a successful Delete.
 
 **DeleteReconcileHelpers** MUST NOT do any of the following:
 
@@ -103,14 +127,14 @@ Rationale:
 - executing patches (`Patch` / `Status().Patch`) or making any patch ordering / patch type decisions;
 - performing any other I/O besides the single Kubernetes API request they own.
 
-**DeleteReconcileHelpers** MUST NOT do “hidden I/O” either:
+**DeleteReconcileHelpers** MUST NOT do "hidden I/O" either:
 
-- `time.Now()` / `time.Since(...)` (nondeterministic wall-clock reads);
+- `time.Now()` / `time.Since(...)` for any purpose **other than** setting `DeletionTimestamp` after delete;
 - random number generation (`rand.*`);
 - environment reads (`os.Getenv`, reading files);
 - network calls of any kind **other than** the single Kubernetes API request they own.
 
-> Rationale: delete helpers are mechanical wrappers around exactly one delete operation; ordering and lifecycle policy remain explicit in **Reconcile methods**.
+> Rationale: delete helpers are mechanical wrappers around exactly one delete operation; ordering and lifecycle policy remain explicit in **Reconcile methods**. The `metav1.Now()` exception exists solely to mark the object as "deleting" for downstream logic.
 
 ---
 
@@ -128,12 +152,14 @@ In particular:
 
 ---
 
-## Read-only contract
+## Read-only contract (with DeletionTimestamp exception)
 
-`delete<Kind>` / `Delete<Kind>` MUST treat inputs as read-only:
+`delete<Kind>` / `Delete<Kind>` MUST treat inputs as read-only, **except** for the required `DeletionTimestamp` mutation after a successful Delete:
 
-- it MUST NOT mutate input objects (including the object being deleted);
-- it MUST NOT perform in-place modifications through aliases.
+- it MUST NOT mutate input objects in any way **other than** setting `DeletionTimestamp` after a successful Delete;
+- it MUST NOT perform in-place modifications through aliases (except the `DeletionTimestamp` assignment).
+
+The `DeletionTimestamp` mutation is the **only** allowed exception to the read-only contract for delete helpers.
 
 See the common read-only contract in `controller-reconcile-helper.mdc` (especially the Go aliasing rule for `map` / `[]T`).
 
@@ -169,13 +195,36 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 ## Error handling
 
 - See the common error handling rules in `controller-reconcile-helper.mdc`.
-- A **DeleteReconcileHelper** SHOULD be mechanically thin: if the single `Delete(...)` call fails, return the error **without wrapping** (or treat NotFound per the chosen deterministic policy).
+- A **DeleteReconcileHelper** SHOULD be mechanically thin: if the single `Delete(...)` call fails (and is not `NotFound`), return the error **without wrapping**. `NotFound` MUST be treated as success via `client.IgnoreNotFound`.
 - A **DeleteReconcileHelper** MUST NOT enrich errors with additional context (including **object identity** such as `namespace/name`, UID, object key).
   - Error enrichment (action + **object identity** + **phase**) is the calling **Reconcile method**’s responsibility.
 
 ---
 
 ## Common anti-patterns (MUST NOT)
+
+❌ Not setting `DeletionTimestamp` after successful Delete:
+```go
+func (r *Reconciler) deleteEK(ctx context.Context, obj *v1alpha1.EK) error {
+    if obj.DeletionTimestamp != nil {
+        return nil
+    }
+    // forbidden: must set DeletionTimestamp after Delete
+    return client.IgnoreNotFound(r.cl.Delete(ctx, obj))
+}
+```
+
+❌ Not checking `DeletionTimestamp` before Delete:
+```go
+func (r *Reconciler) deleteEK(ctx context.Context, obj *v1alpha1.EK) error {
+    // forbidden: must check DeletionTimestamp before calling Delete
+    if err := client.IgnoreNotFound(r.cl.Delete(ctx, obj)); err != nil {
+        return err
+    }
+    obj.DeletionTimestamp = ptr.To(metav1.Now())
+    return nil
+}
+```
 
 ❌ Doing existence checks (`Get/List`) or any extra Kubernetes API calls:
 ```go
@@ -206,7 +255,7 @@ func (r *Reconciler) deleteEK(ctx context.Context, obj *v1alpha1.EK) error {
 }
 ```
 
-❌ Mutating the object as part of deletion (“marking”, finalizer edits, status writes):
+❌ Mutating the object **before** deletion or mutating anything other than `DeletionTimestamp`:
 ```go
 func (r *Reconciler) deleteEK(ctx context.Context, obj *v1alpha1.EK) error {
     obj.Finalizers = nil          // forbidden: mutation belongs to ensure/apply + patch
@@ -214,6 +263,7 @@ func (r *Reconciler) deleteEK(ctx context.Context, obj *v1alpha1.EK) error {
     return r.client.Delete(ctx, obj)
 }
 ```
+Note: Setting `obj.DeletionTimestamp` **after** a successful Delete is the only allowed mutation.
 
 ❌ Trying to “prepare for delete” inside the delete helper (remove finalizer + delete):
 ```go
@@ -248,16 +298,17 @@ func (r *Reconciler) deleteEKs(ctx context.Context, objs []*v1alpha1.EK) error {
 }
 ```
 
-❌ Hidden I/O / nondeterminism (time/random/env/extra network calls):
+❌ Hidden I/O / nondeterminism (random/env/extra network calls, or time for non-DeletionTimestamp purposes):
 ```go
 func (r *Reconciler) deleteEK(ctx context.Context, obj *v1alpha1.EK) error {
     if os.Getenv("DELETE_FAST") == "1" { // forbidden: env read in helper
         // ...
     }
-    _ = time.Now() // forbidden
+    _ = time.Now() // forbidden for any purpose other than DeletionTimestamp
     return r.client.Delete(ctx, obj)
 }
 ```
+Note: `metav1.Now()` is allowed **only** for setting `DeletionTimestamp` after a successful Delete.
 
 ❌ Using `DeleteAllOf` or broad deletes from a delete helper:
 ```go

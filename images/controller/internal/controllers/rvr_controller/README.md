@@ -84,37 +84,36 @@ Reconcile (root) [Pure orchestration]
 │   ├── check DRBDR DRBDConfigured condition → ApplyingConfiguration / ConfigurationFailed
 │   ├── targetType != intendedType → applyDRBDConfiguredCondFalse WaitingForBackingVolume
 │   └── applyDRBDConfiguredCondTrue Configured / applyDRBDConfiguredCondFalse PendingDatameshJoin
-├── ensureStatusAddressesAndType ← details
-│   └── updates rvr.Status.Addresses and rvr.Status.Type from DRBDR
-├── ensureStatusAttachment ← details
-│   └── applyRVRAttachment
-├── ensureStatusPeers ← details
-│   └── mirrors drbdr.Status.Peers to rvr.Status.Peers
-├── ensureConditionAttached ← details
-│   └── applyAttachedCond*
-├── ensureConditionFullyConnected ← details
-│   └── applyFullyConnectedCond*
-├── ensureStatusBackingVolume ← details
-├── ensureConditionBackingVolumeUpToDate ← details
-│   ├── computeHasUpToDatePeer
-│   ├── computeHasConnectedAttachedPeer
-│   └── applyBackingVolumeUpToDateCond*
-├── ensureStatusQuorum ← details
-├── ensureConditionReady ← details
-│   └── applyReadyCond*
-├── ensureConditionSatisfyEligibleNodes [EnsureReconcileHelper] ← details
-│   ├── computeEligibilityWarnings
-│   ├── findLVGInEligibleNode / findLVGInEligibleNodeByName
-│   └── applySatisfyEligibleNodesCond*
-├── ensureStatusDatameshPendingAndConfiguredCond [EnsureReconcileHelper] ← details
-│   ├── computeTargetDatameshPending
-│   ├── rspEligibilityView.isStorageEligible (shared with computeIntendedBackingVolume)
-│   ├── applyDatameshPending
-│   └── applyConfiguredCond*
+├── flow.MergeEnsures (all ensures are independent)
+│   ├── ensureStatusAddressesAndType ← details
+│   │   └── updates rvr.Status.Addresses and rvr.Status.Type from DRBDR
+│   ├── ensureStatusAttachment ← details
+│   │   └── applyRVRAttachment
+│   ├── ensureStatusPeers ← details
+│   │   └── mirrors drbdr.Status.Peers to rvr.Status.Peers
+│   ├── ensureStatusBackingVolume ← details
+│   ├── ensureStatusQuorum ← details
+│   ├── ensureConditionAttached ← details
+│   │   └── applyAttachedCond*
+│   ├── ensureConditionFullyConnected ← details
+│   │   └── applyFullyConnectedCond*
+│   ├── ensureConditionBackingVolumeUpToDate ← details
+│   │   └── applyBackingVolumeUpToDateCond*
+│   ├── ensureConditionReady ← details
+│   │   └── applyReadyCond*
+│   ├── ensureConditionSatisfyEligibleNodes [EnsureReconcileHelper] ← details
+│   │   ├── computeEligibilityWarnings
+│   │   ├── findLVGInEligibleNode / findLVGInEligibleNodeByName
+│   │   └── applySatisfyEligibleNodesCond*
+│   └── ensureStatusDatameshPendingTransitionAndConfiguredCond [EnsureReconcileHelper] ← details
+│       ├── computeTargetDatameshPendingTransition
+│       ├── rspEligibilityView.isStorageEligible (shared with computeIntendedBackingVolume)
+│       ├── applyDatameshPendingTransition
+│       └── applyConfiguredCond*
 └── patchRVRStatus
 ```
 
-Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureStatusAddressesAndType`](#ensurestatusaddressesandtype-details), [`ensureStatusAttachment`](#ensurestatusattachment-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionAttached`](#ensureconditionattached-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeUpToDate`](#ensureconditionbackingvolumeinsync-details), [`ensureStatusQuorum`](#ensurestatusquorum-details), [`ensureConditionReady`](#ensureconditionready-details), [`ensureConditionSatisfyEligibleNodes`](#ensureconditionsatisfyeligiblenodes-details), [`ensureStatusDatameshPendingAndConfiguredCond`](#ensurestatusdatameshpendingandconfiguredcond-details)
+Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureStatusAddressesAndType`](#ensurestatusaddressesandtype-details), [`ensureStatusAttachment`](#ensurestatusattachment-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionAttached`](#ensureconditionattached-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeUpToDate`](#ensureconditionbackingvolumeinsync-details), [`ensureStatusQuorum`](#ensurestatusquorum-details), [`ensureConditionReady`](#ensureconditionready-details), [`ensureConditionSatisfyEligibleNodes`](#ensureconditionsatisfyeligiblenodes-details), [`ensureStatusDatameshPendingTransitionAndConfiguredCond`](#ensurestatusdatameshpendingandconfiguredcond-details)
 
 ## Algorithm Flow
 
@@ -135,21 +134,21 @@ flowchart TD
 
     DRBDR --> StatusBlock
 
-    subgraph StatusBlock [Status Ensure]
+    subgraph StatusBlock ["Status Ensure (MergeEnsures)"]
         AddrType[ensureStatusAddressesAndType]
         AddrType --> StatusAttach[ensureStatusAttachment]
         StatusAttach --> Peers[ensureStatusPeers]
         Peers --> BVStatus[ensureStatusBackingVolume]
         BVStatus --> StatusQuorum[ensureStatusQuorum]
-        StatusQuorum --> DmPendingAndCond[ensureStatusDatameshPendingAndConfiguredCond]
-        DmPendingAndCond --> CondAttach[ensureConditionAttached]
+        StatusQuorum --> CondAttach[ensureConditionAttached]
         CondAttach --> PeersCond[ensureConditionFullyConnected]
         PeersCond --> BVInSync[ensureConditionBackingVolumeUpToDate]
         BVInSync --> CondReady[ensureConditionReady]
         CondReady --> SEN[ensureConditionSatisfyEligibleNodes]
+        SEN --> DmPendingAndCond[ensureStatusDatameshPendingTransitionAndConfiguredCond]
     end
 
-    SEN --> Patch[Patch RVR status]
+    DmPendingAndCond --> Patch[Patch RVR status]
     Patch --> EndNode([Done])
 ```
 
@@ -226,13 +225,11 @@ Indicates whether the local backing volume is in sync with peers.
 | Status | Reason | When |
 |--------|--------|------|
 | True | UpToDate | Backing volume is fully up-to-date |
-| False | Attaching | Backing volume is being attached |
-| False | Detaching | Backing volume is being detached |
+| False | Absent | Backing volume is not present (diskless, attaching, or detaching) |
 | False | Failed | Backing volume failed due to I/O errors |
-| False | Absent | Backing volume is not present |
-| False | Synchronizing | Backing volume is synchronizing |
-| False | SynchronizationBlocked | Sync blocked awaiting peer |
-| False | UnknownState | Unknown backing volume state |
+| False | RequiresSynchronization | Backing volume requires synchronization from peer |
+| False | Synchronizing | Backing volume is actively synchronizing |
+| False | Unknown | Backing volume state is unknown or not yet determined |
 | Unknown | AgentNotReady | Agent is not ready |
 | Unknown | ApplyingConfiguration | Configuration is being applied |
 | (absent) | - | Diskless replica or no DRBDR |
@@ -303,7 +300,7 @@ The controller manages the following status fields on RVR:
 | `attachment` | Device attachment info (device path, I/O suspended) | From DRBDR status |
 | `type` | Observed DRBD type (Diskful/Diskless) | From DRBDR status.activeConfiguration.type |
 | `backingVolume` | Backing volume info (size, state, LVG name, thin pool) | From DRBDR + LLV status |
-| `datameshPending` | Pending datamesh operation (join/leave/role change/BV change) | Computed from spec vs status |
+| `datameshPendingTransition` | Pending datamesh transitions (join/leave/role change/BV change) | Computed from spec vs status |
 | `datameshRevision` | Datamesh revision for which the replica was fully configured | Set when DRBDConfigured=True |
 | `drbd` | DRBD-specific status info (config, actual, status) | From RVR spec + DRBDR |
 | `drbdrReconciliationCache` | Cache of target configuration that DRBDR spec was last applied for | Computed |
@@ -353,19 +350,21 @@ Each entry in `peers` contains:
 | `connectionEstablishedOn` | System networks with established connection |
 | `connectionState` | DRBD connection state |
 | `backingVolumeState` | Peer's backing volume state |
+| `replicationState` | DRBD replication state with this peer (Off, Established, SyncSource, SyncTarget, etc.) |
 
 ### QuorumSummary
 
 | Field | Description |
 |-------|-------------|
-| `connectedVotingPeers` | Count of connected voting peers |
+| `connectedDiskfulPeers` | Count of connected diskful peers |
+| `connectedTieBreakerPeers` | Count of connected tiebreaker peers |
 | `quorum` | Quorum threshold |
 | `connectedUpToDatePeers` | Count of connected UpToDate peers |
 | `quorumMinimumRedundancy` | Minimum UpToDate nodes required |
 
-### DatameshPending
+### DatameshPendingTransition
 
-The `datameshPending` field describes pending datamesh operations. Only set when there's a pending change.
+The `datameshPendingTransition` field describes pending datamesh transition. Only set when there's a pending change.
 
 | Field | Description |
 |-------|-------------|
@@ -445,7 +444,7 @@ The controller watches six event sources:
 | ReplicatedVolumeReplica | Generation changes, Finalizers changes | For() (primary) |
 | LVMLogicalVolume | All fields (Status, Spec, Labels, Finalizers, OwnerRefs) | Owns() |
 | DRBDResource | All fields | Owns() |
-| ReplicatedVolume | DatameshRevision changes, ReplicatedStorageClassName changes | mapRVToRVRs |
+| ReplicatedVolume | DatameshRevision changes, ReplicatedStorageClassName changes, DatameshPendingReplicaTransitions message changes | rvEventHandler (custom) |
 | ReplicatedStoragePool | EligibleNodes changes (per-node) | rspEventHandler |
 | Pod (agent) | Ready condition changes, Create/Delete | mapAgentPodToRVRs |
 
@@ -467,13 +466,27 @@ Intentionally empty: we need to react to all DRBDResource fields.
 
 - Reacts to DatameshRevision changes (covers Size, membership changes, type transitions)
 - Reacts to Spec.ReplicatedStorageClassName changes (for labels)
+- Reacts to DatameshPendingReplicaTransitions message changes (for condition message enrichment)
 - Does not react to Create/Delete (RVRs handle their own lifecycle)
+
+### RV EventHandler
+
+Custom `rvEventHandler` with targeted enqueuing to minimize unnecessary reconciliations:
+
+- **ReplicatedStorageClassName changed**: enqueues ALL RVRs for the RV (labels update needed)
+- **Initial DatameshRevision change** (0 → N): enqueues ALL RVRs for the RV (initial setup)
+- **Non-initial DatameshRevision change**: enqueues only RVRs that are members in old OR new datamesh (targeted by NodeID)
+- **DatameshPendingReplicaTransitions message changed**: enqueues only affected RVRs where the message differs (targeted by NodeID via sorted merge diff)
+
+Multiple independent changes are collected into a single NodeID set and enqueued together.
+RVR names are constructed deterministically from RV name + NodeID without requiring index lookups.
 
 ### RSP Predicates
 
-- Reacts to eligibleNodes changes (compares old and new lists)
 - On Create/Delete: always triggers
-- On Update: triggers only if eligibleNodes differ
+- On Update: triggers only if `EligibleNodesRevision` changed (fast-path filtering)
+
+The predicate uses `EligibleNodesRevision` for efficient change detection. The per-node diff (which specific nodes were added/removed/modified) is computed in the RSP EventHandler.
 
 ### RSP EventHandler
 
@@ -526,7 +539,7 @@ flowchart TD
         EnsureStatusPeers[ensureStatusPeers]
         EnsureBVStatus[ensureStatusBackingVolume]
         EnsureStatusQuorum[ensureStatusQuorum]
-        EnsureDmPendingAndCond[ensureStatusDatameshPendingAndConfiguredCond]
+        EnsureDmPendingAndCond[ensureStatusDatameshPendingTransitionAndConfiguredCond]
         EnsureCondAttach[ensureConditionAttached]
         EnsureCondFC[ensureConditionFullyConnected]
         EnsureBVInSync[ensureConditionBackingVolumeUpToDate]
@@ -579,7 +592,7 @@ flowchart TD
     EnsureBVInSync -->|BackingVolumeUpToDate| RVRStatusConds
     EnsureCondReady -->|Ready| RVRStatusConds
     EnsureCondSEN -->|SatisfyEligibleNodes| RVRStatusConds
-    EnsureDmPendingAndCond -->|datameshPending| RVRStatusFields
+    EnsureDmPendingAndCond -->|datameshPendingTransition| RVRStatusFields
     EnsureDmPendingAndCond -->|Configured| RVRStatusConds
     RSP --> EnsureDmPendingAndCond
 ```
@@ -919,9 +932,12 @@ flowchart TD
     ClearPeers --> End1([Done])
 
     CheckDRBDR -->|Yes| MirrorPeers[Mirror drbdr.Status.Peers to rvr.Status.Peers]
-    MirrorPeers --> ComputeType["Compute Type from drbdr peer:<br/>Diskful → Diskful<br/>Diskless + AllowRemoteRead=false → Access<br/>Diskless + AllowRemoteRead=true → TieBreaker"]
+    MirrorPeers --> ForeignGuard{"Foreign peer guard:<br/>name starts with<br/>ReplicatedVolumeName + dash?"}
+    ForeignGuard -->|No| ErrorForeign[Return error: foreign peer detected]
+    ErrorForeign --> End3([Done])
+    ForeignGuard -->|Yes| ComputeType["Compute Type from drbdr peer:<br/>Diskful → Diskful<br/>Diskless + AllowRemoteRead=false → Access<br/>Diskless + AllowRemoteRead=true → TieBreaker"]
     ComputeType --> ComputeAttached[Compute Attached from Role=Primary]
-    ComputeAttached --> CopyFields[Copy ConnectionState, DiskState, Paths]
+    ComputeAttached --> CopyFields["Copy ConnectionState, DiskState,<br/>ReplicationState, Paths"]
     CopyFields --> End2([Done])
 ```
 
@@ -930,10 +946,11 @@ flowchart TD
 | Input | Description |
 |-------|-------------|
 | `drbdr.Status.Peers` | Peer status from DRBD |
+| `rvr.Spec.ReplicatedVolumeName` | Used for foreign peer guard (name prefix check) |
 
 | Output | Description |
 |--------|-------------|
-| `status.peers[]` | Mirrored peer status list |
+| `status.peers[]` | Mirrored peer status list (including ReplicationState) |
 
 ---
 
@@ -1056,33 +1073,39 @@ flowchart TD
     CheckActive -->|No| Error[Return error: bug in agent]
     Error --> End6([Done])
 
-    CheckActive -->|Yes| GetDiskState[Get drbdr.Status.DiskState]
-    GetDiskState --> EvalState{Evaluate backing volume state}
+    CheckActive -->|Yes| ComputeServingIO["Compute servingIO:<br/>Role=Primary AND<br/>DeviceIOSuspended=false"]
+    ComputeServingIO --> CheckUpToDate{DiskState = UpToDate?}
+    CheckUpToDate -->|Yes| SetTrue[True: UpToDate]
+    SetTrue --> EndOk([Done])
 
-    EvalState -->|UpToDate| SetTrue[True: UpToDate]
-    SetTrue --> End4([Done])
+    CheckUpToDate -->|No| EvalState{Switch on DiskState}
 
-    EvalState -->|Diskless| SetFalse1[False: Absent]
-    EvalState -->|Attaching| SetFalse2[False: Attaching]
-    EvalState -->|Detaching| SetFalse3[False: Detaching]
-    EvalState -->|Failed| SetFalse4[False: Failed]
-    EvalState -->|Syncing states| CheckPeers[Check peer availability]
-    EvalState -->|Unknown| SetFalse5[False: UnknownState]
+    EvalState -->|Diskless/Attaching/Detaching| SetAbsent[False: Absent]
+    EvalState -->|Failed| SetFailed[False: Failed]
+    EvalState -->|Negotiating| SetUnknown3[False: Unknown]
+    EvalState -->|Outdated| SetOutdated[False: RequiresSynchronization]
+    EvalState -->|Consistent| SetConsistent[False: Unknown]
+    EvalState -->|Inconsistent| CheckSyncTarget
+    EvalState -->|default| SetDefault[False: Unknown]
 
-    CheckPeers --> PeerCheck{Has UpToDate peer?}
-    PeerCheck -->|No| SetBlocked1[False: SynchronizationBlocked]
-    PeerCheck -->|Yes| IOCheck{IO available?}
-    IOCheck -->|No| SetBlocked2[False: SynchronizationBlocked]
-    IOCheck -->|Yes| SetSyncing[False: Synchronizing]
+    CheckSyncTarget{"Peer with<br/>ReplicationState=SyncTarget?"}
+    CheckSyncTarget -->|Yes| SetSyncing["False: Synchronizing<br/>(with peer name)"]
+    CheckSyncTarget -->|No| CheckEstablished{"Peer with UpToDate +<br/>ReplicationState=Established?"}
+    CheckEstablished -->|Yes| SetIntermediatePeer["False: Synchronizing<br/>(via intermediate peer)"]
+    CheckEstablished -->|No| CheckHasUpToDate{Any UpToDate peer?}
+    CheckHasUpToDate -->|No| SetNoUpToDate[False: RequiresSynchronization]
+    CheckHasUpToDate -->|Yes| SetFallback[False: RequiresSynchronization]
 
-    SetFalse1 --> End5([Done])
-    SetFalse2 --> End5
-    SetFalse3 --> End5
-    SetFalse4 --> End5
-    SetFalse5 --> End5
-    SetBlocked1 --> End5
-    SetBlocked2 --> End5
-    SetSyncing --> End5
+    SetAbsent --> EndFalse([Done])
+    SetFailed --> EndFalse
+    SetUnknown3 --> EndFalse
+    SetOutdated --> EndFalse
+    SetConsistent --> EndFalse
+    SetSyncing --> EndFalse
+    SetIntermediatePeer --> EndFalse
+    SetNoUpToDate --> EndFalse
+    SetFallback --> EndFalse
+    SetDefault --> EndFalse
 ```
 
 **Data Flow**:
@@ -1090,8 +1113,9 @@ flowchart TD
 | Input | Description |
 |-------|-------------|
 | `drbdr.Status.DiskState` | Local backing volume state from DRBD |
-| `drbdr.Status.ActiveConfiguration.Role` | Local attachment state |
-| `rvr.Status.Peers` | Peer states for sync availability check |
+| `drbdr.Status.ActiveConfiguration.Role` | Local attachment state (for servingIO) |
+| `drbdr.Status.DeviceIOSuspended` | I/O suspension flag (for servingIO) |
+| `rvr.Status.Peers` | Peer states including ReplicationState for sync checks |
 | `rvr.Status.BackingVolume` | Current backing volume info (for relevance check) |
 | `datameshMember` | Whether this replica is a datamesh member |
 
@@ -1174,13 +1198,15 @@ flowchart TD
 
 ---
 
-### ensureStatusDatameshPendingAndConfiguredCond Details
+### ensureStatusDatameshPendingTransitionAndConfiguredCond Details
 
-**Purpose**: Populates both `rvr.Status.DatameshPending` field and the `Configured` condition based on comparison of `rvr.Spec` (intended) vs `rvr.Status` (actual) and eligibility checks.
+**Purpose**: Populates both `rvr.Status.DatameshPendingTransition` field and the `Configured` condition based on comparison of `rvr.Spec` (intended) vs `rvr.Status` (actual) and eligibility checks.
 
-This function combines two logically related status updates to avoid duplicate `computeTargetDatameshPending` calls.
+This function combines two logically related status updates to avoid duplicate `computeTargetDatameshPendingTransition` calls.
 
-**Algorithm (computeTargetDatameshPending)**:
+**RV Message Enrichment**: When a pending transition exists (`target != nil`) and the parent `ReplicatedVolume` has a matching entry in `rv.Status.DatameshPendingReplicaTransitions` for this replica, the message from that entry is appended to the condition message with a `"; "` separator. This allows the RV controller to provide additional context about the overall datamesh transition progress.
+
+**Algorithm (computeTargetDatameshPendingTransition)**:
 
 ```mermaid
 flowchart TD
@@ -1237,7 +1263,7 @@ flowchart TD
 
 **Algorithm (Configured condition application)**:
 
-The `Configured` condition is set based on the `condReason` returned from `computeTargetDatameshPending`:
+The `Configured` condition is set based on the `condReason` returned from `computeTargetDatameshPendingTransition`:
 
 - If `condReason` is empty → remove condition (non-member being deleted)
 - If `condReason` is `Configured` → set `True`
@@ -1252,9 +1278,11 @@ The `Configured` condition is set based on the `condReason` returned from `compu
 | `rvr.Status.DatameshRevision` | Whether replica is a datamesh member (!=0 means member) |
 | `rvr.Status.Type` | Actual DRBD type (Diskful/Diskless) |
 | `rvr.Status.BackingVolume` | Actual backing volume info |
+| `rv` | Parent ReplicatedVolume (optional, used for message enrichment) |
+| `rv.Status.DatameshPendingReplicaTransitions` | RV-level pending transitions with messages |
 | `rspView` | RSP eligibility view (node eligibility, LVG list) |
 
 | Output | Description |
 |--------|-------------|
-| `status.datameshPending` | Pending operation (nil if none) |
-| `Configured` condition | Reports whether config matches intent |
+| `status.datameshPendingTransition` | Pending operation (nil if none) |
+| `Configured` condition | Reports whether config matches intent (message may include RV context) |
