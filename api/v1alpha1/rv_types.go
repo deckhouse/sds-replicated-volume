@@ -117,6 +117,110 @@ type ReplicatedVolumeStatus struct {
 	// Datamesh is the computed datamesh configuration for the volume.
 	// +patchStrategy=merge
 	Datamesh ReplicatedVolumeDatamesh `json:"datamesh" patchStrategy:"merge"`
+
+	// DatameshTransitions is the list of active datamesh transitions.
+	// +listType=atomic
+	// +optional
+	DatameshTransitions []ReplicatedVolumeDatameshTransition `json:"datameshTransitions,omitempty"`
+
+	// DatameshPendingReplicaTransitions is the list of pending replica transitions.
+	// +listType=atomic
+	// +optional
+	DatameshPendingReplicaTransitions []ReplicatedVolumeDatameshPendingReplicaTransition `json:"datameshPendingReplicaTransitions,omitempty"`
+}
+
+// ReplicatedVolumeDatameshPendingReplicaTransition represents a pending transition for a single replica.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeDatameshPendingReplicaTransition struct {
+	// Name is the replica name.
+	// Must have format "prefix-N" where N is 0-31.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^.+-([0-9]|[12][0-9]|3[01])$`
+	Name string `json:"name"`
+
+	// Message is an optional human-readable message about the transition state and progress.
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Transition is the pending datamesh transition details from the replica.
+	// +kubebuilder:validation:Required
+	Transition ReplicatedVolumeReplicaStatusDatameshPendingTransition `json:"transition"`
+
+	// FirstObservedAt is the timestamp when this transition was first observed.
+	// +kubebuilder:validation:Required
+	FirstObservedAt metav1.Time `json:"firstObservedAt"`
+}
+
+// NodeID extracts NodeID from the replica name (e.g., "pvc-xxx-5" → 5).
+func (t ReplicatedVolumeDatameshPendingReplicaTransition) NodeID() uint8 {
+	return nodeIDFromName(t.Name)
+}
+
+// ReplicatedVolumeDatameshTransition represents an active datamesh transition.
+// +kubebuilder:object:generate=true
+//
+//	+kubebuilder:validation:XValidation:rule="self.type != 'Formation' || has(self.formation)",message="formation is required when type is Formation"
+//	+kubebuilder:validation:XValidation:rule="!has(self.formation) || self.type == 'Formation'",message="formation is only allowed when type is Formation"
+//	+kubebuilder:validation:XValidation:rule="self.type != 'Formation' || !has(self.datameshRevision) || self.datameshRevision == 0",message="datameshRevision must be absent (or zero) when type is Formation"
+type ReplicatedVolumeDatameshTransition struct {
+	// Type is the transition type.
+	// +kubebuilder:validation:Required
+	Type ReplicatedVolumeDatameshTransitionType `json:"type"`
+
+	// DatameshRevision is the datamesh revision when this transition was introduced.
+	// Zero means unset. For Formation transitions, must be absent (zero).
+	// +optional
+	DatameshRevision int64 `json:"datameshRevision,omitempty"`
+
+	// Message is an optional human-readable message about the transition.
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// StartedAt is the timestamp when this transition started.
+	// +kubebuilder:validation:Required
+	StartedAt metav1.Time `json:"startedAt"`
+
+	// Formation holds formation-specific details.
+	// Required when type is "Formation"; must not be set otherwise.
+	// +optional
+	Formation *ReplicatedVolumeDatameshTransitionFormation `json:"formation,omitempty"`
+}
+
+// ReplicatedVolumeDatameshTransitionType enumerates possible datamesh transition types.
+type ReplicatedVolumeDatameshTransitionType string
+
+const (
+	// ReplicatedVolumeDatameshTransitionTypeFormation indicates initial datamesh formation.
+	ReplicatedVolumeDatameshTransitionTypeFormation ReplicatedVolumeDatameshTransitionType = "Formation"
+)
+
+func (t ReplicatedVolumeDatameshTransitionType) String() string {
+	return string(t)
+}
+
+// ReplicatedVolumeFormationPhase enumerates formation sub-phases.
+type ReplicatedVolumeFormationPhase string
+
+const (
+	// ReplicatedVolumeFormationPhasePreconfigure is the initial phase where replicas are being created and preconfigured.
+	ReplicatedVolumeFormationPhasePreconfigure ReplicatedVolumeFormationPhase = "Preconfigure"
+	// ReplicatedVolumeFormationPhaseEstablishConnectivity is the phase where replicas establish DRBD connectivity.
+	ReplicatedVolumeFormationPhaseEstablishConnectivity ReplicatedVolumeFormationPhase = "EstablishConnectivity"
+	// ReplicatedVolumeFormationPhaseBootstrapData is the phase where initial data synchronization is bootstrapped.
+	ReplicatedVolumeFormationPhaseBootstrapData ReplicatedVolumeFormationPhase = "BootstrapData"
+)
+
+func (p ReplicatedVolumeFormationPhase) String() string { return string(p) }
+
+// ReplicatedVolumeDatameshTransitionFormation holds formation-specific transition details.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeDatameshTransitionFormation struct {
+	// Phase is the current formation phase.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:default="Preconfigure"
+	// +kubebuilder:validation:Enum=Preconfigure;EstablishConnectivity;BootstrapData
+	Phase ReplicatedVolumeFormationPhase `json:"phase"`
 }
 
 // ReplicatedVolumeDatamesh holds datamesh configuration for the volume.
@@ -145,11 +249,8 @@ type ReplicatedVolumeDatamesh struct {
 	Size resource.Quantity `json:"size"`
 	// Members is the list of datamesh members.
 	// +kubebuilder:validation:MaxItems=24
-	// +patchMergeKey=name
-	// +patchStrategy=merge
-	// +listType=map
-	// +listMapKey=name
-	Members []ReplicatedVolumeDatameshMember `json:"members" patchStrategy:"merge" patchMergeKey:"name"`
+	// +listType=atomic
+	Members []ReplicatedVolumeDatameshMember `json:"members"`
 	// Quorum is the quorum value for the datamesh.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=13
@@ -205,29 +306,32 @@ type ReplicatedVolumeDatameshMember struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=140
 	Name string `json:"name"`
+
 	// Type is the member type (Diskful, Access, or TieBreaker).
 	// +kubebuilder:validation:Required
 	Type ReplicaType `json:"type"`
+
 	// TypeTransition indicates the desired type transition for this member.
 	// +kubebuilder:validation:Enum=ToDiskful;ToDiskless
 	// +optional
 	TypeTransition ReplicatedVolumeDatameshMemberTypeTransition `json:"typeTransition,omitempty"`
-	// Attached indicates whether this member should be attached (Primary in DRBD terms).
-	// +kubebuilder:default=false
-	Attached bool `json:"attached"`
+
 	// NodeName is the Kubernetes node name where the member is located.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	NodeName string `json:"nodeName"`
+
 	// Zone is the zone where the member is located.
 	// +kubebuilder:validation:MaxLength=64
 	// +optional
 	Zone string `json:"zone,omitempty"`
+
 	// Addresses is the list of DRBD addresses for this member.
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
 	Addresses []DRBDResourceAddressStatus `json:"addresses"`
+
 	// LVMVolumeGroupName is the LVMVolumeGroup resource name where this replica should be placed.
 	// +optional
 	// +kubebuilder:validation:MinLength=1
@@ -238,10 +342,14 @@ type ReplicatedVolumeDatameshMember struct {
 	// +kubebuilder:validation:MaxLength=64
 	// +optional
 	LVMVolumeGroupThinPoolName string `json:"lvmVolumeGroupThinPoolName,omitempty"`
+
+	// Attached indicates whether this member should be attached (Primary in DRBD terms).
+	// +kubebuilder:default=false
+	Attached bool `json:"attached"`
 }
 
 // NodeID extracts NodeID from the member name (e.g., "pvc-xxx-5" → 5).
-func (m *ReplicatedVolumeDatameshMember) NodeID() (uint8, bool) {
+func (m ReplicatedVolumeDatameshMember) NodeID() uint8 {
 	return nodeIDFromName(m.Name)
 }
 

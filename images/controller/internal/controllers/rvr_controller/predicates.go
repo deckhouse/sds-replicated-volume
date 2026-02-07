@@ -65,6 +65,7 @@ func drbdrPredicates() []predicate.Predicate {
 // Reacts to:
 // - DatameshRevision changes (Status.Datamesh.Size, membership, etc.)
 // - Spec.ReplicatedStorageClassName changes (for labels)
+// - DatameshPendingReplicaTransitions message changes (for condition message enrichment)
 func rvPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.TypedFuncs[client.Object]{
@@ -85,6 +86,17 @@ func rvPredicates() []predicate.Predicate {
 
 				// React to Spec.ReplicatedStorageClassName change (for labels).
 				if oldRV.Spec.ReplicatedStorageClassName != newRV.Spec.ReplicatedStorageClassName {
+					return true
+				}
+
+				// React to DatameshPendingReplicaTransitions message changes (for condition message enrichment).
+				if !slices.EqualFunc(
+					oldRV.Status.DatameshPendingReplicaTransitions,
+					newRV.Status.DatameshPendingReplicaTransitions,
+					func(a, b v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition) bool {
+						return a.Name == b.Name && a.Message == b.Message
+					},
+				) {
 					return true
 				}
 

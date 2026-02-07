@@ -1366,8 +1366,12 @@ func (r *Reconciler) deleteRSP(ctx context.Context, rsp *v1alpha1.ReplicatedStor
 	if rsp.DeletionTimestamp != nil {
 		return nil
 	}
-	return client.IgnoreNotFound(r.cl.Delete(ctx, rsp, client.Preconditions{
+	if err := client.IgnoreNotFound(r.cl.Delete(ctx, rsp, client.Preconditions{
 		UID:             &rsp.UID,
 		ResourceVersion: &rsp.ResourceVersion,
-	}))
+	})); err != nil {
+		return err
+	}
+	rsp.DeletionTimestamp = ptr.To(metav1.Now())
+	return nil
 }
