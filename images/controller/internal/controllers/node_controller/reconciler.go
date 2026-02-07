@@ -109,7 +109,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		obju.RemoveLabel(node, v1alpha1.AgentNodeLabelKey)
 	}
 
-	// Patch node.
+	// Patch node (without optimistic lock: we only touch a single label map key,
+	// and Node objects change frequently from external sources like kubelet heartbeats,
+	// so optimistic lock would cause constant 409 Conflict errors).
 	if err := r.cl.Patch(rf.Ctx(), node, client.MergeFrom(base)); err != nil {
 		return rf.Fail(err).ToCtrl()
 	}

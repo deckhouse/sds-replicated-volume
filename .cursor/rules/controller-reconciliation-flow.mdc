@@ -219,29 +219,24 @@ Code MUST NOT:
 
 ### Change tracking
 
-`ReconcileOutcome` supports change tracking and optimistic lock requirements, enabling sub-reconciles to propagate change information upward through the reconciliation call graph.
+`ReconcileOutcome` supports change tracking, enabling sub-reconciles to propagate change information upward through the reconciliation call graph. **Reconcile methods** use change state to decide whether to patch at all.
 
 Methods:
 - `ReportChanged()` — marks that something changed.
 - `ReportChangedIf(cond bool)` — marks change if condition is true.
 - `DidChange()` — reports whether any change was recorded.
-- `RequireOptimisticLock()` — marks that save requires optimistic locking.
-  - Contract: MUST be called only after `ReportChanged()` / `ReportChangedIf(...)` (panics otherwise).
-- `OptimisticLockRequired()` — reports whether optimistic locking is required.
 - `WithChangeFrom(eo EnsureOutcome)` — merges change state from an `EnsureOutcome` (strongest wins).
 
 Rules:
-- Code MUST call `RequireOptimisticLock()` only after `ReportChanged()` / `ReportChangedIf(...)`
-  (calling it earlier is a contract violation and panics).
 - Change tracking is optional: if a reconcile method does not call `ReportChanged*`, change state remains "unchanged".
 - Change tracking in **ReconcileOutcome** is useful when **one object** needs to be mutated from **multiple sub-reconciles**,
-  and the parent reconcile method must aggregate change/lock state to decide whether to patch.
+  and the parent reconcile method must aggregate change state to decide whether to patch.
 
 Example patterns (illustrative):
 
 ```go
 // Pattern 1: Direct change reporting
-return rf.Continue().ReportChangedIf(changed).RequireOptimisticLock()
+return rf.Continue().ReportChangedIf(changed)
 
 // Pattern 2: Propagate from EnsureOutcome
 eo := flow.MergeEnsures(ensureA(...), ensureB(...))
@@ -254,7 +249,7 @@ return rf.Continue().WithChangeFrom(eo)
 outcome := r.reconcileChild1(ctx)
 outcome = outcome.Merge(r.reconcileChild2(ctx))
 if outcome.DidChange() {
-    // ... use outcome.OptimisticLockRequired() for patch decisions
+    // ... patch decisions based on DidChange()
 }
 ```
 
@@ -278,7 +273,7 @@ Merge semantics:
 - Errors are joined via `errors.Join` (any error makes merged outcome a `Fail` — terminal).
 - Among terminal outcomes: errors first, then requeue (minimum delay wins), then `Done`.
 - Among non-terminal outcomes: requeue intent is merged (minimum delay wins).
-- Change/lock state is merged: any changed outcome makes merged outcome changed; strongest lock requirement wins.
+- Change state is merged: any changed outcome makes merged outcome changed.
 
 Reviewability:
 - Single-shot merge SHOULD NOT be used (harder to review/extend).
@@ -351,9 +346,8 @@ return childOutcome.Enrichf("foo")
 ## EnsureFlow and EnsureOutcome
 
 `flow.EnsureOutcome` is used by ensure helpers to report:
-- an error (if any),
-- whether the helper mutated its object,
-- and whether the subsequent save must use optimistic locking.
+- an error (if any), and
+- whether the helper mutated its object.
 
 Any ensure helper MUST follow the scope placement rules with `BeginEnsure`.
 
@@ -375,8 +369,6 @@ func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutco
 Rules:
 - Ensure helpers MUST NOT log and also return the same error via `EnsureOutcome`.
   The deferred `ef.OnEnd(&outcome)` logs errors.
-- Code MUST call `RequireOptimisticLock()` only after `ReportChanged()` / `ReportChangedIf(...)`
-  (calling it earlier is a contract violation and panics).
 - To merge multiple sub-ensure results, use `flow.MergeEnsures(...)` or the chainable `outcome.Merge(other)`.
 
 ---

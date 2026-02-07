@@ -128,7 +128,7 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 			v1alpha1.ReplicatedStorageClassCondStoragePoolReadyReasonStoragePoolNotFound,
 			fmt.Sprintf("ReplicatedStoragePool %q not found", rsc.Spec.StoragePool)) || changed
 		if changed {
-			if err := r.patchRSCStatus(rf.Ctx(), rsc, base, false); err != nil {
+			if err := r.patchRSCStatus(rf.Ctx(), rsc, base); err != nil {
 				return rf.Fail(err)
 			}
 		}
@@ -141,7 +141,7 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 	base := rsc.DeepCopy()
 	applyStorageMigration(rsc, targetStorage)
 
-	if err := r.patchRSC(rf.Ctx(), rsc, base, true); err != nil {
+	if err := r.patchRSC(rf.Ctx(), rsc, base); err != nil {
 		return rf.Fail(err)
 	}
 
@@ -175,7 +175,7 @@ func (r *Reconciler) reconcileMain(
 	base := rsc.DeepCopy()
 	applyFinalizer(rsc, targetFinalizerPresent)
 
-	if err := r.patchRSC(rf.Ctx(), rsc, base, true); err != nil {
+	if err := r.patchRSC(rf.Ctx(), rsc, base); err != nil {
 		return rf.Fail(err)
 	}
 
@@ -269,7 +269,7 @@ func (r *Reconciler) reconcileStatus(
 
 	// Patch if changed.
 	if eo.DidChange() {
-		if err := r.patchRSCStatus(rf.Ctx(), rsc, base, eo.OptimisticLockRequired()); err != nil {
+		if err := r.patchRSCStatus(rf.Ctx(), rsc, base); err != nil {
 			return rf.Fail(err)
 		}
 	}
@@ -374,7 +374,7 @@ func ensureConfiguration(
 		"Storage class is ready",
 	)
 
-	return ef.Ok().ReportChanged().RequireOptimisticLock()
+	return ef.Ok().ReportChanged()
 }
 
 // ensureVolumeSummaryAndConditions computes and applies volume summary and conditions in-place.
@@ -1055,7 +1055,7 @@ func (r *Reconciler) reconcileRSP(
 	if !objutilv1.HasFinalizer(rsp, v1alpha1.RSCControllerFinalizer) {
 		base := rsp.DeepCopy()
 		applyRSPFinalizer(rsp, true)
-		if err := r.patchRSP(rf.Ctx(), rsp, base, true); err != nil {
+		if err := r.patchRSP(rf.Ctx(), rsp, base); err != nil {
 			return nil, rf.Fail(err)
 		}
 	}
@@ -1064,7 +1064,7 @@ func (r *Reconciler) reconcileRSP(
 	if !slices.Contains(rsp.Status.UsedBy.ReplicatedStorageClassNames, rsc.Name) {
 		base := rsp.DeepCopy()
 		applyRSPUsedBy(rsp, rsc.Name)
-		if err := r.patchRSPStatus(rf.Ctx(), rsp, base, true); err != nil {
+		if err := r.patchRSPStatus(rf.Ctx(), rsp, base); err != nil {
 			return nil, rf.Fail(err)
 		}
 	}
@@ -1135,7 +1135,7 @@ func (r *Reconciler) reconcileRSPRelease(
 	// Remove RSC from usedBy with optimistic lock.
 	base := rsp.DeepCopy()
 	applyRSPRemoveUsedBy(rsp, rscName)
-	if err := r.patchRSPStatus(rf.Ctx(), rsp, base, true); err != nil {
+	if err := r.patchRSPStatus(rf.Ctx(), rsp, base); err != nil {
 		return rf.Fail(err)
 	}
 
@@ -1145,7 +1145,7 @@ func (r *Reconciler) reconcileRSPRelease(
 		if objutilv1.HasFinalizer(rsp, v1alpha1.RSCControllerFinalizer) {
 			base := rsp.DeepCopy()
 			applyRSPFinalizer(rsp, false)
-			if err := r.patchRSP(rf.Ctx(), rsp, base, true); err != nil {
+			if err := r.patchRSP(rf.Ctx(), rsp, base); err != nil {
 				return rf.Fail(err)
 			}
 		}
@@ -1297,15 +1297,8 @@ func (r *Reconciler) patchRSC(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 	base *v1alpha1.ReplicatedStorageClass,
-	optimisticLock bool,
 ) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Patch(ctx, rsc, patch)
+	return r.cl.Patch(ctx, rsc, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 // patchRSCStatus patches the RSC status subresource.
@@ -1313,15 +1306,8 @@ func (r *Reconciler) patchRSCStatus(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 	base *v1alpha1.ReplicatedStorageClass,
-	optimisticLock bool,
 ) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Status().Patch(ctx, rsc, patch)
+	return r.cl.Status().Patch(ctx, rsc, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 // createRSP creates an RSP.
@@ -1334,15 +1320,8 @@ func (r *Reconciler) patchRSP(
 	ctx context.Context,
 	rsp *v1alpha1.ReplicatedStoragePool,
 	base *v1alpha1.ReplicatedStoragePool,
-	optimisticLock bool,
 ) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Patch(ctx, rsp, patch)
+	return r.cl.Patch(ctx, rsp, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 // patchRSPStatus patches the RSP status subresource.
@@ -1350,15 +1329,8 @@ func (r *Reconciler) patchRSPStatus(
 	ctx context.Context,
 	rsp *v1alpha1.ReplicatedStoragePool,
 	base *v1alpha1.ReplicatedStoragePool,
-	optimisticLock bool,
 ) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Status().Patch(ctx, rsp, patch)
+	return r.cl.Status().Patch(ctx, rsp, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 // deleteRSP deletes an RSP.
