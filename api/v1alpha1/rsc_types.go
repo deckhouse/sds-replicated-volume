@@ -142,6 +142,7 @@ type ReplicatedStorageClassSpec struct {
 	// +kubebuilder:validation:Items={type=string,maxLength=64}
 	// +kubebuilder:validation:XValidation:rule="self.all(n, n == 'Internal')",message="Only 'Internal' network is currently supported"
 	// +kubebuilder:default:={"Internal"}
+	// +listType=set
 	SystemNetworkNames []string `json:"systemNetworkNames"`
 	// ConfigurationRolloutStrategy defines how configuration changes are applied to existing volumes.
 	// Always present with defaults.
@@ -169,7 +170,12 @@ type ReplicatedStorageClassStorage struct {
 	//
 	// > Note that every LVMVolumeGroup resource must have the same type (Thin/Thick)
 	// as specified in the Type field.
+	// TODO(thinpool-object): When ThinPool becomes a separate API object and LVMVolumeGroups
+	// is replaced with selectors, revisit the key. Currently using name only because
+	// thinPoolName is optional and cannot be a listMapKey without a default value.
 	// +kubebuilder:validation:MinItems=1
+	// +listType=map
+	// +listMapKey=name
 	LVMVolumeGroups []ReplicatedStoragePoolLVMVolumeGroups `json:"lvmVolumeGroups"`
 }
 
@@ -322,12 +328,10 @@ type ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair struct {
 // Displays current information about the Storage Class.
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassStatus struct {
-	// +patchMergeKey=type
-	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=type
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// The Storage class current state. Might be:
 	// - Failed (if the controller received incorrect resource configuration or some errors occurred during the operation)
@@ -405,6 +409,7 @@ type ReplicatedStorageClassVolumesSummary struct {
 	// +optional
 	StaleConfiguration *int32 `json:"staleConfiguration,omitempty"`
 	// UsedStoragePoolNames is a sorted list of storage pool names currently used by volumes.
+	// +listType=atomic
 	// +optional
 	UsedStoragePoolNames []string `json:"usedStoragePoolNames,omitempty"`
 }
