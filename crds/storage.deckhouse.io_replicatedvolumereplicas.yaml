@@ -151,6 +151,7 @@ spec:
                   type: object
                 maxItems: 32
                 type: array
+                x-kubernetes-list-type: atomic
               attachment:
                 description: |-
                   Attachment contains information about the device attachment state.
@@ -360,9 +361,14 @@ spec:
                       description: ConnectionEstablishedOn lists system network names
                         where connection to this peer is established.
                       items:
+                        maxLength: 64
                         type: string
                       maxItems: 16
                       type: array
+                      x-kubernetes-list-type: atomic
+                      x-kubernetes-validations:
+                      - message: connectionEstablishedOn must be unique
+                        rule: self.all(x, self.exists_one(y, x == y))
                     connectionState:
                       description: ConnectionState is the DRBD connection state to
                         this peer.
@@ -391,9 +397,10 @@ spec:
                   type: object
                 maxItems: 32
                 type: array
-                x-kubernetes-list-map-keys:
-                - name
-                x-kubernetes-list-type: map
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: peers[].name must be unique
+                  rule: self.all(x, self.exists_one(y, x.name == y.name))
               quorum:
                 description: Quorum indicates whether this replica has quorum.
                 type: boolean

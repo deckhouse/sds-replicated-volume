@@ -68,13 +68,12 @@ alwaysApply: false
   - `Spec` and `Status` structs MUST be embedded as values on the root object (e.g. `Spec TSpec`, `Status TStatus`), not `*TStatus`.
   - Every API object `Status` MUST expose `.conditions` as `[]metav1.Condition`:
     - Field name MUST be `Conditions []metav1.Condition`.
-    - Use the standard kubebuilder/patch markers for mergeable conditions list:
-      - `// +patchMergeKey=type`
-      - `// +patchStrategy=merge`
+    - Use the standard markers for conditions list:
       - `// +listType=map`
       - `// +listMapKey=type`
       - `// +optional`
-      - JSON tag: ``json:"conditions,omitempty"`` and patch tags consistent with the above.
+      - JSON tag: ``json:"conditions,omitempty"``.
+    - MUST NOT use `+patchMergeKey`/`+patchStrategy` or their struct tags -- SMP does not apply to CRDs (see `api-list-types.mdc`).
     - Condition Type/Reason constants are defined in `<objprefix>_conditions.go` only when they become standardized/used (see `conditions_rules.mdc`).
   - Every API **root object** that exposes `.status.conditions` MUST provide adapter methods to satisfy `api/objutilv1.StatusConditionObject`:
     - `GetStatusConditions() []metav1.Condition` (returns `o.Status.Conditions`)
