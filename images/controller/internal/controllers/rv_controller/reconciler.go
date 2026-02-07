@@ -138,7 +138,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	outcome = outcome.WithChangeFrom(eo)
 
 	if outcome.DidChange() {
-		if err := r.patchRVStatus(rf.Ctx(), rv, base, outcome.OptimisticLockRequired()); err != nil {
+		if err := r.patchRVStatus(rf.Ctx(), rv, base); err != nil {
 			return rf.Fail(err).ToCtrl()
 		}
 	}
@@ -917,7 +917,7 @@ func (r *Reconciler) reconcileMetadata(
 	base := rv.DeepCopy()
 	applyRVMetadata(rv, targetFinalizerPresent)
 
-	if err := r.patchRV(rf.Ctx(), rv, base, true); err != nil {
+	if err := r.patchRV(rf.Ctx(), rv, base); err != nil {
 		return rf.Fail(err)
 	}
 
@@ -1423,7 +1423,7 @@ func (r *Reconciler) reconcileDeletion(
 		base := rva.DeepCopy()
 		applyRVADeletionConditions(rva)
 
-		if err := r.patchRVAStatus(rf.Ctx(), rva, base, false); err != nil {
+		if err := r.patchRVAStatus(rf.Ctx(), rva, base); err != nil {
 			return rf.Failf(err, "patching RVA %s status", rva.Name)
 		}
 	}
@@ -1439,7 +1439,7 @@ func (r *Reconciler) reconcileDeletion(
 	if len(rv.Status.Datamesh.Members) > 0 {
 		base := rv.DeepCopy()
 		rv.Status.Datamesh.Members = nil
-		if err := r.patchRVStatus(rf.Ctx(), rv, base, false); err != nil {
+		if err := r.patchRVStatus(rf.Ctx(), rv, base); err != nil {
 			return rf.Failf(err, "clearing datamesh members")
 		}
 	}
@@ -1530,24 +1530,12 @@ func (r *Reconciler) getRV(ctx context.Context, name string) (*v1alpha1.Replicat
 	return &rv, nil
 }
 
-func (r *Reconciler) patchRV(ctx context.Context, obj, base *v1alpha1.ReplicatedVolume, optimisticLock bool) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Patch(ctx, obj, patch)
+func (r *Reconciler) patchRV(ctx context.Context, obj, base *v1alpha1.ReplicatedVolume) error {
+	return r.cl.Patch(ctx, obj, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
-func (r *Reconciler) patchRVStatus(ctx context.Context, obj, base *v1alpha1.ReplicatedVolume, optimisticLock bool) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Status().Patch(ctx, obj, patch)
+func (r *Reconciler) patchRVStatus(ctx context.Context, obj, base *v1alpha1.ReplicatedVolume) error {
+	return r.cl.Status().Patch(ctx, obj, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 // --- DRBDROp ---
@@ -1671,14 +1659,8 @@ func (r *Reconciler) getRVAs(ctx context.Context, rvName string) ([]*v1alpha1.Re
 	return result, nil
 }
 
-func (r *Reconciler) patchRVAStatus(ctx context.Context, obj, base *v1alpha1.ReplicatedVolumeAttachment, optimisticLock bool) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Status().Patch(ctx, obj, patch)
+func (r *Reconciler) patchRVAStatus(ctx context.Context, obj, base *v1alpha1.ReplicatedVolumeAttachment) error {
+	return r.cl.Status().Patch(ctx, obj, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 // --- RVR ---
@@ -1752,14 +1734,8 @@ func (r *Reconciler) createRVR(
 	return rvr, nil
 }
 
-func (r *Reconciler) patchRVR(ctx context.Context, obj, base *v1alpha1.ReplicatedVolumeReplica, optimisticLock bool) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Patch(ctx, obj, patch)
+func (r *Reconciler) patchRVR(ctx context.Context, obj, base *v1alpha1.ReplicatedVolumeReplica) error {
+	return r.cl.Patch(ctx, obj, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 func (r *Reconciler) deleteRVR(ctx context.Context, obj *v1alpha1.ReplicatedVolumeReplica) error {
@@ -1785,7 +1761,7 @@ func (r *Reconciler) deleteRVRWithFinalizerRemoval(ctx context.Context, obj *v1a
 	if obju.HasFinalizer(obj, v1alpha1.RVControllerFinalizer) {
 		base := obj.DeepCopy()
 		obju.RemoveFinalizer(obj, v1alpha1.RVControllerFinalizer)
-		if err := r.patchRVR(ctx, obj, base, true); err != nil {
+		if err := r.patchRVR(ctx, obj, base); err != nil {
 			return flow.Wrapf(err, "removing finalizer")
 		}
 	}

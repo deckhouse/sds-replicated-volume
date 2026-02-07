@@ -96,6 +96,7 @@ spec:
                   type: object
                 minItems: 1
                 type: array
+                x-kubernetes-list-type: atomic
                 x-kubernetes-validations:
                 - message: Value is immutable.
                   rule: self == oldSelf
@@ -173,6 +174,7 @@ spec:
                 maxItems: 1
                 minItems: 1
                 type: array
+                x-kubernetes-list-type: atomic
                 x-kubernetes-validations:
                 - message: Only 'Internal' network is currently supported
                   rule: self.all(n, n == 'Internal')
@@ -206,6 +208,7 @@ spec:
             - systemNetworkNames
             - type
             type: object
+            x-kubernetes-map-type: atomic
             x-kubernetes-validations:
             - message: thinPoolName is required for each lvmVolumeGroups entry when
                 type is LVMThin
@@ -296,6 +299,7 @@ spec:
                         properties:
                           name:
                             description: Name is the LVMVolumeGroup resource name.
+                            maxLength: 253
                             type: string
                           ready:
                             description: Ready indicates whether the LVMVolumeGroup
@@ -304,6 +308,7 @@ spec:
                           thinPoolName:
                             description: ThinPoolName is the thin pool name (for LVMThin
                               storage pools).
+                            maxLength: 128
                             type: string
                           unschedulable:
                             description: Unschedulable indicates whether new volumes
@@ -314,9 +319,12 @@ spec:
                         - ready
                         - unschedulable
                         type: object
+                      maxItems: 50
                       type: array
+                      x-kubernetes-list-type: atomic
                     nodeName:
                       description: NodeName is the Kubernetes node name.
+                      maxLength: 253
                       type: string
                     nodeReady:
                       description: NodeReady indicates whether the Kubernetes node
@@ -328,6 +336,7 @@ spec:
                       type: boolean
                     zoneName:
                       description: ZoneName is the zone this node belongs to.
+                      maxLength: 63
                       type: string
                   required:
                   - agentReady
@@ -335,7 +344,9 @@ spec:
                   - nodeReady
                   - unschedulable
                   type: object
+                maxItems: 1000
                 type: array
+                x-kubernetes-list-type: atomic
               eligibleNodesRevision:
                 description: EligibleNodesRevision is incremented when eligible nodes
                   change.
@@ -357,9 +368,11 @@ spec:
                     description: ReplicatedStorageClassNames lists RSC names using
                       this storage pool.
                     items:
+                      maxLength: 253
                       type: string
+                    maxItems: 100
                     type: array
-                    x-kubernetes-list-type: set
+                    x-kubernetes-list-type: atomic
                 type: object
             type: object
         required:

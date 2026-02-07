@@ -77,6 +77,10 @@ spec:
                   type: string
                 maxItems: 2
                 type: array
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: actuallyAttachedTo must be unique
+                  rule: self.all(x, self.exists_one(y, x == y))
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -213,6 +217,11 @@ spec:
                           maxItems: 16
                           minItems: 1
                           type: array
+                          x-kubernetes-list-type: atomic
+                          x-kubernetes-validations:
+                          - message: addresses[].systemNetworkName must be unique
+                            rule: self.all(x, self.exists_one(y, x.systemNetworkName
+                              == y.systemNetworkName))
                         attached:
                           default: false
                           description: Attached indicates whether this member should
@@ -290,6 +299,9 @@ spec:
                     maxItems: 24
                     type: array
                     x-kubernetes-list-type: atomic
+                    x-kubernetes-validations:
+                    - message: members[].name must be unique
+                      rule: self.all(x, self.exists_one(y, x.name == y.name))
                   quorum:
                     default: 0
                     description: Quorum is the quorum value for the datamesh.
@@ -330,6 +342,10 @@ spec:
                       type: string
                     maxItems: 16
                     type: array
+                    x-kubernetes-list-type: atomic
+                    x-kubernetes-validations:
+                    - message: systemNetworkNames must be unique
+                      rule: self.all(x, self.exists_one(y, x == y))
                 required:
                 - allowMultiattach
                 - members
@@ -353,11 +369,13 @@ spec:
                     message:
                       description: Message is an optional human-readable message about
                         the transition state and progress.
+                      maxLength: 512
                       type: string
                     name:
                       description: |-
                         Name is the replica name.
                         Must have format "prefix-N" where N is 0-31.
+                      maxLength: 123
                       minLength: 1
                       pattern: ^.+-([0-9]|[12][0-9]|3[01])$
                       type: string
@@ -406,8 +424,12 @@ spec:
                   - name
                   - transition
                   type: object
+                maxItems: 32
                 type: array
                 x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: datameshPendingReplicaTransitions[].name must be unique
+                  rule: self.all(x, self.exists_one(y, x.name == y.name))
               datameshRevision:
                 description: DatameshRevision is a counter incremented when datamesh
                   configuration changes.
@@ -476,6 +498,10 @@ spec:
                   type: string
                 maxItems: 2
                 type: array
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: desiredAttachTo must be unique
+                  rule: self.all(x, self.exists_one(y, x == y))
               drbd:
                 properties:
                   config:
@@ -494,6 +520,7 @@ spec:
                   properties:
                     nodeName:
                       description: NodeName is the node where the replica is placed.
+                      maxLength: 253
                       type: string
                     reason:
                       description: Reason describes why this placement violates eligible
@@ -501,13 +528,19 @@ spec:
                       type: string
                     replicaName:
                       description: ReplicaName is the ReplicatedVolumeReplica name.
+                      maxLength: 253
                       type: string
                   required:
                   - nodeName
                   - reason
                   - replicaName
                   type: object
+                maxItems: 32
                 type: array
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: eligibleNodesViolations[].replicaName must be unique
+                  rule: self.all(x, self.exists_one(y, x.replicaName == y.replicaName))
             required:
             - datamesh
             - datameshRevision

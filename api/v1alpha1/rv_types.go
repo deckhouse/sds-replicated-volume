@@ -36,9 +36,8 @@ type ReplicatedVolume struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`
 
-	Spec ReplicatedVolumeSpec `json:"spec"`
-	// +patchStrategy=merge
-	Status ReplicatedVolumeStatus `json:"status,omitempty" patchStrategy:"merge"`
+	Spec   ReplicatedVolumeSpec   `json:"spec"`
+	Status ReplicatedVolumeStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -72,26 +71,27 @@ type ReplicatedVolumeSpec struct {
 
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeStatus struct {
-	// +patchMergeKey=type
-	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=type
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// +patchStrategy=merge
 	// +optional
-	DRBD *DRBDResourceDetails `json:"drbd,omitempty" patchStrategy:"merge"`
+	DRBD *DRBDResourceDetails `json:"drbd,omitempty"`
 
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="actuallyAttachedTo must be unique"
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
+	// +listType=atomic
 	// +optional
 	ActuallyAttachedTo []string `json:"actuallyAttachedTo,omitempty"`
 
 	// DesiredAttachTo is the desired set of nodes where the volume should be attached (up to 2 nodes).
 	// It is computed by controllers from ReplicatedVolumeAttachment (RVA) objects.
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="desiredAttachTo must be unique"
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
+	// +listType=atomic
 	// +optional
 	DesiredAttachTo []string `json:"desiredAttachTo,omitempty"`
 
@@ -108,6 +108,9 @@ type ReplicatedVolumeStatus struct {
 	ConfigurationObservedGeneration int64 `json:"configurationObservedGeneration,omitempty"`
 
 	// EligibleNodesViolations lists replicas placed on non-eligible nodes.
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.replicaName == y.replicaName))",message="eligibleNodesViolations[].replicaName must be unique"
+	// +kubebuilder:validation:MaxItems=32
+	// +listType=atomic
 	// +optional
 	EligibleNodesViolations []ReplicatedVolumeEligibleNodesViolation `json:"eligibleNodesViolations,omitempty"`
 
@@ -115,8 +118,7 @@ type ReplicatedVolumeStatus struct {
 	DatameshRevision int64 `json:"datameshRevision"`
 
 	// Datamesh is the computed datamesh configuration for the volume.
-	// +patchStrategy=merge
-	Datamesh ReplicatedVolumeDatamesh `json:"datamesh" patchStrategy:"merge"`
+	Datamesh ReplicatedVolumeDatamesh `json:"datamesh"`
 
 	// DatameshTransitions is the list of active datamesh transitions.
 	// +listType=atomic
@@ -124,6 +126,8 @@ type ReplicatedVolumeStatus struct {
 	DatameshTransitions []ReplicatedVolumeDatameshTransition `json:"datameshTransitions,omitempty"`
 
 	// DatameshPendingReplicaTransitions is the list of pending replica transitions.
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="datameshPendingReplicaTransitions[].name must be unique"
+	// +kubebuilder:validation:MaxItems=32
 	// +listType=atomic
 	// +optional
 	DatameshPendingReplicaTransitions []ReplicatedVolumeDatameshPendingReplicaTransition `json:"datameshPendingReplicaTransitions,omitempty"`
@@ -136,10 +140,12 @@ type ReplicatedVolumeDatameshPendingReplicaTransition struct {
 	// Must have format "prefix-N" where N is 0-31.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=123
 	// +kubebuilder:validation:Pattern=`^.+-([0-9]|[12][0-9]|3[01])$`
 	Name string `json:"name"`
 
 	// Message is an optional human-readable message about the transition state and progress.
+	// +kubebuilder:validation:MaxLength=512
 	// +optional
 	Message string `json:"message,omitempty"`
 
@@ -227,8 +233,10 @@ type ReplicatedVolumeDatameshTransitionFormation struct {
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeDatamesh struct {
 	// SystemNetworkNames is the list of system network names for DRBD communication.
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="systemNetworkNames must be unique"
 	// +kubebuilder:validation:MaxItems=16
 	// +kubebuilder:validation:items:MaxLength=64
+	// +listType=atomic
 	SystemNetworkNames []string `json:"systemNetworkNames"`
 
 	// SharedSecret is the shared secret for DRBD authentication.
@@ -248,6 +256,7 @@ type ReplicatedVolumeDatamesh struct {
 	// +kubebuilder:validation:Required
 	Size resource.Quantity `json:"size"`
 	// Members is the list of datamesh members.
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="members[].name must be unique"
 	// +kubebuilder:validation:MaxItems=24
 	// +listType=atomic
 	Members []ReplicatedVolumeDatameshMember `json:"members"`
@@ -328,8 +337,10 @@ type ReplicatedVolumeDatameshMember struct {
 	Zone string `json:"zone,omitempty"`
 
 	// Addresses is the list of DRBD addresses for this member.
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))",message="addresses[].systemNetworkName must be unique"
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
+	// +listType=atomic
 	Addresses []DRBDResourceAddressStatus `json:"addresses"`
 
 	// LVMVolumeGroupName is the LVMVolumeGroup resource name where this replica should be placed.
@@ -369,9 +380,8 @@ func (t ReplicatedVolumeDatameshMemberTypeTransition) String() string {
 
 // +kubebuilder:object:generate=true
 type DRBDResourceDetails struct {
-	// +patchStrategy=merge
 	// +optional
-	Config *DRBDResourceConfig `json:"config,omitempty" patchStrategy:"merge"`
+	Config *DRBDResourceConfig `json:"config,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -384,8 +394,10 @@ type DRBDResourceConfig struct {
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeEligibleNodesViolation struct {
 	// NodeName is the node where the replica is placed.
+	// +kubebuilder:validation:MaxLength=253
 	NodeName string `json:"nodeName"`
 	// ReplicaName is the ReplicatedVolumeReplica name.
+	// +kubebuilder:validation:MaxLength=253
 	ReplicaName string `json:"replicaName"`
 	// Reason describes why this placement violates eligible nodes constraints.
 	Reason ReplicatedVolumeEligibleNodesViolationReason `json:"reason"`

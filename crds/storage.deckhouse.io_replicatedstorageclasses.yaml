@@ -230,6 +230,8 @@ spec:
 
                       > Note that every LVMVolumeGroup resource must have the same type (Thin/Thick)
                       as specified in the Type field.
+                      is replaced with selectors, revisit the key. Currently using name only because
+                      thinPoolName is optional and cannot be a listMapKey without a default value.
                     items:
                       properties:
                         name:
@@ -248,6 +250,9 @@ spec:
                       type: object
                     minItems: 1
                     type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
                   type:
                     description: |-
                       Type defines the volumes type. Might be:
@@ -290,6 +295,7 @@ spec:
                 maxItems: 1
                 minItems: 1
                 type: array
+                x-kubernetes-list-type: set
                 x-kubernetes-validations:
                 - message: Only 'Internal' network is currently supported
                   rule: self.all(n, n == 'Internal')
@@ -529,6 +535,7 @@ spec:
                     items:
                       type: string
                     type: array
+                    x-kubernetes-list-type: atomic
                 type: object
             required:
             - volumes

@@ -41,8 +41,7 @@ type ReplicatedVolumeAttachment struct {
 
 	Spec ReplicatedVolumeAttachmentSpec `json:"spec"`
 
-	// +patchStrategy=merge
-	Status ReplicatedVolumeAttachmentStatus `json:"status,omitempty" patchStrategy:"merge"`
+	Status ReplicatedVolumeAttachmentStatus `json:"status,omitempty"`
 }
 
 // ReplicatedVolumeAttachmentList contains a list of ReplicatedVolumeAttachment
@@ -89,12 +88,10 @@ type ReplicatedVolumeAttachmentStatus struct {
 	// +optional
 	Phase ReplicatedVolumeAttachmentPhase `json:"phase,omitempty"`
 
-	// +patchMergeKey=type
-	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=type
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // ReplicatedVolumeAttachmentPhase enumerates possible values for ReplicatedVolumeAttachment status.phase field.

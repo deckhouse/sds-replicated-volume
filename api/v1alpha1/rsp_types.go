@@ -63,6 +63,7 @@ func (rsp *ReplicatedStoragePool) SetStatusConditions(conditions []metav1.Condit
 
 // Defines desired rules for Linstor's Storage-pools.
 // +kubebuilder:object:generate=true
+// +structType=atomic
 // +kubebuilder:validation:XValidation:rule="self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, size(g.thinPoolName) > 0)",message="thinPoolName is required for each lvmVolumeGroups entry when type is LVMThin"
 // +kubebuilder:validation:XValidation:rule="self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName) || size(g.thinPoolName) == 0)",message="thinPoolName must not be specified when type is LVM"
 type ReplicatedStoragePoolSpec struct {
@@ -79,6 +80,7 @@ type ReplicatedStoragePoolSpec struct {
 	// as it is in current resource's 'Spec.Type' field.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
 	// +kubebuilder:validation:MinItems=1
+	// +listType=atomic
 	LVMVolumeGroups []ReplicatedStoragePoolLVMVolumeGroups `json:"lvmVolumeGroups"`
 	// Array of zones the Storage pool's volumes should be replicated in.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
@@ -105,6 +107,7 @@ type ReplicatedStoragePoolSpec struct {
 	// +kubebuilder:validation:Items={type=string,maxLength=64}
 	// +kubebuilder:validation:XValidation:rule="self.all(n, n == 'Internal')",message="Only 'Internal' network is currently supported"
 	// +kubebuilder:default:={"Internal"}
+	// +listType=atomic
 	SystemNetworkNames []string `json:"systemNetworkNames"`
 	// EligibleNodesPolicy defines policies for managing eligible nodes.
 	// Always present with defaults.
@@ -152,12 +155,10 @@ type ReplicatedStoragePoolLVMVolumeGroups struct {
 // Displays current information about the state of the LINSTOR storage pool.
 // +kubebuilder:object:generate=true
 type ReplicatedStoragePoolStatus struct {
-	// +patchMergeKey=type
-	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=type
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// TODO: Remove Phase once the old controller (sds-replicated-volume-controller) is retired.
 	// Phase is used only by the old controller and will be removed in a future version.
@@ -172,6 +173,8 @@ type ReplicatedStoragePoolStatus struct {
 	// +optional
 	EligibleNodesRevision int64 `json:"eligibleNodesRevision,omitempty"`
 	// EligibleNodes lists nodes eligible for this storage pool.
+	// +kubebuilder:validation:MaxItems=1000
+	// +listType=atomic
 	// +optional
 	EligibleNodes []ReplicatedStoragePoolEligibleNode `json:"eligibleNodes,omitempty"`
 
@@ -184,7 +187,9 @@ type ReplicatedStoragePoolStatus struct {
 // +kubebuilder:object:generate=true
 type ReplicatedStoragePoolUsedBy struct {
 	// ReplicatedStorageClassNames lists RSC names using this storage pool.
-	// +listType=set
+	// +kubebuilder:validation:MaxItems=100
+	// +kubebuilder:validation:items:MaxLength=253
+	// +listType=atomic
 	// +optional
 	ReplicatedStorageClassNames []string `json:"replicatedStorageClassNames,omitempty"`
 }
@@ -211,11 +216,15 @@ func (p ReplicatedStoragePoolPhase) String() string {
 // +kubebuilder:object:generate=true
 type ReplicatedStoragePoolEligibleNode struct {
 	// NodeName is the Kubernetes node name.
+	// +kubebuilder:validation:MaxLength=253
 	NodeName string `json:"nodeName"`
 	// ZoneName is the zone this node belongs to.
+	// +kubebuilder:validation:MaxLength=63
 	// +optional
 	ZoneName string `json:"zoneName,omitempty"`
 	// LVMVolumeGroups lists LVM volume groups available on this node.
+	// +kubebuilder:validation:MaxItems=50
+	// +listType=atomic
 	// +optional
 	LVMVolumeGroups []ReplicatedStoragePoolEligibleNodeLVMVolumeGroup `json:"lvmVolumeGroups,omitempty"`
 	// Unschedulable indicates whether new volumes should not be scheduled to this node.
@@ -230,8 +239,10 @@ type ReplicatedStoragePoolEligibleNode struct {
 // +kubebuilder:object:generate=true
 type ReplicatedStoragePoolEligibleNodeLVMVolumeGroup struct {
 	// Name is the LVMVolumeGroup resource name.
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 	// ThinPoolName is the thin pool name (for LVMThin storage pools).
+	// +kubebuilder:validation:MaxLength=128
 	// +optional
 	ThinPoolName string `json:"thinPoolName,omitempty"`
 	// Unschedulable indicates whether new volumes should not use this volume group.

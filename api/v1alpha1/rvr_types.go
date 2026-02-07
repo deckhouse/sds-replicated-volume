@@ -53,8 +53,7 @@ type ReplicatedVolumeReplica struct {
 
 	Spec ReplicatedVolumeReplicaSpec `json:"spec"`
 
-	// +patchStrategy=merge
-	Status ReplicatedVolumeReplicaStatus `json:"status,omitempty" patchStrategy:"merge"`
+	Status ReplicatedVolumeReplicaStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -194,14 +193,13 @@ func (t ReplicaType) String() string {
 
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeReplicaStatus struct {
-	// +patchMergeKey=type
-	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=type
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// +kubebuilder:validation:MaxItems=32
+	// +listType=atomic
 	// +optional
 	Addresses []DRBDResourceAddressStatus `json:"addresses,omitempty"`
 
@@ -220,9 +218,8 @@ type ReplicatedVolumeReplicaStatus struct {
 
 	// BackingVolume contains information about the backing LVM logical volume.
 	// Only set for Diskful replicas.
-	// +patchStrategy=merge
 	// +optional
-	BackingVolume *ReplicatedVolumeReplicaStatusBackingVolume `json:"backingVolume,omitempty" patchStrategy:"merge"`
+	BackingVolume *ReplicatedVolumeReplicaStatusBackingVolume `json:"backingVolume,omitempty"`
 
 	// DatameshPending describes the pending datamesh membership state for this replica.
 	//
@@ -234,9 +231,8 @@ type ReplicatedVolumeReplicaStatus struct {
 	// spec.lvmVolumeGroupName, and spec.lvmVolumeGroupThinPoolName fields must be populated
 	// and validated before the replica can be marked as a pending datamesh member.
 	//
-	// +patchStrategy=merge
 	// +optional
-	DatameshPendingTransition *ReplicatedVolumeReplicaStatusDatameshPendingTransition `json:"datameshPendingTransition,omitempty" patchStrategy:"merge"`
+	DatameshPendingTransition *ReplicatedVolumeReplicaStatusDatameshPendingTransition `json:"datameshPendingTransition,omitempty"`
 
 	// DatameshRevision is the datamesh revision for which the replica was fully configured.
 	//
@@ -255,32 +251,27 @@ type ReplicatedVolumeReplicaStatus struct {
 
 	// Attachment contains information about the device attachment state.
 	// Only set when the replica is attached on the node.
-	// +patchStrategy=merge
 	// +optional
-	Attachment *ReplicatedVolumeReplicaStatusAttachment `json:"attachment,omitempty" patchStrategy:"merge"`
+	Attachment *ReplicatedVolumeReplicaStatusAttachment `json:"attachment,omitempty"`
 
 	// Quorum indicates whether this replica has quorum.
 	// +optional
 	Quorum *bool `json:"quorum,omitempty"`
 
 	// QuorumSummary provides detailed quorum information.
-	// +patchStrategy=merge
 	// +optional
-	QuorumSummary *ReplicatedVolumeReplicaStatusQuorumSummary `json:"quorumSummary,omitempty" patchStrategy:"merge"`
+	QuorumSummary *ReplicatedVolumeReplicaStatusQuorumSummary `json:"quorumSummary,omitempty"`
 
 	// Peers contains the status of connections to peer replicas.
-	// +patchMergeKey=name
-	// +patchStrategy=merge
-	// +listType=map
-	// +listMapKey=name
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="peers[].name must be unique"
 	// +kubebuilder:validation:MaxItems=32
+	// +listType=atomic
 	// +optional
-	Peers []ReplicatedVolumeReplicaStatusPeerStatus `json:"peers,omitempty" patchStrategy:"merge" patchMergeKey:"name"`
+	Peers []ReplicatedVolumeReplicaStatusPeerStatus `json:"peers,omitempty"`
 
 	// DRBDRReconciliationCache holds cached values for DRBDResource reconciliation optimization.
-	// +patchStrategy=merge
 	// +optional
-	DRBDRReconciliationCache ReplicatedVolumeReplicaStatusDRBDRReconciliationCache `json:"drbdrReconciliationCache,omitempty" patchStrategy:"merge"`
+	DRBDRReconciliationCache ReplicatedVolumeReplicaStatusDRBDRReconciliationCache `json:"drbdrReconciliationCache,omitempty"`
 }
 
 // ReplicatedVolumeReplicaStatusAttachment contains information about the device attachment state.
@@ -365,7 +356,10 @@ type ReplicatedVolumeReplicaStatusPeerStatus struct {
 	Attached bool `json:"attached,omitempty"`
 
 	// ConnectionEstablishedOn lists system network names where connection to this peer is established.
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="connectionEstablishedOn must be unique"
 	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:MaxLength=64
+	// +listType=atomic
 	// +optional
 	ConnectionEstablishedOn []string `json:"connectionEstablishedOn,omitempty"`
 
