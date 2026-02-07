@@ -2122,7 +2122,6 @@ var _ = Describe("Reconciler", func() {
 			outcome := ensureConfiguration(context.Background(), rsc, rsp)
 
 			Expect(outcome.DidChange()).To(BeTrue())
-			Expect(outcome.OptimisticLockRequired()).To(BeTrue())
 			Expect(rsc.Status.ConfigurationGeneration).To(Equal(int64(6)))
 			Expect(rsc.Status.Configuration).NotTo(BeNil())
 			Expect(rsc.Status.Configuration.StoragePoolName).To(Equal("my-pool"))

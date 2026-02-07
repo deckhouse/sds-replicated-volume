@@ -1,5 +1,5 @@
 ---
-description: Contracts for PatchReconcileHelper (patch<Kind>) functions: exactly one patch request for one patch domain (main or status), explicit base + optimistic-lock flag, and no other I/O. Apply when writing patch* helpers in reconciler*.go, and when deciding patch mechanics for main vs status. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+description: Contracts for PatchReconcileHelper (patch<Kind>) functions: exactly one patch request for one patch domain (main or status), explicit base, mandatory optimistic locking by default, and no other I/O. Apply when writing patch* helpers in reconciler*.go, and when deciding patch mechanics for main vs status. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
 globs: images/controller/internal/controllers/**/reconciler*.go
 alwaysApply: false
 ---
@@ -19,7 +19,9 @@ Common terminology and rules for any **ReconcileHelper** live in `controller-rec
 Summary only; if anything differs, follow normative sections below.
 
 - **PatchReconcileHelpers** (`patch<Kind>`) are **single-call I/O helpers**: they execute exactly one **patch request** for exactly one **patch domain** (`Patch(...)` (**main patch domain**) or `Status().Patch(...)` (**status patch domain**)).
-- They take `base` explicitly (created by **Reconcile methods** immediately before the patch) and an explicit `optimisticLock` flag, and MUST NOT decide **patch ordering** or **patch strategy** beyond that flag.
+- They take `base` explicitly (created by **Reconcile methods** immediately before the patch) and MUST use **Optimistic locking** by default.
+- A **PatchReconcileHelper** MAY accept a `withoutOptimisticLock bool` parameter **only** when it has been explicitly proven safe to skip optimistic locking for all call sites of that helper (e.g., the patch touches only map keys and no arrays on a frequently-changing external object). When `withoutOptimisticLock` is `true`, the helper uses a plain merge patch without optimistic locking.
+- They MUST NOT decide **patch ordering** or **patch strategy** beyond the above.
 - They MUST patch using the **caller-owned object instance** (`obj`) and, on success, the same instance MUST be updated with **API-server-updated fields** (e.g., `resourceVersion`, managed fields, defaults).
 - They MUST NOT perform any other **Kubernetes API I/O** calls (`Get/List/Create/Update/Delete`), MUST NOT call **DeepCopy**, and MUST NOT patch both **patch domains** in one helper.
 - They MUST treat `base` as **read-only inputs** and stay **deterministic** in everything they control (no **Hidden I/O**: no time/random/env/network beyond the single **patch request**).
@@ -32,15 +34,26 @@ Notes:
 
 ---
 
+## Why optimistic locking is mandatory by default
+
+JSON Strategic Merge Patch treats all arrays (lists) as **atomic**: the entire array is replaced on patch.
+This means `status.conditions`, `metadata.finalizers`, `metadata.ownerReferences`, and any other list fields are NOT safe for concurrent editing without **Optimistic locking**.
+
+Because most patches touch at least one array (conditions, finalizers, etc.), **Optimistic locking** MUST be the default to prevent silent data loss from concurrent modifications.
+
+Skipping optimistic locking (`withoutOptimisticLock`) is allowed **only** when the patch provably touches only scalar fields and/or individual map keys (e.g., adding/removing a single label on a frequently-changing external object like `Node`).
+
+---
+
 ## Definition
 
-A **PatchReconcileHelper** (“patch helper”) is a **ReconcileHelper** that is:
+A **PatchReconcileHelper** ("patch helper") is a **ReconcileHelper** that is:
 
 - **allowed to perform I/O**, and
 - executes exactly **one** **Kubernetes patch request** for exactly **one patch domain** (**main resource patch** or **status subresource patch**), and
 - returns the patch outcome (and optionally an error).
 
-Typical patch helpers encapsulate the mechanical “patch this domain now” operation (including optimistic-lock semantics) and ensure the caller-visible in-memory object reflects server-assigned fields after the patch (e.g., `resourceVersion`, defaults), while **Reconcile methods** still own **patch ordering** decisions across multiple patches.
+Typical patch helpers encapsulate the mechanical "patch this domain now" operation with **Optimistic locking** and ensure the caller-visible in-memory object reflects server-assigned fields after the patch (e.g., `resourceVersion`, defaults), while **Reconcile methods** still own **patch ordering** decisions across multiple patches.
 
 ---
 
@@ -51,7 +64,7 @@ Typical patch helpers encapsulate the mechanical “patch this domain now” ope
   - `patch<Kind>` / `Patch<Kind>` (**main patch domain**)
   - `patch<Kind>Status` / `Patch<Kind>Status` (**status patch domain**)
   `<Kind>` MUST either correspond to the Kubernetes **object** kind being patched or be a short kind name that is already established in the codebase.
-  When `<Kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<Kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
+  When `<Kind>` refers to a kind defined in this repository's API (types under `api/v*/`), `<Kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
   Examples:
   - `patchCM(...)` (or `patchConfigMap(...)`)
   - `patchCMStatus(...)` (or `patchConfigMapStatus(...)`)
@@ -68,25 +81,40 @@ Typical patch helpers encapsulate the mechanical “patch this domain now” ope
 - For **PatchReconcileHelpers** (`patch*`), the simplest signature from the variants below that preserves explicit dependencies and a single-patch scope SHOULD be chosen.
 - If additional signature variants are explicitly permitted elsewhere in this document, they MAY also be used.
 
-### Simple patch
-Pass `base` explicitly (created in the **Reconcile methods** immediately before the patch)
-and an explicit optimistic-lock flag:
+### Simple patch (default — with optimistic locking)
+Pass `base` explicitly (created in the **Reconcile methods** immediately before the patch).
+**Optimistic locking** is always used:
 ```go
 func (r *Reconciler) patchEK(
     ctx context.Context,
     obj *v1alpha1.ExampleKind,
     base *v1alpha1.ExampleKind,
-    optimisticLock bool,
 ) error
 ```
 
-### Status-subresource patch variant
+### Status-subresource patch variant (default — with optimistic locking)
 ```go
 func (r *Reconciler) patchEKStatus(
     ctx context.Context,
     obj *v1alpha1.ExampleKind,
     base *v1alpha1.ExampleKind,
-    optimisticLock bool,
+) error
+```
+
+### Opt-out variant (rare — without optimistic locking)
+
+A patch helper MAY accept `withoutOptimisticLock bool` **only** when all of the following conditions are met:
+
+1. It has been explicitly proven that every call site of this helper patches only scalar fields and/or individual map keys (no arrays).
+2. The patched object is expected to change frequently from external sources (e.g., `Node`), making optimistic locking impractical due to constant 409 Conflict errors.
+3. The decision is documented in the helper's GoDoc.
+
+```go
+func (r *Reconciler) patchNode(
+    ctx context.Context,
+    obj *corev1.Node,
+    base *corev1.Node,
+    withoutOptimisticLock bool,
 ) error
 ```
 
@@ -97,14 +125,8 @@ func (r *Reconciler) patchEK(
     ctx context.Context,
     obj *v1alpha1.ExampleKind,
     base *v1alpha1.ExampleKind,
-    optimisticLock bool,
 ) error {
-    var patch client.Patch
-    if optimisticLock {
-        patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-    } else {
-        patch = client.MergeFrom(base)
-    }
+    patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
     return r.client.Patch(ctx, obj, patch)
 }
 
@@ -112,14 +134,8 @@ func (r *Reconciler) patchEKStatus(
     ctx context.Context,
     obj *v1alpha1.ExampleKind,
     base *v1alpha1.ExampleKind,
-    optimisticLock bool,
 ) error {
-    var patch client.Patch
-    if optimisticLock {
-        patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-    } else {
-        patch = client.MergeFrom(base)
-    }
+    patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
     return r.client.Status().Patch(ctx, obj, patch)
 }
 ```
@@ -139,7 +155,7 @@ func (r *Reconciler) patchEKStatus(
 - controller-runtime client usage to execute exactly **one** Kubernetes patch call for exactly **one** patch domain:
   - `Patch(...)` (main resource), or
   - `Status().Patch(...)` (status subresource),
-  using the **Optimistic locking** mode provided by the caller (typically derived from `EnsureOutcome.OptimisticLockRequired()`).
+  using **Optimistic locking** by default (`client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})`).
 
 **PatchReconcileHelpers** MUST NOT do any of the following:
 
@@ -148,14 +164,14 @@ func (r *Reconciler) patchEKStatus(
 - making any patch ordering decisions across multiple patch requests;
 - performing any other I/O besides the single Kubernetes API request they own.
 
-**PatchReconcileHelpers** MUST NOT do “hidden I/O” either:
+**PatchReconcileHelpers** MUST NOT do "hidden I/O" either:
 
 - `time.Now()` / `time.Since(...)` (nondeterministic wall-clock reads);
 - random number generation (`rand.*`);
 - environment reads (`os.Getenv`, reading files);
 - network calls of any kind **other than** the single Kubernetes API request they own.
 
-> Rationale: patch helpers are mechanical “execute exactly one patch” operations; ordering and multi-step reconciliation policy remain explicit and reviewable in **Reconcile methods**.
+> Rationale: patch helpers are mechanical "execute exactly one patch" operations; ordering and multi-step reconciliation policy remain explicit and reviewable in **Reconcile methods**.
 
 ---
 
@@ -164,9 +180,9 @@ func (r *Reconciler) patchEKStatus(
 A **PatchReconcileHelper** MUST be **deterministic** in everything it controls.
 
 In particular:
-- It MUST execute a single patch request whose parameters are determined only by explicit inputs (`obj`, `base`, `optimisticLock`, domain).
+- It MUST execute a single patch request whose parameters are determined only by explicit inputs (`obj`, `base`, domain, and optionally `withoutOptimisticLock`).
 - See the common determinism contract in `controller-reconcile-helper.mdc` (ordering stability, no map iteration order reliance).
-- It MUST NOT introduce “hidden I/O” (time, random, env, extra network calls) beyond the single patch request they own.
+- It MUST NOT introduce "hidden I/O" (time, random, env, extra network calls) beyond the single patch request they own.
 
 > Practical reason: nondeterminism produces patch churn and makes conflicts hard to reason about.
 
@@ -218,7 +234,7 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 - See the common error handling rules in `controller-reconcile-helper.mdc`.
 - A **PatchReconcileHelper** SHOULD be mechanically thin: if the single patch call fails, return the error **without wrapping**.
 - A **PatchReconcileHelper** MUST NOT enrich errors with additional context (including **object identity** such as `namespace/name`, UID, object key).
-  - Error enrichment (action + **object identity** + **phase**) is the calling **Reconcile method**’s responsibility.
+  - Error enrichment (action + **object identity** + **phase**) is the calling **Reconcile method**'s responsibility.
 
 ---
 
@@ -226,7 +242,7 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ❌ Doing any Kubernetes API calls other than the single patch request (`Get/List/Create/Update/Delete`, or a second patch):
 ```go
-func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK, optimisticLock bool) error {
+func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK) error {
     // forbidden: extra API call
     var cur v1alpha1.EK
     if err := r.client.Get(ctx, client.ObjectKeyFromObject(obj), &cur); err != nil {
@@ -234,23 +250,26 @@ func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK, optimi
     }
 
     // forbidden: patch after an extra call (still >1 API call in helper)
-    return r.client.Patch(ctx, obj, client.MergeFrom(base))
+    patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
+    return r.client.Patch(ctx, obj, patch)
 }
 ```
 
 ❌ Calling `DeepCopy` inside patch helpers (the caller creates `base`):
 ```go
-func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK, optimisticLock bool) error {
+func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK) error {
     _ = obj.DeepCopy() // forbidden: DeepCopy belongs to Reconcile methods
-    return r.client.Patch(ctx, obj, client.MergeFrom(base))
+    patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
+    return r.client.Patch(ctx, obj, patch)
 }
 ```
 
 ❌ Patching a temporary copy and dropping it (caller-owned `obj` stays stale):
 ```go
-func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK, optimisticLock bool) error {
+func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK) error {
     tmp := obj.DeepCopy() // also forbidden: DeepCopy in patch helper
-    if err := r.client.Patch(ctx, tmp, client.MergeFrom(base)); err != nil {
+    patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
+    if err := r.client.Patch(ctx, tmp, patch); err != nil {
         return err
     }
     // forbidden: obj is not updated with new resourceVersion/defaults
@@ -260,71 +279,77 @@ func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK, optimi
 
 ❌ Patching both patch domains in one helper:
 ```go
-func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK, optimisticLock bool) error {
+func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK) error {
+    patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
     // forbidden: two requests / two domains
-    if err := r.client.Patch(ctx, obj, client.MergeFrom(base)); err != nil { // main
+    if err := r.client.Patch(ctx, obj, patch); err != nil { // main
         return err
     }
-    return r.client.Status().Patch(ctx, obj, client.MergeFrom(base)) // status
+    return r.client.Status().Patch(ctx, obj, patch) // status
 }
 ```
 
 ❌ Making patch ordering decisions (patch helpers execute exactly one patch, ordering lives in Reconcile methods):
 ```go
-func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK, optimisticLock bool) error {
+func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK) error {
+    patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
     // forbidden: deciding to patch status first / mixing ordering policy into the helper
     if needsStatus(obj) {
-        if err := r.client.Status().Patch(ctx, obj, client.MergeFrom(base)); err != nil {
+        if err := r.client.Status().Patch(ctx, obj, patch); err != nil {
             return err
         }
     }
-    return r.client.Patch(ctx, obj, client.MergeFrom(base))
+    return r.client.Patch(ctx, obj, patch)
 }
 ```
 
-❌ Overriding the caller’s optimistic-locking decision:
+❌ Skipping optimistic locking without justification:
 ```go
-func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK, optimisticLock bool) error {
-    optimisticLock = true // forbidden: helper must not change the decision
-    // ...
-    return r.client.Patch(ctx, obj, client.MergeFrom(base))
+func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK) error {
+    // forbidden: must use optimistic locking by default
+    patch := client.MergeFrom(base)
+    return r.client.Patch(ctx, obj, patch)
 }
 ```
 
 ❌ Performing business-logic mutations inside the patch helper (beyond the patch call itself):
 ```go
-func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK, optimisticLock bool) error {
+func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK) error {
     // forbidden: business mutations belong to compute/apply/ensure before calling patch
     obj.Spec.Replicas = 3
-    return r.client.Patch(ctx, obj, client.MergeFrom(base))
+    patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
+    return r.client.Patch(ctx, obj, patch)
 }
 ```
 
 ❌ Mutating `base` (it is read-only diff reference):
 ```go
-func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK, optimisticLock bool) error {
+func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK) error {
     labels := base.GetLabels()
     labels["x"] = "y" // forbidden: mutates base via alias
-    return r.client.Patch(ctx, obj, client.MergeFrom(base))
+    patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
+    return r.client.Patch(ctx, obj, patch)
 }
 ```
 
 ❌ Hidden I/O / nondeterminism (time/random/env/extra network calls):
 ```go
-func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK, optimisticLock bool) error {
+func (r *Reconciler) patchEK(ctx context.Context, obj, base *v1alpha1.EK) error {
     if os.Getenv("PATCH_FAST") == "1" { // forbidden: env read in helper
         // ...
     }
     _ = time.Now() // forbidden
-    return r.client.Patch(ctx, obj, client.MergeFrom(base))
+    patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
+    return r.client.Patch(ctx, obj, patch)
 }
 ```
 
 ❌ Using broad patch helpers that patch multiple objects (must patch exactly one object instance):
 ```go
-func (r *Reconciler) patchEKs(ctx context.Context, objs []*v1alpha1.EK, base *v1alpha1.EK, optimisticLock bool) error {
+func (r *Reconciler) patchEKs(ctx context.Context, objs []*v1alpha1.EK, base *v1alpha1.EK) error {
     for _, obj := range objs {
-        if err := r.client.Patch(ctx, obj, client.MergeFrom(base)); err != nil { // forbidden: multiple API calls
+        patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
+        if err := r.client.Patch(ctx, obj, patch); err != nil { // forbidden: multiple API calls
             return err
         }
     }

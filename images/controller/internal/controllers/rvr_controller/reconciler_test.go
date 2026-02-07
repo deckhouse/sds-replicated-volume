@@ -3737,7 +3737,7 @@ var _ = Describe("patchRVRStatus", func() {
 		base := rvr.DeepCopy()
 		rvr.Status.DRBDRReconciliationCache.RVRType = v1alpha1.ReplicaTypeDiskful
 
-		err := rec.patchRVRStatus(ctx, rvr, base, false)
+		err := rec.patchRVRStatus(ctx, rvr, base)
 
 		Expect(err).NotTo(HaveOccurred())
 
@@ -3745,21 +3745,6 @@ var _ = Describe("patchRVRStatus", func() {
 		var updated v1alpha1.ReplicatedVolumeReplica
 		Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, &updated)).To(Succeed())
 		Expect(updated.Status.DRBDRReconciliationCache.RVRType).To(Equal(v1alpha1.ReplicaTypeDiskful))
-	})
-
-	It("patches with optimistic lock when requested", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", ResourceVersion: "1"},
-		}
-		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rvr).WithStatusSubresource(rvr).Build()
-		rec := NewReconciler(cl, scheme, logr.Discard(), "")
-
-		base := rvr.DeepCopy()
-		rvr.Status.DRBDRReconciliationCache.RVRType = v1alpha1.ReplicaTypeDiskful
-
-		err := rec.patchRVRStatus(ctx, rvr, base, true)
-
-		Expect(err).NotTo(HaveOccurred())
 	})
 })
 
@@ -3785,7 +3770,7 @@ var _ = Describe("patchRVR", func() {
 		base := rvr.DeepCopy()
 		rvr.Finalizers = []string{v1alpha1.RVRControllerFinalizer}
 
-		err := rec.patchRVR(ctx, rvr, base, false)
+		err := rec.patchRVR(ctx, rvr, base)
 
 		Expect(err).NotTo(HaveOccurred())
 
@@ -3934,7 +3919,7 @@ var _ = Describe("patchDRBDR", func() {
 		base := drbdr.DeepCopy()
 		drbdr.Spec.NodeName = "node-1"
 
-		err := rec.patchDRBDR(ctx, drbdr, base, false)
+		err := rec.patchDRBDR(ctx, drbdr, base)
 
 		Expect(err).NotTo(HaveOccurred())
 
@@ -3968,7 +3953,7 @@ var _ = Describe("patchLLV", func() {
 		base := llv.DeepCopy()
 		llv.Finalizers = []string{v1alpha1.RVRControllerFinalizer}
 
-		err := rec.patchLLV(ctx, llv, base, false)
+		err := rec.patchLLV(ctx, llv, base)
 
 		Expect(err).NotTo(HaveOccurred())
 
