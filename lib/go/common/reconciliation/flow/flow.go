@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -90,6 +91,43 @@ func Wrapf(err error, format string, args ...any) error {
 	}
 	msg := fmt.Sprintf(format, args...)
 	return fmt.Errorf("%s: %w", msg, err)
+}
+
+// isExpectedTransientError reports whether err consists entirely of expected
+// transient API errors that should be retried silently (logged at Info level,
+// not Error level, and not propagated to controller-runtime as an error).
+//
+// Currently recognized: 409 Conflict (optimistic lock failure).
+//
+// For joined errors (produced by errors.Join or MergeReconciles), every
+// component error must be transient; a single non-transient component causes
+// the whole error to be treated as a real failure.
+func isExpectedTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Multi-error (errors.Join): every component must be transient.
+	if multi, ok := err.(interface{ Unwrap() []error }); ok {
+		errs := multi.Unwrap()
+		if len(errs) == 0 {
+			return false
+		}
+		for _, e := range errs {
+			if !isExpectedTransientError(e) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Single wrapping (fmt.Errorf %w, Wrapf, Enrichf): follow the chain.
+	if inner := errors.Unwrap(err); inner != nil {
+		return isExpectedTransientError(inner)
+	}
+
+	// Leaf error: check known transient types.
+	return apierrors.IsConflict(err)
 }
 
 // phaseContextKey is a private context key for phase metadata.
@@ -269,7 +307,13 @@ func (rf ReconcileFlow) OnEnd(out *ReconcileOutcome) {
 	// Emit exactly one log record per phase end.
 	// Error is logged exactly once: at the first phase that encounters it.
 	if out.err != nil && !out.errorLogged {
-		rf.log.Error(out.err, "phase end", fields...)
+		if isExpectedTransientError(out.err) {
+			// Conflict (optimistic lock) is an expected transient condition;
+			// log at Info, not Error.
+			rf.log.Info("phase end", append(fields, "err", out.err)...)
+		} else {
+			rf.log.Error(out.err, "phase end", fields...)
+		}
 		out.errorLogged = true
 		return
 	}
@@ -404,7 +448,14 @@ func (o ReconcileOutcome) Enrichf(format string, args ...any) ReconcileOutcome {
 
 // ToCtrl converts ReconcileOutcome to controller-runtime return values.
 // Requeue intent (if any) is reflected in ctrl.Result; error (if any) is returned as-is.
+//
+// Conflict (optimistic lock) errors are automatically converted to a rate-limited
+// requeue without error. This prevents controller-runtime from logging them at
+// Error level and incrementing error metrics.
 func (o ReconcileOutcome) ToCtrl() (ctrl.Result, error) {
+	if o.err != nil && isExpectedTransientError(o.err) {
+		return ctrl.Result{Requeue: true}, nil
+	}
 	if o.requeueIntent != nil {
 		return *o.requeueIntent, o.err
 	}
@@ -556,6 +607,9 @@ func reconcileOutcomeKind(o *ReconcileOutcome) (kind string, requeueAfter time.D
 		panic("flow: reconcileOutcomeKind: outcome is nil")
 	}
 	if o.err != nil {
+		if isExpectedTransientError(o.err) {
+			return "Conflict", 0
+		}
 		return "Fail", 0
 	}
 
