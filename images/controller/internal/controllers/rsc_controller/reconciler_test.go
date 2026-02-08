@@ -83,8 +83,9 @@ var _ = Describe("computeActualVolumesSummary", func() {
 				name:                            "rv-1",
 				configurationObservedGeneration: 1, // Matches rsc.Status.ConfigurationGeneration.
 				conditions: rvViewConditions{
-					configurationReady:   true,
-					satisfyEligibleNodes: true,
+					satisfyEligibleNodesKnown: true,
+					satisfyEligibleNodes:      true,
+					configurationReady:        true,
 				},
 			},
 		}
@@ -94,14 +95,16 @@ var _ = Describe("computeActualVolumesSummary", func() {
 		Expect(*counters.Aligned).To(Equal(int32(1)))
 	})
 
-	It("counts configuration not aligned volumes (configurationReady false)", func() {
+	It("counts configuration not aligned volumes (configurationReady present and false)", func() {
 		rvs := []rvView{
 			{
 				name:                            "rv-1",
 				configurationObservedGeneration: 1, // Matches rsc.Status.ConfigurationGeneration.
 				conditions: rvViewConditions{
-					configurationReady:   false,
-					satisfyEligibleNodes: true,
+					satisfyEligibleNodesKnown: true,
+					satisfyEligibleNodes:      true,
+					configurationReadyKnown:   true,
+					configurationReady:        false,
 				},
 			},
 		}
@@ -111,13 +114,14 @@ var _ = Describe("computeActualVolumesSummary", func() {
 		Expect(*counters.StaleConfiguration).To(Equal(int32(1)))
 	})
 
-	It("counts eligible nodes not aligned volumes (satisfyEligibleNodes false)", func() {
+	It("counts eligible nodes not aligned volumes (satisfyEligibleNodes present and false)", func() {
 		rvs := []rvView{
 			{
 				name: "rv-1",
 				conditions: rvViewConditions{
-					configurationReady:   true,
-					satisfyEligibleNodes: false,
+					satisfyEligibleNodesKnown: true,
+					satisfyEligibleNodes:      false,
+					configurationReady:        true,
 				},
 			},
 		}
@@ -127,14 +131,32 @@ var _ = Describe("computeActualVolumesSummary", func() {
 		Expect(*counters.InConflictWithEligibleNodes).To(Equal(int32(1)))
 	})
 
+	It("does not count RVs with absent SatisfyEligibleNodes condition as in conflict", func() {
+		rvs := []rvView{
+			{
+				name: "rv-1",
+				conditions: rvViewConditions{
+					// SatisfyEligibleNodes condition is absent (not yet evaluated).
+					satisfyEligibleNodesKnown: false,
+					satisfyEligibleNodes:      false,
+				},
+			},
+		}
+
+		counters := computeActualVolumesSummary(rsc, rvs)
+
+		Expect(*counters.InConflictWithEligibleNodes).To(Equal(int32(0)))
+	})
+
 	It("returns total and inConflictWithEligibleNodes when RV has not acknowledged (mismatched configurationGeneration)", func() {
 		rvs := []rvView{
 			{
 				name:                            "rv-1",
-				configurationObservedGeneration: 0, // Mismatch - RSC has 1
+				configurationObservedGeneration: 99, // Mismatch - RSC has 1 (non-zero to distinguish from "unset")
 				conditions: rvViewConditions{
-					configurationReady:   true,
-					satisfyEligibleNodes: false, // nodesOK=false
+					satisfyEligibleNodesKnown: true,
+					satisfyEligibleNodes:      false, // nodesOK=false
+					configurationReady:        true,
 				},
 			},
 		}
@@ -155,8 +177,9 @@ var _ = Describe("computeActualVolumesSummary", func() {
 				name:                            "rv-1",
 				configurationObservedGeneration: 1,
 				conditions: rvViewConditions{
-					configurationReady:   true,
-					satisfyEligibleNodes: true,
+					satisfyEligibleNodesKnown: true,
+					satisfyEligibleNodes:      true,
+					configurationReady:        true,
 				},
 			},
 		}
@@ -207,7 +230,7 @@ var _ = Describe("computeActualVolumesSummary", func() {
 			{
 				name:                            "rv-1",
 				configurationStoragePoolName:    "pool-a",
-				configurationObservedGeneration: 0, // Not acknowledged.
+				configurationObservedGeneration: 99, // Not acknowledged (non-zero mismatch with RSC's 1).
 			},
 		}
 
@@ -852,21 +875,20 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 			name:                            name,
 			configurationObservedGeneration: 1,
 			conditions: rvViewConditions{
-				configurationReady:   configOK,
-				satisfyEligibleNodes: nodesOK,
+				satisfyEligibleNodesKnown: true,
+				satisfyEligibleNodes:      nodesOK,
+				configurationReadyKnown:   true,
+				configurationReady:        configOK,
 			},
 		}
 	}
 
-	// makePendingRV creates an rvView that has NOT acknowledged the RSC configuration.
+	// makePendingRV creates an rvView that has NOT acknowledged the RSC configuration
+	// and has no conditions yet (brand-new RV that hasn't been evaluated).
 	makePendingRV := func(name string) rvView {
 		return rvView{
 			name:                            name,
-			configurationObservedGeneration: 0, // Mismatch - RSC has 1
-			conditions: rvViewConditions{
-				configurationReady:   false,
-				satisfyEligibleNodes: false,
-			},
+			configurationObservedGeneration: 99, // Non-zero mismatch with RSC's 1 (0 means "unset", treated as acknowledged)
 		}
 	}
 
@@ -891,7 +913,7 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 		}
 	})
 
-	It("sets ConfigurationRolledOut to Unknown and VolumesSatisfyEligibleNodes based on actual when PendingObservation > 0", func() {
+	It("sets ConfigurationRolledOut to Unknown and VolumesSatisfyEligibleNodes to True when all RVs are pending with unknown eligible-nodes condition", func() {
 		rvs := []rvView{
 			makePendingRV("rv-1"),
 			makePendingRV("rv-2"),
@@ -905,7 +927,8 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 
 		// Check summary
 		Expect(rsc.Status.Volumes.PendingObservation).To(Equal(ptr.To(int32(3))))
-		Expect(rsc.Status.Volumes.InConflictWithEligibleNodes).To(Equal(ptr.To(int32(3))))
+		// Pending RVs have no SatisfyEligibleNodes condition yet, so none are "in conflict".
+		Expect(rsc.Status.Volumes.InConflictWithEligibleNodes).To(Equal(ptr.To(int32(0))))
 
 		// ConfigurationRolledOut is Unknown because we can't determine config status without acknowledgment.
 		configCond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType)
@@ -914,11 +937,11 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 		Expect(configCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonNewConfigurationNotYetObserved))
 		Expect(configCond.Message).To(ContainSubstring("3 volume(s) pending observation"))
 
-		// VolumesSatisfyEligibleNodes is calculated regardless of acknowledgment.
+		// VolumesSatisfyEligibleNodes is True because no RVs are known to be in conflict.
 		nodesCond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType)
 		Expect(nodesCond).NotTo(BeNil())
-		Expect(nodesCond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(nodesCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonManualConflictResolution))
+		Expect(nodesCond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(nodesCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonAllVolumesSatisfy))
 	})
 
 	It("sets ConfigurationRolledOut to False when StaleConfiguration > 0", func() {

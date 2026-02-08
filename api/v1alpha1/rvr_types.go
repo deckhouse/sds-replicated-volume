@@ -127,9 +127,9 @@ func (rvr *ReplicatedVolumeReplica) ChooseNewName(otherRVRs []*ReplicatedVolumeR
 }
 
 // +kubebuilder:object:generate=true
-// +kubebuilder:validation:XValidation:rule="size(self.lvmVolumeGroupName) == 0 || size(self.nodeName) > 0",message="lvmVolumeGroupName requires nodeName to be set"
-// +kubebuilder:validation:XValidation:rule="size(self.lvmVolumeGroupName) == 0 || self.type == 'Diskful'",message="lvmVolumeGroupName can only be set for Diskful type"
-// +kubebuilder:validation:XValidation:rule="size(self.lvmVolumeGroupThinPoolName) == 0 || size(self.lvmVolumeGroupName) > 0",message="lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || has(self.nodeName)",message="lvmVolumeGroupName requires nodeName to be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || self.type == 'Diskful'",message="lvmVolumeGroupName can only be set for Diskful type"
+// +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be set"
 type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
@@ -141,7 +141,7 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +optional
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="nodeName is immutable once set"
+	// +kubebuilder:validation:XValidation:rule="size(oldSelf) == 0 || self == oldSelf",message="nodeName is immutable once set"
 	NodeName string `json:"nodeName,omitempty"`
 
 	// LVMVolumeGroupName is the LVMVolumeGroup resource name where this replica should be placed.

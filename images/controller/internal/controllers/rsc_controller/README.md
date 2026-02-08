@@ -167,9 +167,9 @@ The controller aggregates statistics from all `ReplicatedVolume` resources refer
 
 - **Total** — count of all volumes
 - **Aligned** — volumes where both `ConfigurationReady` and `SatisfyEligibleNodes` conditions are `True`
-- **StaleConfiguration** — volumes where `ConfigurationReady` is `False`
-- **InConflictWithEligibleNodes** — volumes where `SatisfyEligibleNodes` is `False`
-- **PendingObservation** — volumes that haven't observed current RSC configuration/eligible nodes
+- **StaleConfiguration** — volumes where `ConfigurationReady` condition is present and `False` (missing condition is not counted)
+- **InConflictWithEligibleNodes** — volumes where `SatisfyEligibleNodes` condition is present and `False` (missing condition is not counted)
+- **PendingObservation** — volumes with non-zero `ConfigurationObservedGeneration` that doesn't match RSC's `ConfigurationGeneration`. Volumes with unset (0) `ConfigurationObservedGeneration` are treated as acknowledged to avoid status churn on newly created volumes.
 - **UsedStoragePoolNames** — sorted list of storage pool names referenced by volumes
 
 > **Note:** `Aligned` and `StaleConfiguration` are nil when any volumes have pending observations. `Total`, `PendingObservation`, `InConflictWithEligibleNodes`, and `UsedStoragePoolNames` are always computed.

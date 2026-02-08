@@ -93,7 +93,7 @@ spec:
                 type: string
                 x-kubernetes-validations:
                 - message: nodeName is immutable once set
-                  rule: oldSelf == '' || self == oldSelf
+                  rule: size(oldSelf) == 0 || self == oldSelf
               replicatedVolumeName:
                 maxLength: 120
                 minLength: 1
@@ -116,13 +116,12 @@ spec:
             type: object
             x-kubernetes-validations:
             - message: lvmVolumeGroupName requires nodeName to be set
-              rule: size(self.lvmVolumeGroupName) == 0 || size(self.nodeName) > 0
+              rule: '!has(self.lvmVolumeGroupName) || has(self.nodeName)'
             - message: lvmVolumeGroupName can only be set for Diskful type
-              rule: size(self.lvmVolumeGroupName) == 0 || self.type == 'Diskful'
+              rule: '!has(self.lvmVolumeGroupName) || self.type == ''Diskful'''
             - message: lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be
                 set
-              rule: size(self.lvmVolumeGroupThinPoolName) == 0 || size(self.lvmVolumeGroupName)
-                > 0
+              rule: '!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)'
           status:
             properties:
               addresses:
