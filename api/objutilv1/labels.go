@@ -47,7 +47,7 @@ func SetLabel(obj metav1.Object, key, value string) (changed bool) {
 		labels = make(map[string]string)
 	}
 
-	if labels[key] == value {
+	if v, ok := labels[key]; ok && v == value {
 		return false
 	}
 

@@ -236,6 +236,7 @@ type ReplicatedVolumeDatamesh struct {
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="systemNetworkNames must be unique"
 	// +kubebuilder:validation:MaxItems=16
 	// +kubebuilder:validation:items:MaxLength=64
+	// +kubebuilder:default={}
 	// +listType=atomic
 	SystemNetworkNames []string `json:"systemNetworkNames"`
 
@@ -258,6 +259,7 @@ type ReplicatedVolumeDatamesh struct {
 	// Members is the list of datamesh members.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="members[].name must be unique"
 	// +kubebuilder:validation:MaxItems=24
+	// +kubebuilder:default={}
 	// +listType=atomic
 	Members []ReplicatedVolumeDatameshMember `json:"members"`
 	// Quorum is the quorum value for the datamesh.

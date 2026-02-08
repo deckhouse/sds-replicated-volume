@@ -228,6 +228,15 @@ Examples of required protections:
      - You MUST make naming deterministic, or
      - persist the chosen name (or parameters required to compute it deterministically) in a stable place
        (commonly: parent status) before creating.
+3. **Handling `AlreadyExists` on child resource creation** (SHOULD)
+   - When a **Reconcile method** creates a child resource (e.g., an auto-generated RSP) and the name is deterministic
+     (derived from spec via checksum or similar), multiple parent objects may attempt to create the same child concurrently.
+   - The **Reconcile method** SHOULD handle `AlreadyExists` gracefully:
+     - Log at Info level (not Error) — this is an expected race, not a failure.
+     - Return `DoneAndRequeue()` to re-run reconciliation after the informer cache picks up the new object.
+   - The **Reconcile method** SHOULD NOT attempt to `Get` the object immediately after `AlreadyExists`
+     because the informer cache may not yet contain the object created by the concurrent reconciliation.
+   - On the next reconciliation, the cache will contain the object, and the normal flow will proceed.
 
 ## Core invariants for Reconcile methods (MUST)
 

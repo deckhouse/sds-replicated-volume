@@ -58,6 +58,9 @@ func RegisterIndexes(mgr manager.Manager) error {
 	if err := indexes.RegisterRSCByStoragePool(mgr); err != nil {
 		return err
 	}
+	if err := indexes.RegisterRSCByStatusStoragePoolName(mgr); err != nil {
+		return err
+	}
 
 	// ReplicatedStoragePool (RSP)
 	if err := indexes.RegisterRSPByLVMVolumeGroupName(mgr); err != nil {

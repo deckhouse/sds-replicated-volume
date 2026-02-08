@@ -58,6 +58,8 @@ spec:
             description: Defines desired rules for Linstor's Storage-pools.
             properties:
               eligibleNodesPolicy:
+                default:
+                  notReadyGracePeriod: 10m
                 description: |-
                   EligibleNodesPolicy defines policies for managing eligible nodes.
                   Always present with defaults.
@@ -380,4 +382,5 @@ spec:
         type: object
     served: true
     storage: true
-    subresources: {}
+    subresources:
+      status: {}
