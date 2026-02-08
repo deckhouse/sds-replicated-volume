@@ -631,6 +631,7 @@ flowchart TD
 
     CheckNeed -->|Yes| CheckExists{Intended LLV exists?}
     CheckExists -->|No| Create[Create LLV]
+    Create -->|AlreadyExists| Requeue([DoneAndRequeue])
     Create --> SetProv[BackingVolumeReady=False Provisioning]
     SetProv --> End4([Done])
 
@@ -692,6 +693,7 @@ flowchart TD
     CheckRV -->|Yes| ComputeTarget[Compute target DRBDR spec]
     ComputeTarget --> CheckDRBDRExists{DRBDR exists?}
     CheckDRBDRExists -->|No| CreateDRBDR[Create DRBDR]
+    CreateDRBDR -->|AlreadyExists| Requeue([DoneAndRequeue])
     CreateDRBDR --> UpdateStatus1[Update reconciliation cache]
 
     CheckDRBDRExists -->|Yes| CheckNeedsUpdate{Spec needs update?}

@@ -97,7 +97,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			v1alpha1.ReplicatedStoragePoolCondReadyReasonLVMVolumeGroupNotFound,
 			fmt.Sprintf("Some LVMVolumeGroups not found: %v", lvgsNotFoundErr),
 		) {
-			return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base, false)).ToCtrl()
+			return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base)).ToCtrl()
 		}
 
 		return rf.Done().ToCtrl()
@@ -109,7 +109,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			v1alpha1.ReplicatedStoragePoolCondReadyReasonInvalidLVMVolumeGroup,
 			fmt.Sprintf("RSP/LVG validation failed: %v", err),
 		) {
-			return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base, false)).ToCtrl()
+			return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base)).ToCtrl()
 		}
 
 		return rf.Done().ToCtrl()
@@ -126,7 +126,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 				v1alpha1.ReplicatedStoragePoolCondReadyReasonInvalidNodeLabelSelector,
 				fmt.Sprintf("Invalid NodeLabelSelector: %v", err),
 			) {
-				return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base, false)).ToCtrl()
+				return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base)).ToCtrl()
 			}
 			return rf.Done().ToCtrl()
 		}
@@ -142,7 +142,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 				v1alpha1.ReplicatedStoragePoolCondReadyReasonInvalidNodeLabelSelector,
 				fmt.Sprintf("Invalid Zones: %v", err),
 			) {
-				return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base, false)).ToCtrl()
+				return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base)).ToCtrl()
 			}
 			return rf.Done().ToCtrl()
 		}
@@ -173,7 +173,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	) || changed
 
 	if changed {
-		if err := r.patchRSPStatus(rf.Ctx(), rsp, base, true); err != nil {
+		if err := r.patchRSPStatus(rf.Ctx(), rsp, base); err != nil {
 			return rf.Fail(err).ToCtrl()
 		}
 	}
@@ -556,15 +556,8 @@ func (r *Reconciler) patchRSPStatus(
 	ctx context.Context,
 	rsp *v1alpha1.ReplicatedStoragePool,
 	base *v1alpha1.ReplicatedStoragePool,
-	optimisticLock bool,
 ) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Status().Patch(ctx, rsp, patch)
+	return r.cl.Status().Patch(ctx, rsp, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 // --- LVMVolumeGroup (LVG) ---

@@ -100,6 +100,11 @@ func mapRSPToRSC(cl client.Client) handler.MapFunc {
 			}
 		}
 
+		// Also enqueue RSCs from usedBy (handles orphaned entries for deleted RSCs).
+		for _, rscName := range rsp.Status.UsedBy.ReplicatedStorageClassNames {
+			seen[rscName] = struct{}{}
+		}
+
 		if len(seen) == 0 {
 			return nil
 		}

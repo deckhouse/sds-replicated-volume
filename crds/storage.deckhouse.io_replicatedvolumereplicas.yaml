@@ -93,7 +93,7 @@ spec:
                 type: string
                 x-kubernetes-validations:
                 - message: nodeName is immutable once set
-                  rule: oldSelf == '' || self == oldSelf
+                  rule: size(oldSelf) == 0 || self == oldSelf
               replicatedVolumeName:
                 maxLength: 120
                 minLength: 1
@@ -116,13 +116,12 @@ spec:
             type: object
             x-kubernetes-validations:
             - message: lvmVolumeGroupName requires nodeName to be set
-              rule: size(self.lvmVolumeGroupName) == 0 || size(self.nodeName) > 0
+              rule: '!has(self.lvmVolumeGroupName) || has(self.nodeName)'
             - message: lvmVolumeGroupName can only be set for Diskful type
-              rule: size(self.lvmVolumeGroupName) == 0 || self.type == 'Diskful'
+              rule: '!has(self.lvmVolumeGroupName) || self.type == ''Diskful'''
             - message: lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be
                 set
-              rule: size(self.lvmVolumeGroupThinPoolName) == 0 || size(self.lvmVolumeGroupName)
-                > 0
+              rule: '!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)'
           status:
             properties:
               addresses:
@@ -151,6 +150,7 @@ spec:
                   type: object
                 maxItems: 32
                 type: array
+                x-kubernetes-list-type: atomic
               attachment:
                 description: |-
                   Attachment contains information about the device attachment state.
@@ -360,9 +360,14 @@ spec:
                       description: ConnectionEstablishedOn lists system network names
                         where connection to this peer is established.
                       items:
+                        maxLength: 64
                         type: string
                       maxItems: 16
                       type: array
+                      x-kubernetes-list-type: atomic
+                      x-kubernetes-validations:
+                      - message: connectionEstablishedOn must be unique
+                        rule: self.all(x, self.exists_one(y, x == y))
                     connectionState:
                       description: ConnectionState is the DRBD connection state to
                         this peer.
@@ -391,9 +396,10 @@ spec:
                   type: object
                 maxItems: 32
                 type: array
-                x-kubernetes-list-map-keys:
-                - name
-                x-kubernetes-list-type: map
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: peers[].name must be unique
+                  rule: self.all(x, self.exists_one(y, x.name == y.name))
               quorum:
                 description: Quorum indicates whether this replica has quorum.
                 type: boolean

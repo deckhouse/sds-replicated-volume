@@ -33,9 +33,8 @@ type DRBDNodeOperation struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`
 
-	Spec DRBDNodeOperationSpec `json:"spec"`
-	// +patchStrategy=merge
-	Status *DRBDNodeOperationStatus `json:"status,omitempty" patchStrategy:"merge"`
+	Spec   DRBDNodeOperationSpec    `json:"spec"`
+	Status *DRBDNodeOperationStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

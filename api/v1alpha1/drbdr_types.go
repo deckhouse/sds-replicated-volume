@@ -42,9 +42,8 @@ type DRBDResource struct {
 
 	Spec DRBDResourceSpec `json:"spec"`
 
-	// +patchStrategy=merge
 	// +optional
-	Status DRBDResourceStatus `json:"status,omitempty" patchStrategy:"merge"`
+	Status DRBDResourceStatus `json:"status,omitempty"`
 }
 
 // GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
@@ -82,6 +81,7 @@ type DRBDResourceSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
 	// +kubebuilder:validation:items:MaxLength=64
+	// +listType=set
 	SystemNetworks []string `json:"systemNetworks"`
 
 	// +kubebuilder:validation:Minimum=0
@@ -124,13 +124,11 @@ type DRBDResourceSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeID is immutable"
 	NodeID uint8 `json:"nodeID"`
 
-	// +patchMergeKey=name
-	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=name
 	// +kubebuilder:validation:MaxItems=31
 	// +optional
-	Peers []DRBDResourcePeer `json:"peers,omitempty" patchStrategy:"merge" patchMergeKey:"name"`
+	Peers []DRBDResourcePeer `json:"peers,omitempty"`
 
 	// Maintenance mode - when set, reconciliation is paused but status is still updated
 	// +kubebuilder:validation:Enum=NoResourceReconciliation
@@ -187,13 +185,11 @@ type DRBDResourcePeer struct {
 	// +optional
 	PauseSync bool `json:"pauseSync,omitempty"`
 
-	// +patchMergeKey=systemNetworkName
-	// +patchStrategy=merge
-	// +listType=map
-	// +listMapKey=systemNetworkName
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))",message="paths[].systemNetworkName must be unique"
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
-	Paths []DRBDResourcePath `json:"paths" patchStrategy:"merge" patchMergeKey:"systemNetworkName"`
+	// +listType=atomic
+	Paths []DRBDResourcePath `json:"paths"`
 }
 
 // +kubebuilder:object:generate=true
@@ -233,21 +229,20 @@ type DRBDResourceStatus struct {
 	// +optional
 	DeviceIOSuspended *bool `json:"deviceIOSuspended,omitempty"`
 
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))",message="addresses[].systemNetworkName must be unique"
 	// +kubebuilder:validation:MaxItems=32
+	// +listType=atomic
 	// +optional
 	Addresses []DRBDResourceAddressStatus `json:"addresses,omitempty"`
 
-	// +patchStrategy=merge
 	// +optional
-	ActiveConfiguration *DRBDResourceActiveConfiguration `json:"activeConfiguration,omitempty" patchStrategy:"merge"`
+	ActiveConfiguration *DRBDResourceActiveConfiguration `json:"activeConfiguration,omitempty"`
 
-	// +patchMergeKey=nodeID
-	// +patchStrategy=merge
-	// +listType=map
-	// +listMapKey=nodeID
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.nodeID == y.nodeID))",message="peers[].nodeID must be unique"
 	// +kubebuilder:validation:MaxItems=31
+	// +listType=atomic
 	// +optional
-	Peers []DRBDResourcePeerStatus `json:"peers,omitempty" patchStrategy:"merge" patchMergeKey:"nodeID"`
+	Peers []DRBDResourcePeerStatus `json:"peers,omitempty"`
 
 	// +optional
 	DiskState DiskState `json:"diskState,omitempty"`
@@ -255,12 +250,10 @@ type DRBDResourceStatus struct {
 	// +optional
 	Quorum *bool `json:"quorum,omitempty"`
 
-	// +patchMergeKey=type
-	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=type
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -331,13 +324,11 @@ type DRBDResourcePeerStatus struct {
 	// +kubebuilder:validation:Maximum=31
 	NodeID uint `json:"nodeID"`
 
-	// +patchMergeKey=systemNetworkName
-	// +patchStrategy=merge
-	// +listType=map
-	// +listMapKey=systemNetworkName
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))",message="paths[].systemNetworkName must be unique"
 	// +kubebuilder:validation:MaxItems=16
+	// +listType=atomic
 	// +optional
-	Paths []DRBDResourcePathStatus `json:"paths,omitempty" patchStrategy:"merge" patchMergeKey:"systemNetworkName"`
+	Paths []DRBDResourcePathStatus `json:"paths,omitempty"`
 
 	// +optional
 	ConnectionState ConnectionState `json:"connectionState,omitempty"`

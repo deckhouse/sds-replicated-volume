@@ -29,6 +29,9 @@ go run -mod=mod sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19 \
 # remove development dependencies
 go mod tidy -go=1.24.11
 
+# validate generated CRDs (CEL cost budget, schema correctness)
+go run ../hack/validate-crds.go ../crds
+
 cd ..
 
 # generate mocks and any other go:generate targets across all modules

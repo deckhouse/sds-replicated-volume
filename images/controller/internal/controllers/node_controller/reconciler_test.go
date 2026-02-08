@@ -101,7 +101,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node-1",
 					Labels: map[string]string{
-						v1alpha1.AgentNodeLabelKey: "node-1",
+						v1alpha1.AgentNodeLabelKey: "",
 					},
 				},
 			}
@@ -151,7 +151,7 @@ var _ = Describe("Reconciler", func() {
 
 			var updatedNode corev1.Node
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-1"}, &updatedNode)).To(Succeed())
-			Expect(updatedNode.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, "node-1"))
+			Expect(updatedNode.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, ""))
 		})
 
 		It("adds label to node that is in RSP eligibleNodes", func() {
@@ -185,7 +185,7 @@ var _ = Describe("Reconciler", func() {
 
 			var updatedNode corev1.Node
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-1"}, &updatedNode)).To(Succeed())
-			Expect(updatedNode.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, "node-1"))
+			Expect(updatedNode.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, ""))
 		})
 
 		It("does not patch node that is already in sync (has label, has DRBD)", func() {
@@ -193,7 +193,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node-1",
 					Labels: map[string]string{
-						v1alpha1.AgentNodeLabelKey: "node-1",
+						v1alpha1.AgentNodeLabelKey: "",
 					},
 				},
 			}
@@ -217,7 +217,7 @@ var _ = Describe("Reconciler", func() {
 
 			var updatedNode corev1.Node
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-1"}, &updatedNode)).To(Succeed())
-			Expect(updatedNode.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, "node-1"))
+			Expect(updatedNode.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, ""))
 		})
 
 		It("does not patch node that is already in sync (has label, in RSP)", func() {
@@ -225,7 +225,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node-1",
 					Labels: map[string]string{
-						v1alpha1.AgentNodeLabelKey: "node-1",
+						v1alpha1.AgentNodeLabelKey: "",
 					},
 				},
 			}
@@ -253,7 +253,7 @@ var _ = Describe("Reconciler", func() {
 
 			var updatedNode corev1.Node
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-1"}, &updatedNode)).To(Succeed())
-			Expect(updatedNode.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, "node-1"))
+			Expect(updatedNode.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, ""))
 		})
 
 		It("keeps label on node with DRBD even when not in any RSP", func() {
@@ -261,7 +261,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node-1",
 					Labels: map[string]string{
-						v1alpha1.AgentNodeLabelKey: "node-1",
+						v1alpha1.AgentNodeLabelKey: "",
 					},
 				},
 			}
@@ -286,7 +286,7 @@ var _ = Describe("Reconciler", func() {
 
 			var updatedNode corev1.Node
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-1"}, &updatedNode)).To(Succeed())
-			Expect(updatedNode.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, "node-1"))
+			Expect(updatedNode.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, ""))
 		})
 
 		It("removes label once node is removed from RSP and has no DRBD", func() {
@@ -294,7 +294,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node-1",
 					Labels: map[string]string{
-						v1alpha1.AgentNodeLabelKey: "node-1",
+						v1alpha1.AgentNodeLabelKey: "",
 					},
 				},
 			}
@@ -365,7 +365,7 @@ var _ = Describe("Reconciler", func() {
 
 			var updatedNode corev1.Node
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-1"}, &updatedNode)).To(Succeed())
-			Expect(updatedNode.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, "node-1"))
+			Expect(updatedNode.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, ""))
 		})
 
 		It("adds label when node has multiple DRBDResources", func() {
@@ -399,7 +399,7 @@ var _ = Describe("Reconciler", func() {
 
 			var updatedNode corev1.Node
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-1"}, &updatedNode)).To(Succeed())
-			Expect(updatedNode.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, "node-1"))
+			Expect(updatedNode.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, ""))
 		})
 
 		It("handles node with both DRBD and RSP eligibility", func() {
@@ -437,7 +437,69 @@ var _ = Describe("Reconciler", func() {
 
 			var updatedNode corev1.Node
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-1"}, &updatedNode)).To(Succeed())
-			Expect(updatedNode.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, "node-1"))
+			Expect(updatedNode.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, ""))
+		})
+
+		It("corrects legacy non-empty label value to empty string", func() {
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-1",
+					Labels: map[string]string{
+						// Legacy value set by old controller (linstor-node-controller used "" but
+						// an earlier version of node_controller used nodeName).
+						v1alpha1.AgentNodeLabelKey: "node-1",
+					},
+				},
+			}
+			drbdResource := &v1alpha1.DRBDResource{
+				ObjectMeta: metav1.ObjectMeta{Name: "drbd-1"},
+				Spec:       v1alpha1.DRBDResourceSpec{NodeName: "node-1"},
+			}
+			cl = testhelpers.WithDRBDResourceByNodeNameIndex(
+				testhelpers.WithRSPByEligibleNodeNameIndex(
+					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, drbdResource),
+				),
+			).Build()
+			rec = NewReconciler(cl)
+
+			result, err := rec.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: "node-1"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			var updatedNode corev1.Node
+			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-1"}, &updatedNode)).To(Succeed())
+			Expect(updatedNode.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, ""))
+		})
+
+		It("removes legacy non-empty label when node should not have label", func() {
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-1",
+					Labels: map[string]string{
+						v1alpha1.AgentNodeLabelKey: "node-1",
+					},
+				},
+			}
+			cl = testhelpers.WithDRBDResourceByNodeNameIndex(
+				testhelpers.WithRSPByEligibleNodeNameIndex(
+					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node),
+				),
+			).Build()
+			rec = NewReconciler(cl)
+
+			result, err := rec.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: "node-1"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			var updatedNode corev1.Node
+			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-1"}, &updatedNode)).To(Succeed())
+			Expect(updatedNode.Labels).NotTo(HaveKey(v1alpha1.AgentNodeLabelKey))
 		})
 
 		It("only affects the reconciled node, not others", func() {
@@ -479,7 +541,7 @@ var _ = Describe("Reconciler", func() {
 
 			var updatedNode1 corev1.Node
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-1"}, &updatedNode1)).To(Succeed())
-			Expect(updatedNode1.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, "node-1"))
+			Expect(updatedNode1.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, ""))
 
 			// node-2 should remain unchanged (no label)
 			var updatedNode2 corev1.Node

@@ -392,19 +392,15 @@ In this codebase:
 **Patch ordering** is owned by **Reconcile methods**, not **ReconcileHelpers**.
 
 ### **patch strategy** / **patch type decision**
-A **patch strategy** (or **patch type decision**) is a choice about how the patch should be executed (e.g., “plain merge patch” vs “merge patch with optimistic lock”).
+A **patch strategy** (or **patch type decision**) is a choice about how the patch should be executed (e.g., "plain merge patch" vs "merge patch with optimistic lock").
 
 In this codebase:
-- **PatchReconcileHelpers** do not decide the **patch strategy**; they accept an explicit `optimisticLock` input and execute accordingly.
+- **PatchReconcileHelpers** always use **Optimistic locking** by default. A **PatchReconcileHelper** MAY accept a `withoutOptimisticLock bool` parameter only when it has been explicitly proven safe (see `controller-reconcile-helper-patch.mdc`).
 
 ### **Optimistic locking** (**optimistic lock**)
-**Optimistic locking** is the patch mode that causes the API write to fail on concurrent modification conflicts (i.e., it requires the object’s version to match).
+**Optimistic locking** is the patch mode that causes the API write to fail on concurrent modification conflicts (i.e., it requires the object's version to match).
 
-### **optimistic lock requirement**
-An **optimistic lock requirement** is a decision that the subsequent save of a changed **resource**/**object** MUST use **Optimistic locking** semantics.
-
-In this codebase:
-- **EnsureReconcileHelpers** are the primary source of “optimistic lock required” signaling via **`flow.EnsureOutcome`**.
+In this codebase, **Optimistic locking** is mandatory by default for all **PatchReconcileHelpers**, because JSON Strategic Merge Patch treats arrays as atomic (the entire array is replaced), making concurrent editing of conditions, finalizers, owner references, and other list fields unsafe without version checking.
 
 ---
 
@@ -526,17 +522,6 @@ For **ReconcileOutcome**:
 - `ReconcileOutcome.DidChange()` — reads the "was changed?" flag.
 - `ReconcileOutcome.WithChangeFrom(EnsureOutcome)` — merges change state from an **EnsureOutcome** (strongest wins).
 
-### **Optimistic-lock signaling**
-**Optimistic-lock signaling** means encoding that the save MUST use **Optimistic locking** semantics.
-
-For **EnsureOutcome**:
-- `EnsureOutcome.RequireOptimisticLock()` — marks that optimistic locking is required.
-- `EnsureOutcome.OptimisticLockRequired()` — reads the flag.
-
-For **ReconcileOutcome**:
-- `ReconcileOutcome.RequireOptimisticLock()` — marks that optimistic locking is required.
-- `ReconcileOutcome.OptimisticLockRequired()` — reads the flag.
-
 ### **ReconcileOutcome control flow**
 - `ReconcileOutcome.ShouldReturn()` indicates the caller should stop and return (done/requeue/error).
 - `ReconcileOutcome.ToCtrl()` converts an outcome into `(ctrl.Result, error)` for controller-runtime.
@@ -544,11 +529,11 @@ For **ReconcileOutcome**:
 ### **Merging outcomes**
 **Merging outcomes** means combining multiple independent results deterministically:
 
-- `ReconcileOutcome.Merge(...)` / `flow.MergeReconciles(...)` merges **ReconcileOutcome** values (control flow + change/lock state).
-- `EnsureOutcome.Merge(...)` / `flow.MergeEnsures(...)` merges **EnsureOutcome** values (error + change/lock state).
+- `ReconcileOutcome.Merge(...)` / `flow.MergeReconciles(...)` merges **ReconcileOutcome** values (control flow + change state).
+- `EnsureOutcome.Merge(...)` / `flow.MergeEnsures(...)` merges **EnsureOutcome** values (error + change state).
 - `flow.MergeSteps(...)` merges multiple `error` values via `errors.Join`.
 
-For **ReconcileOutcome** and **EnsureOutcome**, merging combines **Change reporting** and **Optimistic-lock signaling**: any changed outcome makes merged outcome changed; strongest lock requirement wins.
+For **ReconcileOutcome** and **EnsureOutcome**, merging combines **Change reporting**: any changed outcome makes merged outcome changed.
 
 ---
 
