@@ -32,32 +32,43 @@ import (
 // BuildAll builds all controllers.
 // podNamespace is the namespace where the controller pod runs, used by controllers
 // that need to access other pods in this namespace (e.g., agent pods).
-func BuildAll(mgr manager.Manager, podNamespace string) error {
+// isEnabled is a filter function: if it returns false for a controller name,
+// that controller is skipped. When ENABLED_CONTROLLERS env is not set,
+// isEnabled returns true for all names (all controllers are started).
+func BuildAll(mgr manager.Manager, podNamespace string, isEnabled func(string) bool) error {
+	log := mgr.GetLogger().WithName("controller-registry")
+
 	// Must be first: controllers rely on MatchingFields against these indexes.
 	if err := RegisterIndexes(mgr); err != nil {
 		return fmt.Errorf("building indexes: %w", err)
 	}
 
-	// Controllers that don't need podNamespace.
-	builders := []func(mgr manager.Manager) error{
-		rvcontroller.BuildController,
-		rvrschedulingcontroller.BuildController,
-		rsccontroller.BuildController,
-		nodecontroller.BuildController,
+	type builder struct {
+		name  string
+		build func(mgr manager.Manager) error
+	}
+	builders := []builder{
+		{name: rvcontroller.RVControllerName, build: rvcontroller.BuildController},
+		{name: rvrschedulingcontroller.RVRSchedulingControllerName, build: rvrschedulingcontroller.BuildController},
+		{name: rsccontroller.RSCControllerName, build: rsccontroller.BuildController},
+		{name: nodecontroller.NodeControllerName, build: nodecontroller.BuildController},
+		{name: rspcontroller.RSPControllerName, build: func(mgr manager.Manager) error {
+			return rspcontroller.BuildController(mgr, podNamespace)
+		}},
+		{name: rvrcontroller.RVRControllerName, build: func(mgr manager.Manager) error {
+			return rvrcontroller.BuildController(mgr, podNamespace)
+		}},
 	}
 
-	for i, buildCtl := range builders {
-		if err := buildCtl(mgr); err != nil {
-			return fmt.Errorf("building controller %d: %w", i, err)
+	for _, b := range builders {
+		if !isEnabled(b.name) {
+			log.Info("controller disabled, skipping", "controller", b.name)
+			continue
 		}
-	}
-
-	// Controllers that need podNamespace for agent pod discovery.
-	if err := rspcontroller.BuildController(mgr, podNamespace); err != nil {
-		return fmt.Errorf("building rsp controller: %w", err)
-	}
-	if err := rvrcontroller.BuildController(mgr, podNamespace); err != nil {
-		return fmt.Errorf("building rvr controller: %w", err)
+		log.Info("building controller", "controller", b.name)
+		if err := b.build(mgr); err != nil {
+			return fmt.Errorf("building controller %s: %w", b.name, err)
+		}
 	}
 
 	return nil

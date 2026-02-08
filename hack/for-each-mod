@@ -5,9 +5,9 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,15 +23,38 @@
 #       `for-each-mod go generate ./...`
 #
 
-os="$(uname -s)"
+set -euo pipefail
 
-case "$os" in
-  Darwin)
-    # BSD find on macOS: keep expression simple and portable.
-    find . -name go.mod -execdir sh -c "$*" {} +
-    ;;
-  *)
-    # Original behaviour (Linux / CI, etc.).
-    find . -type f -name go.mod -execdir sh -c "$*" {} +
-    ;;
-esac
+run_in_dir() {
+  local dir="$1"
+  shift
+
+  if [[ $# -eq 1 ]]; then
+    # Preserve compatibility with callers passing a single shell snippet, e.g.:
+    #   hack/for-each-mod "go get -t -u ./... && go mod tidy"
+    (cd "$dir" && sh -c "$1")
+    return
+  fi
+
+  (cd "$dir" && "$@")
+}
+
+# Prefer iterating workspace modules from go.work to avoid visiting nested go.mod
+# that are not part of the workspace (Go will fail with "directory prefix . does not
+# contain modules listed in go.work").
+if [[ -f "go.work" ]] && command -v jq >/dev/null 2>&1; then
+  modules="$(go work edit -json 2>/dev/null | jq -r '.Use[].DiskPath' 2>/dev/null || true)"
+  if [[ -n "${modules}" ]]; then
+    while IFS= read -r mod; do
+      [[ -z "$mod" ]] && continue
+      run_in_dir "$mod" "$@"
+    done <<< "${modules}"
+    exit 0
+  fi
+fi
+
+# Fallback: run command in each folder containing go.mod
+# (works without go.work / jq, but may include nested modules).
+while IFS= read -r gomod; do
+  run_in_dir "$(dirname "$gomod")" "$@"
+done < <(find . -name go.mod -type f)

@@ -136,7 +136,63 @@ var _ = Describe("Mapper functions", func() {
 			Expect(requests[0].Name).To(Equal("rsc-1"))
 		})
 
-		It("returns empty slice when no RSCs reference the RSP", func() {
+		It("returns requests for RSCs from usedBy (orphaned entries for deleted RSCs)", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "pool-1"},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					UsedBy: v1alpha1.ReplicatedStoragePoolUsedBy{
+						ReplicatedStorageClassNames: []string{"rsc-deleted-1", "rsc-deleted-2"},
+					},
+				},
+			}
+
+			cl := testhelpers.WithRSCByStatusStoragePoolNameIndex(
+				testhelpers.WithRSCByStoragePoolIndex(
+					fake.NewClientBuilder().
+						WithScheme(scheme).
+						WithObjects(rsp),
+				),
+			).Build()
+
+			mapFunc := mapRSPToRSC(cl)
+			requests := mapFunc(context.Background(), rsp)
+
+			Expect(requests).To(HaveLen(2))
+			names := []string{requests[0].Name, requests[1].Name}
+			Expect(names).To(ContainElements("rsc-deleted-1", "rsc-deleted-2"))
+		})
+
+		It("deduplicates usedBy entries with index results", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "pool-1"},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					UsedBy: v1alpha1.ReplicatedStoragePoolUsedBy{
+						ReplicatedStorageClassNames: []string{"rsc-1", "rsc-orphan"},
+					},
+				},
+			}
+			rsc1 := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Status:     v1alpha1.ReplicatedStorageClassStatus{StoragePoolName: "pool-1"},
+			}
+
+			cl := testhelpers.WithRSCByStatusStoragePoolNameIndex(
+				testhelpers.WithRSCByStoragePoolIndex(
+					fake.NewClientBuilder().
+						WithScheme(scheme).
+						WithObjects(rsp, rsc1),
+				),
+			).Build()
+
+			mapFunc := mapRSPToRSC(cl)
+			requests := mapFunc(context.Background(), rsp)
+
+			Expect(requests).To(HaveLen(2))
+			names := []string{requests[0].Name, requests[1].Name}
+			Expect(names).To(ContainElements("rsc-1", "rsc-orphan"))
+		})
+
+		It("returns nil when no RSCs reference the RSP and usedBy is empty", func() {
 			rsp := &v1alpha1.ReplicatedStoragePool{
 				ObjectMeta: metav1.ObjectMeta{Name: "pool-unused"},
 			}

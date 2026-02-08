@@ -27,6 +27,8 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
@@ -919,4 +921,215 @@ func TestStepFlow_OnEnd_PanicIsLoggedAndReraised(t *testing.T) {
 	defer sf.OnEnd(&err)
 
 	panic("test panic")
+}
+
+// =============================================================================
+// Conflict (optimistic lock) handling tests
+// =============================================================================
+
+func newConflictError() error {
+	return apierrors.NewConflict(schema.GroupResource{Resource: "test"}, "obj", errors.New("optimistic lock"))
+}
+
+func TestToCtrl_ConflictErrorBecomesRequeue(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	outcome := rf.Fail(newConflictError())
+
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected nil error from ToCtrl for conflict, got %v", err)
+	}
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
+		t.Fatalf("expected Requeue=true for conflict, got %v", res)
+	}
+}
+
+func TestToCtrl_WrappedConflictErrorBecomesRequeue(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	// Simulate: rf.Fail(err).Enrichf("patching RSP")
+	outcome := rf.Fail(newConflictError()).Enrichf("patching RSP")
+
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected nil error from ToCtrl for wrapped conflict, got %v", err)
+	}
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
+		t.Fatalf("expected Requeue=true for wrapped conflict, got %v", res)
+	}
+}
+
+func TestToCtrl_FailfConflictBecomesRequeue(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	outcome := rf.Failf(newConflictError(), "patching RSP")
+
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected nil error from ToCtrl for Failf conflict, got %v", err)
+	}
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
+		t.Fatalf("expected Requeue=true for Failf conflict, got %v", res)
+	}
+}
+
+func TestToCtrl_NonConflictErrorPassedThrough(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	e := errors.New("real error")
+	outcome := rf.Fail(e)
+
+	_, err := outcome.ToCtrl()
+	if !errors.Is(err, e) {
+		t.Fatalf("expected non-conflict error to pass through, got %v", err)
+	}
+}
+
+func TestMustToCtrl_ConflictErrorBecomesRequeue(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	outcome := rf.Fail(newConflictError())
+
+	res, err := outcome.MustToCtrl()
+	if err != nil {
+		t.Fatalf("expected nil error from MustToCtrl for conflict, got %v", err)
+	}
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
+		t.Fatalf("expected Requeue=true for conflict, got %v", res)
+	}
+}
+
+func TestReconcileFlow_OnEnd_ConflictLoggedAtInfoNotError(t *testing.T) {
+	core, observed := observer.New(zapcore.DebugLevel)
+	zl := zap.New(core)
+	l := zapr.NewLogger(zl)
+
+	ctx := log.IntoContext(context.Background(), l)
+	rf := flow.BeginReconcile(ctx, "p")
+
+	outcome := rf.Fail(newConflictError())
+	rf.OnEnd(&outcome)
+
+	// Should have zero Error-level "phase end" entries.
+	for _, e := range observed.All() {
+		if e.Message == "phase end" && e.Level == zapcore.ErrorLevel {
+			t.Fatalf("conflict should not be logged at Error level; got %v", e)
+		}
+	}
+
+	// Should have exactly one Info-level "phase end" entry (V(0) = Info).
+	var infoMatches []observer.LoggedEntry
+	for _, e := range observed.All() {
+		if e.Message == "phase end" && e.Level == zapcore.InfoLevel {
+			infoMatches = append(infoMatches, e)
+		}
+	}
+	if len(infoMatches) != 1 {
+		t.Fatalf("expected exactly 1 info 'phase end' log entry, got %d; entries=%v", len(infoMatches), observed.All())
+	}
+
+	m := infoMatches[0].ContextMap()
+	if got := m["result"]; got != "Conflict" {
+		t.Fatalf("expected result=Conflict, got %v", got)
+	}
+	if got := m["hasError"]; got != true {
+		t.Fatalf("expected hasError=true, got %v", got)
+	}
+}
+
+func TestReconcileFlow_OnEnd_WrappedConflictLoggedAtInfoNotError(t *testing.T) {
+	core, observed := observer.New(zapcore.DebugLevel)
+	zl := zap.New(core)
+	l := zapr.NewLogger(zl)
+
+	ctx := log.IntoContext(context.Background(), l)
+	rf := flow.BeginReconcile(ctx, "p")
+
+	outcome := rf.Failf(newConflictError(), "patching RSP")
+	rf.OnEnd(&outcome)
+
+	// No Error-level logs for conflict.
+	for _, e := range observed.All() {
+		if e.Message == "phase end" && e.Level == zapcore.ErrorLevel {
+			t.Fatalf("wrapped conflict should not be logged at Error level; got %v", e)
+		}
+	}
+
+	// Should have an Info-level log with result=Conflict.
+	var infoMatches []observer.LoggedEntry
+	for _, e := range observed.All() {
+		if e.Message == "phase end" && e.Level == zapcore.InfoLevel {
+			infoMatches = append(infoMatches, e)
+		}
+	}
+	if len(infoMatches) != 1 {
+		t.Fatalf("expected exactly 1 info 'phase end' log entry, got %d; entries=%v", len(infoMatches), observed.All())
+	}
+	if got := infoMatches[0].ContextMap()["result"]; got != "Conflict" {
+		t.Fatalf("expected result=Conflict, got %v", got)
+	}
+}
+
+func TestReconcileFlow_OnEnd_NestedPhases_ConflictLoggedOnce(t *testing.T) {
+	core, observed := observer.New(zapcore.DebugLevel)
+	zl := zap.New(core)
+	l := zapr.NewLogger(zl)
+
+	ctx := log.IntoContext(context.Background(), l)
+	parentRf := flow.BeginReconcile(ctx, "parent")
+	childRf := flow.BeginReconcile(parentRf.Ctx(), "child")
+
+	outcome := childRf.Fail(newConflictError())
+	childRf.OnEnd(&outcome)
+	parentRf.OnEnd(&outcome)
+
+	// No Error-level logs at all.
+	for _, e := range observed.All() {
+		if e.Message == "phase end" && e.Level == zapcore.ErrorLevel {
+			t.Fatalf("conflict should not be logged at Error level in nested phases; got %v", e)
+		}
+	}
+
+	// Exactly one Info-level "phase end" (from child), one Debug-level (from parent, already logged).
+	infoCount := 0
+	debugCount := 0
+	for _, e := range observed.All() {
+		if e.Message == "phase end" {
+			switch e.Level {
+			case zapcore.InfoLevel:
+				infoCount++
+			case zapcore.DebugLevel:
+				debugCount++
+			}
+		}
+	}
+	if infoCount != 1 {
+		t.Fatalf("expected exactly 1 info 'phase end' log entry, got %d", infoCount)
+	}
+	if debugCount != 1 {
+		t.Fatalf("expected exactly 1 debug 'phase end' log entry (parent after conflict already logged), got %d", debugCount)
+	}
+}
+
+func TestReconcileFlow_OnEnd_NonConflictStillLoggedAtError(t *testing.T) {
+	core, observed := observer.New(zapcore.DebugLevel)
+	zl := zap.New(core)
+	l := zapr.NewLogger(zl)
+
+	ctx := log.IntoContext(context.Background(), l)
+	rf := flow.BeginReconcile(ctx, "p")
+
+	outcome := rf.Fail(errors.New("real error"))
+	rf.OnEnd(&outcome)
+
+	// Should still log at Error level.
+	var errorMatches []observer.LoggedEntry
+	for _, e := range observed.All() {
+		if e.Message == "phase end" && e.Level == zapcore.ErrorLevel {
+			errorMatches = append(errorMatches, e)
+		}
+	}
+	if len(errorMatches) != 1 {
+		t.Fatalf("expected exactly 1 error 'phase end' log entry for non-conflict, got %d; entries=%v",
+			len(errorMatches), observed.All())
+	}
+	if got := errorMatches[0].ContextMap()["result"]; got != "Fail" {
+		t.Fatalf("expected result=Fail, got %v", got)
+	}
 }

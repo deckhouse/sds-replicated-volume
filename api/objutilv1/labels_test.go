@@ -55,3 +55,23 @@ func TestLabelsHelpers(t *testing.T) {
 		t.Fatalf("expected changed=false on repeated remove")
 	}
 }
+
+func TestSetLabel_EmptyStringOnNilLabels(t *testing.T) {
+	obj := &metav1.PartialObjectMetadata{}
+
+	// Setting a label to "" on an object with nil labels must create the key.
+	if changed := objutilv1.SetLabel(obj, "k", ""); !changed {
+		t.Fatalf("expected changed=true when setting empty-string label on nil labels")
+	}
+	if !objutilv1.HasLabel(obj, "k") {
+		t.Fatalf("expected label key to be present after SetLabel with empty value")
+	}
+	if !objutilv1.HasLabelValue(obj, "k", "") {
+		t.Fatalf("expected label value to be empty string")
+	}
+
+	// Idempotent: setting the same key to "" again should report no change.
+	if changed := objutilv1.SetLabel(obj, "k", ""); changed {
+		t.Fatalf("expected changed=false on idempotent set of empty-string label")
+	}
+}
