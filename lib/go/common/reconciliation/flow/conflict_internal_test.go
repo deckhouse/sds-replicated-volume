@@ -19,6 +19,7 @@ package flow
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -109,5 +110,61 @@ func TestIsExpectedTransientError_InternalServerIsNotTransient(t *testing.T) {
 	err := apierrors.NewInternalError(errors.New("oops"))
 	if isExpectedTransientError(err) {
 		t.Fatal("expected false for InternalServerError")
+	}
+}
+
+// --- cleanTransientErrorMessage tests ---
+
+func newConflictErrorWithGroup() error {
+	return apierrors.NewConflict(
+		schema.GroupResource{Group: "storage.deckhouse.io", Resource: "replicatedvolumereplicas"},
+		"test-rv-1-0",
+		errors.New("the object has been modified"),
+	)
+}
+
+func TestCleanTransientErrorMessage_ConflictLeaf(t *testing.T) {
+	err := newConflictErrorWithGroup()
+	got := cleanTransientErrorMessage(err)
+	want := "conflict on replicatedvolumereplicas.storage.deckhouse.io/test-rv-1-0 (will requeue)"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestCleanTransientErrorMessage_WrappedConflict(t *testing.T) {
+	err := Wrapf(Wrapf(newConflictErrorWithGroup(), "removing finalizer"), "deleting RVR test-rv-1-0")
+	got := cleanTransientErrorMessage(err)
+	want := "deleting RVR test-rv-1-0: removing finalizer: conflict on replicatedvolumereplicas.storage.deckhouse.io/test-rv-1-0 (will requeue)"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestCleanTransientErrorMessage_ConflictNoGroup(t *testing.T) {
+	err := newConflictError() // Group is empty, Resource is "test", Name is "obj"
+	got := cleanTransientErrorMessage(err)
+	want := "conflict on test/obj (will requeue)"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestCleanTransientErrorMessage_EndsWithWillRequeue(t *testing.T) {
+	err := Wrapf(newConflictErrorWithGroup(), "patching RSP")
+	got := cleanTransientErrorMessage(err)
+	if !strings.HasSuffix(got, "(will requeue)") {
+		t.Fatalf("expected message to end with '(will requeue)', got %q", got)
+	}
+}
+
+func TestCleanTransientErrorMessage_NoK8sBoilerplate(t *testing.T) {
+	err := Wrapf(newConflictErrorWithGroup(), "patching RSP")
+	got := cleanTransientErrorMessage(err)
+	if strings.Contains(got, "please apply your changes") {
+		t.Fatalf("should not contain K8s boilerplate, got %q", got)
+	}
+	if strings.Contains(got, "Operation cannot be fulfilled") {
+		t.Fatalf("should not contain raw K8s message, got %q", got)
 	}
 }
