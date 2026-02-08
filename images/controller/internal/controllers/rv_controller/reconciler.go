@@ -25,6 +25,7 @@ import (
 	"slices"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
@@ -231,6 +232,11 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 	for diskful.Len() < targetDiskfulCount {
 		rvr, err := r.createRVR(rf.Ctx(), rv, rvrs, v1alpha1.ReplicaTypeDiskful)
 		if err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				// Stale cache: RVR was already created by a previous reconciliation. Requeue to pick it up.
+				rf.Log().Info("RVR already exists, requeueing")
+				return rf.DoneAndRequeue()
+			}
 			return rf.Failf(err, "creating diskful RVR")
 		}
 		diskful.Add(rvr.NodeID())
@@ -323,7 +329,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 		msg := fmt.Sprintf(
 			"Address configuration mismatch: replicas [%s] do not have addresses for all required networks %v. "+
 				"This should not happen during normal formation. "+
-				"If not resolved automatically, formation will be restarted.",
+				"If not resolved automatically, formation will be restarted",
 			missingAddresses.String(), requiredNetworks,
 		)
 		changed = applyFormationTransitionMessage(rv, msg) || changed
@@ -352,7 +358,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 		msg := fmt.Sprintf(
 			"Replicas [%s] are placed on nodes not in eligible nodes list. "+
 				"This should not happen during normal formation. "+
-				"If not resolved automatically, formation will be restarted.",
+				"If not resolved automatically, formation will be restarted",
 			notEligible.String(),
 		)
 		changed = applyFormationTransitionMessage(rv, msg) || changed
@@ -387,7 +393,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 		msg := fmt.Sprintf(
 			"Replicas [%s] have spec changes that don't match pending transition. "+
 				"This may indicate spec changed during formation. "+
-				"If not resolved automatically, formation will be restarted.",
+				"If not resolved automatically, formation will be restarted",
 			specMismatch.String(),
 		)
 		changed = applyFormationTransitionMessage(rv, msg) || changed
@@ -420,7 +426,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 		msg := fmt.Sprintf(
 			"Replicas [%s] have insufficient backing volume size for datamesh (required: %s). "+
 				"This should not happen during normal formation. "+
-				"If not resolved automatically, formation will be restarted.",
+				"If not resolved automatically, formation will be restarted",
 			insufficientSize.String(), rv.Status.Datamesh.Size.String(),
 		)
 		changed = applyFormationTransitionMessage(rv, msg) || changed
@@ -515,7 +521,7 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 		rv.Status.DatameshRevision++
 		applyPendingReplicaMessages(rv, diskful, "Datamesh is forming, waiting for replica to apply new configuration")
 		applyFormationTransitionMessage(rv, fmt.Sprintf(
-			"Replicas [%s] preconfigured and added to datamesh. Waiting for them to establish connections.",
+			"Replicas [%s] preconfigured and added to datamesh. Waiting for them to establish connections",
 			diskful.String(),
 		))
 
@@ -530,7 +536,7 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 		msg := fmt.Sprintf(
 			"Datamesh members mismatch: datamesh has [%s], but active RVRs are [%s]. "+
 				"This may be caused by manual intervention during formation. "+
-				"If not resolved automatically, formation will be restarted.",
+				"If not resolved automatically, formation will be restarted",
 			dmDiskful.String(), diskful.String(),
 		)
 		changed = applyFormationTransitionMessage(rv, msg) || changed
@@ -551,7 +557,7 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 	if configured != diskful {
 		notConfigured := diskful.Difference(configured)
 		changed = applyFormationTransitionMessage(rv, fmt.Sprintf(
-			"Waiting for replicas [%s] to be fully configured for datamesh revision %d.",
+			"Waiting for replicas [%s] to be fully configured for datamesh revision %d",
 			notConfigured.String(), rv.Status.DatameshRevision,
 		)) || changed
 		changed = applyPendingReplicaMessages(rv, notConfigured, "Datamesh is forming, waiting for DRBD configuration to continue") || changed
@@ -577,7 +583,7 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 	if connected != diskful {
 		notConnected := diskful.Difference(connected)
 		changed = applyFormationTransitionMessage(rv, fmt.Sprintf(
-			"Waiting for replicas [%s] to establish connections with all peers.",
+			"Waiting for replicas [%s] to establish connections with all peers",
 			notConnected.String(),
 		)) || changed
 		changed = applyPendingReplicaMessages(rv, diskful, "Datamesh is forming, waiting for all replicas to connect to each other") || changed
@@ -611,7 +617,7 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 		notReady := diskful.Difference(readyForDataBootstrap)
 		changed = applyFormationTransitionMessage(rv, fmt.Sprintf(
 			"Waiting for replicas [%s] to be ready for data bootstrap "+
-				"(backing volume Inconsistent + Established replication with all peers).",
+				"(backing volume Inconsistent + Established replication with all peers)",
 			notReady.String(),
 		)) || changed
 		changed = applyPendingReplicaMessages(rv, notReady, "Datamesh is forming, waiting for data bootstrap readiness (requires backing volume Inconsistent and replication Established with all peers)") || changed
@@ -696,6 +702,11 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 		}
 		drbdrOp, err = r.createDRBDROp(rf.Ctx(), rv, drbdrOpName, drbdrOpSpec)
 		if err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				// Concurrent reconciliation created this DRBDResourceOperation. Requeue to pick it up from cache.
+				rf.Log().Info("DRBDResourceOperation already exists, requeueing", "drbdrOp", drbdrOpName)
+				return rf.DoneAndRequeue()
+			}
 			return rf.Failf(err, "creating DRBDResourceOperation %s", drbdrOpName)
 		}
 	} else {
@@ -738,10 +749,10 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 	var dataBootstrapModeMsg string
 	if rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM {
 		dataBootstrapModeMsg = fmt.Sprintf(
-			"Full data synchronization from source replica %s. Timeout: %s.",
+			"Full data synchronization from source replica %s. Timeout: %s",
 			drbdrOp.Spec.DRBDResourceName, dataBootstrapTimeout)
 	} else {
-		dataBootstrapModeMsg = "Fast mode: data is assumed identical, no synchronization required."
+		dataBootstrapModeMsg = "Fast mode: data is assumed identical, no synchronization required"
 	}
 
 	// Verify the DRBDResourceOperation has not failed.
