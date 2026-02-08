@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -128,6 +129,40 @@ func isExpectedTransientError(err error) bool {
 
 	// Leaf error: check known transient types.
 	return apierrors.IsConflict(err)
+}
+
+// cleanTransientErrorMessage returns a human-friendly error string for known
+// transient errors.
+//
+// For Conflict errors backed by *apierrors.StatusError it extracts the resource
+// identity from Details and replaces the verbose Kubernetes message with a
+// compact "conflict on <resource>/<name> (will requeue)". Any wrapping context
+// added by Wrapf/Enrichf is preserved as a prefix.
+//
+// For other transient errors (or when the StatusError has no Details) the
+// original message is returned with a "(will requeue)" suffix.
+func cleanTransientErrorMessage(err error) string {
+	var se *apierrors.StatusError
+	if errors.As(err, &se) && se.ErrStatus.Details != nil {
+		d := se.ErrStatus.Details
+		resource := d.Kind
+		if d.Group != "" {
+			resource += "." + d.Group
+		}
+
+		// Preserve wrapping context by trimming the leaf StatusError message.
+		leafMsg := se.Error()
+		fullMsg := err.Error()
+		suffix := ": " + leafMsg
+		if strings.HasSuffix(fullMsg, suffix) {
+			prefix := fullMsg[:len(fullMsg)-len(suffix)]
+			return fmt.Sprintf("%s: conflict on %s/%s (will requeue)", prefix, resource, d.Name)
+		}
+		return fmt.Sprintf("conflict on %s/%s (will requeue)", resource, d.Name)
+	}
+
+	// Fallback for non-StatusError transient errors.
+	return err.Error() + " (will requeue)"
 }
 
 // phaseContextKey is a private context key for phase metadata.
@@ -309,8 +344,8 @@ func (rf ReconcileFlow) OnEnd(out *ReconcileOutcome) {
 	if out.err != nil && !out.errorLogged {
 		if isExpectedTransientError(out.err) {
 			// Conflict (optimistic lock) is an expected transient condition;
-			// log at Info, not Error.
-			rf.log.Info("phase end", append(fields, "err", out.err)...)
+			// log at Info (not Error) with a cleaned-up message.
+			rf.log.Info("phase end", append(fields, "err", cleanTransientErrorMessage(out.err))...)
 		} else {
 			rf.log.Error(out.err, "phase end", fields...)
 		}
