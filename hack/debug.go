@@ -846,29 +846,9 @@ func watchSingleResource(ctx context.Context, kind, name string, ws *watchSet, w
 		defer wg.Done()
 	}
 
-	args := []string{"get", kind}
-	if name != "" {
-		args = append(args, name)
-	}
-	args = append(args, "-w", "--output-watch-events", "-o", "json")
-
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	cmd.Stderr = os.Stderr
-
 	label := kind
 	if name != "" {
 		label = kind + "/" + name
-	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		emit(fmt.Sprintf("%s %s[%s]%s failed to create pipe: %v", ts(), colorCyan, label, colorReset, err))
-		return
-	}
-
-	if err := cmd.Start(); err != nil {
-		emit(fmt.Sprintf("%s %s[%s]%s failed to start kubectl: %v", ts(), colorCyan, label, colorReset, err))
-		return
 	}
 
 	// objState stores the previous cleaned object (without conditions) and conditions.
@@ -876,138 +856,174 @@ func watchSingleResource(ctx context.Context, kind, name string, ws *watchSet, w
 		lines      []string
 		conditions []condition
 	}
+	// State persists across reconnects so we don't re-emit ADDED for known objects.
 	state := map[string]objState{}
 
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 4*1024*1024), 4*1024*1024)
+	for {
+		if ctx.Err() != nil {
+			return
+		}
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
+		args := []string{"get", kind}
+		if name != "" {
+			args = append(args, name)
+		}
+		args = append(args, "-w", "--output-watch-events", "-o", "json")
+
+		cmd := exec.CommandContext(ctx, "kubectl", args...)
+		cmd.Stderr = os.Stderr
+
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			emit(fmt.Sprintf("%s %s[%s]%s failed to create pipe: %v", ts(), colorCyan, label, colorReset, err))
+			sleepCtx(ctx, 2*time.Second)
 			continue
 		}
 
-		var event map[string]any
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
+		if err := cmd.Start(); err != nil {
+			emit(fmt.Sprintf("%s %s[%s]%s failed to start kubectl: %v", ts(), colorCyan, label, colorReset, err))
+			sleepCtx(ctx, 2*time.Second)
 			continue
 		}
 
-		eventType, _ := event["type"].(string)
-		obj, _ := event["object"].(map[string]any)
-		if obj == nil {
-			continue
-		}
+		scanner := bufio.NewScanner(stdout)
+		scanner.Buffer(make([]byte, 0, 4*1024*1024), 4*1024*1024)
 
-		// Register the full Kind → short kind mapping on first event.
-		if fullKind, _ := obj["kind"].(string); fullKind != "" {
-			registerKind(kind, fullKind)
-		}
-
-		meta, _ := obj["metadata"].(map[string]any)
-		objName, _ := meta["name"].(string)
-		if objName == "" {
-			objName = "?"
-		}
-
-		// Filter: only show objects that match the watch set.
-		if !ws.matchesObject(kind, objName) {
-			continue
-		}
-
-		// Save full snapshot before any mutations (if snapshots enabled).
-		snapPath := saveSnapshot(kind, objName, obj)
-		objLink := objName
-		if snapPath != "" {
-			objLink = osc8Link(objName, snapPath)
-		}
-
-		// Extract conditions before cleaning for diff.
-		newConds := extractConditions(obj)
-		// Remove conditions from obj so they don't appear in the JSON diff.
-		removeConditions(obj)
-
-		newLines := prettyLines(obj)
-
-		switch eventType {
-		case "DELETED":
-			emit(fmt.Sprintf("%s %s[%s]%s %sDELETED%s %s",
-				ts(), colorCyan, kind, colorReset, colorRed, colorReset, objLink))
-			delete(state, objName)
-
-		case "BOOKMARK":
-			// Bookmark events are informational; skip them to avoid corrupting state.
-			continue
-
-		default: // ADDED, MODIFIED
-			prev, exists := state[objName]
-			state[objName] = objState{lines: newLines, conditions: newConds}
-
-			if !exists {
-				emit(fmt.Sprintf("%s %s[%s]%s %sADDED%s %s",
-					ts(), colorCyan, kind, colorReset, colorGreen, colorReset, objLink))
-
-				hasConds := len(newConds) > 0
-				if hasConds {
-					emitConditionsTable(nil, newConds)
-					emit(fmt.Sprintf("  %s├──%s", colorDim, colorReset))
-				} else {
-					emit(fmt.Sprintf("  %s┌%s", colorDim, colorReset))
-				}
-				for _, l := range newLines {
-					emit(fmt.Sprintf("  %s│%s %s%s%s", colorDim, colorReset, colorDim, l, colorReset))
-				}
-				emit(fmt.Sprintf("  %s└%s", colorDim, colorReset))
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "" {
 				continue
 			}
 
-			// Compute diff.
-			diff := unifiedDiff(prev.lines, newLines,
-				kind+"/"+objName+" (old)",
-				kind+"/"+objName+" (new)")
-			condsChanged := !conditionsEqual(prev.conditions, newConds)
-
-			if len(diff) == 0 && !condsChanged {
+			var event map[string]any
+			if err := json.Unmarshal([]byte(line), &event); err != nil {
 				continue
 			}
 
-			emit(fmt.Sprintf("%s %s[%s]%s MODIFIED %s",
-				ts(), colorCyan, kind, colorReset, objLink))
-
-			// Always show conditions table on modification.
-			condLines := conditionsTableDiff(prev.conditions, newConds)
-			hasConds := len(condLines) > 0
-			hasDiff := len(diff) > 0
-			for _, cl := range condLines {
-				emit(cl)
+			eventType, _ := event["type"].(string)
+			obj, _ := event["object"].(map[string]any)
+			if obj == nil {
+				continue
 			}
 
-			if hasDiff {
-				if hasConds {
-					emit(fmt.Sprintf("  %s├──%s", colorDim, colorReset))
-				} else {
-					emit(fmt.Sprintf("  %s┌%s", colorDim, colorReset))
+			// Register the full Kind → short kind mapping on first event.
+			if fullKind, _ := obj["kind"].(string); fullKind != "" {
+				registerKind(kind, fullKind)
+			}
+
+			meta, _ := obj["metadata"].(map[string]any)
+			objName, _ := meta["name"].(string)
+			if objName == "" {
+				objName = "?"
+			}
+
+			// Filter: only show objects that match the watch set.
+			if !ws.matchesObject(kind, objName) {
+				continue
+			}
+
+			// Save full snapshot before any mutations (if snapshots enabled).
+			snapPath := saveSnapshot(kind, objName, obj)
+			objLink := objName
+			if snapPath != "" {
+				objLink = osc8Link(objName, snapPath)
+			}
+
+			// Extract conditions before cleaning for diff.
+			newConds := extractConditions(obj)
+			// Remove conditions from obj so they don't appear in the JSON diff.
+			removeConditions(obj)
+
+			newLines := prettyLines(obj)
+
+			switch eventType {
+			case "DELETED":
+				emit(fmt.Sprintf("%s %s[%s]%s %sDELETED%s %s",
+					ts(), colorCyan, kind, colorReset, colorRed, colorReset, objLink))
+				delete(state, objName)
+
+			case "BOOKMARK":
+				// Bookmark events are informational; skip them to avoid corrupting state.
+				continue
+
+			default: // ADDED, MODIFIED
+				prev, exists := state[objName]
+				state[objName] = objState{lines: newLines, conditions: newConds}
+
+				if !exists {
+					emit(fmt.Sprintf("%s %s[%s]%s %sADDED%s %s",
+						ts(), colorCyan, kind, colorReset, colorGreen, colorReset, objLink))
+
+					hasConds := len(newConds) > 0
+					if hasConds {
+						emitConditionsTable(nil, newConds)
+						emit(fmt.Sprintf("  %s├──%s", colorDim, colorReset))
+					} else {
+						emit(fmt.Sprintf("  %s┌%s", colorDim, colorReset))
+					}
+					for _, l := range newLines {
+						emit(fmt.Sprintf("  %s│%s %s%s%s", colorDim, colorReset, colorDim, l, colorReset))
+					}
+					emit(fmt.Sprintf("  %s└%s", colorDim, colorReset))
+					continue
 				}
-				bar := fmt.Sprintf("  %s│%s ", colorDim, colorReset)
-				for _, d := range diff {
-					switch {
-					case strings.HasPrefix(d, "+++") || strings.HasPrefix(d, "---"):
-						emit(fmt.Sprintf("%s%s%s%s", bar, colorDim, d, colorReset))
-					case strings.HasPrefix(d, "+"):
-						emit(fmt.Sprintf("%s%s%s%s", bar, colorGreen, d, colorReset))
-					case strings.HasPrefix(d, "-"):
-						emit(fmt.Sprintf("%s%s%s%s", bar, colorRed, d, colorReset))
-					case strings.HasPrefix(d, "@@") || strings.HasPrefix(d, "──"):
-						emit(fmt.Sprintf("%s%s%s%s", bar, colorCyan, d, colorReset))
-					default:
-						emit(fmt.Sprintf("%s%s", bar, d))
+
+				// Compute diff.
+				diff := unifiedDiff(prev.lines, newLines,
+					kind+"/"+objName+" (old)",
+					kind+"/"+objName+" (new)")
+				condsChanged := !conditionsEqual(prev.conditions, newConds)
+
+				if len(diff) == 0 && !condsChanged {
+					continue
+				}
+
+				emit(fmt.Sprintf("%s %s[%s]%s MODIFIED %s",
+					ts(), colorCyan, kind, colorReset, objLink))
+
+				// Always show conditions table on modification.
+				condLines := conditionsTableDiff(prev.conditions, newConds)
+				hasConds := len(condLines) > 0
+				hasDiff := len(diff) > 0
+				for _, cl := range condLines {
+					emit(cl)
+				}
+
+				if hasDiff {
+					if hasConds {
+						emit(fmt.Sprintf("  %s├──%s", colorDim, colorReset))
+					} else {
+						emit(fmt.Sprintf("  %s┌%s", colorDim, colorReset))
+					}
+					bar := fmt.Sprintf("  %s│%s ", colorDim, colorReset)
+					for _, d := range diff {
+						switch {
+						case strings.HasPrefix(d, "+++") || strings.HasPrefix(d, "---"):
+							emit(fmt.Sprintf("%s%s%s%s", bar, colorDim, d, colorReset))
+						case strings.HasPrefix(d, "+"):
+							emit(fmt.Sprintf("%s%s%s%s", bar, colorGreen, d, colorReset))
+						case strings.HasPrefix(d, "-"):
+							emit(fmt.Sprintf("%s%s%s%s", bar, colorRed, d, colorReset))
+						case strings.HasPrefix(d, "@@") || strings.HasPrefix(d, "──"):
+							emit(fmt.Sprintf("%s%s%s%s", bar, colorCyan, d, colorReset))
+						default:
+							emit(fmt.Sprintf("%s%s", bar, d))
+						}
 					}
 				}
+				emit(fmt.Sprintf("  %s└%s", colorDim, colorReset))
 			}
-			emit(fmt.Sprintf("  %s└%s", colorDim, colorReset))
 		}
-	}
 
-	_ = cmd.Wait()
+		_ = cmd.Wait()
+
+		// kubectl watch disconnected (API server timeout, network issue, etc.) — reconnect.
+		if ctx.Err() != nil {
+			return
+		}
+		emit(fmt.Sprintf("%s %s[%s]%s watch disconnected, reconnecting...", ts(), colorDim, label, colorReset))
+		sleepCtx(ctx, 1*time.Second)
+	}
 }
 
 // ---------------------------------------------------------------------------
