@@ -469,8 +469,10 @@ type rvView struct {
 }
 
 type rvViewConditions struct {
-	satisfyEligibleNodes bool
-	configurationReady   bool
+	satisfyEligibleNodesKnown bool // true when SatisfyEligibleNodes condition is present
+	satisfyEligibleNodes      bool // true when SatisfyEligibleNodes condition is present and True
+	configurationReadyKnown   bool // true when ConfigurationReady condition is present
+	configurationReady        bool // true when ConfigurationReady condition is present and True
 }
 
 // newRVView creates an rvView from a ReplicatedVolume.
@@ -480,8 +482,10 @@ func newRVView(unsafeRV *v1alpha1.ReplicatedVolume) rvView {
 		name:                            unsafeRV.Name,
 		configurationObservedGeneration: unsafeRV.Status.ConfigurationObservedGeneration,
 		conditions: rvViewConditions{
-			satisfyEligibleNodes: objutilv1.IsStatusConditionPresentAndTrue(unsafeRV, v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType),
-			configurationReady:   objutilv1.IsStatusConditionPresentAndTrue(unsafeRV, v1alpha1.ReplicatedVolumeCondConfigurationReadyType),
+			satisfyEligibleNodesKnown: objutilv1.HasStatusCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType),
+			satisfyEligibleNodes:      objutilv1.IsStatusConditionPresentAndTrue(unsafeRV, v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType),
+			configurationReadyKnown:   objutilv1.HasStatusCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondConfigurationReadyType),
+			configurationReady:        objutilv1.IsStatusConditionPresentAndTrue(unsafeRV, v1alpha1.ReplicatedVolumeCondConfigurationReadyType),
 		},
 	}
 
@@ -898,7 +902,9 @@ func computeActualVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, rvs []rvV
 		}
 
 		// Check nodes condition regardless of acknowledgment.
-		if !rv.conditions.satisfyEligibleNodes {
+		// Only count as "in conflict" if the condition is present and not True.
+		// Missing condition means the RV hasn't been evaluated yet.
+		if rv.conditions.satisfyEligibleNodesKnown && !rv.conditions.satisfyEligibleNodes {
 			inConflictWithEligibleNodes++
 		}
 
@@ -912,7 +918,9 @@ func computeActualVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, rvs []rvV
 			aligned++
 		}
 
-		if !rv.conditions.configurationReady {
+		// Only count as "stale" if the condition is present and not True.
+		// Missing condition means the RV hasn't been evaluated yet.
+		if rv.conditions.configurationReadyKnown && !rv.conditions.configurationReady {
 			staleConfiguration++
 		}
 	}
@@ -949,6 +957,9 @@ func computeActualVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, rvs []rvV
 // isRSCConfigurationAcknowledgedByRV checks if the RV has acknowledged
 // the current RSC configuration.
 func isRSCConfigurationAcknowledgedByRV(rsc *v1alpha1.ReplicatedStorageClass, rv *rvView) bool {
+	if rv.configurationObservedGeneration == 0 {
+		return true
+	}
 	return rv.configurationObservedGeneration == rsc.Status.ConfigurationGeneration
 }
 

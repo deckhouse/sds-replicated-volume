@@ -162,11 +162,11 @@ var _ = Describe("Reconciler", func() {
 				Build()
 			rec := NewReconciler(cl, scheme)
 
-			// Reconcile multiple times
+			// Reconcile multiple times — the RV enters formation (DatameshRevision=0),
+			// so a RequeueAfter for the formation timeout is expected.
 			for i := 0; i < 3; i++ {
-				result, err := rec.Reconcile(ctx, RequestFor(rv))
+				_, err := rec.Reconcile(ctx, RequestFor(rv))
 				Expect(err).NotTo(HaveOccurred())
-				Expect(result).ToNot(Requeue())
 			}
 
 			var updated v1alpha1.ReplicatedVolume

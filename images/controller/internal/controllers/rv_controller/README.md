@@ -28,10 +28,11 @@ The controller reconciles `ReplicatedVolume` with:
 The controller reconciles individual ReplicatedVolumes:
 
 ```
-ensure metadata (finalizer + labels)
-
 if shouldDelete:
-    update RVA conditions → delete RVRs → clear datamesh members → Done
+    reconcileDeletion (update RVA conditions → delete RVRs → clear datamesh members)
+    reconcileMetadata (remove finalizer if no children left) → Done
+
+ensure metadata (finalizer + labels)
 
 ensure configuration from RSC
 ensure datamesh pending replica transitions (sync from RVR statuses)
@@ -51,14 +52,16 @@ patch status if changed
 ```
 Reconcile (root) [Pure orchestration]
 ├── getRV, getRSC, getRVAs, getRVRsSorted
+├── rvShouldNotExist →
+│   ├── reconcileDeletion [In-place reconciliation] ← details
+│   │   ├── isRVADeletionConditionsInSync / applyRVADeletionConditions
+│   │   ├── deleteRVRWithFinalizerRemoval (loop)
+│   │   └── clear datamesh members + patchRVStatus
+│   └── reconcileMetadata [Target-state driven] (remove finalizer)
 ├── reconcileMetadata [Target-state driven]
 │   ├── isRVMetadataInSync
 │   ├── applyRVMetadata (finalizer + labels)
 │   └── patchRV
-├── rvShouldNotExist → reconcileDeletion [In-place reconciliation] ← details
-│   ├── isRVADeletionConditionsInSync / applyRVADeletionConditions
-│   ├── deleteRVRWithFinalizerRemoval (loop)
-│   └── clear datamesh members + patchRVStatus
 ├── ensureRVConfiguration
 ├── ensureDatameshPendingReplicaTransitions ← details
 ├── reconcileFormation [Pure orchestration]
@@ -92,14 +95,13 @@ flowchart TD
     GetRV -->|NotFound| Done1([Done])
     GetRV --> LoadDeps[Load RSC, RVAs, RVRs]
 
-    LoadDeps --> Meta[reconcileMetadata]
-    Meta -->|"No children left, finalizer removed<br/>(object will be deleted by API server)"| Done2([Done])
-
-    Meta --> CheckDelete{rvShouldNotExist?}
+    LoadDeps --> CheckDelete{rvShouldNotExist?}
     CheckDelete -->|Yes| Deletion[reconcileDeletion]
-    Deletion --> Done3([Done])
+    Deletion --> MetaDel["reconcileMetadata<br/>(remove finalizer)"]
+    MetaDel --> Done3([Done])
 
-    CheckDelete -->|No| EnsureConfig[ensureRVConfiguration +<br/>ensureDatameshPendingReplicaTransitions]
+    CheckDelete -->|No| Meta[reconcileMetadata]
+    Meta -->|"Finalizer added/updated"| EnsureConfig[ensureRVConfiguration +<br/>ensureDatameshPendingReplicaTransitions]
     EnsureConfig --> CheckConfig{Configuration exists?}
     CheckConfig -->|No| Conditions
 
@@ -178,10 +180,12 @@ Triggers initial data synchronization via DRBDResourceOperation and waits for co
 When formation stalls (any safety check fails or progress timeout is exceeded), formation restarts:
 
 1. Wait for timeout since formation started (to avoid thrashing)
-2. Delete formation DRBDResourceOperation if exists
-3. Delete all replicas (with finalizer removal)
-4. Reset all status fields (Configuration, DatameshRevision, Datamesh, transitions)
-5. Requeue for fresh start
+2. Log error (formation timed out)
+3. Delete formation DRBDResourceOperation if exists
+4. Delete all replicas (with finalizer removal)
+5. Reset all status fields (Configuration, DatameshRevision, Datamesh, transitions)
+6. Re-initialize configuration from RSC (to avoid intermediate nil state that would trigger unnecessary RSC reconciliation)
+7. Requeue for fresh start
 
 ## Managed Metadata
 
