@@ -351,6 +351,7 @@ flowchart TD
 
     ComputeCount --> CreateLoop{"diskful.Len < target?"}
     CreateLoop -->|Yes| CreateRVR[createRVR]
+    CreateRVR -->|AlreadyExists| Requeue1([DoneAndRequeue])
     CreateRVR --> CreateLoop
     CreateLoop -->|No| RemoveExcess{"diskful.Len > target?"}
 
@@ -460,6 +461,7 @@ flowchart TD
 
     CheckStale -->|No| CheckExists{Operation exists?}
     CheckExists -->|No| CreateOp["createDRBDROp<br/>Type: CreateNewUUID<br/>LVMThin: clear-bitmap<br/>LVM: force-resync"]
+    CreateOp -->|AlreadyExists| Requeue([DoneAndRequeue])
     CreateOp --> CheckStatus
 
     CheckExists -->|Yes| VerifyParams{"Parameters match<br/>expected?"}

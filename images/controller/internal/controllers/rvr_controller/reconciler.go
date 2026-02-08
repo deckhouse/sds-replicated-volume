@@ -951,7 +951,7 @@ func ensureConditionReady(
 	// M = connectedDiskfulPeers, N = quorum threshold (or "unknown")
 	// T = connectedTieBreakerPeers
 	// J = connectedUpToDatePeers, K = quorumMinimumRedundancy (or "unknown")
-	msg := "quorum: unknown"
+	msg := "Quorum: unknown"
 	if qs := rvr.Status.QuorumSummary; qs != nil {
 		quorumStr := "unknown"
 		if qs.Quorum != nil {
@@ -961,7 +961,7 @@ func ensureConditionReady(
 		if qs.QuorumMinimumRedundancy != nil {
 			qmrStr = strconv.Itoa(*qs.QuorumMinimumRedundancy)
 		}
-		msg = fmt.Sprintf("quorum: diskful %d/%s + tie-breakers %d, data quorum: %d/%s",
+		msg = fmt.Sprintf("Quorum: diskful %d/%s + tie-breakers %d, data quorum: %d/%s",
 			qs.ConnectedDiskfulPeers, quorumStr, qs.ConnectedTieBreakerPeers,
 			qs.ConnectedUpToDatePeers, qmrStr)
 	}
@@ -1454,6 +1454,11 @@ func (r *Reconciler) reconcileBackingVolume(
 		}
 
 		if err := r.createLLV(rf.Ctx(), llv); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				// Concurrent reconciliation created this LLV. Requeue to pick it up from cache.
+				rf.Log().Info("LLV already exists, requeueing", "llvName", intended.LLVName)
+				return nil, nil, rf.DoneAndRequeue()
+			}
 			// Handle validation errors specially: log, set condition and requeue.
 			// LVMLogicalVolume is not our API, so we treat validation errors as recoverable
 			// for safety reasons (e.g., schema changes in sds-node-configurator).
@@ -2080,6 +2085,11 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 			return drbdr, rf.Failf(err, "constructing DRBDResource")
 		}
 		if err := r.createDRBDR(rf.Ctx(), newObj); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				// Concurrent reconciliation created this DRBDResource. Requeue to pick it up from cache.
+				rf.Log().Info("DRBDResource already exists, requeueing", "drbdr", newObj.Name)
+				return drbdr, rf.DoneAndRequeue()
+			}
 			return drbdr, rf.Failf(err, "creating DRBDResource")
 		}
 		drbdr = newObj
