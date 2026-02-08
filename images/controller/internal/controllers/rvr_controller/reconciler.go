@@ -1425,7 +1425,7 @@ func (r *Reconciler) reconcileBackingVolume(
 	// 5. Compute intended state.
 	intended, reason, message := computeIntendedBackingVolume(rvr, rv, actual, rspView)
 
-	// 6. If intended == nil, delete LLVs, clear size and remove condition when done.
+	// 6. If intended == nil, delete LLVs and set/remove condition based on reason.
 	if intended == nil {
 		if len(*llvs) > 0 {
 			deletingNames, ro := r.reconcileLLVsDeletion(rf.Ctx(), llvs, nil)
@@ -1438,8 +1438,13 @@ func (r *Reconciler) reconcileBackingVolume(
 			return nil, nil, rf.Continue().ReportChangedIf(changed)
 		}
 
-		// All LLVs deleted — remove condition entirely.
-		changed := applyBackingVolumeReadyCondAbsent(rvr)
+		// No LLVs left. If backing volume is genuinely not applicable, remove condition entirely.
+		// Otherwise keep it as False with the reason (e.g. PendingScheduling).
+		if reason == v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable {
+			changed := applyBackingVolumeReadyCondAbsent(rvr)
+			return nil, nil, rf.Continue().ReportChangedIf(changed)
+		}
+		changed := applyBackingVolumeReadyCondFalse(rvr, reason, message)
 		return nil, nil, rf.Continue().ReportChangedIf(changed)
 	}
 
