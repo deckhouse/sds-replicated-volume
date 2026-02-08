@@ -26,6 +26,7 @@ import (
 // ReplicatedStoragePool is a Kubernetes Custom Resource that defines a configuration for Linstor Storage-pools.
 // +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=rsp
 // +kubebuilder:metadata:labels=heritage=deckhouse
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
@@ -111,6 +112,7 @@ type ReplicatedStoragePoolSpec struct {
 	SystemNetworkNames []string `json:"systemNetworkNames"`
 	// EligibleNodesPolicy defines policies for managing eligible nodes.
 	// Always present with defaults.
+	// +kubebuilder:default={notReadyGracePeriod: "10m"}
 	EligibleNodesPolicy ReplicatedStoragePoolEligibleNodesPolicy `json:"eligibleNodesPolicy"`
 }
 
