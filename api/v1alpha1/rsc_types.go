@@ -21,6 +21,7 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 // ReplicatedStorageClass is a Kubernetes Custom Resource that defines a configuration for a Kubernetes Storage class.
 // +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=rsc
 // +kubebuilder:metadata:labels=heritage=deckhouse
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
@@ -146,12 +147,15 @@ type ReplicatedStorageClassSpec struct {
 	SystemNetworkNames []string `json:"systemNetworkNames"`
 	// ConfigurationRolloutStrategy defines how configuration changes are applied to existing volumes.
 	// Always present with defaults.
+	// +kubebuilder:default={type: "RollingUpdate", rollingUpdate: {maxParallel: 5}}
 	ConfigurationRolloutStrategy ReplicatedStorageClassConfigurationRolloutStrategy `json:"configurationRolloutStrategy"`
 	// EligibleNodesConflictResolutionStrategy defines how the controller handles volumes with eligible nodes conflicts.
 	// Always present with defaults.
+	// +kubebuilder:default={type: "RollingRepair", rollingRepair: {maxParallel: 5}}
 	EligibleNodesConflictResolutionStrategy ReplicatedStorageClassEligibleNodesConflictResolutionStrategy `json:"eligibleNodesConflictResolutionStrategy"`
 	// EligibleNodesPolicy defines policies for managing eligible nodes.
 	// Always present with defaults.
+	// +kubebuilder:default={notReadyGracePeriod: "10m"}
 	EligibleNodesPolicy ReplicatedStoragePoolEligibleNodesPolicy `json:"eligibleNodesPolicy"`
 }
 
@@ -359,6 +363,7 @@ type ReplicatedStorageClassStatus struct {
 	StoragePoolName string `json:"storagePoolName,omitempty"`
 	// Volumes provides aggregated volume statistics.
 	// Always present (may have total=0).
+	// +kubebuilder:default={}
 	Volumes ReplicatedStorageClassVolumesSummary `json:"volumes"`
 }
 

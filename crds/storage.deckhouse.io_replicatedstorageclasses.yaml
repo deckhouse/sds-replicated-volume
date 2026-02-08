@@ -62,6 +62,10 @@ spec:
               > Note that this field is in read-only mode.
             properties:
               configurationRolloutStrategy:
+                default:
+                  rollingUpdate:
+                    maxParallel: 5
+                  type: RollingUpdate
                 description: |-
                   ConfigurationRolloutStrategy defines how configuration changes are applied to existing volumes.
                   Always present with defaults.
@@ -96,6 +100,10 @@ spec:
                 - message: rollingUpdate must not be set when type is not RollingUpdate
                   rule: self.type == 'RollingUpdate' || !has(self.rollingUpdate)
               eligibleNodesConflictResolutionStrategy:
+                default:
+                  rollingRepair:
+                    maxParallel: 5
+                  type: RollingRepair
                 description: |-
                   EligibleNodesConflictResolutionStrategy defines how the controller handles volumes with eligible nodes conflicts.
                   Always present with defaults.
@@ -130,6 +138,8 @@ spec:
                 - message: rollingRepair must not be set when type is not RollingRepair
                   rule: self.type == 'RollingRepair' || !has(self.rollingRepair)
               eligibleNodesPolicy:
+                default:
+                  notReadyGracePeriod: 10m
                 description: |-
                   EligibleNodesPolicy defines policies for managing eligible nodes.
                   Always present with defaults.
@@ -501,6 +511,7 @@ spec:
                   will share the same StoragePoolName.
                 type: string
               volumes:
+                default: {}
                 description: |-
                   Volumes provides aggregated volume statistics.
                   Always present (may have total=0).
@@ -545,4 +556,5 @@ spec:
         type: object
     served: true
     storage: true
-    subresources: {}
+    subresources:
+      status: {}
