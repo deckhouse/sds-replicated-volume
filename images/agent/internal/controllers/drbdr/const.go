@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drbd
+package drbdr
 
 import (
 	"strings"
@@ -26,10 +26,6 @@ const (
 	// ControllerName is the stable name for the DRBD controller.
 	// Used in .Named(...) for controller-runtime builder.
 	ControllerName = "drbd-controller"
-
-	// OperationControllerName is the stable name for the DRBD operation controller.
-	// Used in .Named(...) for controller-runtime builder.
-	OperationControllerName = "drbd-operation-controller"
 
 	// ScannerName is the name of the DRBD scanner component.
 	ScannerName = "drbd-scanner"

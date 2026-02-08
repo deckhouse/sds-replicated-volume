@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drbd
+package drbdr
 
 // ConfiguredReasonSource carries a condition reason for configuration failures.
 type ConfiguredReasonSource interface {

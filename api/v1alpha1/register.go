@@ -56,6 +56,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&DRBDResourceList{},
 		&DRBDResourceOperation{},
 		&DRBDResourceOperationList{},
+		&DRBDResourceListOperation{},
+		&DRBDResourceListOperationList{},
 		&DRBDNodeOperation{},
 		&DRBDNodeOperationList{},
 	)

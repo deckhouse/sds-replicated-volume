@@ -25,10 +25,13 @@ spec:
     - jsonPath: .spec.state
       name: State
       type: string
-    - jsonPath: .status.role
+    - jsonPath: .status.activeConfiguration.role
       name: Role
       type: string
-    - jsonPath: .spec.type
+    - jsonPath: .status.replicationState
+      name: Replication
+      type: string
+    - jsonPath: .status.activeConfiguration.type
       name: Type
       type: string
     - jsonPath: .status.diskState
@@ -468,6 +471,11 @@ spec:
                 x-kubernetes-list-type: map
               quorum:
                 type: boolean
+              replicationState:
+                description: |-
+                  ReplicationState is the actual replication state from DRBD (e.g. Established, SyncSource).
+                  Taken from the first peer connection when present; empty when no peers or resource down.
+                type: string
             type: object
         required:
         - metadata

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drbd_test
+package drbdr_test
 
 import (
 	"context"
@@ -33,7 +33,7 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbd"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdr"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
@@ -379,8 +379,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 			fakeExec.Setup(t)
 
 			// Create reconciler with port cache
-			portCache := drbd.NewPortCache(context.Background(), drbd.PortRangeMin, drbd.PortRangeMax)
-			rec := drbd.NewReconciler(cl, testNodeName, portCache)
+			portCache := drbdr.NewPortCache(context.Background(), drbdr.PortRangeMin, drbdr.PortRangeMax)
+			rec := drbdr.NewReconciler(cl, testNodeName, portCache)
 
 			// Determine request name
 			reqName := testDRBDRName
@@ -391,7 +391,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			// Run reconcile
 			_, err := rec.Reconcile(
 				t.Context(),
-				drbd.DRBDReconcileRequest{Name: reqName},
+				drbdr.DRBDReconcileRequest{Name: reqName},
 			)
 
 			// Check error

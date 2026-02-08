@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drbd
+package drbdr
 
 import (
 	"context"
@@ -103,19 +103,6 @@ func BuildController(mgr manager.Manager) error {
 		WithOptions(controller.TypedOptions[DRBDReconcileRequest]{MaxConcurrentReconciles: 10}).
 		Complete(rec); err != nil {
 		return fmt.Errorf("building DRBD resource controller: %w", err)
-	}
-
-	// Build DRBD operation controller
-	opRec := NewOperationReconciler(cl, nodeName)
-	if err := builder.ControllerManagedBy(mgr).
-		Named(OperationControllerName).
-		For(
-			&v1alpha1.DRBDResourceOperation{},
-			builder.WithPredicates(operationPredicates()...),
-		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
-		Complete(opRec); err != nil {
-		return fmt.Errorf("building DRBD operation controller: %w", err)
 	}
 
 	return nil

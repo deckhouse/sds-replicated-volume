@@ -14,13 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drbd
+package drbdop
 
 import (
 	"context"
 	"fmt"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdr"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
 
@@ -28,24 +29,24 @@ import (
 func (r *OperationReconciler) executeCreateNewUUID(
 	ctx context.Context,
 	op *v1alpha1.DRBDResourceOperation,
-	drbdr *v1alpha1.DRBDResource,
+	dr *v1alpha1.DRBDResource,
 ) error {
 	// Get minor number from DRBD status
-	drbdResName := DRBDResourceNameOnTheNode(drbdr)
-	aState, err := observeActualDRBDState(ctx, drbdResName)
+	drbdResName := drbdr.DRBDResourceNameOnTheNode(dr)
+	statusResult, err := drbdsetup.ExecuteStatus(ctx, drbdResName)
 	if err != nil {
-		return fmt.Errorf("observing DRBD state: %w", err)
+		return fmt.Errorf("querying DRBD status: %w", err)
 	}
-	if aState.IsZero() || !aState.ResourceExists() {
+	if len(statusResult) == 0 {
 		return fmt.Errorf("DRBD resource %q does not exist", drbdResName)
 	}
 
-	volumes := aState.Volumes()
-	if len(volumes) == 0 {
+	devices := statusResult[0].Devices
+	if len(devices) == 0 {
 		return fmt.Errorf("DRBD resource %q has no volumes", drbdResName)
 	}
 
-	minor := uint(volumes[0].Minor())
+	minor := uint(devices[0].Minor)
 
 	// Get parameters
 	clearBitmap := false
