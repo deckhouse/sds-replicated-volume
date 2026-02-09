@@ -1,4 +1,64 @@
-- name: DRBD
+- id: UTIL_LINUX
+  version: "v2.39.3"
+
+- id: DRBD
+  version: "9.2.13"
+  name: DRBD
   link: https://github.com/LINBIT/drbd
   description: DRBD, developed by LINBIT, provides networked RAID 1 functionality for GNU/Linux. It is designed for high availability clusters and software defined storage.
-  license: GPL 2.0 license
+  license: GPL-2.0
+
+- id: DRBD_REACTOR
+  version: "1.8.0"
+
+- id: DRBD_UTILS
+  version: "9.30.0"
+
+- id: LINSTOR_AFFINITY_CONTROLLER
+  version: "0.3.0"
+
+- id: LINSTOR_API_PY
+  version: "1.19.0"
+
+- id: LINSTOR_CLIENT
+  version: "1.19.0"
+
+- id: LINSTOR_COMMON
+  version: "999c3c0793376f88b891eb7ef3dc8f8bc9aa26ec"
+
+- id: LINSTOR_CSI
+  version: "98544cadb6d111d27a86a11ec07de91b99704b82"
+
+- id: LINSTOR_K8S_AWAIT_ELECTION
+  version: "0.3.1"
+
+- id: LINSTOR_SCHEDULER_EXTENDER
+  version: "0.3.2"
+
+- id: LINSTOR_SCHEDULER_STORK
+  version: "2.11.5"
+
+- id: LINSTOR_SERVER
+  version: "1.24.2"
+  name: LINSTOR
+  link: https://github.com/LINBIT/linstor-server
+  description: LINSTOR is an open source software-defined storage solution by LINBIT for provisioning and managing block devices, LVM or ZFS volumes, and DRBD resources.
+  license: GPL-3.0
+
+- id: LINSTOR_SERVER_GRADLE
+  version: "6.9.3"
+
+- id: LINSTOR_SERVER_PIRAEUS
+  version: "20e96f83f52631dc06d011b7f96293d4026236a1"
+
+- id: LINSTOR_WAIT_UNTIL
+  version: "0.2.1"
+
+- id: SEMVER_TOOL
+  version: "3.4.0"
+
+- id: SPAAS
+  version: "v0.1.5"
+
+- id: THIN_SEND_RECV
+  version: "1.1.3"
