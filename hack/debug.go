@@ -1176,8 +1176,8 @@ var knownKeys = map[string]bool{
 	"time": true, "level": true, "msg": true,
 	"controller": true, "controllerGroup": true, "controllerKind": true,
 	"namespace": true, "name": true, "reconcileID": true,
-	"startedAt": true, "source": true,
-	"err": true, "error": true,
+	"startedAt": true,
+	"err":       true, "error": true,
 }
 
 func parseLogEntry(line string) *logEntry {
@@ -1213,6 +1213,19 @@ func parseLogEntry(line string) *logEntry {
 		}
 		// Skip the phase group — its data is already extracted.
 		if k == e.PhaseName {
+			continue
+		}
+		// "source" appears twice in controller-runtime JSON: once as a slog
+		// AddSource object ({"function":...,"file":...,"line":...}) and once
+		// as a string from the controller event source (e.g. "kind source:
+		// *v1alpha1.ReplicatedStorageClass"). json.Unmarshal keeps the last
+		// value, so we see the string for Starting EventSource messages and
+		// the object for everything else. Skip the object, show the string.
+		if k == "source" {
+			if s, ok := v.(string); ok {
+				s = strings.TrimPrefix(s, "kind source: ")
+				e.extras = append(e.extras, kv{key: "source", val: s})
+			}
 			continue
 		}
 		// Format the value.
@@ -1294,19 +1307,16 @@ func strVal(m map[string]any, key string) string {
 // ---------------------------------------------------------------------------
 
 func filterLogEntry(e *logEntry, ws *watchSet) bool {
-	// 1. Has controllerKind + name → reconcile log for a specific object.
+	// Has controllerKind + name → reconcile log for a specific object.
+	// Only show if the object matches the watch set.
 	if e.Kind != "" && e.Name != "" {
 		return ws.matchesLog(e.Kind, e.Name)
 	}
 
-	// 2. Has controllerKind but no name → controller-level message.
-	//    Show if any target watches that kind.
-	if e.Kind != "" {
-		kind := shortKindFor(e.Kind)
-		return ws.kindAll[kind] || ws.kindNames[kind] != nil
-	}
-
-	// 3. No controllerKind field → global message (startup, shutdown, etc.).
+	// No specific object name → controller-level lifecycle message or global
+	// message (Starting EventSource, Starting Controller, Starting workers,
+	// building controller, shutdown, etc.). Always show regardless of watch
+	// set — these are informational and help understand system state.
 	return true
 }
 

@@ -108,6 +108,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	base := rsc.DeepCopy()
 
 	eo := flow.MergeEnsures(
+		// Clear legacy phase/reason fields set by the old controller.
+		ensureLegacyFieldsCleared(rf.Ctx(), rsc),
+
 		// Ensure storagePool name and condition are up to date.
 		ensureStoragePool(rf.Ctx(), rsc, targetStoragePoolName, rsp),
 
@@ -264,6 +267,28 @@ func (r *Reconciler) reconcileMetadata(
 }
 
 // --- Ensure helpers ---
+
+// ensureLegacyFieldsCleared clears legacy status.phase and status.reason fields
+// that were written by the old controller (sds-replicated-volume-controller).
+func ensureLegacyFieldsCleared(
+	ctx context.Context,
+	rsc *v1alpha1.ReplicatedStorageClass,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "legacy-fields-cleared")
+	defer ef.OnEnd(&outcome)
+
+	changed := false
+	if rsc.Status.Phase != "" {
+		rsc.Status.Phase = ""
+		changed = true
+	}
+	if rsc.Status.Reason != "" {
+		rsc.Status.Reason = ""
+		changed = true
+	}
+
+	return ef.Ok().ReportChangedIf(changed)
+}
 
 // ensureStoragePool ensures status.storagePoolName and StoragePoolReady condition are up to date.
 //
