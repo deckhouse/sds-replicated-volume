@@ -1161,7 +1161,7 @@ var _ = Describe("Reconciler", func() {
 					fake.NewClientBuilder().WithScheme(scheme),
 				),
 			).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -1197,7 +1197,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc, rsp).
 				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{}))).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -1234,7 +1234,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc).
 				WithStatusSubresource(rsc))).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -1285,7 +1285,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc).
 				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{}))).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -1320,7 +1320,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc).
 				WithStatusSubresource(rsc))).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -1363,7 +1363,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc).
 				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{}))).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -1375,7 +1375,6 @@ var _ = Describe("Reconciler", func() {
 			var updatedRSC v1alpha1.ReplicatedStorageClass
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)).To(Succeed())
 			Expect(updatedRSC.Finalizers).To(ContainElement(v1alpha1.RSCControllerFinalizer))
-			Expect(updatedRSC.Finalizers).To(ContainElement(replicatedStorageClassFinalizerName))
 		})
 
 		It("keeps finalizer when RSC has deletionTimestamp but RVs exist", func() {
@@ -1383,7 +1382,7 @@ var _ = Describe("Reconciler", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:              "rsc-1",
-					Finalizers:        []string{v1alpha1.RSCControllerFinalizer, replicatedStorageClassFinalizerName},
+					Finalizers:        []string{v1alpha1.RSCControllerFinalizer},
 					DeletionTimestamp: &now,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
@@ -1407,7 +1406,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc, rv).
 				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{}))).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -1419,7 +1418,6 @@ var _ = Describe("Reconciler", func() {
 			var updatedRSC v1alpha1.ReplicatedStorageClass
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)).To(Succeed())
 			Expect(updatedRSC.Finalizers).To(ContainElement(v1alpha1.RSCControllerFinalizer))
-			Expect(updatedRSC.Finalizers).NotTo(ContainElement(replicatedStorageClassFinalizerName))
 		})
 
 		It("removes finalizer when RSC has deletionTimestamp and no RVs", func() {
@@ -1427,7 +1425,7 @@ var _ = Describe("Reconciler", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:              "rsc-1",
-					Finalizers:        []string{v1alpha1.RSCControllerFinalizer, replicatedStorageClassFinalizerName},
+					Finalizers:        []string{v1alpha1.RSCControllerFinalizer},
 					DeletionTimestamp: &now,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
@@ -1445,7 +1443,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc).
 				WithStatusSubresource(rsc))).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -1454,7 +1452,6 @@ var _ = Describe("Reconciler", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(reconcile.Result{}))
 
-			// After removing the finalizer, the object is deleted by the API server.
 			var updatedRSC v1alpha1.ReplicatedStorageClass
 			err = cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)
 			Expect(err).To(HaveOccurred())
@@ -1488,7 +1485,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc, rsp).
 				WithStatusSubresource(rsc, rsp).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			ctx := flow.BeginRootReconcile(context.Background()).Ctx()
 			outcome := rec.reconcileDeletion(ctx, "rsc-1", rsc, []string{"auto-rsp-abc"})
@@ -1525,7 +1522,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsp).
 				WithStatusSubresource(rsp).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			ctx := flow.BeginRootReconcile(context.Background()).Ctx()
 			outcome := rec.reconcileDeletion(ctx, "rsc-deleted", nil, []string{"auto-rsp-abc"})
@@ -1553,7 +1550,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc).
 				WithStatusSubresource(rsc).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			ctx := flow.BeginRootReconcile(context.Background()).Ctx()
 			outcome := rec.reconcileDeletion(ctx, "rsc-1", rsc, nil)
@@ -1571,7 +1568,7 @@ var _ = Describe("Reconciler", func() {
 			cl = fake.NewClientBuilder().
 				WithScheme(scheme).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			ctx := flow.BeginRootReconcile(context.Background()).Ctx()
 			outcome := rec.reconcileDeletion(ctx, "rsc-gone", nil, nil)
@@ -1602,7 +1599,7 @@ var _ = Describe("Reconciler", func() {
 						WithStatusSubresource(rsp),
 				),
 			).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-deleted"},
@@ -1646,7 +1643,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc).
 				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{}).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			targetStoragePoolName := "auto-rsp-test123"
 			rsp, outcome := rec.reconcileRSP(context.Background(), rsc, targetStoragePoolName)
@@ -1701,7 +1698,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc, existingRSP).
 				WithStatusSubresource(rsc, existingRSP).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			rsp, outcome := rec.reconcileRSP(context.Background(), rsc, "auto-rsp-existing")
 
@@ -1747,7 +1744,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc, existingRSP).
 				WithStatusSubresource(rsc, existingRSP).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			rsp, outcome := rec.reconcileRSP(context.Background(), rsc, "auto-rsp-existing")
 
@@ -1797,7 +1794,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsc, existingRSP).
 				WithStatusSubresource(rsc, existingRSP).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			rsp, outcome := rec.reconcileRSP(context.Background(), rsc, "auto-rsp-existing")
 
@@ -1818,7 +1815,7 @@ var _ = Describe("Reconciler", func() {
 			cl = fake.NewClientBuilder().
 				WithScheme(scheme).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			outcome := rec.reconcileRSPRelease(context.Background(), "rsc-1", "non-existent-rsp")
 
@@ -1842,7 +1839,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsp).
 				WithStatusSubresource(rsp).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			outcome := rec.reconcileRSPRelease(context.Background(), "rsc-1", "my-rsp")
 
@@ -1871,7 +1868,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsp).
 				WithStatusSubresource(rsp).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			outcome := rec.reconcileRSPRelease(context.Background(), "rsc-1", "my-rsp")
 
@@ -1902,7 +1899,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsp).
 				WithStatusSubresource(rsp).
 				Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			outcome := rec.reconcileRSPRelease(context.Background(), "rsc-1", "my-rsp")
 
@@ -2263,6 +2260,13 @@ var _ = Describe("Reconciler", func() {
 							Reason:             "Ready",
 							ObservedGeneration: 5,
 						},
+						{
+							Type:               v1alpha1.ReplicatedStorageClassCondReadyType,
+							Status:             metav1.ConditionTrue,
+							Reason:             v1alpha1.ReplicatedStorageClassCondReadyReasonReady,
+							Message:            "Storage class is ready",
+							ObservedGeneration: 5,
+						},
 					},
 				},
 			}
@@ -2357,6 +2361,13 @@ var _ = Describe("Reconciler", func() {
 							Type:               v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType,
 							Status:             metav1.ConditionTrue,
 							Reason:             "Ready",
+							ObservedGeneration: 5,
+						},
+						{
+							Type:               v1alpha1.ReplicatedStorageClassCondReadyType,
+							Status:             metav1.ConditionTrue,
+							Reason:             v1alpha1.ReplicatedStorageClassCondReadyReasonReady,
+							Message:            "Storage class is ready",
 							ObservedGeneration: 5,
 						},
 					},
@@ -3192,12 +3203,13 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "pool-1"},
 			}
 
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithObjects(rsc, rsp).
-				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})).
-				Build()
-			rec = NewReconciler(cl)
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(
+				testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(rsc, rsp).
+					WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})),
+			).Build()
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			_, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -3238,12 +3250,13 @@ var _ = Describe("Reconciler", func() {
 				Provisioner: "other.provisioner",
 			}
 
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithObjects(rsc, sc, rsp).
-				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})).
-				Build()
-			rec = NewReconciler(cl)
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(
+				testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(rsc, sc, rsp).
+					WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})),
+			).Build()
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			_, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -3281,12 +3294,13 @@ var _ = Describe("Reconciler", func() {
 			delete(oldSC.Parameters, storageClassParamZonesKey)
 			oldSC.Labels = map[string]string{"custom": "1"}
 
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithObjects(rsc, oldSC, rsp).
-				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})).
-				Build()
-			rec = NewReconciler(cl)
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(
+				testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(rsc, oldSC, rsp).
+					WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})),
+			).Build()
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			_, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -3330,12 +3344,13 @@ var _ = Describe("Reconciler", func() {
 			oldSC.Annotations = nil
 			oldSC.Finalizers = nil
 
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithObjects(rsc, oldSC, rsp).
-				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})).
-				Build()
-			rec = NewReconciler(cl)
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(
+				testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(rsc, oldSC, rsp).
+					WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})),
+			).Build()
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
 
 			_, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsc-1"},
@@ -3479,6 +3494,13 @@ var _ = Describe("Reconciler", func() {
 							Type:               v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType,
 							Status:             metav1.ConditionTrue,
 							Reason:             "Ready",
+							ObservedGeneration: 5,
+						},
+						{
+							Type:               v1alpha1.ReplicatedStorageClassCondReadyType,
+							Status:             metav1.ConditionTrue,
+							Reason:             v1alpha1.ReplicatedStorageClassCondReadyReasonReady,
+							Message:            "Storage class is ready",
 							ObservedGeneration: 5,
 						},
 					},

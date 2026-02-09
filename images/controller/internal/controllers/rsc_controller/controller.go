@@ -18,6 +18,7 @@ package rsccontroller
 
 import (
 	"context"
+	"os"
 
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -41,7 +42,12 @@ const (
 func BuildController(mgr manager.Manager) error {
 	cl := mgr.GetClient()
 
-	rec := NewReconciler(cl)
+	ns := controllerNamespaceDefault
+	if v := os.Getenv(podNamespaceEnvVar); v != "" {
+		ns = v
+	}
+
+	rec := NewReconciler(cl, ns)
 
 	return builder.ControllerManagedBy(mgr).
 		Named(RSCControllerName).
