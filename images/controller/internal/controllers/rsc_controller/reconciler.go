@@ -694,7 +694,7 @@ func validateEligibleNodes(
 	replication v1alpha1.ReplicatedStorageClassReplication,
 ) error {
 	if len(eligibleNodes) == 0 {
-		return fmt.Errorf("No nodes available in the storage pool")
+		return fmt.Errorf("no nodes available in the storage pool")
 	}
 
 	// Count nodes and nodes with disks.
@@ -731,7 +731,7 @@ func validateEligibleNodes(
 	case v1alpha1.ReplicationNone:
 		// At least 1 node required.
 		if totalNodes < 1 {
-			return fmt.Errorf("Replication None requires at least 1 node, have %d", totalNodes)
+			return fmt.Errorf("replication None requires at least 1 node, have %d", totalNodes)
 		}
 
 	case v1alpha1.ReplicationAvailability:
@@ -767,10 +767,10 @@ func validateAvailabilityReplication(
 	case v1alpha1.TopologyTransZonal:
 		// 3 different zones, at least 2 with disks.
 		if len(nodesByZone) < 3 {
-			return fmt.Errorf("Replication Availability with TransZonal topology requires nodes in at least 3 zones, have %d", len(nodesByZone))
+			return fmt.Errorf("replication Availability with TransZonal topology requires nodes in at least 3 zones, have %d", len(nodesByZone))
 		}
 		if zonesWithDisks < 2 {
-			return fmt.Errorf("Replication Availability with TransZonal topology requires at least 2 zones with disks, have %d", zonesWithDisks)
+			return fmt.Errorf("replication Availability with TransZonal topology requires at least 2 zones with disks, have %d", zonesWithDisks)
 		}
 
 	case v1alpha1.TopologyZonal:
@@ -783,20 +783,20 @@ func validateAvailabilityReplication(
 				}
 			}
 			if len(nodes) < 3 {
-				return fmt.Errorf("Replication Availability with Zonal topology requires at least 3 nodes in each zone, zone %q has %d", zone, len(nodes))
+				return fmt.Errorf("replication Availability with Zonal topology requires at least 3 nodes in each zone, zone %q has %d", zone, len(nodes))
 			}
 			if zoneNodesWithDisks < 2 {
-				return fmt.Errorf("Replication Availability with Zonal topology requires at least 2 nodes with disks in each zone, zone %q has %d", zone, zoneNodesWithDisks)
+				return fmt.Errorf("replication Availability with Zonal topology requires at least 2 nodes with disks in each zone, zone %q has %d", zone, zoneNodesWithDisks)
 			}
 		}
 
 	default:
 		// Ignored topology or unspecified: global check.
 		if totalNodes < 3 {
-			return fmt.Errorf("Replication Availability requires at least 3 nodes, have %d", totalNodes)
+			return fmt.Errorf("replication Availability requires at least 3 nodes, have %d", totalNodes)
 		}
 		if nodesWithDisks < 2 {
-			return fmt.Errorf("Replication Availability requires at least 2 nodes with disks, have %d", nodesWithDisks)
+			return fmt.Errorf("replication Availability requires at least 2 nodes with disks, have %d", nodesWithDisks)
 		}
 	}
 
@@ -814,7 +814,7 @@ func validateConsistencyReplication(
 	case v1alpha1.TopologyTransZonal:
 		// 2 different zones with disks.
 		if zonesWithDisks < 2 {
-			return fmt.Errorf("Replication Consistency with TransZonal topology requires at least 2 zones with disks, have %d", zonesWithDisks)
+			return fmt.Errorf("replication Consistency with TransZonal topology requires at least 2 zones with disks, have %d", zonesWithDisks)
 		}
 
 	case v1alpha1.TopologyZonal:
@@ -827,17 +827,17 @@ func validateConsistencyReplication(
 				}
 			}
 			if zoneNodesWithDisks < 2 {
-				return fmt.Errorf("Replication Consistency with Zonal topology requires at least 2 nodes with disks in each zone, zone %q has %d", zone, zoneNodesWithDisks)
+				return fmt.Errorf("replication Consistency with Zonal topology requires at least 2 nodes with disks in each zone, zone %q has %d", zone, zoneNodesWithDisks)
 			}
 		}
 
 	default:
 		// Ignored topology or unspecified: global check.
 		if totalNodes < 2 {
-			return fmt.Errorf("Replication Consistency requires at least 2 nodes, have %d", totalNodes)
+			return fmt.Errorf("replication Consistency requires at least 2 nodes, have %d", totalNodes)
 		}
 		if nodesWithDisks < 2 {
-			return fmt.Errorf("Replication Consistency requires at least 2 nodes with disks, have %d", nodesWithDisks)
+			return fmt.Errorf("replication Consistency requires at least 2 nodes with disks, have %d", nodesWithDisks)
 		}
 	}
 
@@ -855,7 +855,7 @@ func validateConsistencyAndAvailabilityReplication(
 	case v1alpha1.TopologyTransZonal:
 		// 3 zones with disks.
 		if zonesWithDisks < 3 {
-			return fmt.Errorf("Replication ConsistencyAndAvailability with TransZonal topology requires at least 3 zones with disks, have %d", zonesWithDisks)
+			return fmt.Errorf("replication ConsistencyAndAvailability with TransZonal topology requires at least 3 zones with disks, have %d", zonesWithDisks)
 		}
 
 	case v1alpha1.TopologyZonal:
@@ -868,14 +868,14 @@ func validateConsistencyAndAvailabilityReplication(
 				}
 			}
 			if zoneNodesWithDisks < 3 {
-				return fmt.Errorf("Replication ConsistencyAndAvailability with Zonal topology requires at least 3 nodes with disks in each zone, zone %q has %d", zone, zoneNodesWithDisks)
+				return fmt.Errorf("replication ConsistencyAndAvailability with Zonal topology requires at least 3 nodes with disks in each zone, zone %q has %d", zone, zoneNodesWithDisks)
 			}
 		}
 
 	default:
 		// Ignored topology or unspecified: global check.
 		if nodesWithDisks < 3 {
-			return fmt.Errorf("Replication ConsistencyAndAvailability requires at least 3 nodes with disks, have %d", nodesWithDisks)
+			return fmt.Errorf("replication ConsistencyAndAvailability requires at least 3 nodes with disks, have %d", nodesWithDisks)
 		}
 	}
 
