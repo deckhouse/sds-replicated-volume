@@ -9,7 +9,6 @@ build:
       removeLabels:
         - /.*/
 ---
-{{ tpl (.Files.Get ".werf/defines/oss-yaml.tmpl") $ }}
 {{ tpl (.Files.Get ".werf/base-images.yaml") $ }}
 {{ tpl (.Files.Get ".werf/consts.yaml") $ }}
 {{ tpl (.Files.Get ".werf/defines/oss-yaml.tmpl") $ }}
