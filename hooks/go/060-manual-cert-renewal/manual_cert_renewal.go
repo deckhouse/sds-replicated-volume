@@ -172,7 +172,7 @@ func getTrigger(ctx context.Context, cl client.Client, input *pkg.HookInput) *v1
 		return nil
 	}
 
-	if err := snapshots[0].UnmarhalTo(cm); err != nil {
+	if err := snapshots[0].UnmarshalTo(cm); err != nil {
 		input.Logger.Error("failed unmarshalling snapshot, skip update", "err", err)
 		return nil
 	}
