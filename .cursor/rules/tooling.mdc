@@ -41,3 +41,18 @@ Anything that may change the working tree, git history, or touches external syst
 - If edits touch CRD types (`api/v1alpha1`), run `bash hack/generate_code.sh` **only after confirmation**.
 - Prefer tasks/commands above over ad-hoc custom pipelines to keep CI parity.
 
+## Prepare for commit
+
+When the user asks to "prepare for commit" (or similar: "pre-commit checks", "run all checks before commit"), run the following commands in order **without asking for confirmation**:
+
+```bash
+go work sync && \
+bash hack/go-mod-tidy && \
+bash hack/generate_code.sh && \
+bash hack/run-linter.sh && \
+bash hack/run-tests.sh
+```
+
+The agent MUST request `"all"` permissions (disable sandbox) when running these commands, because sandbox restrictions cause SSL/TLS errors in `go mod` and related tooling.
+
+If any command fails, stop and report the error.

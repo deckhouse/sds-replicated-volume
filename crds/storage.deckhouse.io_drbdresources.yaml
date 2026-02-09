@@ -14,7 +14,7 @@ spec:
     listKind: DRBDResourceList
     plural: drbdresources
     shortNames:
-    - dr
+    - drbdr
     singular: drbdresource
   scope: Cluster
   versions:
@@ -63,6 +63,11 @@ spec:
             type: object
           spec:
             properties:
+              actualNameOnTheNode:
+                maxLength: 253
+                minLength: 1
+                pattern: ^[0-9A-Za-z.+_-]*$
+                type: string
               allowTwoPrimaries:
                 default: false
                 type: boolean
@@ -114,6 +119,7 @@ spec:
                           address:
                             properties:
                               ipv4:
+                                maxLength: 15
                                 pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
                                 type: string
                               port:
@@ -137,9 +143,11 @@ spec:
                       maxItems: 16
                       minItems: 1
                       type: array
-                      x-kubernetes-list-map-keys:
-                      - systemNetworkName
-                      x-kubernetes-list-type: map
+                      x-kubernetes-list-type: atomic
+                      x-kubernetes-validations:
+                      - message: paths[].systemNetworkName must be unique
+                        rule: self.all(x, self.exists_one(y, x.systemNetworkName ==
+                          y.systemNetworkName))
                     pauseSync:
                       default: false
                       type: boolean
@@ -158,6 +166,8 @@ spec:
                       maxLength: 256
                       type: string
                     sharedSecretAlg:
+                      description: SharedSecretAlg enumerates possible hashing algorithms
+                        for DRBD shared secrets.
                       enum:
                       - SHA256
                       - SHA1
@@ -182,14 +192,15 @@ spec:
                 - name
                 x-kubernetes-list-type: map
               quorum:
-                maximum: 31
+                maximum: 32
                 minimum: 0
                 type: integer
               quorumMinimumRedundancy:
-                maximum: 31
+                maximum: 32
                 minimum: 0
                 type: integer
               role:
+                default: Secondary
                 description: DRBDRole represents the role of a DRBD resource.
                 enum:
                 - Primary
@@ -199,9 +210,12 @@ spec:
                 anyOf:
                 - type: integer
                 - type: string
+                description: Required when type is Diskful, must be empty when type
+                  is Diskless.
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
               state:
+                default: Up
                 description: DRBDResourceState represents the desired state of a DRBD
                   resource.
                 enum:
@@ -215,6 +229,7 @@ spec:
                 maxItems: 16
                 minItems: 1
                 type: array
+                x-kubernetes-list-type: set
               type:
                 default: Diskful
                 description: DRBDResourceType represents the type of a DRBD resource.
@@ -225,7 +240,6 @@ spec:
             required:
             - nodeID
             - nodeName
-            - size
             - systemNetworks
             type: object
           status:
@@ -234,9 +248,13 @@ spec:
                 properties:
                   allowTwoPrimaries:
                     type: boolean
-                  disk:
-                    description: Disk path, e.g. /dev/...
-                    maxLength: 256
+                  lvmLogicalVolumeName:
+                    description: |-
+                      LVMLogicalVolumeName is the LVM logical volume name currently configured in DRBD.
+                      This reflects the actual backing volume that DRBD is using, not the desired spec value.
+                      DRBD itself stores the block device path (e.g. /dev/vg/lv), and this field is
+                      reverse-computed from that path to the LVMLogicalVolume name.
+                    maxLength: 128
                     type: string
                   quorum:
                     type: integer
@@ -262,7 +280,10 @@ spec:
                     - Down
                     type: string
                   type:
-                    description: DRBDResourceType represents the type of a DRBD resource.
+                    description: |-
+                      Type is the current effective DRBD configuration (diskful or diskless).
+                      This reflects how DRBD is configured, not the transient disk state
+                      (which could be DISKLESS, ATTACHING, DETACHING, etc.).
                     enum:
                     - Diskful
                     - Diskless
@@ -274,6 +295,7 @@ spec:
                     address:
                       properties:
                         ipv4:
+                          maxLength: 15
                           pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
                           type: string
                         port:
@@ -293,20 +315,100 @@ spec:
                   type: object
                 maxItems: 32
                 type: array
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: addresses[].systemNetworkName must be unique
+                  rule: self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
               device:
                 description: |-
                   Device path, e.g. /dev/drbd10012 or /dev/sds-replicated/<rvrName>
                   Only present on primary
                 maxLength: 256
                 type: string
+              deviceIOSuspended:
+                description: |-
+                  DeviceIOSuspended indicates whether I/O is suspended on the device.
+                  Only set when attached (device is present).
+                type: boolean
               diskState:
+                description: |-
+                  DiskState represents the state of a DRBD backing disk.
+                  It reflects the disk's synchronization status and determines whether
+                  application I/O can be served locally or requires peer involvement.
                 type: string
               peers:
                 items:
                   properties:
+                    allowRemoteRead:
+                      description: AllowRemoteRead indicates whether reads are allowed
+                        from this peer.
+                      type: boolean
                     connectionState:
                       type: string
                     diskState:
+                      description: |-
+                        DiskState represents the state of a DRBD backing disk.
+                        It reflects the disk's synchronization status and determines whether
+                        application I/O can be served locally or requires peer involvement.
                       type: string
                     name:
                       maxLength: 253
@@ -322,6 +424,7 @@ spec:
                           address:
                             properties:
                               ipv4:
+                                maxLength: 15
                                 pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
                                 type: string
                               port:
@@ -336,6 +439,7 @@ spec:
                             type: boolean
                           systemNetworkName:
                             maxLength: 64
+                            minLength: 1
                             type: string
                         required:
                         - address
@@ -343,9 +447,22 @@ spec:
                         type: object
                       maxItems: 16
                       type: array
-                      x-kubernetes-list-map-keys:
-                      - systemNetworkName
-                      x-kubernetes-list-type: map
+                      x-kubernetes-list-type: atomic
+                      x-kubernetes-validations:
+                      - message: paths[].systemNetworkName must be unique
+                        rule: self.all(x, self.exists_one(y, x.systemNetworkName ==
+                          y.systemNetworkName))
+                    replicationState:
+                      description: ReplicationState is the DRBD replication state
+                        with this peer.
+                      type: string
+                    role:
+                      description: Role is the DRBD role of this peer (Primary or
+                        Secondary).
+                      enum:
+                      - Primary
+                      - Secondary
+                      type: string
                     type:
                       description: DRBDResourceType represents the type of a DRBD
                         resource.
@@ -355,20 +472,16 @@ spec:
                       type: string
                   required:
                   - name
+                  - nodeID
                   type: object
                 maxItems: 31
                 type: array
-                x-kubernetes-list-map-keys:
-                - name
-                x-kubernetes-list-type: map
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: peers[].nodeID must be unique
+                  rule: self.all(x, self.exists_one(y, x.nodeID == y.nodeID))
               quorum:
                 type: boolean
-              role:
-                description: DRBDRole represents the role of a DRBD resource.
-                enum:
-                - Primary
-                - Secondary
-                type: string
             type: object
         required:
         - metadata
@@ -378,10 +491,14 @@ spec:
         - message: lvmLogicalVolumeName is required when type is Diskful and must
             be empty when type is Diskless
           rule: 'self.spec.type == ''Diskful'' ? has(self.spec.lvmLogicalVolumeName)
-            && self.spec.lvmLogicalVolumeName != ” : !has(self.spec.lvmLogicalVolumeName)
-            || self.spec.lvmLogicalVolumeName == ”'
+            && size(self.spec.lvmLogicalVolumeName) > 0 : !has(self.spec.lvmLogicalVolumeName)
+            || size(self.spec.lvmLogicalVolumeName) == 0'
+        - message: size is required when type is Diskful and must be empty when type
+            is Diskless
+          rule: 'self.spec.type == ''Diskful'' ? has(self.spec.size) : !has(self.spec.size)'
         - message: spec.size cannot be decreased
-          rule: '!has(oldSelf.spec.size) || self.spec.size >= oldSelf.spec.size'
+          rule: '!has(oldSelf.spec.size) || !has(self.spec.size) || self.spec.size
+            >= oldSelf.spec.size'
     served: true
     storage: true
     subresources:

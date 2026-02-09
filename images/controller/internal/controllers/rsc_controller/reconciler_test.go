@@ -84,8 +84,9 @@ var _ = Describe("computeActualVolumesSummary", func() {
 				name:                            "rv-1",
 				configurationObservedGeneration: 1, // Matches rsc.Status.ConfigurationGeneration.
 				conditions: rvViewConditions{
-					configurationReady:   true,
-					satisfyEligibleNodes: true,
+					satisfyEligibleNodesKnown: true,
+					satisfyEligibleNodes:      true,
+					configurationReady:        true,
 				},
 			},
 		}
@@ -95,14 +96,16 @@ var _ = Describe("computeActualVolumesSummary", func() {
 		Expect(*counters.Aligned).To(Equal(int32(1)))
 	})
 
-	It("counts configuration not aligned volumes (configurationReady false)", func() {
+	It("counts configuration not aligned volumes (configurationReady present and false)", func() {
 		rvs := []rvView{
 			{
 				name:                            "rv-1",
 				configurationObservedGeneration: 1, // Matches rsc.Status.ConfigurationGeneration.
 				conditions: rvViewConditions{
-					configurationReady:   false,
-					satisfyEligibleNodes: true,
+					satisfyEligibleNodesKnown: true,
+					satisfyEligibleNodes:      true,
+					configurationReadyKnown:   true,
+					configurationReady:        false,
 				},
 			},
 		}
@@ -112,13 +115,14 @@ var _ = Describe("computeActualVolumesSummary", func() {
 		Expect(*counters.StaleConfiguration).To(Equal(int32(1)))
 	})
 
-	It("counts eligible nodes not aligned volumes (satisfyEligibleNodes false)", func() {
+	It("counts eligible nodes not aligned volumes (satisfyEligibleNodes present and false)", func() {
 		rvs := []rvView{
 			{
 				name: "rv-1",
 				conditions: rvViewConditions{
-					configurationReady:   true,
-					satisfyEligibleNodes: false,
+					satisfyEligibleNodesKnown: true,
+					satisfyEligibleNodes:      false,
+					configurationReady:        true,
 				},
 			},
 		}
@@ -128,14 +132,32 @@ var _ = Describe("computeActualVolumesSummary", func() {
 		Expect(*counters.InConflictWithEligibleNodes).To(Equal(int32(1)))
 	})
 
+	It("does not count RVs with absent SatisfyEligibleNodes condition as in conflict", func() {
+		rvs := []rvView{
+			{
+				name: "rv-1",
+				conditions: rvViewConditions{
+					// SatisfyEligibleNodes condition is absent (not yet evaluated).
+					satisfyEligibleNodesKnown: false,
+					satisfyEligibleNodes:      false,
+				},
+			},
+		}
+
+		counters := computeActualVolumesSummary(rsc, rvs)
+
+		Expect(*counters.InConflictWithEligibleNodes).To(Equal(int32(0)))
+	})
+
 	It("returns total and inConflictWithEligibleNodes when RV has not acknowledged (mismatched configurationGeneration)", func() {
 		rvs := []rvView{
 			{
 				name:                            "rv-1",
-				configurationObservedGeneration: 0, // Mismatch - RSC has 1
+				configurationObservedGeneration: 99, // Mismatch - RSC has 1 (non-zero to distinguish from "unset")
 				conditions: rvViewConditions{
-					configurationReady:   true,
-					satisfyEligibleNodes: false, // nodesOK=false
+					satisfyEligibleNodesKnown: true,
+					satisfyEligibleNodes:      false, // nodesOK=false
+					configurationReady:        true,
 				},
 			},
 		}
@@ -156,8 +178,9 @@ var _ = Describe("computeActualVolumesSummary", func() {
 				name:                            "rv-1",
 				configurationObservedGeneration: 1,
 				conditions: rvViewConditions{
-					configurationReady:   true,
-					satisfyEligibleNodes: true,
+					satisfyEligibleNodesKnown: true,
+					satisfyEligibleNodes:      true,
+					configurationReady:        true,
 				},
 			},
 		}
@@ -208,7 +231,7 @@ var _ = Describe("computeActualVolumesSummary", func() {
 			{
 				name:                            "rv-1",
 				configurationStoragePoolName:    "pool-a",
-				configurationObservedGeneration: 0, // Not acknowledged.
+				configurationObservedGeneration: 99, // Not acknowledged (non-zero mismatch with RSC's 1).
 			},
 		}
 
@@ -265,7 +288,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			err := validateEligibleNodes(nil, rsc.Spec.Topology, rsc.Spec.Replication)
 
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("no eligible nodes"))
+			Expect(err.Error()).To(ContainSubstring("No nodes available in the storage pool"))
 		})
 	})
 
@@ -858,21 +881,20 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 			name:                            name,
 			configurationObservedGeneration: 1,
 			conditions: rvViewConditions{
-				configurationReady:   configOK,
-				satisfyEligibleNodes: nodesOK,
+				satisfyEligibleNodesKnown: true,
+				satisfyEligibleNodes:      nodesOK,
+				configurationReadyKnown:   true,
+				configurationReady:        configOK,
 			},
 		}
 	}
 
-	// makePendingRV creates an rvView that has NOT acknowledged the RSC configuration.
+	// makePendingRV creates an rvView that has NOT acknowledged the RSC configuration
+	// and has no conditions yet (brand-new RV that hasn't been evaluated).
 	makePendingRV := func(name string) rvView {
 		return rvView{
 			name:                            name,
-			configurationObservedGeneration: 0, // Mismatch - RSC has 1
-			conditions: rvViewConditions{
-				configurationReady:   false,
-				satisfyEligibleNodes: false,
-			},
+			configurationObservedGeneration: 99, // Non-zero mismatch with RSC's 1 (0 means "unset", treated as acknowledged)
 		}
 	}
 
@@ -897,7 +919,7 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 		}
 	})
 
-	It("sets ConfigurationRolledOut to Unknown and VolumesSatisfyEligibleNodes based on actual when PendingObservation > 0", func() {
+	It("sets ConfigurationRolledOut to Unknown and VolumesSatisfyEligibleNodes to True when all RVs are pending with unknown eligible-nodes condition", func() {
 		rvs := []rvView{
 			makePendingRV("rv-1"),
 			makePendingRV("rv-2"),
@@ -911,7 +933,8 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 
 		// Check summary
 		Expect(rsc.Status.Volumes.PendingObservation).To(Equal(ptr.To(int32(3))))
-		Expect(rsc.Status.Volumes.InConflictWithEligibleNodes).To(Equal(ptr.To(int32(3))))
+		// Pending RVs have no SatisfyEligibleNodes condition yet, so none are "in conflict".
+		Expect(rsc.Status.Volumes.InConflictWithEligibleNodes).To(Equal(ptr.To(int32(0))))
 
 		// ConfigurationRolledOut is Unknown because we can't determine config status without acknowledgment.
 		configCond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType)
@@ -920,11 +943,11 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 		Expect(configCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonNewConfigurationNotYetObserved))
 		Expect(configCond.Message).To(ContainSubstring("3 volume(s) pending observation"))
 
-		// VolumesSatisfyEligibleNodes is calculated regardless of acknowledgment.
+		// VolumesSatisfyEligibleNodes is True because no RVs are known to be in conflict.
 		nodesCond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType)
 		Expect(nodesCond).NotTo(BeNil())
-		Expect(nodesCond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(nodesCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonManualConflictResolution))
+		Expect(nodesCond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(nodesCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonAllVolumesSatisfy))
 	})
 
 	It("sets ConfigurationRolledOut to False when StaleConfiguration > 0", func() {
@@ -1073,6 +1096,47 @@ var _ = Describe("makeConfiguration", func() {
 	})
 })
 
+var _ = Describe("rscShouldBeDeleted", func() {
+	It("returns true when rsc is nil", func() {
+		Expect(rscShouldBeDeleted(nil, nil)).To(BeTrue())
+	})
+
+	It("returns true when rsc is nil even with rvs", func() {
+		rvs := []rvView{{name: "rv-1"}}
+		Expect(rscShouldBeDeleted(nil, rvs)).To(BeTrue())
+	})
+
+	It("returns true when DeletionTimestamp is set and no RVs", func() {
+		now := metav1.Now()
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rsc-1",
+				DeletionTimestamp: &now,
+			},
+		}
+		Expect(rscShouldBeDeleted(rsc, nil)).To(BeTrue())
+	})
+
+	It("returns false when DeletionTimestamp is set but RVs exist", func() {
+		now := metav1.Now()
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rsc-1",
+				DeletionTimestamp: &now,
+			},
+		}
+		rvs := []rvView{{name: "rv-1"}}
+		Expect(rscShouldBeDeleted(rsc, rvs)).To(BeFalse())
+	})
+
+	It("returns false when DeletionTimestamp is nil", func() {
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+		}
+		Expect(rscShouldBeDeleted(rsc, nil)).To(BeFalse())
+	})
+})
+
 var _ = Describe("Reconciler", func() {
 	var (
 		scheme *runtime.Scheme
@@ -1092,7 +1156,11 @@ var _ = Describe("Reconciler", func() {
 
 	Describe("Reconcile", func() {
 		It("does nothing when RSC is not found", func() {
-			cl = fake.NewClientBuilder().WithScheme(scheme).Build()
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(
+				testhelpers.WithRVByReplicatedStorageClassNameIndex(
+					fake.NewClientBuilder().WithScheme(scheme),
+				),
+			).Build()
 			rec = NewReconciler(cl)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
@@ -1124,10 +1192,10 @@ var _ = Describe("Reconciler", func() {
 					},
 				},
 			}
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rsc, rsp).
-				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})).
+				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{}))).
 				Build()
 			rec = NewReconciler(cl)
 
@@ -1161,10 +1229,10 @@ var _ = Describe("Reconciler", func() {
 					StoragePool: "rsp-not-found",
 				},
 			}
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rsc).
-				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})).
+				WithStatusSubresource(rsc))).
 				Build()
 			rec = NewReconciler(cl)
 
@@ -1181,7 +1249,7 @@ var _ = Describe("Reconciler", func() {
 			// StoragePool should remain unchanged (waiting for RSP to exist).
 			Expect(updatedRSC.Spec.StoragePool).To(Equal("rsp-not-found"))
 
-			// Finalizer should NOT be added (reconcileMigrationFromRSP returns Done before reconcileMain).
+			// Finalizer should NOT be added (reconcileMigrationFromRSP returns Done before reconcileMetadata).
 			Expect(updatedRSC.Finalizers).To(BeEmpty())
 
 			// Conditions should be set.
@@ -1212,10 +1280,10 @@ var _ = Describe("Reconciler", func() {
 					},
 				},
 			}
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rsc).
-				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})).
+				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{}))).
 				Build()
 			rec = NewReconciler(cl)
 
@@ -1247,10 +1315,10 @@ var _ = Describe("Reconciler", func() {
 					Topology:      v1alpha1.TopologyZonal,
 				},
 			}
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rsc).
-				WithStatusSubresource(rsc)).
+				WithStatusSubresource(rsc))).
 				Build()
 			rec = NewReconciler(cl)
 
@@ -1290,10 +1358,10 @@ var _ = Describe("Reconciler", func() {
 					},
 				},
 			}
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rsc).
-				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})).
+				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{}))).
 				Build()
 			rec = NewReconciler(cl)
 
@@ -1334,10 +1402,10 @@ var _ = Describe("Reconciler", func() {
 					ReplicatedStorageClassName: "rsc-1",
 				},
 			}
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rsc, rv).
-				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})).
+				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{}))).
 				Build()
 			rec = NewReconciler(cl)
 
@@ -1372,10 +1440,10 @@ var _ = Describe("Reconciler", func() {
 					},
 				},
 			}
-			cl = testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rsc).
-				WithStatusSubresource(rsc)).
+				WithStatusSubresource(rsc))).
 				Build()
 			rec = NewReconciler(cl)
 
@@ -1391,6 +1459,163 @@ var _ = Describe("Reconciler", func() {
 			err = cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)
 			Expect(err).To(HaveOccurred())
 			Expect(client.IgnoreNotFound(err)).To(BeNil())
+		})
+	})
+
+	Describe("reconcileDeletion", func() {
+		It("releases RSPs from usedBy and removes finalizer", func() {
+			now := metav1.Now()
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rsc-1",
+					Finalizers:        []string{v1alpha1.RSCControllerFinalizer},
+					DeletionTimestamp: &now,
+				},
+			}
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "auto-rsp-abc",
+					Finalizers: []string{v1alpha1.RSCControllerFinalizer},
+				},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					UsedBy: v1alpha1.ReplicatedStoragePoolUsedBy{
+						ReplicatedStorageClassNames: []string{"other-rsc", "rsc-1"},
+					},
+				},
+			}
+			cl = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rsc, rsp).
+				WithStatusSubresource(rsc, rsp).
+				Build()
+			rec = NewReconciler(cl)
+
+			ctx := flow.BeginRootReconcile(context.Background()).Ctx()
+			outcome := rec.reconcileDeletion(ctx, "rsc-1", rsc, []string{"auto-rsp-abc"})
+
+			Expect(outcome.Error()).To(BeNil())
+
+			// RSP should have rsc-1 removed from usedBy.
+			var updatedRSP v1alpha1.ReplicatedStoragePool
+			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "auto-rsp-abc"}, &updatedRSP)).To(Succeed())
+			Expect(updatedRSP.Status.UsedBy.ReplicatedStorageClassNames).To(Equal([]string{"other-rsc"}))
+
+			// Finalizer should be removed from RSC.
+			var updatedRSC v1alpha1.ReplicatedStorageClass
+			err := cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)
+			if err == nil {
+				Expect(updatedRSC.Finalizers).NotTo(ContainElement(v1alpha1.RSCControllerFinalizer))
+			}
+		})
+
+		It("cleans usedBy when rsc is nil (already deleted)", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "auto-rsp-abc",
+					Finalizers: []string{v1alpha1.RSCControllerFinalizer},
+				},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					UsedBy: v1alpha1.ReplicatedStoragePoolUsedBy{
+						ReplicatedStorageClassNames: []string{"rsc-deleted"},
+					},
+				},
+			}
+			cl = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rsp).
+				WithStatusSubresource(rsp).
+				Build()
+			rec = NewReconciler(cl)
+
+			ctx := flow.BeginRootReconcile(context.Background()).Ctx()
+			outcome := rec.reconcileDeletion(ctx, "rsc-deleted", nil, []string{"auto-rsp-abc"})
+
+			Expect(outcome.Error()).To(BeNil())
+
+			// RSP should be deleted (last user removed).
+			var updatedRSP v1alpha1.ReplicatedStoragePool
+			err := cl.Get(context.Background(), client.ObjectKey{Name: "auto-rsp-abc"}, &updatedRSP)
+			Expect(err).To(HaveOccurred())
+			Expect(client.IgnoreNotFound(err)).To(BeNil())
+		})
+
+		It("removes finalizer when no RSPs in usedBy", func() {
+			now := metav1.Now()
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rsc-1",
+					Finalizers:        []string{v1alpha1.RSCControllerFinalizer},
+					DeletionTimestamp: &now,
+				},
+			}
+			cl = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rsc).
+				WithStatusSubresource(rsc).
+				Build()
+			rec = NewReconciler(cl)
+
+			ctx := flow.BeginRootReconcile(context.Background()).Ctx()
+			outcome := rec.reconcileDeletion(ctx, "rsc-1", rsc, nil)
+
+			Expect(outcome.Error()).To(BeNil())
+
+			// RSC should have finalizer removed (and be deleted by fake client).
+			var updatedRSC v1alpha1.ReplicatedStorageClass
+			err := cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)
+			Expect(err).To(HaveOccurred())
+			Expect(client.IgnoreNotFound(err)).To(BeNil())
+		})
+
+		It("does nothing when rsc is nil and no RSPs in usedBy", func() {
+			cl = fake.NewClientBuilder().
+				WithScheme(scheme).
+				Build()
+			rec = NewReconciler(cl)
+
+			ctx := flow.BeginRootReconcile(context.Background()).Ctx()
+			outcome := rec.reconcileDeletion(ctx, "rsc-gone", nil, nil)
+
+			Expect(outcome.Error()).To(BeNil())
+		})
+	})
+
+	Describe("Reconcile orphaned usedBy cleanup", func() {
+		It("cleans up orphaned usedBy when RSC is not found", func() {
+			// RSP has a deleted RSC in usedBy but RSC no longer exists.
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "auto-rsp-abc",
+					Finalizers: []string{v1alpha1.RSCControllerFinalizer},
+				},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					UsedBy: v1alpha1.ReplicatedStoragePoolUsedBy{
+						ReplicatedStorageClassNames: []string{"rsc-deleted"},
+					},
+				},
+			}
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(
+				testhelpers.WithRVByReplicatedStorageClassNameIndex(
+					fake.NewClientBuilder().
+						WithScheme(scheme).
+						WithObjects(rsp).
+						WithStatusSubresource(rsp),
+				),
+			).Build()
+			rec = NewReconciler(cl)
+
+			result, err := rec.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: "rsc-deleted"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			// RSP should be deleted (last user removed).
+			var updatedRSP v1alpha1.ReplicatedStoragePool
+			getErr := cl.Get(context.Background(), client.ObjectKey{Name: "auto-rsp-abc"}, &updatedRSP)
+			Expect(getErr).To(HaveOccurred())
+			Expect(client.IgnoreNotFound(getErr)).To(BeNil())
 		})
 	})
 
@@ -1424,7 +1649,7 @@ var _ = Describe("Reconciler", func() {
 			rec = NewReconciler(cl)
 
 			targetStoragePoolName := "auto-rsp-test123"
-			outcome, rsp := rec.reconcileRSP(context.Background(), rsc, targetStoragePoolName)
+			rsp, outcome := rec.reconcileRSP(context.Background(), rsc, targetStoragePoolName)
 
 			Expect(outcome.ShouldReturn()).To(BeFalse())
 			Expect(rsp).NotTo(BeNil())
@@ -1478,7 +1703,7 @@ var _ = Describe("Reconciler", func() {
 				Build()
 			rec = NewReconciler(cl)
 
-			outcome, rsp := rec.reconcileRSP(context.Background(), rsc, "auto-rsp-existing")
+			rsp, outcome := rec.reconcileRSP(context.Background(), rsc, "auto-rsp-existing")
 
 			Expect(outcome.ShouldReturn()).To(BeFalse())
 			Expect(rsp).NotTo(BeNil())
@@ -1524,7 +1749,7 @@ var _ = Describe("Reconciler", func() {
 				Build()
 			rec = NewReconciler(cl)
 
-			outcome, rsp := rec.reconcileRSP(context.Background(), rsc, "auto-rsp-existing")
+			rsp, outcome := rec.reconcileRSP(context.Background(), rsc, "auto-rsp-existing")
 
 			Expect(outcome.ShouldReturn()).To(BeFalse())
 			Expect(rsp).NotTo(BeNil())
@@ -1574,7 +1799,7 @@ var _ = Describe("Reconciler", func() {
 				Build()
 			rec = NewReconciler(cl)
 
-			outcome, rsp := rec.reconcileRSP(context.Background(), rsc, "auto-rsp-existing")
+			rsp, outcome := rec.reconcileRSP(context.Background(), rsc, "auto-rsp-existing")
 
 			Expect(outcome.ShouldReturn()).To(BeFalse())
 			Expect(rsp).NotTo(BeNil())
@@ -1960,7 +2185,7 @@ var _ = Describe("Reconciler", func() {
 			}).To(Panic())
 		})
 
-		It("sets Ready=False when StoragePoolReady is not True", func() {
+		It("sets Ready=False when StoragePoolReady is not True (initial config)", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rsc-1",
@@ -1969,6 +2194,7 @@ var _ = Describe("Reconciler", func() {
 				Status: v1alpha1.ReplicatedStorageClassStatus{
 					StoragePoolBasedOnGeneration: 5,
 					// No StoragePoolReady condition - defaults to not-true.
+					// No Configuration - initial config.
 				},
 			}
 			rsp := &v1alpha1.ReplicatedStoragePool{}
@@ -1980,9 +2206,45 @@ var _ = Describe("Reconciler", func() {
 			Expect(cond).NotTo(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondReadyReasonWaitingForStoragePool))
+			Expect(cond.Message).To(Equal("Pending: initial configuration. Waiting for ReplicatedStoragePool to become ready"))
 		})
 
-		It("sets Ready=False when eligible nodes validation fails", func() {
+		It("sets Ready=False with diff when StoragePoolReady is not True (config changed)", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rsc-1",
+					Generation: 6,
+				},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Replication:  v1alpha1.ReplicationConsistencyAndAvailability,
+					Topology:     v1alpha1.TopologyIgnored,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal,
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					StoragePoolBasedOnGeneration: 6,
+					StoragePoolName:              "pool-1",
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Replication:     v1alpha1.ReplicationNone,
+						Topology:        v1alpha1.TopologyIgnored,
+						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
+						StoragePoolName: "pool-1",
+					},
+					// No StoragePoolReady condition.
+				},
+			}
+			rsp := &v1alpha1.ReplicatedStoragePool{}
+
+			outcome := ensureConfiguration(context.Background(), rsc, rsp)
+
+			Expect(outcome.DidChange()).To(BeTrue())
+			cond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondReadyType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondReadyReasonWaitingForStoragePool))
+			Expect(cond.Message).To(Equal("Pending: replication None -> ConsistencyAndAvailability. Waiting for ReplicatedStoragePool to become ready"))
+		})
+
+		It("sets Ready=False when eligible nodes validation fails (initial config)", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rsc-1",
@@ -2024,6 +2286,57 @@ var _ = Describe("Reconciler", func() {
 			Expect(cond).NotTo(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondReadyReasonInsufficientEligibleNodes))
+			Expect(cond.Message).To(HavePrefix("Pending: initial configuration. "))
+		})
+
+		It("sets Ready=False with diff when eligible nodes validation fails (config changed)", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rsc-1",
+					Generation: 6,
+				},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Replication:  v1alpha1.ReplicationConsistencyAndAvailability,
+					Topology:     v1alpha1.TopologyIgnored,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal,
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					StoragePoolBasedOnGeneration:     6,
+					StoragePoolName:                  "pool-1",
+					StoragePoolEligibleNodesRevision: 1,
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Replication:     v1alpha1.ReplicationNone,
+						Topology:        v1alpha1.TopologyIgnored,
+						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
+						StoragePoolName: "pool-1",
+					},
+					Conditions: []metav1.Condition{
+						{
+							Type:               v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType,
+							Status:             metav1.ConditionTrue,
+							Reason:             "Ready",
+							ObservedGeneration: 6,
+						},
+					},
+				},
+			}
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodesRevision: 2,
+					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+						{NodeName: "node-1"}, // Not enough for ConsistencyAndAvailability.
+					},
+				},
+			}
+
+			outcome := ensureConfiguration(context.Background(), rsc, rsp)
+
+			Expect(outcome.DidChange()).To(BeTrue())
+			cond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondReadyType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondReadyReasonInsufficientEligibleNodes))
+			Expect(cond.Message).To(HavePrefix("Pending: replication None -> ConsistencyAndAvailability. "))
 		})
 
 		It("updates StoragePoolEligibleNodesRevision when RSP revision changes and validation passes", func() {
@@ -2092,6 +2405,13 @@ var _ = Describe("Reconciler", func() {
 							Reason:             "Ready",
 							ObservedGeneration: 5,
 						},
+						{
+							Type:               v1alpha1.ReplicatedStorageClassCondReadyType,
+							Status:             metav1.ConditionTrue,
+							Reason:             v1alpha1.ReplicatedStorageClassCondReadyReasonReady,
+							Message:            "Storage class is ready",
+							ObservedGeneration: 5,
+						},
 					},
 				},
 			}
@@ -2111,6 +2431,58 @@ var _ = Describe("Reconciler", func() {
 			outcome := ensureConfiguration(context.Background(), rsc, rsp)
 
 			Expect(outcome.DidChange()).To(BeFalse())
+		})
+
+		It("re-asserts Ready=True when in-sync but Ready was cleared by transient error", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rsc-1",
+					Generation: 5,
+				},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Replication: v1alpha1.ReplicationNone,
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					StoragePoolBasedOnGeneration:     5,
+					StoragePoolName:                  "my-pool",
+					StoragePoolEligibleNodesRevision: 2,
+					ConfigurationGeneration:          5,
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						StoragePoolName: "my-pool",
+					},
+					Conditions: []metav1.Condition{
+						{
+							Type:               v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType,
+							Status:             metav1.ConditionTrue,
+							Reason:             "Ready",
+							ObservedGeneration: 5,
+						},
+						{
+							Type:               v1alpha1.ReplicatedStorageClassCondReadyType,
+							Status:             metav1.ConditionFalse,
+							Reason:             v1alpha1.ReplicatedStorageClassCondReadyReasonWaitingForStoragePool,
+							Message:            "Waiting for ReplicatedStoragePool to become ready",
+							ObservedGeneration: 5,
+						},
+					},
+				},
+			}
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodesRevision: 2,
+					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+						{NodeName: "node-1"},
+					},
+				},
+			}
+
+			outcome := ensureConfiguration(context.Background(), rsc, rsp)
+
+			Expect(outcome.DidChange()).To(BeTrue())
+			readyCond := meta.FindStatusCondition(rsc.Status.Conditions, v1alpha1.ReplicatedStorageClassCondReadyType)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondReadyReasonReady))
 		})
 
 		It("updates configuration and sets Ready=True when generation mismatch", func() {
@@ -2155,7 +2527,6 @@ var _ = Describe("Reconciler", func() {
 			outcome := ensureConfiguration(context.Background(), rsc, rsp)
 
 			Expect(outcome.DidChange()).To(BeTrue())
-			Expect(outcome.OptimisticLockRequired()).To(BeTrue())
 			Expect(rsc.Status.ConfigurationGeneration).To(Equal(int64(6)))
 			Expect(rsc.Status.Configuration).NotTo(BeNil())
 			Expect(rsc.Status.Configuration.StoragePoolName).To(Equal("my-pool"))
@@ -2168,7 +2539,139 @@ var _ = Describe("Reconciler", func() {
 		})
 	})
 
-	var _ = Describe("applyStoragePool", func() {
+	Describe("computePendingConfigurationDiffMessage", func() {
+		It("returns 'Pending: initial configuration' when status.configuration is nil", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Replication: v1alpha1.ReplicationNone,
+				},
+			}
+			msg := computePendingConfigurationDiffMessage(rsc, "pool-1")
+			Expect(msg).To(Equal("Pending: initial configuration"))
+		})
+
+		It("returns empty string when all fields match", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Replication:  v1alpha1.ReplicationNone,
+					Topology:     v1alpha1.TopologyIgnored,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal,
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Replication:     v1alpha1.ReplicationNone,
+						Topology:        v1alpha1.TopologyIgnored,
+						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
+						StoragePoolName: "pool-1",
+					},
+				},
+			}
+			msg := computePendingConfigurationDiffMessage(rsc, "pool-1")
+			Expect(msg).To(BeEmpty())
+		})
+
+		It("shows replication diff", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Replication:  v1alpha1.ReplicationConsistencyAndAvailability,
+					Topology:     v1alpha1.TopologyIgnored,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal,
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Replication:     v1alpha1.ReplicationNone,
+						Topology:        v1alpha1.TopologyIgnored,
+						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
+						StoragePoolName: "pool-1",
+					},
+				},
+			}
+			msg := computePendingConfigurationDiffMessage(rsc, "pool-1")
+			Expect(msg).To(Equal("Pending: replication None -> ConsistencyAndAvailability"))
+		})
+
+		It("shows topology diff", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Replication:  v1alpha1.ReplicationNone,
+					Topology:     v1alpha1.TopologyTransZonal,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal,
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Replication:     v1alpha1.ReplicationNone,
+						Topology:        v1alpha1.TopologyIgnored,
+						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
+						StoragePoolName: "pool-1",
+					},
+				},
+			}
+			msg := computePendingConfigurationDiffMessage(rsc, "pool-1")
+			Expect(msg).To(Equal("Pending: topology Ignored -> TransZonal"))
+		})
+
+		It("shows volumeAccess diff", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Replication:  v1alpha1.ReplicationNone,
+					Topology:     v1alpha1.TopologyIgnored,
+					VolumeAccess: v1alpha1.VolumeAccessLocal,
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Replication:     v1alpha1.ReplicationNone,
+						Topology:        v1alpha1.TopologyIgnored,
+						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
+						StoragePoolName: "pool-1",
+					},
+				},
+			}
+			msg := computePendingConfigurationDiffMessage(rsc, "pool-1")
+			Expect(msg).To(Equal("Pending: volumeAccess PreferablyLocal -> Local"))
+		})
+
+		It("shows storage pool diff", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Replication:  v1alpha1.ReplicationNone,
+					Topology:     v1alpha1.TopologyIgnored,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal,
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Replication:     v1alpha1.ReplicationNone,
+						Topology:        v1alpha1.TopologyIgnored,
+						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
+						StoragePoolName: "auto-rsp-old",
+					},
+				},
+			}
+			msg := computePendingConfigurationDiffMessage(rsc, "auto-rsp-new")
+			Expect(msg).To(Equal("Pending: storage: not yet accepted (current pool: auto-rsp-old, pending pool: auto-rsp-new)"))
+		})
+
+		It("shows multiple diffs joined by comma", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Replication:  v1alpha1.ReplicationConsistencyAndAvailability,
+					Topology:     v1alpha1.TopologyTransZonal,
+					VolumeAccess: v1alpha1.VolumeAccessLocal,
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Replication:     v1alpha1.ReplicationNone,
+						Topology:        v1alpha1.TopologyIgnored,
+						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
+						StoragePoolName: "pool-old",
+					},
+				},
+			}
+			msg := computePendingConfigurationDiffMessage(rsc, "pool-new")
+			Expect(msg).To(Equal("Pending: replication None -> ConsistencyAndAvailability, topology Ignored -> TransZonal, volumeAccess PreferablyLocal -> Local, storage: not yet accepted (current pool: pool-old, pending pool: pool-new)"))
+		})
+	})
+
+	Describe("applyStoragePool", func() {
 		It("returns true and updates when generation differs", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
@@ -3041,7 +3544,6 @@ var _ = Describe("Reconciler", func() {
 			outcome := ensureConfiguration(context.Background(), rsc, rsp)
 
 			Expect(outcome.DidChange()).To(BeTrue())
-			Expect(outcome.OptimisticLockRequired()).To(BeTrue())
 			Expect(rsc.Status.ConfigurationGeneration).To(Equal(int64(6)))
 			Expect(rsc.Status.Configuration).NotTo(BeNil())
 			Expect(rsc.Status.Configuration.StoragePoolName).To(Equal("my-pool"))

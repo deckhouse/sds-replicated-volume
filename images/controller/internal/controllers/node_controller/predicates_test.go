@@ -55,7 +55,7 @@ var _ = Describe("nodePredicates", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node-1",
 					Labels: map[string]string{
-						v1alpha1.AgentNodeLabelKey: "node-1",
+						v1alpha1.AgentNodeLabelKey: "",
 					},
 				},
 			}
@@ -74,7 +74,7 @@ var _ = Describe("nodePredicates", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node-1",
 					Labels: map[string]string{
-						v1alpha1.AgentNodeLabelKey: "node-1",
+						v1alpha1.AgentNodeLabelKey: "",
 					},
 				},
 			}
@@ -99,7 +99,7 @@ var _ = Describe("nodePredicates", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node-1",
 					Labels: map[string]string{
-						v1alpha1.AgentNodeLabelKey: "node-1",
+						v1alpha1.AgentNodeLabelKey: "",
 					},
 				},
 			}
@@ -107,7 +107,7 @@ var _ = Describe("nodePredicates", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node-1",
 					Labels: map[string]string{
-						v1alpha1.AgentNodeLabelKey: "node-1",
+						v1alpha1.AgentNodeLabelKey: "",
 					},
 				},
 			}
@@ -141,6 +141,60 @@ var _ = Describe("nodePredicates", func() {
 
 			for _, pred := range preds {
 				Expect(pred(e)).To(BeFalse())
+			}
+		})
+
+		It("returns true when AgentNodeLabelKey value changed from canonical empty to non-empty", func() {
+			oldNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-1",
+					Labels: map[string]string{
+						v1alpha1.AgentNodeLabelKey: "",
+					},
+				},
+			}
+			newNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-1",
+					Labels: map[string]string{
+						v1alpha1.AgentNodeLabelKey: "wrong-value",
+					},
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldNode,
+				ObjectNew: newNode,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when AgentNodeLabelKey value changed from non-empty to canonical empty", func() {
+			oldNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-1",
+					Labels: map[string]string{
+						v1alpha1.AgentNodeLabelKey: "wrong-value",
+					},
+				},
+			}
+			newNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-1",
+					Labels: map[string]string{
+						v1alpha1.AgentNodeLabelKey: "",
+					},
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldNode,
+				ObjectNew: newNode,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
 			}
 		})
 
@@ -446,6 +500,38 @@ var _ = Describe("eligibleNodesEqual", func() {
 		}
 
 		Expect(eligibleNodesEqual(a, b)).To(BeTrue())
+	})
+
+	It("returns true for equal unsorted slices (builds sorted index)", func() {
+		// Same nodes but in different order.
+		a := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-3"},
+			{NodeName: "node-1"},
+			{NodeName: "node-2"},
+		}
+		b := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-2"},
+			{NodeName: "node-3"},
+			{NodeName: "node-1"},
+		}
+
+		Expect(eligibleNodesEqual(a, b)).To(BeTrue())
+	})
+
+	It("returns false for different unsorted slices (builds sorted index)", func() {
+		// Different nodes in unsorted order.
+		a := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-3"},
+			{NodeName: "node-1"},
+			{NodeName: "node-2"},
+		}
+		b := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-2"},
+			{NodeName: "node-4"}, // Different.
+			{NodeName: "node-1"},
+		}
+
+		Expect(eligibleNodesEqual(a, b)).To(BeFalse())
 	})
 })
 

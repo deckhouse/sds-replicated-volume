@@ -77,6 +77,10 @@ spec:
                   type: string
                 maxItems: 2
                 type: array
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: actuallyAttachedTo must be unique
+                  rule: self.all(x, self.exists_one(y, x == y))
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -173,12 +177,13 @@ spec:
                 description: Datamesh is the computed datamesh configuration for the
                   volume.
                 properties:
-                  allowTwoPrimaries:
+                  allowMultiattach:
                     default: false
-                    description: AllowTwoPrimaries enables two primaries mode for
-                      the datamesh.
+                    description: AllowMultiattach enables multiattach mode for the
+                      datamesh.
                     type: boolean
                   members:
+                    default: []
                     description: Members is the list of datamesh members.
                     items:
                       description: ReplicatedVolumeDatameshMember represents a member
@@ -192,6 +197,7 @@ spec:
                               address:
                                 properties:
                                   ipv4:
+                                    maxLength: 15
                                     pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
                                     type: string
                                   port:
@@ -210,18 +216,42 @@ spec:
                             - systemNetworkName
                             type: object
                           maxItems: 16
+                          minItems: 1
                           type: array
+                          x-kubernetes-list-type: atomic
+                          x-kubernetes-validations:
+                          - message: addresses[].systemNetworkName must be unique
+                            rule: self.all(x, self.exists_one(y, x.systemNetworkName
+                              == y.systemNetworkName))
+                        attached:
+                          default: false
+                          description: Attached indicates whether this member should
+                            be attached (Primary in DRBD terms).
+                          type: boolean
+                        lvmVolumeGroupName:
+                          description: LVMVolumeGroupName is the LVMVolumeGroup resource
+                            name where this replica should be placed.
+                          maxLength: 253
+                          minLength: 1
+                          pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
+                          type: string
+                        lvmVolumeGroupThinPoolName:
+                          description: LVMVolumeGroupThinPoolName is the thin pool
+                            name (for LVMThin storage pools).
+                          maxLength: 64
+                          type: string
                         name:
-                          description: Name is the member name (used as list map key).
+                          description: |-
+                            Name is the member name (used as list map key).
+                            Must have format "prefix-N" where N is 0-31.
+                          maxLength: 140
                           minLength: 1
                           type: string
                         nodeName:
                           description: NodeName is the Kubernetes node name where
                             the member is located.
+                          maxLength: 253
                           minLength: 1
-                          type: string
-                        role:
-                          description: Role is the DRBD role of this member.
                           type: string
                         type:
                           description: Type is the member type (Diskful, Access, or
@@ -236,24 +266,43 @@ spec:
                           type: string
                         zone:
                           description: Zone is the zone where the member is located.
+                          maxLength: 64
                           type: string
                       required:
                       - addresses
+                      - attached
                       - name
                       - nodeName
                       - type
                       type: object
                       x-kubernetes-validations:
-                      - message: typeTransition must be ToDiskless for Diskful type,
-                          or ToDiskful for Access/TieBreaker types
-                        rule: 'self.type == ''Diskful'' ? (!has(self.typeTransition)
-                          || self.typeTransition == ''ToDiskless'') : (!has(self.typeTransition)
-                          || self.typeTransition == ''ToDiskful'')'
+                      - message: Diskful can only have ToDiskless typeTransition
+                        rule: self.type != 'Diskful' || !has(self.typeTransition)
+                          || self.typeTransition == 'ToDiskless'
+                      - message: TieBreaker can only have ToDiskful typeTransition
+                        rule: self.type != 'TieBreaker' || !has(self.typeTransition)
+                          || self.typeTransition == 'ToDiskful'
+                      - message: Access cannot have typeTransition
+                        rule: self.type != 'Access' || !has(self.typeTransition)
+                      - message: name must contain '-' separator
+                        rule: self.name.lastIndexOf('-') >= 0
+                      - message: name numeric suffix must be between 0 and 31
+                        rule: int(self.name.substring(self.name.lastIndexOf('-') +
+                          1)) <= 31
+                      - message: lvmVolumeGroupName can only be set for Diskful type
+                          or when typeTransition is ToDiskful
+                        rule: size(self.lvmVolumeGroupName) == 0 || self.type == 'Diskful'
+                          || (has(self.typeTransition) && self.typeTransition == 'ToDiskful')
+                      - message: lvmVolumeGroupThinPoolName requires lvmVolumeGroupName
+                          to be set
+                        rule: size(self.lvmVolumeGroupThinPoolName) == 0 || size(self.lvmVolumeGroupName)
+                          > 0
                     maxItems: 24
                     type: array
-                    x-kubernetes-list-map-keys:
-                    - name
-                    x-kubernetes-list-type: map
+                    x-kubernetes-list-type: atomic
+                    x-kubernetes-validations:
+                    - message: members[].name must be unique
+                      rule: self.all(x, self.exists_one(y, x.name == y.name))
                   quorum:
                     default: 0
                     description: Quorum is the quorum value for the datamesh.
@@ -267,6 +316,18 @@ spec:
                     maximum: 8
                     minimum: 0
                     type: integer
+                  sharedSecret:
+                    description: SharedSecret is the shared secret for DRBD authentication.
+                    maxLength: 256
+                    type: string
+                  sharedSecretAlg:
+                    description: SharedSecretAlg is the hashing algorithm for the
+                      shared secret.
+                    enum:
+                    - SHA256
+                    - SHA1
+                    - DummyForTest
+                    type: string
                   size:
                     anyOf:
                     - type: integer
@@ -275,6 +336,7 @@ spec:
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
                   systemNetworkNames:
+                    default: []
                     description: SystemNetworkNames is the list of system network
                       names for DRBD communication.
                     items:
@@ -282,19 +344,154 @@ spec:
                       type: string
                     maxItems: 16
                     type: array
+                    x-kubernetes-list-type: atomic
+                    x-kubernetes-validations:
+                    - message: systemNetworkNames must be unique
+                      rule: self.all(x, self.exists_one(y, x == y))
                 required:
-                - allowTwoPrimaries
+                - allowMultiattach
                 - members
                 - quorum
                 - quorumMinimumRedundancy
                 - size
                 - systemNetworkNames
                 type: object
+              datameshPendingReplicaTransitions:
+                description: DatameshPendingReplicaTransitions is the list of pending
+                  replica transitions.
+                items:
+                  description: ReplicatedVolumeDatameshPendingReplicaTransition represents
+                    a pending transition for a single replica.
+                  properties:
+                    firstObservedAt:
+                      description: FirstObservedAt is the timestamp when this transition
+                        was first observed.
+                      format: date-time
+                      type: string
+                    message:
+                      description: Message is an optional human-readable message about
+                        the transition state and progress.
+                      maxLength: 512
+                      type: string
+                    name:
+                      description: |-
+                        Name is the replica name.
+                        Must have format "prefix-N" where N is 0-31.
+                      maxLength: 123
+                      minLength: 1
+                      pattern: ^.+-([0-9]|[12][0-9]|3[01])$
+                      type: string
+                    transition:
+                      description: Transition is the pending datamesh transition details
+                        from the replica.
+                      properties:
+                        lvmVolumeGroupName:
+                          description: LVMVolumeGroupName is the LVMVolumeGroup resource
+                            name for Diskful replicas.
+                          minLength: 1
+                          pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
+                          type: string
+                        member:
+                          description: Member indicates whether this replica should
+                            be a datamesh member.
+                          type: boolean
+                        thinPoolName:
+                          description: ThinPoolName is the thin pool name (optional,
+                            for LVMThin storage pools).
+                          type: string
+                        type:
+                          description: Type is the intended type when Member is true.
+                          enum:
+                          - Diskful
+                          - Access
+                          - TieBreaker
+                          type: string
+                      type: object
+                      x-kubernetes-validations:
+                      - message: when member is false, type/lvmVolumeGroupName/thinPoolName
+                          must not be set
+                        rule: '!has(self.member) || self.member == true || (!has(self.type)
+                          && !has(self.lvmVolumeGroupName) && !has(self.thinPoolName))'
+                      - message: when member is true, type is required
+                        rule: '!has(self.member) || self.member == false || has(self.type)'
+                      - message: lvmVolumeGroupName is required when type is Diskful
+                        rule: '!has(self.type) || self.type != ''Diskful'' || has(self.lvmVolumeGroupName)'
+                      - message: lvmVolumeGroupName must not be set when type is not
+                          Diskful
+                        rule: '!has(self.type) || self.type == ''Diskful'' || !has(self.lvmVolumeGroupName)'
+                      - message: thinPoolName requires lvmVolumeGroupName to be set
+                        rule: '!has(self.thinPoolName) || has(self.lvmVolumeGroupName)'
+                  required:
+                  - firstObservedAt
+                  - name
+                  - transition
+                  type: object
+                maxItems: 32
+                type: array
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: datameshPendingReplicaTransitions[].name must be unique
+                  rule: self.all(x, self.exists_one(y, x.name == y.name))
               datameshRevision:
                 description: DatameshRevision is a counter incremented when datamesh
                   configuration changes.
                 format: int64
                 type: integer
+              datameshTransitions:
+                description: DatameshTransitions is the list of active datamesh transitions.
+                items:
+                  description: ReplicatedVolumeDatameshTransition represents an active
+                    datamesh transition.
+                  properties:
+                    datameshRevision:
+                      description: |-
+                        DatameshRevision is the datamesh revision when this transition was introduced.
+                        Zero means unset. For Formation transitions, must be absent (zero).
+                      format: int64
+                      type: integer
+                    formation:
+                      description: |-
+                        Formation holds formation-specific details.
+                        Required when type is "Formation"; must not be set otherwise.
+                      properties:
+                        phase:
+                          default: Preconfigure
+                          description: Phase is the current formation phase.
+                          enum:
+                          - Preconfigure
+                          - EstablishConnectivity
+                          - BootstrapData
+                          type: string
+                      required:
+                      - phase
+                      type: object
+                    message:
+                      description: Message is an optional human-readable message about
+                        the transition.
+                      type: string
+                    startedAt:
+                      description: StartedAt is the timestamp when this transition
+                        started.
+                      format: date-time
+                      type: string
+                    type:
+                      description: Type is the transition type.
+                      type: string
+                  required:
+                  - startedAt
+                  - type
+                  type: object
+                  x-kubernetes-validations:
+                  - message: formation is required when type is Formation
+                    rule: self.type != 'Formation' || has(self.formation)
+                  - message: formation is only allowed when type is Formation
+                    rule: '!has(self.formation) || self.type == ''Formation'''
+                  - message: datameshRevision must be absent (or zero) when type is
+                      Formation
+                    rule: self.type != 'Formation' || !has(self.datameshRevision)
+                      || self.datameshRevision == 0
+                type: array
+                x-kubernetes-list-type: atomic
               desiredAttachTo:
                 description: |-
                   DesiredAttachTo is the desired set of nodes where the volume should be attached (up to 2 nodes).
@@ -303,6 +500,10 @@ spec:
                   type: string
                 maxItems: 2
                 type: array
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: desiredAttachTo must be unique
+                  rule: self.all(x, self.exists_one(y, x == y))
               drbd:
                 properties:
                   config:
@@ -321,6 +522,7 @@ spec:
                   properties:
                     nodeName:
                       description: NodeName is the node where the replica is placed.
+                      maxLength: 253
                       type: string
                     reason:
                       description: Reason describes why this placement violates eligible
@@ -328,13 +530,19 @@ spec:
                       type: string
                     replicaName:
                       description: ReplicaName is the ReplicatedVolumeReplica name.
+                      maxLength: 253
                       type: string
                   required:
                   - nodeName
                   - reason
                   - replicaName
                   type: object
+                maxItems: 32
                 type: array
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: eligibleNodesViolations[].replicaName must be unique
+                  rule: self.all(x, self.exists_one(y, x.replicaName == y.replicaName))
             required:
             - datamesh
             - datameshRevision

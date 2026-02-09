@@ -14,7 +14,7 @@ spec:
     listKind: DRBDResourceOperationList
     plural: drbdresourceoperations
     shortNames:
-    - dro
+    - drbdrop
     singular: drbdresourceoperation
   scope: Cluster
   versions:
@@ -61,10 +61,15 @@ spec:
                   clearBitmap:
                     default: false
                     type: boolean
+                  forceResync:
+                    default: false
+                    type: boolean
                 type: object
                 x-kubernetes-validations:
                 - message: createNewUUID is immutable
                   rule: self == oldSelf
+                - message: clearBitmap and forceResync are mutually exclusive
+                  rule: '!(self.clearBitmap && self.forceResync)'
               drbdResourceName:
                 maxLength: 253
                 minLength: 1

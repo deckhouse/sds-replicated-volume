@@ -85,6 +85,12 @@ To standardize deferred end handlers:
 
 The deferred end handler MUST receive a pointer to that named return variable.
 
+### Return value ordering
+
+- If a function returns **ReconcileOutcome** (in code: `flow.ReconcileOutcome`) along with other return values, **ReconcileOutcome** MUST be the **last return value**.
+- If a function returns **EnsureOutcome** (in code: `flow.EnsureOutcome`) along with other return values, **EnsureOutcome** MUST be the **last return value**.
+- Outcome SHOULD be the only return value for convenience, unless additional return values are clearly justified.
+
 ### No bare return
 
 Any scoped function MUST NOT use bare `return` (empty return). It MUST return explicitly.
@@ -190,16 +196,62 @@ func (r *Reconciler) reconcileFoo(ctx context.Context) (outcome flow.ReconcileOu
 ### Constructing outcomes
 
 A function that returns `flow.ReconcileOutcome` MUST construct it only via `ReconcileFlow` methods:
-- `rf.Continue()`
-- `rf.Done()`
-- `rf.Requeue()`
-- `rf.RequeueAfter(d)`
-- `rf.Fail(err)`
-- `rf.Failf(err, "...")`
+
+**Non-terminal outcomes** (`ShouldReturn() = false`):
+- `rf.Continue()` — keep processing, no requeue intent.
+- `rf.ContinueAndRequeue()` — keep processing, schedule immediate requeue after returning.
+- `rf.ContinueAndRequeueAfter(d)` — keep processing, schedule delayed requeue after returning.
+
+**Terminal outcomes** (`ShouldReturn() = true`):
+- `rf.Done()` — stop now, no requeue.
+- `rf.DoneAndRequeue()` — stop now, schedule immediate requeue.
+- `rf.DoneAndRequeueAfter(d)` — stop now, schedule delayed requeue.
+- `rf.Fail(err)` — stop now with error.
+- `rf.Failf(err, "...")` — stop now with wrapped error.
+
+**When to use `Continue*` vs `Done*` with requeue:**
+- Use `ContinueAndRequeue*` when you need to schedule a requeue but want reconciliation to continue (e.g., to run subsequent reconcile steps, persist accumulated in-memory changes, or perform cleanup before returning).
+- Use `DoneAndRequeue*` when you want to stop processing immediately and schedule a requeue (e.g., all changes are already persisted, or no further steps are needed).
 
 Code MUST NOT:
 - construct `flow.ReconcileOutcome{...}` directly,
-- create a new failure outcome from an existing outcome’s `Error()`.
+- create a new failure outcome from an existing outcome's `Error()`.
+
+### Change tracking
+
+`ReconcileOutcome` supports change tracking, enabling sub-reconciles to propagate change information upward through the reconciliation call graph. **Reconcile methods** use change state to decide whether to patch at all.
+
+Methods:
+- `ReportChanged()` — marks that something changed.
+- `ReportChangedIf(cond bool)` — marks change if condition is true.
+- `DidChange()` — reports whether any change was recorded.
+- `WithChangeFrom(eo EnsureOutcome)` — merges change state from an `EnsureOutcome` (strongest wins).
+
+Rules:
+- Change tracking is optional: if a reconcile method does not call `ReportChanged*`, change state remains "unchanged".
+- Change tracking in **ReconcileOutcome** is useful when **one object** needs to be mutated from **multiple sub-reconciles**,
+  and the parent reconcile method must aggregate change state to decide whether to patch.
+
+Example patterns (illustrative):
+
+```go
+// Pattern 1: Direct change reporting
+return rf.Continue().ReportChangedIf(changed)
+
+// Pattern 2: Propagate from EnsureOutcome
+eo := flow.MergeEnsures(ensureA(...), ensureB(...))
+if eo.Error() != nil {
+    return rf.Fail(eo.Error())
+}
+return rf.Continue().WithChangeFrom(eo)
+
+// Pattern 3: Query change state after merging child outcomes
+outcome := r.reconcileChild1(ctx)
+outcome = outcome.Merge(r.reconcileChild2(ctx))
+if outcome.DidChange() {
+    // ... patch decisions based on DidChange()
+}
+```
 
 ### Handling outcomes
 
@@ -215,6 +267,13 @@ At each call site that receives a `flow.ReconcileOutcome` that can influence con
 ### Merging outcomes
 
 Use `flow.MergeReconciles(...)` or the chainable `outcome.Merge(other)` to combine outcomes when multiple independent steps must all run.
+
+Merge semantics:
+- Terminal outcomes (`Done*`, `Fail`) win over non-terminal outcomes (`Continue*`).
+- Errors are joined via `errors.Join` (any error makes merged outcome a `Fail` — terminal).
+- Among terminal outcomes: errors first, then requeue (minimum delay wins), then `Done`.
+- Among non-terminal outcomes: requeue intent is merged (minimum delay wins).
+- Change state is merged: any changed outcome makes merged outcome changed.
 
 Reviewability:
 - Single-shot merge SHOULD NOT be used (harder to review/extend).
@@ -287,9 +346,8 @@ return childOutcome.Enrichf("foo")
 ## EnsureFlow and EnsureOutcome
 
 `flow.EnsureOutcome` is used by ensure helpers to report:
-- an error (if any),
-- whether the helper mutated its object,
-- and whether the subsequent save must use optimistic locking.
+- an error (if any), and
+- whether the helper mutated its object.
 
 Any ensure helper MUST follow the scope placement rules with `BeginEnsure`.
 
@@ -311,8 +369,6 @@ func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.EnsureOutco
 Rules:
 - Ensure helpers MUST NOT log and also return the same error via `EnsureOutcome`.
   The deferred `ef.OnEnd(&outcome)` logs errors.
-- Code MUST call `RequireOptimisticLock()` only after `ReportChanged()` / `ReportChangedIf(...)`
-  (calling it earlier is a contract violation and panics).
 - To merge multiple sub-ensure results, use `flow.MergeEnsures(...)` or the chainable `outcome.Merge(other)`.
 
 ---

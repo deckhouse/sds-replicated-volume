@@ -21,6 +21,7 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 // ReplicatedStorageClass is a Kubernetes Custom Resource that defines a configuration for a Kubernetes Storage class.
 // +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=rsc
 // +kubebuilder:metadata:labels=heritage=deckhouse
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
@@ -45,12 +46,14 @@ type ReplicatedStorageClassList struct {
 
 // GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It returns the root object's `.status.conditions`.
-func (o *ReplicatedStorageClass) GetStatusConditions() []metav1.Condition { return o.Status.Conditions }
+func (rsc *ReplicatedStorageClass) GetStatusConditions() []metav1.Condition {
+	return rsc.Status.Conditions
+}
 
 // SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It sets the root object's `.status.conditions`.
-func (o *ReplicatedStorageClass) SetStatusConditions(conditions []metav1.Condition) {
-	o.Status.Conditions = conditions
+func (rsc *ReplicatedStorageClass) SetStatusConditions(conditions []metav1.Condition) {
+	rsc.Status.Conditions = conditions
 }
 
 // +kubebuilder:validation:XValidation:rule="!has(self.replication) || self.replication != 'None' || self.topology == 'Ignored'",message="Replication None requires topology Ignored (no replicas to distribute)."
@@ -64,7 +67,7 @@ func (o *ReplicatedStorageClass) SetStatusConditions(conditions []metav1.Conditi
 type ReplicatedStorageClassSpec struct {
 	// StoragePool is the name of a ReplicatedStoragePool resource.
 	// Deprecated: Use Storage instead. This field cannot be added or changed, only removed.
-	// +kubebuilder:validation:XValidation:rule="!has(self) || (has(oldSelf) && self == oldSelf)",message="StoragePool cannot be added or changed, only removed"
+	// +kubebuilder:validation:XValidation:rule="size(self) == 0 || self == oldSelf",message="StoragePool cannot be added or changed, only removed"
 	// +optional
 	StoragePool string `json:"storagePool,omitempty"`
 	// Storage defines the storage backend configuration for this storage class.
@@ -140,21 +143,25 @@ type ReplicatedStorageClassSpec struct {
 	// +kubebuilder:validation:Items={type=string,maxLength=64}
 	// +kubebuilder:validation:XValidation:rule="self.all(n, n == 'Internal')",message="Only 'Internal' network is currently supported"
 	// +kubebuilder:default:={"Internal"}
+	// +listType=set
 	SystemNetworkNames []string `json:"systemNetworkNames"`
 	// ConfigurationRolloutStrategy defines how configuration changes are applied to existing volumes.
 	// Always present with defaults.
+	// +kubebuilder:default={type: "RollingUpdate", rollingUpdate: {maxParallel: 5}}
 	ConfigurationRolloutStrategy ReplicatedStorageClassConfigurationRolloutStrategy `json:"configurationRolloutStrategy"`
 	// EligibleNodesConflictResolutionStrategy defines how the controller handles volumes with eligible nodes conflicts.
 	// Always present with defaults.
+	// +kubebuilder:default={type: "RollingRepair", rollingRepair: {maxParallel: 5}}
 	EligibleNodesConflictResolutionStrategy ReplicatedStorageClassEligibleNodesConflictResolutionStrategy `json:"eligibleNodesConflictResolutionStrategy"`
 	// EligibleNodesPolicy defines policies for managing eligible nodes.
 	// Always present with defaults.
+	// +kubebuilder:default={notReadyGracePeriod: "10m"}
 	EligibleNodesPolicy ReplicatedStoragePoolEligibleNodesPolicy `json:"eligibleNodesPolicy"`
 }
 
 // ReplicatedStorageClassStorage defines the storage backend configuration for RSC.
-// +kubebuilder:validation:XValidation:rule="self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, g.thinPoolName != ”)",message="thinPoolName is required for each lvmVolumeGroups entry when type is LVMThin"
-// +kubebuilder:validation:XValidation:rule="self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName) || g.thinPoolName == ”)",message="thinPoolName must not be specified when type is LVM"
+// +kubebuilder:validation:XValidation:rule="self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, size(g.thinPoolName) > 0)",message="thinPoolName is required for each lvmVolumeGroups entry when type is LVMThin"
+// +kubebuilder:validation:XValidation:rule="self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName) || size(g.thinPoolName) == 0)",message="thinPoolName must not be specified when type is LVM"
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassStorage struct {
 	// Type defines the volumes type. Might be:
@@ -167,7 +174,12 @@ type ReplicatedStorageClassStorage struct {
 	//
 	// > Note that every LVMVolumeGroup resource must have the same type (Thin/Thick)
 	// as specified in the Type field.
+	// TODO(thinpool-object): When ThinPool becomes a separate API object and LVMVolumeGroups
+	// is replaced with selectors, revisit the key. Currently using name only because
+	// thinPoolName is optional and cannot be a listMapKey without a default value.
 	// +kubebuilder:validation:MinItems=1
+	// +listType=map
+	// +listMapKey=name
 	LVMVolumeGroups []ReplicatedStoragePoolLVMVolumeGroups `json:"lvmVolumeGroups"`
 }
 
@@ -320,12 +332,10 @@ type ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair struct {
 // Displays current information about the Storage Class.
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassStatus struct {
-	// +patchMergeKey=type
-	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=type
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// The Storage class current state. Might be:
 	// - Failed (if the controller received incorrect resource configuration or some errors occurred during the operation)
@@ -353,6 +363,7 @@ type ReplicatedStorageClassStatus struct {
 	StoragePoolName string `json:"storagePoolName,omitempty"`
 	// Volumes provides aggregated volume statistics.
 	// Always present (may have total=0).
+	// +kubebuilder:default={}
 	Volumes ReplicatedStorageClassVolumesSummary `json:"volumes"`
 }
 
@@ -403,6 +414,7 @@ type ReplicatedStorageClassVolumesSummary struct {
 	// +optional
 	StaleConfiguration *int32 `json:"staleConfiguration,omitempty"`
 	// UsedStoragePoolNames is a sorted list of storage pool names currently used by volumes.
+	// +listType=atomic
 	// +optional
 	UsedStoragePoolNames []string `json:"usedStoragePoolNames,omitempty"`
 }

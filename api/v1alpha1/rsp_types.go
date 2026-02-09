@@ -16,11 +16,17 @@ limitations under the License.
 
 package v1alpha1
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	"slices"
+	"sort"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
 
 // ReplicatedStoragePool is a Kubernetes Custom Resource that defines a configuration for Linstor Storage-pools.
 // +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=rsp
 // +kubebuilder:metadata:labels=heritage=deckhouse
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
@@ -46,18 +52,21 @@ type ReplicatedStoragePoolList struct {
 
 // GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It returns the root object's `.status.conditions`.
-func (o *ReplicatedStoragePool) GetStatusConditions() []metav1.Condition { return o.Status.Conditions }
+func (rsp *ReplicatedStoragePool) GetStatusConditions() []metav1.Condition {
+	return rsp.Status.Conditions
+}
 
 // SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It sets the root object's `.status.conditions`.
-func (o *ReplicatedStoragePool) SetStatusConditions(conditions []metav1.Condition) {
-	o.Status.Conditions = conditions
+func (rsp *ReplicatedStoragePool) SetStatusConditions(conditions []metav1.Condition) {
+	rsp.Status.Conditions = conditions
 }
 
 // Defines desired rules for Linstor's Storage-pools.
 // +kubebuilder:object:generate=true
-// +kubebuilder:validation:XValidation:rule="self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, g.thinPoolName != ”)",message="thinPoolName is required for each lvmVolumeGroups entry when type is LVMThin"
-// +kubebuilder:validation:XValidation:rule="self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName) || g.thinPoolName == ”)",message="thinPoolName must not be specified when type is LVM"
+// +structType=atomic
+// +kubebuilder:validation:XValidation:rule="self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, size(g.thinPoolName) > 0)",message="thinPoolName is required for each lvmVolumeGroups entry when type is LVMThin"
+// +kubebuilder:validation:XValidation:rule="self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName) || size(g.thinPoolName) == 0)",message="thinPoolName must not be specified when type is LVM"
 type ReplicatedStoragePoolSpec struct {
 	// Defines the volumes type. Might be:
 	// - LVM (for Thick)
@@ -72,6 +81,7 @@ type ReplicatedStoragePoolSpec struct {
 	// as it is in current resource's 'Spec.Type' field.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
 	// +kubebuilder:validation:MinItems=1
+	// +listType=atomic
 	LVMVolumeGroups []ReplicatedStoragePoolLVMVolumeGroups `json:"lvmVolumeGroups"`
 	// Array of zones the Storage pool's volumes should be replicated in.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
@@ -98,9 +108,11 @@ type ReplicatedStoragePoolSpec struct {
 	// +kubebuilder:validation:Items={type=string,maxLength=64}
 	// +kubebuilder:validation:XValidation:rule="self.all(n, n == 'Internal')",message="Only 'Internal' network is currently supported"
 	// +kubebuilder:default:={"Internal"}
+	// +listType=atomic
 	SystemNetworkNames []string `json:"systemNetworkNames"`
 	// EligibleNodesPolicy defines policies for managing eligible nodes.
 	// Always present with defaults.
+	// +kubebuilder:default={notReadyGracePeriod: "10m"}
 	EligibleNodesPolicy ReplicatedStoragePoolEligibleNodesPolicy `json:"eligibleNodesPolicy"`
 }
 
@@ -145,12 +157,10 @@ type ReplicatedStoragePoolLVMVolumeGroups struct {
 // Displays current information about the state of the LINSTOR storage pool.
 // +kubebuilder:object:generate=true
 type ReplicatedStoragePoolStatus struct {
-	// +patchMergeKey=type
-	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=type
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// TODO: Remove Phase once the old controller (sds-replicated-volume-controller) is retired.
 	// Phase is used only by the old controller and will be removed in a future version.
@@ -165,6 +175,8 @@ type ReplicatedStoragePoolStatus struct {
 	// +optional
 	EligibleNodesRevision int64 `json:"eligibleNodesRevision,omitempty"`
 	// EligibleNodes lists nodes eligible for this storage pool.
+	// +kubebuilder:validation:MaxItems=1000
+	// +listType=atomic
 	// +optional
 	EligibleNodes []ReplicatedStoragePoolEligibleNode `json:"eligibleNodes,omitempty"`
 
@@ -177,7 +189,9 @@ type ReplicatedStoragePoolStatus struct {
 // +kubebuilder:object:generate=true
 type ReplicatedStoragePoolUsedBy struct {
 	// ReplicatedStorageClassNames lists RSC names using this storage pool.
-	// +listType=set
+	// +kubebuilder:validation:MaxItems=100
+	// +kubebuilder:validation:items:MaxLength=253
+	// +listType=atomic
 	// +optional
 	ReplicatedStorageClassNames []string `json:"replicatedStorageClassNames,omitempty"`
 }
@@ -204,11 +218,15 @@ func (p ReplicatedStoragePoolPhase) String() string {
 // +kubebuilder:object:generate=true
 type ReplicatedStoragePoolEligibleNode struct {
 	// NodeName is the Kubernetes node name.
+	// +kubebuilder:validation:MaxLength=253
 	NodeName string `json:"nodeName"`
 	// ZoneName is the zone this node belongs to.
+	// +kubebuilder:validation:MaxLength=63
 	// +optional
 	ZoneName string `json:"zoneName,omitempty"`
 	// LVMVolumeGroups lists LVM volume groups available on this node.
+	// +kubebuilder:validation:MaxItems=50
+	// +listType=atomic
 	// +optional
 	LVMVolumeGroups []ReplicatedStoragePoolEligibleNodeLVMVolumeGroup `json:"lvmVolumeGroups,omitempty"`
 	// Unschedulable indicates whether new volumes should not be scheduled to this node.
@@ -223,12 +241,84 @@ type ReplicatedStoragePoolEligibleNode struct {
 // +kubebuilder:object:generate=true
 type ReplicatedStoragePoolEligibleNodeLVMVolumeGroup struct {
 	// Name is the LVMVolumeGroup resource name.
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 	// ThinPoolName is the thin pool name (for LVMThin storage pools).
+	// +kubebuilder:validation:MaxLength=128
 	// +optional
 	ThinPoolName string `json:"thinPoolName,omitempty"`
 	// Unschedulable indicates whether new volumes should not use this volume group.
 	Unschedulable bool `json:"unschedulable"`
 	// Ready indicates whether the LVMVolumeGroup (and its thin pool, if applicable) is ready.
 	Ready bool `json:"ready"`
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// EligibleNodesSortedIndex
+//
+
+// EligibleNodesSortedIndex provides sorted access to EligibleNodes by NodeName.
+// It lazily builds a sorting index only if the input slice is not already sorted,
+// avoiding allocations in the common case.
+//
+// Zero value is not usable; create via NewEligibleNodesSortedIndex.
+//
+// +kubebuilder:object:generate=false
+type EligibleNodesSortedIndex struct {
+	nodes   []ReplicatedStoragePoolEligibleNode
+	indices []int // nil if already sorted (identity mapping)
+}
+
+// NewEligibleNodesSortedIndex creates a sorted index for the given nodes.
+// If nodes are already sorted by NodeName, no allocation occurs (O(n) check only).
+// If not sorted, builds and sorts an index slice (O(n log n), O(n) int allocations).
+func NewEligibleNodesSortedIndex(nodes []ReplicatedStoragePoolEligibleNode) EligibleNodesSortedIndex {
+	// Check if already sorted — O(n), zero allocations.
+	sorted := slices.IsSortedFunc(nodes, func(a, b ReplicatedStoragePoolEligibleNode) int {
+		if a.NodeName < b.NodeName {
+			return -1
+		}
+		if a.NodeName > b.NodeName {
+			return 1
+		}
+		return 0
+	})
+
+	if sorted {
+		return EligibleNodesSortedIndex{nodes: nodes, indices: nil}
+	}
+
+	// Build index slice — O(n) allocations.
+	indices := make([]int, len(nodes))
+	for i := range indices {
+		indices[i] = i
+	}
+
+	// Sort index by NodeName — O(n log n).
+	sort.Slice(indices, func(i, j int) bool {
+		return nodes[indices[i]].NodeName < nodes[indices[j]].NodeName
+	})
+
+	return EligibleNodesSortedIndex{nodes: nodes, indices: indices}
+}
+
+// Len returns the number of nodes.
+func (s EligibleNodesSortedIndex) Len() int {
+	return len(s.nodes)
+}
+
+// NodeName returns the node name at sorted position i.
+func (s EligibleNodesSortedIndex) NodeName(i int) string {
+	if s.indices == nil {
+		return s.nodes[i].NodeName
+	}
+	return s.nodes[s.indices[i]].NodeName
+}
+
+// At returns pointer to node at sorted position i.
+func (s EligibleNodesSortedIndex) At(i int) *ReplicatedStoragePoolEligibleNode {
+	if s.indices == nil {
+		return &s.nodes[i]
+	}
+	return &s.nodes[s.indices[i]]
 }

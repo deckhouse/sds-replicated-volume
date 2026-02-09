@@ -62,6 +62,10 @@ spec:
               > Note that this field is in read-only mode.
             properties:
               configurationRolloutStrategy:
+                default:
+                  rollingUpdate:
+                    maxParallel: 5
+                  type: RollingUpdate
                 description: |-
                   ConfigurationRolloutStrategy defines how configuration changes are applied to existing volumes.
                   Always present with defaults.
@@ -96,6 +100,10 @@ spec:
                 - message: rollingUpdate must not be set when type is not RollingUpdate
                   rule: self.type == 'RollingUpdate' || !has(self.rollingUpdate)
               eligibleNodesConflictResolutionStrategy:
+                default:
+                  rollingRepair:
+                    maxParallel: 5
+                  type: RollingRepair
                 description: |-
                   EligibleNodesConflictResolutionStrategy defines how the controller handles volumes with eligible nodes conflicts.
                   Always present with defaults.
@@ -130,6 +138,8 @@ spec:
                 - message: rollingRepair must not be set when type is not RollingRepair
                   rule: self.type == 'RollingRepair' || !has(self.rollingRepair)
               eligibleNodesPolicy:
+                default:
+                  notReadyGracePeriod: 10m
                 description: |-
                   EligibleNodesPolicy defines policies for managing eligible nodes.
                   Always present with defaults.
@@ -230,6 +240,8 @@ spec:
 
                       > Note that every LVMVolumeGroup resource must have the same type (Thin/Thick)
                       as specified in the Type field.
+                      is replaced with selectors, revisit the key. Currently using name only because
+                      thinPoolName is optional and cannot be a listMapKey without a default value.
                     items:
                       properties:
                         name:
@@ -248,6 +260,9 @@ spec:
                       type: object
                     minItems: 1
                     type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
                   type:
                     description: |-
                       Type defines the volumes type. Might be:
@@ -264,11 +279,11 @@ spec:
                 x-kubernetes-validations:
                 - message: thinPoolName is required for each lvmVolumeGroups entry
                     when type is LVMThin
-                  rule: self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, g.thinPoolName
-                    != ”)
+                  rule: self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, size(g.thinPoolName)
+                    > 0)
                 - message: thinPoolName must not be specified when type is LVM
                   rule: self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName)
-                    || g.thinPoolName == ”)
+                    || size(g.thinPoolName) == 0)
               storagePool:
                 description: |-
                   StoragePool is the name of a ReplicatedStoragePool resource.
@@ -276,7 +291,7 @@ spec:
                 type: string
                 x-kubernetes-validations:
                 - message: StoragePool cannot be added or changed, only removed
-                  rule: '!has(self) || (has(oldSelf) && self == oldSelf)'
+                  rule: size(self) == 0 || self == oldSelf
               systemNetworkNames:
                 default:
                 - Internal
@@ -290,6 +305,7 @@ spec:
                 maxItems: 1
                 minItems: 1
                 type: array
+                x-kubernetes-list-type: set
                 x-kubernetes-validations:
                 - message: Only 'Internal' network is currently supported
                   rule: self.all(n, n == 'Internal')
@@ -495,6 +511,7 @@ spec:
                   will share the same StoragePoolName.
                 type: string
               volumes:
+                default: {}
                 description: |-
                   Volumes provides aggregated volume statistics.
                   Always present (may have total=0).
@@ -529,6 +546,7 @@ spec:
                     items:
                       type: string
                     type: array
+                    x-kubernetes-list-type: atomic
                 type: object
             required:
             - volumes
@@ -538,4 +556,5 @@ spec:
         type: object
     served: true
     storage: true
-    subresources: {}
+    subresources:
+      status: {}

@@ -21,6 +21,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -40,6 +41,14 @@ type Reconciler struct {
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
+// Pre-computed raw merge patch payloads for setting/removing the agent node label.
+// Using raw patches avoids fetching the full Node, DeepCopy, and expensive JSON merge patch
+// diff computation. Each payload is a trivially small, deterministic JSON document.
+var (
+	rawPatchSetAgentLabel    = []byte(`{"metadata":{"labels":{"` + v1alpha1.AgentNodeLabelKey + `":""}}}`)
+	rawPatchRemoveAgentLabel = []byte(`{"metadata":{"labels":{"` + v1alpha1.AgentNodeLabelKey + `":null}}}`)
+)
+
 func NewReconciler(cl client.Client) *Reconciler {
 	return &Reconciler{cl: cl}
 }
@@ -48,7 +57,7 @@ func NewReconciler(cl client.Client) *Reconciler {
 // Reconcile
 //
 
-// Reconcile pattern: Conditional desired evaluation
+// Reconcile pattern: Conditional target evaluation
 //
 // Reconciles a single Node by checking if it should have the AgentNodeLabelKey.
 // A node should have the label if:
@@ -60,7 +69,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	nodeName := req.Name
 
 	// Check current label state (cheap, uses UnsafeDisableDeepCopy).
-	nodeExists, hasLabel, err := r.getNodeAgentLabelPresence(rf.Ctx(), nodeName)
+	nodeExists, hasLabel, labelValueCorrect, err := r.getNodeAgentLabelPresence(rf.Ctx(), nodeName)
 	if err != nil {
 		return rf.Fail(err).ToCtrl()
 	}
@@ -84,33 +93,30 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Node should have label if it has any DRBDResource OR is in any RSP's eligibleNodes.
 	shouldHaveLabel := drbdCount > 0 || rspCount > 0
 
-	// Check if node is already in sync.
-	if hasLabel == shouldHaveLabel {
+	// Check if node is already in sync:
+	// - should have label AND label present with correct (empty) value, OR
+	// - should not have label AND label absent.
+	isInSync := (shouldHaveLabel && labelValueCorrect) || (!shouldHaveLabel && !hasLabel)
+	if isInSync {
 		return rf.Done().ToCtrl()
 	}
 
-	// Need to patch: fetch full node.
-	node, err := r.getNode(rf.Ctx(), nodeName)
-	if err != nil {
+	// Patch node label using a pre-computed raw merge patch.
+	// No full node GET or DeepCopy needed: the patch bytes are trivially small and deterministic.
+	// Without optimistic lock: we only touch a single label map key,
+	// and Node objects change frequently from external sources like kubelet heartbeats,
+	// so optimistic lock would cause constant 409 Conflict errors.
+	var node corev1.Node
+	node.Name = nodeName
+	patch := rawPatchRemoveAgentLabel
+	if shouldHaveLabel {
+		patch = rawPatchSetAgentLabel
+	}
+	if err := r.cl.Patch(rf.Ctx(), &node, client.RawPatch(types.MergePatchType, patch)); err != nil {
 		if apierrors.IsNotFound(err) {
 			// Node was deleted between checks, nothing to do.
 			return rf.Done().ToCtrl()
 		}
-		return rf.Fail(err).ToCtrl()
-	}
-
-	// Take patch base.
-	base := node.DeepCopy()
-
-	// Ensure label state.
-	if shouldHaveLabel {
-		obju.SetLabel(node, v1alpha1.AgentNodeLabelKey, nodeName)
-	} else {
-		obju.RemoveLabel(node, v1alpha1.AgentNodeLabelKey)
-	}
-
-	// Patch node.
-	if err := r.cl.Patch(rf.Ctx(), node, client.MergeFrom(base)); err != nil {
 		return rf.Fail(err).ToCtrl()
 	}
 
@@ -121,31 +127,21 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 // Single-call I/O helper categories
 //
 
-// getNodeAgentLabelPresence checks if a node exists and whether it has the AgentNodeLabelKey.
+// getNodeAgentLabelPresence checks if a node exists, whether it has the AgentNodeLabelKey,
+// and whether the label value is the canonical empty string.
 // Uses UnsafeDisableDeepCopy for performance since we only need to read the label.
-// Returns (exists, hasLabel, err).
-func (r *Reconciler) getNodeAgentLabelPresence(ctx context.Context, name string) (bool, bool, error) {
-	var list corev1.NodeList
-	if err := r.cl.List(ctx, &list,
-		client.MatchingFields{indexes.IndexFieldNodeByMetadataName: name},
-		client.UnsafeDisableDeepCopy,
-	); err != nil {
-		return false, false, err
+// Returns (exists, hasLabel, labelValueCorrect, err).
+func (r *Reconciler) getNodeAgentLabelPresence(ctx context.Context, name string) (bool, bool, bool, error) {
+	var unsafeNode corev1.Node
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, &unsafeNode, client.UnsafeDisableDeepCopy); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, false, false, nil
+		}
+		return false, false, false, err
 	}
-	if len(list.Items) == 0 {
-		return false, false, nil
-	}
-	hasLabel := obju.HasLabel(&list.Items[0], v1alpha1.AgentNodeLabelKey)
-	return true, hasLabel, nil
-}
-
-// getNode fetches a Node by name. Returns NotFound error if node doesn't exist.
-func (r *Reconciler) getNode(ctx context.Context, name string) (*corev1.Node, error) {
-	var node corev1.Node
-	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, &node); err != nil {
-		return nil, err
-	}
-	return &node, nil
+	hasLabel := obju.HasLabel(&unsafeNode, v1alpha1.AgentNodeLabelKey)
+	labelValueCorrect := hasLabel && unsafeNode.Labels[v1alpha1.AgentNodeLabelKey] == ""
+	return true, hasLabel, labelValueCorrect, nil
 }
 
 // getNumberOfDRBDResourcesByNode returns the count of DRBDResource objects on the specified node.

@@ -27,6 +27,8 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
@@ -92,21 +94,21 @@ func TestReconcileFlow_Fail_NilPanics(t *testing.T) {
 	mustPanic(t, func() { _ = rf.Fail(nil) })
 }
 
-func TestReconcileFlow_RequeueAfter_ZeroPanics(t *testing.T) {
+func TestReconcileFlow_DoneAndRequeueAfter_ZeroPanics(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
-	mustPanic(t, func() { _ = rf.RequeueAfter(0) })
+	mustPanic(t, func() { _ = rf.DoneAndRequeueAfter(0) })
 }
 
-func TestReconcileFlow_RequeueAfter_NegativePanics(t *testing.T) {
+func TestReconcileFlow_DoneAndRequeueAfter_NegativePanics(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
-	mustPanic(t, func() { _ = rf.RequeueAfter(-1 * time.Second) })
+	mustPanic(t, func() { _ = rf.DoneAndRequeueAfter(-1 * time.Second) })
 }
 
-func TestReconcileFlow_RequeueAfter_Positive(t *testing.T) {
+func TestReconcileFlow_DoneAndRequeueAfter_Positive(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
-	outcome := rf.RequeueAfter(1 * time.Second)
+	outcome := rf.DoneAndRequeueAfter(1 * time.Second)
 	if !outcome.ShouldReturn() {
-		t.Fatalf("expected ShouldReturn() == true")
+		t.Fatalf("expected ShouldReturn() == true for DoneAndRequeueAfter")
 	}
 
 	res, err := outcome.ToCtrl()
@@ -118,18 +120,60 @@ func TestReconcileFlow_RequeueAfter_Positive(t *testing.T) {
 	}
 }
 
-func TestReconcileFlow_Requeue(t *testing.T) {
+func TestReconcileFlow_DoneAndRequeue(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
-	outcome := rf.Requeue()
+	outcome := rf.DoneAndRequeue()
 	if !outcome.ShouldReturn() {
-		t.Fatalf("expected ShouldReturn() == true")
+		t.Fatalf("expected ShouldReturn() == true for DoneAndRequeue")
 	}
 
 	res, err := outcome.ToCtrl()
 	if err != nil {
 		t.Fatalf("expected err to be nil, got %v", err)
 	}
-	if !res.Requeue { //nolint:staticcheck // testing deprecated Requeue field
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
+		t.Fatalf("expected Requeue to be true")
+	}
+}
+
+func TestReconcileFlow_ContinueAndRequeueAfter_ZeroPanics(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	mustPanic(t, func() { _ = rf.ContinueAndRequeueAfter(0) })
+}
+
+func TestReconcileFlow_ContinueAndRequeueAfter_NegativePanics(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	mustPanic(t, func() { _ = rf.ContinueAndRequeueAfter(-1 * time.Second) })
+}
+
+func TestReconcileFlow_ContinueAndRequeueAfter_Positive(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	outcome := rf.ContinueAndRequeueAfter(1 * time.Second)
+	if outcome.ShouldReturn() {
+		t.Fatalf("expected ShouldReturn() == false for ContinueAndRequeueAfter")
+	}
+
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected err to be nil, got %v", err)
+	}
+	if res.RequeueAfter != 1*time.Second {
+		t.Fatalf("expected RequeueAfter to be %v, got %v", 1*time.Second, res.RequeueAfter)
+	}
+}
+
+func TestReconcileFlow_ContinueAndRequeue(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	outcome := rf.ContinueAndRequeue()
+	if outcome.ShouldReturn() {
+		t.Fatalf("expected ShouldReturn() == false for ContinueAndRequeue")
+	}
+
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected err to be nil, got %v", err)
+	}
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
 		t.Fatalf("expected Requeue to be true")
 	}
 }
@@ -145,9 +189,9 @@ func TestMergeReconciles_DoneWinsOverContinue(t *testing.T) {
 	}
 }
 
-func TestMergeReconciles_RequeueAfterChoosesSmallest(t *testing.T) {
+func TestMergeReconciles_DoneAndRequeueAfterChoosesSmallest(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
-	outcome := flow.MergeReconciles(rf.RequeueAfter(5*time.Second), rf.RequeueAfter(1*time.Second))
+	outcome := flow.MergeReconciles(rf.DoneAndRequeueAfter(5*time.Second), rf.DoneAndRequeueAfter(1*time.Second))
 	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")
 	}
@@ -157,6 +201,54 @@ func TestMergeReconciles_RequeueAfterChoosesSmallest(t *testing.T) {
 	}
 	if res.RequeueAfter != 1*time.Second {
 		t.Fatalf("expected RequeueAfter to be %v, got %v", 1*time.Second, res.RequeueAfter)
+	}
+}
+
+func TestMergeReconciles_ContinueAndRequeueAfterChoosesSmallest(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	outcome := flow.MergeReconciles(rf.ContinueAndRequeueAfter(5*time.Second), rf.ContinueAndRequeueAfter(1*time.Second))
+	if outcome.ShouldReturn() {
+		t.Fatalf("expected ShouldReturn() == false for merged ContinueAndRequeueAfter")
+	}
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected err to be nil, got %v", err)
+	}
+	if res.RequeueAfter != 1*time.Second {
+		t.Fatalf("expected RequeueAfter to be %v, got %v", 1*time.Second, res.RequeueAfter)
+	}
+}
+
+func TestMergeReconciles_TerminalWinsOverNonTerminal(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	// Terminal (Done) should win over non-terminal (ContinueAndRequeueAfter)
+	outcome := flow.MergeReconciles(rf.Done(), rf.ContinueAndRequeueAfter(1*time.Second))
+	if !outcome.ShouldReturn() {
+		t.Fatalf("expected ShouldReturn() == true (terminal wins)")
+	}
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected err to be nil, got %v", err)
+	}
+	// Done without requeue intent
+	if res.Requeue || res.RequeueAfter != 0 { //nolint:staticcheck // testing Requeue field
+		t.Fatalf("expected no requeue for Done, got Requeue=%v RequeueAfter=%v", res.Requeue, res.RequeueAfter)
+	}
+}
+
+func TestMergeReconciles_TerminalRequeueWinsOverTerminalDone(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	// DoneAndRequeue should win over Done
+	outcome := flow.MergeReconciles(rf.Done(), rf.DoneAndRequeue())
+	if !outcome.ShouldReturn() {
+		t.Fatalf("expected ShouldReturn() == true")
+	}
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected err to be nil, got %v", err)
+	}
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
+		t.Fatalf("expected Requeue to be true (requeue wins over done)")
 	}
 }
 
@@ -229,7 +321,7 @@ func TestReconcileOutcome_Enrichf_WrapsExistingError(t *testing.T) {
 
 func TestReconcileOutcome_Enrichf_DoesNotAlterReturnDecision(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
-	outcome := rf.RequeueAfter(1 * time.Second).Enrichf("x")
+	outcome := rf.DoneAndRequeueAfter(1 * time.Second).Enrichf("x")
 	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")
 	}
@@ -242,6 +334,13 @@ func TestReconcileOutcome_Enrichf_DoesNotAlterReturnDecision(t *testing.T) {
 func TestReconcileOutcome_MustToCtrl_PanicsOnContinue(t *testing.T) {
 	rf := flow.BeginRootReconcile(context.Background())
 	mustPanic(t, func() { _, _ = rf.Continue().MustToCtrl() })
+}
+
+func TestReconcileOutcome_MustToCtrl_DoesNotPanicOnContinueWithRequeue(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	// ContinueAndRequeue has requeue intent, so MustToCtrl should not panic
+	mustNotPanic(t, func() { _, _ = rf.ContinueAndRequeue().MustToCtrl() })
+	mustNotPanic(t, func() { _, _ = rf.ContinueAndRequeueAfter(1 * time.Second).MustToCtrl() })
 }
 
 // =============================================================================
@@ -261,49 +360,6 @@ func TestEnsureOutcome_DidChange(t *testing.T) {
 	}
 	if ef.Ok().ReportChangedIf(false).DidChange() {
 		t.Fatalf("expected DidChange() == false for ReportChangedIf(false)")
-	}
-}
-
-func TestEnsureOutcome_OptimisticLockRequired(t *testing.T) {
-	ef := flow.BeginEnsure(context.Background(), "test")
-	var outcome flow.EnsureOutcome
-	defer ef.OnEnd(&outcome)
-
-	if ef.Ok().OptimisticLockRequired() {
-		t.Fatalf("expected OptimisticLockRequired() == false for Ok()")
-	}
-
-	if ef.Ok().ReportChanged().OptimisticLockRequired() {
-		t.Fatalf("expected OptimisticLockRequired() == false after ReportChanged()")
-	}
-
-	o := ef.Ok().ReportChanged().RequireOptimisticLock()
-	if !o.OptimisticLockRequired() {
-		t.Fatalf("expected OptimisticLockRequired() == true after ReportChanged().RequireOptimisticLock()")
-	}
-}
-
-func TestEnsureOutcome_RequireOptimisticLock_PanicsWithoutChangeReported(t *testing.T) {
-	ef := flow.BeginEnsure(context.Background(), "test")
-	var outcome flow.EnsureOutcome
-	defer ef.OnEnd(&outcome)
-
-	mustPanic(t, func() { _ = ef.Ok().RequireOptimisticLock() })
-}
-
-func TestEnsureOutcome_RequireOptimisticLock_DoesNotPanicAfterReportChangedIfFalse(t *testing.T) {
-	ef := flow.BeginEnsure(context.Background(), "test")
-	var outcome flow.EnsureOutcome
-	defer ef.OnEnd(&outcome)
-
-	mustNotPanic(t, func() { _ = ef.Ok().ReportChangedIf(false).RequireOptimisticLock() })
-
-	o := ef.Ok().ReportChangedIf(false).RequireOptimisticLock()
-	if o.OptimisticLockRequired() {
-		t.Fatalf("expected OptimisticLockRequired() == false when no change was reported")
-	}
-	if o.DidChange() {
-		t.Fatalf("expected DidChange() == false when no change was reported")
 	}
 }
 
@@ -361,46 +417,16 @@ func TestMergeEnsures_ChangeTracking_DidChange(t *testing.T) {
 	if !o.DidChange() {
 		t.Fatalf("expected merged outcome to report DidChange() == true")
 	}
-	if o.OptimisticLockRequired() {
-		t.Fatalf("expected merged outcome to not require optimistic lock")
-	}
 }
 
-func TestMergeEnsures_ChangeTracking_OptimisticLockRequired(t *testing.T) {
-	ef := flow.BeginEnsure(context.Background(), "test")
-	var outcome flow.EnsureOutcome
-	defer ef.OnEnd(&outcome)
-
-	o := flow.MergeEnsures(
-		ef.Ok().ReportChanged(),
-		ef.Ok().ReportChanged().RequireOptimisticLock(),
-	)
-	if !o.DidChange() {
-		t.Fatalf("expected merged outcome to report DidChange() == true")
-	}
-	if !o.OptimisticLockRequired() {
-		t.Fatalf("expected merged outcome to require optimistic lock")
-	}
-}
-
-func TestMergeEnsures_ChangeTracking_ChangeReportedOr(t *testing.T) {
+func TestMergeEnsures_ChangeTracking_AllUnchanged(t *testing.T) {
 	ef := flow.BeginEnsure(context.Background(), "test")
 	var outcome flow.EnsureOutcome
 	defer ef.OnEnd(&outcome)
 
 	o := flow.MergeEnsures(ef.Ok(), ef.Ok().ReportChangedIf(false))
-
-	// ReportChangedIf(false) does not report a semantic change, but it does report that change tracking was used.
 	if o.DidChange() {
 		t.Fatalf("expected merged outcome DidChange() == false")
-	}
-
-	// This call should not panic because MergeEnsures ORs the changeReported flag, even if no semantic change happened.
-	mustNotPanic(t, func() { _ = o.RequireOptimisticLock() })
-
-	o = o.RequireOptimisticLock()
-	if o.OptimisticLockRequired() {
-		t.Fatalf("expected OptimisticLockRequired() == false when no change was reported")
 	}
 }
 
@@ -631,7 +657,7 @@ func TestReconcileFlow_OnEnd_LogsFailAsError_OnceAndMarksLogged(t *testing.T) {
 	}
 
 	m := matches[0].ContextMap()
-	if got := m["result"]; got != "fail" {
+	if got := m["result"]; got != "Fail" {
 		t.Fatalf("expected result=fail, got %v", got)
 	}
 	if got := m["hasError"]; got != true {
@@ -738,7 +764,7 @@ func TestEnsureFlow_OnEnd_LogsChangeTrackingFields(t *testing.T) {
 	ctx := log.IntoContext(context.Background(), l)
 	ef := flow.BeginEnsure(ctx, "ensure-test")
 
-	outcome := ef.Ok().ReportChanged().RequireOptimisticLock()
+	outcome := ef.Ok().ReportChanged()
 	ef.OnEnd(&outcome)
 
 	// Find V(1) "phase end" log (no error, so Debug level in zap for V(1).Info)
@@ -755,9 +781,6 @@ func TestEnsureFlow_OnEnd_LogsChangeTrackingFields(t *testing.T) {
 	m := matches[0].ContextMap()
 	if got := m["changed"]; got != true {
 		t.Fatalf("expected changed=true, got %v", got)
-	}
-	if got := m["optimisticLock"]; got != true {
-		t.Fatalf("expected optimisticLock=true, got %v", got)
 	}
 	if got := m["hasError"]; got != false {
 		t.Fatalf("expected hasError=false, got %v", got)
@@ -898,4 +921,215 @@ func TestStepFlow_OnEnd_PanicIsLoggedAndReraised(t *testing.T) {
 	defer sf.OnEnd(&err)
 
 	panic("test panic")
+}
+
+// =============================================================================
+// Conflict (optimistic lock) handling tests
+// =============================================================================
+
+func newConflictError() error {
+	return apierrors.NewConflict(schema.GroupResource{Resource: "test"}, "obj", errors.New("optimistic lock"))
+}
+
+func TestToCtrl_ConflictErrorBecomesRequeue(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	outcome := rf.Fail(newConflictError())
+
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected nil error from ToCtrl for conflict, got %v", err)
+	}
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
+		t.Fatalf("expected Requeue=true for conflict, got %v", res)
+	}
+}
+
+func TestToCtrl_WrappedConflictErrorBecomesRequeue(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	// Simulate: rf.Fail(err).Enrichf("patching RSP")
+	outcome := rf.Fail(newConflictError()).Enrichf("patching RSP")
+
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected nil error from ToCtrl for wrapped conflict, got %v", err)
+	}
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
+		t.Fatalf("expected Requeue=true for wrapped conflict, got %v", res)
+	}
+}
+
+func TestToCtrl_FailfConflictBecomesRequeue(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	outcome := rf.Failf(newConflictError(), "patching RSP")
+
+	res, err := outcome.ToCtrl()
+	if err != nil {
+		t.Fatalf("expected nil error from ToCtrl for Failf conflict, got %v", err)
+	}
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
+		t.Fatalf("expected Requeue=true for Failf conflict, got %v", res)
+	}
+}
+
+func TestToCtrl_NonConflictErrorPassedThrough(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	e := errors.New("real error")
+	outcome := rf.Fail(e)
+
+	_, err := outcome.ToCtrl()
+	if !errors.Is(err, e) {
+		t.Fatalf("expected non-conflict error to pass through, got %v", err)
+	}
+}
+
+func TestMustToCtrl_ConflictErrorBecomesRequeue(t *testing.T) {
+	rf := flow.BeginRootReconcile(context.Background())
+	outcome := rf.Fail(newConflictError())
+
+	res, err := outcome.MustToCtrl()
+	if err != nil {
+		t.Fatalf("expected nil error from MustToCtrl for conflict, got %v", err)
+	}
+	if !res.Requeue { //nolint:staticcheck // testing Requeue field
+		t.Fatalf("expected Requeue=true for conflict, got %v", res)
+	}
+}
+
+func TestReconcileFlow_OnEnd_ConflictLoggedAtInfoNotError(t *testing.T) {
+	core, observed := observer.New(zapcore.DebugLevel)
+	zl := zap.New(core)
+	l := zapr.NewLogger(zl)
+
+	ctx := log.IntoContext(context.Background(), l)
+	rf := flow.BeginReconcile(ctx, "p")
+
+	outcome := rf.Fail(newConflictError())
+	rf.OnEnd(&outcome)
+
+	// Should have zero Error-level "phase end" entries.
+	for _, e := range observed.All() {
+		if e.Message == "phase end" && e.Level == zapcore.ErrorLevel {
+			t.Fatalf("conflict should not be logged at Error level; got %v", e)
+		}
+	}
+
+	// Should have exactly one Info-level "phase end" entry (V(0) = Info).
+	var infoMatches []observer.LoggedEntry
+	for _, e := range observed.All() {
+		if e.Message == "phase end" && e.Level == zapcore.InfoLevel {
+			infoMatches = append(infoMatches, e)
+		}
+	}
+	if len(infoMatches) != 1 {
+		t.Fatalf("expected exactly 1 info 'phase end' log entry, got %d; entries=%v", len(infoMatches), observed.All())
+	}
+
+	m := infoMatches[0].ContextMap()
+	if got := m["result"]; got != "Conflict" {
+		t.Fatalf("expected result=Conflict, got %v", got)
+	}
+	if got := m["hasError"]; got != true {
+		t.Fatalf("expected hasError=true, got %v", got)
+	}
+}
+
+func TestReconcileFlow_OnEnd_WrappedConflictLoggedAtInfoNotError(t *testing.T) {
+	core, observed := observer.New(zapcore.DebugLevel)
+	zl := zap.New(core)
+	l := zapr.NewLogger(zl)
+
+	ctx := log.IntoContext(context.Background(), l)
+	rf := flow.BeginReconcile(ctx, "p")
+
+	outcome := rf.Failf(newConflictError(), "patching RSP")
+	rf.OnEnd(&outcome)
+
+	// No Error-level logs for conflict.
+	for _, e := range observed.All() {
+		if e.Message == "phase end" && e.Level == zapcore.ErrorLevel {
+			t.Fatalf("wrapped conflict should not be logged at Error level; got %v", e)
+		}
+	}
+
+	// Should have an Info-level log with result=Conflict.
+	var infoMatches []observer.LoggedEntry
+	for _, e := range observed.All() {
+		if e.Message == "phase end" && e.Level == zapcore.InfoLevel {
+			infoMatches = append(infoMatches, e)
+		}
+	}
+	if len(infoMatches) != 1 {
+		t.Fatalf("expected exactly 1 info 'phase end' log entry, got %d; entries=%v", len(infoMatches), observed.All())
+	}
+	if got := infoMatches[0].ContextMap()["result"]; got != "Conflict" {
+		t.Fatalf("expected result=Conflict, got %v", got)
+	}
+}
+
+func TestReconcileFlow_OnEnd_NestedPhases_ConflictLoggedOnce(t *testing.T) {
+	core, observed := observer.New(zapcore.DebugLevel)
+	zl := zap.New(core)
+	l := zapr.NewLogger(zl)
+
+	ctx := log.IntoContext(context.Background(), l)
+	parentRf := flow.BeginReconcile(ctx, "parent")
+	childRf := flow.BeginReconcile(parentRf.Ctx(), "child")
+
+	outcome := childRf.Fail(newConflictError())
+	childRf.OnEnd(&outcome)
+	parentRf.OnEnd(&outcome)
+
+	// No Error-level logs at all.
+	for _, e := range observed.All() {
+		if e.Message == "phase end" && e.Level == zapcore.ErrorLevel {
+			t.Fatalf("conflict should not be logged at Error level in nested phases; got %v", e)
+		}
+	}
+
+	// Exactly one Info-level "phase end" (from child), one Debug-level (from parent, already logged).
+	infoCount := 0
+	debugCount := 0
+	for _, e := range observed.All() {
+		if e.Message == "phase end" {
+			switch e.Level {
+			case zapcore.InfoLevel:
+				infoCount++
+			case zapcore.DebugLevel:
+				debugCount++
+			}
+		}
+	}
+	if infoCount != 1 {
+		t.Fatalf("expected exactly 1 info 'phase end' log entry, got %d", infoCount)
+	}
+	if debugCount != 1 {
+		t.Fatalf("expected exactly 1 debug 'phase end' log entry (parent after conflict already logged), got %d", debugCount)
+	}
+}
+
+func TestReconcileFlow_OnEnd_NonConflictStillLoggedAtError(t *testing.T) {
+	core, observed := observer.New(zapcore.DebugLevel)
+	zl := zap.New(core)
+	l := zapr.NewLogger(zl)
+
+	ctx := log.IntoContext(context.Background(), l)
+	rf := flow.BeginReconcile(ctx, "p")
+
+	outcome := rf.Fail(errors.New("real error"))
+	rf.OnEnd(&outcome)
+
+	// Should still log at Error level.
+	var errorMatches []observer.LoggedEntry
+	for _, e := range observed.All() {
+		if e.Message == "phase end" && e.Level == zapcore.ErrorLevel {
+			errorMatches = append(errorMatches, e)
+		}
+	}
+	if len(errorMatches) != 1 {
+		t.Fatalf("expected exactly 1 error 'phase end' log entry for non-conflict, got %d; entries=%v",
+			len(errorMatches), observed.All())
+	}
+	if got := errorMatches[0].ContextMap()["result"]; got != "Fail" {
+		t.Fatalf("expected result=Fail, got %v", got)
+	}
 }

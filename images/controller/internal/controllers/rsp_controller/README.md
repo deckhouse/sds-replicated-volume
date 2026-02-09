@@ -44,19 +44,28 @@ For each eligible node, the controller also records LVG readiness and agent read
 ## Reconciliation Structure
 
 ```
-Reconcile (root)
+Reconcile (root) [In-place reconciliation]
 ├── getRSP                                    — fetch the RSP
 ├── getLVGsByRSP                              — fetch LVGs referenced by RSP
-├── validateRSPAndLVGs                        — validate RSP/LVG configuration
+├── Validation step (details)
+│   ├── validateRSPAndLVGs                    — validate RSP/LVG configuration
+│   ├── NodeLabelSelector parsing             — build node selector
+│   └── Zones validation                      — add zone requirement
 ├── getSortedNodes                            — fetch nodes (filtered by selector)
 ├── getAgentReadiness                         — fetch agent pods and compute readiness
-├── computeActualEligibleNodes                — compute eligible nodes list
+├── computeActualEligibleNodes (details)      — compute eligible nodes list
+│   ├── buildLVGByNodeMap (details)           — map LVGs to nodes
+│   └── Grace period logic (details)          — handle NotReady nodes
 ├── applyEligibleNodesAndIncrementRevisionIfChanged
 ├── applyReadyCondTrue/applyReadyCondFalse    — set Ready condition
 └── patchRSPStatus                            — persist status changes
 ```
 
+Links to detailed algorithms: [`Validation`](#validation-details), [`computeActualEligibleNodes`](#computeactualeligiblenodes-details), [`buildLVGByNodeMap`](#buildlvgbynodemap-details), [`Grace Period Logic`](#grace-period-logic-details)
+
 ## Algorithm Flow
+
+High-level overview of the reconciliation flow. See [Detailed Algorithms](#detailed-algorithms) for step-specific diagrams.
 
 ```mermaid
 flowchart TD
@@ -64,44 +73,21 @@ flowchart TD
     GetRSP -->|NotFound| Done1([Done])
     GetRSP --> GetLVGs[Get LVGs by RSP]
 
-    GetLVGs -->|Error| Fail1([Fail])
-    GetLVGs -->|Some NotFound| SetLVGNotFound[Ready=False<br>LVMVolumeGroupNotFound]
-    GetLVGs --> ValidateRSP[Validate RSP and LVGs]
+    GetLVGs --> Validate[Validate LVGs, Selector, Zones]
+    Validate -->|Invalid| SetFalse[Ready=False + Patch]
+    SetFalse --> Done2([Done])
 
-    SetLVGNotFound --> PatchStatus1[Patch status]
-    PatchStatus1 --> Done2([Done])
+    Validate -->|Valid| GetInputs[Get Nodes + Agent Readiness]
+    GetInputs --> Compute[computeActualEligibleNodes]
+    Compute --> Apply[Apply eligible nodes + Ready=True]
 
-    ValidateRSP -->|Invalid| SetInvalidLVG[Ready=False<br>InvalidLVMVolumeGroup]
-    ValidateRSP --> ValidateSelector[Validate NodeLabelSelector]
+    Apply --> PatchDecision{Changed?}
+    PatchDecision -->|Yes| Patch[Patch status]
+    PatchDecision -->|No| GraceCheck
+    Patch --> GraceCheck{Grace period expiration?}
 
-    SetInvalidLVG --> PatchStatus2[Patch status]
-    PatchStatus2 --> Done3([Done])
-
-    ValidateSelector -->|Invalid| SetInvalidSelector[Ready=False<br>InvalidNodeLabelSelector]
-    ValidateSelector --> ValidateZones[Validate Zones]
-
-    SetInvalidSelector --> PatchStatus3[Patch status]
-    PatchStatus3 --> Done4([Done])
-
-    ValidateZones -->|Invalid| SetInvalidZones[Ready=False<br>InvalidNodeLabelSelector]
-    ValidateZones --> GetNodes[Get Nodes<br>filtered by selector]
-
-    SetInvalidZones --> PatchStatus4[Patch status]
-    PatchStatus4 --> Done5([Done])
-
-    GetNodes --> GetAgentReadiness[Get Agent Readiness]
-    GetAgentReadiness --> ComputeEligible[Compute Eligible Nodes]
-
-    ComputeEligible --> ApplyEligible[Apply eligible nodes<br>Increment revision if changed]
-    ApplyEligible --> SetReady[Ready=True]
-
-    SetReady --> Changed{Changed?}
-    Changed -->|Yes| PatchStatus5[Patch status]
-    Changed -->|No| CheckGrace{Grace period<br>expiration?}
-    PatchStatus5 --> CheckGrace
-
-    CheckGrace -->|Yes| Requeue([RequeueAfter])
-    CheckGrace -->|No| Done6([Done])
+    GraceCheck -->|Yes| Requeue([RequeueAfter])
+    GraceCheck -->|No| Done3([Done])
 ```
 
 ## Conditions
@@ -166,7 +152,7 @@ This controller manages `RSP.Status` fields only and does not create external la
 | Index | Field | Purpose |
 |-------|-------|---------|
 | RSP by eligible node name | `status.eligibleNodes[].nodeName` | Find RSPs where a node is eligible |
-| LVMVolumeGroup by name | `metadata.name` | Fetch LVGs referenced by RSP |
+| RSP by LVMVolumeGroup name | `spec.lvmVolumeGroups[].name` | Find RSPs referencing a specific LVG |
 
 ## Data Flow
 
@@ -207,3 +193,190 @@ flowchart TD
     ComputeEligible --> ENRev
     ComputeEligible -->|Ready| Conds
 ```
+
+---
+
+## Detailed Algorithms
+
+### Validation Details
+
+**Purpose:** Validates RSP configuration before computing eligible nodes. Sets `Ready=False` and exits early on any validation failure.
+
+**Algorithm:**
+
+```mermaid
+flowchart TD
+    Start([Validation]) --> CheckLVGs{All LVGs found?}
+    CheckLVGs -->|No| LVGNotFound[Ready=False LVMVolumeGroupNotFound]
+    LVGNotFound --> Exit1([Exit])
+
+    CheckLVGs -->|Yes| ValidateRSP[validateRSPAndLVGs]
+    ValidateRSP -->|Invalid| InvalidLVG[Ready=False InvalidLVMVolumeGroup]
+    InvalidLVG --> Exit2([Exit])
+
+    ValidateRSP -->|Valid| ParseSelector[Parse NodeLabelSelector]
+    ParseSelector -->|Error| InvalidSelector[Ready=False InvalidNodeLabelSelector]
+    InvalidSelector --> Exit3([Exit])
+
+    ParseSelector -->|OK| ParseZones[Parse Zones as label requirement]
+    ParseZones -->|Error| InvalidZones[Ready=False InvalidNodeLabelSelector]
+    InvalidZones --> Exit4([Exit])
+
+    ParseZones -->|OK| Success([Continue to computation])
+```
+
+**Validation checks:**
+
+| Check | Condition | Reason |
+|-------|-----------|--------|
+| LVG existence | All `spec.lvmVolumeGroups[].name` must exist | `LVMVolumeGroupNotFound` |
+| ThinPool reference | For LVMThin: `thinPoolName` must exist in LVG spec | `InvalidLVMVolumeGroup` |
+| NodeLabelSelector | Must be valid `metav1.LabelSelector` | `InvalidNodeLabelSelector` |
+| Zones | Must be valid values for `topology.kubernetes.io/zone` | `InvalidNodeLabelSelector` |
+
+### computeActualEligibleNodes Details
+
+**Purpose:** Computes the list of eligible nodes for an RSP. Also returns the earliest grace period expiration time for requeue scheduling.
+
+**Precondition:** Input `nodes` are already pre-filtered by NodeLabelSelector and Zones.
+
+**Algorithm:**
+
+```mermaid
+flowchart TD
+    Start([computeActualEligibleNodes]) --> BuildLVGMap[buildLVGByNodeMap]
+    BuildLVGMap --> GetGrace[Get gracePeriod from spec]
+
+    GetGrace --> LoopStart{For each node}
+    LoopStart -->|Done| Return([Return eligibleNodes, earliestExpiration])
+
+    LoopStart --> CheckGrace[isNodeReadyOrWithinGrace]
+    CheckGrace -->|NotReady beyond grace| Skip[Skip node]
+    Skip --> LoopStart
+
+    CheckGrace -->|Ready or within grace| TrackExpiration{NotReady within grace?}
+    TrackExpiration -->|Yes| UpdateExpiration[Track earliest expiration]
+    TrackExpiration -->|No| BuildEntry
+    UpdateExpiration --> BuildEntry
+
+    BuildEntry[Build EligibleNode entry] --> AddToResult[Add to result]
+    AddToResult --> LoopStart
+```
+
+**Data Flow:**
+
+| Input | Output |
+|-------|--------|
+| `rsp.Spec.EligibleNodesPolicy.NotReadyGracePeriod` | Grace period duration |
+| `nodes[]` (pre-filtered) | Candidate nodes |
+| `lvgs` map | LVG readiness per node |
+| `agentReadyByNode` map | Agent readiness per node |
+| — | `eligibleNodes[]` |
+| — | `worldStateExpiresAt` (for requeue) |
+
+**EligibleNode entry fields:**
+
+| Field | Source |
+|-------|--------|
+| `NodeName` | `node.name` |
+| `ZoneName` | `node.labels[topology.kubernetes.io/zone]` |
+| `NodeReady` | From grace period check |
+| `Unschedulable` | `node.spec.unschedulable` |
+| `AgentReady` | `agentReadyByNode[nodeName]` |
+| `LVMVolumeGroups` | From `buildLVGByNodeMap` |
+
+### buildLVGByNodeMap Details
+
+**Purpose:** Builds a map from node name to list of LVMVolumeGroup entries for the RSP. Used to populate `eligibleNode.LVMVolumeGroups`.
+
+**Algorithm:**
+
+```mermaid
+flowchart TD
+    Start([buildLVGByNodeMap]) --> LoopRefs{For each RSP LVG ref}
+    LoopRefs -->|Done| SortResult[Sort LVGs by name per node]
+    SortResult --> Return([Return map])
+
+    LoopRefs --> LookupLVG[Lookup LVG in lvgs map]
+    LookupLVG -->|Not found| SkipLVG[Skip]
+    SkipLVG --> LoopRefs
+
+    LookupLVG -->|Found| GetNode[Get nodeName from LVG]
+    GetNode -->|Empty| SkipNode[Skip]
+    SkipNode --> LoopRefs
+
+    GetNode -->|Has node| CheckReady[isLVGReady]
+    CheckReady --> BuildEntry[Build LVG entry]
+    BuildEntry --> AppendToNode[Append to node's list]
+    AppendToNode --> LoopRefs
+```
+
+**LVG Readiness Logic (`isLVGReady`):**
+
+| RSP Type | Ready Condition |
+|----------|-----------------|
+| LVM | `lvg.Ready == True` |
+| LVMThin | `lvg.Ready == True` AND `lvg.Status.ThinPools[name].Ready == True` |
+
+**Data Flow:**
+
+| Input | Output |
+|-------|--------|
+| `lvgs` map (name → lvgView) | — |
+| `rsp.Spec.LVMVolumeGroups[]` | — |
+| `rsp.Spec.Type` | Determines readiness check |
+| — | `map[nodeName][]EligibleNodeLVMVolumeGroup` |
+
+**EligibleNodeLVMVolumeGroup fields:**
+
+| Field | Source |
+|-------|--------|
+| `Name` | `lvg.Name` |
+| `ThinPoolName` | `rsp.Spec.LVMVolumeGroups[].ThinPoolName` |
+| `Unschedulable` | `lvg.Annotations[storage.deckhouse.io/lvmVolumeGroupUnschedulable]` |
+| `Ready` | From `isLVGReady` |
+
+### Grace Period Logic Details
+
+**Purpose:** Implements the `spec.eligibleNodesPolicy.notReadyGracePeriod` behavior. Nodes that became `NotReady` recently are kept in the eligible list for a grace period to avoid disruption during temporary node issues.
+
+**Algorithm:**
+
+```mermaid
+flowchart TD
+    Start([isNodeReadyOrWithinGrace]) --> GetReadyCond[Get node Ready condition]
+    GetReadyCond -->|Not found| AssumeNotReady[Assume NotReady]
+
+    GetReadyCond -->|Found| CheckStatus{Status == True?}
+    CheckStatus -->|True| ReturnReady([Ready: true, expiration: zero])
+
+    CheckStatus -->|False| GetTransition[Get LastTransitionTime]
+    AssumeNotReady --> GetTransition
+    GetTransition --> CalcExpiration[expiration = transition + gracePeriod]
+
+    CalcExpiration --> CheckExpired{now >= expiration?}
+    CheckExpired -->|Yes| ReturnExpired([Ready: false, expiration: zero, exclude from list])
+    CheckExpired -->|No| ReturnWithinGrace([Ready: false, expiration: time, include with nodeReady=false])
+```
+
+**Key behaviors:**
+
+| Node State | Action | `nodeReady` field | Requeue |
+|------------|--------|-------------------|---------|
+| Ready | Include | `true` | No |
+| NotReady < gracePeriod | Include | `false` | Yes, at expiration time |
+| NotReady >= gracePeriod | Exclude | — | No |
+
+**Requeue logic:**
+
+When any node is within grace period, the controller calculates the earliest expiration time and returns `RequeueAfter` to re-reconcile when the grace period expires. This ensures nodes are removed from eligible list promptly when their grace period ends.
+
+**Data Flow:**
+
+| Input | Output |
+|-------|--------|
+| `node.Status.Conditions[Ready]` | — |
+| `rsp.Spec.EligibleNodesPolicy.NotReadyGracePeriod` | — |
+| `now` | — |
+| — | `nodeReady` (bool) |
+| — | `expiration` (time, zero if Ready or expired) |

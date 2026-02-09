@@ -87,7 +87,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Get LVGs referenced by RSP.
 	lvgs, lvgsNotFoundErr, err := r.getLVGsByRSP(rf.Ctx(), rsp)
 	if err != nil {
-		return rf.Fail(err).ToCtrl()
+		return rf.Failf(err, "listing LVMVolumeGroups").ToCtrl()
 	}
 
 	// Cannot calculate eligible nodes if LVGs are missing.
@@ -97,7 +97,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			v1alpha1.ReplicatedStoragePoolCondReadyReasonLVMVolumeGroupNotFound,
 			fmt.Sprintf("Some LVMVolumeGroups not found: %v", lvgsNotFoundErr),
 		) {
-			return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base, false)).ToCtrl()
+			return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base)).ToCtrl()
 		}
 
 		return rf.Done().ToCtrl()
@@ -109,7 +109,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			v1alpha1.ReplicatedStoragePoolCondReadyReasonInvalidLVMVolumeGroup,
 			fmt.Sprintf("RSP/LVG validation failed: %v", err),
 		) {
-			return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base, false)).ToCtrl()
+			return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base)).ToCtrl()
 		}
 
 		return rf.Done().ToCtrl()
@@ -126,7 +126,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 				v1alpha1.ReplicatedStoragePoolCondReadyReasonInvalidNodeLabelSelector,
 				fmt.Sprintf("Invalid NodeLabelSelector: %v", err),
 			) {
-				return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base, false)).ToCtrl()
+				return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base)).ToCtrl()
 			}
 			return rf.Done().ToCtrl()
 		}
@@ -142,7 +142,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 				v1alpha1.ReplicatedStoragePoolCondReadyReasonInvalidNodeLabelSelector,
 				fmt.Sprintf("Invalid Zones: %v", err),
 			) {
-				return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base, false)).ToCtrl()
+				return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base)).ToCtrl()
 			}
 			return rf.Done().ToCtrl()
 		}
@@ -152,13 +152,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Get all nodes matching selector.
 	nodes, err := r.getSortedNodes(rf.Ctx(), nodeSelector)
 	if err != nil {
-		return rf.Fail(err).ToCtrl()
+		return rf.Failf(err, "listing Nodes").ToCtrl()
 	}
 
 	// Get agent readiness per node.
 	agentReadyByNode, err := r.getAgentReadiness(rf.Ctx())
 	if err != nil {
-		return rf.Fail(err).ToCtrl()
+		return rf.Failf(err, "listing agent Pods").ToCtrl()
 	}
 
 	eligibleNodes, worldStateExpiresAt := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
@@ -173,7 +173,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	) || changed
 
 	if changed {
-		if err := r.patchRSPStatus(rf.Ctx(), rsp, base, true); err != nil {
+		if err := r.patchRSPStatus(rf.Ctx(), rsp, base); err != nil {
 			return rf.Fail(err).ToCtrl()
 		}
 	}
@@ -181,7 +181,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Schedule requeue when grace period will expire, even if nothing changed.
 	// This ensures nodes beyond grace period will be removed from EligibleNodes.
 	if worldStateExpiresAt != nil {
-		return rf.RequeueAfter(time.Until(*worldStateExpiresAt)).ToCtrl()
+		return rf.DoneAndRequeueAfter(time.Until(*worldStateExpiresAt)).ToCtrl()
 	}
 
 	return rf.Done().ToCtrl()
@@ -540,7 +540,7 @@ func buildLVGByNodeMap(
 // Single-call I/O helper categories
 //
 
-// --- RSP ---
+// --- ReplicatedStoragePool (RSP) ---
 
 // getRSP fetches an RSP by name.
 func (r *Reconciler) getRSP(ctx context.Context, name string) (*v1alpha1.ReplicatedStoragePool, error) {
@@ -556,18 +556,11 @@ func (r *Reconciler) patchRSPStatus(
 	ctx context.Context,
 	rsp *v1alpha1.ReplicatedStoragePool,
 	base *v1alpha1.ReplicatedStoragePool,
-	optimisticLock bool,
 ) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Status().Patch(ctx, rsp, patch)
+	return r.cl.Status().Patch(ctx, rsp, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
-// --- LVG ---
+// --- LVMVolumeGroup (LVG) ---
 
 // getLVGsByRSP fetches LVGs referenced by the given RSP and returns them as a map keyed by LVG name.
 // Uses UnsafeDisableDeepCopy for efficiency.
@@ -670,7 +663,10 @@ func (r *Reconciler) getAgentReadiness(ctx context.Context) (map[string]bool, er
 		if nodeName == "" {
 			continue
 		}
-		result[nodeName] = isPodReady(unsafePod)
+
+		// There may be completed/terminated pods that haven't been cleaned up yet,
+		// so we use OR logic: if any pod on a node is ready, the node's agent is ready.
+		result[nodeName] = result[nodeName] || isPodReady(unsafePod)
 	}
 	return result, nil
 }

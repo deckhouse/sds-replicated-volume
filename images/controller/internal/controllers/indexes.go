@@ -29,6 +29,9 @@ func RegisterIndexes(mgr manager.Manager) error {
 	if err := indexes.RegisterRVByReplicatedStorageClassName(mgr); err != nil {
 		return err
 	}
+	if err := indexes.RegisterRVByStoragePoolName(mgr); err != nil {
+		return err
+	}
 
 	// ReplicatedVolumeAttachment (RVA)
 	if err := indexes.RegisterRVAByReplicatedVolumeName(mgr); err != nil {
@@ -42,9 +45,7 @@ func RegisterIndexes(mgr manager.Manager) error {
 	if err := indexes.RegisterRVRByReplicatedVolumeName(mgr); err != nil {
 		return err
 	}
-
-	// Node
-	if err := indexes.RegisterNodeByMetadataName(mgr); err != nil {
+	if err := indexes.RegisterRVRByRVAndNode(mgr); err != nil {
 		return err
 	}
 
@@ -57,6 +58,9 @@ func RegisterIndexes(mgr manager.Manager) error {
 	if err := indexes.RegisterRSCByStoragePool(mgr); err != nil {
 		return err
 	}
+	if err := indexes.RegisterRSCByStatusStoragePoolName(mgr); err != nil {
+		return err
+	}
 
 	// ReplicatedStoragePool (RSP)
 	if err := indexes.RegisterRSPByLVMVolumeGroupName(mgr); err != nil {
@@ -66,6 +70,16 @@ func RegisterIndexes(mgr manager.Manager) error {
 		return err
 	}
 	if err := indexes.RegisterRSPByUsedByRSCName(mgr); err != nil {
+		return err
+	}
+
+	// LVMLogicalVolume (LLV)
+	if err := indexes.RegisterLLVByRVROwner(mgr); err != nil {
+		return err
+	}
+
+	// Pod
+	if err := indexes.RegisterPodByNodeName(mgr); err != nil {
 		return err
 	}
 

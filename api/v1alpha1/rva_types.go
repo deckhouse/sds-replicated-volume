@@ -41,8 +41,7 @@ type ReplicatedVolumeAttachment struct {
 
 	Spec ReplicatedVolumeAttachmentSpec `json:"spec"`
 
-	// +patchStrategy=merge
-	Status ReplicatedVolumeAttachmentStatus `json:"status,omitempty" patchStrategy:"merge"`
+	Status ReplicatedVolumeAttachmentStatus `json:"status,omitempty"`
 }
 
 // ReplicatedVolumeAttachmentList contains a list of ReplicatedVolumeAttachment
@@ -57,14 +56,14 @@ type ReplicatedVolumeAttachmentList struct {
 
 // GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It returns the root object's `.status.conditions`.
-func (o *ReplicatedVolumeAttachment) GetStatusConditions() []metav1.Condition {
-	return o.Status.Conditions
+func (rva *ReplicatedVolumeAttachment) GetStatusConditions() []metav1.Condition {
+	return rva.Status.Conditions
 }
 
 // SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It sets the root object's `.status.conditions`.
-func (o *ReplicatedVolumeAttachment) SetStatusConditions(conditions []metav1.Condition) {
-	o.Status.Conditions = conditions
+func (rva *ReplicatedVolumeAttachment) SetStatusConditions(conditions []metav1.Condition) {
+	rva.Status.Conditions = conditions
 }
 
 // +kubebuilder:object:generate=true
@@ -89,12 +88,10 @@ type ReplicatedVolumeAttachmentStatus struct {
 	// +optional
 	Phase ReplicatedVolumeAttachmentPhase `json:"phase,omitempty"`
 
-	// +patchMergeKey=type
-	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=type
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // ReplicatedVolumeAttachmentPhase enumerates possible values for ReplicatedVolumeAttachment status.phase field.

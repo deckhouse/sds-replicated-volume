@@ -20,9 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -35,7 +37,7 @@ import (
 // There are three scopes:
 //
 //   - ReconcileFlow: used by Reconcile methods, returns ReconcileOutcome (flow-control + error).
-//   - EnsureFlow: used by ensure helpers, returns EnsureOutcome (error + change tracking + optimistic lock intent).
+//   - EnsureFlow: used by ensure helpers, returns EnsureOutcome (error + change tracking).
 //   - StepFlow: used by “steps” that should return plain `error` (idiomatic Go).
 //
 // Typical usage patterns:
@@ -61,7 +63,7 @@ import (
 //	  ef := flow.BeginEnsure(ctx, "ensure-foo")
 //	  defer ef.OnEnd(&outcome)
 //	  // mutate obj ...
-//	  return ef.Ok().ReportChangedIf(changed).RequireOptimisticLock()
+//	  return ef.Ok().ReportChangedIf(changed)
 //	}
 //
 // Step helper returning error:
@@ -92,15 +94,82 @@ func Wrapf(err error, format string, args ...any) error {
 	return fmt.Errorf("%s: %w", msg, err)
 }
 
+// isExpectedTransientError reports whether err consists entirely of expected
+// transient API errors that should be retried silently (logged at Info level,
+// not Error level, and not propagated to controller-runtime as an error).
+//
+// Currently recognized: 409 Conflict (optimistic lock failure).
+//
+// For joined errors (produced by errors.Join or MergeReconciles), every
+// component error must be transient; a single non-transient component causes
+// the whole error to be treated as a real failure.
+func isExpectedTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Multi-error (errors.Join): every component must be transient.
+	if multi, ok := err.(interface{ Unwrap() []error }); ok {
+		errs := multi.Unwrap()
+		if len(errs) == 0 {
+			return false
+		}
+		for _, e := range errs {
+			if !isExpectedTransientError(e) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Single wrapping (fmt.Errorf %w, Wrapf, Enrichf): follow the chain.
+	if inner := errors.Unwrap(err); inner != nil {
+		return isExpectedTransientError(inner)
+	}
+
+	// Leaf error: check known transient types.
+	return apierrors.IsConflict(err)
+}
+
+// cleanTransientErrorMessage returns a human-friendly error string for known
+// transient errors.
+//
+// For Conflict errors backed by *apierrors.StatusError it extracts the resource
+// identity from Details and replaces the verbose Kubernetes message with a
+// compact "conflict on <resource>/<name> (will requeue)". Any wrapping context
+// added by Wrapf/Enrichf is preserved as a prefix.
+//
+// For other transient errors (or when the StatusError has no Details) the
+// original message is returned with a "(will requeue)" suffix.
+func cleanTransientErrorMessage(err error) string {
+	var se *apierrors.StatusError
+	if errors.As(err, &se) && se.ErrStatus.Details != nil {
+		d := se.ErrStatus.Details
+		resource := d.Kind
+		if d.Group != "" {
+			resource += "." + d.Group
+		}
+
+		// Preserve wrapping context by trimming the leaf StatusError message.
+		leafMsg := se.Error()
+		fullMsg := err.Error()
+		suffix := ": " + leafMsg
+		if strings.HasSuffix(fullMsg, suffix) {
+			prefix := fullMsg[:len(fullMsg)-len(suffix)]
+			return fmt.Sprintf("%s: conflict on %s/%s (will requeue)", prefix, resource, d.Name)
+		}
+		return fmt.Sprintf("conflict on %s/%s (will requeue)", resource, d.Name)
+	}
+
+	// Fallback for non-StatusError transient errors.
+	return err.Error() + " (will requeue)"
+}
+
 // phaseContextKey is a private context key for phase metadata.
 type phaseContextKey struct{}
 
-// phaseContextValue is the minimal metadata OnEnd needs for consistent logging.
-type phaseContextValue struct {
-	name  string
-	kv    []string
-	start time.Time
-}
+// phaseStartKey sentinel type; value is time.Time (start of the phase).
+// OnEnd reads it back to compute duration.
 
 // panicToError converts a recovered panic value to an error.
 func panicToError(r any) error {
@@ -173,22 +242,16 @@ func buildPhaseLogger(ctx context.Context, phaseName string, kv []string) logr.L
 	return l
 }
 
-// storePhaseContext attaches the logger to ctx and stores metadata needed by OnEnd.
-func storePhaseContext(ctx context.Context, l logr.Logger, phaseName string, kv []string) context.Context {
+// storePhaseStart attaches the logger to ctx and stores the phase start time for OnEnd duration.
+func storePhaseStart(ctx context.Context, l logr.Logger) context.Context {
 	ctx = log.IntoContext(ctx, l)
-	kvCopy := append([]string(nil), kv...)
-	ctx = context.WithValue(ctx, phaseContextKey{}, phaseContextValue{
-		name:  phaseName,
-		kv:    kvCopy,
-		start: time.Now(),
-	})
-	return ctx
+	return context.WithValue(ctx, phaseContextKey{}, time.Now())
 }
 
-// getPhaseContext reads metadata stored by Begin* (if any).
-func getPhaseContext(ctx context.Context) (phaseContextValue, bool) {
-	v, ok := ctx.Value(phaseContextKey{}).(phaseContextValue)
-	return v, ok && v.name != ""
+// getPhaseStart reads the phase start time stored by Begin* (if any).
+func getPhaseStart(ctx context.Context) (time.Time, bool) {
+	t, ok := ctx.Value(phaseContextKey{}).(time.Time)
+	return t, ok && !t.IsZero()
 }
 
 // =============================================================================
@@ -199,7 +262,7 @@ func getPhaseContext(ctx context.Context) (phaseContextValue, bool) {
 //
 // Use it to:
 // - get a phase-scoped ctx/logger (`Ctx()`/`Log()`),
-// - construct ReconcileOutcome values (`Continue/Done/Requeue/RequeueAfter/Fail`),
+// - construct ReconcileOutcome values (`Continue/Done/DoneAndRequeue/DoneAndRequeueAfter/ContinueAndRequeue/ContinueAndRequeueAfter/Fail`),
 // - and to standardize phase end handling via `defer rf.OnEnd(&outcome)` in non-root reconciles.
 type ReconcileFlow struct {
 	ctx context.Context
@@ -237,15 +300,16 @@ func BeginReconcile(ctx context.Context, phaseName string, kv ...string) Reconci
 	l := buildPhaseLogger(ctx, phaseName, kv)
 	l.V(1).Info("phase start")
 
-	ctx = storePhaseContext(ctx, l, phaseName, kv)
+	ctx = storePhaseStart(ctx, l)
 	return ReconcileFlow{ctx: ctx, log: l}
 }
 
-// OnEnd is the deferred “phase end handler” for non-root reconciles.
+// OnEnd is the deferred "phase end handler" for non-root reconciles.
 //
 // What it does:
 // - logs `phase end` (and duration if available),
 // - if the outcome has an error, logs it at Error level exactly once across nested phases,
+// - logs `changed` field,
 // - if the phase panics, logs `phase panic` and re-panics.
 func (rf ReconcileFlow) OnEnd(out *ReconcileOutcome) {
 	if r := recover(); r != nil {
@@ -254,7 +318,7 @@ func (rf ReconcileFlow) OnEnd(out *ReconcileOutcome) {
 		panic(r)
 	}
 
-	v, ok := getPhaseContext(rf.ctx)
+	start, ok := getPhaseStart(rf.ctx)
 	if !ok {
 		return
 	}
@@ -267,59 +331,93 @@ func (rf ReconcileFlow) OnEnd(out *ReconcileOutcome) {
 
 	fields := []any{
 		"result", kind,
+		"changed", out.changed,
 		"hasError", out.err != nil,
 	}
 	if requeueAfter > 0 {
 		fields = append(fields, "requeueAfter", requeueAfter)
 	}
-	if !v.start.IsZero() {
-		fields = append(fields, "duration", time.Since(v.start))
-	}
+	fields = append(fields, "duration", time.Since(start))
 
 	// Emit exactly one log record per phase end.
 	// Error is logged exactly once: at the first phase that encounters it.
 	if out.err != nil && !out.errorLogged {
-		rf.log.Error(out.err, "phase end", fields...)
+		if isExpectedTransientError(out.err) {
+			// Conflict (optimistic lock) is an expected transient condition;
+			// log at Info (not Error) with a cleaned-up message.
+			rf.log.Info("phase end", append(fields, "err", cleanTransientErrorMessage(out.err))...)
+		} else {
+			rf.log.Error(out.err, "phase end", fields...)
+		}
 		out.errorLogged = true
 		return
 	}
 	rf.log.V(1).Info("phase end", fields...)
 }
 
-// Continue indicates “keep executing” within the current Reconcile method.
+// Continue indicates "keep executing" within the current Reconcile method.
 // `ShouldReturn()` is false.
 func (rf ReconcileFlow) Continue() ReconcileOutcome {
-	return ReconcileOutcome{}
+	return ReconcileOutcome{terminal: false}
 }
 
-// Done indicates “stop and return; do not requeue”.
+// Done indicates "stop and return; do not requeue".
 // `ShouldReturn()` is true.
 func (rf ReconcileFlow) Done() ReconcileOutcome {
-	return ReconcileOutcome{result: &ctrl.Result{}}
+	return ReconcileOutcome{terminal: true}
 }
 
-// Requeue indicates “stop and return; requeue immediately”.
+// DoneAndRequeue indicates "stop and return; requeue immediately".
 // `ShouldReturn()` is true.
-func (rf ReconcileFlow) Requeue() ReconcileOutcome {
-	return ReconcileOutcome{result: &ctrl.Result{Requeue: true}}
+//
+// Use this when you want to stop processing immediately and schedule an immediate requeue
+// (e.g., all changes are already persisted, or no further steps are needed).
+func (rf ReconcileFlow) DoneAndRequeue() ReconcileOutcome {
+	return ReconcileOutcome{terminal: true, requeueIntent: &ctrl.Result{Requeue: true}}
 }
 
-// RequeueAfter indicates “stop and return; requeue after d”.
+// DoneAndRequeueAfter indicates "stop and return; requeue after d".
 // `ShouldReturn()` is true.
-func (rf ReconcileFlow) RequeueAfter(d time.Duration) ReconcileOutcome {
+//
+// Use this when you want to stop processing immediately and schedule a delayed requeue
+// (e.g., all changes are already persisted, or no further steps are needed).
+func (rf ReconcileFlow) DoneAndRequeueAfter(d time.Duration) ReconcileOutcome {
 	if d <= 0 {
-		panic("flow: RequeueAfter: duration must be > 0")
+		panic("flow: DoneAndRequeueAfter: duration must be > 0")
 	}
-	return ReconcileOutcome{result: &ctrl.Result{RequeueAfter: d}}
+	return ReconcileOutcome{terminal: true, requeueIntent: &ctrl.Result{RequeueAfter: d}}
 }
 
-// Fail indicates “stop and return with error”.
+// ContinueAndRequeue indicates "remember requeue intent, but keep processing".
+// `ShouldReturn()` is false.
+//
+// Use this when you need to schedule an immediate requeue but want reconciliation
+// to continue (e.g., to run subsequent reconcile steps, persist accumulated changes,
+// or perform cleanup before returning).
+func (rf ReconcileFlow) ContinueAndRequeue() ReconcileOutcome {
+	return ReconcileOutcome{terminal: false, requeueIntent: &ctrl.Result{Requeue: true}}
+}
+
+// ContinueAndRequeueAfter indicates "remember requeue intent with delay, but keep processing".
+// `ShouldReturn()` is false.
+//
+// Use this when you need to schedule a delayed requeue but want reconciliation
+// to continue (e.g., to run subsequent reconcile steps, persist accumulated changes,
+// or perform cleanup before returning).
+func (rf ReconcileFlow) ContinueAndRequeueAfter(d time.Duration) ReconcileOutcome {
+	if d <= 0 {
+		panic("flow: ContinueAndRequeueAfter: duration must be > 0")
+	}
+	return ReconcileOutcome{terminal: false, requeueIntent: &ctrl.Result{RequeueAfter: d}}
+}
+
+// Fail indicates "stop and return with error".
 // `ShouldReturn()` is true.
 func (rf ReconcileFlow) Fail(err error) ReconcileOutcome {
 	if err == nil {
 		panic("flow: Fail: nil error")
 	}
-	return ReconcileOutcome{result: &ctrl.Result{}, err: err}
+	return ReconcileOutcome{terminal: true, err: err}
 }
 
 // Failf is a convenience wrapper around `Fail(Wrapf(...))`.
@@ -340,16 +438,32 @@ func (rf ReconcileFlow) DoneOrFail(err error) ReconcileOutcome {
 //
 // Typical usage is:
 // - declare `outcome flow.ReconcileOutcome` as a named return,
-// - return `rf.Continue()/Done()/Requeue.../Fail...`,
+// - return `rf.Continue()/Done()/DoneAndRequeue.../ContinueAndRequeue.../Fail...`,
 // - and use `outcome.ShouldReturn()` at intermediate boundaries to early-exit.
+//
+// ReconcileOutcome also supports change tracking,
+// enabling sub-reconciles to propagate change information upward:
+// - use `ReportChanged()`/`ReportChangedIf(cond)` to mark changes,
+// - use `DidChange()` to query whether any change was recorded.
+//
+// Terminal vs non-terminal outcomes:
+//   - Terminal outcomes (Done*, Fail) have ShouldReturn() = true — stop processing now.
+//   - Non-terminal outcomes (Continue*) have ShouldReturn() = false — keep processing.
+//   - ContinueAndRequeue* variants remember requeue intent without stopping processing,
+//     allowing reconciliation to continue before returning.
 type ReconcileOutcome struct {
-	result      *ctrl.Result
-	err         error
-	errorLogged bool
+	terminal      bool         // true for Done*/Fail (ShouldReturn = true)
+	requeueIntent *ctrl.Result // requeue info for ContinueAndRequeue* variants
+	err           error
+	errorLogged   bool
+	changed       bool
 }
 
 // ShouldReturn reports whether the caller should return from the current Reconcile method.
-func (o ReconcileOutcome) ShouldReturn() bool { return o.result != nil }
+//
+// Returns true only for terminal outcomes (Done*, Fail).
+// Returns false for non-terminal outcomes (Continue*), even if they have requeue intent.
+func (o ReconcileOutcome) ShouldReturn() bool { return o.terminal }
 
 // Error returns the error carried by the outcome, if any.
 func (o ReconcileOutcome) Error() error { return o.err }
@@ -368,23 +482,28 @@ func (o ReconcileOutcome) Enrichf(format string, args ...any) ReconcileOutcome {
 }
 
 // ToCtrl converts ReconcileOutcome to controller-runtime return values.
+// Requeue intent (if any) is reflected in ctrl.Result; error (if any) is returned as-is.
 //
-// For Continue (result=nil), this returns `(ctrl.Result{}, nil)` (or `(ctrl.Result{}, err)` if you built an invalid outcome).
-// For non-Continue outcomes, this returns the explicit ctrl.Result + error.
+// Conflict (optimistic lock) errors are automatically converted to a rate-limited
+// requeue without error. This prevents controller-runtime from logging them at
+// Error level and incrementing error metrics.
 func (o ReconcileOutcome) ToCtrl() (ctrl.Result, error) {
-	if o.result == nil {
-		return ctrl.Result{}, o.err
+	if o.err != nil && isExpectedTransientError(o.err) {
+		return ctrl.Result{Requeue: true}, nil
 	}
-	return *o.result, o.err
+	if o.requeueIntent != nil {
+		return *o.requeueIntent, o.err
+	}
+	return ctrl.Result{}, o.err
 }
 
 // MustToCtrl converts ReconcileOutcome to controller-runtime return values.
-// It panics if called on Continue.
+// It panics if called on Continue (non-terminal without requeue intent).
 func (o ReconcileOutcome) MustToCtrl() (ctrl.Result, error) {
-	if o.result == nil {
-		panic("flow: ReconcileOutcome.MustToCtrl: result is nil (Continue)")
+	if !o.terminal && o.requeueIntent == nil {
+		panic("flow: ReconcileOutcome.MustToCtrl: called on Continue (non-terminal without requeue)")
 	}
-	return *o.result, o.err
+	return o.ToCtrl()
 }
 
 // Merge combines this outcome with others and returns the merged result.
@@ -394,14 +513,47 @@ func (o ReconcileOutcome) Merge(others ...ReconcileOutcome) ReconcileOutcome {
 	return MergeReconciles(append([]ReconcileOutcome{o}, others...)...)
 }
 
+// ReportChanged marks that this reconcile step changed something.
+func (o ReconcileOutcome) ReportChanged() ReconcileOutcome {
+	o.changed = true
+	return o
+}
+
+// ReportChangedIf is like ReportChanged, but records a change only when cond is true.
+func (o ReconcileOutcome) ReportChangedIf(cond bool) ReconcileOutcome {
+	o.changed = o.changed || cond
+	return o
+}
+
+// DidChange reports whether the outcome records a change.
+func (o ReconcileOutcome) DidChange() bool { return o.changed }
+
+// WithChangeFrom merges change tracking state from an EnsureOutcome into ReconcileOutcome.
+//
+// Merge semantics: changed is OR-ed.
+//
+// This is useful for propagating ensure helper results through reconcile outcomes:
+//
+//	eo := flow.MergeEnsures(ensureA(...), ensureB(...))
+//	if eo.Error() != nil {
+//	    return rf.Fail(eo.Error())
+//	}
+//	return rf.Continue().WithChangeFrom(eo)
+func (o ReconcileOutcome) WithChangeFrom(eo EnsureOutcome) ReconcileOutcome {
+	o.changed = o.changed || eo.changed
+	return o
+}
+
 // MergeReconciles combines multiple ReconcileOutcome values into one.
 //
 // Use this when you intentionally want to run multiple independent steps and then aggregate the decision.
 //
 // Rules (high-level):
-// - Errors are joined via errors.Join (any error makes the merged outcome a Fail).
-// - Requeue/RequeueAfter: treat Requeue as delay=0, RequeueAfter(d) as delay=d, pick minimum delay.
-// - Done wins over Continue.
+// - Terminal outcomes win over non-terminal.
+// - Errors are joined via errors.Join (any error makes the merged outcome a Fail — terminal).
+// - Among terminals: errors first, then requeue (min delay wins), then Done.
+// - Among non-terminals: requeue intent is merged (min delay wins).
+// - Change state is merged deterministically (any changed makes merged changed).
 //
 // Example:
 //
@@ -412,16 +564,14 @@ func MergeReconciles(outcomes ...ReconcileOutcome) ReconcileOutcome {
 		return ReconcileOutcome{}
 	}
 
-	const (
-		noDelay        time.Duration = -1 // sentinel: no requeue requested
-		immediateDelay time.Duration = 0  // Requeue() means delay=0
-	)
-
+	const noDelay time.Duration = -1
 	var (
-		hasReconcileResult bool
-		minDelay           = noDelay
-		errs               []error
-		allErrorsLogged    = true
+		errs             []error
+		allErrorsLogged  = true
+		anyChanged       bool
+		hasTerminal      bool
+		terminalDelay    = noDelay
+		nonTerminalDelay = noDelay
 	)
 
 	for _, o := range outcomes {
@@ -429,54 +579,61 @@ func MergeReconciles(outcomes ...ReconcileOutcome) ReconcileOutcome {
 			errs = append(errs, o.err)
 			allErrorsLogged = allErrorsLogged && o.errorLogged
 		}
+		anyChanged = anyChanged || o.changed
 
-		if o.result == nil {
-			continue
-		}
-		hasReconcileResult = true
-
-		// Compute delay for this outcome: Requeue → 0, RequeueAfter(d) → d
-		delay := noDelay
-		if o.result.Requeue { //nolint:staticcheck // handling deprecated Requeue field for backward compatibility
-			delay = immediateDelay
-		} else if o.result.RequeueAfter > 0 {
-			delay = o.result.RequeueAfter
-		}
-
-		// Pick minimum delay (noDelay means "no requeue requested")
-		if delay != noDelay {
-			if minDelay == noDelay || delay < minDelay {
-				minDelay = delay
+		delay := requeueDelay(o.requeueIntent)
+		if o.terminal {
+			hasTerminal = true
+			if delay >= 0 && (terminalDelay < 0 || delay < terminalDelay) {
+				terminalDelay = delay
 			}
+		} else if delay >= 0 && (nonTerminalDelay < 0 || delay < nonTerminalDelay) {
+			nonTerminalDelay = delay
 		}
 	}
 
-	combinedErr := errors.Join(errs...)
-
-	// 1) Fail: if there are errors.
-	if combinedErr != nil {
-		return ReconcileOutcome{
-			result:      &ctrl.Result{},
-			err:         combinedErr,
-			errorLogged: allErrorsLogged,
-		}
+	result := ReconcileOutcome{
+		changed: anyChanged,
 	}
-
-	// 2) Requeue/RequeueAfter: minDelay wins.
-	if minDelay == immediateDelay {
-		return ReconcileOutcome{result: &ctrl.Result{Requeue: true}}
+	if err := errors.Join(errs...); err != nil {
+		result.terminal = true
+		result.err = err
+		result.errorLogged = allErrorsLogged
+		return result
 	}
-	if minDelay > immediateDelay {
-		return ReconcileOutcome{result: &ctrl.Result{RequeueAfter: minDelay}}
+	if hasTerminal {
+		result.terminal = true
+		result.requeueIntent = delayToRequeueIntent(terminalDelay)
+		return result
 	}
+	result.requeueIntent = delayToRequeueIntent(nonTerminalDelay)
+	return result
+}
 
-	// 3) Done: at least one non-nil result (no requeue requested).
-	if hasReconcileResult {
-		return ReconcileOutcome{result: &ctrl.Result{}}
+// requeueDelay extracts delay from requeueIntent: -1 = none, 0 = immediate, >0 = delayed.
+func requeueDelay(r *ctrl.Result) time.Duration {
+	if r == nil {
+		return -1
 	}
+	if r.Requeue { //nolint:staticcheck // handling Requeue field
+		return 0
+	}
+	if r.RequeueAfter > 0 {
+		return r.RequeueAfter
+	}
+	return -1
+}
 
-	// 4) Continue.
-	return ReconcileOutcome{}
+// delayToRequeueIntent converts delay back to requeueIntent.
+func delayToRequeueIntent(d time.Duration) *ctrl.Result {
+	switch {
+	case d < 0:
+		return nil
+	case d == 0:
+		return &ctrl.Result{Requeue: true}
+	default:
+		return &ctrl.Result{RequeueAfter: d}
+	}
 }
 
 // reconcileOutcomeKind classifies the outcome for phase-end logging.
@@ -484,48 +641,37 @@ func reconcileOutcomeKind(o *ReconcileOutcome) (kind string, requeueAfter time.D
 	if o == nil {
 		panic("flow: reconcileOutcomeKind: outcome is nil")
 	}
-
-	if o.result == nil {
-		if o.err != nil {
-			return "invalid", 0
-		}
-		return "continue", 0
-	}
-
-	if o.result.Requeue { //nolint:staticcheck // handling deprecated Requeue field for backward compatibility
-		return "requeue", 0
-	}
-
-	if o.result.RequeueAfter > 0 {
-		return "requeueAfter", o.result.RequeueAfter
-	}
-
 	if o.err != nil {
-		return "fail", 0
+		if isExpectedTransientError(o.err) {
+			return "Conflict", 0
+		}
+		return "Fail", 0
 	}
 
-	return "done", 0
+	prefix := "Continue"
+	if o.terminal {
+		prefix = "Done"
+	}
+
+	switch delay := requeueDelay(o.requeueIntent); {
+	case delay < 0:
+		return prefix, 0
+	case delay == 0:
+		return prefix + "AndRequeue", 0
+	default:
+		return prefix + "AndRequeueAfter", delay
+	}
 }
 
 // =============================================================================
 // EnsureFlow and EnsureOutcome
 // =============================================================================
 
-// changeState is internal ordering for EnsureOutcome merge semantics.
-type changeState uint8
-
-const (
-	unchangedState changeState = iota
-	changedState
-	changedAndOptimisticLockRequiredState
-)
-
 // EnsureFlow is a phase scope for ensure helpers.
 //
 // Ensure helpers typically mutate an object in-memory (one patch domain) and must report:
-// - whether they changed the object (DidChange),
-// - whether the subsequent save should use optimistic locking,
-// - and whether they encountered an error.
+// - whether they changed the object (DidChange), and
+// - whether they encountered an error.
 type EnsureFlow struct {
 	ctx context.Context
 	log logr.Logger
@@ -554,14 +700,14 @@ func BeginEnsure(ctx context.Context, phaseName string, kv ...string) EnsureFlow
 	l := buildPhaseLogger(ctx, phaseName, kv)
 	l.V(1).Info("phase start")
 
-	ctx = storePhaseContext(ctx, l, phaseName, kv)
+	ctx = storePhaseStart(ctx, l)
 	return EnsureFlow{ctx: ctx, log: l}
 }
 
 // OnEnd is the deferred “phase end handler” for ensure helpers.
 //
 // What it does:
-// - logs `phase end` with `changed`, `optimisticLock`, `hasError`, and duration,
+// - logs `phase end` with `changed`, `hasError`, and duration,
 // - if the phase panics, logs `phase panic` and re-panics.
 func (ef EnsureFlow) OnEnd(out *EnsureOutcome) {
 	if r := recover(); r != nil {
@@ -570,7 +716,7 @@ func (ef EnsureFlow) OnEnd(out *EnsureOutcome) {
 		panic(r)
 	}
 
-	v, ok := getPhaseContext(ef.ctx)
+	start, ok := getPhaseStart(ef.ctx)
 	if !ok {
 		return
 	}
@@ -580,12 +726,9 @@ func (ef EnsureFlow) OnEnd(out *EnsureOutcome) {
 	}
 
 	fields := []any{
-		"changed", out.DidChange(),
-		"optimisticLock", out.OptimisticLockRequired(),
+		"changed", out.changed,
 		"hasError", out.err != nil,
-	}
-	if !v.start.IsZero() {
-		fields = append(fields, "duration", time.Since(v.start))
+		"duration", time.Since(start),
 	}
 
 	if out.err != nil {
@@ -614,18 +757,16 @@ func (ef EnsureFlow) Errf(format string, args ...any) EnsureOutcome {
 //
 // It reports:
 // - Error(): whether the helper failed,
-// - DidChange(): whether the helper mutated the object,
-// - OptimisticLockRequired(): whether the subsequent save should use optimistic locking.
+// - DidChange(): whether the helper mutated the object.
 //
 // Typical pattern:
 //
 //	changed := false
 //	// mutate obj; set changed=true if needed
-//	return ef.Ok().ReportChangedIf(changed).RequireOptimisticLock()
+//	return ef.Ok().ReportChangedIf(changed)
 type EnsureOutcome struct {
-	err            error
-	changeState    changeState
-	changeReported bool
+	err     error
+	changed bool
 }
 
 // Error returns the error carried by the outcome, if any.
@@ -642,47 +783,18 @@ func (o EnsureOutcome) Enrichf(format string, args ...any) EnsureOutcome {
 
 // ReportChanged marks that the helper changed the object.
 func (o EnsureOutcome) ReportChanged() EnsureOutcome {
-	o.changeReported = true
-	if o.changeState == unchangedState {
-		o.changeState = changedState
-	}
+	o.changed = true
 	return o
 }
 
 // ReportChangedIf is like ReportChanged, but records a change only when cond is true.
-//
-// Call this even for “no change” paths to make subsequent use of RequireOptimisticLock explicit and safe:
-//
-//	return ef.Ok().ReportChangedIf(changed).RequireOptimisticLock()
 func (o EnsureOutcome) ReportChangedIf(cond bool) EnsureOutcome {
-	o.changeReported = true
-	if cond && o.changeState == unchangedState {
-		o.changeState = changedState
-	}
+	o.changed = o.changed || cond
 	return o
 }
 
 // DidChange reports whether the outcome records a change.
-func (o EnsureOutcome) DidChange() bool { return o.changeState >= changedState }
-
-// RequireOptimisticLock returns a copy of EnsureOutcome that requires optimistic locking.
-//
-// Contract: it must be called only after ReportChanged/ReportChangedIf; otherwise it panics
-// (this is a guard against forgetting change reporting in ensure helpers).
-func (o EnsureOutcome) RequireOptimisticLock() EnsureOutcome {
-	if !o.changeReported {
-		panic("flow: EnsureOutcome.RequireOptimisticLock called before ReportChanged/ReportChangedIf")
-	}
-	if o.changeState == changedState {
-		o.changeState = changedAndOptimisticLockRequiredState
-	}
-	return o
-}
-
-// OptimisticLockRequired reports whether the outcome requires optimistic locking.
-func (o EnsureOutcome) OptimisticLockRequired() bool {
-	return o.changeState >= changedAndOptimisticLockRequiredState
-}
+func (o EnsureOutcome) DidChange() bool { return o.changed }
 
 // Merge combines this outcome with others and returns the merged result.
 //
@@ -696,34 +808,27 @@ func (o EnsureOutcome) Merge(others ...EnsureOutcome) EnsureOutcome {
 // Use this to aggregate outcomes of multiple sub-ensures within the same ensure helper.
 //
 // - Errors are joined via errors.Join.
-// - Change/lock intent is merged deterministically (strongest wins).
+// - Change state is merged deterministically (any changed makes merged changed).
 func MergeEnsures(outcomes ...EnsureOutcome) EnsureOutcome {
 	if len(outcomes) == 0 {
 		return EnsureOutcome{}
 	}
 
 	var (
-		errs              []error
-		maxChangeState    changeState
-		anyChangeReported bool
+		errs       []error
+		anyChanged bool
 	)
 
 	for _, o := range outcomes {
 		if o.err != nil {
 			errs = append(errs, o.err)
 		}
-
-		anyChangeReported = anyChangeReported || o.changeReported
-
-		if o.changeState > maxChangeState {
-			maxChangeState = o.changeState
-		}
+		anyChanged = anyChanged || o.changed
 	}
 
 	return EnsureOutcome{
-		err:            errors.Join(errs...),
-		changeState:    maxChangeState,
-		changeReported: anyChangeReported,
+		err:     errors.Join(errs...),
+		changed: anyChanged,
 	}
 }
 
@@ -762,7 +867,7 @@ func BeginStep(ctx context.Context, phaseName string, kv ...string) StepFlow {
 	l := buildPhaseLogger(ctx, phaseName, kv)
 	l.V(1).Info("phase start")
 
-	ctx = storePhaseContext(ctx, l, phaseName, kv)
+	ctx = storePhaseStart(ctx, l)
 	return StepFlow{ctx: ctx, log: l}
 }
 
@@ -778,7 +883,7 @@ func (sf StepFlow) OnEnd(err *error) {
 		panic(r)
 	}
 
-	v, ok := getPhaseContext(sf.ctx)
+	start, ok := getPhaseStart(sf.ctx)
 	if !ok {
 		return
 	}
@@ -789,9 +894,7 @@ func (sf StepFlow) OnEnd(err *error) {
 
 	fields := []any{
 		"hasError", *err != nil,
-	}
-	if !v.start.IsZero() {
-		fields = append(fields, "duration", time.Since(v.start))
+		"duration", time.Since(start),
 	}
 
 	if *err != nil {

@@ -24,6 +24,7 @@ import (
 	"hash/fnv"
 	"slices"
 	"sort"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -61,221 +62,53 @@ func NewReconciler(cl client.Client) *Reconciler {
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	rf := flow.BeginRootReconcile(ctx)
 
-	// Get RSC.
+	// Get RSC. Returns nil if not found (already deleted).
 	rsc, err := r.getRSC(rf.Ctx(), req.Name)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return rf.Done().ToCtrl()
-		}
 		return rf.Fail(err).ToCtrl()
 	}
 
 	// Get RVs referencing this RSC.
-	rvs, err := r.getSortedRVsByRSC(rf.Ctx(), rsc.Name)
+	rvs, err := r.getSortedRVsByRSC(rf.Ctx(), req.Name)
 	if err != nil {
 		return rf.Fail(err).ToCtrl()
 	}
 
-	// Reconcile StorageClass.
 	outcome := r.reconcileStorageClass(rf.Ctx(), rsc)
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
 	}
 
-	// Reconcile migration from RSP (deprecated storagePool field).
-	outcome = r.reconcileMigrationFromRSP(rf.Ctx(), rsc)
-	if outcome.ShouldReturn() {
-		return outcome.ToCtrl()
-	}
-
-	// Reconcile main (finalizer management).
-	outcome = r.reconcileMain(rf.Ctx(), rsc, rvs)
-	if outcome.ShouldReturn() {
-		return outcome.ToCtrl()
-	}
-
-	// Reconcile status.
-	outcome = r.reconcileStatus(rf.Ctx(), rsc, rvs)
-	if outcome.ShouldReturn() {
-		return outcome.ToCtrl()
-	}
-
-	// Release storage pools that are no longer used.
-	return r.reconcileUnusedRSPs(rf.Ctx(), rsc).ToCtrl()
-}
-
-// reconcileMigrationFromRSP migrates StoragePool to spec.Storage.
-//
-// Reconcile pattern: Target-state driven
-//
-// Logic:
-//   - If storagePool is empty → Continue (nothing to migrate)
-//   - If storagePool set AND RSP not found → set conditions (Ready=False, StoragePoolReady=False), patch status, return Done
-//   - If storagePool set AND RSP found → copy type+lvmVolumeGroups to spec.storage, clear storagePool
-func (r *Reconciler) reconcileMigrationFromRSP(
-	ctx context.Context,
-	rsc *v1alpha1.ReplicatedStorageClass,
-) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "migration-from-rsp")
-	defer rf.OnEnd(&outcome)
-
-	// Nothing to migrate.
-	if rsc.Spec.StoragePool == "" {
-		return rf.Continue()
-	}
-
-	rsp, err := r.getRSP(rf.Ctx(), rsc.Spec.StoragePool)
+	// Get all RSPs that reference this RSC (via usedBy).
+	usedStoragePoolNames, err := r.getUsedStoragePoolNames(rf.Ctx(), req.Name)
 	if err != nil {
-		return rf.Fail(err)
+		return rf.Fail(err).ToCtrl()
 	}
 
-	// RSP not found - set conditions and wait.
-	if rsp == nil {
-		base := rsc.DeepCopy()
-		changed := applyReadyCondFalse(rsc,
-			v1alpha1.ReplicatedStorageClassCondReadyReasonWaitingForStoragePool,
-			fmt.Sprintf("Cannot migrate from storagePool field: ReplicatedStoragePool %q not found", rsc.Spec.StoragePool))
-		changed = applyStoragePoolReadyCondFalse(rsc,
-			v1alpha1.ReplicatedStorageClassCondStoragePoolReadyReasonStoragePoolNotFound,
-			fmt.Sprintf("ReplicatedStoragePool %q not found", rsc.Spec.StoragePool)) || changed
-		if changed {
-			if err := r.patchRSCStatus(rf.Ctx(), rsc, base, false); err != nil {
-				return rf.Fail(err)
-			}
+	// If RSC is deleted (or being deleted with no RVs), clean up usedBy and remove finalizer.
+	if rscShouldBeDeleted(rsc, rvs) {
+		return r.reconcileDeletion(rf.Ctx(), req.Name, rsc, usedStoragePoolNames).ToCtrl()
+	}
+
+	// Reconcile migration from RSP (deprecated storagePool field).
+	if rsc.Spec.StoragePool != "" {
+		if outcome := r.reconcileMigrationFromRSP(rf.Ctx(), rsc); outcome.ShouldReturn() {
+			return outcome.ToCtrl()
 		}
-		return rf.Done()
 	}
 
-	// RSP found, migrate storage configuration.
-	targetStorage := computeTargetStorageFromRSP(rsp)
-
-	base := rsc.DeepCopy()
-	applyStorageMigration(rsc, targetStorage)
-
-	if err := r.patchRSC(rf.Ctx(), rsc, base, true); err != nil {
-		return rf.Fail(err)
+	// Reconcile metadata (finalizer management).
+	if outcome := r.reconcileMetadata(rf.Ctx(), rsc); outcome.ShouldReturn() {
+		return outcome.ToCtrl()
 	}
-
-	return rf.Continue()
-}
-
-// reconcileMain manages the finalizer.
-//
-// Reconcile pattern: Target-state driven
-//
-// Logic:
-//   - If no finalizer → add it
-//   - If deletionTimestamp set AND no RVs → remove finalizer
-func (r *Reconciler) reconcileMain(
-	ctx context.Context,
-	rsc *v1alpha1.ReplicatedStorageClass,
-	rvs []rvView,
-) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "main")
-	defer rf.OnEnd(&outcome)
-
-	// Compute target for finalizers.
-	actualControllerFinalizerPresent := computeActualFinalizerPresent(rsc)
-	targetControllerFinalizerPresent := computeTargetFinalizerPresent(rsc, rvs)
-	actualLegacyFinalizerPresent := computeActualLegacyFinalizerPresent(rsc)
-	targetLegacyFinalizerPresent := computeTargetLegacyFinalizerPresent(rsc)
-
-	// If nothing changed, continue.
-	if targetControllerFinalizerPresent == actualControllerFinalizerPresent &&
-		targetLegacyFinalizerPresent == actualLegacyFinalizerPresent {
-		return rf.Continue()
-	}
-
-	base := rsc.DeepCopy()
-	applyFinalizers(rsc, targetControllerFinalizerPresent, targetLegacyFinalizerPresent)
-
-	if err := r.patchRSC(rf.Ctx(), rsc, base, true); err != nil {
-		return rf.Fail(err)
-	}
-
-	// If controller finalizer was removed, we're done (object will be deleted).
-	if !targetControllerFinalizerPresent {
-		return rf.Done()
-	}
-
-	return rf.Continue()
-}
-
-// computeTargetStorageFromRSP computes the target Storage from the RSP spec.
-func computeTargetStorageFromRSP(rsp *v1alpha1.ReplicatedStoragePool) v1alpha1.ReplicatedStorageClassStorage {
-	// Clone LVMVolumeGroups to avoid aliasing.
-	lvmVolumeGroups := make([]v1alpha1.ReplicatedStoragePoolLVMVolumeGroups, len(rsp.Spec.LVMVolumeGroups))
-	copy(lvmVolumeGroups, rsp.Spec.LVMVolumeGroups)
-
-	return v1alpha1.ReplicatedStorageClassStorage{
-		Type:            rsp.Spec.Type,
-		LVMVolumeGroups: lvmVolumeGroups,
-	}
-}
-
-// applyStorageMigration applies the target storage and clears the storagePool field.
-func applyStorageMigration(rsc *v1alpha1.ReplicatedStorageClass, targetStorage v1alpha1.ReplicatedStorageClassStorage) {
-	rsc.Spec.Storage = targetStorage
-	rsc.Spec.StoragePool = ""
-}
-
-// computeActualFinalizerPresent returns whether the controller finalizer is present on the RSC.
-func computeActualFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass) bool {
-	return objutilv1.HasFinalizer(rsc, v1alpha1.RSCControllerFinalizer)
-}
-
-// computeTargetFinalizerPresent returns whether the controller finalizer should be present.
-// The finalizer should be present unless the RSC is being deleted AND has no RVs.
-func computeTargetFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass, rvs []rvView) bool {
-	isDeleting := rsc.DeletionTimestamp != nil
-	hasRVs := len(rvs) > 0
-
-	// Keep finalizer if not deleting or if there are still RVs.
-	return !isDeleting || hasRVs
-}
-
-func computeActualLegacyFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass) bool {
-	return objutilv1.HasFinalizer(rsc, replicatedStorageClassFinalizerName)
-}
-
-func computeTargetLegacyFinalizerPresent(rsc *v1alpha1.ReplicatedStorageClass) bool {
-	return rsc.DeletionTimestamp == nil
-}
-
-func applyFinalizers(rsc *v1alpha1.ReplicatedStorageClass, targetControllerFinalizerPresent, targetLegacyFinalizerPresent bool) {
-	if targetControllerFinalizerPresent {
-		objutilv1.AddFinalizer(rsc, v1alpha1.RSCControllerFinalizer)
-	} else {
-		objutilv1.RemoveFinalizer(rsc, v1alpha1.RSCControllerFinalizer)
-	}
-
-	if targetLegacyFinalizerPresent {
-		objutilv1.AddFinalizer(rsc, replicatedStorageClassFinalizerName)
-	} else {
-		objutilv1.RemoveFinalizer(rsc, replicatedStorageClassFinalizerName)
-	}
-}
-
-// --- Reconcile: status ---
-
-// reconcileStatus reconciles the RSC status.
-//
-// Reconcile pattern: In-place reconciliation
-func (r *Reconciler) reconcileStatus(
-	ctx context.Context,
-	rsc *v1alpha1.ReplicatedStorageClass,
-	rvs []rvView,
-) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "status")
-	defer rf.OnEnd(&outcome)
 
 	// Compute target storage pool name (cached if already computed for this generation).
 	targetStoragePoolName := computeTargetStoragePool(rsc)
 
 	// Ensure auto-generated RSP exists and is configured.
-	outcome, rsp := r.reconcileRSP(rf.Ctx(), rsc, targetStoragePoolName)
+	rsp, outcome := r.reconcileRSP(rf.Ctx(), rsc, targetStoragePoolName)
 	if outcome.ShouldReturn() {
-		return outcome
+		return outcome.ToCtrl()
 	}
 
 	// Take patch base before mutations.
@@ -294,12 +127,147 @@ func (r *Reconciler) reconcileStatus(
 
 	// Patch if changed.
 	if eo.DidChange() {
-		if err := r.patchRSCStatus(rf.Ctx(), rsc, base, eo.OptimisticLockRequired()); err != nil {
+		if err := r.patchRSCStatus(rf.Ctx(), rsc, base); err != nil {
+			return rf.Fail(err).ToCtrl()
+		}
+	}
+
+	// Release storage pools that are no longer used.
+	return r.reconcileUnusedRSPs(rf.Ctx(), rsc, usedStoragePoolNames).ToCtrl()
+}
+
+// rscShouldBeDeleted returns true if the RSC is marked for deletion and has no RVs blocking it.
+func rscShouldBeDeleted(rsc *v1alpha1.ReplicatedStorageClass, rvs []rvView) bool {
+	return rsc == nil || (rsc.DeletionTimestamp != nil && len(rvs) == 0)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: deletion
+//
+
+// reconcileDeletion handles RSC deletion: releases all RSPs from usedBy, then removes the finalizer.
+//
+// Reconcile pattern: Pure orchestration
+func (r *Reconciler) reconcileDeletion(
+	ctx context.Context,
+	rscName string,
+	rsc *v1alpha1.ReplicatedStorageClass, // may be nil if already deleted
+	usedStoragePoolNames []string,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "deletion")
+	defer rf.OnEnd(&outcome)
+
+	// Release all RSPs that reference this RSC.
+	outcomes := make([]flow.ReconcileOutcome, 0, len(usedStoragePoolNames))
+	for _, rspName := range usedStoragePoolNames {
+		outcomes = append(outcomes, r.reconcileRSPRelease(rf.Ctx(), rscName, rspName))
+	}
+	if merged := flow.MergeReconciles(outcomes...); merged.ShouldReturn() {
+		return merged
+	}
+
+	// All RSPs released. Remove finalizer (if RSC still exists).
+	if rsc != nil && objutilv1.HasFinalizer(rsc, v1alpha1.RSCControllerFinalizer) {
+		base := rsc.DeepCopy()
+		objutilv1.RemoveFinalizer(rsc, v1alpha1.RSCControllerFinalizer)
+		if err := r.patchRSC(rf.Ctx(), rsc, base); err != nil {
 			return rf.Fail(err)
 		}
 	}
 
 	return rf.Done()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: migration-from-rsp
+//
+
+// reconcileMigrationFromRSP migrates StoragePool to spec.Storage.
+//
+// Precondition: rsc.Spec.StoragePool != "" (checked by caller)
+//
+// Reconcile pattern: Target-state driven
+//
+// Logic:
+//   - If RSP not found → set conditions (Ready=False, StoragePoolReady=False), patch status, return Done
+//   - If RSP found → copy type+lvmVolumeGroups to spec.storage, clear storagePool
+func (r *Reconciler) reconcileMigrationFromRSP(
+	ctx context.Context,
+	rsc *v1alpha1.ReplicatedStorageClass,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "migration-from-rsp", "rsp", rsc.Spec.StoragePool)
+	defer rf.OnEnd(&outcome)
+
+	rsp, err := r.getRSP(rf.Ctx(), rsc.Spec.StoragePool)
+	if err != nil {
+		return rf.Fail(err)
+	}
+
+	// RSP not found - set conditions and wait.
+	if rsp == nil {
+		base := rsc.DeepCopy()
+		changed := applyReadyCondFalse(rsc,
+			v1alpha1.ReplicatedStorageClassCondReadyReasonWaitingForStoragePool,
+			fmt.Sprintf("Cannot migrate from storagePool field: ReplicatedStoragePool %q not found", rsc.Spec.StoragePool))
+		changed = applyStoragePoolReadyCondFalse(rsc,
+			v1alpha1.ReplicatedStorageClassCondStoragePoolReadyReasonStoragePoolNotFound,
+			fmt.Sprintf("ReplicatedStoragePool %q not found", rsc.Spec.StoragePool)) || changed
+		if changed {
+			if err := r.patchRSCStatus(rf.Ctx(), rsc, base); err != nil {
+				return rf.Fail(err)
+			}
+		}
+		return rf.Done()
+	}
+
+	// RSP found, migrate storage configuration.
+	base := rsc.DeepCopy()
+
+	// Clone LVMVolumeGroups to avoid aliasing.
+	lvmVolumeGroups := make([]v1alpha1.ReplicatedStoragePoolLVMVolumeGroups, len(rsp.Spec.LVMVolumeGroups))
+	copy(lvmVolumeGroups, rsp.Spec.LVMVolumeGroups)
+
+	rsc.Spec.Storage = v1alpha1.ReplicatedStorageClassStorage{
+		Type:            rsp.Spec.Type,
+		LVMVolumeGroups: lvmVolumeGroups,
+	}
+	rsc.Spec.StoragePool = ""
+
+	if err := r.patchRSC(rf.Ctx(), rsc, base); err != nil {
+		return rf.Fail(err)
+	}
+
+	return rf.Continue()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: metadata
+//
+
+// reconcileMetadata ensures the controller finalizer is present.
+//
+// Precondition: RSC is not being deleted (deletion is handled by reconcileDeletion).
+//
+// Reconcile pattern: Conditional target evaluation
+func (r *Reconciler) reconcileMetadata(
+	ctx context.Context,
+	rsc *v1alpha1.ReplicatedStorageClass,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "metadata")
+	defer rf.OnEnd(&outcome)
+
+	if objutilv1.HasFinalizer(rsc, v1alpha1.RSCControllerFinalizer) {
+		return rf.Continue()
+	}
+
+	base := rsc.DeepCopy()
+	objutilv1.AddFinalizer(rsc, v1alpha1.RSCControllerFinalizer)
+
+	if err := r.patchRSC(rf.Ctx(), rsc, base); err != nil {
+		return rf.Fail(err)
+	}
+
+	return rf.Continue()
 }
 
 // --- Ensure helpers ---
@@ -339,10 +307,10 @@ func ensureStoragePool(
 // Algorithm:
 //  1. Panic if StoragePoolBasedOnGeneration != Generation (caller bug).
 //  2. If StoragePoolReady != True: set Ready=False (WaitingForStoragePool) and return.
-//  3. If RSP.EligibleNodesRevision != rsc.status.StoragePoolEligibleNodesRevision:
+//  3. If RSP.EligibleNodesRevision changed OR configuration is not in sync:
 //     - Validate RSP.EligibleNodes against topology/replication requirements.
 //     - If invalid: Ready=False (InsufficientEligibleNodes) and return.
-//     - Update rsc.status.StoragePoolEligibleNodesRevision.
+//     - Update rsc.status.StoragePoolEligibleNodesRevision if changed.
 //  4. If ConfigurationGeneration == Generation: done (configuration already in sync).
 //  5. Otherwise: apply new Configuration, set ConfigurationGeneration.
 func ensureConfiguration(
@@ -361,30 +329,51 @@ func ensureConfiguration(
 
 	changed := false
 
+	// Compute diff message for use in Ready=False messages.
+	pendingDiffMsg := computePendingConfigurationDiffMessage(rsc, rsc.Status.StoragePoolName)
+
 	// 2. If StoragePoolReady != True: set Ready=False and return.
 	if !objutilv1.IsStatusConditionPresentAndTrue(rsc, v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType) {
+		msg := "Waiting for ReplicatedStoragePool to become ready"
+		if pendingDiffMsg != "" {
+			msg = pendingDiffMsg + ". " + msg
+		}
 		changed = applyReadyCondFalse(rsc,
 			v1alpha1.ReplicatedStorageClassCondReadyReasonWaitingForStoragePool,
-			"Waiting for ReplicatedStoragePool to become ready")
+			msg)
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
-	// 3. Validate eligibleNodes if revision changed.
-	if rsp.Status.EligibleNodesRevision != rsc.Status.StoragePoolEligibleNodesRevision {
+	// 3. Validate eligibleNodes if revision changed OR configuration is not in sync
+	//    (spec.replication/topology may have changed without RSP revision change).
+	needsValidation := rsp.Status.EligibleNodesRevision != rsc.Status.StoragePoolEligibleNodesRevision ||
+		!isConfigurationInSync(rsc)
+	if needsValidation {
 		if err := validateEligibleNodes(rsp.Status.EligibleNodes, rsc.Spec.Topology, rsc.Spec.Replication); err != nil {
+			msg := err.Error()
+			if pendingDiffMsg != "" {
+				msg = pendingDiffMsg + ". " + msg
+			}
 			changed = applyReadyCondFalse(rsc,
 				v1alpha1.ReplicatedStorageClassCondReadyReasonInsufficientEligibleNodes,
-				err.Error())
+				msg)
 			return ef.Ok().ReportChangedIf(changed)
 		}
 
 		// Update StoragePoolEligibleNodesRevision.
-		rsc.Status.StoragePoolEligibleNodesRevision = rsp.Status.EligibleNodesRevision
-		changed = true
+		if rsc.Status.StoragePoolEligibleNodesRevision != rsp.Status.EligibleNodesRevision {
+			rsc.Status.StoragePoolEligibleNodesRevision = rsp.Status.EligibleNodesRevision
+			changed = true
+		}
 	}
 
-	// 4. If configuration is in sync, we're done.
+	// 4. If configuration is in sync, re-assert Ready=True (may have been cleared
+	//    by a transient StoragePool-not-ready condition) and we're done.
 	if isConfigurationInSync(rsc) {
+		changed = applyReadyCondTrue(rsc,
+			v1alpha1.ReplicatedStorageClassCondReadyReasonReady,
+			"Storage class is ready",
+		) || changed
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
@@ -399,7 +388,7 @@ func ensureConfiguration(
 		"Storage class is ready",
 	)
 
-	return ef.Ok().ReportChanged().RequireOptimisticLock()
+	return ef.Ok().ReportChanged()
 }
 
 // ensureVolumeSummaryAndConditions computes and applies volume summary and conditions in-place.
@@ -425,12 +414,12 @@ func ensureVolumeSummaryAndConditions(
 		if maxParallelConflictResolutions > 0 {
 			changed = applyVolumesSatisfyEligibleNodesCondFalse(rsc,
 				v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonConflictResolutionInProgress,
-				"not implemented",
+				"Not implemented",
 			) || changed
 		} else {
 			changed = applyVolumesSatisfyEligibleNodesCondFalse(rsc,
 				v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonManualConflictResolution,
-				"not implemented",
+				"Not implemented",
 			) || changed
 		}
 	} else {
@@ -456,12 +445,12 @@ func ensureVolumeSummaryAndConditions(
 		if maxParallelConfigurationRollouts > 0 {
 			changed = applyConfigurationRolledOutCondFalse(rsc,
 				v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutInProgress,
-				"not implemented",
+				"Not implemented",
 			) || changed
 		} else {
 			changed = applyConfigurationRolledOutCondFalse(rsc,
 				v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutDisabled,
-				"not implemented",
+				"Not implemented",
 			) || changed
 		}
 	} else {
@@ -487,8 +476,10 @@ type rvView struct {
 }
 
 type rvViewConditions struct {
-	satisfyEligibleNodes bool
-	configurationReady   bool
+	satisfyEligibleNodesKnown bool // true when SatisfyEligibleNodes condition is present
+	satisfyEligibleNodes      bool // true when SatisfyEligibleNodes condition is present and True
+	configurationReadyKnown   bool // true when ConfigurationReady condition is present
+	configurationReady        bool // true when ConfigurationReady condition is present and True
 }
 
 // newRVView creates an rvView from a ReplicatedVolume.
@@ -498,8 +489,10 @@ func newRVView(unsafeRV *v1alpha1.ReplicatedVolume) rvView {
 		name:                            unsafeRV.Name,
 		configurationObservedGeneration: unsafeRV.Status.ConfigurationObservedGeneration,
 		conditions: rvViewConditions{
-			satisfyEligibleNodes: objutilv1.IsStatusConditionPresentAndTrue(unsafeRV, v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType),
-			configurationReady:   objutilv1.IsStatusConditionPresentAndTrue(unsafeRV, v1alpha1.ReplicatedVolumeCondConfigurationReadyType),
+			satisfyEligibleNodesKnown: objutilv1.HasStatusCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType),
+			satisfyEligibleNodes:      objutilv1.IsStatusConditionPresentAndTrue(unsafeRV, v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType),
+			configurationReadyKnown:   objutilv1.HasStatusCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondConfigurationReadyType),
+			configurationReady:        objutilv1.IsStatusConditionPresentAndTrue(unsafeRV, v1alpha1.ReplicatedVolumeCondConfigurationReadyType),
 		},
 	}
 
@@ -538,6 +531,38 @@ func makeConfiguration(rsc *v1alpha1.ReplicatedStorageClass, storagePoolName str
 		VolumeAccess:    rsc.Spec.VolumeAccess,
 		StoragePoolName: storagePoolName,
 	}
+}
+
+// computePendingConfigurationDiffMessage returns a human-readable description of the differences between
+// the current spec-derived configuration and the accepted configuration in status.
+// When status.configuration is nil (first configuration), returns "Pending: initial configuration".
+// When all fields match (no diff), returns an empty string.
+func computePendingConfigurationDiffMessage(rsc *v1alpha1.ReplicatedStorageClass, targetStoragePoolName string) string {
+	if rsc.Status.Configuration == nil {
+		return "Pending: initial configuration"
+	}
+
+	cur := rsc.Status.Configuration
+	var diffs []string
+
+	if cur.Replication != rsc.Spec.Replication {
+		diffs = append(diffs, fmt.Sprintf("replication %s -> %s", cur.Replication, rsc.Spec.Replication))
+	}
+	if cur.Topology != rsc.Spec.Topology {
+		diffs = append(diffs, fmt.Sprintf("topology %s -> %s", cur.Topology, rsc.Spec.Topology))
+	}
+	if cur.VolumeAccess != rsc.Spec.VolumeAccess {
+		diffs = append(diffs, fmt.Sprintf("volumeAccess %s -> %s", cur.VolumeAccess, rsc.Spec.VolumeAccess))
+	}
+	if cur.StoragePoolName != targetStoragePoolName {
+		diffs = append(diffs, fmt.Sprintf("storage: not yet accepted (current pool: %s, pending pool: %s)", cur.StoragePoolName, targetStoragePoolName))
+	}
+
+	if len(diffs) == 0 {
+		return ""
+	}
+
+	return "Pending: " + strings.Join(diffs, ", ")
 }
 
 // applyConfigurationRolledOutCondUnknown sets the ConfigurationRolledOut condition to Unknown.
@@ -669,7 +694,7 @@ func validateEligibleNodes(
 	replication v1alpha1.ReplicatedStorageClassReplication,
 ) error {
 	if len(eligibleNodes) == 0 {
-		return fmt.Errorf("no eligible nodes")
+		return fmt.Errorf("No nodes available in the storage pool")
 	}
 
 	// Count nodes and nodes with disks.
@@ -706,7 +731,7 @@ func validateEligibleNodes(
 	case v1alpha1.ReplicationNone:
 		// At least 1 node required.
 		if totalNodes < 1 {
-			return fmt.Errorf("replication None requires at least 1 node, have %d", totalNodes)
+			return fmt.Errorf("Replication None requires at least 1 node, have %d", totalNodes)
 		}
 
 	case v1alpha1.ReplicationAvailability:
@@ -742,10 +767,10 @@ func validateAvailabilityReplication(
 	case v1alpha1.TopologyTransZonal:
 		// 3 different zones, at least 2 with disks.
 		if len(nodesByZone) < 3 {
-			return fmt.Errorf("replication Availability with TransZonal topology requires nodes in at least 3 zones, have %d", len(nodesByZone))
+			return fmt.Errorf("Replication Availability with TransZonal topology requires nodes in at least 3 zones, have %d", len(nodesByZone))
 		}
 		if zonesWithDisks < 2 {
-			return fmt.Errorf("replication Availability with TransZonal topology requires at least 2 zones with disks, have %d", zonesWithDisks)
+			return fmt.Errorf("Replication Availability with TransZonal topology requires at least 2 zones with disks, have %d", zonesWithDisks)
 		}
 
 	case v1alpha1.TopologyZonal:
@@ -758,20 +783,20 @@ func validateAvailabilityReplication(
 				}
 			}
 			if len(nodes) < 3 {
-				return fmt.Errorf("replication Availability with Zonal topology requires at least 3 nodes in each zone, zone %q has %d", zone, len(nodes))
+				return fmt.Errorf("Replication Availability with Zonal topology requires at least 3 nodes in each zone, zone %q has %d", zone, len(nodes))
 			}
 			if zoneNodesWithDisks < 2 {
-				return fmt.Errorf("replication Availability with Zonal topology requires at least 2 nodes with disks in each zone, zone %q has %d", zone, zoneNodesWithDisks)
+				return fmt.Errorf("Replication Availability with Zonal topology requires at least 2 nodes with disks in each zone, zone %q has %d", zone, zoneNodesWithDisks)
 			}
 		}
 
 	default:
 		// Ignored topology or unspecified: global check.
 		if totalNodes < 3 {
-			return fmt.Errorf("replication Availability requires at least 3 nodes, have %d", totalNodes)
+			return fmt.Errorf("Replication Availability requires at least 3 nodes, have %d", totalNodes)
 		}
 		if nodesWithDisks < 2 {
-			return fmt.Errorf("replication Availability requires at least 2 nodes with disks, have %d", nodesWithDisks)
+			return fmt.Errorf("Replication Availability requires at least 2 nodes with disks, have %d", nodesWithDisks)
 		}
 	}
 
@@ -789,7 +814,7 @@ func validateConsistencyReplication(
 	case v1alpha1.TopologyTransZonal:
 		// 2 different zones with disks.
 		if zonesWithDisks < 2 {
-			return fmt.Errorf("replication Consistency with TransZonal topology requires at least 2 zones with disks, have %d", zonesWithDisks)
+			return fmt.Errorf("Replication Consistency with TransZonal topology requires at least 2 zones with disks, have %d", zonesWithDisks)
 		}
 
 	case v1alpha1.TopologyZonal:
@@ -802,17 +827,17 @@ func validateConsistencyReplication(
 				}
 			}
 			if zoneNodesWithDisks < 2 {
-				return fmt.Errorf("replication Consistency with Zonal topology requires at least 2 nodes with disks in each zone, zone %q has %d", zone, zoneNodesWithDisks)
+				return fmt.Errorf("Replication Consistency with Zonal topology requires at least 2 nodes with disks in each zone, zone %q has %d", zone, zoneNodesWithDisks)
 			}
 		}
 
 	default:
 		// Ignored topology or unspecified: global check.
 		if totalNodes < 2 {
-			return fmt.Errorf("replication Consistency requires at least 2 nodes, have %d", totalNodes)
+			return fmt.Errorf("Replication Consistency requires at least 2 nodes, have %d", totalNodes)
 		}
 		if nodesWithDisks < 2 {
-			return fmt.Errorf("replication Consistency requires at least 2 nodes with disks, have %d", nodesWithDisks)
+			return fmt.Errorf("Replication Consistency requires at least 2 nodes with disks, have %d", nodesWithDisks)
 		}
 	}
 
@@ -830,7 +855,7 @@ func validateConsistencyAndAvailabilityReplication(
 	case v1alpha1.TopologyTransZonal:
 		// 3 zones with disks.
 		if zonesWithDisks < 3 {
-			return fmt.Errorf("replication ConsistencyAndAvailability with TransZonal topology requires at least 3 zones with disks, have %d", zonesWithDisks)
+			return fmt.Errorf("Replication ConsistencyAndAvailability with TransZonal topology requires at least 3 zones with disks, have %d", zonesWithDisks)
 		}
 
 	case v1alpha1.TopologyZonal:
@@ -843,14 +868,14 @@ func validateConsistencyAndAvailabilityReplication(
 				}
 			}
 			if zoneNodesWithDisks < 3 {
-				return fmt.Errorf("replication ConsistencyAndAvailability with Zonal topology requires at least 3 nodes with disks in each zone, zone %q has %d", zone, zoneNodesWithDisks)
+				return fmt.Errorf("Replication ConsistencyAndAvailability with Zonal topology requires at least 3 nodes with disks in each zone, zone %q has %d", zone, zoneNodesWithDisks)
 			}
 		}
 
 	default:
 		// Ignored topology or unspecified: global check.
 		if nodesWithDisks < 3 {
-			return fmt.Errorf("replication ConsistencyAndAvailability requires at least 3 nodes with disks, have %d", nodesWithDisks)
+			return fmt.Errorf("Replication ConsistencyAndAvailability requires at least 3 nodes with disks, have %d", nodesWithDisks)
 		}
 	}
 
@@ -904,7 +929,9 @@ func computeActualVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, rvs []rvV
 		}
 
 		// Check nodes condition regardless of acknowledgment.
-		if !rv.conditions.satisfyEligibleNodes {
+		// Only count as "in conflict" if the condition is present and not True.
+		// Missing condition means the RV hasn't been evaluated yet.
+		if rv.conditions.satisfyEligibleNodesKnown && !rv.conditions.satisfyEligibleNodes {
 			inConflictWithEligibleNodes++
 		}
 
@@ -918,7 +945,9 @@ func computeActualVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, rvs []rvV
 			aligned++
 		}
 
-		if !rv.conditions.configurationReady {
+		// Only count as "stale" if the condition is present and not True.
+		// Missing condition means the RV hasn't been evaluated yet.
+		if rv.conditions.configurationReadyKnown && !rv.conditions.configurationReady {
 			staleConfiguration++
 		}
 	}
@@ -955,6 +984,9 @@ func computeActualVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, rvs []rvV
 // isRSCConfigurationAcknowledgedByRV checks if the RV has acknowledged
 // the current RSC configuration.
 func isRSCConfigurationAcknowledgedByRV(rsc *v1alpha1.ReplicatedStorageClass, rv *rvView) bool {
+	if rv.configurationObservedGeneration == 0 {
+		return true
+	}
 	return rv.configurationObservedGeneration == rsc.Status.ConfigurationGeneration
 }
 
@@ -1064,32 +1096,39 @@ func applyStoragePool(rsc *v1alpha1.ReplicatedStorageClass, targetName string) b
 	return changed
 }
 
-// --- Reconcile: RSP ---
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: ReplicatedStoragePool (RSP)
+//
 
 // reconcileRSP ensures the auto-generated RSP exists and is properly configured.
 // Creates RSP if not found, updates finalizer and usedBy if needed.
 //
-// Reconcile pattern: Conditional desired evaluation
+// Reconcile pattern: Conditional target evaluation
 func (r *Reconciler) reconcileRSP(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 	targetStoragePoolName string,
-) (outcome flow.ReconcileOutcome, rsp *v1alpha1.ReplicatedStoragePool) {
-	rf := flow.BeginReconcile(ctx, "rsp")
+) (rsp *v1alpha1.ReplicatedStoragePool, outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "rsp", "rsp", targetStoragePoolName)
 	defer rf.OnEnd(&outcome)
 
 	// Get existing RSP.
 	var err error
 	rsp, err = r.getRSP(rf.Ctx(), targetStoragePoolName)
 	if err != nil {
-		return rf.Fail(err), nil
+		return nil, rf.Fail(err)
 	}
 
 	// If RSP doesn't exist, create it.
 	if rsp == nil {
 		rsp = newRSP(targetStoragePoolName, rsc)
 		if err := r.createRSP(rf.Ctx(), rsp); err != nil {
-			return rf.Fail(err), nil
+			if apierrors.IsAlreadyExists(err) {
+				// Another RSC created this RSP concurrently. Requeue to pick it up from cache.
+				rf.Log().Info("RSP already exists, requeueing", "rsp", targetStoragePoolName)
+				return nil, rf.DoneAndRequeue()
+			}
+			return nil, rf.Fail(err)
 		}
 		// Continue to ensure usedBy is set below.
 	}
@@ -1098,8 +1137,8 @@ func (r *Reconciler) reconcileRSP(
 	if !objutilv1.HasFinalizer(rsp, v1alpha1.RSCControllerFinalizer) {
 		base := rsp.DeepCopy()
 		applyRSPFinalizer(rsp, true)
-		if err := r.patchRSP(rf.Ctx(), rsp, base, true); err != nil {
-			return rf.Fail(err), nil
+		if err := r.patchRSP(rf.Ctx(), rsp, base); err != nil {
+			return nil, rf.Fail(err)
 		}
 	}
 
@@ -1107,13 +1146,17 @@ func (r *Reconciler) reconcileRSP(
 	if !slices.Contains(rsp.Status.UsedBy.ReplicatedStorageClassNames, rsc.Name) {
 		base := rsp.DeepCopy()
 		applyRSPUsedBy(rsp, rsc.Name)
-		if err := r.patchRSPStatus(rf.Ctx(), rsp, base, true); err != nil {
-			return rf.Fail(err), nil
+		if err := r.patchRSPStatus(rf.Ctx(), rsp, base); err != nil {
+			return nil, rf.Fail(err)
 		}
 	}
 
-	return rf.Continue(), rsp
+	return rsp, rf.Continue()
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: unused-rsps
+//
 
 // reconcileUnusedRSPs releases storage pools that are no longer used by this RSC.
 //
@@ -1121,15 +1164,10 @@ func (r *Reconciler) reconcileRSP(
 func (r *Reconciler) reconcileUnusedRSPs(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
+	usedStoragePoolNames []string,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "unused-rsps")
 	defer rf.OnEnd(&outcome)
-
-	// Get all RSPs that reference this RSC.
-	usedStoragePoolNames, err := r.getUsedStoragePoolNames(rf.Ctx(), rsc.Name)
-	if err != nil {
-		return rf.Fail(err)
-	}
 
 	// Filter out RSPs that are still in use.
 	unusedStoragePoolNames := slices.DeleteFunc(slices.Clone(usedStoragePoolNames), func(name string) bool {
@@ -1149,10 +1187,14 @@ func (r *Reconciler) reconcileUnusedRSPs(
 	return flow.MergeReconciles(outcomes...)
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: rsp-release
+//
+
 // reconcileRSPRelease releases the RSP from this RSC.
 // Removes RSC from usedBy, and if no more users - deletes the RSP.
 //
-// Reconcile pattern: Conditional desired evaluation
+// Reconcile pattern: Conditional target evaluation
 func (r *Reconciler) reconcileRSPRelease(
 	ctx context.Context,
 	rscName string,
@@ -1178,7 +1220,7 @@ func (r *Reconciler) reconcileRSPRelease(
 	// Remove RSC from usedBy with optimistic lock.
 	base := rsp.DeepCopy()
 	applyRSPRemoveUsedBy(rsp, rscName)
-	if err := r.patchRSPStatus(rf.Ctx(), rsp, base, true); err != nil {
+	if err := r.patchRSPStatus(rf.Ctx(), rsp, base); err != nil {
 		return rf.Fail(err)
 	}
 
@@ -1188,7 +1230,7 @@ func (r *Reconciler) reconcileRSPRelease(
 		if objutilv1.HasFinalizer(rsp, v1alpha1.RSCControllerFinalizer) {
 			base := rsp.DeepCopy()
 			applyRSPFinalizer(rsp, false)
-			if err := r.patchRSP(rf.Ctx(), rsp, base, true); err != nil {
+			if err := r.patchRSP(rf.Ctx(), rsp, base); err != nil {
 				return rf.Fail(err)
 			}
 		}
@@ -1204,7 +1246,7 @@ func (r *Reconciler) reconcileRSPRelease(
 
 // --- Helpers: Reconcile (non-I/O) ---
 
-// --- Helpers: RSP ---
+// --- Helpers: ReplicatedStoragePool (RSP) ---
 
 // newRSP constructs a new RSP from RSC spec.
 func newRSP(name string, rsc *v1alpha1.ReplicatedStorageClass) *v1alpha1.ReplicatedStoragePool {
@@ -1274,10 +1316,13 @@ func applyRSPRemoveUsedBy(rsp *v1alpha1.ReplicatedStoragePool, rscName string) b
 // Single-call I/O helper categories
 //
 
-// getRSC fetches an RSC by name.
+// getRSC fetches an RSC by name. Returns (nil, nil) if not found.
 func (r *Reconciler) getRSC(ctx context.Context, name string) (*v1alpha1.ReplicatedStorageClass, error) {
 	var rsc v1alpha1.ReplicatedStorageClass
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, &rsc); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &rsc, nil
@@ -1340,15 +1385,8 @@ func (r *Reconciler) patchRSC(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 	base *v1alpha1.ReplicatedStorageClass,
-	optimisticLock bool,
 ) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Patch(ctx, rsc, patch)
+	return r.cl.Patch(ctx, rsc, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 // patchRSCStatus patches the RSC status subresource.
@@ -1356,15 +1394,8 @@ func (r *Reconciler) patchRSCStatus(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 	base *v1alpha1.ReplicatedStorageClass,
-	optimisticLock bool,
 ) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Status().Patch(ctx, rsc, patch)
+	return r.cl.Status().Patch(ctx, rsc, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 // createRSP creates an RSP.
@@ -1377,15 +1408,8 @@ func (r *Reconciler) patchRSP(
 	ctx context.Context,
 	rsp *v1alpha1.ReplicatedStoragePool,
 	base *v1alpha1.ReplicatedStoragePool,
-	optimisticLock bool,
 ) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Patch(ctx, rsp, patch)
+	return r.cl.Patch(ctx, rsp, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 // patchRSPStatus patches the RSP status subresource.
@@ -1393,21 +1417,21 @@ func (r *Reconciler) patchRSPStatus(
 	ctx context.Context,
 	rsp *v1alpha1.ReplicatedStoragePool,
 	base *v1alpha1.ReplicatedStoragePool,
-	optimisticLock bool,
 ) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
-	return r.cl.Status().Patch(ctx, rsp, patch)
+	return r.cl.Status().Patch(ctx, rsp, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 // deleteRSP deletes an RSP.
 func (r *Reconciler) deleteRSP(ctx context.Context, rsp *v1alpha1.ReplicatedStoragePool) error {
-	return r.cl.Delete(ctx, rsp, client.Preconditions{
+	if rsp.DeletionTimestamp != nil {
+		return nil
+	}
+	if err := client.IgnoreNotFound(r.cl.Delete(ctx, rsp, client.Preconditions{
 		UID:             &rsp.UID,
 		ResourceVersion: &rsp.ResourceVersion,
-	})
+	})); err != nil {
+		return err
+	}
+	rsp.DeletionTimestamp = ptr.To(metav1.Now())
+	return nil
 }

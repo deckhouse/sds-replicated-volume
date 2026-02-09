@@ -17,11 +17,11 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"fmt"
-	"strconv"
-	"strings"
+	"math/bits"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 // ReplicatedVolumeReplica is a Kubernetes Custom Resource that represents a replica of a ReplicatedVolume.
@@ -38,7 +38,7 @@ import (
 // +kubebuilder:printcolumn:name="Attached",type=string,JSONPath=".status.conditions[?(@.type=='Attached')].status"
 // +kubebuilder:printcolumn:name="Online",type=string,JSONPath=".status.conditions[?(@.type=='Online')].status"
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
-// +kubebuilder:printcolumn:name="Configured",type=string,JSONPath=".status.conditions[?(@.type=='Configured')].status"
+// +kubebuilder:printcolumn:name="DRBDConfigured",type=string,JSONPath=".status.conditions[?(@.type=='DRBDConfigured')].status"
 // +kubebuilder:printcolumn:name="DataInitialized",type=string,JSONPath=".status.conditions[?(@.type=='DataInitialized')].status"
 // +kubebuilder:printcolumn:name="InQuorum",type=string,JSONPath=".status.conditions[?(@.type=='InQuorum')].status"
 // +kubebuilder:printcolumn:name="InSync",type=string,JSONPath=".status.syncProgress"
@@ -53,8 +53,7 @@ type ReplicatedVolumeReplica struct {
 
 	Spec ReplicatedVolumeReplicaSpec `json:"spec"`
 
-	// +patchStrategy=merge
-	Status ReplicatedVolumeReplicaStatus `json:"status,omitempty" patchStrategy:"merge"`
+	Status ReplicatedVolumeReplicaStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -68,17 +67,69 @@ type ReplicatedVolumeReplicaList struct {
 
 // GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It returns the root object's `.status.conditions`.
-func (o *ReplicatedVolumeReplica) GetStatusConditions() []metav1.Condition {
-	return o.Status.Conditions
+func (rvr *ReplicatedVolumeReplica) GetStatusConditions() []metav1.Condition {
+	return rvr.Status.Conditions
 }
 
 // SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It sets the root object's `.status.conditions`.
-func (o *ReplicatedVolumeReplica) SetStatusConditions(conditions []metav1.Condition) {
-	o.Status.Conditions = conditions
+func (rvr *ReplicatedVolumeReplica) SetStatusConditions(conditions []metav1.Condition) {
+	rvr.Status.Conditions = conditions
+}
+
+// NodeID extracts NodeID from the RVR name (e.g., "pvc-xxx-5" → 5).
+// Result is cached after first successful call
+func (rvr *ReplicatedVolumeReplica) NodeID() uint8 {
+	return nodeIDFromName(rvr.Name)
+}
+
+// nodeIDSuffixes is a lookup table for nodeID (0-31) to "-N" suffix conversion.
+var nodeIDSuffixes = [32]string{
+	"-0", "-1", "-2", "-3", "-4", "-5", "-6", "-7",
+	"-8", "-9", "-10", "-11", "-12", "-13", "-14", "-15",
+	"-16", "-17", "-18", "-19", "-20", "-21", "-22", "-23",
+	"-24", "-25", "-26", "-27", "-28", "-29", "-30", "-31",
+}
+
+// FormatReplicatedVolumeReplicaName returns the RVR name for the given RV name and nodeID.
+// Panics if nodeID > 31.
+func FormatReplicatedVolumeReplicaName(rvName string, nodeID uint8) string {
+	if nodeID > 31 {
+		panic("nodeID must be in range 0-31")
+	}
+	return rvName + nodeIDSuffixes[nodeID]
+}
+
+// SetNameWithNodeID sets the RVR name using the ReplicatedVolumeName and the given NodeID.
+func (rvr *ReplicatedVolumeReplica) SetNameWithNodeID(nodeID uint8) {
+	rvr.Name = FormatReplicatedVolumeReplicaName(rvr.Spec.ReplicatedVolumeName, nodeID)
+}
+
+// ChooseNewName selects the first available NodeID and sets the RVR name.
+// Returns false if all NodeIDs (0-31) are already taken by other RVRs.
+func (rvr *ReplicatedVolumeReplica) ChooseNewName(otherRVRs []*ReplicatedVolumeReplica) bool {
+	// Bitmask for reserved NodeIDs (0-31 fit in uint32).
+	var reserved uint32
+
+	for _, otherRVR := range otherRVRs {
+		if otherRVR.Spec.ReplicatedVolumeName != rvr.Spec.ReplicatedVolumeName {
+			continue
+		}
+		reserved |= 1 << otherRVR.NodeID()
+	}
+
+	free := ^reserved
+	if free == 0 {
+		return false
+	}
+	rvr.SetNameWithNodeID(uint8(bits.TrailingZeros32(free)))
+	return true
 }
 
 // +kubebuilder:object:generate=true
+// +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || has(self.nodeName)",message="lvmVolumeGroupName requires nodeName to be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || self.type == 'Diskful'",message="lvmVolumeGroupName can only be set for Diskful type"
+// +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be set"
 type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
@@ -90,24 +141,50 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +optional
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:XValidation:rule="size(oldSelf) == 0 || self == oldSelf",message="nodeName is immutable once set"
 	NodeName string `json:"nodeName,omitempty"`
+
+	// LVMVolumeGroupName is the LVMVolumeGroup resource name where this replica should be placed.
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$`
+	LVMVolumeGroupName string `json:"lvmVolumeGroupName,omitempty"`
+
+	// LVMVolumeGroupThinPoolName is the thin pool name (for LVMThin storage pools).
+	// +optional
+	LVMVolumeGroupThinPoolName string `json:"lvmVolumeGroupThinPoolName,omitempty"`
 
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
 	Type ReplicaType `json:"type"`
 }
 
-// ReplicaType enumerates possible values for ReplicatedVolumeReplica spec.type and status.actualType fields.
+// ReplicaType enumerates possible values for ReplicatedVolumeReplica spec.type and status.effectiveType fields.
 type ReplicaType string
 
 // Replica type values for [ReplicatedVolumeReplica] spec.type field.
 const (
 	// ReplicaTypeDiskful represents a diskful replica that stores data on disk.
+	// Diskful replicas are the primary quorum participants. They participate in quorum
+	// only when their backing volume is present and connected; otherwise they act as
+	// implicit tiebreakers. They contribute to quorumMinimumRedundancy only when their
+	// backing volume state is UpToDate.
 	ReplicaTypeDiskful ReplicaType = "Diskful"
-	// ReplicaTypeAccess represents a diskless replica for data access.
-	ReplicaTypeAccess ReplicaType = "Access"
-	// ReplicaTypeTieBreaker represents a diskless replica for quorum.
+
+	// ReplicaTypeTieBreaker represents a diskless replica that can provide a tie-breaking
+	// vote to maintain quorum. TieBreakers do not participate in quorum under normal
+	// conditions. They contribute a vote only when the total number of diskful nodes
+	// participating in quorum is even and exactly one vote is needed to maintain (not
+	// obtain) quorum; in that case, the majority of tiebreakers can provide the required
+	// vote. TieBreakers can also be used for volume access if the StorageClass permits
+	// it via volumeAccess settings.
 	ReplicaTypeTieBreaker ReplicaType = "TieBreaker"
+
+	// ReplicaTypeAccess represents a diskless replica used solely for volume attachment.
+	// Access replicas do not store data and do not participate in quorum in any way.
+	// Their only purpose is to allow attaching the volume on additional nodes when
+	// the StorageClass permits it via volumeAccess settings.
+	ReplicaTypeAccess ReplicaType = "Access"
 )
 
 func (t ReplicaType) String() string {
@@ -116,99 +193,404 @@ func (t ReplicaType) String() string {
 
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeReplicaStatus struct {
-	// +patchMergeKey=type
-	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=type
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
-	ActualType ReplicaType `json:"actualType,omitempty"`
-
+	// +kubebuilder:validation:MaxItems=32
+	// +listType=atomic
 	// +optional
+	Addresses []DRBDResourceAddressStatus `json:"addresses,omitempty"`
+
+	// Type reflects the currently observed DRBD configuration type
+	// from drbdr.Status.ActiveConfiguration.Type.
+	//
+	// This is the observed DRBD type (Diskful or Diskless), not the intended spec.type
+	// which can be Diskful/Diskless/Access/TieBreaker.
+	//
+	// Note: Access and TieBreaker both appear as Diskless here because they cannot be
+	// distinguished from the replica's own status. The difference is only visible
+	// in how other replicas treat this replica's vote in quorum calculation.
+	// +kubebuilder:validation:Enum=Diskful;Diskless
+	// +optional
+	Type DRBDResourceType `json:"type,omitempty"`
+
+	// BackingVolume contains information about the backing LVM logical volume.
+	// Only set for Diskful replicas.
+	// +optional
+	BackingVolume *ReplicatedVolumeReplicaStatusBackingVolume `json:"backingVolume,omitempty"`
+
+	// DatameshPending describes the pending datamesh membership state for this replica.
+	//
+	// This field contains changes that have been validated and are ready from the RVR's
+	// perspective, waiting to be applied to the datamesh. The controller sets this field
+	// only after all prerequisites are satisfied.
+	//
+	// For example, member=true will not be set until scheduling completes: the spec.nodeName,
+	// spec.lvmVolumeGroupName, and spec.lvmVolumeGroupThinPoolName fields must be populated
+	// and validated before the replica can be marked as a pending datamesh member.
+	//
+	// +optional
+	DatameshPendingTransition *ReplicatedVolumeReplicaStatusDatameshPendingTransition `json:"datameshPendingTransition,omitempty"`
+
+	// DatameshRevision is the datamesh revision for which the replica was fully configured.
+	//
+	// "Configured" means:
+	//   - DRBD was configured to match the intended state derived from this datamesh revision.
+	//   - Backing volume (if Diskful) was configured: exists and matches intended LVG/ThinPool/Size.
+	//   - Backing volume (if Diskful) is ready: reported ready and actual size >= intended size.
+	//   - Agent confirmed successful configuration.
+	//
+	// Note: "configured" does NOT mean:
+	//   - DRBD connections are established (happens asynchronously after configuration).
+	//   - Backing volume is synchronized (resync happens asynchronously if the volume was newly added).
+	//
+	// +optional
+	DatameshRevision int64 `json:"datameshRevision,omitempty"`
+
+	// Attachment contains information about the device attachment state.
+	// Only set when the replica is attached on the node.
+	// +optional
+	Attachment *ReplicatedVolumeReplicaStatusAttachment `json:"attachment,omitempty"`
+
+	// Quorum indicates whether this replica has quorum.
+	// +optional
+	Quorum *bool `json:"quorum,omitempty"`
+
+	// QuorumSummary provides detailed quorum information.
+	// +optional
+	QuorumSummary *ReplicatedVolumeReplicaStatusQuorumSummary `json:"quorumSummary,omitempty"`
+
+	// Peers contains the status of connections to peer replicas.
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="peers[].name must be unique"
+	// +kubebuilder:validation:MaxItems=32
+	// +listType=atomic
+	// +optional
+	Peers []ReplicatedVolumeReplicaStatusPeerStatus `json:"peers,omitempty"`
+
+	// DRBDRReconciliationCache holds cached values for DRBDResource reconciliation optimization.
+	// +optional
+	DRBDRReconciliationCache ReplicatedVolumeReplicaStatusDRBDRReconciliationCache `json:"drbdrReconciliationCache,omitempty"`
+}
+
+// ReplicatedVolumeReplicaStatusAttachment contains information about the device attachment state.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeReplicaStatusAttachment struct {
+	// DevicePath is the block device path when the replica is attached.
+	// Example: /dev/drbd10012.
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=256
-	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName,omitempty"`
+	DevicePath string `json:"devicePath"`
 
-	// +patchStrategy=merge
-	DRBD *DRBD `json:"drbd,omitempty" patchStrategy:"merge"`
+	// IOSuspended indicates whether I/O is suspended on the device.
+	IOSuspended bool `json:"ioSuspended"`
 }
 
+// ReplicatedVolumeReplicaStatusBackingVolume contains information about the backing LVM logical volume.
 // +kubebuilder:object:generate=true
-type DRBD struct {
-	// +patchStrategy=merge
-	Config *DRBDConfig `json:"config,omitempty" patchStrategy:"merge"`
-	// +patchStrategy=merge
-	Actual *DRBDActual `json:"actual,omitempty" patchStrategy:"merge"`
-	// +patchStrategy=merge
-	Status *DRBDStatus `json:"status,omitempty" patchStrategy:"merge"`
+type ReplicatedVolumeReplicaStatusBackingVolume struct {
+	// Size is the size of the backing LVM logical volume.
+	// +optional
+	Size *resource.Quantity `json:"size,omitempty"`
+
+	// State is the local backing volume state.
+	// +optional
+	State DiskState `json:"state,omitempty"`
+
+	// LVMVolumeGroupName is the name of the LVM volume group.
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	LVMVolumeGroupName string `json:"lvmVolumeGroupName,omitempty"`
+
+	// LVMVolumeGroupThinPoolName is the name of the thin pool within the LVM volume group.
+	// Empty if the backing volume is not on a thin pool.
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	LVMVolumeGroupThinPoolName string `json:"lvmVolumeGroupThinPoolName,omitempty"`
 }
 
+// ReplicatedVolumeReplicaStatusQuorumSummary provides detailed quorum information for a replica.
 // +kubebuilder:object:generate=true
-type DRBDConfig struct {
-	// +optional
-	Address *Address `json:"address,omitempty"`
+type ReplicatedVolumeReplicaStatusQuorumSummary struct {
+	// ConnectedDiskfulPeers is the number of Diskful peers with established connection.
+	// +kubebuilder:default=0
+	ConnectedDiskfulPeers int `json:"connectedDiskfulPeers"`
 
-	// Peers contains information about other replicas in the same ReplicatedVolume.
-	// The key in this map is the node name where the peer replica is located.
-	// +optional
-	Peers map[string]Peer `json:"peers,omitempty"`
+	// ConnectedTieBreakerPeers is the number of TieBreaker peers with established connection.
+	// TieBreakers only contribute to quorum under specific edge conditions.
+	// +kubebuilder:default=0
+	ConnectedTieBreakerPeers int `json:"connectedTieBreakerPeers"`
 
-	// PeersInitialized indicates that Peers has been calculated.
-	// This field is used to distinguish between no peers and not yet calculated.
-	// +optional
-	PeersInitialized bool `json:"peersInitialized,omitempty"`
+	// ConnectedUpToDatePeers is the number of peers with established connection and UpToDate disk.
+	// +kubebuilder:default=0
+	ConnectedUpToDatePeers int `json:"connectedUpToDatePeers"`
 
+	// Quorum is the required quorum threshold.
 	// +optional
-	Primary *bool `json:"primary,omitempty"`
+	Quorum *int `json:"quorum,omitempty"`
+
+	// QuorumMinimumRedundancy is the number of diskful UpToDate peers (including self) required for quorum.
+	// +optional
+	QuorumMinimumRedundancy *int `json:"quorumMinimumRedundancy,omitempty"`
 }
 
+// ReplicatedVolumeReplicaStatusPeerStatus represents the status of a connection to a peer replica.
 // +kubebuilder:object:generate=true
-type DRBDActual struct {
-	// +optional
-	// +kubebuilder:validation:Pattern=`^(/[a-zA-Z0-9/.+_-]+)?$`
-	// +kubebuilder:validation:MaxLength=256
-	Disk string `json:"disk,omitempty"`
-
-	// +optional
-	// +kubebuilder:default=false
-	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
-
-	// +optional
-	// +kubebuilder:default=false
-	InitialSyncCompleted bool `json:"initialSyncCompleted,omitempty"`
-}
-
-// +kubebuilder:object:generate=true
-type DRBDStatus struct {
+type ReplicatedVolumeReplicaStatusPeerStatus struct {
+	// Name is the name of the peer ReplicatedVolumeReplica.
+	// Must have format "prefix-N" where N is 0-31.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^.+-([0-9]|[12][0-9]|3[01])$`
 	Name string `json:"name"`
-	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
-	NodeId           int                `json:"nodeId"`
-	Role             string             `json:"role"`
-	Suspended        bool               `json:"suspended"`
-	SuspendedUser    bool               `json:"suspendedUser"`
-	SuspendedNoData  bool               `json:"suspendedNoData"`
-	SuspendedFencing bool               `json:"suspendedFencing"`
-	SuspendedQuorum  bool               `json:"suspendedQuorum"`
-	ForceIOFailures  bool               `json:"forceIOFailures"`
-	WriteOrdering    string             `json:"writeOrdering"`
-	Devices          []DeviceStatus     `json:"devices"`
-	Connections      []ConnectionStatus `json:"connections"`
+
+	// Type is the replica type (Diskful/TieBreaker/Access).
+	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
+	// +optional
+	Type ReplicaType `json:"type,omitempty"`
+
+	// Attached indicates whether this peer is attached on its node (and has a block device).
+	// +optional
+	Attached bool `json:"attached,omitempty"`
+
+	// ConnectionEstablishedOn lists system network names where connection to this peer is established.
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="connectionEstablishedOn must be unique"
+	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:MaxLength=64
+	// +listType=atomic
+	// +optional
+	ConnectionEstablishedOn []string `json:"connectionEstablishedOn,omitempty"`
+
+	// ConnectionState is the DRBD connection state to this peer.
+	// +optional
+	ConnectionState ConnectionState `json:"connectionState,omitempty"`
+
+	// BackingVolumeState is the peer's backing volume state.
+	// +optional
+	BackingVolumeState DiskState `json:"backingVolumeState,omitempty"`
+
+	// ReplicationState is the DRBD replication state with this peer.
+	// +optional
+	ReplicationState ReplicationState `json:"replicationState,omitempty"`
 }
 
+// NodeID extracts NodeID from the peer name (e.g., "pvc-xxx-5" → 5).
+func (p ReplicatedVolumeReplicaStatusPeerStatus) NodeID() uint8 {
+	return nodeIDFromName(p.Name)
+}
+
+// ReplicatedVolumeReplicaStatusDRBDRReconciliationCache holds cached values used to optimize DRBDResource reconciliation.
+// These fields track the TARGET configuration that was last computed for DRBDR spec,
+// NOT the actual state that DRBDR has applied. They allow the controller to skip
+// redundant spec comparisons when the input parameters have not changed.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeReplicaStatusDRBDRReconciliationCache struct {
+	// DatameshRevision is the datamesh revision for which DRBDResource spec was last computed.
+	DatameshRevision int64 `json:"datameshRevision,omitempty"`
+
+	// DRBDRGeneration is the DRBDResource generation at the time DRBDResource spec was last computed.
+	DRBDRGeneration int64 `json:"drbdrGeneration,omitempty"`
+
+	// RVRType is the effective replica type for which DRBDResource spec was last computed.
+	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
+	RVRType ReplicaType `json:"rvrType,omitempty"`
+}
+
+// ReplicatedVolumeReplicaStatusDatameshPendingTransition describes pending datamesh changes for this replica.
+//
+// This field contains changes that have been validated and are ready from the RVR's
+// perspective, waiting to be applied to the datamesh. The controller sets this field
+// only after all prerequisites are satisfied (e.g., scheduling completed, spec fields
+// populated and validated).
+//
+// # Supported Operations
+//
+// 1. Datamesh Join (member=true): Add this replica to the datamesh with specified type.
+//   - Type is required when joining.
+//   - For Diskful type: lvmVolumeGroupName is required, thinPoolName is optional.
+//   - For TieBreaker/Access types: no backing volume fields allowed.
+//
+// 2. Datamesh Leave (member=false): Remove this replica from the datamesh.
+//   - No other fields allowed when leaving.
+//
+// 3. Type Change (member=nil, type set): Change the type of an existing datamesh member.
+//   - For change to Diskful: lvmVolumeGroupName required, thinPoolName optional.
+//   - For change to TieBreaker/Access: no backing volume fields allowed.
+//
+// 4. Backing Volume Change (member=nil, type=nil): Replace backing volume for existing Diskful.
+//   - Used when migrating storage (e.g., between LVGs or between thick/thin).
+//   - Only lvmVolumeGroupName (and optionally thinPoolName) is set, no type.
+//   - Implies the replica is already Diskful and remains Diskful.
+//
+// # Field Combinations and Their Meanings
+//
+// Join as Diskful on thin pool:
+//
+//	member: true, type: Diskful, lvmVolumeGroupName: "vg-1", thinPoolName: "tp-1"
+//
+// Join as Diskful on thick LVM:
+//
+//	member: true, type: Diskful, lvmVolumeGroupName: "vg-1"
+//
+// Join as TieBreaker (diskless quorum voter):
+//
+//	member: true, type: TieBreaker
+//
+// Join as Access (diskless data accessor):
+//
+//	member: true, type: Access
+//
+// Leave datamesh:
+//
+//	member: false
+//
+// Change type to Diskful:
+//
+//	type: Diskful, lvmVolumeGroupName: "vg-2", thinPoolName: "tp-2"
+//
+// Change type to TieBreaker:
+//
+//	type: TieBreaker
+//
+// Change type to Access:
+//
+//	type: Access
+//
+// Replace backing volume for existing Diskful (migrate from thin to thick):
+//
+//	lvmVolumeGroupName: "vg-thick"
+//
+// Replace backing volume for existing Diskful (migrate from thick to thin):
+//
+//	lvmVolumeGroupName: "vg-thin", thinPoolName: "tp-1"
+//
+// Replace backing volume for existing Diskful (migrate between LVGs):
+//
+//	lvmVolumeGroupName: "vg-new", thinPoolName: "tp-1"
+//
+// No pending changes (field is nil or absent):
+//
+//	datameshPending: nil
+//
+// +kubebuilder:object:generate=true
+// +kubebuilder:validation:XValidation:rule="!has(self.member) || self.member == true || (!has(self.type) && !has(self.lvmVolumeGroupName) && !has(self.thinPoolName))",message="when member is false, type/lvmVolumeGroupName/thinPoolName must not be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.member) || self.member == false || has(self.type)",message="when member is true, type is required"
+// +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type != 'Diskful' || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupName is required when type is Diskful"
+// +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type == 'Diskful' || !has(self.lvmVolumeGroupName)",message="lvmVolumeGroupName must not be set when type is not Diskful"
+// +kubebuilder:validation:XValidation:rule="!has(self.thinPoolName) || has(self.lvmVolumeGroupName)",message="thinPoolName requires lvmVolumeGroupName to be set"
+type ReplicatedVolumeReplicaStatusDatameshPendingTransition struct {
+	// Member indicates whether this replica should be a datamesh member.
+	// +optional
+	Member *bool `json:"member,omitempty"`
+
+	// Type is the intended type when Member is true.
+	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
+	// +optional
+	Type ReplicaType `json:"type,omitempty"`
+
+	// LVMVolumeGroupName is the LVMVolumeGroup resource name for Diskful replicas.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$`
+	// +optional
+	LVMVolumeGroupName string `json:"lvmVolumeGroupName,omitempty"`
+
+	// ThinPoolName is the thin pool name (optional, for LVMThin storage pools).
+	// +optional
+	ThinPoolName string `json:"thinPoolName,omitempty"`
+}
+
+// Equals returns true if all fields match.
+func (t *ReplicatedVolumeReplicaStatusDatameshPendingTransition) Equals(other *ReplicatedVolumeReplicaStatusDatameshPendingTransition) bool {
+	if t == nil || other == nil {
+		return t == other
+	}
+	return ptr.Equal(t.Member, other.Member) &&
+		t.Type == other.Type &&
+		t.LVMVolumeGroupName == other.LVMVolumeGroupName &&
+		t.ThinPoolName == other.ThinPoolName
+}
+
+// DiskState represents the state of a DRBD backing disk.
+// It reflects the disk's synchronization status and determines whether
+// application I/O can be served locally or requires peer involvement.
 type DiskState string
 
 const (
-	DiskStateDiskless     DiskState = "Diskless"
-	DiskStateAttaching    DiskState = "Attaching"
-	DiskStateDetaching    DiskState = "Detaching"
-	DiskStateFailed       DiskState = "Failed"
-	DiskStateNegotiating  DiskState = "Negotiating"
+	// DiskStateDiskless indicates no local disk is attached.
+	// The node operates without local storage (diskless client configuration),
+	// receiving and sending data only via network from peer nodes.
+	// Application I/O: only through peers.
+	DiskStateDiskless DiskState = "Diskless"
+
+	// DiskStateAttaching is a transient state when attaching a disk.
+	// DRBD is reading metadata from the local device (triggered by `drbdadm attach`).
+	// Application I/O: not allowed.
+	DiskStateAttaching DiskState = "Attaching"
+
+	// DiskStateDetaching is a transient state when detaching a disk.
+	// DRBD is completing pending operations and preparing to transition to Diskless.
+	// Application I/O: not allowed.
+	DiskStateDetaching DiskState = "Detaching"
+
+	// DiskStateFailed indicates the disk failed due to I/O errors.
+	// This is a transient state before transitioning to Diskless.
+	// After notifying peers about the failure, the node transitions to Diskless.
+	// Application I/O: not allowed.
+	DiskStateFailed DiskState = "Failed"
+
+	// DiskStateNegotiating is a late attach state where DRBD negotiates with peers
+	// to determine: who has current data, whether synchronization is needed, and
+	// in which direction. After negotiation completes, transitions to one of:
+	// Inconsistent, Outdated, Consistent, or UpToDate.
+	// Application I/O: not allowed.
+	DiskStateNegotiating DiskState = "Negotiating"
+
+	// DiskStateInconsistent indicates that local data is not guaranteed to be
+	// consistent. This state occurs when:
+	//   - Freshly created disk (before initial sync)
+	//   - Node is a sync target receiving data
+	//   - Manual invalidation for full resync
+	//   - Synchronization failed with errors on target
+	//   - Local I/O error occurred
+	//
+	// When acting as sync target: reading synchronized blocks is done locally;
+	// reading unsynchronized blocks is forwarded to a peer with UpToDate data.
+	// Writing requires a peer with UpToDate data.
+	// Application I/O: allowed (with peer assistance).
 	DiskStateInconsistent DiskState = "Inconsistent"
-	DiskStateOutdated     DiskState = "Outdated"
-	DiskStateUnknown      DiskState = "DUnknown"
-	DiskStateConsistent   DiskState = "Consistent"
-	DiskStateUpToDate     DiskState = "UpToDate"
+
+	// DiskStateOutdated indicates consistent but stale data.
+	// The node was disconnected from the cluster while another node performed writes.
+	// Data is consistent (not corrupted) but does not contain the latest changes.
+	// Resynchronization from an up-to-date node is required.
+	// Application I/O: only through peers (direct I/O not allowed).
+	DiskStateOutdated DiskState = "Outdated"
+
+	// DiskStateUnknown indicates unknown disk state.
+	// Used only to describe the state of a peer node when connection to it
+	// is absent or lost. Never used to describe the node's own disk.
+	// Application I/O: N/A (peer state only).
+	DiskStateUnknown DiskState = "DUnknown"
+
+	// DiskStateConsistent indicates consistent data with undetermined currency.
+	// The node knows its data was consistent (was up-to-date) but at the moment
+	// cannot determine whether it is current or outdated without peer connection.
+	// Occurs when:
+	//   - Starting without connected peers.
+	//   - Cannot unambiguously determine who has current data.
+	//
+	// Upon establishing connection, transitions to UpToDate or Outdated
+	// depending on negotiation results.
+	// Application I/O: only through peers (direct I/O not allowed).
+	DiskStateConsistent DiskState = "Consistent"
+
+	// DiskStateUpToDate indicates fully up-to-date data.
+	// This is the only state allowing full application I/O without peer involvement.
+	// The disk contains the most recent consistent data and is ready for operation.
+	// Application I/O: allowed locally (full read/write without peers).
+	DiskStateUpToDate DiskState = "UpToDate"
 )
 
 func (s DiskState) String() string {
@@ -233,25 +615,65 @@ func ParseDiskState(s string) DiskState {
 	}
 }
 
+// ReplicationState represents DRBD's replication state (repl_state) for a peer connection.
+// The state describes OUR role in the replication relationship with a specific peer:
+//   - "Source" states mean we send data TO the peer
+//   - "Target" states mean we receive data FROM the peer
 type ReplicationState string
 
 const (
-	ReplicationStateOff                ReplicationState = "Off"
-	ReplicationStateEstablished        ReplicationState = "Established"
+	// --- Basic connection states ---
+
+	// ReplicationStateOff indicates no active connection with the peer.
+	ReplicationStateOff ReplicationState = "Off"
+	// ReplicationStateEstablished indicates a normal, fully synchronized connection.
+	ReplicationStateEstablished ReplicationState = "Established"
+
+	// --- Synchronization preparation (handshake before data transfer) ---
+
+	// ReplicationStateStartingSyncSource: initiating full resync as source (admin-triggered).
 	ReplicationStateStartingSyncSource ReplicationState = "StartingSyncS"
+	// ReplicationStateStartingSyncTarget: initiating full resync as target (admin-triggered).
 	ReplicationStateStartingSyncTarget ReplicationState = "StartingSyncT"
-	ReplicationStateWFBitMapSource     ReplicationState = "WFBitMapS"
-	ReplicationStateWFBitMapTarget     ReplicationState = "WFBitMapT"
-	ReplicationStateWFSyncUUID         ReplicationState = "WFSyncUUID"
-	ReplicationStateSyncSource         ReplicationState = "SyncSource"
-	ReplicationStateSyncTarget         ReplicationState = "SyncTarget"
-	ReplicationStatePausedSyncSource   ReplicationState = "PausedSyncS"
-	ReplicationStatePausedSyncTarget   ReplicationState = "PausedSyncT"
-	ReplicationStateVerifySource       ReplicationState = "VerifyS"
-	ReplicationStateVerifyTarget       ReplicationState = "VerifyT"
-	ReplicationStateAhead              ReplicationState = "Ahead"
-	ReplicationStateBehind             ReplicationState = "Behind"
-	ReplicationStateUnknown            ReplicationState = "Unknown"
+	// ReplicationStateWFBitMapSource: waiting for bitmap from peer; we will be sync source.
+	ReplicationStateWFBitMapSource ReplicationState = "WFBitMapS"
+	// ReplicationStateWFBitMapTarget: waiting for bitmap from peer; we will be sync target.
+	ReplicationStateWFBitMapTarget ReplicationState = "WFBitMapT"
+	// ReplicationStateWFSyncUUID: waiting for sync UUID from peer before proceeding.
+	ReplicationStateWFSyncUUID ReplicationState = "WFSyncUUID"
+
+	// --- Active synchronization (data transfer in progress) ---
+
+	// ReplicationStateSyncSource: we are sending data TO this peer.
+	ReplicationStateSyncSource ReplicationState = "SyncSource"
+	// ReplicationStateSyncTarget: we are receiving data FROM this peer.
+	ReplicationStateSyncTarget ReplicationState = "SyncTarget"
+
+	// --- Paused synchronization (suspended by user, peer, or dependency) ---
+
+	// ReplicationStatePausedSyncSource: sync paused; we would be source when resumed.
+	ReplicationStatePausedSyncSource ReplicationState = "PausedSyncS"
+	// ReplicationStatePausedSyncTarget: sync paused; we would be target when resumed.
+	ReplicationStatePausedSyncTarget ReplicationState = "PausedSyncT"
+
+	// --- Online verify (hash-based consistency check) ---
+
+	// ReplicationStateVerifySource: we are the verify initiator, requesting and comparing hashes.
+	ReplicationStateVerifySource ReplicationState = "VerifyS"
+	// ReplicationStateVerifyTarget: we are the verify responder, sending hashes on request.
+	ReplicationStateVerifyTarget ReplicationState = "VerifyT"
+
+	// --- Congestion / DRBD Proxy states ---
+
+	// ReplicationStateAhead: we are ahead of the peer (peer is behind due to congestion).
+	ReplicationStateAhead ReplicationState = "Ahead"
+	// ReplicationStateBehind: we are behind the peer (we are congested).
+	ReplicationStateBehind ReplicationState = "Behind"
+
+	// --- Fallback ---
+
+	// ReplicationStateUnknown: unrecognized or unavailable replication state.
+	ReplicationStateUnknown ReplicationState = "Unknown"
 )
 
 func (s ReplicationState) String() string {
@@ -339,121 +761,15 @@ func ParseConnectionState(s string) ConnectionState {
 	}
 }
 
-// +kubebuilder:object:generate=true
-type DeviceStatus struct {
-	Volume    int       `json:"volume"`
-	Minor     int       `json:"minor"`
-	DiskState DiskState `json:"diskState"`
-	Client    bool      `json:"client"`
-	Open      bool      `json:"open"`
-	Quorum    bool      `json:"quorum"`
-	Size      int       `json:"size"`
-}
-
-// +kubebuilder:object:generate=true
-type ConnectionStatus struct {
-	//nolint:revive // var-naming: PeerNodeId kept for API compatibility with JSON tag
-	PeerNodeId      int                `json:"peerNodeId"`
-	Name            string             `json:"name"`
-	ConnectionState ConnectionState    `json:"connectionState"`
-	Congested       bool               `json:"congested"`
-	Peerrole        string             `json:"peerRole"`
-	TLS             bool               `json:"tls"`
-	Paths           []PathStatus       `json:"paths"`
-	PeerDevices     []PeerDeviceStatus `json:"peerDevices"`
-}
-
-// +kubebuilder:object:generate=true
-type PathStatus struct {
-	ThisHost    HostStatus `json:"thisHost"`
-	RemoteHost  HostStatus `json:"remoteHost"`
-	Established bool       `json:"established"`
-}
-
-// +kubebuilder:object:generate=true
-type HostStatus struct {
-	Address string `json:"address"`
-	Port    int    `json:"port"`
-	Family  string `json:"family"`
-}
-
-// +kubebuilder:object:generate=true
-type PeerDeviceStatus struct {
-	Volume                 int              `json:"volume"`
-	ReplicationState       ReplicationState `json:"replicationState"`
-	PeerDiskState          DiskState        `json:"peerDiskState"`
-	PeerClient             bool             `json:"peerClient"`
-	ResyncSuspended        string           `json:"resyncSuspended"`
-	OutOfSync              int              `json:"outOfSync"`
-	HasSyncDetails         bool             `json:"hasSyncDetails"`
-	HasOnlineVerifyDetails bool             `json:"hasOnlineVerifyDetails"`
-	PercentInSync          string           `json:"percentInSync"`
-}
-
-// +kubebuilder:object:generate=true
-type Peer struct {
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=7
-	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
-	NodeId uint `json:"nodeId"`
-
-	// +kubebuilder:validation:Required
-	Address Address `json:"address"`
-
-	// +kubebuilder:default=false
-	Diskless bool `json:"diskless,omitempty"`
-}
-
-// +kubebuilder:object:generate=true
-type Address struct {
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Pattern=`^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`
-	IPv4 string `json:"ipv4"`
-
-	// +kubebuilder:validation:Minimum=1025
-	// +kubebuilder:validation:Maximum=65535
-	Port uint `json:"port"`
-}
-
 // DRBD node ID constants for ReplicatedVolumeReplica
 const (
 	// RVRMinNodeID is the minimum valid node ID for DRBD configuration in ReplicatedVolumeReplica
-	RVRMinNodeID = uint(0)
+	RVRMinNodeID = uint8(0)
 	// RVRMaxNodeID is the maximum valid node ID for DRBD configuration in ReplicatedVolumeReplica
-	RVRMaxNodeID = uint(31)
+	RVRMaxNodeID = uint8(31)
 )
 
 // IsValidNodeID checks if nodeID is within valid range [RVRMinNodeID; RVRMaxNodeID].
-func IsValidNodeID(nodeID uint) bool {
+func IsValidNodeID(nodeID uint8) bool {
 	return nodeID >= RVRMinNodeID && nodeID <= RVRMaxNodeID
-}
-
-// FormatValidNodeIDRange returns a formatted string representing the valid nodeID range.
-// faster than fmt.Sprintf("%d; %d", RVRMinNodeID, RVRMaxNodeID) because it avoids allocation and copying of the string.
-func FormatValidNodeIDRange() string {
-	var b strings.Builder
-	b.Grow(10) // Pre-allocate: "[0; 31]" = 8 bytes, but allocate a bit more
-	b.WriteByte('[')
-	b.WriteString(strconv.FormatUint(uint64(RVRMinNodeID), 10))
-	b.WriteString("; ")
-	b.WriteString(strconv.FormatUint(uint64(RVRMaxNodeID), 10))
-	b.WriteByte(']')
-	return b.String()
-}
-
-func SprintDRBDDisk(actualVGNameOnTheNode, actualLVNameOnTheNode string) string {
-	return fmt.Sprintf("/dev/%s/%s", actualVGNameOnTheNode, actualLVNameOnTheNode)
-}
-
-func ParseDRBDDisk(disk string) (actualVGNameOnTheNode, actualLVNameOnTheNode string, err error) {
-	parts := strings.Split(disk, "/")
-	if len(parts) != 4 || parts[0] != "" || parts[1] != "dev" ||
-		len(parts[2]) == 0 || len(parts[3]) == 0 {
-		return "", "",
-			fmt.Errorf(
-				"parsing DRBD Disk: expected format '/dev/{actualVGNameOnTheNode}/{actualLVNameOnTheNode}', got '%s'",
-				disk,
-			)
-	}
-	return parts[2], parts[3], nil
 }

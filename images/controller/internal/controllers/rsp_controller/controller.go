@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -39,10 +40,10 @@ const RSPControllerName = "rsp-controller"
 
 // BuildController registers the RSP controller with the manager.
 // It sets up watches on ReplicatedStoragePool, Node, LVMVolumeGroup, and agent Pod resources.
-func BuildController(mgr manager.Manager, podNamespace string) error {
+func BuildController(mgr manager.Manager, agentPodNamespace string) error {
 	cl := mgr.GetClient()
 
-	rec := NewReconciler(cl, mgr.GetLogger().WithName(RSPControllerName), podNamespace)
+	rec := NewReconciler(cl, mgr.GetLogger().WithName(RSPControllerName), agentPodNamespace)
 
 	return builder.ControllerManagedBy(mgr).
 		Named(RSPControllerName).
@@ -59,8 +60,8 @@ func BuildController(mgr manager.Manager, podNamespace string) error {
 		).
 		Watches(
 			&corev1.Pod{},
-			handler.EnqueueRequestsFromMapFunc(mapAgentPodToRSP(cl, podNamespace)),
-			builder.WithPredicates(agentPodPredicates(podNamespace)...),
+			handler.EnqueueRequestsFromMapFunc(mapAgentPodToRSP(cl, agentPodNamespace)),
+			builder.WithPredicates(agentPodPredicates(agentPodNamespace)...),
 		).
 		// TODO(systemnetwork): IMPORTANT! Watch NetworkNode resources and filter eligible nodes.
 		//
@@ -101,12 +102,14 @@ func mapNodeToRSP(cl client.Client) handler.MapFunc {
 			client.MatchingFields{indexes.IndexFieldRSPByEligibleNodeName: node.Name},
 			client.UnsafeDisableDeepCopy,
 		); err != nil {
+			log.FromContext(ctx).Error(err, "mapNodeToRSP: failed to list RSPs by eligible node", "node", node.Name)
 			return nil
 		}
 
 		// 2. Find all RSPs to check if node could be added.
 		var all v1alpha1.ReplicatedStoragePoolList
 		if err := cl.List(ctx, &all, client.UnsafeDisableDeepCopy); err != nil {
+			log.FromContext(ctx).Error(err, "mapNodeToRSP: failed to list all RSPs", "node", node.Name)
 			return nil
 		}
 
@@ -177,6 +180,7 @@ func mapLVGToRSP(cl client.Client) handler.MapFunc {
 		if err := cl.List(ctx, &rspList, client.MatchingFields{
 			indexes.IndexFieldRSPByLVMVolumeGroupName: lvg.Name,
 		}); err != nil {
+			log.FromContext(ctx).Error(err, "mapLVGToRSP: failed to list RSPs", "lvg", lvg.Name)
 			return nil
 		}
 
@@ -217,6 +221,7 @@ func mapAgentPodToRSP(cl client.Client, podNamespace string) handler.MapFunc {
 		if err := cl.List(ctx, &rspList, client.MatchingFields{
 			indexes.IndexFieldRSPByEligibleNodeName: nodeName,
 		}); err != nil {
+			log.FromContext(ctx).Error(err, "mapAgentPodToRSP: failed to list RSPs", "node", nodeName)
 			return nil
 		}
 

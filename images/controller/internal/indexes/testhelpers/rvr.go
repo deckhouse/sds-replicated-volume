@@ -53,3 +53,18 @@ func WithRVRByReplicatedVolumeNameIndex(b *fake.ClientBuilder) *fake.ClientBuild
 		return []string{rvr.Spec.ReplicatedVolumeName}
 	})
 }
+
+// WithRVRByRVAndNodeIndex registers the IndexFieldRVRByRVAndNode composite index
+// on a fake.ClientBuilder. This is useful for tests that need to use the index.
+func WithRVRByRVAndNodeIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
+	return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRByRVAndNode, func(obj client.Object) []string {
+		rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+		if !ok {
+			return nil
+		}
+		if rvr.Spec.ReplicatedVolumeName == "" || rvr.Spec.NodeName == "" {
+			return nil
+		}
+		return []string{indexes.RVRByRVAndNodeKey(rvr.Spec.ReplicatedVolumeName, rvr.Spec.NodeName)}
+	})
+}
