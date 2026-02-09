@@ -177,8 +177,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
-	// Remove finalizers from completed RVOs when cursor moved forward.
-	if err := r.removeRVOLockFinalizers(rf.Ctx(), rsc, rvos); err != nil {
+	// Patch completed RVOs to remove finalizer when cursor has advanced or rolling is complete.
+	if err := r.patchCompletedRVOsRemoveFinalizer(rf.Ctx(), rsc, rvos); err != nil {
 		return rf.Fail(err).ToCtrl()
 	}
 
@@ -566,14 +566,21 @@ func ensureRollingOperations(
 		return ef.Ok().ReportChangedIf(changed), nil
 	}
 
-	// Select target operations.
-	ops, saltChanged, cursorsChanged := selectTargetRollingOperations(
+	// Ensure salt exists (mutable + rand — ensure helper owns this).
+	if rsc.Status.RollingOperationsSortSalt == "" {
+		rsc.Status.RollingOperationsSortSalt = generateSortSalt()
+		changed = true
+	}
+
+	// Pure computation: select target operations and compute new cursor.
+	ops, newCursor := computeTargetRollingOperations(
 		rsc, rvs, rvos,
 		maxParallelConfigurationRollouts,
 		maxParallelConflictResolutions,
 	)
 
-	changed = changed || saltChanged || cursorsChanged
+	// Apply cursor change (mutable — ensure helper owns this).
+	changed = applyRollingOperationsCursor(rsc, newCursor) || changed
 	targetOps = ops
 
 	return ef.Ok().ReportChangedIf(changed), targetOps
@@ -805,6 +812,16 @@ func applyVolumesSatisfyEligibleNodesCondFalse(rsc *v1alpha1.ReplicatedStorageCl
 	})
 }
 
+// applyRollingOperationsCursor updates the rolling operations cursor.
+// Returns true if the cursor was changed.
+func applyRollingOperationsCursor(rsc *v1alpha1.ReplicatedStorageClass, cursor string) bool {
+	if cursor == "" || cursor == rsc.Status.RollingOperationsCursor {
+		return false
+	}
+	rsc.Status.RollingOperationsCursor = cursor
+	return true
+}
+
 // applyClearRollingState clears sortSalt and cursor when all volumes are aligned.
 // Returns true if any field was cleared.
 func applyClearRollingState(rsc *v1alpha1.ReplicatedStorageClass) bool {
@@ -820,20 +837,18 @@ func applyClearRollingState(rsc *v1alpha1.ReplicatedStorageClass) bool {
 	return changed
 }
 
-// selectTargetRollingOperations selects and builds target operations for rolling updates.
-// It mutates rsc.Status (RollingOperationsSortSalt, cursors) when generating new operations.
+// computeTargetRollingOperations computes target operations for rolling updates and the new cursor position.
+// It treats rsc as read-only and does not mutate any inputs.
 //
-// NOTE: Named "select" instead of "compute" because it mutates rsc.Status in-place,
-// violating compute* pure/non-mutating convention.
+// Precondition: rsc.Status.RollingOperationsSortSalt MUST be non-empty (caller ensures this).
 //
 // Algorithm:
-//  1. Generate RollingOperationsSortSalt if not present.
-//  2. Build lookup for pending operations.
-//  3. Filter RVs that need operations (not aligned, no pending operation) — O(N) cheap checks.
-//  4. Compute hashes and sort candidates — O(C) hash computations, O(C log C) sort.
-//  5. Calculate available budget based on existing uncompleted operations.
-//  6. Select RVs from cursor position, wrapping around for full circle.
-//  7. Build target operations.
+//  1. Build lookup for pending operations.
+//  2. Filter RVs that need operations (not aligned, no pending operation) — O(N) cheap checks.
+//  3. Compute hashes and sort candidates — O(C) hash computations, O(C log C) sort.
+//  4. Calculate available budget based on existing uncompleted operations.
+//  5. Select RVs from cursor position, wrapping around for full circle.
+//  6. Build target operations.
 //
 // Optimization: filter-before-compute reduces hash computations from O(N+C) to O(C).
 // See .cursor/rules/go-performance-patterns.mdc "Filter before compute".
@@ -844,19 +859,13 @@ func applyClearRollingState(rsc *v1alpha1.ReplicatedStorageClass) bool {
 // conflict resolution alone. Eligible nodes violations are usually more urgent than
 // config drift. Config update will happen later when strategy changes or volume is
 // recreated.
-func selectTargetRollingOperations(
+func computeTargetRollingOperations(
 	rsc *v1alpha1.ReplicatedStorageClass,
 	rvs []rvView,
 	rvos *rvoCacheRefs,
 	maxParallelConfigurationRollouts int32,
 	maxParallelConflictResolutions int32,
-) (targetOps []v1alpha1.ReplicatedVolumeOperation, saltChanged, cursorsChanged bool) {
-	// Generate sortSalt if needed.
-	if rsc.Status.RollingOperationsSortSalt == "" {
-		rsc.Status.RollingOperationsSortSalt = generateSortSalt()
-		saltChanged = true
-	}
-
+) (targetOps []v1alpha1.ReplicatedVolumeOperation, newCursor string) {
 	// Build lookup for existing uncompleted operations by RV name.
 	pendingOpsByRV := make(map[string]*v1alpha1.ReplicatedVolumeOperation)
 	var inFlightConfigOps, inFlightConflictOps int32
@@ -921,7 +930,7 @@ func selectTargetRollingOperations(
 	}
 
 	if len(rawCandidates) == 0 {
-		return nil, saltChanged, false
+		return nil, ""
 	}
 
 	// Step 2: Compute hashes and sort candidates (O(C) hash calls, O(C log C) sort).
@@ -991,13 +1000,12 @@ func selectTargetRollingOperations(
 		targetOps = append(targetOps, op)
 	}
 
-	// Update cursor if changed.
-	if lastSelectedHash != "" && lastSelectedHash != rsc.Status.RollingOperationsCursor {
-		rsc.Status.RollingOperationsCursor = lastSelectedHash
-		cursorsChanged = true
+	// Return the new cursor position (caller applies it).
+	if lastSelectedHash != "" {
+		newCursor = lastSelectedHash
 	}
 
-	return targetOps, saltChanged, cursorsChanged
+	return targetOps, newCursor
 }
 
 // generateSortSalt generates a random 8-character hex string for sorting.
@@ -1901,19 +1909,18 @@ func (r *Reconciler) createRVO(ctx context.Context, rvo *v1alpha1.ReplicatedVolu
 	return r.cl.Create(ctx, rvo)
 }
 
-// removeRVOLockFinalizers removes the lock finalizer from completed RVOs
-// when the cursor has moved forward or rolling update is complete.
+// patchCompletedRVOsRemoveFinalizer removes the controller finalizer from completed RVOs
+// whose cursor has advanced or rolling update is complete.
 //
-// NOTE: This function patches multiple objects in a loop. It is NOT a PatchReconcileHelper
-// (which must perform exactly one patch per call). This is a batch cleanup operation
-// similar to patchScheduledReplicas in rvr_scheduling_controller. The controller rules
-// may need an explicit "batch operation" category for such cases.
+// NOTE: This is a batch patch operation — it patches multiple objects in a loop.
+// It is NOT a single-call PatchReconcileHelper.
+// Same pattern as patchScheduledReplicas in rvr_scheduling_controller.
 //
 // TODO(rvo-controller): Handle edge case where RV is deleted while RVO is in progress.
 // If the target ReplicatedVolume is deleted, the RVO will be stuck in "terminating" state
 // because the finalizer blocks GC. The RVO controller must detect this case (missing RV)
 // and mark the operation as Completed (Failed or Succeeded) to allow finalizer removal.
-func (r *Reconciler) removeRVOLockFinalizers(
+func (r *Reconciler) patchCompletedRVOsRemoveFinalizer(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 	rvos *rvoCacheRefs,

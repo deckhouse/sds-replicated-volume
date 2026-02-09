@@ -118,8 +118,7 @@ type ReplicatedVolumeStatus struct {
 	DatameshRevision int64 `json:"datameshRevision"`
 
 	// Datamesh is the computed datamesh configuration for the volume.
-	// +patchStrategy=merge
-	Datamesh ReplicatedVolumeDatamesh `json:"datamesh" patchStrategy:"merge"`
+	Datamesh ReplicatedVolumeDatamesh `json:"datamesh"`
 
 	// DatameshTransitions is the list of active datamesh transitions.
 	// +listType=atomic
