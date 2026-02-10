@@ -13,9 +13,86 @@ metadata:
   name: d8:{{ .Chart.Name }}:controller
   {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-controller")) | nindent 2 }}
 rules:
-  - apiGroups: ["*"]
-    resources: ["*"]
-    verbs:  ["*"]
+  - apiGroups: [""]
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - persistentvolumes
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - storage.deckhouse.io
+    resources:
+      - replicatedstorageclasses
+      - replicatedstoragepools
+      - replicatedvolumes
+      - replicatedvolumeattachments
+      - replicatedvolumereplicas
+      - drbdresources
+      - drbdresourceoperations
+      - drbdnodeoperations
+      - lvmvolumegroups
+      - lvmlogicalvolumes
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - storage.deckhouse.io
+    resources:
+      - replicatedstorageclasses/status
+      - replicatedstoragepools/status
+      - replicatedvolumes/status
+      - replicatedvolumeattachments/status
+      - replicatedvolumereplicas/status
+      - drbdresources/status
+      - drbdresourceoperations/status
+      - drbdnodeoperations/status
+      - lvmvolumegroups/status
+      - lvmlogicalvolumes/status
+    verbs:
+      - get
+      - update
+      - patch
+  - apiGroups:
+      - storage.deckhouse.io
+    resources:
+      - replicatedstorageclasses/finalizers
+      - replicatedstoragepools/finalizers
+      - replicatedvolumes/finalizers
+      - replicatedvolumeattachments/finalizers
+      - replicatedvolumereplicas/finalizers
+      - drbdresources/finalizers
+      - drbdresourceoperations/finalizers
+      - drbdnodeoperations/finalizers
+      - lvmvolumegroups/finalizers
+      - lvmlogicalvolumes/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - storage.k8s.io
+    resources:
+      - storageclasses
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
