@@ -1,0 +1,312 @@
+---
+description: Go performance patterns for sorting, iteration, and controller-runtime optimizations. Apply when reviewing code with sort.Slice over collections that may have 100+ items, expensive operations before filtering, or List operations that may return many objects.
+alwaysApply: false
+---
+
+See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
+
+# Go performance patterns
+
+## Schwartzian transform for sorting (SHOULD)
+
+When sorting slices where:
+- the comparator calls **expensive functions** (hash computations, string formatting, allocations), AND
+- the slice may contain **100+ items** in production scenarios,
+
+you SHOULD use the **Schwartzian transform** (decorate-sort-undecorate) pattern:
+
+1. **Decorate**: Precompute expensive values into a temporary struct slice — O(N)
+2. **Sort**: Sort by precomputed values (cheap comparison) — O(N log N) comparisons
+3. **Undecorate**: Extract results — O(N)
+
+This reduces expensive computations from O(N log N) to O(N).
+
+### Why it matters
+
+| Items | Comparisons (sort) | Hash calls (naive) | Hash calls (optimized) |
+|-------|-------------------|--------------------|------------------------|
+| 100   | ~665              | ~1330              | 100                    |
+| 500   | ~4483             | ~8966              | 500                    |
+| 1000  | ~9966             | ~19932             | 1000                   |
+
+### Example (GOOD)
+
+```go
+// sortItemsByExpensiveKey sorts items using Schwartzian transform.
+// Precomputes keys to avoid O(N log N) expensive calls.
+func sortItemsByExpensiveKey(items []Item) []Item {
+    // Decorate: precompute keys once.
+    type decorated struct {
+        item *Item
+        key  string
+    }
+    tmp := make([]decorated, len(items))
+    for i := range items {
+        tmp[i] = decorated{
+            item: &items[i],
+            key:  expensiveKeyComputation(items[i]),
+        }
+    }
+
+    // Sort by precomputed key.
+    sort.SliceStable(tmp, func(i, j int) bool {
+        return tmp[i].key < tmp[j].key
+    })
+
+    // Undecorate: extract sorted items.
+    result := make([]Item, len(tmp))
+    for i, d := range tmp {
+        result[i] = *d.item
+    }
+    return result
+}
+```
+
+### Example (BAD)
+
+```go
+// BAD: expensiveKeyComputation called O(N log N) times
+sort.SliceStable(items, func(i, j int) bool {
+    return expensiveKeyComputation(items[i]) < expensiveKeyComputation(items[j])
+})
+```
+
+### When reviewing code
+
+When you see `sort.Slice` / `sort.SliceStable` with a non-trivial comparator:
+
+1. ASK about expected collection size in production
+2. ASK about comparator cost (allocations, hashing, formatting)
+3. SUGGEST Schwartzian transform if:
+   - Collection may have 100+ items, AND
+   - Comparator is more expensive than simple field access
+
+---
+
+## Filter before compute (SHOULD)
+
+When processing a collection with expensive per-element operations (hashing, serialization, complex computations), you SHOULD filter the collection **before** applying those operations.
+
+### Rationale
+
+If only M of N elements need processing, filtering first reduces expensive operations from O(N) to O(M).
+
+### Example (BAD)
+
+```go
+// BAD: computes expensive values for ALL N items, then filters
+sortedAll := sortByExpensiveHash(items) // N hash calls
+var candidates []Item
+for _, item := range sortedAll {
+    if needsProcessing(item) { // cheap check
+        candidates = append(candidates, item)
+    }
+}
+// Only M candidates actually needed, but we computed N hashes
+```
+
+### Example (GOOD)
+
+```go
+// GOOD: filter first, then compute only for candidates
+var candidates []Item
+for i := range items {
+    if needsProcessing(&items[i]) { // cheap check: O(N)
+        candidates = append(candidates, items[i])
+    }
+}
+// Now compute expensive values only for M candidates
+sortedCandidates := sortByExpensiveHash(candidates) // M hash calls
+```
+
+### Combining with Schwartzian transform
+
+When both patterns apply:
+
+1. **Filter** to candidates — O(N) cheap checks
+2. **Decorate** candidates with expensive keys — O(M) expensive calls
+3. **Sort** by precomputed keys — O(M log M) cheap comparisons
+4. **Undecorate** (if needed) — O(M)
+
+This reduces expensive computations from O(N + N log N) to O(M).
+
+### When reviewing code
+
+When you see expensive operations applied to a collection before filtering:
+
+1. ASK: "Can we filter first to reduce the set?"
+2. CHECK: Is the filter condition cheap (simple field checks, map lookups)?
+3. SUGGEST filter-before-compute if:
+   - Only a subset M of N items need the expensive operation, AND
+   - The filter condition is significantly cheaper than the expensive operation
+
+---
+
+## UnsafeDisableDeepCopy for List operations (MAY)
+
+When listing Kubernetes objects in controllers where:
+- The list may contain **100+ items** in large clusters, AND
+- Items are primarily **read** (not modified), AND
+- The overhead of N × DeepCopy is measurable (GC pressure, latency),
+
+you MAY use `client.UnsafeDisableDeepCopy` to skip per-item deep copying.
+
+### Why it matters
+
+By default, controller-runtime's cached client performs `DeepCopy` on every object
+returned from `List` to protect the informer cache from accidental modifications.
+With `UnsafeDisableDeepCopy`, returned items point directly to cache memory.
+
+| Items | DeepCopy overhead (default) | With UnsafeDisableDeepCopy |
+|-------|----------------------------|----------------------------|
+| 100   | 100 × DeepCopy             | 0                          |
+| 500   | 500 × DeepCopy             | 0                          |
+| 2000  | 2000 × DeepCopy            | 0                          |
+
+### Safety consideration (SHOULD)
+
+When using `UnsafeDisableDeepCopy`, you SHOULD consider wrapping results in a read-only wrapper type
+that prevents accidental modifications. Modifying cache items directly **corrupts the informer cache**.
+
+Alternative approaches:
+- **Wrapper type** (recommended): Prevents misuse at compile time
+- **Inline with explicit comments**: Keep `UnsafeDisableDeepCopy` visible at each call site
+- **Naming convention**: Use `*CacheRefs` suffix to signal read-only semantics
+
+### Example wrapper pattern (OPTIONAL, recommended for reusable code)
+
+```go
+// fooCacheRefs wraps Foo list from informer cache (UnsafeDisableDeepCopy).
+// Items are READ-ONLY direct cache references - modifying them corrupts the cache.
+//
+// This optimization avoids N×DeepCopy allocations when listing Foos.
+// In large clusters with 2000+ items, skipping DeepCopy reduces GC pressure significantly.
+//
+// Usage:
+//   - Use Len()/At(i) for iteration
+//   - NEVER modify items directly - always DeepCopy first
+//   - Pass the wrapper (not raw slice) to prevent accidental modifications
+type fooCacheRefs struct {
+    items []v1alpha1.Foo
+}
+
+// Len returns the number of cached items.
+func (r *fooCacheRefs) Len() int { return len(r.items) }
+
+// At returns a READ-ONLY pointer to the item at index i.
+// WARNING: Do NOT modify the returned value - it points to informer cache.
+// Use item.DeepCopy() before any modification.
+func (r *fooCacheRefs) At(i int) *v1alpha1.Foo { return &r.items[i] }
+
+// getFoosCacheRefs fetches Foos with UnsafeDisableDeepCopy.
+// Returns fooCacheRefs wrapper - see type doc for usage guidelines.
+func (r *Reconciler) getFoosCacheRefs(ctx context.Context) (*fooCacheRefs, error) {
+    var list v1alpha1.FooList
+    if err := r.cl.List(ctx, &list,
+        client.UnsafeDisableDeepCopy,
+    ); err != nil {
+        return nil, err
+    }
+    return &fooCacheRefs{items: list.Items}, nil
+}
+```
+
+### Using the wrapper (GOOD)
+
+```go
+refs, err := r.getFoosCacheRefs(ctx)
+if err != nil {
+    return err
+}
+
+for i := 0; i < refs.Len(); i++ {
+    item := refs.At(i) // Read-only cache ref.
+
+    // READ operations are safe:
+    if item.Status.Phase == "Ready" {
+        // ...
+    }
+
+    // WRITE operations require DeepCopy:
+    if needsModification(item) {
+        modified := item.DeepCopy()
+        modified.Spec.Value = "new"
+        if err := r.cl.Patch(ctx, modified, client.MergeFrom(item)); err != nil {
+            return err
+        }
+    }
+}
+```
+
+### Alternative: Inline with explicit comments (GOOD for simple cases)
+
+```go
+// When UnsafeDisableDeepCopy is used inline (not extracted to function),
+// keep the danger visible at the call site:
+var list v1alpha1.FooList
+if err := r.cl.List(ctx, &list,
+    client.UnsafeDisableDeepCopy, // ⚠️ Returns cache refs - read-only!
+); err != nil {
+    return err
+}
+
+for i := range list.Items {
+    item := &list.Items[i] // Read-only cache ref.
+
+    // Modify requires DeepCopy:
+    modified := item.DeepCopy()
+    modified.Spec.Value = "new"
+    if err := r.cl.Patch(ctx, modified, client.MergeFrom(item)); err != nil {
+        return err
+    }
+}
+```
+
+### Example without safety measures (BAD)
+
+```go
+// BAD: Raw slice exposes cache to accidental modification
+func (r *Reconciler) getFoos(ctx context.Context) ([]v1alpha1.Foo, error) {
+    var list v1alpha1.FooList
+    if err := r.cl.List(ctx, &list, client.UnsafeDisableDeepCopy); err != nil {
+        return nil, err
+    }
+    return list.Items, nil // DANGEROUS: caller can modify cache!
+}
+
+// Caller might accidentally do:
+foos, _ := r.getFoos(ctx)
+for i := range foos {
+    foos[i].Spec.Value = "oops" // CORRUPTS CACHE!
+}
+```
+
+### Why wrapper prevents misuse
+
+The wrapper type:
+
+1. **No `range` iteration**: `for _, item := range refs` won't compile
+2. **Explicit API**: `At(i)` name reminds developer about read-only semantics
+3. **Documentation**: Type's GoDoc explains the danger and proper usage
+4. **Zero overhead**: Wrapper is 24 bytes on stack (slice header), no heap allocation
+
+### When to use this optimization
+
+| Scenario | Recommendation |
+|----------|----------------|
+| List returns 10-50 items | Skip optimization (overhead minimal) |
+| List returns 100+ items | Consider if read-heavy |
+| List returns 500+ items | Likely beneficial |
+| Hot path with frequent reconciles | Likely beneficial |
+| Items mostly read, rarely modified | Good candidate |
+| Items frequently modified | Skip (DeepCopy needed anyway) |
+
+### When reviewing code
+
+When you see `client.UnsafeDisableDeepCopy` usage:
+
+1. CHECK: Is `DeepCopy()` called before any modification?
+2. CHECK: Are there clear comments warning about read-only semantics?
+3. ASK: Is the optimization justified by collection size / hot path?
+4. SUGGEST: Wrapper type if the code is reused or complex
+5. WARN: Raw slice returns without safety measures (cache corruption risk)

@@ -101,3 +101,27 @@ func rvPredicates() []predicate.Predicate {
 		},
 	}
 }
+
+// rvoPredicates returns predicates for ReplicatedVolumeOperation events.
+// Filters to only react to changes in:
+//   - Completed condition (status changes)
+func rvoPredicates() []predicate.Predicate {
+	return []predicate.Predicate{
+		predicate.Funcs{
+			GenericFunc: func(event.TypedGenericEvent[client.Object]) bool { return false },
+			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				oldRVO, okOld := e.ObjectOld.(*v1alpha1.ReplicatedVolumeOperation)
+				newRVO, okNew := e.ObjectNew.(*v1alpha1.ReplicatedVolumeOperation)
+				if !okOld || !okNew || oldRVO == nil || newRVO == nil {
+					return true
+				}
+
+				// React to Completed condition changes.
+				return !obju.AreConditionsSemanticallyEqual(
+					oldRVO, newRVO,
+					v1alpha1.ReplicatedVolumeOperationCondCompletedType,
+				)
+			},
+		},
+	}
+}

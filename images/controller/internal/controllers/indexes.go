@@ -83,5 +83,13 @@ func RegisterIndexes(mgr manager.Manager) error {
 		return err
 	}
 
+	// ReplicatedVolumeOperation (RVO)
+	if err := indexes.RegisterRVOByRSCOwnerRef(mgr); err != nil {
+		return err
+	}
+	if err := indexes.RegisterRVOByRVOwnerRef(mgr); err != nil {
+		return err
+	}
+
 	return nil
 }
