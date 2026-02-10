@@ -104,16 +104,10 @@ spec:
         volumeMounts:
         - mountPath: /dev/
           name: host-device-dir
+        - mountPath: /sys/
+          name: sys-dir
         - mountPath: /etc/config/
           name: config
-        - mountPath: /var/lib/sds-replicated-volume-agent.d/
-          name: sds-replicated-volume-agent-d
-        - mountPath: /var/lib/drbd/
-          name: var-lib-drbd
-        - mountPath: /var/run/drbd/
-          name: var-run-drbd
-        - mountPath: /var/lock/
-          name: var-lock
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
@@ -125,18 +119,14 @@ spec:
           path: /dev/
           type: ""
         name: host-device-dir
+      - hostPath:
+          path: /sys/
+          type: Directory
+        name: sys-dir
       - name: config
         configMap:
           name: agent-config
           items:
             - key: slogh.cfg
               path: slogh.cfg
-      - name: sds-replicated-volume-agent-d
-        emptyDir: {}
-      - name: var-lib-drbd
-        emptyDir: {}
-      - name: var-run-drbd
-        emptyDir: {}
-      - name: var-lock
-        emptyDir: {}
 {{- end }}
