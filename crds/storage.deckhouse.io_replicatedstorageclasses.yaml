@@ -354,7 +354,7 @@ spec:
                   - Availability, ConsistencyAndAvailability: at least 3 zones required
                   - Consistency: at least 2 zones required
 
-                  When replication is 'None' (topology 'Ignored'), zones act as a node constraint
+                  When replication is 'None', zones act as a node constraint
                   limiting where the single replica can be placed.
                 items:
                   maxLength: 63

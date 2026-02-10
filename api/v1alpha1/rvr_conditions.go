@@ -156,9 +156,12 @@ const (
 	//
 	// Reasons describe scheduling outcome or failure.
 	ReplicatedVolumeReplicaCondScheduledType                            = "Scheduled"
+	ReplicatedVolumeReplicaCondScheduledReasonNoAvailableLVGOnNode      = "NoAvailableLVGOnNode"      // No suitable LVG found on the assigned node.
 	ReplicatedVolumeReplicaCondScheduledReasonNoAvailableNodes          = "NoAvailableNodes"          // No nodes are available.
 	ReplicatedVolumeReplicaCondScheduledReasonReplicaScheduled          = "ReplicaScheduled"          // Scheduled successfully.
 	ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed          = "SchedulingFailed"          // Scheduling failed.
 	ReplicatedVolumeReplicaCondScheduledReasonSchedulingPending         = "SchedulingPending"         // Scheduling is pending.
 	ReplicatedVolumeReplicaCondScheduledReasonTopologyConstraintsFailed = "TopologyConstraintsFailed" // Topology constraints prevent scheduling.
+	ReplicatedVolumeReplicaCondScheduledReasonExtenderUnavailable       = "ExtenderUnavailable"       // Scheduler extender is unavailable.
+	ReplicatedVolumeReplicaCondScheduledReasonPendingConfiguration      = "PendingConfiguration"      // Scheduling is pending because required configuration (RV or RSP) is not yet available.
 )
