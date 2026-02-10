@@ -3416,6 +3416,92 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &sc)).To(Succeed())
 			Expect(sc.Labels).To(HaveKeyWithValue(managedLabelKey, managedLabelValue))
 		})
+
+		It("recreates StorageClass when storagePool parameter was empty", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+							{Name: "lvg-1"},
+						},
+					},
+					ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
+					Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:  v1alpha1.VolumeAccessAny,
+					Topology:      v1alpha1.TopologyIgnored,
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					StoragePoolName: "pool-1",
+				},
+			}
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "pool-1"},
+			}
+
+			intended := computeIntendedStorageClass(rsc, false)
+			oldSC := intended.DeepCopy()
+			oldSC.Parameters[storageClassStoragePoolKey] = ""
+
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(
+				testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(rsc, oldSC, rsp).
+					WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})),
+			).Build()
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
+
+			_, err := rec.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: "rsc-1"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var sc storagev1.StorageClass
+			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &sc)).To(Succeed())
+			Expect(sc.Parameters).To(HaveKeyWithValue(storageClassStoragePoolKey, "pool-1"))
+		})
+
+		It("returns error when StorageClass storagePool differs and is not empty", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Storage: v1alpha1.ReplicatedStorageClassStorage{
+						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+							{Name: "lvg-1"},
+						},
+					},
+					ReclaimPolicy: v1alpha1.RSCReclaimPolicyRetain,
+					Replication:   v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:  v1alpha1.VolumeAccessAny,
+					Topology:      v1alpha1.TopologyIgnored,
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					StoragePoolName: "pool-2",
+				},
+			}
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "pool-2"},
+			}
+
+			intended := computeIntendedStorageClass(rsc, false)
+			oldSC := intended.DeepCopy()
+			oldSC.Parameters[storageClassStoragePoolKey] = "pool-1"
+
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(
+				testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(rsc, oldSC, rsp).
+					WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{})),
+			).Build()
+			rec = NewReconciler(cl, "d8-sds-replicated-volume")
+
+			_, err := rec.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: "rsc-1"},
+			})
+			Expect(err).To(HaveOccurred())
+		})
 	})
 
 	var _ = Describe("ensureConfiguration", func() {

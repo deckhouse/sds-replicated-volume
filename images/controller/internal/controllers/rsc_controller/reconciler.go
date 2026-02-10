@@ -412,6 +412,11 @@ func canRecreateStorageClass(newSC, oldSC *storagev1.StorageClass) (bool, string
 	newSCCopy.Parameters = maps.Clone(newSC.Parameters)
 	oldSCCopy.Parameters = maps.Clone(oldSC.Parameters)
 
+	if oldSCCopy.Parameters[storageClassStoragePoolKey] == "" && newSCCopy.Parameters[storageClassStoragePoolKey] != "" {
+		delete(newSCCopy.Parameters, storageClassStoragePoolKey)
+		delete(oldSCCopy.Parameters, storageClassStoragePoolKey)
+	}
+
 	delete(newSCCopy.Parameters, quorumMinimumRedundancyWithPrefixSCKey)
 	delete(newSCCopy.Parameters, replicatedStorageClassParamNameKey)
 	delete(newSCCopy.Parameters, storageClassParamTopologyKey)
