@@ -165,6 +165,7 @@ func (r *ListOperationReconciler) getDRBDR(ctx context.Context, name string) (*v
 		}
 		return nil, err
 	}
+
 	return drbdr, nil
 }
 

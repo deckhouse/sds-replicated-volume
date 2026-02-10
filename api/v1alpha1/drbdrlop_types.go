@@ -41,7 +41,6 @@ type DRBDResourceListOperationSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=2
 	// +kubebuilder:validation:MaxItems=32
-	// +kubebuilder:validation:UniqueItems=true
 	// +kubebuilder:validation:items:MinLength=1
 	// +kubebuilder:validation:items:MaxLength=253
 	// +kubebuilder:validation:items:Pattern=`^[0-9A-Za-z.+_-]*$`

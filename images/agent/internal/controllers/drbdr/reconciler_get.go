@@ -1,5 +1,3 @@
-//go:build !localdev
-
 /*
 Copyright 2025 Flant JSC
 

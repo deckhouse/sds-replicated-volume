@@ -26,13 +26,66 @@ import (
 
 	"github.com/go-logr/logr"
 	"golang.org/x/sync/errgroup"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	crlog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
 	"github.com/deckhouse/sds-common-lib/slogh"
 	u "github.com/deckhouse/sds-common-lib/utils"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 )
+
+func NewCl() (client.Client, error) {
+	kubeConfig, err := config.GetConfig()
+	if err != nil {
+		return nil, fmt.Errorf("getting config: %w", err)
+	}
+
+	scheme, err := scheme.New()
+	if err != nil {
+		return nil, fmt.Errorf("scheme: %w", err)
+	}
+
+	clientOpts := client.Options{
+		Scheme: scheme,
+	}
+
+	return client.New(kubeConfig, clientOpts)
+}
+
+func testPatch() {
+	ctx := context.Background()
+
+	cl, err := NewCl()
+	if err != nil {
+		panic(err)
+	}
+
+	op := &v1alpha1.DRBDResourceListOperation{}
+
+	gvk, err := apiutil.GVKForObject(op, cl.Scheme())
+	if err != nil {
+		panic(err)
+	}
+	op.SetGroupVersionKind(gvk)
+
+	op.SetName("drbdrlop-0")
+
+	op.Status = &v1alpha1.DRBDResourceListOperationStatus{
+		Results: []v1alpha1.DRBDResourceListOperationResult{
+			{DRBDResourceName: "test1"},
+		},
+	}
+
+	if err := cl.Status().Patch(ctx, op, client.Apply, client.FieldOwner("testPatch1")); err != nil {
+		panic(err)
+	}
+
+}
 
 func main() {
 	ctx := signals.SetupSignalHandler()

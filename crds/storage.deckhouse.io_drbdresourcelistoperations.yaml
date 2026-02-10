@@ -57,7 +57,6 @@ spec:
                 maxItems: 32
                 minItems: 2
                 type: array
-                uniqueItems: true
                 x-kubernetes-list-type: set
                 x-kubernetes-validations:
                 - message: drbdResourceNames is immutable
