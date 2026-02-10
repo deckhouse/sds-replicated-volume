@@ -2001,6 +2001,61 @@ var _ = Describe("Reconciler", func() {
 		})
 	})
 
+	Describe("ensureLegacyFieldsCleared", func() {
+		It("clears phase and reason when both are set", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Phase:  v1alpha1.RSCPhaseCreated,
+					Reason: "some old reason",
+				},
+			}
+
+			outcome := ensureLegacyFieldsCleared(context.Background(), rsc)
+
+			Expect(outcome.DidChange()).To(BeTrue())
+			Expect(rsc.Status.Phase).To(Equal(v1alpha1.ReplicatedStorageClassPhase("")))
+			Expect(rsc.Status.Reason).To(BeEmpty())
+		})
+
+		It("clears only phase when reason is already empty", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Phase: v1alpha1.RSCPhaseFailed,
+				},
+			}
+
+			outcome := ensureLegacyFieldsCleared(context.Background(), rsc)
+
+			Expect(outcome.DidChange()).To(BeTrue())
+			Expect(rsc.Status.Phase).To(Equal(v1alpha1.ReplicatedStorageClassPhase("")))
+		})
+
+		It("clears only reason when phase is already empty", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Reason: "leftover reason",
+				},
+			}
+
+			outcome := ensureLegacyFieldsCleared(context.Background(), rsc)
+
+			Expect(outcome.DidChange()).To(BeTrue())
+			Expect(rsc.Status.Reason).To(BeEmpty())
+		})
+
+		It("reports no change when both are already empty", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Status: v1alpha1.ReplicatedStorageClassStatus{},
+			}
+
+			outcome := ensureLegacyFieldsCleared(context.Background(), rsc)
+
+			Expect(outcome.DidChange()).To(BeFalse())
+			Expect(rsc.Status.Phase).To(Equal(v1alpha1.ReplicatedStorageClassPhase("")))
+			Expect(rsc.Status.Reason).To(BeEmpty())
+		})
+	})
+
 	Describe("ensureStoragePool", func() {
 		It("updates storagePoolName and storagePoolBasedOnGeneration when not in sync", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
