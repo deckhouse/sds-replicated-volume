@@ -46,17 +46,23 @@ var ResetNextDeviceMinor = func() {
 }
 
 // NewMinorArgs returns the arguments for drbdsetup new-minor command.
-var NewMinorArgs = func(resource string, minor uint, volume uint) []string {
-	return []string{
+// When diskless is true, --diskless is appended to mark the device as an intentionally diskless client.
+var NewMinorArgs = func(resource string, minor uint, volume uint, diskless bool) []string {
+	args := []string{
 		"new-minor", resource,
 		strconv.FormatUint(uint64(minor), 10),
 		strconv.FormatUint(uint64(volume), 10),
 	}
+	if diskless {
+		args = append(args, "--diskless")
+	}
+	return args
 }
 
 // ExecuteNewMinor creates a new DRBD device/volume within a resource.
-func ExecuteNewMinor(ctx context.Context, resource string, minor uint, volume uint) (err error) {
-	args := NewMinorArgs(resource, minor, volume)
+// When diskless is true, --diskless is passed to mark the device as an intentionally diskless client.
+func ExecuteNewMinor(ctx context.Context, resource string, minor uint, volume uint, diskless bool) (err error) {
+	args := NewMinorArgs(resource, minor, volume, diskless)
 	cmd := ExecCommandContext(ctx, Command, args...)
 
 	defer func() {
@@ -80,14 +86,15 @@ func ExecuteNewMinor(ctx context.Context, resource string, minor uint, volume ui
 }
 
 // ExecuteNewAutoMinor creates a new DRBD device/volume with auto-allocated minor.
+// When diskless is true, --diskless is passed to mark the device as an intentionally diskless client.
 // Returns the allocated minor number on success.
-func ExecuteNewAutoMinor(ctx context.Context, resource string, volume uint) (uint, error) {
+func ExecuteNewAutoMinor(ctx context.Context, resource string, volume uint, diskless bool) (uint, error) {
 	nextDeviceMinorMu.Lock()
 	defer nextDeviceMinorMu.Unlock()
 
 	for {
 		minor := nextDeviceMinor
-		err := ExecuteNewMinor(ctx, resource, nextDeviceMinor, volume)
+		err := ExecuteNewMinor(ctx, resource, nextDeviceMinor, volume, diskless)
 		if err == nil {
 			_ = incrementDeviceMinor(nil) // error can only occur with exhausted minors; nil input skips that check
 			return minor, nil

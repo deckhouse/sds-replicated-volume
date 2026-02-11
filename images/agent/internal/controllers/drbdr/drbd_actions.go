@@ -84,11 +84,12 @@ func (a ResourceOptionsAction) String() string {
 type NewMinorAction struct {
 	ResourceName   string
 	Volume         uint
+	Diskless       bool
 	AllocatedMinor *uint
 }
 
 func (a NewMinorAction) Execute(ctx context.Context) error {
-	minor, err := drbdsetup.ExecuteNewAutoMinor(ctx, a.ResourceName, a.Volume)
+	minor, err := drbdsetup.ExecuteNewAutoMinor(ctx, a.ResourceName, a.Volume, a.Diskless)
 	if err != nil {
 		return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNewMinorFailed)
 	}
@@ -99,7 +100,7 @@ func (a NewMinorAction) Execute(ctx context.Context) error {
 }
 
 func (a NewMinorAction) String() string {
-	return fmt.Sprintf("NewMinor(resource=%s, volume=%d)", a.ResourceName, a.Volume)
+	return fmt.Sprintf("NewMinor(resource=%s, volume=%d, diskless=%t)", a.ResourceName, a.Volume, a.Diskless)
 }
 
 // CreateMetadataAction creates DRBD metadata on a backing device.

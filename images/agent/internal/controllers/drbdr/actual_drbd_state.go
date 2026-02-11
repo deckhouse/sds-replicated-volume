@@ -390,13 +390,27 @@ func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResour
 		ac.AllowTwoPrimaries = &atp
 	}
 
-	// Type and Size from first volume
+	// Type and Size from first volume.
+	// Type is determined from drbdsetup show configuration (backing-disk), not from
+	// the transient disk state in drbdsetup status. Intentionally diskless volumes
+	// (created with --diskless) have backing-disk "none" in show output.
 	// LVMLogicalVolumeName is set by the reconciler after reverse-lookup
 	// from the backing disk path. This Report() method does not set it.
 	if len(volumes) > 0 {
 		vol := &volumes[0]
 
-		if vol.DiskState == "Diskless" {
+		// Look up the show volume to check backing-disk configuration.
+		backingDisk := ""
+		if aState.show != nil {
+			for i := range aState.show.ThisHost.Volumes {
+				if aState.show.ThisHost.Volumes[i].VolumeNr == vol.Volume {
+					backingDisk = aState.show.ThisHost.Volumes[i].BackingDisk
+					break
+				}
+			}
+		}
+
+		if backingDisk == "none" {
 			ac.Type = v1alpha1.DRBDResourceTypeDiskless
 			ac.Size = nil
 		} else {

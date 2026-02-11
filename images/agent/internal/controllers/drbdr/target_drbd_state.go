@@ -77,7 +77,7 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 	res = append(res, computeResourceOptions(resourceName, iState, aState)...)
 
 	// 3. Compute minor actions (create if missing)
-	minor, minorActions := computeMinorActions(resourceName, &allocatedMinor, aState)
+	minor, minorActions := computeMinorActions(resourceName, &allocatedMinor, iState, aState)
 	res = append(res, minorActions...)
 
 	// 4. Handle disk (detach if changing, attach if missing, reconcile options)
@@ -154,7 +154,7 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 // computeMinorActions returns a pointer to the minor number and any actions needed to create it.
 // If a volume already exists, returns its minor; otherwise returns the allocatedMinor pointer
 // that will be filled by NewMinorAction during execution.
-func computeMinorActions(resourceName string, allocatedMinor *uint, aState ActualDRBDState) (*uint, DRBDActions) {
+func computeMinorActions(resourceName string, allocatedMinor *uint, iState IntendedDRBDState, aState ActualDRBDState) (*uint, DRBDActions) {
 	if len(aState.Volumes()) > 0 {
 		m := uint(aState.Volumes()[0].Minor())
 		return &m, nil
@@ -162,6 +162,7 @@ func computeMinorActions(resourceName string, allocatedMinor *uint, aState Actua
 	return allocatedMinor, DRBDActions{NewMinorAction{
 		ResourceName:   resourceName,
 		Volume:         0,
+		Diskless:       iState.Type() == v1alpha1.DRBDResourceTypeDiskless,
 		AllocatedMinor: allocatedMinor,
 	}}
 }

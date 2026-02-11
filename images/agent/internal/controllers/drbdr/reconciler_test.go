@@ -112,7 +112,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 				// ResourceOptionsAction sets resource options
 				resourceOptionsCmd(testDRBDResName),
 				// NewMinorAction calls ExecuteNewAutoMinor which tries nextDeviceMinor=0 first
-				newMinorCmd(testDRBDResName, 0, 0),
+				newMinorCmd(testDRBDResName, 0, 0, false),
 				// After actions, refresh actual state
 				statusCmd(testDRBDResName, configuredStatus(testDRBDResName)),
 				showCmd(testDRBDResName, &drbdsetup.ShowResource{
@@ -228,7 +228,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 				// ResourceOptionsAction sets resource options
 				resourceOptionsCmd(testDRBDResName),
 				// ExecuteNewAutoMinor tries nextDeviceMinor=0 first
-				newMinorCmd(testDRBDResName, 0, 0),
+				newMinorCmd(testDRBDResName, 0, 0, false),
 				// Refresh after actions
 				statusCmd(testDRBDResName, configuredStatus(testDRBDResName)),
 				showCmd(testDRBDResName, &drbdsetup.ShowResource{
@@ -514,10 +514,10 @@ func newResourceCmd(resourceName string, nodeID uint8) *fakedrbdsetup.ExpectedCm
 	}
 }
 
-func newMinorCmd(resourceName string, minor, volume uint) *fakedrbdsetup.ExpectedCmd {
+func newMinorCmd(resourceName string, minor, volume uint, diskless bool) *fakedrbdsetup.ExpectedCmd {
 	return &fakedrbdsetup.ExpectedCmd{
 		Name:         drbdsetup.Command,
-		Args:         drbdsetup.NewMinorArgs(resourceName, minor, volume),
+		Args:         drbdsetup.NewMinorArgs(resourceName, minor, volume, diskless),
 		ResultOutput: []byte{},
 		ResultErr:    nil,
 	}
