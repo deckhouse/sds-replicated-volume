@@ -365,6 +365,8 @@ func FilteredAndScoredBySchedulerExtender(
 		i++
 	}
 
+	// TODO: отсортировать в стандартный порядок
+
 	return &ScoringStep{
 		upstream: upstream,
 		entries:  result,
@@ -395,6 +397,123 @@ func (s *ScoringStep) Summary() string {
 		return own
 	}
 	return upstream + "; " + own
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GroupScoringStep
+//
+
+// GroupScoreFn receives a group key and the candidates in that group,
+// and returns a score to add to every entry in the group.
+type GroupScoreFn func(key string, group []*CandidateEntry) int
+
+// groupScoringStep eagerly collects upstream entries, groups them by a key,
+// scores each group via a callback, and yields all entries with adjusted scores.
+// No entries are filtered — only scores are adjusted.
+type groupScoringStep struct {
+	upstream SchedulingPipeline
+	name     string
+	entries  []*CandidateEntry
+	logger   logr.Logger
+}
+
+// WithGroupScore creates a pipeline step that eagerly collects upstream
+// entries, groups them by keyFn, calls scoreFn for each group, and adds
+// the returned score to every entry in the group. No entries are filtered.
+func WithGroupScore(
+	upstream SchedulingPipeline,
+	name string,
+	logger logr.Logger,
+	keyFn func(*CandidateEntry) string,
+	scoreFn GroupScoreFn,
+) SchedulingPipeline {
+	// 1. Collect all upstream entries.
+	var all []*CandidateEntry
+	for _, e := range upstream.Seq() {
+		all = append(all, e)
+	}
+
+	// 2. Group by key, preserving first-seen order.
+	type group struct {
+		key     string
+		entries []*CandidateEntry
+	}
+	var groups []group
+	idx := make(map[string]int) // key → index in groups
+	for _, e := range all {
+		k := keyFn(e)
+		if i, ok := idx[k]; ok {
+			groups[i].entries = append(groups[i].entries, e)
+		} else {
+			idx[k] = len(groups)
+			groups = append(groups, group{key: k, entries: []*CandidateEntry{e}})
+		}
+	}
+
+	// 3. Score each group.
+	for _, g := range groups {
+		score := scoreFn(g.key, g.entries)
+		if score != 0 {
+			for _, e := range g.entries {
+				e.Score += score
+			}
+			logger.V(3).Info("group scored",
+				"step", name,
+				"key", g.key,
+				"score", score,
+				"count", len(g.entries),
+			)
+		}
+	}
+
+	return &groupScoringStep{
+		upstream: upstream,
+		name:     name,
+		entries:  all,
+		logger:   logger,
+	}
+}
+
+// WithZoneScore groups candidates by zone name and scores each zone group.
+func WithZoneScore(
+	upstream SchedulingPipeline,
+	name string,
+	logger logr.Logger,
+	scoreFn GroupScoreFn,
+) SchedulingPipeline {
+	return WithGroupScore(upstream, name, logger,
+		func(e *CandidateEntry) string { return e.Node.ZoneName },
+		scoreFn,
+	)
+}
+
+// WithNodeScore groups candidates by node name and scores each node group.
+func WithNodeScore(
+	upstream SchedulingPipeline,
+	name string,
+	logger logr.Logger,
+	scoreFn GroupScoreFn,
+) SchedulingPipeline {
+	return WithGroupScore(upstream, name, logger,
+		func(e *CandidateEntry) string { return e.Node.NodeName },
+		scoreFn,
+	)
+}
+
+// Seq returns an iterator over all entries with adjusted scores.
+func (s *groupScoringStep) Seq() CandidateSeq {
+	return func(yield func(int, *CandidateEntry) bool) {
+		for i, e := range s.entries {
+			if !yield(i, e) {
+				return
+			}
+		}
+	}
+}
+
+// Summary passes through the upstream summary (group scoring does not filter).
+func (s *groupScoringStep) Summary() string {
+	return s.upstream.Summary()
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

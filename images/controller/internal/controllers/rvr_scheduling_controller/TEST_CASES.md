@@ -6,7 +6,7 @@ Non-obvious / non-trivial cases are marked with ⚡.
 
 ---
 
-## Zonal Topology (8 cases)
+## Zonal Topology
 
 1. **small-1z: D:2 — all in zone-a.**
    Cluster with 1 zone (2 nodes). 2 Diskful replicas are scheduled into the only zone, zone-a.
@@ -20,21 +20,18 @@ Non-obvious / non-trivial cases are marked with ⚡.
 4. ⚡ **medium-2z-4n: existing D in zone-a — new D and TB also go to zone-a.**
    There is already a Diskful on node-a1. New D and TB must go to the same zone (sticky behavior).
 
-5. ⚡ **medium-2z: existing D in different zones — TopologyConstraintsFailed.**
-   Existing Diskful replicas in zone-a and zone-b. For Zonal topology this is a conflict: the new replica cannot be scheduled and receives `Scheduled=False` / `TopologyConstraintsFailed`.
+5. ⚡ **medium-2z: existing D in different zones — inconsistent state logged, scheduling proceeds.**
+   Existing Diskful replicas in zone-a and zone-b. For Zonal topology this is an inconsistent state: the reconciler logs an Info message listing the preferred zones (both zone-a and zone-b are tied) and proceeds with scheduling — no zone filter is applied, the replica is placed by score.
 
 6. **small-1z: all nodes occupied — no candidates for TB.**
-   2 existing Diskful occupy both nodes. TieBreaker receives `Scheduled=False` / `NoAvailableNodes`.
+   2 existing Diskful occupy both nodes. TieBreaker receives `Scheduled=False` / `SchedulingFailed`.
 
-7. ⚡ **medium-2z: TB without any Diskful — no candidates.**
-   No Diskful at all (neither existing nor to-be-scheduled). In a multi-zone cluster the zone for TieBreaker is undefined → `Scheduled=False` / `NoAvailableNodes`.
-
-8. **medium-2z: existing D in zone-a — TB also goes to zone-a.**
+7. **medium-2z: existing D in zone-a — TB also goes to zone-a.**
    Existing Diskful on node-a1 locks the zone. TieBreaker is scheduled in zone-a on a free node.
 
 ---
 
-## TransZonal Topology (6 cases)
+## TransZonal Topology
 
 1. **large-3z: D:3 — one per zone.**
    3 zones, 3 Diskful → each zone gets exactly one replica.
@@ -52,11 +49,11 @@ Non-obvious / non-trivial cases are marked with ⚡.
    Cluster has 4 zones (a,b,c,d), but RSC restricts to 3 (a,b,c). All 3D are scheduled only in RSC zones; zone-d is not used.
 
 6. **medium-2z: all nodes occupied — TB is not scheduled.**
-   4 existing Diskful fill all 4 nodes across 2 zones. TieBreaker receives `Scheduled=False` / `NoAvailableNodes`.
+   4 existing Diskful fill all 4 nodes across 2 zones. TieBreaker receives `Scheduled=False` / `SchedulingFailed`.
 
 ---
 
-## Ignored Topology (4 cases)
+## Ignored Topology
 
 1. **large-3z: D:2 — Diskful by best scores.**
    No zone constraints: 2 Diskful are scheduled on the nodes with the highest scores (node-a1=100, node-b1=90), regardless of zones.
@@ -68,105 +65,100 @@ Non-obvious / non-trivial cases are marked with ⚡.
    All 4 replicas (2 Diskful + 2 TieBreaker) are successfully scheduled, each on a separate node.
 
 4. **small-1z: all nodes occupied — TB is not scheduled.**
-   2 existing Diskful on both nodes. TieBreaker cannot be scheduled — `NoAvailableNodes`.
+   2 existing Diskful on both nodes. TieBreaker cannot be scheduled — `SchedulingFailed`.
 
 ---
 
-## Extender Filtering (2 cases)
+## Extender Filtering
 
-1. ⚡ **Extender error → `Scheduled=False` / `ExtenderUnavailable`.**
-   Mock extender returns an error (simulating unavailability). The replica is not scheduled and receives `Scheduled=False` / `ExtenderUnavailable`. Reconcile itself completes **without error** — the problem is isolated to one replica.
+1. ⚡ **Extender error, single Diskful → `Scheduled=False` / `ExtenderUnavailable`, Reconcile returns error.**
+   1 Diskful, no TieBreaker. Mock extender returns an error. The Diskful receives `Scheduled=False` / `ExtenderUnavailable`. Reconcile returns an error (triggers retry).
 
-2. **Extender returns no scores for zone-b → nodes filtered out.**
+2. ⚡ **Extender error, multiple Diskful → all attempted, then error.**
+   3 Diskful, no TieBreaker. Extender fails on the first Diskful. The reconciler continues to attempt the remaining Diskful (each also fails with `ExtenderUnavailable`). All 3 receive `Scheduled=False` / `ExtenderUnavailable`. Reconcile returns an error after attempting all Diskful.
+
+3. ⚡ **Extender error, Diskful + TieBreaker → Diskful fails, TieBreaker NOT attempted.**
+   1 Diskful + 1 TieBreaker. Extender fails on the Diskful. Diskful receives `Scheduled=False` / `ExtenderUnavailable`. Reconcile returns an error before reaching Phase 3 (TieBreaker scheduling). TieBreaker is not scheduled in this run.
+
+4. ⚡ **TieBreaker only, extender unavailable → TieBreaker scheduled normally.**
+   No unscheduled Diskful, 1 TieBreaker. Extender is unavailable but irrelevant — TieBreaker does not use the extender. TieBreaker is scheduled successfully. Reconcile returns without error.
+
+5. **Extender returns no scores for zone-b → nodes filtered out.**
    Mock extender returns scores only for LVGs in zone-a. The replica is scheduled strictly on node-a1 or node-a2 (zone-a); zone-b nodes are unavailable.
 
 ---
 
-## Partial Diskful Scheduling (1 case)
+## Partial Diskful Scheduling
 
 1. ⚡ **3 Diskful on 2 nodes → 2 scheduled, 1 `Scheduled=False`.**
-   Cluster small-1z (2 nodes). 3 Diskful RVRs. The reconciler schedules 2 (greedy), the third receives `Scheduled=False` / `NoAvailableNodes`. The scheduled ones get `Scheduled=True`.
+   Cluster small-1z (2 nodes). 3 Diskful RVRs. The reconciler schedules 2 (greedy), the third receives `Scheduled=False` / `SchedulingFailed`. The scheduled ones get `Scheduled=True`.
 
 ---
 
-## Deleting Replica Node Occupancy (1 case)
+## Deleting Replica Node Occupancy
 
 1. ⚡ **Deleting replica (with DeletionTimestamp) blocks its node.**
    RVR with `DeletionTimestamp` + `NodeName=node-a1` + finalizer. The new replica rvr-new must be scheduled on node-a2, not node-a1 (even though node-a1 has a higher score).
 
 ---
 
-## RVR with DeletionTimestamp (1 case)
+## RVR with DeletionTimestamp
 
 1. ⚡ **Deleting unscheduled RVR is skipped.**
    RVR with `DeletionTimestamp` but no `NodeName`. The reconciler does not attempt to schedule it; `NodeName` remains empty.
 
 ---
 
-## Scheduled Condition Management (1 case)
+## Scheduled Condition Management
 
 1. ⚡ **`Scheduled=True` is set on already-existing replicas too.**
-   Existing RVR with `NodeName=node-a1` + `LVMVolumeGroupName=vg-node-a1` (fully scheduled) + a new RVR without NodeName. After Reconcile, both receive the condition `Scheduled=True` / `ReplicaScheduled`.
+   Existing RVR with `NodeName=node-a1` + `LVMVolumeGroupName=vg-node-a1` (fully scheduled) + a new RVR without NodeName. After Reconcile, both receive the condition `Scheduled=True` / `Scheduled`.
 
 ---
 
-## RV Not Ready (1 case)
-
-1. ⚡ **RV without finalizer → error + `SchedulingPending`.**
-   RV exists but has no finalizer (RV controller has not reconciled it yet). The reconciler returns an error and sets `Scheduled=False` / `SchedulingPending` on all RVRs.
-
----
-
-## Constraint Violation Conditions (1 case)
+## Constraint Violation Conditions
 
 1. ⚡ **TransZonal: eligible nodes only from zone-a, but topology=TransZonal.**
-   RSC specifies 2 zones, but eligible nodes exist only in zone-a. 2 Diskful: the first is scheduled in zone-a, the second receives `Scheduled=False` (no node in the second zone — `NoAvailableNodes` or `TopologyConstraintsFailed`).
+   RSC specifies 2 zones, but eligible nodes exist only in zone-a. 2 Diskful: the first is scheduled in zone-a, the second receives `Scheduled=False` / `SchedulingFailed` (no node in the second zone).
 
 ---
 
-## Multi-LVG Selection (5 cases)
+## Multi-LVG Node Bonus
 
-1. ⚡ **Equal BestScore → node with more LVGs wins.**
-   Node-1: 2 LVGs (lvg-1a=9, lvg-1b=5). Node-2: 1 LVG (lvg-2a=9). BestScore is equal (9), but Node-1 has 2 LVGs > 1 → Node-1 wins. lvg-1a is selected (best score on the node).
+When `volumeAccess != Any`, nodes with more than one LVG receive a +2 score
+bonus. This improves resilience: if a disk fails, a second LVG on the same
+node allows local migration without violating volumeAccess constraints.
 
-2. ⚡ **Equal BestScore and LVGCount → higher SumScore wins.**
-   Node-1: 2 LVGs (9+5=14). Node-2: 2 LVGs (9+2=11). BestScore=9, LVGCount=2 — identical. Sum: 14 > 11 → Node-1.
+Selection within a node always picks the LVG with the highest extender score.
 
-3. **Different BestScore → best score wins.**
-   Node-1: 2 LVGs (best=9). Node-2: 1 LVG (best=10). Despite having more LVGs, Node-2 wins by BestScore (10 > 9).
+1. ⚡ **Equal extender score → multi-LVG node wins by bonus.**
+   volumeAccess=Local. Node-1: 2 LVGs (lvg-1a=9, lvg-1b=5). Node-2: 1 LVG (lvg-2a=9). Node-1 entries get +2 bonus → lvg-1a has score 11 vs lvg-2a score 9. Node-1 wins; lvg-1a is selected.
 
-4. ⚡ **LVGs without capacity are filtered out before counting.**
-   Node-1: 3 LVGs, but lvg-1c is not in scores (no capacity). After filtering: Node-1 has 2 suitable LVGs vs Node-2 with 1 → Node-1 wins.
+2. **Higher extender score beats multi-LVG bonus.**
+   volumeAccess=Local. Node-1: 2 LVGs (best=5, +2 bonus → 7). Node-2: 1 LVG (score=10). Node-2 wins by score (10 > 7) despite fewer LVGs.
 
-5. **Best LVG is selected on the winning node.**
-   1 node with 3 LVGs (scores 10, 15, 5). lvg-1b (score=15) is selected — the best on the node.
+3. ⚡ **volumeAccess=Any → no multi-LVG bonus applied.**
+   volumeAccess=Any. Node-1: 2 LVGs (lvg-1a=9, lvg-1b=5). Node-2: 1 LVG (lvg-2a=9). No bonus → tie at score 9. Tiebreak by alphabetical NodeName.
 
----
-
-## RV Validation Errors (2 cases)
-
-1. **Size=0 → error + `SchedulingPending`.**
-   RV has `Size: "0"`. Reconcile returns an error. RVR receives `Scheduled=False` / `SchedulingPending`.
-
-2. **Empty ReplicatedStorageClassName → error + `SchedulingPending`.**
-   RV with empty `ReplicatedStorageClassName`. Reconcile returns an error. RVR receives `Scheduled=False` / `SchedulingPending`.
+4. **Best LVG is selected on the winning node.**
+   1 node with 3 LVGs (scores 10, 15, 5). All get +2 bonus (12, 17, 7). lvg-1b (score=17) is selected — the highest on the node.
 
 ---
 
-## RSP Not Found (3 cases)
+## RSP Not Found
 
-1. ⚡ **RSP does not exist → error, RVR status is NOT touched.**
-   Configuration points to a nonexistent RSP (`rsp-nonexistent`). Reconcile returns an error containing "not found". RVR status remains empty — an I/O error must not modify status.
+1. ⚡ **RSP does not exist → `PendingConfiguration` condition on all RVRs.**
+   Configuration points to a nonexistent RSP (`rsp-nonexistent`). Guard #3 fires: all RVRs receive `Scheduled=Unknown` / `PendingConfiguration` with a message naming the missing RSP. Reconcile returns without error.
 
-2. ⚡ **Empty StoragePoolName → error + `SchedulingPending`.**
-   Configuration with empty `StoragePoolName`. Error: "no storage pool configured". RVR receives `Scheduled=False` / `SchedulingPending` (unlike RSP-not-found — here status IS updated).
+2. ⚡ **Empty StoragePoolName → `PendingConfiguration` condition on all RVRs.**
+   Configuration with empty `StoragePoolName`. `getRSP("")` returns NotFound → Guard #3 fires: all RVRs receive `Scheduled=Unknown` / `PendingConfiguration`. Reconcile returns without error.
 
-3. **RV not found → Done without error.**
-   RV is not found. Reconcile returns `Done` with no error and no requeue.
+3. **RV not found → `PendingConfiguration` condition on all RVRs.**
+   RV is not found. Guard #1 fires: all RVRs receive `Scheduled=Unknown` / `PendingConfiguration`. Reconcile returns without error.
 
 ---
 
-## Node and LVG Readiness (5 cases)
+## Node and LVG Readiness
 
 1. **NodeReady=false → node is skipped.**
    2 nodes: ready (score=50) and not-ready (score=100). Despite the higher score, the not-ready node is skipped.
@@ -185,7 +177,7 @@ Non-obvious / non-trivial cases are marked with ⚡.
 
 ---
 
-## LVMThin Storage Type (2 cases)
+## LVMThin Storage Type
 
 1. **LVMThin → ThinPoolName is set.**
    RSP type=LVMThin. RVR receives both `LVMVolumeGroupName` and `LVMVolumeGroupThinPoolName` from the eligible node.
@@ -195,14 +187,14 @@ Non-obvious / non-trivial cases are marked with ⚡.
 
 ---
 
-## Requeue Behavior (1 case)
+## Requeue Behavior
 
-1. ⚡ **Scheduling failure → `RequeueAfter(5s)`.**
-   Extender returns empty scores (no capacity anywhere). Reconcile completes **without error**, but with `RequeueAfter(5s)`.
+1. ⚡ **No capacity anywhere → Reconcile completes without error, no explicit requeue.**
+   Extender returns empty scores (no capacity). Replicas receive `Scheduled=False` / `SchedulingFailed`. Reconcile completes without error and without `RequeueAfter` — re-reconciliation happens naturally when the watched resources (RSP, RVR, RV) change.
 
 ---
 
-## Access Replica Handling (2 cases)
+## Access Replica Handling
 
 1. **Access replica is not scheduled.**
    Access RVR without NodeName. After Reconcile, NodeName is still empty.
@@ -212,7 +204,7 @@ Non-obvious / non-trivial cases are marked with ⚡.
 
 ---
 
-## Topology Edge Cases (2 cases)
+## Topology Edge Cases
 
 1. ⚡ **TransZonal: round-robin 4 Diskful across 3 zones.**
    Cluster large-3z-3n (3 zones × 3 nodes). 4 Diskful. All 3 zones are used; one zone gets 2 replicas, the others get 1 each (round-robin balancing).
@@ -222,55 +214,54 @@ Non-obvious / non-trivial cases are marked with ⚡.
 
 ---
 
-## AttachTo Bonus (2 cases)
+## AttachTo Bonus
 
-1. ⚡ **+1000 bonus overrides a small score difference.**
-   vg-attachto=50 (+1000=1050) vs vg-other=60. The attachTo node wins.
+1. ⚡ **+1000 bonus overrides extender scores (extender returns 0–10).**
+   vg-attachto=3 (+1000=1003) vs vg-other=10. The attachTo node always wins because the +1000 bonus is far larger than the maximum extender score (10).
 
-2. ⚡ **Bonus does not override a significantly higher score.**
-   vg-attachto=50 (+1000=1050) vs vg-other=2000. The node with the much higher capacity score wins.
+2. ⚡ **AttachTo bonus is not applied to TieBreaker replicas.**
+   attachTo=[node-a1]. 1 TieBreaker. TieBreaker does not go through extender scoring or attachTo bonus — it is placed purely by node availability and zone preference.
 
 ---
 
-## Zone Insufficiency (3 cases)
+## Zone Insufficiency
 
-1. ⚡ **TransZonal: 2 zones × 1 node, 3 Diskful → 2 OK, 1 `NoAvailableNodes`.**
+1. ⚡ **TransZonal: 2 zones × 1 node, 3 Diskful → 2 OK, 1 `SchedulingFailed`.**
    Greedy: the first 2 Diskful are scheduled (one per zone), the third gets `Scheduled=False`.
 
 2. ⚡ **TransZonal: zone-a occupied by existing → new replicas go to zone-b, zone-c.**
    3 zones × 1 node. Existing Diskful on node-a1 occupies zone-a. 3 new Diskful: 2 are scheduled in zone-b and zone-c, 1 gets `Scheduled=False`.
 
-3. ⚡ **Zonal: zone exhausted → `NoAvailableNodes`.**
+3. ⚡ **Zonal: zone exhausted → `SchedulingFailed`.**
    2 zones, existing Diskful on node-a1 locks zone-a. zone-a has 2 nodes. Scheduling 2 new: the first goes to node-a2, the second gets `Scheduled=False` (no free nodes in zone-a).
 
 ---
 
-## Zonal soft zone preference / UnscheduledRVRsCount (7 cases)
+## Zonal zone capacity penalty
 
-1. ⚡ **L1: one zone has enough nodes — both replicas go there.**
-   zone-a: 2 nodes, zone-b: 1 node. UnscheduledRVRsCount=2. zone-a has 2 >= required(2) → both replicas are scheduled in zone-a.
+Zone capacity penalty applies to Diskful + Zonal only. Zones where the number
+of free nodes is less than the remaining Diskful demand receive a -800 score
+penalty. The required Diskful count depends on the replication mode:
+None → 1, Availability/Consistency → 2, ConsistencyAndAvailability → 3.
 
-2. ⚡ **L2: no zone has enough nodes → best-effort by score.**
-   zone-a: 1 node (score=100), zone-b: 1 node (score=90). Required=2, neither zone fits. zone-a is chosen by score → 1 replica OK, 1 `Scheduled=False`.
+1. ⚡ **Zone with enough free nodes has no penalty — replicas go there.**
+   Replication=Availability (required=2). zone-a: 2 free nodes, zone-b: 1 free node. zone-b gets -800 penalty. Both replicas are scheduled in zone-a.
 
-3. ⚡ **L2: 3 replicas, both zones have 2 nodes → 2 OK, 1 unscheduled.**
-   zone-a: 2 nodes (scores 100, 90), zone-b: 2 nodes (85, 80). Required=3, neither zone fits. zone-a by score → 2 replicas OK, 1 `Scheduled=False`.
+2. ⚡ **No zone has enough free nodes → all penalized, best score wins.**
+   Replication=Availability (required=2). zone-a: 1 node (score=10), zone-b: 1 node (score=8). Both zones get -800. zone-a wins by score → 1 replica OK, 1 `Scheduled=False`.
 
-4. ⚡ **L3: UnscheduledRVRsCount=0 → zone chosen purely by score.**
-   2 zones × 1 node, UnscheduledRVRsCount=0. 2 Diskful: 1 is scheduled in the best zone, 1 `Scheduled=False` (only 1 node in the chosen zone).
+3. ⚡ **All Diskful already scheduled → no penalty applied (remainingDemand=0).**
+   Replication=Availability (required=2), 2 Diskful already scheduled. New Diskful: no penalty step runs, zone chosen purely by score.
 
-5. ⚡ **L2: reserved nodes reduce available count.**
-   zone-a: 2 nodes (1 reserved), zone-b: 1 node. Required=2. After subtracting reserved: zone-a=1, zone-b=1. Neither fits. zone-a by score → 1 OK, 1 `Scheduled=False`.
+4. ⚡ **Existing replicas commit the zone; penalty does not override sticky.**
+   Replication=ConsistencyAndAvailability (required=3). Existing Diskful on node-a1 (zone-a, 3 nodes). zone-b: 2 nodes. remainingDemand=2. zone-a has 2 free nodes (enough), zone-b has 2 free nodes (enough) — no penalty on either. Zonal sticky filter picks zone-a (has 1 Diskful > 0). Both new replicas go to zone-a.
 
-6. ⚡ **Existing replicas in zone: continue scheduling until exhausted.**
-   Existing on node-a1 (zone-a). UnscheduledRVRsCount=2. zone-a is committed by existing. First new → node-a2, second → `Scheduled=False` (zone-a exhausted).
-
-7. ⚡ **attachTo narrows to a zone with 1 node — soft fallback.**
-   zone-a: 1 node (node-a1, attachTo target), zone-b: 3 nodes. attachTo locks zone-a. Required=2, zone-a has 1 node. Best-effort: 1 replica on node-a1, 1 `Scheduled=False`.
+5. ⚡ **Penalty pushes replicas away from a small zone.**
+   Replication=ConsistencyAndAvailability (required=3). zone-a: 1 node (score=10), zone-b: 3 nodes (scores 8, 7, 6). remainingDemand=3. zone-a has 1 free node < 3 → gets -800. zone-b has 3 free nodes → no penalty. All 3 replicas go to zone-b despite zone-a having the highest individual score.
 
 ---
 
-## Zonal reserved nodes (2 cases)
+## Zonal reserved nodes
 
 1. ⚡ **Reserved nodes (NodeName without LVG) commit the zone, despite better scores in another zone.**
    zone-a: 3 nodes (scores 90, 80, 100). zone-b: 2 nodes (scores 200, 190). 2 Diskful RVRs with NodeName in zone-a but no LVMVolumeGroupName (reserved). 1 new Diskful RVR. Reserved commit zone-a → the new replica goes to zone-a (node-a3), not zone-b. Reserved ones get their LVGs assigned (vg-a1, vg-a2).
@@ -280,7 +271,7 @@ Non-obvious / non-trivial cases are marked with ⚡.
 
 ---
 
-## TransZonal greedy scheduling (4 cases)
+## TransZonal greedy scheduling
 
 1. ⚡ **3 Diskful, 2 zones × 1 node → 2 greedy, 1 `Scheduled=False`.**
    UnscheduledRVRsCount=3. TransZonal without fail-fast: 2 replicas are scheduled greedily (one per zone), the third gets `Scheduled=False`.
@@ -296,13 +287,13 @@ Non-obvious / non-trivial cases are marked with ⚡.
 
 ---
 
-## RVR with Node but No LVG (5 cases)
+## RVR with Node but No LVG
 
 1. ⚡ **LVG selection on an already-assigned node.**
    RVR has NodeName=node-b, but LVMVolumeGroupName is empty. The reconciler does not re-schedule the node; it picks the LVG (vg-b) on node-b. Sets `Scheduled=True`.
 
-2. ⚡ **`NoAvailableLVGOnNode` — no suitable LVG on the assigned node.**
-   RVR on node-b. The only LVG on node-b has Ready=false and no capacity in scores. The replica receives `Scheduled=False` / `NoAvailableLVGOnNode`.
+2. ⚡ **No suitable LVG on the assigned node → `SchedulingFailed`.**
+   RVR on node-b. The only LVG on node-b has Ready=false and no capacity in scores. The pipeline is narrowed to node-b, all LVGs are filtered out → `Scheduled=False` / `SchedulingFailed`.
 
 3. ⚡ **Partially-scheduled RVR blocks its node for other replicas.**
    rvr-needs-lvg on node-a (NodeName set, LVG empty). rvr-new is completely new. rvr-needs-lvg receives vg-a. rvr-new must go to node-b, not node-a (node is occupied).
@@ -310,9 +301,92 @@ Non-obvious / non-trivial cases are marked with ⚡.
 4. ⚡ **LVMThin: ThinPoolName for a partially-scheduled RVR.**
    RSP type=LVMThin. RVR with NodeName=node-a, without LVG or ThinPool. After Reconcile: receives both `LVMVolumeGroupName=vg-a` and `LVMVolumeGroupThinPoolName=thin-a`. `Scheduled=True`.
 
-5. ⚡ **Early exit → `Scheduled=False` on both partially-scheduled and fully-unscheduled RVRs.**
-   RV with empty StoragePoolName → early exit with error. 2 RVRs: one with NodeName (partial), one without (unscheduled). Both receive `Scheduled=False` — the reconciler makes no distinction on early exit.
+5. ⚡ **Early exit → `PendingConfiguration` on both partially-scheduled and fully-unscheduled RVRs.**
+   RV with empty StoragePoolName → Guard #3: RSP not found. 2 RVRs: one with NodeName (partial), one without (unscheduled). Both receive `Scheduled=Unknown` / `PendingConfiguration` — the reconciler makes no distinction on early exit.
 
 ---
 
-**Total: ~68 test cases.**
+## Edge Cases: Empty Inputs
+
+1. **No RVRs at all — Reconcile returns Done.**
+   RV and RSP exist and are valid. No RVRs linked to this RV. Reconcile returns Done without error. No patches, no conditions set.
+
+2. **All RVRs are Access — no scheduling, condition removed.**
+   3 Access RVRs (some may have had `Scheduled` condition from a previous type). After Reconcile: `Scheduled` condition is removed from all Access RVRs. No scheduling pipeline runs. Reconcile returns Done.
+
+3. **0 eligible nodes in RSP — all Diskful get `SchedulingFailed`.**
+   RSP exists but `EligibleNodes` is empty. 2 Diskful RVRs. Both receive `Scheduled=False` / `SchedulingFailed`. Pipeline summary: "0 candidates (node×LVG) from 0 eligible nodes".
+
+4. ⚡ **RVR with unknown ReplicaType — silently skipped.**
+   RVR with a type that is not Diskful, TieBreaker, or Access. It is in `All` but not in any type set. It does not appear in `unscheduledDiskful` or `unscheduledTieBreaker` → silently skipped. No condition set, no error.
+
+---
+
+## Idempotency and Patch Behavior
+
+1. ⚡ **Repeated Reconcile is a no-op — no patches emitted.**
+   All RVRs already scheduled with correct conditions. Second Reconcile: `reconcileRVRCondition` detects no diff → skips patch. No API writes. Reconcile returns Done.
+
+2. **Condition already set with identical value — no patch.**
+   RVR already has `Scheduled=True` / `Scheduled` with the correct message. `reconcileRVRCondition` compares status/reason/message → match → returns Continue without patching.
+
+3. ⚡ **RVR deleted concurrently — NotFound on patch is silently ignored.**
+   RVR is deleted between Get and Patch. `patchRVR` / `patchRVRStatus` return NotFound → converted to nil. Reconcile continues without error.
+
+4. ⚡ **Conflict on patch (optimistic lock) — Reconcile returns error for retry.**
+   Another controller modifies the RVR between DeepCopy and Patch. Patch returns Conflict. Reconcile returns error → controller-runtime retries.
+
+---
+
+## Extender: NarrowReservation
+
+1. ⚡ **NarrowReservation error (scoring OK, narrow fails).**
+   `FilterAndScore` succeeds and returns scores. `NarrowReservation` fails with an error. RVR receives `Scheduled=False` / `ExtenderUnavailable` with message "failed to confirm capacity reservation". Reconcile returns error.
+
+---
+
+## Scheduling Order
+
+1. ⚡ **Diskful replicas scheduled in NodeID order — deterministic.**
+   3 Diskful RVRs (NodeID 0, 1, 2) on a cluster with 3 nodes. RVRs are processed in NodeID order. The first (NodeID 0) gets the best-scoring node; subsequent ones get remaining nodes. Verify deterministic assignment.
+
+2. **Diskful before TieBreaker — TieBreaker sees updated state.**
+   1 Diskful + 1 TieBreaker, 2 nodes. Diskful is scheduled in Phase 2 (takes one node). TieBreaker in Phase 3 sees the updated `OccupiedNodes` → goes to the remaining node.
+
+---
+
+## Access Replica Condition Cleanup
+
+1. ⚡ **Access RVR formerly Diskful — Scheduled condition removed.**
+   RVR was Diskful with `Scheduled=True`. Type changed to Access. After Reconcile: `Scheduled` condition is removed by `reconcileRVRsConditionAbsent`. NodeName/LVG remain (not cleared by this controller).
+
+---
+
+## Ignored Topology: No Zone Filtering
+
+1. **Ignored topology — Zonal and TransZonal code paths not activated.**
+   Cluster with 3 zones, topology=Ignored. 2 Diskful scheduled. Verify: no zone filter predicates are added to the pipeline. Replicas go to nodes with best scores regardless of zone.
+
+---
+
+## Pipeline Summary in Condition Message
+
+1. **`SchedulingFailed` message contains pipeline diagnostic summary.**
+   1 Diskful, all nodes not ready. Condition `Scheduled=False` / `SchedulingFailed` is set. Condition `.message` contains the pipeline summary, e.g. "4 candidates (node×LVG) from 2 eligible nodes; 4 excluded: node not ready".
+
+---
+
+## ReservationID
+
+1. **ReservationID from RV annotation — used as-is.**
+   RV has annotation `SchedulingReservationID=ns/pvc-123`. Extender is called with `reservationID="ns/pvc-123"`, not with the computed LLV name.
+
+2. **ReservationID computed when annotation absent.**
+   RV has no `SchedulingReservationID` annotation. Extender is called with `reservationID = rvrllvname.ComputeLLVName(rvr.Name, rvr.Spec.LVMVolumeGroupName, rvr.Spec.LVMVolumeGroupThinPoolName)`.
+
+---
+
+## Deleting Scheduled RVR
+
+1. ⚡ **Deleting scheduled RVR — condition `Scheduled=True` preserved, not re-scheduled.**
+   RVR with DeletionTimestamp + NodeName + LVG (fully scheduled). It is in `Scheduled` → gets `Scheduled=True` condition. It is excluded from `unscheduled` (via `Deleting`). Its node stays in `OccupiedNodes`, blocking new replicas. Verify: condition set, not re-scheduled, node blocked.

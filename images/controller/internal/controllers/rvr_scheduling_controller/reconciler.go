@@ -39,13 +39,6 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
-const (
-	// attachToScoreBonus is added to the scheduling score of nodes that are
-	// already listed in RV's attachToNodes, so they are strongly preferred
-	// when placing new replicas.
-	attachToScoreBonus = 1000
-)
-
 // ──────────────────────────────────────────────────────────────────────────────
 // Wiring / construction
 //
@@ -90,7 +83,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, nodeidset.All,
 			metav1.ConditionUnknown,
 			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonPendingConfiguration,
-			"ReplicatedVolume not found; waiting for it to be created").ToCtrl()
+			"ReplicatedVolume not found; waiting for it to be created").
+			Enrichf("setting PendingConfiguration: RV not found").ToCtrl()
 	}
 
 	// Guard 2: RV has no configuration yet — RV controller hasn't reconciled it.
@@ -98,7 +92,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, nodeidset.All,
 			metav1.ConditionUnknown,
 			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonPendingConfiguration,
-			"ReplicatedVolume has no configuration yet; waiting for RV controller to reconcile").ToCtrl()
+			"ReplicatedVolume has no configuration yet; waiting for RV controller to reconcile").
+			Enrichf("setting PendingConfiguration: RV has no configuration").ToCtrl()
 	}
 
 	rsp, err := r.getRSP(rf.Ctx(), rv.Status.Configuration.StoragePoolName)
@@ -111,7 +106,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, nodeidset.All,
 			metav1.ConditionUnknown,
 			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonPendingConfiguration,
-			fmt.Sprintf("ReplicatedStoragePool %q not found; waiting for it to be created", rv.Status.Configuration.StoragePoolName)).ToCtrl()
+			fmt.Sprintf("ReplicatedStoragePool %q not found; waiting for it to be created", rv.Status.Configuration.StoragePoolName)).
+			Enrichf("setting PendingConfiguration: RSP %q not found", rv.Status.Configuration.StoragePoolName).ToCtrl()
 	}
 
 	// Build the scheduling context: eligible nodes, topology, zone layout,
@@ -134,7 +130,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// validation as successfully scheduled.
 	outcome = outcome.Merge(r.reconcileRVRsCondition(rf.Ctx(), rvrs, sctx.Scheduled,
 		metav1.ConditionTrue,
-		v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonReplicaScheduled,
+		v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled,
 		"Replica scheduled successfully"))
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
@@ -149,14 +145,18 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Done().ToCtrl()
 	}
 
+	// Replicas that still need scheduling. Deleting RVRs (DeletionTimestamp
+	// set) are excluded — they are being removed and should not be placed.
+	unscheduled := sctx.All.Difference(sctx.Scheduled).Difference(sctx.Deleting)
+
 	// Phase 2: Schedule unscheduled Diskful RVRs (per-RVR pipeline).
-	unscheduled := sctx.All.Difference(sctx.Scheduled)
 	unscheduledDiskful := unscheduled.Intersect(sctx.Diskful)
 	for _, rvr := range rvrs {
 		if !unscheduledDiskful.Contains(rvr.NodeID()) {
 			continue
 		}
-		outcome = outcome.Merge(r.reconcileOneRVRScheduling(rf.Ctx(), rvr, sctx))
+		outcome = outcome.Merge(r.reconcileOneRVRScheduling(rf.Ctx(), rvr, sctx).
+			Enrichf("scheduling Diskful"))
 	}
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
@@ -168,19 +168,88 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		if !unscheduledTieBreaker.Contains(rvr.NodeID()) {
 			continue
 		}
-		outcome = outcome.Merge(r.reconcileOneRVRScheduling(rf.Ctx(), rvr, sctx))
+		outcome = outcome.Merge(r.reconcileOneRVRScheduling(rf.Ctx(), rvr, sctx).
+			Enrichf("scheduling TieBreaker"))
 	}
-
-	// TODO: review pipeline summary messages for clarity and completeness
-	// TODO: review phase names for consistency and correctness
-	// TODO: verify the condition message when Scheduled is set to True
-	// TODO: review what gets written to the logs (structured fields, verbosity levels)
 
 	return rf.Done().ToCtrl()
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Reconcile: Per-RVR scheduling pipeline
+// Reconcile: rvrs-condition-absent
+//
+
+// reconcileRVRsConditionAbsent removes the Scheduled condition from every RVR
+// whose NodeID is in rvrIDs. RVRs that don't have the condition are skipped.
+// NotFound errors on individual patches are silently ignored.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileRVRsConditionAbsent(
+	ctx context.Context,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rvrIDs nodeidset.NodeIDSet,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "rvrs-condition-absent", "rvrIDs", rvrIDs.String())
+	defer rf.OnEnd(&outcome)
+
+	for _, rvr := range rvrs {
+		if !rvrIDs.Contains(rvr.NodeID()) {
+			continue
+		}
+		if !obju.HasStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType) {
+			continue
+		}
+		base := rvr.DeepCopy()
+		obju.RemoveStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+		if err := r.patchRVRStatus(rf.Ctx(), rvr, base); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return rf.Fail(err)
+		}
+	}
+
+	return rf.Continue()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: rvrs-condition
+//
+
+// reconcileRVRsCondition sets the Scheduled condition (with the given status,
+// reason and message) on every RVR whose NodeID is in rvrIDs.
+// Pass nodeidset.All to affect all RVRs unconditionally.
+// NotFound errors on individual patches are silently ignored (the RVR may have
+// been deleted concurrently).
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileRVRsCondition(
+	ctx context.Context,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rvrIDs nodeidset.NodeIDSet,
+	status metav1.ConditionStatus,
+	reason,
+	message string,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "rvrs-condition", "rvrIDs", rvrIDs.String())
+	defer rf.OnEnd(&outcome)
+
+	for _, rvr := range rvrs {
+		if !rvrIDs.Contains(rvr.NodeID()) {
+			continue
+		}
+		outcome = outcome.Merge(r.reconcileRVRCondition(rf.Ctx(), rvr, status, reason, message).
+			Enrichf("setting condition on rvr %s", rvr.Name))
+		if outcome.ShouldReturn() {
+			return outcome
+		}
+	}
+
+	return rf.Continue()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: schedule-rvr
 //
 
 // reconcileOneRVRScheduling builds a fresh candidate pipeline for a single RVR,
@@ -194,7 +263,7 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	sctx *schedulingContext,
 ) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "one-rvr-scheduling")
+	rf := flow.BeginReconcile(ctx, "schedule-rvr", "rvr", rvr.Name)
 	defer rf.OnEnd(&outcome)
 
 	logger := rf.Log()
@@ -202,6 +271,13 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	var p SchedulingPipeline
 
 	// Build per-RVR pipeline from scratch.
+	//
+	// RSP.Status.EligibleNodes already contains only the nodes / LVGs /
+	// thin-pools that satisfy the RSC constraints, including the
+	// user-configured zone(s). Therefore we do NOT filter by zone
+	// membership here — that is already handled by the RSP controller.
+	// The zone predicates below (Zonal / TransZonal) only choose which
+	// of the eligible zones to prefer for replica placement.
 	isDiskful := rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful
 	if isDiskful {
 		p = TakeLVGsFromEligibleNodes(sctx.EligibleNodes, logger)
@@ -209,6 +285,7 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 		p = TakeOnlyNodesFromEligibleNodes(sctx.EligibleNodes, logger)
 	}
 
+	// Exclude nodes that are unschedulable, not ready, or whose agent is down.
 	p = WithPredicate(p, "node not ready", logger, func(e *CandidateEntry) *CandidateEntry {
 		if e.Node.Unschedulable || !e.Node.NodeReady || !e.Node.AgentReady {
 			return nil
@@ -216,6 +293,7 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 		return e
 	})
 
+	// Exclude LVGs that are unschedulable or not ready (Diskful only).
 	if isDiskful {
 		p = WithPredicate(p, "LVG not ready", logger, func(e *CandidateEntry) *CandidateEntry {
 			if e.LVG.Unschedulable || !e.LVG.Ready {
@@ -225,16 +303,23 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 		})
 	}
 
-	occupied := sctx.OccupiedNodes
-	p = WithPredicate(p, "node occupied", logger, func(e *CandidateEntry) *CandidateEntry {
-		if _, ok := occupied[e.Node.NodeName]; ok {
-			return nil
-		}
-		return e
-	})
-
-	// Per-RVR: partially scheduled → narrow to assigned node.
-	if rvr.Spec.NodeName != "" {
+	// Fully unscheduled RVR (no NodeName): exclude nodes already occupied
+	// by other replicas so each replica lands on a separate node.
+	//
+	// Partially scheduled RVR (NodeName set, but LVG missing): narrow
+	// the pipeline to only the assigned node — we just need to pick an
+	// LVG on it. The "node occupied" filter is intentionally skipped
+	// because the RVR's own node is in OccupiedNodes and would block
+	// itself.
+	if rvr.Spec.NodeName == "" {
+		occupied := sctx.OccupiedNodes
+		p = WithPredicate(p, "node occupied", logger, func(e *CandidateEntry) *CandidateEntry {
+			if _, ok := occupied[e.Node.NodeName]; ok {
+				return nil
+			}
+			return e
+		})
+	} else {
 		nodeName := rvr.Spec.NodeName
 		p = WithPredicate(p, "node mismatch (assigned)", logger, func(e *CandidateEntry) *CandidateEntry {
 			if e.Node.NodeName != nodeName {
@@ -244,10 +329,12 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 		})
 	}
 
-	// Zonal topology: all Diskful replicas should land in the same zone.
+	// Zonal topology: all replicas (Diskful and TieBreaker) should land in
+	// the same zone. Pick the zone(s) that already hold the majority of
+	// Diskful replicas so that new replicas (of any type) follow them.
 	// If replicas are already spread across multiple zones (user error or
-	// migration), pick the zone(s) that already hold the majority of
-	// Diskful replicas to minimize cross-zone divergence.
+	// migration), prefer the zone with the most Diskful to minimize
+	// cross-zone divergence.
 	if sctx.Topology == v1alpha1.TopologyZonal {
 		zones := computePreferredZones(sctx.ReplicasByZone, func(a, b nodeidset.NodeIDSet) int {
 			return cmp.Compare(
@@ -255,6 +342,12 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 				b.Intersect(sctx.Diskful).Len(),
 			)
 		})
+
+		if len(zones) > 1 {
+			logger.Info("zonal topology: Diskful replicas are spread across multiple zones; this is an inconsistent state — preferring zones with the most Diskful",
+				"preferredZones", zones)
+		}
+
 		if len(zones) < len(sctx.ReplicasByZone) {
 			p = WithPredicate(p, "zone (zonal majority)", logger, func(e *CandidateEntry) *CandidateEntry {
 				if !slices.Contains(zones, e.Node.ZoneName) {
@@ -266,13 +359,43 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	}
 
 	// TransZonal topology: replicas should be evenly spread across zones.
-	// Pick the zone(s) with the fewest existing replicas so the next
-	// placement fills the least-loaded zone first.
 	if sctx.Topology == v1alpha1.TopologyTransZonal {
-		zones := computePreferredZones(sctx.ReplicasByZone,
-			func(a, b nodeidset.NodeIDSet) int {
-				return cmp.Compare(a.Len(), b.Len())
-			})
+		var compare func(a, b nodeidset.NodeIDSet) int
+		if isDiskful {
+			// Diskful replicas participate in the quorum, so they must be spread
+			// evenly across zones for availability. The rv_controller is
+			// responsible for creating the right number of replicas; this
+			// scheduler only decides where to place them.
+			// Preferred zone: fewest Diskful replicas.
+			compare = func(a, b nodeidset.NodeIDSet) int {
+				return -1 * cmp.Compare(
+					a.Intersect(sctx.Diskful).Len(),
+					b.Intersect(sctx.Diskful).Len(),
+				)
+			}
+		} else {
+			// TieBreaker replicas do not participate in the main quorum, but in
+			// some configurations they form a separate tie-breaker quorum used to
+			// sustain the main one — so they must be spread evenly as well.
+			// Preferred zone: fewest total replicas (Diskful + TieBreaker), and
+			// among those — fewest TieBreaker replicas. This ensures TieBreakers
+			// land in zones with less overall load first; when total counts are
+			// equal, they fill zones that have more Diskful relative to TieBreakers,
+			// keeping the tie-breaker quorum balanced independently.
+			allReplicas := sctx.Diskful.Union(sctx.TieBreaker)
+			compare = func(a, b nodeidset.NodeIDSet) int {
+				totalA := a.Intersect(allReplicas).Len()
+				totalB := b.Intersect(allReplicas).Len()
+				if c := cmp.Compare(totalA, totalB); c != 0 {
+					return -c
+				}
+				return -cmp.Compare(
+					a.Intersect(sctx.TieBreaker).Len(),
+					b.Intersect(sctx.TieBreaker).Len(),
+				)
+			}
+		}
+		zones := computePreferredZones(sctx.ReplicasByZone, compare)
 		if len(zones) < len(sctx.ReplicasByZone) {
 			p = WithPredicate(p, "zone (transZonal min replicas)", logger, func(e *CandidateEntry) *CandidateEntry {
 				if !slices.Contains(zones, e.Node.ZoneName) {
@@ -304,6 +427,9 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 		}
 
 		// Attach-to bonus (applied after scoring).
+		// attachToScoreBonus is added to the scheduling score of nodes that are
+		// already listed in RV's attachToNodes, so they are strongly preferred
+		// when placing new replicas.
 		attachToNodes := sctx.AttachToNodes
 		if len(attachToNodes) > 0 {
 			attachSet := make(map[string]struct{}, len(attachToNodes))
@@ -312,10 +438,72 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 			}
 			p = WithPredicate(p, "attach-to bonus", logger, func(e *CandidateEntry) *CandidateEntry {
 				if _, ok := attachSet[e.Node.NodeName]; ok {
-					e.Score += attachToScoreBonus
+					e.Score += 1000 // Attach to bonus
 				}
 				return e
 			})
+		}
+	}
+
+	// When volumeAccess != Any, prefer nodes with more than one LVG.
+	// If a disk fails, having a second LVG on the same node allows
+	// migrating the volume locally without violating volumeAccess
+	// constraints (the pod can keep running on the same node).
+	if isDiskful && sctx.VolumeAccess != v1alpha1.VolumeAccessAny {
+		p = WithNodeScore(p, "multi-LVG node bonus", logger,
+			func(_ string, group []*CandidateEntry) int {
+				if len(group) > 1 {
+					return 2
+				}
+				return 0
+			})
+	}
+
+	// Zone capacity penalty (Diskful + Zonal only): penalize zones that do
+	// not have enough free nodes to host the required number of Diskful
+	// replicas. For TransZonal this is unnecessary — replicas are already
+	// spread across zones by the zone filtering predicate above.
+	//
+	// The required Diskful count depends on the replication mode:
+	//   None                       → 1
+	//   Availability/Consistency   → 2
+	//   ConsistencyAndAvailability → 3
+	//
+	// We subtract already-scheduled Diskful to get the remaining demand.
+	// By this point the "node occupied" predicate has already filtered
+	// out occupied nodes, so every candidate in the pipeline is on a
+	// free node. We just count unique nodes per zone.
+	// Zones where free nodes < remaining demand receive a -800 penalty,
+	// making them strongly disfavored (the extender returns scores in
+	// the 0–10 range, so -800 pushes these zones to the bottom and
+	// they will only be chosen as a last resort).
+	if isDiskful && sctx.Topology == v1alpha1.TopologyZonal {
+		requiredDiskful := 1
+		switch sctx.Replication {
+		case v1alpha1.ReplicationAvailability, v1alpha1.ReplicationConsistency:
+			requiredDiskful = 2
+		case v1alpha1.ReplicationConsistencyAndAvailability:
+			requiredDiskful = 3
+		}
+		scheduledDiskful := sctx.Scheduled.Intersect(sctx.Diskful).Len()
+		remainingDemand := requiredDiskful - scheduledDiskful
+		if remainingDemand < 0 {
+			remainingDemand = 0
+		}
+
+		if remainingDemand > 0 {
+			p = WithZoneScore(p, "zone capacity penalty", logger,
+				func(_ string, group []*CandidateEntry) int {
+					// Count unique free nodes (occupied already filtered out).
+					seen := make(map[string]struct{}, len(group))
+					for _, e := range group {
+						seen[e.Node.NodeName] = struct{}{}
+					}
+					if len(seen) < remainingDemand {
+						return -800
+					}
+					return 0
+				})
 		}
 	}
 
@@ -331,7 +519,7 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 
 	if best == nil {
 		return r.reconcileRVRCondition(rf.Ctx(), rvr, metav1.ConditionFalse,
-			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonNoAvailableNodes, summary)
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed, summary)
 	}
 
 	if isDiskful {
@@ -357,34 +545,7 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	return rf.Continue()
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Reconcile: Per-RVR placement
-//
-
-// reconcileRVRPlacement applies placement from a CandidateEntry to an RVR and
-// patches both the main (spec) and status domains.
-//
-// Reconcile pattern: In-place reconciliation
-func (r *Reconciler) reconcileRVRPlacement(ctx context.Context, rvr *v1alpha1.ReplicatedVolumeReplica, entry *CandidateEntry) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "rvr-placement")
-	defer rf.OnEnd(&outcome)
-
-	// Main domain: apply placement → patch.
-	base := rvr.DeepCopy()
-	if applyPlacementFromEntry(rvr, entry) {
-		if err := r.patchRVR(rf.Ctx(), rvr, base); err != nil {
-			return rf.Fail(err)
-		}
-	}
-
-	// Status domain: set Scheduled=True.
-	return r.reconcileRVRCondition(rf.Ctx(), rvr, metav1.ConditionTrue,
-		v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonReplicaScheduled, "")
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Helpers: scheduling (apply / compute)
-//
+// --- apply ---
 
 // applyPlacementFromEntry sets node, LVG and thin pool on RVR spec from a
 // CandidateEntry. Returns true if any field changed.
@@ -396,26 +557,20 @@ func applyPlacementFromEntry(rvr *v1alpha1.ReplicatedVolumeReplica, entry *Candi
 		changed = true
 	}
 
-	if rvr.Spec.LVMVolumeGroupName != entry.LVG.Name {
-		rvr.Spec.LVMVolumeGroupName = entry.LVG.Name
+	if rvr.Spec.LVMVolumeGroupName != entry.LVGName() {
+		rvr.Spec.LVMVolumeGroupName = entry.LVGName()
 		changed = true
 	}
 
-	thinPoolName := ""
-	if entry.ThinPool != nil {
-		thinPoolName = *entry.ThinPool
-	}
-	if rvr.Spec.LVMVolumeGroupThinPoolName != thinPoolName {
-		rvr.Spec.LVMVolumeGroupThinPoolName = thinPoolName
+	if rvr.Spec.LVMVolumeGroupThinPoolName != entry.ThinPoolName() {
+		rvr.Spec.LVMVolumeGroupThinPoolName = entry.ThinPoolName()
 		changed = true
 	}
 
 	return changed
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Helpers: scheduling (pure compute)
-//
+// --- compute ---
 
 // schedulingContext holds mutable scheduling state shared across per-RVR
 // pipeline runs within a single Reconcile invocation.
@@ -451,6 +606,10 @@ type schedulingContext struct {
 	Topology       v1alpha1.ReplicatedStorageClassTopology
 	ReplicasByZone map[string]nodeidset.NodeIDSet
 
+	// Replication mode and volume access from the resolved RSC configuration.
+	Replication  v1alpha1.ReplicatedStorageClassReplication
+	VolumeAccess v1alpha1.ReplicatedStorageClassVolumeAccess
+
 	// Replica type sets (computed in one pass over rvrs).
 	All        nodeidset.NodeIDSet
 	Access     nodeidset.NodeIDSet
@@ -479,6 +638,8 @@ func computeSchedulingContext(
 	sctx := &schedulingContext{
 		EligibleNodes: eligibleNodes,
 		Topology:      rv.Status.Configuration.Topology,
+		Replication:   rv.Status.Configuration.Replication,
+		VolumeAccess:  rv.Status.Configuration.VolumeAccess,
 		AttachToNodes: rv.Status.DesiredAttachTo,
 		ReservationID: rv.GetAnnotations()[v1alpha1.SchedulingReservationIDAnnotationKey],
 		Size:          rv.Spec.Size.Value(),
@@ -583,6 +744,8 @@ func computeReplicasByZone(
 
 // computePreferredZones returns the zone names whose replica set is the "best"
 // according to compare(repIDsA, repIDsB), which follows cmp.Compare semantics.
+// The function finds the maximum: the zone(s) for which compare returns the
+// highest value relative to others.
 func computePreferredZones(
 	replicasByZone map[string]nodeidset.NodeIDSet,
 	compare func(repIDsA, repIDsB nodeidset.NodeIDSet) int,
@@ -591,11 +754,11 @@ func computePreferredZones(
 		return nil
 	}
 
-	// Find the "best" replica set.
+	// Find the "best" replica set (maximum by compare).
 	var best nodeidset.NodeIDSet
 	first := true
 	for _, replicas := range replicasByZone {
-		if first || compare(replicas, best) < 0 {
+		if first || compare(replicas, best) > 0 {
 			best = replicas
 			first = false
 		}
@@ -612,39 +775,33 @@ func computePreferredZones(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// reconcileRVRsCondition / reconcileRVRsConditionAbsent
+// Reconcile: place-rvr
 //
 
-// reconcileRVRsCondition sets the Scheduled condition (with the given status,
-// reason and message) on every RVR whose NodeID is in rvrIDs.
-// Pass nodeidset.All to affect all RVRs unconditionally.
-// NotFound errors on individual patches are silently ignored (the RVR may have
-// been deleted concurrently).
+// reconcileRVRPlacement applies placement from a CandidateEntry to an RVR and
+// patches both the main (spec) and status domains.
 //
 // Reconcile pattern: In-place reconciliation
-func (r *Reconciler) reconcileRVRsCondition(
-	ctx context.Context,
-	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-	rvrIDs nodeidset.NodeIDSet,
-	status metav1.ConditionStatus,
-	reason,
-	message string,
-) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "rvrs-condition")
+func (r *Reconciler) reconcileRVRPlacement(ctx context.Context, rvr *v1alpha1.ReplicatedVolumeReplica, entry *CandidateEntry) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "place-rvr")
 	defer rf.OnEnd(&outcome)
 
-	for _, rvr := range rvrs {
-		if !rvrIDs.Contains(rvr.NodeID()) {
-			continue
-		}
-		outcome = outcome.Merge(r.reconcileRVRCondition(rf.Ctx(), rvr, status, reason, message))
-		if outcome.ShouldReturn() {
-			return outcome
+	// Main domain: apply placement → patch.
+	base := rvr.DeepCopy()
+	if applyPlacementFromEntry(rvr, entry) {
+		if err := r.patchRVR(rf.Ctx(), rvr, base); err != nil {
+			return rf.Fail(err)
 		}
 	}
 
-	return rf.Continue()
+	// Status domain: set Scheduled=True.
+	return r.reconcileRVRCondition(rf.Ctx(), rvr, metav1.ConditionTrue,
+		v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled, "Replica scheduled successfully")
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: rvr-condition
+//
 
 // reconcileRVRCondition sets the Scheduled condition on a single RVR if it
 // differs from the current state. NotFound errors are silently ignored.
@@ -685,72 +842,11 @@ func (r *Reconciler) reconcileRVRCondition(
 	return rf.Continue()
 }
 
-// reconcileRVRsConditionAbsent removes the Scheduled condition from every RVR
-// whose NodeID is in rvrIDs. RVRs that don't have the condition are skipped.
-// NotFound errors on individual patches are silently ignored.
-//
-// Reconcile pattern: In-place reconciliation
-func (r *Reconciler) reconcileRVRsConditionAbsent(
-	ctx context.Context,
-	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-	rvrIDs nodeidset.NodeIDSet,
-) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "rvrs-condition-absent")
-	defer rf.OnEnd(&outcome)
-
-	for _, rvr := range rvrs {
-		if !rvrIDs.Contains(rvr.NodeID()) {
-			continue
-		}
-		if !obju.HasStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType) {
-			continue
-		}
-		base := rvr.DeepCopy()
-		obju.RemoveStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
-		if err := r.patchRVRStatus(rf.Ctx(), rvr, base); err != nil {
-			if apierrors.IsNotFound(err) {
-				continue
-			}
-			return rf.Fail(err)
-		}
-	}
-
-	return rf.Continue()
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
-// Single-call I/O helpers: RV
+// Single-call I/O helpers
 //
 
-func (r *Reconciler) getRV(ctx context.Context, name string) (*v1alpha1.ReplicatedVolume, error) {
-	rv := &v1alpha1.ReplicatedVolume{}
-	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, rv); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return rv, nil
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Single-call I/O helpers: RSP
-//
-
-func (r *Reconciler) getRSP(ctx context.Context, name string) (*v1alpha1.ReplicatedStoragePool, error) {
-	rsp := &v1alpha1.ReplicatedStoragePool{}
-	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, rsp); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return rsp, nil
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Single-call I/O helpers: RVR
-//
+// --- RVR ---
 
 func (r *Reconciler) getRVRsByRVName(ctx context.Context, rvName string) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
 	list := &v1alpha1.ReplicatedVolumeReplicaList{}
@@ -809,4 +905,30 @@ func (r *Reconciler) patchRVRStatus(
 		return err
 	}
 	return nil
+}
+
+// --- RV ---
+
+func (r *Reconciler) getRV(ctx context.Context, name string) (*v1alpha1.ReplicatedVolume, error) {
+	rv := &v1alpha1.ReplicatedVolume{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, rv); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return rv, nil
+}
+
+// --- RSP ---
+
+func (r *Reconciler) getRSP(ctx context.Context, name string) (*v1alpha1.ReplicatedStoragePool, error) {
+	rsp := &v1alpha1.ReplicatedStoragePool{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, rsp); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return rsp, nil
 }
