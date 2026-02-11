@@ -28,9 +28,6 @@ spec:
     - jsonPath: .status.activeConfiguration.role
       name: Role
       type: string
-    - jsonPath: .status.replicationState
-      name: Replication
-      type: string
     - jsonPath: .status.activeConfiguration.type
       name: Type
       type: string
@@ -455,6 +452,10 @@ spec:
                       - message: paths[].systemNetworkName must be unique
                         rule: self.all(x, self.exists_one(y, x.systemNetworkName ==
                           y.systemNetworkName))
+                    replicationState:
+                      description: ReplicationState is the DRBD replication state
+                        with this peer.
+                      type: string
                     role:
                       description: Role is the DRBD role of this peer (Primary or
                         Secondary).

@@ -23,15 +23,13 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdop"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdr"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdrlop"
 )
 
 var registry []func(mgr manager.Manager) error
 
 func init() {
-	registry = append(registry, drbdr.BuildController)    // DRBDR controller + scanner (registers indexes)
-	registry = append(registry, drbdop.BuildController)   // DRBDResourceOperation controller
-	registry = append(registry, drbdrlop.BuildController) // DRBDResourceListOperation controller
+	registry = append(registry, drbdr.BuildController)  // DRBDR controller + scanner (registers indexes)
+	registry = append(registry, drbdop.BuildController) // DRBDResourceOperation controller
 }
 
 func BuildAll(mgr manager.Manager) error {
