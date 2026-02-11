@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -81,6 +82,11 @@ func mapRSPToRSC() handler.MapFunc {
 			if rscName == "" {
 				continue
 			}
+			seen[rscName] = struct{}{}
+		}
+
+		// Also enqueue RSCs from usedBy (handles orphaned entries for deleted RSCs).
+		for _, rscName := range rsp.Status.UsedBy.ReplicatedStorageClassNames {
 			seen[rscName] = struct{}{}
 		}
 
