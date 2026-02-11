@@ -32,6 +32,9 @@ var nodeIDStr = [32]string{
 // NodeIDSet is a bitset for node IDs (0-31).
 type NodeIDSet uint32
 
+// All is a NodeIDSet with all 32 node IDs present.
+const All NodeIDSet = 0xFFFF_FFFF
+
 // Contains reports whether the set contains id.
 func (s NodeIDSet) Contains(id uint8) bool { return s&(1<<id) != 0 }
 
