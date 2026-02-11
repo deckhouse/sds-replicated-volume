@@ -24,12 +24,13 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
-const controllerName = "rvr-scheduling-controller"
+// RVRSchedulingControllerName is the controller name for rvr-scheduling-controller.
+const RVRSchedulingControllerName = "rvr-scheduling-controller"
 
 func BuildController(mgr manager.Manager) error {
 	r, err := NewReconciler(
 		mgr.GetClient(),
-		mgr.GetLogger().WithName(controllerName).WithName("Reconciler"),
+		mgr.GetLogger().WithName(RVRSchedulingControllerName).WithName("Reconciler"),
 		mgr.GetScheme(),
 	)
 	if err != nil {
@@ -37,7 +38,7 @@ func BuildController(mgr manager.Manager) error {
 	}
 
 	return builder.ControllerManagedBy(mgr).
-		Named(controllerName).
+		Named(RVRSchedulingControllerName).
 		For(&v1alpha1.ReplicatedVolume{}).
 		Watches(
 			&v1alpha1.ReplicatedVolumeReplica{},

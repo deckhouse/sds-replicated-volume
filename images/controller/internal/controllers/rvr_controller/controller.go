@@ -33,6 +33,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/nodeidset"
 )
 
 const RVRControllerName = "rvr-controller"
@@ -50,7 +51,7 @@ func BuildController(mgr manager.Manager, agentPodNamespace string) error {
 		Owns(&v1alpha1.DRBDResource{}, builder.WithPredicates(drbdrPredicates()...)).
 		Watches(
 			&v1alpha1.ReplicatedVolume{},
-			handler.EnqueueRequestsFromMapFunc(mapRVToRVRs(cl)),
+			newRVEventHandler(cl),
 			builder.WithPredicates(rvPredicates()...),
 		).
 		Watches(
@@ -67,30 +68,117 @@ func BuildController(mgr manager.Manager, agentPodNamespace string) error {
 		Complete(rec)
 }
 
-// mapRVToRVRs maps a ReplicatedVolume to all ReplicatedVolumeReplica resources that belong to it.
-func mapRVToRVRs(cl client.Client) handler.MapFunc {
-	return func(ctx context.Context, obj client.Object) []reconcile.Request {
-		rv, ok := obj.(*v1alpha1.ReplicatedVolume)
-		if !ok || rv == nil {
-			return nil
-		}
+// rvEventHandler handles ReplicatedVolume events and enqueues RVRs with targeted logic:
+// - DatameshRevision changed: enqueue members from old/new datamesh (or all if initial)
+// - ReplicatedStorageClassName changed: enqueue all RVRs
+// - DatameshPendingReplicaTransitions message changed: enqueue only affected RVRs
+type rvEventHandler struct {
+	cl client.Client
+}
 
-		var rvrList v1alpha1.ReplicatedVolumeReplicaList
-		if err := cl.List(ctx, &rvrList,
-			client.MatchingFields{indexes.IndexFieldRVRByReplicatedVolumeName: rv.Name},
-			client.UnsafeDisableDeepCopy,
-		); err != nil {
-			log.FromContext(ctx).Error(err, "mapRVToRVRs: failed to list RVRs", "rv", rv.Name)
-			return nil
-		}
+func newRVEventHandler(cl client.Client) handler.EventHandler {
+	return &rvEventHandler{cl: cl}
+}
 
-		requests := make([]reconcile.Request, 0, len(rvrList.Items))
-		for _, rvr := range rvrList.Items {
-			requests = append(requests, reconcile.Request{
-				NamespacedName: client.ObjectKey{Name: rvr.Name},
-			})
+func (h *rvEventHandler) Create(ctx context.Context, e event.CreateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	rv, ok := e.Object.(*v1alpha1.ReplicatedVolume)
+	if !ok || rv == nil {
+		return
+	}
+	h.enqueueAllRVRs(ctx, rv.Name, q)
+}
+
+func (h *rvEventHandler) Delete(ctx context.Context, e event.DeleteEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	rv, ok := e.Object.(*v1alpha1.ReplicatedVolume)
+	if !ok || rv == nil {
+		return
+	}
+	h.enqueueAllRVRs(ctx, rv.Name, q)
+}
+
+func (h *rvEventHandler) Generic(_ context.Context, _ event.GenericEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	// Not used.
+}
+
+func (h *rvEventHandler) Update(ctx context.Context, e event.UpdateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	oldRV, okOld := e.ObjectOld.(*v1alpha1.ReplicatedVolume)
+	newRV, okNew := e.ObjectNew.(*v1alpha1.ReplicatedVolume)
+	if !okOld || !okNew || oldRV == nil || newRV == nil {
+		return
+	}
+
+	// Cases that require enqueuing ALL RVRs (early return).
+	if oldRV.Spec.ReplicatedStorageClassName != newRV.Spec.ReplicatedStorageClassName {
+		// ReplicatedStorageClassName changed (for labels).
+		h.enqueueAllRVRs(ctx, newRV.Name, q)
+		return
+	}
+	if oldRV.Status.DatameshRevision != newRV.Status.DatameshRevision && oldRV.Status.DatameshRevision == 0 {
+		// Initial setup — enqueue ALL RVRs.
+		h.enqueueAllRVRs(ctx, newRV.Name, q)
+		return
+	}
+
+	// Collect affected replicas from multiple independent changes.
+	var replicas nodeidset.NodeIDSet
+
+	// DatameshRevision changed (non-initial): enqueue members from old OR new datamesh.
+	if oldRV.Status.DatameshRevision != newRV.Status.DatameshRevision {
+		replicas = nodeidset.FromAll(oldRV.Status.Datamesh.Members).
+			Union(nodeidset.FromAll(newRV.Status.Datamesh.Members))
+	}
+
+	// DatameshPendingReplicaTransitions messages changed: enqueue affected replicas.
+	oldTx := oldRV.Status.DatameshPendingReplicaTransitions
+	newTx := newRV.Status.DatameshPendingReplicaTransitions
+	i, j := 0, 0
+	for i < len(oldTx) || j < len(newTx) {
+		switch {
+		case i >= len(oldTx):
+			replicas.Add(newTx[j].NodeID())
+			j++
+		case j >= len(newTx):
+			replicas.Add(oldTx[i].NodeID())
+			i++
+		case oldTx[i].Name < newTx[j].Name:
+			replicas.Add(oldTx[i].NodeID())
+			i++
+		case oldTx[i].Name > newTx[j].Name:
+			replicas.Add(newTx[j].NodeID())
+			j++
+		default:
+			if oldTx[i].Message != newTx[j].Message {
+				replicas.Add(oldTx[i].NodeID())
+			}
+			i++
+			j++
 		}
-		return requests
+	}
+
+	if !replicas.IsEmpty() {
+		h.enqueueRVRsByNodeIDs(newRV.Name, replicas, q)
+	}
+}
+
+// enqueueAllRVRs enqueues all RVRs for the given RV.
+func (h *rvEventHandler) enqueueAllRVRs(ctx context.Context, rvName string, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	var rvrList v1alpha1.ReplicatedVolumeReplicaList
+	if err := h.cl.List(ctx, &rvrList,
+		client.MatchingFields{indexes.IndexFieldRVRByReplicatedVolumeName: rvName},
+		client.UnsafeDisableDeepCopy,
+	); err != nil {
+		log.FromContext(ctx).Error(err, "rvEventHandler: failed to list RVRs", "rv", rvName)
+		return
+	}
+	for _, rvr := range rvrList.Items {
+		q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: rvr.Name}})
+	}
+}
+
+// enqueueRVRsByNodeIDs enqueues RVRs by constructing names from RV name and node IDs.
+func (h *rvEventHandler) enqueueRVRsByNodeIDs(rvName string, nodeIDs nodeidset.NodeIDSet, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	for id := range nodeIDs.All() {
+		q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: v1alpha1.FormatReplicatedVolumeReplicaName(rvName, id)}})
 	}
 }
 

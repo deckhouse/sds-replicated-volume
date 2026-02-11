@@ -33,9 +33,8 @@ type DRBDResourceOperation struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`
 
-	Spec DRBDResourceOperationSpec `json:"spec"`
-	// +patchStrategy=merge
-	Status *DRBDResourceOperationStatus `json:"status,omitempty" patchStrategy:"merge"`
+	Spec   DRBDResourceOperationSpec    `json:"spec"`
+	Status *DRBDResourceOperationStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -59,10 +58,15 @@ type DRBDResourceOperationSpec struct {
 }
 
 // +kubebuilder:object:generate=true
+//
+//	+kubebuilder:validation:XValidation:rule="!(self.clearBitmap && self.forceResync)",message="clearBitmap and forceResync are mutually exclusive"
 type CreateNewUUIDParams struct {
 	// +kubebuilder:default=false
 	// +optional
 	ClearBitmap bool `json:"clearBitmap,omitempty"`
+	// +kubebuilder:default=false
+	// +optional
+	ForceResync bool `json:"forceResync,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

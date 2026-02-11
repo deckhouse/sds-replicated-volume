@@ -24,7 +24,7 @@ Summary only; if anything differs, follow normative sections below.
 - They treat `obj` and all caller-provided inputs as **read-only inputs** and MUST NOT mutate them (including via **Aliasing** of maps/slices; **Clone** before modifying derived maps/slices).
 - They MUST NOT perform **Kubernetes API I/O**, call **DeepCopy**, execute patches, or make any **patch ordering** / **patch type decision** decisions.
 - A **ComputeReconcileHelper** MUST return computed values (and optionally `error`) and MUST NOT report object mutations or optimistic-lock intent.
-  In particular, a **ComputeReconcileHelper** MUST NOT return `flow.EnsureOutcome` and MUST NOT call `ReportChanged*` / `RequireOptimisticLock`.
+  In particular, a **ComputeReconcileHelper** MUST NOT return `flow.EnsureOutcome` and MUST NOT call `ReportChanged*`.
 - If `computeTarget*` derives **target** values for **both** **patch domains** (**main patch domain** + **status patch domain**) that will later be used by **IsInSyncReconcileHelper** and/or **ApplyReconcileHelper**, it MUST return **two separate** values (**target main** + **target status**), not a mixed struct.
 - New code MUST NOT introduce `computeDesired*` helpers. Replace legacy “desired” helpers with **intended**/**target**/**report** helpers.
 - If a **ComputeReconcileHelper** depends on previous compute output, the dependency MUST be explicit in the signature as args **after `obj`**.
@@ -283,10 +283,7 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 **ComputeReconcileHelpers** MUST NOT report object changes or optimistic-lock requirements:
 - MUST NOT return `flow.EnsureOutcome`
 - MUST NOT call `ReportChanged` / `ReportChangedIf`
-- MUST NOT call `RequireOptimisticLock`
-
-Rationale: change reporting / optimistic-lock intent semantically mean
-“this helper already mutated the target object and the subsequent save of that mutation must use **Optimistic locking** semantics”.
+Rationale: change reporting semantically means "this helper already mutated the target object".
 **ComputeReconcileHelpers** do not mutate `obj` by contract.
 
 ### Step scope pattern (illustrative)

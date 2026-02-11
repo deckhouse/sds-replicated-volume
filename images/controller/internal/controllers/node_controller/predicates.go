@@ -33,11 +33,11 @@ func nodePredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.TypedFuncs[client.Object]{
 			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
-				// Only react if AgentNodeLabelKey presence/absence changed.
-				_, oldHas := e.ObjectOld.GetLabels()[v1alpha1.AgentNodeLabelKey]
-				_, newHas := e.ObjectNew.GetLabels()[v1alpha1.AgentNodeLabelKey]
+				// React if AgentNodeLabelKey presence, absence, or value changed.
+				oldVal, oldHas := e.ObjectOld.GetLabels()[v1alpha1.AgentNodeLabelKey]
+				newVal, newHas := e.ObjectNew.GetLabels()[v1alpha1.AgentNodeLabelKey]
 
-				return oldHas != newHas
+				return oldHas != newHas || oldVal != newVal
 			},
 			DeleteFunc: func(_ event.TypedDeleteEvent[client.Object]) bool {
 				// Node deletions are not interesting for this controller.

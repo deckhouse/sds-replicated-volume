@@ -146,9 +146,11 @@ spec:
                       maxItems: 16
                       minItems: 1
                       type: array
-                      x-kubernetes-list-map-keys:
-                      - systemNetworkName
-                      x-kubernetes-list-type: map
+                      x-kubernetes-list-type: atomic
+                      x-kubernetes-validations:
+                      - message: paths[].systemNetworkName must be unique
+                        rule: self.all(x, self.exists_one(y, x.systemNetworkName ==
+                          y.systemNetworkName))
                     pauseSync:
                       default: false
                       type: boolean
@@ -230,6 +232,7 @@ spec:
                 maxItems: 16
                 minItems: 1
                 type: array
+                x-kubernetes-list-type: set
               type:
                 default: Diskful
                 description: DRBDResourceType represents the type of a DRBD resource.
@@ -315,6 +318,10 @@ spec:
                   type: object
                 maxItems: 32
                 type: array
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: addresses[].systemNetworkName must be unique
+                  rule: self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -443,9 +450,11 @@ spec:
                         type: object
                       maxItems: 16
                       type: array
-                      x-kubernetes-list-map-keys:
-                      - systemNetworkName
-                      x-kubernetes-list-type: map
+                      x-kubernetes-list-type: atomic
+                      x-kubernetes-validations:
+                      - message: paths[].systemNetworkName must be unique
+                        rule: self.all(x, self.exists_one(y, x.systemNetworkName ==
+                          y.systemNetworkName))
                     role:
                       description: Role is the DRBD role of this peer (Primary or
                         Secondary).
@@ -466,16 +475,12 @@ spec:
                   type: object
                 maxItems: 31
                 type: array
-                x-kubernetes-list-map-keys:
-                - nodeID
-                x-kubernetes-list-type: map
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: peers[].nodeID must be unique
+                  rule: self.all(x, self.exists_one(y, x.nodeID == y.nodeID))
               quorum:
                 type: boolean
-              replicationState:
-                description: |-
-                  ReplicationState is the actual replication state from DRBD (e.g. Established, SyncSource).
-                  Taken from the first peer connection when present; empty when no peers or resource down.
-                type: string
             type: object
         required:
         - metadata

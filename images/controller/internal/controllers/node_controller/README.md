@@ -5,6 +5,9 @@ This controller manages the `storage.deckhouse.io/sds-replicated-volume-node` la
 ## Purpose
 
 The `storage.deckhouse.io/sds-replicated-volume-node` label determines which nodes should run the sds-replicated-volume agent.
+The label value is always an empty string (`""`), which matches the `nodeSelector` convention used by other components
+(Deckhouse hooks, Helm templates, and the legacy `linstor-node-controller`).
+
 The controller automatically adds this label to nodes that are in at least one `ReplicatedStoragePool` (RSP) `eligibleNodes` list,
 and removes it from nodes that are not in any RSP's `eligibleNodes`.
 
@@ -36,12 +39,11 @@ The controller reconciles individual nodes (not a singleton):
 
 ```
 Reconcile(nodeName)
-├── getNodeAgentLabelPresence  — check if node exists and has label (direct Get)
+├── getNodeAgentLabelPresence  — check if node exists, has label, and value is correct (direct Get, UnsafeDisableDeepCopy)
 ├── getNumberOfDRBDResourcesByNode — count DRBDResources on node (index lookup)
 ├── getNumberOfRSPByEligibleNode — count RSPs with this node eligible (index lookup)
-├── if hasLabel == shouldHaveLabel → Done (no patch needed)
-├── getNode — fetch full node object
-└── Patch node label (add or remove)
+├── if (shouldHaveLabel && labelValueCorrect) || (!shouldHaveLabel && !hasLabel) → Done (in sync)
+└── Patch node label via pre-computed raw merge patch (no full node GET or DeepCopy)
 ```
 
 ## Algorithm Flow
@@ -53,18 +55,17 @@ flowchart TD
     CheckExists -->|Yes| GetDRBD[Count DRBDResources on node]
     GetDRBD --> GetRSP[Count RSPs with node eligible]
     GetRSP --> ComputeTarget[shouldHaveLabel = drbd > 0 OR rsp > 0]
-    ComputeTarget --> CheckSync{hasLabel == shouldHaveLabel?}
+    ComputeTarget --> CheckSync{In sync?}
     CheckSync -->|Yes| Done
-    CheckSync -->|No| FetchNode[Fetch full Node object]
-    FetchNode --> Patch[Patch Node label]
+    CheckSync -->|No| Patch[Raw merge patch: set or remove label]
     Patch --> Done
 ```
 
 ## Managed Metadata
 
-| Type | Key | Managed On | Purpose |
-|------|-----|------------|---------|
-| Label | `storage.deckhouse.io/sds-replicated-volume-node` | Node | Mark nodes that should run the agent |
+| Type | Key | Value | Managed On | Purpose |
+|------|-----|-------|------------|---------|
+| Label | `storage.deckhouse.io/sds-replicated-volume-node` | `""` (empty string) | Node | Mark nodes that should run the agent |
 
 ## Watches
 
@@ -72,7 +73,7 @@ The controller watches three event sources:
 
 | Resource | Events | Handler |
 |----------|--------|---------|
-| Node | Create, Update | Reacts to `AgentNodeLabelKey` presence changes |
+| Node | Create, Update | Reacts to `AgentNodeLabelKey` key presence/absence or value changes |
 | ReplicatedStoragePool | Create, Update, Delete | Reacts to `eligibleNodes` changes (delta computation) |
 | DRBDResource | Create, Delete | Maps to node via `spec.nodeName` |
 

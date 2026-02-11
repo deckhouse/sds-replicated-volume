@@ -427,7 +427,7 @@ func (r *Reconciler) reconcileFinalizer(
 
 	// Patch main object if finalizers changed
 	if ensureOutcome.DidChange() {
-		if err := r.patchDRBDR(rf.Ctx(), drbdr, base, ensureOutcome.OptimisticLockRequired()); err != nil {
+		if err := r.patchDRBDR(rf.Ctx(), drbdr, base, true); err != nil {
 			return rf.Fail(err)
 		}
 	}

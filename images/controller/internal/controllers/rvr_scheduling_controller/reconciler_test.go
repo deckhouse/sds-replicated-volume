@@ -298,7 +298,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       "rv-test",
-				Finalizers: []string{v1alpha1.ControllerFinalizer},
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
 			},
 			Spec: v1alpha1.ReplicatedVolumeSpec{
 				Size:                       resource.MustParse("10Gi"),
@@ -938,7 +938,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
-					Finalizers: []string{v1alpha1.ControllerFinalizer},
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
@@ -1024,7 +1024,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
-					Finalizers: []string{v1alpha1.ControllerFinalizer},
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
@@ -1121,7 +1121,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 		rv = &v1alpha1.ReplicatedVolume{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       "rv-access",
-				Finalizers: []string{v1alpha1.ControllerFinalizer},
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
 			},
 			Spec: v1alpha1.ReplicatedVolumeSpec{
 				Size:                       resource.MustParse("10Gi"),
@@ -1377,7 +1377,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
-					Finalizers: []string{v1alpha1.ControllerFinalizer},
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
@@ -1494,7 +1494,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
-					Finalizers: []string{v1alpha1.ControllerFinalizer},
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
@@ -1589,7 +1589,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
-					Finalizers: []string{v1alpha1.ControllerFinalizer},
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
@@ -1679,7 +1679,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
-					Finalizers: []string{v1alpha1.ControllerFinalizer},
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),

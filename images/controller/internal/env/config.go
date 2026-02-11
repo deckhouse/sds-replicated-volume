@@ -20,12 +20,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 )
 
 const (
 	PodNamespaceEnvVar           = "POD_NAMESPACE"
 	HealthProbeBindAddressEnvVar = "HEALTH_PROBE_BIND_ADDRESS"
 	MetricsPortEnvVar            = "METRICS_BIND_ADDRESS"
+	EnabledControllersEnvVar     = "ENABLED_CONTROLLERS"
 
 	// defaults are different for each app, do not merge them
 	DefaultHealthProbeBindAddress = ":4271"
@@ -38,6 +40,7 @@ type Config struct {
 	podNamespace           string
 	healthProbeBindAddress string
 	metricsBindAddress     string
+	enabledControllers     map[string]struct{} // nil means all enabled
 }
 
 func (c *Config) HealthProbeBindAddress() string {
@@ -52,10 +55,22 @@ func (c *Config) PodNamespace() string {
 	return c.podNamespace
 }
 
+// IsControllerEnabled reports whether the named controller should be started.
+// When ENABLED_CONTROLLERS is not set (or empty), all controllers are enabled.
+// When set, only the listed controllers (comma-separated) are enabled.
+func (c *Config) IsControllerEnabled(name string) bool {
+	if c.enabledControllers == nil {
+		return true // not set → all enabled
+	}
+	_, ok := c.enabledControllers[name]
+	return ok
+}
+
 type ConfigProvider interface {
 	PodNamespace() string
 	HealthProbeBindAddress() string
 	MetricsBindAddress() string
+	IsControllerEnabled(name string) bool
 }
 
 var _ ConfigProvider = &Config{}
@@ -79,6 +94,18 @@ func GetConfig() (*Config, error) {
 	cfg.metricsBindAddress = os.Getenv(MetricsPortEnvVar)
 	if cfg.metricsBindAddress == "" {
 		cfg.metricsBindAddress = DefaultMetricsBindAddress
+	}
+
+	// Enabled controllers (optional): comma-separated list of controller names.
+	// When not set or empty, all controllers are enabled.
+	if raw := os.Getenv(EnabledControllersEnvVar); raw != "" {
+		cfg.enabledControllers = make(map[string]struct{})
+		for _, name := range strings.Split(raw, ",") {
+			name = strings.TrimSpace(name)
+			if name != "" {
+				cfg.enabledControllers[name] = struct{}{}
+			}
+		}
 	}
 
 	return cfg, nil
