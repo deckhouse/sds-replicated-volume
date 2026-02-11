@@ -121,7 +121,7 @@ type ReplicatedStorageClassSpec struct {
 	// - Availability, ConsistencyAndAvailability: at least 3 zones required
 	// - Consistency: at least 2 zones required
 	//
-	// When replication is 'None' (topology 'Ignored'), zones act as a node constraint
+	// When replication is 'None', zones act as a node constraint
 	// limiting where the single replica can be placed.
 	// +kubebuilder:validation:MaxItems=10
 	// +kubebuilder:validation:items:MaxLength=63

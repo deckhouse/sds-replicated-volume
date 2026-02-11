@@ -18,9 +18,7 @@ package rvrcontroller
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
-	"hash/fnv"
 	"slices"
 	"strconv"
 	"strings"
@@ -44,6 +42,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/drbd_size"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
+	rvrllvname "github.com/deckhouse/sds-replicated-volume/images/controller/internal/rvr_llv_name"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -1035,15 +1034,14 @@ func ensureConditionSatisfyEligibleNodes(
 			return ef.Ok().ReportChangedIf(changed)
 		}
 
-		// Then, check ThinPool if specified.
-		if rvr.Spec.LVMVolumeGroupThinPoolName != "" {
-			lvg = findLVGInEligibleNode(rspView.EligibleNode, rvr.Spec.LVMVolumeGroupName, rvr.Spec.LVMVolumeGroupThinPoolName)
-			if lvg == nil {
-				changed = applySatisfyEligibleNodesCondFalse(rvr,
-					v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonThinPoolMismatch,
-					"Node and LVMVolumeGroup are eligible, but ThinPool is not in the allowed list for this LVMVolumeGroup according to ReplicatedStoragePool") || changed
-				return ef.Ok().ReportChangedIf(changed)
-			}
+		// Then, check ThinPool (even if empty — must match RSP type).
+		lvg = findLVGInEligibleNode(rspView.EligibleNode, rvr.Spec.LVMVolumeGroupName, rvr.Spec.LVMVolumeGroupThinPoolName)
+		if lvg == nil {
+			msg := thinPoolMismatchMessage(rspView.Type, rvr.Spec.LVMVolumeGroupName, rvr.Spec.LVMVolumeGroupThinPoolName)
+			changed = applySatisfyEligibleNodesCondFalse(rvr,
+				v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonThinPoolMismatch,
+				msg) || changed
+			return ef.Ok().ReportChangedIf(changed)
 		}
 	}
 
@@ -1060,6 +1058,32 @@ func ensureConditionSatisfyEligibleNodes(
 		message) || changed
 
 	return ef.Ok().ReportChangedIf(changed)
+}
+
+// thinPoolMismatchMessage returns a human-readable message describing why the
+// ThinPool check failed. It differentiates between type mismatches (ThinPool
+// specified for LVM thick, or not specified for LVMThin) and name mismatches
+// (ThinPool specified but not in the eligible list).
+func thinPoolMismatchMessage(rspType v1alpha1.ReplicatedStoragePoolType, lvgName, thinPool string) string {
+	switch {
+	case thinPool != "" && rspType == v1alpha1.ReplicatedStoragePoolTypeLVM:
+		return fmt.Sprintf(
+			"ThinPool %q is specified, but ReplicatedStoragePool type is LVM (thick), which does not use ThinPools",
+			thinPool)
+	case thinPool == "" && rspType == v1alpha1.ReplicatedStoragePoolTypeLVMThin:
+		return "ThinPool is not specified, but ReplicatedStoragePool type is LVMThin, which requires a ThinPool"
+	case thinPool != "":
+		return fmt.Sprintf(
+			"ThinPool %q is not in the allowed list for LVMVolumeGroup %q according to ReplicatedStoragePool",
+			thinPool, lvgName)
+	default:
+		// Should not happen: LVM (thick) RSP entries have no ThinPool,
+		// LVMThin RSP entries always have one. If we reach here, something
+		// is inconsistent in the RSP eligible nodes data.
+		return fmt.Sprintf(
+			"Unexpected state: LVMVolumeGroup %q exists in eligible nodes but no entry matches the expected ThinPool configuration for this ReplicatedStoragePool type",
+			lvgName)
+	}
 }
 
 // findLVGInEligibleNodeByName finds an LVMVolumeGroup by name only in the eligible node.
@@ -1778,21 +1802,10 @@ func computeIntendedBackingVolume(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1a
 		actual.ThinPoolName == bv.ThinPoolName {
 		bv.LLVName = actual.LLVName
 	} else {
-		bv.LLVName = computeLLVName(rvr.Name, bv.LVMVolumeGroupName, bv.ThinPoolName)
+		bv.LLVName = rvrllvname.ComputeLLVName(rvr.Name, bv.LVMVolumeGroupName, bv.ThinPoolName)
 	}
 
 	return bv, "", ""
-}
-
-// computeLLVName computes the LVMLogicalVolume name for a given RVR.
-// Format: rvrName + "-" + fnv128(lvgName + thinPoolName)
-func computeLLVName(rvrName, lvgName, thinPoolName string) string {
-	h := fnv.New128a()
-	h.Write([]byte(lvgName))
-	h.Write([]byte{0}) // separator
-	h.Write([]byte(thinPoolName))
-	checksum := hex.EncodeToString(h.Sum(nil))
-	return rvrName + "-" + checksum
 }
 
 // newLLV constructs a new LVMLogicalVolume with ownerRef, finalizer, and labels.

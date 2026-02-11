@@ -22,4 +22,8 @@ const (
 	// LVMVolumeGroupUnschedulableAnnotationKey marks an LVMVolumeGroup as unschedulable
 	// for new ReplicatedVolumeReplicas.
 	LVMVolumeGroupUnschedulableAnnotationKey = annotationPrefix + "unschedulable"
+
+	// SchedulingReservationIDAnnotationKey stores the scheduler-extender reservation ID
+	// used for capacity reservation during RVR scheduling.
+	SchedulingReservationIDAnnotationKey = annotationPrefix + "scheduling-reservation-id"
 )
