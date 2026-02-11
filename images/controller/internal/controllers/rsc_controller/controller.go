@@ -26,12 +26,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 const (
@@ -54,7 +52,7 @@ func BuildController(mgr manager.Manager) error {
 		For(&v1alpha1.ReplicatedStorageClass{}).
 		Watches(
 			&v1alpha1.ReplicatedStoragePool{},
-			handler.EnqueueRequestsFromMapFunc(mapRSPToRSC(cl)),
+			handler.EnqueueRequestsFromMapFunc(mapRSPToRSC()),
 			builder.WithPredicates(rspPredicates()...),
 		).
 		Watches(
@@ -67,47 +65,22 @@ func BuildController(mgr manager.Manager) error {
 }
 
 // mapRSPToRSC maps a ReplicatedStoragePool to all ReplicatedStorageClass resources that reference it.
-// It queries RSCs using two indexes:
-//   - spec.storagePool (for migration from deprecated field)
-//   - status.storagePoolName (for auto-generated RSPs)
-func mapRSPToRSC(cl client.Client) handler.MapFunc {
+func mapRSPToRSC() handler.MapFunc {
 	return func(ctx context.Context, obj client.Object) []reconcile.Request {
 		rsp, ok := obj.(*v1alpha1.ReplicatedStoragePool)
 		if !ok || rsp == nil {
 			return nil
 		}
 
-		// Deduplicate RSC names from both indexes.
-		seen := make(map[string]struct{})
-
-		// Query by spec.storagePool (migration).
-		var listBySpec v1alpha1.ReplicatedStorageClassList
-		if err := cl.List(ctx, &listBySpec,
-			client.MatchingFields{indexes.IndexFieldRSCByStoragePool: rsp.Name},
-			client.UnsafeDisableDeepCopy,
-		); err != nil {
-			log.FromContext(ctx).Error(err, "mapRSPToRSC: failed to list RSCs by spec.storagePool", "rsp", rsp.Name)
-		} else {
-			for i := range listBySpec.Items {
-				seen[listBySpec.Items[i].Name] = struct{}{}
-			}
+		if len(rsp.Status.UsedBy.ReplicatedStorageClassNames) == 0 {
+			return nil
 		}
 
-		// Query by status.storagePoolName (auto-generated).
-		var listByStatus v1alpha1.ReplicatedStorageClassList
-		if err := cl.List(ctx, &listByStatus,
-			client.MatchingFields{indexes.IndexFieldRSCByStatusStoragePoolName: rsp.Name},
-			client.UnsafeDisableDeepCopy,
-		); err != nil {
-			log.FromContext(ctx).Error(err, "mapRSPToRSC: failed to list RSCs by status.storagePoolName", "rsp", rsp.Name)
-		} else {
-			for i := range listByStatus.Items {
-				seen[listByStatus.Items[i].Name] = struct{}{}
-			}
-		}
-
-		// Also enqueue RSCs from usedBy (handles orphaned entries for deleted RSCs).
+		seen := make(map[string]struct{}, len(rsp.Status.UsedBy.ReplicatedStorageClassNames))
 		for _, rscName := range rsp.Status.UsedBy.ReplicatedStorageClassNames {
+			if rscName == "" {
+				continue
+			}
 			seen[rscName] = struct{}{}
 		}
 

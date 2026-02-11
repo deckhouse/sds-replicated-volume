@@ -288,7 +288,7 @@ var _ = Describe("validateEligibleNodes", func() {
 			err := validateEligibleNodes(nil, rsc.Spec.Topology, rsc.Spec.Replication)
 
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("No nodes available in the storage pool"))
+			Expect(err.Error()).To(ContainSubstring("no nodes available in the storage pool"))
 		})
 	})
 

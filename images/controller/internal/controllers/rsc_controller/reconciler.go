@@ -1063,7 +1063,7 @@ func validateEligibleNodes(
 	replication v1alpha1.ReplicatedStorageClassReplication,
 ) error {
 	if len(eligibleNodes) == 0 {
-		return fmt.Errorf("No nodes available in the storage pool")
+		return fmt.Errorf("no nodes available in the storage pool")
 	}
 
 	// Count nodes and nodes with disks.
@@ -1697,6 +1697,24 @@ func (r *Reconciler) getRSC(ctx context.Context, name string) (*v1alpha1.Replica
 	return &rsc, nil
 }
 
+// patchRSC patches the RSC main resource.
+func (r *Reconciler) patchRSC(
+	ctx context.Context,
+	rsc *v1alpha1.ReplicatedStorageClass,
+	base *v1alpha1.ReplicatedStorageClass,
+) error {
+	return r.cl.Patch(ctx, rsc, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
+}
+
+// patchRSCStatus patches the RSC status subresource.
+func (r *Reconciler) patchRSCStatus(
+	ctx context.Context,
+	rsc *v1alpha1.ReplicatedStorageClass,
+	base *v1alpha1.ReplicatedStorageClass,
+) error {
+	return r.cl.Status().Patch(ctx, rsc, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
+}
+
 // getRSP fetches an RSP by name. Returns (nil, nil) if not found.
 func (r *Reconciler) getRSP(ctx context.Context, name string) (*v1alpha1.ReplicatedStoragePool, error) {
 	var rsp v1alpha1.ReplicatedStoragePool
@@ -1725,46 +1743,6 @@ func (r *Reconciler) getUsedStoragePoolNames(ctx context.Context, rscName string
 		names[i] = unsafeList.Items[i].Name
 	}
 	return names, nil
-}
-
-// getSortedRVsByRSC fetches RVs referencing a specific RSC using the index, sorted by name.
-func (r *Reconciler) getSortedRVsByRSC(ctx context.Context, rscName string) ([]rvView, error) {
-	var unsafeList v1alpha1.ReplicatedVolumeList
-	if err := r.cl.List(ctx, &unsafeList,
-		client.MatchingFields{indexes.IndexFieldRVByReplicatedStorageClassName: rscName},
-		client.UnsafeDisableDeepCopy,
-	); err != nil {
-		return nil, err
-	}
-
-	rvs := make([]rvView, len(unsafeList.Items))
-	for i := range unsafeList.Items {
-		rvs[i] = newRVView(&unsafeList.Items[i])
-	}
-
-	sort.Slice(rvs, func(i, j int) bool {
-		return rvs[i].name < rvs[j].name
-	})
-
-	return rvs, nil
-}
-
-// patchRSC patches the RSC main resource.
-func (r *Reconciler) patchRSC(
-	ctx context.Context,
-	rsc *v1alpha1.ReplicatedStorageClass,
-	base *v1alpha1.ReplicatedStorageClass,
-) error {
-	return r.cl.Patch(ctx, rsc, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
-}
-
-// patchRSCStatus patches the RSC status subresource.
-func (r *Reconciler) patchRSCStatus(
-	ctx context.Context,
-	rsc *v1alpha1.ReplicatedStorageClass,
-	base *v1alpha1.ReplicatedStorageClass,
-) error {
-	return r.cl.Status().Patch(ctx, rsc, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 // createRSP creates an RSP.
@@ -1803,6 +1781,28 @@ func (r *Reconciler) deleteRSP(ctx context.Context, rsp *v1alpha1.ReplicatedStor
 	}
 	rsp.DeletionTimestamp = ptr.To(metav1.Now())
 	return nil
+}
+
+// getSortedRVsByRSC fetches RVs referencing a specific RSC using the index, sorted by name.
+func (r *Reconciler) getSortedRVsByRSC(ctx context.Context, rscName string) ([]rvView, error) {
+	var unsafeList v1alpha1.ReplicatedVolumeList
+	if err := r.cl.List(ctx, &unsafeList,
+		client.MatchingFields{indexes.IndexFieldRVByReplicatedStorageClassName: rscName},
+		client.UnsafeDisableDeepCopy,
+	); err != nil {
+		return nil, err
+	}
+
+	rvs := make([]rvView, len(unsafeList.Items))
+	for i := range unsafeList.Items {
+		rvs[i] = newRVView(&unsafeList.Items[i])
+	}
+
+	sort.Slice(rvs, func(i, j int) bool {
+		return rvs[i].name < rvs[j].name
+	})
+
+	return rvs, nil
 }
 
 // getStorageClass fetches a StorageClass by name. Returns (nil, nil) if not found.
