@@ -28,6 +28,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	crlog "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // Client queries the scheduler-extender for LVG capacity scores.
@@ -117,7 +119,17 @@ func (c *httpClient) FilterAndScore(
 		return nil, fmt.Errorf("unable to marshal scheduler-extender filter-and-score request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/lvg/filter-and-score", bytes.NewReader(data))
+	endpoint := c.baseURL + "/v1/lvg/filter-and-score"
+	logger := crlog.FromContext(ctx).WithName("scheduler-extender")
+	logger.V(3).Info("filter-and-score request",
+		"endpoint", endpoint,
+		"reservationID", reservationID,
+		"reservationTTL", reservationTTL.String(),
+		"size", size,
+		"lvgCount", len(lvgs),
+	)
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("unable to build scheduler-extender filter-and-score request: %w", err)
 	}
@@ -137,6 +149,12 @@ func (c *httpClient) FilterAndScore(
 	if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
 		return nil, fmt.Errorf("unable to decode scheduler-extender response: %w", err)
 	}
+
+	logger.V(3).Info("filter-and-score response",
+		"endpoint", endpoint,
+		"reservationID", reservationID,
+		"scoredCount", len(respBody.LVGS),
+	)
 
 	return respBody.LVGS, nil
 }
@@ -158,7 +176,17 @@ func (c *httpClient) NarrowReservation(
 		return fmt.Errorf("unable to marshal scheduler-extender narrow-reservation request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/lvg/narrow-reservation", bytes.NewReader(data))
+	endpoint := c.baseURL + "/v1/lvg/narrow-reservation"
+	logger := crlog.FromContext(ctx).WithName("scheduler-extender")
+	logger.V(3).Info("narrow-reservation request",
+		"endpoint", endpoint,
+		"reservationID", reservationID,
+		"reservationTTL", reservationTTL.String(),
+		"lvg", lvg.LVGName,
+		"thinPool", lvg.ThinPoolName,
+	)
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("unable to build scheduler-extender narrow-reservation request: %w", err)
 	}
@@ -173,6 +201,12 @@ func (c *httpClient) NarrowReservation(
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("scheduler-extender narrow-reservation returned unexpected status %d", resp.StatusCode)
 	}
+
+	logger.V(3).Info("narrow-reservation response",
+		"endpoint", endpoint,
+		"reservationID", reservationID,
+		"status", resp.StatusCode,
+	)
 
 	return nil
 }
