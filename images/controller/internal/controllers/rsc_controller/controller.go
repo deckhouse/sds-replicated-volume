@@ -66,7 +66,7 @@ func BuildController(mgr manager.Manager) error {
 
 // mapRSPToRSC maps a ReplicatedStoragePool to all ReplicatedStorageClass resources that reference it.
 func mapRSPToRSC() handler.MapFunc {
-	return func(ctx context.Context, obj client.Object) []reconcile.Request {
+	return func(_ context.Context, obj client.Object) []reconcile.Request {
 		rsp, ok := obj.(*v1alpha1.ReplicatedStoragePool)
 		if !ok || rsp == nil {
 			return nil
