@@ -72,11 +72,14 @@ func newManager(
 	}
 
 	mgrOpts := manager.Options{
-		Scheme:                 scheme,
-		BaseContext:            func() context.Context { return ctx },
-		Logger:                 logr.FromSlogHandler(log.Handler()),
-		HealthProbeBindAddress: envConfig.HealthProbeBindAddress(),
-		Cache:                  cacheOpt,
+		Scheme:                  scheme,
+		BaseContext:             func() context.Context { return ctx },
+		Logger:                  logr.FromSlogHandler(log.Handler()),
+		HealthProbeBindAddress:  envConfig.HealthProbeBindAddress(),
+		LeaderElection:          true,
+		LeaderElectionNamespace: envConfig.PodNamespace(),
+		LeaderElectionID:        "sds-replicated-volume-controller",
+		Cache:                   cacheOpt,
 		Metrics: server.Options{
 			BindAddress: envConfig.MetricsBindAddress(),
 		},
