@@ -67,7 +67,8 @@ Reconcile (root) [Pure orchestration]
 ├── reconcileFormation [Pure orchestration]
 │   ├── reconcileFormationPhasePreconfigure [Pure orchestration] ← details
 │   │   ├── applyFormationTransition
-│   │   ├── create/delete RVRs (replica count management)
+│   │   ├── create/delete RVRs (guards for deleting/misplaced, replica count management)
+│   │   ├── wait for deleting replicas cleanup
 │   │   ├── safety checks (addresses, eligible nodes, spec mismatch, backing volume size)
 │   │   └── reconcileFormationRestartIfTimeoutPassed
 │   ├── reconcileFormationPhaseEstablishConnectivity [Pure orchestration] ← details
@@ -142,10 +143,13 @@ Creates diskful replicas and waits for them to become preconfigured (DRBD setup 
 
 **Steps:**
 1. Initialize datamesh configuration (SystemNetworkNames, Size, DatameshRevision=1)
-2. Create missing diskful replicas (count based on replication mode)
-3. Remove misplaced/excess replicas
-4. Wait for scheduling and preconfiguration
-5. Safety checks: addresses, eligible nodes, spec consistency, backing volume size
+2. Identify misplaced replicas (SatisfyEligibleNodes=False) and deleting replicas (DeletionTimestamp set)
+3. Collect active diskful replicas (excluding misplaced and deleting)
+4. Create missing diskful replicas only when no deleting or misplaced replicas exist (prevents zombie accumulation)
+5. Remove excess/misplaced replicas
+6. Wait for all deleting replicas to be fully removed (restart formation if timeout)
+7. Wait for scheduling and preconfiguration
+8. Safety checks: addresses, eligible nodes, spec consistency, backing volume size
 
 ### Phase 2: Establish Connectivity
 
@@ -350,20 +354,28 @@ flowchart TD
     Start([Start]) --> ApplyTransition["applyFormationTransition(Preconfigure)<br/>Init: DatameshRevision=1, SystemNetworkNames, Size"]
 
     ApplyTransition --> FindMisplaced["Find misplaced replicas<br/>(SatisfyEligibleNodes=False)"]
-    FindMisplaced --> CollectDiskful["Collect active diskful replicas<br/>(exclude misplaced)"]
+    FindMisplaced --> FindDeleting["Find deleting replicas<br/>(DeletionTimestamp set)"]
+    FindDeleting --> CollectDiskful["Collect active diskful replicas<br/>(exclude misplaced + deleting)"]
     CollectDiskful --> ComputeCount[computeIntendedDiskfulReplicaCount]
 
-    ComputeCount --> CreateLoop{"diskful.Len < target?"}
+    ComputeCount --> CheckClean{"No deleting and<br/>no misplaced?"}
+    CheckClean -->|Yes| CreateLoop{"diskful.Len < target?"}
     CreateLoop -->|Yes| CreateRVR[createRVR]
     CreateRVR -->|AlreadyExists| Requeue1([DoneAndRequeue])
     CreateRVR --> CreateLoop
+    CheckClean -->|No| SkipCreate[Skip creation]
+    SkipCreate --> RemoveExcess
+
     CreateLoop -->|No| RemoveExcess{"diskful.Len > target?"}
 
     RemoveExcess -->|Yes| PickCandidate["Pick least-progressed replica<br/>(not scheduled > not preconfigured > any)"]
     PickCandidate --> RemoveExcess
-    RemoveExcess -->|No| DeleteUnwanted["Delete replicas not in diskful set"]
+    RemoveExcess -->|No| DeleteUnwanted["Delete replicas not in diskful set<br/>(misplaced, excess, externally created)"]
 
-    DeleteUnwanted --> WaitReady{"All scheduled<br/>and preconfigured?"}
+    DeleteUnwanted --> CheckDeleting{"Any replicas still<br/>deleting?"}
+    CheckDeleting -->|Yes| WaitDeleting["Wait for cleanup /<br/>restart if timeout (30s)"]
+
+    CheckDeleting -->|No| WaitReady{"All scheduled<br/>and preconfigured?"}
     WaitReady -->|No| WaitTimeout1[Wait / restart if timeout]
 
     WaitReady -->|Yes| CheckAddresses{"All have required<br/>network addresses?"}
