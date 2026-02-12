@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/controlleroptions"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
@@ -60,7 +61,10 @@ func BuildController(mgr manager.Manager) error {
 			builder.WithPredicates(rvrPredicates()...),
 		).
 		Owns(&v1alpha1.DRBDResourceOperation{}, builder.WithPredicates(drbdrOpPredicates()...)).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+			RateLimiter:             controlleroptions.DefaultRateLimiter(),
+		}).
 		Complete(rec)
 }
 

@@ -33,6 +33,7 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/controlleroptions"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
@@ -81,7 +82,10 @@ func BuildController(mgr manager.Manager, agentPodNamespace string) error {
 		// (the default node internal network). The API (kubebuilder validation) currently forbids
 		// other values. This means no NetworkNode filtering is needed until custom networks are supported.
 		//
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+			RateLimiter:             controlleroptions.DefaultRateLimiter(),
+		}).
 		Complete(rec)
 }
 

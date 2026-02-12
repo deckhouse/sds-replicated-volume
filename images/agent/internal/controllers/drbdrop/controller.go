@@ -22,8 +22,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/controlleroptions"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 )
 
@@ -49,7 +51,10 @@ func BuildController(mgr manager.Manager) error {
 			&v1alpha1.DRBDResourceOperation{},
 			builder.WithPredicates(operationPredicates()...),
 		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 1,
+			RateLimiter:             controlleroptions.DefaultRateLimiter[reconcile.Request](),
+		}).
 		Complete(rec); err != nil {
 		return fmt.Errorf("building DRBD operation controller: %w", err)
 	}

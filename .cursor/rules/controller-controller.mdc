@@ -69,7 +69,7 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
     - `.ControllerManagedBy(mgr).Named(<ControllerName>)`
     - `.For(&<apiObject>{} /*, <forOptions>... */)`
     - `.Watches(...)` when the controller reacts to additional objects/events
-    - `.WithOptions(controller.Options{MaxConcurrentReconciles: 10})` by default
+    - `.WithOptions(controller.Options{MaxConcurrentReconciles: 10, RateLimiter: controlleroptions.DefaultRateLimiter[reconcile.Request]()})` by default
     - `.Complete(rec)`
 
   Example: minimal `BuildController` skeleton (illustrative)
@@ -82,7 +82,10 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
       "sigs.k8s.io/controller-runtime/pkg/controller"
       "sigs.k8s.io/controller-runtime/pkg/manager"
 
+      "sigs.k8s.io/controller-runtime/pkg/reconcile"
+
       "example.com/api/v1alpha1"
+      "example.com/images/<app>/internal/controllers/controlleroptions"
   )
 
   const ExampleControllerName = "example-controller"
@@ -101,7 +104,10 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
           For(&v1alpha1.Example{}, builder.WithPredicates(
               examplePredicates()...,
           )).
-          WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+          WithOptions(controller.Options{
+              MaxConcurrentReconciles: 10,
+              RateLimiter:             controlleroptions.DefaultRateLimiter[reconcile.Request](),
+          }).
           Complete(rec)
   }
   ```
@@ -114,8 +120,17 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
   - See: `controller-predicate.mdc`.
 
 - MaxConcurrentReconciles (MUST):
-  - Configure `.WithOptions(controller.Options{MaxConcurrentReconciles: 10})` unless there is a strong, explicit reason not to.
+  - Configure `MaxConcurrentReconciles: 10` in `.WithOptions(...)` unless there is a strong, explicit reason not to.
   - If deviating from 10, document the reason near the options.
+
+- RateLimiter (MUST):
+  - Every controller MUST set `RateLimiter` in `.WithOptions(...)` to the shared factory: `controlleroptions.DefaultRateLimiter[reconcile.Request]()` (or the appropriate request type `T` for typed controllers).
+  - The shared factory lives in `<app>/internal/controllers/controlleroptions/options.go` (package `controlleroptions` or `agentcontrolleroptions` depending on the application).
+  - `DefaultRateLimiter[T comparable]()` returns a `workqueue.TypedRateLimiter[T]` combining:
+    - Per-item exponential backoff: baseDelay 5 ms, maxDelay 1 minute.
+    - Global token bucket: 100 QPS, burst 500.
+  - Controllers MUST NOT construct their own rate limiter inline; they MUST call the shared factory.
+  - If a rate limiter parameter needs to change, update the single factory function rather than each controller.
 
 - Watching child resources (MUST):
   - Watch **child resources** either:
@@ -134,7 +149,10 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
           &v1alpha1.ExampleChild{},
           builder.WithPredicates(exampleChildPredicates()...),
       ). // ownerRef-based mapping
-      WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+      WithOptions(controller.Options{
+          MaxConcurrentReconciles: 10,
+          RateLimiter:             controlleroptions.DefaultRateLimiter[reconcile.Request](),
+      }).
       Complete(rec)
   ```
 
@@ -157,7 +175,10 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
           }),
           builder.WithPredicates(exampleChildPredicates()...),
       ).
-      WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+      WithOptions(controller.Options{
+          MaxConcurrentReconciles: 10,
+          RateLimiter:             controlleroptions.DefaultRateLimiter[reconcile.Request](),
+      }).
       Complete(rec)
   ```
 
