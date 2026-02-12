@@ -4,23 +4,17 @@ import (
 	"testing"
 
 	. "github.com/deckhouse/sds-replicated-volume/e2e/agent/internal/suite"
-	ctesting "github.com/deckhouse/sds-replicated-volume/lib/go/common/testing"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func TestDiamond(t *testing.T) {
 
-	s := Suite{
-		ZClient: ctesting.Zymbol[client.Client]{Provider: ProvideDefaultClient},
-	}
-	_ = s
+	cl := SetupClient(t)
 
-	cl := s.Client.Require(t)
+	nodeNames := []string{}
 
-	// s.Client.SetProvider()
+	nodes := SetupExistingNodes(t, cl, nodeNames)
 
-	// SymbolClient.SetProvider(t, ProvideDefaultClient)
-	SymbolSelectedNodeNames.Provide(t, []string{})
+	_ = nodes
 
 	t.Error("oops")
 }

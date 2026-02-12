@@ -7,7 +7,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func ProvideDefaultClient(t *testing.T) client.Client {
+func SetupClient(t *testing.T) client.Client {
 	cl, err := agentClient.NewClient()
 	if err != nil {
 		t.Fatal(err)
