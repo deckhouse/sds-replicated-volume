@@ -110,6 +110,24 @@ func emit(line string) {
 	}
 }
 
+// emitBlock outputs multiple lines atomically under a single lock,
+// preventing interleaving with output from other goroutines.
+func emitBlock(lines []string) {
+	if len(lines) == 0 {
+		return
+	}
+	output.mu.Lock()
+	defer output.mu.Unlock()
+
+	for _, line := range lines {
+		fmt.Println(line)
+		if output.log != nil {
+			clean := ansiRe.ReplaceAllString(line, "")
+			_, _ = fmt.Fprintln(output.log, clean)
+		}
+	}
+}
+
 func ts() string {
 	return time.Now().Format("[15:04:05]")
 }
@@ -646,14 +664,14 @@ func condMsgMaxWidth(tw, sw, rw int) int {
 	return w
 }
 
-// emitConditionsTable emits a conditions table for an ADDED object (no diff).
-// Does NOT emit closing └ — caller handles border transitions.
-func emitConditionsTable(oldConds, newConds []condition) {
+// conditionsTableNew returns formatted lines for a conditions table of a newly
+// ADDED object. Does NOT include closing └ — caller handles border transitions.
+func conditionsTableNew(oldConds, newConds []condition) []string {
 	tw, sw, rw := condWidths(newConds)
 	mw := condMsgMaxWidth(tw, sw, rw)
-	emit(fmt.Sprintf("  %s┌ conditions%s", colorDim, colorReset))
+	lines := []string{fmt.Sprintf("  %s┌ conditions%s", colorDim, colorReset)}
 	for _, c := range newConds {
-		emit(fmt.Sprintf("  %s│%s %s %s %s %s %s %s%s%s",
+		lines = append(lines, fmt.Sprintf("  %s│%s %s %s %s %s %s %s%s%s",
 			colorDim, colorReset,
 			colorGreen+"+"+colorReset,
 			statusIcon(c.Status),
@@ -663,6 +681,7 @@ func emitConditionsTable(oldConds, newConds []condition) {
 			colorDim, truncMsg(c.Message, mw), colorReset,
 		))
 	}
+	return lines
 }
 
 // conditionsTableDiff returns formatted lines showing the conditions diff.
@@ -950,68 +969,67 @@ func watchSingleResource(ctx context.Context, kind, name string, ws *watchSet, w
 				prev, exists := state[objName]
 				state[objName] = objState{lines: newLines, conditions: newConds}
 
+				// Collect all output lines into a block for atomic emission.
+				var block []string
+
 				if !exists {
-					emit(fmt.Sprintf("%s %s[%s]%s %sADDED%s %s",
+					block = append(block, fmt.Sprintf("%s %s[%s]%s %sADDED%s %s",
 						ts(), colorCyan, kind, colorReset, colorGreen, colorReset, objLink))
 
 					hasConds := len(newConds) > 0
 					if hasConds {
-						emitConditionsTable(nil, newConds)
-						emit(fmt.Sprintf("  %s├──%s", colorDim, colorReset))
+						block = append(block, conditionsTableNew(nil, newConds)...)
+						block = append(block, fmt.Sprintf("  %s├──%s", colorDim, colorReset))
 					} else {
-						emit(fmt.Sprintf("  %s┌%s", colorDim, colorReset))
+						block = append(block, fmt.Sprintf("  %s┌%s", colorDim, colorReset))
 					}
 					for _, l := range newLines {
-						emit(fmt.Sprintf("  %s│%s %s%s%s", colorDim, colorReset, colorDim, l, colorReset))
+						block = append(block, fmt.Sprintf("  %s│%s %s%s%s", colorDim, colorReset, colorDim, l, colorReset))
 					}
-					emit(fmt.Sprintf("  %s└%s", colorDim, colorReset))
+					block = append(block, fmt.Sprintf("  %s└%s", colorDim, colorReset))
+					emitBlock(block)
 					continue
 				}
 
 				// Compute diff.
-				diff := unifiedDiff(prev.lines, newLines,
-					kind+"/"+objName+" (old)",
-					kind+"/"+objName+" (new)")
+				diff := unifiedDiff(prev.lines, newLines)
 				condsChanged := !conditionsEqual(prev.conditions, newConds)
 
 				if len(diff) == 0 && !condsChanged {
 					continue
 				}
 
-				emit(fmt.Sprintf("%s %s[%s]%s MODIFIED %s",
+				block = append(block, fmt.Sprintf("%s %s[%s]%s MODIFIED %s",
 					ts(), colorCyan, kind, colorReset, objLink))
 
 				// Always show conditions table on modification.
 				condLines := conditionsTableDiff(prev.conditions, newConds)
 				hasConds := len(condLines) > 0
 				hasDiff := len(diff) > 0
-				for _, cl := range condLines {
-					emit(cl)
-				}
+				block = append(block, condLines...)
 
 				if hasDiff {
 					if hasConds {
-						emit(fmt.Sprintf("  %s├──%s", colorDim, colorReset))
+						block = append(block, fmt.Sprintf("  %s├──%s", colorDim, colorReset))
 					} else {
-						emit(fmt.Sprintf("  %s┌%s", colorDim, colorReset))
+						block = append(block, fmt.Sprintf("  %s┌%s", colorDim, colorReset))
 					}
 					bar := fmt.Sprintf("  %s│%s ", colorDim, colorReset)
 					for _, d := range diff {
 						switch {
-						case strings.HasPrefix(d, "+++") || strings.HasPrefix(d, "---"):
-							emit(fmt.Sprintf("%s%s%s%s", bar, colorDim, d, colorReset))
 						case strings.HasPrefix(d, "+"):
-							emit(fmt.Sprintf("%s%s%s%s", bar, colorGreen, d, colorReset))
+							block = append(block, fmt.Sprintf("%s%s%s%s", bar, colorGreen, d, colorReset))
 						case strings.HasPrefix(d, "-"):
-							emit(fmt.Sprintf("%s%s%s%s", bar, colorRed, d, colorReset))
+							block = append(block, fmt.Sprintf("%s%s%s%s", bar, colorRed, d, colorReset))
 						case strings.HasPrefix(d, "@@") || strings.HasPrefix(d, "──"):
-							emit(fmt.Sprintf("%s%s%s%s", bar, colorCyan, d, colorReset))
+							block = append(block, fmt.Sprintf("%s%s%s%s", bar, colorCyan, d, colorReset))
 						default:
-							emit(fmt.Sprintf("%s%s", bar, d))
+							block = append(block, fmt.Sprintf("%s%s", bar, d))
 						}
 					}
 				}
-				emit(fmt.Sprintf("  %s└%s", colorDim, colorReset))
+				block = append(block, fmt.Sprintf("  %s└%s", colorDim, colorReset))
+				emitBlock(block)
 			}
 		}
 
@@ -1034,12 +1052,20 @@ const podNamespace = "d8-sds-replicated-volume"
 
 // followPodLogs continuously tails logs from pods matching the given label
 // selector. On disconnect (pod restart, rollover), it reconnects after a
-// brief pause. Runs until ctx is cancelled.
+// brief pause. Uses exponential backoff when no log lines are received
+// (e.g. pods are not running). Runs until ctx is cancelled.
 func followPodLogs(ctx context.Context, component, labelSelector string, ws *watchSet, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	// Track the last reconcileID per (controller, name) for separator drawing.
 	lastReconcileID := map[string]string{} // "controller\x00name" -> reconcileID
+
+	const (
+		backoffMin = 2 * time.Second
+		backoffMax = 30 * time.Second
+	)
+	backoff := backoffMin
+	notifiedWaiting := false // true after we printed "waiting for pods"
 
 	for {
 		if ctx.Err() != nil {
@@ -1053,32 +1079,38 @@ func followPodLogs(ctx context.Context, component, labelSelector string, ws *wat
 			"--all-containers",
 			"--prefix",
 			"--since=1s",
+			"--max-log-requests=50",
 		}
 
 		cmd := exec.CommandContext(ctx, "kubectl", args...)
-		cmd.Stderr = os.Stderr
+		// Capture stderr so that kubectl "error: ... no matching pods" does not
+		// spam the terminal when pods are absent.
+		var stderrBuf strings.Builder
+		cmd.Stderr = &stderrBuf
 
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			emit(fmt.Sprintf("%s %s[%s]%s failed to create pipe: %v", ts(), colorMagenta, component, colorReset, err))
-			sleepCtx(ctx, 2*time.Second)
+			sleepCtx(ctx, backoff)
 			continue
 		}
 
 		if err := cmd.Start(); err != nil {
 			emit(fmt.Sprintf("%s %s[%s]%s failed to start kubectl logs: %v", ts(), colorMagenta, component, colorReset, err))
-			sleepCtx(ctx, 2*time.Second)
+			sleepCtx(ctx, backoff)
 			continue
 		}
 
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 0, 1*1024*1024), 1*1024*1024)
 
+		gotLines := false
 		for scanner.Scan() {
 			raw := scanner.Text()
 			if raw == "" {
 				continue
 			}
+			gotLines = true
 
 			// kubectl --prefix prepends "[pod/container] " to each line.
 			jsonStr := raw
@@ -1100,9 +1132,7 @@ func followPodLogs(ctx context.Context, component, labelSelector string, ws *wat
 			}
 
 			formatted := formatLogEntry(entry, component, lastReconcileID)
-			for _, line := range formatted {
-				emit(line)
-			}
+			emitBlock(formatted)
 		}
 
 		_ = cmd.Wait()
@@ -1111,9 +1141,26 @@ func followPodLogs(ctx context.Context, component, labelSelector string, ws *wat
 			return
 		}
 
-		emit(fmt.Sprintf("%s %s[%s]%s %s── reconnecting ──%s",
-			ts(), badgeColor(component), component, colorReset, colorDim, colorReset))
-		sleepCtx(ctx, 2*time.Second)
+		if gotLines {
+			// Had real output → normal reconnect with minimal backoff.
+			backoff = backoffMin
+			notifiedWaiting = false
+			emit(fmt.Sprintf("%s %s[%s]%s %s── reconnecting ──%s",
+				ts(), badgeColor(component), component, colorReset, colorDim, colorReset))
+		} else {
+			// No output at all → pods are likely absent. Print once, then back off silently.
+			if !notifiedWaiting {
+				emit(fmt.Sprintf("%s %s[%s]%s %s── no pods, waiting ──%s",
+					ts(), badgeColor(component), component, colorReset, colorDim, colorReset))
+				notifiedWaiting = true
+			}
+			// Exponential backoff.
+			backoff = backoff * 2
+			if backoff > backoffMax {
+				backoff = backoffMax
+			}
+		}
+		sleepCtx(ctx, backoff)
 	}
 }
 
@@ -1171,8 +1218,9 @@ type logEntry struct {
 }
 
 type kv struct {
-	key string
-	val string
+	key  string
+	val  string // display value (may be a brief summary)
+	file string // optional: path to saved file (for clickable link)
 }
 
 // knownKeys are the standard fields that we extract into dedicated logEntry fields.
@@ -1228,8 +1276,10 @@ func parseLogEntry(line string) *logEntry {
 		if knownKeys[k] {
 			continue
 		}
-		// Skip nested objects (shouldn't exist in flat output, but be safe).
-		if _, isMap := v.(map[string]any); isMap {
+		// Skip the primary reconciled object — its kind/name is already in the
+		// log header (e.g. "rvr/test-rv-100mi-r1-0"), so showing
+		// ReplicatedVolumeReplica={"name":"..."} on every line is pure noise.
+		if k == e.Kind {
 			continue
 		}
 		// "source" appears twice in controller-runtime JSON: once as a slog
@@ -1245,11 +1295,370 @@ func parseLogEntry(line string) *logEntry {
 			}
 			continue
 		}
-		e.extras = append(e.extras, kv{key: k, val: fmtVal(v)})
+		e.extras = append(e.extras, processExtraValue(k, v))
 	}
 	sortExtras(e.extras)
 
 	return e
+}
+
+// ---------------------------------------------------------------------------
+// Hexdump parsing and Kubernetes protobuf metadata extraction
+// ---------------------------------------------------------------------------
+
+// isHexDump reports whether s looks like the output of encoding/hex.Dump
+// (e.g. "00000000  6b 38 73 00 ...  |k8s...|").
+func isHexDump(s string) bool {
+	if len(s) < 10 {
+		return false
+	}
+	for i := 0; i < 8; i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return s[8] == ' ' && s[9] == ' '
+}
+
+// parseHexDump extracts raw bytes from encoding/hex.Dump formatted output.
+func parseHexDump(s string) []byte {
+	var result []byte
+	for _, line := range strings.Split(s, "\n") {
+		if len(line) < 10 || line[8] != ' ' || line[9] != ' ' {
+			continue
+		}
+		hexPart := line[10:]
+		if pipe := strings.IndexByte(hexPart, '|'); pipe >= 0 {
+			hexPart = hexPart[:pipe]
+		}
+		for _, token := range strings.Fields(hexPart) {
+			if len(token) != 2 {
+				continue
+			}
+			b, err := strconv.ParseUint(token, 16, 8)
+			if err != nil {
+				continue
+			}
+			result = append(result, byte(b))
+		}
+	}
+	return result
+}
+
+// k8sProtobufMagic is the 4-byte magic header for Kubernetes protobuf encoding.
+const k8sProtobufMagic = "k8s\x00"
+
+// extractK8sProtobufMeta extracts apiVersion and kind from Kubernetes
+// protobuf-encoded bytes. The wire format is:
+//
+//	magic("k8s\0") + runtime.Unknown{ field1: TypeMeta{ field1: apiVersion, field2: kind }, field2: Raw, ... }
+func extractK8sProtobufMeta(data []byte) (apiVersion, kind string) {
+	if len(data) < 4 || string(data[:4]) != k8sProtobufMagic {
+		return "", ""
+	}
+	data = data[4:]
+
+	// Parse runtime.Unknown: look for field 1 (TypeMeta, length-delimited).
+	for len(data) > 0 {
+		tag, n := protoDecodeVarint(data)
+		if n == 0 {
+			return
+		}
+		data = data[n:]
+		fieldNum := tag >> 3
+		wireType := tag & 0x7
+
+		switch wireType {
+		case 2: // length-delimited
+			length, ln := protoDecodeVarint(data)
+			if ln == 0 || int(length) > len(data[ln:]) {
+				return
+			}
+			data = data[ln:]
+			if fieldNum == 1 {
+				return parseProtoTypeMeta(data[:length])
+			}
+			data = data[length:]
+		case 0: // varint
+			_, vn := protoDecodeVarint(data)
+			if vn == 0 {
+				return
+			}
+			data = data[vn:]
+		case 1: // 64-bit
+			if len(data) < 8 {
+				return
+			}
+			data = data[8:]
+		case 5: // 32-bit
+			if len(data) < 4 {
+				return
+			}
+			data = data[4:]
+		default:
+			return
+		}
+	}
+	return
+}
+
+// parseProtoTypeMeta decodes the TypeMeta protobuf message:
+// field 1 = apiVersion (string), field 2 = kind (string).
+func parseProtoTypeMeta(data []byte) (apiVersion, kind string) {
+	for len(data) > 0 {
+		tag, n := protoDecodeVarint(data)
+		if n == 0 {
+			return
+		}
+		data = data[n:]
+		fieldNum := tag >> 3
+		wireType := tag & 0x7
+
+		if wireType != 2 {
+			// Skip non-length-delimited fields.
+			switch wireType {
+			case 0:
+				_, vn := protoDecodeVarint(data)
+				if vn == 0 {
+					return
+				}
+				data = data[vn:]
+			case 1:
+				if len(data) < 8 {
+					return
+				}
+				data = data[8:]
+			case 5:
+				if len(data) < 4 {
+					return
+				}
+				data = data[4:]
+			default:
+				return
+			}
+			continue
+		}
+
+		length, ln := protoDecodeVarint(data)
+		if ln == 0 || int(length) > len(data[ln:]) {
+			return
+		}
+		data = data[ln:]
+		switch fieldNum {
+		case 1:
+			apiVersion = string(data[:length])
+		case 2:
+			kind = string(data[:length])
+		}
+		data = data[length:]
+	}
+	return
+}
+
+// protoDecodeVarint decodes a protobuf varint from the beginning of data.
+// Returns the value and the number of bytes consumed (0 if truncated).
+func protoDecodeVarint(data []byte) (uint64, int) {
+	var value uint64
+	for i, b := range data {
+		if i >= 10 {
+			return 0, 0
+		}
+		value |= uint64(b&0x7f) << (7 * uint(i))
+		if b&0x80 == 0 {
+			return value, i + 1
+		}
+	}
+	return 0, 0
+}
+
+// processHexDumpValue handles a hexdump string (typically a protobuf response body):
+// parses the hex, tries to extract Kubernetes TypeMeta, saves to file, returns brief summary.
+func processHexDumpValue(key, hexStr string) kv {
+	raw := parseHexDump(hexStr)
+
+	var brief string
+	if len(raw) >= 4 && string(raw[:4]) == k8sProtobufMagic {
+		apiVersion, k := extractK8sProtobufMeta(raw)
+		sk := shortKindFor(k)
+		switch {
+		case k != "" && apiVersion != "":
+			brief = fmt.Sprintf("pb %s (%s) %d bytes", sk, apiVersion, len(raw))
+		case k != "":
+			brief = fmt.Sprintf("pb %s %d bytes", sk, len(raw))
+		default:
+			brief = fmt.Sprintf("pb %d bytes", len(raw))
+		}
+	} else if len(raw) > 0 {
+		brief = fmt.Sprintf("binary %d bytes", len(raw))
+	} else {
+		brief = fmt.Sprintf("hexdump %d chars", len(hexStr))
+	}
+
+	path := saveLogBody(key, []byte(hexStr))
+	return kv{key: key, val: brief, file: path}
+}
+
+// longValueThreshold is the character count above which a value is considered
+// "long" and should be saved to a file instead of displayed inline.
+const longValueThreshold = 120
+
+// processExtraValue converts a raw JSON field into a kv for display.
+// Long values and Kubernetes-like objects are saved to files with brief summaries.
+func processExtraValue(key string, raw any) kv {
+	switch val := raw.(type) {
+	case map[string]any:
+		return processMapValue(key, val)
+	case []any:
+		b, _ := json.Marshal(val)
+		s := string(b)
+		if len(s) <= longValueThreshold {
+			return kv{key: key, val: s}
+		}
+		path := saveLogBody(key, b)
+		return kv{key: key, val: fmt.Sprintf("[%d items]", len(val)), file: path}
+	case string:
+		// Hexdump (protobuf response bodies from client-go V8 transport logging).
+		if isHexDump(val) {
+			return processHexDumpValue(key, val)
+		}
+		// Try to parse string as JSON object (some libraries serialize objects to string).
+		if len(val) > longValueThreshold && len(val) > 2 && val[0] == '{' {
+			var obj map[string]any
+			if json.Unmarshal([]byte(val), &obj) == nil {
+				return processMapValue(key, obj)
+			}
+		}
+		if len(val) <= longValueThreshold {
+			return kv{key: key, val: val}
+		}
+		path := saveLogBody(key, []byte(val))
+		return kv{key: key, val: val[:longValueThreshold] + "…", file: path}
+	default:
+		return kv{key: key, val: fmtVal(raw)}
+	}
+}
+
+// processMapValue handles a JSON object: tries to extract Kubernetes resource
+// metadata for a brief summary. Only saves to file if the serialized JSON
+// exceeds longValueThreshold; small objects are shown inline as compact JSON.
+func processMapValue(key string, obj map[string]any) kv {
+	// Kubernetes-like object → brief summary (e.g. "rvr/name rv=123").
+	if brief := briefKubeResource(obj); brief != "" {
+		b, _ := json.MarshalIndent(obj, "", "  ")
+		var path string
+		if len(b) > longValueThreshold {
+			path = saveLogBody(key, b)
+		}
+		return kv{key: key, val: brief, file: path}
+	}
+
+	// Not a Kubernetes object → compact JSON inline or save to file.
+	compact, _ := json.Marshal(obj)
+	s := string(compact)
+	if len(s) <= longValueThreshold {
+		return kv{key: key, val: s}
+	}
+	pretty, _ := json.MarshalIndent(obj, "", "  ")
+	path := saveLogBody(key, pretty)
+	return kv{key: key, val: fmt.Sprintf("{%d fields}", len(obj)), file: path}
+}
+
+// briefKubeResource returns a brief description of a Kubernetes-like JSON
+// object: "Kind/name rv=123" or "Kind/ns/name/status rv=123".
+// Returns "" if the object doesn't look like a Kubernetes resource.
+func briefKubeResource(obj map[string]any) string {
+	kind, _ := obj["kind"].(string)
+	if kind == "" {
+		return ""
+	}
+	meta, _ := obj["metadata"].(map[string]any)
+	if meta == nil {
+		return ""
+	}
+
+	// Kubernetes API error responses (kind: "Status") have a different shape:
+	// no real metadata, but have "reason", "code", "message", "details" fields.
+	if kind == "Status" {
+		reason, _ := obj["reason"].(string)
+		code, _ := obj["code"].(float64)
+
+		// Extract the target object from "details" if present.
+		var target string
+		if details, ok := obj["details"].(map[string]any); ok {
+			dKind, _ := details["kind"].(string)
+			dName, _ := details["name"].(string)
+			if dKind != "" && dName != "" {
+				target = shortKindFor(dKind) + "/" + dName
+			}
+		}
+
+		var parts []string
+		if code != 0 {
+			parts = append(parts, fmt.Sprintf("%d", int(code)))
+		}
+		if reason != "" {
+			parts = append(parts, reason)
+		}
+		if target != "" {
+			parts = append(parts, target)
+		}
+		if len(parts) == 0 {
+			return "Status"
+		}
+		return "Status " + strings.Join(parts, " ")
+	}
+
+	name, _ := meta["name"].(string)
+	ns, _ := meta["namespace"].(string)
+	rv, _ := meta["resourceVersion"].(string)
+
+	// Use short kind if registered.
+	displayKind := shortKindFor(kind)
+
+	// Build "Kind/[ns/]name" or "Kind/[ns/]name/status".
+	var ident string
+	if ns != "" {
+		ident = fmt.Sprintf("%s/%s/%s", displayKind, ns, name)
+	} else if name != "" {
+		ident = fmt.Sprintf("%s/%s", displayKind, name)
+	} else {
+		ident = displayKind
+	}
+
+	// Detect status subresource payload: has "status" as a map but no "spec".
+	// (The "status" field must be a map — a plain string like "Failure" in
+	// Status error responses is not a subresource.)
+	if statusMap, ok := obj["status"].(map[string]any); ok && statusMap != nil {
+		if _, hasSpec := obj["spec"]; !hasSpec {
+			ident += "/status"
+		}
+	}
+
+	if rv != "" {
+		return fmt.Sprintf("%s rv=%s", ident, rv)
+	}
+	return ident
+}
+
+// saveLogBody writes data to a timestamped file in the snapshots directory.
+// Returns the absolute path, or "" if snapshots are disabled or write fails.
+func saveLogBody(key string, data []byte) string {
+	if snapshotsDir == "" {
+		return ""
+	}
+	stamp := time.Now().Format("15-04-05.000")
+	filename := fmt.Sprintf("log-%s-%s.json", stamp, key)
+	p := filepath.Join(snapshotsDir, filename)
+
+	if err := os.WriteFile(p, data, 0o644); err != nil {
+		return ""
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	return abs
 }
 
 // fmtVal formats a value for display.
@@ -1300,6 +1709,14 @@ func strVal(m map[string]any, key string) string {
 // ---------------------------------------------------------------------------
 
 func filterLogEntry(e *logEntry, ws *watchSet) bool {
+	// Skip Request/Response Body messages with empty body (GET/LIST/WATCH requests).
+	if e.Msg == "Request Body" || e.Msg == "Response Body" {
+		body, exists := e.raw["body"]
+		if !exists || body == nil || body == "" {
+			return false
+		}
+	}
+
 	// Has controllerKind + name → reconcile log for a specific object.
 	// Only show if the object matches the watch set.
 	if e.Kind != "" && e.Name != "" {
@@ -1548,7 +1965,12 @@ func formatExtras(e *logEntry) string {
 	}
 	var parts []string
 	for _, kv := range e.extras {
-		parts = append(parts, fmt.Sprintf("%s%s=%s%s", colorDim, kv.key, kv.val, colorReset))
+		val := kv.val
+		if kv.file != "" {
+			// Make the value a clickable link to the saved file.
+			val = osc8Link(val, kv.file)
+		}
+		parts = append(parts, fmt.Sprintf("%s%s=%s%s%s", colorDim, kv.key, colorReset, val, colorReset))
 	}
 	return strings.Join(parts, " ")
 }
@@ -1584,7 +2006,7 @@ type opcode struct {
 	j1, j2 int
 }
 
-func unifiedDiff(a, b []string, fromFile, toFile string) []string {
+func unifiedDiff(a, b []string) []string {
 	ops := diffOpcodes(a, b)
 
 	const ctx = 0
@@ -1617,10 +2039,8 @@ func unifiedDiff(a, b []string, fromFile, toFile string) []string {
 		return nil
 	}
 
-	out := []string{
-		fmt.Sprintf("--- %s", fromFile),
-		fmt.Sprintf("+++ %s", toFile),
-	}
+	var out []string
+	prevPath := ""
 
 	for _, g := range groups {
 		first := g.ops[0]
@@ -1632,12 +2052,14 @@ func unifiedDiff(a, b []string, fromFile, toFile string) []string {
 		j2 := min(lastOp.j2+ctx, len(b))
 
 		// Show YAML path breadcrumb instead of raw @@ line numbers.
+		// Suppress duplicate consecutive paths.
 		path := yamlPath(b, first.j1)
-		if path != "" {
+		if path != "" && path != prevPath {
 			out = append(out, fmt.Sprintf("── %s", path))
-		} else {
+		} else if path == "" {
 			out = append(out, fmt.Sprintf("@@ -%d,%d +%d,%d @@", i1+1, i2-i1, j1+1, j2-j1))
 		}
+		prevPath = path
 
 		ia, ib := i1, j1
 		for _, op := range g.ops {
