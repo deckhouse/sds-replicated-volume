@@ -1151,8 +1151,13 @@ type logEntry struct {
 	ReconcileID string
 	Error       string
 
-	// Phase data (from nested groups).
-	PhaseName string // key of the nested group (e.g. "ensureFinalizer", "computeStatus")
+	// Phase data.
+	// The logr→slog adapter stores the WithName chain as a flat top-level
+	// "logger" field (slash-separated, e.g. "schedule-rvr/place-rvr/rvr-condition").
+	// Phase-end attributes (result, changed, hasError, duration) are also
+	// flat top-level fields emitted by flow.*.OnEnd.
+	PhasePath []string // segments of the "logger" field
+	PhaseName string   // last segment of PhasePath
 	Result    string
 	Changed   string
 	HasError  string
@@ -1178,6 +1183,10 @@ var knownKeys = map[string]bool{
 	"namespace": true, "name": true, "reconcileID": true,
 	"startedAt": true,
 	"err":       true, "error": true,
+	// Phase data: logr→slog "logger" field + flow.*.OnEnd attrs.
+	"logger": true,
+	"result": true, "changed": true, "hasError": true, "duration": true,
+	"requeueAfter": true, "phaseName": true,
 }
 
 func parseLogEntry(line string) *logEntry {
@@ -1201,18 +1210,26 @@ func parseLogEntry(line string) *logEntry {
 		e.Error = strVal(m, "error")
 	}
 
-	// Phase data: look in nested groups (slog WithGroup via WithName).
-	// The phase name becomes a group key containing an object with
-	// result/changed/hasError/duration. We scan all nested objects.
-	extractPhaseData(m, e)
+	// Phase path: the logr→slog adapter stores the WithName chain as a flat
+	// "logger" field (e.g. "schedule-rvr/place-rvr/rvr-condition").
+	if logger := strVal(m, "logger"); logger != "" {
+		e.PhasePath = strings.Split(logger, "/")
+		e.PhaseName = e.PhasePath[len(e.PhasePath)-1]
+	}
+
+	// Phase-end metadata (flat top-level fields set by flow.*.OnEnd).
+	e.Result = strVal(m, "result")
+	e.Changed = strVal(m, "changed")
+	e.HasError = strVal(m, "hasError")
+	e.Duration = strVal(m, "duration")
 
 	// Collect extra fields not covered by dedicated struct fields.
 	for k, v := range m {
 		if knownKeys[k] {
 			continue
 		}
-		// Skip the phase group — its data is already extracted.
-		if k == e.PhaseName {
+		// Skip nested objects (shouldn't exist in flat output, but be safe).
+		if _, isMap := v.(map[string]any); isMap {
 			continue
 		}
 		// "source" appears twice in controller-runtime JSON: once as a slog
@@ -1228,35 +1245,11 @@ func parseLogEntry(line string) *logEntry {
 			}
 			continue
 		}
-		// Format the value.
 		e.extras = append(e.extras, kv{key: k, val: fmtVal(v)})
 	}
-	// Sort extras for stable output.
 	sortExtras(e.extras)
 
 	return e
-}
-
-func extractPhaseData(m map[string]any, e *logEntry) {
-	for k, v := range m {
-		sub, ok := v.(map[string]any)
-		if !ok {
-			continue
-		}
-		if r := strVal(sub, "result"); r != "" {
-			e.PhaseName = k
-			e.Result = r
-			e.Changed = strVal(sub, "changed")
-			e.HasError = strVal(sub, "hasError")
-			e.Duration = strVal(sub, "duration")
-			return
-		}
-		// Recurse one more level (in case phase groups are further nested).
-		extractPhaseData(sub, e)
-		if e.PhaseName != "" {
-			return
-		}
-	}
 }
 
 // fmtVal formats a value for display.
@@ -1310,7 +1303,17 @@ func filterLogEntry(e *logEntry, ws *watchSet) bool {
 	// Has controllerKind + name → reconcile log for a specific object.
 	// Only show if the object matches the watch set.
 	if e.Kind != "" && e.Name != "" {
-		return ws.matchesLog(e.Kind, e.Name)
+		if ws.matchesLog(e.Kind, e.Name) {
+			return true
+		}
+		// Fallback: match by controller name prefix.
+		// Example: rvr-scheduling-controller starts with "rvr-" → matches "rvr" target.
+		// This covers controllers that reconcile a different primary kind (e.g. RV)
+		// but are logically associated with a watched kind (e.g. RVR).
+		if e.Controller != "" {
+			return ws.matchesControllerName(e.Controller)
+		}
+		return false
 	}
 
 	// No specific object name → controller-level lifecycle message or global
@@ -1318,6 +1321,18 @@ func filterLogEntry(e *logEntry, ws *watchSet) bool {
 	// building controller, shutdown, etc.). Always show regardless of watch
 	// set — these are informational and help understand system state.
 	return true
+}
+
+// matchesControllerName returns true if the controller name starts with any
+// watched kind prefix (e.g. controller "rvr-scheduling-controller" matches
+// watched kind "rvr" because it starts with "rvr-").
+func (ws *watchSet) matchesControllerName(controllerName string) bool {
+	for _, kind := range ws.allKinds {
+		if strings.HasPrefix(controllerName, kind+"-") {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -1426,23 +1441,22 @@ func levelColored(level string) string {
 func formatMessage(e *logEntry) string {
 	// Phase-specific formatting.
 	if e.Msg == "phase start" {
-		phase := e.PhaseName
-		if phase == "" {
-			phase = "?"
-		}
-		extras := formatExtras(e)
-		if extras != "" {
-			return fmt.Sprintf("%s▶ %s%s  %s", colorDim, phase, colorReset, extras)
-		}
-		return fmt.Sprintf("%s▶ %s%s", colorDim, phase, colorReset)
+		return formatPhaseStart(e)
 	}
 
 	if e.Msg == "phase end" {
 		return formatPhaseEnd(e)
 	}
 
-	// Generic message.
+	// Generic message with phase path context (for log lines within a phase).
 	var parts []string
+
+	// Show phase path context for non-phase log lines within a phase.
+	if len(e.PhasePath) > 0 {
+		pathStr := strings.Join(e.PhasePath, " › ")
+		parts = append(parts, fmt.Sprintf("%s[%s]%s", colorDim, pathStr, colorReset))
+	}
+
 	parts = append(parts, e.Msg)
 
 	// Append error if present.
@@ -1458,10 +1472,38 @@ func formatMessage(e *logEntry) string {
 	return strings.Join(parts, "  ")
 }
 
+func formatPhaseStart(e *logEntry) string {
+	// Build the phase path display with tree characters.
+	depth := len(e.PhasePath)
+	indent := ""
+	if depth > 1 {
+		indent = strings.Repeat("│ ", depth-1)
+	}
+
+	phase := e.PhaseName
+	if phase == "" {
+		phase = "?"
+	}
+
+	extraStr := ""
+	if extras := formatExtras(e); extras != "" {
+		extraStr = "  " + extras
+	}
+
+	return fmt.Sprintf("%s%s▶ %s%s%s", colorDim, indent, phase, colorReset, extraStr)
+}
+
 func formatPhaseEnd(e *logEntry) string {
 	phase := e.PhaseName
 	if phase == "" {
 		phase = "?"
+	}
+
+	// Build indentation based on phase path depth.
+	depth := len(e.PhasePath)
+	indent := ""
+	if depth > 1 {
+		indent = strings.Repeat("│ ", depth-1)
 	}
 
 	var parts []string
@@ -1493,10 +1535,10 @@ func formatPhaseEnd(e *logEntry) string {
 	}
 
 	if len(parts) == 0 {
-		return fmt.Sprintf("%s■ %s%s", colorDim, phase, colorReset)
+		return fmt.Sprintf("%s%s■ %s%s", colorDim, indent, phase, colorReset)
 	}
 
-	return fmt.Sprintf("■ %s  %s", phase, strings.Join(parts, "  "))
+	return fmt.Sprintf("%s■ %s  %s", indent, phase, strings.Join(parts, "  "))
 }
 
 // formatExtras renders extra key-value pairs as dim key=value tokens.
