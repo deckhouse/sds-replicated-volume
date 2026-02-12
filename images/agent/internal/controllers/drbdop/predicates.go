@@ -41,7 +41,7 @@ func operationPredicates() []predicate.Predicate {
 				}
 				return !isOperationTerminal(op)
 			},
-			DeleteFunc: func(e event.DeleteEvent) bool {
+			DeleteFunc: func(_ event.DeleteEvent) bool {
 				// No need to reconcile deleted operations
 				return false
 			},

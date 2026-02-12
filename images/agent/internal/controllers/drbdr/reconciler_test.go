@@ -105,7 +105,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			name:  "state up, drbd not configured - creates resource and minor",
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp),
 			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
-				statusCmd(testDRBDResName, drbdsetup.StatusResult{}),
+				statusCmd(drbdsetup.StatusResult{}),
 				// After status returns empty, actions are generated:
 				// NewResourceAction calls new-resource
 				newResourceCmd(testDRBDResName, 0),
@@ -114,8 +114,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 				// NewMinorAction calls ExecuteNewAutoMinor which tries nextDeviceMinor=0 first
 				newMinorCmd(testDRBDResName, 0, 0, false),
 				// After actions, refresh actual state
-				statusCmd(testDRBDResName, configuredStatus(testDRBDResName)),
-				showCmd(testDRBDResName, &drbdsetup.ShowResource{
+				statusCmd(configuredStatus(testDRBDResName)),
+				showCmd(&drbdsetup.ShowResource{
 					Resource: testDRBDResName,
 					Options: drbdsetup.ShowOptions{
 						AutoPromote:                false,
@@ -139,8 +139,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 			name:  "state up, drbd configured - queries status and show only",
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp),
 			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
-				statusCmd(testDRBDResName, configuredStatus(testDRBDResName)),
-				showCmd(testDRBDResName, &drbdsetup.ShowResource{
+				statusCmd(configuredStatus(testDRBDResName)),
+				showCmd(&drbdsetup.ShowResource{
 					Resource: testDRBDResName,
 					Options: drbdsetup.ShowOptions{
 						AutoPromote:                false,
@@ -160,7 +160,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			name:  "state down - queries status",
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateDown),
 			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
-				statusCmd(testDRBDResName, drbdsetup.StatusResult{}),
+				statusCmd(drbdsetup.StatusResult{}),
 			},
 		},
 
@@ -169,7 +169,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			name:  "deleting resource - queries status",
 			drbdr: deletingDRBDR(testNodeName, v1alpha1.AgentFinalizer),
 			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
-				statusCmd(testDRBDResName, drbdsetup.StatusResult{}),
+				statusCmd(drbdsetup.StatusResult{}),
 			},
 		},
 
@@ -201,7 +201,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			name:  "show command error - returns error",
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateDown),
 			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
-				statusCmd(testDRBDResName, drbdsetup.StatusResult{
+				statusCmd(drbdsetup.StatusResult{
 					{Name: testDRBDResName, NodeID: 0, Role: "Secondary"},
 				}),
 				{
@@ -230,8 +230,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 				// ExecuteNewAutoMinor tries nextDeviceMinor=0 first
 				newMinorCmd(testDRBDResName, 0, 0, false),
 				// Refresh after actions
-				statusCmd(testDRBDResName, configuredStatus(testDRBDResName)),
-				showCmd(testDRBDResName, &drbdsetup.ShowResource{
+				statusCmd(configuredStatus(testDRBDResName)),
+				showCmd(&drbdsetup.ShowResource{
 					Resource: testDRBDResName,
 					Options: drbdsetup.ShowOptions{
 						AutoPromote:                false,
@@ -250,8 +250,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 			name:  "maintenance mode - queries status and show",
 			drbdr: drbdrInMaintenance(testNodeName, v1alpha1.MaintenanceModeNoResourceReconciliation),
 			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
-				statusCmd(testDRBDResName, configuredStatus(testDRBDResName)),
-				showCmd(testDRBDResName, &drbdsetup.ShowResource{
+				statusCmd(configuredStatus(testDRBDResName)),
+				showCmd(&drbdsetup.ShowResource{
 					Resource: testDRBDResName,
 					Options: drbdsetup.ShowOptions{
 						AutoPromote:                false,
@@ -270,7 +270,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			name:  "resource with connections - removes stale peer",
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp),
 			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
-				statusCmd(testDRBDResName, drbdsetup.StatusResult{
+				statusCmd(drbdsetup.StatusResult{
 					{
 						Name:   testDRBDResName,
 						NodeID: 0,
@@ -290,7 +290,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 						},
 					},
 				}),
-				showCmd(testDRBDResName, &drbdsetup.ShowResource{
+				showCmd(&drbdsetup.ShowResource{
 					Resource: testDRBDResName,
 					Options: drbdsetup.ShowOptions{
 						AutoPromote:                false,
@@ -309,8 +309,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 				delPeerCmd(testDRBDResName, 1),
 				forgetPeerCmd(testDRBDResName, 1),
 				// Refresh after actions
-				statusCmd(testDRBDResName, configuredStatus(testDRBDResName)),
-				showCmd(testDRBDResName, &drbdsetup.ShowResource{
+				statusCmd(configuredStatus(testDRBDResName)),
+				showCmd(&drbdsetup.ShowResource{
 					Resource: testDRBDResName,
 					Options: drbdsetup.ShowOptions{
 						AutoPromote:                false,
@@ -481,17 +481,17 @@ func drbdrInMaintenance(nodeName string, mode v1alpha1.MaintenanceMode) *v1alpha
 	return dr
 }
 
-func statusCmd(resourceName string, result drbdsetup.StatusResult) *fakedrbdsetup.ExpectedCmd {
+func statusCmd(result drbdsetup.StatusResult) *fakedrbdsetup.ExpectedCmd {
 	output, _ := json.Marshal(result)
 	return &fakedrbdsetup.ExpectedCmd{
 		Name:         drbdsetup.Command,
-		Args:         drbdsetup.StatusArgs(resourceName),
+		Args:         drbdsetup.StatusArgs(testDRBDResName),
 		ResultOutput: output,
 		ResultErr:    nil,
 	}
 }
 
-func showCmd(resourceName string, result *drbdsetup.ShowResource) *fakedrbdsetup.ExpectedCmd {
+func showCmd(result *drbdsetup.ShowResource) *fakedrbdsetup.ExpectedCmd {
 	var results []drbdsetup.ShowResource
 	if result != nil {
 		results = []drbdsetup.ShowResource{*result}
@@ -499,7 +499,7 @@ func showCmd(resourceName string, result *drbdsetup.ShowResource) *fakedrbdsetup
 	output, _ := json.Marshal(results)
 	return &fakedrbdsetup.ExpectedCmd{
 		Name:         drbdsetup.Command,
-		Args:         drbdsetup.ShowArgs(resourceName, true),
+		Args:         drbdsetup.ShowArgs(testDRBDResName, true),
 		ResultOutput: output,
 		ResultErr:    nil,
 	}
