@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drbdop
+package drbdrop
 
 import (
 	"fmt"
@@ -29,7 +29,7 @@ import (
 
 const (
 	// ControllerName is the stable name for the DRBD resource operation controller.
-	ControllerName = "drbd-operation-controller"
+	ControllerName = "drbdrop-controller"
 )
 
 // BuildController creates and registers the DRBDResourceOperation controller with the manager.
