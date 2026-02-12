@@ -221,28 +221,39 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 				Eval()
 	})
 
-	// Collect active diskful replicas (not being deleted).
+	// Replicas that are still being deleted.
+	deleting := nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return rvr.DeletionTimestamp != nil
+	})
+
+	// Collect diskful replicas.
 	diskful := nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		return rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.DeletionTimestamp == nil
+		return rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful
 	})
 
 	// Ignore misplaced replicas.
 	diskful = diskful.Difference(misplaced)
 
+	// Ignore deleting replicas.
+	diskful = diskful.Difference(deleting)
+
 	targetDiskfulCount := computeIntendedDiskfulReplicaCount(rv)
 
-	// Create missing diskful replicas.
-	for diskful.Len() < targetDiskfulCount {
-		rvr, err := r.createRVR(rf.Ctx(), rv, rvrs, v1alpha1.ReplicaTypeDiskful)
-		if err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				// Stale cache: RVR was already created by a previous reconciliation. Requeue to pick it up.
-				rf.Log().Info("RVR already exists, requeueing")
-				return rf.DoneAndRequeue()
+	// Create missing diskful replicas only when there are no replicas being deleted or misplaced.
+	// This prevents zombie accumulation: we wait for all cleanup to finish before creating new ones.
+	if deleting.IsEmpty() && misplaced.IsEmpty() {
+		for diskful.Len() < targetDiskfulCount {
+			rvr, err := r.createRVR(rf.Ctx(), rv, rvrs, v1alpha1.ReplicaTypeDiskful)
+			if err != nil {
+				if apierrors.IsAlreadyExists(err) {
+					// Stale cache: RVR was already created by a previous reconciliation. Requeue to pick it up.
+					rf.Log().Info("RVR already exists, requeueing")
+					return rf.DoneAndRequeue()
+				}
+				return rf.Failf(err, "creating diskful RVR")
 			}
-			return rf.Failf(err, "creating diskful RVR")
+			diskful.Add(rvr.NodeID())
 		}
-		diskful.Add(rvr.NodeID())
 	}
 
 	// Replicas that have been assigned to a node by the scheduler.
@@ -288,6 +299,27 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 				return rf.Failf(err, "deleting RVR %s", rvr.Name)
 			}
 		}
+	}
+
+	// Wait for all deleting RVRs to be fully removed before proceeding with formation.
+	// Replicas may be deleting for various reasons: leftover from a previous formation cycle,
+	// excess replicas removed above, misplaced replicas, or externally created replicas.
+	// If deletion takes too long, restart formation.
+	deleting = nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return rvr.DeletionTimestamp != nil
+	})
+	if !deleting.IsEmpty() {
+		msg := fmt.Sprintf(
+			"Waiting for %d deleting replicas [%s] to be fully removed before proceeding with formation",
+			deleting.Len(), deleting.String(),
+		)
+		changed = applyFormationTransitionMessage(rv, msg) || changed
+		changed = applyPendingReplicaMessages(
+			rv, diskful,
+			"Datamesh is forming, waiting for replica cleanup to complete",
+		) || changed
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
+			ReportChangedIf(changed)
 	}
 
 	// Replicas waiting to be scheduled.
