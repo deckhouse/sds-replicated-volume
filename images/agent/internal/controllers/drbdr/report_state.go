@@ -22,6 +22,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
@@ -72,7 +73,12 @@ func applyConfiguredCondition(drbdr *v1alpha1.DRBDResource, err error, maintenan
 		message = ""
 	}
 
-	setCondition(drbdr, v1alpha1.DRBDResourceCondConfiguredType, status, reason, message)
+	obju.SetStatusCondition(drbdr, metav1.Condition{
+		Type:    v1alpha1.DRBDResourceCondConfiguredType,
+		Status:  status,
+		Reason:  reason,
+		Message: message,
+	})
 }
 
 func getConfiguredReason(err error) string {
@@ -81,29 +87,4 @@ func getConfiguredReason(err error) string {
 		return cfr.ConfiguredReason()
 	}
 	return v1alpha1.DRBDResourceCondConfiguredReasonFailed
-}
-
-func setCondition(drbdr *v1alpha1.DRBDResource, condType string, status metav1.ConditionStatus, reason, message string) {
-	now := metav1.Now()
-
-	for i := range drbdr.Status.Conditions {
-		c := &drbdr.Status.Conditions[i]
-		if c.Type == condType {
-			c.Reason = reason
-			c.Message = message
-			if c.Status != status {
-				c.Status = status
-				c.LastTransitionTime = now
-			}
-			return
-		}
-	}
-
-	drbdr.Status.Conditions = append(drbdr.Status.Conditions, metav1.Condition{
-		Type:               condType,
-		Status:             status,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: now,
-	})
 }
