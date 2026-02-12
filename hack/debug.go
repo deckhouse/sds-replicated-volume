@@ -512,13 +512,18 @@ func sortedMapKeys(m map[string]any, topLevel bool) []string {
 // ---------------------------------------------------------------------------
 
 type condition struct {
-	Type    string
-	Status  string
-	Reason  string
-	Message string
+	Type               string
+	Status             string
+	Reason             string
+	Message            string
+	LastTransitionTime string // raw ISO timestamp, "" if absent
+	ObservedGeneration int64  // -1 means field absent
+	Generation         int64  // object's metadata.generation (copied from parent)
 }
 
 // extractConditions reads .status.conditions from an object.
+// Each condition gets the object's metadata.generation so renderers can
+// compare it with the per-condition observedGeneration.
 func extractConditions(obj map[string]any) []condition {
 	status, _ := obj["status"].(map[string]any)
 	if status == nil {
@@ -528,17 +533,33 @@ func extractConditions(obj map[string]any) []condition {
 	if len(raw) == 0 {
 		return nil
 	}
+
+	// Object's metadata.generation (0 if absent).
+	var gen int64
+	if meta, _ := obj["metadata"].(map[string]any); meta != nil {
+		if g, ok := meta["generation"].(float64); ok {
+			gen = int64(g)
+		}
+	}
+
 	conds := make([]condition, 0, len(raw))
 	for _, r := range raw {
 		m, ok := r.(map[string]any)
 		if !ok {
 			continue
 		}
+		og := int64(-1) // -1 = field absent
+		if v, ok := m["observedGeneration"].(float64); ok {
+			og = int64(v)
+		}
 		conds = append(conds, condition{
-			Type:    strVal(m, "type"),
-			Status:  strVal(m, "status"),
-			Reason:  strVal(m, "reason"),
-			Message: strVal(m, "message"),
+			Type:               strVal(m, "type"),
+			Status:             strVal(m, "status"),
+			Reason:             strVal(m, "reason"),
+			Message:            strVal(m, "message"),
+			LastTransitionTime: strVal(m, "lastTransitionTime"),
+			ObservedGeneration: og,
+			Generation:         gen,
 		})
 	}
 	return conds
@@ -552,6 +573,33 @@ func removeConditions(obj map[string]any) {
 		return
 	}
 	delete(status, "conditions")
+}
+
+// generationIcon returns a small icon indicating whether a condition's
+// observedGeneration matches the object's generation.
+//
+//	"" — observedGeneration absent (nothing to show)
+//	"⊙" (green) — observedGeneration == generation (current)
+//	"◌" (yellow) — observedGeneration != generation (stale)
+func generationIcon(c condition) string {
+	if c.ObservedGeneration < 0 {
+		return fmt.Sprintf("%s∅%s", colorRed, colorReset) // not set
+	}
+	if c.ObservedGeneration == c.Generation {
+		return fmt.Sprintf("%s⊙%s", colorGreen, colorReset)
+	}
+	return fmt.Sprintf("%s◌%s", colorYellow, colorReset)
+}
+
+// generationIconDim is like generationIcon but dim (for unchanged conditions).
+func generationIconDim(c condition) string {
+	if c.ObservedGeneration < 0 {
+		return fmt.Sprintf("%s∅%s", colorDim, colorReset) // not set
+	}
+	if c.ObservedGeneration == c.Generation {
+		return fmt.Sprintf("%s⊙%s", colorDim, colorReset)
+	}
+	return fmt.Sprintf("%s◌%s", colorDim+colorYellow, colorReset)
 }
 
 // statusIcon returns a colored icon for a condition status.
@@ -654,9 +702,9 @@ func condWidths(sets ...[]condition) (typeW, statusW, reasonW int) {
 }
 
 // condMsgMaxWidth returns the maximum message width given column widths.
-// Prefix layout: "  │ X ✓ " (8 display chars) + tw + " " + sw + " " + rw + " ".
-func condMsgMaxWidth(tw, sw, rw int) int {
-	prefix := 8 + tw + 1 + sw + 1 + rw + 1 // +1 for each inter-column space
+// Prefix layout: "  │ X ⊙✓ " (9 display chars) + aw + " " + tw + " " + sw + " " + rw + " ".
+func condMsgMaxWidth(aw, tw, sw, rw int) int {
+	prefix := 9 + aw + 1 + tw + 1 + sw + 1 + rw + 1
 	w := termWidth() - prefix
 	if w < 20 {
 		w = 20
@@ -668,17 +716,21 @@ func condMsgMaxWidth(tw, sw, rw int) int {
 // ADDED object. Does NOT include closing └ — caller handles border transitions.
 func conditionsTableNew(oldConds, newConds []condition) []string {
 	tw, sw, rw := condWidths(newConds)
-	mw := condMsgMaxWidth(tw, sw, rw)
+	aw := condAgeWidth(newConds)
+	mw := condMsgMaxWidth(aw, tw, sw, rw)
 	lines := []string{fmt.Sprintf("  %s┌ conditions%s", colorDim, colorReset)}
 	for _, c := range newConds {
-		lines = append(lines, fmt.Sprintf("  %s│%s %s %s %s %s %s %s%s%s",
-			colorDim, colorReset,
-			colorGreen+"+"+colorReset,
-			statusIcon(c.Status),
+		lines = append(lines, fmt.Sprintf("  %s│   %s%s%s %s %s %s %s%s %s%s",
+			colorDim,
+			generationIconDim(c),
+			statusIconDim(c.Status),
+			colorDim,
+			pad(condAge(c), aw),
 			pad(c.Type, tw),
 			statusColored(pad(c.Status, sw)),
+			colorDim,
 			pad(c.Reason, rw),
-			colorDim, truncMsg(c.Message, mw), colorReset,
+			truncMsg(c.Message, mw), colorReset,
 		))
 	}
 	return lines
@@ -725,7 +777,8 @@ func conditionsTableDiff(oldConds, newConds []condition) []string {
 		}
 	}
 
-	mw := condMsgMaxWidth(tw, sw, rw)
+	aw := condAgeWidth(oldConds, newConds)
+	mw := condMsgMaxWidth(aw, tw, sw, rw)
 
 	var lines []string
 
@@ -733,11 +786,15 @@ func conditionsTableDiff(oldConds, newConds []condition) []string {
 	if !changed {
 		lines = append(lines, fmt.Sprintf("  %s┌ conditions (unchanged)%s", colorDim, colorReset))
 		for _, c := range newConds {
-			lines = append(lines, fmt.Sprintf("  %s│   %s %s %s %s %s%s",
+			lines = append(lines, fmt.Sprintf("  %s│   %s%s%s %s %s %s %s%s %s%s",
 				colorDim,
+				generationIconDim(c),
 				statusIconDim(c.Status),
+				colorDim, // re-enter dim after icon resets
+				pad(condAge(c), aw),
 				pad(c.Type, tw),
 				statusColored(pad(c.Status, sw)),
+				colorDim, // re-enter dim after statusColored resets
 				pad(c.Reason, rw),
 				truncMsg(c.Message, mw), colorReset,
 			))
@@ -752,16 +809,18 @@ func conditionsTableDiff(oldConds, newConds []condition) []string {
 		old, existed := oldMap[c.Type]
 		if !existed {
 			// Added condition.
-			lines = append(lines, fmt.Sprintf("  %s│%s %s %s %s %s %s %s%s%s",
+			lines = append(lines, fmt.Sprintf("  %s│%s %s %s%s %s %s %s %s %s%s%s",
 				colorDim, colorReset,
 				colorGreen+"+"+colorReset,
+				generationIcon(c),
 				statusIcon(c.Status),
+				pad(condAge(c), aw),
 				pad(c.Type, tw),
 				statusColored(pad(c.Status, sw)),
 				pad(c.Reason, rw),
 				colorDim, truncMsg(c.Message, mw), colorReset,
 			))
-		} else if old.Status != c.Status || old.Reason != c.Reason || old.Message != c.Message {
+		} else if condChanged(old, c) {
 			// Changed condition.
 			statusStr := statusColored(pad(c.Status, sw))
 			if old.Status != c.Status {
@@ -779,10 +838,17 @@ func conditionsTableDiff(oldConds, newConds []condition) []string {
 					reasonStr += strings.Repeat(" ", rw-plainW)
 				}
 			}
-			lines = append(lines, fmt.Sprintf("  %s│%s %s %s %s %s %s %s%s%s",
+			// Age column: highlight if lastTransitionTime changed.
+			ageStr := pad(condAge(c), aw)
+			if old.LastTransitionTime != c.LastTransitionTime {
+				ageStr = fmt.Sprintf("%s%s%s", colorYellow, pad(condAge(c), aw), colorReset)
+			}
+			lines = append(lines, fmt.Sprintf("  %s│%s %s %s%s %s %s %s %s %s%s%s",
 				colorDim, colorReset,
 				colorYellow+"~"+colorReset,
+				generationIcon(c),
 				statusIcon(c.Status),
+				ageStr,
 				pad(c.Type, tw),
 				statusStr,
 				reasonStr,
@@ -790,12 +856,16 @@ func conditionsTableDiff(oldConds, newConds []condition) []string {
 			))
 		} else {
 			// Unchanged condition — show dim for context but keep status colored.
-			lines = append(lines, fmt.Sprintf("  %s│   %s %s%s %s %s%s %s%s",
+			lines = append(lines, fmt.Sprintf("  %s│   %s%s%s %s %s %s %s%s %s%s",
 				colorDim,
-				statusIcon(c.Status),
-				colorDim, pad(c.Type, tw),
+				generationIconDim(c),
+				statusIconDim(c.Status),
+				colorDim, // re-enter dim after icon resets
+				pad(condAge(c), aw),
+				pad(c.Type, tw),
 				statusColored(pad(c.Status, sw)),
-				colorDim, pad(c.Reason, rw),
+				colorDim, // re-enter dim after statusColored resets
+				pad(c.Reason, rw),
 				truncMsg(c.Message, mw), colorReset,
 			))
 		}
@@ -804,16 +874,70 @@ func conditionsTableDiff(oldConds, newConds []condition) []string {
 	// Show removed conditions.
 	for _, c := range oldConds {
 		if _, exists := newMap[c.Type]; !exists {
-			lines = append(lines, fmt.Sprintf("  %s│%s %s %s %s%s (removed)%s",
+			lines = append(lines, fmt.Sprintf("  %s│%s %s  %s %s %s%s (removed)%s",
 				colorDim, colorReset,
 				colorRed+"-"+colorReset,
 				statusIcon(c.Status),
+				pad(condAge(c), aw),
 				colorRed, pad(c.Type, tw), colorReset,
 			))
 		}
 	}
 
 	return lines
+}
+
+// condAge returns a short human-readable age string for a condition's
+// lastTransitionTime (e.g. "3s", "5m", "2h", "7d"). Returns "--" if absent.
+func condAge(c condition) string {
+	if c.LastTransitionTime == "" {
+		return "⏱--"
+	}
+	t, err := time.Parse(time.RFC3339, c.LastTransitionTime)
+	if err != nil {
+		t, err = time.Parse(time.RFC3339Nano, c.LastTransitionTime)
+		if err != nil {
+			return "⏱?"
+		}
+	}
+	d := time.Since(t)
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("⏱%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("⏱%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("⏱%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("⏱%dd", int(d.Hours()/24))
+	}
+}
+
+// condAgeWidth computes the max display width of the age column across
+// multiple condition sets.
+func condAgeWidth(sets ...[]condition) int {
+	w := 2 // minimum "--"
+	for _, cs := range sets {
+		for _, c := range cs {
+			if aw := len(condAge(c)); aw > w {
+				w = aw
+			}
+		}
+	}
+	return w
+}
+
+// condChanged reports whether any visible field of a condition changed.
+func condChanged(old, new condition) bool {
+	return old.Status != new.Status ||
+		old.Reason != new.Reason ||
+		old.Message != new.Message ||
+		old.LastTransitionTime != new.LastTransitionTime ||
+		old.ObservedGeneration != new.ObservedGeneration ||
+		old.Generation != new.Generation
 }
 
 func conditionsEqual(a, b []condition) bool {
@@ -829,7 +953,7 @@ func conditionsEqual(a, b []condition) bool {
 		if !ok {
 			return false
 		}
-		if old.Status != c.Status || old.Reason != c.Reason || old.Message != c.Message {
+		if condChanged(old, c) {
 			return false
 		}
 	}
