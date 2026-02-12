@@ -40,8 +40,8 @@ const (
 func BuildController(mgr manager.Manager) error {
 	cl := mgr.GetClient()
 
-	ns := controllerNamespaceDefault
-	if v := os.Getenv(podNamespaceEnvVar); v != "" {
+	ns := v1alpha1.ControllerNamespaceDefault
+	if v := os.Getenv(v1alpha1.PodNamespaceEnvVar); v != "" {
 		ns = v
 	}
 

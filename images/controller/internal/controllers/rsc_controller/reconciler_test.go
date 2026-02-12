@@ -3273,9 +3273,9 @@ var _ = Describe("Reconciler", func() {
 
 			var sc storagev1.StorageClass
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &sc)).To(Succeed())
-			Expect(sc.Provisioner).To(Equal(storageClassProvisioner))
-			Expect(sc.Parameters).To(HaveKeyWithValue(storageClassParamTopologyKey, string(v1alpha1.TopologyTransZonal)))
-			Expect(sc.Annotations).NotTo(HaveKey(storageClassVirtualizationAnnotationKey))
+			Expect(sc.Provisioner).To(Equal(v1alpha1.StorageClassProvisioner))
+			Expect(sc.Parameters).To(HaveKeyWithValue(v1alpha1.StorageClassParamTopologyKey, string(v1alpha1.TopologyTransZonal)))
+			Expect(sc.Annotations).NotTo(HaveKey(v1alpha1.StorageClassVirtualizationAnnotationKey))
 		})
 
 		It("returns error when StorageClass has different provisioner", func() {
@@ -3345,8 +3345,8 @@ var _ = Describe("Reconciler", func() {
 
 			intended := computeIntendedStorageClass(rsc, false)
 			oldSC := intended.DeepCopy()
-			delete(oldSC.Parameters, storageClassParamTopologyKey)
-			delete(oldSC.Parameters, storageClassParamZonesKey)
+			delete(oldSC.Parameters, v1alpha1.StorageClassParamTopologyKey)
+			delete(oldSC.Parameters, v1alpha1.StorageClassParamZonesKey)
 			oldSC.Labels = map[string]string{"custom": "1"}
 
 			cl = testhelpers.WithRSPByUsedByRSCNameIndex(
@@ -3364,10 +3364,10 @@ var _ = Describe("Reconciler", func() {
 
 			var sc storagev1.StorageClass
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &sc)).To(Succeed())
-			Expect(sc.Parameters).To(HaveKey(storageClassParamTopologyKey))
-			Expect(sc.Parameters).To(HaveKey(storageClassParamZonesKey))
+			Expect(sc.Parameters).To(HaveKey(v1alpha1.StorageClassParamTopologyKey))
+			Expect(sc.Parameters).To(HaveKey(v1alpha1.StorageClassParamZonesKey))
 			Expect(sc.Labels).To(HaveKeyWithValue("custom", "1"))
-			Expect(sc.Labels).To(HaveKeyWithValue(managedLabelKey, managedLabelValue))
+			Expect(sc.Labels).To(HaveKeyWithValue(v1alpha1.ManagedLabelKey, v1alpha1.ManagedLabelValue))
 		})
 
 		It("updates StorageClass metadata when needed", func() {
@@ -3414,7 +3414,7 @@ var _ = Describe("Reconciler", func() {
 
 			var sc storagev1.StorageClass
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &sc)).To(Succeed())
-			Expect(sc.Labels).To(HaveKeyWithValue(managedLabelKey, managedLabelValue))
+			Expect(sc.Labels).To(HaveKeyWithValue(v1alpha1.ManagedLabelKey, v1alpha1.ManagedLabelValue))
 		})
 
 		It("recreates StorageClass when storagePool parameter was empty", func() {
@@ -3442,7 +3442,7 @@ var _ = Describe("Reconciler", func() {
 
 			intended := computeIntendedStorageClass(rsc, false)
 			oldSC := intended.DeepCopy()
-			oldSC.Parameters[storageClassStoragePoolKey] = ""
+			oldSC.Parameters[v1alpha1.StorageClassStoragePoolKey] = ""
 
 			cl = testhelpers.WithRSPByUsedByRSCNameIndex(
 				testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
@@ -3459,7 +3459,7 @@ var _ = Describe("Reconciler", func() {
 
 			var sc storagev1.StorageClass
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &sc)).To(Succeed())
-			Expect(sc.Parameters).To(HaveKeyWithValue(storageClassStoragePoolKey, "pool-1"))
+			Expect(sc.Parameters).To(HaveKeyWithValue(v1alpha1.StorageClassStoragePoolKey, "pool-1"))
 		})
 
 		It("returns error when StorageClass storagePool differs and is not empty", func() {
@@ -3487,7 +3487,7 @@ var _ = Describe("Reconciler", func() {
 
 			intended := computeIntendedStorageClass(rsc, false)
 			oldSC := intended.DeepCopy()
-			oldSC.Parameters[storageClassStoragePoolKey] = "pool-1"
+			oldSC.Parameters[v1alpha1.StorageClassStoragePoolKey] = "pool-1"
 
 			cl = testhelpers.WithRSPByUsedByRSCNameIndex(
 				testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().

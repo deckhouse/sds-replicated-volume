@@ -37,5 +37,33 @@ const (
 	StorageClassParamOnSuspendedPrimaryOutdatedKey = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/on-suspended-primary-outdated"
 	PrimaryOutdatedForceSecondary                  = "force-secondary"
 
+	StorageClassParamAutoDiskfulKey             = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/auto-diskful"
+	StorageClassParamAutoDiskfulAllowCleanupKey = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/auto-diskful-allow-cleanup"
+
+	QuorumMinimumRedundancyWithPrefixSCKey = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/quorum-minimum-redundancy"
+
 	DefaultStorageClassAnnotationKey = "storageclass.kubernetes.io/is-default-class"
+
+	ManagedLabelKey   = "storage.deckhouse.io/managed-by"
+	ManagedLabelValue = "sds-replicated-volume"
+
+	RSCStorageClassVolumeSnapshotClassAnnotationKey   = "storage.deckhouse.io/volumesnapshotclass"
+	RSCStorageClassVolumeSnapshotClassAnnotationValue = "sds-replicated-volume"
+
+	StorageClassParamAllowRemoteVolumeAccessValue = "- fromSame:\n  - topology.kubernetes.io/zone"
+
+	ReplicatedStorageClassParamNameKey = "replicated.csi.storage.deckhouse.io/replicatedStorageClassName"
+
+	StorageClassParamTopologyKey = "replicated.csi.storage.deckhouse.io/topology"
+	StorageClassParamZonesKey    = "replicated.csi.storage.deckhouse.io/zones"
+
+	StorageClassVirtualizationAnnotationKey   = "virtualdisk.virtualization.deckhouse.io/access-mode"
+	StorageClassVirtualizationAnnotationValue = "ReadWriteOnce"
+	StorageClassIgnoreLocalAnnotationKey      = "replicatedstorageclass.storage.deckhouse.io/ignore-local"
+
+	ControllerConfigMapName        = "sds-replicated-volume-controller-config"
+	VirtualizationModuleEnabledKey = "virtualizationEnabled"
+
+	PodNamespaceEnvVar         = "POD_NAMESPACE"
+	ControllerNamespaceDefault = "d8-sds-replicated-volume"
 )
