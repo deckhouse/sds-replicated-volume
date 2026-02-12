@@ -1065,11 +1065,24 @@ func followPodLogs(ctx context.Context, component, labelSelector string, ws *wat
 		backoffMax = 30 * time.Second
 	)
 	backoff := backoffMin
-	notifiedWaiting := false // true after we printed "waiting for pods"
+	notifiedWaiting := false  // true after we printed "waiting for pods"
+	var lastLogTime time.Time // timestamp of the last received log entry
 
 	for {
 		if ctx.Err() != nil {
 			return
+		}
+
+		// On first connect use --since=1s (only recent logs).
+		// On reconnect compute the gap since the last received log entry
+		// so we don't miss startup logs after a pod restart.
+		sinceArg := "--since=1s"
+		if !lastLogTime.IsZero() {
+			gapSec := int(time.Since(lastLogTime).Seconds()) + 5 // +5s buffer for clock skew
+			if gapSec < 1 {
+				gapSec = 1
+			}
+			sinceArg = fmt.Sprintf("--since=%ds", gapSec)
 		}
 
 		args := []string{
@@ -1078,7 +1091,7 @@ func followPodLogs(ctx context.Context, component, labelSelector string, ws *wat
 			"-n", podNamespace,
 			"--all-containers",
 			"--prefix",
-			"--since=1s",
+			sinceArg,
 			"--max-log-requests=50",
 		}
 
@@ -1111,6 +1124,7 @@ func followPodLogs(ctx context.Context, component, labelSelector string, ws *wat
 				continue
 			}
 			gotLines = true
+			lastLogTime = time.Now()
 
 			// kubectl --prefix prepends "[pod/container] " to each line.
 			jsonStr := raw
