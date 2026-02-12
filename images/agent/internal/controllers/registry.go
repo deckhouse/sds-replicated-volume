@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,12 +20,16 @@ import (
 	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdop"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdr"
 )
 
 var registry []func(mgr manager.Manager) error
 
 func init() {
-	// ...
+	registry = append(registry, drbdr.BuildController)  // DRBDR controller + scanner (registers indexes)
+	registry = append(registry, drbdop.BuildController) // DRBDResourceOperation controller
 }
 
 func BuildAll(mgr manager.Manager) error {

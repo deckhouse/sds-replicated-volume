@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -58,7 +58,19 @@ func main() {
 	)
 }
 
+const drbdUsermodeHelperPath = "/sys/module/drbd/parameters/usermode_helper"
+
+func disableDRBDUsermodeHelper(log *slog.Logger) {
+	if err := os.WriteFile(drbdUsermodeHelperPath, []byte("disabled\n"), 0o644); err != nil {
+		log.Warn("failed to disable DRBD usermode helper", "path", drbdUsermodeHelperPath, "err", err)
+	} else {
+		log.Info("disabled DRBD usermode helper", "path", drbdUsermodeHelperPath)
+	}
+}
+
 func run(ctx context.Context, log *slog.Logger) (err error) {
+	disableDRBDUsermodeHelper(log)
+
 	// The derived Context is canceled the first time a function passed to eg.Go
 	// returns a non-nil error or the first time Wait returns
 	eg, ctx := errgroup.WithContext(ctx)

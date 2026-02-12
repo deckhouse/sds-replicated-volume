@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 )
 
 type StatusResult []Resource
@@ -98,27 +97,33 @@ type PeerDevice struct {
 	PercentInSync          float64 `json:"percent-in-sync"`
 }
 
-func ExecuteStatus(ctx context.Context) (StatusResult, error) {
-	cmd := exec.CommandContext(ctx, Command, StatusArgs...)
+// ExecuteStatus runs "drbdsetup status --json <resourceName>". Pass "" to query
+// all resources. Returns empty result (not error) if resource not found.
+func ExecuteStatus(ctx context.Context, resourceName string) (res StatusResult, err error) {
+	if resourceName == "" {
+		resourceName = "all"
+	}
+	args := StatusArgs(resourceName)
+	cmd := ExecCommandContext(ctx, Command, args...)
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
 
 	jsonBytes, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil,
-			fmt.Errorf(
-				"running command: %w; output: %q",
-				err, string(jsonBytes),
-			)
+		if errToExitCode(err) == 10 {
+			return StatusResult{}, nil
+		}
+		return nil, withOutput(err, jsonBytes)
 	}
 
-	// TODO: we need all items to be sorted and not rely on sorting on DRBD side
-	var res StatusResult
-	if err := json.Unmarshal(jsonBytes, &res); err != nil {
-		return nil,
-			fmt.Errorf(
-				"unmarshaling command output: %w; output: %q",
-				err, string(jsonBytes),
-			)
+	var result StatusResult
+	if err := json.Unmarshal(jsonBytes, &result); err != nil {
+		return nil, fmt.Errorf("unmarshaling command output: %w; output: %q", err, string(jsonBytes))
 	}
 
-	return res, nil
+	return result, nil
 }

@@ -18,12 +18,27 @@ package drbdsetup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
-// ExecuteDown brings down a DRBD resource.
-func ExecuteDown(ctx context.Context, resource string) (err error) {
-	args := DownArgs(resource)
+var (
+	ErrSecondaryDeviceInUse      = errors.New("device in use, cannot demote")
+	ErrSecondaryResourceNotFound = errors.New("resource not found")
+)
+
+// SecondaryArgs returns the arguments for drbdsetup secondary command.
+var SecondaryArgs = func(resource string, force bool) []string {
+	args := []string{"secondary", resource}
+	if force {
+		args = append(args, "--force")
+	}
+	return args
+}
+
+// ExecuteSecondary changes the role of a node in a resource to secondary.
+func ExecuteSecondary(ctx context.Context, resource string, force bool) (err error) {
+	args := SecondaryArgs(resource, force)
 	cmd := ExecCommandContext(ctx, Command, args...)
 
 	defer func() {
@@ -34,6 +49,12 @@ func ExecuteDown(ctx context.Context, resource string) (err error) {
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		switch errToExitCode(err) {
+		case 11:
+			err = ErrSecondaryDeviceInUse
+		case 158:
+			err = ErrSecondaryResourceNotFound
+		}
 		return withOutput(err, out)
 	}
 

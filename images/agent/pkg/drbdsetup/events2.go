@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"iter"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -72,7 +71,7 @@ func ExecuteEvents2(
 	}
 
 	return func(yield func(Events2Result) bool) {
-		cmd := exec.CommandContext(
+		cmd := ExecCommandContext(
 			ctx,
 			Command,
 			Events2Args...,
