@@ -28,10 +28,10 @@ func TestDRBDResource(t *testing.T) {
 	for i, n := range cfg.Nodes {
 		nodeNames[i] = n.Name
 	}
-	_ = SetupExistingNodes(t, cl, nodeNames)
+	_ = DiscoverNodes(t, cl, nodeNames)
 
 	// Discover existing LVGs.
-	lvgs := SetupExistingLVGs(t, cl, cfg.Nodes)
+	lvgs := DiscoverLVGs(t, cl, cfg.Nodes)
 
 	// Create LLVs for diskful nodes.
 	testID := shortID()

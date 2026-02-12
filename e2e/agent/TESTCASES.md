@@ -2,7 +2,7 @@
 
 ## Preconditions
 
-<!-- Each precondition corresponds 1-to-1 to a setup helper (SetupX). -->
+<!-- Each precondition corresponds 1-to-1 to a helper (SetupX / DiscoverX / InitializeX). -->
 <!-- Format: -->
 <!-- ### PreconditionName -->
 <!-- Description of the environment state this precondition arranges. -->
@@ -17,12 +17,12 @@ schemes.
 Agent pod log streaming is started for all agent pods. Errors in logs are
 collected. During cleanup, any collected errors are reported as test failures.
 
-### ExistingNodes
+### Nodes
 
 At least 2 nodes are discovered from the cluster by names from environment
 configuration.
 
-### ExistingLVGs
+### LVGs
 
 For each selected node, an existing `LVMVolumeGroup` is discovered on that
 node. LVG names come from environment configuration.
@@ -61,7 +61,7 @@ has: `name` = peer's `spec.nodeName`, `nodeID` = peer's `spec.nodeID`,
 
 ### StandaloneDRBDResourceProducesAddresses
 
-**Preconditions:** Client, PodLogMonitor, ExistingNodes, ExistingLVGs, LLVs,
+**Preconditions:** Client, PodLogMonitor, Nodes, LVGs, LLVs,
 DRBDResourcesCreated
 
 Each DRBDResource has `status.addresses` with an entry for "Internal" system
@@ -69,21 +69,21 @@ network containing a valid IPv4 and `port > 0`.
 
 ### StandaloneDRBDResourceBecomesConfigured
 
-**Preconditions:** Client, PodLogMonitor, ExistingNodes, ExistingLVGs, LLVs,
+**Preconditions:** Client, PodLogMonitor, Nodes, LVGs, LLVs,
 DRBDResourcesCreated
 
 Each DRBDResource has condition `Configured` with `status=True`.
 
 ### StandaloneDiskfulResourceDiskIsUpToDate
 
-**Preconditions:** Client, PodLogMonitor, ExistingNodes, ExistingLVGs, LLVs,
+**Preconditions:** Client, PodLogMonitor, Nodes, LVGs, LLVs,
 DRBDResourcesCreated
 
 Each diskful DRBDResource has `status.diskState = UpToDate`.
 
 ### StandaloneDRBDResourceActiveConfigurationMatchesSpec
 
-**Preconditions:** Client, PodLogMonitor, ExistingNodes, ExistingLVGs, LLVs,
+**Preconditions:** Client, PodLogMonitor, Nodes, LVGs, LLVs,
 DRBDResourcesCreated
 
 Each DRBDResource has `status.activeConfiguration` reflecting: `state=Up`,
@@ -94,7 +94,7 @@ Each DRBDResource has `status.activeConfiguration` reflecting: `state=Up`,
 
 ### PeeredDRBDResourcesConfigured
 
-**Preconditions:** Client, PodLogMonitor, ExistingNodes, ExistingLVGs, LLVs,
+**Preconditions:** Client, PodLogMonitor, Nodes, LVGs, LLVs,
 DRBDResourcesCreated, DRBDResourcesPeered
 
 After adding peers, each DRBDResource has condition `Configured` with
@@ -102,14 +102,14 @@ After adding peers, each DRBDResource has condition `Configured` with
 
 ### PeeredDRBDResourcesPeerConnected
 
-**Preconditions:** Client, PodLogMonitor, ExistingNodes, ExistingLVGs, LLVs,
+**Preconditions:** Client, PodLogMonitor, Nodes, LVGs, LLVs,
 DRBDResourcesCreated, DRBDResourcesPeered
 
 Each DRBDResource reports all peers with `connectionState = Connected`.
 
 ### PeeredDRBDResourcesReplicationEstablished
 
-**Preconditions:** Client, PodLogMonitor, ExistingNodes, ExistingLVGs, LLVs,
+**Preconditions:** Client, PodLogMonitor, Nodes, LVGs, LLVs,
 DRBDResourcesCreated, DRBDResourcesPeered
 
 Each DRBDResource reports all diskful peers with
@@ -117,7 +117,7 @@ Each DRBDResource reports all diskful peers with
 
 ### PeeredDRBDResourcesPathsEstablished
 
-**Preconditions:** Client, PodLogMonitor, ExistingNodes, ExistingLVGs, LLVs,
+**Preconditions:** Client, PodLogMonitor, Nodes, LVGs, LLVs,
 DRBDResourcesCreated, DRBDResourcesPeered
 
 Each DRBDResource reports all peer paths with `established = true`.

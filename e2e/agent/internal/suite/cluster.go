@@ -8,10 +8,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// SetupExistingNodes Provides a slice of Node objects discovered from the cluster.
+// DiscoverNodes Discovers existing Node objects from the cluster by name.
 // nodeNames must be non-empty and contain no duplicates. Each name must match
 // an existing cluster node.
-func SetupExistingNodes(
+func DiscoverNodes(
 	t *testing.T,
 	cl client.Client,
 	nodeNames []string,
@@ -61,10 +61,10 @@ type LVGInfo struct {
 	LVG      *snc.LVMVolumeGroup
 }
 
-// SetupExistingLVGs Provides a slice of LVGInfo for the given node configs.
+// DiscoverLVGs Discovers existing LVMVolumeGroup objects for the given node configs.
 // Each node config specifies a node name and LVG name. The LVG must exist
 // in the cluster and its spec.local.nodeName must match the expected node.
-func SetupExistingLVGs(
+func DiscoverLVGs(
 	t *testing.T,
 	cl client.Client,
 	nodeConfigs []NodeConfig,
