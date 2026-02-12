@@ -62,6 +62,7 @@ func (rv *ReplicatedVolume) SetStatusConditions(conditions []metav1.Condition) {
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeSpec struct {
 	// +kubebuilder:validation:Required
+	//	+kubebuilder:validation:XValidation:rule="quantity(string(self)).isGreaterThan(quantity('0'))",message="size must be greater than 0"
 	Size resource.Quantity `json:"size"`
 
 	// +kubebuilder:validation:Required

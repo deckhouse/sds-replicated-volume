@@ -152,13 +152,17 @@ const (
 )
 
 const (
-	// ReplicatedVolumeReplicaCondScheduledType indicates whether the replica has been scheduled to a node.
+	// ReplicatedVolumeReplicaCondScheduledType indicates whether the replica has been fully
+	// scheduled: node, LVM volume group, and (for thin pools) thin pool name are all assigned.
+	//
+	// A replica with a node but no LVG/ThinPool (e.g., after a replica type change)
+	// is considered partially scheduled; the scheduler will resolve the remaining
+	// fields in a subsequent reconciliation.
 	//
 	// Reasons describe scheduling outcome or failure.
-	ReplicatedVolumeReplicaCondScheduledType                            = "Scheduled"
-	ReplicatedVolumeReplicaCondScheduledReasonNoAvailableNodes          = "NoAvailableNodes"          // No nodes are available.
-	ReplicatedVolumeReplicaCondScheduledReasonReplicaScheduled          = "ReplicaScheduled"          // Scheduled successfully.
-	ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed          = "SchedulingFailed"          // Scheduling failed.
-	ReplicatedVolumeReplicaCondScheduledReasonSchedulingPending         = "SchedulingPending"         // Scheduling is pending.
-	ReplicatedVolumeReplicaCondScheduledReasonTopologyConstraintsFailed = "TopologyConstraintsFailed" // Topology constraints prevent scheduling.
+	ReplicatedVolumeReplicaCondScheduledType                       = "Scheduled"
+	ReplicatedVolumeReplicaCondScheduledReasonExtenderUnavailable  = "ExtenderUnavailable"  // Scheduler extender is unavailable; scheduling will be retried.
+	ReplicatedVolumeReplicaCondScheduledReasonPendingConfiguration = "PendingConfiguration" // Required configuration (RV or RSP) is not yet available; waiting.
+	ReplicatedVolumeReplicaCondScheduledReasonScheduled            = "Scheduled"            // Node, LVG, and ThinPool (if applicable) are all assigned.
+	ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed     = "SchedulingFailed"     // No suitable candidate found (no available nodes/LVGs, all filtered out, etc.).
 )

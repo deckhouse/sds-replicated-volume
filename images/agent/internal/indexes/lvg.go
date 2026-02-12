@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,9 +20,10 @@ import (
 	"context"
 	"fmt"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
 
 // IndexFieldLVGByNodeName is used to quickly list

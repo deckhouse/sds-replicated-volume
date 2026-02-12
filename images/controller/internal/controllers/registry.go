@@ -32,10 +32,12 @@ import (
 // BuildAll builds all controllers.
 // podNamespace is the namespace where the controller pod runs, used by controllers
 // that need to access other pods in this namespace (e.g., agent pods).
+// schedulerExtenderURL is the URL of the scheduler extender service, used by the
+// rvr-scheduling-controller to query LVG scores.
 // isEnabled is a filter function: if it returns false for a controller name,
 // that controller is skipped. When ENABLED_CONTROLLERS env is not set,
 // isEnabled returns true for all names (all controllers are started).
-func BuildAll(mgr manager.Manager, podNamespace string, isEnabled func(string) bool) error {
+func BuildAll(mgr manager.Manager, podNamespace string, schedulerExtenderURL string, isEnabled func(string) bool) error {
 	log := mgr.GetLogger().WithName("controller-registry")
 
 	// Must be first: controllers rely on MatchingFields against these indexes.
@@ -49,7 +51,9 @@ func BuildAll(mgr manager.Manager, podNamespace string, isEnabled func(string) b
 	}
 	builders := []builder{
 		{name: rvcontroller.RVControllerName, build: rvcontroller.BuildController},
-		{name: rvrschedulingcontroller.RVRSchedulingControllerName, build: rvrschedulingcontroller.BuildController},
+		{name: rvrschedulingcontroller.RVRSchedulingControllerName, build: func(mgr manager.Manager) error {
+			return rvrschedulingcontroller.BuildController(mgr, schedulerExtenderURL)
+		}},
 		{name: rsccontroller.RSCControllerName, build: rsccontroller.BuildController},
 		{name: nodecontroller.NodeControllerName, build: nodecontroller.BuildController},
 		{name: rspcontroller.RSPControllerName, build: func(mgr manager.Manager) error {

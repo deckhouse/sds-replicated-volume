@@ -40,6 +40,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
+	rvrllvname "github.com/deckhouse/sds-replicated-volume/images/controller/internal/rvr_llv_name"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -1016,17 +1017,17 @@ var _ = Describe("computeTargetDatameshPendingTransition", func() {
 
 var _ = Describe("computeLLVName", func() {
 	It("produces deterministic output", func() {
-		name1 := computeLLVName("rvr-1", "lvg-1", "thinpool-1")
-		name2 := computeLLVName("rvr-1", "lvg-1", "thinpool-1")
+		name1 := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "thinpool-1")
+		name2 := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "thinpool-1")
 
 		Expect(name1).To(Equal(name2))
 	})
 
 	It("produces different output for different inputs", func() {
-		name1 := computeLLVName("rvr-1", "lvg-1", "thinpool-1")
-		name2 := computeLLVName("rvr-1", "lvg-2", "thinpool-1")
-		name3 := computeLLVName("rvr-1", "lvg-1", "thinpool-2")
-		name4 := computeLLVName("rvr-2", "lvg-1", "thinpool-1")
+		name1 := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "thinpool-1")
+		name2 := rvrllvname.ComputeLLVName("rvr-1", "lvg-2", "thinpool-1")
+		name3 := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "thinpool-2")
+		name4 := rvrllvname.ComputeLLVName("rvr-2", "lvg-1", "thinpool-1")
 
 		Expect(name1).NotTo(Equal(name2))
 		Expect(name1).NotTo(Equal(name3))
@@ -1034,13 +1035,13 @@ var _ = Describe("computeLLVName", func() {
 	})
 
 	It("uses rvrName as prefix", func() {
-		name := computeLLVName("my-rvr", "lvg-1", "")
+		name := rvrllvname.ComputeLLVName("my-rvr", "lvg-1", "")
 
 		Expect(name).To(HavePrefix("my-rvr-"))
 	})
 
 	It("handles empty thin pool name", func() {
-		name := computeLLVName("rvr-1", "lvg-1", "")
+		name := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "")
 
 		Expect(name).To(HavePrefix("rvr-1-"))
 		Expect(len(name)).To(BeNumerically(">", len("rvr-1-")))
@@ -4366,7 +4367,7 @@ var _ = Describe("Reconciler", func() {
 				},
 			}
 			// Compute LLV name
-			llvName := computeLLVName("rvr-1", "lvg-1", "")
+			llvName := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "")
 			llv := &snc.LVMLogicalVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       llvName,
@@ -4442,7 +4443,7 @@ var _ = Describe("Reconciler", func() {
 				},
 			}
 			// Old LLV on lvg-1
-			oldLLVName := computeLLVName("rvr-1", "lvg-1", "")
+			oldLLVName := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "")
 			oldLLV := &snc.LVMLogicalVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       oldLLVName,
@@ -4468,7 +4469,7 @@ var _ = Describe("Reconciler", func() {
 				},
 			}
 			// New LLV on lvg-2 (ready with size >= intended, including DRBD metadata overhead)
-			newLLVName := computeLLVName("rvr-1", "lvg-2", "")
+			newLLVName := rvrllvname.ComputeLLVName("rvr-1", "lvg-2", "")
 			newLLV := &snc.LVMLogicalVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       newLLVName,
@@ -4584,7 +4585,7 @@ var _ = Describe("Reconciler", func() {
 				},
 			}
 			// LLV exists but is not ready (Phase=Pending)
-			llvName := computeLLVName("rvr-1", "lvg-1", "")
+			llvName := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "")
 			llv := &snc.LVMLogicalVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       llvName,
@@ -4680,7 +4681,7 @@ var _ = Describe("Reconciler", func() {
 				},
 			}
 			// LLV exists but is not ready (Phase=Pending), no DRBDResource
-			llvName := computeLLVName("rvr-1", "lvg-1", "")
+			llvName := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "")
 			llv := &snc.LVMLogicalVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       llvName,
@@ -4761,7 +4762,7 @@ var _ = Describe("Reconciler", func() {
 				},
 			}
 			// LLV ready but smaller than intended
-			llvName := computeLLVName("rvr-1", "lvg-1", "")
+			llvName := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "")
 			llv := &snc.LVMLogicalVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       llvName,
@@ -4848,7 +4849,7 @@ var _ = Describe("Reconciler", func() {
 				},
 			}
 			// Existing LLV
-			llvName := computeLLVName("rvr-1", "lvg-1", "")
+			llvName := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "")
 			llv := &snc.LVMLogicalVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       llvName,
@@ -4933,7 +4934,7 @@ var _ = Describe("Reconciler", func() {
 				},
 			}
 			// DRBDResource references old LLV
-			oldLLVName := computeLLVName("rvr-1", "lvg-1", "")
+			oldLLVName := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "")
 			drbdr := &v1alpha1.DRBDResource{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "rvr-1",
@@ -4987,7 +4988,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify new LLV was created on lvg-2
-			newLLVName := computeLLVName("rvr-1", "lvg-2", "")
+			newLLVName := rvrllvname.ComputeLLVName("rvr-1", "lvg-2", "")
 			var newLLV snc.LVMLogicalVolume
 			Expect(cl.Get(ctx, client.ObjectKey{Name: newLLVName}, &newLLV)).To(Succeed())
 			Expect(newLLV.Spec.LVMVolumeGroupName).To(Equal("lvg-2"))
@@ -5067,11 +5068,11 @@ var _ = Describe("Reconciler", func() {
 					Name: "rvr-1",
 				},
 				Spec: v1alpha1.DRBDResourceSpec{
-					LVMLogicalVolumeName: computeLLVName("rvr-1", "lvg-1", ""),
+					LVMLogicalVolumeName: rvrllvname.ComputeLLVName("rvr-1", "lvg-1", ""),
 				},
 			}
 			// Old LLV on lvg-1
-			oldLLVName := computeLLVName("rvr-1", "lvg-1", "")
+			oldLLVName := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "")
 			oldLLV := &snc.LVMLogicalVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       oldLLVName,
@@ -5109,7 +5110,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify new LLV was created on lvg-2 (from RVR spec)
-			newLLVName := computeLLVName("rvr-1", "lvg-2", "")
+			newLLVName := rvrllvname.ComputeLLVName("rvr-1", "lvg-2", "")
 			var newLLV snc.LVMLogicalVolume
 			Expect(cl.Get(ctx, client.ObjectKey{Name: newLLVName}, &newLLV)).To(Succeed())
 			Expect(newLLV.Spec.LVMVolumeGroupName).To(Equal("lvg-2"))
@@ -5147,7 +5148,7 @@ var _ = Describe("Reconciler", func() {
 				},
 			}
 			// DRBDResource references existing LLV
-			llvName := computeLLVName("rvr-1", "lvg-1", "")
+			llvName := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "")
 			drbdr := &v1alpha1.DRBDResource{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "rvr-1",
@@ -5252,7 +5253,7 @@ var _ = Describe("Reconciler", func() {
 				},
 			}
 			// LLV exists but missing finalizer and labels
-			llvName := computeLLVName("rvr-1", "lvg-1", "")
+			llvName := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "")
 			llv := &snc.LVMLogicalVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: llvName,
@@ -5494,7 +5495,7 @@ var _ = Describe("Reconciler", func() {
 				},
 			}
 			// LLV owned by RVR (will be found via index)
-			llvName := computeLLVName("rvr-1", "lvg-first", "")
+			llvName := rvrllvname.ComputeLLVName("rvr-1", "lvg-first", "")
 			llv := &snc.LVMLogicalVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       llvName,
@@ -5736,7 +5737,7 @@ var _ = Describe("Reconciler", func() {
 				},
 			}
 			// LLV ready but smaller than intended, with all metadata in sync
-			llvName := computeLLVName("rvr-1", "lvg-1", "")
+			llvName := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "")
 			llv := &snc.LVMLogicalVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       llvName,

@@ -526,10 +526,15 @@ func buildLVGByNodeMap(
 		result[nodeName] = append(result[nodeName], entry)
 	}
 
-	// Sort LVGs by name for deterministic output.
+	// Sort LVGs by (name, thinPoolName) for deterministic output.
+	// Both keys are needed because the same LVG name can appear multiple
+	// times with different thin pools (valid for LVMThin type).
 	for nodeName := range result {
 		sort.Slice(result[nodeName], func(i, j int) bool {
-			return result[nodeName][i].Name < result[nodeName][j].Name
+			if result[nodeName][i].Name != result[nodeName][j].Name {
+				return result[nodeName][i].Name < result[nodeName][j].Name
+			}
+			return result[nodeName][i].ThinPoolName < result[nodeName][j].ThinPoolName
 		})
 	}
 

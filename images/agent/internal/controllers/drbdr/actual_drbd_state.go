@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,9 +24,9 @@ import (
 	"strconv"
 	"strings"
 
-	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )

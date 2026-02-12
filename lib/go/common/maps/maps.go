@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,6 +23,8 @@ import (
 
 	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	"golang.org/x/exp/constraints"
+
+	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 )
 
 func SetUnique[K comparable, V any](m map[K]V, key K, value V) (map[K]V, bool) {
