@@ -1,3 +1,8 @@
+---
+name: writing-e2e-tests
+description: Write and maintain e2e integration tests and keep e2e/agent/TESTCASES.md in sync with Go test code. Use when editing test code under e2e/ or e2e/agent/TESTCASES.md.
+---
+
 # Writing e2e tests
 
 This skill covers writing and maintaining end-to-end tests for the e2e agent.
@@ -157,9 +162,10 @@ arrangement, this MUST be a fatal test failure. A setup helper that supports
 Arrange MUST also support Discover, unless the arrangement itself is
 idempotent.
 
-**Discovery helpers** (`DiscoverX`) perform only this step: they discover and
-validate existing state, then provide it. They never have Arrange or Cleanup
-steps. If the state is not found or not valid, it is a fatal test failure.
+**In discovery helpers:** Discover is the only meaningful step. The helper
+discovers and validates existing state, then provides it. If the state is not
+found or not valid, this MUST be a fatal test failure. Discovery helpers never
+have Arrange or Cleanup steps.
 
 ## Root test
 
@@ -175,12 +181,46 @@ as much as possible. This means a hierarchical test structure using `t.Run` for
 subtests, where subtests run sequentially and reuse state defined in the parent
 scope.
 
+```go
+func TestMain(t *testing.T) {
+    // Discover: read and validate configuration from the environment.
+    cfg := DiscoverConfig(t)
+    client := InitializeClient(t, cfg)
+
+    // Arrange: set up shared environment state.
+    storageClass := SetupStorageClass(t, client)
+    // t.Cleanup registered inside SetupStorageClass.
+
+    t.Run("WithSingleVolume", func(t *testing.T) {
+        // Arrange: narrow state for this group of subtests.
+        volume := SetupVolume(t, client, storageClass)
+
+        t.Run("VolumeIsAccessible", func(t *testing.T) {
+            // Test case: uses volume from parent scope, no extra arrange.
+        })
+
+        t.Run("VolumeCanBeResized", func(t *testing.T) {
+            // Test case: uses volume from parent scope, acts and asserts.
+        })
+    })
+
+    t.Run("WithReplicatedVolume", func(t *testing.T) {
+        // Arrange: different state, same storageClass from root scope.
+        volume := SetupReplicatedVolume(t, client, storageClass)
+
+        t.Run("ReplicationIsHealthy", func(t *testing.T) {
+            // Test case: uses volume from parent scope.
+        })
+    })
+}
+```
+
 ### Relation to test helpers
 
 In terms of test helpers, the root test behaves like a setup helper without
 Require and Provide: it arranges state, registers cleanup, and runs subtests.
-Subtests have a Require part (they depend on state from the parent scope) but do
-not provide anything.
+Subtests depend on state from the parent scope (Require) but do not provide
+anything.
 
 One important difference from setup helpers: in the root test, all arranged
 state is cleaned up before the test exits (via `t.Cleanup`), so no state leaks
@@ -195,10 +235,36 @@ environments.
 
 ## Test cases
 
-The full hierarchy of test cases is maintained in `e2e/agent/TESTCASES.md`. This
-file MUST correspond to the actual Go tests: hierarchy, test names, and
-descriptions of what each test does.
+Test cases are documented in `e2e/agent/TESTCASES.md`. This file has two
+sections: **Preconditions** and **Test cases**.
 
-Whenever a test case is added, renamed, or removed in `TESTCASES.md`, the
-corresponding Go test MUST be updated to match, and vice versa — changes to Go
-tests MUST be reflected in `TESTCASES.md`.
+**Preconditions** are named 1-to-1 with setup helpers. Each precondition
+describes the environment state that a setup helper arranges.
+
+**Test cases** are a flat list. Each test case has:
+ - A title, which MUST match the Go test name.
+ - A list of preconditions required for the test.
+
+Any grouping or structure within `TESTCASES.md` is purely for readability and
+has no relation to the actual Go test hierarchy.
+
+### Two views of the same tests
+
+`TESTCASES.md` and the Go test hierarchy serve different purposes:
+
+ - **`TESTCASES.md`** is optimized for **readability**. Test cases are listed
+   flat, grouped by topic for humans.
+ - **Go test hierarchy** is optimized for **environment reuse**. Tests are
+   nested with `t.Run` so that subtests sharing the same preconditions live
+   under a common parent that arranges those preconditions once.
+
+These two views MUST be kept in sync: whenever a test case is added, renamed, or
+removed in one, the other MUST be updated to match.
+
+### Placing a new test in Go hierarchy
+
+When a test case is added to `TESTCASES.md`, the corresponding Go test MUST NOT
+simply be appended at the top level. Instead, find (or create) a place in the
+existing `t.Run` hierarchy where all of the test's preconditions are already
+arranged by a parent scope. This ensures the environment is reused and avoids
+redundant setup.
