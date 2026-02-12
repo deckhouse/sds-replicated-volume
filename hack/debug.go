@@ -1045,40 +1045,211 @@ func watchSingleResource(ctx context.Context, kind, name string, ws *watchSet, w
 }
 
 // ---------------------------------------------------------------------------
-// Pod log streaming with restart handling
+// Pod log streaming with per-pod discovery
 // ---------------------------------------------------------------------------
 
 const podNamespace = "d8-sds-replicated-volume"
 
-// followPodLogs continuously tails logs from pods matching the given label
-// selector. On disconnect (pod restart, rollover), it reconnects after a
-// brief pause. Uses exponential backoff when no log lines are received
-// (e.g. pods are not running). Runs until ctx is cancelled.
+// reconcileIDTracker is a mutex-protected map tracking the last reconcileID
+// per (controller, name) for reconcile boundary separator drawing.
+// Shared across all per-pod log streamers of a component.
+type reconcileIDTracker struct {
+	mu sync.Mutex
+	m  map[string]string // "controller\x00name" -> reconcileID
+}
+
+func newReconcileIDTracker() *reconcileIDTracker {
+	return &reconcileIDTracker{m: map[string]string{}}
+}
+
+func (t *reconcileIDTracker) swap(key, newID string) (prevID string, hasPrev bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	prevID, hasPrev = t.m[key]
+	t.m[key] = newID
+	return
+}
+
+// podEvent represents a pod lifecycle event from the pod watcher.
+type podEvent struct {
+	eventType string // "ADDED", "MODIFIED", "DELETED"
+	podName   string
+	phase     string // pod status phase (e.g. "Running", "Pending")
+}
+
+// followPodLogs discovers pods matching the label selector via a watch,
+// then starts and stops per-pod log streamers as pods appear and disappear.
+// This ensures new pods (e.g. during rolling updates) are picked up
+// immediately without waiting for a full reconnect cycle.
 func followPodLogs(ctx context.Context, component, labelSelector string, ws *watchSet, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	// Track the last reconcileID per (controller, name) for separator drawing.
-	lastReconcileID := map[string]string{} // "controller\x00name" -> reconcileID
+	tracker := newReconcileIDTracker()
 
-	const (
-		backoffMin = 2 * time.Second
-		backoffMax = 30 * time.Second
-	)
-	backoff := backoffMin
-	notifiedWaiting := false  // true after we printed "waiting for pods"
-	var lastLogTime time.Time // timestamp of the last received log entry
+	events := make(chan podEvent, 16)
+
+	// Start pod watcher in background.
+	var watcherWg sync.WaitGroup
+	watcherWg.Add(1)
+	go watchPods(ctx, component, labelSelector, events, &watcherWg)
+
+	// activePods tracks running per-pod streamers: podName → cancel func.
+	activePods := map[string]context.CancelFunc{}
+	var streamerWg sync.WaitGroup
+
+	notifiedWaiting := false
+
+	for {
+		select {
+		case <-ctx.Done():
+			// Global shutdown — cancel all per-pod streamers and wait.
+			for name, cancel := range activePods {
+				cancel()
+				delete(activePods, name)
+			}
+			streamerWg.Wait()
+			watcherWg.Wait()
+			return
+
+		case ev, ok := <-events:
+			if !ok {
+				// Pod watcher channel closed (shouldn't happen before ctx cancel).
+				for name, cancel := range activePods {
+					cancel()
+					delete(activePods, name)
+				}
+				streamerWg.Wait()
+				watcherWg.Wait()
+				return
+			}
+
+			switch ev.eventType {
+			case "ADDED", "MODIFIED":
+				if _, exists := activePods[ev.podName]; exists {
+					continue // already streaming
+				}
+				podCtx, podCancel := context.WithCancel(ctx)
+				activePods[ev.podName] = podCancel
+				notifiedWaiting = false
+				streamerWg.Add(1)
+				go streamPodLogs(podCtx, component, ev.podName, ws, tracker, &streamerWg)
+
+			case "DELETED":
+				if cancel, exists := activePods[ev.podName]; exists {
+					cancel()
+					delete(activePods, ev.podName)
+				}
+				// If all pods are gone, notify once.
+				if len(activePods) == 0 && !notifiedWaiting {
+					emit(fmt.Sprintf("%s %s[%s]%s %s── no pods, waiting ──%s",
+						ts(), badgeColor(component), component, colorReset, colorDim, colorReset))
+					notifiedWaiting = true
+				}
+			}
+		}
+	}
+}
+
+// watchPods runs "kubectl get pods -w" and sends podEvents to the channel.
+// Reconnects on disconnect. Runs until ctx is cancelled, then closes events.
+func watchPods(ctx context.Context, component, labelSelector string, events chan<- podEvent, wg *sync.WaitGroup) {
+	defer wg.Done()
+	defer close(events)
 
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 
-		// On first connect use --since=1s (only recent logs).
-		// On reconnect compute the gap since the last received log entry
-		// so we don't miss startup logs after a pod restart.
+		args := []string{
+			"get", "pods",
+			"-l", labelSelector,
+			"-n", podNamespace,
+			"-w", "--output-watch-events", "-o", "json",
+		}
+
+		cmd := exec.CommandContext(ctx, "kubectl", args...)
+		cmd.Stderr = os.Stderr
+
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			sleepCtx(ctx, 2*time.Second)
+			continue
+		}
+
+		if err := cmd.Start(); err != nil {
+			sleepCtx(ctx, 2*time.Second)
+			continue
+		}
+
+		scanner := bufio.NewScanner(stdout)
+		scanner.Buffer(make([]byte, 0, 1*1024*1024), 1*1024*1024)
+
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "" {
+				continue
+			}
+
+			var raw map[string]any
+			if err := json.Unmarshal([]byte(line), &raw); err != nil {
+				continue
+			}
+
+			eventType, _ := raw["type"].(string)
+			obj, _ := raw["object"].(map[string]any)
+			if obj == nil {
+				continue
+			}
+
+			meta, _ := obj["metadata"].(map[string]any)
+			podName, _ := meta["name"].(string)
+			if podName == "" {
+				continue
+			}
+
+			// Extract pod phase.
+			status, _ := obj["status"].(map[string]any)
+			phase, _ := status["phase"].(string)
+
+			select {
+			case events <- podEvent{eventType: eventType, podName: podName, phase: phase}:
+			case <-ctx.Done():
+				_ = cmd.Process.Kill()
+				return
+			}
+		}
+
+		_ = cmd.Wait()
+
+		if ctx.Err() != nil {
+			return
+		}
+		sleepCtx(ctx, 2*time.Second)
+	}
+}
+
+// streamPodLogs tails logs from a single pod. It reconnects with exponential
+// backoff when the pod is not yet ready, and uses --since based on the last
+// received log timestamp to avoid missing logs across reconnects.
+func streamPodLogs(ctx context.Context, component, podName string, ws *watchSet, tracker *reconcileIDTracker, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	const (
+		backoffMin = 2 * time.Second
+		backoffMax = 30 * time.Second
+	)
+	backoff := backoffMin
+	var lastLogTime time.Time
+
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
 		sinceArg := "--since=1s"
 		if !lastLogTime.IsZero() {
-			gapSec := int(time.Since(lastLogTime).Seconds()) + 5 // +5s buffer for clock skew
+			gapSec := int(time.Since(lastLogTime).Seconds()) + 5
 			if gapSec < 1 {
 				gapSec = 1
 			}
@@ -1087,29 +1258,24 @@ func followPodLogs(ctx context.Context, component, labelSelector string, ws *wat
 
 		args := []string{
 			"logs", "-f",
-			"-l", labelSelector,
+			podName,
 			"-n", podNamespace,
 			"--all-containers",
 			"--prefix",
 			sinceArg,
-			"--max-log-requests=50",
 		}
 
 		cmd := exec.CommandContext(ctx, "kubectl", args...)
-		// Capture stderr so that kubectl "error: ... no matching pods" does not
-		// spam the terminal when pods are absent.
 		var stderrBuf strings.Builder
 		cmd.Stderr = &stderrBuf
 
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
-			emit(fmt.Sprintf("%s %s[%s]%s failed to create pipe: %v", ts(), colorMagenta, component, colorReset, err))
 			sleepCtx(ctx, backoff)
 			continue
 		}
 
 		if err := cmd.Start(); err != nil {
-			emit(fmt.Sprintf("%s %s[%s]%s failed to start kubectl logs: %v", ts(), colorMagenta, component, colorReset, err))
 			sleepCtx(ctx, backoff)
 			continue
 		}
@@ -1134,7 +1300,6 @@ func followPodLogs(ctx context.Context, component, labelSelector string, ws *wat
 
 			entry := parseLogEntry(jsonStr)
 			if entry == nil {
-				// Non-JSON line (e.g. startup noise) — show as-is if it looks useful.
 				if len(jsonStr) > 0 {
 					emit(fmt.Sprintf("%s %s[%s]%s %s", ts(), badgeColor(component), component, colorReset, jsonStr))
 				}
@@ -1145,7 +1310,7 @@ func followPodLogs(ctx context.Context, component, labelSelector string, ws *wat
 				continue
 			}
 
-			formatted := formatLogEntry(entry, component, lastReconcileID)
+			formatted := formatLogEntryTracked(entry, component, tracker)
 			emitBlock(formatted)
 		}
 
@@ -1156,19 +1321,8 @@ func followPodLogs(ctx context.Context, component, labelSelector string, ws *wat
 		}
 
 		if gotLines {
-			// Had real output → normal reconnect with minimal backoff.
 			backoff = backoffMin
-			notifiedWaiting = false
-			emit(fmt.Sprintf("%s %s[%s]%s %s── reconnecting ──%s",
-				ts(), badgeColor(component), component, colorReset, colorDim, colorReset))
 		} else {
-			// No output at all → pods are likely absent. Print once, then back off silently.
-			if !notifiedWaiting {
-				emit(fmt.Sprintf("%s %s[%s]%s %s── no pods, waiting ──%s",
-					ts(), badgeColor(component), component, colorReset, colorDim, colorReset))
-				notifiedWaiting = true
-			}
-			// Exponential backoff.
 			backoff = backoff * 2
 			if backoff > backoffMax {
 				backoff = backoffMax
@@ -1770,12 +1924,13 @@ func (ws *watchSet) matchesControllerName(controllerName string) bool {
 // Log visualization
 // ---------------------------------------------------------------------------
 
-func formatLogEntry(e *logEntry, component string, lastReconcileID map[string]string) []string {
+// formatLogEntryTracked is like formatLogEntry but uses a mutex-protected
+// reconcileIDTracker for safe concurrent access from multiple pod streamers.
+func formatLogEntryTracked(e *logEntry, component string, tracker *reconcileIDTracker) []string {
 	var lines []string
 
 	badge := fmt.Sprintf("%s[%s]%s", badgeColor(component), component, colorReset)
 
-	// Short reconcile ID (first 8 chars).
 	shortID := ""
 	if e.ReconcileID != "" {
 		shortID = e.ReconcileID
@@ -1784,11 +1939,9 @@ func formatLogEntry(e *logEntry, component string, lastReconcileID map[string]st
 		}
 	}
 
-	// Draw reconcile boundary separator when reconcileID changes.
 	if e.Controller != "" && e.Name != "" && e.ReconcileID != "" {
 		key := e.Controller + "\x00" + e.Name
-		prev, hasPrev := lastReconcileID[key]
-		lastReconcileID[key] = e.ReconcileID
+		prev, hasPrev := tracker.swap(key, e.ReconcileID)
 		if hasPrev && prev != e.ReconcileID {
 			lines = append(lines, fmt.Sprintf(
 				"%s────────── reconcile %s done ──────────%s",
@@ -1796,6 +1949,10 @@ func formatLogEntry(e *logEntry, component string, lastReconcileID map[string]st
 		}
 	}
 
+	return formatLogEntryCommon(e, badge, shortID, lines)
+}
+
+func formatLogEntryCommon(e *logEntry, badge, shortID string, lines []string) []string {
 	// Timestamp.
 	timeStr := ""
 	if e.Time != "" {
