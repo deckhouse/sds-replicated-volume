@@ -2234,7 +2234,10 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 	// At this point DRBDR is configured (Configured condition is True).
 
 	// 10. DRBDR is configured — check addresses are populated.
-	if len(rvr.Status.Addresses) == 0 {
+	// Note: We check drbdr.Status.Addresses (the source of truth) rather than
+	// rvr.Status.Addresses (the mirror). ensureStatusAddressesAndType copies
+	// addresses from DRBDR to RVR later in the same reconcile cycle.
+	if len(drbdr.Status.Addresses) == 0 {
 		changed = applyDRBDConfiguredCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration,
 			"Waiting for DRBD addresses") || changed
