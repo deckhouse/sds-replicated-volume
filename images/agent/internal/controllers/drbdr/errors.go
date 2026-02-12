@@ -14,28 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drbdsetup
+package drbdr
 
-import (
-	"context"
-	"fmt"
-)
+// ConfiguredReasonSource carries a condition reason for configuration failures.
+type ConfiguredReasonSource interface {
+	ConfiguredReason() string
+}
 
-// ExecuteDown brings down a DRBD resource.
-func ExecuteDown(ctx context.Context, resource string) (err error) {
-	args := DownArgs(resource)
-	cmd := ExecCommandContext(ctx, Command, args...)
+type configuredReasonError struct {
+	error
+	reason string
+}
 
-	defer func() {
-		if err != nil {
-			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
-		}
-	}()
+func (e configuredReasonError) ConfiguredReason() string { return e.reason }
 
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return withOutput(err, out)
+// ConfiguredReasonError wraps an error with a configured reason.
+// Returns nil if err is nil.
+func ConfiguredReasonError(err error, reason string) error {
+	if err == nil {
+		return nil
 	}
-
-	return nil
+	return configuredReasonError{error: err, reason: reason}
 }
