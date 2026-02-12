@@ -1,0 +1,235 @@
+[
+    {
+        "resource": "r2-test",
+        "options": {
+            "cpu-mask": "",
+            "on-no-data-accessible": "suspend-io",
+            "auto-promote": true,
+            "peer-ack-window": "4096s",
+            "peer-ack-delay": "100",
+            "twopc-timeout": "300",
+            "twopc-retry-timeout": "1",
+            "auto-promote-timeout": "20",
+            "max-io-depth": "8000",
+            "quorum": "2",
+            "on-no-quorum": "suspend-io",
+            "quorum-minimum-redundancy": "1",
+            "on-suspended-primary-outdated": "disconnect"
+        },
+        "_this_host": {
+            "node-id": 0,
+            "volumes": [
+                {
+                    "volume_nr": 0,
+                    "device_minor": 1001,
+                    "backing-disk": "/dev/vg-0/r2-test",
+                    "meta-disk": "internal",
+                    "disk": {
+                        "size": "0s",
+                        "on-io-error": "detach",
+                        "disk-barrier": false,
+                        "disk-flushes": true,
+                        "disk-drain": true,
+                        "md-flushes": true,
+                        "resync-after": "-1",
+                        "al-extents": "1237",
+                        "al-updates": true,
+                        "discard-zeroes-if-aligned": true,
+                        "disable-write-same": false,
+                        "disk-timeout": "0",
+                        "read-balancing": "prefer-local",
+                        "rs-discard-granularity": "0"
+                    }
+                }
+            ]
+        },
+        "connections": [
+            {
+                "path": {
+                    "_this_host": "ipv4 10.12.0.241:7001",
+                    "_remote_host": "ipv4 10.12.0.235:7001"
+                },
+                "net": {
+                    "transport": "",
+                    "load-balance-paths": false,
+                    "protocol": "C",
+                    "timeout": "60",
+                    "max-epoch-size": "2048",
+                    "connect-int": "10",
+                    "ping-int": "10",
+                    "sndbuf-size": "0",
+                    "rcvbuf-size": "0",
+                    "ko-count": "7",
+                    "allow-two-primaries": false,
+                    "cram-hmac-alg": "",
+                    "shared-secret": "",
+                    "after-sb-0pri": "disconnect",
+                    "after-sb-1pri": "disconnect",
+                    "after-sb-2pri": "disconnect",
+                    "always-asbp": false,
+                    "rr-conflict": "disconnect",
+                    "ping-timeout": "5",
+                    "data-integrity-alg": "",
+                    "tcp-cork": true,
+                    "on-congestion": "block",
+                    "congestion-fill": "0s",
+                    "congestion-extents": "1237",
+                    "csums-alg": "",
+                    "csums-after-crash-only": false,
+                    "verify-alg": "",
+                    "use-rle": true,
+                    "socket-check-timeout": "0",
+                    "fencing": "dont-care",
+                    "max-buffers": "2048",
+                    "allow-remote-read": true,
+                    "tls": false,
+                    "tls-keyring": "(null)",
+                    "tls-privkey": "(null)",
+                    "tls-certificate": "(null)",
+                    "rdma-ctrl-rcvbuf-size": "0",
+                    "rdma-ctrl-sndbuf-size": "0",
+                    "_name": "astef-sds-rv-redos-1"
+                },
+                "volumes": [
+                    {
+                        "volume_nr": 0,
+                        "disk": {
+                            "resync-rate": "250k",
+                            "c-plan-ahead": "20",
+                            "c-delay-target": "10",
+                            "c-fill-target": "100s",
+                            "c-max-rate": "102400k",
+                            "c-min-rate": "250k",
+                            "bitmap": true
+                        }
+                    }
+                ],
+                "_peer_node_id": 1
+            },
+            {
+                "path": {
+                    "_this_host": "ipv4 10.12.0.241:7001",
+                    "_remote_host": "ipv4 10.12.0.236:7001"
+                },
+                "net": {
+                    "transport": "",
+                    "load-balance-paths": false,
+                    "protocol": "C",
+                    "timeout": "60",
+                    "max-epoch-size": "2048",
+                    "connect-int": "10",
+                    "ping-int": "10",
+                    "sndbuf-size": "0",
+                    "rcvbuf-size": "0",
+                    "ko-count": "7",
+                    "allow-two-primaries": false,
+                    "cram-hmac-alg": "",
+                    "shared-secret": "",
+                    "after-sb-0pri": "disconnect",
+                    "after-sb-1pri": "disconnect",
+                    "after-sb-2pri": "disconnect",
+                    "always-asbp": false,
+                    "rr-conflict": "disconnect",
+                    "ping-timeout": "5",
+                    "data-integrity-alg": "",
+                    "tcp-cork": true,
+                    "on-congestion": "block",
+                    "congestion-fill": "0s",
+                    "congestion-extents": "1237",
+                    "csums-alg": "",
+                    "csums-after-crash-only": false,
+                    "verify-alg": "",
+                    "use-rle": true,
+                    "socket-check-timeout": "0",
+                    "fencing": "dont-care",
+                    "max-buffers": "2048",
+                    "allow-remote-read": true,
+                    "tls": false,
+                    "tls-keyring": "(null)",
+                    "tls-privkey": "(null)",
+                    "tls-certificate": "(null)",
+                    "rdma-ctrl-rcvbuf-size": "0",
+                    "rdma-ctrl-sndbuf-size": "0",
+                    "_name": "astef-sds-rv-ubuntu-0"
+                },
+                "volumes": [
+                    {
+                        "volume_nr": 0,
+                        "disk": {
+                            "resync-rate": "250k",
+                            "c-plan-ahead": "20",
+                            "c-delay-target": "10",
+                            "c-fill-target": "100s",
+                            "c-max-rate": "102400k",
+                            "c-min-rate": "250k",
+                            "bitmap": false
+                        }
+                    }
+                ],
+                "_peer_node_id": 2
+            },
+            {
+                "path": {
+                    "_this_host": "ipv4 10.12.0.241:7001",
+                    "_remote_host": "ipv4 10.12.0.234:7001"
+                },
+                "net": {
+                    "transport": "",
+                    "load-balance-paths": false,
+                    "protocol": "C",
+                    "timeout": "60",
+                    "max-epoch-size": "2048",
+                    "connect-int": "10",
+                    "ping-int": "10",
+                    "sndbuf-size": "0",
+                    "rcvbuf-size": "0",
+                    "ko-count": "7",
+                    "allow-two-primaries": false,
+                    "cram-hmac-alg": "",
+                    "shared-secret": "",
+                    "after-sb-0pri": "disconnect",
+                    "after-sb-1pri": "disconnect",
+                    "after-sb-2pri": "disconnect",
+                    "always-asbp": false,
+                    "rr-conflict": "disconnect",
+                    "ping-timeout": "5",
+                    "data-integrity-alg": "",
+                    "tcp-cork": true,
+                    "on-congestion": "block",
+                    "congestion-fill": "0s",
+                    "congestion-extents": "1237",
+                    "csums-alg": "",
+                    "csums-after-crash-only": false,
+                    "verify-alg": "",
+                    "use-rle": true,
+                    "socket-check-timeout": "0",
+                    "fencing": "dont-care",
+                    "max-buffers": "2048",
+                    "allow-remote-read": false,
+                    "tls": false,
+                    "tls-keyring": "(null)",
+                    "tls-privkey": "(null)",
+                    "tls-certificate": "(null)",
+                    "rdma-ctrl-rcvbuf-size": "0",
+                    "rdma-ctrl-sndbuf-size": "0",
+                    "_name": "astef-sds-rv-ubuntu-1"
+                },
+                "volumes": [
+                    {
+                        "volume_nr": 0,
+                        "disk": {
+                            "resync-rate": "250k",
+                            "c-plan-ahead": "20",
+                            "c-delay-target": "10",
+                            "c-fill-target": "100s",
+                            "c-max-rate": "102400k",
+                            "c-min-rate": "250k",
+                            "bitmap": false
+                        }
+                    }
+                ],
+                "_peer_node_id": 3
+            }
+        ]
+    }
+]

@@ -29,7 +29,6 @@ import (
 
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 )
 
@@ -66,10 +65,6 @@ func newManager(
 	mgr, err := manager.New(config, mgrOpts)
 	if err != nil {
 		return nil, u.LogError(log, fmt.Errorf("creating manager: %w", err))
-	}
-
-	if err := indexes.RegisterIndexes(ctx, mgr); err != nil {
-		return nil, u.LogError(log, fmt.Errorf("registering indexes: %w", err))
 	}
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

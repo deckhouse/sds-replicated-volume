@@ -25,10 +25,10 @@ spec:
     - jsonPath: .spec.state
       name: State
       type: string
-    - jsonPath: .status.role
+    - jsonPath: .status.activeConfiguration.role
       name: Role
       type: string
-    - jsonPath: .spec.type
+    - jsonPath: .status.activeConfiguration.type
       name: Type
       type: string
     - jsonPath: .status.diskState
