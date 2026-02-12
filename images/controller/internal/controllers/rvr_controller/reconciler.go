@@ -1475,7 +1475,34 @@ func (r *Reconciler) reconcileBackingVolume(
 	// 7. Find the intended LLV in the list.
 	intendedLLV := findLLVByName(*llvs, intended.LLVName)
 
-	// 8. Create if missing.
+	// 8. If the intended LLV exists but is being deleted, wait for deletion to complete.
+	// This happens when an RVR is recreated while the old LLV from the previous incarnation
+	// is still being deleted (e.g., held by sds-node-configurator's finalizer).
+	// We cannot create a new LLV with the same name until the old one is fully removed.
+	//
+	// IMPORTANT: This guard applies ONLY to RVRs that are not yet datamesh members.
+	// For active datamesh members, a deleting LLV is an abnormal situation (e.g., accidental
+	// manual deletion) and we must NOT help delete it by removing our finalizer — the existing
+	// steps 9–12 will handle it (report NotReady, etc.).
+	if intendedLLV != nil && intendedLLV.DeletionTimestamp != nil &&
+		rv.Status.Datamesh.FindMemberByName(rvr.Name) == nil {
+		// Remove our finalizer from the deleting LLV if still present
+		// (help speed up deletion in case it was missed by the previous incarnation).
+		if obju.HasFinalizer(intendedLLV, v1alpha1.RVRControllerFinalizer) {
+			base := intendedLLV.DeepCopy()
+			obju.RemoveFinalizer(intendedLLV, v1alpha1.RVRControllerFinalizer)
+			if err := r.patchLLV(rf.Ctx(), intendedLLV, base); err != nil {
+				return nil, nil, rf.Failf(err, "removing finalizer from deleting LLV %s", intendedLLV.Name)
+			}
+		}
+
+		changed := applyBackingVolumeReadyCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioning,
+			fmt.Sprintf("Waiting for old backing volume %s to be fully deleted", intended.LLVName))
+		return actual, intended, rf.Continue().ReportChangedIf(changed)
+	}
+
+	// 9. Create if missing.
 	if intendedLLV == nil {
 		llv, err := newLLV(r.scheme, rvr, rv, intended)
 		if err != nil {
@@ -1519,7 +1546,7 @@ func (r *Reconciler) reconcileBackingVolume(
 		return actual, intended, rf.Continue().ReportChangedIf(changed)
 	}
 
-	// 9. Ensure metadata (ownerRef, finalizer, label) on the intended LLV.
+	// 10. Ensure metadata (ownerRef, finalizer, label) on the intended LLV.
 	// Note: In rare cases this results in two LLV patches per reconcile (metadata + resize).
 	// This only happens during migration or manual interventions, so it's acceptable.
 	if !isLLVMetadataInSync(rvr, rv, intendedLLV) {
@@ -1532,7 +1559,7 @@ func (r *Reconciler) reconcileBackingVolume(
 		}
 	}
 
-	// 10. Check if LLV is ready.
+	// 11. Check if LLV is ready.
 	if !isLLVReady(intendedLLV) {
 		var reason, message string
 		switch {
@@ -1553,7 +1580,7 @@ func (r *Reconciler) reconcileBackingVolume(
 		return actual, intended, rf.Continue().ReportChangedIf(changed)
 	}
 
-	// 11. Resize if needed: LLV is ready, but size may need to grow.
+	// 12. Resize if needed: LLV is ready, but size may need to grow.
 	// Note: Status is guaranteed non-nil here because isLLVReady checks it.
 	actualSize := intendedLLV.Status.ActualSize
 	if actualSize.Cmp(intended.Size) < 0 {
@@ -1583,7 +1610,7 @@ func (r *Reconciler) reconcileBackingVolume(
 		return actual, intended, rf.Continue().ReportChangedIf(changed)
 	}
 
-	// 12. Fully ready: delete obsolete LLVs and set condition to Ready.
+	// 13. Fully ready: delete obsolete LLVs and set condition to Ready.
 	// Keep actual LLV if it's different from intended (migration in progress).
 	// But at this point intended is ready, so we can delete actual too.
 	message = fmt.Sprintf("Backing volume %s is ready", intended.LLVName)
@@ -1593,7 +1620,9 @@ func (r *Reconciler) reconcileBackingVolume(
 		if ro.ShouldReturn() {
 			return nil, nil, ro
 		}
-		message = fmt.Sprintf("%s; deleting obsolete: %s", message, strings.Join(deletingNames, ", "))
+		if len(deletingNames) > 0 {
+			message = fmt.Sprintf("%s; deleting obsolete: %s", message, strings.Join(deletingNames, ", "))
+		}
 	}
 	changed := applyBackingVolumeReadyCondTrue(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonReady, message)
 

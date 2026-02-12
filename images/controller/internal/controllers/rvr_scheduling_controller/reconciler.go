@@ -78,9 +78,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Fail(err).ToCtrl()
 	}
 
+	all := nodeidset.FromAll(rvrs)
+
 	// Guard 1: RV not found — nothing to schedule.
 	if rv == nil {
-		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, nodeidset.All,
+		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, all,
 			metav1.ConditionUnknown,
 			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonPendingConfiguration,
 			"ReplicatedVolume not found; waiting for it to be created").
@@ -89,7 +91,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Guard 2: RV has no configuration yet — RV controller hasn't reconciled it.
 	if rv.Status.Configuration == nil {
-		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, nodeidset.All,
+		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, all,
 			metav1.ConditionUnknown,
 			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonPendingConfiguration,
 			"ReplicatedVolume has no configuration yet; waiting for RV controller to reconcile").
@@ -103,7 +105,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Guard 3: RSP not found — storage pool doesn't exist yet.
 	if rsp == nil {
-		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, nodeidset.All,
+		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, all,
 			metav1.ConditionUnknown,
 			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonPendingConfiguration,
 			fmt.Sprintf("ReplicatedStoragePool %q not found; waiting for it to be created", rv.Status.Configuration.StoragePoolName)).
@@ -121,19 +123,24 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// condition from them if it was set previously (e.g., the replica
 	// type was changed from Diskful/TieBreaker to Access), and exclude
 	// them from all subsequent scheduling logic.
-	outcome := r.reconcileRVRsConditionAbsent(rf.Ctx(), rvrs, sctx.Access)
-	if outcome.ShouldReturn() {
-		return outcome.ToCtrl()
+	var outcome flow.ReconcileOutcome
+	if sctx.Access.Len() > 0 {
+		outcome := r.reconcileRVRsConditionAbsent(rf.Ctx(), rvrs, sctx.Access)
+		if outcome.ShouldReturn() {
+			return outcome.ToCtrl()
+		}
 	}
 
 	// Mark replicas that already have a node assigned and passed eligible-node
 	// validation as successfully scheduled.
-	outcome = outcome.Merge(r.reconcileRVRsCondition(rf.Ctx(), rvrs, sctx.Scheduled,
-		metav1.ConditionTrue,
-		v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled,
-		"Replica scheduled successfully"))
-	if outcome.ShouldReturn() {
-		return outcome.ToCtrl()
+	if sctx.Scheduled.Len() > 0 {
+		outcome = outcome.Merge(r.reconcileRVRsCondition(rf.Ctx(), rvrs, sctx.Scheduled,
+			metav1.ConditionTrue,
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled,
+			"Replica scheduled successfully"))
+		if outcome.ShouldReturn() {
+			return outcome.ToCtrl()
+		}
 	}
 
 	// All relevant replicas are already scheduled — nothing more to do.
