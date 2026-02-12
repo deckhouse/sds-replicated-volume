@@ -4514,6 +4514,296 @@ var _ = Describe("Reconciler", func() {
 			Expect(llvList.Items[0].Name).To(Equal(newLLVName))
 		})
 
+		It("waits for old deleting LLV and removes finalizer when RVR is not a datamesh member", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Spec: v1alpha1.ReplicatedStoragePoolSpec{
+					Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+				},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+						{
+							NodeName: "node-1",
+							LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+								{Name: "lvg-1", Ready: true},
+							},
+						},
+					},
+				},
+			}
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						StoragePoolName: "rsp-1",
+					},
+					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+						Size: resource.MustParse("10Gi"),
+						// No members — RVR is not yet a member.
+					},
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rvr-1",
+					UID:        "uid-1",
+					Finalizers: []string{v1alpha1.RVRControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedVolumeLabelKey: "rv-1",
+						v1alpha1.LVMVolumeGroupLabelKey:   "lvg-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+			}
+			// Old LLV that is being deleted (e.g., from a previous RVR incarnation).
+			now := metav1.Now()
+			llvName := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "")
+			oldLLV := &snc.LVMLogicalVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              llvName,
+					DeletionTimestamp: &now,
+					Finalizers:        []string{v1alpha1.RVRControllerFinalizer, "other-finalizer"},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         v1alpha1.SchemeGroupVersion.String(),
+							Kind:               "ReplicatedVolumeReplica",
+							Name:               "rvr-1",
+							UID:                "uid-1",
+							Controller:         boolPtr(true),
+							BlockOwnerDeletion: boolPtr(true),
+						},
+					},
+				},
+				Spec: snc.LVMLogicalVolumeSpec{
+					LVMVolumeGroupName: "lvg-1",
+					Type:               "Thick",
+				},
+			}
+
+			cl := testhelpers.WithLLVByRVROwnerIndex(
+				fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(rsp, rv, rvr, oldLLV).
+					WithStatusSubresource(rvr, rv, rsp, oldLLV),
+			).Build()
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify our finalizer was removed from the deleting LLV.
+			var updatedLLV snc.LVMLogicalVolume
+			Expect(cl.Get(ctx, client.ObjectKey{Name: llvName}, &updatedLLV)).To(Succeed())
+			Expect(obju.HasFinalizer(&updatedLLV, v1alpha1.RVRControllerFinalizer)).To(BeFalse())
+			// The other finalizer should remain.
+			Expect(updatedLLV.Finalizers).To(ContainElement("other-finalizer"))
+
+			// Verify BackingVolumeReady=False Provisioning condition is set on RVR.
+			var updatedRVR v1alpha1.ReplicatedVolumeReplica
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, &updatedRVR)).To(Succeed())
+			cond := obju.GetStatusCondition(&updatedRVR, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioning))
+			Expect(cond.Message).To(ContainSubstring("Waiting for old backing volume"))
+
+			// Verify no new LLV was created (only the old deleting one should exist).
+			var llvList snc.LVMLogicalVolumeList
+			Expect(cl.List(ctx, &llvList)).To(Succeed())
+			Expect(llvList.Items).To(HaveLen(1))
+			Expect(llvList.Items[0].Name).To(Equal(llvName))
+		})
+
+		It("waits for old deleting LLV without patching when our finalizer is already absent", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Spec: v1alpha1.ReplicatedStoragePoolSpec{
+					Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+				},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+						{
+							NodeName: "node-1",
+							LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+								{Name: "lvg-1", Ready: true},
+							},
+						},
+					},
+				},
+			}
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						StoragePoolName: "rsp-1",
+					},
+					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+						Size: resource.MustParse("10Gi"),
+						// No members — RVR is not yet a member.
+					},
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rvr-1",
+					UID:        "uid-1",
+					Finalizers: []string{v1alpha1.RVRControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedVolumeLabelKey: "rv-1",
+						v1alpha1.LVMVolumeGroupLabelKey:   "lvg-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+			}
+			// Old LLV being deleted, our finalizer already removed.
+			now := metav1.Now()
+			llvName := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "")
+			oldLLV := &snc.LVMLogicalVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              llvName,
+					DeletionTimestamp: &now,
+					Finalizers:        []string{"other-finalizer"},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         v1alpha1.SchemeGroupVersion.String(),
+							Kind:               "ReplicatedVolumeReplica",
+							Name:               "rvr-1",
+							UID:                "uid-1",
+							Controller:         boolPtr(true),
+							BlockOwnerDeletion: boolPtr(true),
+						},
+					},
+				},
+				Spec: snc.LVMLogicalVolumeSpec{
+					LVMVolumeGroupName: "lvg-1",
+					Type:               "Thick",
+				},
+			}
+
+			cl := testhelpers.WithLLVByRVROwnerIndex(
+				fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(rsp, rv, rvr, oldLLV).
+					WithStatusSubresource(rvr, rv, rsp, oldLLV),
+			).Build()
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify BackingVolumeReady=False Provisioning condition is set.
+			var updatedRVR v1alpha1.ReplicatedVolumeReplica
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, &updatedRVR)).To(Succeed())
+			cond := obju.GetStatusCondition(&updatedRVR, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioning))
+			Expect(cond.Message).To(ContainSubstring("Waiting for old backing volume"))
+
+			// Our finalizer should still be absent on the LLV (no unnecessary patch).
+			var updatedLLV snc.LVMLogicalVolume
+			Expect(cl.Get(ctx, client.ObjectKey{Name: llvName}, &updatedLLV)).To(Succeed())
+			Expect(obju.HasFinalizer(&updatedLLV, v1alpha1.RVRControllerFinalizer)).To(BeFalse())
+		})
+
+		It("does not wait for deleting LLV when RVR is a datamesh member", func() {
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
+					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+						Size: resource.MustParse("10Gi"),
+						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+							{
+								Name:               "rvr-1",
+								Type:               v1alpha1.ReplicaTypeDiskful,
+								LVMVolumeGroupName: "lvg-1",
+							},
+						},
+					},
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rvr-1",
+					UID:        "uid-1",
+					Finalizers: []string{v1alpha1.RVRControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedVolumeLabelKey: "rv-1",
+						v1alpha1.LVMVolumeGroupLabelKey:   "lvg-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+			}
+			// LLV that is being deleted, but RVR IS a datamesh member.
+			// The controller should NOT remove the finalizer or wait.
+			now := metav1.Now()
+			llvName := rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "")
+			deletingLLV := &snc.LVMLogicalVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              llvName,
+					DeletionTimestamp: &now,
+					Finalizers:        []string{v1alpha1.RVRControllerFinalizer, "other-finalizer"},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         v1alpha1.SchemeGroupVersion.String(),
+							Kind:               "ReplicatedVolumeReplica",
+							Name:               "rvr-1",
+							UID:                "uid-1",
+							Controller:         boolPtr(true),
+							BlockOwnerDeletion: boolPtr(true),
+						},
+					},
+				},
+				Spec: snc.LVMLogicalVolumeSpec{
+					LVMVolumeGroupName: "lvg-1",
+					Type:               "Thick",
+				},
+			}
+
+			cl := testhelpers.WithLLVByRVROwnerIndex(
+				fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(rv, rvr, deletingLLV).
+					WithStatusSubresource(rvr, rv, deletingLLV),
+			).Build()
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify our finalizer was NOT removed from the LLV (we must NOT help delete it).
+			var updatedLLV snc.LVMLogicalVolume
+			Expect(cl.Get(ctx, client.ObjectKey{Name: llvName}, &updatedLLV)).To(Succeed())
+			Expect(obju.HasFinalizer(&updatedLLV, v1alpha1.RVRControllerFinalizer)).To(BeTrue())
+
+			// Verify the condition is NOT set to "Waiting for old backing volume" — the normal
+			// flow should handle this (e.g., NotReady since LLV has no status).
+			var updatedRVR v1alpha1.ReplicatedVolumeReplica
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, &updatedRVR)).To(Succeed())
+			cond := obju.GetStatusCondition(&updatedRVR, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
+			if cond != nil {
+				Expect(cond.Message).NotTo(ContainSubstring("Waiting for old backing volume"))
+			}
+		})
+
 		It("deletes DRBDResource when RVR is being deleted (only our finalizer)", func() {
 			now := metav1.Now()
 			rvr := &v1alpha1.ReplicatedVolumeReplica{
