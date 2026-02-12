@@ -24,9 +24,9 @@ import (
 	"strconv"
 	"strings"
 
-	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )

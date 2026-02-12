@@ -232,7 +232,7 @@ func TestMergeReconciles_TerminalWinsOverNonTerminal(t *testing.T) {
 	}
 	// Done without requeue intent
 	if res.Requeue || res.RequeueAfter != 0 { //nolint:staticcheck // testing Requeue field
-		t.Fatalf("expected no requeue for Done, got Requeue=%v RequeueAfter=%v", res.Requeue, res.RequeueAfter)
+		t.Fatalf("expected no requeue for Done, got Requeue=%v RequeueAfter=%v", res.Requeue, res.RequeueAfter) //nolint:staticcheck // testing Requeue field
 	}
 }
 

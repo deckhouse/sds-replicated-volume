@@ -20,9 +20,10 @@ import (
 	"context"
 	"fmt"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
 
 // IndexFieldLVGByNodeName is used to quickly list
