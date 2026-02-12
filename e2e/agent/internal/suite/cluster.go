@@ -3,10 +3,14 @@ package suite
 import (
 	"testing"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// SetupExistingNodes Provides a slice of Node objects discovered from the cluster.
+// nodeNames must be non-empty and contain no duplicates. Each name must match
+// an existing cluster node.
 func SetupExistingNodes(
 	t *testing.T,
 	cl client.Client,
@@ -39,18 +43,55 @@ func SetupExistingNodes(
 		}
 	}
 
+	if len(res) != len(nodeNames) {
+		found := make([]string, 0, len(res))
+		for _, n := range res {
+			found = append(found, n.Name)
+		}
+		t.Fatalf("expected %d nodes %v, found %d: %v", len(nodeNames), nodeNames, len(found), found)
+	}
+
 	return res
 }
 
-func SetupExistingLVG(
+// LVGInfo holds a discovered LVMVolumeGroup and its associated node name.
+type LVGInfo struct {
+	NodeName string
+	LVGName  string
+	LVG      *snc.LVMVolumeGroup
+}
+
+// SetupExistingLVGs Provides a slice of LVGInfo for the given node configs.
+// Each node config specifies a node name and LVG name. The LVG must exist
+// in the cluster and its spec.local.nodeName must match the expected node.
+func SetupExistingLVGs(
 	t *testing.T,
 	cl client.Client,
-	nodeNames []string,
-) {
-	// nodes := SymbolSelectedNodes.Require()
+	nodeConfigs []NodeConfig,
+) []LVGInfo {
+	if len(nodeConfigs) == 0 {
+		t.Fatal("expected nodeConfigs to be non-empty")
+	}
 
-	// _ = nodes
-	// slices.Sort(nodes)
+	result := make([]LVGInfo, 0, len(nodeConfigs))
 
-	// SymbolSelectedLVGs.Provide(func(nodeName string) string { return "lvg-0" })
+	for _, nc := range nodeConfigs {
+		lvg := &snc.LVMVolumeGroup{}
+		if err := cl.Get(t.Context(), client.ObjectKey{Name: nc.LVGName}, lvg); err != nil {
+			t.Fatalf("getting LVG %q for node %q: %v", nc.LVGName, nc.Name, err)
+		}
+
+		if lvg.Spec.Local.NodeName != nc.Name {
+			t.Fatalf("LVG %q is on node %q, expected %q",
+				nc.LVGName, lvg.Spec.Local.NodeName, nc.Name)
+		}
+
+		result = append(result, LVGInfo{
+			NodeName: nc.Name,
+			LVGName:  nc.LVGName,
+			LVG:      lvg,
+		})
+	}
+
+	return result
 }
