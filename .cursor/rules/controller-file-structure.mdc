@@ -50,6 +50,11 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
     - These components MAY perform **Kubernetes API I/O** as part of initialization/maintenance.
     - Their registration/wiring belongs to **`controller.go`** (`mgr.Add(...)`, indexes, sources, etc.); **Reconciliation business logic** still belongs to **`reconciler.go`**.
 
+- **`controlleroptions`** sibling package (MUST):
+  - Each application that has controllers (e.g., `images/controller`, `images/agent`) MUST have a shared `controlleroptions` package at `<app>/internal/controllers/controlleroptions/options.go`.
+  - This package provides the `DefaultRateLimiter[T comparable]()` factory used by all controllers in that application.
+  - Individual controller packages MUST NOT define their own rate limiter; they MUST import and call `controlleroptions.DefaultRateLimiter[T]()`.
+
 - Additional components (MAY): extracted helpers for heavy computations or caching.
   - Allowed examples:
     - “world view” / “planner” / “topology scorer” components that build an in-memory model for convenient calculations (often used to shape **actual**, decide **target**, and produce **report** artifacts).

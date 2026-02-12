@@ -25,7 +25,7 @@ import (
 const (
 	// ControllerName is the stable name for the DRBD controller.
 	// Used in .Named(...) for controller-runtime builder.
-	ControllerName = "drbd-controller"
+	ControllerName = "drbdr-controller"
 
 	// ScannerName is the name of the DRBD scanner component.
 	ScannerName = "drbd-scanner"

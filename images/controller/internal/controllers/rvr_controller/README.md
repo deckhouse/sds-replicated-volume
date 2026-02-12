@@ -36,6 +36,7 @@ if RVR exists:
 
 reconcile backing volume:
     if diskless or deleting → delete all LLVs
+    if intended LLV is deleting and not datamesh member → wait for old LLV removal
     else → ensure intended LLV exists and is ready
 
 reconcile DRBD resource:
@@ -70,6 +71,7 @@ Reconcile (root) [Pure orchestration]
 │   ├── rvrShouldNotExist check
 │   ├── computeActualBackingVolume
 │   ├── computeIntendedBackingVolume
+│   ├── wait for old deleting LLV (non-member only)
 │   ├── createLLV / patchLLV metadata / patchLLV resize
 │   ├── reconcileLLVsDeletion (cleanup obsolete)
 │   └── applyBackingVolumeReadyCondTrue/False
@@ -181,7 +183,7 @@ Indicates whether the backing volume (LVMLogicalVolume) is ready.
 | False | NotApplicable | Replica is diskless or being deleted |
 | False | NotReady | Backing volume exists but not ready yet |
 | False | PendingScheduling | Waiting for node or storage assignment |
-| False | Provisioning | Creating new backing volume |
+| False | Provisioning | Creating new backing volume or waiting for old deleting LLV to be removed |
 | False | ProvisioningFailed | Failed to create backing volume (validation error) |
 | False | Reprovisioning | Creating new backing volume to replace existing one |
 | False | ResizeFailed | Failed to resize backing volume (validation error) |
@@ -416,9 +418,10 @@ The backing volume size is taken from `rv.Status.Datamesh.Size` (after DRBD over
 
 ### Lifecycle
 
-1. **Create**: When intended LLV does not exist, create it with ownerRef, finalizer, and labels
-2. **Resize**: When LLV is ready but actual size < intended size, patch spec.size
-3. **Delete**: Remove finalizer, then delete LLV
+1. **Wait for old deletion**: If the intended LLV exists but is being deleted (from a previous RVR incarnation) and the RVR is not yet a datamesh member, remove our finalizer and wait for full deletion before creating a new one
+2. **Create**: When intended LLV does not exist, create it with ownerRef, finalizer, and labels
+3. **Resize**: When LLV is ready but actual size < intended size, patch spec.size
+4. **Delete**: Remove finalizer, then delete LLV
 
 ## Managed Metadata
 
@@ -629,7 +632,13 @@ flowchart TD
     DeleteLLVs --> RemoveCond[Remove BackingVolumeReady condition]
     RemoveCond --> End3([Done])
 
-    CheckNeed -->|Yes| CheckExists{Intended LLV exists?}
+    CheckNeed -->|Yes| FindLLV[Find intended LLV]
+    FindLLV --> CheckDeleting{"LLV being deleted AND\nnot datamesh member?"}
+    CheckDeleting -->|Yes| RemoveFin2[Remove our finalizer from old LLV]
+    RemoveFin2 --> SetWaitDel["BackingVolumeReady=False Provisioning\n(waiting for old LLV deletion)"]
+    SetWaitDel --> EndWait([Done])
+
+    CheckDeleting -->|No| CheckExists{Intended LLV exists?}
     CheckExists -->|No| Create[Create LLV]
     Create -->|AlreadyExists| Requeue([DoneAndRequeue])
     Create --> SetProv[BackingVolumeReady=False Provisioning]

@@ -32,6 +32,7 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/controlleroptions"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/nodeidset"
 )
@@ -64,7 +65,10 @@ func BuildController(mgr manager.Manager, agentPodNamespace string) error {
 			newRSPEventHandler(cl),
 			builder.WithPredicates(rspPredicates()...),
 		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+			RateLimiter:             controlleroptions.DefaultRateLimiter(),
+		}).
 		Complete(rec)
 }
 

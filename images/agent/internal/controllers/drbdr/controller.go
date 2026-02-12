@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/controlleroptions"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
@@ -100,7 +101,10 @@ func BuildController(mgr manager.Manager) error {
 				},
 			)),
 		).
-		WithOptions(controller.TypedOptions[DRBDReconcileRequest]{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.TypedOptions[DRBDReconcileRequest]{
+			MaxConcurrentReconciles: 10,
+			RateLimiter:             controlleroptions.DefaultRateLimiter[DRBDReconcileRequest](),
+		}).
 		Complete(rec); err != nil {
 		return fmt.Errorf("building DRBD resource controller: %w", err)
 	}

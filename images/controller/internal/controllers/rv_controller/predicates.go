@@ -20,6 +20,7 @@ import (
 	"slices"
 	"strings"
 
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -171,7 +172,12 @@ func drbdrOpPredicates() []predicate.Predicate {
 
 // rvrPredicates returns predicates for ReplicatedVolumeReplica events.
 // Reacts to:
-// - DatameshRevision changes (affects rollout progress)
+// - Condition changes: Scheduled, DRBDConfigured, SatisfyEligibleNodes (formation progress, misplaced detection)
+// - DatameshPendingTransition changes (preconfiguration readiness)
+// - DatameshRevision changes (rollout progress)
+// - Addresses changes (network readiness during formation)
+// - BackingVolume changes (backing volume state during formation and data bootstrap)
+// - Peers changes (connectivity and replication state during formation)
 // - DeletionTimestamp changes (deletion started)
 // - Finalizers changes (cleanup)
 func rvrPredicates() []predicate.Predicate {
@@ -184,8 +190,50 @@ func rvrPredicates() []predicate.Predicate {
 					return true
 				}
 
+				// React to condition changes used during formation and normal operation:
+				// - Scheduled: scheduling progress (preconfigure phase)
+				// - DRBDConfigured: DRBD configuration progress (preconfigure + establish-connectivity phases)
+				// - SatisfyEligibleNodes: misplaced replica detection (preconfigure phase)
+				if !obju.AreConditionsSemanticallyEqual(
+					oldRVR, newRVR,
+					v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+					v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+					v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
+				) {
+					return true
+				}
+
+				// React to DatameshPendingTransition change (preconfiguration readiness).
+				if !oldRVR.Status.DatameshPendingTransition.Equals(newRVR.Status.DatameshPendingTransition) {
+					return true
+				}
+
 				// React to DatameshRevision change (rollout progress).
 				if oldRVR.Status.DatameshRevision != newRVR.Status.DatameshRevision {
+					return true
+				}
+
+				// React to Addresses change (network readiness for formation).
+				if !slices.EqualFunc(oldRVR.Status.Addresses, newRVR.Status.Addresses,
+					func(a, b v1alpha1.DRBDResourceAddressStatus) bool {
+						return a.SystemNetworkName == b.SystemNetworkName && a.Address == b.Address
+					}) {
+					return true
+				}
+
+				// React to BackingVolume changes (state and size during formation).
+				oldBV, newBV := oldRVR.Status.BackingVolume, newRVR.Status.BackingVolume
+				if (oldBV == nil) != (newBV == nil) ||
+					(oldBV != nil && newBV != nil && (oldBV.State != newBV.State || !ptr.Equal(oldBV.Size, newBV.Size))) {
+					return true
+				}
+
+				// React to Peers changes (connectivity and replication during formation).
+				if !slices.EqualFunc(oldRVR.Status.Peers, newRVR.Status.Peers,
+					func(a, b v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
+						return a.Name == b.Name && a.Type == b.Type &&
+							a.ConnectionState == b.ConnectionState && a.ReplicationState == b.ReplicationState
+					}) {
 					return true
 				}
 

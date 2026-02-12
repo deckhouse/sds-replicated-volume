@@ -1073,6 +1073,154 @@ var _ = Describe("Reconciler", func() {
 			Expect(updated.Status.Datamesh.Members).NotTo(BeEmpty())
 		})
 	})
+
+	Describe("Formation", func() {
+		It("waits for deleting RVRs before creating new ones", func(ctx SpecContext) {
+			rsc := newRSCWithConfiguration("rsc-1")
+			rsp := newTestRSP("test-pool")
+
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				// DatameshRevision defaults to 0 → formation in progress.
+			}
+
+			now := metav1.Now()
+			deletingRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+					DeletionTimestamp: &now,
+					Finalizers:        []string{v1alpha1.RVRControllerFinalizer}, // Blocked by rvr-controller.
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+			}
+
+			// Track whether Create was called for an RVR.
+			rvrCreateCalled := false
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsc, rsp, deletingRVR).
+				WithStatusSubresource(rv, rsc, deletingRVR).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+						if _, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok {
+							rvrCreateCalled = true
+						}
+						return cl.Create(ctx, obj, opts...)
+					},
+				}).
+				Build()
+			rec := NewReconciler(cl, scheme)
+
+			result, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			// No new RVRs should be created while deleting ones exist.
+			Expect(rvrCreateCalled).To(BeFalse(), "should not create new RVRs while deleting ones exist")
+
+			// reconcileFormationRestartIfTimeoutPassed schedules a requeue for when
+			// the formation timeout expires (formation just started → RequeueAfter ≈ 30s).
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0), "should requeue to check formation timeout")
+
+			// Verify formation transition message indicates waiting.
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
+			Expect(updated.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation))
+			Expect(updated.Status.DatameshTransitions[0].Formation.Phase).To(Equal(v1alpha1.ReplicatedVolumeFormationPhasePreconfigure))
+			Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("Waiting for"))
+			Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("deleting replicas"))
+		})
+
+		It("blocks creation when misplaced replicas exist", func(ctx SpecContext) {
+			rsc := newRSCWithConfiguration("rsc-1")
+			rsp := newTestRSP("test-pool")
+
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+			}
+
+			// A misplaced replica: not deleting, but SatisfyEligibleNodes is False.
+			misplacedRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+					Finalizers: []string{
+						v1alpha1.RVControllerFinalizer,  // Will be removed by deleteRVRWithFinalizerRemoval.
+						v1alpha1.RVRControllerFinalizer, // Keeps the object around after Delete (blocks real removal).
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+			}
+			// Mark replica as misplaced (SatisfyEligibleNodes=False, generation-current).
+			obju.SetStatusCondition(misplacedRVR, metav1.Condition{
+				Type:   v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
+				Status: metav1.ConditionFalse,
+				Reason: v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonNodeMismatch,
+			})
+
+			// Track whether Create was called for an RVR.
+			rvrCreateCalled := false
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsc, rsp, misplacedRVR).
+				WithStatusSubresource(rv, rsc, misplacedRVR).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+						if _, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok {
+							rvrCreateCalled = true
+						}
+						return cl.Create(ctx, obj, opts...)
+					},
+				}).
+				Build()
+			rec := NewReconciler(cl, scheme)
+
+			result, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			// No new RVRs should be created while misplaced ones are being cleaned up.
+			Expect(rvrCreateCalled).To(BeFalse(), "should not create new RVRs while misplaced ones exist")
+
+			// Misplaced replica was deleted and is now "deleting" → formation timeout requeue.
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0), "should requeue to check formation timeout")
+
+			// Verify formation transition message indicates waiting for cleanup.
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
+			Expect(updated.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation))
+			Expect(updated.Status.DatameshTransitions[0].Formation.Phase).To(Equal(v1alpha1.ReplicatedVolumeFormationPhasePreconfigure))
+			Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("Waiting for"))
+			Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("deleting replicas"))
+		})
+	})
 })
 
 var _ = Describe("ensureDatameshPendingReplicaTransitions", func() {
