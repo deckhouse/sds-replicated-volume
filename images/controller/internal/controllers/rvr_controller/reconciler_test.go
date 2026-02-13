@@ -2928,7 +2928,7 @@ var _ = Describe("computeDRBDRType", func() {
 })
 
 var _ = Describe("computeTargetDRBDRSpec", func() {
-	It("creates new spec with NodeName and NodeID from RVR when drbdr is nil", func() {
+	It("creates new spec with NodeName and NodeID (DRBDR) from RVR when drbdr is nil", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
 			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
@@ -2945,7 +2945,7 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 		Expect(spec.NodeID).To(Equal(uint8(1)))
 	})
 
-	It("preserves NodeName and NodeID from existing drbdr", func() {
+	It("preserves NodeName and NodeID (DRBDR) from existing drbdr", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-2"},
 			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{

@@ -37,8 +37,8 @@ import (
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/nodeidset"
 )
 
 func TestRvControllerReconciler(t *testing.T) {
@@ -1875,7 +1875,7 @@ var _ = Describe("applyDatameshMemberAbsent", func() {
 				},
 			},
 		}
-		var ids nodeidset.NodeIDSet
+		var ids idset.IDSet
 		ids.Add(0)
 		ids.Add(1)
 		changed := applyDatameshMemberAbsent(rv, ids)
@@ -1895,7 +1895,7 @@ var _ = Describe("applyDatameshMemberAbsent", func() {
 				},
 			},
 		}
-		var ids nodeidset.NodeIDSet
+		var ids idset.IDSet
 		ids.Add(0)
 		ids.Add(2)
 		changed := applyDatameshMemberAbsent(rv, ids)
@@ -1916,7 +1916,7 @@ var _ = Describe("applyPendingReplicaMessages", func() {
 				},
 			},
 		}
-		var ids nodeidset.NodeIDSet
+		var ids idset.IDSet
 		ids.Add(0)
 		changed := applyPendingReplicaMessages(rv, ids, "new")
 		Expect(changed).To(BeTrue())
@@ -1932,7 +1932,7 @@ var _ = Describe("applyPendingReplicaMessages", func() {
 				},
 			},
 		}
-		var ids nodeidset.NodeIDSet
+		var ids idset.IDSet
 		ids.Add(0)
 		changed := applyPendingReplicaMessages(rv, ids, "same")
 		Expect(changed).To(BeFalse())
@@ -1946,8 +1946,8 @@ var _ = Describe("applyPendingReplicaMessages", func() {
 				},
 			},
 		}
-		var ids nodeidset.NodeIDSet
-		ids.Add(5) // NodeID 5 does not match any entry.
+		var ids idset.IDSet
+		ids.Add(5) // ID 5 does not match any entry.
 		changed := applyPendingReplicaMessages(rv, ids, "new")
 		Expect(changed).To(BeFalse())
 	})
@@ -2044,10 +2044,10 @@ var _ = Describe("Formation: Preconfigure", func() {
 	// newPreconfiguredRVR creates an RVR that is fully preconfigured:
 	// scheduled, DRBDConfigured=PendingDatameshJoin, pending transition member=true.
 	//nolint:unparam // rvName is always "rv-1" in current tests, but kept as param for future extensibility.
-	newPreconfiguredRVR := func(rvName string, nodeID uint8, nodeName string) *v1alpha1.ReplicatedVolumeReplica {
+	newPreconfiguredRVR := func(rvName string, id uint8, nodeName string) *v1alpha1.ReplicatedVolumeReplica {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:       v1alpha1.FormatReplicatedVolumeReplicaName(rvName, nodeID),
+				Name:       v1alpha1.FormatReplicatedVolumeReplicaName(rvName, id),
 				Finalizers: []string{v1alpha1.RVControllerFinalizer},
 			},
 			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
@@ -2287,7 +2287,7 @@ var _ = Describe("Formation: Preconfigure", func() {
 		_, err := rec.Reconcile(ctx, RequestFor(rv))
 		Expect(err).NotTo(HaveOccurred())
 
-		// rvr1 (less progressed, higher NodeID) should be deleted.
+		// rvr1 (less progressed, higher ID) should be deleted.
 		var updatedRVR1 v1alpha1.ReplicatedVolumeReplica
 		err = cl.Get(ctx, client.ObjectKeyFromObject(rvr1), &updatedRVR1)
 		if err == nil {
@@ -2484,7 +2484,7 @@ var _ = Describe("Formation: Preconfigure", func() {
 		_, err := rec.Reconcile(ctx, RequestFor(rv))
 		Expect(err).NotTo(HaveOccurred())
 
-		// rvr1 (unscheduled, higher NodeID) should be deleted.
+		// rvr1 (unscheduled, higher ID) should be deleted.
 		var updatedRVR1 v1alpha1.ReplicatedVolumeReplica
 		err = cl.Get(ctx, client.ObjectKeyFromObject(rvr1), &updatedRVR1)
 		if err == nil {
@@ -2495,9 +2495,9 @@ var _ = Describe("Formation: Preconfigure", func() {
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr0), &updatedRVR0)).To(Succeed())
 	})
 
-	It("removes excess replicas with highest NodeID when all equally progressed", func(ctx SpecContext) {
+	It("removes excess replicas with highest ID when all equally progressed", func(ctx SpecContext) {
 		// ReplicationNone → wants 1 diskful, but we have 2 preconfigured replicas.
-		// Both are fully preconfigured → "any" fallback → remove highest NodeID.
+		// Both are fully preconfigured → "any" fallback → remove highest ID.
 		rsc := newRSCWithConfiguration("rsc-1")
 		rsp := newTestRSPWithNodes("test-pool", "node-1", "node-2")
 		rv := newFormationRV("rsc-1")
@@ -2516,13 +2516,13 @@ var _ = Describe("Formation: Preconfigure", func() {
 		_, err := rec.Reconcile(ctx, RequestFor(rv))
 		Expect(err).NotTo(HaveOccurred())
 
-		// rvr1 (higher NodeID) should be deleted even though both equally progressed.
+		// rvr1 (higher ID) should be deleted even though both equally progressed.
 		var updatedRVR1 v1alpha1.ReplicatedVolumeReplica
 		err = cl.Get(ctx, client.ObjectKeyFromObject(rvr1), &updatedRVR1)
 		if err == nil {
-			Expect(updatedRVR1.DeletionTimestamp).NotTo(BeNil(), "higher NodeID excess RVR should be deleted")
+			Expect(updatedRVR1.DeletionTimestamp).NotTo(BeNil(), "higher ID excess RVR should be deleted")
 		}
-		// rvr0 (lower NodeID) should still exist.
+		// rvr0 (lower ID) should still exist.
 		var updatedRVR0 v1alpha1.ReplicatedVolumeReplica
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr0), &updatedRVR0)).To(Succeed())
 	})
@@ -2720,7 +2720,7 @@ var _ = Describe("Formation: EstablishConnectivity", func() {
 			{NodeName: "node-1", LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{{Name: "lvg-1"}}},
 		}
 		rv := newRVInEstablishConnectivity()
-		// rv has member for nodeID 0, but we add a member for nodeID 1 that has no matching RVR.
+		// rv has member for ID 0, but we add a member for ID 1 that has no matching RVR.
 		rv.Status.Datamesh.Members = append(rv.Status.Datamesh.Members, v1alpha1.ReplicatedVolumeDatameshMember{
 			Name:               v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 1),
 			Type:               v1alpha1.ReplicaTypeDiskful,
@@ -2729,7 +2729,7 @@ var _ = Describe("Formation: EstablishConnectivity", func() {
 			LVMVolumeGroupName: "lvg-1",
 		})
 
-		// Only one active RVR (nodeID 0), but datamesh has members for 0 and 1.
+		// Only one active RVR (ID 0), but datamesh has members for 0 and 1.
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),

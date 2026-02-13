@@ -394,7 +394,7 @@ func ensureStatusPeers(
 		// Guard: foreign peer (peer not belonging to this ReplicatedVolume).
 		// DRBDR spec.peers is derived from RV datamesh members, so foreign peers should never
 		// appear. If they do, it indicates a serious misconfiguration. This check also ensures
-		// that NodeID() (which extracts the numeric suffix from peer name) works correctly.
+		// that ID() (which extracts the numeric suffix from peer name) works correctly.
 		if !strings.HasPrefix(src.Name, rvNamePrefix) {
 			return ef.Errf("foreign peer detected: %s", src.Name)
 		}
@@ -2685,7 +2685,7 @@ func computeDRBDRType(replicaType v1alpha1.ReplicaType) v1alpha1.DRBDResourceTyp
 }
 
 // newDRBDR constructs a new DRBDResource with ownerRef and finalizer.
-// Spec must already have all fields set (including NodeName and NodeID).
+// Spec must already have all fields set (including NodeName and NodeID for DRBDR).
 func newDRBDR(
 	scheme *runtime.Scheme,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
@@ -2707,11 +2707,11 @@ func newDRBDR(
 // computeTargetDRBDRSpec computes the target DRBDR spec based on rvr, existing drbdr,
 // datamesh and member configuration.
 // If drbdr exists, starts from a copy of its spec (preserving immutable and user-controlled fields).
-// Otherwise creates a new spec with NodeName/NodeID from rvr.
+// Otherwise creates a new spec with NodeName and NodeID (from rvr.ID()) for DRBDR.
 //
 // Exception: This helper uses DeepCopy which normally violates ComputeReconcileHelper rules.
 // This is intentional: we copy the existing spec to preserve immutable and user-controlled fields
-// (NodeName, NodeID, Maintenance) that we don't want to manually track. The DeepCopy overhead
+// (NodeName, NodeID (DRBDR field), Maintenance) that we don't want to manually track. The DeepCopy overhead
 // is acceptable since this is not a hot path.
 func computeTargetDRBDRSpec(
 	rvr *v1alpha1.ReplicatedVolumeReplica,
@@ -2727,7 +2727,7 @@ func computeTargetDRBDRSpec(
 		spec = *drbdr.Spec.DeepCopy()
 	} else {
 		spec.NodeName = rvr.Spec.NodeName
-		spec.NodeID = rvr.NodeID()
+		spec.NodeID = rvr.ID()
 	}
 
 	// Fill mutable fields.
@@ -2816,8 +2816,8 @@ func computeTargetDRBDRPeers(datamesh *v1alpha1.ReplicatedVolumeDatamesh, self *
 		peerIsAccess := m.Type == v1alpha1.ReplicaTypeAccess
 		allowRemoteRead := !peerIsAccess
 
-		// Extract NodeID from the member name (validated by API).
-		nodeID := m.NodeID()
+		// Extract ID from the member name (validated by API).
+		id := m.ID()
 
 		// Peer type: if treated as Diskful, use Diskful; otherwise Diskless.
 		peerType := v1alpha1.DRBDResourceTypeDiskless
@@ -2829,7 +2829,7 @@ func computeTargetDRBDRPeers(datamesh *v1alpha1.ReplicatedVolumeDatamesh, self *
 			Name:            m.Name,
 			Type:            peerType,
 			AllowRemoteRead: allowRemoteRead,
-			NodeID:          nodeID,
+			NodeID:          id,
 			Protocol:        v1alpha1.DRBDProtocolC,
 			SharedSecret:    datamesh.SharedSecret,
 			SharedSecretAlg: datamesh.SharedSecretAlg,

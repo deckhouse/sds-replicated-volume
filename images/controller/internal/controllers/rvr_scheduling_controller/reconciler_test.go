@@ -86,8 +86,8 @@ func newRSP(poolType v1alpha1.ReplicatedStoragePoolType, nodes []v1alpha1.Replic
 	}
 }
 
-func newRVR(nodeID uint8, replicaType v1alpha1.ReplicaType) *v1alpha1.ReplicatedVolumeReplica {
-	name := fmt.Sprintf("%s-%d", testRVName, nodeID)
+func newRVR(id uint8, replicaType v1alpha1.ReplicaType) *v1alpha1.ReplicatedVolumeReplica {
+	name := fmt.Sprintf("%s-%d", testRVName, id)
 	return &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
@@ -1649,7 +1649,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(dNode).NotTo(Equal(tbNode))
 		})
 
-		It("3 Diskful in NodeID order — deterministic", func() {
+		It("3 Diskful in ID order — deterministic", func() {
 			rv := newRV(defaultConfig())
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -1689,7 +1689,7 @@ var _ = Describe("Reconciler", func() {
 			_, err := reconcileRV(ctx, rec)
 			Expect(err).NotTo(HaveOccurred())
 
-			// NodeID 0 gets highest score (node-a), NodeID 1 gets second (node-b), NodeID 2 gets third (node-c)
+			// ID 0 gets highest score (node-a), ID 1 gets second (node-b), ID 2 gets third (node-c)
 			expectNodeName(ctx, cl, rvr0, "node-a")
 			expectNodeName(ctx, cl, rvr1, "node-b")
 			expectNodeName(ctx, cl, rvr2, "node-c")

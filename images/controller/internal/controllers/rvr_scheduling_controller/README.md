@@ -27,7 +27,7 @@ The controller reconciles all RVRs belonging to a single `ReplicatedVolume` (RV)
 The controller is triggered by RV name (primary resource) and reconciles all RVRs for that RV:
 
 ```
-load RV, RVRs (sorted by NodeID), RSP
+load RV, RVRs (sorted by ID), RSP
 
 Guard 1: RV not found → WaitingForReplicatedVolume on all RVRs → Done
 Guard 2: RV has no configuration → WaitingForReplicatedVolume on all RVRs → Done
@@ -45,13 +45,13 @@ if all non-Access replicas are scheduled → Done
 
 compute unscheduled = All - Scheduled - Deleting
 
-Phase 2: for each unscheduled Diskful (in NodeID order):
+Phase 2: for each unscheduled Diskful (in ID order):
     build per-RVR pipeline → filter → score via extender → SelectBest
     NarrowReservation on best candidate
     patch RVR spec + set Scheduled condition
     update schedulingContext (occupied nodes, zone counts)
 
-Phase 3: for each unscheduled TieBreaker (in NodeID order):
+Phase 3: for each unscheduled TieBreaker (in ID order):
     build per-RVR pipeline → filter → SelectBest (no extender scoring)
     patch RVR spec + set Scheduled condition
     update schedulingContext
@@ -226,13 +226,13 @@ The `schedulingContext` is built once per Reconcile invocation by `computeSchedu
 | `Topology` | `rv.Status.Configuration.Topology` | Zonal / TransZonal / Ignored |
 | `Replication` | `rv.Status.Configuration.Replication` | None / Availability / Consistency / ConsistencyAndAvailability |
 | `VolumeAccess` | `rv.Status.Configuration.VolumeAccess` | Any / Local / PreferablyLocal |
-| `ReplicasByZone` | Computed from eligible nodes + RVRs | Zone → NodeIDSet of replicas in that zone |
-| `All` | RVRs | NodeIDSet of all RVR NodeIDs |
-| `Access` | RVRs with type=Access | NodeIDSet |
-| `Diskful` | RVRs with type=Diskful | NodeIDSet |
-| `TieBreaker` | RVRs with type=TieBreaker | NodeIDSet |
-| `Deleting` | RVRs with DeletionTimestamp | NodeIDSet |
-| `Scheduled` | RVRs with NodeName + LVG + valid pool type | NodeIDSet |
+| `ReplicasByZone` | Computed from eligible nodes + RVRs | Zone → IDSet of replicas in that zone |
+| `All` | RVRs | IDSet of all RVR IDs |
+| `Access` | RVRs with type=Access | IDSet |
+| `Diskful` | RVRs with type=Diskful | IDSet |
+| `TieBreaker` | RVRs with type=TieBreaker | IDSet |
+| `Deleting` | RVRs with DeletionTimestamp | IDSet |
+| `Scheduled` | RVRs with NodeName + LVG + valid pool type | IDSet |
 
 ### Scheduled Detection
 

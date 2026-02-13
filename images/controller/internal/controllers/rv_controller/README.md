@@ -316,7 +316,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> SortExisting[Sort existing entries by NodeID]
+    Start([Start]) --> SortExisting[Sort existing entries by ID]
     SortExisting --> Merge["Sorted merge:<br/>existing × rvrs"]
 
     Merge --> CaseRemoved["existing entry not in rvrs → removed"]
@@ -341,7 +341,7 @@ flowchart TD
 
 | Output | Description |
 |--------|-------------|
-| `rv.Status.DatameshPendingReplicaTransitions` | Synchronized list (sorted by NodeID) |
+| `rv.Status.DatameshPendingReplicaTransitions` | Synchronized list (sorted by ID) |
 
 ---
 
