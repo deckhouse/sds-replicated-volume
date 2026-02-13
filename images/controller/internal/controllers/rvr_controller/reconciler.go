@@ -463,6 +463,10 @@ func ensureStatusPeers(
 			dst.BackingVolumeState = src.DiskState
 			changed = true
 		}
+		if dst.ReplicationState != src.ReplicationState {
+			dst.ReplicationState = src.ReplicationState
+			changed = true
+		}
 	}
 
 	return ef.Ok().ReportChangedIf(changed)
