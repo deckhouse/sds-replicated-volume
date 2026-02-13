@@ -118,16 +118,14 @@ const (
 	// ReplicatedVolumeReplicaCondFullyConnectedType indicates whether the replica is fully connected to all peers.
 	//
 	// Reasons describe connection state or applicability.
-	ReplicatedVolumeReplicaCondFullyConnectedType                        = "FullyConnected"
-	ReplicatedVolumeReplicaCondFullyConnectedReasonAgentNotReady         = "AgentNotReady"         // Agent is not ready.
-	ReplicatedVolumeReplicaCondFullyConnectedReasonApplyingConfiguration = "ApplyingConfiguration" // Configuration is being applied.
-	ReplicatedVolumeReplicaCondFullyConnectedReasonConnectedToAllPeers   = "ConnectedToAllPeers"   // All peers are connected but not all paths are established.
-	ReplicatedVolumeReplicaCondFullyConnectedReasonFullyConnected        = "FullyConnected"        // Fully connected to all peers on all paths.
-	ReplicatedVolumeReplicaCondFullyConnectedReasonNoPeers               = "NoPeers"               // No peers configured.
-	ReplicatedVolumeReplicaCondFullyConnectedReasonSoleMember            = "SoleMember"            // Sole datamesh member, no peers expected.
-	ReplicatedVolumeReplicaCondFullyConnectedReasonNotApplicable         = "NotApplicable"         // No DRBDR exists.
-	ReplicatedVolumeReplicaCondFullyConnectedReasonNotConnected          = "NotConnected"          // Not connected to any peer.
-	ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected    = "PartiallyConnected"    // Connected to some but not all peers.
+	ReplicatedVolumeReplicaCondFullyConnectedType                      = "FullyConnected"
+	ReplicatedVolumeReplicaCondFullyConnectedReasonAgentNotReady       = "AgentNotReady"       // Agent is not ready.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonConnectedToAllPeers = "ConnectedToAllPeers" // All peers are connected but not all paths are established.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonFullyConnected      = "FullyConnected"      // Fully connected to all peers on all paths.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonNoPeers             = "NoPeers"             // No peers configured.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonSoleMember          = "SoleMember"          // Sole datamesh member, no peers expected.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonNotConnected        = "NotConnected"        // Not connected to any peer.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected  = "PartiallyConnected"  // Connected to some but not all peers.
 )
 
 const (

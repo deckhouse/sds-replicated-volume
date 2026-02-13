@@ -280,23 +280,6 @@ Indicates whether the replica satisfies the eligible nodes requirements from its
 | Unknown | WaitingForReplicatedVolume | Waiting for ReplicatedVolume or ReplicatedStoragePool to be ready |
 | (absent) | - | Node not yet assigned |
 
-### Configured
-
-Indicates whether the replica is configured as intended within the datamesh.
-
-| Status | Reason | When |
-|--------|--------|------|
-| True | Configured | Replica is fully configured as a datamesh member matching spec |
-| False | NodeNotEligible | Node is not in the eligible nodes list of the storage pool |
-| False | PendingBackingVolumeChange | Replica is waiting to change its backing volume |
-| False | PendingJoin | Replica is waiting to join the datamesh |
-| False | PendingLeave | Replica is waiting to leave the datamesh (during deletion) |
-| False | PendingRoleChange | Replica is waiting to change its role in the datamesh |
-| False | PendingScheduling | Replica is waiting for node or storage assignment |
-| False | StorageNotEligible | The intended storage (LVG/ThinPool) is not eligible on the node |
-| Unknown | WaitingForReplicatedVolume | Waiting for ReplicatedVolume to be ready |
-| (absent) | - | Replica is being deleted and is no longer a datamesh member |
-
 ## Status Fields
 
 The controller manages the following status fields on RVR:
@@ -309,7 +292,6 @@ The controller manages the following status fields on RVR:
 | `backingVolume` | Backing volume info (size, state, LVG name, thin pool) | From DRBDR + LLV status |
 | `datameshPendingTransition` | Pending datamesh transitions (join/leave/role change/BV change) | Computed from spec vs status |
 | `datameshRevision` | Datamesh revision for which the replica was fully configured | Set when DRBDConfigured=True |
-| `drbd` | DRBD-specific status info (config, actual, status) | From RVR spec + DRBDR |
 | `drbdrReconciliationCache` | Cache of target configuration that DRBDR spec was last applied for | Computed |
 | `peers` | Peer connectivity status | Merged from datamesh + DRBDR |
 | `quorum` | Whether this replica has quorum | From DRBDR status |
@@ -375,19 +357,19 @@ The `datameshPendingTransition` field describes pending datamesh transition. Onl
 
 | Field | Description |
 |-------|-------------|
-| `member` | `true` = pending join, `false` = pending leave, absent = role/BV change |
-| `role` | Intended role (Diskful/Access/TieBreaker) when joining or changing role |
-| `lvmVolumeGroupName` | LVG name for Diskful role |
+| `member` | `true` = pending join, `false` = pending leave, absent = type/BV change |
+| `type` | Intended type (Diskful/Access/TieBreaker) when joining or changing type |
+| `lvmVolumeGroupName` | LVG name for Diskful type |
 | `thinPoolName` | Thin pool name (optional, for LVMThin) |
 
 **Operation examples:**
 
 | Operation | Fields |
 |-----------|--------|
-| Join as Diskful | `member: true, role: Diskful, lvmVolumeGroupName: "vg-1"` |
-| Join as TieBreaker | `member: true, role: TieBreaker` |
+| Join as Diskful | `member: true, type: Diskful, lvmVolumeGroupName: "vg-1"` |
+| Join as TieBreaker | `member: true, type: TieBreaker` |
 | Leave datamesh | `member: false` |
-| Change to Diskful | `role: Diskful, lvmVolumeGroupName: "vg-2"` |
+| Change to Diskful | `type: Diskful, lvmVolumeGroupName: "vg-2"` |
 | Change backing volume | `lvmVolumeGroupName: "vg-new"` |
 | Configured (no pending) | `nil` |
 
@@ -399,13 +381,19 @@ The controller manages LVMLogicalVolume resources as backing storage for diskful
 
 A backing volume is needed if **all** conditions are met:
 
-1. **Replica type is Diskful** — diskless replicas do not need backing storage
+1. **Replica needs a disk** — see rules below
 2. **RVR is not being deleted** — no backing volume during deletion
 3. **Configuration is complete** — nodeName and lvmVolumeGroupName are set
 
-For replicas that are members of the datamesh:
-- Type must be `Diskful` AND typeTransition must NOT be `ToDiskless`
-- When transitioning to diskless, backing volume is removed first
+For replicas that are members of the datamesh, a disk is needed if:
+- Type is `Diskful`, OR
+- TypeTransition is `ToDiskful` (disk is being prepared before becoming Diskful)
+
+A disk is NOT needed if:
+- TypeTransition is `ToDiskless` (disk is being removed)
+- Type is diskless (Access/TieBreaker) and no transition to Diskful
+
+For non-members, a disk is needed if spec.type is `Diskful`.
 
 ### LLV naming
 
@@ -419,7 +407,7 @@ For migration support: if an existing LLV is already referenced by DRBDResource 
 
 ### Size source
 
-The backing volume size is taken from `rv.Status.Datamesh.Size` (after DRBD overhead adjustment), not directly from RV spec. This ensures consistency during resize operations when datamesh has not yet propagated the new size.
+The backing volume size is taken as `max(rv.Spec.Size, rv.Status.Datamesh.Size)` (after DRBD overhead adjustment). During resize, datamesh will lag behind spec until all backing volumes are ready, so we take the maximum for correctness.
 
 ### Lifecycle
 
