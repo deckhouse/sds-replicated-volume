@@ -19,39 +19,47 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.replicatedVolumeName
-      name: Volume
-      type: string
     - jsonPath: .spec.nodeName
       name: Node
       type: string
     - jsonPath: .spec.type
       name: Type
       type: string
-    - jsonPath: .status.conditions[?(@.type=='Attached')].status
-      name: Attached
-      type: string
-    - jsonPath: .status.conditions[?(@.type=='Online')].status
-      name: Online
-      type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Configured')].status
+      name: Configured
       type: string
     - jsonPath: .status.conditions[?(@.type=='DRBDConfigured')].status
       name: DRBDConfigured
       type: string
-    - jsonPath: .status.conditions[?(@.type=='DataInitialized')].status
-      name: DataInitialized
-      type: string
-    - jsonPath: .status.conditions[?(@.type=='InQuorum')].status
-      name: InQuorum
-      type: string
-    - jsonPath: .status.syncProgress
-      name: InSync
+    - jsonPath: .status.conditions[?(@.type=='BackingVolumeUpToDate')].status
+      name: DataUpToDate
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.conditions[?(@.type=='Scheduled')].status
+      name: Scheduled
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Attached')].status
+      name: Attached
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='FullyConnected')].status
+      name: FullyConnected
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='BackingVolumeReady')].status
+      name: BVReady
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='SatisfyEligibleNodes')].status
+      name: SatisfyEligibleNodes
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:

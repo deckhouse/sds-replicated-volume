@@ -26,9 +26,16 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 // +kubebuilder:metadata:labels=heritage=deckhouse
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:metadata:labels=backup.deckhouse.io/cluster-config=true
-// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="Reason",type=string,priority=1,JSONPath=`.status.reason`
-// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,description="The age of this resource"
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
+// +kubebuilder:printcolumn:name="Replication",type=string,JSONPath=`.spec.replication`
+// +kubebuilder:printcolumn:name="Topology",type=string,JSONPath=`.spec.topology`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:printcolumn:name="StoragePool",type=string,priority=1,JSONPath=`.status.storagePoolName`
+// +kubebuilder:printcolumn:name="StoragePoolReady",type=string,priority=1,JSONPath=`.status.conditions[?(@.type=='StoragePoolReady')].status`
+// +kubebuilder:printcolumn:name="ConfigRolledOut",type=string,priority=1,JSONPath=`.status.conditions[?(@.type=='ConfigurationRolledOut')].status`
+// +kubebuilder:printcolumn:name="VolsSatisfyEN",type=string,priority=1,JSONPath=`.status.conditions[?(@.type=='VolumesSatisfyEligibleNodes')].status`
+// +kubebuilder:printcolumn:name="VolumeAccess",type=string,priority=1,JSONPath=`.spec.volumeAccess`
+// +kubebuilder:printcolumn:name="Volumes",type=integer,priority=1,JSONPath=`.status.volumes.total`
 type ReplicatedStorageClass struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

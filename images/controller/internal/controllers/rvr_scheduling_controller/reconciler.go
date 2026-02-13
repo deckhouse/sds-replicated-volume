@@ -19,7 +19,6 @@ package rvrschedulingcontroller
 import (
 	"cmp"
 	"context"
-	"fmt"
 	"slices"
 	"time"
 
@@ -84,18 +83,18 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if rv == nil {
 		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, all,
 			metav1.ConditionUnknown,
-			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonPendingConfiguration,
-			"ReplicatedVolume not found; waiting for it to be created").
-			Enrichf("setting PendingConfiguration: RV not found").ToCtrl()
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume,
+			"ReplicatedVolume not found; waiting for it be present").
+			Enrichf("setting WaitingForReplicatedVolume: RV not found").ToCtrl()
 	}
 
 	// Guard 2: RV has no configuration yet — RV controller hasn't reconciled it.
 	if rv.Status.Configuration == nil {
 		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, all,
 			metav1.ConditionUnknown,
-			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonPendingConfiguration,
-			"ReplicatedVolume has no configuration yet; waiting for RV controller to reconcile").
-			Enrichf("setting PendingConfiguration: RV has no configuration").ToCtrl()
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume,
+			"ReplicatedVolume has no configuration yet; waiting for it to appear").
+			Enrichf("setting WaitingForReplicatedVolume: RV has no configuration").ToCtrl()
 	}
 
 	rsp, err := r.getRSP(rf.Ctx(), rv.Status.Configuration.StoragePoolName)
@@ -107,9 +106,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if rsp == nil {
 		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, all,
 			metav1.ConditionUnknown,
-			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonPendingConfiguration,
-			fmt.Sprintf("ReplicatedStoragePool %q not found; waiting for it to be created", rv.Status.Configuration.StoragePoolName)).
-			Enrichf("setting PendingConfiguration: RSP %q not found", rv.Status.Configuration.StoragePoolName).ToCtrl()
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume,
+			"ReplicatedStoragePool not found; waiting for it to be present").
+			Enrichf("setting WaitingForReplicatedVolume: RSP %q not found", rv.Status.Configuration.StoragePoolName).ToCtrl()
 	}
 
 	// Build the scheduling context: eligible nodes, topology, zone layout,

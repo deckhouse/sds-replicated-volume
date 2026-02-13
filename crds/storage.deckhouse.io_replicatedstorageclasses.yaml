@@ -21,17 +21,42 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.phase
-      name: Phase
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
       type: string
-    - jsonPath: .status.reason
-      name: Reason
-      priority: 1
+    - jsonPath: .spec.replication
+      name: Replication
       type: string
-    - description: The age of this resource
-      jsonPath: .metadata.creationTimestamp
+    - jsonPath: .spec.topology
+      name: Topology
+      type: string
+    - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.storagePoolName
+      name: StoragePool
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='StoragePoolReady')].status
+      name: StoragePoolReady
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='ConfigurationRolledOut')].status
+      name: ConfigRolledOut
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='VolumesSatisfyEligibleNodes')].status
+      name: VolsSatisfyEN
+      priority: 1
+      type: string
+    - jsonPath: .spec.volumeAccess
+      name: VolumeAccess
+      priority: 1
+      type: string
+    - jsonPath: .status.volumes.total
+      name: Volumes
+      priority: 1
+      type: integer
     name: v1alpha1
     schema:
       openAPIV3Schema:

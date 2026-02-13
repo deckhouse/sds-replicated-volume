@@ -60,12 +60,10 @@ func (r *OperationReconciler) Reconcile(
 		return rf.Done().ToCtrl()
 	}
 
-	if op.Status != nil {
-		switch op.Status.Phase {
-		case v1alpha1.DRBDOperationPhaseSucceeded, v1alpha1.DRBDOperationPhaseFailed:
-			rf.Log().V(1).Info("Operation in terminal state, skipping", "phase", op.Status.Phase)
-			return rf.Done().ToCtrl()
-		}
+	switch op.Status.Phase {
+	case v1alpha1.DRBDOperationPhaseSucceeded, v1alpha1.DRBDOperationPhaseFailed:
+		rf.Log().V(1).Info("Operation in terminal state, skipping", "phase", op.Status.Phase)
+		return rf.Done().ToCtrl()
 	}
 
 	switch op.Spec.Type {
@@ -82,6 +80,15 @@ func (r *OperationReconciler) reconcileCreateNewUUID(ctx context.Context, op *v1
 	rf := flow.BeginReconcile(ctx, "CreateNewUUID")
 	defer rf.OnEnd(&outcome)
 
+	// Validate parameters: clearBitmap and forceResync are mutually exclusive.
+	// This duplicates the CRD-level CEL validation as a defense-in-depth measure.
+	if op.Spec.CreateNewUUID != nil && op.Spec.CreateNewUUID.ClearBitmap && op.Spec.CreateNewUUID.ForceResync {
+		if err := r.failOperationAndPatch(ctx, op, "clearBitmap and forceResync are mutually exclusive"); err != nil {
+			return rf.Fail(err)
+		}
+		return rf.Done()
+	}
+
 	drbdr, err := r.getDRBDResourceForOperation(ctx, op)
 	if err != nil {
 		return rf.Fail(err)
@@ -90,16 +97,13 @@ func (r *OperationReconciler) reconcileCreateNewUUID(ctx context.Context, op *v1
 		return rf.Done()
 	}
 
-	if op.Status == nil {
-		op.Status = &v1alpha1.DRBDResourceOperationStatus{}
-	}
 	base := op.DeepCopy()
 	runOutcome := ensureOperationStatusRunning(ctx, op, metav1.NewTime(time.Now()))
 	if runOutcome.Error() != nil {
 		return rf.Fail(runOutcome.Error())
 	}
 	if runOutcome.DidChange() {
-		if err := r.patchOperationStatus(ctx, op, base, false); err != nil {
+		if err := r.patchOperationStatus(ctx, op, base); err != nil {
 			return rf.Fail(err)
 		}
 	}
@@ -176,9 +180,6 @@ func (r *OperationReconciler) getDRBDR(ctx context.Context, name string) (*v1alp
 func ensureOperationStatusRunning(ctx context.Context, op *v1alpha1.DRBDResourceOperation, startedAt metav1.Time) (outcome flow.EnsureOutcome) {
 	ef := flow.BeginEnsure(ctx, "OperationStatusRunning")
 	defer ef.OnEnd(&outcome)
-	if op.Status == nil {
-		op.Status = &v1alpha1.DRBDResourceOperationStatus{}
-	}
 	changed := op.Status.Phase != v1alpha1.DRBDOperationPhaseRunning
 	op.Status.Phase = v1alpha1.DRBDOperationPhaseRunning
 	op.Status.StartedAt = &startedAt
@@ -190,9 +191,6 @@ func ensureOperationStatusRunning(ctx context.Context, op *v1alpha1.DRBDResource
 func ensureOperationStatusSucceeded(ctx context.Context, op *v1alpha1.DRBDResourceOperation, completedAt metav1.Time) (outcome flow.EnsureOutcome) {
 	ef := flow.BeginEnsure(ctx, "OperationStatusSucceeded")
 	defer ef.OnEnd(&outcome)
-	if op.Status == nil {
-		op.Status = &v1alpha1.DRBDResourceOperationStatus{}
-	}
 	changed := op.Status.Phase != v1alpha1.DRBDOperationPhaseSucceeded
 	op.Status.Phase = v1alpha1.DRBDOperationPhaseSucceeded
 	op.Status.CompletedAt = &completedAt
@@ -204,9 +202,6 @@ func ensureOperationStatusSucceeded(ctx context.Context, op *v1alpha1.DRBDResour
 func ensureOperationStatusFailed(ctx context.Context, op *v1alpha1.DRBDResourceOperation, message string, completedAt metav1.Time) (outcome flow.EnsureOutcome) {
 	ef := flow.BeginEnsure(ctx, "OperationStatusFailed")
 	defer ef.OnEnd(&outcome)
-	if op.Status == nil {
-		op.Status = &v1alpha1.DRBDResourceOperationStatus{}
-	}
 	changed := op.Status.Phase != v1alpha1.DRBDOperationPhaseFailed || op.Status.Message != message
 	op.Status.Phase = v1alpha1.DRBDOperationPhaseFailed
 	op.Status.CompletedAt = &completedAt
@@ -221,7 +216,7 @@ func (r *OperationReconciler) failOperationAndPatch(ctx context.Context, op *v1a
 	if outcome.Error() != nil {
 		return outcome.Error()
 	}
-	return r.patchOperationStatus(ctx, op, base, false)
+	return r.patchOperationStatus(ctx, op, base)
 }
 
 // succeedOperationAndPatch sets operation status to Succeeded and patches. Returns ensure error or patch error.
@@ -231,20 +226,14 @@ func (r *OperationReconciler) succeedOperationAndPatch(ctx context.Context, op *
 	if outcome.Error() != nil {
 		return outcome.Error()
 	}
-	return r.patchOperationStatus(ctx, op, base, false)
+	return r.patchOperationStatus(ctx, op, base)
 }
 
-// patchOperationStatus patches the operation status subresource.
+// patchOperationStatus patches the operation status subresource with optimistic locking.
 func (r *OperationReconciler) patchOperationStatus(
 	ctx context.Context,
 	obj, base *v1alpha1.DRBDResourceOperation,
-	optimisticLock bool,
 ) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
+	patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
 	return r.cl.Status().Patch(ctx, obj, patch)
 }

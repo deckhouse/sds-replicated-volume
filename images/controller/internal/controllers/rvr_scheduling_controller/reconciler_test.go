@@ -197,7 +197,7 @@ var _ = Describe("Reconciler", func() {
 	//
 
 	Describe("RSP Not Found / Guards", func() {
-		It("Guard 1: RV not found — PendingConfiguration on all RVRs", func() {
+		It("Guard 1: RV not found — WaitingForReplicatedVolume on all RVRs", func() {
 			rvr := newRVR(0, v1alpha1.ReplicaTypeDiskful)
 			rvr.Spec.ReplicatedVolumeName = "rv-test"
 
@@ -211,10 +211,10 @@ var _ = Describe("Reconciler", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(reconcile.Result{}))
 			expectScheduledCondition(ctx, cl, rvr, metav1.ConditionUnknown,
-				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonPendingConfiguration)
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume)
 		})
 
-		It("Guard 2: RV has no configuration — PendingConfiguration", func() {
+		It("Guard 2: RV has no configuration — WaitingForReplicatedVolume", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-test"},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
@@ -234,10 +234,10 @@ var _ = Describe("Reconciler", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(reconcile.Result{}))
 			expectScheduledCondition(ctx, cl, rvr, metav1.ConditionUnknown,
-				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonPendingConfiguration)
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume)
 		})
 
-		It("Guard 3: RSP not found — PendingConfiguration", func() {
+		It("Guard 3: RSP not found — WaitingForReplicatedVolume", func() {
 			rv := newRV(defaultConfig())
 			rvr := newRVR(0, v1alpha1.ReplicaTypeDiskful)
 
@@ -251,7 +251,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(reconcile.Result{}))
 			expectScheduledCondition(ctx, cl, rvr, metav1.ConditionUnknown,
-				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonPendingConfiguration)
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume)
 		})
 	})
 
