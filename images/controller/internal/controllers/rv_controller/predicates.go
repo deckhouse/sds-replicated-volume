@@ -153,15 +153,7 @@ func drbdrOpPredicates() []predicate.Predicate {
 					return true
 				}
 
-				oldPhase := v1alpha1.DRBDOperationPhase("")
-				newPhase := v1alpha1.DRBDOperationPhase("")
-				if oldDROp.Status != nil {
-					oldPhase = oldDROp.Status.Phase
-				}
-				if newDROp.Status != nil {
-					newPhase = newDROp.Status.Phase
-				}
-				return oldPhase != newPhase
+				return oldDROp.Status.Phase != newDROp.Status.Phase
 			},
 			DeleteFunc: func(e event.TypedDeleteEvent[client.Object]) bool {
 				return strings.HasSuffix(e.Object.GetName(), "-formation")

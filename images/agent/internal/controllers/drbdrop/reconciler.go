@@ -60,12 +60,10 @@ func (r *OperationReconciler) Reconcile(
 		return rf.Done().ToCtrl()
 	}
 
-	if op.Status != nil {
-		switch op.Status.Phase {
-		case v1alpha1.DRBDOperationPhaseSucceeded, v1alpha1.DRBDOperationPhaseFailed:
-			rf.Log().V(1).Info("Operation in terminal state, skipping", "phase", op.Status.Phase)
-			return rf.Done().ToCtrl()
-		}
+	switch op.Status.Phase {
+	case v1alpha1.DRBDOperationPhaseSucceeded, v1alpha1.DRBDOperationPhaseFailed:
+		rf.Log().V(1).Info("Operation in terminal state, skipping", "phase", op.Status.Phase)
+		return rf.Done().ToCtrl()
 	}
 
 	switch op.Spec.Type {
@@ -90,9 +88,6 @@ func (r *OperationReconciler) reconcileCreateNewUUID(ctx context.Context, op *v1
 		return rf.Done()
 	}
 
-	if op.Status == nil {
-		op.Status = &v1alpha1.DRBDResourceOperationStatus{}
-	}
 	base := op.DeepCopy()
 	runOutcome := ensureOperationStatusRunning(ctx, op, metav1.NewTime(time.Now()))
 	if runOutcome.Error() != nil {
@@ -176,9 +171,6 @@ func (r *OperationReconciler) getDRBDR(ctx context.Context, name string) (*v1alp
 func ensureOperationStatusRunning(ctx context.Context, op *v1alpha1.DRBDResourceOperation, startedAt metav1.Time) (outcome flow.EnsureOutcome) {
 	ef := flow.BeginEnsure(ctx, "OperationStatusRunning")
 	defer ef.OnEnd(&outcome)
-	if op.Status == nil {
-		op.Status = &v1alpha1.DRBDResourceOperationStatus{}
-	}
 	changed := op.Status.Phase != v1alpha1.DRBDOperationPhaseRunning
 	op.Status.Phase = v1alpha1.DRBDOperationPhaseRunning
 	op.Status.StartedAt = &startedAt
@@ -190,9 +182,6 @@ func ensureOperationStatusRunning(ctx context.Context, op *v1alpha1.DRBDResource
 func ensureOperationStatusSucceeded(ctx context.Context, op *v1alpha1.DRBDResourceOperation, completedAt metav1.Time) (outcome flow.EnsureOutcome) {
 	ef := flow.BeginEnsure(ctx, "OperationStatusSucceeded")
 	defer ef.OnEnd(&outcome)
-	if op.Status == nil {
-		op.Status = &v1alpha1.DRBDResourceOperationStatus{}
-	}
 	changed := op.Status.Phase != v1alpha1.DRBDOperationPhaseSucceeded
 	op.Status.Phase = v1alpha1.DRBDOperationPhaseSucceeded
 	op.Status.CompletedAt = &completedAt
@@ -204,9 +193,6 @@ func ensureOperationStatusSucceeded(ctx context.Context, op *v1alpha1.DRBDResour
 func ensureOperationStatusFailed(ctx context.Context, op *v1alpha1.DRBDResourceOperation, message string, completedAt metav1.Time) (outcome flow.EnsureOutcome) {
 	ef := flow.BeginEnsure(ctx, "OperationStatusFailed")
 	defer ef.OnEnd(&outcome)
-	if op.Status == nil {
-		op.Status = &v1alpha1.DRBDResourceOperationStatus{}
-	}
 	changed := op.Status.Phase != v1alpha1.DRBDOperationPhaseFailed || op.Status.Message != message
 	op.Status.Phase = v1alpha1.DRBDOperationPhaseFailed
 	op.Status.CompletedAt = &completedAt

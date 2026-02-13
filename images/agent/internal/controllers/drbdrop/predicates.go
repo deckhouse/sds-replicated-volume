@@ -58,9 +58,6 @@ func operationPredicates() []predicate.Predicate {
 
 // isOperationTerminal returns true if the operation is in a terminal state.
 func isOperationTerminal(op *v1alpha1.DRBDResourceOperation) bool {
-	if op.Status == nil {
-		return false
-	}
 	switch op.Status.Phase {
 	case v1alpha1.DRBDOperationPhaseSucceeded, v1alpha1.DRBDOperationPhaseFailed:
 		return true
