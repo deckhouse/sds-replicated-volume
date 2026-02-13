@@ -94,7 +94,7 @@ func (r *OperationReconciler) reconcileCreateNewUUID(ctx context.Context, op *v1
 		return rf.Fail(runOutcome.Error())
 	}
 	if runOutcome.DidChange() {
-		if err := r.patchOperationStatus(ctx, op, base, false); err != nil {
+		if err := r.patchOperationStatus(ctx, op, base); err != nil {
 			return rf.Fail(err)
 		}
 	}
@@ -207,7 +207,7 @@ func (r *OperationReconciler) failOperationAndPatch(ctx context.Context, op *v1a
 	if outcome.Error() != nil {
 		return outcome.Error()
 	}
-	return r.patchOperationStatus(ctx, op, base, false)
+	return r.patchOperationStatus(ctx, op, base)
 }
 
 // succeedOperationAndPatch sets operation status to Succeeded and patches. Returns ensure error or patch error.
@@ -217,20 +217,14 @@ func (r *OperationReconciler) succeedOperationAndPatch(ctx context.Context, op *
 	if outcome.Error() != nil {
 		return outcome.Error()
 	}
-	return r.patchOperationStatus(ctx, op, base, false)
+	return r.patchOperationStatus(ctx, op, base)
 }
 
-// patchOperationStatus patches the operation status subresource.
+// patchOperationStatus patches the operation status subresource with optimistic locking.
 func (r *OperationReconciler) patchOperationStatus(
 	ctx context.Context,
 	obj, base *v1alpha1.DRBDResourceOperation,
-	optimisticLock bool,
 ) error {
-	var patch client.Patch
-	if optimisticLock {
-		patch = client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	} else {
-		patch = client.MergeFrom(base)
-	}
+	patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
 	return r.cl.Status().Patch(ctx, obj, patch)
 }
