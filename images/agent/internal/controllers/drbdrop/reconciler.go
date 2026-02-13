@@ -80,6 +80,15 @@ func (r *OperationReconciler) reconcileCreateNewUUID(ctx context.Context, op *v1
 	rf := flow.BeginReconcile(ctx, "CreateNewUUID")
 	defer rf.OnEnd(&outcome)
 
+	// Validate parameters: clearBitmap and forceResync are mutually exclusive.
+	// This duplicates the CRD-level CEL validation as a defense-in-depth measure.
+	if op.Spec.CreateNewUUID != nil && op.Spec.CreateNewUUID.ClearBitmap && op.Spec.CreateNewUUID.ForceResync {
+		if err := r.failOperationAndPatch(ctx, op, "clearBitmap and forceResync are mutually exclusive"); err != nil {
+			return rf.Fail(err)
+		}
+		return rf.Done()
+	}
+
 	drbdr, err := r.getDRBDResourceForOperation(ctx, op)
 	if err != nil {
 		return rf.Fail(err)

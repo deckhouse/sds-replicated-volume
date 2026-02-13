@@ -50,12 +50,14 @@ func (r *OperationReconciler) executeCreateNewUUID(
 
 	// Get parameters
 	clearBitmap := false
+	forceResync := false
 	if op.Spec.CreateNewUUID != nil {
 		clearBitmap = op.Spec.CreateNewUUID.ClearBitmap
+		forceResync = op.Spec.CreateNewUUID.ForceResync
 	}
 
 	// Execute command
-	if err := drbdsetup.ExecuteNewCurrentUUID(ctx, minor, clearBitmap, false); err != nil {
+	if err := drbdsetup.ExecuteNewCurrentUUID(ctx, minor, clearBitmap, forceResync); err != nil {
 		return fmt.Errorf("executing new-current-uuid: %w", err)
 	}
 
