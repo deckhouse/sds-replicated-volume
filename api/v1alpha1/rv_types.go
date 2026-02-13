@@ -28,10 +28,14 @@ import (
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 120",message="metadata.name must be at most 120 characters (to fit derived RVR/LLV names)"
 // +kubebuilder:printcolumn:name="IOReady",type=string,JSONPath=".status.conditions[?(@.type=='IOReady')].status"
+// +kubebuilder:printcolumn:name="Quorum",type=string,JSONPath=".status.conditions[?(@.type=='Quorum')].status"
+// +kubebuilder:printcolumn:name="Scheduled",type=string,JSONPath=".status.conditions[?(@.type=='Scheduled')].status"
+// +kubebuilder:printcolumn:name="Configured",type=string,JSONPath=".status.conditions[?(@.type=='Configured')].status"
 // +kubebuilder:printcolumn:name="Size",type=string,JSONPath=".spec.size"
-// +kubebuilder:printcolumn:name="ActualSize",type=string,JSONPath=".status.actualSize"
-// +kubebuilder:printcolumn:name="DiskfulReplicas",type=string,JSONPath=".status.diskfulReplicaCount"
-// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="ConfigurationReady",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='ConfigurationReady')].status"
+// +kubebuilder:printcolumn:name="SatisfyEligibleNodes",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='SatisfyEligibleNodes')].status"
+// +kubebuilder:printcolumn:name="StorageClass",type=string,priority=1,JSONPath=".spec.replicatedStorageClassName"
 type ReplicatedVolume struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`

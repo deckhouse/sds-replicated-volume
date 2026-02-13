@@ -22,17 +22,32 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='IOReady')].status
       name: IOReady
       type: string
+    - jsonPath: .status.conditions[?(@.type=='Quorum')].status
+      name: Quorum
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Scheduled')].status
+      name: Scheduled
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Configured')].status
+      name: Configured
+      type: string
     - jsonPath: .spec.size
       name: Size
       type: string
-    - jsonPath: .status.actualSize
-      name: ActualSize
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - jsonPath: .status.conditions[?(@.type=='ConfigurationReady')].status
+      name: ConfigurationReady
+      priority: 1
       type: string
-    - jsonPath: .status.diskfulReplicaCount
-      name: DiskfulReplicas
+    - jsonPath: .status.conditions[?(@.type=='SatisfyEligibleNodes')].status
+      name: SatisfyEligibleNodes
+      priority: 1
       type: string
-    - jsonPath: .status.phase
-      name: Phase
+    - jsonPath: .spec.replicatedStorageClassName
+      name: StorageClass
+      priority: 1
       type: string
     name: v1alpha1
     schema:
