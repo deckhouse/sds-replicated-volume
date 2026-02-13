@@ -102,8 +102,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		rvr.Spec.NodeName != "" &&
 		!rvrShouldNotExist(rvr) &&
 		rv != nil &&
-		rv.Status.Configuration != nil &&
-		rv.Status.Configuration.StoragePoolName != "" {
+		rv.Status.Configuration != nil {
 		rspView, err = r.getRSPEligibilityView(rf.Ctx(), rv.Status.Configuration.StoragePoolName, rvr.Spec.NodeName)
 		if err != nil {
 			return rf.Failf(err, "getting RSP eligibility for %s", rv.Status.Configuration.StoragePoolName).ToCtrl()
@@ -1101,7 +1100,7 @@ func ensureConditionSatisfyEligibleNodes(
 	}
 
 	// Guard: no Configuration — condition Unknown.
-	if rv.Status.Configuration == nil || rv.Status.Configuration.StoragePoolName == "" {
+	if rv.Status.Configuration == nil {
 		changed = applySatisfyEligibleNodesCondUnknown(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonWaitingForReplicatedVolume,
 			"ReplicatedVolume has no configuration yet; waiting for it to appear") || changed
@@ -2513,7 +2512,7 @@ func computeTargetDatameshPendingTransition(
 		return nil, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonWaitingForReplicatedVolume,
 			"Datamesh is not initialized yet; waiting for ReplicatedVolume to initialize it"
 	}
-	if rv.Status.Configuration == nil || rv.Status.Configuration.StoragePoolName == "" {
+	if rv.Status.Configuration == nil {
 		return nil, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonWaitingForReplicatedVolume,
 			"ReplicatedVolume has no configuration yet; waiting for it to appear"
 	}

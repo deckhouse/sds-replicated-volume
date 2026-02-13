@@ -393,12 +393,16 @@ func (p ReplicatedStorageClassPhase) String() string {
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassConfiguration struct {
 	// Topology is the resolved topology setting.
+	// +kubebuilder:validation:Enum=TransZonal;Zonal;Ignored
 	Topology ReplicatedStorageClassTopology `json:"topology"`
 	// Replication is the resolved replication mode.
+	// +kubebuilder:validation:Enum=None;Availability;Consistency;ConsistencyAndAvailability
 	Replication ReplicatedStorageClassReplication `json:"replication"`
 	// VolumeAccess is the resolved volume access mode.
+	// +kubebuilder:validation:Enum=Local;EventuallyLocal;PreferablyLocal;Any
 	VolumeAccess ReplicatedStorageClassVolumeAccess `json:"volumeAccess"`
 	// StoragePoolName is the name of the ReplicatedStoragePool used by this RSC.
+	// +kubebuilder:validation:MinLength=1
 	StoragePoolName string `json:"storagePoolName"`
 }
 

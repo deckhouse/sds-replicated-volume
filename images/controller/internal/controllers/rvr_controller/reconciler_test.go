@@ -754,6 +754,9 @@ var _ = Describe("computeTargetDatameshPendingTransition", func() {
 		Status: v1alpha1.ReplicatedVolumeStatus{
 			DatameshRevision: 1,
 			Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+				Topology:        v1alpha1.TopologyIgnored,
+				Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+				VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 				StoragePoolName: "pool-1",
 			},
 		},
@@ -5098,6 +5101,9 @@ var _ = Describe("Reconciler", func() {
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					DatameshRevision: 1,
 					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        v1alpha1.TopologyIgnored,
+						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 						StoragePoolName: "rsp-1",
 					},
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
@@ -5204,6 +5210,9 @@ var _ = Describe("Reconciler", func() {
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					DatameshRevision: 1,
 					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        v1alpha1.TopologyIgnored,
+						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 						StoragePoolName: "rsp-1",
 					},
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
@@ -5883,6 +5892,9 @@ var _ = Describe("Reconciler", func() {
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					DatameshRevision: 1,
 					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        v1alpha1.TopologyIgnored,
+						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 						StoragePoolName: "rsp-1",
 					},
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
@@ -6794,6 +6806,9 @@ var _ = Describe("ensureStatusDatameshPendingTransitionAndConfiguredCond", func(
 		Status: v1alpha1.ReplicatedVolumeStatus{
 			DatameshRevision: 1,
 			Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+				Topology:        v1alpha1.TopologyIgnored,
+				Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+				VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 				StoragePoolName: "pool-1",
 			},
 		},
@@ -6994,6 +7009,9 @@ var _ = Describe("ensureStatusDatameshPendingTransitionAndConfiguredCond", func(
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				DatameshRevision: 1,
 				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology:        v1alpha1.TopologyIgnored,
+					Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 					StoragePoolName: "pool-1",
 				},
 				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
@@ -7050,6 +7068,9 @@ var _ = Describe("ensureStatusDatameshPendingTransitionAndConfiguredCond", func(
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				DatameshRevision: 1,
 				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology:        v1alpha1.TopologyIgnored,
+					Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 					StoragePoolName: "pool-1",
 				},
 				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
@@ -7155,6 +7176,9 @@ var _ = Describe("ensureConditionSatisfyEligibleNodes", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology:        v1alpha1.TopologyIgnored,
+					Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 					StoragePoolName: "rsp-missing",
 				},
 			},
@@ -7180,6 +7204,9 @@ var _ = Describe("ensureConditionSatisfyEligibleNodes", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology:        v1alpha1.TopologyIgnored,
+					Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 					StoragePoolName: "rsp-1",
 				},
 			},
@@ -7211,6 +7238,9 @@ var _ = Describe("ensureConditionSatisfyEligibleNodes", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology:        v1alpha1.TopologyIgnored,
+					Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 					StoragePoolName: "rsp-1",
 				},
 			},
@@ -7249,6 +7279,9 @@ var _ = Describe("ensureConditionSatisfyEligibleNodes", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology:        v1alpha1.TopologyIgnored,
+					Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 					StoragePoolName: "rsp-1",
 				},
 			},
@@ -7285,6 +7318,9 @@ var _ = Describe("ensureConditionSatisfyEligibleNodes", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology:        v1alpha1.TopologyIgnored,
+					Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 					StoragePoolName: "rsp-1",
 				},
 			},
@@ -7321,6 +7357,9 @@ var _ = Describe("ensureConditionSatisfyEligibleNodes", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology:        v1alpha1.TopologyIgnored,
+					Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 					StoragePoolName: "rsp-1",
 				},
 			},
@@ -7357,6 +7396,9 @@ var _ = Describe("ensureConditionSatisfyEligibleNodes", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology:        v1alpha1.TopologyIgnored,
+					Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 					StoragePoolName: "rsp-1",
 				},
 			},
@@ -7394,6 +7436,9 @@ var _ = Describe("ensureConditionSatisfyEligibleNodes", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology:        v1alpha1.TopologyIgnored,
+					Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 					StoragePoolName: "rsp-1",
 				},
 			},

@@ -484,16 +484,31 @@ spec:
                 properties:
                   replication:
                     description: Replication is the resolved replication mode.
+                    enum:
+                    - None
+                    - Availability
+                    - Consistency
+                    - ConsistencyAndAvailability
                     type: string
                   storagePoolName:
                     description: StoragePoolName is the name of the ReplicatedStoragePool
                       used by this RSC.
+                    minLength: 1
                     type: string
                   topology:
                     description: Topology is the resolved topology setting.
+                    enum:
+                    - TransZonal
+                    - Zonal
+                    - Ignored
                     type: string
                   volumeAccess:
                     description: VolumeAccess is the resolved volume access mode.
+                    enum:
+                    - Local
+                    - EventuallyLocal
+                    - PreferablyLocal
+                    - Any
                     type: string
                 required:
                 - replication
