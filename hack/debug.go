@@ -591,15 +591,16 @@ func generationIcon(c condition) string {
 	return fmt.Sprintf("%s◌%s", colorYellow, colorReset)
 }
 
-// generationIconDim is like generationIcon but dim (for unchanged conditions).
+// generationIconDim is like generationIcon but returns a plain character
+// without ANSI codes — the caller is responsible for wrapping in colorDim.
 func generationIconDim(c condition) string {
 	if c.ObservedGeneration < 0 {
-		return fmt.Sprintf("%s∅%s", colorDim, colorReset) // not set
+		return "∅"
 	}
 	if c.ObservedGeneration == c.Generation {
-		return fmt.Sprintf("%s⊙%s", colorDim, colorReset)
+		return "⊙"
 	}
-	return fmt.Sprintf("%s◌%s", colorDim+colorYellow, colorReset)
+	return "◌"
 }
 
 // statusIcon returns a colored icon for a condition status.
@@ -720,15 +721,13 @@ func conditionsTableNew(oldConds, newConds []condition) []string {
 	mw := condMsgMaxWidth(aw, tw, sw, rw)
 	lines := []string{fmt.Sprintf("  %s┌ conditions%s", colorDim, colorReset)}
 	for _, c := range newConds {
-		lines = append(lines, fmt.Sprintf("  %s│   %s%s%s %s %s %s %s%s %s%s",
+		lines = append(lines, fmt.Sprintf("  %s│   %s%s %s %s %s %s %s%s",
 			colorDim,
 			generationIconDim(c),
 			statusIconDim(c.Status),
-			colorDim,
 			pad(condAge(c), aw),
 			pad(c.Type, tw),
-			statusColored(pad(c.Status, sw)),
-			colorDim,
+			pad(c.Status, sw),
 			pad(c.Reason, rw),
 			truncMsg(c.Message, mw), colorReset,
 		))
@@ -782,19 +781,17 @@ func conditionsTableDiff(oldConds, newConds []condition) []string {
 
 	var lines []string
 
-	// When nothing changed, render the whole table in dim but keep status colored.
+	// When nothing changed, render the whole table in dim (no bright colors).
 	if !changed {
 		lines = append(lines, fmt.Sprintf("  %s┌ conditions (unchanged)%s", colorDim, colorReset))
 		for _, c := range newConds {
-			lines = append(lines, fmt.Sprintf("  %s│   %s%s%s %s %s %s %s%s %s%s",
+			lines = append(lines, fmt.Sprintf("  %s│   %s%s %s %s %s %s %s%s",
 				colorDim,
 				generationIconDim(c),
 				statusIconDim(c.Status),
-				colorDim, // re-enter dim after icon resets
 				pad(condAge(c), aw),
 				pad(c.Type, tw),
-				statusColored(pad(c.Status, sw)),
-				colorDim, // re-enter dim after statusColored resets
+				pad(c.Status, sw),
 				pad(c.Reason, rw),
 				truncMsg(c.Message, mw), colorReset,
 			))
@@ -855,16 +852,14 @@ func conditionsTableDiff(oldConds, newConds []condition) []string {
 				colorDim, truncMsg(c.Message, mw), colorReset,
 			))
 		} else {
-			// Unchanged condition — show dim for context but keep status colored.
-			lines = append(lines, fmt.Sprintf("  %s│   %s%s%s %s %s %s %s%s %s%s",
+			// Unchanged condition — fully dim, no bright colors.
+			lines = append(lines, fmt.Sprintf("  %s│   %s%s %s %s %s %s %s%s",
 				colorDim,
 				generationIconDim(c),
 				statusIconDim(c.Status),
-				colorDim, // re-enter dim after icon resets
 				pad(condAge(c), aw),
 				pad(c.Type, tw),
-				statusColored(pad(c.Status, sw)),
-				colorDim, // re-enter dim after statusColored resets
+				pad(c.Status, sw),
 				pad(c.Reason, rw),
 				truncMsg(c.Message, mw), colorReset,
 			))
@@ -966,21 +961,12 @@ func conditionsEqual(a, b []condition) bool {
 
 // watchResource spawns "kubectl get <kind> [<name>] -w --output-watch-events -o json"
 // and feeds events into the shared display pipeline.
-func watchResource(ctx context.Context, kind string, names []string, ws *watchSet, wg *sync.WaitGroup) {
+func watchResource(ctx context.Context, kind string, _ []string, ws *watchSet, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	// If we have specific names and the kind is NOT also watched broadly,
-	// start one watch per name. Otherwise watch the whole kind.
-	if len(names) > 0 && !ws.kindAll[kind] {
-		var innerWg sync.WaitGroup
-		for _, n := range names {
-			innerWg.Add(1)
-			go watchSingleResource(ctx, kind, n, ws, &innerWg)
-		}
-		innerWg.Wait()
-		return
-	}
-
+	// Always watch the entire kind and filter by name client-side
+	// (via ws.matchesObject). This allows watching for resources that
+	// don't exist yet — they will appear as ADDED once created.
 	watchSingleResource(ctx, kind, "", ws, nil)
 }
 
