@@ -147,14 +147,14 @@ Selection within a node always picks the LVG with the highest extender score.
 
 ## RSP Not Found
 
-1. ⚡ **RSP does not exist → `PendingConfiguration` condition on all RVRs.**
-   Configuration points to a nonexistent RSP (`rsp-nonexistent`). Guard #3 fires: all RVRs receive `Scheduled=Unknown` / `PendingConfiguration` with a message naming the missing RSP. Reconcile returns without error.
+1. ⚡ **RSP does not exist → `WaitingForReplicatedVolume` condition on all RVRs.**
+   Configuration points to a nonexistent RSP (`rsp-nonexistent`). Guard #3 fires: all RVRs receive `Scheduled=Unknown` / `WaitingForReplicatedVolume` with a message naming the missing RSP. Reconcile returns without error.
 
-2. ⚡ **Empty StoragePoolName → `PendingConfiguration` condition on all RVRs.**
-   Configuration with empty `StoragePoolName`. `getRSP("")` returns NotFound → Guard #3 fires: all RVRs receive `Scheduled=Unknown` / `PendingConfiguration`. Reconcile returns without error.
+2. ⚡ **Empty StoragePoolName → `WaitingForReplicatedVolume` condition on all RVRs.**
+   Configuration with empty `StoragePoolName`. `getRSP("")` returns NotFound → Guard #3 fires: all RVRs receive `Scheduled=Unknown` / `WaitingForReplicatedVolume`. Reconcile returns without error.
 
-3. **RV not found → `PendingConfiguration` condition on all RVRs.**
-   RV is not found. Guard #1 fires: all RVRs receive `Scheduled=Unknown` / `PendingConfiguration`. Reconcile returns without error.
+3. **RV not found → `WaitingForReplicatedVolume` condition on all RVRs.**
+   RV is not found. Guard #1 fires: all RVRs receive `Scheduled=Unknown` / `WaitingForReplicatedVolume`. Reconcile returns without error.
 
 ---
 
@@ -301,8 +301,8 @@ None → 1, Availability/Consistency → 2, ConsistencyAndAvailability → 3.
 4. ⚡ **LVMThin: ThinPoolName for a partially-scheduled RVR.**
    RSP type=LVMThin. RVR with NodeName=node-a, without LVG or ThinPool. After Reconcile: receives both `LVMVolumeGroupName=vg-a` and `LVMVolumeGroupThinPoolName=thin-a`. `Scheduled=True`.
 
-5. ⚡ **Early exit → `PendingConfiguration` on both partially-scheduled and fully-unscheduled RVRs.**
-   RV with empty StoragePoolName → Guard #3: RSP not found. 2 RVRs: one with NodeName (partial), one without (unscheduled). Both receive `Scheduled=Unknown` / `PendingConfiguration` — the reconciler makes no distinction on early exit.
+5. ⚡ **Early exit → `WaitingForReplicatedVolume` on both partially-scheduled and fully-unscheduled RVRs.**
+   RV with empty StoragePoolName → Guard #3: RSP not found. 2 RVRs: one with NodeName (partial), one without (unscheduled). Both receive `Scheduled=Unknown` / `WaitingForReplicatedVolume` — the reconciler makes no distinction on early exit.
 
 ---
 
