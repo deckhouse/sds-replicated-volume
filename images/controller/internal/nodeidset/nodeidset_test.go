@@ -24,6 +24,38 @@ import (
 )
 
 // ----------------------------------------------------------------------------
+// Constructors
+// ----------------------------------------------------------------------------
+
+func TestOf(t *testing.T) {
+	// Of(id) creates a singleton set containing only that ID.
+	for _, id := range []uint8{0, 1, 15, 31} {
+		s := nodeidset.Of(id)
+		if !s.Contains(id) {
+			t.Fatalf("Of(%d) does not contain %d", id, id)
+		}
+		if s.Len() != 1 {
+			t.Fatalf("Of(%d) has len %d, want 1", id, s.Len())
+		}
+		if s.Min() != id {
+			t.Fatalf("Of(%d).Min() = %d, want %d", id, s.Min(), id)
+		}
+		if s.Max() != id {
+			t.Fatalf("Of(%d).Max() = %d, want %d", id, s.Max(), id)
+		}
+	}
+
+	// Of(id) is equivalent to NodeIDSet(1 << id).
+	for id := uint8(0); id < 32; id++ {
+		got := nodeidset.Of(id)
+		want := nodeidset.NodeIDSet(1 << id)
+		if got != want {
+			t.Fatalf("Of(%d) = %v, want %v", id, got, want)
+		}
+	}
+}
+
+// ----------------------------------------------------------------------------
 // Basic operations
 // ----------------------------------------------------------------------------
 
@@ -391,7 +423,7 @@ func TestNodeIDSet_Intersect(t *testing.T) {
 	}
 
 	// Disjoint sets.
-	c := nodeidset.NodeIDSet(1 << 5)
+	c := nodeidset.Of(5)
 	if a.Intersect(c) != 0 {
 		t.Fatal("intersect of disjoint sets should be empty")
 	}

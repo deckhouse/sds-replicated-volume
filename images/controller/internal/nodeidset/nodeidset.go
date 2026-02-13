@@ -35,6 +35,9 @@ type NodeIDSet uint32
 // All is a NodeIDSet with all 32 node IDs present.
 const All NodeIDSet = 0xFFFF_FFFF
 
+// Of returns a singleton NodeIDSet containing only the given node ID.
+func Of(id uint8) NodeIDSet { return 1 << id }
+
 // Contains reports whether the set contains id.
 func (s NodeIDSet) Contains(id uint8) bool { return s&(1<<id) != 0 }
 
