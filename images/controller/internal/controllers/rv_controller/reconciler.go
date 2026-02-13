@@ -720,11 +720,13 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 		}
 	}
 
-	// LVMThin uses clear-bitmap (thin volumes don't need full resync),
-	// LVM uses force-resync (thick volumes require full data synchronization).
+	// Single replica: no peers to synchronize with, always use clear-bitmap.
+	// Multiple replicas with thin provisioning: clear-bitmap (thin volumes don't need full resync).
+	// Multiple replicas with thick provisioning: force-resync (thick volumes require full data synchronization).
+	singleReplica := dmDiskful.Len() == 1
 	drbdrOpFormationParams := &v1alpha1.CreateNewUUIDParams{
-		ClearBitmap: rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVMThin,
-		ForceResync: rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM,
+		ClearBitmap: singleReplica || rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+		ForceResync: !singleReplica && rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM,
 	}
 
 	// Create DRBDResourceOperation for data bootstrap if it doesn't exist yet.
@@ -768,15 +770,17 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 		}
 	}
 
-	// Timeout: 1 min base. For LVM (force-resync) add volume size / 100 Mbit/s (≈12.5 MB/s)
-	// to account for full data synchronization. LVMThin (clear-bitmap) skips full resync.
+	// Timeout: 1 min base. For multi-replica thick provisioning (force-resync) add volume
+	// size / 100 Mbit/s (≈12.5 MB/s) to account for full data synchronization. Single
+	// replica and thin provisioning (clear-bitmap) skip full resync, so no size-based
+	// addition is needed.
 	//
 	// We expect sds-replicated-volume to run on 10 Gbit/s networks (or at least 1 Gbit/s).
 	// In the worst case, when many volumes are being created simultaneously, each volume
 	// should still get at least 100 Mbit/s of bandwidth. If even that is not enough,
-	// something has gone wrong and there is no point in waiting further.
+	// something has gone completely wrong and there is no point in waiting further.
 	dataBootstrapTimeout := 1 * time.Minute
-	if rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM {
+	if !singleReplica && rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM {
 		const worstCaseBytesPerSec = 100 * 1000 * 1000 / 8 // 100 Mbit/s in bytes
 		sizeBytes := rv.Status.Datamesh.Size.Value()
 		dataBootstrapTimeout += time.Duration(sizeBytes/worstCaseBytesPerSec) * time.Second
@@ -784,7 +788,7 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 
 	// Build a human-readable description of the data bootstrap mode.
 	var dataBootstrapModeMsg string
-	if rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM {
+	if !singleReplica && rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM {
 		dataBootstrapModeMsg = fmt.Sprintf(
 			"Full data synchronization from source replica %s. Timeout: %s",
 			drbdrOp.Spec.DRBDResourceName, dataBootstrapTimeout)

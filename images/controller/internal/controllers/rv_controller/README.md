@@ -169,15 +169,17 @@ Triggers initial data synchronization via DRBDResourceOperation and waits for co
 
 **Steps:**
 1. Create DRBDResourceOperation (type: CreateNewUUID)
-   - LVMThin: clear-bitmap (fast, no full resync needed)
-   - LVM: force-resync (full data synchronization)
+   - Single replica (any pool type): clear-bitmap (no peers to synchronize with)
+   - Multiple replicas, thin provisioning: clear-bitmap (no full resync needed)
+   - Multiple replicas, thick provisioning: force-resync (full data synchronization)
 2. Wait for operation to succeed
 3. Wait for all replicas to reach UpToDate state
 4. Remove Formation transition (formation complete)
 
 **Timeout calculation:**
 - Base: 1 minute
-- LVM (force-resync): + volume size / 100 Mbit/s (worst-case bandwidth estimate)
+- Force-resync (multi-replica thick provisioning): + volume size / 100 Mbit/s (worst-case bandwidth estimate)
+- Clear-bitmap (single replica or thin provisioning): base only
 
 ### Formation Restart
 
@@ -476,7 +478,7 @@ flowchart TD
     DeleteStale --> CheckExists
 
     CheckStale -->|No| CheckExists{Operation exists?}
-    CheckExists -->|No| CreateOp["createDRBDROp<br/>Type: CreateNewUUID<br/>LVMThin: clear-bitmap<br/>LVM: force-resync"]
+    CheckExists -->|No| CreateOp["createDRBDROp<br/>Type: CreateNewUUID<br/>single/thin: clear-bitmap<br/>multi+thick: force-resync"]
     CreateOp -->|AlreadyExists| Requeue([DoneAndRequeue])
     CreateOp --> CheckStatus
 
@@ -498,9 +500,9 @@ flowchart TD
 
 | Input | Description |
 |-------|-------------|
-| `rv.Status.Datamesh.Members` | Diskful members (target for operation) |
-| `rsp.Type` | LVM or LVMThin (determines sync mode) |
-| `rv.Status.Datamesh.Size` | Volume size (for LVM timeout calculation) |
+| `rv.Status.Datamesh.Members` | Diskful members (target for operation, count determines single/multi-replica) |
+| `rsp.Type` | LVM or LVMThin (together with replica count determines sync mode) |
+| `rv.Status.Datamesh.Size` | Volume size (for force-resync timeout calculation) |
 
 | Output | Description |
 |--------|-------------|
