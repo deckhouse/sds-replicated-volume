@@ -6483,7 +6483,7 @@ var _ = Describe("ensureStatusDatameshPendingTransitionAndConfiguredCond", func(
 		// Check Configured condition message includes RV message.
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
 		Expect(cond).NotTo(BeNil())
-		Expect(cond.Message).To(ContainSubstring("; Waiting for DRBD resource creation"))
+		Expect(cond.Message).To(ContainSubstring(": Waiting for DRBD resource creation"))
 		Expect(cond.Message).NotTo(ContainSubstring("Other replica message"))
 	})
 

@@ -1249,7 +1249,7 @@ flowchart TD
 
 This function combines two logically related status updates to avoid duplicate `computeTargetDatameshPendingTransition` calls.
 
-**RV Message Enrichment**: When a pending transition exists (`target != nil`) and the parent `ReplicatedVolume` has a matching entry in `rv.Status.DatameshPendingReplicaTransitions` for this replica, the message from that entry is appended to the condition message with a `"; "` separator. This allows the RV controller to provide additional context about the overall datamesh transition progress.
+**RV Message Enrichment**: When a pending transition exists (`target != nil`) and the parent `ReplicatedVolume` has a matching entry in `rv.Status.DatameshPendingReplicaTransitions` for this replica, the message from that entry is appended to the condition message with a `": "` separator. This allows the RV controller to provide additional context about the overall datamesh transition progress.
 
 **Algorithm (computeTargetDatameshPendingTransition)**:
 
