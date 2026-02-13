@@ -197,9 +197,9 @@ When formation stalls (any safety check fails or progress timeout is exceeded), 
 
 | Type | Key | Managed On | Purpose |
 |------|-----|------------|---------|
-| Finalizer | `storage.deckhouse.io/rv-controller` | RV | Prevent deletion while child resources exist |
-| Label | `storage.deckhouse.io/replicated-storage-class` | RV | Link to ReplicatedStorageClass |
-| Finalizer | `storage.deckhouse.io/rv-controller` | RVR | Removed during formation restart / deletion |
+| Finalizer | `sds-replicated-volume.deckhouse.io/rv-controller` | RV | Prevent deletion while child resources exist |
+| Label | `sds-replicated-volume.deckhouse.io/replicated-storage-class` | RV | Link to ReplicatedStorageClass |
+| Finalizer | `sds-replicated-volume.deckhouse.io/rv-controller` | RVR | Removed during formation restart / deletion |
 | OwnerRef | controller reference | DRBDResourceOperation | Owner reference to RV |
 
 ## Watches
