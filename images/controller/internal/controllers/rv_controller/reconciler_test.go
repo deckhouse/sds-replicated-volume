@@ -1630,7 +1630,10 @@ var _ = Describe("computeIntendedDiskfulReplicaCount", func() {
 	It("returns 1 for ReplicationNone", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{Replication: v1alpha1.ReplicationNone},
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationNone,
+					VolumeAccess: v1alpha1.VolumeAccessLocal, StoragePoolName: "test-pool",
+				},
 			},
 		}
 		Expect(computeIntendedDiskfulReplicaCount(rv)).To(Equal(1))
@@ -1639,7 +1642,10 @@ var _ = Describe("computeIntendedDiskfulReplicaCount", func() {
 	It("returns 2 for ReplicationAvailability", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{Replication: v1alpha1.ReplicationAvailability},
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationAvailability,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "test-pool",
+				},
 			},
 		}
 		Expect(computeIntendedDiskfulReplicaCount(rv)).To(Equal(2))
@@ -1648,7 +1654,10 @@ var _ = Describe("computeIntendedDiskfulReplicaCount", func() {
 	It("returns 2 for ReplicationConsistency", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{Replication: v1alpha1.ReplicationConsistency},
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationConsistency,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "test-pool",
+				},
 			},
 		}
 		Expect(computeIntendedDiskfulReplicaCount(rv)).To(Equal(2))
@@ -1657,7 +1666,10 @@ var _ = Describe("computeIntendedDiskfulReplicaCount", func() {
 	It("returns 3 for ReplicationConsistencyAndAvailability", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{Replication: v1alpha1.ReplicationConsistencyAndAvailability},
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "test-pool",
+				},
 			},
 		}
 		Expect(computeIntendedDiskfulReplicaCount(rv)).To(Equal(3))
@@ -1675,8 +1687,11 @@ var _ = Describe("computeTargetQuorum", func() {
 		}
 		return &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{Replication: replication},
-				Datamesh:      v1alpha1.ReplicatedVolumeDatamesh{Members: members},
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology: v1alpha1.TopologyIgnored, Replication: replication,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "test-pool",
+				},
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{Members: members},
 			},
 		}
 	}
@@ -3753,6 +3768,8 @@ var _ = Describe("ensureRVConfiguration", func() {
 				ConfigurationGeneration: 5,
 				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
 					Topology:        v1alpha1.TopologyTransZonal,
+					Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 					StoragePoolName: "old-pool",
 				},
 			},
@@ -3774,7 +3791,10 @@ var _ = Describe("computeTargetQuorum edge cases", func() {
 	It("counts TypeTransition=ToDiskful members as intended diskful", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{Replication: v1alpha1.ReplicationAvailability},
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationAvailability,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "test-pool",
+				},
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
 						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0), Type: v1alpha1.ReplicaTypeDiskful},
@@ -3797,7 +3817,10 @@ var _ = Describe("computeTargetQuorum edge cases", func() {
 	It("uses default quorum for unknown replication mode", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{Replication: "UnknownMode"},
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology: v1alpha1.TopologyIgnored, Replication: "UnknownMode",
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "test-pool",
+				},
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
 						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0), Type: v1alpha1.ReplicaTypeDiskful},
@@ -3816,7 +3839,10 @@ var _ = Describe("computeTargetQuorum edge cases", func() {
 	It("does not count non-diskful members without TypeTransition", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{Replication: v1alpha1.ReplicationNone},
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationNone,
+					VolumeAccess: v1alpha1.VolumeAccessLocal, StoragePoolName: "test-pool",
+				},
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
 						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0), Type: v1alpha1.ReplicaTypeDiskful},

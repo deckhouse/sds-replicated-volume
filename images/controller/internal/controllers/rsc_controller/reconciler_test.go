@@ -716,7 +716,10 @@ var _ = Describe("isConfigurationInSync", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			ObjectMeta: metav1.ObjectMeta{Generation: 2},
 			Status: v1alpha1.ReplicatedStorageClassStatus{
-				Configuration:           &v1alpha1.ReplicatedStorageClassConfiguration{},
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "pool-1",
+				},
 				ConfigurationGeneration: 1,
 			},
 		}
@@ -730,7 +733,10 @@ var _ = Describe("isConfigurationInSync", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			ObjectMeta: metav1.ObjectMeta{Generation: 5},
 			Status: v1alpha1.ReplicatedStorageClassStatus{
-				Configuration:           &v1alpha1.ReplicatedStorageClassConfiguration{},
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationConsistencyAndAvailability,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "pool-1",
+				},
 				ConfigurationGeneration: 5,
 			},
 		}
@@ -2426,6 +2432,9 @@ var _ = Describe("Reconciler", func() {
 					StoragePoolEligibleNodesRevision: 2, // Already in sync.
 					ConfigurationGeneration:          5, // Already in sync.
 					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        v1alpha1.TopologyIgnored,
+						Replication:     v1alpha1.ReplicationNone,
+						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 						StoragePoolName: "my-pool",
 					},
 					Conditions: []metav1.Condition{
@@ -2474,6 +2483,9 @@ var _ = Describe("Reconciler", func() {
 					StoragePoolEligibleNodesRevision: 2,
 					ConfigurationGeneration:          5,
 					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						Topology:        v1alpha1.TopologyIgnored,
+						Replication:     v1alpha1.ReplicationNone,
+						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
 						StoragePoolName: "my-pool",
 					},
 					Conditions: []metav1.Condition{
