@@ -1305,7 +1305,7 @@ func ensureStatusDatameshPendingTransitionAndConfiguredCond(
 		for i := range rv.Status.DatameshPendingReplicaTransitions {
 			if rv.Status.DatameshPendingReplicaTransitions[i].Name == rvr.Name {
 				if msg := rv.Status.DatameshPendingReplicaTransitions[i].Message; msg != "" {
-					condMessage += "; " + msg
+					condMessage += ": " + msg
 				}
 				break
 			}
