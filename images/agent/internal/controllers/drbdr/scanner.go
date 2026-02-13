@@ -19,9 +19,9 @@ package drbdr
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
@@ -29,17 +29,14 @@ import (
 // Scanner listens for DRBD events via drbdsetup events2 and triggers
 // reconciliation of DRBDResource objects by sending events to the controller.
 type Scanner struct {
-	log       *slog.Logger
 	requestCh chan<- event.TypedGenericEvent[DRBDReconcileRequest]
 }
 
 // NewScanner creates a new Scanner.
 func NewScanner(
-	log *slog.Logger,
 	requestCh chan<- event.TypedGenericEvent[DRBDReconcileRequest],
 ) *Scanner {
 	return &Scanner{
-		log:       log.With("name", ScannerName),
 		requestCh: requestCh,
 	}
 }
@@ -47,15 +44,18 @@ func NewScanner(
 // Start implements manager.Runnable interface.
 // It starts listening for DRBD events and triggers reconciliation.
 func (s *Scanner) Start(ctx context.Context) error {
-	s.log.Info("Starting scanner")
+	logger := log.FromContext(ctx).WithName(ScannerName)
+	ctx = log.IntoContext(ctx, logger)
+
+	logger.Info("Starting scanner")
 
 	for {
 		if err := s.runEventsLoop(ctx); err != nil {
 			if ctx.Err() != nil {
-				s.log.Info("Scanner stopping due to context cancellation")
+				logger.Info("Scanner stopping due to context cancellation")
 				return nil
 			}
-			s.log.Error("Events loop failed, restarting", "error", err)
+			logger.Error(err, "Events loop failed, restarting")
 			// Continue to retry
 		}
 
@@ -86,15 +86,17 @@ func (s *Scanner) runEventsLoop(ctx context.Context) error {
 		}
 	}
 
+	logger := log.FromContext(ctx)
+
 	for ev := range drbdsetup.ExecuteEvents2(ctx, &err) {
 		switch tev := ev.(type) {
 		case *drbdsetup.Event:
-			s.log.Debug("DRBD event received", "kind", tev.Kind, "object", tev.Object, "state", tev.State)
+			logger.V(1).Info("DRBD event received", "kind", tev.Kind, "object", tev.Object, "state", tev.State)
 
 			// Check for "exists -" which indicates initial state dump is complete
 			if !online && tev.Kind == "exists" && tev.Object == "-" {
 				online = true
-				s.log.Info("DRBD events online", "pendingResources", len(pending))
+				logger.Info("DRBD events online", "pendingResources", len(pending))
 				// Trigger reconciliation for all accumulated resources
 				for drbdName := range pending {
 					s.triggerReconciliation(ctx, drbdName)
@@ -118,7 +120,7 @@ func (s *Scanner) runEventsLoop(ctx context.Context) error {
 			}
 
 		case *drbdsetup.UnparsedEvent:
-			s.log.Warn("Unparsed event", "error", tev.Err, "line", tev.RawEventLine)
+			logger.Info("Unparsed event", "error", tev.Err, "line", tev.RawEventLine)
 		}
 	}
 
@@ -133,16 +135,17 @@ func (s *Scanner) runEventsLoop(ctx context.Context) error {
 // If the DRBD name has the standard "sdsrv-" prefix, it derives the K8S name and sends a Name-based request.
 // If the DRBD name does not have the prefix, it sends an ActualNameOnTheNode-based request for orphan/rename handling.
 func (s *Scanner) triggerReconciliation(ctx context.Context, drbdName string) {
+	logger := log.FromContext(ctx)
 	var req DRBDReconcileRequest
 
 	// If DRBD name has standard prefix, we can derive K8S name
 	if k8sName, hasPrefix := ParseDRBDResourceNameOnTheNode(drbdName); hasPrefix {
 		req.Name = k8sName
-		s.log.Debug("Triggered reconciliation (by k8s name)", "name", k8sName)
+		logger.V(1).Info("Triggered reconciliation (by k8s name)", "name", k8sName)
 	} else {
 		// No prefix - use ActualNameOnTheNode for orphan/rename handling
 		req.ActualNameOnTheNode = drbdName
-		s.log.Debug("Triggered reconciliation (by actual name)", "actualNameOnTheNode", drbdName)
+		logger.V(1).Info("Triggered reconciliation (by actual name)", "actualNameOnTheNode", drbdName)
 	}
 
 	select {
