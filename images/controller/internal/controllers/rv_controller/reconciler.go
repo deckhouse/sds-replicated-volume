@@ -608,7 +608,7 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 			return false
 		}
 		// Expected peers: all other diskful replicas.
-		expectedPeers := diskful.Difference(nodeidset.NodeIDSet(1 << rvr.NodeID()))
+		expectedPeers := diskful.Difference(nodeidset.Of(rvr.NodeID()))
 		// Actual peers: only diskful with ConnectionStateConnected.
 		actualPeers := nodeidset.FromWhere(rvr.Status.Peers, func(p v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
 			return p.Type == v1alpha1.ReplicaTypeDiskful &&
@@ -642,7 +642,7 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 			return false
 		}
 		// All diskful peers must have ReplicationState == Established.
-		expectedPeers := diskful.Difference(nodeidset.NodeIDSet(1 << rvr.NodeID()))
+		expectedPeers := diskful.Difference(nodeidset.Of(rvr.NodeID()))
 		replicationEstablishedPeers := nodeidset.FromWhere(rvr.Status.Peers, func(p v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
 			return p.Type == v1alpha1.ReplicaTypeDiskful &&
 				p.ReplicationState == v1alpha1.ReplicationStateEstablished

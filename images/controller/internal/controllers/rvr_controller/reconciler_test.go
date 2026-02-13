@@ -8212,7 +8212,7 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
-					{Name: "peer-1", Type: v1alpha1.DRBDResourceTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnected, DiskState: v1alpha1.DiskStateUpToDate},
+					{Name: "peer-1", Type: v1alpha1.DRBDResourceTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnected, DiskState: v1alpha1.DiskStateUpToDate, ReplicationState: v1alpha1.ReplicationStateEstablished},
 					{Name: "peer-2", Type: v1alpha1.DRBDResourceTypeDiskless, AllowRemoteRead: true},  // TieBreaker
 					{Name: "peer-3", Type: v1alpha1.DRBDResourceTypeDiskless, AllowRemoteRead: false}, // Access
 				},
@@ -8229,6 +8229,8 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 		Expect(peer1).NotTo(BeNil())
 		Expect(peer1.Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
 		Expect(peer1.ConnectionState).To(Equal(v1alpha1.ConnectionStateConnected))
+		Expect(peer1.BackingVolumeState).To(Equal(v1alpha1.DiskStateUpToDate))
+		Expect(peer1.ReplicationState).To(Equal(v1alpha1.ReplicationStateEstablished))
 
 		// peer-2: TieBreaker (Diskless + AllowRemoteRead=true)
 		peer2 := findPeerByName(rvr.Status.Peers, "peer-2")
@@ -8266,7 +8268,7 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 		drbdr := &v1alpha1.DRBDResource{
 			Status: v1alpha1.DRBDResourceStatus{
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
-					{Name: "peer-1", Type: v1alpha1.DRBDResourceTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnected},
+					{Name: "peer-1", Type: v1alpha1.DRBDResourceTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnected, ReplicationState: v1alpha1.ReplicationStateEstablished},
 				},
 			},
 		}
