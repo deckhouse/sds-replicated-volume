@@ -266,6 +266,18 @@ var _ = Describe("backingVolume.Equal", func() {
 	})
 })
 
+var _ = Describe("backingVolume.LLVNameOrEmpty", func() {
+	It("returns empty string for nil receiver", func() {
+		var bv *backingVolume
+		Expect(bv.LLVNameOrEmpty()).To(Equal(""))
+	})
+
+	It("returns LLV name for non-nil receiver", func() {
+		bv := &backingVolume{LLVName: "llv-1"}
+		Expect(bv.LLVNameOrEmpty()).To(Equal("llv-1"))
+	})
+})
+
 var _ = Describe("computeIntendedBackingVolume", func() {
 	var rv *v1alpha1.ReplicatedVolume
 
@@ -327,6 +339,26 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
 	})
 
+	It("returns backing volume for datamesh member with TypeTransition=ToDiskful", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+			{
+				Name:               "rvr-1",
+				Type:               v1alpha1.ReplicaTypeTieBreaker,
+				TypeTransition:     v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+
+		bv, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
+
+		Expect(bv).NotTo(BeNil())
+		Expect(reason).To(BeEmpty())
+		Expect(bv.LVMVolumeGroupName).To(Equal("lvg-1"))
+	})
+
 	It("returns nil for datamesh member with empty LVMVolumeGroupName", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
@@ -380,6 +412,32 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 		Expect(bv).NotTo(BeNil())
 		Expect(bv.LVMVolumeGroupName).To(Equal("lvg-1"))
 		Expect(bv.ThinPoolName).To(Equal("thinpool-1"))
+	})
+
+	It("uses rv.Spec.Size when larger than datamesh.Size", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+			{
+				Name:               "rvr-1",
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+		// datamesh.Size = 10Gi (from BeforeEach), rv.Spec.Size = 20Gi (larger).
+		rv.Spec.Size = resource.MustParse("20Gi")
+
+		bvFromSpec, _, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
+
+		// Reset rv.Spec.Size to zero and get the datamesh-only size for comparison.
+		rv.Spec.Size = resource.Quantity{}
+		bvFromDatamesh, _, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
+
+		Expect(bvFromSpec).NotTo(BeNil())
+		Expect(bvFromDatamesh).NotTo(BeNil())
+		// Size from rv.Spec.Size (20Gi) must be larger than from datamesh.Size (10Gi).
+		Expect(bvFromSpec.Size.Cmp(bvFromDatamesh.Size) > 0).To(BeTrue())
 	})
 
 	It("returns nil for non-member with Access type (diskless)", func() {
@@ -1374,6 +1432,152 @@ var _ = Describe("computeEligibilityWarnings", func() {
 	})
 })
 
+var _ = Describe("thinPoolMismatchMessage", func() {
+	It("returns LVM thick message when ThinPool specified but RSP type is LVM", func() {
+		msg := thinPoolMismatchMessage(v1alpha1.ReplicatedStoragePoolTypeLVM, "lvg-1", "tp-1")
+
+		Expect(msg).To(ContainSubstring("tp-1"))
+		Expect(msg).To(ContainSubstring("LVM (thick)"))
+	})
+
+	It("returns LVMThin message when ThinPool not specified but RSP type is LVMThin", func() {
+		msg := thinPoolMismatchMessage(v1alpha1.ReplicatedStoragePoolTypeLVMThin, "lvg-1", "")
+
+		Expect(msg).To(ContainSubstring("ThinPool is not specified"))
+		Expect(msg).To(ContainSubstring("LVMThin"))
+	})
+
+	It("returns not-in-list message when ThinPool specified for LVMThin but not in list", func() {
+		msg := thinPoolMismatchMessage(v1alpha1.ReplicatedStoragePoolTypeLVMThin, "lvg-1", "tp-missing")
+
+		Expect(msg).To(ContainSubstring("tp-missing"))
+		Expect(msg).To(ContainSubstring("not in the allowed list"))
+		Expect(msg).To(ContainSubstring("lvg-1"))
+	})
+
+	It("returns unexpected state message for default case", func() {
+		msg := thinPoolMismatchMessage(v1alpha1.ReplicatedStoragePoolTypeLVM, "lvg-1", "")
+
+		Expect(msg).To(ContainSubstring("Unexpected state"))
+		Expect(msg).To(ContainSubstring("lvg-1"))
+	})
+})
+
+var _ = Describe("rspEligibilityView.isStorageEligible", func() {
+	It("returns RSPNotAvailable for nil receiver", func() {
+		var v *rspEligibilityView
+		code, msg := v.isStorageEligible("lvg-1", "")
+
+		Expect(code).To(Equal(storageEligibilityRSPNotAvailable))
+		Expect(msg).To(ContainSubstring("ReplicatedStoragePool not found"))
+	})
+
+	It("returns NodeNotEligible when EligibleNode is nil", func() {
+		v := &rspEligibilityView{
+			Type:         v1alpha1.ReplicatedStoragePoolTypeLVM,
+			EligibleNode: nil,
+		}
+		code, msg := v.isStorageEligible("lvg-1", "")
+
+		Expect(code).To(Equal(storageEligibilityNodeNotEligible))
+		Expect(msg).To(ContainSubstring("not eligible in RSP"))
+	})
+
+	It("returns TypeMismatch when ThinPool specified but RSP type is LVM", func() {
+		v := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+			},
+		}
+		code, msg := v.isStorageEligible("lvg-1", "tp-1")
+
+		Expect(code).To(Equal(storageEligibilityTypeMismatch))
+		Expect(msg).To(ContainSubstring("tp-1"))
+		Expect(msg).To(ContainSubstring("LVM (thick)"))
+	})
+
+	It("returns TypeMismatch when ThinPool not specified but RSP type is LVMThin", func() {
+		v := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+			},
+		}
+		code, msg := v.isStorageEligible("lvg-1", "")
+
+		Expect(code).To(Equal(storageEligibilityTypeMismatch))
+		Expect(msg).To(ContainSubstring("ThinPool not specified"))
+		Expect(msg).To(ContainSubstring("LVMThin"))
+	})
+
+	It("returns LVGNotEligible when LVG not in list (LVM)", func() {
+		v := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-other"},
+				},
+			},
+		}
+		code, msg := v.isStorageEligible("lvg-1", "")
+
+		Expect(code).To(Equal(storageEligibilityLVGNotEligible))
+		Expect(msg).To(ContainSubstring("lvg-1"))
+		Expect(msg).To(ContainSubstring("not eligible"))
+	})
+
+	It("returns ThinPoolNotEligible when LVG found but ThinPool not in list", func() {
+		v := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1", ThinPoolName: "tp-other"},
+				},
+			},
+		}
+		code, msg := v.isStorageEligible("lvg-1", "tp-1")
+
+		Expect(code).To(Equal(storageEligibilityThinPoolNotEligible))
+		Expect(msg).To(ContainSubstring("lvg-1"))
+		Expect(msg).To(ContainSubstring("tp-1"))
+	})
+
+	It("returns OK for LVM thick when LVG found", func() {
+		v := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1"},
+				},
+			},
+		}
+		code, msg := v.isStorageEligible("lvg-1", "")
+
+		Expect(code).To(Equal(storageEligibilityOK))
+		Expect(msg).To(BeEmpty())
+	})
+
+	It("returns OK for LVMThin when LVG and ThinPool found", func() {
+		v := &rspEligibilityView{
+			Type: v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+			EligibleNode: &v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "node-1",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1", ThinPoolName: "tp-1"},
+				},
+			},
+		}
+		code, msg := v.isStorageEligible("lvg-1", "tp-1")
+
+		Expect(code).To(Equal(storageEligibilityOK))
+		Expect(msg).To(BeEmpty())
+	})
+})
+
 var _ = Describe("computeAPIValidationErrorCauses", func() {
 	It("returns error message for non-StatusError", func() {
 		err := newTestError("some error")
@@ -2258,6 +2462,90 @@ var _ = Describe("applyDRBDConfiguredCondFalse", func() {
 	})
 })
 
+var _ = Describe("applyDRBDConfiguredCondUnknown", func() {
+	It("sets condition to Unknown", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applyDRBDConfiguredCondUnknown(rvr, "TestReason", "Test message")
+
+		Expect(changed).To(BeTrue())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(cond.Reason).To(Equal("TestReason"))
+		Expect(cond.Message).To(Equal("Test message"))
+	})
+
+	It("returns false when condition already matches (idempotent)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		applyDRBDConfiguredCondUnknown(rvr, "TestReason", "Test message")
+
+		changed := applyDRBDConfiguredCondUnknown(rvr, "TestReason", "Test message")
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applyBackingVolumeReadyCondUnknown", func() {
+	It("sets condition to Unknown", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applyBackingVolumeReadyCondUnknown(rvr, "TestReason", "Test message")
+
+		Expect(changed).To(BeTrue())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(cond.Reason).To(Equal("TestReason"))
+		Expect(cond.Message).To(Equal("Test message"))
+	})
+
+	It("returns false when condition already matches (idempotent)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		applyBackingVolumeReadyCondUnknown(rvr, "TestReason", "Test message")
+
+		changed := applyBackingVolumeReadyCondUnknown(rvr, "TestReason", "Test message")
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
+var _ = Describe("applyConfiguredCondUnknown", func() {
+	It("sets condition to Unknown", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+
+		changed := applyConfiguredCondUnknown(rvr, "TestReason", "Test message")
+
+		Expect(changed).To(BeTrue())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(cond.Reason).To(Equal("TestReason"))
+		Expect(cond.Message).To(Equal("Test message"))
+	})
+
+	It("returns false when condition already matches (idempotent)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+		applyConfiguredCondUnknown(rvr, "TestReason", "Test message")
+
+		changed := applyConfiguredCondUnknown(rvr, "TestReason", "Test message")
+
+		Expect(changed).To(BeFalse())
+	})
+})
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Construction functions tests
 //
@@ -2764,6 +3052,123 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 
 		Expect(spec.Role).To(Equal(v1alpha1.DRBDRolePrimary))
 	})
+
+	It("sets AllowTwoPrimaries from datamesh.AllowMultiattach when member is present", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			AllowMultiattach: true,
+		}
+		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+			Name: "pvc-abc-1",
+		}
+
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "", v1alpha1.ReplicaTypeAccess)
+
+		Expect(spec.AllowTwoPrimaries).To(BeTrue())
+	})
+
+	It("sets AllowTwoPrimaries=false when member and datamesh.AllowMultiattach=false", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			AllowMultiattach: false,
+		}
+		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+			Name: "pvc-abc-1",
+		}
+
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "", v1alpha1.ReplicaTypeAccess)
+
+		Expect(spec.AllowTwoPrimaries).To(BeFalse())
+	})
+
+	It("sets quorum from datamesh for diskful member", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Quorum:                  3,
+			QuorumMinimumRedundancy: 2,
+		}
+		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+			Name: "pvc-abc-1",
+		}
+
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "llv-1", v1alpha1.ReplicaTypeDiskful)
+
+		Expect(spec.Quorum).To(Equal(byte(3)))
+		Expect(spec.QuorumMinimumRedundancy).To(Equal(byte(2)))
+	})
+
+	It("sets quorum=32 and QMR from datamesh for diskless member", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Quorum:                  3,
+			QuorumMinimumRedundancy: 2,
+		}
+		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+			Name: "pvc-abc-1",
+		}
+
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "", v1alpha1.ReplicaTypeAccess)
+
+		Expect(spec.Quorum).To(Equal(byte(32)))
+		Expect(spec.QuorumMinimumRedundancy).To(Equal(byte(2)))
+	})
+
+	It("sets quorum=32 and QMR=32 for non-member", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Quorum:                  3,
+			QuorumMinimumRedundancy: 2,
+		}
+
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+
+		Expect(spec.Quorum).To(Equal(byte(32)))
+		Expect(spec.QuorumMinimumRedundancy).To(Equal(byte(32)))
+	})
+
+	It("clones SystemNetworks from datamesh without aliasing", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			SystemNetworkNames: []string{"net-1", "net-2"},
+		}
+
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+
+		Expect(spec.SystemNetworks).To(Equal([]string{"net-1", "net-2"}))
+		// Verify no aliasing: mutating the result should not affect datamesh.
+		spec.SystemNetworks[0] = "mutated"
+		Expect(datamesh.SystemNetworkNames[0]).To(Equal("net-1"))
+	})
+
+	It("sets State to Up always", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{}
+
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+
+		Expect(spec.State).To(Equal(v1alpha1.DRBDResourceStateUp))
+	})
 })
 
 var _ = Describe("computeTargetDRBDRPeers", func() {
@@ -2919,6 +3324,43 @@ var _ = Describe("computeTargetDRBDRPeers", func() {
 
 		Expect(peers[0].Paths).To(HaveLen(1))
 		Expect(peers[0].Paths[0].Address.IPv4).To(Equal("10.0.0.1"))
+	})
+
+	It("sorts peers by Name for deterministic output", func() {
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
+				{Name: "pvc-abc-4", Type: v1alpha1.ReplicaTypeDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful},
+				{Name: "pvc-abc-3", Type: v1alpha1.ReplicaTypeDiskful},
+			},
+		}
+		self := &datamesh.Members[0]
+
+		peers := computeTargetDRBDRPeers(datamesh, self)
+
+		Expect(peers).To(HaveLen(3))
+		Expect(peers[0].Name).To(Equal("pvc-abc-2"))
+		Expect(peers[1].Name).To(Equal("pvc-abc-3"))
+		Expect(peers[2].Name).To(Equal("pvc-abc-4"))
+	})
+
+	It("sets Protocol to C for all peers", func() {
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful},
+				{Name: "pvc-abc-3", Type: v1alpha1.ReplicaTypeTieBreaker},
+			},
+		}
+		self := &datamesh.Members[0]
+
+		peers := computeTargetDRBDRPeers(datamesh, self)
+
+		Expect(peers).To(HaveLen(2))
+		for _, p := range peers {
+			Expect(p.Protocol).To(Equal(v1alpha1.DRBDProtocolC))
+		}
 	})
 })
 
@@ -3321,6 +3763,106 @@ var _ = Describe("getDRBDR", func() {
 
 		Expect(err).To(MatchError(testErr))
 		Expect(result).To(BeNil())
+	})
+})
+
+var _ = Describe("getRSPEligibilityView", func() {
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
+	})
+
+	It("returns view with EligibleNode when RSP found and node in eligible list", func() {
+		rsp := &v1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			Spec: v1alpha1.ReplicatedStoragePoolSpec{
+				Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+			},
+			Status: v1alpha1.ReplicatedStoragePoolStatus{
+				EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+					{
+						NodeName:   "node-1",
+						NodeReady:  true,
+						AgentReady: true,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+							{Name: "lvg-1", Ready: true},
+						},
+					},
+					{
+						NodeName: "node-2",
+					},
+				},
+			},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rsp).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		view, err := rec.getRSPEligibilityView(ctx, "rsp-1", "node-1")
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(view).NotTo(BeNil())
+		Expect(view.Type).To(Equal(v1alpha1.ReplicatedStoragePoolTypeLVM))
+		Expect(view.EligibleNode).NotTo(BeNil())
+		Expect(view.EligibleNode.NodeName).To(Equal("node-1"))
+		Expect(view.EligibleNode.LVMVolumeGroups).To(HaveLen(1))
+		Expect(view.EligibleNode.LVMVolumeGroups[0].Name).To(Equal("lvg-1"))
+	})
+
+	It("returns view with nil EligibleNode when RSP found but node not in eligible list", func() {
+		rsp := &v1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			Spec: v1alpha1.ReplicatedStoragePoolSpec{
+				Type: v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+			},
+			Status: v1alpha1.ReplicatedStoragePoolStatus{
+				EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+					{NodeName: "node-other"},
+				},
+			},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rsp).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		view, err := rec.getRSPEligibilityView(ctx, "rsp-1", "node-1")
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(view).NotTo(BeNil())
+		Expect(view.Type).To(Equal(v1alpha1.ReplicatedStoragePoolTypeLVMThin))
+		Expect(view.EligibleNode).To(BeNil())
+	})
+
+	It("returns nil, nil when RSP not found", func() {
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		view, err := rec.getRSPEligibilityView(ctx, "rsp-missing", "node-1")
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(view).To(BeNil())
+	})
+
+	It("returns error on API error", func() {
+		testErr := errors.New("test API error")
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+					return testErr
+				},
+			}).
+			Build()
+		rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+		view, err := rec.getRSPEligibilityView(ctx, "rsp-1", "node-1")
+
+		Expect(err).To(MatchError(testErr))
+		Expect(view).To(BeNil())
 	})
 })
 
@@ -7435,6 +7977,116 @@ var _ = Describe("ensureStatusAttachment", func() {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
+// ensureStatusAddressesAndType tests
+//
+
+var _ = Describe("ensureStatusAddressesAndType", func() {
+	var (
+		ctx context.Context
+		rvr *v1alpha1.ReplicatedVolumeReplica
+	)
+
+	BeforeEach(func() {
+		ctx = logr.NewContext(context.Background(), logr.Discard())
+		rvr = &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+	})
+
+	It("clears addresses and type when drbdr is nil", func() {
+		rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-1", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
+		}
+		rvr.Status.Type = v1alpha1.DRBDResourceTypeDiskful
+
+		outcome := ensureStatusAddressesAndType(ctx, rvr, nil)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Addresses).To(BeNil())
+		Expect(rvr.Status.Type).To(BeEmpty())
+	})
+
+	It("returns no change when drbdr is nil and addresses/type already empty", func() {
+		outcome := ensureStatusAddressesAndType(ctx, rvr, nil)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+	})
+
+	It("copies addresses from drbdr", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Addresses: []v1alpha1.DRBDResourceAddressStatus{
+					{SystemNetworkName: "net-1", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
+					{SystemNetworkName: "net-2", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.2", Port: 7001}},
+				},
+			},
+		}
+
+		outcome := ensureStatusAddressesAndType(ctx, rvr, drbdr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Addresses).To(HaveLen(2))
+		Expect(rvr.Status.Addresses[0].SystemNetworkName).To(Equal("net-1"))
+		Expect(rvr.Status.Addresses[1].SystemNetworkName).To(Equal("net-2"))
+	})
+
+	It("sets type from ActiveConfiguration", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Type: v1alpha1.DRBDResourceTypeDiskful,
+				},
+			},
+		}
+
+		outcome := ensureStatusAddressesAndType(ctx, rvr, drbdr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Type).To(Equal(v1alpha1.DRBDResourceTypeDiskful))
+	})
+
+	It("sets type to empty when ActiveConfiguration is nil", func() {
+		rvr.Status.Type = v1alpha1.DRBDResourceTypeDiskful
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				ActiveConfiguration: nil,
+			},
+		}
+
+		outcome := ensureStatusAddressesAndType(ctx, rvr, drbdr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Type).To(BeEmpty())
+	})
+
+	It("is idempotent", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Addresses: []v1alpha1.DRBDResourceAddressStatus{
+					{SystemNetworkName: "net-1", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
+				},
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Type: v1alpha1.DRBDResourceTypeDiskful,
+				},
+			},
+		}
+
+		outcome1 := ensureStatusAddressesAndType(ctx, rvr, drbdr)
+		Expect(outcome1.Error()).NotTo(HaveOccurred())
+		Expect(outcome1.DidChange()).To(BeTrue())
+
+		outcome2 := ensureStatusAddressesAndType(ctx, rvr, drbdr)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
 // ensureStatusPeers + ensureConditionFullyConnected tests
 //
 
@@ -8696,6 +9348,88 @@ var _ = Describe("ensureConditionReady", func() {
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumViaPeers))
 		Expect(cond.Message).To(ContainSubstring("data quorum: 0/2"))
 	})
+
+	It("sets Ready=Unknown WaitingForReplicatedVolume when no system networks", func() {
+		rvNoNetworks := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 1,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					SystemNetworkNames: nil, // no system networks
+				},
+			},
+		}
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Quorum: boolPtr(true),
+			},
+		}
+
+		outcome := ensureConditionReady(ctx, rvr, rvNoNetworks, drbdr, nil, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonWaitingForReplicatedVolume))
+		Expect(cond.Message).To(ContainSubstring("system networks"))
+	})
+
+	It("counts self as diskful vote and UpToDate vote in quorum message", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Quorum: boolPtr(true),
+			},
+		}
+		member := &v1alpha1.ReplicatedVolumeDatameshMember{Name: "rvr-1"}
+		// Diskful member with UpToDate backing volume — self counts as both diskful and UpToDate vote.
+		rvr.Status.Type = v1alpha1.DRBDResourceTypeDiskful
+		rvr.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+			State: v1alpha1.DiskStateUpToDate,
+		}
+		rvr.Status.QuorumSummary = &v1alpha1.ReplicatedVolumeReplicaStatusQuorumSummary{
+			Quorum:                  intPtr(2),
+			QuorumMinimumRedundancy: intPtr(1),
+			ConnectedDiskfulPeers:   1,
+			ConnectedUpToDatePeers:  1,
+		}
+
+		outcome := ensureConditionReady(ctx, rvr, validRV, drbdr, member, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		// 1 connected peer + 1 self = 2 diskful, 1 connected UpToDate peer + 1 self = 2 UpToDate
+		Expect(cond.Message).To(ContainSubstring("diskful 2/2"))
+		Expect(cond.Message).To(ContainSubstring("data quorum: 2/1"))
+	})
+
+	It("includes tie-breaker peers in quorum message", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Quorum: boolPtr(true),
+			},
+		}
+		member := &v1alpha1.ReplicatedVolumeDatameshMember{Name: "rvr-1"}
+		rvr.Status.Type = v1alpha1.DRBDResourceTypeDiskful
+		rvr.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+			State: v1alpha1.DiskStateUpToDate,
+		}
+		rvr.Status.QuorumSummary = &v1alpha1.ReplicatedVolumeReplicaStatusQuorumSummary{
+			Quorum:                   intPtr(2),
+			QuorumMinimumRedundancy:  intPtr(1),
+			ConnectedDiskfulPeers:    0,
+			ConnectedTieBreakerPeers: 1, // tie-breaker peer
+			ConnectedUpToDatePeers:   0,
+		}
+
+		outcome := ensureConditionReady(ctx, rvr, validRV, drbdr, member, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Message).To(ContainSubstring("+ tie-breakers 1"))
+	})
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -9211,6 +9945,112 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 
 		Expect(outcome.Error()).To(HaveOccurred())
 		Expect(outcome.Error().Error()).To(ContainSubstring("ActiveConfiguration is nil"))
+	})
+
+	It("sets Synchronizing when Inconsistent with SyncTarget peer", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				DiskState: v1alpha1.DiskStateInconsistent,
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role: v1alpha1.DRBDRoleSecondary,
+				},
+			},
+		}
+		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+			Name: "rvr-1",
+			Type: v1alpha1.ReplicaTypeDiskful,
+		}
+		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+			{
+				Name:             "peer-sync",
+				ReplicationState: v1alpha1.ReplicationStateSyncTarget,
+			},
+		}
+
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizing))
+		Expect(cond.Message).To(ContainSubstring("peer-sync"))
+	})
+
+	It("sets Synchronizing via intermediate peer when Inconsistent with Established UpToDate peer", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				DiskState: v1alpha1.DiskStateInconsistent,
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role: v1alpha1.DRBDRoleSecondary,
+				},
+			},
+		}
+		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+			Name: "rvr-1",
+			Type: v1alpha1.ReplicaTypeDiskful,
+		}
+		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+			{
+				Name:               "peer-intermediate",
+				BackingVolumeState: v1alpha1.DiskStateUpToDate,
+				ReplicationState:   v1alpha1.ReplicationStateEstablished,
+			},
+		}
+
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizing))
+		Expect(cond.Message).To(ContainSubstring("intermediate peer"))
+		Expect(cond.Message).To(ContainSubstring("peer-intermediate"))
+	})
+
+	It("sets Unknown for Negotiating disk state", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				DiskState: v1alpha1.DiskStateNegotiating,
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role: v1alpha1.DRBDRoleSecondary,
+				},
+			},
+		}
+		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+			Name: "rvr-1",
+			Type: v1alpha1.ReplicaTypeDiskful,
+		}
+
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUnknown))
+		Expect(cond.Message).To(ContainSubstring("negotiating"))
+	})
+
+	It("sets Unknown for Consistent disk state", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				DiskState: v1alpha1.DiskStateConsistent,
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role: v1alpha1.DRBDRoleSecondary,
+				},
+			},
+		}
+		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+			Name: "rvr-1",
+			Type: v1alpha1.ReplicaTypeDiskful,
+		}
+
+		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUnknown))
+		Expect(cond.Message).To(ContainSubstring("peer connection required"))
 	})
 })
 
