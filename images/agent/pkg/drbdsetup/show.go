@@ -22,6 +22,40 @@ import (
 	"fmt"
 )
 
+// UnmarshalJSON implements json.Unmarshaler for ShowVolumeDisk.
+// drbdsetup may emit the "disk" field as a plain string (e.g. for diskless volumes)
+// instead of a JSON object with disk options. This method handles both forms.
+func (d *ShowVolumeDisk) UnmarshalJSON(data []byte) error {
+	// If the value is a JSON string (e.g. "diskless"), leave the struct zero-valued.
+	if len(data) > 0 && data[0] == '"' {
+		return nil
+	}
+
+	type showVolumeDiskAlias ShowVolumeDisk
+	var alias showVolumeDiskAlias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	*d = ShowVolumeDisk(alias)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler for ShowConnectionVolumeDisk.
+// Same rationale as ShowVolumeDisk.UnmarshalJSON.
+func (d *ShowConnectionVolumeDisk) UnmarshalJSON(data []byte) error {
+	if len(data) > 0 && data[0] == '"' {
+		return nil
+	}
+
+	type showConnectionVolumeDiskAlias ShowConnectionVolumeDisk
+	var alias showConnectionVolumeDiskAlias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	*d = ShowConnectionVolumeDisk(alias)
+	return nil
+}
+
 // ShowResource represents the parsed output of drbdsetup show --json.
 type ShowResource struct {
 	Resource    string           `json:"resource"`
