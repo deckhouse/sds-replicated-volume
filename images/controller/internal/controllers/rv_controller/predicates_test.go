@@ -561,7 +561,7 @@ var _ = Describe("drbdrOpPredicates", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "rv-1-formation",
 				},
-				Status: &v1alpha1.DRBDResourceOperationStatus{
+				Status: v1alpha1.DRBDResourceOperationStatus{
 					Phase: v1alpha1.DRBDOperationPhasePending,
 				},
 			}
@@ -569,7 +569,7 @@ var _ = Describe("drbdrOpPredicates", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "rv-1-formation",
 				},
-				Status: &v1alpha1.DRBDResourceOperationStatus{
+				Status: v1alpha1.DRBDResourceOperationStatus{
 					Phase: v1alpha1.DRBDOperationPhaseRunning,
 				},
 			}
@@ -636,7 +636,7 @@ var _ = Describe("drbdrOpPredicates", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "rv-1-formation",
 				},
-				Status: &v1alpha1.DRBDResourceOperationStatus{
+				Status: v1alpha1.DRBDResourceOperationStatus{
 					Phase: v1alpha1.DRBDOperationPhasePending,
 				},
 			}
