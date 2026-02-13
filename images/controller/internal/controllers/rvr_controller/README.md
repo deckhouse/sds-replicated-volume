@@ -471,11 +471,11 @@ Custom `rvEventHandler` with targeted enqueuing to minimize unnecessary reconcil
 
 - **ReplicatedStorageClassName changed**: enqueues ALL RVRs for the RV (labels update needed)
 - **Initial DatameshRevision change** (0 → N): enqueues ALL RVRs for the RV (initial setup)
-- **Non-initial DatameshRevision change**: enqueues only RVRs that are members in old OR new datamesh (targeted by NodeID)
-- **DatameshPendingReplicaTransitions message changed**: enqueues only affected RVRs where the message differs (targeted by NodeID via sorted merge diff)
+- **Non-initial DatameshRevision change**: enqueues only RVRs that are members in old OR new datamesh (targeted by ID)
+- **DatameshPendingReplicaTransitions message changed**: enqueues only affected RVRs where the message differs (targeted by ID via sorted merge diff)
 
-Multiple independent changes are collected into a single NodeID set and enqueued together.
-RVR names are constructed deterministically from RV name + NodeID without requiring index lookups.
+Multiple independent changes are collected into a single ID set and enqueued together.
+RVR names are constructed deterministically from RV name + ID without requiring index lookups.
 
 ### RSP Predicates
 

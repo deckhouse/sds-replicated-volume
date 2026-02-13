@@ -78,52 +78,52 @@ func (rvr *ReplicatedVolumeReplica) SetStatusConditions(conditions []metav1.Cond
 	rvr.Status.Conditions = conditions
 }
 
-// NodeID extracts NodeID from the RVR name (e.g., "pvc-xxx-5" → 5).
+// ID extracts ID from the RVR name (e.g., "pvc-xxx-5" → 5).
 // Result is cached after first successful call
-func (rvr *ReplicatedVolumeReplica) NodeID() uint8 {
-	return nodeIDFromName(rvr.Name)
+func (rvr *ReplicatedVolumeReplica) ID() uint8 {
+	return idFromName(rvr.Name)
 }
 
-// nodeIDSuffixes is a lookup table for nodeID (0-31) to "-N" suffix conversion.
-var nodeIDSuffixes = [32]string{
+// idSuffixes is a lookup table for ID (0-31) to "-N" suffix conversion.
+var idSuffixes = [32]string{
 	"-0", "-1", "-2", "-3", "-4", "-5", "-6", "-7",
 	"-8", "-9", "-10", "-11", "-12", "-13", "-14", "-15",
 	"-16", "-17", "-18", "-19", "-20", "-21", "-22", "-23",
 	"-24", "-25", "-26", "-27", "-28", "-29", "-30", "-31",
 }
 
-// FormatReplicatedVolumeReplicaName returns the RVR name for the given RV name and nodeID.
-// Panics if nodeID > 31.
-func FormatReplicatedVolumeReplicaName(rvName string, nodeID uint8) string {
-	if nodeID > 31 {
-		panic("nodeID must be in range 0-31")
+// FormatReplicatedVolumeReplicaName returns the RVR name for the given RV name and ID.
+// Panics if id > 31.
+func FormatReplicatedVolumeReplicaName(rvName string, id uint8) string {
+	if id > 31 {
+		panic("id must be in range 0-31")
 	}
-	return rvName + nodeIDSuffixes[nodeID]
+	return rvName + idSuffixes[id]
 }
 
-// SetNameWithNodeID sets the RVR name using the ReplicatedVolumeName and the given NodeID.
-func (rvr *ReplicatedVolumeReplica) SetNameWithNodeID(nodeID uint8) {
-	rvr.Name = FormatReplicatedVolumeReplicaName(rvr.Spec.ReplicatedVolumeName, nodeID)
+// SetNameWithID sets the RVR name using the ReplicatedVolumeName and the given ID.
+func (rvr *ReplicatedVolumeReplica) SetNameWithID(id uint8) {
+	rvr.Name = FormatReplicatedVolumeReplicaName(rvr.Spec.ReplicatedVolumeName, id)
 }
 
-// ChooseNewName selects the first available NodeID and sets the RVR name.
-// Returns false if all NodeIDs (0-31) are already taken by other RVRs.
+// ChooseNewName selects the first available ID and sets the RVR name.
+// Returns false if all IDs (0-31) are already taken by other RVRs.
 func (rvr *ReplicatedVolumeReplica) ChooseNewName(otherRVRs []*ReplicatedVolumeReplica) bool {
-	// Bitmask for reserved NodeIDs (0-31 fit in uint32).
+	// Bitmask for reserved IDs (0-31 fit in uint32).
 	var reserved uint32
 
 	for _, otherRVR := range otherRVRs {
 		if otherRVR.Spec.ReplicatedVolumeName != rvr.Spec.ReplicatedVolumeName {
 			continue
 		}
-		reserved |= 1 << otherRVR.NodeID()
+		reserved |= 1 << otherRVR.ID()
 	}
 
 	free := ^reserved
 	if free == 0 {
 		return false
 	}
-	rvr.SetNameWithNodeID(uint8(bits.TrailingZeros32(free)))
+	rvr.SetNameWithID(uint8(bits.TrailingZeros32(free)))
 	return true
 }
 
@@ -377,9 +377,9 @@ type ReplicatedVolumeReplicaStatusPeerStatus struct {
 	ReplicationState ReplicationState `json:"replicationState,omitempty"`
 }
 
-// NodeID extracts NodeID from the peer name (e.g., "pvc-xxx-5" → 5).
-func (p ReplicatedVolumeReplicaStatusPeerStatus) NodeID() uint8 {
-	return nodeIDFromName(p.Name)
+// ID extracts ID from the peer name (e.g., "pvc-xxx-5" → 5).
+func (p ReplicatedVolumeReplicaStatusPeerStatus) ID() uint8 {
+	return idFromName(p.Name)
 }
 
 // ReplicatedVolumeReplicaStatusDRBDRReconciliationCache holds cached values used to optimize DRBDResource reconciliation.
@@ -762,15 +762,15 @@ func ParseConnectionState(s string) ConnectionState {
 	}
 }
 
-// DRBD node ID constants for ReplicatedVolumeReplica
+// ID range constants for ReplicatedVolumeReplica
 const (
-	// RVRMinNodeID is the minimum valid node ID for DRBD configuration in ReplicatedVolumeReplica
-	RVRMinNodeID = uint8(0)
-	// RVRMaxNodeID is the maximum valid node ID for DRBD configuration in ReplicatedVolumeReplica
-	RVRMaxNodeID = uint8(31)
+	// RVRMinID is the minimum valid ID for ReplicatedVolumeReplica
+	RVRMinID = uint8(0)
+	// RVRMaxID is the maximum valid ID for ReplicatedVolumeReplica
+	RVRMaxID = uint8(31)
 )
 
-// IsValidNodeID checks if nodeID is within valid range [RVRMinNodeID; RVRMaxNodeID].
-func IsValidNodeID(nodeID uint8) bool {
-	return nodeID >= RVRMinNodeID && nodeID <= RVRMaxNodeID
+// IsValidID checks if id is within valid range [RVRMinID; RVRMaxID].
+func IsValidID(id uint8) bool {
+	return id >= RVRMinID && id <= RVRMaxID
 }

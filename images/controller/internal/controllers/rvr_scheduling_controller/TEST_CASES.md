@@ -347,8 +347,8 @@ None → 1, Availability/Consistency → 2, ConsistencyAndAvailability → 3.
 
 ## Scheduling Order
 
-1. ⚡ **Diskful replicas scheduled in NodeID order — deterministic.**
-   3 Diskful RVRs (NodeID 0, 1, 2) on a cluster with 3 nodes. RVRs are processed in NodeID order. The first (NodeID 0) gets the best-scoring node; subsequent ones get remaining nodes. Verify deterministic assignment.
+1. ⚡ **Diskful replicas scheduled in ID order — deterministic.**
+   3 Diskful RVRs (ID 0, 1, 2) on a cluster with 3 nodes. RVRs are processed in ID order. The first (ID 0) gets the best-scoring node; subsequent ones get remaining nodes. Verify deterministic assignment.
 
 2. **Diskful before TieBreaker — TieBreaker sees updated state.**
    1 Diskful + 1 TieBreaker, 2 nodes. Diskful is scheduled in Phase 2 (takes one node). TieBreaker in Phase 3 sees the updated `OccupiedNodes` → goes to the remaining node.

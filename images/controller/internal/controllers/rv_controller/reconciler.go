@@ -35,8 +35,8 @@ import (
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/drbd_size"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/nodeidset"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -213,7 +213,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 
 	// Replicas placed on nodes that violate eligible nodes constraints.
 	// These need to be replaced with replicas on eligible nodes.
-	misplaced := nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+	misplaced := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 		return rvr.DeletionTimestamp == nil &&
 			obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType).
 				IsFalse().
@@ -222,12 +222,12 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 	})
 
 	// Replicas that are still being deleted.
-	deleting := nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+	deleting := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 		return rvr.DeletionTimestamp != nil
 	})
 
 	// Collect diskful replicas.
-	diskful := nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+	diskful := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 		return rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful
 	})
 
@@ -252,13 +252,13 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 				}
 				return rf.Failf(err, "creating diskful RVR")
 			}
-			diskful.Add(rvr.NodeID())
+			diskful.Add(rvr.ID())
 		}
 	}
 
 	// Replicas that have been assigned to a node by the scheduler.
 	// ObservedGenerationCurrent ensures the scheduling decision is up-to-date with the current spec.
-	scheduled := nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+	scheduled := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 		return obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType).
 			IsTrue().
 			ObservedGenerationCurrent().
@@ -269,7 +269,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 	// These replicas have:
 	// - a pending transition with Member=true (signaling readiness to become a datamesh member),
 	// - DRBDConfigured condition with reason PendingDatameshJoin (DRBD setup complete, awaiting membership).
-	preconfigured := nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+	preconfigured := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 		pt := rvr.Status.DatameshPendingTransition
 		return pt != nil && pt.Member != nil && *pt.Member &&
 			obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType).
@@ -278,10 +278,10 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 				Eval()
 	})
 
-	// Remove excess diskful replicas (prefer higher NodeID).
+	// Remove excess diskful replicas (prefer higher ID).
 	// Priority: prefer deleting replicas that are less progressed (not scheduled > not preconfigured > any).
 	for diskful.Len() > targetDiskfulCount {
-		var candidates nodeidset.NodeIDSet
+		var candidates idset.IDSet
 		if ns := diskful.Difference(scheduled); !ns.IsEmpty() {
 			candidates = ns
 		} else if np := diskful.Difference(preconfigured); !np.IsEmpty() {
@@ -294,7 +294,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 
 	// Delete all replicas not in diskful (misplaced, excess, etc.).
 	for _, rvr := range *rvrs {
-		if !diskful.Contains(rvr.NodeID()) {
+		if !diskful.Contains(rvr.ID()) {
 			if err := r.deleteRVRWithFinalizerRemoval(rf.Ctx(), rvr); err != nil {
 				return rf.Failf(err, "deleting RVR %s", rvr.Name)
 			}
@@ -305,7 +305,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 	// Replicas may be deleting for various reasons: leftover from a previous formation cycle,
 	// excess replicas removed above, misplaced replicas, or externally created replicas.
 	// If deletion takes too long, restart formation.
-	deleting = nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+	deleting = idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 		return rvr.DeletionTimestamp != nil
 	})
 	if !deleting.IsEmpty() {
@@ -345,8 +345,8 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 
 	// Verify all diskful replicas have addresses for all required SystemNetworkNames (safety check).
 	requiredNetworks := rv.Status.Datamesh.SystemNetworkNames
-	missingAddresses := nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		if !diskful.Contains(rvr.NodeID()) {
+	missingAddresses := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		if !diskful.Contains(rvr.ID()) {
 			return false
 		}
 		// Check if RVR has addresses for all required networks.
@@ -381,8 +381,8 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 	}
 
 	// Verify all diskful replicas are on eligible nodes (safety check).
-	notEligible := nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		return diskful.Contains(rvr.NodeID()) &&
+	notEligible := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return diskful.Contains(rvr.ID()) &&
 			!slices.ContainsFunc(rsp.EligibleNodes, func(en v1alpha1.ReplicatedStoragePoolEligibleNode) bool {
 				return en.NodeName == rvr.Spec.NodeName
 			})
@@ -410,8 +410,8 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 	}
 
 	// Verify spec matches pending transition (safety check against spec changes during formation).
-	specMismatch := nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		if !diskful.Contains(rvr.NodeID()) {
+	specMismatch := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		if !diskful.Contains(rvr.ID()) {
 			return false
 		}
 		pt := rvr.Status.DatameshPendingTransition
@@ -445,8 +445,8 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 	}
 
 	// Verify backing volume size is sufficient for datamesh (safety check).
-	insufficientSize := nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		if !diskful.Contains(rvr.NodeID()) {
+	insufficientSize := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		if !diskful.Contains(rvr.ID()) {
 			return false
 		}
 		if rvr.Status.BackingVolume == nil || rvr.Status.BackingVolume.Size == nil {
@@ -505,7 +505,7 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 	}
 
 	// Collect active diskful replicas (not being deleted).
-	diskful := nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+	diskful := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 		return rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.DeletionTimestamp == nil
 	})
 
@@ -520,7 +520,7 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 
 		// Add diskful replicas as datamesh members.
 		for _, rvr := range *rvrs {
-			if !diskful.Contains(rvr.NodeID()) {
+			if !diskful.Contains(rvr.ID()) {
 				continue
 			}
 
@@ -565,7 +565,7 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 	}
 
 	// Verify datamesh members match active replicas (safety check).
-	dmDiskful := nodeidset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.ReplicatedVolumeDatameshMember) bool {
+	dmDiskful := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.ReplicatedVolumeDatameshMember) bool {
 		return m.Type == v1alpha1.ReplicaTypeDiskful
 	})
 	if dmDiskful != diskful {
@@ -582,8 +582,8 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 	}
 
 	// Verify all diskful replicas are fully configured for the current datamesh revision.
-	configured := nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		return diskful.Contains(rvr.NodeID()) &&
+	configured := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return diskful.Contains(rvr.ID()) &&
 			rvr.Status.DatameshRevision == rv.Status.DatameshRevision &&
 			obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType).
 				IsTrue().
@@ -603,14 +603,14 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 	}
 
 	// Verify all diskful replicas are connected to each other.
-	connected := nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		if !diskful.Contains(rvr.NodeID()) {
+	connected := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		if !diskful.Contains(rvr.ID()) {
 			return false
 		}
 		// Expected peers: all other diskful replicas.
-		expectedPeers := diskful.Difference(nodeidset.Of(rvr.NodeID()))
+		expectedPeers := diskful.Difference(idset.Of(rvr.ID()))
 		// Actual peers: only diskful with ConnectionStateConnected.
-		actualPeers := nodeidset.FromWhere(rvr.Status.Peers, func(p v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
+		actualPeers := idset.FromWhere(rvr.Status.Peers, func(p v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
 			return p.Type == v1alpha1.ReplicaTypeDiskful &&
 				p.ConnectionState == v1alpha1.ConnectionStateConnected
 		})
@@ -633,8 +633,8 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 	// This is the special case during formation: all peers have Inconsistent backing volumes
 	// with UUID_JUST_CREATED flag. DRBD establishes the connection between such peers
 	// before any resync is triggered.
-	readyForDataBootstrap := nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		if !diskful.Contains(rvr.NodeID()) {
+	readyForDataBootstrap := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		if !diskful.Contains(rvr.ID()) {
 			return false
 		}
 		// Backing volume must be Inconsistent.
@@ -642,8 +642,8 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 			return false
 		}
 		// All diskful peers must have ReplicationState == Established.
-		expectedPeers := diskful.Difference(nodeidset.Of(rvr.NodeID()))
-		replicationEstablishedPeers := nodeidset.FromWhere(rvr.Status.Peers, func(p v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
+		expectedPeers := diskful.Difference(idset.Of(rvr.ID()))
+		replicationEstablishedPeers := idset.FromWhere(rvr.Status.Peers, func(p v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
 			return p.Type == v1alpha1.ReplicaTypeDiskful &&
 				p.ReplicationState == v1alpha1.ReplicationStateEstablished
 		})
@@ -690,7 +690,7 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 		applyFormationTransitionMessage(rv, "Starting data bootstrap")
 	}
 
-	dmDiskful := nodeidset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.ReplicatedVolumeDatameshMember) bool {
+	dmDiskful := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.ReplicatedVolumeDatameshMember) bool {
 		return m.Type == v1alpha1.ReplicaTypeDiskful
 	})
 
@@ -751,8 +751,8 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 	} else {
 		// Verify that DRBDResourceName targets one of the diskful replicas.
 		drbdrOpTargetsDiskful := false
-		for nodeID := range dmDiskful.All() {
-			if drbdrOp.Spec.DRBDResourceName == v1alpha1.FormatReplicatedVolumeReplicaName(rv.Name, nodeID) {
+		for id := range dmDiskful.All() {
+			if drbdrOp.Spec.DRBDResourceName == v1alpha1.FormatReplicatedVolumeReplicaName(rv.Name, id) {
 				drbdrOpTargetsDiskful = true
 				break
 			}
@@ -820,8 +820,8 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 
 	// Verify all diskful replicas have backing volume UpToDate — this is the actual
 	// completion signal for data bootstrap (the DRBDResourceOperation only initiates it).
-	upToDate := nodeidset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		return dmDiskful.Contains(rvr.NodeID()) &&
+	upToDate := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return dmDiskful.Contains(rvr.ID()) &&
 			rvr.Status.BackingVolume != nil &&
 			rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate
 	})
@@ -1089,7 +1089,7 @@ func applyFormationTransitionAbsent(rv *v1alpha1.ReplicatedVolume) bool {
 // Returns true if the member was added or any field was changed.
 func applyDatameshMember(rv *v1alpha1.ReplicatedVolume, member v1alpha1.ReplicatedVolumeDatameshMember) bool {
 	for i := range rv.Status.Datamesh.Members {
-		if rv.Status.Datamesh.Members[i].NodeID() == member.NodeID() {
+		if rv.Status.Datamesh.Members[i].ID() == member.ID() {
 			m := &rv.Status.Datamesh.Members[i]
 			changed := false
 			if m.Type != member.Type {
@@ -1131,12 +1131,12 @@ func applyDatameshMember(rv *v1alpha1.ReplicatedVolume, member v1alpha1.Replicat
 	return true
 }
 
-// applyDatameshMemberAbsent removes members whose NodeID is NOT in the given set.
+// applyDatameshMemberAbsent removes members whose ID is NOT in the given set.
 // Returns true if any member was removed.
-func applyDatameshMemberAbsent(rv *v1alpha1.ReplicatedVolume, repIDs nodeidset.NodeIDSet) bool {
+func applyDatameshMemberAbsent(rv *v1alpha1.ReplicatedVolume, repIDs idset.IDSet) bool {
 	n := 0
 	for i := range rv.Status.Datamesh.Members {
-		if repIDs.Contains(rv.Status.Datamesh.Members[i].NodeID()) {
+		if repIDs.Contains(rv.Status.Datamesh.Members[i].ID()) {
 			rv.Status.Datamesh.Members[n] = rv.Status.Datamesh.Members[i]
 			n++
 		}
@@ -1149,12 +1149,12 @@ func applyDatameshMemberAbsent(rv *v1alpha1.ReplicatedVolume, repIDs nodeidset.N
 }
 
 // applyPendingReplicaMessages updates the Message field for pending replica transitions
-// whose NodeID is in the given set. Returns true if any message was changed.
-func applyPendingReplicaMessages(rv *v1alpha1.ReplicatedVolume, repIDs nodeidset.NodeIDSet, message string) bool {
+// whose ID is in the given set. Returns true if any message was changed.
+func applyPendingReplicaMessages(rv *v1alpha1.ReplicatedVolume, repIDs idset.IDSet, message string) bool {
 	changed := false
 	for i := range rv.Status.DatameshPendingReplicaTransitions {
 		t := &rv.Status.DatameshPendingReplicaTransitions[i]
-		if repIDs.Contains(t.NodeID()) && t.Message != message {
+		if repIDs.Contains(t.ID()) && t.Message != message {
 			t.Message = message
 			changed = true
 		}
@@ -1177,7 +1177,7 @@ func computeIntendedDiskfulReplicaCount(rv *v1alpha1.ReplicatedVolume) int {
 
 // computeTargetQuorum computes Quorum and QuorumMinimumRedundancy based on intended diskful members and replication mode.
 func computeTargetQuorum(rv *v1alpha1.ReplicatedVolume) (q, qmr byte) {
-	intendedDiskful := nodeidset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.ReplicatedVolumeDatameshMember) bool {
+	intendedDiskful := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.ReplicatedVolumeDatameshMember) bool {
 		return m.Type == v1alpha1.ReplicaTypeDiskful || m.TypeTransition == v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskful
 	})
 
@@ -1355,7 +1355,7 @@ func ensureDatameshPendingReplicaTransitions(
 	// irrelevant for the API, so a mere reorder is not a reason to patch. If a real
 	// content change occurs, the patch will persist the correctly sorted value.
 	slices.SortFunc(existing, func(a, b v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition) int {
-		return cmp.Compare(a.NodeID(), b.NodeID())
+		return cmp.Compare(a.ID(), b.ID())
 	})
 
 	// Merge-in-place with two pointers.
@@ -1730,7 +1730,7 @@ func (r *Reconciler) patchRVAStatus(ctx context.Context, obj, base *v1alpha1.Rep
 // --- RVR ---
 
 // getRVRsSorted lists ReplicatedVolumeReplicas for the given RV name,
-// sorted by NodeID (deterministic, ascending).
+// sorted by ID (deterministic, ascending).
 func (r *Reconciler) getRVRsSorted(ctx context.Context, rvName string) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
 	var list v1alpha1.ReplicatedVolumeReplicaList
 	if err := r.cl.List(ctx, &list,
@@ -1754,12 +1754,12 @@ func (r *Reconciler) getRVRsSorted(ctx context.Context, rvName string) ([]*v1alp
 	}
 
 	slices.SortFunc(result, func(a, b *v1alpha1.ReplicatedVolumeReplica) int {
-		return cmp.Compare(a.NodeID(), b.NodeID())
+		return cmp.Compare(a.ID(), b.ID())
 	})
 	return result, nil
 }
 
-// createRVR constructs a new ReplicatedVolumeReplica (choosing a free NodeID name,
+// createRVR constructs a new ReplicatedVolumeReplica (choosing a free ID name,
 // adding the RV controller finalizer, setting controller owner ref), creates it via the API,
 // and inserts it into rvrs in sorted order.
 //
@@ -1780,7 +1780,7 @@ func (r *Reconciler) createRVR(
 		},
 	}
 	if !rvr.ChooseNewName(*rvrs) {
-		return nil, fmt.Errorf("no available NodeID for new RVR")
+		return nil, fmt.Errorf("no available ID for new RVR")
 	}
 	obju.AddFinalizer(rvr, v1alpha1.RVControllerFinalizer)
 	if _, err := obju.SetControllerRef(rvr, rv, r.scheme); err != nil {
@@ -1789,10 +1789,10 @@ func (r *Reconciler) createRVR(
 	if err := r.cl.Create(ctx, rvr); err != nil {
 		return nil, err
 	}
-	// Insert in sorted order by NodeID.
-	nodeID := rvr.NodeID()
-	idx, _ := slices.BinarySearchFunc(*rvrs, nodeID, func(r *v1alpha1.ReplicatedVolumeReplica, id uint8) int {
-		return cmp.Compare(r.NodeID(), id)
+	// Insert in sorted order by ID.
+	rvrID := rvr.ID()
+	idx, _ := slices.BinarySearchFunc(*rvrs, rvrID, func(r *v1alpha1.ReplicatedVolumeReplica, id uint8) int {
+		return cmp.Compare(r.ID(), id)
 	})
 	*rvrs = slices.Insert(*rvrs, idx, rvr)
 	return rvr, nil

@@ -163,9 +163,9 @@ type ReplicatedVolumeDatameshPendingReplicaTransition struct {
 	FirstObservedAt metav1.Time `json:"firstObservedAt"`
 }
 
-// NodeID extracts NodeID from the replica name (e.g., "pvc-xxx-5" → 5).
-func (t ReplicatedVolumeDatameshPendingReplicaTransition) NodeID() uint8 {
-	return nodeIDFromName(t.Name)
+// ID extracts ID from the replica name (e.g., "pvc-xxx-5" → 5).
+func (t ReplicatedVolumeDatameshPendingReplicaTransition) ID() uint8 {
+	return idFromName(t.Name)
 }
 
 // ReplicatedVolumeDatameshTransition represents an active datamesh transition.
@@ -366,9 +366,9 @@ type ReplicatedVolumeDatameshMember struct {
 	Attached bool `json:"attached"`
 }
 
-// NodeID extracts NodeID from the member name (e.g., "pvc-xxx-5" → 5).
-func (m ReplicatedVolumeDatameshMember) NodeID() uint8 {
-	return nodeIDFromName(m.Name)
+// ID extracts ID from the member name (e.g., "pvc-xxx-5" → 5).
+func (m ReplicatedVolumeDatameshMember) ID() uint8 {
+	return idFromName(m.Name)
 }
 
 // ReplicatedVolumeDatameshMemberTypeTransition enumerates possible type transitions for datamesh members.
