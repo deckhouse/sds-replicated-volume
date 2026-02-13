@@ -94,14 +94,14 @@ func (s IDSet) AppendTo(dst []uint8) []uint8 {
 	return dst
 }
 
-// String returns a comma-separated list of IDs (e.g., "0, 3, 7").
+// String returns a comma-separated list of IDs with # prefix (e.g., "#0, #3, #7").
 // Uses a fixed-size stack buffer; only one allocation for the final string.
 func (s IDSet) String() string {
 	if s == 0 {
 		return ""
 	}
-	// Max capacity: 10 one-digit (0-9) + 22 two-digit (10-31) + 31 separators (", ") = 116 bytes.
-	var buf [116]byte
+	// Max capacity: 32 '#' + 10 one-digit (0-9) + 22 two-digit (10-31) + 31 separators (", ") = 148 bytes.
+	var buf [148]byte
 	b := buf[:0]
 	x := uint32(s)
 	for x != 0 {
@@ -109,6 +109,7 @@ func (s IDSet) String() string {
 			b = append(b, ',', ' ')
 		}
 		i := bits.TrailingZeros32(x)
+		b = append(b, '#')
 		b = append(b, idStr[i]...)
 		x &^= 1 << uint(i)
 	}
