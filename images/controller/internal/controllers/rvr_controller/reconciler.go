@@ -287,6 +287,7 @@ func ensureStatusAttachment(
 		attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
 			DevicePath:  drbdr.Status.Device,
 			IOSuspended: drbdr.Status.DeviceIOSuspended != nil && *drbdr.Status.DeviceIOSuspended,
+			InUse:       drbdr.Status.DeviceOpen != nil && *drbdr.Status.DeviceOpen,
 		}
 	}
 
