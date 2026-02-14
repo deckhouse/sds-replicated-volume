@@ -2256,7 +2256,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		// - DRBDResource.Generation (DRBDR was modified externally)
 		// - DatameshRevision (datamesh configuration changed)
 		// - RVRType (replica type changed, e.g. diskful -> tiebreaker due to missing disk)
-		targetDRBDRReconciliationCache := computeTargetDRBDRReconciliationCache(rv.Status.DatameshRevision, drbdr.Generation, targetType)
+		targetDRBDRReconciliationCache = computeTargetDRBDRReconciliationCache(rv.Status.DatameshRevision, drbdr.Generation, targetType)
 		specMayNeedUpdate := rvr.Status.DRBDRReconciliationCache != targetDRBDRReconciliationCache
 
 		if specMayNeedUpdate {
