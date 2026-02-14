@@ -1398,6 +1398,14 @@ func (r *Reconciler) reconcileMetadata(
 	// Keep finalizer if RVR should exist or if there are still child resources.
 	targetFinalizerPresent := shouldExist || hasLLVs || hasDRBDR
 
+	// Kubernetes rejects adding new finalizers to a deleting object.
+	// If our finalizer is not already present and the object is deleting,
+	// we must not attempt to add it — force target to false.
+	if targetFinalizerPresent && rvr.DeletionTimestamp != nil &&
+		!obju.HasFinalizer(rvr, v1alpha1.RVRControllerFinalizer) {
+		targetFinalizerPresent = false
+	}
+
 	// Compute actual LVG name from the LLV referenced by DRBDResource, or first LLV.
 	var actualLVGName string
 	if drbdr != nil && drbdr.Spec.LVMLogicalVolumeName != "" {

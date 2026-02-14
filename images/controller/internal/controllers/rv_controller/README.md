@@ -8,7 +8,7 @@ The controller reconciles `ReplicatedVolume` with:
 
 1. **Configuration initialization** — copies resolved configuration from `ReplicatedStorageClass` (RSC) into RV status
 2. **Datamesh formation** — creates replicas, establishes DRBD connectivity, bootstraps data synchronization
-3. **Normal operation** — steady-state datamesh lifecycle (attach handling, scaling, access replica join/leave, etc.) *(WIP)*
+3. **Normal operation** — steady-state datamesh lifecycle (Access replica create/delete/join/leave, etc.) *(WIP)*
 4. **Deletion** — cleans up child resources (RVRs, RVAs) and datamesh state
 
 ## Interactions
@@ -18,8 +18,8 @@ The controller reconciles `ReplicatedVolume` with:
 | ← input | ReplicatedStorageClass | Reads configuration (replication, topology, storage pool) |
 | ← input | ReplicatedStoragePool | Reads eligible nodes, system networks, zones for formation |
 | ← input | ReplicatedVolumeReplica | Reads replica status (scheduling, preconfiguration, connectivity, data sync) |
-| ← input | ReplicatedVolumeAttachment | Reads attachment status (for deletion decisions) |
-| → manages | ReplicatedVolumeReplica | Creates/deletes during formation and deletion |
+| ← input | ReplicatedVolumeAttachment | Reads attachment intent (for Access replica create/delete and deletion decisions) |
+| → manages | ReplicatedVolumeReplica | Creates/deletes during formation, normal operation (Access replicas), and deletion |
 | → manages | ReplicatedVolumeAttachment | Manages finalizers; updates conditions during deletion |
 | → manages | DRBDResourceOperation | Creates for data bootstrap during formation |
 
@@ -49,7 +49,7 @@ if configuration exists:
     if formation in progress (DatameshRevision == 0 or Formation transition active):
         reconcile formation (3-phase process)
     else:
-        reconcile normal operation (WIP: Access replica join/leave)
+        reconcile normal operation (WIP: Access replica create/delete/join/leave)
 
 ensure ConfigurationReady condition
 patch status if changed
@@ -102,15 +102,17 @@ Reconcile (root) [Pure orchestration]
 │       ├── reconcileFormationRestartIfTimeoutPassed
 │       └── applyFormationTransitionAbsent (formation complete)
 ├── reconcileNormalOperation [Pure orchestration] (WIP)
-│   └── ensureDatameshAccessReplicas ← details
-│       ├── ensureDatameshAccessReplicaTransitionProgress (loop: active transitions)
-│       ├── ensureDatameshAddAccessReplica (loop: pending joins)
-│       └── ensureDatameshRemoveAccessReplica (loop: pending leaves)
+│   ├── reconcileCreateAccessReplicas [Pure orchestration] ← details
+│   ├── ensureDatameshAccessReplicas ← details
+│   │   ├── ensureDatameshAccessReplicaTransitionProgress (loop: active transitions)
+│   │   ├── ensureDatameshAddAccessReplica (loop: pending joins)
+│   │   └── ensureDatameshRemoveAccessReplica (loop: pending leaves)
+│   └── reconcileDeleteAccessReplicas [Pure orchestration] ← details
 ├── ensureConditionConfigurationReady ← details
 └── patchRVStatus
 ```
 
-Links to detailed algorithms: [`reconcileDeletion`](#reconciledeletion-details), [`ensureDatameshPendingReplicaTransitions`](#ensuredatameshpendingreplicatransitions-details), [`reconcileFormationPhasePreconfigure`](#reconcileformationphasepreconfigure-details), [`reconcileFormationPhaseEstablishConnectivity`](#reconcileformationphaseestablishconnectivity-details), [`reconcileFormationPhaseBootstrapData`](#reconcileformationphasebootstrapdata-details), [`ensureDatameshAccessReplicas`](#ensuredatameshaccessreplicas-details), [`ensureConditionConfigurationReady`](#ensureconditionconfigurationready-details)
+Links to detailed algorithms: [`reconcileDeletion`](#reconciledeletion-details), [`ensureDatameshPendingReplicaTransitions`](#ensuredatameshpendingreplicatransitions-details), [`reconcileFormationPhasePreconfigure`](#reconcileformationphasepreconfigure-details), [`reconcileFormationPhaseEstablishConnectivity`](#reconcileformationphaseestablishconnectivity-details), [`reconcileFormationPhaseBootstrapData`](#reconcileformationphasebootstrapdata-details), [`reconcileCreateAccessReplicas`](#reconcilecreateaccessreplicas-details), [`reconcileDeleteAccessReplicas`](#reconciledeleteaccessreplicas-details), [`ensureDatameshAccessReplicas`](#ensuredatameshaccessreplicas-details), [`ensureConditionConfigurationReady`](#ensureconditionconfigurationready-details)
 
 ## Algorithm Flow
 
@@ -290,6 +292,7 @@ flowchart TD
     RSP --> ReconcileFormation
     RVRStatus --> ReconcileNormalOp
     RSP --> ReconcileNormalOp
+    RVAStatus --> ReconcileNormalOp
     RVAStatus --> ReconcileDeletion
 
     ReconcileMeta --> RVMeta
@@ -300,6 +303,7 @@ flowchart TD
     ReconcileFormation --> RVRManaged
     ReconcileFormation --> DRBDROp
     ReconcileNormalOp --> RVStatus
+    ReconcileNormalOp --> RVRManaged
     ReconcileDeletion --> RVAConditions
     ReconcileDeletion --> RVRManaged
     ReconcileDeletion --> RVStatus
@@ -587,6 +591,77 @@ flowchart TD
 | Output | Description |
 |--------|-------------|
 | `ConfigurationReady` condition | Reports configuration state |
+
+---
+
+### reconcileCreateAccessReplicas Details
+
+**Purpose:** Creates Access RVRs for active (non-deleting) RVAs on nodes that do not yet have any RVR. Called from `reconcileNormalOperation` before `ensureDatameshAccessReplicas`.
+
+**File:** `reconciler_access_replicas.go`
+
+#### Creation guards
+
+| # | Guard | Outcome |
+|---|-------|---------|
+| 1 | RV deleting | No creation (detach-only mode) |
+| 2 | VolumeAccess=Local | No creation |
+| 3 | RSP nil | No creation |
+| 4 | RVR already exists on node (any type, including deleting) | Skip node |
+| 5 | Node not in eligible nodes, or !nodeReady, or !agentReady | Skip node |
+| 6 | Duplicate RVA on same node | Deduplicate (one creation per node) |
+
+All guards passed: create Access RVR via `createAccessRVR` (sets `spec.type=Access`, `spec.nodeName`). On `AlreadyExists`: requeue.
+
+**Data Flow:**
+
+| Input | Description |
+|-------|-------------|
+| `rv.DeletionTimestamp` | Detach-only mode check |
+| `rv.Status.Configuration.VolumeAccess` | Local blocks Access creation |
+| `rvas` | Active RVAs determine which nodes need Access replicas |
+| `rvrs` | Existing replicas (any type on node blocks creation) |
+| `rsp.EligibleNodes` | Node readiness check |
+
+| Output | Description |
+|--------|-------------|
+| RVR create | Access RVRs created for eligible nodes |
+
+---
+
+### reconcileDeleteAccessReplicas Details
+
+**Purpose:** Deletes Access RVRs that are redundant (another datamesh member on the same node) or unused (no active RVA on the node). Called from `reconcileNormalOperation` after `ensureDatameshAccessReplicas`.
+
+**File:** `reconciler_access_replicas.go`
+
+#### Deletion guards
+
+| # | Guard | Outcome |
+|---|-------|---------|
+| 1 | Not Access type | Skip |
+| 2 | Already deleting (DeletionTimestamp set) | Skip |
+| 3 | Attached (datamesh member with attached=true) | Skip (hard invariant) |
+| 4 | Active Detach or AddAccessReplica transition for this replica | Skip (avoid churn) |
+| 5 | Another datamesh member on same node | **Delete** (redundant, even if RVA exists) |
+| 6 | No active (non-deleting) RVA on node | **Delete** (unused) |
+
+Deletion via `deleteRVR` (sets DeletionTimestamp). The existing pipeline handles the rest:
+- If datamesh member: rvr_controller forms leave pending, `ensureDatameshRemoveAccessReplica` creates RemoveAccessReplica transition, `reconcileRVRFinalizers` removes finalizer after completion.
+- If not datamesh member: `reconcileRVRFinalizers` removes finalizer directly.
+
+**Data Flow:**
+
+| Input | Description |
+|-------|-------------|
+| `rv.Status.Datamesh.Members` | Attached check, redundancy check (other member on same node) |
+| `rv.Status.DatameshTransitions` | Active Detach/AddAccessReplica check |
+| `rvrs` | Access RVRs to evaluate |
+| `rvas` | Active RVAs determine which nodes still need Access replicas |
+
+| Output | Description |
+|--------|-------------|
+| RVR delete | Unneeded Access RVRs deleted (DeletionTimestamp set) |
 
 ---
 
