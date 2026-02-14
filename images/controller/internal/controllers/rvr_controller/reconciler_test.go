@@ -8857,6 +8857,21 @@ var _ = Describe("applyRVRAttachment", func() {
 		Expect(changed).To(BeTrue())
 		Expect(rvr.Status.Attachment.IOSuspended).To(BeTrue())
 	})
+
+	It("updates InUse", func() {
+		rvr.Status.Attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
+			InUse:       false,
+		}
+		changed := applyRVRAttachment(rvr, &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+			DevicePath:  "/dev/drbd1000",
+			IOSuspended: false,
+			InUse:       true,
+		})
+		Expect(changed).To(BeTrue())
+		Expect(rvr.Status.Attachment.InUse).To(BeTrue())
+	})
 })
 
 var _ = Describe("applyBackingVolumeReadyCondAbsent", func() {

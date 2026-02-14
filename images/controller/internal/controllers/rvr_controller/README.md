@@ -847,7 +847,7 @@ flowchart TD
 
 ### ensureStatusAttachment Details
 
-**Purpose**: Updates the `status.attachment` field with device path and I/O suspension status.
+**Purpose**: Updates the `status.attachment` field with device path, I/O suspension status, and device open (in-use) status.
 
 **Algorithm**:
 
@@ -861,7 +861,7 @@ flowchart TD
     CheckAttached -->|No| ClearAttach[Clear status.attachment]
     ClearAttach --> End2([Done])
 
-    CheckAttached -->|Yes| SetAttach[Set status.attachment<br/>with device path and IOSuspended]
+    CheckAttached -->|Yes| SetAttach["Set status.attachment<br/>with devicePath, ioSuspended, inUse"]
     SetAttach --> End3([Done])
 ```
 
@@ -872,11 +872,13 @@ flowchart TD
 | `drbdr.Status.ActiveConfiguration.Role` | Actual attachment state |
 | `drbdr.Status.Device` | Device path when attached |
 | `drbdr.Status.DeviceIOSuspended` | I/O suspension flag |
+| `drbdr.Status.DeviceOpen` | Device open (in-use) flag |
 
 | Output | Description |
 |--------|-------------|
 | `status.attachment.devicePath` | Block device path |
 | `status.attachment.ioSuspended` | I/O suspension status |
+| `status.attachment.inUse` | Whether the device is in use (detach blocked) |
 
 ---
 
