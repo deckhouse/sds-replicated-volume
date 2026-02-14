@@ -515,6 +515,11 @@ func (in *DRBDResourceStatus) DeepCopyInto(out *DRBDResourceStatus) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.DeviceOpen != nil {
+		in, out := &in.DeviceOpen, &out.DeviceOpen
+		*out = new(bool)
+		**out = **in
+	}
 	if in.Addresses != nil {
 		in, out := &in.Addresses, &out.Addresses
 		*out = make([]DRBDResourceAddressStatus, len(*in))
@@ -1148,6 +1153,16 @@ func (in *ReplicatedVolumeAttachmentStatus) DeepCopyInto(out *ReplicatedVolumeAt
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
+	}
+	if in.IOSuspended != nil {
+		in, out := &in.IOSuspended, &out.IOSuspended
+		*out = new(bool)
+		**out = **in
+	}
+	if in.InUse != nil {
+		in, out := &in.InUse, &out.InUse
+		*out = new(bool)
+		**out = **in
 	}
 }
 

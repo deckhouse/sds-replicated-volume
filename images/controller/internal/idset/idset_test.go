@@ -14,13 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package nodeidset_test
+package idset_test
 
 import (
 	"slices"
 	"testing"
 
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/nodeidset"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 )
 
 // ----------------------------------------------------------------------------
@@ -30,7 +30,7 @@ import (
 func TestOf(t *testing.T) {
 	// Of(id) creates a singleton set containing only that ID.
 	for _, id := range []uint8{0, 1, 15, 31} {
-		s := nodeidset.Of(id)
+		s := idset.Of(id)
 		if !s.Contains(id) {
 			t.Fatalf("Of(%d) does not contain %d", id, id)
 		}
@@ -45,10 +45,10 @@ func TestOf(t *testing.T) {
 		}
 	}
 
-	// Of(id) is equivalent to NodeIDSet(1 << id).
+	// Of(id) is equivalent to IDSet(1 << id).
 	for id := uint8(0); id < 32; id++ {
-		got := nodeidset.Of(id)
-		want := nodeidset.NodeIDSet(1 << id)
+		got := idset.Of(id)
+		want := idset.IDSet(1 << id)
 		if got != want {
 			t.Fatalf("Of(%d) = %v, want %v", id, got, want)
 		}
@@ -59,8 +59,8 @@ func TestOf(t *testing.T) {
 // Basic operations
 // ----------------------------------------------------------------------------
 
-func TestNodeIDSet_AddContainsRemove(t *testing.T) {
-	var s nodeidset.NodeIDSet
+func TestIDSet_AddContainsRemove(t *testing.T) {
+	var s idset.IDSet
 
 	// Empty set contains nothing.
 	if s.Contains(0) {
@@ -110,8 +110,8 @@ func TestNodeIDSet_AddContainsRemove(t *testing.T) {
 	}
 }
 
-func TestNodeIDSet_IsEmpty(t *testing.T) {
-	var s nodeidset.NodeIDSet
+func TestIDSet_IsEmpty(t *testing.T) {
+	var s idset.IDSet
 
 	if !s.IsEmpty() {
 		t.Fatal("expected empty set")
@@ -128,8 +128,8 @@ func TestNodeIDSet_IsEmpty(t *testing.T) {
 	}
 }
 
-func TestNodeIDSet_Len(t *testing.T) {
-	var s nodeidset.NodeIDSet
+func TestIDSet_Len(t *testing.T) {
+	var s idset.IDSet
 
 	if s.Len() != 0 {
 		t.Fatalf("expected len=0, got %d", s.Len())
@@ -164,8 +164,8 @@ func TestNodeIDSet_Len(t *testing.T) {
 // Min / Max
 // ----------------------------------------------------------------------------
 
-func TestNodeIDSet_Min(t *testing.T) {
-	var s nodeidset.NodeIDSet
+func TestIDSet_Min(t *testing.T) {
+	var s idset.IDSet
 
 	s.Add(5)
 	s.Add(10)
@@ -187,8 +187,8 @@ func TestNodeIDSet_Min(t *testing.T) {
 	}
 }
 
-func TestNodeIDSet_Max(t *testing.T) {
-	var s nodeidset.NodeIDSet
+func TestIDSet_Max(t *testing.T) {
+	var s idset.IDSet
 
 	s.Add(5)
 	s.Add(10)
@@ -210,11 +210,11 @@ func TestNodeIDSet_Max(t *testing.T) {
 	}
 }
 
-func TestNodeIDSet_MinMaxOnEmpty_UndefinedBehavior(t *testing.T) {
+func TestIDSet_MinMaxOnEmpty_UndefinedBehavior(t *testing.T) {
 	// Note: Min/Max on empty set is documented as "Panics if the set is empty",
 	// but the implementation returns 32 (outside valid 0-31 range) via bits.TrailingZeros32/LeadingZeros32.
 	// This test documents actual behavior; callers must check IsEmpty() before calling Min/Max.
-	var s nodeidset.NodeIDSet
+	var s idset.IDSet
 
 	// bits.TrailingZeros32(0) == 32
 	if s.Min() != 32 {
@@ -232,8 +232,8 @@ func TestNodeIDSet_MinMaxOnEmpty_UndefinedBehavior(t *testing.T) {
 // MinMissing
 // ----------------------------------------------------------------------------
 
-func TestNodeIDSet_MinMissing(t *testing.T) {
-	var s nodeidset.NodeIDSet
+func TestIDSet_MinMissing(t *testing.T) {
+	var s idset.IDSet
 
 	// Empty set -> 0 is missing.
 	id, ok := s.MinMissing()
@@ -264,7 +264,7 @@ func TestNodeIDSet_MinMissing(t *testing.T) {
 	}
 
 	// Full set -> nothing missing.
-	s = nodeidset.NodeIDSet(0xFFFFFFFF)
+	s = idset.IDSet(0xFFFFFFFF)
 	id, ok = s.MinMissing()
 	if ok {
 		t.Fatalf("expected (_, false) for full set, got (%d, %v)", id, ok)
@@ -275,8 +275,8 @@ func TestNodeIDSet_MinMissing(t *testing.T) {
 // Iteration
 // ----------------------------------------------------------------------------
 
-func TestNodeIDSet_All(t *testing.T) {
-	var s nodeidset.NodeIDSet
+func TestIDSet_All(t *testing.T) {
+	var s idset.IDSet
 	s.Add(3)
 	s.Add(0)
 	s.Add(7)
@@ -293,8 +293,8 @@ func TestNodeIDSet_All(t *testing.T) {
 	}
 }
 
-func TestNodeIDSet_All_Empty(t *testing.T) {
-	var s nodeidset.NodeIDSet
+func TestIDSet_All_Empty(t *testing.T) {
+	var s idset.IDSet
 
 	var count int
 	for range s.All() {
@@ -306,8 +306,8 @@ func TestNodeIDSet_All_Empty(t *testing.T) {
 	}
 }
 
-func TestNodeIDSet_All_EarlyBreak(t *testing.T) {
-	var s nodeidset.NodeIDSet
+func TestIDSet_All_EarlyBreak(t *testing.T) {
+	var s idset.IDSet
 	s.Add(1)
 	s.Add(5)
 	s.Add(10)
@@ -326,8 +326,8 @@ func TestNodeIDSet_All_EarlyBreak(t *testing.T) {
 	}
 }
 
-func TestNodeIDSet_AppendTo(t *testing.T) {
-	var s nodeidset.NodeIDSet
+func TestIDSet_AppendTo(t *testing.T) {
+	var s idset.IDSet
 	s.Add(2)
 	s.Add(5)
 	s.Add(8)
@@ -348,7 +348,7 @@ func TestNodeIDSet_AppendTo(t *testing.T) {
 	}
 
 	// Empty set appends nothing.
-	var empty nodeidset.NodeIDSet
+	var empty idset.IDSet
 	got = empty.AppendTo([]uint8{1})
 	want = []uint8{1}
 	if !slices.Equal(got, want) {
@@ -360,19 +360,19 @@ func TestNodeIDSet_AppendTo(t *testing.T) {
 // String
 // ----------------------------------------------------------------------------
 
-func TestNodeIDSet_String(t *testing.T) {
+func TestIDSet_String(t *testing.T) {
 	tests := []struct {
 		name string
-		set  nodeidset.NodeIDSet
+		set  idset.IDSet
 		want string
 	}{
 		{"empty", 0, ""},
-		{"single_0", 1 << 0, "0"},
-		{"single_31", 1 << 31, "31"},
-		{"two_elements", (1 << 0) | (1 << 5), "0, 5"},
-		{"three_elements", (1 << 3) | (1 << 7) | (1 << 15), "3, 7, 15"},
-		{"consecutive", (1 << 0) | (1 << 1) | (1 << 2), "0, 1, 2"},
-		{"mixed", (1 << 0) | (1 << 10) | (1 << 20) | (1 << 31), "0, 10, 20, 31"},
+		{"single_0", 1 << 0, "#0"},
+		{"single_31", 1 << 31, "#31"},
+		{"two_elements", (1 << 0) | (1 << 5), "#0, #5"},
+		{"three_elements", (1 << 3) | (1 << 7) | (1 << 15), "#3, #7, #15"},
+		{"consecutive", (1 << 0) | (1 << 1) | (1 << 2), "#0, #1, #2"},
+		{"mixed", (1 << 0) | (1 << 10) | (1 << 20) | (1 << 31), "#0, #10, #20, #31"},
 	}
 
 	for _, tt := range tests {
@@ -389,12 +389,12 @@ func TestNodeIDSet_String(t *testing.T) {
 // Set algebra
 // ----------------------------------------------------------------------------
 
-func TestNodeIDSet_Union(t *testing.T) {
-	a := nodeidset.NodeIDSet((1 << 0) | (1 << 2))
-	b := nodeidset.NodeIDSet((1 << 1) | (1 << 2))
+func TestIDSet_Union(t *testing.T) {
+	a := idset.IDSet((1 << 0) | (1 << 2))
+	b := idset.IDSet((1 << 1) | (1 << 2))
 
 	got := a.Union(b)
-	want := nodeidset.NodeIDSet((1 << 0) | (1 << 1) | (1 << 2))
+	want := idset.IDSet((1 << 0) | (1 << 1) | (1 << 2))
 
 	if got != want {
 		t.Fatalf("expected %v, got %v", want, got)
@@ -406,12 +406,12 @@ func TestNodeIDSet_Union(t *testing.T) {
 	}
 }
 
-func TestNodeIDSet_Intersect(t *testing.T) {
-	a := nodeidset.NodeIDSet((1 << 0) | (1 << 2) | (1 << 3))
-	b := nodeidset.NodeIDSet((1 << 1) | (1 << 2) | (1 << 3))
+func TestIDSet_Intersect(t *testing.T) {
+	a := idset.IDSet((1 << 0) | (1 << 2) | (1 << 3))
+	b := idset.IDSet((1 << 1) | (1 << 2) | (1 << 3))
 
 	got := a.Intersect(b)
-	want := nodeidset.NodeIDSet((1 << 2) | (1 << 3))
+	want := idset.IDSet((1 << 2) | (1 << 3))
 
 	if got != want {
 		t.Fatalf("expected %v, got %v", want, got)
@@ -423,18 +423,18 @@ func TestNodeIDSet_Intersect(t *testing.T) {
 	}
 
 	// Disjoint sets.
-	c := nodeidset.Of(5)
+	c := idset.Of(5)
 	if a.Intersect(c) != 0 {
 		t.Fatal("intersect of disjoint sets should be empty")
 	}
 }
 
-func TestNodeIDSet_Difference(t *testing.T) {
-	a := nodeidset.NodeIDSet((1 << 0) | (1 << 2) | (1 << 3))
-	b := nodeidset.NodeIDSet((1 << 2) | (1 << 5))
+func TestIDSet_Difference(t *testing.T) {
+	a := idset.IDSet((1 << 0) | (1 << 2) | (1 << 3))
+	b := idset.IDSet((1 << 2) | (1 << 5))
 
 	got := a.Difference(b)
-	want := nodeidset.NodeIDSet((1 << 0) | (1 << 3))
+	want := idset.IDSet((1 << 0) | (1 << 3))
 
 	if got != want {
 		t.Fatalf("expected %v, got %v", want, got)
@@ -451,12 +451,12 @@ func TestNodeIDSet_Difference(t *testing.T) {
 	}
 }
 
-func TestNodeIDSet_SymDiff(t *testing.T) {
-	a := nodeidset.NodeIDSet((1 << 0) | (1 << 2))
-	b := nodeidset.NodeIDSet((1 << 1) | (1 << 2))
+func TestIDSet_SymDiff(t *testing.T) {
+	a := idset.IDSet((1 << 0) | (1 << 2))
+	b := idset.IDSet((1 << 1) | (1 << 2))
 
 	got := a.SymDiff(b)
-	want := nodeidset.NodeIDSet((1 << 0) | (1 << 1))
+	want := idset.IDSet((1 << 0) | (1 << 1))
 
 	if got != want {
 		t.Fatalf("expected %v, got %v", want, got)
@@ -477,9 +477,9 @@ func TestNodeIDSet_SymDiff(t *testing.T) {
 // Set predicates
 // ----------------------------------------------------------------------------
 
-func TestNodeIDSet_IsSubsetOf(t *testing.T) {
-	a := nodeidset.NodeIDSet((1 << 0) | (1 << 2))
-	b := nodeidset.NodeIDSet((1 << 0) | (1 << 2) | (1 << 5))
+func TestIDSet_IsSubsetOf(t *testing.T) {
+	a := idset.IDSet((1 << 0) | (1 << 2))
+	b := idset.IDSet((1 << 0) | (1 << 2) | (1 << 5))
 
 	if !a.IsSubsetOf(b) {
 		t.Fatal("expected a ⊆ b")
@@ -494,7 +494,7 @@ func TestNodeIDSet_IsSubsetOf(t *testing.T) {
 	}
 
 	// Empty is subset of everything.
-	var empty nodeidset.NodeIDSet
+	var empty idset.IDSet
 	if !empty.IsSubsetOf(a) {
 		t.Fatal("expected ∅ ⊆ a")
 	}
@@ -503,10 +503,10 @@ func TestNodeIDSet_IsSubsetOf(t *testing.T) {
 	}
 }
 
-func TestNodeIDSet_Equals(t *testing.T) {
-	a := nodeidset.NodeIDSet((1 << 0) | (1 << 2))
-	b := nodeidset.NodeIDSet((1 << 0) | (1 << 2))
-	c := nodeidset.NodeIDSet((1 << 0) | (1 << 3))
+func TestIDSet_Equals(t *testing.T) {
+	a := idset.IDSet((1 << 0) | (1 << 2))
+	b := idset.IDSet((1 << 0) | (1 << 2))
+	c := idset.IDSet((1 << 0) | (1 << 3))
 
 	if !a.Equals(b) {
 		t.Fatal("expected a == b")
@@ -515,16 +515,16 @@ func TestNodeIDSet_Equals(t *testing.T) {
 		t.Fatal("expected a ≠ c")
 	}
 
-	var empty nodeidset.NodeIDSet
+	var empty idset.IDSet
 	if !empty.Equals(0) {
 		t.Fatal("expected empty == 0")
 	}
 }
 
-func TestNodeIDSet_Overlaps(t *testing.T) {
-	a := nodeidset.NodeIDSet((1 << 0) | (1 << 2))
-	b := nodeidset.NodeIDSet((1 << 2) | (1 << 5))
-	c := nodeidset.NodeIDSet((1 << 3) | (1 << 4))
+func TestIDSet_Overlaps(t *testing.T) {
+	a := idset.IDSet((1 << 0) | (1 << 2))
+	b := idset.IDSet((1 << 2) | (1 << 5))
+	c := idset.IDSet((1 << 3) | (1 << 4))
 
 	if !a.Overlaps(b) {
 		t.Fatal("expected a and b to overlap")
@@ -534,7 +534,7 @@ func TestNodeIDSet_Overlaps(t *testing.T) {
 	}
 
 	// Empty overlaps nothing.
-	var empty nodeidset.NodeIDSet
+	var empty idset.IDSet
 	if empty.Overlaps(a) {
 		t.Fatal("expected empty to not overlap with a")
 	}
@@ -543,10 +543,10 @@ func TestNodeIDSet_Overlaps(t *testing.T) {
 	}
 }
 
-func TestNodeIDSet_IsDisjointWith(t *testing.T) {
-	a := nodeidset.NodeIDSet((1 << 0) | (1 << 2))
-	b := nodeidset.NodeIDSet((1 << 2) | (1 << 5))
-	c := nodeidset.NodeIDSet((1 << 3) | (1 << 4))
+func TestIDSet_IsDisjointWith(t *testing.T) {
+	a := idset.IDSet((1 << 0) | (1 << 2))
+	b := idset.IDSet((1 << 2) | (1 << 5))
+	c := idset.IDSet((1 << 3) | (1 << 4))
 
 	if a.IsDisjointWith(b) {
 		t.Fatal("expected a and b to not be disjoint")
@@ -556,7 +556,7 @@ func TestNodeIDSet_IsDisjointWith(t *testing.T) {
 	}
 
 	// Empty is disjoint with everything.
-	var empty nodeidset.NodeIDSet
+	var empty idset.IDSet
 	if !empty.IsDisjointWith(a) {
 		t.Fatal("expected empty to be disjoint with a")
 	}
@@ -574,7 +574,7 @@ type testNode struct {
 	active bool
 }
 
-func (n testNode) NodeID() uint8 { return n.id }
+func (n testNode) ID() uint8 { return n.id }
 
 func TestFromAll(t *testing.T) {
 	nodes := []testNode{
@@ -583,21 +583,21 @@ func TestFromAll(t *testing.T) {
 		{id: 10},
 	}
 
-	got := nodeidset.FromAll(nodes)
-	want := nodeidset.NodeIDSet((1 << 0) | (1 << 5) | (1 << 10))
+	got := idset.FromAll(nodes)
+	want := idset.IDSet((1 << 0) | (1 << 5) | (1 << 10))
 
 	if got != want {
 		t.Fatalf("expected %v, got %v", want, got)
 	}
 
 	// Empty slice.
-	got = nodeidset.FromAll([]testNode{})
+	got = idset.FromAll([]testNode{})
 	if got != 0 {
 		t.Fatalf("expected empty set, got %v", got)
 	}
 
 	// Nil slice.
-	got = nodeidset.FromAll[testNode](nil)
+	got = idset.FromAll[testNode](nil)
 	if got != 0 {
 		t.Fatalf("expected empty set for nil slice, got %v", got)
 	}
@@ -611,28 +611,28 @@ func TestFromWhere(t *testing.T) {
 		{id: 15, active: false},
 	}
 
-	got := nodeidset.FromWhere(nodes, func(n testNode) bool { return n.active })
-	want := nodeidset.NodeIDSet((1 << 0) | (1 << 10))
+	got := idset.FromWhere(nodes, func(n testNode) bool { return n.active })
+	want := idset.IDSet((1 << 0) | (1 << 10))
 
 	if got != want {
 		t.Fatalf("expected %v, got %v", want, got)
 	}
 
 	// No matches.
-	got = nodeidset.FromWhere(nodes, func(_ testNode) bool { return false })
+	got = idset.FromWhere(nodes, func(_ testNode) bool { return false })
 	if got != 0 {
 		t.Fatalf("expected empty set, got %v", got)
 	}
 
 	// All match.
-	got = nodeidset.FromWhere(nodes, func(_ testNode) bool { return true })
-	want = nodeidset.NodeIDSet((1 << 0) | (1 << 5) | (1 << 10) | (1 << 15))
+	got = idset.FromWhere(nodes, func(_ testNode) bool { return true })
+	want = idset.IDSet((1 << 0) | (1 << 5) | (1 << 10) | (1 << 15))
 	if got != want {
 		t.Fatalf("expected %v, got %v", want, got)
 	}
 
 	// Empty slice.
-	got = nodeidset.FromWhere([]testNode{}, func(_ testNode) bool { return true })
+	got = idset.FromWhere([]testNode{}, func(_ testNode) bool { return true })
 	if got != 0 {
 		t.Fatalf("expected empty set, got %v", got)
 	}
@@ -642,8 +642,8 @@ func TestFromWhere(t *testing.T) {
 // Edge cases
 // ----------------------------------------------------------------------------
 
-func TestNodeIDSet_FullSet(t *testing.T) {
-	full := nodeidset.NodeIDSet(0xFFFFFFFF)
+func TestIDSet_FullSet(t *testing.T) {
+	full := idset.IDSet(0xFFFFFFFF)
 
 	if full.Len() != 32 {
 		t.Fatalf("expected len=32, got %d", full.Len())
@@ -671,8 +671,8 @@ func TestNodeIDSet_FullSet(t *testing.T) {
 	}
 }
 
-func TestNodeIDSet_BoundaryValues(t *testing.T) {
-	var s nodeidset.NodeIDSet
+func TestIDSet_BoundaryValues(t *testing.T) {
+	var s idset.IDSet
 
 	// Test boundary IDs: 0 and 31.
 	s.Add(0)

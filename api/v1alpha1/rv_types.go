@@ -163,9 +163,9 @@ type ReplicatedVolumeDatameshPendingReplicaTransition struct {
 	FirstObservedAt metav1.Time `json:"firstObservedAt"`
 }
 
-// NodeID extracts NodeID from the replica name (e.g., "pvc-xxx-5" → 5).
-func (t ReplicatedVolumeDatameshPendingReplicaTransition) NodeID() uint8 {
-	return nodeIDFromName(t.Name)
+// ID extracts ID from the replica name (e.g., "pvc-xxx-5" → 5).
+func (t ReplicatedVolumeDatameshPendingReplicaTransition) ID() uint8 {
+	return idFromName(t.Name)
 }
 
 // ReplicatedVolumeDatameshTransition represents an active datamesh transition.
@@ -174,9 +174,12 @@ func (t ReplicatedVolumeDatameshPendingReplicaTransition) NodeID() uint8 {
 //	+kubebuilder:validation:XValidation:rule="self.type != 'Formation' || has(self.formation)",message="formation is required when type is Formation"
 //	+kubebuilder:validation:XValidation:rule="!has(self.formation) || self.type == 'Formation'",message="formation is only allowed when type is Formation"
 //	+kubebuilder:validation:XValidation:rule="self.type != 'Formation' || !has(self.datameshRevision) || self.datameshRevision == 0",message="datameshRevision must be absent (or zero) when type is Formation"
+//	+kubebuilder:validation:XValidation:rule="self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach' || has(self.replicaName)",message="replicaName is required for Attach, Detach, AddAccessReplica, RemoveAccessReplica transitions"
+//	+kubebuilder:validation:XValidation:rule="!has(self.replicaName) || !(self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach')",message="replicaName must not be set for Formation, EnableMultiattach, DisableMultiattach transitions"
 type ReplicatedVolumeDatameshTransition struct {
 	// Type is the transition type.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=Formation;AddAccessReplica;Attach;Detach;DisableMultiattach;EnableMultiattach;RemoveAccessReplica
 	Type ReplicatedVolumeDatameshTransitionType `json:"type"`
 
 	// DatameshRevision is the datamesh revision when this transition was introduced.
@@ -192,6 +195,15 @@ type ReplicatedVolumeDatameshTransition struct {
 	// +kubebuilder:validation:Required
 	StartedAt metav1.Time `json:"startedAt"`
 
+	// ReplicaName is the name of the replica this transition applies to.
+	// Required for Attach, Detach, AddAccessReplica, RemoveAccessReplica transitions.
+	// Must not be set for Formation, EnableMultiattach, DisableMultiattach.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=123
+	// +kubebuilder:validation:Pattern=`^.+-([0-9]|[12][0-9]|3[01])$`
+	// +optional
+	ReplicaName string `json:"replicaName,omitempty"`
+
 	// Formation holds formation-specific details.
 	// Required when type is "Formation"; must not be set otherwise.
 	// +optional
@@ -204,6 +216,19 @@ type ReplicatedVolumeDatameshTransitionType string
 const (
 	// ReplicatedVolumeDatameshTransitionTypeFormation indicates initial datamesh formation.
 	ReplicatedVolumeDatameshTransitionTypeFormation ReplicatedVolumeDatameshTransitionType = "Formation"
+
+	// ReplicatedVolumeDatameshTransitionTypeAddAccessReplica indicates adding an Access replica to the datamesh.
+	ReplicatedVolumeDatameshTransitionTypeAddAccessReplica ReplicatedVolumeDatameshTransitionType = "AddAccessReplica"
+	// ReplicatedVolumeDatameshTransitionTypeAttach indicates attaching a replica (promoting to Primary in DRBD terms).
+	ReplicatedVolumeDatameshTransitionTypeAttach ReplicatedVolumeDatameshTransitionType = "Attach"
+	// ReplicatedVolumeDatameshTransitionTypeDetach indicates detaching a replica (demoting from Primary in DRBD terms).
+	ReplicatedVolumeDatameshTransitionTypeDetach ReplicatedVolumeDatameshTransitionType = "Detach"
+	// ReplicatedVolumeDatameshTransitionTypeDisableMultiattach indicates disabling multi-attach (allowTwoPrimaries).
+	ReplicatedVolumeDatameshTransitionTypeDisableMultiattach ReplicatedVolumeDatameshTransitionType = "DisableMultiattach"
+	// ReplicatedVolumeDatameshTransitionTypeEnableMultiattach indicates enabling multi-attach (allowTwoPrimaries).
+	ReplicatedVolumeDatameshTransitionTypeEnableMultiattach ReplicatedVolumeDatameshTransitionType = "EnableMultiattach"
+	// ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica indicates removing an Access replica from the datamesh.
+	ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica ReplicatedVolumeDatameshTransitionType = "RemoveAccessReplica"
 )
 
 func (t ReplicatedVolumeDatameshTransitionType) String() string {
@@ -366,9 +391,9 @@ type ReplicatedVolumeDatameshMember struct {
 	Attached bool `json:"attached"`
 }
 
-// NodeID extracts NodeID from the member name (e.g., "pvc-xxx-5" → 5).
-func (m ReplicatedVolumeDatameshMember) NodeID() uint8 {
-	return nodeIDFromName(m.Name)
+// ID extracts ID from the member name (e.g., "pvc-xxx-5" → 5).
+func (m ReplicatedVolumeDatameshMember) ID() uint8 {
+	return idFromName(m.Name)
 }
 
 // ReplicatedVolumeDatameshMemberTypeTransition enumerates possible type transitions for datamesh members.
