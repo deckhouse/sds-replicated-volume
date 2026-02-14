@@ -8,7 +8,7 @@ The controller reconciles `ReplicatedVolume` with:
 
 1. **Configuration initialization** — copies resolved configuration from `ReplicatedStorageClass` (RSC) into RV status
 2. **Datamesh formation** — creates replicas, establishes DRBD connectivity, bootstraps data synchronization
-3. **Normal operation** — steady-state datamesh lifecycle (attach handling, scaling, etc.) *(TODO)*
+3. **Normal operation** — steady-state datamesh lifecycle (attach handling, scaling, access replica join/leave, etc.) *(WIP)*
 4. **Deletion** — cleans up child resources (RVRs, RVAs) and datamesh state
 
 ## Interactions
@@ -49,7 +49,7 @@ if configuration exists:
     if formation in progress (DatameshRevision == 0 or Formation transition active):
         reconcile formation (3-phase process)
     else:
-        reconcile normal operation (TODO)
+        reconcile normal operation (WIP: Access replica join/leave)
 
 ensure ConfigurationReady condition
 patch status if changed
@@ -78,7 +78,10 @@ Reconcile (root) [Pure orchestration]
 │   ├── applyRVMetadata (finalizer + labels)
 │   └── patchRV
 ├── reconcileRVAFinalizers [Target-state driven] (same as above)
-├── reconcileRVRFinalizers [Target-state driven] (same as above)
+├── reconcileRVRFinalizers [Target-state driven]
+│   ├── add RVControllerFinalizer to non-deleting RVRs
+│   └── remove RVControllerFinalizer from deleting RVRs (when safe)
+│       └── isRVRMemberOrLeavingDatamesh (member + RemoveAccessReplica check)
 ├── ensureRVConfiguration
 ├── ensureDatameshPendingReplicaTransitions ← details
 ├── reconcileFormation [Pure orchestration]
@@ -98,12 +101,16 @@ Reconcile (root) [Pure orchestration]
 │       ├── verify operation status + UpToDate replicas
 │       ├── reconcileFormationRestartIfTimeoutPassed
 │       └── applyFormationTransitionAbsent (formation complete)
-├── reconcileNormalOperation [Pure orchestration] (TODO)
+├── reconcileNormalOperation [Pure orchestration] (WIP)
+│   └── ensureDatameshAccessReplicas ← details
+│       ├── ensureDatameshAccessReplicaTransitionProgress (loop: active transitions)
+│       ├── ensureDatameshAddAccessReplica (loop: pending joins)
+│       └── ensureDatameshRemoveAccessReplica (loop: pending leaves)
 ├── ensureConditionConfigurationReady ← details
 └── patchRVStatus
 ```
 
-Links to detailed algorithms: [`reconcileDeletion`](#reconciledeletion-details), [`ensureDatameshPendingReplicaTransitions`](#ensuredatameshpendingreplicatransitions-details), [`reconcileFormationPhasePreconfigure`](#reconcileformationphasepreconfigure-details), [`reconcileFormationPhaseEstablishConnectivity`](#reconcileformationphaseestablishconnectivity-details), [`reconcileFormationPhaseBootstrapData`](#reconcileformationphasebootstrapdata-details), [`ensureConditionConfigurationReady`](#ensureconditionconfigurationready-details)
+Links to detailed algorithms: [`reconcileDeletion`](#reconciledeletion-details), [`ensureDatameshPendingReplicaTransitions`](#ensuredatameshpendingreplicatransitions-details), [`reconcileFormationPhasePreconfigure`](#reconcileformationphasepreconfigure-details), [`reconcileFormationPhaseEstablishConnectivity`](#reconcileformationphaseestablishconnectivity-details), [`reconcileFormationPhaseBootstrapData`](#reconcileformationphasebootstrapdata-details), [`ensureDatameshAccessReplicas`](#ensuredatameshaccessreplicas-details), [`ensureConditionConfigurationReady`](#ensureconditionconfigurationready-details)
 
 ## Algorithm Flow
 
@@ -258,6 +265,7 @@ flowchart TD
     subgraph reconcilers [Reconcilers]
         ReconcileMeta[reconcileMetadata]
         ReconcileFormation[reconcileFormation]
+        ReconcileNormalOp[reconcileNormalOperation]
         ReconcileDeletion[reconcileDeletion]
     end
 
@@ -280,6 +288,8 @@ flowchart TD
     RVRStatus --> EnsurePending
     RVRStatus --> ReconcileFormation
     RSP --> ReconcileFormation
+    RVRStatus --> ReconcileNormalOp
+    RSP --> ReconcileNormalOp
     RVAStatus --> ReconcileDeletion
 
     ReconcileMeta --> RVMeta
@@ -289,6 +299,7 @@ flowchart TD
     ReconcileFormation --> RVStatus
     ReconcileFormation --> RVRManaged
     ReconcileFormation --> DRBDROp
+    ReconcileNormalOp --> RVStatus
     ReconcileDeletion --> RVAConditions
     ReconcileDeletion --> RVRManaged
     ReconcileDeletion --> RVStatus
@@ -576,3 +587,89 @@ flowchart TD
 | Output | Description |
 |--------|-------------|
 | `ConfigurationReady` condition | Reports configuration state |
+
+---
+
+### ensureDatameshAccessReplicas Details
+
+**Purpose:** Coordinates Access replica datamesh membership: completes finished transitions, processes join requests, and processes leave requests. Called from `reconcileNormalOperation`.
+
+**Algorithm:**
+
+```mermaid
+flowchart TD
+    Start([Start]) --> BuildSets["Build diskfulMembers, accessMembers,<br/>index pendingReplicaTransitions by ID"]
+
+    BuildSets --> Loop1["Loop 1: existing transitions<br/>(reverse iteration)"]
+    Loop1 --> CheckType{AddAccessReplica or<br/>RemoveAccessReplica?}
+    CheckType -->|No| SkipTransition[Skip]
+    CheckType -->|Yes| Progress[ensureDatameshAccessReplicaTransitionProgress]
+    Progress --> Completed{Completed?}
+    Completed -->|Yes| RemoveTransition[Remove transition from list]
+    Completed -->|No| KeepTransition[Keep transition]
+    RemoveTransition --> MarkProcessed["Mark pending as processed<br/>(nil in array)"]
+    KeepTransition --> MarkProcessed
+    SkipTransition --> Loop1
+    MarkProcessed --> Loop1
+
+    Loop1 -->|Done| Loop2["Loop 2: remaining pendings"]
+    Loop2 --> CheckJoinLeave{Join or leave?}
+    CheckJoinLeave -->|Join| JoinFn[ensureDatameshAddAccessReplica]
+    CheckJoinLeave -->|Leave| LeaveFn[ensureDatameshRemoveAccessReplica]
+    JoinFn --> Loop2
+    LeaveFn --> Loop2
+    Loop2 -->|Done| EndNode([Return EnsureOutcome])
+```
+
+#### ensureDatameshAddAccessReplica (join guards)
+
+| # | Guard | Outcome |
+|---|-------|---------|
+| 1 | Already a datamesh member | Skip (transient state) |
+| 2 | RV deleting | Message: "Will not join datamesh: volume is being deleted" |
+| 3 | VolumeAccess=Local | Message: "Will not join datamesh: volumeAccess is Local" |
+| 4 | RVR not found | Skip silently |
+| 5 | Addresses empty | Message: "Waiting for replica addresses to be populated" |
+| 6 | Member already on same node | Message: member info |
+| 7 | RSP nil | Message: "Waiting for ReplicatedStoragePool to be available" |
+| 8 | Node not in eligible nodes | Message: node name |
+
+All guards passed: add member to datamesh, increment revision, create AddAccessReplica transition.
+
+#### ensureDatameshRemoveAccessReplica (leave guards)
+
+| # | Guard | Outcome |
+|---|-------|---------|
+| 1 | Not a datamesh member | Skip (transient state) |
+| 2 | Member type is not Access | Skip (defensive) |
+| 3 | Member is attached | Message: "Cannot leave datamesh: replica is attached, detach required first" |
+
+All guards passed: remove member from datamesh, increment revision, create RemoveAccessReplica transition.
+
+#### ensureDatameshAccessReplicaTransitionProgress
+
+Checks confirmation progress for a single AddAccessReplica or RemoveAccessReplica transition:
+
+- **Confirmation**: a replica is confirmed when `DatameshRevision >= transition.DatameshRevision`.
+- **RemoveAccessReplica special case**: the leaving replica also counts as confirmed when `DatameshRevision == 0` (it left the datamesh and reset its revision).
+- **Error reporting**: waiting replicas with `Configured=False` are reported as errors in the transition message. For AddAccessReplica, the subject replica's `Configured=False` with reason `PendingJoin` is expected and skipped (it has not joined the datamesh yet).
+
+**Data Flow:**
+
+| Input | Description |
+|-------|-------------|
+| `rv.Status.DatameshPendingReplicaTransitions` | Pending join/leave requests from RVRs |
+| `rv.Status.DatameshTransitions` | Active transitions |
+| `rv.Status.Datamesh.Members` | Current datamesh members |
+| `rv.Status.Configuration.VolumeAccess` | Volume access mode (Local blocks join) |
+| `rvrs[].Status.DatameshRevision` | Replica confirmation progress |
+| `rvrs[].Status.Addresses` | Replica addresses (required for join) |
+| `rvrs[].Status.Conditions` | Configured condition (for error reporting) |
+| `rsp.EligibleNodes` | Eligible nodes with zones (for join) |
+
+| Output | Description |
+|--------|-------------|
+| `rv.Status.Datamesh.Members` | Members added/removed |
+| `rv.Status.DatameshRevision` | Incremented on join/leave |
+| `rv.Status.DatameshTransitions` | Transitions created/completed/removed |
+| `rv.Status.DatameshPendingReplicaTransitions[].Message` | Progress/error messages |

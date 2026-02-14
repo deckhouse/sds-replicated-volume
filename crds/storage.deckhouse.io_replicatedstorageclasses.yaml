@@ -304,8 +304,8 @@ spec:
                 x-kubernetes-validations:
                 - message: thinPoolName is required for each lvmVolumeGroups entry
                     when type is LVMThin
-                  rule: self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, size(g.thinPoolName)
-                    > 0)
+                  rule: self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, has(g.thinPoolName)
+                    && size(g.thinPoolName) > 0)
                 - message: thinPoolName must not be specified when type is LVM
                   rule: self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName)
                     || size(g.thinPoolName) == 0)
