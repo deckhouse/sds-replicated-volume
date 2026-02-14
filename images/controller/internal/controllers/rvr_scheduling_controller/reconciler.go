@@ -84,7 +84,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, all,
 			metav1.ConditionUnknown,
 			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume,
-			"ReplicatedVolume not found; waiting for it be present").
+			"ReplicatedVolume not found; waiting for it to be present").
 			Enrichf("setting WaitingForReplicatedVolume: RV not found").ToCtrl()
 	}
 

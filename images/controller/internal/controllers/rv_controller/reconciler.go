@@ -70,8 +70,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Failf(err, "getting ReplicatedVolume").ToCtrl()
 	}
 	if rv == nil {
-		// NotFound: object deleted, nothing to do.
-		return rf.Done().ToCtrl()
+		// RV deleted. Handle orphaned RVAs (set conditions, remove finalizers).
+		rvas, err := r.getRVAs(rf.Ctx(), req.Name)
+		if err != nil {
+			return rf.Failf(err, "listing RVAs for deleted RV").ToCtrl()
+		}
+		if len(rvas) == 0 {
+			return rf.Done().ToCtrl()
+		}
+		return r.reconcileOrphanedRVAs(rf.Ctx(), rvas).ToCtrl()
 	}
 
 	// Load RSC.
@@ -91,23 +98,46 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Failf(err, "listing ReplicatedVolumeReplicas").ToCtrl()
 	}
 
-	// Handle deletion: cleanup children first, then reconcile metadata (remove finalizer).
+	// Handle deletion: force-cleanup children, then remove our finalizer from RV.
+	//
+	// rvShouldNotExist returns true only when:
+	//   - RV has DeletionTimestamp set,
+	//   - no finalizers except ours,
+	//   - no attached datamesh members,
+	//   - no Detach transitions in progress.
+	//
+	// While the RV is still attached or detaching, rvShouldNotExist returns false
+	// and reconciliation continues through the normal path (where reconcileRVAFinalizers
+	// and the future attach/detach logic handle the graceful detach lifecycle).
+	//
+	// Once all attachments are fully resolved, we enter this branch and force-delete
+	// all remaining child resources (RVRs, datamesh state) via reconcileDeletion.
 	if rvShouldNotExist(rv) {
+		// Order matters (Go evaluates arguments left to right):
+		// 1. reconcileDeletion: set RVA conditions, force-delete RVRs, clear datamesh members.
+		// 2. reconcileRVAFinalizers: remove finalizer from deleting RVAs (may trigger
+		//    Kubernetes finalization = object deletion). Must run after reconcileDeletion,
+		//    otherwise reconcileDeletion would try to patch conditions on an already-deleted RVA.
+		// 3. reconcileMetadata: remove RV finalizer if no children remain.
 		return flow.MergeReconciles(
-			r.reconcileRVAFinalizers(rf.Ctx(), rv, rvas),
 			r.reconcileDeletion(rf.Ctx(), rv, rvas, &rvrs),
-			r.reconcileMetadata(rf.Ctx(), rv, rvas, rvrs),
+			r.reconcileRVAFinalizers(rf.Ctx(), rv, rvas),
+			r.reconcileMetadata(rf.Ctx(), rv, rvrs),
 		).ToCtrl()
 	}
 
 	// Reconcile the RV metadata (finalizers and labels).
-	outcome := r.reconcileMetadata(rf.Ctx(), rv, rvas, rvrs)
+	outcome := r.reconcileMetadata(rf.Ctx(), rv, rvrs)
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
 	}
 
-	// Reconcile RVA finalizers (add to non-deleting, remove from deleting when safe).
-	outcome = outcome.Merge(r.reconcileRVAFinalizers(rf.Ctx(), rv, rvas))
+	// Reconcile RVA and RVR finalizers.
+	outcome = flow.MergeReconciles(
+		outcome,
+		r.reconcileRVAFinalizers(rf.Ctx(), rv, rvas),
+		r.reconcileRVRFinalizers(rf.Ctx(), rv, rvrs),
+	)
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
 	}
@@ -305,7 +335,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 	// Delete all replicas not in diskful (misplaced, excess, etc.).
 	for _, rvr := range *rvrs {
 		if !diskful.Contains(rvr.ID()) {
-			if err := r.deleteRVRWithFinalizerRemoval(rf.Ctx(), rvr); err != nil {
+			if err := r.deleteRVRWithForcedFinalizerRemoval(rf.Ctx(), rvr); err != nil {
 				return rf.Failf(err, "deleting RVR %s", rvr.Name)
 			}
 		}
@@ -918,7 +948,7 @@ func (r *Reconciler) reconcileFormationRestartIfTimeoutPassed(
 
 	// Delete all replicas (with finalizer removal to avoid blocking on normal cleanup).
 	for _, rvr := range *rvrs {
-		if err := r.deleteRVRWithFinalizerRemoval(rf.Ctx(), rvr); err != nil {
+		if err := r.deleteRVRWithForcedFinalizerRemoval(rf.Ctx(), rvr); err != nil {
 			return rf.Failf(err, "deleting RVR %s", rvr.Name)
 		}
 	}
@@ -976,7 +1006,6 @@ func (r *Reconciler) reconcileNormalOperation(
 func (r *Reconciler) reconcileMetadata(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
-	rvas []*v1alpha1.ReplicatedVolumeAttachment,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "metadata")
@@ -985,10 +1014,10 @@ func (r *Reconciler) reconcileMetadata(
 	// Compute target finalizer state.
 	// RV should exist if it has no DeletionTimestamp.
 	shouldExist := rv.DeletionTimestamp == nil
-	hasRVAs := len(rvas) > 0
 	hasRVRs := len(rvrs) > 0
-	// Keep finalizer if RV should exist or if there are still child resources.
-	targetFinalizerPresent := shouldExist || hasRVAs || hasRVRs
+	// Keep finalizer if RV should exist or if there are still RVRs (datamesh children).
+	// RVAs do not block RV deletion — they are independent intent objects.
+	targetFinalizerPresent := shouldExist || hasRVRs
 
 	if isRVMetadataInSync(rv, targetFinalizerPresent) {
 		return rf.Continue()
@@ -1119,6 +1148,87 @@ func hasOtherNonDeletingRVAOnNode(rvas []*v1alpha1.ReplicatedVolumeAttachment, n
 			return true
 		}
 	}
+	return false
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: RVR finalizers
+//
+
+// reconcileRVRFinalizers adds RVControllerFinalizer to non-deleting RVRs (including user-created)
+// and removes it from deleting RVRs when safe (not a datamesh member and no RemoveAccessReplica
+// transition in progress).
+//
+// Reconcile pattern: Target-state driven
+func (r *Reconciler) reconcileRVRFinalizers(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "rvr-finalizers")
+	defer rf.OnEnd(&outcome)
+
+	for _, rvr := range rvrs {
+		if rvr.DeletionTimestamp == nil {
+			// Non-deleting: add finalizer if missing.
+
+			// Skip if finalizer is already present.
+			if obju.HasFinalizer(rvr, v1alpha1.RVControllerFinalizer) {
+				continue
+			}
+
+			// Add finalizer to ensure datamesh cleanup completes before RVR is deleted.
+			base := rvr.DeepCopy()
+			obju.AddFinalizer(rvr, v1alpha1.RVControllerFinalizer)
+			if err := r.patchRVR(rf.Ctx(), rvr, base); err != nil {
+				return rf.Failf(err, "adding finalizer to RVR %s", rvr.Name)
+			}
+		} else {
+			// Deleting: remove finalizer if safe.
+
+			// Skip if finalizer is already absent.
+			if !obju.HasFinalizer(rvr, v1alpha1.RVControllerFinalizer) {
+				continue
+			}
+
+			// Not safe to remove if the RVR is still a datamesh member or leaving datamesh
+			// (RemoveAccessReplica transition in progress).
+			if isRVRMemberOrLeavingDatamesh(rv, rvr.Name) {
+				continue
+			}
+
+			// Remove finalizer — RVR can be finalized.
+			base := rvr.DeepCopy()
+			obju.RemoveFinalizer(rvr, v1alpha1.RVControllerFinalizer)
+			if err := r.patchRVR(rf.Ctx(), rvr, base); err != nil {
+				return rf.Failf(err, "removing finalizer from RVR %s", rvr.Name)
+			}
+		}
+	}
+
+	return rf.Continue()
+}
+
+// isRVRMemberOrLeavingDatamesh returns true if the RVR is a datamesh member or has an active
+// RemoveAccessReplica transition (still leaving datamesh). Returns false when rv is nil.
+func isRVRMemberOrLeavingDatamesh(rv *v1alpha1.ReplicatedVolume, rvrName string) bool {
+	if rv == nil {
+		return false
+	}
+
+	// Check if the RVR is a datamesh member.
+	if rv.Status.Datamesh.FindMemberByName(rvrName) != nil {
+		return true
+	}
+
+	// Check for active RemoveAccessReplica transition for this replica.
+	for i := range rv.Status.DatameshTransitions {
+		t := &rv.Status.DatameshTransitions[i]
+		if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica && t.ReplicaName == rvrName {
+			return true
+		}
+	}
+
 	return false
 }
 
@@ -1614,7 +1724,8 @@ func ensureDatameshPendingReplicaTransitions(
 }
 
 // rvShouldNotExist returns true if RV should be deleted:
-// DeletionTimestamp is set, no finalizers except ours, and no attached members.
+// DeletionTimestamp is set, no finalizers except ours, no attached members,
+// and no Detach transitions in progress.
 func rvShouldNotExist(rv *v1alpha1.ReplicatedVolume) bool {
 	if rv == nil {
 		return true
@@ -1632,6 +1743,13 @@ func rvShouldNotExist(rv *v1alpha1.ReplicatedVolume) bool {
 	// Check no attached members.
 	for i := range rv.Status.Datamesh.Members {
 		if rv.Status.Datamesh.Members[i].Attached {
+			return false
+		}
+	}
+
+	// Check no Detach transitions in progress (agent may still be demoting DRBD).
+	for i := range rv.Status.DatameshTransitions {
+		if rv.Status.DatameshTransitions[i].Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach {
 			return false
 		}
 	}
@@ -1657,13 +1775,14 @@ func (r *Reconciler) reconcileDeletion(
 	defer rf.OnEnd(&outcome)
 
 	// Step 1: Update all RVA conditions.
+	const rvDeletingMessage = "ReplicatedVolume is being deleted"
 	for _, rva := range rvas {
-		if isRVADeletionConditionsInSync(rva) {
+		if isRVAWaitingForRVConditionsInSync(rva, rvDeletingMessage) {
 			continue
 		}
 
 		base := rva.DeepCopy()
-		applyRVADeletionConditions(rva)
+		applyRVAWaitingForRVConditions(rva, rvDeletingMessage)
 
 		if err := r.patchRVAStatus(rf.Ctx(), rva, base); err != nil {
 			return rf.Failf(err, "patching RVA %s status", rva.Name)
@@ -1672,7 +1791,7 @@ func (r *Reconciler) reconcileDeletion(
 
 	// Step 2: Remove finalizers from RVRs and delete them.
 	for _, rvr := range *rvrs {
-		if err := r.deleteRVRWithFinalizerRemoval(rf.Ctx(), rvr); err != nil {
+		if err := r.deleteRVRWithForcedFinalizerRemoval(rf.Ctx(), rvr); err != nil {
 			return rf.Failf(err, "deleting RVR %s", rvr.Name)
 		}
 	}
@@ -1690,8 +1809,8 @@ func (r *Reconciler) reconcileDeletion(
 	return rf.Done()
 }
 
-// isRVADeletionConditionsInSync checks if RVA has the expected conditions for RV deletion.
-func isRVADeletionConditionsInSync(rva *v1alpha1.ReplicatedVolumeAttachment) bool {
+// isRVAWaitingForRVConditionsInSync checks if RVA has the expected conditions for when RV is unavailable.
+func isRVAWaitingForRVConditionsInSync(rva *v1alpha1.ReplicatedVolumeAttachment, message string) bool {
 	// Should have exactly 2 conditions: Attached and Ready.
 	if len(rva.Status.Conditions) != 2 {
 		return false
@@ -1700,35 +1819,37 @@ func isRVADeletionConditionsInSync(rva *v1alpha1.ReplicatedVolumeAttachment) boo
 	attachedCond := obju.GetStatusCondition(rva, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 	if attachedCond == nil ||
 		attachedCond.Status != metav1.ConditionFalse ||
-		attachedCond.Reason != v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolume {
+		attachedCond.Reason != v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolume ||
+		attachedCond.Message != message {
 		return false
 	}
 
 	readyCond := obju.GetStatusCondition(rva, v1alpha1.ReplicatedVolumeAttachmentCondReadyType)
 	if readyCond == nil ||
 		readyCond.Status != metav1.ConditionFalse ||
-		readyCond.Reason != v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonNotAttached {
+		readyCond.Reason != v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonNotAttached ||
+		readyCond.Message != message {
 		return false
 	}
 
 	return true
 }
 
-// applyRVADeletionConditions sets RVA conditions for RV deletion:
+// applyRVAWaitingForRVConditions sets RVA conditions when RV is unavailable:
 // Attached=False (WaitingForReplicatedVolume), Ready=False (NotAttached).
 // Removes all other conditions.
-func applyRVADeletionConditions(rva *v1alpha1.ReplicatedVolumeAttachment) {
+func applyRVAWaitingForRVConditions(rva *v1alpha1.ReplicatedVolumeAttachment, message string) {
 	obju.SetStatusCondition(rva, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
 		Status:  metav1.ConditionFalse,
 		Reason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolume,
-		Message: "ReplicatedVolume is being deleted",
+		Message: message,
 	})
 	obju.SetStatusCondition(rva, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeAttachmentCondReadyType,
 		Status:  metav1.ConditionFalse,
 		Reason:  v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonNotAttached,
-		Message: "ReplicatedVolume is being deleted",
+		Message: message,
 	})
 	// Remove all conditions except the two set above.
 	rva.Status.Conditions = slices.DeleteFunc(rva.Status.Conditions, func(c metav1.Condition) bool {
@@ -1752,6 +1873,46 @@ type rspView struct {
 	SystemNetworkNames []string
 	// EligibleNodes contains only nodes that are present in the RVRs.
 	EligibleNodes []v1alpha1.ReplicatedStoragePoolEligibleNode
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: orphaned RVAs (RV already deleted)
+//
+
+// reconcileOrphanedRVAs handles RVAs that reference a deleted RV.
+// Sets conditions (Attached=False/WaitingForReplicatedVolume, Ready=False/NotAttached)
+// and removes RVControllerFinalizer from deleting RVAs.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileOrphanedRVAs(
+	ctx context.Context,
+	rvas []*v1alpha1.ReplicatedVolumeAttachment,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "orphaned-rvas")
+	defer rf.OnEnd(&outcome)
+
+	const rvNotFoundMessage = "ReplicatedVolume not found; waiting for it to appear"
+	for _, rva := range rvas {
+		// Set conditions (Attached=False/WaitingForReplicatedVolume).
+		if !isRVAWaitingForRVConditionsInSync(rva, rvNotFoundMessage) {
+			base := rva.DeepCopy()
+			applyRVAWaitingForRVConditions(rva, rvNotFoundMessage)
+			if err := r.patchRVAStatus(rf.Ctx(), rva, base); err != nil {
+				return rf.Failf(err, "patching orphaned RVA %s status", rva.Name)
+			}
+		}
+
+		// Remove our finalizer from deleting RVAs (RV is gone → nothing is attached → safe).
+		if rva.DeletionTimestamp != nil && obju.HasFinalizer(rva, v1alpha1.RVControllerFinalizer) {
+			base := rva.DeepCopy()
+			obju.RemoveFinalizer(rva, v1alpha1.RVControllerFinalizer)
+			if err := r.patchRVA(rf.Ctx(), rva, base); err != nil {
+				return rf.Failf(err, "removing finalizer from orphaned RVA %s", rva.Name)
+			}
+		}
+	}
+
+	return rf.Done()
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1995,14 +2156,17 @@ func (r *Reconciler) deleteRVR(ctx context.Context, obj *v1alpha1.ReplicatedVolu
 	return nil
 }
 
-// deleteRVRWithFinalizerRemoval removes the RV controller finalizer and deletes the RVR.
-// Use this when RV controller owns the RVR lifecycle and wants to force deletion
-// without waiting for normal finalizer cleanup.
+// deleteRVRWithForcedFinalizerRemoval forcibly removes the RV controller finalizer and deletes the RVR.
+//
+// WARNING: This bypasses normal datamesh cleanup — the RVR's finalizer is removed without
+// checking whether it is still a datamesh member or has pending transitions. Use ONLY in
+// "tear everything down" flows (formation restart, RV deletion) where the entire datamesh
+// is being reset or destroyed. For normal RVR deletion, use deleteRVR and let
+// reconcileRVRFinalizers remove the finalizer when datamesh cleanup completes.
 //
 // Exception: this is a composite helper (patch + delete = two API calls). It intentionally
-// combines finalizer removal and deletion into one step for readability at call sites
-// (formation restart, RV deletion). Naming kept as delete* for discoverability.
-func (r *Reconciler) deleteRVRWithFinalizerRemoval(ctx context.Context, obj *v1alpha1.ReplicatedVolumeReplica) error {
+// combines finalizer removal and deletion into one step for readability at call sites.
+func (r *Reconciler) deleteRVRWithForcedFinalizerRemoval(ctx context.Context, obj *v1alpha1.ReplicatedVolumeReplica) error {
 	// Remove finalizer if present.
 	if obju.HasFinalizer(obj, v1alpha1.RVControllerFinalizer) {
 		base := obj.DeepCopy()
