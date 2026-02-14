@@ -286,6 +286,9 @@ type ReplicatedVolumeReplicaStatusAttachment struct {
 
 	// IOSuspended indicates whether I/O is suspended on the device.
 	IOSuspended bool `json:"ioSuspended"`
+
+	// InUse indicates whether the replica's block device is currently in use by a process.
+	InUse bool `json:"inUse"`
 }
 
 // ReplicatedVolumeReplicaStatusBackingVolume contains information about the backing LVM logical volume.

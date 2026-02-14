@@ -171,12 +171,17 @@ spec:
                     maxLength: 256
                     minLength: 1
                     type: string
+                  inUse:
+                    description: InUse indicates whether the replica's block device
+                      is currently in use by a process.
+                    type: boolean
                   ioSuspended:
                     description: IOSuspended indicates whether I/O is suspended on
                       the device.
                     type: boolean
                 required:
                 - devicePath
+                - inUse
                 - ioSuspended
                 type: object
               backingVolume:
