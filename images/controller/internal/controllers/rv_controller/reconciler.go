@@ -23,6 +23,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -324,16 +325,23 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 
 	// Replicas waiting to be scheduled.
 	waitingScheduling := diskful.Difference(scheduled)
+
+	// Split waitingScheduling: replicas where scheduling explicitly failed vs not yet processed.
+	schedulingFailed := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return waitingScheduling.Contains(rvr.ID()) &&
+			obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType).
+				IsFalse().
+				Eval()
+	})
+	pendingScheduling := waitingScheduling.Difference(schedulingFailed)
+
 	// Replicas scheduled but waiting for preconfiguration.
 	waitingPreconfiguration := scheduled.Intersect(diskful).Difference(preconfigured)
 
 	// Wait for replicas to become preconfigured; restart formation if timeout exceeded.
 	if !waitingScheduling.IsEmpty() || !waitingPreconfiguration.IsEmpty() {
-		msg := fmt.Sprintf(
-			"Waiting for %d/%d replicas: scheduling [%s], preconfiguring [%s]",
-			diskful.Len(), targetDiskfulCount,
-			waitingScheduling.String(), waitingPreconfiguration.String(),
-		)
+		msg := computeFormationPreconfigureWaitMessage(*rvrs, targetDiskfulCount,
+			pendingScheduling, schedulingFailed, waitingPreconfiguration)
 		changed = applyFormationTransitionMessage(rv, msg) || changed
 		changed = applyPendingReplicaMessages(
 			rv, preconfigured,
@@ -1160,6 +1168,54 @@ func applyPendingReplicaMessages(rv *v1alpha1.ReplicatedVolume, repIDs idset.IDS
 		}
 	}
 	return changed
+}
+
+// computeFormationPreconfigureWaitMessage builds a human-readable formation transition
+// message for the preconfigure phase, showing only non-empty wait reasons
+// (pending scheduling, scheduling failed with inline error details, preconfiguring).
+func computeFormationPreconfigureWaitMessage(
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	targetDiskfulCount int,
+	pendingScheduling, schedulingFailed, waitingPreconfiguration idset.IDSet,
+) string {
+	var waitReasons []string
+	if !pendingScheduling.IsEmpty() {
+		waitReasons = append(waitReasons, fmt.Sprintf("pending scheduling [%s]", pendingScheduling))
+	}
+	if !schedulingFailed.IsEmpty() {
+		part := fmt.Sprintf("scheduling failed [%s]", schedulingFailed)
+		if msgs := computeActualSchedulingFailureMessages(rvrs, schedulingFailed); len(msgs) > 0 {
+			part += " (" + strings.Join(msgs, " | ") + ")"
+		}
+		waitReasons = append(waitReasons, part)
+	}
+	if !waitingPreconfiguration.IsEmpty() {
+		waitReasons = append(waitReasons, fmt.Sprintf("preconfiguring [%s]", waitingPreconfiguration))
+	}
+	waitingCount := pendingScheduling.Len() + schedulingFailed.Len() + waitingPreconfiguration.Len()
+	return fmt.Sprintf("Waiting for %d/%d replicas: %s",
+		waitingCount, targetDiskfulCount, strings.Join(waitReasons, ", "))
+}
+
+// computeActualSchedulingFailureMessages collects deduplicated, sorted messages from RVRs
+// whose Scheduled condition is present and False. Only RVRs whose ID is in the given set
+// are considered. Returns nil if no such messages exist.
+func computeActualSchedulingFailureMessages(rvrs []*v1alpha1.ReplicatedVolumeReplica, ids idset.IDSet) []string {
+	var msgs []string
+	for _, rvr := range rvrs {
+		if !ids.Contains(rvr.ID()) {
+			continue
+		}
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+		if cond == nil || cond.Status != metav1.ConditionFalse || cond.Message == "" {
+			continue
+		}
+		if !slices.Contains(msgs, cond.Message) {
+			msgs = append(msgs, cond.Message)
+		}
+	}
+	slices.Sort(msgs)
+	return msgs
 }
 
 // computeIntendedDiskfulReplicaCount returns the intended number of diskful replicas

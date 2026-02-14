@@ -1722,6 +1722,169 @@ var _ = Describe("computeTargetQuorum", func() {
 	})
 })
 
+var _ = Describe("computeActualSchedulingFailureMessages", func() {
+	mkRVR := func(id uint8, condStatus metav1.ConditionStatus, message string) *v1alpha1.ReplicatedVolumeReplica {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", id),
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+				Type:                 v1alpha1.ReplicaTypeDiskful,
+			},
+		}
+		if condStatus != "" {
+			obju.SetStatusCondition(rvr, metav1.Condition{
+				Type:    v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+				Status:  condStatus,
+				Reason:  v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed,
+				Message: message,
+			})
+		}
+		return rvr
+	}
+
+	It("returns nil when no RVRs have Scheduled=False", func() {
+		rvr0 := mkRVR(0, "", "")                             // no condition
+		rvr1 := mkRVR(1, metav1.ConditionTrue, "all good")   // Scheduled=True
+		rvr2 := mkRVR(2, metav1.ConditionUnknown, "waiting") // Scheduled=Unknown
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr0, rvr1, rvr2}
+		ids := idset.Of(0).Union(idset.Of(1)).Union(idset.Of(2))
+		Expect(computeActualSchedulingFailureMessages(rvrs, ids)).To(BeNil())
+	})
+
+	It("returns the message when one RVR has Scheduled=False", func() {
+		rvr0 := mkRVR(0, metav1.ConditionFalse, "2 candidates; 2 excluded: node not ready")
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr0}
+		ids := idset.Of(0)
+		Expect(computeActualSchedulingFailureMessages(rvrs, ids)).To(Equal(
+			[]string{"2 candidates; 2 excluded: node not ready"},
+		))
+	})
+
+	It("deduplicates identical messages from multiple RVRs", func() {
+		msg := "4 candidates; 4 excluded: node not ready"
+		rvr0 := mkRVR(0, metav1.ConditionFalse, msg)
+		rvr1 := mkRVR(1, metav1.ConditionFalse, msg)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr0, rvr1}
+		ids := idset.Of(0).Union(idset.Of(1))
+		result := computeActualSchedulingFailureMessages(rvrs, ids)
+		Expect(result).To(HaveLen(1))
+		Expect(result[0]).To(Equal(msg))
+	})
+
+	It("returns sorted distinct messages from multiple RVRs", func() {
+		rvr0 := mkRVR(0, metav1.ConditionFalse, "extender unavailable")
+		rvr1 := mkRVR(1, metav1.ConditionFalse, "2 candidates; 2 excluded: node not ready")
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr0, rvr1}
+		ids := idset.Of(0).Union(idset.Of(1))
+		Expect(computeActualSchedulingFailureMessages(rvrs, ids)).To(Equal(
+			[]string{"2 candidates; 2 excluded: node not ready", "extender unavailable"},
+		))
+	})
+
+	It("skips RVRs not in the ID set", func() {
+		rvr0 := mkRVR(0, metav1.ConditionFalse, "should appear")
+		rvr1 := mkRVR(1, metav1.ConditionFalse, "should be skipped")
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr0, rvr1}
+		ids := idset.Of(0) // only ID 0
+		Expect(computeActualSchedulingFailureMessages(rvrs, ids)).To(Equal(
+			[]string{"should appear"},
+		))
+	})
+
+	It("skips RVRs with Scheduled=False but empty message", func() {
+		rvr0 := mkRVR(0, metav1.ConditionFalse, "")
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr0}
+		ids := idset.Of(0)
+		Expect(computeActualSchedulingFailureMessages(rvrs, ids)).To(BeNil())
+	})
+})
+
+var _ = Describe("computeFormationPreconfigureWaitMessage", func() {
+	mkRVR := func(id uint8, condStatus metav1.ConditionStatus, message string) *v1alpha1.ReplicatedVolumeReplica {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", id),
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+				Type:                 v1alpha1.ReplicaTypeDiskful,
+			},
+		}
+		if condStatus != "" {
+			obju.SetStatusCondition(rvr, metav1.Condition{
+				Type:    v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+				Status:  condStatus,
+				Reason:  v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed,
+				Message: message,
+			})
+		}
+		return rvr
+	}
+
+	It("shows only pending scheduling when no failures or preconfiguring", func() {
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR(0, "", "")}
+		msg := computeFormationPreconfigureWaitMessage(rvrs, 3,
+			idset.Of(0), idset.IDSet(0), idset.IDSet(0))
+		Expect(msg).To(Equal("Waiting for 1/3 replicas: pending scheduling [#0]"))
+	})
+
+	It("shows only scheduling failed with inline error", func() {
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR(0, metav1.ConditionFalse, "2 candidates; 2 excluded: node not ready"),
+		}
+		msg := computeFormationPreconfigureWaitMessage(rvrs, 3,
+			idset.IDSet(0), idset.Of(0), idset.IDSet(0))
+		Expect(msg).To(Equal("Waiting for 1/3 replicas: scheduling failed [#0] (2 candidates; 2 excluded: node not ready)"))
+	})
+
+	It("shows only preconfiguring", func() {
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR(0, "", "")}
+		msg := computeFormationPreconfigureWaitMessage(rvrs, 3,
+			idset.IDSet(0), idset.IDSet(0), idset.Of(0))
+		Expect(msg).To(Equal("Waiting for 1/3 replicas: preconfiguring [#0]"))
+	})
+
+	It("shows all three groups when all non-empty", func() {
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR(0, "", ""),
+			mkRVR(1, metav1.ConditionFalse, "node not ready"),
+			mkRVR(2, "", ""),
+		}
+		msg := computeFormationPreconfigureWaitMessage(rvrs, 3,
+			idset.Of(0), idset.Of(1), idset.Of(2))
+		Expect(msg).To(Equal("Waiting for 3/3 replicas: pending scheduling [#0], scheduling failed [#1] (node not ready), preconfiguring [#2]"))
+	})
+
+	It("counts waiting replicas correctly (not total diskful)", func() {
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR(2, "", "")}
+		msg := computeFormationPreconfigureWaitMessage(rvrs, 3,
+			idset.IDSet(0), idset.IDSet(0), idset.Of(2))
+		Expect(msg).To(HavePrefix("Waiting for 1/3"))
+	})
+
+	It("joins multiple scheduling failure messages with pipe", func() {
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR(0, metav1.ConditionFalse, "extender unavailable"),
+			mkRVR(1, metav1.ConditionFalse, "2 candidates; 2 excluded: node not ready"),
+		}
+		msg := computeFormationPreconfigureWaitMessage(rvrs, 3,
+			idset.IDSet(0), idset.Of(0).Union(idset.Of(1)), idset.IDSet(0))
+		Expect(msg).To(ContainSubstring("(2 candidates; 2 excluded: node not ready | extender unavailable)"))
+	})
+
+	It("omits parentheses when scheduling failed has no messages", func() {
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR(0, metav1.ConditionFalse, ""), // Scheduled=False but empty message
+		}
+		msg := computeFormationPreconfigureWaitMessage(rvrs, 1,
+			idset.IDSet(0), idset.Of(0), idset.IDSet(0))
+		Expect(msg).To(Equal("Waiting for 1/1 replicas: scheduling failed [#0]"))
+		Expect(msg).NotTo(ContainSubstring("("))
+	})
+})
+
 var _ = Describe("generateSharedSecret", func() {
 	It("returns non-empty string within DRBD limit", func() {
 		secret, err := generateSharedSecret()
@@ -2185,7 +2348,47 @@ var _ = Describe("Formation: Preconfigure", func() {
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
 		Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("scheduling"))
+		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("pending scheduling"))
+	})
+
+	It("includes scheduling failure details when RVR has Scheduled=False", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+		rv := newFormationRV("rsc-1")
+
+		// Create an RVR with Scheduled=False and a diagnostic message.
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+				Type:                 v1alpha1.ReplicaTypeDiskful,
+			},
+		}
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed,
+			Message: "2 candidates; 2 excluded: node not ready",
+		})
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		result, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("scheduling failed [#0]"))
+		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("(2 candidates; 2 excluded: node not ready)"))
 	})
 
 	It("waits for preconfiguration when RVR is scheduled but not preconfigured", func(ctx SpecContext) {
