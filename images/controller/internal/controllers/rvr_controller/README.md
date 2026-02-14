@@ -48,7 +48,10 @@ reconcile DRBD resource:
     if agent not ready → DRBDConfigured=False AgentNotReady
     if DRBDR pending → DRBDConfigured=False ApplyingConfiguration
     if DRBDR failed → DRBDConfigured=False ConfigurationFailed
-    if not datamesh member → DRBDConfigured=False PendingDatameshJoin
+    if not datamesh member:
+        if was member (datameshRevision > 0) → reset datameshRevision to 0, DRBDConfigured=True
+        elif deleting → DRBDConfigured=True (replica is being deleted)
+        else → DRBDConfigured=False PendingDatameshJoin
     else → DRBDConfigured=True
 
 patch status if changed
@@ -196,11 +199,11 @@ Indicates whether the replica's DRBD resource is configured.
 
 | Status | Reason | When |
 |--------|--------|------|
-| True | Configured | DRBD resource is fully configured and replica is a datamesh member |
+| True | Configured | DRBD resource is fully configured (datamesh member, removed from datamesh, or deleting non-member) |
 | False | AgentNotReady | Agent is not ready on the target node |
 | False | ConfigurationFailed | DRBD resource configuration failed |
-| False | NotApplicable | Replica is being deleted |
-| False | PendingDatameshJoin | DRBD preconfigured, waiting for datamesh membership |
+| False | NotApplicable | Replica is being deleted (rvrShouldNotExist) |
+| False | PendingDatameshJoin | DRBD preconfigured, waiting for datamesh membership (not deleting) |
 | False | PendingScheduling | Waiting for node assignment |
 | False | WaitingForBackingVolume | Waiting for backing volume (creating, resizing, or replacing) |
 | Unknown | ApplyingConfiguration | Waiting for agent to apply DRBD configuration |
@@ -259,8 +262,8 @@ Indicates overall replica readiness for I/O (based on quorum state).
 |--------|--------|------|
 | True | Ready | Ready for I/O (quorum message) |
 | True/False | QuorumViaPeers | Diskless replica; quorum provided by connected peers |
-| False | Deleting | Replica is being deleted |
-| False | PendingDatameshJoin | Waiting to join datamesh |
+| False | Deleting | Replica is being deleted (rvrShouldNotExist or deleting non-member) |
+| False | PendingDatameshJoin | Waiting to join datamesh (not deleting) |
 | False | PendingScheduling | Waiting for node assignment |
 | False | QuorumLost | Quorum is lost (quorum message) |
 | Unknown | AgentNotReady | Agent is not ready |
@@ -291,7 +294,7 @@ The controller manages the following status fields on RVR:
 | `type` | Observed DRBD type (Diskful/Diskless) | From DRBDR status.activeConfiguration.type |
 | `backingVolume` | Backing volume info (size, state, LVG name, thin pool) | From DRBDR + LLV status |
 | `datameshPendingTransition` | Pending datamesh transitions (join/leave/role change/BV change) | Computed from spec vs status |
-| `datameshRevision` | Datamesh revision for which the replica was fully configured | Set when DRBDConfigured=True |
+| `datameshRevision` | Datamesh revision for which the replica was fully configured; reset to 0 when removed from datamesh | Set when DRBDConfigured=True; reset to 0 when removed |
 | `drbdrReconciliationCache` | Cache of target configuration that DRBDR spec was last applied for | Computed |
 | `peers` | Peer connectivity status | Merged from datamesh + DRBDR |
 | `quorum` | Whether this replica has quorum | From DRBDR status |
@@ -728,9 +731,15 @@ flowchart TD
     SetWaitBV3 --> End11([Done])
 
     CheckResize -->|No| CheckMember{Datamesh member?}
-    CheckMember -->|No| SetPendingJoin[DRBDConfigured=False PendingDatameshJoin]
-    CheckMember -->|Yes| RecordRevision[Record DatameshRevision]
+    CheckMember -->|No| CheckWasMember{Was member?<br/>DatameshRevision > 0}
+    CheckWasMember -->|Yes| ResetRevision["Reset DatameshRevision to 0<br/>DRBDConfigured=True Configured<br/>(removed from datamesh)"]
+    ResetRevision --> End7a([Done])
+    CheckWasMember -->|No| CheckDeleting{Deleting?}
+    CheckDeleting -->|Yes| SetDeletingConfigured["DRBDConfigured=True Configured<br/>(replica is being deleted)"]
+    SetDeletingConfigured --> End7b([Done])
+    CheckDeleting -->|No| SetPendingJoin[DRBDConfigured=False PendingDatameshJoin]
     SetPendingJoin --> End7([Done])
+    CheckMember -->|Yes| RecordRevision[Record DatameshRevision]
     RecordRevision --> SetConfigured[DRBDConfigured=True]
     SetConfigured --> End8([Done])
 ```
@@ -748,7 +757,7 @@ flowchart TD
 |--------|-------------|
 | `DRBDResource` | Created/patched/deleted DRBD resource |
 | `DRBDConfigured` condition | Reports DRBD configuration state |
-| `status.datameshRevision` | Datamesh revision for which replica was fully configured |
+| `status.datameshRevision` | Datamesh revision for which replica was fully configured; reset to 0 when removed from datamesh |
 | `status.drbdrReconciliationCache` | Cache of target configuration (datameshRevision, drbdrGeneration, rvrType) |
 
 ---

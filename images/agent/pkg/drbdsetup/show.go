@@ -26,8 +26,10 @@ import (
 // drbdsetup may emit the "disk" field as a plain string (e.g. for diskless volumes)
 // instead of a JSON object with disk options. This method handles both forms.
 func (d *ShowVolumeDisk) UnmarshalJSON(data []byte) error {
-	// If the value is a JSON string (e.g. "diskless"), leave the struct zero-valued.
+	// If the value is a JSON string (e.g. "none" for diskless volumes),
+	// mark IsNone and leave the rest of the struct zero-valued.
 	if len(data) > 0 && data[0] == '"' {
+		d.IsNone = true
 		return nil
 	}
 
@@ -94,6 +96,11 @@ type ShowVolume struct {
 }
 
 type ShowVolumeDisk struct {
+	// IsNone is true when drbdsetup show emitted the "disk" field as a plain string
+	// (e.g. "none" for intentionally diskless volumes) rather than a JSON object with
+	// disk options. This flag is set by UnmarshalJSON and is not part of the JSON schema.
+	IsNone bool `json:"-"`
+
 	Size                   string `json:"size"`
 	OnIOError              string `json:"on-io-error"`
 	DiskBarrier            bool   `json:"disk-barrier"`

@@ -45,7 +45,7 @@ import (
 // +kubebuilder:printcolumn:name="BVReady",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='BackingVolumeReady')].status"
 // +kubebuilder:printcolumn:name="SatisfyEligibleNodes",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='SatisfyEligibleNodes')].status"
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.startsWith(self.spec.replicatedVolumeName + '-')",message="metadata.name must start with spec.replicatedVolumeName + '-'"
-// +kubebuilder:validation:XValidation:rule="int(self.metadata.name.substring(self.metadata.name.lastIndexOf('-') + 1)) <= 31",message="numeric suffix must be between 0 and 31"
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.substring(size(self.spec.replicatedVolumeName) + 1).matches('^[0-9][0-9]?$') && int(self.metadata.name.substring(size(self.spec.replicatedVolumeName) + 1)) <= 31",message="metadata.name must be exactly spec.replicatedVolumeName + '-' + id where id is 0..31"
 // +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 123",message="metadata.name must be at most 123 characters (to fit derived LLV name with prefix)"
 type ReplicatedVolumeReplica struct {
 	metav1.TypeMeta `json:",inline"`
@@ -128,6 +128,7 @@ func (rvr *ReplicatedVolumeReplica) ChooseNewName(otherRVRs []*ReplicatedVolumeR
 }
 
 // +kubebuilder:object:generate=true
+// +kubebuilder:validation:XValidation:rule="self.type != 'Access' || has(self.nodeName)",message="nodeName is required for Access type"
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || has(self.nodeName)",message="lvmVolumeGroupName requires nodeName to be set"
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || self.type == 'Diskful'",message="lvmVolumeGroupName can only be set for Diskful type"
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be set"

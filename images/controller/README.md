@@ -110,7 +110,7 @@ flowchart TB
     RVA --> RVCtrl
     RVCtrl -->|creates/deletes| RVR
     RVCtrl -->|creates| DRBDROp
-    RVCtrl -->|"updates conditions (deletion)"| RVA
+    RVCtrl -->|"manages finalizers; updates conditions (deletion)"| RVA
 
     RV --> RVRSchedCtrl
     RSP --> RVRSchedCtrl

@@ -65,7 +65,7 @@ func (rsp *ReplicatedStoragePool) SetStatusConditions(conditions []metav1.Condit
 // Defines desired rules for Linstor's Storage-pools.
 // +kubebuilder:object:generate=true
 // +structType=atomic
-// +kubebuilder:validation:XValidation:rule="self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, size(g.thinPoolName) > 0)",message="thinPoolName is required for each lvmVolumeGroups entry when type is LVMThin"
+// +kubebuilder:validation:XValidation:rule="self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, has(g.thinPoolName) && size(g.thinPoolName) > 0)",message="thinPoolName is required for each lvmVolumeGroups entry when type is LVMThin"
 // +kubebuilder:validation:XValidation:rule="self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName) || size(g.thinPoolName) == 0)",message="thinPoolName must not be specified when type is LVM"
 type ReplicatedStoragePoolSpec struct {
 	// Defines the volumes type. Might be:

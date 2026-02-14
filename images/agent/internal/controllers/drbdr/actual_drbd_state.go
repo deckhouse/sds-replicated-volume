@@ -391,26 +391,37 @@ func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResour
 	}
 
 	// Type and Size from first volume.
-	// Type is determined from drbdsetup show configuration (backing-disk), not from
-	// the transient disk state in drbdsetup status. Intentionally diskless volumes
-	// (created with --diskless) have backing-disk "none" in show output.
+	// Type is determined from drbdsetup show configuration ("disk" field), not from
+	// the transient disk state in drbdsetup status.
+	//
+	// drbdsetup show JSON output per volume:
+	//   - Diskful:  has "backing-disk": "/dev/vg/lv", "disk": { ...options... }
+	//   - Diskless: has "disk": "none" only (no "backing-disk" field at all)
+	//   - Detached: has only "volume_nr" and "device_minor" (no "backing-disk", no "disk")
+	//
+	// Diskless is reported only when "disk" is explicitly the string "none"
+	// (Disk.IsNone == true). Everything else — including detached diskful
+	// resources where "backing-disk" is absent — is reported as Diskful,
+	// because the configured type does not change when the backing device
+	// is temporarily unavailable. The diskState field reports disk health.
+	//
 	// LVMLogicalVolumeName is set by the reconciler after reverse-lookup
 	// from the backing disk path. This Report() method does not set it.
 	if len(volumes) > 0 {
 		vol := &volumes[0]
 
-		// Look up the show volume to check backing-disk configuration.
-		backingDisk := ""
+		// Look up the show volume to check disk configuration.
+		diskIsNone := false
 		if aState.show != nil {
 			for i := range aState.show.ThisHost.Volumes {
 				if aState.show.ThisHost.Volumes[i].VolumeNr == vol.Volume {
-					backingDisk = aState.show.ThisHost.Volumes[i].BackingDisk
+					diskIsNone = aState.show.ThisHost.Volumes[i].Disk.IsNone
 					break
 				}
 			}
 		}
 
-		if backingDisk == "none" {
+		if diskIsNone {
 			ac.Type = v1alpha1.DRBDResourceTypeDiskless
 			ac.Size = nil
 		} else {

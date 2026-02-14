@@ -638,6 +638,56 @@ func TestFromWhere(t *testing.T) {
 	}
 }
 
+func TestFromFunc(t *testing.T) {
+	type item struct {
+		name   string
+		rid    uint8
+		hasRID bool
+	}
+	items := []item{
+		{name: "a", rid: 0, hasRID: true},
+		{name: "b", rid: 5, hasRID: false},
+		{name: "c", rid: 10, hasRID: true},
+		{name: "d", rid: 15, hasRID: true},
+	}
+
+	got := idset.FromFunc(items, func(it item) (uint8, bool) {
+		if !it.hasRID {
+			return 0, false
+		}
+		return it.rid, true
+	})
+	want := idset.IDSet((1 << 0) | (1 << 10) | (1 << 15))
+	if got != want {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+
+	// No matches.
+	got = idset.FromFunc(items, func(_ item) (uint8, bool) { return 0, false })
+	if got != 0 {
+		t.Fatalf("expected empty set, got %v", got)
+	}
+
+	// All match.
+	got = idset.FromFunc(items, func(it item) (uint8, bool) { return it.rid, true })
+	want = idset.IDSet((1 << 0) | (1 << 5) | (1 << 10) | (1 << 15))
+	if got != want {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+
+	// Empty slice.
+	got = idset.FromFunc([]item{}, func(it item) (uint8, bool) { return it.rid, true })
+	if got != 0 {
+		t.Fatalf("expected empty set, got %v", got)
+	}
+
+	// Nil slice.
+	got = idset.FromFunc[item](nil, func(it item) (uint8, bool) { return it.rid, true })
+	if got != 0 {
+		t.Fatalf("expected empty set for nil slice, got %v", got)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Edge cases
 // ----------------------------------------------------------------------------

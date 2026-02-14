@@ -210,6 +210,15 @@ type ReplicatedVolumeDatameshTransition struct {
 	Formation *ReplicatedVolumeDatameshTransitionFormation `json:"formation,omitempty"`
 }
 
+// ReplicaID extracts ID from the replica name (e.g., "pvc-xxx-5" → 5).
+// Panics if ReplicaName is not set (transition types without ReplicaName must not call this).
+func (t ReplicatedVolumeDatameshTransition) ReplicaID() uint8 {
+	if t.ReplicaName == "" {
+		panic("ReplicaID called on transition without replicaName (type: " + string(t.Type) + ")")
+	}
+	return idFromName(t.ReplicaName)
+}
+
 // ReplicatedVolumeDatameshTransitionType enumerates possible datamesh transition types.
 type ReplicatedVolumeDatameshTransitionType string
 
@@ -338,8 +347,8 @@ func (a SharedSecretAlg) String() string {
 // +kubebuilder:validation:XValidation:rule="self.type != 'Access' || !has(self.typeTransition)",message="Access cannot have typeTransition"
 // +kubebuilder:validation:XValidation:rule="self.name.lastIndexOf('-') >= 0",message="name must contain '-' separator"
 // +kubebuilder:validation:XValidation:rule="int(self.name.substring(self.name.lastIndexOf('-') + 1)) <= 31",message="name numeric suffix must be between 0 and 31"
-// +kubebuilder:validation:XValidation:rule="size(self.lvmVolumeGroupName) == 0 || self.type == 'Diskful' || (has(self.typeTransition) && self.typeTransition == 'ToDiskful')",message="lvmVolumeGroupName can only be set for Diskful type or when typeTransition is ToDiskful"
-// +kubebuilder:validation:XValidation:rule="size(self.lvmVolumeGroupThinPoolName) == 0 || size(self.lvmVolumeGroupName) > 0",message="lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || self.type == 'Diskful' || (has(self.typeTransition) && self.typeTransition == 'ToDiskful')",message="lvmVolumeGroupName can only be set for Diskful type or when typeTransition is ToDiskful"
+// +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be set"
 type ReplicatedVolumeDatameshMember struct {
 	// Name is the member name (used as list map key).
 	// Must have format "prefix-N" where N is 0-31.
