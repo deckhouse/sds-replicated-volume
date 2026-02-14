@@ -20,7 +20,7 @@ The controller reconciles `ReplicatedVolume` with:
 | ← input | ReplicatedVolumeReplica | Reads replica status (scheduling, preconfiguration, connectivity, data sync) |
 | ← input | ReplicatedVolumeAttachment | Reads attachment status (for deletion decisions) |
 | → manages | ReplicatedVolumeReplica | Creates/deletes during formation and deletion |
-| → manages | ReplicatedVolumeAttachment | Updates conditions during deletion |
+| → manages | ReplicatedVolumeAttachment | Manages finalizers; updates conditions during deletion |
 | → manages | DRBDResourceOperation | Creates for data bootstrap during formation |
 
 ## Algorithm
@@ -29,10 +29,12 @@ The controller reconciles individual ReplicatedVolumes:
 
 ```
 if shouldDelete:
+    reconcileRVAFinalizers (add/remove RVA finalizers)
     reconcileDeletion (update RVA conditions → delete RVRs → clear datamesh members)
     reconcileMetadata (remove finalizer if no children left) → Done
 
 ensure metadata (finalizer + labels)
+reconcileRVAFinalizers (add/remove RVA finalizers)
 
 ensure configuration from RSC
 ensure datamesh pending replica transitions (sync from RVR statuses)
@@ -53,6 +55,11 @@ patch status if changed
 Reconcile (root) [Pure orchestration]
 ├── getRV, getRSC, getRVAs, getRVRsSorted
 ├── rvShouldNotExist →
+│   ├── reconcileRVAFinalizers [Target-state driven]
+│   │   ├── add RVControllerFinalizer to non-deleting RVAs
+│   │   └── remove RVControllerFinalizer from deleting RVAs (when safe)
+│   │       ├── hasOtherNonDeletingRVAOnNode (duplicate check)
+│   │       └── isNodeAttachedOrDetaching (datamesh state check)
 │   ├── reconcileDeletion [In-place reconciliation] ← details
 │   │   ├── isRVADeletionConditionsInSync / applyRVADeletionConditions
 │   │   ├── deleteRVRWithFinalizerRemoval (loop)
@@ -62,6 +69,7 @@ Reconcile (root) [Pure orchestration]
 │   ├── isRVMetadataInSync
 │   ├── applyRVMetadata (finalizer + labels)
 │   └── patchRV
+├── reconcileRVAFinalizers [Target-state driven] (same as above)
 ├── ensureRVConfiguration
 ├── ensureDatameshPendingReplicaTransitions ← details
 ├── reconcileFormation [Pure orchestration]
@@ -97,12 +105,14 @@ flowchart TD
     GetRV --> LoadDeps[Load RSC, RVAs, RVRs]
 
     LoadDeps --> CheckDelete{rvShouldNotExist?}
-    CheckDelete -->|Yes| Deletion[reconcileDeletion]
+    CheckDelete -->|Yes| RVAFinDel[reconcileRVAFinalizers]
+    RVAFinDel --> Deletion[reconcileDeletion]
     Deletion --> MetaDel["reconcileMetadata<br/>(remove finalizer)"]
     MetaDel --> Done3([Done])
 
     CheckDelete -->|No| Meta[reconcileMetadata]
-    Meta -->|"Finalizer added/updated"| EnsureConfig[ensureRVConfiguration +<br/>ensureDatameshPendingReplicaTransitions]
+    Meta --> RVAFin[reconcileRVAFinalizers]
+    RVAFin --> EnsureConfig[ensureRVConfiguration +<br/>ensureDatameshPendingReplicaTransitions]
     EnsureConfig --> CheckConfig{Configuration exists?}
     CheckConfig -->|No| Conditions
 
@@ -199,6 +209,7 @@ When formation stalls (any safety check fails or progress timeout is exceeded), 
 |------|-----|------------|---------|
 | Finalizer | `sds-replicated-volume.deckhouse.io/rv-controller` | RV | Prevent deletion while child resources exist |
 | Label | `sds-replicated-volume.deckhouse.io/replicated-storage-class` | RV | Link to ReplicatedStorageClass |
+| Finalizer | `sds-replicated-volume.deckhouse.io/rv-controller` | RVA | Prevent deletion while node is attached or detaching |
 | Finalizer | `sds-replicated-volume.deckhouse.io/rv-controller` | RVR | Removed during formation restart / deletion |
 | OwnerRef | controller reference | DRBDResourceOperation | Owner reference to RV |
 
@@ -208,7 +219,7 @@ When formation stalls (any safety check fails or progress timeout is exceeded), 
 |----------|--------|---------|
 | ReplicatedVolume | Generation, DeletionTimestamp, ReplicatedStorageClass label, Finalizers changes | For() (primary) |
 | ReplicatedStorageClass | ConfigurationGeneration changes | mapRSCToRVs (index lookup) |
-| ReplicatedVolumeAttachment | Attached condition status changes | mapRVAToRV |
+| ReplicatedVolumeAttachment | DeletionTimestamp, Finalizers, Attached condition status changes | mapRVAToRV |
 | ReplicatedVolumeReplica | Conditions (Scheduled, DRBDConfigured, SatisfyEligibleNodes), DatameshPendingTransition, DatameshRevision, Addresses, BackingVolume, Peers, DeletionTimestamp, Finalizers changes | mapRVRToRV |
 | DRBDResourceOperation | Create/Delete of *-formation ops, Phase changes, Generation changes | Owns() |
 
