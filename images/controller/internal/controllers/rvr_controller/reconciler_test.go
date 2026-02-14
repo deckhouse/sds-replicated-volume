@@ -6728,6 +6728,157 @@ var _ = Describe("Reconciler", func() {
 			Expect(patchCalled).To(BeTrue(), "patch should be called to remove finalizer")
 			Expect(deleteCalled).To(BeTrue(), "delete should be called after finalizer removal")
 		})
+
+		It("resets DatameshRevision to 0 when replica removed from datamesh", func() {
+			// Scenario: Access replica was a datamesh member (DatameshRevision=3),
+			// now removed from datamesh.members by RV controller. RVR has deletionTimestamp
+			// but also rv-controller finalizer, so rvrShouldNotExist returns false.
+			// The replica should reset DatameshRevision to 0 and set DRBDConfigured=True.
+
+			// Register corev1 for Pod objects.
+			Expect(corev1.AddToScheme(scheme)).To(Succeed())
+
+			now := metav1.Now()
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 4,
+					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+						StoragePoolName: "rsp-1",
+					},
+					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+						Size:               resource.MustParse("1Gi"),
+						SystemNetworkNames: []string{"Internal"},
+						// No members — replica removed from datamesh.
+					},
+				},
+			}
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Spec: v1alpha1.ReplicatedStoragePoolSpec{
+					Type: v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+				},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+						{
+							NodeName: "node-1",
+							LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+								{Name: "vg1", ThinPoolName: "thindata"},
+							},
+						},
+					},
+				},
+			}
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rvr-1",
+					UID:               "uid-1",
+					DeletionTimestamp: &now,
+					// Two finalizers: rvrShouldNotExist returns false.
+					Finalizers: []string{
+						v1alpha1.RVRControllerFinalizer,
+						"sds-replicated-volume.deckhouse.io/rv-controller",
+					},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedVolumeLabelKey: "rv-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeAccess,
+					NodeName:             "node-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					DatameshRevision: 3, // Was a member at revision 3.
+				},
+			}
+			drbdr := &v1alpha1.DRBDResource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rvr-1",
+					Finalizers: []string{v1alpha1.RVRControllerFinalizer},
+				},
+				Spec: v1alpha1.DRBDResourceSpec{
+					NodeName:       "node-1",
+					NodeID:         1,
+					Type:           v1alpha1.DRBDResourceTypeDiskless,
+					SystemNetworks: []string{"Internal"},
+					State:          v1alpha1.DRBDResourceStateUp,
+				},
+				Status: v1alpha1.DRBDResourceStatus{
+					Addresses: []v1alpha1.DRBDResourceAddressStatus{
+						{SystemNetworkName: "Internal"},
+					},
+					ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+						Role: v1alpha1.DRBDRoleSecondary,
+						Type: v1alpha1.DRBDResourceTypeDiskless,
+					},
+					Conditions: []metav1.Condition{
+						{
+							Type:               v1alpha1.DRBDResourceCondConfiguredType,
+							Status:             metav1.ConditionTrue,
+							Reason:             v1alpha1.DRBDResourceCondConfiguredReasonConfigured,
+							ObservedGeneration: 0, // Matches drbdr.Generation (0 for new objects in fake client).
+						},
+					},
+				},
+			}
+			// Agent pod ready on node-1.
+			agentPod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-1",
+					Namespace: "d8-sds-replicated-volume",
+					Labels:    map[string]string{"app": "agent"},
+				},
+				Spec: corev1.PodSpec{
+					NodeName: "node-1",
+				},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+					},
+				},
+			}
+
+			withPodIndex := func(b *fake.ClientBuilder) *fake.ClientBuilder {
+				return b.WithIndex(&corev1.Pod{}, indexes.IndexFieldPodByNodeName, func(obj client.Object) []string {
+					pod := obj.(*corev1.Pod)
+					if pod.Spec.NodeName == "" {
+						return nil
+					}
+					return []string{pod.Spec.NodeName}
+				})
+			}
+
+			cl := withPodIndex(testhelpers.WithLLVByRVROwnerIndex(
+				fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(rv, rsp, rvr, drbdr, agentPod).
+					WithStatusSubresource(rvr, rv, rsp, drbdr),
+			)).Build()
+			rec := NewReconciler(cl, scheme, logr.Discard(), "d8-sds-replicated-volume")
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify DatameshRevision was reset to 0.
+			var updated v1alpha1.ReplicatedVolumeReplica
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, &updated)).To(Succeed())
+			Expect(updated.Status.DatameshRevision).To(Equal(int64(0)),
+				"DatameshRevision should be reset to 0 when replica is removed from datamesh")
+
+			// Verify DRBDConfigured=True Configured.
+			cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured))
+			Expect(cond.Message).To(ContainSubstring("removed from datamesh"))
+
+			// Verify Ready=False/Deleting (not PendingDatameshJoin).
+			readyCond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonDeleting))
+		})
 	})
 })
 
@@ -9355,6 +9506,29 @@ var _ = Describe("ensureConditionReady", func() {
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonPendingDatameshJoin))
 		Expect(cond.Message).To(ContainSubstring("Waiting to join datamesh"))
+	})
+
+	It("sets Ready=False Deleting when non-member and DeletionTimestamp set", func() {
+		now := metav1.Now()
+		rvr.DeletionTimestamp = &now
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Quorum: boolPtr(false),
+			},
+		}
+		rvr.Status.QuorumSummary = &v1alpha1.ReplicatedVolumeReplicaStatusQuorumSummary{
+			Quorum:                  intPtr(32),
+			QuorumMinimumRedundancy: intPtr(32),
+		}
+
+		outcome := ensureConditionReady(ctx, rvr, validRV, drbdr, nil, true, false)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonDeleting))
+		Expect(cond.Message).To(ContainSubstring("being deleted"))
 	})
 
 	It("sets Ready=True QuorumViaPeers when diskless member has quorum", func() {

@@ -5304,3 +5304,65 @@ var _ = Describe("reconcileRVRFinalizers", func() {
 		Expect(apierrors.IsNotFound(err)).To(BeTrue())
 	})
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Tests: datamesh access replicas
+//
+
+var _ = Describe("removeDatameshMembers", func() {
+	It("removes members in the set and returns true", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-1"},
+						{Name: "rv-1-1", Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-2"},
+					},
+				},
+			},
+		}
+		Expect(removeDatameshMembers(rv, idset.Of(1))).To(BeTrue())
+		Expect(rv.Status.Datamesh.Members).To(HaveLen(1))
+		Expect(rv.Status.Datamesh.Members[0].Name).To(Equal("rv-1-0"))
+	})
+
+	It("returns false when no member matches", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful},
+					},
+				},
+			},
+		}
+		Expect(removeDatameshMembers(rv, idset.Of(5))).To(BeFalse())
+		Expect(rv.Status.Datamesh.Members).To(HaveLen(1))
+	})
+})
+
+var _ = Describe("applyTransitionMessage", func() {
+	It("sets message and returns true when different", func() {
+		t := &v1alpha1.ReplicatedVolumeDatameshTransition{Message: "old"}
+		Expect(applyTransitionMessage(t, "new")).To(BeTrue())
+		Expect(t.Message).To(Equal("new"))
+	})
+
+	It("returns false when message is the same", func() {
+		t := &v1alpha1.ReplicatedVolumeDatameshTransition{Message: "same"}
+		Expect(applyTransitionMessage(t, "same")).To(BeFalse())
+	})
+})
+
+var _ = Describe("applyPendingReplicaTransitionMessage", func() {
+	It("sets message and returns true when different", func() {
+		p := &v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{Name: "rv-1-1", Message: "old"}
+		Expect(applyPendingReplicaTransitionMessage(p, "new")).To(BeTrue())
+		Expect(p.Message).To(Equal("new"))
+	})
+
+	It("returns false when message is the same", func() {
+		p := &v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{Name: "rv-1-0", Message: "same"}
+		Expect(applyPendingReplicaTransitionMessage(p, "same")).To(BeFalse())
+	})
+})

@@ -156,14 +156,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Perform main processing.
 	if rv.Status.Configuration != nil {
+		rsp, err := r.getRSP(rf.Ctx(), rv.Status.Configuration.StoragePoolName, rvrs)
+		if err != nil {
+			return rf.Failf(err, "getting RSP").ToCtrl()
+		}
 		if forming, formationPhase := isFormationInProgress(rv); forming {
-			rsp, err := r.getRSP(rf.Ctx(), rv.Status.Configuration.StoragePoolName, rvrs)
-			if err != nil {
-				return rf.Failf(err, "getting RSP").ToCtrl()
-			}
 			outcome = outcome.Merge(r.reconcileFormation(rf.Ctx(), rv, &rvrs, rsp, rsc, formationPhase))
 		} else {
-			outcome = outcome.Merge(r.reconcileNormalOperation(rf.Ctx(), rv, &rvrs))
+			outcome = outcome.Merge(r.reconcileNormalOperation(rf.Ctx(), rv, &rvrs, rsp))
 		}
 		if outcome.ShouldReturn() {
 			return outcome.ToCtrl()
@@ -986,15 +986,131 @@ func (r *Reconciler) reconcileNormalOperation(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
+	rsp *rspView,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "normal-operation")
 	defer rf.OnEnd(&outcome)
 
-	// TODO: implement normal operation logic
-	_ = rv
-	_ = rvrs
+	eo := ensureDatameshAccessReplicas(rf.Ctx(), rv, *rvrs, rsp)
+	if eo.Error() != nil {
+		return rf.Fail(eo.Error())
+	}
 
-	return rf.Continue()
+	return rf.Continue().WithChangeFrom(eo)
+}
+
+// computeDatameshTransitionProgressMessage builds a detailed transition message showing
+// confirmation progress and errors from waiting replicas.
+//
+// skipError (optional) is called for each waiting replica that has Configured=False.
+// If it returns true, the replica is not reported as an error.
+func computeDatameshTransitionProgressMessage(
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	revision int64,
+	mustConfirm, confirmed idset.IDSet,
+	skipError func(id uint8, cond *metav1.Condition) bool,
+) string {
+	waiting := mustConfirm.Difference(confirmed)
+
+	var msg strings.Builder
+	fmt.Fprintf(&msg, "%d/%d replicas confirmed revision %d",
+		confirmed.Len(), mustConfirm.Len(), revision)
+
+	if waiting.IsEmpty() {
+		return msg.String()
+	}
+
+	fmt.Fprintf(&msg, ". Waiting: [%s]", waiting)
+
+	var found idset.IDSet
+	hasErrors := false
+	for _, rvr := range rvrs {
+		id := rvr.ID()
+		if !waiting.Contains(id) {
+			continue
+		}
+		found.Add(id)
+
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		if cond != nil && cond.Status == metav1.ConditionFalse && cond.ObservedGeneration == rvr.Generation {
+			if skipError != nil && skipError(id, cond) {
+				continue
+			}
+
+			if !hasErrors {
+				msg.WriteString(". Errors: [")
+				hasErrors = true
+			} else {
+				msg.WriteString("; ")
+			}
+			fmt.Fprintf(&msg, "#%d: Configured=False (%s)", id, cond.Reason)
+		}
+	}
+
+	for id := range waiting.Difference(found).All() {
+		if !hasErrors {
+			msg.WriteString(". Errors: [")
+			hasErrors = true
+		} else {
+			msg.WriteString("; ")
+		}
+		fmt.Fprintf(&msg, "#%d: replica not found", id)
+	}
+
+	if hasErrors {
+		msg.WriteByte(']')
+	}
+
+	return msg.String()
+}
+
+// findRVRByID returns the RVR with the given ID, or nil if not found.
+// rvrs must be sorted by ID (as returned by getRVRsSorted).
+func findRVRByID(rvrs []*v1alpha1.ReplicatedVolumeReplica, id uint8) *v1alpha1.ReplicatedVolumeReplica {
+	idx, found := slices.BinarySearchFunc(rvrs, id, func(rvr *v1alpha1.ReplicatedVolumeReplica, target uint8) int {
+		return cmp.Compare(rvr.ID(), target)
+	})
+	if !found {
+		return nil
+	}
+	return rvrs[idx]
+}
+
+// removeDatameshMembers removes members whose ID is in the given set.
+// Returns true if any member was removed.
+func removeDatameshMembers(rv *v1alpha1.ReplicatedVolume, ids idset.IDSet) bool {
+	n := 0
+	for i := range rv.Status.Datamesh.Members {
+		if !ids.Contains(rv.Status.Datamesh.Members[i].ID()) {
+			rv.Status.Datamesh.Members[n] = rv.Status.Datamesh.Members[i]
+			n++
+		}
+	}
+	if n == len(rv.Status.Datamesh.Members) {
+		return false
+	}
+	rv.Status.Datamesh.Members = rv.Status.Datamesh.Members[:n]
+	return true
+}
+
+// applyTransitionMessage sets the Message field on a datamesh transition.
+// Returns true if the message was changed.
+func applyTransitionMessage(t *v1alpha1.ReplicatedVolumeDatameshTransition, msg string) bool {
+	if t.Message == msg {
+		return false
+	}
+	t.Message = msg
+	return true
+}
+
+// applyPendingReplicaTransitionMessage sets the Message field on the given pending replica
+// transition. Returns true if the message was changed.
+func applyPendingReplicaTransitionMessage(p *v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition, msg string) bool {
+	if p == nil || p.Message == msg {
+		return false
+	}
+	p.Message = msg
+	return true
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

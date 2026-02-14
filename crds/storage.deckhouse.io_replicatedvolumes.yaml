@@ -324,12 +324,11 @@ spec:
                           1)) <= 31
                       - message: lvmVolumeGroupName can only be set for Diskful type
                           or when typeTransition is ToDiskful
-                        rule: size(self.lvmVolumeGroupName) == 0 || self.type == 'Diskful'
-                          || (has(self.typeTransition) && self.typeTransition == 'ToDiskful')
+                        rule: '!has(self.lvmVolumeGroupName) || self.type == ''Diskful''
+                          || (has(self.typeTransition) && self.typeTransition == ''ToDiskful'')'
                       - message: lvmVolumeGroupThinPoolName requires lvmVolumeGroupName
                           to be set
-                        rule: size(self.lvmVolumeGroupThinPoolName) == 0 || size(self.lvmVolumeGroupName)
-                          > 0
+                        rule: '!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)'
                     maxItems: 24
                     type: array
                     x-kubernetes-list-type: atomic

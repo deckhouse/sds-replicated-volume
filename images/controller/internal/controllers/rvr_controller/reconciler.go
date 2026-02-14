@@ -1018,10 +1018,17 @@ func ensureConditionReady(
 	}
 	switch {
 	case datameshMember == nil:
-		// Not a datamesh member yet — cannot participate in quorum.
-		changed = applyReadyCondFalse(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondReadyReasonPendingDatameshJoin,
-			"Waiting to join datamesh") || changed
+		if rvr.DeletionTimestamp != nil {
+			// Replica is being deleted, not joining.
+			changed = applyReadyCondFalse(rvr,
+				v1alpha1.ReplicatedVolumeReplicaCondReadyReasonDeleting,
+				"Replica is being deleted") || changed
+		} else {
+			// Not a datamesh member yet — cannot participate in quorum.
+			changed = applyReadyCondFalse(rvr,
+				v1alpha1.ReplicatedVolumeReplicaCondReadyReasonPendingDatameshJoin,
+				"Waiting to join datamesh") || changed
+		}
 
 	case rvr.Status.Type == v1alpha1.DRBDResourceTypeDiskless:
 		// Diskless member: quorum provided by connected peers.
@@ -2394,11 +2401,32 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		}
 	}
 
-	// 13. If not a datamesh member — DRBD is preconfigured, waiting for membership.
+	// 13. If not a datamesh member.
 	if member == nil {
-		changed = applyDRBDConfiguredCondFalse(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingDatameshJoin,
-			"DRBD preconfigured, waiting for datamesh membership") || changed
+		// If previously a datamesh member (DatameshRevision > 0) but now removed from the
+		// datamesh (e.g., during replica deletion), reset DatameshRevision to signal that
+		// the replica is no longer a datamesh member. The RV controller uses this to detect
+		// that the replica has acknowledged its removal from the datamesh.
+		if rvr.Status.DatameshRevision != 0 {
+			rvr.Status.DatameshRevision = 0
+			changed = true
+			changed = applyDRBDConfiguredCondTrue(rvr,
+				v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured,
+				"DRBD configured (removed from datamesh)") || changed
+			return drbdr, rf.Continue().ReportChangedIf(changed)
+		}
+
+		if rvr.DeletionTimestamp != nil {
+			// Replica is being deleted, DRBD is configured (standalone, no peers).
+			changed = applyDRBDConfiguredCondTrue(rvr,
+				v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured,
+				"DRBD configured (replica is being deleted)") || changed
+		} else {
+			// Never was a datamesh member — DRBD is preconfigured, waiting for membership.
+			changed = applyDRBDConfiguredCondFalse(rvr,
+				v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingDatameshJoin,
+				"DRBD preconfigured, waiting for datamesh membership") || changed
+		}
 		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
