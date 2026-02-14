@@ -128,6 +128,7 @@ func (rvr *ReplicatedVolumeReplica) ChooseNewName(otherRVRs []*ReplicatedVolumeR
 }
 
 // +kubebuilder:object:generate=true
+// +kubebuilder:validation:XValidation:rule="self.type != 'Access' || has(self.nodeName)",message="nodeName is required for Access type"
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || has(self.nodeName)",message="lvmVolumeGroupName requires nodeName to be set"
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || self.type == 'Diskful'",message="lvmVolumeGroupName can only be set for Diskful type"
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be set"
