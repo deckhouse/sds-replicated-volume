@@ -22,17 +22,32 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='IOReady')].status
       name: IOReady
       type: string
+    - jsonPath: .status.conditions[?(@.type=='Quorum')].status
+      name: Quorum
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Scheduled')].status
+      name: Scheduled
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Configured')].status
+      name: Configured
+      type: string
     - jsonPath: .spec.size
       name: Size
       type: string
-    - jsonPath: .status.actualSize
-      name: ActualSize
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - jsonPath: .status.conditions[?(@.type=='ConfigurationReady')].status
+      name: ConfigurationReady
+      priority: 1
       type: string
-    - jsonPath: .status.diskfulReplicaCount
-      name: DiskfulReplicas
+    - jsonPath: .status.conditions[?(@.type=='SatisfyEligibleNodes')].status
+      name: SatisfyEligibleNodes
+      priority: 1
       type: string
-    - jsonPath: .status.phase
-      name: Phase
+    - jsonPath: .spec.replicatedStorageClassName
+      name: StorageClass
+      priority: 1
       type: string
     name: v1alpha1
     schema:
@@ -149,16 +164,31 @@ spec:
                 properties:
                   replication:
                     description: Replication is the resolved replication mode.
+                    enum:
+                    - None
+                    - Availability
+                    - Consistency
+                    - ConsistencyAndAvailability
                     type: string
                   storagePoolName:
                     description: StoragePoolName is the name of the ReplicatedStoragePool
                       used by this RSC.
+                    minLength: 1
                     type: string
                   topology:
                     description: Topology is the resolved topology setting.
+                    enum:
+                    - TransZonal
+                    - Zonal
+                    - Ignored
                     type: string
                   volumeAccess:
                     description: VolumeAccess is the resolved volume access mode.
+                    enum:
+                    - Local
+                    - EventuallyLocal
+                    - PreferablyLocal
+                    - Any
                     type: string
                 required:
                 - replication
@@ -472,6 +502,15 @@ spec:
                       description: Message is an optional human-readable message about
                         the transition.
                       type: string
+                    replicaName:
+                      description: |-
+                        ReplicaName is the name of the replica this transition applies to.
+                        Required for Attach, Detach, AddAccessReplica, RemoveAccessReplica transitions.
+                        Must not be set for Formation, EnableMultiattach, DisableMultiattach.
+                      maxLength: 123
+                      minLength: 1
+                      pattern: ^.+-([0-9]|[12][0-9]|3[01])$
+                      type: string
                     startedAt:
                       description: StartedAt is the timestamp when this transition
                         started.
@@ -479,6 +518,14 @@ spec:
                       type: string
                     type:
                       description: Type is the transition type.
+                      enum:
+                      - Formation
+                      - AddAccessReplica
+                      - Attach
+                      - Detach
+                      - DisableMultiattach
+                      - EnableMultiattach
+                      - RemoveAccessReplica
                       type: string
                   required:
                   - startedAt
@@ -493,6 +540,14 @@ spec:
                       Formation
                     rule: self.type != 'Formation' || !has(self.datameshRevision)
                       || self.datameshRevision == 0
+                  - message: replicaName is required for Attach, Detach, AddAccessReplica,
+                      RemoveAccessReplica transitions
+                    rule: self.type == 'Formation' || self.type == 'EnableMultiattach'
+                      || self.type == 'DisableMultiattach' || has(self.replicaName)
+                  - message: replicaName must not be set for Formation, EnableMultiattach,
+                      DisableMultiattach transitions
+                    rule: '!has(self.replicaName) || !(self.type == ''Formation''
+                      || self.type == ''EnableMultiattach'' || self.type == ''DisableMultiattach'')'
                 type: array
                 x-kubernetes-list-type: atomic
               desiredAttachTo:

@@ -32,8 +32,9 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/controlleroptions"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/nodeidset"
 )
 
 const RVRControllerName = "rvr-controller"
@@ -64,7 +65,10 @@ func BuildController(mgr manager.Manager, agentPodNamespace string) error {
 			newRSPEventHandler(cl),
 			builder.WithPredicates(rspPredicates()...),
 		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+			RateLimiter:             controlleroptions.DefaultRateLimiter(),
+		}).
 		Complete(rec)
 }
 
@@ -120,12 +124,12 @@ func (h *rvEventHandler) Update(ctx context.Context, e event.UpdateEvent, q work
 	}
 
 	// Collect affected replicas from multiple independent changes.
-	var replicas nodeidset.NodeIDSet
+	var replicas idset.IDSet
 
 	// DatameshRevision changed (non-initial): enqueue members from old OR new datamesh.
 	if oldRV.Status.DatameshRevision != newRV.Status.DatameshRevision {
-		replicas = nodeidset.FromAll(oldRV.Status.Datamesh.Members).
-			Union(nodeidset.FromAll(newRV.Status.Datamesh.Members))
+		replicas = idset.FromAll(oldRV.Status.Datamesh.Members).
+			Union(idset.FromAll(newRV.Status.Datamesh.Members))
 	}
 
 	// DatameshPendingReplicaTransitions messages changed: enqueue affected replicas.
@@ -135,20 +139,20 @@ func (h *rvEventHandler) Update(ctx context.Context, e event.UpdateEvent, q work
 	for i < len(oldTx) || j < len(newTx) {
 		switch {
 		case i >= len(oldTx):
-			replicas.Add(newTx[j].NodeID())
+			replicas.Add(newTx[j].ID())
 			j++
 		case j >= len(newTx):
-			replicas.Add(oldTx[i].NodeID())
+			replicas.Add(oldTx[i].ID())
 			i++
 		case oldTx[i].Name < newTx[j].Name:
-			replicas.Add(oldTx[i].NodeID())
+			replicas.Add(oldTx[i].ID())
 			i++
 		case oldTx[i].Name > newTx[j].Name:
-			replicas.Add(newTx[j].NodeID())
+			replicas.Add(newTx[j].ID())
 			j++
 		default:
 			if oldTx[i].Message != newTx[j].Message {
-				replicas.Add(oldTx[i].NodeID())
+				replicas.Add(oldTx[i].ID())
 			}
 			i++
 			j++
@@ -156,7 +160,7 @@ func (h *rvEventHandler) Update(ctx context.Context, e event.UpdateEvent, q work
 	}
 
 	if !replicas.IsEmpty() {
-		h.enqueueRVRsByNodeIDs(newRV.Name, replicas, q)
+		h.enqueueRVRsByIDs(newRV.Name, replicas, q)
 	}
 }
 
@@ -175,9 +179,9 @@ func (h *rvEventHandler) enqueueAllRVRs(ctx context.Context, rvName string, q wo
 	}
 }
 
-// enqueueRVRsByNodeIDs enqueues RVRs by constructing names from RV name and node IDs.
-func (h *rvEventHandler) enqueueRVRsByNodeIDs(rvName string, nodeIDs nodeidset.NodeIDSet, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-	for id := range nodeIDs.All() {
+// enqueueRVRsByIDs enqueues RVRs by constructing names from RV name and IDs.
+func (h *rvEventHandler) enqueueRVRsByIDs(rvName string, ids idset.IDSet, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	for id := range ids.All() {
 		q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: v1alpha1.FormatReplicatedVolumeReplicaName(rvName, id)}})
 	}
 }

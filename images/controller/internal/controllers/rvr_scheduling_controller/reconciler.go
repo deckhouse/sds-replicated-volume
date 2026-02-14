@@ -19,7 +19,6 @@ package rvrschedulingcontroller
 import (
 	"cmp"
 	"context"
-	"fmt"
 	"slices"
 	"time"
 
@@ -32,8 +31,8 @@ import (
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/nodeidset"
 	rvrllvname "github.com/deckhouse/sds-replicated-volume/images/controller/internal/rvr_llv_name"
 	schext "github.com/deckhouse/sds-replicated-volume/images/controller/internal/scheduler_extender"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
@@ -78,22 +77,24 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Fail(err).ToCtrl()
 	}
 
+	all := idset.FromAll(rvrs)
+
 	// Guard 1: RV not found — nothing to schedule.
 	if rv == nil {
-		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, nodeidset.All,
+		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, all,
 			metav1.ConditionUnknown,
-			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonPendingConfiguration,
-			"ReplicatedVolume not found; waiting for it to be created").
-			Enrichf("setting PendingConfiguration: RV not found").ToCtrl()
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume,
+			"ReplicatedVolume not found; waiting for it be present").
+			Enrichf("setting WaitingForReplicatedVolume: RV not found").ToCtrl()
 	}
 
 	// Guard 2: RV has no configuration yet — RV controller hasn't reconciled it.
 	if rv.Status.Configuration == nil {
-		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, nodeidset.All,
+		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, all,
 			metav1.ConditionUnknown,
-			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonPendingConfiguration,
-			"ReplicatedVolume has no configuration yet; waiting for RV controller to reconcile").
-			Enrichf("setting PendingConfiguration: RV has no configuration").ToCtrl()
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume,
+			"ReplicatedVolume has no configuration yet; waiting for it to appear").
+			Enrichf("setting WaitingForReplicatedVolume: RV has no configuration").ToCtrl()
 	}
 
 	rsp, err := r.getRSP(rf.Ctx(), rv.Status.Configuration.StoragePoolName)
@@ -103,11 +104,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Guard 3: RSP not found — storage pool doesn't exist yet.
 	if rsp == nil {
-		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, nodeidset.All,
+		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, all,
 			metav1.ConditionUnknown,
-			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonPendingConfiguration,
-			fmt.Sprintf("ReplicatedStoragePool %q not found; waiting for it to be created", rv.Status.Configuration.StoragePoolName)).
-			Enrichf("setting PendingConfiguration: RSP %q not found", rv.Status.Configuration.StoragePoolName).ToCtrl()
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume,
+			"ReplicatedStoragePool not found; waiting for it to be present").
+			Enrichf("setting WaitingForReplicatedVolume: RSP %q not found", rv.Status.Configuration.StoragePoolName).ToCtrl()
 	}
 
 	// Build the scheduling context: eligible nodes, topology, zone layout,
@@ -121,24 +122,29 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// condition from them if it was set previously (e.g., the replica
 	// type was changed from Diskful/TieBreaker to Access), and exclude
 	// them from all subsequent scheduling logic.
-	outcome := r.reconcileRVRsConditionAbsent(rf.Ctx(), rvrs, sctx.Access)
-	if outcome.ShouldReturn() {
-		return outcome.ToCtrl()
+	var outcome flow.ReconcileOutcome
+	if sctx.Access.Len() > 0 {
+		outcome := r.reconcileRVRsConditionAbsent(rf.Ctx(), rvrs, sctx.Access)
+		if outcome.ShouldReturn() {
+			return outcome.ToCtrl()
+		}
 	}
 
 	// Mark replicas that already have a node assigned and passed eligible-node
 	// validation as successfully scheduled.
-	outcome = outcome.Merge(r.reconcileRVRsCondition(rf.Ctx(), rvrs, sctx.Scheduled,
-		metav1.ConditionTrue,
-		v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled,
-		"Replica scheduled successfully"))
-	if outcome.ShouldReturn() {
-		return outcome.ToCtrl()
+	if sctx.Scheduled.Len() > 0 {
+		outcome = outcome.Merge(r.reconcileRVRsCondition(rf.Ctx(), rvrs, sctx.Scheduled,
+			metav1.ConditionTrue,
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled,
+			"Replica scheduled successfully"))
+		if outcome.ShouldReturn() {
+			return outcome.ToCtrl()
+		}
 	}
 
 	// All relevant replicas are already scheduled — nothing more to do.
 	// Guard: All != 0 protects against RVRs with non-standard names whose
-	// NodeIDs fall outside the 0-31 range and silently map to 0 in NodeIDSet.
+	// IDs fall outside the 0-31 range and silently map to 0 in IDSet.
 	scheduledNonAccess := sctx.Scheduled.Difference(sctx.Access)
 	allNonAccess := sctx.All.Difference(sctx.Access)
 	if scheduledNonAccess == allNonAccess {
@@ -152,7 +158,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Phase 2: Schedule unscheduled Diskful RVRs (per-RVR pipeline).
 	unscheduledDiskful := unscheduled.Intersect(sctx.Diskful)
 	for _, rvr := range rvrs {
-		if !unscheduledDiskful.Contains(rvr.NodeID()) {
+		if !unscheduledDiskful.Contains(rvr.ID()) {
 			continue
 		}
 		outcome = outcome.Merge(r.reconcileOneRVRScheduling(rf.Ctx(), rvr, sctx).
@@ -165,7 +171,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Phase 3: Schedule unscheduled TieBreaker RVRs (per-RVR pipeline, no scoring).
 	unscheduledTieBreaker := unscheduled.Intersect(sctx.TieBreaker)
 	for _, rvr := range rvrs {
-		if !unscheduledTieBreaker.Contains(rvr.NodeID()) {
+		if !unscheduledTieBreaker.Contains(rvr.ID()) {
 			continue
 		}
 		outcome = outcome.Merge(r.reconcileOneRVRScheduling(rf.Ctx(), rvr, sctx).
@@ -180,20 +186,20 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 //
 
 // reconcileRVRsConditionAbsent removes the Scheduled condition from every RVR
-// whose NodeID is in rvrIDs. RVRs that don't have the condition are skipped.
+// whose ID is in rvrIDs. RVRs that don't have the condition are skipped.
 // NotFound errors on individual patches are silently ignored.
 //
 // Reconcile pattern: In-place reconciliation
 func (r *Reconciler) reconcileRVRsConditionAbsent(
 	ctx context.Context,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-	rvrIDs nodeidset.NodeIDSet,
+	rvrIDs idset.IDSet,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "rvrs-condition-absent", "rvrIDs", rvrIDs.String())
 	defer rf.OnEnd(&outcome)
 
 	for _, rvr := range rvrs {
-		if !rvrIDs.Contains(rvr.NodeID()) {
+		if !rvrIDs.Contains(rvr.ID()) {
 			continue
 		}
 		if !obju.HasStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType) {
@@ -217,8 +223,8 @@ func (r *Reconciler) reconcileRVRsConditionAbsent(
 //
 
 // reconcileRVRsCondition sets the Scheduled condition (with the given status,
-// reason and message) on every RVR whose NodeID is in rvrIDs.
-// Pass nodeidset.All to affect all RVRs unconditionally.
+// reason and message) on every RVR whose ID is in rvrIDs.
+// Pass idset.All to affect all RVRs unconditionally.
 // NotFound errors on individual patches are silently ignored (the RVR may have
 // been deleted concurrently).
 //
@@ -226,7 +232,7 @@ func (r *Reconciler) reconcileRVRsConditionAbsent(
 func (r *Reconciler) reconcileRVRsCondition(
 	ctx context.Context,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-	rvrIDs nodeidset.NodeIDSet,
+	rvrIDs idset.IDSet,
 	status metav1.ConditionStatus,
 	reason,
 	message string,
@@ -235,7 +241,7 @@ func (r *Reconciler) reconcileRVRsCondition(
 	defer rf.OnEnd(&outcome)
 
 	for _, rvr := range rvrs {
-		if !rvrIDs.Contains(rvr.NodeID()) {
+		if !rvrIDs.Contains(rvr.ID()) {
 			continue
 		}
 		outcome = outcome.Merge(r.reconcileRVRCondition(rf.Ctx(), rvr, status, reason, message).
@@ -336,7 +342,7 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	// migration), prefer the zone with the most Diskful to minimize
 	// cross-zone divergence.
 	if sctx.Topology == v1alpha1.TopologyZonal {
-		zones := computePreferredZones(sctx.ReplicasByZone, func(a, b nodeidset.NodeIDSet) int {
+		zones := computePreferredZones(sctx.ReplicasByZone, func(a, b idset.IDSet) int {
 			return cmp.Compare(
 				a.Intersect(sctx.Diskful).Len(),
 				b.Intersect(sctx.Diskful).Len(),
@@ -360,14 +366,14 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 
 	// TransZonal topology: replicas should be evenly spread across zones.
 	if sctx.Topology == v1alpha1.TopologyTransZonal {
-		var compare func(a, b nodeidset.NodeIDSet) int
+		var compare func(a, b idset.IDSet) int
 		if isDiskful {
 			// Diskful replicas participate in the quorum, so they must be spread
 			// evenly across zones for availability. The rv_controller is
 			// responsible for creating the right number of replicas; this
 			// scheduler only decides where to place them.
 			// Preferred zone: fewest Diskful replicas.
-			compare = func(a, b nodeidset.NodeIDSet) int {
+			compare = func(a, b idset.IDSet) int {
 				return -1 * cmp.Compare(
 					a.Intersect(sctx.Diskful).Len(),
 					b.Intersect(sctx.Diskful).Len(),
@@ -383,7 +389,7 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 			// equal, they fill zones that have more Diskful relative to TieBreakers,
 			// keeping the tie-breaker quorum balanced independently.
 			allReplicas := sctx.Diskful.Union(sctx.TieBreaker)
-			compare = func(a, b nodeidset.NodeIDSet) int {
+			compare = func(a, b idset.IDSet) int {
 				totalA := a.Intersect(allReplicas).Len()
 				totalB := b.Intersect(allReplicas).Len()
 				if c := cmp.Compare(totalA, totalB); c != 0 {
@@ -592,7 +598,7 @@ type schedulingContext struct {
 
 	// Topology and zone layout.
 	//
-	// ReplicasByZone maps zone name → NodeIDSet of replicas in that zone.
+	// ReplicasByZone maps zone name → IDSet of replicas in that zone.
 	// Keys are derived from EligibleNodes (unique ZoneName values); values
 	// may be empty (no replicas yet).
 	//
@@ -604,19 +610,19 @@ type schedulingContext struct {
 	// a ZoneName set (mixed). ReplicasByZone is built from whatever
 	// ZoneName each node carries, so "" is a valid key ("zone unknown").
 	Topology       v1alpha1.ReplicatedStorageClassTopology
-	ReplicasByZone map[string]nodeidset.NodeIDSet
+	ReplicasByZone map[string]idset.IDSet
 
 	// Replication mode and volume access from the resolved RSC configuration.
 	Replication  v1alpha1.ReplicatedStorageClassReplication
 	VolumeAccess v1alpha1.ReplicatedStorageClassVolumeAccess
 
 	// Replica type sets (computed in one pass over rvrs).
-	All        nodeidset.NodeIDSet
-	Access     nodeidset.NodeIDSet
-	Diskful    nodeidset.NodeIDSet
-	TieBreaker nodeidset.NodeIDSet
-	Deleting   nodeidset.NodeIDSet
-	Scheduled  nodeidset.NodeIDSet
+	All        idset.IDSet
+	Access     idset.IDSet
+	Diskful    idset.IDSet
+	TieBreaker idset.IDSet
+	Deleting   idset.IDSet
+	Scheduled  idset.IDSet
 }
 
 // computeSchedulingContext builds a schedulingContext from RV, RSP and RVRs.
@@ -650,7 +656,7 @@ func computeSchedulingContext(
 
 	// Single pass: classify each RVR by type, scheduling state, and deletion.
 	for _, rvr := range rvrs {
-		id := rvr.NodeID()
+		id := rvr.ID()
 		sctx.All.Add(id)
 
 		switch rvr.Spec.Type {
@@ -692,7 +698,7 @@ func computeSchedulingContext(
 // Update records a successful placement: marks the node as occupied and adds
 // the RVR to its zone in ReplicasByZone.
 func (sctx *schedulingContext) Update(rvr *v1alpha1.ReplicatedVolumeReplica, entry *CandidateEntry) {
-	id := rvr.NodeID()
+	id := rvr.ID()
 	sctx.OccupiedNodes[entry.Node.NodeName] = struct{}{}
 	sctx.Scheduled.Add(id)
 	s := sctx.ReplicasByZone[entry.Node.ZoneName]
@@ -700,7 +706,7 @@ func (sctx *schedulingContext) Update(rvr *v1alpha1.ReplicatedVolumeReplica, ent
 	sctx.ReplicasByZone[entry.Node.ZoneName] = s
 }
 
-// computeReplicasByZone builds a map of zone → NodeIDSet of all replicas in
+// computeReplicasByZone builds a map of zone → IDSet of all replicas in
 // that zone. Keys are derived from eligibleNodes (not from RSP.Spec.Zones),
 // so it works correctly even when RSP has no explicit zones and nodes carry
 // mixed or empty ZoneNames. Uses binary search on the sorted eligibleNodes
@@ -708,9 +714,9 @@ func (sctx *schedulingContext) Update(rvr *v1alpha1.ReplicatedVolumeReplica, ent
 func computeReplicasByZone(
 	eligibleNodes []v1alpha1.ReplicatedStoragePoolEligibleNode,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-) map[string]nodeidset.NodeIDSet {
+) map[string]idset.IDSet {
 	// Collect unique zones from eligibleNodes.
-	replicasByZone := make(map[string]nodeidset.NodeIDSet)
+	replicasByZone := make(map[string]idset.IDSet)
 	for i := range eligibleNodes {
 		if _, ok := replicasByZone[eligibleNodes[i].ZoneName]; !ok {
 			replicasByZone[eligibleNodes[i].ZoneName] = 0
@@ -734,7 +740,7 @@ func computeReplicasByZone(
 		zone := eligibleNodes[idx].ZoneName
 
 		if s, ok := replicasByZone[zone]; ok {
-			s.Add(rvr.NodeID())
+			s.Add(rvr.ID())
 			replicasByZone[zone] = s
 		}
 	}
@@ -747,15 +753,15 @@ func computeReplicasByZone(
 // The function finds the maximum: the zone(s) for which compare returns the
 // highest value relative to others.
 func computePreferredZones(
-	replicasByZone map[string]nodeidset.NodeIDSet,
-	compare func(repIDsA, repIDsB nodeidset.NodeIDSet) int,
+	replicasByZone map[string]idset.IDSet,
+	compare func(repIDsA, repIDsB idset.IDSet) int,
 ) []string {
 	if len(replicasByZone) == 0 {
 		return nil
 	}
 
 	// Find the "best" replica set (maximum by compare).
-	var best nodeidset.NodeIDSet
+	var best idset.IDSet
 	first := true
 	for _, replicas := range replicasByZone {
 		if first || compare(replicas, best) > 0 {
@@ -871,7 +877,7 @@ func (r *Reconciler) getRVRsByRVName(ctx context.Context, rvName string) ([]*v1a
 	}
 
 	slices.SortFunc(result, func(a, b *v1alpha1.ReplicatedVolumeReplica) int {
-		return cmp.Compare(a.NodeID(), b.NodeID())
+		return cmp.Compare(a.ID(), b.ID())
 	})
 
 	return result, nil

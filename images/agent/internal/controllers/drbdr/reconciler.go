@@ -321,6 +321,14 @@ func (r *Reconciler) reconcileLLVFinalizerAdd(ctx context.Context, llvName strin
 		)
 	}
 
+	// Do not add finalizer to a deleting LLV — treat it as unavailable.
+	if llv.DeletionTimestamp != nil {
+		return "", ConfiguredReasonError(
+			flow.Wrapf(nil, "LVMLogicalVolume %q is being deleted", llvName),
+			v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed,
+		)
+	}
+
 	// Add finalizer if not present
 	if !obju.HasFinalizer(llv, v1alpha1.AgentFinalizer) {
 		llvBase := llv.DeepCopy()
@@ -446,7 +454,7 @@ func ensureFinalizer(
 	defer ef.OnEnd(&outcome)
 
 	var changed bool
-	if adding && isUpAndNotInCleanup {
+	if adding && isUpAndNotInCleanup && drbdr.DeletionTimestamp == nil {
 		changed = obju.AddFinalizer(drbdr, v1alpha1.AgentFinalizer)
 	} else if !adding && !isUpAndNotInCleanup {
 		changed = obju.RemoveFinalizer(drbdr, v1alpha1.AgentFinalizer)

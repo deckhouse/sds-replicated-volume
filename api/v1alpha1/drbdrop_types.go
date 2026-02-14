@@ -33,8 +33,8 @@ type DRBDResourceOperation struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`
 
-	Spec   DRBDResourceOperationSpec    `json:"spec"`
-	Status *DRBDResourceOperationStatus `json:"status,omitempty"`
+	Spec   DRBDResourceOperationSpec   `json:"spec"`
+	Status DRBDResourceOperationStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

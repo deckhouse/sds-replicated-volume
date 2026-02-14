@@ -92,6 +92,22 @@ type ReplicatedVolumeAttachmentStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// DevicePath is the block device path on the node when the volume is attached.
+	// Only set when Phase is Attached. Example: /dev/drbd10012.
+	// +kubebuilder:validation:MaxLength=256
+	// +optional
+	DevicePath string `json:"devicePath,omitempty"`
+
+	// IOSuspended indicates whether I/O is suspended on the device.
+	// Only set when Phase is Attached.
+	// +optional
+	IOSuspended *bool `json:"ioSuspended,omitempty"`
+
+	// InUse indicates whether the replica's block device is currently in use by a process.
+	// Only set when Phase is Attached.
+	// +optional
+	InUse *bool `json:"inUse,omitempty"`
 }
 
 // ReplicatedVolumeAttachmentPhase enumerates possible values for ReplicatedVolumeAttachment status.phase field.

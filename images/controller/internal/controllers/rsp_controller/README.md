@@ -46,6 +46,7 @@ For each eligible node, the controller also records LVG readiness and agent read
 ```
 Reconcile (root) [In-place reconciliation]
 ├── getRSP                                    — fetch the RSP
+├── applyLegacyFieldsCleared + patchRSPStatus — clear old controller phase/reason (one-time migration)
 ├── getLVGsByRSP                              — fetch LVGs referenced by RSP
 ├── Validation step (details)
 │   ├── validateRSPAndLVGs                    — validate RSP/LVG configuration
@@ -71,7 +72,10 @@ High-level overview of the reconciliation flow. See [Detailed Algorithms](#detai
 flowchart TD
     Start([Reconcile]) --> GetRSP[Get RSP]
     GetRSP -->|NotFound| Done1([Done])
-    GetRSP --> GetLVGs[Get LVGs by RSP]
+    GetRSP --> ClearLegacy{Legacy phase/reason set?}
+    ClearLegacy -->|Yes| PatchLegacy[Clear + Patch status]
+    PatchLegacy --> GetLVGs
+    ClearLegacy -->|No| GetLVGs[Get LVGs by RSP]
 
     GetLVGs --> Validate[Validate LVGs, Selector, Zones]
     Validate -->|Invalid| SetFalse[Ready=False + Patch]

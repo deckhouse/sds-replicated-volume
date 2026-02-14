@@ -19,13 +19,13 @@ package v1alpha1
 // Place shared helpers here that do not belong to any single API object,
 // but you are sure they must live in the API package.
 
-// nodeIDFromName extracts NodeID from a name with format "prefix-N" (e.g., "pvc-xxx-5" → 5).
-// Used by ReplicatedVolumeReplica.NodeID(), ReplicatedVolumeDatameshMember.NodeID(),
-// and ReplicatedVolumeDatameshPendingReplicaTransition.NodeID().
+// idFromName extracts ID from a name with format "prefix-N" (e.g., "pvc-xxx-5" → 5).
+// Used by ReplicatedVolumeReplica.ID(), ReplicatedVolumeDatameshMember.ID(),
+// and ReplicatedVolumeDatameshPendingReplicaTransition.ID().
 //
 // IMPORTANT: This function assumes the name is already validated by kubebuilder markers.
 // Only use with validated names (ending with -0 to -31).
-func nodeIDFromName(name string) uint8 {
+func idFromName(name string) uint8 {
 	l := len(name)
 	last := name[l-1] - '0'
 	prev := name[l-2] - '0'

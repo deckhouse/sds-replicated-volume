@@ -146,6 +146,22 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              devicePath:
+                description: |-
+                  DevicePath is the block device path on the node when the volume is attached.
+                  Only set when Phase is Attached. Example: /dev/drbd10012.
+                maxLength: 256
+                type: string
+              inUse:
+                description: |-
+                  InUse indicates whether the replica's block device is currently in use by a process.
+                  Only set when Phase is Attached.
+                type: boolean
+              ioSuspended:
+                description: |-
+                  IOSuspended indicates whether I/O is suspended on the device.
+                  Only set when Phase is Attached.
+                type: boolean
               phase:
                 description: ReplicatedVolumeAttachmentPhase enumerates possible values
                   for ReplicatedVolumeAttachment status.phase field.

@@ -41,7 +41,7 @@ func drbdrPredicates(nodeName string) []predicate.Predicate {
 				dr, ok := e.Object.(*v1alpha1.DRBDResource)
 				return ok && dr.Spec.NodeName == nodeName
 			},
-			GenericFunc: func(e event.TypedGenericEvent[client.Object]) bool {
+			GenericFunc: func(_ event.TypedGenericEvent[client.Object]) bool {
 				return false
 			},
 		},

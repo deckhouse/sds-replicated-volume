@@ -387,7 +387,14 @@ spec:
               deviceIOSuspended:
                 description: |-
                   DeviceIOSuspended indicates whether I/O is suspended on the device.
-                  Only set when attached (device is present).
+                  Only present on primary
+                type: boolean
+              deviceOpen:
+                description: |-
+                  DeviceOpen indicates whether the block device is currently open by a process
+                  (bd_openers > 0). Reflects DRBD's "open: yes/no" from drbdsetup status.
+                  When true, demotion to Secondary will fail.
+                  Only present on primary
                 type: boolean
               diskState:
                 description: |-
