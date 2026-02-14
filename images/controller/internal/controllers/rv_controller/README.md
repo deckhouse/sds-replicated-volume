@@ -148,7 +148,7 @@ Creates diskful replicas and waits for them to become preconfigured (DRBD setup 
 4. Create missing diskful replicas only when no deleting or misplaced replicas exist (prevents zombie accumulation)
 5. Remove excess/misplaced replicas
 6. Wait for all deleting replicas to be fully removed (restart formation if timeout)
-7. Wait for scheduling and preconfiguration
+7. Wait for scheduling and preconfiguration (replicas split into pending scheduling / scheduling failed / preconfiguring; scheduling failure messages from RVR Scheduled=False conditions are shown inline)
 8. Safety checks: addresses, eligible nodes, spec consistency, backing volume size
 
 ### Phase 2: Establish Connectivity
@@ -377,8 +377,10 @@ flowchart TD
     DeleteUnwanted --> CheckDeleting{"Any replicas still<br/>deleting?"}
     CheckDeleting -->|Yes| WaitDeleting["Wait for cleanup /<br/>restart if timeout (30s)"]
 
-    CheckDeleting -->|No| WaitReady{"All scheduled<br/>and preconfigured?"}
-    WaitReady -->|No| WaitTimeout1[Wait / restart if timeout]
+    CheckDeleting -->|No| SplitScheduling["Split waitingScheduling into<br/>pendingScheduling + schedulingFailed<br/>(Scheduled=False)"]
+    SplitScheduling --> WaitReady{"All scheduled<br/>and preconfigured?"}
+    WaitReady -->|No| BuildMsg["computeFormationPreconfigureWaitMessage:<br/>only non-empty groups shown,<br/>scheduling failed includes inline<br/>error from Scheduled condition"]
+    BuildMsg --> WaitTimeout1[Wait / restart if timeout]
 
     WaitReady -->|Yes| CheckAddresses{"All have required<br/>network addresses?"}
     CheckAddresses -->|No| WaitTimeout2[Wait / restart if timeout]
