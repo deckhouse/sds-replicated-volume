@@ -227,14 +227,12 @@ func ensureDatameshAddAccessReplica(
 	}
 
 	// Guard: Node must be in RSP eligible nodes.
-	eligibleNodeIdx := slices.IndexFunc(rsp.EligibleNodes, func(en v1alpha1.ReplicatedStoragePoolEligibleNode) bool {
-		return en.NodeName == rvr.Spec.NodeName
-	})
-	if eligibleNodeIdx < 0 {
+	eligibleNode := rsp.FindEligibleNode(rvr.Spec.NodeName)
+	if eligibleNode == nil {
 		return applyPendingReplicaTransitionMessage(prt,
 			fmt.Sprintf("Will not join datamesh: node %s is not in eligible nodes", rvr.Spec.NodeName))
 	}
-	zone := rsp.EligibleNodes[eligibleNodeIdx].ZoneName
+	zone := eligibleNode.ZoneName
 
 	// All guards passed — add member and create AddAccessReplica transition.
 	applyDatameshMember(rv, v1alpha1.ReplicatedVolumeDatameshMember{

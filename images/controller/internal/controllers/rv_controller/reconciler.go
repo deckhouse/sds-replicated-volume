@@ -156,14 +156,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Perform main processing.
 	if rv.Status.Configuration != nil {
-		rsp, err := r.getRSP(rf.Ctx(), rv.Status.Configuration.StoragePoolName, rvrs)
+		rsp, err := r.getRSP(rf.Ctx(), rv.Status.Configuration.StoragePoolName, rvrs, rvas)
 		if err != nil {
 			return rf.Failf(err, "getting RSP").ToCtrl()
 		}
 		if forming, formationPhase := isFormationInProgress(rv); forming {
 			outcome = outcome.Merge(r.reconcileFormation(rf.Ctx(), rv, &rvrs, rsp, rsc, formationPhase))
 		} else {
-			outcome = outcome.Merge(r.reconcileNormalOperation(rf.Ctx(), rv, &rvrs, rsp))
+			outcome = outcome.Merge(r.reconcileNormalOperation(rf.Ctx(), rv, &rvrs, rvas, rsp))
 		}
 		if outcome.ShouldReturn() {
 			return outcome.ToCtrl()
@@ -284,7 +284,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 	// This prevents zombie accumulation: we wait for all cleanup to finish before creating new ones.
 	if deleting.IsEmpty() && misplaced.IsEmpty() {
 		for diskful.Len() < targetDiskfulCount {
-			rvr, err := r.createRVR(rf.Ctx(), rv, rvrs, v1alpha1.ReplicaTypeDiskful)
+			rvr, err := r.createDiskfulRVR(rf.Ctx(), rv, rvrs)
 			if err != nil {
 				if apierrors.IsAlreadyExists(err) {
 					// Stale cache: RVR was already created by a previous reconciliation. Requeue to pick it up.
@@ -430,10 +430,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 
 	// Verify all diskful replicas are on eligible nodes (safety check).
 	notEligible := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		return diskful.Contains(rvr.ID()) &&
-			!slices.ContainsFunc(rsp.EligibleNodes, func(en v1alpha1.ReplicatedStoragePoolEligibleNode) bool {
-				return en.NodeName == rvr.Spec.NodeName
-			})
+		return diskful.Contains(rvr.ID()) && rsp.FindEligibleNode(rvr.Spec.NodeName) == nil
 	})
 	if !notEligible.IsEmpty() {
 		okReplicas := diskful.Difference(notEligible)
@@ -574,11 +571,8 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 
 			// Find zone from rsp.EligibleNodes.
 			var zone string
-			for _, en := range rsp.EligibleNodes {
-				if en.NodeName == rvr.Spec.NodeName {
-					zone = en.ZoneName
-					break
-				}
+			if en := rsp.FindEligibleNode(rvr.Spec.NodeName); en != nil {
+				zone = en.ZoneName
 			}
 
 			// We could use rv.Status.DatameshPendingReplicaTransitions, but that would require
@@ -986,17 +980,29 @@ func (r *Reconciler) reconcileNormalOperation(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
+	rvas []*v1alpha1.ReplicatedVolumeAttachment,
 	rsp *rspView,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "normal-operation")
 	defer rf.OnEnd(&outcome)
 
+	// Step 1: Create Access RVRs for Active RVAs on nodes without any RVR.
+	outcome = r.reconcileCreateAccessReplicas(rf.Ctx(), rv, rvrs, rvas, rsp)
+	if outcome.ShouldReturn() {
+		return outcome
+	}
+
+	// Step 2: Process datamesh Access replica membership transitions.
 	eo := ensureDatameshAccessReplicas(rf.Ctx(), rv, *rvrs, rsp)
 	if eo.Error() != nil {
 		return rf.Fail(eo.Error())
 	}
+	outcome = outcome.WithChangeFrom(eo)
 
-	return rf.Continue().WithChangeFrom(eo)
+	// Step 3: Delete unnecessary Access RVRs (redundant or unused).
+	outcome = outcome.Merge(r.reconcileDeleteAccessReplicas(rf.Ctx(), rv, rvrs, rvas))
+
+	return outcome
 }
 
 // computeDatameshTransitionProgressMessage builds a detailed transition message showing
@@ -1988,8 +1994,20 @@ type rspView struct {
 	Zones []string
 	// SystemNetworkNames is the list of system network names from RSP spec.
 	SystemNetworkNames []string
-	// EligibleNodes contains only nodes that are present in the RVRs.
+	// EligibleNodes contains only nodes present in RVRs/RVAs, sorted by NodeName.
 	EligibleNodes []v1alpha1.ReplicatedStoragePoolEligibleNode
+}
+
+// FindEligibleNode returns a pointer to the eligible node with the given name, or nil if not found.
+// Uses binary search (EligibleNodes is sorted by NodeName).
+func (v *rspView) FindEligibleNode(nodeName string) *v1alpha1.ReplicatedStoragePoolEligibleNode {
+	idx, found := slices.BinarySearchFunc(v.EligibleNodes, nodeName, func(en v1alpha1.ReplicatedStoragePoolEligibleNode, target string) int {
+		return cmp.Compare(en.NodeName, target)
+	})
+	if !found {
+		return nil
+	}
+	return &v.EligibleNodes[idx]
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2105,37 +2123,53 @@ func (r *Reconciler) deleteDRBDROp(ctx context.Context, obj *v1alpha1.DRBDResour
 // --- RSP ---
 
 // getRSP fetches the RSP and returns a view containing only the eligible nodes
-// that are present in the provided RVRs.
+// that are present in the provided RVRs or active (non-deleting) RVAs.
 // Uses UnsafeDisableDeepCopy for performance, manually copying needed fields.
 func (r *Reconciler) getRSP(
 	ctx context.Context,
 	rspName string,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rvas []*v1alpha1.ReplicatedVolumeAttachment,
 ) (*rspView, error) {
 	var unsafeRSP v1alpha1.ReplicatedStoragePool
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rspName}, &unsafeRSP, client.UnsafeDisableDeepCopy); err != nil {
 		return nil, err
 	}
 
-	// Build sorted list of node names from RVRs for binary search.
-	rvrNodeNames := make([]string, 0, len(rvrs))
+	// Build sorted, deduplicated list of node names from RVRs + active RVAs for binary search.
+	// RVA nodes are included so that Access RVR creation can check eligibility
+	// for nodes that don't have an RVR yet.
+	nodeNames := make([]string, 0, len(rvrs)+len(rvas))
 	for _, rvr := range rvrs {
 		if rvr.Spec.NodeName != "" {
-			rvrNodeNames = append(rvrNodeNames, rvr.Spec.NodeName)
+			nodeNames = append(nodeNames, rvr.Spec.NodeName)
 		}
 	}
-	slices.Sort(rvrNodeNames)
+	for _, rva := range rvas {
+		if rva.DeletionTimestamp == nil {
+			nodeNames = append(nodeNames, rva.Spec.NodeName)
+		}
+	}
+	slices.Sort(nodeNames)
+	nodeNames = slices.Compact(nodeNames)
 
-	// Filter eligible nodes using binary search.
-	eligibleNodes := make([]v1alpha1.ReplicatedStoragePoolEligibleNode, 0, len(rvrNodeNames))
+	// Filter eligible nodes using binary search, then sort by NodeName for rspView lookups.
+	eligibleNodes := make([]v1alpha1.ReplicatedStoragePoolEligibleNode, 0, len(nodeNames))
 	for i := range unsafeRSP.Status.EligibleNodes {
 		node := &unsafeRSP.Status.EligibleNodes[i]
-		_, found := slices.BinarySearch(rvrNodeNames, node.NodeName)
+		_, found := slices.BinarySearch(nodeNames, node.NodeName)
 		if found {
 			// DeepCopy to avoid aliasing with cache (LVMVolumeGroups is a slice).
 			eligibleNodes = append(eligibleNodes, *node.DeepCopy())
 		}
 	}
+
+	// Safety sort: RSP eligible nodes are sorted by NodeName in practice (rsp_controller
+	// maintains sorted order), but we sort here defensively to guarantee the invariant
+	// that rspView.FindEligibleNode relies on (binary search by NodeName).
+	slices.SortFunc(eligibleNodes, func(a, b v1alpha1.ReplicatedStoragePoolEligibleNode) int {
+		return cmp.Compare(a.NodeName, b.NodeName)
+	})
 
 	return &rspView{
 		Type:               unsafeRSP.Spec.Type,
@@ -2219,6 +2253,25 @@ func (r *Reconciler) getRVRsSorted(ctx context.Context, rvName string) ([]*v1alp
 	return result, nil
 }
 
+// createDiskfulRVR creates a Diskful RVR (nodeName is left empty for the scheduler to assign).
+func (r *Reconciler) createDiskfulRVR(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
+) (*v1alpha1.ReplicatedVolumeReplica, error) {
+	return r.createRVR(ctx, rv, rvrs, v1alpha1.ReplicaTypeDiskful, "")
+}
+
+// createAccessRVR creates an Access RVR on the specified node.
+func (r *Reconciler) createAccessRVR(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
+	nodeName string,
+) (*v1alpha1.ReplicatedVolumeReplica, error) {
+	return r.createRVR(ctx, rv, rvrs, v1alpha1.ReplicaTypeAccess, nodeName)
+}
+
 // createRVR constructs a new ReplicatedVolumeReplica (choosing a free ID name,
 // adding the RV controller finalizer, setting controller owner ref), creates it via the API,
 // and inserts it into rvrs in sorted order.
@@ -2227,16 +2280,20 @@ func (r *Reconciler) getRVRsSorted(ctx context.Context, rvName string) ([]*v1alp
 // setup, and caller-slice mutation beyond a simple single-call Create. This is intentional
 // to keep the formation loop readable; all policy decisions (when to create, how many)
 // remain in the calling Reconcile method.
+//
+// Prefer using typed wrappers: createDiskfulRVR, createAccessRVR.
 func (r *Reconciler) createRVR(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
 	typ v1alpha1.ReplicaType,
+	nodeName string,
 ) (*v1alpha1.ReplicatedVolumeReplica, error) {
 	rvr := &v1alpha1.ReplicatedVolumeReplica{
 		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: rv.Name,
 			Type:                 typ,
+			NodeName:             nodeName,
 		},
 	}
 	if !rvr.ChooseNewName(*rvrs) {
