@@ -28,13 +28,19 @@ The controller reconciles `ReplicatedVolume` with:
 The controller reconciles individual ReplicatedVolumes:
 
 ```
-if shouldDelete:
-    reconcileRVAFinalizers (add/remove RVA finalizers)
-    reconcileDeletion (update RVA conditions → delete RVRs → clear datamesh members)
+if rv deleted (NotFound):
+    if orphaned RVAs exist:
+        reconcileOrphanedRVAs (set conditions + remove finalizers) → Done
+    else → Done
+
+if shouldDelete (DeletionTimestamp + no attached members + no Detach transitions):
+    reconcileDeletion (update RVA conditions → force-delete RVRs → clear datamesh members)
+    reconcileRVAFinalizers (remove RVA finalizers — after conditions are set)
     reconcileMetadata (remove finalizer if no children left) → Done
 
 ensure metadata (finalizer + labels)
 reconcileRVAFinalizers (add/remove RVA finalizers)
+reconcileRVRFinalizers (add/remove RVR finalizers)
 
 ensure configuration from RSC
 ensure datamesh pending replica transitions (sync from RVR statuses)
@@ -53,23 +59,26 @@ patch status if changed
 
 ```
 Reconcile (root) [Pure orchestration]
-├── getRV, getRSC, getRVAs, getRVRsSorted
-├── rvShouldNotExist →
+├── getRV
+├── rv == nil → getRVAs → reconcileOrphanedRVAs (set conditions + remove finalizers)
+├── getRSC, getRVAs, getRVRsSorted
+├── rvShouldNotExist (DeletionTimestamp + no attached + no Detach transitions) →
+│   ├── reconcileDeletion [In-place reconciliation] ← details
+│   │   ├── isRVADeletionConditionsInSync / applyRVADeletionConditions
+│   │   ├── deleteRVRWithForcedFinalizerRemoval (loop)
+│   │   └── clear datamesh members + patchRVStatus
 │   ├── reconcileRVAFinalizers [Target-state driven]
 │   │   ├── add RVControllerFinalizer to non-deleting RVAs
 │   │   └── remove RVControllerFinalizer from deleting RVAs (when safe)
 │   │       ├── hasOtherNonDeletingRVAOnNode (duplicate check)
 │   │       └── isNodeAttachedOrDetaching (datamesh state check)
-│   ├── reconcileDeletion [In-place reconciliation] ← details
-│   │   ├── isRVADeletionConditionsInSync / applyRVADeletionConditions
-│   │   ├── deleteRVRWithFinalizerRemoval (loop)
-│   │   └── clear datamesh members + patchRVStatus
 │   └── reconcileMetadata [Target-state driven] (remove finalizer)
 ├── reconcileMetadata [Target-state driven]
 │   ├── isRVMetadataInSync
 │   ├── applyRVMetadata (finalizer + labels)
 │   └── patchRV
 ├── reconcileRVAFinalizers [Target-state driven] (same as above)
+├── reconcileRVRFinalizers [Target-state driven] (same as above)
 ├── ensureRVConfiguration
 ├── ensureDatameshPendingReplicaTransitions ← details
 ├── reconcileFormation [Pure orchestration]
@@ -101,18 +110,22 @@ Links to detailed algorithms: [`reconcileDeletion`](#reconciledeletion-details),
 ```mermaid
 flowchart TD
     Start([Reconcile]) --> GetRV[Get RV]
-    GetRV -->|NotFound| Done1([Done])
+    GetRV -->|NotFound| CheckOrphanedRVAs{Orphaned RVAs?}
+    CheckOrphanedRVAs -->|No| Done1([Done])
+    CheckOrphanedRVAs -->|Yes| OrphanedRVAs["reconcileOrphanedRVAs<br/>(set conditions + remove finalizers)"]
+    OrphanedRVAs --> Done1
     GetRV --> LoadDeps[Load RSC, RVAs, RVRs]
 
     LoadDeps --> CheckDelete{rvShouldNotExist?}
-    CheckDelete -->|Yes| RVAFinDel[reconcileRVAFinalizers]
-    RVAFinDel --> Deletion[reconcileDeletion]
-    Deletion --> MetaDel["reconcileMetadata<br/>(remove finalizer)"]
+    CheckDelete -->|Yes| Deletion[reconcileDeletion]
+    Deletion --> RVAFinDel[reconcileRVAFinalizers]
+    RVAFinDel --> MetaDel["reconcileMetadata<br/>(remove finalizer)"]
     MetaDel --> Done3([Done])
 
     CheckDelete -->|No| Meta[reconcileMetadata]
     Meta --> RVAFin[reconcileRVAFinalizers]
-    RVAFin --> EnsureConfig[ensureRVConfiguration +<br/>ensureDatameshPendingReplicaTransitions]
+    RVAFin --> RVRFin[reconcileRVRFinalizers]
+    RVRFin --> EnsureConfig[ensureRVConfiguration +<br/>ensureDatameshPendingReplicaTransitions]
     EnsureConfig --> CheckConfig{Configuration exists?}
     CheckConfig -->|No| Conditions
 
@@ -210,7 +223,7 @@ When formation stalls (any safety check fails or progress timeout is exceeded), 
 | Finalizer | `sds-replicated-volume.deckhouse.io/rv-controller` | RV | Prevent deletion while child resources exist |
 | Label | `sds-replicated-volume.deckhouse.io/replicated-storage-class` | RV | Link to ReplicatedStorageClass |
 | Finalizer | `sds-replicated-volume.deckhouse.io/rv-controller` | RVA | Prevent deletion while node is attached or detaching |
-| Finalizer | `sds-replicated-volume.deckhouse.io/rv-controller` | RVR | Removed during formation restart / deletion |
+| Finalizer | `sds-replicated-volume.deckhouse.io/rv-controller` | RVR | Prevent deletion while RVR is a datamesh member or leaving datamesh; force-removed during formation restart / RV deletion |
 | OwnerRef | controller reference | DRBDResourceOperation | Owner reference to RV |
 
 ## Watches
@@ -302,7 +315,7 @@ flowchart TD
     SkipRVA --> LoopRVA
     PatchRVA --> LoopRVA
 
-    LoopRVA -->|Done| DeleteRVRs["Delete all RVRs<br/>(with finalizer removal)"]
+    LoopRVA -->|Done| DeleteRVRs["Delete all RVRs<br/>(with forced finalizer removal)"]
     DeleteRVRs --> CheckMembers{Datamesh members exist?}
     CheckMembers -->|Yes| ClearMembers["Clear datamesh members<br/>Patch RV status"]
     CheckMembers -->|No| End([Done])
