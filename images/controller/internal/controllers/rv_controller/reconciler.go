@@ -93,12 +93,21 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Handle deletion: cleanup children first, then reconcile metadata (remove finalizer).
 	if rvShouldNotExist(rv) {
-		outcome := r.reconcileDeletion(rf.Ctx(), rv, rvas, &rvrs)
-		return outcome.Merge(r.reconcileMetadata(rf.Ctx(), rv, rvas, rvrs)).ToCtrl()
+		return flow.MergeReconciles(
+			r.reconcileRVAFinalizers(rf.Ctx(), rv, rvas),
+			r.reconcileDeletion(rf.Ctx(), rv, rvas, &rvrs),
+			r.reconcileMetadata(rf.Ctx(), rv, rvas, rvrs),
+		).ToCtrl()
 	}
 
 	// Reconcile the RV metadata (finalizers and labels).
 	outcome := r.reconcileMetadata(rf.Ctx(), rv, rvas, rvrs)
+	if outcome.ShouldReturn() {
+		return outcome.ToCtrl()
+	}
+
+	// Reconcile RVA finalizers (add to non-deleting, remove from deleting when safe).
+	outcome = outcome.Merge(r.reconcileRVAFinalizers(rf.Ctx(), rv, rvas))
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
 	}
@@ -1001,6 +1010,119 @@ func (r *Reconciler) reconcileMetadata(
 	return rf.Continue()
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: RVA finalizers
+//
+
+// reconcileRVAFinalizers adds RVControllerFinalizer to non-deleting RVAs
+// and removes it from deleting RVAs when safe (node not attached and no detach in progress).
+//
+// Reconcile pattern: Target-state driven
+func (r *Reconciler) reconcileRVAFinalizers(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvas []*v1alpha1.ReplicatedVolumeAttachment,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "rva-finalizers")
+	defer rf.OnEnd(&outcome)
+
+	for _, rva := range rvas {
+		if rva.DeletionTimestamp == nil {
+			// Non-deleting: add finalizer if missing.
+
+			// Skip if finalizer is already present.
+			if obju.HasFinalizer(rva, v1alpha1.RVControllerFinalizer) {
+				continue
+			}
+
+			// Add finalizer to ensure detach completes before RVA is deleted.
+			base := rva.DeepCopy()
+			obju.AddFinalizer(rva, v1alpha1.RVControllerFinalizer)
+			if err := r.patchRVA(rf.Ctx(), rva, base); err != nil {
+				return rf.Failf(err, "adding finalizer to RVA %s", rva.Name)
+			}
+		} else {
+			// Deleting: remove finalizer if safe.
+
+			// Skip if finalizer is already absent.
+			if !obju.HasFinalizer(rva, v1alpha1.RVControllerFinalizer) {
+				continue
+			}
+
+			// Safe to remove if another non-deleting RVA exists on the same node
+			// (duplicate — the other RVA will maintain the attach).
+			isDuplicate := hasOtherNonDeletingRVAOnNode(rvas, rva.Spec.NodeName, rva.Name)
+
+			// Also safe to remove if the node is not attached and no detach is in progress
+			// (nothing to wait for — detach already completed or was never started).
+			if !isDuplicate && isNodeAttachedOrDetaching(rv, rva.Spec.NodeName) {
+				continue
+			}
+
+			// Remove finalizer — RVA can be finalized.
+			base := rva.DeepCopy()
+			obju.RemoveFinalizer(rva, v1alpha1.RVControllerFinalizer)
+			if err := r.patchRVA(rf.Ctx(), rva, base); err != nil {
+				return rf.Failf(err, "removing finalizer from RVA %s", rva.Name)
+			}
+		}
+	}
+
+	return rf.Continue()
+}
+
+// isNodeAttachedOrDetaching returns true if the given node has an attached datamesh member
+// or an active Detach transition. Returns false when rv is nil (no datamesh state).
+func isNodeAttachedOrDetaching(rv *v1alpha1.ReplicatedVolume, nodeName string) bool {
+	if rv == nil {
+		return false
+	}
+
+	// Check for attached member on this node.
+	for i := range rv.Status.Datamesh.Members {
+		m := &rv.Status.Datamesh.Members[i]
+		if m.NodeName == nodeName && m.Attached {
+			return true
+		}
+	}
+
+	// Check for active Detach transition targeting a replica on this node.
+	for i := range rv.Status.DatameshTransitions {
+		t := &rv.Status.DatameshTransitions[i]
+
+		if t.Type != v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach {
+			continue
+		}
+
+		// Look up the member by replicaName to get its nodeName.
+		member := rv.Status.Datamesh.FindMemberByName(t.ReplicaName)
+		if member != nil && member.NodeName == nodeName {
+			return true
+		}
+	}
+
+	return false
+}
+
+// hasOtherNonDeletingRVAOnNode returns true if there is another non-deleting RVA on the same node,
+// excluding the RVA identified by excludeName.
+func hasOtherNonDeletingRVAOnNode(rvas []*v1alpha1.ReplicatedVolumeAttachment, nodeName string, excludeName string) bool {
+	for _, rva := range rvas {
+		if rva.Name == excludeName {
+			continue
+		}
+
+		if rva.DeletionTimestamp != nil {
+			continue
+		}
+
+		if rva.Spec.NodeName == nodeName {
+			return true
+		}
+	}
+	return false
+}
+
 // generateSharedSecret generates a random DRBD shared secret.
 // DRBD shared-secret supports up to 64 characters.
 // Generates 32 random bytes and encodes as base64 (~43 chars).
@@ -1778,6 +1900,10 @@ func (r *Reconciler) getRVAs(ctx context.Context, rvName string) ([]*v1alpha1.Re
 		result[i] = &list.Items[i]
 	}
 	return result, nil
+}
+
+func (r *Reconciler) patchRVA(ctx context.Context, obj, base *v1alpha1.ReplicatedVolumeAttachment) error {
+	return r.cl.Patch(ctx, obj, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 func (r *Reconciler) patchRVAStatus(ctx context.Context, obj, base *v1alpha1.ReplicatedVolumeAttachment) error {

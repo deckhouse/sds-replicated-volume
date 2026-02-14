@@ -4441,3 +4441,320 @@ var _ = Describe("Root Reconcile edge cases", func() {
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonWaitingForStorageClass))
 	})
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// RVA finalizer helpers tests
+//
+
+var _ = Describe("isNodeAttachedOrDetaching", func() {
+	It("returns false when rv is nil", func() {
+		Expect(isNodeAttachedOrDetaching(nil, "node-1")).To(BeFalse())
+	})
+
+	It("returns false when no members", func() {
+		rv := &v1alpha1.ReplicatedVolume{}
+		Expect(isNodeAttachedOrDetaching(rv, "node-1")).To(BeFalse())
+	})
+
+	It("returns true when member on node is attached", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						{Name: "rv-1-0", NodeName: "node-1", Attached: true},
+					},
+				},
+			},
+		}
+		Expect(isNodeAttachedOrDetaching(rv, "node-1")).To(BeTrue())
+	})
+
+	It("returns false when member on node is not attached", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						{Name: "rv-1-0", NodeName: "node-1", Attached: false},
+					},
+				},
+			},
+		}
+		Expect(isNodeAttachedOrDetaching(rv, "node-1")).To(BeFalse())
+	})
+
+	It("returns false when attached member is on a different node", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						{Name: "rv-1-0", NodeName: "node-2", Attached: true},
+					},
+				},
+			},
+		}
+		Expect(isNodeAttachedOrDetaching(rv, "node-1")).To(BeFalse())
+	})
+
+	It("returns true when detach transition targets a replica on the node", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						{Name: "rv-1-0", NodeName: "node-1", Attached: false},
+					},
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					{
+						Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach,
+						ReplicaName: "rv-1-0",
+					},
+				},
+			},
+		}
+		Expect(isNodeAttachedOrDetaching(rv, "node-1")).To(BeTrue())
+	})
+
+	It("returns false when detach transition targets a replica on a different node", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						{Name: "rv-1-0", NodeName: "node-2", Attached: false},
+					},
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					{
+						Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach,
+						ReplicaName: "rv-1-0",
+					},
+				},
+			},
+		}
+		Expect(isNodeAttachedOrDetaching(rv, "node-1")).To(BeFalse())
+	})
+
+	It("ignores non-detach transitions", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						{Name: "rv-1-0", NodeName: "node-1", Attached: false},
+					},
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					{
+						Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach,
+						ReplicaName: "rv-1-0",
+					},
+				},
+			},
+		}
+		Expect(isNodeAttachedOrDetaching(rv, "node-1")).To(BeFalse())
+	})
+})
+
+var _ = Describe("hasOtherNonDeletingRVAOnNode", func() {
+	It("returns false when no other RVAs", func() {
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{
+			{ObjectMeta: metav1.ObjectMeta{Name: "rva-1"}, Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{NodeName: "node-1"}},
+		}
+		Expect(hasOtherNonDeletingRVAOnNode(rvas, "node-1", "rva-1")).To(BeFalse())
+	})
+
+	It("returns true when another active RVA on same node", func() {
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{
+			{ObjectMeta: metav1.ObjectMeta{Name: "rva-1"}, Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{NodeName: "node-1"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "rva-2"}, Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{NodeName: "node-1"}},
+		}
+		Expect(hasOtherNonDeletingRVAOnNode(rvas, "node-1", "rva-1")).To(BeTrue())
+	})
+
+	It("returns false when other RVA on same node is deleting", func() {
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{
+			{ObjectMeta: metav1.ObjectMeta{Name: "rva-1"}, Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{NodeName: "node-1"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "rva-2", DeletionTimestamp: ptr.To(metav1.Now())}, Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{NodeName: "node-1"}},
+		}
+		Expect(hasOtherNonDeletingRVAOnNode(rvas, "node-1", "rva-1")).To(BeFalse())
+	})
+
+	It("returns false when other active RVA is on a different node", func() {
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{
+			{ObjectMeta: metav1.ObjectMeta{Name: "rva-1"}, Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{NodeName: "node-1"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "rva-2"}, Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{NodeName: "node-2"}},
+		}
+		Expect(hasOtherNonDeletingRVAOnNode(rvas, "node-1", "rva-1")).To(BeFalse())
+	})
+})
+
+var _ = Describe("reconcileRVAFinalizers", func() {
+	var scheme *runtime.Scheme
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+	})
+
+	makeRVA := func(name, rvName, node string) *v1alpha1.ReplicatedVolumeAttachment {
+		return &v1alpha1.ReplicatedVolumeAttachment{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+				ReplicatedVolumeName: rvName,
+				NodeName:             node,
+			},
+		}
+	}
+
+	makeDeletingRVA := func(name, rvName, node string) *v1alpha1.ReplicatedVolumeAttachment {
+		rva := makeRVA(name, rvName, node)
+		rva.Finalizers = []string{v1alpha1.RVControllerFinalizer}
+		rva.DeletionTimestamp = ptr.To(metav1.Now())
+		return rva
+	}
+
+	It("adds finalizer to non-deleting RVA", func(ctx SpecContext) {
+		rva := makeRVA("rva-1", "rv-1", "node-1")
+		cl := newClientBuilder(scheme).WithObjects(rva).Build()
+		rec := NewReconciler(cl, scheme)
+
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rva}
+		outcome := rec.reconcileRVAFinalizers(ctx, &v1alpha1.ReplicatedVolume{}, rvas)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolumeAttachment
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva), &updated)).To(Succeed())
+		Expect(updated.Finalizers).To(ContainElement(v1alpha1.RVControllerFinalizer))
+	})
+
+	It("skips non-deleting RVA that already has finalizer", func(ctx SpecContext) {
+		rva := makeRVA("rva-1", "rv-1", "node-1")
+		rva.Finalizers = []string{v1alpha1.RVControllerFinalizer}
+		cl := newClientBuilder(scheme).WithObjects(rva).Build()
+		rec := NewReconciler(cl, scheme)
+
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rva}
+		outcome := rec.reconcileRVAFinalizers(ctx, &v1alpha1.ReplicatedVolume{}, rvas)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+	})
+
+	It("removes finalizer from deleting RVA when rv is nil", func(ctx SpecContext) {
+		rva := makeDeletingRVA("rva-1", "rv-1", "node-1")
+		cl := newClientBuilder(scheme).WithObjects(rva).Build()
+		rec := NewReconciler(cl, scheme)
+
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rva}
+		outcome := rec.reconcileRVAFinalizers(ctx, nil, rvas)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+
+		// After removing the last finalizer, the fake client finalizes the object (deletes it).
+		var updated v1alpha1.ReplicatedVolumeAttachment
+		err := cl.Get(ctx, client.ObjectKeyFromObject(rva), &updated)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("keeps finalizer on deleting RVA when node is attached", func(ctx SpecContext) {
+		rva := makeDeletingRVA("rva-1", "rv-1", "node-1")
+		cl := newClientBuilder(scheme).WithObjects(rva).Build()
+		rec := NewReconciler(cl, scheme)
+
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						{Name: "rv-1-0", NodeName: "node-1", Attached: true},
+					},
+				},
+			},
+		}
+
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rva}
+		outcome := rec.reconcileRVAFinalizers(ctx, rv, rvas)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolumeAttachment
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva), &updated)).To(Succeed())
+		Expect(updated.Finalizers).To(ContainElement(v1alpha1.RVControllerFinalizer))
+	})
+
+	It("removes finalizer from deleting RVA when node is attached but duplicate active RVA exists", func(ctx SpecContext) {
+		rvaDeleting := makeDeletingRVA("rva-1", "rv-1", "node-1")
+		rvaActive := makeRVA("rva-2", "rv-1", "node-1")
+		cl := newClientBuilder(scheme).WithObjects(rvaDeleting, rvaActive).Build()
+		rec := NewReconciler(cl, scheme)
+
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						{Name: "rv-1-0", NodeName: "node-1", Attached: true},
+					},
+				},
+			},
+		}
+
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rvaDeleting, rvaActive}
+		outcome := rec.reconcileRVAFinalizers(ctx, rv, rvas)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+
+		// Deleting RVA finalized (last finalizer removed → object deleted by fake client).
+		var updated v1alpha1.ReplicatedVolumeAttachment
+		err := cl.Get(ctx, client.ObjectKeyFromObject(rvaDeleting), &updated)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+
+		// Active RVA got finalizer added.
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvaActive), &updated)).To(Succeed())
+		Expect(updated.Finalizers).To(ContainElement(v1alpha1.RVControllerFinalizer))
+	})
+
+	It("keeps finalizer on deleting RVA when detach transition in progress", func(ctx SpecContext) {
+		rva := makeDeletingRVA("rva-1", "rv-1", "node-1")
+		cl := newClientBuilder(scheme).WithObjects(rva).Build()
+		rec := NewReconciler(cl, scheme)
+
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						{Name: "rv-1-0", NodeName: "node-1", Attached: false},
+					},
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
+				},
+			},
+		}
+
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rva}
+		outcome := rec.reconcileRVAFinalizers(ctx, rv, rvas)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolumeAttachment
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva), &updated)).To(Succeed())
+		Expect(updated.Finalizers).To(ContainElement(v1alpha1.RVControllerFinalizer))
+	})
+
+	It("removes finalizer from deleting RVA when node not attached and no detach transition", func(ctx SpecContext) {
+		rva := makeDeletingRVA("rva-1", "rv-1", "node-1")
+		cl := newClientBuilder(scheme).WithObjects(rva).Build()
+		rec := NewReconciler(cl, scheme)
+
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						{Name: "rv-1-0", NodeName: "node-1", Attached: false},
+					},
+				},
+			},
+		}
+
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rva}
+		outcome := rec.reconcileRVAFinalizers(ctx, rv, rvas)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+
+		// Deleting RVA finalized (last finalizer removed → object deleted by fake client).
+		var updated v1alpha1.ReplicatedVolumeAttachment
+		err := cl.Get(ctx, client.ObjectKeyFromObject(rva), &updated)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+	})
+})
