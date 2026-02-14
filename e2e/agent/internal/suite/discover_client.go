@@ -1,7 +1,7 @@
-package client
+package suite
 
 import (
-	"fmt"
+	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/etesting"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -12,10 +12,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
-func NewScheme() (*runtime.Scheme, error) {
+// DiscoverClient Discovers a K8s client from kubeconfig. Registers
+// v1alpha1, sds-node-configurator, core, and storage schemes.
+func DiscoverClient(e *etesting.E) client.Client {
 	scheme := runtime.NewScheme()
 
-	var schemeFuncs = []func(s *runtime.Scheme) error{
+	schemeFuncs := []func(s *runtime.Scheme) error{
 		corev1.AddToScheme,
 		storagev1.AddToScheme,
 		v1alpha1.AddToScheme,
@@ -24,27 +26,19 @@ func NewScheme() (*runtime.Scheme, error) {
 
 	for i, f := range schemeFuncs {
 		if err := f(scheme); err != nil {
-			return nil, fmt.Errorf("adding scheme %d: %w", i, err)
+			e.Fatalf("adding scheme %d: %v", i, err)
 		}
 	}
 
-	return scheme, nil
-}
-
-func NewClient() (client.Client, error) {
 	kubeConfig, err := config.GetConfig()
 	if err != nil {
-		return nil, fmt.Errorf("getting config: %w", err)
+		e.Fatalf("getting kubeconfig: %v", err)
 	}
 
-	scheme, err := NewScheme()
+	cl, err := client.New(kubeConfig, client.Options{Scheme: scheme})
 	if err != nil {
-		return nil, fmt.Errorf("scheme: %w", err)
+		e.Fatalf("creating client: %v", err)
 	}
 
-	clientOpts := client.Options{
-		Scheme: scheme,
-	}
-
-	return client.New(kubeConfig, clientOpts)
+	return cl
 }

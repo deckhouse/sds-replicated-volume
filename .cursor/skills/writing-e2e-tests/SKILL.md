@@ -19,62 +19,75 @@ A test helper is a Go function that serves as a reusable building block for e2e
 tests. Every e2e test MUST be composed from test helpers. Each helper should be
 focused on a single responsibility and reusable across tests.
 
-There are three categories of test helpers, ordered from heaviest to lightest:
+There are two categories of test helpers:
 
  - **Setup helpers** (`SetupX`) — have at least one Arrange step (and,
    therefore, Cleanup). They create or modify state in the environment and
-   provide a service with guarantees about that state.
+   provide a service with guarantees about that state. Setup helpers MUST
+   discover whether what they are setting up already exists before arranging
+   (see Discover step below). For most resources, this means a paired
+   `discover_X.go` and `setup_X.go`, where the setup helper calls the discover
+   helper.
  - **Discovery helpers** (`DiscoverX`) — discovery-only. They discover and
-   validate existing state but do not arrange anything.
- - **Initialization helpers** (`InitializeX`) — the lightest category. Unlike
-   discovery helpers, they do not look at environment state at all. They only
-   construct and return a value or service. They MUST have Provide and MAY have
-   Require; they have no other steps.
+   validate existing state in the environment (I/O: reading files, environment
+   variables, querying a cluster, reading kubeconfig) but do not arrange
+   anything and do not need cleanup.
+
+Pure value construction from arguments (no I/O) is not a test helper — use Go's
+standard `New*` pattern for that.
 
 All test helpers MUST follow common naming and signature conventions (see
 Signature below). Each helper is composed of the following steps (see
 corresponding sections below):
 
- - Require — all categories
- - Discover — setup and discovery helpers only
+ - Require — both categories
+ - Discover — both categories
  - Arrange/Act — setup helpers only
  - Cleanup — setup helpers only
- - Assert — setup and discovery helpers only
- - Provide — all categories
+ - Assert — both categories
+ - Provide — both categories
 
 ### Signature
 
-Here's a sample signature for a state `X`, which is provided by a SetupX setup
-helper.
+Note the first argument of every test helper, it MUST be `e *etesting.E`.
 
 ```go
 // SetupX Provides X, which is guaranteed to be ..., can be accessed via ...
-func SetupX(t *testing.T, <REQUIREMENTS>) <PROVIDED_X_SERVICE> {
-    // May call any test helpers (Setup, Discover, Initialize).
+func SetupX(e *etesting.E, <REQUIREMENTS>) <PROVIDED_X_SERVICE> {
+    // May call any test helpers (Setup, Discover).
+}
+
+// DiscoverX Discovers existing X, which is guaranteed to be ...
+func DiscoverX(e *etesting.E, <REQUIREMENTS>) <PROVIDED_X_SERVICE> {
+    // May call other Discover helpers, but NOT Setup helpers.
 }
 ```
 
-Discovery and initialization helpers follow the same pattern with their
-respective prefixes:
+### `t.Helper()` — do NOT use in test helpers
+
+Test helpers MUST NOT call `t.Helper()`. When a test fails inside a helper, the
+stack trace must point to the exact line inside the helper where the failure
+occurred — not to the caller. `t.Helper()` hides the helper from the stack
+trace, making it harder to diagnose failures.
+
+### Error message prefixes
+
+Error messages in test helpers MUST be prefixed with the step name, not the
+helper function name. Use lowercase step names matching the helper step
+structure: `require:`, `discover:`, `arrange:`, `cleanup:`, `assert:`.
 
 ```go
-// DiscoverX Discovers existing X, which is guaranteed to be ...
-func DiscoverX(t *testing.T, <REQUIREMENTS>) <PROVIDED_X_SERVICE> {
-    // May call other Discover and Initialize helpers, but NOT Setup helpers.
-}
-
-// InitializeX Initializes X service for ...
-func InitializeX(t *testing.T, <REQUIREMENTS>) <PROVIDED_X_SERVICE> {
-    // Must not call any other test helpers.
-}
+e.Fatal("require: option must not be empty")
 ```
 
-`t` is the main argument, which always comes first.
+Error messages that describe what happened (e.g., `"getting LVG %q: %v"`,
+`"creating DRBDResource %q: %v"`) do not need a step prefix — the context is
+clear from the message itself.
 
 ### Require
 
 This is what the test helper requires from the environment to be true. In order
-to enforce these requirements, it MAY accept arguments after `t` (compile-time
+to enforce these requirements, it MAY accept arguments after `e` (compile-time
 requirements) and also do its own validation of them at the beginning of the
 test helper.
 
@@ -115,7 +128,7 @@ Applies only to setup helpers.
 
 Setup helpers MAY leave side effects in the system after returning (see
 Arrange). But they MUST register cleanup at the test cleanup phase. To achieve
-that, setup helpers MUST use `t.Cleanup(func() { /* do cleanup here */ })`.
+that, setup helpers MUST use `e.Cleanup(func() { /* do cleanup here */ })`.
 
 As always with deferred cleanups, they MUST be deferred right after the Arrange
 of the corresponding side effect.
@@ -142,9 +155,6 @@ This is what the test helper returns to the calling test helper (or the root
 test). Usually it is a service encapsulating the provided state. It may then be
 passed to other test helpers that require it.
 
-For initialization helpers, Provide is the only required step (alongside
-optional Require). The helper just constructs and returns a value or service.
-
 Returning an error from a test helper does not make sense, since errors are
 reported as test failures.
 
@@ -160,7 +170,8 @@ desired state already exists and is valid. If it does, Arrange is skipped. If
 the discovered state is partially valid and would conflict with a new
 arrangement, this MUST be a fatal test failure. A setup helper that supports
 Arrange MUST also support Discover, unless the arrangement itself is
-idempotent.
+idempotent. For most resources, the discover logic SHOULD be extracted into a
+separate `DiscoverX` helper so it can be reused independently.
 
 **In discovery helpers:** Discover is the only meaningful step. The helper
 discovers and validates existing state, then provides it. If the state is not
@@ -177,38 +188,37 @@ running against a real environment.
 
 Arranging state in an environment is costly — we cannot afford doing it for each
 test case individually. Instead, tests are structured to reuse the environment
-as much as possible. This means a hierarchical test structure using `t.Run` for
+as much as possible. This means a hierarchical test structure using `e.Run` for
 subtests, where subtests run sequentially and reuse state defined in the parent
 scope.
 
 ```go
 func TestMain(t *testing.T) {
-    // Discover: read and validate configuration from the environment.
-    cfg := DiscoverConfig(t)
-    client := InitializeClient(t, cfg)
+    e := etesting.New(t)
+    client := DiscoverClient(e)
 
     // Arrange: set up shared environment state.
-    storageClass := SetupStorageClass(t, client)
-    // t.Cleanup registered inside SetupStorageClass.
+    storageClass := SetupStorageClass(e, client)
+    // e.Cleanup registered inside SetupStorageClass.
 
-    t.Run("WithSingleVolume", func(t *testing.T) {
+    e.Run("WithSingleVolume", func(e *etesting.E) {
         // Arrange: narrow state for this group of subtests.
-        volume := SetupVolume(t, client, storageClass)
+        volume := SetupVolume(e, client, storageClass)
 
-        t.Run("VolumeIsAccessible", func(t *testing.T) {
+        e.Run("VolumeIsAccessible", func(e *etesting.E) {
             // Test case: uses volume from parent scope, no extra arrange.
         })
 
-        t.Run("VolumeCanBeResized", func(t *testing.T) {
+        e.Run("VolumeCanBeResized", func(e *etesting.E) {
             // Test case: uses volume from parent scope, acts and asserts.
         })
     })
 
-    t.Run("WithReplicatedVolume", func(t *testing.T) {
+    e.Run("WithReplicatedVolume", func(e *etesting.E) {
         // Arrange: different state, same storageClass from root scope.
-        volume := SetupReplicatedVolume(t, client, storageClass)
+        volume := SetupReplicatedVolume(e, client, storageClass)
 
-        t.Run("ReplicationIsHealthy", func(t *testing.T) {
+        e.Run("ReplicationIsHealthy", func(e *etesting.E) {
             // Test case: uses volume from parent scope.
         })
     })
@@ -223,15 +233,66 @@ Subtests depend on state from the parent scope (Require) but do not provide
 anything.
 
 One important difference from setup helpers: in the root test, all arranged
-state is cleaned up before the test exits (via `t.Cleanup`), so no state leaks
+state is cleaned up before the test exits (via `e.Cleanup`), so no state leaks
 out.
 
 ### Configuration
 
-The root test discovers its configuration from a JSON file on the filesystem,
-with environment-specific variables. Keep a `.env.example.json` in the test
+The root test discovers its configuration from a JSON config file on the
+filesystem, with environment-specific variables. The `*E` context reads this
+file once in `etesting.New(t)`. Keep a `.env.example.json` in the test
 directory to document the expected configuration shape and help set up new
 environments.
+
+#### Config file structure
+
+The config file is a flat JSON object whose first-level keys serve two purposes:
+
+ - **Common options** — top-level scalar keys consumed by `*E` itself (e.g.,
+   `testId`). These are available to every helper via `e.TestID()`.
+ - **Per-helper sections** — top-level object keys, each named after the Go
+   options type that the section unmarshals into. Each helper reads its own
+   section via `e.Options(&opts)`, where the section key is inferred from the
+   type name of `opts` via reflection. Helpers that do not need config from the
+   file receive data through function arguments instead.
+
+This layout makes the config extensible: adding a new helper that needs
+configuration is just adding a new top-level key matching the options type name;
+no existing code changes.
+
+```json
+{
+  "testId": "e2e",
+  "FooOptions": {
+    "option1": "value1"
+  },
+  "BarOptions": {
+    "option2": 42
+  }
+}
+```
+
+#### Deterministic test IDs
+
+Resource names in e2e tests MUST include a deterministic test identifier (the
+`testId` config field, defaulting to `"e2e"`). Random or timestamped identifiers
+MUST NOT be used, because:
+
+ - Resources are expensive; cleanup MUST succeed after every run.
+ - If cleanup fails, the next run MUST produce a name conflict that immediately
+   surfaces the problem.
+ - A deterministic ID ensures names are stable across runs, so leftover
+   resources from a failed cleanup are detected.
+
+The `testId` MAY be overridden in the config to allow parallel test runs against
+the same cluster if needed.
+
+### File organization
+
+Each test helper MUST live in its own file. The file SHOULD be named after the
+helper (e.g., `setup_llvs.go` for `SetupLLVs`, `discover_nodes.go` for
+`DiscoverNodes`). Closely related private functions (cleanup, wait, internal
+types) MAY live in the same file as the helper they support.
 
 ## Test cases
 
@@ -255,7 +316,7 @@ has no relation to the actual Go test hierarchy.
  - **`TESTCASES.md`** is optimized for **readability**. Test cases are listed
    flat, grouped by topic for humans.
  - **Go test hierarchy** is optimized for **environment reuse**. Tests are
-   nested with `t.Run` so that subtests sharing the same preconditions live
+   nested with `e.Run` so that subtests sharing the same preconditions live
    under a common parent that arranges those preconditions once.
 
 These two views MUST be kept in sync: whenever a test case is added, renamed, or
@@ -265,6 +326,6 @@ removed in one, the other MUST be updated to match.
 
 When a test case is added to `TESTCASES.md`, the corresponding Go test MUST NOT
 simply be appended at the top level. Instead, find (or create) a place in the
-existing `t.Run` hierarchy where all of the test's preconditions are already
+existing `e.Run` hierarchy where all of the test's preconditions are already
 arranged by a parent scope. This ensures the environment is reused and avoids
 redundant setup.

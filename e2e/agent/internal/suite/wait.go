@@ -1,8 +1,9 @@
 package suite
 
 import (
-	"testing"
 	"time"
+
+	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/etesting"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,20 +19,18 @@ const (
 // type has the expected status, or the timeout expires.
 // Returns the last-observed DRBDResource.
 func waitForDRBDResourceCondition(
-	t *testing.T,
+	e *etesting.E,
 	cl client.Client,
 	name string,
 	condType string,
 	expectedStatus metav1.ConditionStatus,
 ) *v1alpha1.DRBDResource {
-	t.Helper()
-
 	deadline := time.Now().Add(defaultTimeout)
 
 	for {
 		drbdr := &v1alpha1.DRBDResource{}
-		if err := cl.Get(t.Context(), client.ObjectKey{Name: name}, drbdr); err != nil {
-			t.Fatalf("getting DRBDResource %q: %v", name, err)
+		if err := cl.Get(e.Context(), client.ObjectKey{Name: name}, drbdr); err != nil {
+			e.Fatalf("getting DRBDResource %q: %v", name, err)
 		}
 
 		for _, cond := range drbdr.Status.Conditions {
@@ -41,7 +40,7 @@ func waitForDRBDResourceCondition(
 		}
 
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for DRBDResource %q condition %s=%s; last conditions: %v",
+			e.Fatalf("timed out waiting for DRBDResource %q condition %s=%s; last conditions: %v",
 				name, condType, expectedStatus, formatConditions(drbdr.Status.Conditions))
 		}
 
@@ -53,18 +52,16 @@ func waitForDRBDResourceCondition(
 // populated with at least one entry that has a non-zero port.
 // Returns the last-observed DRBDResource.
 func waitForDRBDResourceAddresses(
-	t *testing.T,
+	e *etesting.E,
 	cl client.Client,
 	name string,
 ) *v1alpha1.DRBDResource {
-	t.Helper()
-
 	deadline := time.Now().Add(defaultTimeout)
 
 	for {
 		drbdr := &v1alpha1.DRBDResource{}
-		if err := cl.Get(t.Context(), client.ObjectKey{Name: name}, drbdr); err != nil {
-			t.Fatalf("getting DRBDResource %q: %v", name, err)
+		if err := cl.Get(e.Context(), client.ObjectKey{Name: name}, drbdr); err != nil {
+			e.Fatalf("getting DRBDResource %q: %v", name, err)
 		}
 
 		if hasValidAddresses(drbdr) {
@@ -72,7 +69,7 @@ func waitForDRBDResourceAddresses(
 		}
 
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for DRBDResource %q to have valid addresses; last addresses: %v",
+			e.Fatalf("timed out waiting for DRBDResource %q to have valid addresses; last addresses: %v",
 				name, drbdr.Status.Addresses)
 		}
 
