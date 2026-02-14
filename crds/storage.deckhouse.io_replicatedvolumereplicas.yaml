@@ -123,6 +123,8 @@ spec:
             - type
             type: object
             x-kubernetes-validations:
+            - message: nodeName is required for Access type
+              rule: self.type != 'Access' || has(self.nodeName)
             - message: lvmVolumeGroupName requires nodeName to be set
               rule: '!has(self.lvmVolumeGroupName) || has(self.nodeName)'
             - message: lvmVolumeGroupName can only be set for Diskful type
