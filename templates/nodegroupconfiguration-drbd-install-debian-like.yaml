@@ -203,13 +203,12 @@ spec:
     if [ "$need_disable_gcc_plugins" = "1" ]; then
       bb-log-info "Kernel was built with GCC 8 but gcc-8 is not available, disabling GCC plugins for module build"
       kernel_build="/lib/modules/$(uname -r)/build"
-      for mk in "$kernel_build/Makefile" "$kernel_build/scripts/Makefile.gcc-plugins"; do
-        if [ -f "$mk" ] && ! grep -q 'd8-drbd-disable-gcc-plugins' "$mk"; then
-          echo '' >> "$mk"
-          echo '# d8-drbd-disable-gcc-plugins: kernel built with different GCC' >> "$mk"
-          echo 'GCC_PLUGINS_CFLAGS :=' >> "$mk"
-        fi
-      done
+      makefile_build="$kernel_build/scripts/Makefile.build"
+      if [ -f "$makefile_build" ] && ! grep -q 'd8-drbd-disable-gcc-plugins' "$makefile_build"; then
+        echo '' >> "$makefile_build"
+        echo '# d8-drbd-disable-gcc-plugins: kernel built with different GCC' >> "$makefile_build"
+        echo 'c_flags := $(filter-out -fplugin=%, $(c_flags))' >> "$makefile_build"
+      fi
     fi
 
     cd /opt/deckhouse/drbd
