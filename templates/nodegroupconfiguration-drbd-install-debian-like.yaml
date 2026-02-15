@@ -205,12 +205,18 @@ spec:
       kernel_build="/lib/modules/$(uname -r)/build"
       for f in "$kernel_build/.config" "$kernel_build/include/config/auto.conf"; do
         if [ -f "$f" ] && grep -q '^CONFIG_GCC_PLUGINS=' "$f"; then
-          sed -i 's/^CONFIG_GCC_PLUGINS=.*/CONFIG_GCC_PLUGINS=n/' "$f"
+          sed -i 's/^CONFIG_GCC_PLUGINS=.*/CONFIG_GCC_PLUGINS=/' "$f"
         fi
       done
       autoconf_h="$kernel_build/include/generated/autoconf.h"
       if [ -f "$autoconf_h" ] && grep -q '^#define CONFIG_GCC_PLUGINS ' "$autoconf_h"; then
         sed -i 's/^#define CONFIG_GCC_PLUGINS .*/#undef CONFIG_GCC_PLUGINS/' "$autoconf_h"
+      fi
+      gcc_plugins_mk="$kernel_build/scripts/Makefile.gcc-plugins"
+      if [ -f "$gcc_plugins_mk" ] && ! grep -q 'GCC_PLUGINS_CFLAGS :=$' "$gcc_plugins_mk"; then
+        echo '' >> "$gcc_plugins_mk"
+        echo '# Override: disable plugins for external module build (kernel built with different GCC)' >> "$gcc_plugins_mk"
+        echo 'GCC_PLUGINS_CFLAGS :=' >> "$gcc_plugins_mk"
       fi
     fi
 
