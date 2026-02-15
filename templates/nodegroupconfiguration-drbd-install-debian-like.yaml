@@ -205,19 +205,9 @@ spec:
       gcc_wrapper="/opt/deckhouse/drbd/bin/gcc-no-plugins"
       mkdir -p "$(dirname "$gcc_wrapper")"
       real_gcc="$(which $gccVersion 2>/dev/null || which gcc 2>/dev/null || echo /usr/bin/gcc)"
-      cat > "$gcc_wrapper" << 'GCCWRAPPER'
-#!/bin/bash
-args=()
-for arg in "$@"; do
-  case "$arg" in
-    -fplugin=*|-fplugin-arg-*) ;;
-    *) args+=("$arg") ;;
-  esac
-done
-exec REAL_GCC_PLACEHOLDER "${args[@]}"
-GCCWRAPPER
-      sed -i "s|REAL_GCC_PLACEHOLDER|$real_gcc|" "$gcc_wrapper"
-      chmod +x "$gcc_wrapper"
+      printf '%s\n' '#!/bin/bash' 'args=()' 'for arg in "$$@"; do' '  case "$$arg" in' '    -fplugin=*|-fplugin-arg-*) ;;' '    *) args+=("$$arg") ;;' '  esac' 'done' 'exec REAL_GCC_PLACEHOLDER "$${args[@]}"' > "$$gcc_wrapper"
+      sed -i "s|REAL_GCC_PLACEHOLDER|$$real_gcc|" "$$gcc_wrapper"
+      chmod +x "$$gcc_wrapper"
       export CC="$gcc_wrapper"
     fi
 
