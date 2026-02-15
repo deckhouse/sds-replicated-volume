@@ -209,6 +209,7 @@ spec:
       sed -i "s|REAL_GCC_PLACEHOLDER|$$real_gcc|" "$$gcc_wrapper"
       chmod +x "$$gcc_wrapper"
       export CC="$gcc_wrapper"
+      make_extra_args="CC=$gcc_wrapper"
     fi
 
     cd /opt/deckhouse/drbd
