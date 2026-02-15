@@ -203,21 +203,13 @@ spec:
     if [ "$need_disable_gcc_plugins" = "1" ]; then
       bb-log-info "Kernel was built with GCC 8 but gcc-8 is not available, disabling GCC plugins for module build"
       kernel_build="/lib/modules/$(uname -r)/build"
-      for f in "$kernel_build/.config" "$kernel_build/include/config/auto.conf"; do
-        if [ -f "$f" ] && grep -q '^CONFIG_GCC_PLUGINS=' "$f"; then
-          sed -i 's/^CONFIG_GCC_PLUGINS=.*/CONFIG_GCC_PLUGINS=/' "$f"
+      for mk in "$kernel_build/Makefile" "$kernel_build/scripts/Makefile.gcc-plugins"; do
+        if [ -f "$mk" ] && ! grep -q 'd8-drbd-disable-gcc-plugins' "$mk"; then
+          echo '' >> "$mk"
+          echo '# d8-drbd-disable-gcc-plugins: kernel built with different GCC' >> "$mk"
+          echo 'GCC_PLUGINS_CFLAGS :=' >> "$mk"
         fi
       done
-      autoconf_h="$kernel_build/include/generated/autoconf.h"
-      if [ -f "$autoconf_h" ] && grep -q '^#define CONFIG_GCC_PLUGINS ' "$autoconf_h"; then
-        sed -i 's/^#define CONFIG_GCC_PLUGINS .*/#undef CONFIG_GCC_PLUGINS/' "$autoconf_h"
-      fi
-      gcc_plugins_mk="$kernel_build/scripts/Makefile.gcc-plugins"
-      if [ -f "$gcc_plugins_mk" ] && ! grep -q 'GCC_PLUGINS_CFLAGS :=$' "$gcc_plugins_mk"; then
-        echo '' >> "$gcc_plugins_mk"
-        echo '# Override: disable plugins for external module build (kernel built with different GCC)' >> "$gcc_plugins_mk"
-        echo 'GCC_PLUGINS_CFLAGS :=' >> "$gcc_plugins_mk"
-      fi
     fi
 
     cd /opt/deckhouse/drbd
