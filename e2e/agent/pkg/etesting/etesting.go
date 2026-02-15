@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-const defaultTestID = "e2e"
-
 // E is the e2e test context. It embeds *testing.T and adds test-wide
 // configuration: a stable test ID and per-helper options sections discovered
 // from a JSON config file.
@@ -16,7 +14,6 @@ type E struct {
 	*testing.T
 	testID   string
 	sections map[string]json.RawMessage
-	cache    map[string]any
 }
 
 // New discovers e2e test configuration from a JSON config file and returns a
@@ -41,9 +38,8 @@ func New(t *testing.T) *E {
 		t.Fatalf("parsing config top-level from %s: %v", path, err)
 	}
 
-	testID := top.TestID
-	if testID == "" {
-		testID = defaultTestID
+	if top.TestID == "" {
+		t.Fatal("config: testId must not be empty")
 	}
 
 	// Parse all sections as raw JSON for on-demand unmarshalling.
@@ -57,9 +53,8 @@ func New(t *testing.T) *E {
 
 	return &E{
 		T:        t,
-		testID:   testID,
+		testID:   top.TestID,
 		sections: raw,
-		cache:    make(map[string]any),
 	}
 }
 
@@ -72,57 +67,33 @@ func (e *E) TestID() string {
 
 // Options unmarshals the config section into target. The section key is derived
 // from the Go type name of *target via reflection (e.g., *DRBDResourcesOptions
-// looks up section "DRBDResourcesOptions"). Results are cached; subsequent calls
-// for the same type return a deep copy without re-unmarshalling.
+// looks up section "DRBDResourcesOptions"). Each call unmarshals from the raw
+// JSON, so callers always get an independent copy.
 func (e *E) Options(target any) {
 	typ := reflect.TypeOf(target)
 	if typ.Kind() != reflect.Pointer || typ.Elem().Kind() != reflect.Struct {
-		e.Fatalf("Options: target must be a pointer to struct, got %T", target)
+		e.Fatalf("target must be a pointer to struct, got %T", target)
 	}
 	typeName := typ.Elem().Name()
 
-	if cached, ok := e.cache[typeName]; ok {
-		// Deep copy via JSON round-trip.
-		data, err := json.Marshal(cached)
-		if err != nil {
-			e.Fatalf("Options: marshalling cached %q: %v", typeName, err)
-		}
-		if err := json.Unmarshal(data, target); err != nil {
-			e.Fatalf("Options: unmarshalling cached %q: %v", typeName, err)
-		}
-		return
-	}
-
 	raw, ok := e.sections[typeName]
 	if !ok {
-		e.Fatalf("config: section %q not found", typeName)
+		e.Fatalf("section %q not found", typeName)
 	}
 
 	if err := json.Unmarshal(raw, target); err != nil {
-		e.Fatalf("config: unmarshalling section %q: %v", typeName, err)
+		e.Fatalf("unmarshalling section %q: %v", typeName, err)
 	}
-
-	// Store a deep copy in cache.
-	cacheValue := reflect.New(typ.Elem()).Interface()
-	cacheData, err := json.Marshal(target)
-	if err != nil {
-		e.Fatalf("Options: marshalling for cache %q: %v", typeName, err)
-	}
-	if err := json.Unmarshal(cacheData, cacheValue); err != nil {
-		e.Fatalf("Options: unmarshalling for cache %q: %v", typeName, err)
-	}
-	e.cache[typeName] = cacheValue
 }
 
-// Run runs fn as a subtest of e. The child *E shares testID, config sections,
-// and cache with the parent, but wraps the subtest's *testing.T.
+// Run runs fn as a subtest of e. The child *E shares testID and config sections
+// with the parent, but wraps the subtest's *testing.T.
 func (e *E) Run(name string, fn func(*E)) bool {
 	return e.T.Run(name, func(t *testing.T) {
 		child := &E{
 			T:        t,
 			testID:   e.testID,
 			sections: e.sections,
-			cache:    e.cache,
 		}
 		fn(child)
 	})

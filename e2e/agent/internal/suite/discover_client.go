@@ -8,6 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
@@ -41,4 +42,21 @@ func DiscoverClient(e *etesting.E) client.Client {
 	}
 
 	return cl
+}
+
+// DiscoverClientset Discovers a Kubernetes clientset from kubeconfig.
+// Used for operations that require the standard client-go API (e.g., pod log
+// streaming).
+func DiscoverClientset(e *etesting.E) *kubernetes.Clientset {
+	kubeConfig, err := config.GetConfig()
+	if err != nil {
+		e.Fatalf("getting kubeconfig for clientset: %v", err)
+	}
+
+	clientset, err := kubernetes.NewForConfig(kubeConfig)
+	if err != nil {
+		e.Fatalf("creating clientset: %v", err)
+	}
+
+	return clientset
 }
