@@ -215,7 +215,11 @@ spec:
 
     cd /opt/deckhouse/drbd
     make clean || true
-    make $make_extra_args
+    if [ "$need_disable_gcc_plugins" = "1" ]; then
+      (export PATH="$drbd_bin:$PATH" CC="$drbd_bin/gcc"; make CC="$drbd_bin/gcc")
+    else
+      make $make_extra_args
+    fi
     make install
     if [ -e "/etc/modules" ]; then
       if grep -q -E '^drbd$' /etc/modules; then
