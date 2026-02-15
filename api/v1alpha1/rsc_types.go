@@ -145,6 +145,7 @@ type ReplicatedStorageClassSpec struct {
 	//
 	// TODO(systemnetwork): Currently only "Internal" (default node network) is supported.
 	// Custom network support requires NetworkNode watch implementation in the controller.
+	// When multi-network support is implemented, raise MaxItems to 10.
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=1
 	// +kubebuilder:validation:Items={type=string,maxLength=64}

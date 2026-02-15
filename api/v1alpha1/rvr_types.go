@@ -200,7 +200,7 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:MaxItems=10
 	// +listType=atomic
 	// +optional
 	Addresses []DRBDResourceAddressStatus `json:"addresses,omitempty"`
@@ -266,7 +266,7 @@ type ReplicatedVolumeReplicaStatus struct {
 
 	// Peers contains the status of connections to peer replicas.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="peers[].name must be unique"
-	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:MaxItems=31
 	// +listType=atomic
 	// +optional
 	Peers []ReplicatedVolumeReplicaStatusPeerStatus `json:"peers,omitempty"`
@@ -362,7 +362,7 @@ type ReplicatedVolumeReplicaStatusPeerStatus struct {
 
 	// ConnectionEstablishedOn lists system network names where connection to this peer is established.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="connectionEstablishedOn must be unique"
-	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:MaxItems=10
 	// +kubebuilder:validation:items:MaxLength=64
 	// +listType=atomic
 	// +optional

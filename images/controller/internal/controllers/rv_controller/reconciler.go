@@ -71,7 +71,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 	if rv == nil {
 		// RV deleted. Handle orphaned RVAs (set conditions, remove finalizers).
-		rvas, err := r.getRVAs(rf.Ctx(), req.Name)
+		rvas, err := r.getRVAsSorted(rf.Ctx(), req.Name)
 		if err != nil {
 			return rf.Failf(err, "listing RVAs for deleted RV").ToCtrl()
 		}
@@ -88,7 +88,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Load child resources.
-	rvas, err := r.getRVAs(rf.Ctx(), req.Name)
+	rvas, err := r.getRVAsSorted(rf.Ctx(), req.Name)
 	if err != nil {
 		return rf.Failf(err, "listing ReplicatedVolumeAttachments").ToCtrl()
 	}
@@ -132,16 +132,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return outcome.ToCtrl()
 	}
 
-	// Reconcile RVA and RVR finalizers.
-	outcome = flow.MergeReconciles(
-		outcome,
-		r.reconcileRVAFinalizers(rf.Ctx(), rv, rvas),
-		r.reconcileRVRFinalizers(rf.Ctx(), rv, rvrs),
-	)
-	if outcome.ShouldReturn() {
-		return outcome.ToCtrl()
-	}
-
 	base := rv.DeepCopy()
 
 	// Preparatory actions.
@@ -178,6 +168,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Fail(eo.Error()).ToCtrl()
 	}
 	outcome = outcome.WithChangeFrom(eo)
+
+	// Reconcile RVA and RVR finalizers.
+	outcome = flow.MergeReconciles(
+		outcome,
+		r.reconcileRVAFinalizers(rf.Ctx(), rv, rvas),
+		r.reconcileRVRFinalizers(rf.Ctx(), rv, rvrs),
+	)
+	if outcome.ShouldReturn() {
+		return outcome.ToCtrl()
+	}
 
 	if outcome.DidChange() {
 		if err := r.patchRVStatus(rf.Ctx(), rv, base); err != nil {
@@ -998,7 +998,15 @@ func (r *Reconciler) reconcileNormalOperation(
 	}
 	outcome = outcome.WithChangeFrom(eo)
 
-	// Step 3: Delete unnecessary Access RVRs (redundant or unused).
+	// Step 3: Process attach/detach transitions.
+	atts, eo2 := ensureDatameshAttachments(rf.Ctx(), rv, *rvrs, rvas, rsp)
+	if eo2.Error() != nil {
+		return rf.Fail(eo2.Error())
+	}
+	outcome = outcome.WithChangeFrom(eo2)
+	_ = atts // TODO: use atts to set RVA conditions
+
+	// Step 4: Delete unnecessary Access RVRs (redundant or unused).
 	outcome = outcome.Merge(r.reconcileDeleteAccessReplicas(rf.Ctx(), rv, rvrs, rvas))
 
 	return outcome
@@ -1007,13 +1015,14 @@ func (r *Reconciler) reconcileNormalOperation(
 // computeDatameshTransitionProgressMessage builds a detailed transition message showing
 // confirmation progress and errors from waiting replicas.
 //
-// skipError (optional) is called for each waiting replica that has Configured=False.
-// If it returns true, the replica is not reported as an error.
+// skipError (optional) is called for each waiting replica that has a False condition
+// from conditionTypes. If it returns true, the replica is not reported as an error.
 func computeDatameshTransitionProgressMessage(
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 	revision int64,
 	mustConfirm, confirmed idset.IDSet,
 	skipError func(id uint8, cond *metav1.Condition) bool,
+	conditionTypes ...string,
 ) string {
 	waiting := mustConfirm.Difference(confirmed)
 
@@ -1028,7 +1037,7 @@ func computeDatameshTransitionProgressMessage(
 	fmt.Fprintf(&msg, ". Waiting: [%s]", waiting)
 
 	var found idset.IDSet
-	hasErrors := false
+	errorGroups := 0
 	for _, rvr := range rvrs {
 		id := rvr.ID()
 		if !waiting.Contains(id) {
@@ -1036,34 +1045,44 @@ func computeDatameshTransitionProgressMessage(
 		}
 		found.Add(id)
 
-		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
-		if cond != nil && cond.Status == metav1.ConditionFalse && cond.ObservedGeneration == rvr.Generation {
+		replicaHasError := false
+		for _, condType := range conditionTypes {
+			cond := obju.GetStatusCondition(rvr, condType)
+			if cond == nil || cond.Status != metav1.ConditionFalse || cond.ObservedGeneration != rvr.Generation {
+				continue
+			}
 			if skipError != nil && skipError(id, cond) {
 				continue
 			}
 
-			if !hasErrors {
-				msg.WriteString(". Errors: [")
-				hasErrors = true
+			if !replicaHasError {
+				if errorGroups == 0 {
+					msg.WriteString(". Errors: ")
+				} else {
+					msg.WriteString(" | ")
+				}
+				fmt.Fprintf(&msg, "#%d ", id)
+				replicaHasError = true
+				errorGroups++
 			} else {
-				msg.WriteString("; ")
+				msg.WriteString(", ")
 			}
-			fmt.Fprintf(&msg, "#%d: Configured=False (%s)", id, cond.Reason)
+			fmt.Fprintf(&msg, "%s/%s", condType, cond.Reason)
+			if cond.Message != "" {
+				msg.WriteString(": ")
+				msg.WriteString(cond.Message)
+			}
 		}
 	}
 
 	for id := range waiting.Difference(found).All() {
-		if !hasErrors {
-			msg.WriteString(". Errors: [")
-			hasErrors = true
+		if errorGroups == 0 {
+			msg.WriteString(". Errors: ")
 		} else {
-			msg.WriteString("; ")
+			msg.WriteString(" | ")
 		}
-		fmt.Fprintf(&msg, "#%d: replica not found", id)
-	}
-
-	if hasErrors {
-		msg.WriteByte(']')
+		fmt.Fprintf(&msg, "#%d Replica not found", id)
+		errorGroups++
 	}
 
 	return msg.String()
@@ -2194,9 +2213,9 @@ func (r *Reconciler) getRSC(ctx context.Context, name string) (*v1alpha1.Replica
 
 // --- RVA ---
 
-// getRVAs lists ReplicatedVolumeAttachments for the given RV name.
-// The returned slice is unordered.
-func (r *Reconciler) getRVAs(ctx context.Context, rvName string) ([]*v1alpha1.ReplicatedVolumeAttachment, error) {
+// getRVAs lists ReplicatedVolumeAttachments for the given RV name,
+// sorted by NodeName (primary), CreationTimestamp (secondary), Name (tertiary).
+func (r *Reconciler) getRVAsSorted(ctx context.Context, rvName string) ([]*v1alpha1.ReplicatedVolumeAttachment, error) {
 	var list v1alpha1.ReplicatedVolumeAttachmentList
 	if err := r.cl.List(ctx, &list,
 		client.MatchingFields{indexes.IndexFieldRVAByReplicatedVolumeName: rvName},
@@ -2209,6 +2228,16 @@ func (r *Reconciler) getRVAs(ctx context.Context, rvName string) ([]*v1alpha1.Re
 	for i := range list.Items {
 		result[i] = &list.Items[i]
 	}
+
+	slices.SortFunc(result, func(a, b *v1alpha1.ReplicatedVolumeAttachment) int {
+		if c := cmp.Compare(a.Spec.NodeName, b.Spec.NodeName); c != 0 {
+			return c
+		}
+		if c := a.CreationTimestamp.Time.Compare(b.CreationTimestamp.Time); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Name, b.Name)
+	})
 	return result, nil
 }
 

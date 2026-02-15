@@ -72,6 +72,25 @@ type ReplicatedVolumeSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	ReplicatedStorageClassName string `json:"replicatedStorageClassName"`
+
+	// MaxAttachments is the maximum number of nodes this volume can be attached to simultaneously.
+	//
+	// WARNING: Values greater than 1 enable multi-attach mode. In this mode the block device
+	// is writable from multiple nodes concurrently. The consuming application MUST guarantee
+	// that it never writes to the same disk regions from different nodes simultaneously.
+	// In particular:
+	//   - Mounting the volume as a regular filesystem (ext4, xfs, etc.) from more than one node
+	//     is NOT safe unless ALL mounts are read-only. Use a cluster-aware filesystem (e.g. GFS2,
+	//     OCFS2) or application-level coordination instead.
+	//   - Concurrent writes to overlapping regions from different nodes produce UNDEFINED behavior:
+	//     different Diskful replicas may apply writes in different order, leading to divergent data.
+	//   - Use at your own risk and with full understanding of the implications.
+	//
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=32
+	// +kubebuilder:default=1
+	MaxAttachments byte `json:"maxAttachments"`
 }
 
 // +kubebuilder:object:generate=true
@@ -273,7 +292,7 @@ type ReplicatedVolumeDatameshTransitionFormation struct {
 type ReplicatedVolumeDatamesh struct {
 	// SystemNetworkNames is the list of system network names for DRBD communication.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="systemNetworkNames must be unique"
-	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:MaxItems=10
 	// +kubebuilder:validation:items:MaxLength=64
 	// +kubebuilder:default={}
 	// +listType=atomic
@@ -289,23 +308,27 @@ type ReplicatedVolumeDatamesh struct {
 	// +optional
 	SharedSecretAlg SharedSecretAlg `json:"sharedSecretAlg,omitempty"`
 
-	// AllowMultiattach enables multiattach mode for the datamesh.
+	// Multiattach enables multiattach mode for the datamesh.
 	// +kubebuilder:default=false
-	AllowMultiattach bool `json:"allowMultiattach"`
+	Multiattach bool `json:"multiattach,omitempty"`
+
 	// Size is the desired size of the volume.
 	// +kubebuilder:validation:Required
 	Size resource.Quantity `json:"size"`
+
 	// Members is the list of datamesh members.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="members[].name must be unique"
-	// +kubebuilder:validation:MaxItems=24
+	// +kubebuilder:validation:MaxItems=32
 	// +kubebuilder:default={}
 	// +listType=atomic
 	Members []ReplicatedVolumeDatameshMember `json:"members"`
+
 	// Quorum is the quorum value for the datamesh.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=13
 	// +kubebuilder:default=0
 	Quorum byte `json:"quorum"`
+
 	// QuorumMinimumRedundancy is the minimum redundancy required for quorum.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=8
@@ -380,7 +403,7 @@ type ReplicatedVolumeDatameshMember struct {
 	// Addresses is the list of DRBD addresses for this member.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))",message="addresses[].systemNetworkName must be unique"
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:MaxItems=10
 	// +listType=atomic
 	Addresses []DRBDResourceAddressStatus `json:"addresses"`
 

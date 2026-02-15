@@ -3056,13 +3056,13 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 		Expect(spec.Role).To(Equal(v1alpha1.DRBDRolePrimary))
 	})
 
-	It("sets AllowTwoPrimaries from datamesh.AllowMultiattach when member is present", func() {
+	It("sets AllowTwoPrimaries from datamesh.Multiattach when member is present", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
 			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			AllowMultiattach: true,
+			Multiattach: true,
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
 			Name: "pvc-abc-1",
@@ -3073,13 +3073,13 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 		Expect(spec.AllowTwoPrimaries).To(BeTrue())
 	})
 
-	It("sets AllowTwoPrimaries=false when member and datamesh.AllowMultiattach=false", func() {
+	It("sets AllowTwoPrimaries=false when member and datamesh.Multiattach=false", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
 			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			AllowMultiattach: false,
+			Multiattach: false,
 		}
 		member := &v1alpha1.ReplicatedVolumeDatameshMember{
 			Name: "pvc-abc-1",
