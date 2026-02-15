@@ -209,7 +209,8 @@ spec:
       sed -i "s|REAL_GCC_PLACEHOLDER|$real_gcc|" "$drbd_bin/gcc"
       chmod +x "$drbd_bin/gcc"
       export PATH="$drbd_bin:$PATH"
-      export CC="gcc"
+      export CC="$drbd_bin/gcc"
+      make_extra_args="CC=$drbd_bin/gcc"
     fi
 
     cd /opt/deckhouse/drbd
