@@ -137,8 +137,22 @@ spec:
       fi
     fi
 
-    # Check, if we need gcc version 12
-    gccVersion="$(cat /proc/version | grep -q x86_64-linux-gnu-gcc-12 && echo gcc-12 || echo gcc)"
+    # Detect GCC version used to build the kernel - kernel modules must use the same compiler
+    # to avoid "incompatible gcc/plugin versions" errors with stackleak/structleak plugins
+    proc_version="$(cat /proc/version)"
+    need_disable_gcc_plugins=0
+    if echo "$proc_version" | grep -q 'x86_64-linux-gnu-gcc-12'; then
+      gccVersion="gcc-12"
+    elif echo "$proc_version" | grep -qE 'gcc.*\b8\.[0-9]+\.[0-9]+'; then
+      if apt-get install -y gcc-8 2>/dev/null; then
+        gccVersion="gcc-8"
+      else
+        gccVersion="gcc"
+        need_disable_gcc_plugins=1
+      fi
+    else
+      gccVersion="gcc"
+    fi
     bb-apt-install make bind9-host patch mokutil $gccVersion
     check_sb_state="$(mokutil --sb-state || echo "Not supported")"
     if [[ "$check_sb_state" == "SecureBoot enabled" ]]; then
@@ -184,9 +198,20 @@ spec:
 
     bb-log-info "SPAAS service is accessible, starting DRBD building"
 
+    export CC=$gccVersion
+    make_extra_args=""
+    if [ "$need_disable_gcc_plugins" = "1" ]; then
+      bb-log-info "Kernel was built with GCC 8 but gcc-8 is not available, disabling GCC plugins for module build"
+      kernel_build="/lib/modules/$(uname -r)/build"
+      if [ -f "$kernel_build/.config" ]; then
+        sed -i 's/^CONFIG_GCC_PLUGINS=.*/CONFIG_GCC_PLUGINS=n/' "$kernel_build/.config"
+      fi
+      make_extra_args="GCC_PLUGINS_CFLAGS="
+    fi
+
     cd /opt/deckhouse/drbd
     make clean || true
-    make
+    make $make_extra_args
     make install
     if [ -e "/etc/modules" ]; then
       if grep -q -E '^drbd$' /etc/modules; then
