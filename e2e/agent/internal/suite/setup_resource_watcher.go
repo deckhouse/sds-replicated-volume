@@ -32,6 +32,7 @@ type ResourceWatcher struct {
 //
 // The watcher is stopped during cleanup.
 func SetupResourceWatcher(
+	ctx context.Context,
 	e *etesting.E,
 	cl client.Client,
 	key client.ObjectKey,
@@ -57,7 +58,7 @@ func SetupResourceWatcher(
 		e.Fatalf("resource monitor: creating watch client: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(e.Context())
+	ctx, cancel := context.WithCancel(ctx)
 	wg := &sync.WaitGroup{}
 
 	wg.Go(func() {

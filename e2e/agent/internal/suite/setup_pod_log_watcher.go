@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -24,14 +25,14 @@ type PodLogMonitorOptions struct {
 // Key is the pod name, Value is the log line.
 type PodLogLine = utils.KeyedEvent[string, string]
 
-// SetupPodLogWatcher discovers a clientset, starts streaming logs from a single
-// pod, and returns an EventSource[string]. The stream is stopped during cleanup.
+// SetupPodLogWatcher starts streaming logs from a single pod and returns an
+// EventSource[string]. The stream is stopped during cleanup.
 func SetupPodLogWatcher(
 	e *etesting.E,
+	clientset *kubernetes.Clientset,
 	namespace string,
 	podName string,
 ) utils.EventSource[string] {
-	clientset := DiscoverClientset(e)
 	dispatcher := utils.NewEventDispatcher[string](nil)
 
 	ctx, cancel := context.WithCancel(e.Context())
@@ -68,11 +69,13 @@ func SetupPodLogWatcher(
 // matching the label selector, starts a log watcher for each pod, and returns a
 // single EventSource[PodLogLine] that fans in events from all watchers keyed by
 // pod name.
-func SetupPodsLogWatcher(e *etesting.E) utils.EventSource[PodLogLine] {
+func SetupPodsLogWatcher(
+	e *etesting.E,
+	cl client.Client,
+	clientset *kubernetes.Clientset,
+) utils.EventSource[PodLogLine] {
 	var opts PodLogMonitorOptions
 	e.Options(&opts)
-
-	cl := DiscoverClient(e)
 
 	selector, err := labels.Parse(opts.LabelSelector)
 	if err != nil {
@@ -94,7 +97,7 @@ func SetupPodsLogWatcher(e *etesting.E) utils.EventSource[PodLogLine] {
 	sources := make(map[string]utils.EventSource[string], len(podList.Items))
 	for i := range podList.Items {
 		podName := podList.Items[i].Name
-		sources[podName] = SetupPodLogWatcher(e, opts.Namespace, podName)
+		sources[podName] = SetupPodLogWatcher(e, clientset, opts.Namespace, podName)
 	}
 
 	return utils.NewMultiEventSource(sources)
