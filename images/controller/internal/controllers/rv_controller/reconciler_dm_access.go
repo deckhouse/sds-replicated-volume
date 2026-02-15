@@ -28,6 +28,10 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
+// ──────────────────────────────────────────────────────────────────────────────
+// ensureDatameshAccessReplicas
+//
+
 // ensureDatameshAccessReplicas coordinates datamesh Access replica membership:
 // completes finished transitions, processes join requests, and processes leave requests.
 func ensureDatameshAccessReplicas(
@@ -110,6 +114,10 @@ func ensureDatameshAccessReplicas(
 	return ef.Ok().ReportChangedIf(changed)
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// ensureDatameshAccessReplicaTransitionProgress
+//
+
 // ensureDatameshAccessReplicaTransitionProgress checks confirmation progress for a single
 // AddAccessReplica or RemoveAccessReplica transition and updates messages.
 // Returns (completed, changed). Does NOT delete the transition — the caller handles that.
@@ -146,18 +154,19 @@ func ensureDatameshAccessReplicaTransitionProgress(
 		return true, changed
 	}
 
-	// For AddAccessReplica: the subject replica is expected to have Configured=False
-	// with reason PendingJoin (it has not joined the datamesh yet) — not an error.
+	// For AddAccessReplica: the subject replica is expected to have DRBDConfigured=False
+	// with reason PendingDatameshJoin (it has not joined the datamesh yet) — not an error.
 	var skipError func(uint8, *metav1.Condition) bool
 	if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica {
 		skipError = func(id uint8, cond *metav1.Condition) bool {
-			return id == replicaID && cond.Reason == v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin
+			return id == replicaID && cond.Reason == v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingDatameshJoin
 		}
 	}
 
 	// Transition in progress — update messages.
 	changed = applyTransitionMessage(t,
-		computeDatameshTransitionProgressMessage(rvrs, t.DatameshRevision, mustConfirm, confirmed, skipError),
+		computeDatameshTransitionProgressMessage(rvrs, t.DatameshRevision, mustConfirm, confirmed, skipError,
+			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
 	)
 
 	progress := fmt.Sprintf("%d/%d replicas confirmed revision %d",
@@ -171,6 +180,10 @@ func ensureDatameshAccessReplicaTransitionProgress(
 
 	return false, changed
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ensureDatameshAddAccessReplica
+//
 
 // ensureDatameshAddAccessReplica checks guards and creates an AddAccessReplica transition
 // for a single pending join request. Returns true if rv was changed.
@@ -261,6 +274,10 @@ func ensureDatameshAddAccessReplica(
 
 	return true
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ensureDatameshRemoveAccessReplica
+//
 
 // ensureDatameshRemoveAccessReplica checks guards and creates a RemoveAccessReplica transition
 // for a single pending leave request. Returns true if rv was changed.

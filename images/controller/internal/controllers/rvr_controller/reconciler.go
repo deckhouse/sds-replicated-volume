@@ -2799,7 +2799,7 @@ func computeTargetDRBDRSpec(
 		} else {
 			spec.Role = v1alpha1.DRBDRoleSecondary
 		}
-		spec.AllowTwoPrimaries = datamesh.AllowMultiattach
+		spec.AllowTwoPrimaries = datamesh.Multiattach
 
 		// Quorum: diskless node quorum depends on connection to enough UpToDate diskful nodes that have quorum.
 		if spec.Type == v1alpha1.DRBDResourceTypeDiskless {

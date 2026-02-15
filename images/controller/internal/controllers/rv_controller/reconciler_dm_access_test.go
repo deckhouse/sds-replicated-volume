@@ -412,20 +412,20 @@ var _ = Describe("ensureDatameshAccessReplicaTransitionProgress", func() {
 		Expect(prt.Message).To(ContainSubstring("Leaving datamesh"))
 	})
 
-	It("does not show PendingJoin as error for AddAccessReplica subject", func() {
+	It("does not show PendingDatameshJoin as error for AddAccessReplica subject", func() {
 		t := &v1alpha1.ReplicatedVolumeDatameshTransition{
 			Type:             v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica,
 			DatameshRevision: 6, ReplicaName: "rv-1-1", StartedAt: metav1.Now(),
 		}
 		prt := mkPRT("rv-1-1", true)
-		// Diskful confirmed. Subject waiting with Configured=False/PendingJoin.
+		// Diskful confirmed. Subject waiting with DRBDConfigured=False/PendingDatameshJoin.
 		subjectRVR := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rv-1-1", Generation: 1},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 				DatameshRevision: 5,
 				Conditions: []metav1.Condition{
-					{Type: v1alpha1.ReplicatedVolumeReplicaCondConfiguredType, Status: metav1.ConditionFalse,
-						Reason: v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin, ObservedGeneration: 1},
+					{Type: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType, Status: metav1.ConditionFalse,
+						Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingDatameshJoin, ObservedGeneration: 1},
 				},
 			},
 		}
@@ -435,25 +435,25 @@ var _ = Describe("ensureDatameshAccessReplicaTransitionProgress", func() {
 
 		Expect(completed).To(BeFalse())
 		Expect(changed).To(BeTrue())
-		// PendingJoin should NOT appear in errors.
+		// PendingDatameshJoin should NOT appear in errors.
 		Expect(t.Message).NotTo(ContainSubstring("Errors"))
-		Expect(t.Message).NotTo(ContainSubstring("PendingJoin"))
+		Expect(t.Message).NotTo(ContainSubstring("PendingDatameshJoin"))
 		Expect(t.Message).To(ContainSubstring("1/2"))
 	})
 
-	It("shows other Configured=False reasons as errors for AddAccessReplica subject", func() {
+	It("shows other DRBDConfigured=False reasons as errors for AddAccessReplica subject", func() {
 		t := &v1alpha1.ReplicatedVolumeDatameshTransition{
 			Type:             v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica,
 			DatameshRevision: 6, ReplicaName: "rv-1-1", StartedAt: metav1.Now(),
 		}
 		prt := mkPRT("rv-1-1", true)
-		// Subject waiting with Configured=False/ConfigurationFailed — this IS an error.
+		// Subject waiting with DRBDConfigured=False/ConfigurationFailed — this IS an error.
 		subjectRVR := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rv-1-1", Generation: 1},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 				DatameshRevision: 5,
 				Conditions: []metav1.Condition{
-					{Type: v1alpha1.ReplicatedVolumeReplicaCondConfiguredType, Status: metav1.ConditionFalse,
+					{Type: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType, Status: metav1.ConditionFalse,
 						Reason: "ConfigurationFailed", ObservedGeneration: 1},
 				},
 			},
@@ -542,13 +542,13 @@ var _ = Describe("ensureDatameshAccessReplicas", func() {
 		Expect(rv.Status.DatameshTransitions[0].Message).To(ContainSubstring("#1"))
 	})
 
-	It("surfaces errors from Configured condition", func(ctx SpecContext) {
+	It("surfaces errors from DRBDConfigured condition", func(ctx SpecContext) {
 		failingRVR := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rv-1-0", Generation: 1},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 				DatameshRevision: 5,
 				Conditions: []metav1.Condition{
-					{Type: v1alpha1.ReplicatedVolumeReplicaCondConfiguredType, Status: metav1.ConditionFalse,
+					{Type: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType, Status: metav1.ConditionFalse,
 						Reason: "ConfigurationFailed", ObservedGeneration: 1},
 				},
 			},
@@ -605,7 +605,7 @@ var _ = Describe("ensureDatameshAccessReplicas", func() {
 		outcome := ensureDatameshAccessReplicas(ctx, rv, rvrs, nil)
 
 		Expect(outcome.DidChange()).To(BeTrue())
-		Expect(rv.Status.DatameshTransitions[0].Message).To(ContainSubstring("#1: replica not found"))
+		Expect(rv.Status.DatameshTransitions[0].Message).To(ContainSubstring("#1 Replica not found"))
 	})
 
 	It("completes transition and then processes new join", func(ctx SpecContext) {
