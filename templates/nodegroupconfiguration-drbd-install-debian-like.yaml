@@ -201,15 +201,15 @@ spec:
     export CC=$gccVersion
     make_extra_args=""
     if [ "$need_disable_gcc_plugins" = "1" ]; then
-      bb-log-info "Kernel was built with GCC 8 but gcc-8 is not available, using CC wrapper to strip GCC plugin flags"
-      gcc_wrapper="/opt/deckhouse/drbd/bin/gcc-no-plugins"
-      mkdir -p "$(dirname "$gcc_wrapper")"
+      bb-log-info "Kernel was built with GCC 8 but gcc-8 is not available, using gcc wrapper to strip GCC plugin flags"
+      drbd_bin="/opt/deckhouse/drbd/bin"
+      mkdir -p "$drbd_bin"
       real_gcc="$(which $gccVersion 2>/dev/null || which gcc 2>/dev/null || echo /usr/bin/gcc)"
-      printf '%s\n' '#!/bin/bash' 'args=()' 'for arg in "$$@"; do' '  case "$$arg" in' '    -fplugin=*|-fplugin-arg-*) ;;' '    *) args+=("$$arg") ;;' '  esac' 'done' 'exec REAL_GCC_PLACEHOLDER "$${args[@]}"' > "$$gcc_wrapper"
-      sed -i "s|REAL_GCC_PLACEHOLDER|$$real_gcc|" "$$gcc_wrapper"
-      chmod +x "$$gcc_wrapper"
-      export CC="$gcc_wrapper"
-      make_extra_args="CC=$gcc_wrapper"
+      printf '%s\n' '#!/bin/bash' 'args=()' 'for arg in "$$@"; do' '  case "$$arg" in' '    -fplugin=*|-fplugin-arg-*) ;;' '    *) args+=("$$arg") ;;' '  esac' 'done' 'exec REAL_GCC_PLACEHOLDER "$${args[@]}"' > "$drbd_bin/gcc"
+      sed -i "s|REAL_GCC_PLACEHOLDER|$real_gcc|" "$drbd_bin/gcc"
+      chmod +x "$drbd_bin/gcc"
+      export PATH="$drbd_bin:$PATH"
+      export CC="gcc"
     fi
 
     cd /opt/deckhouse/drbd
