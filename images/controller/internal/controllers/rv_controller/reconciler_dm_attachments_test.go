@@ -28,7 +28,22 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
+
+// testEnsureDatameshAttachments is a test-only wrapper that preserves the old
+// two-return-value call convention for ensureDatameshAttachments.
+func testEnsureDatameshAttachments(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rvas []*v1alpha1.ReplicatedVolumeAttachment,
+	rsp *rspView,
+) (*attachmentsSummary, flow.EnsureOutcome) {
+	var atts *attachmentsSummary
+	outcome := ensureDatameshAttachments(ctx, rv, rvrs, rvas, rsp, &atts)
+	return atts, outcome
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Shared test helpers
@@ -73,6 +88,7 @@ func mkAttachRVR(name, nodeName string, ready bool) *v1alpha1.ReplicatedVolumeRe
 		rvr.Status.Conditions = []metav1.Condition{
 			{Type: v1alpha1.ReplicatedVolumeReplicaCondReadyType, Status: metav1.ConditionTrue, Reason: "Ready"},
 		}
+		rvr.Status.Quorum = ptr.To(true)
 	}
 	return rvr
 }
@@ -263,7 +279,7 @@ var _ = Describe("ensureDatameshAttachments intent", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		as := atts.findAttachmentStateByNodeName("node-1")
 		Expect(as).NotTo(BeNil())
@@ -277,11 +293,29 @@ var _ = Describe("ensureDatameshAttachments intent", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		atts, outcome := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		as := atts.findAttachmentStateByNodeName("node-1")
 		// potentiallyAttached + active RVA → intent=Attach, but fully settled = Attach (already has slot).
 		Expect(as.intent).To(Equal(attachmentIntentAttach))
+		Expect(outcome.DidChange()).To(BeFalse())
+	})
+
+	It("settled attached node keeps Attached condition when RV is deleting", func() {
+		rv := mkAttachRV([]v1alpha1.ReplicatedVolumeDatameshMember{
+			mkAttachMember("rv-1-0", "node-1", true),
+		}, 10)
+		rv.DeletionTimestamp = ptr.To(metav1.Now())
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
+
+		atts, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+
+		as := atts.findAttachmentStateByNodeName("node-1")
+		Expect(as.intent).To(Equal(attachmentIntentAttach))
+		Expect(as.conditionReason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
+		Expect(as.conditionMessage).To(ContainSubstring("attached and ready to serve I/O"))
+		Expect(as.conditionMessage).To(ContainSubstring("pending deletion"))
 		Expect(outcome.DidChange()).To(BeFalse())
 	})
 
@@ -291,13 +325,13 @@ var _ = Describe("ensureDatameshAttachments intent", func() {
 		}, 10)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		as := atts.findAttachmentStateByNodeName("node-1")
 		Expect(as.intent).To(Equal(attachmentIntentDetach))
 	})
 
-	It("sets Queued when slot is full", func() {
+	It("sets Pending when slot is full", func() {
 		rv := mkAttachRV([]v1alpha1.ReplicatedVolumeDatameshMember{
 			mkAttachMember("rv-1-0", "node-1", true),
 			mkAttachMember("rv-1-1", "node-2", false),
@@ -312,12 +346,12 @@ var _ = Describe("ensureDatameshAttachments intent", func() {
 			mkAttachRVA("rva-2", "node-2"),
 		}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		Expect(atts.findAttachmentStateByNodeName("node-1").intent).To(Equal(attachmentIntentAttach))
 		as2 := atts.findAttachmentStateByNodeName("node-2")
-		Expect(as2.intent).To(Equal(attachmentIntentQueued))
-		Expect(as2.progressMessage).To(ContainSubstring("Waiting for attachment slot"))
+		Expect(as2.intent).To(Equal(attachmentIntentPending))
+		Expect(as2.conditionMessage).To(ContainSubstring("Waiting for attachment slot"))
 	})
 
 	It("already-attached node keeps slot over older RVA on different node", func() {
@@ -336,10 +370,10 @@ var _ = Describe("ensureDatameshAttachments intent", func() {
 			mkAttachRVAAt("rva-2", "node-2", t0),                  // older
 		}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		Expect(atts.findAttachmentStateByNodeName("node-1").intent).To(Equal(attachmentIntentAttach))
-		Expect(atts.findAttachmentStateByNodeName("node-2").intent).To(Equal(attachmentIntentQueued))
+		Expect(atts.findAttachmentStateByNodeName("node-2").intent).To(Equal(attachmentIntentPending))
 	})
 
 	It("maxAttachments decrease: over-limit nodes keep intent=Attach", func() {
@@ -357,7 +391,7 @@ var _ = Describe("ensureDatameshAttachments intent", func() {
 			mkAttachRVA("rva-2", "node-2"),
 		}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		// Both keep Attach — no forced detach.
 		Expect(atts.findAttachmentStateByNodeName("node-1").intent).To(Equal(attachmentIntentAttach))
@@ -381,7 +415,7 @@ var _ = Describe("ensureDatameshAttachments intent", func() {
 			mkAttachRVA("rva-2", "node-2"),
 		}
 
-		atts, outcome := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		Expect(outcome.Error()).To(BeNil())
 		Expect(outcome.DidChange()).To(BeTrue())
@@ -406,11 +440,11 @@ var _ = Describe("ensureDatameshAttachments intent", func() {
 			mkAttachRVAAt("rva-b", "node-b", t0),
 		}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		// node-b gets the slot (older RVA).
 		Expect(atts.findAttachmentStateByNodeName("node-b").intent).To(Equal(attachmentIntentAttach))
-		Expect(atts.findAttachmentStateByNodeName("node-a").intent).To(Equal(attachmentIntentQueued))
+		Expect(atts.findAttachmentStateByNodeName("node-a").intent).To(Equal(attachmentIntentPending))
 	})
 
 	It("queues when node not in eligibleNodes", func() {
@@ -422,11 +456,11 @@ var _ = Describe("ensureDatameshAttachments intent", func() {
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
 		// RSP does NOT include node-1.
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-2"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-2"))
 
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.intent).To(Equal(attachmentIntentQueued))
-		Expect(as.progressMessage).To(ContainSubstring("not eligible"))
+		Expect(as.intent).To(Equal(attachmentIntentPending))
+		Expect(as.conditionMessage).To(ContainSubstring("not eligible"))
 	})
 
 	It("queues when node is not ready", func() {
@@ -439,11 +473,11 @@ var _ = Describe("ensureDatameshAttachments intent", func() {
 			{NodeName: "node-1", NodeReady: false, AgentReady: true},
 		}}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, rsp)
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, rsp)
 
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.intent).To(Equal(attachmentIntentQueued))
-		Expect(as.progressMessage).To(ContainSubstring("Node is not ready"))
+		Expect(as.intent).To(Equal(attachmentIntentPending))
+		Expect(as.conditionMessage).To(ContainSubstring("Node is not ready"))
 	})
 
 	It("queues when agent is not ready", func() {
@@ -456,58 +490,76 @@ var _ = Describe("ensureDatameshAttachments intent", func() {
 			{NodeName: "node-1", NodeReady: true, AgentReady: false},
 		}}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, rsp)
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, rsp)
 
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.intent).To(Equal(attachmentIntentQueued))
-		Expect(as.progressMessage).To(ContainSubstring("Agent is not ready"))
+		Expect(as.intent).To(Equal(attachmentIntentPending))
+		Expect(as.conditionMessage).To(ContainSubstring("Agent is not ready"))
 	})
 
 	It("queues when no member but has RVR with PendingReplicaTransition", func() {
-		rv := mkAttachRV(nil, 10)
+		// Background diskful member on another node to satisfy global quorum.
+		rv := mkAttachRV([]v1alpha1.ReplicatedVolumeDatameshMember{
+			mkAttachMember("rv-1-9", "node-bg", false),
+		}, 10)
 		rv.Status.DatameshPendingReplicaTransitions = []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
 			{Name: "rv-1-0", Message: "scheduling in progress", Transition: v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
 				Member: ptr.To(true), Type: v1alpha1.ReplicaTypeAccess,
 			}},
 		}
-		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkAttachRVR("rv-1-0", "node-1", true),
+			mkAttachRVR("rv-1-9", "node-bg", true),
+		}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
 
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.intent).To(Equal(attachmentIntentQueued))
-		Expect(as.progressMessage).To(ContainSubstring("join datamesh"))
-		Expect(as.progressMessage).To(ContainSubstring("scheduling in progress"))
+		Expect(as.intent).To(Equal(attachmentIntentPending))
+		Expect(as.conditionMessage).To(ContainSubstring("join datamesh"))
+		Expect(as.conditionMessage).To(ContainSubstring("scheduling in progress"))
 	})
 
 	It("queues when no member, has RVR with Ready condition message", func() {
-		rv := mkAttachRV(nil, 10)
+		// Background diskful member on another node to satisfy global quorum.
+		rv := mkAttachRV([]v1alpha1.ReplicatedVolumeDatameshMember{
+			mkAttachMember("rv-1-9", "node-bg", false),
+		}, 10)
 		rvr := mkAttachRVR("rv-1-0", "node-1", false)
 		rvr.Status.Conditions = []metav1.Condition{
 			{Type: v1alpha1.ReplicatedVolumeReplicaCondReadyType, Status: metav1.ConditionFalse, Reason: "NotReady", Message: "waiting for quorum"},
 		}
-		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			rvr,
+			mkAttachRVR("rv-1-9", "node-bg", true),
+		}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
 
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.intent).To(Equal(attachmentIntentQueued))
-		Expect(as.progressMessage).To(ContainSubstring("NotReady"))
-		Expect(as.progressMessage).To(ContainSubstring("waiting for quorum"))
+		Expect(as.intent).To(Equal(attachmentIntentPending))
+		Expect(as.conditionMessage).To(ContainSubstring("NotReady"))
+		Expect(as.conditionMessage).To(ContainSubstring("waiting for quorum"))
 	})
 
 	It("queues when no member, has RVR without Ready message", func() {
-		rv := mkAttachRV(nil, 10)
-		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
+		// Background diskful member on another node to satisfy global quorum.
+		rv := mkAttachRV([]v1alpha1.ReplicatedVolumeDatameshMember{
+			mkAttachMember("rv-1-9", "node-bg", false),
+		}, 10)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkAttachRVR("rv-1-0", "node-1", true),
+			mkAttachRVR("rv-1-9", "node-bg", true),
+		}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
 
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.intent).To(Equal(attachmentIntentQueued))
-		Expect(as.progressMessage).To(ContainSubstring("join datamesh"))
+		Expect(as.intent).To(Equal(attachmentIntentPending))
+		Expect(as.conditionMessage).To(ContainSubstring("join datamesh"))
 	})
 
 	It("queues all active-RVA nodes when quorum not satisfied", func() {
@@ -521,11 +573,11 @@ var _ = Describe("ensureDatameshAttachments intent", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
 
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.intent).To(Equal(attachmentIntentQueued))
-		Expect(as.progressMessage).To(ContainSubstring("Quorum not satisfied"))
+		Expect(as.intent).To(Equal(attachmentIntentPending))
+		Expect(as.conditionMessage).To(ContainSubstring("Quorum not satisfied"))
 	})
 })
 
@@ -546,7 +598,7 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 10)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		_, outcome := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		_, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		Expect(outcome.Error()).To(BeNil())
 		Expect(outcome.DidChange()).To(BeTrue())
@@ -562,7 +614,7 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 10)}
 
-		_, outcome := ensureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		_, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		Expect(outcome.Error()).To(BeNil())
 		Expect(outcome.DidChange()).To(BeTrue())
@@ -584,7 +636,7 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 			mkAttachRVRWithRev("rv-1-1", "node-2", 10),
 		}
 
-		_, outcome := ensureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		_, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		Expect(outcome.Error()).To(BeNil())
 		Expect(outcome.DidChange()).To(BeTrue())
@@ -620,7 +672,7 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 		}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		_, outcome := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2"))
+		_, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2"))
 
 		Expect(outcome.Error()).To(BeNil())
 		// EnableMultiattach should NOT be completed.
@@ -657,7 +709,7 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 		}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		_, outcome := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2"))
+		_, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2"))
 
 		Expect(outcome.Error()).To(BeNil())
 		Expect(outcome.DidChange()).To(BeTrue())
@@ -690,7 +742,7 @@ var _ = Describe("ensureDatameshAttachments attach", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		atts, outcome := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		Expect(outcome.Error()).To(BeNil())
 		Expect(outcome.DidChange()).To(BeTrue())
@@ -700,7 +752,7 @@ var _ = Describe("ensureDatameshAttachments attach", func() {
 		Expect(rv.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach))
 
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.progressMessage).To(ContainSubstring("Attaching"))
+		Expect(as.conditionMessage).To(ContainSubstring("Attaching"))
 	})
 
 	It("blocks attach when RV is deleting", func() {
@@ -711,37 +763,43 @@ var _ = Describe("ensureDatameshAttachments attach", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		Expect(rv.Status.Datamesh.Members[0].Attached).To(BeFalse())
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.progressMessage).To(ContainSubstring("deleted"))
+		Expect(as.conditionMessage).To(ContainSubstring("deleted"))
 	})
 
 	It("blocks attach when RVR is not Ready", func() {
 		rv := mkAttachRV([]v1alpha1.ReplicatedVolumeDatameshMember{
 			mkAttachMember("rv-1-0", "node-1", false),
 		}, 10)
-		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", false)}
+		rvr := mkAttachRVR("rv-1-0", "node-1", false)
+		rvr.Status.Quorum = ptr.To(true) // quorum OK, but not Ready
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		Expect(rv.Status.Datamesh.Members[0].Attached).To(BeFalse())
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.progressMessage).To(ContainSubstring("Ready"))
+		Expect(as.conditionMessage).To(ContainSubstring("Ready"))
 	})
 
 	It("queues when node has no datamesh member and no RVR", func() {
-		rv := mkAttachRV(nil, 10)
+		// Background diskful member on another node to satisfy global quorum.
+		rv := mkAttachRV([]v1alpha1.ReplicatedVolumeDatameshMember{
+			mkAttachMember("rv-1-9", "node-bg", false),
+		}, 10)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-9", "node-bg", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, nil, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		as := atts.findAttachmentStateByNodeName("node-1")
 		Expect(as).NotTo(BeNil())
-		Expect(as.intent).To(Equal(attachmentIntentQueued))
-		Expect(as.progressMessage).To(ContainSubstring("Waiting for replica on node"))
+		Expect(as.intent).To(Equal(attachmentIntentPending))
+		Expect(as.conditionMessage).To(ContainSubstring("Waiting for replica on node"))
 	})
 
 	It("queues attach when active Detach occupies slot in single-attach mode", func() {
@@ -758,14 +816,14 @@ var _ = Describe("ensureDatameshAttachments attach", func() {
 		}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-2")}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		// node-1 is potentiallyAttached (detach not confirmed) → occupies slot.
-		// node-2 gets Queued (no available slot), not Attach.
+		// node-2 gets Pending (no available slot), not Attach.
 		Expect(rv.Status.Datamesh.Members[1].Attached).To(BeFalse())
 		as := atts.findAttachmentStateByNodeName("node-2")
-		Expect(as.intent).To(Equal(attachmentIntentQueued))
-		Expect(as.progressMessage).To(ContainSubstring("Waiting for attachment slot"))
+		Expect(as.intent).To(Equal(attachmentIntentPending))
+		Expect(as.conditionMessage).To(ContainSubstring("Waiting for attachment slot"))
 	})
 
 	It("blocks attach when AddAccessReplica in progress", func() {
@@ -778,11 +836,11 @@ var _ = Describe("ensureDatameshAttachments attach", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-1", "node-1", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		Expect(rv.Status.Datamesh.Members[0].Attached).To(BeFalse())
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.progressMessage).To(ContainSubstring("join datamesh"))
+		Expect(as.conditionMessage).To(ContainSubstring("join datamesh"))
 	})
 })
 
@@ -800,7 +858,7 @@ var _ = Describe("ensureDatameshAttachments detach", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachDeletingRVA("rva-1", "node-1")}
 
-		atts, outcome := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		Expect(outcome.Error()).To(BeNil())
 		Expect(outcome.DidChange()).To(BeTrue())
@@ -809,7 +867,7 @@ var _ = Describe("ensureDatameshAttachments detach", func() {
 		Expect(rv.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach))
 
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.progressMessage).To(ContainSubstring("Detaching"))
+		Expect(as.conditionMessage).To(ContainSubstring("Detaching"))
 	})
 
 	It("proceeds with detach even when RVR is not Ready", func() {
@@ -818,7 +876,7 @@ var _ = Describe("ensureDatameshAttachments detach", func() {
 		}, 10)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", false)}
 
-		_, outcome := ensureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		_, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		Expect(outcome.Error()).To(BeNil())
 		Expect(outcome.DidChange()).To(BeTrue())
@@ -838,11 +896,11 @@ var _ = Describe("ensureDatameshAttachments detach", func() {
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		Expect(rv.Status.Datamesh.Members[0].Attached).To(BeTrue())
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.progressMessage).To(ContainSubstring("in use"))
+		Expect(as.conditionMessage).To(ContainSubstring("in use"))
 	})
 
 	It("allows detach in detach-only mode (RV deleting)", func() {
@@ -852,7 +910,7 @@ var _ = Describe("ensureDatameshAttachments detach", func() {
 		rv.DeletionTimestamp = ptr.To(metav1.Now())
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 
-		_, outcome := ensureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		_, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		Expect(outcome.Error()).To(BeNil())
 		Expect(outcome.DidChange()).To(BeTrue())
@@ -879,7 +937,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		// Only RVA on node-2 → switch from node-1 to node-2.
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-2")}
 
-		atts, outcome := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		Expect(outcome.Error()).To(BeNil())
 		Expect(outcome.DidChange()).To(BeTrue())
@@ -889,11 +947,11 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
 		Expect(rv.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach))
 
-		// node-2 is Queued: node-1 still occupies the slot (detach not confirmed).
+		// node-2 is Pending: node-1 still occupies the slot (detach not confirmed).
 		Expect(rv.Status.Datamesh.Members[1].Attached).To(BeFalse())
 		as := atts.findAttachmentStateByNodeName("node-2")
-		Expect(as.intent).To(Equal(attachmentIntentQueued))
-		Expect(as.progressMessage).To(ContainSubstring("Waiting for attachment slot"))
+		Expect(as.intent).To(Equal(attachmentIntentPending))
+		Expect(as.conditionMessage).To(ContainSubstring("Waiting for attachment slot"))
 	})
 
 	It("no-op when settled", func() {
@@ -903,7 +961,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		_, outcome := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		_, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		Expect(outcome.Error()).To(BeNil())
 		Expect(outcome.DidChange()).To(BeFalse())
@@ -912,7 +970,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 	It("empty state: no members, no RVAs", func() {
 		rv := mkAttachRV(nil, 10)
 
-		atts, outcome := ensureDatameshAttachments(ctx, rv, nil, nil, mkAttachRSP())
+		atts, outcome := testEnsureDatameshAttachments(ctx, rv, nil, nil, mkAttachRSP())
 
 		Expect(outcome.Error()).To(BeNil())
 		Expect(outcome.DidChange()).To(BeFalse())
@@ -935,7 +993,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachRVA("rva-2", "node-2"),
 		}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		// intendedAttachments=2 > 1 → multiattach stays enabled.
 		Expect(atts.intendedAttachments.Len()).To(Equal(2))
@@ -958,7 +1016,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachRVA("rva-2", "node-2"),
 		}
 
-		_, outcome := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		_, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		Expect(outcome.DidChange()).To(BeTrue())
 		Expect(rv.Status.Datamesh.Multiattach).To(BeTrue())
@@ -979,7 +1037,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2", "node-3", "node-a", "node-b"))
 
 		as := atts.findAttachmentStateByNodeName("node-1")
 		Expect(as).NotTo(BeNil())
@@ -996,7 +1054,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		_, outcome := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
+		_, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
 
 		Expect(outcome.DidChange()).To(BeTrue())
 		Expect(rv.Status.Datamesh.Multiattach).To(BeFalse())
@@ -1024,7 +1082,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		_, _ = ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2"))
+		_, _ = testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2"))
 
 		// potentiallyAttached = {node-1, node-2} (>1) → DisableMultiattach NOT created.
 		Expect(rv.Status.Datamesh.Multiattach).To(BeTrue())
@@ -1052,7 +1110,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachRVA("rva-2", "node-2"),
 		}
 
-		_, _ = ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2"))
+		_, _ = testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2"))
 
 		// Should not create a second EnableMultiattach.
 		enableCount := 0
@@ -1079,7 +1137,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachRVA("rva-2", "node-2"),
 		}
 
-		_, _ = ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2"))
+		_, _ = testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2"))
 
 		// EnableMultiattach transition should have a Message filled by the progress callback.
 		for _, t := range rv.Status.DatameshTransitions {
@@ -1104,7 +1162,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		_, outcome := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2"))
+		_, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2"))
 
 		Expect(outcome.DidChange()).To(BeTrue())
 		for _, t := range rv.Status.DatameshTransitions {
@@ -1112,7 +1170,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		}
 	})
 
-	It("in-progress Attach transition sets progressMessage", func() {
+	It("in-progress Attach transition sets conditionMessage", func() {
 		rv := mkAttachRV([]v1alpha1.ReplicatedVolumeDatameshMember{
 			mkAttachMember("rv-1-0", "node-1", true),
 		}, 10)
@@ -1122,16 +1180,16 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)} // not confirmed
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
 
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.progressMessage).To(ContainSubstring("Attaching"))
-		Expect(as.progressMessage).To(ContainSubstring("replicas confirmed revision"))
+		Expect(as.conditionMessage).To(ContainSubstring("Attaching"))
+		Expect(as.conditionMessage).To(ContainSubstring("replicas confirmed revision"))
 		// Transition.Message should also be set.
 		Expect(rv.Status.DatameshTransitions[0].Message).To(ContainSubstring("replicas confirmed revision"))
 	})
 
-	It("in-progress Detach transition sets progressMessage", func() {
+	It("in-progress Detach transition sets conditionMessage", func() {
 		rv := mkAttachRV([]v1alpha1.ReplicatedVolumeDatameshMember{
 			mkAttachMember("rv-1-0", "node-1", false),
 		}, 10)
@@ -1140,11 +1198,11 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)} // not confirmed
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1"))
 
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.progressMessage).To(ContainSubstring("Detaching"))
-		Expect(as.progressMessage).To(ContainSubstring("replicas confirmed revision"))
+		Expect(as.conditionMessage).To(ContainSubstring("Detaching"))
+		Expect(as.conditionMessage).To(ContainSubstring("replicas confirmed revision"))
 	})
 
 	It("in-progress transition with DRBDConfigured=False includes error in message", func() {
@@ -1163,13 +1221,13 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
 
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.progressMessage).To(ContainSubstring("Attaching"))
-		Expect(as.progressMessage).To(ContainSubstring("DRBDConfigured"))
-		Expect(as.progressMessage).To(ContainSubstring("ConfigurationFailed"))
-		Expect(as.progressMessage).To(ContainSubstring("connection timed out"))
+		Expect(as.conditionMessage).To(ContainSubstring("Attaching"))
+		Expect(as.conditionMessage).To(ContainSubstring("DRBDConfigured"))
+		Expect(as.conditionMessage).To(ContainSubstring("ConfigurationFailed"))
+		Expect(as.conditionMessage).To(ContainSubstring("connection timed out"))
 	})
 
 	It("detach: already fully detached is no-op", func() {
@@ -1179,7 +1237,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 		// No RVA → intent=Detach, but already settled.
 
-		_, outcome := ensureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1"))
+		_, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1"))
 
 		Expect(outcome.DidChange()).To(BeFalse())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
@@ -1194,7 +1252,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)}
 
-		_, _ = ensureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1"))
+		_, _ = testEnsureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1"))
 
 		// Still exactly 1 Detach transition (no duplicate).
 		detachCount := 0
@@ -1216,13 +1274,13 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1"))
 
 		// Should NOT create Detach (conflict).
 		Expect(rv.Status.Datamesh.Members[0].Attached).To(BeTrue())
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.progressMessage).To(ContainSubstring("Detach pending"))
-		Expect(as.progressMessage).To(ContainSubstring("waiting for attach to complete first"))
+		Expect(as.conditionMessage).To(ContainSubstring("Detach pending"))
+		Expect(as.conditionMessage).To(ContainSubstring("waiting for attach to complete first"))
 	})
 
 	It("attach: already fully attached is no-op", func() {
@@ -1232,7 +1290,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		_, outcome := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
+		_, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
 
 		Expect(outcome.DidChange()).To(BeFalse())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
@@ -1248,7 +1306,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		_, _ = ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
+		_, _ = testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
 
 		// Still exactly 1 Attach transition (no duplicate).
 		attachCount := 0
@@ -1270,12 +1328,12 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
 
 		// Should NOT create Attach (conflict with Detach on same replica).
 		as := atts.findAttachmentStateByNodeName("node-1")
-		Expect(as.progressMessage).To(ContainSubstring("Attach pending"))
-		Expect(as.progressMessage).To(ContainSubstring("waiting for detach to complete first"))
+		Expect(as.conditionMessage).To(ContainSubstring("Attach pending"))
+		Expect(as.conditionMessage).To(ContainSubstring("waiting for detach to complete first"))
 	})
 
 	It("attach: blocks second Attach when Multiattach=false", func() {
@@ -1294,11 +1352,11 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachRVA("rva-2", "node-2"),
 		}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2"))
 
 		// node-2 should be blocked (waiting for multiattach).
 		as := atts.findAttachmentStateByNodeName("node-2")
-		Expect(as.progressMessage).To(ContainSubstring("Waiting for multiattach to be enabled"))
+		Expect(as.conditionMessage).To(ContainSubstring("Waiting for multiattach to be enabled"))
 		// Attach should NOT be created for node-2.
 		for _, t := range rv.Status.DatameshTransitions {
 			if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach {
@@ -1314,7 +1372,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		_, _ = ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
+		_, _ = testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
 
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
 		Expect(rv.Status.DatameshTransitions[0].Message).To(ContainSubstring("replicas confirmed revision"))
@@ -1327,7 +1385,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 		// No RVA → will detach.
 
-		_, _ = ensureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1"))
+		_, _ = testEnsureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1"))
 
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
 		Expect(rv.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach))
@@ -1341,7 +1399,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
 
 		// After Attach creation, potentiallyAttached should include the member.
 		Expect(atts.potentiallyAttached.Contains(0)).To(BeTrue())
@@ -1355,12 +1413,12 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 
-		atts, _ := ensureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
+		atts, _ := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
 
 		as := atts.findAttachmentStateByNodeName("node-1")
 		// Node-1 is potentiallyAttached + has RVA → intent=Attach.
 		// But attach is blocked (deleting) → message should be set.
 		Expect(as.intent).To(Equal(attachmentIntentAttach))
-		Expect(as.progressMessage).To(ContainSubstring("deleted"))
+		Expect(as.conditionMessage).To(ContainSubstring("deleted"))
 	})
 })
