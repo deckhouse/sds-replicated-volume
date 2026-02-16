@@ -8,7 +8,7 @@ git:
   - url: {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-utils
     add: /
     to: /drbd-utils
-    tag: v{{ include "get_oss_version_by_id" (list "DRBD_UTILS" .) }}
+    tag: v{{ $.Versions.DRBD_UTILS }}
     stageDependencies:
       setup:
         - "**/*"
@@ -16,7 +16,7 @@ git:
   - url: {{ $.Root.SOURCE_REPO }}/LINBIT/thin-send-recv
     add: /
     to: /thin-send-recv
-    tag: v{{ include "get_oss_version_by_id" (list "THIN_SEND_RECV" .) }}
+    tag: v{{ $.Versions.THIN_SEND_RECV }}
     stageDependencies:
       setup:
         - "**/*"
@@ -40,7 +40,7 @@ shell:
     # clone drbd-utils git repo
     {{- $ctx := dict }}
     {{- $_ := set $ctx "repo" (printf "%s/LINBIT/drbd-utils" $.Root.SOURCE_REPO) }}
-    {{- $_ := set $ctx "branch" (printf "v%s" (include "get_oss_version_by_id" (list "DRBD_UTILS" .))) }}
+    {{- $_ := set $ctx "branch" (printf "v%s" $.Versions.DRBD_UTILS) }}
     {{- $_ := set $ctx "folder" "/drbd-utils" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
 
@@ -52,7 +52,7 @@ shell:
     # make .rpm package
     {{- $ctx := dict }}
     {{- $_ := set $ctx "name" "drbd-utils" }}
-    {{- $_ := set $ctx "version" (include "get_oss_version_by_id" (list "DRBD_UTILS" .)) }}
+    {{- $_ := set $ctx "version" $.Versions.DRBD_UTILS }}
     {{- $_ := set $ctx "spec" "drbd.spec" }}
     {{- $_ := set $ctx "arch" "x86_64" }}
     # set initscripttype explicitly for workaround errors like 'No such file or directory: /tmp/.private/rpmbuilder/drbd-buildroot/usr/lib/systemd/system/drbd@.service'
@@ -63,14 +63,14 @@ shell:
     # clone thin-send-recv git repo
     {{- $ctx := dict }}
     {{- $_ := set $ctx "repo" (printf "%s/LINBIT/thin-send-recv" $.Root.SOURCE_REPO) }}
-    {{- $_ := set $ctx "branch" (printf "v%s" (include "get_oss_version_by_id" (list "THIN_SEND_RECV" .))) }}
+    {{- $_ := set $ctx "branch" (printf "v%s" $.Versions.THIN_SEND_RECV) }}
     {{- $_ := set $ctx "folder" "/thin-send-recv" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
 
     # make .rpm package
     {{- $ctx := dict }}
     {{- $_ := set $ctx "name" "thin-send-recv" }}
-    {{- $_ := set $ctx "version" (include "get_oss_version_by_id" (list "THIN_SEND_RECV" .)) }}
+    {{- $_ := set $ctx "version" $.Versions.THIN_SEND_RECV }}
     {{- $_ := set $ctx "spec" "thin_send_recv.spec" }}
     {{- $_ := set $ctx "arch" "x86_64" }}
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
@@ -90,7 +90,7 @@ git:
   - url: {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-reactor
     add: /
     to: /drbd-reactor
-    tag: v{{ include "get_oss_version_by_id" (list "DRBD_REACTOR" .) }}
+    tag: v{{ $.Versions.DRBD_REACTOR }}
     stageDependencies:
       setup:
         - "**/*"
@@ -117,19 +117,19 @@ shell:
   setup:
     {{- $ctx := dict }}
     {{- $_ := set $ctx "repo" (printf "%s/LINBIT/drbd-reactor" $.Root.SOURCE_REPO) }}
-    {{- $_ := set $ctx "branch" (printf "v%s" (include "get_oss_version_by_id" (list "DRBD_REACTOR" .))) }}
+    {{- $_ := set $ctx "branch" (printf "v%s" "9.30.0") }}
     {{- $_ := set $ctx "folder" "/drbd-reactor" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
     # apply git patches to upstream's code
     - git apply /patches/*.patch && git commit -am "Auto-commit patched files"
-    - git tag -f v{{ include "get_oss_version_by_id" (list "DRBD_REACTOR" .) }}
+    - git tag -f v9.30.0
 
     - install /dev/null /usr/local/bin/lbvers.py
 
     # make .rpm package
     {{- $ctx := dict }}
     {{- $_ := set $ctx "name" "drbd-reactor" }}
-    {{- $_ := set $ctx "version" (include "get_oss_version_by_id" (list "DRBD_REACTOR" .)) }}
+    {{- $_ := set $ctx "version" "9.30.0" }}
     {{- $_ := set $ctx "spec" "drbd-reactor.spec" }}
     {{- $_ := set $ctx "arch" "x86_64" }}
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
@@ -179,5 +179,5 @@ docker:
   LABEL:
     distro: ALTLinux
     version: all
-    drbd-utils: {{ include "get_oss_version_by_id" (list "DRBD_UTILS" .) }}
-    drbd-reactor: {{ include "get_oss_version_by_id" (list "DRBD_REACTOR" .) }}
+    drbd-utils: {{ $.Versions.DRBD_UTILS }}
+    drbd-reactor: {{ $.Versions.DRBD_REACTOR }}
