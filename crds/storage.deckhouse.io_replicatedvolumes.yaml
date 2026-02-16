@@ -566,27 +566,6 @@ spec:
                       || self.type == ''EnableMultiattach'' || self.type == ''DisableMultiattach'')'
                 type: array
                 x-kubernetes-list-type: atomic
-              desiredAttachTo:
-                description: |-
-                  DesiredAttachTo is the desired set of nodes where the volume should be attached (up to 2 nodes).
-                  It is computed by controllers from ReplicatedVolumeAttachment (RVA) objects.
-                items:
-                  type: string
-                maxItems: 2
-                type: array
-                x-kubernetes-list-type: atomic
-                x-kubernetes-validations:
-                - message: desiredAttachTo must be unique
-                  rule: self.all(x, self.exists_one(y, x == y))
-              drbd:
-                properties:
-                  config:
-                    properties:
-                      allowTwoPrimaries:
-                        default: false
-                        type: boolean
-                    type: object
-                type: object
               eligibleNodesViolations:
                 description: EligibleNodesViolations lists replicas placed on non-eligible
                   nodes.
