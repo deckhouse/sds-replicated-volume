@@ -662,7 +662,7 @@ flowchart TD
     IterRVAs --> ComputeReady["computeRVAReadyCondition<br/>(per-RVA: deleting RVAs are never Ready)"]
     ComputeReady --> CheckSync{"Conditions + fields<br/>already in sync?"}
     CheckSync -->|Yes| SkipRVA[Skip]
-    CheckSync -->|No| Patch["Set conditions + applyRVAAttachmentFields<br/>patchRVAStatus"]
+    CheckSync -->|No| Patch["Set conditions + applyRVAAttachmentFields<br/>patchRVAStatus (NotFound ignored)"]
     SkipRVA --> IterRVAs
     Patch --> IterRVAs
     IterRVAs -->|Done| IterStates
