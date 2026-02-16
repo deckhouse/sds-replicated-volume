@@ -179,5 +179,5 @@ docker:
   LABEL:
     distro: ALTLinux
     version: all
-    drbd-utils: {{ $.Versions.DRBD_UTILS }}
+    drbd-utils: 9.30.0
     drbd-reactor: {{ $.Versions.DRBD_REACTOR }}
