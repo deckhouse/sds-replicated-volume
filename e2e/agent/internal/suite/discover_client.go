@@ -1,7 +1,7 @@
 package suite
 
 import (
-	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/etesting"
+	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -15,7 +15,8 @@ import (
 
 // DiscoverClient Discovers a K8s client from kubeconfig. Registers
 // v1alpha1, sds-node-configurator, core, and storage schemes.
-func DiscoverClient(e *etesting.E) client.Client {
+// The returned client supports watch operations.
+func DiscoverClient(e *envtesting.E) client.WithWatch {
 	scheme := runtime.NewScheme()
 
 	schemeFuncs := []func(s *runtime.Scheme) error{
@@ -36,7 +37,7 @@ func DiscoverClient(e *etesting.E) client.Client {
 		e.Fatalf("getting kubeconfig: %v", err)
 	}
 
-	cl, err := client.New(kubeConfig, client.Options{Scheme: scheme})
+	cl, err := client.NewWithWatch(kubeConfig, client.Options{Scheme: scheme})
 	if err != nil {
 		e.Fatalf("creating client: %v", err)
 	}
@@ -47,7 +48,7 @@ func DiscoverClient(e *etesting.E) client.Client {
 // DiscoverClientset Discovers a Kubernetes clientset from kubeconfig.
 // Used for operations that require the standard client-go API (e.g., pod log
 // streaming).
-func DiscoverClientset(e *etesting.E) *kubernetes.Clientset {
+func DiscoverClientset(e *envtesting.E) *kubernetes.Clientset {
 	kubeConfig, err := config.GetConfig()
 	if err != nil {
 		e.Fatalf("getting kubeconfig for clientset: %v", err)

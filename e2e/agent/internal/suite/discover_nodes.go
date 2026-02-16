@@ -1,7 +1,7 @@
 package suite
 
 import (
-	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/etesting"
+	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -11,7 +11,7 @@ import (
 // nodeNames must be non-empty and contain no duplicates. Each name must match
 // an existing cluster node.
 func DiscoverNodes(
-	e *etesting.E,
+	e *envtesting.E,
 	cl client.Client,
 	nodeNames []string,
 ) []*corev1.Node {

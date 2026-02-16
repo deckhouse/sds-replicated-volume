@@ -3,7 +3,7 @@ package suite
 import (
 	"fmt"
 
-	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/etesting"
+	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -20,7 +20,7 @@ import (
 //  2. Remove all finalizers via patch.
 //  3. Delete the resource (skip if already gone).
 func SetupResource(
-	e *etesting.E,
+	e *envtesting.E,
 	cl client.Client,
 	obj client.Object,
 ) {
@@ -39,7 +39,7 @@ func SetupResource(
 // cleanupResource removes all finalizers from the resource and deletes it.
 // Errors are reported via e.Errorf so that cleanup continues for other
 // resources even if one fails.
-func cleanupResource(e *etesting.E, cl client.Client, obj client.Object) {
+func cleanupResource(e *envtesting.E, cl client.Client, obj client.Object) {
 	key := client.ObjectKeyFromObject(obj)
 	kind := fmt.Sprintf("%T", obj)
 

@@ -3,7 +3,7 @@ package suite
 import (
 	"fmt"
 
-	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/etesting"
+	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -24,7 +24,7 @@ func SetupResourcePatch[T any, PT interface {
 	client.Object
 	*T
 }](
-	e *etesting.E,
+	e *envtesting.E,
 	cl client.Client,
 	key client.ObjectKey,
 	mutate func(PT),

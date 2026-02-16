@@ -2,11 +2,9 @@ package suite
 
 import (
 	"bufio"
-	"context"
 	"sync"
 
-	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/etesting"
-	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/utils"
+	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,61 +20,58 @@ type PodLogMonitorOptions struct {
 }
 
 // PodLogLine is a log line tagged with the pod name it came from.
-// Key is the pod name, Value is the log line.
-type PodLogLine = utils.KeyedEvent[string, string]
+type PodLogLine struct {
+	PodName string
+	Line    string
+}
 
-// SetupPodLogWatcher starts streaming logs from a single pod and returns an
-// EventSource[string]. The stream is stopped during cleanup.
+// SetupPodLogWatcher starts streaming logs from a single pod and returns a
+// channel of log lines. The channel is closed when the stream ends. The stream
+// is stopped during cleanup.
 func SetupPodLogWatcher(
-	e *etesting.E,
-	clientset *kubernetes.Clientset,
+	e *envtesting.E,
+	cs *kubernetes.Clientset,
 	namespace string,
 	podName string,
-) utils.EventSource[string] {
-	dispatcher := utils.NewEventDispatcher[string](nil)
-
-	ctx, cancel := context.WithCancel(e.Context())
-	wg := &sync.WaitGroup{}
+) <-chan string {
+	ch := make(chan string)
 
 	now := metav1.Now()
-	stream, err := clientset.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
+	stream, err := cs.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
 		Follow:    true,
 		SinceTime: &now,
-	}).Stream(ctx)
+	}).Stream(e.Context())
 	if err != nil {
-		cancel()
 		e.Fatalf("streaming logs for pod %s: %v", podName, err)
 	}
 
+	wg := sync.WaitGroup{}
 	wg.Go(func() {
-		defer stream.Close()
+		defer close(ch)
 
 		scanner := bufio.NewScanner(stream)
-		for ctx.Err() == nil && scanner.Scan() {
-			dispatcher.DispatchEvent(scanner.Text())
+		for scanner.Scan() {
+			ch <- scanner.Text()
 		}
 	})
 
 	e.Cleanup(func() {
-		cancel()
+		stream.Close()
 		wg.Wait()
 	})
 
-	return dispatcher
+	return ch
 }
 
-// SetupPodsLogWatcher reads "PodLogMonitorOptions" config, discovers pods
-// matching the label selector, starts a log watcher for each pod, and returns a
-// single EventSource[PodLogLine] that fans in events from all watchers keyed by
-// pod name.
+// SetupPodsLogWatcher discovers pods matching opts.LabelSelector in
+// opts.Namespace, starts a log watcher for each pod, and returns a single
+// channel of PodLogLine that fans in log lines from all pods.
 func SetupPodsLogWatcher(
-	e *etesting.E,
+	e *envtesting.E,
 	cl client.Client,
-	clientset *kubernetes.Clientset,
-) utils.EventSource[PodLogLine] {
-	var opts PodLogMonitorOptions
-	e.Options(&opts)
-
+	cs *kubernetes.Clientset,
+	opts PodLogMonitorOptions,
+) <-chan PodLogLine {
 	selector, err := labels.Parse(opts.LabelSelector)
 	if err != nil {
 		e.Fatalf("parsing label selector %q: %v", opts.LabelSelector, err)
@@ -94,11 +89,23 @@ func SetupPodsLogWatcher(
 			opts.LabelSelector, opts.Namespace)
 	}
 
-	sources := make(map[string]utils.EventSource[string], len(podList.Items))
+	out := make(chan PodLogLine)
+	var fanWg sync.WaitGroup
+
 	for i := range podList.Items {
 		podName := podList.Items[i].Name
-		sources[podName] = SetupPodLogWatcher(e, clientset, opts.Namespace, podName)
+		ch := SetupPodLogWatcher(e, cs, opts.Namespace, podName)
+		fanWg.Go(func() {
+			for line := range ch {
+				out <- PodLogLine{PodName: podName, Line: line}
+			}
+		})
 	}
 
-	return utils.NewMultiEventSource(sources)
+	go func() {
+		fanWg.Wait()
+		close(out)
+	}()
+
+	return out
 }

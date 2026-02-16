@@ -1,14 +1,13 @@
 package agent
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/etesting"
+	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -18,21 +17,25 @@ import (
 )
 
 func TestDRBDResource(t *testing.T) {
-	e := etesting.New(t)
+	e := envtesting.Discover(t)
+
+	var testID envtesting.TestId
+	e.Options(&testID)
 
 	// Discover K8s clients.
 	cl := DiscoverClient(e)
 	cs := DiscoverClientset(e)
 
 	// Start agent pod log monitoring.
-	podsLogs := SetupPodsLogWatcher(e, cl, cs)
+	var podLogOpts PodLogMonitorOptions
+	e.Options(&podLogOpts)
+	podsLogs := SetupPodsLogWatcher(e, cl, cs, podLogOpts)
 	SetupErrorLogsWatcher(e, podsLogs)
 
-	e.Run("R1", func(e *etesting.E) {
-		var opts ClusterOptions
-		e.Options(&opts)
-		node := opts.Nodes[0]
-		testID := e.TestID()
+	e.Run("R1", func(e *envtesting.E) {
+		var clusterOpts ClusterOptions
+		e.Options(&clusterOpts)
+		node := clusterOpts.Nodes[0]
 		drbdrName := fmt.Sprintf("e2e-drbdr-%s-%s", testID, node.Name)
 		llvName := drbdrName
 		size := resource.MustParse("100Mi")
@@ -72,15 +75,14 @@ func TestDRBDResource(t *testing.T) {
 		waitDRBDRConfigured(e, cl, drbdrName)
 	})
 
-	e.Run("R2", func(e *etesting.E) {
-		var opts ClusterOptions
-		e.Options(&opts)
-		if len(opts.Nodes) < 2 {
-			e.Fatalf("R2 requires at least 2 nodes, got %d", len(opts.Nodes))
+	e.Run("R2", func(e *envtesting.E) {
+		var clusterOpts ClusterOptions
+		e.Options(&clusterOpts)
+		if len(clusterOpts.Nodes) < 2 {
+			e.Fatalf("R2 requires at least 2 nodes, got %d", len(clusterOpts.Nodes))
 		}
-		node0 := opts.Nodes[0]
-		node1 := opts.Nodes[1]
-		testID := e.TestID()
+		node0 := clusterOpts.Nodes[0]
+		node1 := clusterOpts.Nodes[1]
 		drbdrName0 := fmt.Sprintf("e2e-drbdr-%s-%s", testID, node0.Name)
 		drbdrName1 := fmt.Sprintf("e2e-drbdr-%s-%s", testID, node1.Name)
 		llvName0 := drbdrName0
@@ -198,7 +200,7 @@ func TestDRBDResource(t *testing.T) {
 		waitDRBDRConfigured(e, cl, drbdrName1)
 	})
 
-	// e.Run("R3", func(e *etesting.E) {
+	// e.Run("R3", func(e *envtesting.E) {
 	// 	SetupResource(e, cl, &v1alpha1.DRBDResource{})
 	// 	waitDRBDRConfigured(e, cl, "TODO")
 
@@ -209,7 +211,7 @@ func TestDRBDResource(t *testing.T) {
 	// 	waitDRBDRConfigured(e, cl, "TODO")
 	// })
 
-	// e.Run("R4", func(e *etesting.E) {
+	// e.Run("R4", func(e *envtesting.E) {
 	// 	SetupResource(e, cl, &v1alpha1.DRBDResource{})
 	// 	waitDRBDRConfigured(e, cl, "TODO")
 
@@ -224,58 +226,66 @@ func TestDRBDResource(t *testing.T) {
 	// })
 }
 
-func waitDRBDRConfigured(e *etesting.E, cl client.Client, drbdrName string) *v1alpha1.DRBDResource {
-	waitCtx, cancel := context.WithTimeout(e.Context(), 120*time.Second)
-	defer cancel()
+func waitDRBDRConfigured(e *envtesting.E, cl client.WithWatch, drbdrName string) *v1alpha1.DRBDResource {
+	var result *v1alpha1.DRBDResource
+	passed := e.RunWithTimeout("WaitDRBDRConfigured/"+drbdrName, 120*time.Second, func(e *envtesting.E) {
+		ch := SetupResourceWatcher(e, cl,
+			types.NamespacedName{Name: drbdrName},
+			func() client.ObjectList { return &v1alpha1.DRBDResourceList{} },
+		)
+		ch = SetupWatchLog(e, ch)
 
-	w := SetupResourceWatcher(waitCtx, e, cl,
-		types.NamespacedName{Name: drbdrName},
-		func() client.ObjectList { return &v1alpha1.DRBDResourceList{} },
-	)
-
-	for event := range w.Chan(waitCtx) {
-		drbdr, ok := event.Object.(*v1alpha1.DRBDResource)
-		if !ok {
-			continue
-		}
-		for _, cond := range drbdr.Status.Conditions {
-			if cond.Type != v1alpha1.DRBDResourceCondConfiguredType {
+		for event := range ch {
+			drbdr, ok := event.Object.(*v1alpha1.DRBDResource)
+			if !ok {
 				continue
 			}
-			if cond.ObservedGeneration < drbdr.Generation {
+			for _, cond := range drbdr.Status.Conditions {
+				if cond.Type != v1alpha1.DRBDResourceCondConfiguredType {
+					continue
+				}
+				if cond.ObservedGeneration < drbdr.Generation {
+					break
+				}
+				if cond.Status == metav1.ConditionTrue {
+					result = drbdr
+					return
+				}
 				break
 			}
-			if cond.Status == metav1.ConditionTrue {
-				return drbdr
-			}
-			break
 		}
-	}
 
-	e.Fatalf("timed out waiting for DRBDResource %q to be configured", drbdrName)
-	return nil
+		e.Fatalf("DRBDResource %q was not configured", drbdrName)
+	})
+	if !passed {
+		e.FailNow()
+	}
+	return result
 }
 
-func waitLLVCreated(e *etesting.E, cl client.Client, llvName string) {
-	waitCtx, cancel := context.WithTimeout(e.Context(), 120*time.Second)
-	defer cancel()
+func waitLLVCreated(e *envtesting.E, cl client.WithWatch, llvName string) {
+	passed := e.RunWithTimeout("WaitLLVCreated/"+llvName, 120*time.Second, func(e *envtesting.E) {
+		ch := SetupResourceWatcher(e, cl,
+			types.NamespacedName{Name: llvName},
+			func() client.ObjectList { return &snc.LVMLogicalVolumeList{} },
+		)
+		ch = SetupWatchLog(e, ch)
 
-	w := SetupResourceWatcher(waitCtx, e, cl,
-		types.NamespacedName{Name: llvName},
-		func() client.ObjectList { return &snc.LVMLogicalVolumeList{} },
-	)
+		for event := range ch {
+			llv, ok := event.Object.(*snc.LVMLogicalVolume)
+			if !ok {
+				continue
+			}
+			if llv.Status != nil && llv.Status.Phase == snc.PhaseCreated {
+				return
+			}
+		}
 
-	for event := range w.Chan(waitCtx) {
-		llv, ok := event.Object.(*snc.LVMLogicalVolume)
-		if !ok {
-			continue
-		}
-		if llv.Status != nil && llv.Status.Phase == snc.PhaseCreated {
-			return
-		}
+		e.Fatalf("LVMLogicalVolume %q did not reach phase Created", llvName)
+	})
+	if !passed {
+		e.FailNow()
 	}
-
-	e.Fatalf("timed out waiting for LVMLogicalVolume %q to reach phase Created", llvName)
 }
 
 func addressesToPaths(addrs []v1alpha1.DRBDResourceAddressStatus) []v1alpha1.DRBDResourcePath {

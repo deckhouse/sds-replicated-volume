@@ -49,16 +49,16 @@ corresponding sections below):
 
 ### Signature
 
-Note the first argument of every test helper, it MUST be `e *etesting.E`.
+The first argument of every test helper MUST be `e *envtesting.E`.
 
 ```go
 // SetupX Provides X, which is guaranteed to be ..., can be accessed via ...
-func SetupX(e *etesting.E, <REQUIREMENTS>) <PROVIDED_X_SERVICE> {
+func SetupX(e *envtesting.E, <REQUIREMENTS>) <PROVIDED_X_SERVICE> {
     // May call any test helpers (Setup, Discover).
 }
 
 // DiscoverX Discovers existing X, which is guaranteed to be ...
-func DiscoverX(e *etesting.E, <REQUIREMENTS>) <PROVIDED_X_SERVICE> {
+func DiscoverX(e *envtesting.E, <REQUIREMENTS>) <PROVIDED_X_SERVICE> {
     // May call other Discover helpers, but NOT Setup helpers.
 }
 ```
@@ -96,9 +96,10 @@ A failed requirement is a reason to fail the test (fatal).
 Requirements that are not strictly guaranteed by the Go type system MUST be
 validated and MUST be described in the test helper's documentation.
 
-Configuration of test helpers should also be treated as an environment
-requirement, since from the test helper's perspective it is not determined where
-an argument came from — caller's code or environment.
+Configuration of test helpers MUST be passed as explicit arguments. Helpers MUST
+NOT call `e.Options()` internally — the caller is responsible for discovering
+options and passing them to the helper. This keeps each helper's dependencies
+visible in its signature.
 
 ### Arrange/Act
 
@@ -194,31 +195,31 @@ scope.
 
 ```go
 func TestMain(t *testing.T) {
-    e := etesting.New(t)
+    e := envtesting.Discover(t)
     client := DiscoverClient(e)
 
     // Arrange: set up shared environment state.
     storageClass := SetupStorageClass(e, client)
     // e.Cleanup registered inside SetupStorageClass.
 
-    e.Run("WithSingleVolume", func(e *etesting.E) {
+    e.Run("WithSingleVolume", func(e *envtesting.E) {
         // Arrange: narrow state for this group of subtests.
         volume := SetupVolume(e, client, storageClass)
 
-        e.Run("VolumeIsAccessible", func(e *etesting.E) {
+        e.Run("VolumeIsAccessible", func(e *envtesting.E) {
             // Test case: uses volume from parent scope, no extra arrange.
         })
 
-        e.Run("VolumeCanBeResized", func(e *etesting.E) {
+        e.Run("VolumeCanBeResized", func(e *envtesting.E) {
             // Test case: uses volume from parent scope, acts and asserts.
         })
     })
 
-    e.Run("WithReplicatedVolume", func(e *etesting.E) {
+    e.Run("WithReplicatedVolume", func(e *envtesting.E) {
         // Arrange: different state, same storageClass from root scope.
         volume := SetupReplicatedVolume(e, client, storageClass)
 
-        e.Run("ReplicationIsHealthy", func(e *etesting.E) {
+        e.Run("ReplicationIsHealthy", func(e *envtesting.E) {
             // Test case: uses volume from parent scope.
         })
     })
@@ -238,31 +239,13 @@ out.
 
 ### Configuration
 
-The root test discovers its configuration from a JSON config file on the
-filesystem, with environment-specific variables. The `*E` context reads this
-file once in `etesting.New(t)`. Keep a `.env.example.json` in the test
-directory to document the expected configuration shape and help set up new
-environments.
-
-#### Config file structure
-
-The config file is a flat JSON object whose first-level keys serve two purposes:
-
- - **Common options** — top-level scalar keys consumed by `*E` itself (e.g.,
-   `testId`). These are available to every helper via `e.TestID()`.
- - **Per-helper sections** — top-level object keys, each named after the Go
-   options type that the section unmarshals into. Each helper reads its own
-   section via `e.Options(&opts)`, where the section key is inferred from the
-   type name of `opts` via reflection. Helpers that do not need config from the
-   file receive data through function arguments instead.
-
-This layout makes the config extensible: adding a new helper that needs
-configuration is just adding a new top-level key matching the options type name;
-no existing code changes.
+The config file (`.env.example.json`) is a flat JSON object. Each top-level key
+is named after the Go type that the section unmarshals into via
+`e.Options(&target)`.
 
 ```json
 {
-  "testId": "e2e",
+  "TestId": "e2e",
   "FooOptions": {
     "option1": "value1"
   },
@@ -272,20 +255,10 @@ no existing code changes.
 }
 ```
 
-#### Deterministic test IDs
-
 Resource names in e2e tests MUST include a deterministic test identifier (the
-`testId` config field, defaulting to `"e2e"`). Random or timestamped identifiers
-MUST NOT be used, because:
-
- - Resources are expensive; cleanup MUST succeed after every run.
- - If cleanup fails, the next run MUST produce a name conflict that immediately
-   surfaces the problem.
- - A deterministic ID ensures names are stable across runs, so leftover
-   resources from a failed cleanup are detected.
-
-The `testId` MAY be overridden in the config to allow parallel test runs against
-the same cluster if needed.
+`TestId` config field). Random or timestamped identifiers MUST NOT be used —
+deterministic IDs ensure leftover resources from a failed cleanup are detected
+on the next run.
 
 ### File organization
 

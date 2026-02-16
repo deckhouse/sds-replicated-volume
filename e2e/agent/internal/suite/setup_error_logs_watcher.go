@@ -3,20 +3,20 @@ package suite
 import (
 	"strings"
 
-	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/etesting"
-	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/utils"
+	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
 )
 
-// SetupErrorLogsWatcher subscribes to a PodLogLine event source and fails the
-// test as soon as an error-level log line is detected.
-func SetupErrorLogsWatcher(e *etesting.E, source utils.EventSource[PodLogLine]) {
-	cleanup := source.SetupSubscriber(func(event PodLogLine) {
-		if isErrorLogLine(event.Value) {
-			e.Errorf("pod '%s': %s", event.Key, event.Value)
+// SetupErrorLogsWatcher reads from a PodLogLine channel and fails the test
+// when an error-level log line is detected. The goroutine stops when the
+// channel closes.
+func SetupErrorLogsWatcher(e *envtesting.E, ch <-chan PodLogLine) {
+	go func() {
+		for event := range ch {
+			if isErrorLogLine(event.Line) {
+				e.Errorf("pod '%s': %s", event.PodName, event.Line)
+			}
 		}
-	})
-
-	e.Cleanup(cleanup)
+	}()
 }
 
 // isErrorLogLine checks whether a log line indicates an error.
