@@ -198,7 +198,7 @@ func CreateReplicatedVolume(
 	ctx context.Context,
 	kc client.Client,
 	log *logger.Logger,
-	traceID, name string,
+	traceID, name, pvcName, pvcNamespace string,
 	rvSpec srv.ReplicatedVolumeSpec,
 ) (*srv.ReplicatedVolume, error) {
 	rv := &srv.ReplicatedVolume{
@@ -206,6 +206,10 @@ func CreateReplicatedVolume(
 			Name:            name,
 			OwnerReferences: []metav1.OwnerReference{},
 			Finalizers:      []string{SDSReplicatedVolumeCSIFinalizer},
+			Annotations: map[string]string{
+				srv.SchedulingReservationIDAnnotationKey: pvcName,
+				srv.ReplicatedVolumePVCNamespace:         pvcNamespace,
+			},
 		},
 		Spec: rvSpec,
 	}

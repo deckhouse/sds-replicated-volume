@@ -95,7 +95,9 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 	// Create ReplicatedVolume
 	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ------------ CreateReplicatedVolume start ------------", traceID, volumeID))
-	_, err = utils.CreateReplicatedVolume(ctx, d.cl, d.log, traceID, volumeID, rvSpec)
+	pvcName := request.Parameters[internal.PVCAnnotationNameKey]
+	pvcNamespace := request.Parameters[internal.PVCAnnotationNamespaceKey]
+	_, err = utils.CreateReplicatedVolume(ctx, d.cl, d.log, traceID, volumeID, pvcName, pvcNamespace, rvSpec)
 	if err != nil {
 		if kerrors.IsAlreadyExists(err) {
 			d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume %s already exists. Skip creating", traceID, volumeID, volumeID))
