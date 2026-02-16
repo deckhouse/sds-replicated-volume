@@ -48,8 +48,9 @@ type attachmentsSummary struct {
 	attachmentStateByReplicaID [32]*attachmentState
 
 	// attachBlocked: all attach operations globally blocked.
-	attachBlocked        bool
-	attachBlockedMessage string
+	attachBlocked                 bool
+	attachBlockedConditionMessage string
+	attachBlockedConditionReason  string
 
 	// Global transition flags.
 	hasActiveEnableMultiattachTransition  bool
@@ -86,9 +87,9 @@ func (s *attachmentsSummary) findAttachmentStateByNodeName(nodeName string) *att
 type attachmentIntent string
 
 const (
-	attachmentIntentAttach attachmentIntent = "Attach" // should be attached (has slot)
-	attachmentIntentQueued attachmentIntent = "Queued" // active RVA exists, waiting for slot
-	attachmentIntentDetach attachmentIntent = "Detach" // should be detached
+	attachmentIntentAttach  attachmentIntent = "Attach"  // should be attached
+	attachmentIntentPending attachmentIntent = "Pending" // active RVA exists, attach not yet possible
+	attachmentIntentDetach  attachmentIntent = "Detach"  // should be detached
 	// "" = no intent (node in list for indexing only, not processed)
 )
 
@@ -116,9 +117,11 @@ type attachmentState struct {
 	hasActiveDetachTransition    bool
 	hasActiveAddAccessTransition bool
 
-	// Human-readable progress or blocker reason.
-	// Empty when the node is in its final state (fully attached or fully detached, no pending transitions).
-	progressMessage string
+	// conditionMessage is the human-readable message for the RVA Attached condition.
+	// conditionReason is the machine-readable reason (maps to ReplicatedVolumeAttachmentCondAttachedReason* constants).
+	// Both are always set together by ensureDatameshAttachments for every node that has RVAs.
+	conditionMessage string
+	conditionReason  string
 }
 
 // hasActiveRVA returns true if this node has at least one non-deleting RVA.
@@ -231,7 +234,7 @@ func buildAttachmentsSummary(
 //
 
 // computeDatameshAttachBlocked determines if attach is globally blocked and sets
-// atts.attachBlocked and atts.attachBlockedMessage accordingly.
+// atts.attachBlocked, atts.attachBlockedConditionReason, and atts.attachBlockedConditionMessage accordingly.
 func computeDatameshAttachBlocked(
 	atts *attachmentsSummary,
 	rv *v1alpha1.ReplicatedVolume,
@@ -239,20 +242,15 @@ func computeDatameshAttachBlocked(
 ) {
 	if rv.DeletionTimestamp != nil {
 		atts.attachBlocked = true
-		atts.attachBlockedMessage = "Volume is being deleted"
+		atts.attachBlockedConditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonReplicatedVolumeDeleting
+		atts.attachBlockedConditionMessage = "Volume is being deleted"
 		return
 	}
 
-	allMembers := idset.FromAll(rv.Status.Datamesh.Members)
-	withQuorum := idset.FromWhere(rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		return rvr.Status.Quorum != nil && *rvr.Status.Quorum
-	}).Intersect(allMembers)
-
-	minRedundancy := rv.Status.Datamesh.QuorumMinimumRedundancy
-	if withQuorum.Len() < int(minRedundancy) {
+	if quorumOK, diagnostic := computeActualQuorum(rv, rvrs); !quorumOK {
 		atts.attachBlocked = true
-		atts.attachBlockedMessage = fmt.Sprintf("Quorum not satisfied (%d/%d replicas with quorum)",
-			withQuorum.Len(), minRedundancy)
+		atts.attachBlockedConditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending
+		atts.attachBlockedConditionMessage = "Quorum not satisfied: " + diagnostic
 		return
 	}
 }
@@ -267,11 +265,11 @@ func computeDatameshAttachBlocked(
 // Algorithm:
 //  1. PotentiallyAttached nodes with active RVA → intent=Attach (keep their slot).
 //     PotentiallyAttached nodes without active RVA → intent=Detach.
-//  2. If attach globally blocked → all remaining active-RVA nodes → Queued (early return).
-//  3. If no slots available → all remaining active-RVA nodes → Queued (early return).
+//  2. If attach globally blocked → all remaining active-RVA nodes → Pending (early return).
+//  3. If no slots available → all remaining active-RVA nodes → Pending (early return).
 //  4. Remaining active-RVA nodes are checked for eligibility (RSP) and member presence.
-//     Ineligible or memberless nodes → Queued with specific message.
-//  5. Eligible candidates compete for available slots in FIFO order → Attach or Queued.
+//     Ineligible or memberless nodes → Pending with specific message.
+//  5. Eligible candidates compete for available slots in FIFO order → Attach or Pending.
 //
 // Already-attached nodes NEVER lose their slot when maxAttachments decreases.
 func computeDatameshAttachmentIntents(atts *attachmentsSummary, rv *v1alpha1.ReplicatedVolume, rsp *rspView) {
@@ -294,13 +292,23 @@ func computeDatameshAttachmentIntents(atts *attachmentsSummary, rv *v1alpha1.Rep
 		}
 	}
 
-	// If attach is globally blocked — all unassigned active-RVA nodes are Queued.
+	// If attach is globally blocked — unassigned active-RVA nodes are Pending;
+	// nodes with only deleting RVAs are Detached.
 	if atts.attachBlocked {
 		for i := range atts.attachmentStates {
 			as := &atts.attachmentStates[i]
-			if as.intent == "" && as.hasActiveRVA() {
-				as.intent = attachmentIntentQueued
-				as.progressMessage = atts.attachBlockedMessage
+			if as.intent != "" {
+				continue
+			}
+			if as.hasActiveRVA() {
+				as.intent = attachmentIntentPending
+				as.conditionReason = atts.attachBlockedConditionReason
+				as.conditionMessage = atts.attachBlockedConditionMessage
+			} else if len(as.rvas) > 0 {
+				// Only deleting RVAs remain — node is already detached or was never attached.
+				as.intent = attachmentIntentDetach
+				as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetached
+				as.conditionMessage = "Volume has been detached from the node"
 			}
 		}
 		return
@@ -314,13 +322,14 @@ func computeDatameshAttachmentIntents(atts *attachmentsSummary, rv *v1alpha1.Rep
 	// while nodes were already attached. In that case availableNewSlots is 0.
 	availableNewSlots := max(0, int(maxAttachments)-occupiedSlots)
 
-	// No slots available — all unassigned active-RVA nodes are Queued.
+	// No slots available — all unassigned active-RVA nodes are Pending.
 	if availableNewSlots == 0 {
 		for i := range atts.attachmentStates {
 			as := &atts.attachmentStates[i]
 			if as.intent == "" && as.hasActiveRVA() {
-				as.intent = attachmentIntentQueued
-				as.progressMessage = fmt.Sprintf("Waiting for attachment slot (slots occupied %d/%d)", occupiedSlots, maxAttachments)
+				as.intent = attachmentIntentPending
+				as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending
+				as.conditionMessage = fmt.Sprintf("Waiting for attachment slot (slots occupied %d/%d)", occupiedSlots, maxAttachments)
 			}
 		}
 		return
@@ -345,41 +354,56 @@ func computeDatameshAttachmentIntents(atts *attachmentsSummary, rv *v1alpha1.Rep
 		en := rsp.FindEligibleNode(as.nodeName)
 		switch {
 		case en == nil:
-			as.intent = attachmentIntentQueued
-			as.progressMessage = fmt.Sprintf("Node is not eligible for storage class %s (pool %s)",
+			as.intent = attachmentIntentPending
+			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonNodeNotEligible
+			as.conditionMessage = fmt.Sprintf("Node is not eligible for storage class %s (pool %s)",
 				rv.Spec.ReplicatedStorageClassName, rv.Status.Configuration.StoragePoolName)
 			continue
 		case !en.NodeReady:
-			as.intent = attachmentIntentQueued
-			as.progressMessage = "Node is not ready"
+			as.intent = attachmentIntentPending
+			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending
+			as.conditionMessage = "Node is not ready"
 			continue
 		case !en.AgentReady:
-			as.intent = attachmentIntentQueued
-			as.progressMessage = "Agent is not ready on node"
+			as.intent = attachmentIntentPending
+			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending
+			as.conditionMessage = "Agent is not ready on node"
 			continue
 		}
 
 		if as.member == nil {
 			// Active RVA but no datamesh member — can't attach yet.
-			as.intent = attachmentIntentQueued
+			as.intent = attachmentIntentPending
+
+			// VolumeAccess=Local: no Access replica will be created on this node,
+			// so if there is no Diskful RVR, attachment is permanently impossible.
+			if rv.Status.Configuration.VolumeAccess == v1alpha1.VolumeAccessLocal &&
+				(as.rvr == nil || as.rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful) {
+				as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonVolumeAccessLocalityNotSatisfied
+				as.conditionMessage = fmt.Sprintf(
+					"No Diskful replica on this node (volumeAccess is Local for storage class %s)",
+					rv.Spec.ReplicatedStorageClassName)
+				continue
+			}
+
+			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica
 			if as.rvr == nil {
-				as.progressMessage = "Waiting for replica on node"
+				as.conditionMessage = "Waiting for replica on node"
 			} else {
 				rvrID := as.rvr.ID()
 				prtIdx := slices.IndexFunc(rv.Status.DatameshPendingReplicaTransitions, func(prt v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition) bool {
 					return prt.Name == as.rvr.Name && prt.Transition.Member != nil && *prt.Transition.Member
 				})
 				readyCond := obju.GetStatusCondition(as.rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
-
 				switch {
 				case prtIdx >= 0:
-					as.progressMessage = fmt.Sprintf("Waiting for replica [#%d] to join datamesh: %s",
+					as.conditionMessage = fmt.Sprintf("Waiting for replica [#%d] to join datamesh: %s",
 						rvrID, rv.Status.DatameshPendingReplicaTransitions[prtIdx].Message)
 				case readyCond != nil && readyCond.Message != "":
-					as.progressMessage = fmt.Sprintf("Waiting for replica [#%d] to join datamesh: %s — %s",
+					as.conditionMessage = fmt.Sprintf("Waiting for replica [#%d] to join datamesh: %s — %s",
 						rvrID, readyCond.Reason, readyCond.Message)
 				default:
-					as.progressMessage = fmt.Sprintf("Waiting for replica [#%d] to join datamesh", rvrID)
+					as.conditionMessage = fmt.Sprintf("Waiting for replica [#%d] to join datamesh", rvrID)
 				}
 			}
 			continue
@@ -395,14 +419,26 @@ func computeDatameshAttachmentIntents(atts *attachmentsSummary, rv *v1alpha1.Rep
 		return cmp.Compare(a.nodeName, b.nodeName)
 	})
 
-	// Assign: first availableNewSlots → Attach, rest → Queued.
+	// Assign: first availableNewSlots → Attach, rest → Pending.
 	for j, as := range candidates {
 		if j < availableNewSlots {
 			as.intent = attachmentIntentAttach
 			atts.intendedAttachments.Add(as.member.ID())
 		} else {
-			as.intent = attachmentIntentQueued
-			as.progressMessage = fmt.Sprintf("Waiting for attachment slot (slots occupied %d/%d)", occupiedSlots, maxAttachments)
+			as.intent = attachmentIntentPending
+			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending
+			as.conditionMessage = fmt.Sprintf("Waiting for attachment slot (slots occupied %d/%d)", occupiedSlots, maxAttachments)
+		}
+	}
+
+	// Nodes with only deleting RVAs (no active RVAs) that were never attached
+	// or already fully detached — mark as Detached.
+	for i := range atts.attachmentStates {
+		as := &atts.attachmentStates[i]
+		if as.intent == "" && len(as.rvas) > 0 {
+			as.intent = attachmentIntentDetach
+			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetached
+			as.conditionMessage = "Volume has been detached from the node"
 		}
 	}
 }
@@ -412,7 +448,7 @@ func computeDatameshAttachmentIntents(atts *attachmentsSummary, rv *v1alpha1.Rep
 //
 
 // ensureDatameshAttachments coordinates datamesh attach/detach transitions.
-// Returns the fully populated attachmentsSummary for downstream consumers
+// Writes the fully populated attachmentsSummary to outAtts for downstream consumers
 // (e.g., RVA condition reconciliation).
 //
 // Exception: sub-functions use metav1.Now() for StartedAt when creating new transitions.
@@ -424,12 +460,14 @@ func ensureDatameshAttachments(
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 	rvas []*v1alpha1.ReplicatedVolumeAttachment,
 	rsp *rspView,
-) (atts *attachmentsSummary, outcome flow.EnsureOutcome) {
+	outAtts **attachmentsSummary,
+) (outcome flow.EnsureOutcome) {
 	ef := flow.BeginEnsure(ctx, "datamesh-attachments")
 	defer ef.OnEnd(&outcome)
 
 	// Build per-node attachment states (members, rvrs, rvas — no intent yet).
-	atts = buildAttachmentsSummary(rv, rvrs, rvas)
+	atts := buildAttachmentsSummary(rv, rvrs, rvas)
+	*outAtts = atts
 
 	// Determine if attach is globally blocked.
 	computeDatameshAttachBlocked(atts, rv, rvrs)
@@ -460,7 +498,7 @@ func ensureDatameshAttachments(
 	// Create Attach transitions where needed.
 	changed = ensureDatameshAttachTransitions(rv, rvrs, atts) || changed
 
-	return atts, ef.Ok().ReportChangedIf(changed)
+	return ef.Ok().ReportChangedIf(changed)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -485,13 +523,25 @@ func ensureDatameshAttachDetachTransitionProgress(
 		switch t.Type {
 		case v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach,
 			v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach:
-			// Completion: target replica confirmed revision.
 			replicaID := t.ReplicaID()
 			as := atts.attachmentStateByReplicaID[replicaID]
-			if as != nil && as.rvr != nil && as.rvr.Status.DatameshRevision >= t.DatameshRevision {
-				rv.Status.DatameshTransitions = slices.Delete(rv.Status.DatameshTransitions, i, i+1)
-				changed = true
-				continue
+
+			// Attach completion: replica confirmed the revision.
+			if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach {
+				if as != nil && as.rvr != nil && as.rvr.Status.DatameshRevision >= t.DatameshRevision {
+					rv.Status.DatameshTransitions = slices.Delete(rv.Status.DatameshTransitions, i, i+1)
+					changed = true
+					continue
+				}
+			}
+
+			// Detach completion: replica confirmed the revision, is no longer a datamesh member, or doesn't exist.
+			if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach {
+				if as == nil || as.rvr == nil || as.rvr.Status.DatameshRevision == 0 || as.rvr.Status.DatameshRevision >= t.DatameshRevision {
+					rv.Status.DatameshTransitions = slices.Delete(rv.Status.DatameshTransitions, i, i+1)
+					changed = true
+					continue
+				}
 			}
 
 			// Not completed — fill flags (as != nil is defensive: transition should always have a matching node).
@@ -513,9 +563,11 @@ func ensureDatameshAttachDetachTransitionProgress(
 			if as != nil {
 				switch t.Type {
 				case v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach:
-					as.progressMessage = "Attaching, " + progressMsg
+					as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching
+					as.conditionMessage = "Attaching, " + progressMsg
 				case v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach:
-					as.progressMessage = "Detaching, " + progressMsg
+					as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching
+					as.conditionMessage = "Detaching, " + progressMsg
 				}
 			}
 
@@ -679,29 +731,34 @@ func ensureDatameshDetachTransitions(
 			continue
 		}
 
-		// Already fully detached (no pending transition) — settled, skip.
+		// Already fully detached (no pending transition) — settled.
 		if as.member != nil && !as.member.Attached && !as.hasActiveDetachTransition {
+			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetached
+			as.conditionMessage = "Volume has been detached from the node"
 			continue
 		}
 
 		// Already has an active Detach transition — skip.
 		if as.hasActiveDetachTransition {
+			// conditionReason/conditionMessage already set by ensureDatameshAttachDetachTransitionProgress.
 			continue
 		}
 
 		// Guard: conflict — Attach on the same replica.
 		if as.hasActiveAttachTransition {
-			as.progressMessage = "Detach pending, waiting for attach to complete first. " + as.progressMessage
+			as.conditionMessage = "Detach pending, waiting for attach to complete first. " + as.conditionMessage
+			// conditionReason stays from the attach transition (Attaching).
 			continue
 		}
 
 		// Note: we do NOT check RVR existence or Ready condition for detach.
 		// Detach proceeds regardless — if the RVR is missing, no one will confirm the revision,
-		// but that will be handled separately.
+		// but that is specifically handled by ensureDatameshAttachDetachTransitionProgress
 
 		// Guard: not in use.
 		if as.rvr != nil && as.rvr.Status.Attachment != nil && as.rvr.Status.Attachment.InUse {
-			as.progressMessage = "Device in use, detach blocked"
+			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching
+			as.conditionMessage = "Device in use, detach blocked"
 			continue
 		}
 
@@ -721,7 +778,8 @@ func ensureDatameshDetachTransitions(
 		)
 		changed = true
 		as.hasActiveDetachTransition = true
-		as.progressMessage = "Detaching, " + msg
+		as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching
+		as.conditionMessage = "Detaching, " + msg
 	}
 
 	return changed
@@ -741,72 +799,84 @@ func ensureDatameshAttachTransitions(
 ) bool {
 	changed := false
 
-	// Set global block messages for all Attach-intent nodes if attach is blocked.
-	if atts.attachBlocked {
-		for i := range atts.attachmentStates {
-			if atts.attachmentStates[i].intent == attachmentIntentAttach && atts.attachmentStates[i].progressMessage == "" {
-				atts.attachmentStates[i].progressMessage = atts.attachBlockedMessage
-			}
-		}
-		return false
-	}
-
 	for i := range atts.attachmentStates {
 		as := &atts.attachmentStates[i]
 		if as.intent != attachmentIntentAttach {
 			continue
 		}
 
-		// Already fully attached (no pending transition) — settled, skip.
+		// Already fully attached (no pending transition) — settled.
 		if as.member != nil && as.member.Attached && !as.hasActiveAttachTransition {
+			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached
+			as.conditionMessage = "Volume is attached and ready to serve I/O on the node"
+			if rv.DeletionTimestamp != nil {
+				as.conditionMessage += " (volume is pending deletion and will be deleted after the last active attachment is removed)"
+			}
 			continue
 		}
 
 		// Already has an active Attach transition — skip.
 		if as.hasActiveAttachTransition {
+			// conditionReason/conditionMessage already set by ensureDatameshAttachDetachTransitionProgress.
 			continue
 		}
 
 		// Guard: conflict — Detach on the same replica.
 		if as.hasActiveDetachTransition {
-			as.progressMessage = "Attach pending, waiting for detach to complete first. " + as.progressMessage
+			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending
+			as.conditionMessage = "Attach pending, waiting for detach to complete first. " + as.conditionMessage
 			continue
 		}
 
 		// Guard: AddAccessReplica in progress for same replica.
 		if as.hasActiveAddAccessTransition {
-			as.progressMessage = "Waiting for replica to join datamesh"
+			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica
+			as.conditionMessage = "Waiting for replica to join datamesh"
 			continue
 		}
 
 		// Defensive: should not happen — computeDatameshAttachmentIntents sets intent=Attach
 		// only for nodes with a datamesh member (potentiallyAttached or candidate).
 		if as.member == nil {
-			as.progressMessage = "Waiting for datamesh member"
+			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica
+			as.conditionMessage = "Waiting for datamesh member"
 			continue
 		}
 
 		// Defensive: should not happen — RVR is protected by a finalizer while the member
 		// is part of datamesh, so it cannot be deleted before RemoveAccessReplica completes.
 		if as.rvr == nil {
-			as.progressMessage = "Waiting for replica"
+			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica
+			as.conditionMessage = "Waiting for replica"
 			continue
 		}
 
 		// Guard: RVR Ready.
 		if !obju.StatusCondition(as.rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType).IsTrue().Eval() {
-			as.progressMessage = "Waiting for replica to become Ready"
+			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica
+			as.conditionMessage = "Waiting for replica to become Ready"
+			continue
+		}
+
+		// Guard: VolumeAccess=Local requires a Diskful member on this node.
+		if rv.Status.Configuration.VolumeAccess == v1alpha1.VolumeAccessLocal &&
+			as.member.Type != v1alpha1.ReplicaTypeDiskful {
+			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonVolumeAccessLocalityNotSatisfied
+			as.conditionMessage = fmt.Sprintf(
+				"No Diskful replica on this node (volumeAccess is Local for storage class %s)",
+				rv.Spec.ReplicatedStorageClassName)
 			continue
 		}
 
 		// Multiattach guards.
 		if !atts.potentiallyAttached.IsEmpty() {
 			if !rv.Status.Datamesh.Multiattach || atts.hasActiveEnableMultiattachTransition {
-				as.progressMessage = "Waiting for multiattach to be enabled"
+				as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching
+				as.conditionMessage = "Waiting for multiattach to be enabled"
 				for i := range rv.Status.DatameshTransitions {
 					if rv.Status.DatameshTransitions[i].Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach {
 						if m := rv.Status.DatameshTransitions[i].Message; m != "" {
-							as.progressMessage += ". " + m
+							as.conditionMessage += ". " + m
 						}
 						break
 					}
@@ -817,17 +887,27 @@ func ensureDatameshAttachTransitions(
 			// Defensive: unclear when this can happen (EnableMultiattach and DisableMultiattach
 			// are mutually exclusive, and we just checked EnableMultiattach above).
 			if atts.hasActiveDisableMultiattachTransition {
-				as.progressMessage = "Waiting for multiattach to be enabled, but disable is in progress and must complete first"
+				as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching
+				as.conditionMessage = "Waiting for multiattach to be enabled, but disable is in progress and must complete first"
 				for i := range rv.Status.DatameshTransitions {
 					if rv.Status.DatameshTransitions[i].Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach {
 						if m := rv.Status.DatameshTransitions[i].Message; m != "" {
-							as.progressMessage += ". " + m
+							as.conditionMessage += ". " + m
 						}
 						break
 					}
 				}
 				break
 			}
+		}
+
+		// Defensive: should not happen — when attachBlocked, computeDatameshAttachmentIntents
+		// sets intent=Pending for all non-potentiallyAttached nodes, and potentiallyAttached
+		// nodes are caught by the settled/transition checks above.
+		if atts.attachBlocked {
+			as.conditionReason = atts.attachBlockedConditionReason
+			as.conditionMessage = atts.attachBlockedConditionMessage
+			continue
 		}
 
 		// All guards passed — create Attach transition.
@@ -847,7 +927,8 @@ func ensureDatameshAttachTransitions(
 		changed = true
 		as.hasActiveAttachTransition = true
 		atts.potentiallyAttached.Add(as.member.ID())
-		as.progressMessage = "Attaching, " + msg
+		as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching
+		as.conditionMessage = "Attaching, " + msg
 	}
 
 	return changed

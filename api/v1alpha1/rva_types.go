@@ -29,7 +29,6 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 // +kubebuilder:selectablefield:JSONPath=.spec.replicatedVolumeName
 // +kubebuilder:printcolumn:name="Volume",type=string,JSONPath=".spec.replicatedVolumeName"
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
-// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Attached",type=string,JSONPath=".status.conditions[?(@.type=='Attached')].status"
 // +kubebuilder:printcolumn:name="ReplicaReady",type=string,JSONPath=".status.conditions[?(@.type=='ReplicaReady')].status"
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
@@ -84,48 +83,24 @@ type ReplicatedVolumeAttachmentSpec struct {
 
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeAttachmentStatus struct {
-	// +kubebuilder:validation:Enum=Pending;Attaching;Attached;Detaching
-	// +optional
-	Phase ReplicatedVolumeAttachmentPhase `json:"phase,omitempty"`
-
 	// +listType=map
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// DevicePath is the block device path on the node when the volume is attached.
-	// Only set when Phase is Attached. Example: /dev/drbd10012.
+	// DevicePath is the block device path on the node.
+	// Only set when the device is available on the node. Example: /dev/drbd10012.
 	// +kubebuilder:validation:MaxLength=256
 	// +optional
 	DevicePath string `json:"devicePath,omitempty"`
 
 	// IOSuspended indicates whether I/O is suspended on the device.
-	// Only set when Phase is Attached.
+	// Only set when the device is available on the node.
 	// +optional
 	IOSuspended *bool `json:"ioSuspended,omitempty"`
 
-	// InUse indicates whether the replica's block device is currently in use by a process.
-	// Only set when Phase is Attached.
+	// InUse indicates whether the block device is currently in use by a process.
+	// Only set when the device is available on the node.
 	// +optional
 	InUse *bool `json:"inUse,omitempty"`
-}
-
-// ReplicatedVolumeAttachmentPhase enumerates possible values for ReplicatedVolumeAttachment status.phase field.
-type ReplicatedVolumeAttachmentPhase string
-
-// ReplicatedVolumeAttachment status.phase possible values.
-// Keep these in sync with `ReplicatedVolumeAttachmentStatus.Phase` validation enum.
-const (
-	// ReplicatedVolumeAttachmentPhasePending means the attachment is not started yet.
-	ReplicatedVolumeAttachmentPhasePending ReplicatedVolumeAttachmentPhase = "Pending"
-	// ReplicatedVolumeAttachmentPhaseAttaching means the system is attaching the volume.
-	ReplicatedVolumeAttachmentPhaseAttaching ReplicatedVolumeAttachmentPhase = "Attaching"
-	// ReplicatedVolumeAttachmentPhaseAttached means the volume is attached.
-	ReplicatedVolumeAttachmentPhaseAttached ReplicatedVolumeAttachmentPhase = "Attached"
-	// ReplicatedVolumeAttachmentPhaseDetaching means the system is detaching the volume.
-	ReplicatedVolumeAttachmentPhaseDetaching ReplicatedVolumeAttachmentPhase = "Detaching"
-)
-
-func (p ReplicatedVolumeAttachmentPhase) String() string {
-	return string(p)
 }

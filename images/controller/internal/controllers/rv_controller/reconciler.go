@@ -70,15 +70,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Failf(err, "getting ReplicatedVolume").ToCtrl()
 	}
 	if rv == nil {
-		// RV deleted. Handle orphaned RVAs (set conditions, remove finalizers).
-		rvas, err := r.getRVAsSorted(rf.Ctx(), req.Name)
-		if err != nil {
-			return rf.Failf(err, "listing RVAs for deleted RV").ToCtrl()
-		}
-		if len(rvas) == 0 {
-			return rf.Done().ToCtrl()
-		}
-		return r.reconcileOrphanedRVAs(rf.Ctx(), rvas).ToCtrl()
+		return r.reconcileOrphanedRVAs(rf.Ctx(), req.Name).ToCtrl()
 	}
 
 	// Load RSC.
@@ -151,7 +143,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			return rf.Failf(err, "getting RSP").ToCtrl()
 		}
 		if forming, formationPhase := isFormationInProgress(rv); forming {
-			outcome = outcome.Merge(r.reconcileFormation(rf.Ctx(), rv, &rvrs, rsp, rsc, formationPhase))
+			outcome = outcome.Merge(r.reconcileFormation(rf.Ctx(), rv, &rvrs, rvas, rsp, rsc, formationPhase))
 		} else {
 			outcome = outcome.Merge(r.reconcileNormalOperation(rf.Ctx(), rv, &rvrs, rvas, rsp))
 		}
@@ -197,6 +189,7 @@ func (r *Reconciler) reconcileFormation(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
+	rvas []*v1alpha1.ReplicatedVolumeAttachment,
 	rsp *rspView,
 	rsc *v1alpha1.ReplicatedStorageClass,
 	phase v1alpha1.ReplicatedVolumeFormationPhase,
@@ -206,14 +199,19 @@ func (r *Reconciler) reconcileFormation(
 
 	switch phase {
 	case v1alpha1.ReplicatedVolumeFormationPhasePreconfigure, "":
-		return r.reconcileFormationPhasePreconfigure(rf.Ctx(), rv, rvrs, rsp, rsc)
+		outcome = r.reconcileFormationPhasePreconfigure(rf.Ctx(), rv, rvrs, rsp, rsc)
 	case v1alpha1.ReplicatedVolumeFormationPhaseEstablishConnectivity:
-		return r.reconcileFormationPhaseEstablishConnectivity(rf.Ctx(), rv, rvrs, rsp, rsc)
+		outcome = r.reconcileFormationPhaseEstablishConnectivity(rf.Ctx(), rv, rvrs, rsp, rsc)
 	case v1alpha1.ReplicatedVolumeFormationPhaseBootstrapData:
-		return r.reconcileFormationPhaseBootstrapData(rf.Ctx(), rv, rvrs, rsp, rsc)
+		outcome = r.reconcileFormationPhaseBootstrapData(rf.Ctx(), rv, rvrs, rsp, rsc)
 	default:
 		return rf.Fail(fmt.Errorf("invalid formation phase: %s", phase))
 	}
+
+	// Set "waiting" conditions on all RVAs — datamesh is not ready yet.
+	outcome = outcome.Merge(r.reconcileRVAWaiting(rf.Ctx(), rvas, "Datamesh formation is in progress"))
+
+	return outcome
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -889,7 +887,9 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 	// The datamesh is born. Remove the Formation transition so that the main reconcile
 	// loop can proceed with normal operation (e.g., attach handling, scaling).
 	changed = applyFormationTransitionAbsent(rv) || changed
-	return rf.Continue().ReportChangedIf(changed)
+
+	// Requeue is required so the next reconciliation enters the normal-operation path.
+	return rf.ContinueAndRequeue().ReportChangedIf(changed)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -986,29 +986,32 @@ func (r *Reconciler) reconcileNormalOperation(
 	rf := flow.BeginReconcile(ctx, "normal-operation")
 	defer rf.OnEnd(&outcome)
 
-	// Step 1: Create Access RVRs for Active RVAs on nodes without any RVR.
+	// Create Access RVRs for Active RVAs on nodes without any RVR.
 	outcome = r.reconcileCreateAccessReplicas(rf.Ctx(), rv, rvrs, rvas, rsp)
 	if outcome.ShouldReturn() {
 		return outcome
 	}
 
-	// Step 2: Process datamesh Access replica membership transitions.
-	eo := ensureDatameshAccessReplicas(rf.Ctx(), rv, *rvrs, rsp)
+	var atts *attachmentsSummary
+	eo := flow.MergeEnsures(
+		// Process datamesh Access replica membership transitions.
+		ensureDatameshAccessReplicas(rf.Ctx(), rv, *rvrs, rsp),
+
+		// Process attach/detach transitions.
+		ensureDatameshAttachments(rf.Ctx(), rv, *rvrs, rvas, rsp, &atts),
+	)
 	if eo.Error() != nil {
 		return rf.Fail(eo.Error())
 	}
 	outcome = outcome.WithChangeFrom(eo)
 
-	// Step 3: Process attach/detach transitions.
-	atts, eo2 := ensureDatameshAttachments(rf.Ctx(), rv, *rvrs, rvas, rsp)
-	if eo2.Error() != nil {
-		return rf.Fail(eo2.Error())
-	}
-	outcome = outcome.WithChangeFrom(eo2)
-	_ = atts // TODO: use atts to set RVA conditions
+	outcome = outcome.Merge(
+		// Update RVA conditions and status fields.
+		r.reconcileRVAConditionsFromAttachmentsSummary(rf.Ctx(), atts),
 
-	// Step 4: Delete unnecessary Access RVRs (redundant or unused).
-	outcome = outcome.Merge(r.reconcileDeleteAccessReplicas(rf.Ctx(), rv, rvrs, rvas))
+		// Delete unnecessary Access RVRs (redundant or unused).
+		r.reconcileDeleteAccessReplicas(rf.Ctx(), rv, rvrs, rvas),
+	)
 
 	return outcome
 }
@@ -1178,119 +1181,6 @@ func (r *Reconciler) reconcileMetadata(
 	}
 
 	return rf.Continue()
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Reconcile: RVA finalizers
-//
-
-// reconcileRVAFinalizers adds RVControllerFinalizer to non-deleting RVAs
-// and removes it from deleting RVAs when safe (node not attached and no detach in progress).
-//
-// Reconcile pattern: Target-state driven
-func (r *Reconciler) reconcileRVAFinalizers(
-	ctx context.Context,
-	rv *v1alpha1.ReplicatedVolume,
-	rvas []*v1alpha1.ReplicatedVolumeAttachment,
-) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "rva-finalizers")
-	defer rf.OnEnd(&outcome)
-
-	for _, rva := range rvas {
-		if rva.DeletionTimestamp == nil {
-			// Non-deleting: add finalizer if missing.
-
-			// Skip if finalizer is already present.
-			if obju.HasFinalizer(rva, v1alpha1.RVControllerFinalizer) {
-				continue
-			}
-
-			// Add finalizer to ensure detach completes before RVA is deleted.
-			base := rva.DeepCopy()
-			obju.AddFinalizer(rva, v1alpha1.RVControllerFinalizer)
-			if err := r.patchRVA(rf.Ctx(), rva, base); err != nil {
-				return rf.Failf(err, "adding finalizer to RVA %s", rva.Name)
-			}
-		} else {
-			// Deleting: remove finalizer if safe.
-
-			// Skip if finalizer is already absent.
-			if !obju.HasFinalizer(rva, v1alpha1.RVControllerFinalizer) {
-				continue
-			}
-
-			// Safe to remove if another non-deleting RVA exists on the same node
-			// (duplicate — the other RVA will maintain the attach).
-			isDuplicate := hasOtherNonDeletingRVAOnNode(rvas, rva.Spec.NodeName, rva.Name)
-
-			// Also safe to remove if the node is not attached and no detach is in progress
-			// (nothing to wait for — detach already completed or was never started).
-			if !isDuplicate && isNodeAttachedOrDetaching(rv, rva.Spec.NodeName) {
-				continue
-			}
-
-			// Remove finalizer — RVA can be finalized.
-			base := rva.DeepCopy()
-			obju.RemoveFinalizer(rva, v1alpha1.RVControllerFinalizer)
-			if err := r.patchRVA(rf.Ctx(), rva, base); err != nil {
-				return rf.Failf(err, "removing finalizer from RVA %s", rva.Name)
-			}
-		}
-	}
-
-	return rf.Continue()
-}
-
-// isNodeAttachedOrDetaching returns true if the given node has an attached datamesh member
-// or an active Detach transition. Returns false when rv is nil (no datamesh state).
-func isNodeAttachedOrDetaching(rv *v1alpha1.ReplicatedVolume, nodeName string) bool {
-	if rv == nil {
-		return false
-	}
-
-	// Check for attached member on this node.
-	for i := range rv.Status.Datamesh.Members {
-		m := &rv.Status.Datamesh.Members[i]
-		if m.NodeName == nodeName && m.Attached {
-			return true
-		}
-	}
-
-	// Check for active Detach transition targeting a replica on this node.
-	for i := range rv.Status.DatameshTransitions {
-		t := &rv.Status.DatameshTransitions[i]
-
-		if t.Type != v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach {
-			continue
-		}
-
-		// Look up the member by replicaName to get its nodeName.
-		member := rv.Status.Datamesh.FindMemberByName(t.ReplicaName)
-		if member != nil && member.NodeName == nodeName {
-			return true
-		}
-	}
-
-	return false
-}
-
-// hasOtherNonDeletingRVAOnNode returns true if there is another non-deleting RVA on the same node,
-// excluding the RVA identified by excludeName.
-func hasOtherNonDeletingRVAOnNode(rvas []*v1alpha1.ReplicatedVolumeAttachment, nodeName string, excludeName string) bool {
-	for _, rva := range rvas {
-		if rva.Name == excludeName {
-			continue
-		}
-
-		if rva.DeletionTimestamp != nil {
-			continue
-		}
-
-		if rva.Spec.NodeName == nodeName {
-			return true
-		}
-	}
-	return false
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1631,6 +1521,47 @@ func computeTargetQuorum(rv *v1alpha1.ReplicatedVolume) (q, qmr byte) {
 	return q, qmr
 }
 
+// computeActualQuorum checks whether at least one diskful replica has quorum and a ready agent.
+// Returns (true, "") if quorum is satisfied, or (false, diagnostic) with a diagnostic detail otherwise.
+func computeActualQuorum(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) (satisfied bool, diagnostic string) {
+	diskfulMembers := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.ReplicatedVolumeDatameshMember) bool {
+		return m.Type == v1alpha1.ReplicaTypeDiskful
+	})
+	agentNotReady := idset.FromWhere(rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType).
+			ReasonEqual(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonAgentNotReady).
+			Eval()
+	})
+	withQuorum := idset.FromWhere(rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return rvr.Status.Quorum != nil && *rvr.Status.Quorum
+	}).Intersect(diskfulMembers).Difference(agentNotReady)
+
+	if !withQuorum.IsEmpty() {
+		return true, ""
+	}
+
+	// Diagnostic: which diskful replicas exist and why they don't count.
+	allRVRIDs := idset.FromAll(rvrs)
+	diskfulAgentNotReady := diskfulMembers.Intersect(agentNotReady)
+	diskfulNoQuorum := diskfulMembers.Intersect(allRVRIDs).Difference(agentNotReady)
+
+	switch {
+	case !diskfulNoQuorum.IsEmpty() && !diskfulAgentNotReady.IsEmpty():
+		diagnostic = fmt.Sprintf("no quorum on [%s]; agent not ready on [%s]",
+			diskfulNoQuorum, diskfulAgentNotReady)
+	case !diskfulNoQuorum.IsEmpty():
+		diagnostic = fmt.Sprintf("no quorum on [%s]", diskfulNoQuorum)
+	case !diskfulAgentNotReady.IsEmpty():
+		diagnostic = fmt.Sprintf("agent not ready on [%s]", diskfulAgentNotReady)
+	default:
+		diagnostic = "no diskful replicas available"
+	}
+	return false, diagnostic
+}
+
 // isRVMetadataInSync checks if the RV metadata (finalizer + labels) is in sync with the target state.
 func isRVMetadataInSync(rv *v1alpha1.ReplicatedVolume, targetFinalizerPresent bool) bool {
 	// Check finalizer.
@@ -1917,18 +1848,9 @@ func (r *Reconciler) reconcileDeletion(
 	defer rf.OnEnd(&outcome)
 
 	// Step 1: Update all RVA conditions.
-	const rvDeletingMessage = "ReplicatedVolume is being deleted"
-	for _, rva := range rvas {
-		if isRVAWaitingForRVConditionsInSync(rva, rvDeletingMessage) {
-			continue
-		}
-
-		base := rva.DeepCopy()
-		applyRVAWaitingForRVConditions(rva, rvDeletingMessage)
-
-		if err := r.patchRVAStatus(rf.Ctx(), rva, base); err != nil {
-			return rf.Failf(err, "patching RVA %s status", rva.Name)
-		}
+	outcome = r.reconcileRVAWaiting(rf.Ctx(), rvas, "ReplicatedVolume is being deleted")
+	if outcome.ShouldReturn() {
+		return outcome
 	}
 
 	// Step 2: Remove finalizers from RVRs and delete them.
@@ -1949,55 +1871,6 @@ func (r *Reconciler) reconcileDeletion(
 
 	// We're done. Don't continue further reconciliation.
 	return rf.Done()
-}
-
-// isRVAWaitingForRVConditionsInSync checks if RVA has the expected conditions for when RV is unavailable.
-func isRVAWaitingForRVConditionsInSync(rva *v1alpha1.ReplicatedVolumeAttachment, message string) bool {
-	// Should have exactly 2 conditions: Attached and Ready.
-	if len(rva.Status.Conditions) != 2 {
-		return false
-	}
-
-	attachedCond := obju.GetStatusCondition(rva, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
-	if attachedCond == nil ||
-		attachedCond.Status != metav1.ConditionFalse ||
-		attachedCond.Reason != v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolume ||
-		attachedCond.Message != message {
-		return false
-	}
-
-	readyCond := obju.GetStatusCondition(rva, v1alpha1.ReplicatedVolumeAttachmentCondReadyType)
-	if readyCond == nil ||
-		readyCond.Status != metav1.ConditionFalse ||
-		readyCond.Reason != v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonNotAttached ||
-		readyCond.Message != message {
-		return false
-	}
-
-	return true
-}
-
-// applyRVAWaitingForRVConditions sets RVA conditions when RV is unavailable:
-// Attached=False (WaitingForReplicatedVolume), Ready=False (NotAttached).
-// Removes all other conditions.
-func applyRVAWaitingForRVConditions(rva *v1alpha1.ReplicatedVolumeAttachment, message string) {
-	obju.SetStatusCondition(rva, metav1.Condition{
-		Type:    v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
-		Status:  metav1.ConditionFalse,
-		Reason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolume,
-		Message: message,
-	})
-	obju.SetStatusCondition(rva, metav1.Condition{
-		Type:    v1alpha1.ReplicatedVolumeAttachmentCondReadyType,
-		Status:  metav1.ConditionFalse,
-		Reason:  v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonNotAttached,
-		Message: message,
-	})
-	// Remove all conditions except the two set above.
-	rva.Status.Conditions = slices.DeleteFunc(rva.Status.Conditions, func(c metav1.Condition) bool {
-		return c.Type != v1alpha1.ReplicatedVolumeAttachmentCondAttachedType &&
-			c.Type != v1alpha1.ReplicatedVolumeAttachmentCondReadyType
-	})
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2027,46 +1900,6 @@ func (v *rspView) FindEligibleNode(nodeName string) *v1alpha1.ReplicatedStorageP
 		return nil
 	}
 	return &v.EligibleNodes[idx]
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Reconcile: orphaned RVAs (RV already deleted)
-//
-
-// reconcileOrphanedRVAs handles RVAs that reference a deleted RV.
-// Sets conditions (Attached=False/WaitingForReplicatedVolume, Ready=False/NotAttached)
-// and removes RVControllerFinalizer from deleting RVAs.
-//
-// Reconcile pattern: In-place reconciliation
-func (r *Reconciler) reconcileOrphanedRVAs(
-	ctx context.Context,
-	rvas []*v1alpha1.ReplicatedVolumeAttachment,
-) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "orphaned-rvas")
-	defer rf.OnEnd(&outcome)
-
-	const rvNotFoundMessage = "ReplicatedVolume not found; waiting for it to appear"
-	for _, rva := range rvas {
-		// Set conditions (Attached=False/WaitingForReplicatedVolume).
-		if !isRVAWaitingForRVConditionsInSync(rva, rvNotFoundMessage) {
-			base := rva.DeepCopy()
-			applyRVAWaitingForRVConditions(rva, rvNotFoundMessage)
-			if err := r.patchRVAStatus(rf.Ctx(), rva, base); err != nil {
-				return rf.Failf(err, "patching orphaned RVA %s status", rva.Name)
-			}
-		}
-
-		// Remove our finalizer from deleting RVAs (RV is gone → nothing is attached → safe).
-		if rva.DeletionTimestamp != nil && obju.HasFinalizer(rva, v1alpha1.RVControllerFinalizer) {
-			base := rva.DeepCopy()
-			obju.RemoveFinalizer(rva, v1alpha1.RVControllerFinalizer)
-			if err := r.patchRVA(rf.Ctx(), rva, base); err != nil {
-				return rf.Failf(err, "removing finalizer from orphaned RVA %s", rva.Name)
-			}
-		}
-	}
-
-	return rf.Done()
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

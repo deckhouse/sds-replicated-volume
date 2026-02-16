@@ -25,9 +25,6 @@ spec:
     - jsonPath: .spec.nodeName
       name: Node
       type: string
-    - jsonPath: .status.phase
-      name: Phase
-      type: string
     - jsonPath: .status.conditions[?(@.type=='Attached')].status
       name: Attached
       type: string
@@ -148,29 +145,20 @@ spec:
                 x-kubernetes-list-type: map
               devicePath:
                 description: |-
-                  DevicePath is the block device path on the node when the volume is attached.
-                  Only set when Phase is Attached. Example: /dev/drbd10012.
+                  DevicePath is the block device path on the node.
+                  Only set when the device is available on the node. Example: /dev/drbd10012.
                 maxLength: 256
                 type: string
               inUse:
                 description: |-
-                  InUse indicates whether the replica's block device is currently in use by a process.
-                  Only set when Phase is Attached.
+                  InUse indicates whether the block device is currently in use by a process.
+                  Only set when the device is available on the node.
                 type: boolean
               ioSuspended:
                 description: |-
                   IOSuspended indicates whether I/O is suspended on the device.
-                  Only set when Phase is Attached.
+                  Only set when the device is available on the node.
                 type: boolean
-              phase:
-                description: ReplicatedVolumeAttachmentPhase enumerates possible values
-                  for ReplicatedVolumeAttachment status.phase field.
-                enum:
-                - Pending
-                - Attaching
-                - Attached
-                - Detaching
-                type: string
             type: object
         required:
         - metadata

@@ -626,7 +626,7 @@ func WaitForRVAReady(
 		// Waiting here only burns time and hides the real cause from CSI callers.
 		if lastAttachedCond != nil &&
 			lastAttachedCond.Status == metav1.ConditionFalse &&
-			(lastAttachedCond.Reason == srv.ReplicatedVolumeAttachmentCondAttachedReasonLocalityNotSatisfied || lastAttachedCond.Reason == srv.ReplicatedVolumeAttachmentCondAttachedReasonUnableToProvideLocalVolumeAccess) {
+			lastAttachedCond.Reason == srv.ReplicatedVolumeAttachmentCondAttachedReasonVolumeAccessLocalityNotSatisfied {
 			return &RVAWaitError{
 				VolumeName:            volumeName,
 				NodeName:              nodeName,
