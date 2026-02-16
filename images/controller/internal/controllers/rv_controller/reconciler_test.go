@@ -4159,6 +4159,54 @@ var _ = Describe("reconcileDeletion error paths", func() {
 		Expect(errors.Is(err, testErr)).To(BeTrue())
 	})
 
+	It("ignores NotFound from patchRVAStatus (RVA deleted between read and patch)", func(ctx SpecContext) {
+		now := metav1.Now()
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rv-1",
+				DeletionTimestamp: &now,
+				Finalizers:        []string{v1alpha1.RVControllerFinalizer},
+			},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				Size:                       resource.MustParse("10Gi"),
+				ReplicatedStorageClassName: "rsc-1",
+			},
+		}
+
+		rva := &v1alpha1.ReplicatedVolumeAttachment{
+			ObjectMeta: metav1.ObjectMeta{Name: "rva-1"},
+			Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+				ReplicatedVolumeName: "rv-1",
+				NodeName:             "node-1",
+			},
+		}
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rva).
+			WithStatusSubresource(rv, rva).
+			WithInterceptorFuncs(interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, cl client.Client, _ string, obj client.Object, patch client.Patch, _ ...client.SubResourcePatchOption) error {
+					if _, ok := obj.(*v1alpha1.ReplicatedVolumeAttachment); ok {
+						return apierrors.NewNotFound(schema.GroupResource{
+							Group:    v1alpha1.SchemeGroupVersion.Group,
+							Resource: "replicatedvolumeattachments",
+						}, "rva-1")
+					}
+					return cl.Status().Patch(ctx, obj, patch)
+				},
+			}).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		// NotFound from patchRVAStatus should be ignored — no error propagated from RVA patching.
+		// The reconcile may still return an error from other steps (e.g., requeue),
+		// but it must NOT be a NotFound error for the RVA.
+		if err != nil {
+			Expect(apierrors.IsNotFound(err)).To(BeFalse(), "NotFound from patchRVAStatus should be ignored, got: %v", err)
+		}
+	})
+
 	It("returns error when deleteRVRWithForcedFinalizerRemoval fails during deletion", func(ctx SpecContext) {
 		now := metav1.Now()
 		rv := &v1alpha1.ReplicatedVolume{

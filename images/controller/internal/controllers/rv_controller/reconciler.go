@@ -2079,7 +2079,7 @@ func (r *Reconciler) patchRVA(ctx context.Context, obj, base *v1alpha1.Replicate
 }
 
 func (r *Reconciler) patchRVAStatus(ctx context.Context, obj, base *v1alpha1.ReplicatedVolumeAttachment) error {
-	return r.cl.Status().Patch(ctx, obj, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
+	return client.IgnoreNotFound(r.cl.Status().Patch(ctx, obj, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})))
 }
 
 // --- RVR ---
