@@ -1092,6 +1092,7 @@ flowchart TD
 
 | # | Guard | Outcome |
 |---|-------|---------|
+| 0 | No datamesh member (`as.member == nil`) | Skip (never attached); conditionReason=Detached |
 | 1 | Already fully detached (member.Attached=false, no active Detach transition) | Skip (settled); conditionReason=Detached |
 | 2 | Active Detach transition already exists | Skip |
 | 3 | Active Attach transition on same replica | Block: "Detach pending, waiting for attach to complete first" |
