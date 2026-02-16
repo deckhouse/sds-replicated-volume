@@ -100,24 +100,13 @@ type ReplicatedVolumeStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// +optional
-	DRBD *DRBDResourceDetails `json:"drbd,omitempty"`
-
+	// TODO: Remove this field. It is no longer used (except for CSI driver, which will use RVA objects instead).
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="actuallyAttachedTo must be unique"
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
 	// +listType=atomic
 	// +optional
 	ActuallyAttachedTo []string `json:"actuallyAttachedTo,omitempty"`
-
-	// DesiredAttachTo is the desired set of nodes where the volume should be attached (up to 2 nodes).
-	// It is computed by controllers from ReplicatedVolumeAttachment (RVA) objects.
-	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="desiredAttachTo must be unique"
-	// +kubebuilder:validation:MaxItems=2
-	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
-	// +listType=atomic
-	// +optional
-	DesiredAttachTo []string `json:"desiredAttachTo,omitempty"`
 
 	// Configuration is the desired configuration snapshot for this volume.
 	// +optional
@@ -440,18 +429,6 @@ const (
 
 func (t ReplicatedVolumeDatameshMemberTypeTransition) String() string {
 	return string(t)
-}
-
-// +kubebuilder:object:generate=true
-type DRBDResourceDetails struct {
-	// +optional
-	Config *DRBDResourceConfig `json:"config,omitempty"`
-}
-
-// +kubebuilder:object:generate=true
-type DRBDResourceConfig struct {
-	// +kubebuilder:default=false
-	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
 }
 
 // ReplicatedVolumeEligibleNodesViolation describes a replica placed on a non-eligible node.

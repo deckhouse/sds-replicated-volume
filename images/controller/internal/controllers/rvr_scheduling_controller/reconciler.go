@@ -111,11 +111,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			Enrichf("setting WaitingForReplicatedVolume: RSP %q not found", rv.Status.Configuration.StoragePoolName).ToCtrl()
 	}
 
+	attachToNodes, err := r.getIntendedAttachments(rf.Ctx(), req.Name)
+	if err != nil {
+		return rf.Fail(err).ToCtrl()
+	}
+
 	// Build the scheduling context: eligible nodes, topology, zone layout,
 	// reservation parameters, and replica-type sets (All, Access, Diskful,
 	// TieBreaker, Deleting, Scheduled) with OccupiedNodes — all computed in
 	// a single pass over rvrs.
-	sctx := computeSchedulingContext(rv, rsp, rvrs)
+	sctx := computeSchedulingContext(rv, rsp, rvrs, attachToNodes)
 
 	// Access replicas (diskless) don't need scheduling — they are created
 	// directly on the node where they are needed. Remove the Scheduled
@@ -625,7 +630,8 @@ type schedulingContext struct {
 	Scheduled  idset.IDSet
 }
 
-// computeSchedulingContext builds a schedulingContext from RV, RSP and RVRs.
+// computeSchedulingContext builds a schedulingContext from RV, RSP, RVRs, and
+// the desired attach-to node list (from RVA objects).
 // All replica-type sets (All, Access, Diskful, TieBreaker, Deleting, Scheduled)
 // and OccupiedNodes are computed in a single pass over rvrs.
 // EligibleNodes are sorted by NodeName.
@@ -633,6 +639,7 @@ func computeSchedulingContext(
 	rv *v1alpha1.ReplicatedVolume,
 	rsp *v1alpha1.ReplicatedStoragePool,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	attachToNodes []string,
 ) *schedulingContext {
 	eligibleNodes := rsp.Status.EligibleNodes
 
@@ -646,7 +653,7 @@ func computeSchedulingContext(
 		Topology:      rv.Status.Configuration.Topology,
 		Replication:   rv.Status.Configuration.Replication,
 		VolumeAccess:  rv.Status.Configuration.VolumeAccess,
-		AttachToNodes: rv.Status.DesiredAttachTo,
+		AttachToNodes: attachToNodes,
 		ReservationID: rv.GetAnnotations()[v1alpha1.SchedulingReservationIDAnnotationKey],
 		Size:          rv.Spec.Size.Value(),
 		OccupiedNodes: make(map[string]struct{}, len(rvrs)),
@@ -937,4 +944,30 @@ func (r *Reconciler) getRSP(ctx context.Context, name string) (*v1alpha1.Replica
 		return nil, err
 	}
 	return rsp, nil
+}
+
+// --- RVA ---
+
+// getIntendedAttachments lists ReplicatedVolumeAttachment objects for the given
+// RV name using the informer cache (UnsafeDisableDeepCopy) and returns a sorted
+// slice of unique node names. No map allocations are made.
+func (r *Reconciler) getIntendedAttachments(ctx context.Context, rvName string) ([]string, error) {
+	var list v1alpha1.ReplicatedVolumeAttachmentList
+	if err := r.cl.List(ctx, &list,
+		client.MatchingFields{indexes.IndexFieldRVAByReplicatedVolumeName: rvName},
+		client.UnsafeDisableDeepCopy,
+	); err != nil {
+		return nil, err
+	}
+
+	if len(list.Items) == 0 {
+		return nil, nil
+	}
+
+	nodes := make([]string, len(list.Items))
+	for i := range list.Items {
+		nodes[i] = list.Items[i].Spec.NodeName
+	}
+	slices.Sort(nodes)
+	return slices.Compact(nodes), nil
 }

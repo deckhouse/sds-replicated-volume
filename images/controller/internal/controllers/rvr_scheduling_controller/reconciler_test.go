@@ -56,8 +56,10 @@ func newScheme() *runtime.Scheme {
 }
 
 func newClientBuilder(scheme *runtime.Scheme) *fake.ClientBuilder {
-	return testhelpers.WithRVRByReplicatedVolumeNameIndex(
-		fake.NewClientBuilder().WithScheme(scheme),
+	return testhelpers.WithRVAByReplicatedVolumeNameIndex(
+		testhelpers.WithRVRByReplicatedVolumeNameIndex(
+			fake.NewClientBuilder().WithScheme(scheme),
+		),
 	)
 }
 
@@ -93,6 +95,16 @@ func newRVR(id uint8, replicaType v1alpha1.ReplicaType) *v1alpha1.ReplicatedVolu
 		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: testRVName,
 			Type:                 replicaType,
+		},
+	}
+}
+
+func newRVA(nodeName string) *v1alpha1.ReplicatedVolumeAttachment {
+	return &v1alpha1.ReplicatedVolumeAttachment{
+		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rva-%s-%s", testRVName, nodeName)},
+		Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+			ReplicatedVolumeName: testRVName,
+			NodeName:             nodeName,
 		},
 	}
 }
@@ -1359,7 +1371,7 @@ var _ = Describe("Reconciler", func() {
 		It("+1000 bonus overrides extender scores", func() {
 			cfg := defaultConfig()
 			rv := newRV(cfg)
-			rv.Status.DesiredAttachTo = []string{"node-a"}
+			rva := newRVA("node-a")
 
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -1369,7 +1381,7 @@ var _ = Describe("Reconciler", func() {
 			rvr := newRVR(0, v1alpha1.ReplicaTypeDiskful)
 
 			cl := newClientBuilder(scheme).
-				WithObjects(rv, rsp, rvr).
+				WithObjects(rv, rsp, rvr, rva).
 				WithStatusSubresource(rvr).
 				Build()
 			mock := &reconcilerMockExtender{
@@ -2387,7 +2399,7 @@ var _ = Describe("Reconciler", func() {
 	Describe("Zonal AttachTo", func() {
 		It("Zonal: attachTo node — D on that node, TB on remaining", func() {
 			rv := newRV(zonalConfig())
-			rv.Status.DesiredAttachTo = []string{"node-a1"}
+			rva := newRVA("node-a1")
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
 					makeNode("node-a1", "zone-a", makeLVG("vg-a1", true)),
@@ -2398,7 +2410,7 @@ var _ = Describe("Reconciler", func() {
 			tb := newRVR(1, v1alpha1.ReplicaTypeTieBreaker)
 
 			cl := newClientBuilder(scheme).
-				WithObjects(rv, rsp, d, tb).
+				WithObjects(rv, rsp, d, tb, rva).
 				WithStatusSubresource(d, tb).
 				Build()
 			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
@@ -2412,7 +2424,8 @@ var _ = Describe("Reconciler", func() {
 
 		It("Zonal: attachTo both nodes of same zone — all D in zone-a", func() {
 			rv := newRV(zonalConfig())
-			rv.Status.DesiredAttachTo = []string{"node-a1", "node-a2"}
+			rvaA1 := newRVA("node-a1")
+			rvaA2 := newRVA("node-a2")
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
 					makeNode("node-a1", "zone-a", makeLVG("vg-a1", true)),
@@ -2425,7 +2438,7 @@ var _ = Describe("Reconciler", func() {
 			rvr1 := newRVR(1, v1alpha1.ReplicaTypeDiskful)
 
 			cl := newClientBuilder(scheme).
-				WithObjects(rv, rsp, rvr0, rvr1).
+				WithObjects(rv, rsp, rvr0, rvr1, rvaA1, rvaA2).
 				WithStatusSubresource(rvr0, rvr1).
 				Build()
 			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
@@ -2442,7 +2455,7 @@ var _ = Describe("Reconciler", func() {
 
 		It("AttachTo bonus NOT applied to TieBreaker", func() {
 			rv := newRV(defaultConfig())
-			rv.Status.DesiredAttachTo = []string{"node-a"}
+			rva := newRVA("node-a")
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
 					makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
@@ -2457,7 +2470,7 @@ var _ = Describe("Reconciler", func() {
 			tb := newRVR(1, v1alpha1.ReplicaTypeTieBreaker)
 
 			cl := newClientBuilder(scheme).
-				WithObjects(rv, rsp, d, tb).
+				WithObjects(rv, rsp, d, tb, rva).
 				WithStatusSubresource(d, tb).
 				Build()
 			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
