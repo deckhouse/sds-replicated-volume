@@ -8,7 +8,7 @@ git:
   - url: {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-utils
     add: /
     to: /drbd-utils
-    tag: v{{ $.Versions.DRBD_UTILS }}
+    tag: v9.30.0
     stageDependencies:
       setup:
         - "**/*"
@@ -40,7 +40,7 @@ shell:
     # clone drbd-utils git repo
     {{- $ctx := dict }}
     {{- $_ := set $ctx "repo" (printf "%s/LINBIT/drbd-utils" $.Root.SOURCE_REPO) }}
-    {{- $_ := set $ctx "branch" (printf "v%s" $.Versions.DRBD_UTILS) }}
+    {{- $_ := set $ctx "branch" (printf "v%s" "9.30.0") }}
     {{- $_ := set $ctx "folder" "/drbd-utils" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
 
@@ -52,7 +52,7 @@ shell:
     # make .rpm package
     {{- $ctx := dict }}
     {{- $_ := set $ctx "name" "drbd-utils" }}
-    {{- $_ := set $ctx "version" $.Versions.DRBD_UTILS }}
+    {{- $_ := set $ctx "version" "9.30.0" }}
     {{- $_ := set $ctx "spec" "drbd.spec" }}
     {{- $_ := set $ctx "arch" "x86_64" }}
     # set initscripttype explicitly for workaround errors like 'No such file or directory: /tmp/.private/rpmbuilder/drbd-buildroot/usr/lib/systemd/system/drbd@.service'
