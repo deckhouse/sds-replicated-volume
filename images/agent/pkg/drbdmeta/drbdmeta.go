@@ -57,7 +57,11 @@ var CreateMDArgs = func(minor uint, backingDev string) []string {
 		"internal",
 		"create-md",
 		"--force",
-		"31", // number-of-bitmap-slots (positional argument for v09 create-md)
+
+		// number-of-bitmap-slots (positional argument for v09 create-md)
+		// Must match maxPeers in images/controller/internal/drbd_size/drbd_size.go
+		// and --max-peers in images/agent/pkg/drbdadm/vars.go.
+		"7",
 	}
 }
 

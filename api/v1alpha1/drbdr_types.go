@@ -225,9 +225,16 @@ type DRBDResourceStatus struct {
 	Device string `json:"device,omitempty"`
 
 	// DeviceIOSuspended indicates whether I/O is suspended on the device.
-	// Only set when attached (device is present).
+	// Only present on primary
 	// +optional
 	DeviceIOSuspended *bool `json:"deviceIOSuspended,omitempty"`
+
+	// DeviceOpen indicates whether the block device is currently open by a process
+	// (bd_openers > 0). Reflects DRBD's "open: yes/no" from drbdsetup status.
+	// When true, demotion to Secondary will fail.
+	// Only present on primary
+	// +optional
+	DeviceOpen *bool `json:"deviceOpen,omitempty"`
 
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))",message="addresses[].systemNetworkName must be unique"
 	// +kubebuilder:validation:MaxItems=32

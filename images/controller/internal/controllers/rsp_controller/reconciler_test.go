@@ -1237,3 +1237,58 @@ var _ = Describe("getLVGsByRSP", func() {
 		Expect(lvgs).To(HaveKey("lvg-c"))
 	})
 })
+
+var _ = Describe("applyLegacyFieldsCleared", func() {
+	It("clears phase and reason when both are set", func() {
+		rsp := &v1alpha1.ReplicatedStoragePool{
+			Status: v1alpha1.ReplicatedStoragePoolStatus{
+				Phase:  v1alpha1.RSPPhaseCompleted,
+				Reason: "pool creation completed",
+			},
+		}
+
+		changed := applyLegacyFieldsCleared(rsp)
+
+		Expect(changed).To(BeTrue())
+		Expect(rsp.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhase("")))
+		Expect(rsp.Status.Reason).To(BeEmpty())
+	})
+
+	It("clears only phase when reason is already empty", func() {
+		rsp := &v1alpha1.ReplicatedStoragePool{
+			Status: v1alpha1.ReplicatedStoragePoolStatus{
+				Phase: v1alpha1.RSPPhaseFailed,
+			},
+		}
+
+		changed := applyLegacyFieldsCleared(rsp)
+
+		Expect(changed).To(BeTrue())
+		Expect(rsp.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhase("")))
+	})
+
+	It("clears only reason when phase is already empty", func() {
+		rsp := &v1alpha1.ReplicatedStoragePool{
+			Status: v1alpha1.ReplicatedStoragePoolStatus{
+				Reason: "leftover reason",
+			},
+		}
+
+		changed := applyLegacyFieldsCleared(rsp)
+
+		Expect(changed).To(BeTrue())
+		Expect(rsp.Status.Reason).To(BeEmpty())
+	})
+
+	It("reports no change when both are already empty", func() {
+		rsp := &v1alpha1.ReplicatedStoragePool{
+			Status: v1alpha1.ReplicatedStoragePoolStatus{},
+		}
+
+		changed := applyLegacyFieldsCleared(rsp)
+
+		Expect(changed).To(BeFalse())
+		Expect(rsp.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhase("")))
+		Expect(rsp.Status.Reason).To(BeEmpty())
+	})
+})

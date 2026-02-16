@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/controlleroptions"
 )
 
 // NodeControllerName is the controller name for node_controller.
@@ -55,7 +56,10 @@ func BuildController(mgr manager.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(mapDRBDResourceToNode),
 			builder.WithPredicates(drbdResourcePredicates()...),
 		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+			RateLimiter:             controlleroptions.DefaultRateLimiter(),
+		}).
 		Complete(rec)
 }
 

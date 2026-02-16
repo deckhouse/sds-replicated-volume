@@ -21,9 +21,8 @@ These controllers manage the full volume lifecycle — from datamesh formation t
 | Controller | Primary Resource | Purpose |
 |------------|------------------|---------|
 | [rv_controller](internal/controllers/rv_controller/README.md) | ReplicatedVolume | Orchestrates datamesh formation, manages configuration, deletion |
+| [rvr_scheduling_controller](internal/controllers/rvr_scheduling_controller/README.md) | ReplicatedVolume | Assigns nodes/LVGs to unscheduled replicas based on topology and storage capacity |
 | [rvr_controller](internal/controllers/rvr_controller/README.md) | ReplicatedVolumeReplica | Manages backing volumes (LLV), DRBD resources, and reports replica status |
-
-<!-- TODO: add rvr_scheduling_controller (assigns nodes to replicas based on topology and storage capacity) once its README is written -->
 
 ## Architecture
 
@@ -90,6 +89,7 @@ flowchart TB
 
     subgraph controllers [Controllers]
         RVCtrl[rv_controller]
+        RVRSchedCtrl[rvr_scheduling_controller]
         RVRCtrl[rvr_controller]
     end
 
@@ -97,6 +97,10 @@ flowchart TB
         LLV[LVMLogicalVolume]
         DRBDR[DRBDResource]
         DRBDROp[DRBDResourceOperation]
+    end
+
+    subgraph externalSvc [External Services]
+        SchExt[scheduler-extender]
     end
 
     RSC --> RVCtrl
@@ -107,6 +111,12 @@ flowchart TB
     RVCtrl -->|creates/deletes| RVR
     RVCtrl -->|creates| DRBDROp
     RVCtrl -->|"updates conditions (deletion)"| RVA
+
+    RV --> RVRSchedCtrl
+    RSP --> RVRSchedCtrl
+    RVR --> RVRSchedCtrl
+    SchExt --> RVRSchedCtrl
+    RVRSchedCtrl -->|"assigns node/LVG"| RVR
 
     RVR --> RVRCtrl
     RV --> RVRCtrl
@@ -134,12 +144,11 @@ Each controller reconciles independently, reacting to changes in its watched res
 The volume lifecycle controllers form a chain that connects storage infrastructure to physical DRBD resources:
 
 ```
-(RSC + RSP) → RV (rv_controller) → RVR (rvr_controller) → (LLV, DRBDResource)
+(RSC + RSP) → RV (rv_controller) → RVR (rvr_scheduling_controller) → RVR (rvr_controller) → (LLV, DRBDResource)
 ```
 
 1. **rv_controller** — reads RSC configuration and RSP eligible nodes; orchestrates datamesh formation (3-phase: preconfigure, establish connectivity, bootstrap data); manages RVR creation/deletion and RV status
-2. **rvr_controller** — manages backing volumes (LVMLogicalVolume) and DRBD resources (DRBDResource) for each replica; reports replica conditions and status
-
-<!-- TODO: add rvr_scheduling_controller to the chain (assigns nodes to unscheduled RVRs between rv_controller and rvr_controller) -->
+2. **rvr_scheduling_controller** — assigns nodes and LVGs to unscheduled RVRs using topology-aware placement and scheduler-extender capacity scoring
+3. **rvr_controller** — manages backing volumes (LVMLogicalVolume) and DRBD resources (DRBDResource) for each replica; reports replica conditions and status
 
 Each controller reconciles independently, reacting to changes in its watched resources.

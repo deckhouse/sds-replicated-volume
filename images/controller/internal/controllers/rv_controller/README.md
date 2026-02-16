@@ -67,7 +67,8 @@ Reconcile (root) [Pure orchestration]
 ├── reconcileFormation [Pure orchestration]
 │   ├── reconcileFormationPhasePreconfigure [Pure orchestration] ← details
 │   │   ├── applyFormationTransition
-│   │   ├── create/delete RVRs (replica count management)
+│   │   ├── create/delete RVRs (guards for deleting/misplaced, replica count management)
+│   │   ├── wait for deleting replicas cleanup
 │   │   ├── safety checks (addresses, eligible nodes, spec mismatch, backing volume size)
 │   │   └── reconcileFormationRestartIfTimeoutPassed
 │   ├── reconcileFormationPhaseEstablishConnectivity [Pure orchestration] ← details
@@ -142,10 +143,13 @@ Creates diskful replicas and waits for them to become preconfigured (DRBD setup 
 
 **Steps:**
 1. Initialize datamesh configuration (SystemNetworkNames, Size, DatameshRevision=1)
-2. Create missing diskful replicas (count based on replication mode)
-3. Remove misplaced/excess replicas
-4. Wait for scheduling and preconfiguration
-5. Safety checks: addresses, eligible nodes, spec consistency, backing volume size
+2. Identify misplaced replicas (SatisfyEligibleNodes=False) and deleting replicas (DeletionTimestamp set)
+3. Collect active diskful replicas (excluding misplaced and deleting)
+4. Create missing diskful replicas only when no deleting or misplaced replicas exist (prevents zombie accumulation)
+5. Remove excess/misplaced replicas
+6. Wait for all deleting replicas to be fully removed (restart formation if timeout)
+7. Wait for scheduling and preconfiguration (replicas split into pending scheduling / scheduling failed / preconfiguring; scheduling failure messages from RVR Scheduled=False conditions are shown inline)
+8. Safety checks: addresses, eligible nodes, spec consistency, backing volume size
 
 ### Phase 2: Establish Connectivity
 
@@ -165,15 +169,17 @@ Triggers initial data synchronization via DRBDResourceOperation and waits for co
 
 **Steps:**
 1. Create DRBDResourceOperation (type: CreateNewUUID)
-   - LVMThin: clear-bitmap (fast, no full resync needed)
-   - LVM: force-resync (full data synchronization)
+   - Single replica (any pool type): clear-bitmap (no peers to synchronize with)
+   - Multiple replicas, thin provisioning: clear-bitmap (no full resync needed)
+   - Multiple replicas, thick provisioning: force-resync (full data synchronization)
 2. Wait for operation to succeed
 3. Wait for all replicas to reach UpToDate state
 4. Remove Formation transition (formation complete)
 
 **Timeout calculation:**
 - Base: 1 minute
-- LVM (force-resync): + volume size / 100 Mbit/s (worst-case bandwidth estimate)
+- Force-resync (multi-replica thick provisioning): + volume size / 100 Mbit/s (worst-case bandwidth estimate)
+- Clear-bitmap (single replica or thin provisioning): base only
 
 ### Formation Restart
 
@@ -191,9 +197,9 @@ When formation stalls (any safety check fails or progress timeout is exceeded), 
 
 | Type | Key | Managed On | Purpose |
 |------|-----|------------|---------|
-| Finalizer | `storage.deckhouse.io/rv-controller` | RV | Prevent deletion while child resources exist |
-| Label | `storage.deckhouse.io/replicated-storage-class` | RV | Link to ReplicatedStorageClass |
-| Finalizer | `storage.deckhouse.io/rv-controller` | RVR | Removed during formation restart / deletion |
+| Finalizer | `sds-replicated-volume.deckhouse.io/rv-controller` | RV | Prevent deletion while child resources exist |
+| Label | `sds-replicated-volume.deckhouse.io/replicated-storage-class` | RV | Link to ReplicatedStorageClass |
+| Finalizer | `sds-replicated-volume.deckhouse.io/rv-controller` | RVR | Removed during formation restart / deletion |
 | OwnerRef | controller reference | DRBDResourceOperation | Owner reference to RV |
 
 ## Watches
@@ -203,7 +209,7 @@ When formation stalls (any safety check fails or progress timeout is exceeded), 
 | ReplicatedVolume | Generation, DeletionTimestamp, ReplicatedStorageClass label, Finalizers changes | For() (primary) |
 | ReplicatedStorageClass | ConfigurationGeneration changes | mapRSCToRVs (index lookup) |
 | ReplicatedVolumeAttachment | Attached condition status changes | mapRVAToRV |
-| ReplicatedVolumeReplica | DatameshRevision, DeletionTimestamp, Finalizers changes | mapRVRToRV |
+| ReplicatedVolumeReplica | Conditions (Scheduled, DRBDConfigured, SatisfyEligibleNodes), DatameshPendingTransition, DatameshRevision, Addresses, BackingVolume, Peers, DeletionTimestamp, Finalizers changes | mapRVRToRV |
 | DRBDResourceOperation | Create/Delete of *-formation ops, Phase changes, Generation changes | Owns() |
 
 ## Indexes
@@ -310,7 +316,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> SortExisting[Sort existing entries by NodeID]
+    Start([Start]) --> SortExisting[Sort existing entries by ID]
     SortExisting --> Merge["Sorted merge:<br/>existing × rvrs"]
 
     Merge --> CaseRemoved["existing entry not in rvrs → removed"]
@@ -335,7 +341,7 @@ flowchart TD
 
 | Output | Description |
 |--------|-------------|
-| `rv.Status.DatameshPendingReplicaTransitions` | Synchronized list (sorted by NodeID) |
+| `rv.Status.DatameshPendingReplicaTransitions` | Synchronized list (sorted by ID) |
 
 ---
 
@@ -350,21 +356,31 @@ flowchart TD
     Start([Start]) --> ApplyTransition["applyFormationTransition(Preconfigure)<br/>Init: DatameshRevision=1, SystemNetworkNames, Size"]
 
     ApplyTransition --> FindMisplaced["Find misplaced replicas<br/>(SatisfyEligibleNodes=False)"]
-    FindMisplaced --> CollectDiskful["Collect active diskful replicas<br/>(exclude misplaced)"]
+    FindMisplaced --> FindDeleting["Find deleting replicas<br/>(DeletionTimestamp set)"]
+    FindDeleting --> CollectDiskful["Collect active diskful replicas<br/>(exclude misplaced + deleting)"]
     CollectDiskful --> ComputeCount[computeIntendedDiskfulReplicaCount]
 
-    ComputeCount --> CreateLoop{"diskful.Len < target?"}
+    ComputeCount --> CheckClean{"No deleting and<br/>no misplaced?"}
+    CheckClean -->|Yes| CreateLoop{"diskful.Len < target?"}
     CreateLoop -->|Yes| CreateRVR[createRVR]
     CreateRVR -->|AlreadyExists| Requeue1([DoneAndRequeue])
     CreateRVR --> CreateLoop
+    CheckClean -->|No| SkipCreate[Skip creation]
+    SkipCreate --> RemoveExcess
+
     CreateLoop -->|No| RemoveExcess{"diskful.Len > target?"}
 
     RemoveExcess -->|Yes| PickCandidate["Pick least-progressed replica<br/>(not scheduled > not preconfigured > any)"]
     PickCandidate --> RemoveExcess
-    RemoveExcess -->|No| DeleteUnwanted["Delete replicas not in diskful set"]
+    RemoveExcess -->|No| DeleteUnwanted["Delete replicas not in diskful set<br/>(misplaced, excess, externally created)"]
 
-    DeleteUnwanted --> WaitReady{"All scheduled<br/>and preconfigured?"}
-    WaitReady -->|No| WaitTimeout1[Wait / restart if timeout]
+    DeleteUnwanted --> CheckDeleting{"Any replicas still<br/>deleting?"}
+    CheckDeleting -->|Yes| WaitDeleting["Wait for cleanup /<br/>restart if timeout (30s)"]
+
+    CheckDeleting -->|No| SplitScheduling["Split waitingScheduling into<br/>pendingScheduling + schedulingFailed<br/>(Scheduled=False)"]
+    SplitScheduling --> WaitReady{"All scheduled<br/>and preconfigured?"}
+    WaitReady -->|No| BuildMsg["computeFormationPreconfigureWaitMessage:<br/>only non-empty groups shown,<br/>scheduling failed includes inline<br/>error from Scheduled condition"]
+    BuildMsg --> WaitTimeout1[Wait / restart if timeout]
 
     WaitReady -->|Yes| CheckAddresses{"All have required<br/>network addresses?"}
     CheckAddresses -->|No| WaitTimeout2[Wait / restart if timeout]
@@ -464,7 +480,7 @@ flowchart TD
     DeleteStale --> CheckExists
 
     CheckStale -->|No| CheckExists{Operation exists?}
-    CheckExists -->|No| CreateOp["createDRBDROp<br/>Type: CreateNewUUID<br/>LVMThin: clear-bitmap<br/>LVM: force-resync"]
+    CheckExists -->|No| CreateOp["createDRBDROp<br/>Type: CreateNewUUID<br/>single/thin: clear-bitmap<br/>multi+thick: force-resync"]
     CreateOp -->|AlreadyExists| Requeue([DoneAndRequeue])
     CreateOp --> CheckStatus
 
@@ -486,9 +502,9 @@ flowchart TD
 
 | Input | Description |
 |-------|-------------|
-| `rv.Status.Datamesh.Members` | Diskful members (target for operation) |
-| `rsp.Type` | LVM or LVMThin (determines sync mode) |
-| `rv.Status.Datamesh.Size` | Volume size (for LVM timeout calculation) |
+| `rv.Status.Datamesh.Members` | Diskful members (target for operation, count determines single/multi-replica) |
+| `rsp.Type` | LVM or LVMThin (together with replica count determines sync mode) |
+| `rv.Status.Datamesh.Size` | Volume size (for force-resync timeout calculation) |
 
 | Output | Description |
 |--------|-------------|

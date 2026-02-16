@@ -19,8 +19,6 @@ package drbdr_test
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -325,8 +323,6 @@ func TestReconciler_Reconcile(t *testing.T) {
 		},
 	}
 
-	setupDiscardLogger(t)
-
 	sch, err := scheme.New()
 	if err != nil {
 		t.Fatal(err)
@@ -414,15 +410,6 @@ func TestReconciler_Reconcile(t *testing.T) {
 }
 
 // Helper functions
-
-func setupDiscardLogger(t *testing.T) {
-	t.Helper()
-	prevLogger := slog.Default()
-	t.Cleanup(func() {
-		slog.SetDefault(prevLogger)
-	})
-	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
-}
 
 func baseDRBDR() *v1alpha1.DRBDResource {
 	return &v1alpha1.DRBDResource{
