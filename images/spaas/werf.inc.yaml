@@ -6,7 +6,7 @@ git:
   - url: {{ $.Root.SOURCE_REPO }}/LINBIT/saas
     add: /
     to: /usr/local/go/{{ $.ImageName }}
-    tag: {{ include "get_oss_version_by_id" (list "SPAAS" .) }}
+    tag: {{ include "get_oss_version_by_id" (list "SPAAS" $.Root) }}
     stageDependencies:
       setup:
         - "**/*"
@@ -30,8 +30,8 @@ import:
     before: setup
 
   - image: drbd-artifact
-    add: /drbd/drbd-{{ include "get_oss_version_by_id" (list "DRBD" .) }}.tar.gz
-    to: /var/cache/spaas/tarballs/drbd-{{ include "get_oss_version_by_id" (list "DRBD" .) }}.tar.gz
+    add: /drbd/drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }}.tar.gz
+    to: /var/cache/spaas/tarballs/drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }}.tar.gz
     before: setup
 
 shell:
@@ -51,4 +51,4 @@ docker:
   LABEL:
     distro: all
     version: all
-    spaas: {{ include "get_oss_version_by_id" (list "SPAAS" .) }}
+    spaas: {{ include "get_oss_version_by_id" (list "SPAAS" $.Root) }}

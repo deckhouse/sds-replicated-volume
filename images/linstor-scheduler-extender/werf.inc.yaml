@@ -7,7 +7,7 @@ git:
   - url: https://github.com/piraeusdatastore/linstor-scheduler-extender
     add: /
     to: /usr/local/go/{{ $.ImageName }}
-    tag: v{{ include "get_oss_version_by_id" (list "LINSTOR_SCHEDULER_EXTENDER" .) }}
+    tag: v{{ include "get_oss_version_by_id" (list "LINSTOR_SCHEDULER_EXTENDER" $.Root) }}
     stageDependencies:
       setup:
         - "**/*"
@@ -15,7 +15,7 @@ git:
   - url: https://github.com/libopenstorage/stork
     add: /
     to: /usr/local/go/stork
-    tag: v{{ include "get_oss_version_by_id" (list "LINSTOR_SCHEDULER_STORK" .) }}
+    tag: v{{ include "get_oss_version_by_id" (list "LINSTOR_SCHEDULER_STORK" $.Root) }}
     stageDependencies:
       beforeSetup:
         - "**/*"
@@ -46,7 +46,7 @@ shell:
     - go mod edit -replace=github.com/libopenstorage/stork=/usr/local/go/stork
     - go mod tidy
     - cd cmd/linstor-scheduler-extender
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-scheduler-extender/pkg/consts.Version=v{{ include "get_oss_version_by_id" (list "LINSTOR_SCHEDULER_EXTENDER" .) }}"
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-scheduler-extender/pkg/consts.Version=v{{ include "get_oss_version_by_id" (list "LINSTOR_SCHEDULER_EXTENDER" $.Root) }}"
     - mv {{ $.ImageName }} /
     - chmod +x /{{ $.ImageName }}
 ---
@@ -64,5 +64,5 @@ docker:
   LABEL:
     distro: all
     version: all
-    linstor-scheduler-extender: {{ include "get_oss_version_by_id" (list "LINSTOR_SCHEDULER_EXTENDER" .) }}
+    linstor-scheduler-extender: {{ include "get_oss_version_by_id" (list "LINSTOR_SCHEDULER_EXTENDER" $.Root) }}
 ---

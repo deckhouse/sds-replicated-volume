@@ -27,7 +27,7 @@ shell:
     - chmod +x /install
     - chmod +x /uninstall
   setup:
-    - git clone --depth 1 --branch drbd-{{ include "get_oss_version_by_id" (list "DRBD" .) }} {{ $.Root.SOURCE_REPO }}/LINBIT/drbd.git  /drbd
+    - git clone --depth 1 --branch drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }} {{ $.Root.SOURCE_REPO }}/LINBIT/drbd.git  /drbd
     - cd /drbd
     - git submodule update --init --recursive
     - sed -e "s/\<curl\>/d8-curl -k/g" -i /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh
@@ -53,4 +53,4 @@ docker:
   LABEL:
     distro: all
     version: all
-    drbd: {{ include "get_oss_version_by_id" (list "DRBD" .) }}
+    drbd: {{ include "get_oss_version_by_id" (list "DRBD" $.Root) }}

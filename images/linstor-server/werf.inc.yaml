@@ -24,7 +24,7 @@ git:
   - url: https://github.com/LINBIT/linstor-server
     add: /
     to: /linstor-server
-    tag: v{{ include "get_oss_version_by_id" (list "LINSTOR_SERVER" .) }}
+    tag: v{{ include "get_oss_version_by_id" (list "LINSTOR_SERVER" $.Root) }}
     stageDependencies:
       setup:
         - "**/*"
@@ -54,28 +54,28 @@ shell:
   beforeSetup:
     - mkdir /opt/gradle
     - cd /opt/gradle
-    - wget -q https://services.gradle.org/distributions/gradle-{{ include "get_oss_version_by_id" (list "LINSTOR_SERVER_GRADLE" .) }}-bin.zip
-    - unzip gradle-{{ include "get_oss_version_by_id" (list "LINSTOR_SERVER_GRADLE" .) }}-bin.zip
-    - rm gradle-{{ include "get_oss_version_by_id" (list "LINSTOR_SERVER_GRADLE" .) }}-bin.zip
-    - ln -sf /opt/gradle/gradle-{{ include "get_oss_version_by_id" (list "LINSTOR_SERVER_GRADLE" .) }}/bin/gradle /usr/local/bin/gradle
+    - wget -q https://services.gradle.org/distributions/gradle-{{ include "get_oss_version_by_id" (list "LINSTOR_SERVER_GRADLE" $.Root) }}-bin.zip
+    - unzip gradle-{{ include "get_oss_version_by_id" (list "LINSTOR_SERVER_GRADLE" $.Root) }}-bin.zip
+    - rm gradle-{{ include "get_oss_version_by_id" (list "LINSTOR_SERVER_GRADLE" $.Root) }}-bin.zip
+    - ln -sf /opt/gradle/gradle-{{ include "get_oss_version_by_id" (list "LINSTOR_SERVER_GRADLE" $.Root) }}/bin/gradle /usr/local/bin/gradle
   setup:
     # clone linstor-server git repo
     {{- $ctx := dict }}
     {{- $_ := set $ctx "repo" "https://github.com/LINBIT/linstor-server" }}
-    {{- $_ := set $ctx "branch" (printf "v%s" (include "get_oss_version_by_id" (list "LINSTOR_SERVER" .))) }}
+    {{- $_ := set $ctx "branch" (printf "v%s" (include "get_oss_version_by_id" (list "LINSTOR_SERVER" $.Root))) }}
     {{- $_ := set $ctx "folder" "/linstor-server" }}
     {{- /* .submodules is a string like "submodule1-name=submodule1-branch submodule2-name=" */}}
     {{- /* If branch is not set then using branch from .git-submodules file */}}
-    {{- $_ := set $ctx "submodules" (printf "linstor-common=%s" (include "get_oss_version_by_id" (list "LINSTOR_COMMON" .))) }}
+    {{- $_ := set $ctx "submodules" (printf "linstor-common=%s" (include "get_oss_version_by_id" (list "LINSTOR_COMMON" $.Root))) }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
     # apply git patches to upstream's code
     - git apply /patches/*.patch && git commit -am "Auto-commit patched files"
-    - git tag -f v{{ include "get_oss_version_by_id" (list "LINSTOR_SERVER" .) }}
+    - git tag -f v{{ include "get_oss_version_by_id" (list "LINSTOR_SERVER" $.Root) }}
 
     # make .rpm package
     {{- $ctx := dict }}
     {{- $_ := set $ctx "name" "linstor-server" }}
-    {{- $_ := set $ctx "version" (include "get_oss_version_by_id" (list "LINSTOR_SERVER" .)) }}
+    {{- $_ := set $ctx "version" (include "get_oss_version_by_id" (list "LINSTOR_SERVER" $.Root)) }}
     {{- $_ := set $ctx "spec" "linstor.spec" }}
     {{- $_ := set $ctx "tarball_cmd" "make tarball" }}
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
@@ -94,7 +94,7 @@ git:
   - url: https://github.com/LINBIT/linstor-api-py
     add: /
     to: /linstor-api-py
-    tag: v{{ include "get_oss_version_by_id" (list "LINSTOR_API_PY" .) }}
+    tag: v{{ include "get_oss_version_by_id" (list "LINSTOR_API_PY" $.Root) }}
     stageDependencies:
       setup:
         - "**/*"
@@ -102,7 +102,7 @@ git:
   - url: https://github.com/LINBIT/linstor-client
     add: /
     to: /linstor-client
-    tag: v{{ include "get_oss_version_by_id" (list "LINSTOR_CLIENT" .) }}
+    tag: v{{ include "get_oss_version_by_id" (list "LINSTOR_CLIENT" $.Root) }}
     stageDependencies:
       setup:
         - "**/*"
@@ -128,11 +128,11 @@ shell:
     # clone linstor-api-py git repo
     {{- $ctx := dict }}
     {{- $_ := set $ctx "repo" "https://github.com/LINBIT/linstor-api-py" }}
-    {{- $_ := set $ctx "branch" (printf "v%s" (include "get_oss_version_by_id" (list "LINSTOR_API_PY" .))) }}
+    {{- $_ := set $ctx "branch" (printf "v%s" (include "get_oss_version_by_id" (list "LINSTOR_API_PY" $.Root))) }}
     {{- $_ := set $ctx "folder" "/linstor-api-py" }}
     {{- /* .submodules is a string like "submodule1-name=submodule1-branch submodule2-name=" */}}
     {{- /* If branch is not set then using branch from .git-submodules file */}}
-    {{- $_ := set $ctx "submodules" (printf "linstor-common=%s" (include "get_oss_version_by_id" (list "LINSTOR_COMMON" .))) }}
+    {{- $_ := set $ctx "submodules" (printf "linstor-common=%s" (include "get_oss_version_by_id" (list "LINSTOR_COMMON" $.Root))) }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
 
     # patch sdist to do not replace - with _ or RPM build will fail
@@ -144,7 +144,7 @@ shell:
     - python3 setup.py bdist_rpm --spec-only
     {{- $ctx := dict }}
     {{- $_ := set $ctx "name" "python-linstor" }}
-    {{- $_ := set $ctx "version" (include "get_oss_version_by_id" (list "LINSTOR_API_PY" .)) }}
+    {{- $_ := set $ctx "version" (include "get_oss_version_by_id" (list "LINSTOR_API_PY" $.Root)) }}
     {{- $_ := set $ctx "spec" "dist/python-linstor.spec" }}
     {{- $_ := set $ctx "gen_path" "./dist" }}
     # fix error: python3(distutils.version) < 0 is needed by python-linstor-1.19.0-1.noarch when installing this package
@@ -156,7 +156,7 @@ shell:
     # clone linstor-client git repo
     {{- $ctx := dict }}
     {{- $_ := set $ctx "repo" "https://github.com/LINBIT/linstor-client" }}
-    {{- $_ := set $ctx "branch" (printf "v%s" (include "get_oss_version_by_id" (list "LINSTOR_CLIENT" .))) }}
+    {{- $_ := set $ctx "branch" (printf "v%s" (include "get_oss_version_by_id" (list "LINSTOR_CLIENT" $.Root))) }}
     {{- $_ := set $ctx "folder" "/linstor-client" }}
     {{- /* .submodules is a string like "submodule1-name=submodule1-branch submodule2-name=" */}}
     {{- /* If branch is not set then using branch from .git-submodules file */}}
@@ -166,16 +166,16 @@ shell:
     # copy RPM spec-file
     #- cp /patches/linstor-client.spec /linstor-client/
     # substitute version in .spec-file
-    #- sed -i -e 's/<VERSION>/{{ include "get_oss_version_by_id" (list "LINSTOR_CLIENT" .) }}/g' linstor-client.spec
+    #- sed -i -e 's/<VERSION>/{{ include "get_oss_version_by_id" (list "LINSTOR_CLIENT" $.Root) }}/g' linstor-client.spec
     # install python-linstor because it's required for linstor-client
-    - rpm -ihv /python-linstor-{{ include "get_oss_version_by_id" (list "LINSTOR_API_PY" .) }}-1.noarch.rpm
+    - rpm -ihv /python-linstor-{{ include "get_oss_version_by_id" (list "LINSTOR_API_PY" $.Root) }}-1.noarch.rpm
 
     # make .rpm package
     # make only spec before building RPM
     - python3 setup.py bdist_rpm --spec-only
     {{- $ctx := dict }}
     {{- $_ := set $ctx "name" "linstor-client" }}
-    {{- $_ := set $ctx "version" (include "get_oss_version_by_id" (list "LINSTOR_CLIENT" .)) }}
+    {{- $_ := set $ctx "version" (include "get_oss_version_by_id" (list "LINSTOR_CLIENT" $.Root)) }}
     {{- $_ := set $ctx "spec" "dist/linstor-client.spec" }}
     {{- $_ := set $ctx "gen_path" "./dist" }}
     {{- $_ := set $ctx "spec_patch" "sed -i 's/python3-setuptools/python3-module-setuptools/g' linstor-client.spec" }}
@@ -194,7 +194,7 @@ git:
   - url: https://github.com/LINBIT/k8s-await-election
     add: /
     to: /usr/local/go/k8s-await-election
-    tag: v{{ include "get_oss_version_by_id" (list "LINSTOR_K8S_AWAIT_ELECTION" .) }}
+    tag: v{{ include "get_oss_version_by_id" (list "LINSTOR_K8S_AWAIT_ELECTION" $.Root) }}
     stageDependencies:
       setup:
         - "**/*"
@@ -350,7 +350,7 @@ shell:
     # install piraeus-entry
     - |
       echo "Install piraeus-entry..."
-      curl -Lfo /usr/bin/piraeus-entry.sh https://github.com/piraeusdatastore/piraeus/raw/{{ include "get_oss_version_by_id" (list "LINSTOR_SERVER_PIRAEUS" .) }}/dockerfiles/piraeus-server/entry.sh
+      curl -Lfo /usr/bin/piraeus-entry.sh https://github.com/piraeusdatastore/piraeus/raw/{{ include "get_oss_version_by_id" (list "LINSTOR_SERVER_PIRAEUS" $.Root) }}/dockerfiles/piraeus-server/entry.sh
       chmod +x /usr/bin/piraeus-entry.sh
 
     - mv /usr/bin/linstor /usr/bin/originallinstor
@@ -383,10 +383,10 @@ docker:
   LABEL:
     distro: ALTLinux
     version: all
-    linstor-server: {{ include "get_oss_version_by_id" (list "LINSTOR_SERVER" .) }}
-    linstor-api-py: {{ include "get_oss_version_by_id" (list "LINSTOR_API_PY" .) }}
-    linstor-client: {{ include "get_oss_version_by_id" (list "LINSTOR_CLIENT" .) }}
-    linstor-common: {{ include "get_oss_version_by_id" (list "LINSTOR_COMMON" .) }}
-    k8s-await-election: {{ include "get_oss_version_by_id" (list "LINSTOR_K8S_AWAIT_ELECTION" .) }}
-    piraeus-entry: {{ include "get_oss_version_by_id" (list "LINSTOR_SERVER_PIRAEUS" .) }}
+    linstor-server: {{ include "get_oss_version_by_id" (list "LINSTOR_SERVER" $.Root) }}
+    linstor-api-py: {{ include "get_oss_version_by_id" (list "LINSTOR_API_PY" $.Root) }}
+    linstor-client: {{ include "get_oss_version_by_id" (list "LINSTOR_CLIENT" $.Root) }}
+    linstor-common: {{ include "get_oss_version_by_id" (list "LINSTOR_COMMON" $.Root) }}
+    k8s-await-election: {{ include "get_oss_version_by_id" (list "LINSTOR_K8S_AWAIT_ELECTION" $.Root) }}
+    piraeus-entry: {{ include "get_oss_version_by_id" (list "LINSTOR_SERVER_PIRAEUS" $.Root) }}
 ---

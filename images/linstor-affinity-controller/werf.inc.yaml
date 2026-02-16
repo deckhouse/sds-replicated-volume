@@ -7,7 +7,7 @@ git:
   - url: https://github.com/piraeusdatastore/linstor-affinity-controller
     add: /
     to: /usr/local/go/{{ $.ImageName }}
-    tag: v{{ include "get_oss_version_by_id" (list "LINSTOR_AFFINITY_CONTROLLER" .) }}
+    tag: v{{ include "get_oss_version_by_id" (list "LINSTOR_AFFINITY_CONTROLLER" $.Root) }}
     stageDependencies:
       setup:
         - "**/*"
@@ -26,7 +26,7 @@ shell:
     - cd /usr/local/go/{{ $.ImageName }}
     - git apply /patches/*.patch
     - cd /usr/local/go/{{ $.ImageName }}/cmd/linstor-affinity-controller
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-affinity-controller/pkg/consts.Version=v{{ include "get_oss_version_by_id" (list "LINSTOR_AFFINITY_CONTROLLER" .) }}"
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-affinity-controller/pkg/consts.Version=v{{ include "get_oss_version_by_id" (list "LINSTOR_AFFINITY_CONTROLLER" $.Root) }}"
     - mv {{ $.ImageName }} /
     - chmod +x /{{ $.ImageName }}
 ---
@@ -44,4 +44,4 @@ docker:
   LABEL:
     distro: all
     version: all
-    linstor-affinity-controller: {{ include "get_oss_version_by_id" (list "LINSTOR_AFFINITY_CONTROLLER" .) }}
+    linstor-affinity-controller: {{ include "get_oss_version_by_id" (list "LINSTOR_AFFINITY_CONTROLLER" $.Root) }}

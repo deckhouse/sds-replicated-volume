@@ -6,7 +6,7 @@ git:
   - url: {{ $.Root.SOURCE_REPO }}/linbit/linstor-csi
     add: /
     to: /usr/local/go/linstor-csi
-    commit: {{ include "get_oss_version_by_id" (list "LINSTOR_CSI" .) }}
+    commit: {{ include "get_oss_version_by_id" (list "LINSTOR_CSI" $.Root) }}
     stageDependencies:
       setup:
         - "**/*"
@@ -24,7 +24,7 @@ shell:
     - cd /usr/local/go/linstor-csi
     - git apply /patches/*.patch
     - cd cmd/linstor-csi
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-csi/pkg/driver.Version=v{{ include "get_oss_version_by_id" (list "LINSTOR_CSI" .) }}"
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-csi/pkg/driver.Version=v{{ include "get_oss_version_by_id" (list "LINSTOR_CSI" $.Root) }}"
     - mv linstor-csi /
     - chmod +x /linstor-csi
 ---
@@ -101,4 +101,4 @@ docker:
   LABEL:
     distro: all
     version: all
-    linstor-csi: {{ include "get_oss_version_by_id" (list "LINSTOR_CSI" .) }}
+    linstor-csi: {{ include "get_oss_version_by_id" (list "LINSTOR_CSI" $.Root) }}
