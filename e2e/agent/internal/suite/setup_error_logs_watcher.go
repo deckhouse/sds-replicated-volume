@@ -2,6 +2,7 @@ package suite
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
 )
@@ -10,13 +11,17 @@ import (
 // when an error-level log line is detected. The goroutine stops when the
 // channel closes.
 func SetupErrorLogsWatcher(e *envtesting.E, ch <-chan PodLogLine) {
-	go func() {
+	wg := sync.WaitGroup{}
+	wg.Go(func() {
 		for event := range ch {
 			if isErrorLogLine(event.Line) {
 				e.Errorf("pod '%s': %s", event.PodName, event.Line)
 			}
 		}
-	}()
+	})
+	e.Cleanup(func() {
+		wg.Wait()
+	})
 }
 
 // isErrorLogLine checks whether a log line indicates an error.

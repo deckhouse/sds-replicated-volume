@@ -1,7 +1,8 @@
 package suite
 
 type ClusterOptions struct {
-	Nodes []NodeOptions `json:"nodes"`
+	Nodes        []NodeOptions `json:"nodes"`
+	AllocateSize string        `json:"allocateSize"`
 }
 
 type NodeOptions struct {
