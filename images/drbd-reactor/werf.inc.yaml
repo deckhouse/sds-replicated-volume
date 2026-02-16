@@ -16,7 +16,7 @@ git:
   - url: {{ $.Root.SOURCE_REPO }}/LINBIT/thin-send-recv
     add: /
     to: /thin-send-recv
-    tag: v{{ $.Versions.THIN_SEND_RECV }}
+    tag: v1.1.3
     stageDependencies:
       setup:
         - "**/*"
@@ -63,14 +63,14 @@ shell:
     # clone thin-send-recv git repo
     {{- $ctx := dict }}
     {{- $_ := set $ctx "repo" (printf "%s/LINBIT/thin-send-recv" $.Root.SOURCE_REPO) }}
-    {{- $_ := set $ctx "branch" (printf "v%s" $.Versions.THIN_SEND_RECV) }}
+    {{- $_ := set $ctx "branch" (printf "v%s" "1.1.3") }}
     {{- $_ := set $ctx "folder" "/thin-send-recv" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
 
     # make .rpm package
     {{- $ctx := dict }}
     {{- $_ := set $ctx "name" "thin-send-recv" }}
-    {{- $_ := set $ctx "version" $.Versions.THIN_SEND_RECV }}
+    {{- $_ := set $ctx "version" "1.1.3" }}
     {{- $_ := set $ctx "spec" "thin_send_recv.spec" }}
     {{- $_ := set $ctx "arch" "x86_64" }}
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
@@ -90,7 +90,7 @@ git:
   - url: {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-reactor
     add: /
     to: /drbd-reactor
-    tag: v{{ $.Versions.DRBD_REACTOR }}
+    tag: v1.8.0
     stageDependencies:
       setup:
         - "**/*"
@@ -180,4 +180,4 @@ docker:
     distro: ALTLinux
     version: all
     drbd-utils: 9.30.0
-    drbd-reactor: {{ $.Versions.DRBD_REACTOR }}
+    drbd-reactor: 1.8.0
