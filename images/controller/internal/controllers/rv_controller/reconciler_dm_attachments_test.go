@@ -903,6 +903,54 @@ var _ = Describe("ensureDatameshAttachments detach", func() {
 		Expect(as.conditionMessage).To(ContainSubstring("in use"))
 	})
 
+	It("skips detach when deleting RVA exists on node without datamesh member", func() {
+		// node-1: diskful member with quorum (satisfies global quorum).
+		// node-2: only a deleting RVA, no member → intent=Detach, but member=nil → skip.
+		rv := mkAttachRV([]v1alpha1.ReplicatedVolumeDatameshMember{
+			mkAttachMember("rv-1-0", "node-1", false),
+		}, 10)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachDeletingRVA("rva-del", "node-2")}
+
+		atts, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2"))
+
+		Expect(outcome.Error()).To(BeNil())
+		// No Detach transition created for node-2 (no member to detach).
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+
+		as := atts.findAttachmentStateByNodeName("node-2")
+		Expect(as).NotTo(BeNil())
+		Expect(as.intent).To(Equal(attachmentIntentDetach))
+		Expect(as.member).To(BeNil())
+		Expect(as.conditionReason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetached))
+		Expect(as.conditionMessage).To(ContainSubstring("detached"))
+	})
+
+	It("skips detach when deleting RVA exists on non-member node while attach is blocked (RV deleting)", func() {
+		// RV is deleting → attach blocked.
+		// node-1: diskful member (will get Detach).
+		// node-2: only a deleting RVA, no member → intent=Detach, member=nil → skip.
+		rv := mkAttachRV([]v1alpha1.ReplicatedVolumeDatameshMember{
+			mkAttachMember("rv-1-0", "node-1", true),
+		}, 10)
+		rv.DeletionTimestamp = ptr.To(metav1.Now())
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachDeletingRVA("rva-del", "node-2")}
+
+		atts, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2"))
+
+		Expect(outcome.Error()).To(BeNil())
+		// Detach transition created only for node-1 (which has a member).
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].ReplicaName).To(Equal("rv-1-0"))
+
+		as := atts.findAttachmentStateByNodeName("node-2")
+		Expect(as).NotTo(BeNil())
+		Expect(as.intent).To(Equal(attachmentIntentDetach))
+		Expect(as.member).To(BeNil())
+		Expect(as.conditionReason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetached))
+	})
+
 	It("allows detach in detach-only mode (RV deleting)", func() {
 		rv := mkAttachRV([]v1alpha1.ReplicatedVolumeDatameshMember{
 			mkAttachMember("rv-1-0", "node-1", true),

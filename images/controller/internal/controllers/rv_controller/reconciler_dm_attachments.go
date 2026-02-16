@@ -731,8 +731,16 @@ func ensureDatameshDetachTransitions(
 			continue
 		}
 
+		// No datamesh member on this node — nothing to detach (node was never attached).
+		// This happens when a deleting RVA exists on a node that has no member.
+		if as.member == nil {
+			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetached
+			as.conditionMessage = "Volume has been detached from the node"
+			continue
+		}
+
 		// Already fully detached (no pending transition) — settled.
-		if as.member != nil && !as.member.Attached && !as.hasActiveDetachTransition {
+		if !as.member.Attached && !as.hasActiveDetachTransition {
 			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetached
 			as.conditionMessage = "Volume has been detached from the node"
 			continue
