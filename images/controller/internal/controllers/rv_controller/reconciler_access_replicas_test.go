@@ -17,6 +17,8 @@ limitations under the License.
 package rvcontroller
 
 import (
+	"fmt"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -280,6 +282,27 @@ var _ = Describe("reconcileCreateAccessReplicas", func() {
 		outcome := rec.reconcileCreateAccessReplicas(ctx, rv, &rvrs, rvas, rsp)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(rvrs).To(HaveLen(1))
+	})
+
+	It("stops creating when replica limit (32) is reached", func(ctx SpecContext) {
+		rv := mkRV(v1alpha1.VolumeAccessPreferablyLocal)
+		cl := newClientBuilder(scheme).WithObjects(rv).Build()
+		rec := NewReconciler(cl, scheme)
+
+		// Fill all 32 IDs (0-31) with existing RVRs.
+		rvrs := make([]*v1alpha1.ReplicatedVolumeReplica, 32)
+		for i := range rvrs {
+			nodeName := fmt.Sprintf("node-%d", i)
+			rvrs[i] = mkRVR(v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", uint8(i)), nodeName, v1alpha1.ReplicaTypeDiskful)
+		}
+
+		// RVA on a new node that doesn't have an RVR — would normally create one.
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-new")}
+		rsp := mkRSP(readyNode("node-new"))
+
+		outcome := rec.reconcileCreateAccessReplicas(ctx, rv, &rvrs, rvas, rsp)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(rvrs).To(HaveLen(32)) // no new RVR created — limit reached
 	})
 
 	It("skips node with existing deleting RVR", func(ctx SpecContext) {

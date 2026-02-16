@@ -745,7 +745,8 @@ flowchart TD
 | 3 | RSP nil | No creation |
 | 4 | RVR already exists on node (any type, including deleting) | Skip node |
 | 5 | Node not in eligible nodes, or !nodeReady, or !agentReady | Skip node |
-| 6 | Duplicate RVA on same node | Deduplicate (one creation per node) |
+| 6 | Replica limit reached (32 RVRs) | Stop creation (break loop) |
+| 7 | Duplicate RVA on same node | Deduplicate (one creation per node) |
 
 All guards passed: create Access RVR via `createAccessRVR` (sets `spec.type=Access`, `spec.nodeName`). On `AlreadyExists`: requeue.
 

@@ -86,6 +86,11 @@ func (r *Reconciler) reconcileCreateAccessReplicas(
 			continue
 		}
 
+		// Guard: Replica limit reached — cannot create more RVRs.
+		if len(*rvrs) >= int(v1alpha1.RVRMaxID)+1 {
+			break
+		}
+
 		// Create Access RVR.
 		_, err := r.createAccessRVR(rf.Ctx(), rv, rvrs, nodeName)
 		if err != nil {
