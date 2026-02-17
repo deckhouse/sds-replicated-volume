@@ -80,11 +80,11 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 	It("GenerateStorageClassFromReplicatedStorageClass_Generates_expected_StorageClass", func() {
 		var (
-			testName                    = generateTestName()
-			allowVolumeExpansion   bool = true
-			volumeBindingMode           = storagev1.VolumeBindingWaitForFirstConsumer
-			reclaimPolicy               = v1.PersistentVolumeReclaimPolicy(validSpecReplicatedSCTemplate.Spec.ReclaimPolicy)
-			storageClassParameters      = map[string]string{
+			testName               = generateTestName()
+			allowVolumeExpansion   = true
+			volumeBindingMode      = storagev1.VolumeBindingWaitForFirstConsumer
+			reclaimPolicy          = v1.PersistentVolumeReclaimPolicy(validSpecReplicatedSCTemplate.Spec.ReclaimPolicy)
+			storageClassParameters = map[string]string{
 				controller.ReplicatedStorageClassParamNameKey:             testName,
 				controller.StorageClassStoragePoolKey:                     validSpecReplicatedSCTemplate.Spec.StoragePool,
 				controller.StorageClassParamFSTypeKey:                     controller.FsTypeExt4,

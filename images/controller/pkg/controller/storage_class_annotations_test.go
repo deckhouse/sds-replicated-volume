@@ -51,10 +51,10 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 
 		validCFG, _ = config.NewConfig()
 
-		allowVolumeExpansion   bool = true
-		volumeBindingMode           = storagev1.VolumeBindingWaitForFirstConsumer
-		reclaimPolicy               = corev1.PersistentVolumeReclaimPolicy(controller.ReclaimPolicyRetain)
-		storageClassParameters      = map[string]string{
+		allowVolumeExpansion   = true
+		volumeBindingMode      = storagev1.VolumeBindingWaitForFirstConsumer
+		reclaimPolicy          = corev1.PersistentVolumeReclaimPolicy(controller.ReclaimPolicyRetain)
+		storageClassParameters = map[string]string{
 			controller.StorageClassStoragePoolKey:                     "test-sp",
 			controller.StorageClassParamFSTypeKey:                     controller.FsTypeExt4,
 			controller.StorageClassParamPlacementPolicyKey:            controller.PlacementPolicyAutoPlaceTopology,

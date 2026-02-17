@@ -177,7 +177,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 		goodReplicatedStoragePool, err := controller.GetReplicatedStoragePool(ctx, cl, testNameSpace, GoodReplicatedStoragePoolName)
 		Expect(err).NotTo(HaveOccurred())
 
-		goodReplicatedStoragePoolrequest := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: goodReplicatedStoragePool.ObjectMeta.Namespace, Name: goodReplicatedStoragePool.ObjectMeta.Name}}
+		goodReplicatedStoragePoolrequest := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: goodReplicatedStoragePool.Namespace, Name: goodReplicatedStoragePool.Name}}
 		shouldRequeue, err := controller.ReconcileReplicatedStoragePoolEvent(ctx, cl, goodReplicatedStoragePoolrequest, *log, lc)
 		Expect(err).To(HaveOccurred())
 		Expect(shouldRequeue).To(BeTrue())
@@ -196,7 +196,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 		badReplicatedStoragePool, err := controller.GetReplicatedStoragePool(ctx, cl, testNameSpace, BadReplicatedStoragePoolName)
 		Expect(err).NotTo(HaveOccurred())
 
-		badReplicatedStoragePoolrequest := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: badReplicatedStoragePool.ObjectMeta.Namespace, Name: badReplicatedStoragePool.ObjectMeta.Name}}
+		badReplicatedStoragePoolrequest := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: badReplicatedStoragePool.Namespace, Name: badReplicatedStoragePool.Name}}
 		shouldRequeue, err = controller.ReconcileReplicatedStoragePoolEvent(ctx, cl, badReplicatedStoragePoolrequest, *log, lc)
 		Expect(err).To(HaveOccurred())
 		Expect(shouldRequeue).To(BeTrue())

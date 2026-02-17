@@ -202,7 +202,7 @@ func ReconcileReplicatedStorageClassEvent(
 	}
 
 	// Handle deletion
-	if replicatedSC.ObjectMeta.DeletionTimestamp != nil {
+	if replicatedSC.DeletionTimestamp != nil {
 		log.Info("[ReconcileReplicatedStorageClass] ReplicatedStorageClass with name: " +
 			replicatedSC.Name + " is marked for deletion. Removing it.")
 		shouldRequeue, err := ReconcileDeleteReplicatedStorageClass(ctx, cl, log, replicatedSC, sc)
@@ -291,8 +291,8 @@ func ReconcileReplicatedStorageClass(
 
 	replicatedSC.Status.Phase = Created
 	replicatedSC.Status.Reason = "ReplicatedStorageClass and StorageClass are equal."
-	if !slices.Contains(replicatedSC.ObjectMeta.Finalizers, ReplicatedStorageClassFinalizerName) {
-		replicatedSC.ObjectMeta.Finalizers = append(replicatedSC.ObjectMeta.Finalizers,
+	if !slices.Contains(replicatedSC.Finalizers, ReplicatedStorageClassFinalizerName) {
+		replicatedSC.Finalizers = append(replicatedSC.Finalizers,
 			ReplicatedStorageClassFinalizerName)
 	}
 	log.Trace(fmt.Sprintf("[ReconcileReplicatedStorageClassEvent] update ReplicatedStorageClass %+v", replicatedSC))
@@ -334,7 +334,7 @@ func ReconcileDeleteReplicatedStorageClass(
 	log.Info("[ReconcileDeleteReplicatedStorageClass] Removing finalizer from ReplicatedStorageClass with name: " +
 		replicatedSC.Name)
 
-	replicatedSC.ObjectMeta.Finalizers = RemoveString(replicatedSC.ObjectMeta.Finalizers,
+	replicatedSC.Finalizers = RemoveString(replicatedSC.Finalizers,
 		ReplicatedStorageClassFinalizerName)
 	if err := UpdateReplicatedStorageClass(ctx, cl, replicatedSC); err != nil {
 		return true, fmt.Errorf("error UpdateReplicatedStorageClass after removing finalizer: %w", err)
@@ -581,7 +581,7 @@ func GetStorageClass(ctx context.Context, cl client.Client, name string) (*stora
 }
 
 func DeleteStorageClass(ctx context.Context, cl client.Client, sc *storagev1.StorageClass) error {
-	finalizers := sc.ObjectMeta.Finalizers
+	finalizers := sc.Finalizers
 	switch len(finalizers) {
 	case 0:
 		return cl.Delete(ctx, sc)
@@ -589,7 +589,7 @@ func DeleteStorageClass(ctx context.Context, cl client.Client, sc *storagev1.Sto
 		if finalizers[0] != StorageClassFinalizerName {
 			return fmt.Errorf("deletion of StorageClass with finalizer %s is not allowed", finalizers[0])
 		}
-		sc.ObjectMeta.Finalizers = nil
+		sc.Finalizers = nil
 		if err := cl.Update(ctx, sc); err != nil {
 			return fmt.Errorf("error updating StorageClass to remove finalizer %s: %w",
 				StorageClassFinalizerName, err)
