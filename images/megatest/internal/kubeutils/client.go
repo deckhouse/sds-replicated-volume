@@ -536,7 +536,7 @@ func (c *Client) WaitForRVAReady(ctx context.Context, rvName, nodeName string) e
 		attachedCond := meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 		if attachedCond != nil &&
 			attachedCond.Status == metav1.ConditionFalse &&
-			(attachedCond.Reason == v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonLocalityNotSatisfied || attachedCond.Reason == v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonUnableToProvideLocalVolumeAccess) {
+			attachedCond.Reason == v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonVolumeAccessLocalityNotSatisfied {
 			return fmt.Errorf("RVA %s for volume=%s node=%s not attachable: Attached=%s reason=%s message=%q",
 				rvaName, rvName, nodeName, attachedCond.Status, attachedCond.Reason, attachedCond.Message)
 		}

@@ -45,7 +45,7 @@ import (
 // +kubebuilder:printcolumn:name="BVReady",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='BackingVolumeReady')].status"
 // +kubebuilder:printcolumn:name="SatisfyEligibleNodes",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='SatisfyEligibleNodes')].status"
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.startsWith(self.spec.replicatedVolumeName + '-')",message="metadata.name must start with spec.replicatedVolumeName + '-'"
-// +kubebuilder:validation:XValidation:rule="int(self.metadata.name.substring(self.metadata.name.lastIndexOf('-') + 1)) <= 31",message="numeric suffix must be between 0 and 31"
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.substring(size(self.spec.replicatedVolumeName) + 1).matches('^[0-9][0-9]?$') && int(self.metadata.name.substring(size(self.spec.replicatedVolumeName) + 1)) <= 31",message="metadata.name must be exactly spec.replicatedVolumeName + '-' + id where id is 0..31"
 // +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 123",message="metadata.name must be at most 123 characters (to fit derived LLV name with prefix)"
 type ReplicatedVolumeReplica struct {
 	metav1.TypeMeta `json:",inline"`
@@ -128,6 +128,7 @@ func (rvr *ReplicatedVolumeReplica) ChooseNewName(otherRVRs []*ReplicatedVolumeR
 }
 
 // +kubebuilder:object:generate=true
+// +kubebuilder:validation:XValidation:rule="self.type != 'Access' || has(self.nodeName)",message="nodeName is required for Access type"
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || has(self.nodeName)",message="lvmVolumeGroupName requires nodeName to be set"
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || self.type == 'Diskful'",message="lvmVolumeGroupName can only be set for Diskful type"
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be set"
@@ -199,7 +200,7 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:MaxItems=10
 	// +listType=atomic
 	// +optional
 	Addresses []DRBDResourceAddressStatus `json:"addresses,omitempty"`
@@ -265,7 +266,7 @@ type ReplicatedVolumeReplicaStatus struct {
 
 	// Peers contains the status of connections to peer replicas.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="peers[].name must be unique"
-	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:MaxItems=31
 	// +listType=atomic
 	// +optional
 	Peers []ReplicatedVolumeReplicaStatusPeerStatus `json:"peers,omitempty"`
@@ -361,7 +362,7 @@ type ReplicatedVolumeReplicaStatusPeerStatus struct {
 
 	// ConnectionEstablishedOn lists system network names where connection to this peer is established.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="connectionEstablishedOn must be unique"
-	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:MaxItems=10
 	// +kubebuilder:validation:items:MaxLength=64
 	// +listType=atomic
 	// +optional

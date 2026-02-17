@@ -102,18 +102,35 @@ func rscPredicates() []predicate.Predicate {
 
 // rvaPredicates returns predicates for ReplicatedVolumeAttachment events.
 // Reacts to:
+// - DeletionTimestamp changes (start of deletion — triggers detach/finalizer-removal flow)
+// - Finalizers changes (finalizer management)
 // - Attached condition status changes (affects rvShouldNotExist check)
 func rvaPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.TypedFuncs[client.Object]{
 			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				if e.ObjectOld == nil || e.ObjectNew == nil {
+					return true
+				}
+
+				// React to DeletionTimestamp change.
+				oldDT := e.ObjectOld.GetDeletionTimestamp()
+				newDT := e.ObjectNew.GetDeletionTimestamp()
+				if (oldDT == nil) != (newDT == nil) {
+					return true
+				}
+
+				// React to Finalizers change.
+				if !slices.Equal(e.ObjectNew.GetFinalizers(), e.ObjectOld.GetFinalizers()) {
+					return true
+				}
+
+				// React to Attached condition status change.
 				oldRVA, okOld := e.ObjectOld.(obju.StatusConditionObject)
 				newRVA, okNew := e.ObjectNew.(obju.StatusConditionObject)
 				if !okOld || !okNew || oldRVA == nil || newRVA == nil {
 					return true
 				}
-
-				// React to Attached condition status change.
 				if !obju.AreConditionsEqualByStatus(oldRVA, newRVA, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType) {
 					return true
 				}

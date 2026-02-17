@@ -468,6 +468,27 @@ func TestStatusConditionChecker_Present(t *testing.T) {
 	}
 }
 
+func TestStatusConditionChecker_Absent(t *testing.T) {
+	obj := &testConditionedObject{}
+	obj.SetGeneration(1)
+
+	// Condition not present -> Absent returns true.
+	if !objutilv1.StatusCondition(obj, "Ready").Absent().Eval() {
+		t.Fatalf("expected true when condition not present")
+	}
+
+	// Condition present -> Absent returns false.
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK"})
+	if objutilv1.StatusCondition(obj, "Ready").Absent().Eval() {
+		t.Fatalf("expected false when condition present")
+	}
+
+	// Absent on a different type that doesn't exist -> true.
+	if !objutilv1.StatusCondition(obj, "Other").Absent().Eval() {
+		t.Fatalf("expected true for absent condition type")
+	}
+}
+
 func TestStatusConditionChecker_StatusEqual(t *testing.T) {
 	obj := &testConditionedObject{}
 	obj.SetGeneration(1)
@@ -524,6 +545,24 @@ func TestStatusConditionChecker_ReasonEqual(t *testing.T) {
 
 	// Condition not present -> always false.
 	if objutilv1.StatusCondition(obj, "Missing").ReasonEqual("OK").Eval() {
+		t.Fatalf("expected false when condition not present")
+	}
+}
+
+func TestStatusConditionChecker_ReasonNotEqual(t *testing.T) {
+	obj := &testConditionedObject{}
+	obj.SetGeneration(1)
+	_ = objutilv1.SetStatusCondition(obj, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK"})
+
+	if !objutilv1.StatusCondition(obj, "Ready").ReasonNotEqual("Other").Eval() {
+		t.Fatalf("expected true when reason differs")
+	}
+	if objutilv1.StatusCondition(obj, "Ready").ReasonNotEqual("OK").Eval() {
+		t.Fatalf("expected false when reason matches")
+	}
+
+	// Condition not present -> always false.
+	if objutilv1.StatusCondition(obj, "Missing").ReasonNotEqual("OK").Eval() {
 		t.Fatalf("expected false when condition not present")
 	}
 }

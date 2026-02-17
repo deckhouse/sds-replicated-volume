@@ -168,3 +168,15 @@ func FromWhere[T IDer](items []T, pred func(T) bool) IDSet {
 	}
 	return s
 }
+
+// FromFunc returns a new IDSet by calling fn for each item.
+// fn returns the ID and whether to include it.
+func FromFunc[T any](items []T, fn func(T) (id uint8, include bool)) IDSet {
+	var s IDSet
+	for i := range items {
+		if id, ok := fn(items[i]); ok {
+			s.Add(id)
+		}
+	}
+	return s
+}
