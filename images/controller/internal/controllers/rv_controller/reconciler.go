@@ -207,6 +207,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 		rv.Status.DatameshRevision = 1
 		rv.Status.Datamesh.SystemNetworkNames = rsp.SystemNetworkNames
 		rv.Status.Datamesh.Size = rv.Spec.Size
+		
 
 		applyFormationTransitionMessage(rv, "Starting preconfigure phase")
 	}

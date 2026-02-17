@@ -84,6 +84,16 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	// with key "kubernetes.io/hostname"
 	// NOTE: We no longer use rv.spec.attachTo. Attachment intent is expressed via ReplicatedVolumeAttachment (RVA)
 	// created in ControllerPublishVolume.
+	preferredNode := ""
+	if ar := request.AccessibilityRequirements; ar != nil {
+		for _, topo := range ar.Preferred {
+			if node, ok := topo.Segments["kubernetes.io/hostname"]; ok {
+				preferredNode = node
+				break
+			}
+		}
+	}
+	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Preferred node from AccessibilityRequirements: %q", traceID, volumeID, preferredNode))
 
 	// Build ReplicatedVolumeSpec
 	rvSpec := utils.BuildReplicatedVolumeSpec(
