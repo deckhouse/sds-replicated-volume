@@ -100,7 +100,7 @@ func main() {
 		// MetricsBindAddress: cfgParams.MetricsPort,
 		HealthProbeBindAddress:  cfgParams.HealthProbeBindAddress,
 		Cache:                   cacheOpt,
-		LeaderElection:          true,
+		LeaderElection:          false,
 		LeaderElectionNamespace: cfgParams.ControllerNamespace,
 		LeaderElectionID:        config.ControllerName,
 	}
