@@ -74,7 +74,7 @@ jobs:
         run: |
           echo $MODULES_MODULE_SOURCE
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/setup@v2
+      - uses: deckhouse/modules-actions/setup@v4
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
@@ -83,7 +83,7 @@ jobs:
         run: |
           chmod +x .github/check_previous_channel_release.sh
           .github/check_previous_channel_release.sh $MODULES_MODULE_NAME ce $RELEASE_CHANNEL $MODULES_MODULE_TAG license-token $MODULES_READ_REGISTRY_PASSWORD
-      - uses: deckhouse/modules-actions/deploy@v2
+      - uses: deckhouse/modules-actions/deploy@v4
         with:
           module_source: "${{ vars.PROD_REGISTRY }}/${{ vars.PROD_MODULE_SOURCE_NAME }}/ce/modules"
           module_name: ${{ vars.MODULE_NAME }}
@@ -103,7 +103,7 @@ jobs:
         run: |
           echo $MODULES_MODULE_SOURCE
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/setup@v2
+      - uses: deckhouse/modules-actions/setup@v4
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
@@ -112,7 +112,7 @@ jobs:
         run: |
           chmod +x .github/check_previous_channel_release.sh
           .github/check_previous_channel_release.sh $MODULES_MODULE_NAME ee $RELEASE_CHANNEL $MODULES_MODULE_TAG license-token $MODULES_READ_REGISTRY_PASSWORD
-      - uses: deckhouse/modules-actions/deploy@v2
+      - uses: deckhouse/modules-actions/deploy@v4
         with:
           module_source: "${{ vars.PROD_REGISTRY }}/${{ vars.PROD_MODULE_SOURCE_NAME }}/ee/modules"
           module_name: ${{ vars.MODULE_NAME }}
@@ -132,7 +132,7 @@ jobs:
         run: |
           echo $MODULES_MODULE_SOURCE
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/setup@v2
+      - uses: deckhouse/modules-actions/setup@v4
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
@@ -141,7 +141,7 @@ jobs:
         run: |
           chmod +x .github/check_previous_channel_release.sh
           .github/check_previous_channel_release.sh $MODULES_MODULE_NAME fe $RELEASE_CHANNEL $MODULES_MODULE_TAG license-token $MODULES_READ_REGISTRY_PASSWORD
-      - uses: deckhouse/modules-actions/deploy@v2
+      - uses: deckhouse/modules-actions/deploy@v4
         with:
           module_source: "${{ vars.PROD_REGISTRY }}/${{ vars.PROD_MODULE_SOURCE_NAME }}/fe/modules"
           module_name: ${{ vars.MODULE_NAME }}
@@ -161,7 +161,7 @@ jobs:
         run: |
           echo $MODULES_MODULE_SOURCE
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/setup@v2
+      - uses: deckhouse/modules-actions/setup@v4
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
@@ -170,7 +170,7 @@ jobs:
         run: |
           chmod +x .github/check_previous_channel_release.sh
           .github/check_previous_channel_release.sh $MODULES_MODULE_NAME se $RELEASE_CHANNEL $MODULES_MODULE_TAG license-token $MODULES_READ_REGISTRY_PASSWORD
-      - uses: deckhouse/modules-actions/deploy@v2
+      - uses: deckhouse/modules-actions/deploy@v4
         with:
           module_source: "${{ vars.PROD_REGISTRY }}/${{ vars.PROD_MODULE_SOURCE_NAME }}/se/modules"
           module_name: ${{ vars.MODULE_NAME }}
@@ -190,7 +190,7 @@ jobs:
         run: |
           echo $MODULES_MODULE_SOURCE
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/setup@v2
+      - uses: deckhouse/modules-actions/setup@v4
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
@@ -199,7 +199,7 @@ jobs:
         run: |
           chmod +x .github/check_previous_channel_release.sh
           .github/check_previous_channel_release.sh $MODULES_MODULE_NAME se-plus $RELEASE_CHANNEL $MODULES_MODULE_TAG license-token $MODULES_READ_REGISTRY_PASSWORD
-      - uses: deckhouse/modules-actions/deploy@v2
+      - uses: deckhouse/modules-actions/deploy@v4
         with:
           module_source: "${{ vars.PROD_REGISTRY }}/${{ vars.PROD_MODULE_SOURCE_NAME }}/se-plus/modules"
           module_name: ${{ vars.MODULE_NAME }}

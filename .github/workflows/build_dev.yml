@@ -46,7 +46,7 @@ jobs:
           if [ -f openapi/values_ce.yaml ]; then
             cp -f openapi/values_ce.yaml openapi/values.yaml
           fi
-      - uses: deckhouse/modules-actions/lint@main
+      - uses: deckhouse/modules-actions/lint@v4
         env:
           DMT_METRICS_URL: ${{ secrets.DMT_METRICS_URL }}
           DMT_METRICS_TOKEN: ${{ secrets.DMT_METRICS_TOKEN }}
@@ -55,7 +55,7 @@ jobs:
           if [ -f openapi/values_ee.yaml ]; then
             cp -f openapi/values_ee.yaml openapi/values.yaml
           fi
-      - uses: deckhouse/modules-actions/lint@main
+      - uses: deckhouse/modules-actions/lint@v4
         env:
           DMT_METRICS_URL: ${{ secrets.DMT_METRICS_URL }}
           DMT_METRICS_TOKEN: ${{ secrets.DMT_METRICS_TOKEN }}
@@ -131,7 +131,7 @@ jobs:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/build@v4_add_logs
+      - uses: deckhouse/modules-actions/build@v4
         with:
           module_source: "${{ vars.DEV_MODULE_SOURCE }}"
           module_name: ${{ vars.MODULE_NAME }}
