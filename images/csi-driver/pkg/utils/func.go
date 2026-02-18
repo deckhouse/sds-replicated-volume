@@ -389,6 +389,7 @@ func BuildReplicatedVolumeSpec(
 	return srv.ReplicatedVolumeSpec{
 		Size:                       size,
 		ReplicatedStorageClassName: rscName,
+		MaxAttachments:             1, // TODO handle RWX
 	}
 }
 
