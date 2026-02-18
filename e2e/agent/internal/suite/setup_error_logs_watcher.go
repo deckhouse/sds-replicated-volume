@@ -10,7 +10,7 @@ import (
 // SetupErrorLogsWatcher reads from a PodLogLine channel and fails the test
 // when an error-level log line is detected. The goroutine stops when the
 // channel closes.
-func SetupErrorLogsWatcher(e *envtesting.E, ch <-chan PodLogLine) {
+func SetupErrorLogsWatcher(e envtesting.E, ch <-chan PodLogLine) {
 	wg := sync.WaitGroup{}
 	wg.Go(func() {
 		for event := range ch {

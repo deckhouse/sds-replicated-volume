@@ -15,7 +15,7 @@ import (
 // list is a zero-value ObjectList for the watched resource type
 // (e.g., &v1alpha1.DRBDResourceList{}).
 func SetupResourceWatcher(
-	e *envtesting.E,
+	e envtesting.E,
 	wc client.WithWatch,
 	key client.ObjectKey,
 	list client.ObjectList,

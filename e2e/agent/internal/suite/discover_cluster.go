@@ -22,7 +22,7 @@ type ClusterNode struct {
 // DiscoverCluster reads ClusterOptions from the config, discovers every node's
 // LVG, and validates that each LVG is Ready and has enough free space for
 // AllocateSize.
-func DiscoverCluster(e *envtesting.E, cl client.Client) *Cluster {
+func DiscoverCluster(e envtesting.E, cl client.Client) *Cluster {
 	var opts ClusterOptions
 	e.Options(&opts)
 

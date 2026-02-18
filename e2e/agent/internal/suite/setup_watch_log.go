@@ -22,7 +22,7 @@ import (
 //   - Modified: event type, name, diff against last known state
 //   - Deleted: event type, name
 //   - Other: event type, and %s of Object if present
-func SetupWatchLog(e *envtesting.E, ch <-chan watch.Event) <-chan watch.Event {
+func SetupWatchLog(e envtesting.E, ch <-chan watch.Event) <-chan watch.Event {
 	out := make(chan watch.Event)
 	wg := sync.WaitGroup{}
 	wg.Go(func() {
@@ -42,7 +42,7 @@ func SetupWatchLog(e *envtesting.E, ch <-chan watch.Event) <-chan watch.Event {
 	return out
 }
 
-func logWatchEvent(e *envtesting.E, event watch.Event, lastKnown runtime.Object) {
+func logWatchEvent(e envtesting.E, event watch.Event, lastKnown runtime.Object) {
 	name := objectName(event.Object)
 
 	switch event.Type {

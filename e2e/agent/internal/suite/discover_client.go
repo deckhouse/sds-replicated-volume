@@ -16,7 +16,7 @@ import (
 // DiscoverClient Discovers a K8s client from kubeconfig. Registers
 // v1alpha1, sds-node-configurator, core, and storage schemes.
 // The returned client supports watch operations.
-func DiscoverClient(e *envtesting.E) client.WithWatch {
+func DiscoverClient(e envtesting.E) client.WithWatch {
 	scheme := runtime.NewScheme()
 
 	schemeFuncs := []func(s *runtime.Scheme) error{
@@ -48,7 +48,7 @@ func DiscoverClient(e *envtesting.E) client.WithWatch {
 // DiscoverClientset Discovers a Kubernetes clientset from kubeconfig.
 // Used for operations that require the standard client-go API (e.g., pod log
 // streaming).
-func DiscoverClientset(e *envtesting.E) *kubernetes.Clientset {
+func DiscoverClientset(e envtesting.E) *kubernetes.Clientset {
 	kubeConfig, err := config.GetConfig()
 	if err != nil {
 		e.Fatalf("getting kubeconfig for clientset: %v", err)

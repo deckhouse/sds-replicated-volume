@@ -11,7 +11,7 @@ import (
 // nodeNames must be non-empty and contain no duplicates. Each name must match
 // an existing cluster node.
 func DiscoverNodes(
-	e *envtesting.E,
+	e envtesting.E,
 	cl client.Client,
 	nodeNames []string,
 ) []*corev1.Node {

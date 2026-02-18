@@ -19,7 +19,7 @@ import (
 func TestDRBDResource(t *testing.T) {
 	e := envtesting.Discover(t)
 
-	var testID envtesting.TestId
+	var testID TestId
 	e.Options(&testID)
 
 	var timeouts Timeouts
@@ -38,11 +38,11 @@ func TestDRBDResource(t *testing.T) {
 	// Discover and validate cluster (LVGs ready, enough free space).
 	cluster := DiscoverCluster(e, cl)
 
-	e.Run("R1", func(e *envtesting.E) {
+	e.Run("R1", func(e envtesting.E) {
 		SetupDisklessToDiskfulReplica(e, cl, timeouts, testID.ResourceName("0"), cluster.Nodes[0], 0, cluster.AllocateSize)
 	})
 
-	e.Run("R2", func(e *envtesting.E) {
+	e.Run("R2", func(e envtesting.E) {
 		if len(cluster.Nodes) < 2 {
 			e.Fatalf("R2 requires at least 2 nodes, got %d", len(cluster.Nodes))
 		}
@@ -101,10 +101,10 @@ func TestDRBDResource(t *testing.T) {
 		assertDRBDRConfigured(e, event1.Object.(*v1alpha1.DRBDResource))
 	})
 
-	// e.Run("R3", func(e *envtesting.E) {
+	// e.Run("R3", func(e envtesting.E) {
 	// })
 
-	// e.Run("R4", func(e *envtesting.E) {
+	// e.Run("R4", func(e envtesting.E) {
 	// })
 }
 
@@ -120,7 +120,7 @@ type Replica struct {
 // -> wait configured. Returns a Replica with the live watcher channel for
 // subsequent waits (e.g. peering).
 func SetupDisklessToDiskfulReplica(
-	e *envtesting.E,
+	e envtesting.E,
 	cl client.WithWatch,
 	timeouts Timeouts,
 	name string,
@@ -220,7 +220,7 @@ func isDRBDRTerminal(event watch.Event) bool {
 
 // assertDRBDRConfigured fails the test if the DRBDResource Configured
 // condition is not True.
-func assertDRBDRConfigured(e *envtesting.E, drbdr *v1alpha1.DRBDResource) {
+func assertDRBDRConfigured(e envtesting.E, drbdr *v1alpha1.DRBDResource) {
 	for _, cond := range drbdr.Status.Conditions {
 		if cond.Type != v1alpha1.DRBDResourceCondConfiguredType {
 			continue

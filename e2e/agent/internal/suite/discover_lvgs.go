@@ -17,7 +17,7 @@ type NodeLVG struct {
 // node-LVG pairs. Each LVG must exist and its spec.local.nodeName must match
 // the expected node. Returns LVGs in the same order as nodeLVGs.
 func DiscoverLVGs(
-	e *envtesting.E,
+	e envtesting.E,
 	cl client.Client,
 	nodeLVGs []NodeLVG,
 ) []*snc.LVMVolumeGroup {

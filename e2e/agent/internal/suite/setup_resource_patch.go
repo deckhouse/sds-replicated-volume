@@ -24,7 +24,7 @@ func SetupResourcePatch[T any, PT interface {
 	client.Object
 	*T
 }](
-	e *envtesting.E,
+	e envtesting.E,
 	cl client.Client,
 	key client.ObjectKey,
 	mutate func(PT),

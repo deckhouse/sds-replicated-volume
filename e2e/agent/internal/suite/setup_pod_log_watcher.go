@@ -29,7 +29,7 @@ type PodLogLine struct {
 // channel of log lines. The channel is closed when the stream ends. The stream
 // is stopped during cleanup.
 func SetupPodLogWatcher(
-	e *envtesting.E,
+	e envtesting.E,
 	cs *kubernetes.Clientset,
 	namespace string,
 	podName string,
@@ -67,7 +67,7 @@ func SetupPodLogWatcher(
 // opts.Namespace, starts a log watcher for each pod, and returns a single
 // channel of PodLogLine that fans in log lines from all pods.
 func SetupPodsLogWatcher(
-	e *envtesting.E,
+	e envtesting.E,
 	cl client.Client,
 	cs *kubernetes.Clientset,
 	opts PodLogMonitorOptions,
