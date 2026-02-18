@@ -8,9 +8,10 @@ env:
   MODULES_REGISTRY_LOGIN: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
   MODULES_REGISTRY_PASSWORD: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
   MODULES_MODULE_TAG: ${{ github.ref_name }}
-  GOLANG_VERSION: ${{ vars.GOLANG_VERSION }}
   GOPROXY: ${{ secrets.GOPROXY }}
-  BASE_IMAGES_VERSION: "v0.5.50"
+  SOURCE_REPO: ${{ secrets.SOURCE_REPO }}
+  SOURCE_REPO_SSH_KEY: ${{ secrets.SOURCE_REPO_SSH_KEY }}
+  BASE_IMAGES_VERSION: "v0.5.56"
 
 on:
   push:
@@ -42,22 +43,24 @@ jobs:
           wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
           cat base_images.yml
 
-      - uses: deckhouse/modules-actions/setup@v2
+      - uses: deckhouse/modules-actions/setup@v4
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/setup@v2
+      - uses: deckhouse/modules-actions/setup@v4
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/build@v2
+      - uses: deckhouse/modules-actions/build@v4
         with:
           module_source: "${{ vars.PROD_REGISTRY }}/${{ vars.PROD_MODULE_SOURCE_NAME }}/ce/modules"
           module_name: ${{ vars.MODULE_NAME }}
           module_tag: ${{ github.ref_name }}
           secondary_repo: "${{ vars.DEV_MODULE_SOURCE }}/${{ vars.MODULE_NAME }}"
+          source_repo: ${{ secrets.SOURCE_REPO }}
+          source_repo_ssh_key: ${{ secrets.SOURCE_REPO_SSH_KEY }}
 
   prod_ee_setup_build:
     runs-on: [self-hosted, large]
@@ -83,22 +86,24 @@ jobs:
           wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
           cat base_images.yml
 
-      - uses: deckhouse/modules-actions/setup@v2
+      - uses: deckhouse/modules-actions/setup@v4
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/setup@v2
+      - uses: deckhouse/modules-actions/setup@v4
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/build@v2
+      - uses: deckhouse/modules-actions/build@v4
         with:
           module_source: "${{ vars.PROD_REGISTRY }}/${{ vars.PROD_MODULE_SOURCE_NAME }}/ee/modules"
           module_name: ${{ vars.MODULE_NAME }}
           module_tag: ${{ github.ref_name }}
           secondary_repo: "${{ vars.DEV_MODULE_SOURCE }}/${{ vars.MODULE_NAME }}"
+          source_repo: ${{ secrets.SOURCE_REPO }}
+          source_repo_ssh_key: ${{ secrets.SOURCE_REPO_SSH_KEY }}
 
   prod_fe_setup_build:
     runs-on: [self-hosted, large]
@@ -124,22 +129,24 @@ jobs:
           wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
           cat base_images.yml
 
-      - uses: deckhouse/modules-actions/setup@v2
+      - uses: deckhouse/modules-actions/setup@v4
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/setup@v2
+      - uses: deckhouse/modules-actions/setup@v4
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/build@v2
+      - uses: deckhouse/modules-actions/build@v4
         with:
           module_source: "${{ vars.PROD_REGISTRY }}/${{ vars.PROD_MODULE_SOURCE_NAME }}/fe/modules"
           module_name: ${{ vars.MODULE_NAME }}
           module_tag: ${{ github.ref_name }}
           secondary_repo: "${{ vars.DEV_MODULE_SOURCE }}/${{ vars.MODULE_NAME }}"
+          source_repo: ${{ secrets.SOURCE_REPO }}
+          source_repo_ssh_key: ${{ secrets.SOURCE_REPO_SSH_KEY }}
 
   prod_se_setup_build:
     runs-on: [self-hosted, large]
@@ -165,22 +172,24 @@ jobs:
           wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
           cat base_images.yml
 
-      - uses: deckhouse/modules-actions/setup@v2
+      - uses: deckhouse/modules-actions/setup@v4
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/setup@v2
+      - uses: deckhouse/modules-actions/setup@v4
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/build@v2
+      - uses: deckhouse/modules-actions/build@v4
         with:
           module_source: "${{ vars.PROD_REGISTRY }}/${{ vars.PROD_MODULE_SOURCE_NAME }}/se/modules"
           module_name: ${{ vars.MODULE_NAME }}
           module_tag: ${{ github.ref_name }}
           secondary_repo: "${{ vars.DEV_MODULE_SOURCE }}/${{ vars.MODULE_NAME }}"
+          source_repo: ${{ secrets.SOURCE_REPO }}
+          source_repo_ssh_key: ${{ secrets.SOURCE_REPO_SSH_KEY }}
 
   prod_se_plus_setup_build:
     runs-on: [self-hosted, large]
@@ -206,19 +215,21 @@ jobs:
           wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
           cat base_images.yml
 
-      - uses: deckhouse/modules-actions/setup@v2
+      - uses: deckhouse/modules-actions/setup@v4
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/setup@v2
+      - uses: deckhouse/modules-actions/setup@v4
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/build@v2
+      - uses: deckhouse/modules-actions/build@v4
         with:
           module_source: "${{ vars.PROD_REGISTRY }}/${{ vars.PROD_MODULE_SOURCE_NAME }}/se-plus/modules"
           module_name: ${{ vars.MODULE_NAME }}
           module_tag: ${{ github.ref_name }}
           secondary_repo: "${{ vars.DEV_MODULE_SOURCE }}/${{ vars.MODULE_NAME }}"
+          source_repo: ${{ secrets.SOURCE_REPO }}
+          source_repo_ssh_key: ${{ secrets.SOURCE_REPO_SSH_KEY }}

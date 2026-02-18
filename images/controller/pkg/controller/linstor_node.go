@@ -589,9 +589,10 @@ func GetLinstorNodes(ctx context.Context, lc *lclient.Client) ([]lclient.Node, [
 	linstorSatelliteNodes := make([]lclient.Node, 0, len(linstorNodes))
 
 	for _, linstorNode := range linstorNodes {
-		if linstorNode.Type == LinstorControllerType {
+		switch linstorNode.Type {
+		case LinstorControllerType:
 			linstorControllerNodes = append(linstorControllerNodes, linstorNode)
-		} else if linstorNode.Type == LinstorSatelliteType {
+		case LinstorSatelliteType:
 			linstorSatelliteNodes = append(linstorSatelliteNodes, linstorNode)
 		}
 	}

@@ -149,7 +149,8 @@ func GenerateNewSelfSignedTLSGroup(
 		caConf.CommonCACanonicalName,
 		certificate.WithKeyAlgo(caConf.KeyAlgorithm),
 		certificate.WithKeySize(caConf.KeySize),
-		certificate.WithCAExpiry(caConf.CAExpiryDuration.String()))
+		certificate.WithCAExpiry(caConf.CAExpiryDuration),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("generating ca: %w", err)
 	}
@@ -164,7 +165,7 @@ func GenerateNewSelfSignedTLSGroup(
 				KeySize:      conf.KeySize,
 				SANs:         conf.SANs(input),
 				Usages:       conf.UsagesStrings(),
-				CAExpiry:     conf.CAExpiryDuration.String(),
+				CAExpiry:     conf.CAExpiryDuration,
 				CertExpiry:   conf.CertExpiryDuration,
 			},
 		)

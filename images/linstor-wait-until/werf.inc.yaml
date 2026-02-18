@@ -7,7 +7,7 @@ git:
   - url: https://github.com/LINBIT/linstor-wait-until
     add: /
     to: /usr/local/go/{{ $.ImageName }}
-    tag: v{{ $.Versions.LINSTOR_WAIT_UNTIL }}
+    tag: v{{ include "get_oss_version_by_id" (list "LINSTOR_WAIT_UNTIL" $.Root) }}
     stageDependencies:
       setup:
         - "**/*"
@@ -46,4 +46,4 @@ docker:
   LABEL:
     distro: all
     version: all
-    linstor-wait-until: {{ $.Versions.LINSTOR_WAIT_UNTIL }}
+    linstor-wait-until: {{ include "get_oss_version_by_id" (list "LINSTOR_WAIT_UNTIL" $.Root) }}

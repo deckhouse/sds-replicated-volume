@@ -10,7 +10,7 @@ env:
   GOPROXY: ${{ secrets.GOPROXY }}
   SOURCE_REPO: ${{ secrets.SOURCE_REPO }}
   SOURCE_REPO_SSH_KEY: ${{ secrets.SOURCE_REPO_SSH_KEY }}
-  BASE_IMAGES_VERSION: "v0.5.50"
+  BASE_IMAGES_VERSION: "v0.5.56"
 
 on:
   #pull_request:
@@ -46,7 +46,7 @@ jobs:
           if [ -f openapi/values_ce.yaml ]; then
             cp -f openapi/values_ce.yaml openapi/values.yaml
           fi
-      - uses: deckhouse/modules-actions/lint@main
+      - uses: deckhouse/modules-actions/lint@v4
         env:
           DMT_METRICS_URL: ${{ secrets.DMT_METRICS_URL }}
           DMT_METRICS_TOKEN: ${{ secrets.DMT_METRICS_TOKEN }}
@@ -55,7 +55,7 @@ jobs:
           if [ -f openapi/values_ee.yaml ]; then
             cp -f openapi/values_ee.yaml openapi/values.yaml
           fi
-      - uses: deckhouse/modules-actions/lint@main
+      - uses: deckhouse/modules-actions/lint@v4
         env:
           DMT_METRICS_URL: ${{ secrets.DMT_METRICS_URL }}
           DMT_METRICS_TOKEN: ${{ secrets.DMT_METRICS_TOKEN }}
