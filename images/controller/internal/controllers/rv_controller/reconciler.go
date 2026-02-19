@@ -155,6 +155,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Ensure conditions.
 	eo = flow.MergeEnsures(
 		ensureConditionConfigurationReady(rf.Ctx(), rv, rsc),
+		ensureConditionIOReady(rf.Ctx(), rv),
 	)
 	if eo.Error() != nil {
 		return rf.Fail(eo.Error()).ToCtrl()
@@ -1693,6 +1694,54 @@ func applyConfigurationReadyCondFalse(rv *v1alpha1.ReplicatedVolume, reason, mes
 		Reason:  reason,
 		Message: message,
 	})
+}
+
+func ensureConditionIOReady(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "cond-io-ready")
+	defer ef.OnEnd(&outcome)
+
+	changed := false
+
+	if rv.Status.Configuration == nil {
+		changed = obju.SetStatusCondition(rv, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeCondIOReadyType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeCondIOReadyReasonNoConfiguration,
+			Message: "Volume has no configuration yet",
+		})
+		return ef.Ok().ReportChangedIf(changed)
+	}
+
+	if forming, _ := isFormationInProgress(rv); forming {
+		changed = obju.SetStatusCondition(rv, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeCondIOReadyType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeCondIOReadyReasonFormationInProgress,
+			Message: "Datamesh formation is in progress",
+		})
+		return ef.Ok().ReportChangedIf(changed)
+	}
+
+	if len(rv.Status.DatameshTransitions) > 0 {
+		changed = obju.SetStatusCondition(rv, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeCondIOReadyType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeCondIOReadyReasonTransitionsInProgress,
+			Message: "Datamesh transitions are in progress",
+		})
+		return ef.Ok().ReportChangedIf(changed)
+	}
+
+	changed = obju.SetStatusCondition(rv, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeCondIOReadyType,
+		Status:  metav1.ConditionTrue,
+		Reason:  v1alpha1.ReplicatedVolumeCondIOReadyReasonReady,
+		Message: "Datamesh is formed and ready for I/O",
+	})
+	return ef.Ok().ReportChangedIf(changed)
 }
 
 // ensureDatameshPendingReplicaTransitions synchronizes rv.Status.DatameshPendingReplicaTransitions
