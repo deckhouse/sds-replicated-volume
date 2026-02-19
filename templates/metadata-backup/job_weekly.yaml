@@ -3,6 +3,7 @@ cpu: 10m
 memory: 25Mi
 {{- end }}
 
+{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
 {{- if dig "backup" "enabled" true .Values.sdsReplicatedVolume }}
 ---
 apiVersion: batch/v1
@@ -54,4 +55,5 @@ spec:
           volumes:
             - name: tmp
               emptyDir: {}
+{{- end }}
 {{- end }}
