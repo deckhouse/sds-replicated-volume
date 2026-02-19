@@ -17,7 +17,7 @@ import (
 )
 
 func TestDRBDResource(t *testing.T) {
-	e := envtesting.Discover(t)
+	e := envtesting.New(t, nil)
 
 	var testID TestId
 	e.Options(&testID)

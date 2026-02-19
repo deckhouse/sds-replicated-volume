@@ -54,37 +54,30 @@ type E interface {
 	Close()
 }
 
-// New creates an E backed by t. sections may be nil if Options is not needed.
+// New creates an E backed by t. It reads the JSON config file whose path is
+// taken from the E2E_CONFIG_PATH environment variable (defaults to ".env.json").
+// sections may be provided directly; when nil, the config file is read.
 func New[T interface {
 	TRun[T]
 	TCommon
 }](t T, sections map[string]json.RawMessage) E {
+	if sections == nil {
+		path := os.Getenv("E2E_CONFIG_PATH")
+		if path == "" {
+			path = ".env.json"
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("reading config from %s: %v", path, err)
+		}
+
+		if err := json.Unmarshal(data, &sections); err != nil {
+			t.Fatalf("parsing config sections from %s: %v", path, err)
+		}
+	}
+
 	return newEImpl(t, sections)
-}
-
-// Discover reads the JSON config file and returns a new E. The file path is
-// read from the E2E_CONFIG_PATH environment variable; if unset, defaults to
-// ".env.json".
-func Discover[T interface {
-	TRun[T]
-	TCommon
-}](t T) E {
-	path := os.Getenv("E2E_CONFIG_PATH")
-	if path == "" {
-		path = ".env.json"
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("reading config from %s: %v", path, err)
-	}
-
-	var sections map[string]json.RawMessage
-	if err := json.Unmarshal(data, &sections); err != nil {
-		t.Fatalf("parsing config sections from %s: %v", path, err)
-	}
-
-	return New(t, sections)
 }
 
 // eImpl is the single concrete implementation of E.
@@ -142,10 +135,6 @@ func (e *eImpl) Run(name string, fn func(E)) bool {
 // Options unmarshals the config section whose key matches the Go type name of
 // *target. target must be a pointer to a named type.
 func (e *eImpl) Options(target any) {
-	if e.sections == nil {
-		e.TCommon.Fatalf("Options called on E without config sections; use Discover instead of New")
-	}
-
 	typ := reflect.TypeOf(target)
 	if typ.Kind() != reflect.Pointer {
 		e.TCommon.Fatalf("Options: target must be a pointer, got %T", target)

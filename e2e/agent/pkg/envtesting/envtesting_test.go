@@ -26,27 +26,38 @@ func newMockT() *mockT {
 	return &mockT{ctx: context.Background(), name: "mock"}
 }
 
-func (m *mockT) Cleanup(f func())                        { m.cleanups = append(m.cleanups, f) }
-func (m *mockT) Context() context.Context                 { return m.ctx }
-func (m *mockT) Deadline() (time.Time, bool)              { return time.Time{}, false }
-func (m *mockT) Error(args ...any)                        { m.errors = append(m.errors, joinArgs(args)); m.failed = true }
-func (m *mockT) Errorf(format string, args ...any)        { m.errors = append(m.errors, fmtSprintf(format, args)); m.failed = true }
-func (m *mockT) Fail()                                    { m.failed = true }
-func (m *mockT) FailNow()                                 { m.failed = true; runtime.Goexit() }
-func (m *mockT) Failed() bool                             { return m.failed }
-func (m *mockT) Fatal(args ...any)                        { m.fatals = append(m.fatals, joinArgs(args)); m.failed = true; runtime.Goexit() }
-func (m *mockT) Fatalf(format string, args ...any)        { m.fatals = append(m.fatals, fmtSprintf(format, args)); m.failed = true; runtime.Goexit() }
-func (m *mockT) Helper()                                  {}
-func (m *mockT) Log(args ...any)                          { m.logs = append(m.logs, joinArgs(args)) }
-func (m *mockT) Logf(format string, args ...any)          { m.logs = append(m.logs, fmtSprintf(format, args)) }
-func (m *mockT) Name() string                             { return m.name }
-func (m *mockT) Parallel()                                {}
-func (m *mockT) Setenv(_, _ string)                       {}
-func (m *mockT) Skip(args ...any)                         { m.skipped = true; runtime.Goexit() }
-func (m *mockT) Skipf(format string, args ...any)         { m.skipped = true; runtime.Goexit() }
-func (m *mockT) SkipNow()                                 { m.skipped = true; runtime.Goexit() }
-func (m *mockT) Skipped() bool                            { return m.skipped }
-func (m *mockT) TempDir() string                          { return "" }
+func (m *mockT) Cleanup(f func())            { m.cleanups = append(m.cleanups, f) }
+func (m *mockT) Context() context.Context    { return m.ctx }
+func (m *mockT) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (m *mockT) Error(args ...any)           { m.errors = append(m.errors, joinArgs(args)); m.failed = true }
+func (m *mockT) Errorf(format string, args ...any) {
+	m.errors = append(m.errors, fmtSprintf(format, args))
+	m.failed = true
+}
+func (m *mockT) Fail()        { m.failed = true }
+func (m *mockT) FailNow()     { m.failed = true; runtime.Goexit() }
+func (m *mockT) Failed() bool { return m.failed }
+func (m *mockT) Fatal(args ...any) {
+	m.fatals = append(m.fatals, joinArgs(args))
+	m.failed = true
+	runtime.Goexit()
+}
+func (m *mockT) Fatalf(format string, args ...any) {
+	m.fatals = append(m.fatals, fmtSprintf(format, args))
+	m.failed = true
+	runtime.Goexit()
+}
+func (m *mockT) Helper()                          {}
+func (m *mockT) Log(args ...any)                  { m.logs = append(m.logs, joinArgs(args)) }
+func (m *mockT) Logf(format string, args ...any)  { m.logs = append(m.logs, fmtSprintf(format, args)) }
+func (m *mockT) Name() string                     { return m.name }
+func (m *mockT) Parallel()                        {}
+func (m *mockT) Setenv(_, _ string)               {}
+func (m *mockT) Skip(args ...any)                 { m.skipped = true; runtime.Goexit() }
+func (m *mockT) Skipf(format string, args ...any) { m.skipped = true; runtime.Goexit() }
+func (m *mockT) SkipNow()                         { m.skipped = true; runtime.Goexit() }
+func (m *mockT) Skipped() bool                    { return m.skipped }
+func (m *mockT) TempDir() string                  { return "" }
 
 func (m *mockT) Run(name string, fn func(*mockT)) bool {
 	child := &mockT{ctx: m.ctx, name: m.name + "/" + name}
@@ -151,9 +162,9 @@ func TestOptions_MissingSection(t *testing.T) {
 	}
 }
 
-func TestOptions_NoSections(t *testing.T) {
+func TestOptions_EmptySections(t *testing.T) {
 	m := newMockT()
-	e := envtesting.New(m, nil)
+	e := envtesting.New(m, map[string]json.RawMessage{})
 
 	done := make(chan struct{})
 	go func() {
@@ -164,7 +175,7 @@ func TestOptions_NoSections(t *testing.T) {
 	<-done
 
 	if len(m.fatals) == 0 {
-		t.Fatal("expected fatal when Options called without sections")
+		t.Fatal("expected fatal when section is missing")
 	}
 }
 
