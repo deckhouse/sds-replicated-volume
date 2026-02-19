@@ -21,15 +21,14 @@ import (
 	"fmt"
 	"slices"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
-
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 const (
@@ -115,44 +114,6 @@ func RSPValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 					}
 				}
 				break
-			}
-		}
-
-		if thinPoolExists {
-			ctx := context.Background() // TODO: can't we use previous context or derive from it?
-			cl, err := NewKubeClient("")
-			if err != nil {
-				klog.Fatal(err.Error())
-			}
-
-			srvModuleConfig := &d8commonapi.ModuleConfig{}
-
-			err = cl.Get(ctx, types.NamespacedName{Name: sdsReplicatedVolumeModuleName, Namespace: ""}, srvModuleConfig)
-			if err != nil {
-				klog.Fatal(err)
-			}
-
-			if value, exists := srvModuleConfig.Spec.Settings["enableThinProvisioning"]; exists && value == true {
-				klog.Info("Thin pools support is enabled")
-			} else {
-				klog.Info("Enabling thin pools support")
-				patchBytes, err := json.Marshal(map[string]interface{}{
-					"spec": map[string]interface{}{
-						"version": 1,
-						"settings": map[string]interface{}{
-							"enableThinProvisioning": true,
-						},
-					},
-				})
-
-				if err != nil {
-					klog.Fatalf("Error marshalling patch: %s", err.Error())
-				}
-
-				err = cl.Patch(context.TODO(), srvModuleConfig, client.RawPatch(types.MergePatchType, patchBytes))
-				if err != nil {
-					klog.Fatalf("Error patching object: %s", err.Error())
-				}
 			}
 		}
 
