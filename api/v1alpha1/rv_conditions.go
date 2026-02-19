@@ -41,11 +41,10 @@ const (
 
 const (
 	// ReplicatedVolumeCondIOReadyType indicates whether the volume is ready for I/O operations.
-	ReplicatedVolumeCondIOReadyType                        = "IOReady"
-	ReplicatedVolumeCondIOReadyReasonFormationInProgress   = "FormationInProgress"   // Datamesh formation is still in progress.
-	ReplicatedVolumeCondIOReadyReasonNoConfiguration       = "NoConfiguration"       // Volume has no configuration yet.
-	ReplicatedVolumeCondIOReadyReasonReady                 = "Ready"                 // Datamesh is formed and ready for I/O.
-	ReplicatedVolumeCondIOReadyReasonTransitionsInProgress = "TransitionsInProgress" // Datamesh transitions are in progress.
+	ReplicatedVolumeCondIOReadyType                      = "IOReady"
+	ReplicatedVolumeCondIOReadyReasonFormationInProgress = "FormationInProgress" // Datamesh formation is still in progress.
+	ReplicatedVolumeCondIOReadyReasonNoConfiguration     = "NoConfiguration"     // Volume has no configuration yet.
+	ReplicatedVolumeCondIOReadyReasonReady               = "Ready"               // Datamesh is formed and ready for I/O.
 )
 
 const (

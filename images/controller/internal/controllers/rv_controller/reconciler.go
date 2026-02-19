@@ -1725,16 +1725,6 @@ func ensureConditionIOReady(
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
-	if len(rv.Status.DatameshTransitions) > 0 {
-		changed = obju.SetStatusCondition(rv, metav1.Condition{
-			Type:    v1alpha1.ReplicatedVolumeCondIOReadyType,
-			Status:  metav1.ConditionFalse,
-			Reason:  v1alpha1.ReplicatedVolumeCondIOReadyReasonTransitionsInProgress,
-			Message: "Datamesh transitions are in progress",
-		})
-		return ef.Ok().ReportChangedIf(changed)
-	}
-
 	changed = obju.SetStatusCondition(rv, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeCondIOReadyType,
 		Status:  metav1.ConditionTrue,
