@@ -43,3 +43,11 @@ rm -f ./out
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go test ./...
 echo "api ok"
 cd - > /dev/null
+
+cd images/webhooks
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o ./out ./cmd
+rm -f ./out
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go test ./...
+echo "webhooks ok"
+cd - > /dev/null
+
