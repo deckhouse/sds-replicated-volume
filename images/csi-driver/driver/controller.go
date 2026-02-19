@@ -51,9 +51,6 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		return nil, status.Error(codes.InvalidArgument, "Volume Capability cannot de empty")
 	}
 
-
-	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] storage class BindingMode: %s", traceID, volumeID, BindingMode))
-
 	// Get LVMVolumeGroups from StoragePool
 	storagePoolName := request.Parameters[internal.StoragePoolKey]
 	if len(storagePoolName) == 0 {
