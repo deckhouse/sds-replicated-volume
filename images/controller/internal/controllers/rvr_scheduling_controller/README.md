@@ -16,7 +16,8 @@ The controller reconciles all RVRs belonging to a single `ReplicatedVolume` (RV)
 
 | Direction | Resource/Controller | Relationship |
 |-----------|---------------------|--------------|
-| ← input | ReplicatedVolume | Reads configuration (topology, replication, volumeAccess, storagePoolName), attachTo nodes, reservation annotation, volume size |
+| ← input | ReplicatedVolume | Reads configuration (topology, replication, volumeAccess, storagePoolName), reservation annotation, volume size |
+| ← input | ReplicatedVolumeAttachment | Lists RVAs for the RV to determine attach-to nodes (via `getIntendedAttachments`) |
 | ← input | ReplicatedStoragePool | Reads eligible nodes (with node/LVG readiness and zone info), pool type |
 | ← input | ReplicatedVolumeReplica | Reads spec (type, nodeName, LVG), classifies by type/scheduling state/deletion |
 | → manages | ReplicatedVolumeReplica | Patches spec (NodeName, LVMVolumeGroupName, LVMVolumeGroupThinPoolName) and status (Scheduled condition) |
@@ -33,7 +34,8 @@ Guard 1: RV not found → WaitingForReplicatedVolume on all RVRs → Done
 Guard 2: RV has no configuration → WaitingForReplicatedVolume on all RVRs → Done
 Guard 3: RSP not found → WaitingForReplicatedVolume on all RVRs → Done
 
-build schedulingContext (classify RVRs, compute zones, eligible nodes, occupied nodes)
+getIntendedAttachments (list RVAs → sorted unique node names)
+build schedulingContext (classify RVRs, compute zones, eligible nodes, occupied nodes, attachToNodes)
 
 if Access replicas exist:
     remove Scheduled condition from Access RVRs
@@ -66,6 +68,7 @@ Reconcile (root) [Pure orchestration]
 ├── Guard 2: no configuration → reconcileRVRsCondition (WaitingForReplicatedVolume) → Done
 ├── getRSP
 ├── Guard 3: RSP not found → reconcileRVRsCondition (WaitingForReplicatedVolume) → Done
+├── getIntendedAttachments (list RVAs → sorted unique node names)
 ├── computeSchedulingContext
 ├── reconcileRVRsConditionAbsent (Access replicas) [In-place reconciliation]
 ├── reconcileRVRsCondition (Scheduled=True for already-scheduled) [In-place reconciliation]
@@ -110,7 +113,8 @@ flowchart TD
     Guard3 -->|No| SetWaiting3["Scheduled=Unknown<br/>WaitingForReplicatedVolume<br/>on all RVRs"]
     SetWaiting3 --> Done3([Done])
 
-    Guard3 -->|Yes| BuildCtx[computeSchedulingContext]
+    Guard3 -->|Yes| GetRVAs[getIntendedAttachments]
+    GetRVAs --> BuildCtx[computeSchedulingContext]
     BuildCtx --> AccessCheck{Access replicas?}
     AccessCheck -->|Yes| RemoveCond[Remove Scheduled condition]
     AccessCheck -->|No| ScheduledCheck
@@ -155,7 +159,7 @@ Source → Predicate filters → Scoring → SelectBest
 4. **Node occupancy**: exclude occupied nodes (unscheduled RVR) or narrow to assigned node (partially-scheduled RVR)
 5. **Zone filter** (topology-dependent): Zonal majority or TransZonal least-loaded
 6. **Extender scoring** (Diskful only): `FilterAndScore` via scheduler-extender
-7. **Attach-to bonus** (Diskful only): +1000 to nodes in `rv.Status.DesiredAttachTo`
+7. **Attach-to bonus** (Diskful only): +1000 to nodes from RVA objects (`getIntendedAttachments`)
 8. **Multi-LVG bonus** (Diskful, volumeAccess != Any): +2 to nodes with >1 LVG
 9. **Zone capacity penalty** (Diskful + Zonal only): -800 to zones with insufficient free nodes
 10. **SelectBest**: highest score → alphabetical node name → alphabetical LVG name
@@ -220,7 +224,7 @@ The `schedulingContext` is built once per Reconcile invocation by `computeSchedu
 |-------|--------|-------------|
 | `EligibleNodes` | `rsp.Status.EligibleNodes` | Candidate nodes (sorted by NodeName) |
 | `OccupiedNodes` | RVRs with `spec.nodeName != ""` | Nodes already used by any RVR |
-| `AttachToNodes` | `rv.Status.DesiredAttachTo` | Nodes preferred for attachment |
+| `AttachToNodes` | RVA objects (via `getIntendedAttachments`) | Nodes preferred for attachment (sorted, deduplicated) |
 | `ReservationID` | RV annotation or computed from LLV name | Scheduler-extender reservation key |
 | `Size` | `rv.Spec.Size` | Volume size in bytes |
 | `Topology` | `rv.Status.Configuration.Topology` | Zonal / TransZonal / Ignored |
@@ -280,6 +284,7 @@ This controller does not manage finalizers, labels, or owner references. It only
 | Index | Field | Purpose |
 |-------|-------|---------|
 | `IndexFieldRVRByReplicatedVolumeName` | `spec.replicatedVolumeName` | List RVRs for an RV (used by `getRVRsByRVName`) |
+| `IndexFieldRVAByReplicatedVolumeName` | `spec.replicatedVolumeName` | List RVAs for an RV (used by `getIntendedAttachments`) |
 | `IndexFieldRVByStoragePoolName` | `status.configuration.storagePoolName` | Map RSP events to RVs (used by `mapRSPToRV`) |
 
 ## Data Flow
@@ -287,7 +292,8 @@ This controller does not manage finalizers, labels, or owner references. It only
 ```mermaid
 flowchart TD
     subgraph inputs [Inputs]
-        RV["RV.status.configuration<br/>RV.status.desiredAttachTo<br/>RV.spec.size"]
+        RV["RV.status.configuration<br/>RV.spec.size"]
+        RVAs["RVA.spec.nodeName<br/>(attach-to nodes)"]
         RSP["RSP.status.eligibleNodes<br/>RSP.spec.type"]
         RVRs["RVR.spec (type, node, LVG)<br/>RVR.status (conditions)"]
         Extender[scheduler-extender]
@@ -311,6 +317,7 @@ flowchart TD
     end
 
     RV --> BuildCtx
+    RVAs --> BuildCtx
     RSP --> BuildCtx
     RVRs --> BuildCtx
 
@@ -334,7 +341,7 @@ flowchart TD
 
 ### computeSchedulingContext Details
 
-**Purpose:** Builds the shared scheduling state from RV, RSP, and RVRs in a single pass.
+**Purpose:** Builds the shared scheduling state from RV, RSP, RVRs, and attach-to nodes (from RVAs) in a single pass.
 
 **Algorithm:**
 
@@ -364,7 +371,7 @@ flowchart TD
 | Input | Description |
 |-------|-------------|
 | `rv.Status.Configuration` | Topology, replication, volumeAccess |
-| `rv.Status.DesiredAttachTo` | Preferred attachment nodes |
+| `attachToNodes` (from RVAs via `getIntendedAttachments`) | Preferred attachment nodes (sorted, deduplicated) |
 | `rv.Annotations[SchedulingReservationIDAnnotationKey]` | CSI reservation ID (if set) |
 | `rv.Spec.Size` | Volume size |
 | `rsp.Status.EligibleNodes` | Candidate nodes with LVG/zone info |

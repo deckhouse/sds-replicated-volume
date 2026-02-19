@@ -191,13 +191,13 @@ func printFlag(cmd *cobra.Command, flag *pflag.Flag, maxWidth int) {
 	var b strings.Builder
 
 	if flag.Shorthand != "" && flag.ShorthandDeprecated == "" {
-		b.WriteString(fmt.Sprintf("  -%s, --%s", flag.Shorthand, flag.Name))
+		fmt.Fprintf(&b, "  -%s, --%s", flag.Shorthand, flag.Name)
 	} else {
-		b.WriteString(fmt.Sprintf("      --%s", flag.Name))
+		fmt.Fprintf(&b, "      --%s", flag.Name)
 	}
 
 	if flag.Value.Type() != "bool" {
-		b.WriteString(fmt.Sprintf(" %s", flag.Value.Type()))
+		fmt.Fprintf(&b, " %s", flag.Value.Type())
 	}
 
 	// Add spacing to align descriptions

@@ -238,6 +238,12 @@ func (c *StatusConditionChecker) Present() *StatusConditionChecker {
 	return c
 }
 
+// Absent checks that the condition does not exist.
+func (c *StatusConditionChecker) Absent() *StatusConditionChecker {
+	c.result = c.cond == nil
+	return c
+}
+
 // StatusEqual checks that the condition status equals the given value.
 func (c *StatusConditionChecker) StatusEqual(status metav1.ConditionStatus) *StatusConditionChecker {
 	if c.result {
@@ -260,6 +266,14 @@ func (c *StatusConditionChecker) IsFalse() *StatusConditionChecker {
 func (c *StatusConditionChecker) ReasonEqual(reason string) *StatusConditionChecker {
 	if c.result {
 		c.result = c.cond.Reason == reason
+	}
+	return c
+}
+
+// ReasonNotEqual checks that the condition reason does not equal the given value.
+func (c *StatusConditionChecker) ReasonNotEqual(reason string) *StatusConditionChecker {
+	if c.result {
+		c.result = c.cond.Reason != reason
 	}
 	return c
 }

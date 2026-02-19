@@ -123,6 +123,8 @@ spec:
             - type
             type: object
             x-kubernetes-validations:
+            - message: nodeName is required for Access type
+              rule: self.type != 'Access' || has(self.nodeName)
             - message: lvmVolumeGroupName requires nodeName to be set
               rule: '!has(self.lvmVolumeGroupName) || has(self.nodeName)'
             - message: lvmVolumeGroupName can only be set for Diskful type
@@ -156,7 +158,7 @@ spec:
                   - address
                   - systemNetworkName
                   type: object
-                maxItems: 32
+                maxItems: 10
                 type: array
                 x-kubernetes-list-type: atomic
               attachment:
@@ -375,7 +377,7 @@ spec:
                       items:
                         maxLength: 64
                         type: string
-                      maxItems: 16
+                      maxItems: 10
                       type: array
                       x-kubernetes-list-type: atomic
                       x-kubernetes-validations:
@@ -407,7 +409,7 @@ spec:
                   required:
                   - name
                   type: object
-                maxItems: 32
+                maxItems: 31
                 type: array
                 x-kubernetes-list-type: atomic
                 x-kubernetes-validations:
@@ -470,8 +472,10 @@ spec:
         x-kubernetes-validations:
         - message: metadata.name must start with spec.replicatedVolumeName + '-'
           rule: self.metadata.name.startsWith(self.spec.replicatedVolumeName + '-')
-        - message: numeric suffix must be between 0 and 31
-          rule: int(self.metadata.name.substring(self.metadata.name.lastIndexOf('-')
+        - message: metadata.name must be exactly spec.replicatedVolumeName + '-' +
+            id where id is 0..31
+          rule: self.metadata.name.substring(size(self.spec.replicatedVolumeName)
+            + 1).matches('^[0-9][0-9]?$') && int(self.metadata.name.substring(size(self.spec.replicatedVolumeName)
             + 1)) <= 31
         - message: metadata.name must be at most 123 characters (to fit derived LLV
             name with prefix)

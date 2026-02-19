@@ -79,7 +79,7 @@ type DRBDResourceSpec struct {
 
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:MaxItems=10
 	// +kubebuilder:validation:items:MaxLength=64
 	// +listType=set
 	SystemNetworks []string `json:"systemNetworks"`
@@ -187,7 +187,7 @@ type DRBDResourcePeer struct {
 
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))",message="paths[].systemNetworkName must be unique"
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:MaxItems=10
 	// +listType=atomic
 	Paths []DRBDResourcePath `json:"paths"`
 }
@@ -237,7 +237,7 @@ type DRBDResourceStatus struct {
 	DeviceOpen *bool `json:"deviceOpen,omitempty"`
 
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))",message="addresses[].systemNetworkName must be unique"
-	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:MaxItems=10
 	// +listType=atomic
 	// +optional
 	Addresses []DRBDResourceAddressStatus `json:"addresses,omitempty"`
@@ -332,7 +332,7 @@ type DRBDResourcePeerStatus struct {
 	NodeID uint `json:"nodeID"`
 
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))",message="paths[].systemNetworkName must be unique"
-	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:MaxItems=10
 	// +listType=atomic
 	// +optional
 	Paths []DRBDResourcePathStatus `json:"paths,omitempty"`

@@ -196,7 +196,7 @@ func (r *Reconciler) reconcileDRBDR(
 	if !equality.Semantic.DeepEqual(statusBase.Status, drbdr.Status) {
 		statusPatchErr := r.patchDRBDRStatus(rf.Ctx(), drbdr, statusBase, false)
 		// Ignore "not found" error if object was being deleted
-		if statusPatchErr != nil && !(drbdr.DeletionTimestamp != nil && client.IgnoreNotFound(statusPatchErr) == nil) {
+		if statusPatchErr != nil && (drbdr.DeletionTimestamp == nil || client.IgnoreNotFound(statusPatchErr) != nil) {
 			reconcileErr = errors.Join(reconcileErr, statusPatchErr)
 		}
 	}

@@ -10,9 +10,9 @@ These controllers are tightly coupled and manage storage class configuration and
 
 | Controller | Primary Resource | Purpose |
 |------------|------------------|---------|
-| [rsp_controller](internal/controllers/rsp_controller/README.md) | ReplicatedStoragePool | Calculates eligible nodes from LVGs, Nodes, and agent Pods |
-| [rsc_controller](internal/controllers/rsc_controller/README.md) | ReplicatedStorageClass | Manages RSP, validates configuration, aggregates volume stats |
-| [node_controller](internal/controllers/node_controller/README.md) | Node | Manages agent node labels based on RSP eligibility and DRBDResources |
+| [rsp_controller](internal/controllers/rsp_controller/README.md) | ReplicatedStoragePool | Aggregates eligible nodes from LVMVolumeGroups, Nodes, and agent Pods |
+| [rsc_controller](internal/controllers/rsc_controller/README.md) | ReplicatedStorageClass | Manages auto-generated RSP, validates configuration against topology/replication, aggregates volume stats |
+| [node_controller](internal/controllers/node_controller/README.md) | Node | Manages agent node labels based on RSP eligibility and DRBDResource presence |
 
 ### Volume Lifecycle Controllers
 
@@ -20,9 +20,9 @@ These controllers manage the full volume lifecycle — from datamesh formation t
 
 | Controller | Primary Resource | Purpose |
 |------------|------------------|---------|
-| [rv_controller](internal/controllers/rv_controller/README.md) | ReplicatedVolume | Orchestrates datamesh formation, manages configuration, deletion |
-| [rvr_scheduling_controller](internal/controllers/rvr_scheduling_controller/README.md) | ReplicatedVolume | Assigns nodes/LVGs to unscheduled replicas based on topology and storage capacity |
-| [rvr_controller](internal/controllers/rvr_controller/README.md) | ReplicatedVolumeReplica | Manages backing volumes (LLV), DRBD resources, and reports replica status |
+| [rv_controller](internal/controllers/rv_controller/README.md) | ReplicatedVolume | Orchestrates datamesh formation, normal operation (Access replicas, attach/detach, multiattach), and deletion |
+| [rvr_scheduling_controller](internal/controllers/rvr_scheduling_controller/README.md) | ReplicatedVolume | Selects nodes/LVGs for unscheduled replicas using topology-aware placement and scheduler-extender scoring |
+| [rvr_controller](internal/controllers/rvr_controller/README.md) | ReplicatedVolumeReplica | Manages backing volumes (LVMLogicalVolume), DRBD resources (DRBDResource), and reports replica conditions and status |
 
 ## Architecture
 
@@ -64,7 +64,7 @@ flowchart TB
     RSPStatus --> RSCCtrl
     RSC --> RSCCtrl
     RV --> RSCCtrl
-    RSCCtrl -->|creates| RSP
+    RSCCtrl -->|creates/updates| RSP
     RSCCtrl --> RSCStatus
 
     RSPStatus --> NodeCtrl
@@ -110,11 +110,12 @@ flowchart TB
     RVA --> RVCtrl
     RVCtrl -->|creates/deletes| RVR
     RVCtrl -->|creates| DRBDROp
-    RVCtrl -->|"updates conditions (deletion)"| RVA
+    RVCtrl -->|"manages finalizers; updates conditions"| RVA
 
     RV --> RVRSchedCtrl
     RSP --> RVRSchedCtrl
     RVR --> RVRSchedCtrl
+    RVA --> RVRSchedCtrl
     SchExt --> RVRSchedCtrl
     RVRSchedCtrl -->|"assigns node/LVG"| RVR
 
@@ -134,7 +135,7 @@ flowchart TB
 Controllers have a logical dependency order:
 
 1. **rsp_controller** — runs first, aggregates external resources into `RSP.status.eligibleNodes`
-2. **rsc_controller** — depends on RSP status for configuration validation
+2. **rsc_controller** — depends on RSP status for configuration validation and eligible nodes
 3. **node_controller** — depends on RSP status for node label decisions
 
 Each controller reconciles independently, reacting to changes in its watched resources.
@@ -147,8 +148,8 @@ The volume lifecycle controllers form a chain that connects storage infrastructu
 (RSC + RSP) → RV (rv_controller) → RVR (rvr_scheduling_controller) → RVR (rvr_controller) → (LLV, DRBDResource)
 ```
 
-1. **rv_controller** — reads RSC configuration and RSP eligible nodes; orchestrates datamesh formation (3-phase: preconfigure, establish connectivity, bootstrap data); manages RVR creation/deletion and RV status
-2. **rvr_scheduling_controller** — assigns nodes and LVGs to unscheduled RVRs using topology-aware placement and scheduler-extender capacity scoring
-3. **rvr_controller** — manages backing volumes (LVMLogicalVolume) and DRBD resources (DRBDResource) for each replica; reports replica conditions and status
+1. **rv_controller** — reads RSC configuration and RSP eligible nodes; orchestrates datamesh formation (3-phase: preconfigure, establish connectivity, bootstrap data); manages normal operation (Access replica create/delete/join/leave, attach/detach transitions, multiattach); manages RVR/RVA creation/deletion, RVA conditions, and RV status
+2. **rvr_scheduling_controller** — assigns nodes and LVGs to unscheduled RVRs using topology-aware placement and scheduler-extender capacity scoring; uses RVA attach-to nodes as a scoring bonus
+3. **rvr_controller** — manages backing volumes (LVMLogicalVolume) and DRBD resources (DRBDResource) for each replica; reports replica conditions (Configured, BackingVolumeReady, DRBDConfigured, Attached, FullyConnected, BackingVolumeUpToDate, Ready, SatisfyEligibleNodes) and status
 
 Each controller reconciles independently, reacting to changes in its watched resources.

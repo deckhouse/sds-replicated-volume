@@ -143,7 +143,7 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
 			Type:               v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
 			Status:             metav1.ConditionFalse,
-			Reason:             v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonLocalityNotSatisfied,
+			Reason:             v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonVolumeAccessLocalityNotSatisfied,
 			Message:            "Local volume access requires a Diskful replica on the requested node",
 			ObservedGeneration: rva.Generation,
 		})
@@ -167,7 +167,7 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 		Expect(waitErr.LastReadyCondition).NotTo(BeNil())
 		Expect(waitErr.LastReadyCondition.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonNotAttached))
 		Expect(waitErr.LastAttachedCondition).NotTo(BeNil())
-		Expect(waitErr.LastAttachedCondition.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonLocalityNotSatisfied))
+		Expect(waitErr.LastAttachedCondition.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonVolumeAccessLocalityNotSatisfied))
 	})
 
 	It("WaitForRVAReady returns context deadline error but includes last observed reason/message", func(ctx SpecContext) {
@@ -182,7 +182,7 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
 			Type:               v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
 			Status:             metav1.ConditionFalse,
-			Reason:             v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonSettingPrimary,
+			Reason:             v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching,
 			Message:            "Waiting for replica to become Primary",
 			ObservedGeneration: rva.Generation,
 		})
@@ -207,7 +207,7 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 		Expect(waitErr.LastReadyCondition).NotTo(BeNil())
 		Expect(waitErr.LastReadyCondition.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonNotAttached))
 		Expect(waitErr.LastAttachedCondition).NotTo(BeNil())
-		Expect(waitErr.LastAttachedCondition.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonSettingPrimary))
+		Expect(waitErr.LastAttachedCondition.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching))
 		Expect(waitErr.LastAttachedCondition.Message).To(Equal("Waiting for replica to become Primary"))
 	})
 })

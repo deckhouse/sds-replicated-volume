@@ -140,7 +140,7 @@ spec:
                         - address
                         - systemNetworkName
                         type: object
-                      maxItems: 16
+                      maxItems: 10
                       minItems: 1
                       type: array
                       x-kubernetes-list-type: atomic
@@ -226,7 +226,7 @@ spec:
                 items:
                   maxLength: 64
                   type: string
-                maxItems: 16
+                maxItems: 10
                 minItems: 1
                 type: array
                 x-kubernetes-list-type: set
@@ -313,7 +313,7 @@ spec:
                   - address
                   - systemNetworkName
                   type: object
-                maxItems: 32
+                maxItems: 10
                 type: array
                 x-kubernetes-list-type: atomic
                 x-kubernetes-validations:
@@ -452,7 +452,7 @@ spec:
                         - address
                         - systemNetworkName
                         type: object
-                      maxItems: 16
+                      maxItems: 10
                       type: array
                       x-kubernetes-list-type: atomic
                       x-kubernetes-validations:

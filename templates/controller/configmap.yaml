@@ -8,6 +8,11 @@ metadata:
 data:
   drbdMinPort: "{{ $.Values.sdsReplicatedVolume.drbdPortRange.minPort }}"
   drbdMaxPort: "{{ $.Values.sdsReplicatedVolume.drbdPortRange.maxPort }}"
+{{- if has "virtualization" .Values.global.enabledModules }}
+  virtualizationEnabled: "true"
+{{- else }}
+  virtualizationEnabled: "false"
+{{- end }}
   slogh.cfg: |
     # those are all keys with default values:
 

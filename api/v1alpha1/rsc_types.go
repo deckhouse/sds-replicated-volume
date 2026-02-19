@@ -145,6 +145,7 @@ type ReplicatedStorageClassSpec struct {
 	//
 	// TODO(systemnetwork): Currently only "Internal" (default node network) is supported.
 	// Custom network support requires NetworkNode watch implementation in the controller.
+	// When multi-network support is implemented, raise MaxItems to 10.
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=1
 	// +kubebuilder:validation:Items={type=string,maxLength=64}
@@ -167,7 +168,7 @@ type ReplicatedStorageClassSpec struct {
 }
 
 // ReplicatedStorageClassStorage defines the storage backend configuration for RSC.
-// +kubebuilder:validation:XValidation:rule="self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, size(g.thinPoolName) > 0)",message="thinPoolName is required for each lvmVolumeGroups entry when type is LVMThin"
+// +kubebuilder:validation:XValidation:rule="self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, has(g.thinPoolName) && size(g.thinPoolName) > 0)",message="thinPoolName is required for each lvmVolumeGroups entry when type is LVMThin"
 // +kubebuilder:validation:XValidation:rule="self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName) || size(g.thinPoolName) == 0)",message="thinPoolName must not be specified when type is LVM"
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassStorage struct {
