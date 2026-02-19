@@ -586,9 +586,10 @@ var _ = Describe("Reconciler", func() {
 					var result []schext.ScoredLVMVolumeGroup
 					for _, l := range lvgs {
 						score := 5
-						if l.LVGName == "vg-a" {
+						switch l.LVGName {
+						case "vg-a":
 							score = 10
-						} else if l.LVGName == "vg-b" {
+						case "vg-b":
 							score = 9
 						}
 						result = append(result, schext.ScoredLVMVolumeGroup{LVMVolumeGroup: l, Score: score})

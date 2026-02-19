@@ -1,0 +1,67 @@
+{{- /* Webhook TLS Certs Secret */ -}}
+{{- $secretConfig := dict
+  "valuesKey" "sdsReplicatedVolume"
+  "webhookCertPath" "internal.customWebhookCert"
+}}
+{{ include "helm_lib_module_webhook_certs_secret" (list . $secretConfig) }}
+
+{{- /* Controller Deployment */ -}}
+{{- $linstorEnvs := list
+  (dict "name" "LS_USER_CERTIFICATE" "valueFrom" (dict "secretKeyRef" (dict "name" "linstor-client-https-cert" "key" "tls.crt")))
+  (dict "name" "LS_USER_KEY" "valueFrom" (dict "secretKeyRef" (dict "name" "linstor-client-https-cert" "key" "tls.key")))
+  (dict "name" "LS_ROOT_CA" "valueFrom" (dict "secretKeyRef" (dict "name" "linstor-client-https-cert" "key" "ca.crt")))
+  (dict "name" "LS_CONTROLLERS" "value" (printf "https://linstor.d8-%s.svc:3371" .Chart.Name))
+}}
+
+{{- $config := dict
+  "valuesKey" "sdsReplicatedVolume"
+  "webhookEnabled" true
+  "webhookCertPath" "internal.customWebhookCert"
+  "onMasterNode" true
+  "podSecurityContext" "deckhouse"
+  "additionalControllerEnvs" $linstorEnvs
+}}
+{{ include "helm_lib_module_controller_manifests" (list . $config) }}
+
+{{- /* Webhook Service */ -}}
+{{ include "helm_lib_module_webhook_service" (list . dict) }}
+
+{{- /* ValidatingWebhookConfiguration for ReplicatedStoragePools */ -}}
+{{- $rspWebhookConfig := dict
+  "name" "rsp-validation"
+  "webhookName" "rsp-validation"
+  "valuesKey" "sdsReplicatedVolume"
+  "path" "/rsp-validate"
+  "rules" (list (dict "apiGroups" (list "storage.deckhouse.io") "apiVersions" (list "v1alpha1") "operations" (list "CREATE" "UPDATE") "resources" (list "replicatedstoragepools") "scope" "Cluster"))
+}}
+{{ include "helm_lib_module_validating_webhook_configuration" (list . $rspWebhookConfig) }}
+
+{{- /* ValidatingWebhookConfiguration for ReplicatedStorageClasses */ -}}
+{{- $rscWebhookConfig := dict
+  "name" "rsc-validation"
+  "webhookName" "rsc-validation"
+  "valuesKey" "sdsReplicatedVolume"
+  "path" "/rsc-validate"
+  "rules" (list (dict "apiGroups" (list "storage.deckhouse.io") "apiVersions" (list "v1alpha1") "operations" (list "CREATE" "UPDATE") "resources" (list "replicatedstorageclasses") "scope" "Cluster"))
+}}
+{{ include "helm_lib_module_validating_webhook_configuration" (list . $rscWebhookConfig) }}
+
+{{- /* ValidatingWebhookConfiguration for StorageClasses */ -}}
+{{- $scWebhookConfig := dict
+  "name" "sc-validation"
+  "webhookName" "sc-validation"
+  "valuesKey" "sdsReplicatedVolume"
+  "path" "/sc-validate"
+  "rules" (list (dict "apiGroups" (list "storage.k8s.io") "apiVersions" (list "v1") "operations" (list "*") "resources" (list "storageclasses") "scope" "Cluster"))
+}}
+{{ include "helm_lib_module_validating_webhook_configuration" (list . $scWebhookConfig) }}
+
+{{- /* ValidatingWebhookConfiguration for PersistentVolumeClaims */ -}}
+{{- $pvcWebhookConfig := dict
+  "name" "pvc-validation"
+  "webhookName" "pvc-validation"
+  "valuesKey" "sdsReplicatedVolume"
+  "path" "/pvc-validate"
+  "rules" (list (dict "apiGroups" (list "") "apiVersions" (list "v1") "operations" (list "CREATE") "resources" (list "persistentvolumeclaims") "scope" "Namespaced"))
+}}
+{{ include "helm_lib_module_validating_webhook_configuration" (list . $pvcWebhookConfig) }}

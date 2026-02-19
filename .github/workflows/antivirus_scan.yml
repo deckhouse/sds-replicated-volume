@@ -1,0 +1,54 @@
+name: Antivirus scan
+
+on:
+  # schedule:
+  #   - cron: 0 0 0 0 0
+  workflow_dispatch:
+    inputs:
+      scan_branch:
+        type: string
+        required: false
+
+jobs:
+  compute:
+    runs-on: [self-hosted, regular]
+    outputs:
+      matrix: ${{ steps.compute_matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: compute_matrix
+        uses: deckhouse/modules-actions/antivirus_scan/compute_matrix@antivirus-scan-for-modules
+        with:
+          scan_branch: ${{ inputs.scan_branch }}
+          active_releases_to_scan: 3
+          editions: fe
+
+  scan:
+    runs-on: [self-hosted, antivirus]
+    needs: compute
+    strategy:
+      fail-fast: false
+      matrix:
+        av:
+          - name: drweb            
+            path: drweb
+          - name: kaspersky
+            path: antivirus
+        target: ${{ fromJson(needs.compute.outputs.matrix).include }}
+    steps:
+      - uses: ./.github/actions/av-run-scan
+        with:
+          tag: ${{ matrix.target.tag }}
+          antivirus_name: ${{ matrix.av.name }}
+          antivirus_container: ${{ matrix.av.container }}
+          antivirus_path: ${{ matrix.av.path }}
+          scan_results_dir: scans
+          module_name: ${{ github }}
+          prod_registry: ${{ vars.PROD_REGISTRY }}
+          dev_registry: ${{ vars.DEV_REGISTRY }}
+
+      - if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: scans-${{ matrix.av.name }}-${{ matrix.target.tag }}
+          path: scans

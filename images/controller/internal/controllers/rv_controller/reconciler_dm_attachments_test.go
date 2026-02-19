@@ -1261,7 +1261,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, DatameshRevision: 10, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
 		}
 		rvr := mkAttachRVRWithRev("rv-1-0", "node-1", 5)
-		rvr.ObjectMeta.Generation = 1
+		rvr.Generation = 1
 		rvr.Status.Conditions = append(rvr.Status.Conditions,
 			metav1.Condition{Type: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType, Status: metav1.ConditionFalse,
 				Reason: "ConfigurationFailed", Message: "connection timed out", ObservedGeneration: 1},
