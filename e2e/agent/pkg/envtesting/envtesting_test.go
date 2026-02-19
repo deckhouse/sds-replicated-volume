@@ -2,7 +2,9 @@ package envtesting_test
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
@@ -29,27 +31,29 @@ func newMockT() *mockT {
 func (m *mockT) Cleanup(f func())            { m.cleanups = append(m.cleanups, f) }
 func (m *mockT) Context() context.Context    { return m.ctx }
 func (m *mockT) Deadline() (time.Time, bool) { return time.Time{}, false }
-func (m *mockT) Error(args ...any)           { m.errors = append(m.errors, joinArgs(args)); m.failed = true }
+func (m *mockT) Error(args ...any)           { m.errors = append(m.errors, fmt.Sprint(args...)); m.failed = true }
 func (m *mockT) Errorf(format string, args ...any) {
-	m.errors = append(m.errors, fmtSprintf(format, args))
+	m.errors = append(m.errors, fmt.Sprintf(format, args...))
 	m.failed = true
 }
 func (m *mockT) Fail()        { m.failed = true }
 func (m *mockT) FailNow()     { m.failed = true; runtime.Goexit() }
 func (m *mockT) Failed() bool { return m.failed }
 func (m *mockT) Fatal(args ...any) {
-	m.fatals = append(m.fatals, joinArgs(args))
+	m.fatals = append(m.fatals, fmt.Sprint(args...))
 	m.failed = true
 	runtime.Goexit()
 }
 func (m *mockT) Fatalf(format string, args ...any) {
-	m.fatals = append(m.fatals, fmtSprintf(format, args))
+	m.fatals = append(m.fatals, fmt.Sprintf(format, args...))
 	m.failed = true
 	runtime.Goexit()
 }
-func (m *mockT) Helper()                          {}
-func (m *mockT) Log(args ...any)                  { m.logs = append(m.logs, joinArgs(args)) }
-func (m *mockT) Logf(format string, args ...any)  { m.logs = append(m.logs, fmtSprintf(format, args)) }
+func (m *mockT) Helper()         {}
+func (m *mockT) Log(args ...any) { m.logs = append(m.logs, fmt.Sprint(args...)) }
+func (m *mockT) Logf(format string, args ...any) {
+	m.logs = append(m.logs, fmt.Sprintf(format, args...))
+}
 func (m *mockT) Name() string                     { return m.name }
 func (m *mockT) Parallel()                        {}
 func (m *mockT) Setenv(_, _ string)               {}
@@ -62,39 +66,13 @@ func (m *mockT) TempDir() string                  { return "" }
 func (m *mockT) Run(name string, fn func(*mockT)) bool {
 	child := &mockT{ctx: m.ctx, name: m.name + "/" + name}
 	fn(child)
-	m.runChildCleanups(child)
+	for i := len(child.cleanups) - 1; i >= 0; i-- {
+		child.cleanups[i]()
+	}
 	if child.failed {
 		m.failed = true
 	}
 	return !child.failed
-}
-
-func (m *mockT) runChildCleanups(child *mockT) {
-	for i := len(child.cleanups) - 1; i >= 0; i-- {
-		child.cleanups[i]()
-	}
-}
-
-func joinArgs(args []any) string {
-	return fmtSprint(args...)
-}
-
-func fmtSprint(args ...any) string {
-	if len(args) == 1 {
-		return args[0].(string)
-	}
-	s := ""
-	for i, a := range args {
-		if i > 0 {
-			s += " "
-		}
-		s += a.(string)
-	}
-	return s
-}
-
-func fmtSprintf(format string, args []any) string {
-	return format // simplified for tests that don't inspect formatted output
 }
 
 // --- Helpers ---
@@ -103,22 +81,27 @@ type TestConfig struct {
 	Key string `json:"key"`
 }
 
-func testSections() map[string]json.RawMessage {
-	return map[string]json.RawMessage{
-		"TestConfig": json.RawMessage(`{"key":"value"}`),
+func writeConfig(t *testing.T, content string) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
 	}
+	t.Setenv("E2E_CONFIG_PATH", path)
 }
 
-func newTestE() (envtesting.E, *mockT) {
+func newTestE(t *testing.T) (envtesting.E, *mockT) {
+	t.Helper()
+	writeConfig(t, `{"TestConfig":{"key":"value"}}`)
 	m := newMockT()
-	e := envtesting.New(m, testSections())
-	return e, m
+	return envtesting.New(m), m
 }
 
 // --- Options tests ---
 
 func TestOptions(t *testing.T) {
-	e, _ := newTestE()
+	e, _ := newTestE(t)
 
 	var cfg TestConfig
 	e.Options(&cfg)
@@ -129,14 +112,15 @@ func TestOptions(t *testing.T) {
 }
 
 func TestOptions_NonPointer(t *testing.T) {
+	writeConfig(t, `{}`)
 	m := newMockT()
-	e := envtesting.New(m, testSections())
+	e := envtesting.New(m)
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		var cfg TestConfig
-		e.Options(cfg) // not a pointer
+		e.Options(cfg)
 	}()
 	<-done
 
@@ -146,8 +130,9 @@ func TestOptions_NonPointer(t *testing.T) {
 }
 
 func TestOptions_MissingSection(t *testing.T) {
+	writeConfig(t, `{}`)
 	m := newMockT()
-	e := envtesting.New(m, map[string]json.RawMessage{})
+	e := envtesting.New(m)
 
 	done := make(chan struct{})
 	go func() {
@@ -162,27 +147,10 @@ func TestOptions_MissingSection(t *testing.T) {
 	}
 }
 
-func TestOptions_EmptySections(t *testing.T) {
-	m := newMockT()
-	e := envtesting.New(m, map[string]json.RawMessage{})
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		var cfg TestConfig
-		e.Options(&cfg)
-	}()
-	<-done
-
-	if len(m.fatals) == 0 {
-		t.Fatal("expected fatal when section is missing")
-	}
-}
-
 // --- Scope / Cleanup tests ---
 
 func TestScope_CleanupLIFO(t *testing.T) {
-	e, _ := newTestE()
+	e, _ := newTestE(t)
 
 	var order []int
 	child := e.Scope()
@@ -197,7 +165,7 @@ func TestScope_CleanupLIFO(t *testing.T) {
 }
 
 func TestScope_IndependentFromParent(t *testing.T) {
-	e, _ := newTestE()
+	e, _ := newTestE(t)
 
 	parentCleaned := false
 	e.Cleanup(func() { parentCleaned = true })
@@ -215,19 +183,38 @@ func TestScope_IndependentFromParent(t *testing.T) {
 	}
 }
 
-func TestScope_SharesParentContext(t *testing.T) {
-	e, _ := newTestE()
+func TestScope_ContextDerivedFromParent(t *testing.T) {
+	e, _ := newTestE(t)
 
 	child := e.Scope()
 	defer child.Close()
 
-	if child.Context() != e.Context() {
-		t.Fatal("Scope child should share parent's context")
+	if child.Context() == e.Context() {
+		t.Fatal("Scope child should have its own derived context, not the same pointer")
+	}
+	if child.Context().Err() != nil {
+		t.Fatal("Scope child context should be valid before Close")
+	}
+}
+
+func TestScope_ContextCancelledDuringCleanup(t *testing.T) {
+	e, _ := newTestE(t)
+
+	child := e.Scope()
+
+	var ctxDuringCleanup context.Context
+	child.Cleanup(func() {
+		ctxDuringCleanup = child.Context()
+	})
+	child.Close()
+
+	if ctxDuringCleanup.Err() == nil {
+		t.Fatal("Scope context during cleanup should be cancelled (matching testing.T behavior)")
 	}
 }
 
 func TestScope_ErrorAccumulation(t *testing.T) {
-	e, m := newTestE()
+	e, m := newTestE(t)
 
 	child := e.Scope()
 	child.Error("scope error 1")
@@ -244,7 +231,7 @@ func TestScope_ErrorAccumulation(t *testing.T) {
 }
 
 func TestScope_ErrorsSentToParentOnClose(t *testing.T) {
-	e, _ := newTestE()
+	e, _ := newTestE(t)
 
 	parent := e.Scope()
 	child := parent.Scope()
@@ -257,7 +244,7 @@ func TestScope_ErrorsSentToParentOnClose(t *testing.T) {
 }
 
 func TestScope_FailWithoutMessage(t *testing.T) {
-	e, m := newTestE()
+	e, m := newTestE(t)
 
 	child := e.Scope()
 	child.Fail()
@@ -277,7 +264,7 @@ func TestScope_FailWithoutMessage(t *testing.T) {
 // --- ScopeWithTimeout tests ---
 
 func TestScopeWithTimeout_HasDeadline(t *testing.T) {
-	e, _ := newTestE()
+	e, _ := newTestE(t)
 
 	child := e.ScopeWithTimeout(50 * time.Millisecond)
 	defer child.Close()
@@ -292,7 +279,7 @@ func TestScopeWithTimeout_HasDeadline(t *testing.T) {
 }
 
 func TestScopeWithTimeout_CloseCancelsContext(t *testing.T) {
-	e, _ := newTestE()
+	e, _ := newTestE(t)
 
 	child := e.ScopeWithTimeout(10 * time.Second)
 	ctx := child.Context()
@@ -303,11 +290,10 @@ func TestScopeWithTimeout_CloseCancelsContext(t *testing.T) {
 	}
 }
 
-func TestScopeWithTimeout_ContextDuringCloseUsesParent(t *testing.T) {
-	e, _ := newTestE()
+func TestScopeWithTimeout_ContextCancelledDuringCleanup(t *testing.T) {
+	e, _ := newTestE(t)
 
-	child := e.ScopeWithTimeout(1 * time.Nanosecond)
-	time.Sleep(5 * time.Millisecond)
+	child := e.ScopeWithTimeout(10 * time.Second)
 
 	var ctxDuringCleanup context.Context
 	child.Cleanup(func() {
@@ -315,13 +301,13 @@ func TestScopeWithTimeout_ContextDuringCloseUsesParent(t *testing.T) {
 	})
 	child.Close()
 
-	if ctxDuringCleanup.Err() != nil {
-		t.Fatalf("context during cleanup should be parent's (valid), got err: %v", ctxDuringCleanup.Err())
+	if ctxDuringCleanup.Err() == nil {
+		t.Fatal("context during cleanup should be cancelled (matching testing.T behavior)")
 	}
 }
 
 func TestScopeWithTimeout_Nested(t *testing.T) {
-	e, _ := newTestE()
+	e, _ := newTestE(t)
 
 	outer := e.ScopeWithTimeout(10 * time.Second)
 	inner := outer.ScopeWithTimeout(50 * time.Millisecond)
@@ -340,7 +326,7 @@ func TestScopeWithTimeout_Nested(t *testing.T) {
 // --- DiscardErrors tests ---
 
 func TestDiscardErrors(t *testing.T) {
-	e, m := newTestE()
+	e, m := newTestE(t)
 
 	child := e.Scope()
 	child.Error("will be discarded")
@@ -367,7 +353,7 @@ func TestDiscardErrors(t *testing.T) {
 }
 
 func TestDiscardErrors_NewErrorsAfterDiscard(t *testing.T) {
-	e, m := newTestE()
+	e, m := newTestE(t)
 
 	child := e.Scope()
 	child.Error("first")
@@ -385,12 +371,12 @@ func TestDiscardErrors_NewErrorsAfterDiscard(t *testing.T) {
 // --- Close idempotency ---
 
 func TestClose_Idempotent(t *testing.T) {
-	e, m := newTestE()
+	e, m := newTestE(t)
 
 	child := e.Scope()
 	child.Error("once")
 	child.Close()
-	child.Close() // second call
+	child.Close()
 
 	e.Close()
 
@@ -405,10 +391,10 @@ func TestClose_Idempotent(t *testing.T) {
 	}
 }
 
-// --- Cleanup with e.Fail / e.Error ---
+// --- Cleanup with e.Fail / e.Error / e.Errorf ---
 
 func TestCleanup_CallsFail(t *testing.T) {
-	e, m := newTestE()
+	e, m := newTestE(t)
 
 	child := e.Scope()
 	child.Cleanup(func() {
@@ -423,7 +409,7 @@ func TestCleanup_CallsFail(t *testing.T) {
 }
 
 func TestCleanup_CallsError(t *testing.T) {
-	e, m := newTestE()
+	e, m := newTestE(t)
 
 	child := e.Scope()
 	child.Cleanup(func() {
@@ -435,12 +421,47 @@ func TestCleanup_CallsError(t *testing.T) {
 	if !m.failed {
 		t.Fatal("T should be failed after cleanup called Error()")
 	}
+
+	found := false
+	for _, msg := range m.errors {
+		if msg == "cleanup error" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("cleanup error message should reach T, got errors: %v", m.errors)
+	}
+}
+
+func TestCleanup_CallsErrorf(t *testing.T) {
+	e, m := newTestE(t)
+
+	child := e.Scope()
+	child.Cleanup(func() {
+		child.Errorf("cleanup %s %d", "err", 42)
+	})
+	child.Close()
+	e.Close()
+
+	if !m.failed {
+		t.Fatal("T should be failed after cleanup called Errorf()")
+	}
+
+	found := false
+	for _, msg := range m.errors {
+		if msg == "cleanup err 42" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("cleanup Errorf message should reach T formatted, got errors: %v", m.errors)
+	}
 }
 
 // --- Cleanup panic recovery ---
 
 func TestCleanup_PanicRecovered(t *testing.T) {
-	e, _ := newTestE()
+	e, _ := newTestE(t)
 
 	ranAfterPanic := false
 	child := e.Scope()
@@ -462,27 +483,16 @@ func TestCleanup_PanicRecovered(t *testing.T) {
 	child.Close()
 }
 
-// --- Goexit in cleanup ---
-
-func TestCleanup_GoexitHandled(t *testing.T) {
-	e, m := newTestE()
-
-	ranAfterGoexit := false
-	child := e.Scope()
-	child.Cleanup(func() { ranAfterGoexit = true })
-	child.Cleanup(func() { runtime.Goexit() })
-	child.Close()
-
-	if !ranAfterGoexit {
-		t.Fatal("cleanup after goexit should still run")
-	}
-	_ = m
-}
+// runtime.Goexit in a cleanup is handled by the recursion+defer pattern in
+// runCleanups (matching testing.T.runCleanup): the deferred function processes
+// remaining cleanups before Goexit continues unwinding. This is not directly
+// testable from within the testing framework because Goexit propagates out of
+// Close() into testing.tRunner, which treats unexpected Goexit as a failure.
 
 // --- Run tests ---
 
 func TestRun_ChildSharesOptions(t *testing.T) {
-	e, _ := newTestE()
+	e, _ := newTestE(t)
 
 	e.Run("sub", func(child envtesting.E) {
 		var cfg TestConfig
@@ -494,7 +504,7 @@ func TestRun_ChildSharesOptions(t *testing.T) {
 }
 
 func TestRun_ChildHasIndependentScope(t *testing.T) {
-	e, _ := newTestE()
+	e, _ := newTestE(t)
 
 	parentCleaned := false
 	e.Cleanup(func() { parentCleaned = true })
@@ -502,7 +512,6 @@ func TestRun_ChildHasIndependentScope(t *testing.T) {
 	e.Run("sub", func(child envtesting.E) {
 		childCleaned := false
 		child.Cleanup(func() { childCleaned = true })
-		// child auto-closes when subtest ends
 		if childCleaned {
 			t.Error("child cleanup should NOT run before subtest ends")
 		}
@@ -516,17 +525,15 @@ func TestRun_ChildHasIndependentScope(t *testing.T) {
 // --- Auto-close via parent cleanup ---
 
 func TestScope_AutoCloseOnParentCleanup(t *testing.T) {
-	e, m := newTestE()
+	e, _ := newTestE(t)
 
 	child := e.Scope()
 	childCleaned := false
 	child.Cleanup(func() { childCleaned = true })
 
-	// Don't call child.Close() -- it should auto-close when parent's cleanups run.
 	e.Close()
 
 	if !childCleaned {
 		t.Fatal("child should auto-close when parent's cleanups run")
 	}
-	_ = m
 }

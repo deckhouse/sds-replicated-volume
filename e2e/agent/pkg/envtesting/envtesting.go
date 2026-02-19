@@ -3,36 +3,46 @@ package envtesting
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"reflect"
 	"sync"
 	"time"
 )
 
-// TCommon mirrors the public API of *testing.T, excluding Run.
-type TCommon interface {
-	Cleanup(func())
-	Context() context.Context
-	Deadline() (deadline time.Time, ok bool)
-	Error(args ...any)
-	Errorf(format string, args ...any)
-	Fail()
-	FailNow()
-	Failed() bool
+// TDirect contains methods that always pass through to *testing.T.
+// E never overrides these.
+type TDirect interface {
 	Fatal(args ...any)
 	Fatalf(format string, args ...any)
-	Helper()
+	FailNow()
 	Log(args ...any)
 	Logf(format string, args ...any)
-	Name() string
-	Parallel()
-	Setenv(key, value string)
+	Helper()
 	Skip(args ...any)
 	Skipf(format string, args ...any)
 	SkipNow()
+	Name() string
+	Parallel()
+	Setenv(key, value string)
 	Skipped() bool
 	TempDir() string
+	Deadline() (deadline time.Time, ok bool)
+}
+
+// TOverridable contains methods that E overrides with scope-local behavior.
+type TOverridable interface {
+	Cleanup(func())
+	Context() context.Context
+	Error(args ...any)
+	Errorf(format string, args ...any)
+	Fail()
+	Failed() bool
+}
+
+// TCommon is the full interface matching *testing.T's public API (excluding Run).
+type TCommon interface {
+	TDirect
+	TOverridable
 }
 
 // TRun is the generic subtest interface. *testing.T satisfies TRun[*testing.T].
@@ -56,62 +66,63 @@ type E interface {
 
 // New creates an E backed by t. It reads the JSON config file whose path is
 // taken from the E2E_CONFIG_PATH environment variable (defaults to ".env.json").
-// sections may be provided directly; when nil, the config file is read.
 func New[T interface {
 	TRun[T]
 	TCommon
-}](t T, sections map[string]json.RawMessage) E {
-	if sections == nil {
-		path := os.Getenv("E2E_CONFIG_PATH")
-		if path == "" {
-			path = ".env.json"
-		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("reading config from %s: %v", path, err)
-		}
-
-		if err := json.Unmarshal(data, &sections); err != nil {
-			t.Fatalf("parsing config sections from %s: %v", path, err)
-		}
+}](t T) E {
+	path := os.Getenv("E2E_CONFIG_PATH")
+	if path == "" {
+		path = ".env.json"
 	}
 
-	return newEImpl(t, sections)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading config from %s: %v", path, err)
+	}
+
+	var sections map[string]json.RawMessage
+	if err := json.Unmarshal(data, &sections); err != nil {
+		t.Fatalf("parsing config sections from %s: %v", path, err)
+	}
+
+	return newRoot(t, sections)
 }
 
-// eImpl is the single concrete implementation of E.
-type eImpl struct {
+// errorRecord stores arguments for a deferred Error or Errorf call.
+type errorRecord struct {
+	format *string
+	args   []any
+}
+
+// scope is the single concrete implementation of E.
+// TCommon is either the underlying T (root/subtest) or the parent E (scope).
+type scope struct {
 	TCommon
+
+	mu sync.RWMutex
 
 	runFn    func(name string, fn func(E)) bool
 	sections map[string]json.RawMessage
 
-	parent    E
 	ctx       context.Context
 	cancelCtx context.CancelFunc
 
-	errors   []string
+	errors   []errorRecord
 	failed   bool
 	cleanups []func()
 
-	closed    bool
-	closingUp bool
+	closed bool
 }
 
-var _ E = (*eImpl)(nil)
+var _ E = (*scope)(nil)
 
-func newEImpl[T interface {
+func newRoot[T interface {
 	TRun[T]
 	TCommon
-}](t T, sections map[string]json.RawMessage) *eImpl {
-	e := &eImpl{
-		TCommon:  t,
-		sections: sections,
-	}
-	e.runFn = newRunFn(t, sections)
-	t.Cleanup(e.Close)
-	return e
+}](t T, sections map[string]json.RawMessage) *scope {
+	ctx, cancel := context.WithCancel(t.Context())
+	runFn := newRunFn(t, sections)
+	return newChild(t, ctx, cancel, sections, runFn)
 }
 
 func newRunFn[T interface {
@@ -120,21 +131,32 @@ func newRunFn[T interface {
 }](t T, sections map[string]json.RawMessage) func(string, func(E)) bool {
 	return func(name string, fn func(E)) bool {
 		return t.Run(name, func(childT T) {
-			child := newEImpl(childT, sections)
-			fn(child)
+			fn(newRoot(childT, sections))
 		})
 	}
 }
 
+func newChild(parent TCommon, ctx context.Context, cancelCtx context.CancelFunc, sections map[string]json.RawMessage, runFn func(string, func(E)) bool) *scope {
+	child := &scope{
+		TCommon:   parent,
+		ctx:       ctx,
+		cancelCtx: cancelCtx,
+		sections:  sections,
+		runFn:     runFn,
+	}
+	parent.Cleanup(child.Close)
+	return child
+}
+
 // Run creates a subtest. The child E has its own scope that auto-closes when
 // the subtest finishes.
-func (e *eImpl) Run(name string, fn func(E)) bool {
+func (e *scope) Run(name string, fn func(E)) bool {
 	return e.runFn(name, fn)
 }
 
 // Options unmarshals the config section whose key matches the Go type name of
 // *target. target must be a pointer to a named type.
-func (e *eImpl) Options(target any) {
+func (e *scope) Options(target any) {
 	typ := reflect.TypeOf(target)
 	if typ.Kind() != reflect.Pointer {
 		e.TCommon.Fatalf("Options: target must be a pointer, got %T", target)
@@ -157,156 +179,153 @@ func (e *eImpl) Options(target any) {
 }
 
 // Error accumulates an error in the scope instead of sending it to T.
-func (e *eImpl) Error(args ...any) {
-	e.errors = append(e.errors, fmt.Sprint(args...))
+func (e *scope) Error(args ...any) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.errors = append(e.errors, errorRecord{args: args})
 	e.failed = true
 }
 
 // Errorf accumulates a formatted error in the scope.
-func (e *eImpl) Errorf(format string, args ...any) {
-	e.errors = append(e.errors, fmt.Sprintf(format, args...))
+func (e *scope) Errorf(format string, args ...any) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.errors = append(e.errors, errorRecord{format: &format, args: args})
 	e.failed = true
 }
 
 // Fail marks the scope as failed without recording an error message.
-func (e *eImpl) Fail() {
+func (e *scope) Fail() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.failed = true
 }
 
 // Failed returns true if the scope has accumulated any errors.
-func (e *eImpl) Failed() bool {
+func (e *scope) Failed() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	return e.failed
 }
 
 // Cleanup registers a cleanup function on this scope's own list.
-func (e *eImpl) Cleanup(f func()) {
+func (e *scope) Cleanup(f func()) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.cleanups = append(e.cleanups, f)
 }
 
-// Context returns the scope's context. During Close, it returns the parent's
-// context so that cleanup operations are not affected by an expired timeout.
-func (e *eImpl) Context() context.Context {
-	if e.parent == nil {
-		return e.TCommon.Context()
-	}
-	if e.closingUp {
-		return e.parent.Context()
-	}
+// Context returns the scope's context.
+func (e *scope) Context() context.Context {
 	return e.ctx
 }
 
-// Scope creates a child E with its own error buffer and cleanup list, sharing
-// the parent's context. The child auto-closes when the parent's cleanups run.
-func (e *eImpl) Scope() E {
-	child := &eImpl{
-		TCommon:  e.TCommon,
-		parent:   e,
-		ctx:      e.Context(),
-		sections: e.sections,
-		runFn:    e.runFn,
-	}
-	e.Cleanup(child.Close)
-	return child
+// Scope creates a child E with its own error buffer and cleanup list. The
+// child gets a derived context that is cancelled before its cleanups run.
+func (e *scope) Scope() E {
+	ctx, cancel := context.WithCancel(e.Context())
+	return newChild(e, ctx, cancel, e.sections, e.runFn)
 }
 
 // ScopeWithTimeout creates a child E with its own error buffer, cleanup list,
-// and a timeout-bounded context. The child auto-closes when the parent's
-// cleanups run.
-func (e *eImpl) ScopeWithTimeout(timeout time.Duration) E {
+// and a timeout-bounded context.
+func (e *scope) ScopeWithTimeout(timeout time.Duration) E {
 	ctx, cancel := context.WithTimeout(e.Context(), timeout)
-	child := &eImpl{
-		TCommon:   e.TCommon,
-		parent:    e,
-		ctx:       ctx,
-		cancelCtx: cancel,
-		sections:  e.sections,
-		runFn:     e.runFn,
-	}
-	e.Cleanup(child.Close)
-	return child
+	return newChild(e, ctx, cancel, e.sections, e.runFn)
 }
 
 // DiscardErrors logs each accumulated error and clears the buffer. The scope
 // remains usable -- new errors can accumulate after discard.
-func (e *eImpl) DiscardErrors() {
-	for _, msg := range e.errors {
-		e.TCommon.Logf("discarded error: %s", msg)
-	}
+func (e *scope) DiscardErrors() {
+	e.mu.Lock()
+	errors := e.errors
 	e.errors = nil
 	e.failed = false
+	e.mu.Unlock()
+
+	for _, rec := range errors {
+		if rec.format != nil {
+			e.TCommon.Logf("discarded: "+*rec.format, rec.args...)
+		} else {
+			e.TCommon.Log(append([]any{"discarded:"}, rec.args...)...)
+		}
+	}
 }
 
-// Close is idempotent. It runs cleanups in LIFO order, sends accumulated
-// errors (including any produced during cleanup) to the parent (or T for
-// root), cancels the timeout context if any, and re-panics if a cleanup
-// panicked.
-func (e *eImpl) Close() {
+// Close is idempotent. It cancels the context, runs cleanups in LIFO order
+// (surviving panics and runtime.Goexit via recursion, matching testing.T),
+// sends accumulated errors (including any produced during cleanup) to TCommon,
+// and re-panics with the first panic value.
+func (e *scope) Close() {
+	e.mu.Lock()
 	if e.closed {
+		e.mu.Unlock()
 		return
 	}
 	e.closed = true
+	e.mu.Unlock()
 
-	// Run cleanups in LIFO first so that cleanup-produced errors are captured.
-	// Each runs in its own goroutine to survive panics and runtime.Goexit.
-	e.closingUp = true
-	var firstPanic any
-	for i := len(e.cleanups) - 1; i >= 0; i-- {
-		normal, panicked, panicVal := runCleanupFunc(e.cleanups[i])
-		if panicked {
-			e.TCommon.Logf("cleanup panic: %v", panicVal)
-			if firstPanic == nil {
-				firstPanic = panicVal
-			}
-		}
-		if !normal && !panicked {
-			e.TCommon.Logf("cleanup called runtime.Goexit")
-		}
-	}
-	e.closingUp = false
+	// Cancel context before cleanups, matching testing.T behavior.
+	cancel := e.cancelCtx
+	e.cancelCtx = func() {}
+	cancel()
 
-	// Send all accumulated errors (pre-close + cleanup-produced) to parent or T.
-	if e.parent != nil {
-		for _, msg := range e.errors {
-			e.parent.Error(msg)
-		}
-		if e.failed && len(e.errors) == 0 {
-			e.parent.Fail()
-		}
-	} else {
-		for _, msg := range e.errors {
-			e.TCommon.Error(msg)
-		}
-		if e.failed && len(e.errors) == 0 {
-			e.TCommon.Fail()
-		}
-	}
+	// Run cleanups. Lock is NOT held -- each cleanup may call e.Error(),
+	// e.Cleanup(), etc. which lock independently. Matching testing.T.
+	panicVal := e.runCleanups()
+
+	// Snapshot and clear accumulated errors under lock.
+	e.mu.Lock()
+	errors := e.errors
+	failed := e.failed
 	e.errors = nil
+	e.failed = false
+	e.mu.Unlock()
 
-	if e.cancelCtx != nil {
-		e.cancelCtx()
+	// Replay errors to parent (TCommon). Parent handles its own locking.
+	for _, rec := range errors {
+		if rec.format != nil {
+			e.TCommon.Errorf(*rec.format, rec.args...)
+		} else {
+			e.TCommon.Error(rec.args...)
+		}
+	}
+	if failed && len(errors) == 0 {
+		e.TCommon.Fail()
 	}
 
-	if firstPanic != nil {
-		panic(firstPanic)
+	if panicVal != nil {
+		panic(panicVal)
 	}
 }
 
-// runCleanupFunc executes f in a goroutine to survive both panic and
-// runtime.Goexit, ensuring the caller can continue running remaining cleanups.
-func runCleanupFunc(f func()) (normalReturn, panicked bool, panicVal any) {
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		defer func() {
-			if !normalReturn {
-				panicVal = recover()
-				panicked = panicVal != nil
+// runCleanups executes cleanup functions in LIFO order using recursion+defer
+// to survive panics and runtime.Goexit, matching testing.T.runCleanup.
+// The mutex is locked only briefly to pop a cleanup, then released before
+// calling it -- so callbacks can safely call e.Error(), e.Cleanup(), etc.
+func (e *scope) runCleanups() (panicVal any) {
+	defer func() {
+		e.mu.RLock()
+		remaining := len(e.cleanups)
+		e.mu.RUnlock()
+		if remaining > 0 {
+			if p := e.runCleanups(); p != nil && panicVal == nil {
+				panicVal = p
 			}
-		}()
-		f()
-		normalReturn = true
+		}
 	}()
-	wg.Wait()
-	return
+
+	for {
+		e.mu.Lock()
+		if len(e.cleanups) == 0 {
+			e.mu.Unlock()
+			return nil
+		}
+		last := len(e.cleanups) - 1
+		cleanup := e.cleanups[last]
+		e.cleanups = e.cleanups[:last]
+		e.mu.Unlock()
+
+		cleanup()
+	}
 }
