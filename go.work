@@ -1,4 +1,4 @@
-go 1.24.11
+go 1.25.7
 
 use (
 	./api
@@ -8,7 +8,6 @@ use (
 	./images/csi-driver
 	./images/linstor-drbd-wait
 	./images/megatest
-	./images/sds-replicated-volume-controller
 	./images/webhooks
 	./lib/go/common
 )

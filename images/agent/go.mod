@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/images/agent
 
-go 1.24.11
+go 1.25.7
 
 replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go/common
 

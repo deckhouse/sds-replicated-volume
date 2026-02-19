@@ -804,8 +804,8 @@ exit_function(){
       execute_command "kubectl uncordon ${NODE_FOR_EVICT}"
     fi
     if [[ -n ${SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS} ]]; then
-      echo "Scaling up sds-replicated-volume-controller to ${SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS}"
-      execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-replicated-volume-controller --replicas=${SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS}"
+      echo "Scaling up controller to ${SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS}"
+      execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment controller --replicas=${SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS}"
     fi
     echo "Terminating the script"
     exit 0
@@ -873,14 +873,14 @@ linstor_backup_database() {
     count=0
     max_attempts=10
     until [ $count -eq $max_attempts ]; do
-      echo "Checking the number of replicas for LINSTOR controller and sds-replicated-volume-controller"
+      echo "Checking the number of replicas for LINSTOR controller and controller"
       linstor_controller_current_replicas=$(kubectl -n ${LINSTOR_NAMESPACE} get deployment linstor-controller -o jsonpath='{.spec.replicas}')
-      sds_replicated_volume_controller_current_replicas=$(kubectl -n ${LINSTOR_NAMESPACE} get deployment sds-replicated-volume-controller -o jsonpath='{.spec.replicas}')
+      sds_replicated_volume_controller_current_replicas=$(kubectl -n ${LINSTOR_NAMESPACE} get deployment controller -o jsonpath='{.spec.replicas}')
       ((count++))
       if [[ -z "${linstor_controller_current_replicas}" || -z "${sds_replicated_volume_controller_current_replicas}" ]]; then
-        echo "Can't get the number of replicas for LINSTOR controller or sds-replicated-volume-controller."
-        if get_user_confirmation "Should we recheck the number of replicas for the LINSTOR controller and sds-replicated-volume-controller after $TIMEOUT_SEC seconds? (Note that the database backup will not be performed if this is not done.)" "y" "n"; then
-          echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for LINSTOR controller and sds-replicated-volume-controller"
+        echo "Can't get the number of replicas for LINSTOR controller or controller."
+        if get_user_confirmation "Should we recheck the number of replicas for the LINSTOR controller and controller after $TIMEOUT_SEC seconds? (Note that the database backup will not be performed if this is not done.)" "y" "n"; then
+          echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for LINSTOR controller and controller"
           sleep $TIMEOUT_SEC
           continue
         else
@@ -892,11 +892,11 @@ linstor_backup_database() {
     done
 
     if [ $count -eq $max_attempts ]; then
-      echo "Timeout reached. Can't get the number of replicas for LINSTOR controller or sds-replicated-volume-controller."
-      if get_user_confirmation "Exit the script? If not, the script will continue and recheck for the number of replicas for LINSTOR controller and sds-replicated-volume-controller." "y" "n"; then
+      echo "Timeout reached. Can't get the number of replicas for LINSTOR controller or controller."
+      if get_user_confirmation "Exit the script? If not, the script will continue and recheck for the number of replicas for LINSTOR controller and controller." "y" "n"; then
         exit_function
       else
-        echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for LINSTOR controller and sds-replicated-volume-controller"
+        echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for LINSTOR controller and controller"
         sleep $TIMEOUT_SEC
         continue
       fi
@@ -905,7 +905,7 @@ linstor_backup_database() {
   done
 
   if [[ $sds_replicated_volume_controller_current_replicas -eq 0 ]]; then
-    echo "The number of replicas for sds-replicated-volume-controller is 0. The number of replicas will be set to 2."
+    echo "The number of replicas for controller is 0. The number of replicas will be set to 2."
     sds_replicated_volume_controller_current_replicas=2
   fi
 
@@ -914,10 +914,10 @@ linstor_backup_database() {
     linstor_controller_current_replicas=2
   fi
 
-  echo "Scale down sds-replicated-volume-controller and LINSTOR controller"
-  execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-replicated-volume-controller --replicas=0"
-  echo "Waiting for sds-replicated-volume-controller to scale down"
-  wait_for_deployment_scale_down "sds-replicated-volume-controller" "${LINSTOR_NAMESPACE}"
+  echo "Scale down controller and LINSTOR controller"
+  execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment controller --replicas=0"
+  echo "Waiting for controller to scale down"
+  wait_for_deployment_scale_down "controller" "${LINSTOR_NAMESPACE}"
 
   execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment linstor-controller --replicas=0"
   echo "Waiting for LINSTOR controller to scale down"
@@ -929,8 +929,8 @@ linstor_backup_database() {
   kubectl get crds | grep -o ".*.internal.linstor.linbit.com" | xargs kubectl get crds -oyaml > ./linstor_db_backup_before_evict_${current_datetime}/crds.yaml
   kubectl get crds | grep -o ".*.internal.linstor.linbit.com" | xargs -i{} sh -xc "kubectl get {} -oyaml > ./linstor_db_backup_before_evict_${current_datetime}/{}.yaml"
   echo "Database backup completed"
-  echo "Scale up LINSTOR controller and sds-replicated-volume-controller"
-  execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-replicated-volume-controller --replicas=${sds_replicated_volume_controller_current_replicas}"
+  echo "Scale up LINSTOR controller and controller"
+  execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment controller --replicas=${sds_replicated_volume_controller_current_replicas}"
   execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment linstor-controller --replicas=${linstor_controller_current_replicas}"
   echo "Waiting for LINSTOR controller to scale up"
   sleep 15
@@ -949,14 +949,14 @@ delete_node_from_kubernetes_and_linstor() {
     count=0
     max_attempts=10
     until [ $count -eq $max_attempts ]; do
-      echo "Checking the number of replicas for Deckhouse and sds-replicated-volume-controller"
+      echo "Checking the number of replicas for Deckhouse and controller"
       deckhouse_current_replicas=$(kubectl -n d8-system get deployment deckhouse -o jsonpath='{.spec.replicas}')
-      sds_replicated_volume_controller_current_replicas=$(kubectl -n ${LINSTOR_NAMESPACE} get deployment sds-replicated-volume-controller -o jsonpath='{.spec.replicas}')
+      sds_replicated_volume_controller_current_replicas=$(kubectl -n ${LINSTOR_NAMESPACE} get deployment controller -o jsonpath='{.spec.replicas}')
       ((count++))
       if [[ -z "${deckhouse_current_replicas}" || -z "${sds_replicated_volume_controller_current_replicas}" ]]; then
-        echo "Can't get the number of replicas for Deckhouse or sds-replicated-volume-controller."
-        if get_user_confirmation "Should we recheck the number of replicas for Deckhouse and sds-replicated-volume-controller after $TIMEOUT_SEC seconds? (Note that the node will not be deleted from Kubernetes and LINSTOR if this is not done.)" "y" "n"; then
-          echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for Deckhouse and sds-replicated-volume-controller"
+        echo "Can't get the number of replicas for Deckhouse or controller."
+        if get_user_confirmation "Should we recheck the number of replicas for Deckhouse and controller after $TIMEOUT_SEC seconds? (Note that the node will not be deleted from Kubernetes and LINSTOR if this is not done.)" "y" "n"; then
+          echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for Deckhouse and controller"
           sleep $TIMEOUT_SEC
           continue
         else
@@ -969,11 +969,11 @@ delete_node_from_kubernetes_and_linstor() {
     done
 
     if [ $count -eq $max_attempts ]; then
-      echo "Timeout reached. Can't get the number of replicas for Deckhouse or sds-replicated-volume-controller."
-      if get_user_confirmation "Exit the script? If not, the script will continue and recheck for the number of replicas for Deckhouse and sds-replicated-volume-controller." "y" "n"; then
+      echo "Timeout reached. Can't get the number of replicas for Deckhouse or controller."
+      if get_user_confirmation "Exit the script? If not, the script will continue and recheck for the number of replicas for Deckhouse and controller." "y" "n"; then
         exit_function
       else
-        echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for Deckhouse and sds-replicated-volume-controller"
+        echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for Deckhouse and controller"
         sleep $TIMEOUT_SEC
         continue
       fi
@@ -994,23 +994,23 @@ delete_node_from_kubernetes_and_linstor() {
   fi
 
   echo "The procedure for deleting a node from LINSTOR will consist of the following actions:" 
-  echo "1. Shutting down Deckhouse and sds-replicated-volume-controller"
+  echo "1. Shutting down Deckhouse and controller"
   if [[ $linstor_satellite_online == "true" ]]; then
     echo "2. Standard node deletion from LINSTOR"
   else
     echo "2. Executing the command \"linstor node lost ${NODE_FOR_EVICT}\""
   fi
   echo "3. Deleting the node from Kubernetes"
-  echo "4. Turning Deckhouse and sds-replicated-volume-controller back on"
+  echo "4. Turning Deckhouse and controller back on"
 
   if get_user_confirmation "Perform the actions listed above?" "yes-i-am-sane-and-i-understand-what-i-am-doing" "n"; then
     execute_command "kubectl -n d8-system scale deployment deckhouse --replicas=0"
     echo "Waiting for Deckhouse to scale down"
     wait_for_deployment_scale_down "deckhouse" "d8-system"
 
-    execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-replicated-volume-controller --replicas=0"
-    echo "Waiting for sds-replicated-volume-controller to scale down"
-    wait_for_deployment_scale_down "sds-replicated-volume-controller" "${LINSTOR_NAMESPACE}"
+    execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment controller --replicas=0"
+    echo "Waiting for controller to scale down"
+    wait_for_deployment_scale_down "controller" "${LINSTOR_NAMESPACE}"
 
     if [[ $linstor_satellite_online == "true" ]]; then
       echo "Performing standard node deletion procedure from LINSTOR"
@@ -1023,12 +1023,12 @@ delete_node_from_kubernetes_and_linstor() {
     if is_linstor_satellite_does_not_exist; then
       execute_command "kubectl delete node ${NODE_FOR_EVICT}"
       execute_command "kubectl -n d8-system scale deployment deckhouse --replicas=${deckhouse_current_replicas}"
-      execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-replicated-volume-controller --replicas=${sds_replicated_volume_controller_current_replicas}"
+      execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment controller --replicas=${sds_replicated_volume_controller_current_replicas}"
       return
     else
-      echo "Warning! Node ${NODE_FOR_EVICT} has not been deleted from LINSTOR. Turning Deckhouse and sds-replicated-volume-controller back on."
+      echo "Warning! Node ${NODE_FOR_EVICT} has not been deleted from LINSTOR. Turning Deckhouse and controller back on."
       execute_command "kubectl -n d8-system scale deployment deckhouse --replicas=${deckhouse_current_replicas}"
-      execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-replicated-volume-controller --replicas=${sds_replicated_volume_controller_current_replicas}"
+      execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment controller --replicas=${sds_replicated_volume_controller_current_replicas}"
       echo "It is recommended to terminate the script and investigate the cause of the error."
       exit_function
       return
@@ -1186,13 +1186,13 @@ while true; do
   count=0
   max_attempts=10
   until [ $count -eq $max_attempts ]; do
-    echo "Checking the number of replicas for the sds-replicated-volume-controller"
-    SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS=$(kubectl -n ${LINSTOR_NAMESPACE} get deployment sds-replicated-volume-controller -o jsonpath='{.spec.replicas}')
+    echo "Checking the number of replicas for the controller"
+    SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS=$(kubectl -n ${LINSTOR_NAMESPACE} get deployment controller -o jsonpath='{.spec.replicas}')
     ((count++))
     if [[ -z "${SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS}" ]]; then
-      echo "Can't get the number of replicas for the sds-replicated-volume-controller."
-      if get_user_confirmation "Should we recheck the number of replicas for the sds-replicated-volume-controller after $TIMEOUT_SEC seconds?" "y" "n"; then
-        echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for the sds-replicated-volume-controller"
+      echo "Can't get the number of replicas for the controller."
+      if get_user_confirmation "Should we recheck the number of replicas for the controller after $TIMEOUT_SEC seconds?" "y" "n"; then
+        echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for the controller"
         sleep $TIMEOUT_SEC
         continue
       else
@@ -1200,7 +1200,7 @@ while true; do
       fi
     else
       if [[ "${SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS}" -eq 0 ]]; then
-        echo "The number of replicas for the sds-replicated-volume-controller is 0. The number of replicas will be set to 2."
+        echo "The number of replicas for the controller is 0. The number of replicas will be set to 2."
         SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS=2
       fi
       break
@@ -1208,11 +1208,11 @@ while true; do
   done
 
   if [ $count -eq $max_attempts ]; then
-    echo "Timeout reached. Can't get the number of replicas for sds-replicated-volume-controller."
-    if get_user_confirmation "Exit the script? If not, the script will continue and recheck for the number of replicas for sds-replicated-volume-controller." "y" "n"; then
+    echo "Timeout reached. Can't get the number of replicas for controller."
+    if get_user_confirmation "Exit the script? If not, the script will continue and recheck for the number of replicas for controller." "y" "n"; then
       exit_function
     else
-      echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for sds-replicated-volume-controller"
+      echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for controller"
       sleep $TIMEOUT_SEC
       continue
     fi
@@ -1220,10 +1220,10 @@ while true; do
   break
 done
 
-echo "Scale down sds-replicated-volume-controller"
-execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-replicated-volume-controller --replicas=0"
-echo "Waiting for sds-replicated-volume-controller to scale down"
-wait_for_deployment_scale_down "sds-replicated-volume-controller" "${LINSTOR_NAMESPACE}"
+echo "Scale down controller"
+execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment controller --replicas=0"
+echo "Waiting for controller to scale down"
+wait_for_deployment_scale_down "controller" "${LINSTOR_NAMESPACE}"
 
 echo "Excluding node ${NODE_FOR_EVICT} from LINSTOR scheduler"
 exec_linstor_with_exit_code_check node set-property ${NODE_FOR_EVICT} AutoplaceTarget false
@@ -1324,7 +1324,7 @@ linstor_change_replicas_count 0 2 "${RESOURCE_AND_GROUP_NAMES_NEW}" "${RESOURCE_
 linstor_check_faulty
 linstor_check_advise
 
-echo "Turning sds-replicated-volume-controller back on."
-execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-replicated-volume-controller --replicas=${SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS}"
+echo "Turning controller back on."
+execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment controller --replicas=${SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS}"
 
 echo "Script operation completed"

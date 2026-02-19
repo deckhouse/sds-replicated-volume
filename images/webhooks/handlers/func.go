@@ -53,7 +53,11 @@ func NewKubeClient(kubeconfigPath string) (client.Client, error) {
 
 	controllerruntime.SetLogger(logr.New(ctrllog.NullLogSink{}))
 
-	config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	if kubeconfigPath != "" {
+		config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	} else {
+		config, err = rest.InClusterConfig()
+	}
 
 	if err != nil {
 		return nil, err
