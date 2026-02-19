@@ -51,7 +51,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		return nil, status.Error(codes.InvalidArgument, "Volume Capability cannot de empty")
 	}
 
-	BindingMode := request.Parameters[internal.BindingModeKey]
+
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] storage class BindingMode: %s", traceID, volumeID, BindingMode))
 
 	// Get LVMVolumeGroups from StoragePool
@@ -81,15 +81,16 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 	preferredNode := ""
 	if ar := request.AccessibilityRequirements; ar != nil {
+		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] AccessibilityRequirements: Requisite=%v, Preferred=%v", traceID, volumeID, ar.Requisite, ar.Preferred))
 		for _, topo := range ar.Preferred {
-			if node, ok := topo.Segments["kubernetes.io/hostname"]; ok {
+			if node, ok := topo.Segments[internal.TopologyKey]; ok {
 				preferredNode = node
 				break
 			}
 		}
 	}
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Preferred node from AccessibilityRequirements: %q", traceID, volumeID, preferredNode))
-	if BindingMode == internal.BindingModeWFFC && preferredNode != "" {
+	if preferredNode != "" {
 		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] WFFC binding: creating early RVA for preferred node", traceID, volumeID, preferredNode))
 		_, err := utils.EnsureRVA(ctx, d.cl, d.log, traceID, volumeID, preferredNode)
 		if err != nil {
