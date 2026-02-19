@@ -744,14 +744,14 @@ linstor_backup_database() {
     count=0
     max_attempts=10
     until [ $count -eq $max_attempts ]; do
-      echo "Checking the number of replicas for LINSTOR controller and sds-replicated-volume-controller"
+      echo "Checking the number of replicas for LINSTOR controller and controller"
       linstor_controller_current_replicas=$(kubectl -n ${LINSTOR_NAMESPACE} get deployment linstor-controller -o jsonpath='{.spec.replicas}')
-      sds_replicated_volume_controller_current_replicas=$(kubectl -n ${LINSTOR_NAMESPACE} get deployment sds-replicated-volume-controller -o jsonpath='{.spec.replicas}')
+      sds_replicated_volume_controller_current_replicas=$(kubectl -n ${LINSTOR_NAMESPACE} get deployment controller -o jsonpath='{.spec.replicas}')
       ((count++))
       if [[ -z "${linstor_controller_current_replicas}" || -z "${sds_replicated_volume_controller_current_replicas}" ]]; then
-        echo "Can't get the number of replicas for LINSTOR controller or sds-replicated-volume-controller."
-        if get_user_confirmation "Should we recheck the number of replicas for the LINSTOR controller and sds-replicated-volume-controller after $TIMEOUT_SEC seconds? (Note that the database backup will not be performed if this is not done.)" "y" "n"; then
-          echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for LINSTOR controller and sds-replicated-volume-controller"
+        echo "Can't get the number of replicas for LINSTOR controller or controller."
+        if get_user_confirmation "Should we recheck the number of replicas for the LINSTOR controller and controller after $TIMEOUT_SEC seconds? (Note that the database backup will not be performed if this is not done.)" "y" "n"; then
+          echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for LINSTOR controller and controller"
           sleep $TIMEOUT_SEC
           continue
         else
@@ -763,11 +763,11 @@ linstor_backup_database() {
     done
 
     if [ $count -eq $max_attempts ]; then
-      echo "Timeout reached. Can't get the number of replicas for LINSTOR controller or sds-replicated-volume-controller."
-      if get_user_confirmation "Exit the script? If not, the script will continue and recheck for the number of replicas for LINSTOR controller and sds-replicated-volume-controller." "y" "n"; then
+      echo "Timeout reached. Can't get the number of replicas for LINSTOR controller or controller."
+      if get_user_confirmation "Exit the script? If not, the script will continue and recheck for the number of replicas for LINSTOR controller and controller." "y" "n"; then
         exit_function
       else
-        echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for LINSTOR controller and sds-replicated-volume-controller"
+        echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for LINSTOR controller and controller"
         sleep $TIMEOUT_SEC
         continue
       fi
@@ -775,10 +775,10 @@ linstor_backup_database() {
     break
   done
 
-  echo "Scale down sds-replicated-volume-controller and LINSTOR controller"
-  execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-replicated-volume-controller --replicas=0"
-  echo "Waiting for sds-replicated-volume-controller to scale down"
-  wait_for_deployment_scale_down "sds-replicated-volume-controller" "${LINSTOR_NAMESPACE}"
+  echo "Scale down controller and LINSTOR controller"
+  execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment controller --replicas=0"
+  echo "Waiting for controller to scale down"
+  wait_for_deployment_scale_down "controller" "${LINSTOR_NAMESPACE}"
 
   execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment linstor-controller --replicas=0"
   echo "Waiting for LINSTOR controller to scale down"
@@ -790,8 +790,8 @@ linstor_backup_database() {
   kubectl get crds | grep -o ".*.internal.linstor.linbit.com" | xargs kubectl get crds -oyaml > ./linstor_db_backup_before_replicas_manager_${current_datetime}/crds.yaml
   kubectl get crds | grep -o ".*.internal.linstor.linbit.com" | xargs -i{} sh -xc "kubectl get {} -oyaml > ./linstor_db_backup_before_replicas_manager_${current_datetime}/{}.yaml"
   echo "Database backup completed"
-  echo "Scale up LINSTOR controller and sds-replicated-volume-controller"
-  execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-replicated-volume-controller --replicas=${sds_replicated_volume_controller_current_replicas}"
+  echo "Scale up LINSTOR controller and controller"
+  execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment controller --replicas=${sds_replicated_volume_controller_current_replicas}"
   execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment linstor-controller --replicas=${linstor_controller_current_replicas}"
   echo "Waiting for LINSTOR controller to scale up"
   sleep 15

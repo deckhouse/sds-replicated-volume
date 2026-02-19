@@ -413,7 +413,7 @@ func computeDatameshAttachmentIntents(atts *attachmentsSummary, rv *v1alpha1.Rep
 
 	// Sort candidates FIFO: earliest active RVA timestamp, then NodeName tie-breaker.
 	slices.SortFunc(candidates, func(a, b *attachmentState) int {
-		if c := a.earliestActiveRVATimestamp().Time.Compare(b.earliestActiveRVATimestamp().Time); c != 0 {
+		if c := a.earliestActiveRVATimestamp().Compare(b.earliestActiveRVATimestamp().Time); c != 0 {
 			return c
 		}
 		return cmp.Compare(a.nodeName, b.nodeName)

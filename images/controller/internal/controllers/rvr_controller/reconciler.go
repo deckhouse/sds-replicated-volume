@@ -2124,12 +2124,9 @@ func isLLVMetadataInSync(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.Rep
 // applyLLVMetadata applies ownerRef, finalizer, and labels to LLV.
 // Returns true if any changes were made.
 func applyLLVMetadata(scheme *runtime.Scheme, rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.ReplicatedVolume, llv *snc.LVMLogicalVolume) (bool, error) {
-	changed := false
+	changed := obju.AddFinalizer(llv, v1alpha1.RVRControllerFinalizer)
 
 	// Ensure finalizer.
-	if obju.AddFinalizer(llv, v1alpha1.RVRControllerFinalizer) {
-		changed = true
-	}
 
 	// Ensure replicated-volume label.
 	if rvr.Spec.ReplicatedVolumeName != "" {

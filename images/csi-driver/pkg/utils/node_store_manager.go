@@ -210,7 +210,7 @@ func (s *Store) NodePublishVolumeFS(source, devPath, target, fsType string, moun
 		return nil
 	}
 
-	err = s.NodeStorage.Interface.Mount(source, target, fsType, mountOpts)
+	err = s.NodeStorage.Mount(source, target, fsType, mountOpts)
 	if err != nil {
 		return fmt.Errorf("[NodePublishVolumeFS] failed to bind mount %q to %q with mount options %v: %w", source, target, mountOpts, err)
 	}
@@ -289,7 +289,7 @@ func toMapperPath(devPath string) string {
 }
 
 func checkMount(s *Store, devPath, target string, mountOpts []string) error {
-	mntInfo, err := s.NodeStorage.Interface.List()
+	mntInfo, err := s.NodeStorage.List()
 	if err != nil {
 		return fmt.Errorf("[checkMount] failed to list mounts: %w", err)
 	}

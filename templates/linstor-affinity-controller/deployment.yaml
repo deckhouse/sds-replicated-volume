@@ -17,7 +17,7 @@ spec:
     kind: Deployment
     name: linstor-affinity-controller
   updatePolicy:
-    updateMode: "Auto"
+    updateMode: "Initial"
   resourcePolicy:
     containerPolicies:
     - containerName: linstor-affinity-controller

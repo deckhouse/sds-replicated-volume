@@ -18,27 +18,22 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 const (
-	LVMThinType                   = "LVMThin"
-	sdsReplicatedVolumeModuleName = "sds-replicated-volume"
+	LVMThinType = "LVMThin"
 )
 
 func RSPValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {

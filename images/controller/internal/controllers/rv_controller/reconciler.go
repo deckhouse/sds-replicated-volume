@@ -245,7 +245,6 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 		rv.Status.DatameshRevision = 1
 		rv.Status.Datamesh.SystemNetworkNames = rsp.SystemNetworkNames
 		rv.Status.Datamesh.Size = rv.Spec.Size
-		
 
 		applyFormationTransitionMessage(rv, "Starting preconfigure phase")
 	}
@@ -2067,7 +2066,7 @@ func (r *Reconciler) getRVAsSorted(ctx context.Context, rvName string) ([]*v1alp
 		if c := cmp.Compare(a.Spec.NodeName, b.Spec.NodeName); c != 0 {
 			return c
 		}
-		if c := a.CreationTimestamp.Time.Compare(b.CreationTimestamp.Time); c != 0 {
+		if c := a.CreationTimestamp.Compare(b.CreationTimestamp.Time); c != 0 {
 			return c
 		}
 		return cmp.Compare(a.Name, b.Name)

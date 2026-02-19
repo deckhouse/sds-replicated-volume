@@ -1,0 +1,6 @@
+version: 2
+conversions:
+  - del(.enableThinProvisioning)
+description:
+  ru: "Нужно удалить параметр `.enableThinProvisioning`."
+  en: "Need to remove the `.enableThinProvisioning` parameter."
