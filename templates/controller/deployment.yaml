@@ -3,6 +3,7 @@ cpu: 10m
 memory: 25Mi
 {{- end }}
 
+{{- if .Values.sdsReplicatedVolume.newControlPlane }}
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
 apiVersion: autoscaling.k8s.io/v1
@@ -87,10 +88,10 @@ spec:
           resources:
             requests:
               {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
-{{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
-              {{- include "sds_drbd_controller_resources" . | nindent 14 }}
-{{- end }}
-          {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" dict | nindent 10 }}
+              {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+                {{- include "sds_drbd_controller_resources" . | nindent 14 }}
+              {{- end }}
+          {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 10 }}
           env:
             - name: POD_NAMESPACE
               valueFrom:
@@ -110,3 +111,4 @@ spec:
             items:
               - key: slogh.cfg
                 path: slogh.cfg
+{{- end }}

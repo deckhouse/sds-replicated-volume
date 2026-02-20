@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
 {{- /* Webhook TLS Certs Secret */ -}}
 {{- $secretConfig := dict
   "valuesKey" "sdsReplicatedVolume"
@@ -20,6 +21,7 @@
   "onMasterNode" true
   "podSecurityContext" "deckhouse"
   "additionalControllerEnvs" $linstorEnvs
+  "controllerImageName" "oldcontroller"
 }}
 {{ include "helm_lib_module_controller_manifests" (list . $config) }}
 
@@ -65,3 +67,4 @@
   "rules" (list (dict "apiGroups" (list "") "apiVersions" (list "v1") "operations" (list "CREATE") "resources" (list "persistentvolumeclaims") "scope" "Namespaced"))
 }}
 {{ include "helm_lib_module_validating_webhook_configuration" (list . $pvcWebhookConfig) }}
+{{- end }}
