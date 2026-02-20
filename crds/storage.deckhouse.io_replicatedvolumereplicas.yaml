@@ -1,0 +1,489 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  labels:
+    module: sds-replicated-volume
+  name: replicatedvolumereplicas.storage.deckhouse.io
+spec:
+  group: storage.deckhouse.io
+  names:
+    kind: ReplicatedVolumeReplica
+    listKind: ReplicatedVolumeReplicaList
+    plural: replicatedvolumereplicas
+    shortNames:
+    - rvr
+    singular: replicatedvolumereplica
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.nodeName
+      name: Node
+      type: string
+    - jsonPath: .spec.type
+      name: Type
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Configured')].status
+      name: Configured
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='DRBDConfigured')].status
+      name: DRBDConfigured
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='BackingVolumeUpToDate')].status
+      name: DataUpToDate
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - jsonPath: .status.conditions[?(@.type=='Scheduled')].status
+      name: Scheduled
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Attached')].status
+      name: Attached
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='FullyConnected')].status
+      name: FullyConnected
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='BackingVolumeReady')].status
+      name: BVReady
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='SatisfyEligibleNodes')].status
+      name: SatisfyEligibleNodes
+      priority: 1
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ReplicatedVolumeReplica is a Kubernetes Custom Resource that
+          represents a replica of a ReplicatedVolume.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              lvmVolumeGroupName:
+                description: LVMVolumeGroupName is the LVMVolumeGroup resource name
+                  where this replica should be placed.
+                minLength: 1
+                pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
+                type: string
+              lvmVolumeGroupThinPoolName:
+                description: LVMVolumeGroupThinPoolName is the thin pool name (for
+                  LVMThin storage pools).
+                type: string
+              nodeName:
+                maxLength: 253
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: nodeName is immutable once set
+                  rule: size(oldSelf) == 0 || self == oldSelf
+              replicatedVolumeName:
+                maxLength: 120
+                minLength: 1
+                pattern: ^[0-9A-Za-z.+_-]*$
+                type: string
+                x-kubernetes-validations:
+                - message: replicatedVolumeName is immutable
+                  rule: self == oldSelf
+              type:
+                description: ReplicaType enumerates possible values for ReplicatedVolumeReplica
+                  spec.type and status.effectiveType fields.
+                enum:
+                - Diskful
+                - Access
+                - TieBreaker
+                type: string
+            required:
+            - replicatedVolumeName
+            - type
+            type: object
+            x-kubernetes-validations:
+            - message: nodeName is required for Access type
+              rule: self.type != 'Access' || has(self.nodeName)
+            - message: lvmVolumeGroupName requires nodeName to be set
+              rule: '!has(self.lvmVolumeGroupName) || has(self.nodeName)'
+            - message: lvmVolumeGroupName can only be set for Diskful type
+              rule: '!has(self.lvmVolumeGroupName) || self.type == ''Diskful'''
+            - message: lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be
+                set
+              rule: '!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)'
+          status:
+            properties:
+              addresses:
+                items:
+                  properties:
+                    address:
+                      properties:
+                        ipv4:
+                          maxLength: 15
+                          pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
+                          type: string
+                        port:
+                          maximum: 65535
+                          minimum: 1025
+                          type: integer
+                      required:
+                      - ipv4
+                      - port
+                      type: object
+                    systemNetworkName:
+                      maxLength: 64
+                      type: string
+                  required:
+                  - address
+                  - systemNetworkName
+                  type: object
+                maxItems: 10
+                type: array
+                x-kubernetes-list-type: atomic
+              attachment:
+                description: |-
+                  Attachment contains information about the device attachment state.
+                  Only set when the replica is attached on the node.
+                properties:
+                  devicePath:
+                    description: |-
+                      DevicePath is the block device path when the replica is attached.
+                      Example: /dev/drbd10012.
+                    maxLength: 256
+                    minLength: 1
+                    type: string
+                  inUse:
+                    description: InUse indicates whether the replica's block device
+                      is currently in use by a process.
+                    type: boolean
+                  ioSuspended:
+                    description: IOSuspended indicates whether I/O is suspended on
+                      the device.
+                    type: boolean
+                required:
+                - devicePath
+                - inUse
+                - ioSuspended
+                type: object
+              backingVolume:
+                description: |-
+                  BackingVolume contains information about the backing LVM logical volume.
+                  Only set for Diskful replicas.
+                properties:
+                  lvmVolumeGroupName:
+                    description: LVMVolumeGroupName is the name of the LVM volume
+                      group.
+                    maxLength: 253
+                    type: string
+                  lvmVolumeGroupThinPoolName:
+                    description: |-
+                      LVMVolumeGroupThinPoolName is the name of the thin pool within the LVM volume group.
+                      Empty if the backing volume is not on a thin pool.
+                    maxLength: 253
+                    type: string
+                  size:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: Size is the size of the backing LVM logical volume.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  state:
+                    description: State is the local backing volume state.
+                    type: string
+                type: object
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              datameshPendingTransition:
+                description: |-
+                  DatameshPending describes the pending datamesh membership state for this replica.
+
+                  This field contains changes that have been validated and are ready from the RVR's
+                  perspective, waiting to be applied to the datamesh. The controller sets this field
+                  only after all prerequisites are satisfied.
+
+                  For example, member=true will not be set until scheduling completes: the spec.nodeName,
+                  spec.lvmVolumeGroupName, and spec.lvmVolumeGroupThinPoolName fields must be populated
+                  and validated before the replica can be marked as a pending datamesh member.
+                properties:
+                  lvmVolumeGroupName:
+                    description: LVMVolumeGroupName is the LVMVolumeGroup resource
+                      name for Diskful replicas.
+                    minLength: 1
+                    pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
+                    type: string
+                  member:
+                    description: Member indicates whether this replica should be a
+                      datamesh member.
+                    type: boolean
+                  thinPoolName:
+                    description: ThinPoolName is the thin pool name (optional, for
+                      LVMThin storage pools).
+                    type: string
+                  type:
+                    description: Type is the intended type when Member is true.
+                    enum:
+                    - Diskful
+                    - Access
+                    - TieBreaker
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: when member is false, type/lvmVolumeGroupName/thinPoolName
+                    must not be set
+                  rule: '!has(self.member) || self.member == true || (!has(self.type)
+                    && !has(self.lvmVolumeGroupName) && !has(self.thinPoolName))'
+                - message: when member is true, type is required
+                  rule: '!has(self.member) || self.member == false || has(self.type)'
+                - message: lvmVolumeGroupName is required when type is Diskful
+                  rule: '!has(self.type) || self.type != ''Diskful'' || has(self.lvmVolumeGroupName)'
+                - message: lvmVolumeGroupName must not be set when type is not Diskful
+                  rule: '!has(self.type) || self.type == ''Diskful'' || !has(self.lvmVolumeGroupName)'
+                - message: thinPoolName requires lvmVolumeGroupName to be set
+                  rule: '!has(self.thinPoolName) || has(self.lvmVolumeGroupName)'
+              datameshRevision:
+                description: |-
+                  DatameshRevision is the datamesh revision for which the replica was fully configured.
+
+                  "Configured" means:
+                    - DRBD was configured to match the intended state derived from this datamesh revision.
+                    - Backing volume (if Diskful) was configured: exists and matches intended LVG/ThinPool/Size.
+                    - Backing volume (if Diskful) is ready: reported ready and actual size >= intended size.
+                    - Agent confirmed successful configuration.
+
+                  Note: "configured" does NOT mean:
+                    - DRBD connections are established (happens asynchronously after configuration).
+                    - Backing volume is synchronized (resync happens asynchronously if the volume was newly added).
+                format: int64
+                type: integer
+              drbdrReconciliationCache:
+                description: DRBDRReconciliationCache holds cached values for DRBDResource
+                  reconciliation optimization.
+                properties:
+                  datameshRevision:
+                    description: DatameshRevision is the datamesh revision for which
+                      DRBDResource spec was last computed.
+                    format: int64
+                    type: integer
+                  drbdrGeneration:
+                    description: DRBDRGeneration is the DRBDResource generation at
+                      the time DRBDResource spec was last computed.
+                    format: int64
+                    type: integer
+                  rvrType:
+                    description: RVRType is the effective replica type for which DRBDResource
+                      spec was last computed.
+                    enum:
+                    - Diskful
+                    - Access
+                    - TieBreaker
+                    type: string
+                type: object
+              peers:
+                description: Peers contains the status of connections to peer replicas.
+                items:
+                  description: ReplicatedVolumeReplicaStatusPeerStatus represents
+                    the status of a connection to a peer replica.
+                  properties:
+                    attached:
+                      description: Attached indicates whether this peer is attached
+                        on its node (and has a block device).
+                      type: boolean
+                    backingVolumeState:
+                      description: BackingVolumeState is the peer's backing volume
+                        state.
+                      type: string
+                    connectionEstablishedOn:
+                      description: ConnectionEstablishedOn lists system network names
+                        where connection to this peer is established.
+                      items:
+                        maxLength: 64
+                        type: string
+                      maxItems: 10
+                      type: array
+                      x-kubernetes-list-type: atomic
+                      x-kubernetes-validations:
+                      - message: connectionEstablishedOn must be unique
+                        rule: self.all(x, self.exists_one(y, x == y))
+                    connectionState:
+                      description: ConnectionState is the DRBD connection state to
+                        this peer.
+                      type: string
+                    name:
+                      description: |-
+                        Name is the name of the peer ReplicatedVolumeReplica.
+                        Must have format "prefix-N" where N is 0-31.
+                      maxLength: 253
+                      minLength: 1
+                      pattern: ^.+-([0-9]|[12][0-9]|3[01])$
+                      type: string
+                    replicationState:
+                      description: ReplicationState is the DRBD replication state
+                        with this peer.
+                      type: string
+                    type:
+                      description: Type is the replica type (Diskful/TieBreaker/Access).
+                      enum:
+                      - Diskful
+                      - Access
+                      - TieBreaker
+                      type: string
+                  required:
+                  - name
+                  type: object
+                maxItems: 31
+                type: array
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: peers[].name must be unique
+                  rule: self.all(x, self.exists_one(y, x.name == y.name))
+              quorum:
+                description: Quorum indicates whether this replica has quorum.
+                type: boolean
+              quorumSummary:
+                description: QuorumSummary provides detailed quorum information.
+                properties:
+                  connectedDiskfulPeers:
+                    default: 0
+                    description: ConnectedDiskfulPeers is the number of Diskful peers
+                      with established connection.
+                    type: integer
+                  connectedTieBreakerPeers:
+                    default: 0
+                    description: |-
+                      ConnectedTieBreakerPeers is the number of TieBreaker peers with established connection.
+                      TieBreakers only contribute to quorum under specific edge conditions.
+                    type: integer
+                  connectedUpToDatePeers:
+                    default: 0
+                    description: ConnectedUpToDatePeers is the number of peers with
+                      established connection and UpToDate disk.
+                    type: integer
+                  quorum:
+                    description: Quorum is the required quorum threshold.
+                    type: integer
+                  quorumMinimumRedundancy:
+                    description: QuorumMinimumRedundancy is the number of diskful
+                      UpToDate peers (including self) required for quorum.
+                    type: integer
+                required:
+                - connectedDiskfulPeers
+                - connectedTieBreakerPeers
+                - connectedUpToDatePeers
+                type: object
+              type:
+                description: |-
+                  Type reflects the currently observed DRBD configuration type
+                  from drbdr.Status.ActiveConfiguration.Type.
+
+                  This is the observed DRBD type (Diskful or Diskless), not the intended spec.type
+                  which can be Diskful/Diskless/Access/TieBreaker.
+
+                  Note: Access and TieBreaker both appear as Diskless here because they cannot be
+                  distinguished from the replica's own status. The difference is only visible
+                  in how other replicas treat this replica's vote in quorum calculation.
+                enum:
+                - Diskful
+                - Diskless
+                type: string
+            type: object
+        required:
+        - metadata
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: metadata.name must start with spec.replicatedVolumeName + '-'
+          rule: self.metadata.name.startsWith(self.spec.replicatedVolumeName + '-')
+        - message: metadata.name must be exactly spec.replicatedVolumeName + '-' +
+            id where id is 0..31
+          rule: self.metadata.name.substring(size(self.spec.replicatedVolumeName)
+            + 1).matches('^[0-9][0-9]?$') && int(self.metadata.name.substring(size(self.spec.replicatedVolumeName)
+            + 1)) <= 31
+        - message: metadata.name must be at most 123 characters (to fit derived LLV
+            name with prefix)
+          rule: size(self.metadata.name) <= 123
+    selectableFields:
+    - jsonPath: .spec.nodeName
+    - jsonPath: .spec.replicatedVolumeName
+    served: true
+    storage: true
+    subresources:
+      status: {}

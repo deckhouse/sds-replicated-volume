@@ -1,17 +1,119 @@
-{{- /* RBAC */ -}}
-{{- $rbacConfig := dict
-  "roleRules" (list
-    (dict "apiGroups" (list "") "resources" (list "configmaps") "verbs" (list "get" "list" "watch" "update"))
-    (dict "apiGroups" (list "") "resources" (list "secrets") "verbs" (list "get" "list" "watch"))
-    (dict "apiGroups" (list "") "resources" (list "pods") "verbs" (list "get" "list" "watch" "update"))
-    (dict "apiGroups" (list "coordination.k8s.io") "resources" (list "leases") "verbs" (list "get" "watch" "list" "delete" "update" "create"))
-  )
-  "clusterRoleRules" (list
-    (dict "apiGroups" (list "") "resources" (list "nodes" "persistentvolumes") "verbs" (list "get" "list" "watch" "patch" "update"))
-    (dict "apiGroups" (list "") "resources" (list "events") "verbs" (list "create" "list"))
-    (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "replicatedstorageclasses" "lvmvolumegroups" "replicatedstoragepools") "verbs" (list "get" "list" "create" "delete" "watch" "update"))
-    (dict "apiGroups" (list "storage.k8s.io") "resources" (list "storageclasses" "csinodes") "verbs" (list "create" "delete" "list" "get" "watch" "update"))
-    (dict "apiGroups" (list "internal.linstor.linbit.com") "resources" (list "propscontainers") "verbs" (list "list" "get" "update" "watch"))
-  )
-}}
-{{ include "helm_lib_module_controller_rbac" (list . $rbacConfig) }}
+{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: controller
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-controller")) | nindent 2 }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: d8:{{ .Chart.Name }}:controller
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-controller")) | nindent 2 }}
+rules:
+  # --- storage.deckhouse.io: read + patch (finalizers, labels) ---
+  - apiGroups: ["storage.deckhouse.io"]
+    resources:
+      - replicatedstorageclasses
+      - replicatedvolumes
+      - replicatedvolumeattachments
+    verbs: ["get", "list", "watch", "patch"]
+
+  # --- storage.deckhouse.io: full lifecycle (create, patch, delete) ---
+  - apiGroups: ["storage.deckhouse.io"]
+    resources:
+      - replicatedstoragepools
+      - replicatedvolumereplicas
+      - drbdresources
+      - lvmlogicalvolumes
+    verbs: ["get", "list", "watch", "create", "patch", "delete"]
+
+  # --- storage.deckhouse.io: read + create + delete (no patch) ---
+  - apiGroups: ["storage.deckhouse.io"]
+    resources:
+      - drbdresourceoperations
+      - drbdnodeoperations
+    verbs: ["get", "list", "watch", "create", "delete"]
+
+  # --- storage.deckhouse.io: read-only ---
+  - apiGroups: ["storage.deckhouse.io"]
+    resources:
+      - lvmvolumegroups
+    verbs: ["get", "list", "watch"]
+
+  # --- storage.deckhouse.io: status subresources ---
+  - apiGroups: ["storage.deckhouse.io"]
+    resources:
+      - replicatedstorageclasses/status
+      - replicatedstoragepools/status
+      - replicatedvolumes/status
+      - replicatedvolumereplicas/status
+      - replicatedvolumeattachments/status
+    verbs: ["patch"]
+
+  # --- Nodes: read + patch labels ---
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: d8:{{ .Chart.Name }}:controller
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-controller")) | nindent 2 }}
+subjects:
+  - kind: ServiceAccount
+    name: controller
+    namespace: d8-{{ .Chart.Name }}
+roleRef:
+  kind: ClusterRole
+  name: d8:{{ .Chart.Name }}:controller
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: controller
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-controller")) | nindent 2 }}
+rules:
+  # --- Pods: read-only (agent readiness checks) ---
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+
+  # --- Leader election: specific Lease ---
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    resourceNames: ["sds-replicated-volume-controller"]
+    verbs: ["get", "update"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create"]
+
+  # --- Events: leader election event recording ---
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: controller
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-controller")) | nindent 2 }}
+subjects:
+  - kind: ServiceAccount
+    name: controller
+    namespace: d8-{{ .Chart.Name }}
+roleRef:
+  kind: Role
+  name: controller
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

@@ -1,0 +1,601 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  labels:
+    backup.deckhouse.io/cluster-config: "true"
+    heritage: deckhouse
+    module: sds-replicated-volume
+  name: replicatedstorageclasses.storage.deckhouse.io
+spec:
+  group: storage.deckhouse.io
+  names:
+    kind: ReplicatedStorageClass
+    listKind: ReplicatedStorageClassList
+    plural: replicatedstorageclasses
+    shortNames:
+    - rsc
+    singular: replicatedstorageclass
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .spec.replication
+      name: Replication
+      type: string
+    - jsonPath: .spec.topology
+      name: Topology
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - jsonPath: .status.storagePoolName
+      name: StoragePool
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='StoragePoolReady')].status
+      name: StoragePoolReady
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='ConfigurationRolledOut')].status
+      name: ConfigRolledOut
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='VolumesSatisfyEligibleNodes')].status
+      name: VolsSatisfyEN
+      priority: 1
+      type: string
+    - jsonPath: .spec.volumeAccess
+      name: VolumeAccess
+      priority: 1
+      type: string
+    - jsonPath: .status.volumes.total
+      name: Volumes
+      priority: 1
+      type: integer
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ReplicatedStorageClass is a Kubernetes Custom Resource that defines
+          a configuration for a Kubernetes Storage class.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              Defines a Kubernetes Storage class configuration.
+
+              > Note that this field is in read-only mode.
+            properties:
+              configurationRolloutStrategy:
+                default:
+                  rollingUpdate:
+                    maxParallel: 5
+                  type: RollingUpdate
+                description: |-
+                  ConfigurationRolloutStrategy defines how configuration changes are applied to existing volumes.
+                  Always present with defaults.
+                properties:
+                  rollingUpdate:
+                    description: |-
+                      RollingUpdate configures parameters for RollingUpdate strategy.
+                      Required when type is RollingUpdate.
+                    properties:
+                      maxParallel:
+                        default: 5
+                        description: MaxParallel is the maximum number of volumes
+                          being rolled out simultaneously.
+                        format: int32
+                        maximum: 200
+                        minimum: 1
+                        type: integer
+                    required:
+                    - maxParallel
+                    type: object
+                  type:
+                    default: RollingUpdate
+                    description: Type specifies the rollout strategy type.
+                    enum:
+                    - RollingUpdate
+                    - NewVolumesOnly
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: rollingUpdate is required when type is RollingUpdate
+                  rule: self.type != 'RollingUpdate' || has(self.rollingUpdate)
+                - message: rollingUpdate must not be set when type is not RollingUpdate
+                  rule: self.type == 'RollingUpdate' || !has(self.rollingUpdate)
+              eligibleNodesConflictResolutionStrategy:
+                default:
+                  rollingRepair:
+                    maxParallel: 5
+                  type: RollingRepair
+                description: |-
+                  EligibleNodesConflictResolutionStrategy defines how the controller handles volumes with eligible nodes conflicts.
+                  Always present with defaults.
+                properties:
+                  rollingRepair:
+                    description: |-
+                      RollingRepair configures parameters for RollingRepair conflict resolution strategy.
+                      Required when type is RollingRepair.
+                    properties:
+                      maxParallel:
+                        default: 5
+                        description: MaxParallel is the maximum number of volumes
+                          being repaired simultaneously.
+                        format: int32
+                        maximum: 200
+                        minimum: 1
+                        type: integer
+                    required:
+                    - maxParallel
+                    type: object
+                  type:
+                    default: RollingRepair
+                    description: Type specifies the conflict resolution strategy type.
+                    enum:
+                    - Manual
+                    - RollingRepair
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: rollingRepair is required when type is RollingRepair
+                  rule: self.type != 'RollingRepair' || has(self.rollingRepair)
+                - message: rollingRepair must not be set when type is not RollingRepair
+                  rule: self.type == 'RollingRepair' || !has(self.rollingRepair)
+              eligibleNodesPolicy:
+                default:
+                  notReadyGracePeriod: 10m
+                description: |-
+                  EligibleNodesPolicy defines policies for managing eligible nodes.
+                  Always present with defaults.
+                properties:
+                  notReadyGracePeriod:
+                    default: 10m
+                    description: |-
+                      NotReadyGracePeriod specifies how long to wait before removing
+                      a not-ready node from the eligible nodes list.
+                    type: string
+                required:
+                - notReadyGracePeriod
+                type: object
+              nodeLabelSelector:
+                description: |-
+                  NodeLabelSelector filters nodes eligible for DRBD participation.
+                  Only nodes matching this selector can store data, provide access, or host tiebreaker.
+                  If not specified, all nodes are candidates.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              reclaimPolicy:
+                description: |-
+                  The storage class's reclaim policy. Might be:
+                  - Delete (If the Persistent Volume Claim is deleted, deletes the Persistent Volume and its associated storage as well)
+                  - Retain (If the Persistent Volume Claim is deleted, remains the Persistent Volume and its associated storage)
+                enum:
+                - Delete
+                - Retain
+                type: string
+              replication:
+                default: ConsistencyAndAvailability
+                description: |-
+                  The Storage class's replication mode. Might be:
+                  - None — In this mode the Storage class's 'placementCount' and 'AutoEvictMinReplicaCount' params equal '1'.
+                    Requires topology to be 'Ignored' (no replicas to distribute across zones).
+                  - Availability — In this mode the volume remains readable and writable even if one of the replica nodes becomes unavailable. Data is stored in two copies on different nodes. This corresponds to `placementCount = 2` and `AutoEvictMinReplicaCount = 2`. **Important:** this mode does not guarantee data consistency and may lead to split brain and data loss in case of network connectivity issues between nodes. Recommended only for non-critical data and applications that do not require high reliability and data integrity.
+                  - ConsistencyAndAvailability — In this mode the volume remains readable and writable when one replica node fails. Data is stored in three copies on different nodes (`placementCount = 3`, `AutoEvictMinReplicaCount = 3`). This mode provides protection against data loss when two nodes containing volume replicas fail and guarantees data consistency. However, if two replicas are lost, the volume switches to suspend-io mode.
+
+                  > Note that default Replication mode is 'ConsistencyAndAvailability'.
+                enum:
+                - None
+                - Availability
+                - Consistency
+                - ConsistencyAndAvailability
+                type: string
+              storage:
+                description: |-
+                  Storage defines the storage backend configuration for this storage class.
+                  Specifies the type of volumes (LVM or LVMThin) and which LVMVolumeGroups
+                  will be used to allocate space for volumes.
+                properties:
+                  lvmVolumeGroups:
+                    description: |-
+                      LVMVolumeGroups is an array of LVMVolumeGroup resource names whose Volume Groups/Thin-pools
+                      will be used to allocate the required space.
+
+                      > Note that every LVMVolumeGroup resource must have the same type (Thin/Thick)
+                      as specified in the Type field.
+                      is replaced with selectors, revisit the key. Currently using name only because
+                      thinPoolName is optional and cannot be a listMapKey without a default value.
+                    items:
+                      properties:
+                        name:
+                          description: Selected LVMVolumeGroup resource's name.
+                          minLength: 1
+                          pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
+                          type: string
+                        thinPoolName:
+                          description: Selected Thin-pool name.
+                          maxLength: 128
+                          minLength: 1
+                          pattern: ^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  type:
+                    description: |-
+                      Type defines the volumes type. Might be:
+                      - LVM (for Thick)
+                      - LVMThin (for Thin)
+                    enum:
+                    - LVM
+                    - LVMThin
+                    type: string
+                required:
+                - lvmVolumeGroups
+                - type
+                type: object
+                x-kubernetes-validations:
+                - message: thinPoolName is required for each lvmVolumeGroups entry
+                    when type is LVMThin
+                  rule: self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, has(g.thinPoolName)
+                    && size(g.thinPoolName) > 0)
+                - message: thinPoolName must not be specified when type is LVM
+                  rule: self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName)
+                    || size(g.thinPoolName) == 0)
+              storagePool:
+                description: |-
+                  StoragePool is the name of a ReplicatedStoragePool resource.
+                  Deprecated: Use Storage instead. This field cannot be added or changed, only removed.
+                type: string
+                x-kubernetes-validations:
+                - message: StoragePool cannot be added or changed, only removed
+                  rule: size(self) == 0 || self == oldSelf
+              systemNetworkNames:
+                default:
+                - Internal
+                description: |-
+                  SystemNetworkNames specifies network names used for DRBD replication traffic.
+                  At least one network name must be specified. Each name is limited to 64 characters.
+
+                  Custom network support requires NetworkNode watch implementation in the controller.
+                  When multi-network support is implemented, raise MaxItems to 10.
+                items:
+                  type: string
+                maxItems: 1
+                minItems: 1
+                type: array
+                x-kubernetes-list-type: set
+                x-kubernetes-validations:
+                - message: Only 'Internal' network is currently supported
+                  rule: self.all(n, n == 'Internal')
+              topology:
+                description: |-
+                  The topology settings for the volumes in the created Storage class. Might be:
+                  - TransZonal — replicas of the volumes will be created in different zones (one replica per zone).
+                    To use this topology, the available zones must be specified in the 'zones' param, and the cluster nodes must have the topology.kubernetes.io/zone=<zone name> label.
+                  - Zonal — all replicas of the volumes are created in the same zone that the scheduler selected to place the pod using this volume.
+                  - Ignored — the topology information will not be used to place replicas of the volumes.
+                    The replicas can be placed on any available nodes, with the restriction: no more than one replica of a given volume on one node.
+                    Required when replication is 'None'.
+
+                  > Note that the 'Ignored' value can be used only if there are no zones in the cluster (there are no nodes with the topology.kubernetes.io/zone label).
+
+                  > For the system to operate correctly, either every cluster node must be labeled with 'topology.kubernetes.io/zone', or none of them should have this label.
+                enum:
+                - TransZonal
+                - Zonal
+                - Ignored
+                type: string
+              volumeAccess:
+                default: PreferablyLocal
+                description: |-
+                  The Storage class's volume access mode. Defines how pods access the volume. Might be:
+                  - Local — volume is accessed only from the node where a replica resides. Pod scheduling waits for consumer.
+                  - EventuallyLocal — volume can be accessed remotely, but a local replica will be created on the accessing node
+                    after some time. Pod scheduling waits for consumer.
+                  - PreferablyLocal — volume prefers local access but allows remote access if no local replica is available.
+                    Scheduler tries to place pods on nodes with replicas. Pod scheduling waits for consumer.
+                  - Any — volume can be accessed from any node. Most flexible mode with immediate volume binding.
+
+                  > Note that the default Volume Access mode is 'PreferablyLocal'.
+                enum:
+                - Local
+                - EventuallyLocal
+                - PreferablyLocal
+                - Any
+                type: string
+              zones:
+                description: |-
+                  Array of zones the Storage class's volumes should be replicated in. The controller will put a label with
+                  the Storage class's name on the nodes which be actual used by the Storage class.
+
+                  For TransZonal topology, the number of zones depends on replication mode:
+                  - Availability, ConsistencyAndAvailability: at least 3 zones required
+                  - Consistency: at least 2 zones required
+
+                  When replication is 'None', zones act as a node constraint
+                  limiting where the single replica can be placed.
+                items:
+                  maxLength: 63
+                  type: string
+                maxItems: 10
+                type: array
+                x-kubernetes-list-type: set
+            required:
+            - configurationRolloutStrategy
+            - eligibleNodesConflictResolutionStrategy
+            - eligibleNodesPolicy
+            - reclaimPolicy
+            - storage
+            - systemNetworkNames
+            - topology
+            type: object
+            x-kubernetes-validations:
+            - message: Replication None requires topology Ignored (no replicas to
+                distribute).
+              rule: '!has(self.replication) || self.replication != ''None'' || self.topology
+                == ''Ignored'''
+            - message: TransZonal topology with Availability replication requires
+                at least 3 zones (if specified).
+              rule: self.topology != 'TransZonal' || !has(self.replication) || self.replication
+                != 'Availability' || !has(self.zones) || size(self.zones) == 0 ||
+                size(self.zones) >= 3
+            - message: TransZonal topology with Consistency replication requires at
+                least 2 zones (if specified).
+              rule: self.topology != 'TransZonal' || !has(self.replication) || self.replication
+                != 'Consistency' || !has(self.zones) || size(self.zones) == 0 || size(self.zones)
+                >= 2
+            - message: TransZonal topology with ConsistencyAndAvailability replication
+                (default) requires at least 3 zones (if specified).
+              rule: self.topology != 'TransZonal' || (has(self.replication) && self.replication
+                != 'ConsistencyAndAvailability') || !has(self.zones) || size(self.zones)
+                == 0 || size(self.zones) >= 3
+          status:
+            description: Displays current information about the Storage Class.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              configuration:
+                description: Configuration is the resolved configuration that volumes
+                  should align to.
+                properties:
+                  replication:
+                    description: Replication is the resolved replication mode.
+                    enum:
+                    - None
+                    - Availability
+                    - Consistency
+                    - ConsistencyAndAvailability
+                    type: string
+                  storagePoolName:
+                    description: StoragePoolName is the name of the ReplicatedStoragePool
+                      used by this RSC.
+                    minLength: 1
+                    type: string
+                  topology:
+                    description: Topology is the resolved topology setting.
+                    enum:
+                    - TransZonal
+                    - Zonal
+                    - Ignored
+                    type: string
+                  volumeAccess:
+                    description: VolumeAccess is the resolved volume access mode.
+                    enum:
+                    - Local
+                    - EventuallyLocal
+                    - PreferablyLocal
+                    - Any
+                    type: string
+                required:
+                - replication
+                - storagePoolName
+                - topology
+                - volumeAccess
+                type: object
+              configurationGeneration:
+                description: ConfigurationGeneration is the RSC generation when configuration
+                  was accepted.
+                format: int64
+                type: integer
+              phase:
+                description: |-
+                  The Storage class current state. Might be:
+                  - Failed (if the controller received incorrect resource configuration or some errors occurred during the operation)
+                  - Create (if everything went fine)
+                enum:
+                - Failed
+                - Created
+                type: string
+              reason:
+                description: Additional information about the current state of the
+                  Storage Class.
+                type: string
+              storagePoolBasedOnGeneration:
+                description: StoragePoolBasedOnGeneration is the RSC generation when
+                  storagePoolName was computed.
+                format: int64
+                type: integer
+              storagePoolEligibleNodesRevision:
+                description: StoragePoolEligibleNodesRevision tracks RSP's eligibleNodesRevision
+                  for change detection.
+                format: int64
+                type: integer
+              storagePoolName:
+                description: |-
+                  StoragePoolName is the computed name of the ReplicatedStoragePool for this RSC.
+                  Format: auto-rsp-<fnv128-hex>. Multiple RSCs with identical storage parameters
+                  will share the same StoragePoolName.
+                type: string
+              volumes:
+                default: {}
+                description: |-
+                  Volumes provides aggregated volume statistics.
+                  Always present (may have total=0).
+                properties:
+                  aligned:
+                    description: Aligned is the number of volumes whose configuration
+                      matches the storage class.
+                    format: int32
+                    type: integer
+                  inConflictWithEligibleNodes:
+                    description: InConflictWithEligibleNodes is the number of volumes
+                      with replicas on non-eligible nodes.
+                    format: int32
+                    type: integer
+                  pendingObservation:
+                    description: PendingObservation is the number of volumes that
+                      haven't observed current RSC configuration or eligible nodes.
+                    format: int32
+                    type: integer
+                  staleConfiguration:
+                    description: StaleConfiguration is the number of volumes with
+                      outdated configuration.
+                    format: int32
+                    type: integer
+                  total:
+                    description: Total is the total number of volumes.
+                    format: int32
+                    type: integer
+                  usedStoragePoolNames:
+                    description: UsedStoragePoolNames is a sorted list of storage
+                      pool names currently used by volumes.
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: atomic
+                type: object
+            required:
+            - volumes
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

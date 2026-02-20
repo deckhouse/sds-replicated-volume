@@ -1,0 +1,39 @@
+{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Chart.Name }}-mc.deckhouse.io
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["deckhouse.io"]
+        apiVersions: ["*"]
+        resources: ["moduleconfigs"]
+        resourceNames: ["{{ .Chart.Name }}"]
+        operations: ["CREATE", "UPDATE"]
+  validations:
+    - expression: |
+        oldObject == null ||
+        !(
+          has(oldObject.spec.settings.newControlPlane) &&
+          oldObject.spec.settings.newControlPlane == true &&
+          (
+            !has(object.spec.settings.newControlPlane) ||
+            object.spec.settings.newControlPlane == false
+          )
+        )
+      message: "Changing spec.settings.newControlPlane from true to false is not allowed for {{ .Chart.Name }}"
+      reason: "Forbidden"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Chart.Name }}-mc.deckhouse.io
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
+spec:
+  policyName: {{ .Chart.Name }}-mc.deckhouse.io
+  validationActions: ["Deny","Audit"]
+{{- end }}

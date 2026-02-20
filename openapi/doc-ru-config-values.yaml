@@ -1,7 +1,16 @@
 type: object
 properties:
+  registryScheme:
+    description: Устаревший параметр. Удалите его из ModuleConfig для Deckhouse версии выше 1.57.
   logLevel:
     description: Уровень логирования для приложений модуля
+  drbdPortRange:
+    description: Настройки диапазона TCP-портов для DRBD
+    properties:
+      minPort:
+        description: Начало диапазона портов DRBD
+      maxPort:
+        description: Конец диапазона портов DRBD
   dataNodes:
     description: Настройки для узлов Linstor с данными
     properties:
@@ -20,3 +29,5 @@ properties:
         description: Количество  резервных копий для хранения
       schedule:
         description: Расписание резервного копирования
+  newControlPlane:
+    description: Использовать новый control-plane как бэкенд для модуля
