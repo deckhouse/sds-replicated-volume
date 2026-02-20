@@ -8,6 +8,7 @@ use (
 	./images/csi-driver
 	./images/linstor-drbd-wait
 	./images/megatest
+	./images/oldcontroller
 	./images/webhooks
 	./lib/go/common
 )

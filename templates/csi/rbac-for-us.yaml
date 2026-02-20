@@ -47,6 +47,9 @@ roleRef:
   kind: ClusterRole
   name: d8:{{ .Chart.Name }}:rsc-watcher
   apiGroup: rbac.authorization.k8s.io
+
+
+{{- if .Values.sdsReplicatedVolume.newControlPlane }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -95,3 +98,4 @@ roleRef:
   kind: ClusterRole
   name: d8:{{ .Chart.Name }}:replicatedvolumereplica-reader
   apiGroup: rbac.authorization.k8s.io
+{{- end }}
