@@ -198,7 +198,7 @@ func CreateReplicatedVolume(
 	ctx context.Context,
 	kc client.Client,
 	log *logger.Logger,
-	traceID, name string,
+	traceID, name, pvcName, pvcNamespace string,
 	rvSpec srv.ReplicatedVolumeSpec,
 ) (*srv.ReplicatedVolume, error) {
 	rv := &srv.ReplicatedVolume{
@@ -206,6 +206,10 @@ func CreateReplicatedVolume(
 			Name:            name,
 			OwnerReferences: []metav1.OwnerReference{},
 			Finalizers:      []string{SDSReplicatedVolumeCSIFinalizer},
+			Annotations: map[string]string{
+				srv.SchedulingReservationIDAnnotationKey: pvcName,
+				srv.ReplicatedVolumePVCNamespace:         pvcNamespace,
+			},
 		},
 		Spec: rvSpec,
 	}
@@ -344,15 +348,17 @@ func GetReplicatedVolumeReplicaForNode(ctx context.Context, kc client.Client, vo
 	err := kc.List(
 		ctx,
 		rvrList,
-		client.MatchingFields{"spec.replicatedVolumeName": volumeName},
-		client.MatchingFields{"spec.nodeName": nodeName},
+		client.MatchingFields{
+			"spec.replicatedVolumeName": volumeName,
+			"spec.nodeName":             nodeName,
+		},
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	for i := range rvrList.Items {
-		if rvrList.Items[i].Spec.NodeName == nodeName {
+		if rvrList.Items[i].Spec.ReplicatedVolumeName == volumeName && rvrList.Items[i].Spec.NodeName == nodeName {
 			return &rvrList.Items[i], nil
 		}
 	}
@@ -385,6 +391,7 @@ func BuildReplicatedVolumeSpec(
 	return srv.ReplicatedVolumeSpec{
 		Size:                       size,
 		ReplicatedStorageClassName: rscName,
+		MaxAttachments:             1, // TODO handle RWX
 	}
 }
 

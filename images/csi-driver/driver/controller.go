@@ -51,9 +51,6 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		return nil, status.Error(codes.InvalidArgument, "Volume Capability cannot de empty")
 	}
 
-	BindingMode := request.Parameters[internal.BindingModeKey]
-	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] storage class BindingMode: %s", traceID, volumeID, BindingMode))
-
 	// Get LVMVolumeGroups from StoragePool
 	storagePoolName := request.Parameters[internal.StoragePoolKey]
 	if len(storagePoolName) == 0 {
@@ -79,11 +76,24 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	rvSize := resource.NewQuantity(request.CapacityRange.GetRequiredBytes(), resource.BinarySI)
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume size: %s", traceID, volumeID, rvSize.String()))
 
-	// Extract preferred node from AccessibilityRequirements for WaitForFirstConsumer
-	// Kubernetes provides the selected node in AccessibilityRequirements.Preferred[].Segments
-	// with key "kubernetes.io/hostname"
-	// NOTE: We no longer use rv.spec.attachTo. Attachment intent is expressed via ReplicatedVolumeAttachment (RVA)
-	// created in ControllerPublishVolume.
+	preferredNode := ""
+	if ar := request.AccessibilityRequirements; ar != nil {
+		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] AccessibilityRequirements: Requisite=%v, Preferred=%v", traceID, volumeID, ar.Requisite, ar.Preferred))
+		for _, topo := range ar.Preferred {
+			if node, ok := topo.Segments[internal.TopologyKey]; ok {
+				preferredNode = node
+				break
+			}
+		}
+	}
+	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Preferred node from AccessibilityRequirements: %q", traceID, volumeID, preferredNode))
+	if preferredNode != "" {
+		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] WFFC binding: creating early RVA for preferred node", traceID, volumeID, preferredNode))
+		_, err := utils.EnsureRVA(ctx, d.cl, d.log, traceID, volumeID, preferredNode)
+		if err != nil {
+			d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] Failed to create early RVA (non-fatal)", traceID, volumeID, preferredNode))
+		}
+	}
 
 	// Build ReplicatedVolumeSpec
 	rvSpec := utils.BuildReplicatedVolumeSpec(
@@ -95,7 +105,9 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 	// Create ReplicatedVolume
 	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ------------ CreateReplicatedVolume start ------------", traceID, volumeID))
-	_, err = utils.CreateReplicatedVolume(ctx, d.cl, d.log, traceID, volumeID, rvSpec)
+	pvcName := request.Parameters[internal.PVCAnnotationNameKey]
+	pvcNamespace := request.Parameters[internal.PVCAnnotationNamespaceKey]
+	_, err = utils.CreateReplicatedVolume(ctx, d.cl, d.log, traceID, volumeID, pvcName, pvcNamespace, rvSpec)
 	if err != nil {
 		if kerrors.IsAlreadyExists(err) {
 			d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume %s already exists. Skip creating", traceID, volumeID, volumeID))

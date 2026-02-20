@@ -67,6 +67,24 @@ type narrowReservationRequest struct {
 	LVG            LVMVolumeGroup `json:"lvg"`
 }
 
+type noOpClient struct{}
+
+func NewNoOpClient() Client {
+	return noOpClient{}
+}
+
+func (noOpClient) FilterAndScore(_ context.Context, _ string, _ time.Duration, _ int64, lvgs []LVMVolumeGroup) ([]ScoredLVMVolumeGroup, error) {
+	scored := make([]ScoredLVMVolumeGroup, len(lvgs))
+	for i, lvg := range lvgs {
+		scored[i] = ScoredLVMVolumeGroup{LVMVolumeGroup: lvg, Score: 0}
+	}
+	return scored, nil
+}
+
+func (noOpClient) NarrowReservation(context.Context, string, time.Duration, LVMVolumeGroup) error {
+	return nil
+}
+
 type httpClient struct {
 	httpClient *http.Client
 	baseURL    string

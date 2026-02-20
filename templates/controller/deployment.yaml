@@ -99,7 +99,7 @@ spec:
             - name: SLOGH_CONFIG_PATH
               value: "/etc/config/slogh.cfg"
             - name: SCHEDULER_EXTENDER_URL
-              value: "https://sds-common-scheduler-extender.d8-sds-node-configurator.svc:8099/api/v1/volumes/filter-prioritize"
+              value: "https://sds-common-scheduler-extender.d8-sds-node-configurator.svc:8099"
           volumeMounts:
             - mountPath: /etc/config/
               name: config
