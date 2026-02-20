@@ -1,8 +1,3 @@
-{{- define "drbd_wait_resources" }}
-cpu: 10m
-memory: 25Mi
-{{- end }}
-
 {{- define "sds_replicated_volume_agent_resources" }}
 cpu: 50m
 memory: 50Mi
@@ -62,24 +57,6 @@ spec:
         - name: {{ .Chart.Name }}-module-registry
       serviceAccountName: agent
       hostNetwork: true
-      initContainers:
-      - name: wait-drbd-ver-9-2
-        command:
-          - /linstor-drbd-wait
-        env:
-          - name: FILE_CONTENT
-            value: "version: 9.2"
-          - name: WAITING_MSG
-            value: "Waiting for DRBD version 9.2.x on host"
-        image: {{ include "helm_lib_module_image" (list . "linstorDrbdWait") }}
-        imagePullPolicy: IfNotPresent
-        {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 8 }}
-        resources:
-          requests:
-            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
-            {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
-              {{- include "drbd_wait_resources" . | nindent 12 }}
-            {{- end }}
       containers:
       - name: agent
         image: {{ include "helm_lib_module_image" (list . "agent") }}
