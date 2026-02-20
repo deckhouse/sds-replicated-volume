@@ -6,11 +6,8 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
-	csync "github.com/deckhouse/sds-replicated-volume/lib/go/common/sync"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/watch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	. "github.com/deckhouse/sds-replicated-volume/e2e/agent/internal/suite"
@@ -49,8 +46,8 @@ func TestDRBDResource(t *testing.T) {
 		node0, node1 := cluster.Nodes[0], cluster.Nodes[1]
 		name0, name1 := testID.ResourceName("0"), testID.ResourceName("1")
 
-		r0 := SetupDisklessToDiskfulReplica(e, cl, timeouts, name0, node0, 0, cluster.AllocateSize)
-		r1 := SetupDisklessToDiskfulReplica(e, cl, timeouts, name1, node1, 1, cluster.AllocateSize)
+		SetupDisklessToDiskfulReplica(e, cl, timeouts, name0, node0, 0, cluster.AllocateSize)
+		SetupDisklessToDiskfulReplica(e, cl, timeouts, name1, node1, 1, cluster.AllocateSize)
 
 		// Fetch fresh addresses for peering.
 		fresh0 := &v1alpha1.DRBDResource{}
@@ -64,41 +61,44 @@ func TestDRBDResource(t *testing.T) {
 
 		sharedSecret := "e2e-test-shared-secret"
 
-		// Patch peers.
-		SetupResourcePatch(e, cl, client.ObjectKey{Name: name0}, func(d *v1alpha1.DRBDResource) {
-			d.Spec.Peers = []v1alpha1.DRBDResourcePeer{{
-				Name:            node1.Name,
-				Type:            v1alpha1.DRBDResourceTypeDiskful,
-				NodeID:          1,
-				Protocol:        v1alpha1.DRBDProtocolC,
-				SharedSecret:    sharedSecret,
-				SharedSecretAlg: v1alpha1.SharedSecretAlgDummyForTest,
-				Paths:           addressesToPaths(fresh1.Status.Addresses),
-			}}
-		})
-		SetupResourcePatch(e, cl, client.ObjectKey{Name: name1}, func(d *v1alpha1.DRBDResource) {
-			d.Spec.Peers = []v1alpha1.DRBDResourcePeer{{
-				Name:            node0.Name,
-				Type:            v1alpha1.DRBDResourceTypeDiskful,
-				NodeID:          0,
-				Protocol:        v1alpha1.DRBDProtocolC,
-				SharedSecret:    sharedSecret,
-				SharedSecretAlg: v1alpha1.SharedSecretAlgDummyForTest,
-				Paths:           addressesToPaths(fresh0.Status.Addresses),
-			}}
-		})
+		// Patch peers with wait.
+		drbdr0 := SetupResourcePatch(
+			e.ScopeWithTimeout(timeouts.DRBDRConfiguredDuration()),
+			cl,
+			client.ObjectKey{Name: name0},
+			func(d *v1alpha1.DRBDResource) {
+				d.Spec.Peers = []v1alpha1.DRBDResourcePeer{{
+					Name:            node1.Name,
+					Type:            v1alpha1.DRBDResourceTypeDiskful,
+					NodeID:          1,
+					Protocol:        v1alpha1.DRBDProtocolC,
+					SharedSecret:    sharedSecret,
+					SharedSecretAlg: v1alpha1.SharedSecretAlgDummyForTest,
+					Paths:           addressesToPaths(fresh1.Status.Addresses),
+				}}
+			},
+			isDRBDRTerminal,
+		)
+		assertDRBDRConfigured(e, drbdr0)
 
-		event0, ok := csync.WaitWithTimeout(e.Context(), timeouts.DRBDRConfiguredDuration(), r0.DRBDRCh, isDRBDRTerminal)
-		if !ok {
-			e.Fatalf("DRBDResource %q did not reach terminal state after peering", name0)
-		}
-		assertDRBDRConfigured(e, event0.Object.(*v1alpha1.DRBDResource))
-
-		event1, ok := csync.WaitWithTimeout(e.Context(), timeouts.DRBDRConfiguredDuration(), r1.DRBDRCh, isDRBDRTerminal)
-		if !ok {
-			e.Fatalf("DRBDResource %q did not reach terminal state after peering", name1)
-		}
-		assertDRBDRConfigured(e, event1.Object.(*v1alpha1.DRBDResource))
+		drbdr1 := SetupResourcePatch(
+			e.ScopeWithTimeout(timeouts.DRBDRConfiguredDuration()),
+			cl,
+			client.ObjectKey{Name: name1},
+			func(d *v1alpha1.DRBDResource) {
+				d.Spec.Peers = []v1alpha1.DRBDResourcePeer{{
+					Name:            node0.Name,
+					Type:            v1alpha1.DRBDResourceTypeDiskful,
+					NodeID:          0,
+					Protocol:        v1alpha1.DRBDProtocolC,
+					SharedSecret:    sharedSecret,
+					SharedSecretAlg: v1alpha1.SharedSecretAlgDummyForTest,
+					Paths:           addressesToPaths(fresh0.Status.Addresses),
+				}}
+			},
+			isDRBDRTerminal,
+		)
+		assertDRBDRConfigured(e, drbdr1)
 	})
 
 	// e.Run("R3", func(e envtesting.E) {
@@ -108,17 +108,9 @@ func TestDRBDResource(t *testing.T) {
 	// })
 }
 
-// Replica holds state returned by SetupDisklessToDiskfulReplica for further
-// use (e.g. peering in multi-replica tests).
-type Replica struct {
-	Name    string
-	DRBDRCh <-chan watch.Event
-}
-
 // SetupDisklessToDiskfulReplica creates a full single-node replica: diskless
 // DRBDResource -> wait configured -> LLV -> wait created -> patch to diskful
-// -> wait configured. Returns a Replica with the live watcher channel for
-// subsequent waits (e.g. peering).
+// -> wait configured.
 func SetupDisklessToDiskfulReplica(
 	e envtesting.E,
 	cl client.WithWatch,
@@ -127,42 +119,36 @@ func SetupDisklessToDiskfulReplica(
 	node ClusterNode,
 	nodeID uint8,
 	size resource.Quantity,
-) *Replica {
-	// Watch before create to not miss events.
-	drbdrCh := SetupResourceWatcher(e, cl, types.NamespacedName{Name: name}, &v1alpha1.DRBDResourceList{})
-	drbdrCh = SetupWatchLog(e, drbdrCh)
-
-	llvCh := SetupResourceWatcher(e, cl, types.NamespacedName{Name: name}, &snc.LVMLogicalVolumeList{})
-	llvCh = SetupWatchLog(e, llvCh)
-
-	// Create DRBDResource (Diskless).
-	SetupResource(e, cl, newDRBDResourceDiskless(name, node.Name, nodeID))
-	event, ok := csync.WaitWithTimeout(e.Context(), timeouts.DRBDRConfiguredDuration(), drbdrCh, isDRBDRTerminal)
-	if !ok {
-		e.Fatalf("DRBDResource %q did not reach terminal state", name)
-	}
-	drbdr := event.Object.(*v1alpha1.DRBDResource)
+) {
+	// Create DRBDResource (Diskless), wait for configured.
+	drbdr := SetupResource(
+		e.ScopeWithTimeout(timeouts.DRBDRConfiguredDuration()),
+		cl,
+		newDRBDResourceDiskless(name, node.Name, nodeID),
+		isDRBDRTerminal,
+	)
 	assertDRBDRConfigured(e, drbdr)
 	if len(drbdr.Status.Addresses) == 0 {
 		e.Fatalf("DRBDResource %q has no addresses after configured", name)
 	}
 
-	// Create LLV.
-	SetupResource(e, cl, newLLV(name, size, node.LVG.Name))
-	_, ok = csync.WaitWithTimeout(e.Context(), timeouts.LLVCreatedDuration(), llvCh, isLLVCreated)
-	if !ok {
-		e.Fatalf("LVMLogicalVolume %q did not reach phase Created", name)
-	}
+	// Create LLV, wait for created.
+	SetupResource(
+		e.ScopeWithTimeout(timeouts.LLVCreatedDuration()),
+		cl,
+		newLLV(name, size, node.LVG.Name),
+		isLLVCreated,
+	)
 
-	// Patch DRBDResource to Diskful.
-	SetupResourcePatch(e, cl, client.ObjectKey{Name: name}, changeDRBDResourceToDiskful(name, size))
-	event, ok = csync.WaitWithTimeout(e.Context(), timeouts.DRBDRConfiguredDuration(), drbdrCh, isDRBDRTerminal)
-	if !ok {
-		e.Fatalf("DRBDResource %q did not reach terminal state after diskful patch", name)
-	}
-	assertDRBDRConfigured(e, event.Object.(*v1alpha1.DRBDResource))
-
-	return &Replica{Name: name, DRBDRCh: drbdrCh}
+	// Patch DRBDResource to Diskful, wait for configured.
+	drbdr = SetupResourcePatch(
+		e.ScopeWithTimeout(timeouts.DRBDRConfiguredDuration()),
+		cl,
+		client.ObjectKey{Name: name},
+		changeDRBDResourceToDiskful(name, size),
+		isDRBDRTerminal,
+	)
+	assertDRBDRConfigured(e, drbdr)
 }
 
 func newDRBDResourceDiskless(name, nodeName string, nodeID uint8) *v1alpha1.DRBDResource {
@@ -201,11 +187,7 @@ func changeDRBDResourceToDiskful(llvName string, size resource.Quantity) func(*v
 
 // isDRBDRTerminal returns true when the Configured condition has reached a
 // terminal state (Status=True or Status=False) for the current generation.
-func isDRBDRTerminal(event watch.Event) bool {
-	drbdr, ok := event.Object.(*v1alpha1.DRBDResource)
-	if !ok {
-		return false
-	}
+func isDRBDRTerminal(drbdr *v1alpha1.DRBDResource) bool {
 	for _, cond := range drbdr.Status.Conditions {
 		if cond.Type != v1alpha1.DRBDResourceCondConfiguredType {
 			continue
@@ -234,11 +216,7 @@ func assertDRBDRConfigured(e envtesting.E, drbdr *v1alpha1.DRBDResource) {
 	e.Fatalf("DRBDResource %q has no Configured condition", drbdr.Name)
 }
 
-func isLLVCreated(event watch.Event) bool {
-	llv, ok := event.Object.(*snc.LVMLogicalVolume)
-	if !ok {
-		return false
-	}
+func isLLVCreated(llv *snc.LVMLogicalVolume) bool {
 	return llv.Status != nil && llv.Status.Phase == snc.PhaseCreated
 }
 

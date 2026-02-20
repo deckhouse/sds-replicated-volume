@@ -1,50 +1,112 @@
 package suite
 
 import (
+	"context"
 	"fmt"
 
-	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
-
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/watch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
+	capi "github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
+	csync "github.com/deckhouse/sds-replicated-volume/lib/go/common/sync"
 )
 
-// SetupResource creates the given resource and registers a reliable cleanup
-// that removes all finalizers and deletes the resource after the test.
+// objectPtr constrains PT to be a pointer to T that implements client.Object.
+type objectPtr[T any] interface {
+	client.Object
+	*T
+}
+
+// SetupResource creates the given resource and optionally waits for it to
+// reach a desired state.
 //
-// The resource object must have Name (and optionally Namespace) set.
-// If the resource already exists, the function fatals.
+// If predicate is non-nil, a watcher is started before creation, the function
+// waits until predicate returns true, then the watcher is cleaned up. The
+// returned object is the one that matched. The timeout comes from e.Context()
+// (caller should use e.ScopeWithTimeout if a timeout is needed).
 //
-// Cleanup sequence:
-//  1. Re-fetch the resource (skip if already gone).
-//  2. Remove all finalizers via patch.
-//  3. Delete the resource (skip if already gone).
-func SetupResource(
+// If predicate is nil, the resource is created and returned immediately.
+//
+// Resource cleanup (finalizer removal and deletion) is registered on e.
+func SetupResource[T any, PT objectPtr[T]](
 	e envtesting.E,
-	cl client.Client,
-	obj client.Object,
-) {
+	wc client.WithWatch,
+	obj PT,
+	predicate func(PT) bool,
+) PT {
 	key := client.ObjectKeyFromObject(obj)
 	kind := fmt.Sprintf("%T", obj)
 
+	if predicate == nil {
+		createResource(e, wc, obj, key, kind)
+		return obj
+	}
+
+	watcherScope := e.Scope()
+	defer watcherScope.Close()
+
+	logCh := startWatcher(watcherScope, wc, obj, key, kind)
+	createResource(e, wc, obj, key, kind)
+	return waitForMatch(e, logCh, key, kind, predicate)
+}
+
+func createResource(e envtesting.E, cl client.Client, obj client.Object, key client.ObjectKey, kind string) {
 	if err := cl.Create(e.Context(), obj); err != nil {
 		e.Fatalf("creating %s %q: %v", kind, key, err)
 	}
+	e.Cleanup(func() { cleanupResource(e, cl, obj) })
+}
 
-	e.Cleanup(func() {
-		cleanupResource(e, cl, obj)
+func startWatcher(
+	e envtesting.E,
+	wc client.WithWatch,
+	obj client.Object,
+	key client.ObjectKey,
+	kind string,
+) <-chan watch.Event {
+	list, err := capi.NewListForObject(obj, wc.Scheme())
+	if err != nil {
+		e.Fatalf("creating list type for %s: %v", kind, err)
+	}
+
+	watcher, err := wc.Watch(e.Context(), list, &client.ListOptions{
+		Namespace:     key.Namespace,
+		FieldSelector: fields.OneTermEqualSelector("metadata.name", key.Name),
 	})
+	if err != nil {
+		e.Fatalf("setting up watcher for %s %q: %v", kind, key, err)
+	}
+	e.Cleanup(watcher.Stop)
+
+	return setupWatchLogInternal(e, watcher.ResultChan())
+}
+
+func waitForMatch[T any, PT objectPtr[T]](
+	e envtesting.E,
+	logCh <-chan watch.Event,
+	key client.ObjectKey,
+	kind string,
+	predicate func(PT) bool,
+) PT {
+	event, ok := csync.Wait(logCh, func(ev watch.Event) bool {
+		return predicate(ev.Object.(PT))
+	})
+	if !ok {
+		e.Fatalf("waiting for %s %q: timed out or context cancelled", kind, key)
+	}
+	return event.Object.(PT)
 }
 
 // cleanupResource removes all finalizers from the resource and deletes it.
-// Errors are reported via e.Errorf so that cleanup continues for other
-// resources even if one fails.
 func cleanupResource(e envtesting.E, cl client.Client, obj client.Object) {
+	ctx := context.Background()
 	key := client.ObjectKeyFromObject(obj)
 	kind := fmt.Sprintf("%T", obj)
 
-	// Re-fetch to get the latest version.
-	if err := cl.Get(e.Context(), key, obj); err != nil {
+	if err := cl.Get(ctx, key, obj); err != nil {
 		if apierrors.IsNotFound(err) {
 			return
 		}
@@ -52,11 +114,10 @@ func cleanupResource(e envtesting.E, cl client.Client, obj client.Object) {
 		return
 	}
 
-	// Remove all finalizers if any are present.
 	if len(obj.GetFinalizers()) > 0 {
 		patch := client.MergeFrom(obj.DeepCopyObject().(client.Object))
 		obj.SetFinalizers(nil)
-		if err := cl.Patch(e.Context(), obj, patch); err != nil {
+		if err := cl.Patch(ctx, obj, patch); err != nil {
 			if apierrors.IsNotFound(err) {
 				return
 			}
@@ -65,8 +126,7 @@ func cleanupResource(e envtesting.E, cl client.Client, obj client.Object) {
 		}
 	}
 
-	// Delete.
-	if err := cl.Delete(e.Context(), obj); err != nil {
+	if err := cl.Delete(ctx, obj); err != nil {
 		if apierrors.IsNotFound(err) {
 			return
 		}

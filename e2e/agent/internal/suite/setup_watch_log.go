@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
 	"github.com/google/go-cmp/cmp"
-
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
+
+	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
 )
 
 // SetupWatchLog wraps a watch event channel, logging every event to e.Logf
@@ -23,9 +23,29 @@ import (
 //   - Deleted: event type, name
 //   - Other: event type, and %s of Object if present
 func SetupWatchLog(e envtesting.E, ch <-chan watch.Event) <-chan watch.Event {
-	out := make(chan watch.Event)
 	wg := sync.WaitGroup{}
-	wg.Go(func() {
+	out := pipeWatchLog(e, ch, &wg)
+	e.Cleanup(func() { wg.Wait() })
+	return out
+}
+
+// setupWatchLogInternal is like SetupWatchLog but does NOT register cleanup.
+// The caller is responsible for managing the watcher lifecycle (typically via
+// a scoped context that cancels when the watcher should stop).
+func setupWatchLogInternal(e envtesting.E, ch <-chan watch.Event) <-chan watch.Event {
+	return pipeWatchLog(e, ch, nil)
+}
+
+// pipeWatchLog runs the log-and-forward goroutine. If wg is non-nil, the
+// goroutine is tracked in it.
+func pipeWatchLog(e envtesting.E, ch <-chan watch.Event, wg *sync.WaitGroup) <-chan watch.Event {
+	out := make(chan watch.Event)
+	ctx := e.Context()
+	runGo := func(fn func()) { go fn() }
+	if wg != nil {
+		runGo = wg.Go
+	}
+	runGo(func() {
 		defer close(out)
 		var lastKnown runtime.Object
 		for event := range ch {
@@ -33,11 +53,12 @@ func SetupWatchLog(e envtesting.E, ch <-chan watch.Event) <-chan watch.Event {
 			if event.Object != nil {
 				lastKnown = event.Object.DeepCopyObject()
 			}
-			out <- event
+			select {
+			case out <- event:
+			case <-ctx.Done():
+				return
+			}
 		}
-	})
-	e.Cleanup(func() {
-		wg.Wait()
 	})
 	return out
 }
