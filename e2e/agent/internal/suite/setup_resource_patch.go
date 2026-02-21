@@ -23,37 +23,43 @@ import (
 //
 // The reverse patch is pre-computed immediately after mutate, so the revert
 // cleanup is exact regardless of what happens to the resource later.
-func SetupResourcePatch[T any, PT objectPtr[T]](
+func SetupResourcePatch[T any, PT clientObjectAndPtr[T]](
 	e envtesting.E,
 	wc client.WithWatch,
 	key client.ObjectKey,
 	mutate func(PT),
 	predicate func(PT) bool,
 ) PT {
+	e.Helper()
+
 	obj := PT(new(T))
-	kind := fmt.Sprintf("%T", obj)
+	obj.SetName(key.Name)
+	obj.SetNamespace(key.Namespace)
 
 	if predicate == nil {
-		patchResource(e, wc, key, obj, kind, mutate)
+		patchResource(e, wc, obj, mutate)
 		return obj
 	}
 
 	watcherScope := e.Scope()
 	defer watcherScope.Close()
 
-	logCh := startWatcher(watcherScope, wc, obj, key, kind)
-	patchResource(e, wc, key, obj, kind, mutate)
-	return waitForMatch(e, logCh, key, kind, predicate)
+	ch := startWatcher(watcherScope, wc, obj)
+	patchResource(e, wc, obj, mutate)
+
+	return waitForMatch(e, ch, obj.GetUID(), obj.GetGeneration(), predicate)
 }
 
-func patchResource[T any, PT objectPtr[T]](
+func patchResource[T any, PT clientObjectAndPtr[T]](
 	e envtesting.E,
 	cl client.Client,
-	key client.ObjectKey,
 	obj PT,
-	kind string,
 	mutate func(PT),
 ) {
+	e.Helper()
+	key := client.ObjectKeyFromObject(obj)
+	kind := fmt.Sprintf("%T", obj)
+
 	if err := cl.Get(e.Context(), key, obj); err != nil {
 		e.Fatalf("getting %s %q before patch: %v", kind, key, err)
 	}
@@ -61,34 +67,43 @@ func patchResource[T any, PT objectPtr[T]](
 	original := obj.DeepCopyObject().(client.Object)
 	mutate(obj)
 
-	revertPatch := client.MergeFrom(obj.DeepCopyObject().(client.Object))
-	revertBytes, err := revertPatch.Data(original)
+	revertFrom := client.MergeFrom(obj.DeepCopyObject().(client.Object))
+	revertBytes, err := revertFrom.Data(original)
 	if err != nil {
-		e.Fatalf("computing revert patch for %s %q: %v", kind, key, err)
+		e.Fatalf("computing revert patch: %v", err)
 	}
 
 	if err := cl.Patch(e.Context(), obj, client.MergeFrom(original)); err != nil {
 		e.Fatalf("patching %s %q: %v", kind, key, err)
 	}
 
-	e.Cleanup(func() {
-		ctx := context.Background()
-		fresh := PT(new(T))
+	e.Cleanup(func() { applyRevertPatch(e, cl, obj, revertBytes) })
+}
 
-		if err := cl.Get(ctx, key, fresh); err != nil {
-			if apierrors.IsNotFound(err) {
-				return
-			}
-			e.Errorf("cleanup: getting %s %q for revert: %v", kind, key, err)
+func applyRevertPatch[T any, PT clientObjectAndPtr[T]](
+	e envtesting.E,
+	cl client.Client,
+	obj PT,
+	revertBytes []byte,
+) {
+	ctx := context.Background()
+	key := client.ObjectKeyFromObject(obj)
+	kind := fmt.Sprintf("%T", obj)
+
+	fresh := PT(new(T))
+	if err := cl.Get(ctx, key, fresh); err != nil {
+		if apierrors.IsNotFound(err) {
 			return
 		}
+		e.Errorf("cleanup: getting %s %q for revert: %v", kind, key, err)
+		return
+	}
 
-		if err := cl.Patch(ctx, fresh,
-			client.RawPatch(types.MergePatchType, revertBytes)); err != nil {
-			if apierrors.IsNotFound(err) {
-				return
-			}
-			e.Errorf("cleanup: reverting patch on %s %q: %v", kind, key, err)
+	if err := cl.Patch(ctx, fresh,
+		client.RawPatch(types.MergePatchType, revertBytes)); err != nil {
+		if apierrors.IsNotFound(err) {
+			return
 		}
-	})
+		e.Errorf("cleanup: reverting patch on %s %q: %v", kind, key, err)
+	}
 }

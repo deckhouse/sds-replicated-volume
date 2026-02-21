@@ -24,7 +24,12 @@ func Wait[T any](ch <-chan T, predicate func(T) bool) (T, bool) {
 //
 // The caller is responsible for ensuring that the channel closes when the
 // context is cancelled (e.g. a Kubernetes watcher bound to the context).
-func WaitWithTimeout[T any](parentCtx context.Context, timeout time.Duration, ch <-chan T, predicate func(T) bool) (T, bool) {
+func WaitWithTimeout[T any](
+	parentCtx context.Context,
+	timeout time.Duration,
+	ch <-chan T,
+	predicate func(T) bool,
+) (T, bool) {
 	ctx, cancel := context.WithTimeout(parentCtx, timeout)
 	defer cancel()
 

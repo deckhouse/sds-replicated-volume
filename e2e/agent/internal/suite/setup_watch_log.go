@@ -23,29 +23,11 @@ import (
 //   - Deleted: event type, name
 //   - Other: event type, and %s of Object if present
 func SetupWatchLog(e envtesting.E, ch <-chan watch.Event) <-chan watch.Event {
-	wg := sync.WaitGroup{}
-	out := pipeWatchLog(e, ch, &wg)
-	e.Cleanup(func() { wg.Wait() })
-	return out
-}
-
-// setupWatchLogInternal is like SetupWatchLog but does NOT register cleanup.
-// The caller is responsible for managing the watcher lifecycle (typically via
-// a scoped context that cancels when the watcher should stop).
-func setupWatchLogInternal(e envtesting.E, ch <-chan watch.Event) <-chan watch.Event {
-	return pipeWatchLog(e, ch, nil)
-}
-
-// pipeWatchLog runs the log-and-forward goroutine. If wg is non-nil, the
-// goroutine is tracked in it.
-func pipeWatchLog(e envtesting.E, ch <-chan watch.Event, wg *sync.WaitGroup) <-chan watch.Event {
 	out := make(chan watch.Event)
 	ctx := e.Context()
-	runGo := func(fn func()) { go fn() }
-	if wg != nil {
-		runGo = wg.Go
-	}
-	runGo(func() {
+
+	wg := sync.WaitGroup{}
+	wg.Go(func() {
 		defer close(out)
 		var lastKnown runtime.Object
 		for event := range ch {
@@ -60,29 +42,21 @@ func pipeWatchLog(e envtesting.E, ch <-chan watch.Event, wg *sync.WaitGroup) <-c
 			}
 		}
 	})
+
+	e.Cleanup(wg.Wait)
+
 	return out
 }
 
 func logWatchEvent(e envtesting.E, event watch.Event, lastKnown runtime.Object) {
-	name := objectName(event.Object)
+	e.Logf("watch: %s %s", event.Type, objectName(event.Object))
 
-	switch event.Type {
-	case watch.Added:
-		e.Logf("watch: %s %s\n%s", event.Type, name, formatObject(event.Object))
-	case watch.Modified:
-		if lastKnown != nil {
-			e.Logf("watch: %s %s\n%s", event.Type, name, cmp.Diff(lastKnown, event.Object))
-		} else {
-			e.Logf("watch: %s %s\n%s", event.Type, name, formatObject(event.Object))
-		}
-	case watch.Deleted:
-		e.Logf("watch: %s %s", event.Type, name)
-	default:
-		if event.Object != nil {
-			e.Logf("watch: %s %s", event.Type, fmt.Sprintf("%s", event.Object))
-		} else {
-			e.Logf("watch: %s", event.Type)
-		}
+	switch {
+	case event.Type == watch.Modified && lastKnown != nil:
+		e.Log(cmp.Diff(lastKnown, event.Object))
+	case event.Type == watch.Deleted:
+	case event.Object != nil:
+		e.Log(formatObject(event.Object))
 	}
 }
 

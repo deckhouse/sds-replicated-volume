@@ -6,6 +6,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -14,8 +15,8 @@ import (
 	csync "github.com/deckhouse/sds-replicated-volume/lib/go/common/sync"
 )
 
-// objectPtr constrains PT to be a pointer to T that implements client.Object.
-type objectPtr[T any] interface {
+// clientObjectAndPtr constrains PT to be a pointer to T that implements client.Object.
+type clientObjectAndPtr[T any] interface {
 	client.Object
 	*T
 }
@@ -31,29 +32,33 @@ type objectPtr[T any] interface {
 // If predicate is nil, the resource is created and returned immediately.
 //
 // Resource cleanup (finalizer removal and deletion) is registered on e.
-func SetupResource[T any, PT objectPtr[T]](
+func SetupResource[T any, PT clientObjectAndPtr[T]](
 	e envtesting.E,
 	wc client.WithWatch,
 	obj PT,
 	predicate func(PT) bool,
 ) PT {
-	key := client.ObjectKeyFromObject(obj)
-	kind := fmt.Sprintf("%T", obj)
+	e.Helper()
 
 	if predicate == nil {
-		createResource(e, wc, obj, key, kind)
+		createResource(e, wc, obj)
 		return obj
 	}
 
 	watcherScope := e.Scope()
 	defer watcherScope.Close()
 
-	logCh := startWatcher(watcherScope, wc, obj, key, kind)
-	createResource(e, wc, obj, key, kind)
-	return waitForMatch(e, logCh, key, kind, predicate)
+	ch := startWatcher(watcherScope, wc, obj)
+	createResource(e, wc, obj)
+
+	return waitForMatch(e, ch, obj.GetUID(), obj.GetGeneration(), predicate)
 }
 
-func createResource(e envtesting.E, cl client.Client, obj client.Object, key client.ObjectKey, kind string) {
+func createResource(e envtesting.E, cl client.Client, obj client.Object) {
+	e.Helper()
+	key := client.ObjectKeyFromObject(obj)
+	kind := fmt.Sprintf("%T", obj)
+
 	if err := cl.Create(e.Context(), obj); err != nil {
 		e.Fatalf("creating %s %q: %v", kind, key, err)
 	}
@@ -64,38 +69,48 @@ func startWatcher(
 	e envtesting.E,
 	wc client.WithWatch,
 	obj client.Object,
-	key client.ObjectKey,
-	kind string,
 ) <-chan watch.Event {
+	e.Helper()
+
 	list, err := capi.NewListForObject(obj, wc.Scheme())
 	if err != nil {
-		e.Fatalf("creating list type for %s: %v", kind, err)
+		e.Fatalf("creating list type: %v", err)
 	}
 
 	watcher, err := wc.Watch(e.Context(), list, &client.ListOptions{
-		Namespace:     key.Namespace,
-		FieldSelector: fields.OneTermEqualSelector("metadata.name", key.Name),
+		Namespace:     obj.GetNamespace(),
+		FieldSelector: fields.OneTermEqualSelector("metadata.name", obj.GetName()),
 	})
 	if err != nil {
-		e.Fatalf("setting up watcher for %s %q: %v", kind, key, err)
+		e.Fatalf("setting up watcher: %v", err)
 	}
+
+	ch := SetupWatchLog(e, watcher.ResultChan())
 	e.Cleanup(watcher.Stop)
 
-	return setupWatchLogInternal(e, watcher.ResultChan())
+	return ch
 }
 
-func waitForMatch[T any, PT objectPtr[T]](
+func waitForMatch[T any, PT clientObjectAndPtr[T]](
 	e envtesting.E,
 	logCh <-chan watch.Event,
-	key client.ObjectKey,
-	kind string,
+	uid types.UID,
+	minGeneration int64,
 	predicate func(PT) bool,
 ) PT {
+	e.Helper()
 	event, ok := csync.Wait(logCh, func(ev watch.Event) bool {
-		return predicate(ev.Object.(PT))
+		obj := ev.Object.(PT)
+		if obj.GetUID() != uid {
+			return false
+		}
+		if obj.GetGeneration() < minGeneration {
+			return false
+		}
+		return predicate(obj)
 	})
 	if !ok {
-		e.Fatalf("waiting for %s %q: timed out or context cancelled", kind, key)
+		e.Fatalf("waiting failed")
 	}
 	return event.Object.(PT)
 }

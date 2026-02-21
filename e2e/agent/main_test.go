@@ -16,12 +16,6 @@ import (
 func TestDRBDResource(t *testing.T) {
 	e := envtesting.New(t)
 
-	var testID TestId
-	e.Options(&testID)
-
-	var timeouts Timeouts
-	e.Options(&timeouts)
-
 	// Discover K8s clients.
 	cl := DiscoverClient(e)
 	cs := DiscoverClientset(e)
@@ -36,69 +30,23 @@ func TestDRBDResource(t *testing.T) {
 	cluster := DiscoverCluster(e, cl)
 
 	e.Run("R1", func(e envtesting.E) {
-		SetupDisklessToDiskfulReplica(e, cl, timeouts, testID.ResourceName("0"), cluster.Nodes[0], 0, cluster.AllocateSize)
+		var testID TestId
+		e.Options(&testID)
+		SetupDisklessToDiskfulReplica(e, cl, testID.ResourceName("0"), cluster.Nodes[0], 0, cluster.AllocateSize)
 	})
 
 	e.Run("R2", func(e envtesting.E) {
 		if len(cluster.Nodes) < 2 {
 			e.Fatalf("R2 requires at least 2 nodes, got %d", len(cluster.Nodes))
 		}
-		node0, node1 := cluster.Nodes[0], cluster.Nodes[1]
-		name0, name1 := testID.ResourceName("0"), testID.ResourceName("1")
 
-		SetupDisklessToDiskfulReplica(e, cl, timeouts, name0, node0, 0, cluster.AllocateSize)
-		SetupDisklessToDiskfulReplica(e, cl, timeouts, name1, node1, 1, cluster.AllocateSize)
+		var testID TestId
+		e.Options(&testID)
 
-		// Fetch fresh addresses for peering.
-		fresh0 := &v1alpha1.DRBDResource{}
-		if err := cl.Get(e.Context(), client.ObjectKey{Name: name0}, fresh0); err != nil {
-			e.Fatalf("getting DRBDResource %q for peering: %v", name0, err)
-		}
-		fresh1 := &v1alpha1.DRBDResource{}
-		if err := cl.Get(e.Context(), client.ObjectKey{Name: name1}, fresh1); err != nil {
-			e.Fatalf("getting DRBDResource %q for peering: %v", name1, err)
-		}
+		drbdr0, _ := SetupDisklessToDiskfulReplica(e, cl, testID.ResourceName("0"), cluster.Nodes[0], 0, cluster.AllocateSize)
+		drbdr1, _ := SetupDisklessToDiskfulReplica(e, cl, testID.ResourceName("1"), cluster.Nodes[1], 1, cluster.AllocateSize)
 
-		sharedSecret := "e2e-test-shared-secret"
-
-		// Patch peers with wait.
-		drbdr0 := SetupResourcePatch(
-			e.ScopeWithTimeout(timeouts.DRBDRConfiguredDuration()),
-			cl,
-			client.ObjectKey{Name: name0},
-			func(d *v1alpha1.DRBDResource) {
-				d.Spec.Peers = []v1alpha1.DRBDResourcePeer{{
-					Name:            node1.Name,
-					Type:            v1alpha1.DRBDResourceTypeDiskful,
-					NodeID:          1,
-					Protocol:        v1alpha1.DRBDProtocolC,
-					SharedSecret:    sharedSecret,
-					SharedSecretAlg: v1alpha1.SharedSecretAlgDummyForTest,
-					Paths:           addressesToPaths(fresh1.Status.Addresses),
-				}}
-			},
-			isDRBDRTerminal,
-		)
-		assertDRBDRConfigured(e, drbdr0)
-
-		drbdr1 := SetupResourcePatch(
-			e.ScopeWithTimeout(timeouts.DRBDRConfiguredDuration()),
-			cl,
-			client.ObjectKey{Name: name1},
-			func(d *v1alpha1.DRBDResource) {
-				d.Spec.Peers = []v1alpha1.DRBDResourcePeer{{
-					Name:            node0.Name,
-					Type:            v1alpha1.DRBDResourceTypeDiskful,
-					NodeID:          0,
-					Protocol:        v1alpha1.DRBDProtocolC,
-					SharedSecret:    sharedSecret,
-					SharedSecretAlg: v1alpha1.SharedSecretAlgDummyForTest,
-					Paths:           addressesToPaths(fresh0.Status.Addresses),
-				}}
-			},
-			isDRBDRTerminal,
-		)
-		assertDRBDRConfigured(e, drbdr1)
+		SetupPeering(e, cl, drbdr0, drbdr1)
 	})
 
 	// e.Run("R3", func(e envtesting.E) {
@@ -110,16 +58,18 @@ func TestDRBDResource(t *testing.T) {
 
 // SetupDisklessToDiskfulReplica creates a full single-node replica: diskless
 // DRBDResource -> wait configured -> LLV -> wait created -> patch to diskful
-// -> wait configured.
+// -> wait configured. Returns the configured DRBDResource and LLV.
 func SetupDisklessToDiskfulReplica(
 	e envtesting.E,
 	cl client.WithWatch,
-	timeouts Timeouts,
 	name string,
 	node ClusterNode,
 	nodeID uint8,
 	size resource.Quantity,
-) {
+) (*v1alpha1.DRBDResource, *snc.LVMLogicalVolume) {
+	var timeouts Timeouts
+	e.Options(&timeouts)
+
 	// Create DRBDResource (Diskless), wait for configured.
 	drbdr := SetupResource(
 		e.ScopeWithTimeout(timeouts.DRBDRConfiguredDuration()),
@@ -133,7 +83,7 @@ func SetupDisklessToDiskfulReplica(
 	}
 
 	// Create LLV, wait for created.
-	SetupResource(
+	llv := SetupResource(
 		e.ScopeWithTimeout(timeouts.LLVCreatedDuration()),
 		cl,
 		newLLV(name, size, node.LVG.Name),
@@ -149,6 +99,72 @@ func SetupDisklessToDiskfulReplica(
 		isDRBDRTerminal,
 	)
 	assertDRBDRConfigured(e, drbdr)
+
+	return drbdr, llv
+}
+
+// SetupPeering links two DRBDResources as peers of each other.
+// Returns the updated resources after peering is configured.
+func SetupPeering(
+	e envtesting.E,
+	cl client.WithWatch,
+	drbdr0, drbdr1 *v1alpha1.DRBDResource,
+) (*v1alpha1.DRBDResource, *v1alpha1.DRBDResource) {
+	var timeouts Timeouts
+	e.Options(&timeouts)
+
+	sharedSecret := "e2e-test-shared-secret"
+
+	drbdr0 = SetupResourcePatch(
+		e.ScopeWithTimeout(timeouts.DRBDRConfiguredDuration()),
+		cl,
+		client.ObjectKey{Name: drbdr0.Name},
+		func(d *v1alpha1.DRBDResource) {
+			d.Spec.Peers = []v1alpha1.DRBDResourcePeer{{
+				Name:            drbdr1.Spec.NodeName,
+				Type:            drbdr1.Spec.Type,
+				NodeID:          drbdr1.Spec.NodeID,
+				Protocol:        v1alpha1.DRBDProtocolC,
+				SharedSecret:    sharedSecret,
+				SharedSecretAlg: v1alpha1.SharedSecretAlgDummyForTest,
+				Paths:           addressesToPaths(drbdr1.Status.Addresses),
+			}}
+		},
+		isDRBDRTerminal,
+	)
+	assertDRBDRConfigured(e, drbdr0)
+	assertDRBDRHasPeer(e, drbdr0, drbdr1.Spec.NodeName, drbdr1.Spec.NodeID)
+
+	drbdr1 = SetupResourcePatch(
+		e.ScopeWithTimeout(timeouts.DRBDRConfiguredDuration()),
+		cl,
+		client.ObjectKey{Name: drbdr1.Name},
+		func(d *v1alpha1.DRBDResource) {
+			d.Spec.Peers = []v1alpha1.DRBDResourcePeer{{
+				Name:            drbdr0.Spec.NodeName,
+				Type:            drbdr0.Spec.Type,
+				NodeID:          drbdr0.Spec.NodeID,
+				Protocol:        v1alpha1.DRBDProtocolC,
+				SharedSecret:    sharedSecret,
+				SharedSecretAlg: v1alpha1.SharedSecretAlgDummyForTest,
+				Paths:           addressesToPaths(drbdr0.Status.Addresses),
+			}}
+		},
+		isDRBDRTerminal,
+	)
+	assertDRBDRConfigured(e, drbdr1)
+	assertDRBDRHasPeer(e, drbdr1, drbdr0.Spec.NodeName, drbdr0.Spec.NodeID)
+
+	return drbdr0, drbdr1
+}
+
+func assertDRBDRHasPeer(e envtesting.E, drbdr *v1alpha1.DRBDResource, peerName string, peerNodeID uint8) {
+	for _, peer := range drbdr.Status.Peers {
+		if peer.Name == peerName && peer.NodeID == uint(peerNodeID) {
+			return
+		}
+	}
+	e.Fatalf("DRBDResource %q has no peer with name %q and nodeID %d in status", drbdr.Name, peerName, peerNodeID)
 }
 
 func newDRBDResourceDiskless(name, nodeName string, nodeID uint8) *v1alpha1.DRBDResource {
