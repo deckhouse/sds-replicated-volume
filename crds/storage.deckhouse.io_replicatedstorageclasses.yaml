@@ -312,7 +312,9 @@ spec:
               storagePool:
                 description: |-
                   StoragePool is the name of a ReplicatedStoragePool resource.
-                  Deprecated: Use Storage instead. This field cannot be added or changed, only removed.
+                  This field cannot be added or changed, only removed.
+
+                  Deprecated: Use Storage instead.
                 type: string
                 x-kubernetes-validations:
                 - message: StoragePool cannot be added or changed, only removed
