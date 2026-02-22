@@ -87,7 +87,7 @@ type IntendedDRBDState interface {
 	// RsDiscardGranularity returns the intended rs-discard-granularity. Always 8192.
 	RsDiscardGranularity() uint
 
-	// NonVoting returns the intended non-voting setting. Always false.
+	// NonVoting returns the intended non-voting setting. Read from spec.
 	NonVoting() bool
 }
 
@@ -146,6 +146,7 @@ type intendedDRBDState struct {
 	quorum                  byte
 	quorumMinimumRedundancy byte
 	allowTwoPrimaries       bool
+	nonVoting               bool
 	role                    v1alpha1.DRBDRole
 	sizeBytes               int64
 	peers                   []IntendedPeer
@@ -176,7 +177,7 @@ func (s *intendedDRBDState) QuorumDynamicVoters() bool          { return !drbdse
 // Hardcoded disk options defaults
 func (s *intendedDRBDState) DiscardZeroesIfAligned() bool { return false }
 func (s *intendedDRBDState) RsDiscardGranularity() uint   { return 8192 } // TODO: DETECT AUTOMATICALLY FROM LVM
-func (s *intendedDRBDState) NonVoting() bool              { return false }
+func (s *intendedDRBDState) NonVoting() bool              { return s.nonVoting }
 
 var _ IntendedDRBDState = (*intendedDRBDState)(nil)
 
@@ -294,6 +295,7 @@ func computeIntendedDRBDState(
 		quorum:                  drbdr.Spec.Quorum,
 		quorumMinimumRedundancy: drbdr.Spec.QuorumMinimumRedundancy,
 		allowTwoPrimaries:       drbdr.Spec.AllowTwoPrimaries,
+		nonVoting:               drbdr.Spec.NonVoting,
 		role:                    drbdr.Spec.Role,
 		sizeBytes:               sizeBytes,
 		peers:                   peers,
