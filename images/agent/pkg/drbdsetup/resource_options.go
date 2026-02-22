@@ -35,6 +35,7 @@ type ResourceOptions struct {
 	OnSuspendedPrimaryOutdated string // "disconnect" | "force-secondary"
 	Quorum                     *uint  // nil = don't set, 0 = off
 	QuorumMinimumRedundancy    *uint  // nil = don't set, 0 = off
+	QuorumDynamicVoters        *bool  // nil = don't set (flant extension)
 }
 
 // ResourceOptionsArgs returns arguments for drbdsetup resource-options command.
@@ -74,6 +75,14 @@ var ResourceOptionsArgs = func(resource string, opts ResourceOptions) []string {
 			args = append(args, "--quorum-minimum-redundancy", "off")
 		} else {
 			args = append(args, "--quorum-minimum-redundancy", strconv.FormatUint(uint64(*opts.QuorumMinimumRedundancy), 10))
+		}
+	}
+
+	if opts.QuorumDynamicVoters != nil {
+		if *opts.QuorumDynamicVoters {
+			args = append(args, "--quorum-dynamic-voters=yes")
+		} else {
+			args = append(args, "--quorum-dynamic-voters=no")
 		}
 	}
 
