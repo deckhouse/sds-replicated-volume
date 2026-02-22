@@ -37,7 +37,7 @@ var _ = Describe("computeRVAAttachedConditionFromAttachmentsSummary", func() {
 	It("returns Attached when fully attached", func() {
 		as := &attachmentState{
 			intent:           attachmentIntentAttach,
-			member:           &v1alpha1.ReplicatedVolumeDatameshMember{Attached: true, Type: v1alpha1.ReplicaTypeDiskful},
+			member:           &v1alpha1.DatameshMember{Attached: true, Type: v1alpha1.DatameshMemberTypeDiskful},
 			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached,
 			conditionMessage: "Volume is attached and ready to serve I/O on the node",
 		}
@@ -49,7 +49,7 @@ var _ = Describe("computeRVAAttachedConditionFromAttachmentsSummary", func() {
 	It("returns Attaching when attach transition is active", func() {
 		as := &attachmentState{
 			intent:                    attachmentIntentAttach,
-			member:                    &v1alpha1.ReplicatedVolumeDatameshMember{Attached: true},
+			member:                    &v1alpha1.DatameshMember{Attached: true},
 			hasActiveAttachTransition: true,
 			conditionMessage:          "Attaching, 0/1 confirmed",
 			conditionReason:           v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching,
@@ -63,7 +63,7 @@ var _ = Describe("computeRVAAttachedConditionFromAttachmentsSummary", func() {
 	It("returns Detaching when detach transition is active", func() {
 		as := &attachmentState{
 			intent:                    attachmentIntentDetach,
-			member:                    &v1alpha1.ReplicatedVolumeDatameshMember{Attached: false},
+			member:                    &v1alpha1.DatameshMember{Attached: false},
 			hasActiveDetachTransition: true,
 			conditionMessage:          "Detaching, 0/1 confirmed",
 			conditionReason:           v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching,
@@ -164,7 +164,7 @@ var _ = Describe("computeRVAAttachedConditionFromAttachmentsSummary", func() {
 	It("returns WaitingForReplica when RVR not ready", func() {
 		as := &attachmentState{
 			intent:           attachmentIntentAttach,
-			member:           &v1alpha1.ReplicatedVolumeDatameshMember{Attached: false},
+			member:           &v1alpha1.DatameshMember{Attached: false},
 			conditionMessage: "Waiting for replica to become Ready",
 			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica,
 		}
@@ -176,7 +176,7 @@ var _ = Describe("computeRVAAttachedConditionFromAttachmentsSummary", func() {
 	It("returns Attaching when waiting for multiattach", func() {
 		as := &attachmentState{
 			intent:           attachmentIntentAttach,
-			member:           &v1alpha1.ReplicatedVolumeDatameshMember{Attached: false},
+			member:           &v1alpha1.DatameshMember{Attached: false},
 			conditionMessage: "Waiting for multiattach to be enabled",
 			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching,
 		}
@@ -188,7 +188,7 @@ var _ = Describe("computeRVAAttachedConditionFromAttachmentsSummary", func() {
 	It("returns Pending when detach conflict blocks attach", func() {
 		as := &attachmentState{
 			intent:                    attachmentIntentAttach,
-			member:                    &v1alpha1.ReplicatedVolumeDatameshMember{Attached: false},
+			member:                    &v1alpha1.DatameshMember{Attached: false},
 			hasActiveDetachTransition: true,
 			conditionMessage:          "Attach pending, waiting for detach to complete first",
 			conditionReason:           v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending,
@@ -201,7 +201,7 @@ var _ = Describe("computeRVAAttachedConditionFromAttachmentsSummary", func() {
 	It("returns Detaching when device in use blocks detach", func() {
 		as := &attachmentState{
 			intent:           attachmentIntentDetach,
-			member:           &v1alpha1.ReplicatedVolumeDatameshMember{Attached: true},
+			member:           &v1alpha1.DatameshMember{Attached: true},
 			conditionMessage: "Device in use, detach blocked",
 			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching,
 		}
@@ -369,7 +369,7 @@ var _ = Describe("isNodeAttachedOrDetaching", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-1", Attached: true},
 					},
 				},
@@ -382,7 +382,7 @@ var _ = Describe("isNodeAttachedOrDetaching", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-1", Attached: false},
 					},
 				},
@@ -395,7 +395,7 @@ var _ = Describe("isNodeAttachedOrDetaching", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-2", Attached: true},
 					},
 				},
@@ -408,7 +408,7 @@ var _ = Describe("isNodeAttachedOrDetaching", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-1", Attached: false},
 					},
 				},
@@ -424,7 +424,7 @@ var _ = Describe("isNodeAttachedOrDetaching", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-1", Attached: false},
 					},
 				},
@@ -440,7 +440,7 @@ var _ = Describe("isNodeAttachedOrDetaching", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-2", Attached: false},
 					},
 				},
@@ -564,7 +564,7 @@ var _ = Describe("reconcileRVAFinalizers", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-1", Attached: true},
 					},
 				},
@@ -589,7 +589,7 @@ var _ = Describe("reconcileRVAFinalizers", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-1", Attached: true},
 					},
 				},
@@ -618,7 +618,7 @@ var _ = Describe("reconcileRVAFinalizers", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-1", Attached: false},
 					},
 				},
@@ -645,7 +645,7 @@ var _ = Describe("reconcileRVAFinalizers", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-1", Attached: false},
 					},
 				},

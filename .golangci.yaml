@@ -35,6 +35,11 @@ linters:
         text: don't use an underscore in package name
       - path: (.+)\.go$
         text: 'exported: .*'
+      # The old controller intentionally uses deprecated API fields/types
+      # (StoragePool, RSPPhase*) that it owns. Suppress SA1019 there.
+      - linters: [staticcheck]
+        path: images/oldcontroller/
+        text: "SA1019:"
     paths:
       - third_party$
       - builtin$

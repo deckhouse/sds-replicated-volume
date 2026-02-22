@@ -134,7 +134,7 @@ func (r *Reconciler) reconcileDeleteAccessReplicas(
 	}
 
 	// Build idset of attached datamesh members.
-	attached := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.ReplicatedVolumeDatameshMember) bool {
+	attached := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
 		return m.Attached
 	})
 

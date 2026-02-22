@@ -1205,7 +1205,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)).To(Succeed())
 
 			// StoragePool should be cleared.
-			Expect(updatedRSC.Spec.StoragePool).To(BeEmpty())
+			Expect(updatedRSC.Spec.StoragePool).To(BeEmpty()) //nolint:staticcheck // SA1019: testing migration from deprecated StoragePool
 
 			// spec.Storage should contain data from RSP.
 			Expect(updatedRSC.Spec.Storage.Type).To(Equal(v1alpha1.ReplicatedStoragePoolTypeLVMThin))
@@ -1242,7 +1242,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)).To(Succeed())
 
 			// StoragePool should remain unchanged (waiting for RSP to exist).
-			Expect(updatedRSC.Spec.StoragePool).To(Equal("rsp-not-found"))
+			Expect(updatedRSC.Spec.StoragePool).To(Equal("rsp-not-found")) //nolint:staticcheck // SA1019: testing migration from deprecated StoragePool
 
 			// Finalizer should NOT be added (reconcileMigrationFromRSP returns Done before reconcileMetadata).
 			Expect(updatedRSC.Finalizers).To(BeEmpty())
@@ -1293,7 +1293,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)).To(Succeed())
 
 			// Nothing should change.
-			Expect(updatedRSC.Spec.StoragePool).To(BeEmpty())
+			Expect(updatedRSC.Spec.StoragePool).To(BeEmpty()) //nolint:staticcheck // SA1019: testing migration from deprecated StoragePool
 			Expect(updatedRSC.Spec.Storage.Type).To(Equal(v1alpha1.ReplicatedStoragePoolTypeLVM))
 			Expect(updatedRSC.Spec.Storage.LVMVolumeGroups).To(HaveLen(1))
 			Expect(updatedRSC.Spec.Storage.LVMVolumeGroups[0].Name).To(Equal("lvg-existing"))

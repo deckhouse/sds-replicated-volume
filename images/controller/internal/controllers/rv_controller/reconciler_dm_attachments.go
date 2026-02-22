@@ -106,7 +106,7 @@ type attachmentState struct {
 
 	// Pointer into rv.Status.Datamesh.Members. nil = no member on this node.
 	// Mutations (member.Attached) go through this pointer.
-	member *v1alpha1.ReplicatedVolumeDatameshMember
+	member *v1alpha1.DatameshMember
 
 	// Pointer into rvrs slice. nil = no RVR found for this node's member.
 	// Read-only — any RVR field available without extra lookups.
@@ -162,12 +162,12 @@ func buildAttachmentsSummary(
 	rvas []*v1alpha1.ReplicatedVolumeAttachment,
 ) *attachmentsSummary {
 	// Sort members by NodeName for merge. Stack-allocated array avoids heap allocation.
-	var sortedMembers [32]*v1alpha1.ReplicatedVolumeDatameshMember
+	var sortedMembers [32]*v1alpha1.DatameshMember
 	numMembers := min(len(rv.Status.Datamesh.Members), 32)
 	for i := range numMembers {
 		sortedMembers[i] = &rv.Status.Datamesh.Members[i]
 	}
-	slices.SortFunc(sortedMembers[:numMembers], func(a, b *v1alpha1.ReplicatedVolumeDatameshMember) int {
+	slices.SortFunc(sortedMembers[:numMembers], func(a, b *v1alpha1.DatameshMember) int {
 		return cmp.Compare(a.NodeName, b.NodeName)
 	})
 
@@ -628,9 +628,9 @@ func ensureDatameshMultiattachTransitionProgress(
 			continue
 		}
 
-		// Must be confirmed by all Diskful members + any potentially-attached member.
-		mustConfirm := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.ReplicatedVolumeDatameshMember) bool {
-			return m.Type == v1alpha1.ReplicaTypeDiskful || m.Attached
+		// Must be confirmed by all members that have a backing volume + any potentially-attached member.
+		mustConfirm := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
+			return m.Type.HasBackingVolume() || m.Attached
 		}).Union(atts.potentiallyAttached)
 
 		// Completion: all required members confirmed revision.
@@ -866,9 +866,9 @@ func ensureDatameshAttachTransitions(
 			continue
 		}
 
-		// Guard: VolumeAccess=Local requires a Diskful member on this node.
+		// Guard: VolumeAccess=Local requires a member with backing volume on this node.
 		if rv.Status.Configuration.VolumeAccess == v1alpha1.VolumeAccessLocal &&
-			as.member.Type != v1alpha1.ReplicaTypeDiskful {
+			!as.member.Type.HasBackingVolume() {
 			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonVolumeAccessLocalityNotSatisfied
 			as.conditionMessage = fmt.Sprintf(
 				"No Diskful replica on this node (volumeAccess is Local for storage class %s)",

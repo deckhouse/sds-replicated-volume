@@ -84,7 +84,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Reconcile migration from RSP (deprecated storagePool field).
-	if rsc.Spec.StoragePool != "" {
+	if rsc.Spec.StoragePool != "" { //nolint:staticcheck // SA1019: migration from deprecated StoragePool
 		if outcome := r.reconcileMigrationFromRSP(rf.Ctx(), rsc); outcome.ShouldReturn() {
 			return outcome.ToCtrl()
 		}
@@ -191,10 +191,10 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 ) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "migration-from-rsp", "rsp", rsc.Spec.StoragePool)
+	rf := flow.BeginReconcile(ctx, "migration-from-rsp", "rsp", rsc.Spec.StoragePool) //nolint:staticcheck // SA1019: migration from deprecated StoragePool
 	defer rf.OnEnd(&outcome)
 
-	rsp, err := r.getRSP(rf.Ctx(), rsc.Spec.StoragePool)
+	rsp, err := r.getRSP(rf.Ctx(), rsc.Spec.StoragePool) //nolint:staticcheck // SA1019: migration from deprecated StoragePool
 	if err != nil {
 		return rf.Fail(err)
 	}
@@ -204,10 +204,10 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 		base := rsc.DeepCopy()
 		changed := applyReadyCondFalse(rsc,
 			v1alpha1.ReplicatedStorageClassCondReadyReasonWaitingForStoragePool,
-			fmt.Sprintf("Cannot migrate from storagePool field: ReplicatedStoragePool %q not found", rsc.Spec.StoragePool))
+			fmt.Sprintf("Cannot migrate from storagePool field: ReplicatedStoragePool %q not found", rsc.Spec.StoragePool)) //nolint:staticcheck // SA1019: migration from deprecated StoragePool
 		changed = applyStoragePoolReadyCondFalse(rsc,
 			v1alpha1.ReplicatedStorageClassCondStoragePoolReadyReasonStoragePoolNotFound,
-			fmt.Sprintf("ReplicatedStoragePool %q not found", rsc.Spec.StoragePool)) || changed
+			fmt.Sprintf("ReplicatedStoragePool %q not found", rsc.Spec.StoragePool)) || changed //nolint:staticcheck // SA1019: migration from deprecated StoragePool
 		if changed {
 			if err := r.patchRSCStatus(rf.Ctx(), rsc, base); err != nil {
 				return rf.Fail(err)
@@ -227,7 +227,7 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 		Type:            rsp.Spec.Type,
 		LVMVolumeGroups: lvmVolumeGroups,
 	}
-	rsc.Spec.StoragePool = ""
+	rsc.Spec.StoragePool = "" //nolint:staticcheck // SA1019: migration from deprecated StoragePool
 
 	if err := r.patchRSC(rf.Ctx(), rsc, base); err != nil {
 		return rf.Fail(err)

@@ -387,9 +387,17 @@ func (p ReplicatedVolumeReplicaStatusPeerStatus) ID() uint8 {
 }
 
 // ReplicatedVolumeReplicaStatusDRBDRReconciliationCache holds cached values used to optimize DRBDResource reconciliation.
-// These fields track the TARGET configuration that was last computed for DRBDR spec,
-// NOT the actual state that DRBDR has applied. They allow the controller to skip
-// redundant spec comparisons when the input parameters have not changed.
+// ReplicatedVolumeReplicaStatusDRBDRReconciliationCache is a composite cache key
+// used to skip redundant DRBDResource spec recomputations. The fields together
+// capture the inputs that determine the DRBDR spec:
+//   - DatameshRevision — peer topology (membership, connectivity);
+//   - DRBDRGeneration  — external modifications to DRBDR;
+//   - TargetType       — local resource configuration (disk mode, spec.type changes).
+//
+// When any field changes, the controller recomputes and potentially patches the
+// DRBDR spec. Note: the cache is populated even before the replica becomes a
+// datamesh member; in that case the DRBDR is only partially configured (no peer
+// connections), and DatameshRevision / TargetType reflect the partial inputs.
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeReplicaStatusDRBDRReconciliationCache struct {
 	// DatameshRevision is the datamesh revision for which DRBDResource spec was last computed.
@@ -398,9 +406,9 @@ type ReplicatedVolumeReplicaStatusDRBDRReconciliationCache struct {
 	// DRBDRGeneration is the DRBDResource generation at the time DRBDResource spec was last computed.
 	DRBDRGeneration int64 `json:"drbdrGeneration,omitempty"`
 
-	// RVRType is the effective replica type for which DRBDResource spec was last computed.
-	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
-	RVRType ReplicaType `json:"rvrType,omitempty"`
+	// TargetType is the target type for which DRBDResource spec was last computed.
+	// +kubebuilder:validation:Enum=Diskful;LiminalDiskful;TieBreaker;Access
+	TargetType DatameshMemberType `json:"targetType,omitempty"`
 }
 
 // ReplicatedVolumeReplicaStatusDatameshPendingTransition describes pending datamesh changes for this replica.

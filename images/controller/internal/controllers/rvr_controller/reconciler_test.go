@@ -313,8 +313,8 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
-		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rvr-1", Type: v1alpha1.ReplicaTypeAccess},
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
+			{Name: "rvr-1", Type: v1alpha1.DatameshMemberTypeAccess},
 		}
 
 		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
@@ -322,32 +322,14 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
 	})
 
-	It("returns nil for datamesh member with TypeTransition=ToDiskless", func() {
+	It("returns backing volume for liminal Diskful datamesh member", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
-		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
-			{
-				Name:           "rvr-1",
-				Type:           v1alpha1.ReplicaTypeDiskful,
-				TypeTransition: v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskless,
-			},
-		}
-
-		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
-		Expect(intended).To(BeNil())
-		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
-	})
-
-	It("returns backing volume for datamesh member with TypeTransition=ToDiskful", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-		}
-		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
 			{
 				Name:               "rvr-1",
-				Type:               v1alpha1.ReplicaTypeTieBreaker,
-				TypeTransition:     v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskful,
+				Type:               v1alpha1.DatameshMemberTypeLiminalDiskful,
 				LVMVolumeGroupName: "lvg-1",
 			},
 		}
@@ -363,8 +345,8 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
-		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rvr-1", Type: v1alpha1.ReplicaTypeDiskful, LVMVolumeGroupName: ""},
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
+			{Name: "rvr-1", Type: v1alpha1.DatameshMemberTypeDiskful, LVMVolumeGroupName: ""},
 		}
 
 		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
@@ -376,10 +358,10 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
-		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
 			{
 				Name:               "rvr-1",
-				Type:               v1alpha1.ReplicaTypeDiskful,
+				Type:               v1alpha1.DatameshMemberTypeDiskful,
 				LVMVolumeGroupName: "lvg-1",
 			},
 		}
@@ -398,10 +380,10 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
-		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
 			{
 				Name:                       "rvr-1",
-				Type:                       v1alpha1.ReplicaTypeDiskful,
+				Type:                       v1alpha1.DatameshMemberTypeDiskful,
 				LVMVolumeGroupName:         "lvg-1",
 				LVMVolumeGroupThinPoolName: "thinpool-1",
 			},
@@ -418,10 +400,10 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
-		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
 			{
 				Name:               "rvr-1",
-				Type:               v1alpha1.ReplicaTypeDiskful,
+				Type:               v1alpha1.DatameshMemberTypeDiskful,
 				LVMVolumeGroupName: "lvg-1",
 			},
 		}
@@ -528,10 +510,10 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
-		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
 			{
 				Name:               "rvr-1",
-				Type:               v1alpha1.ReplicaTypeDiskful,
+				Type:               v1alpha1.DatameshMemberTypeDiskful,
 				LVMVolumeGroupName: "lvg-1",
 			},
 		}
@@ -551,10 +533,10 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		}
-		rv.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
 			{
 				Name:               "rvr-1",
-				Type:               v1alpha1.ReplicaTypeDiskful,
+				Type:               v1alpha1.DatameshMemberTypeDiskful,
 				LVMVolumeGroupName: "lvg-new",
 			},
 		}
@@ -2833,7 +2815,7 @@ var _ = Describe("computeIntendedType", func() {
 
 		result := computeIntendedType(rvr, nil)
 
-		Expect(result).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(result).To(Equal(v1alpha1.DatameshMemberTypeDiskful))
 	})
 
 	It("returns Diskless from RVR spec when member is nil", func() {
@@ -2845,86 +2827,47 @@ var _ = Describe("computeIntendedType", func() {
 
 		result := computeIntendedType(rvr, nil)
 
-		Expect(result).To(Equal(v1alpha1.ReplicaTypeAccess))
+		Expect(result).To(Equal(v1alpha1.DatameshMemberTypeAccess))
 	})
 
 	It("returns member type when no transition", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Type: v1alpha1.ReplicaTypeDiskful,
+		member := &v1alpha1.DatameshMember{
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		result := computeIntendedType(rvr, member)
 
-		Expect(result).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(result).To(Equal(v1alpha1.DatameshMemberTypeDiskful))
 	})
 
-	It("returns TieBreaker during Diskful to Diskless transition", func() {
+	It("returns LiminalDiskful for liminal Diskful member", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Type:           v1alpha1.ReplicaTypeDiskful,
-			TypeTransition: v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskless,
+		member := &v1alpha1.DatameshMember{
+			Type: v1alpha1.DatameshMemberTypeLiminalDiskful,
 		}
 
 		result := computeIntendedType(rvr, member)
 
-		Expect(result).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
-	})
-
-	It("returns member type during non-ToDiskless transition", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
-			Type:           v1alpha1.ReplicaTypeTieBreaker,
-			TypeTransition: v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskful,
-		}
-
-		result := computeIntendedType(rvr, member)
-
-		Expect(result).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
-	})
-})
-
-var _ = Describe("computeTargetType", func() {
-	It("returns intended type when target LLV name is present", func() {
-		result := computeTargetType(v1alpha1.ReplicaTypeDiskful, "llv-1")
-
-		Expect(result).To(Equal(v1alpha1.ReplicaTypeDiskful))
-	})
-
-	It("returns TieBreaker when intended is Diskful but no backing volume", func() {
-		result := computeTargetType(v1alpha1.ReplicaTypeDiskful, "")
-
-		Expect(result).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
-	})
-
-	It("returns intended type when intended is not Diskful and no backing volume", func() {
-		result := computeTargetType(v1alpha1.ReplicaTypeAccess, "")
-
-		Expect(result).To(Equal(v1alpha1.ReplicaTypeAccess))
-	})
-
-	It("returns TieBreaker type as-is when no backing volume", func() {
-		result := computeTargetType(v1alpha1.ReplicaTypeTieBreaker, "")
-
-		Expect(result).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
+		Expect(result).To(Equal(v1alpha1.DatameshMemberTypeLiminalDiskful))
 	})
 })
 
 var _ = Describe("computeDRBDRType", func() {
 	It("converts Diskful to DRBDResourceTypeDiskful", func() {
-		result := computeDRBDRType(v1alpha1.ReplicaTypeDiskful)
+		result := computeDRBDRType(v1alpha1.DatameshMemberTypeDiskful)
 
 		Expect(result).To(Equal(v1alpha1.DRBDResourceTypeDiskful))
 	})
 
 	It("converts Access to DRBDResourceTypeDiskless", func() {
-		result := computeDRBDRType(v1alpha1.ReplicaTypeAccess)
+		result := computeDRBDRType(v1alpha1.DatameshMemberTypeAccess)
 
 		Expect(result).To(Equal(v1alpha1.DRBDResourceTypeDiskless))
 	})
 
 	It("converts TieBreaker to DRBDResourceTypeDiskless", func() {
-		result := computeDRBDRType(v1alpha1.ReplicaTypeTieBreaker)
+		result := computeDRBDRType(v1alpha1.DatameshMemberTypeTieBreaker)
 
 		Expect(result).To(Equal(v1alpha1.DRBDResourceTypeDiskless))
 	})
@@ -2942,7 +2885,7 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 			SystemNetworkNames: []string{"net-1"},
 		}
 
-		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.DatameshMemberType(rvr.Spec.Type))
 
 		Expect(spec.NodeName).To(Equal("node-1"))
 		Expect(spec.NodeID).To(Equal(uint8(1)))
@@ -2965,21 +2908,25 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 			SystemNetworkNames: []string{"net-1"},
 		}
 
-		spec := computeTargetDRBDRSpec(rvr, drbdr, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+		spec := computeTargetDRBDRSpec(rvr, drbdr, datamesh, nil, "", v1alpha1.DatameshMemberType(rvr.Spec.Type))
 
 		Expect(spec.NodeName).To(Equal("existing-node"))
 		Expect(spec.NodeID).To(Equal(uint8(99)))
 	})
 
-	It("sets Type based on targetType", func() {
-		rvr := &v1alpha1.ReplicatedVolumeReplica{
+	It("sets Type based on intended replica type", func() {
+		rvrDiskful := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
-			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1", Type: v1alpha1.ReplicaTypeDiskful},
+		}
+		rvrAccess := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1", Type: v1alpha1.ReplicaTypeAccess},
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{}
 
-		specDiskful := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "llv-1", v1alpha1.ReplicaTypeDiskful)
-		specDiskless := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+		specDiskful := computeTargetDRBDRSpec(rvrDiskful, nil, datamesh, nil, "llv-1", v1alpha1.DatameshMemberTypeDiskful)
+		specDiskless := computeTargetDRBDRSpec(rvrAccess, nil, datamesh, nil, "", v1alpha1.DatameshMemberTypeAccess)
 
 		Expect(specDiskful.Type).To(Equal(v1alpha1.DRBDResourceTypeDiskful))
 		Expect(specDiskless.Type).To(Equal(v1alpha1.DRBDResourceTypeDiskless))
@@ -2988,13 +2935,13 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 	It("sets LVMLogicalVolumeName and Size for Diskful type", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
-			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1", Type: v1alpha1.ReplicaTypeDiskful},
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
 			Size: resource.MustParse("10Gi"),
 		}
 
-		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "llv-1", v1alpha1.ReplicaTypeDiskful)
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "llv-1", v1alpha1.DatameshMemberTypeDiskful)
 
 		Expect(spec.LVMLogicalVolumeName).To(Equal("llv-1"))
 		Expect(spec.Size).NotTo(BeNil())
@@ -3010,7 +2957,7 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 			Size: resource.MustParse("10Gi"),
 		}
 
-		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.DatameshMemberType(rvr.Spec.Type))
 
 		Expect(spec.LVMLogicalVolumeName).To(BeEmpty())
 		Expect(spec.Size).To(BeNil())
@@ -3023,7 +2970,7 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{}
 
-		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.DatameshMemberType(rvr.Spec.Type))
 
 		Expect(spec.Role).To(Equal(v1alpha1.DRBDRoleSecondary))
 	})
@@ -3035,7 +2982,7 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{}
 
-		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.DatameshMemberType(rvr.Spec.Type))
 
 		Expect(spec.Peers).To(BeNil())
 	})
@@ -3046,12 +2993,12 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name:     "pvc-abc-1",
 			Attached: true,
 		}
 
-		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "", v1alpha1.ReplicaTypeAccess)
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "", member.Type)
 
 		Expect(spec.Role).To(Equal(v1alpha1.DRBDRolePrimary))
 	})
@@ -3064,11 +3011,11 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
 			Multiattach: true,
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "pvc-abc-1",
 		}
 
-		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "", v1alpha1.ReplicaTypeAccess)
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "", member.Type)
 
 		Expect(spec.AllowTwoPrimaries).To(BeTrue())
 	})
@@ -3081,11 +3028,11 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
 			Multiattach: false,
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "pvc-abc-1",
 		}
 
-		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "", v1alpha1.ReplicaTypeAccess)
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "", member.Type)
 
 		Expect(spec.AllowTwoPrimaries).To(BeFalse())
 	})
@@ -3093,17 +3040,18 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 	It("sets quorum from datamesh for diskful member", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
-			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1", Type: v1alpha1.ReplicaTypeDiskful},
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
 			Quorum:                  3,
 			QuorumMinimumRedundancy: 2,
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "pvc-abc-1",
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 
-		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "llv-1", v1alpha1.ReplicaTypeDiskful)
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "llv-1", v1alpha1.DatameshMemberTypeDiskful)
 
 		Expect(spec.Quorum).To(Equal(byte(3)))
 		Expect(spec.QuorumMinimumRedundancy).To(Equal(byte(2)))
@@ -3118,11 +3066,11 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 			Quorum:                  3,
 			QuorumMinimumRedundancy: 2,
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "pvc-abc-1",
 		}
 
-		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "", v1alpha1.ReplicaTypeAccess)
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "", member.Type)
 
 		Expect(spec.Quorum).To(Equal(byte(32)))
 		Expect(spec.QuorumMinimumRedundancy).To(Equal(byte(2)))
@@ -3138,7 +3086,7 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 			QuorumMinimumRedundancy: 2,
 		}
 
-		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.DatameshMemberType(rvr.Spec.Type))
 
 		Expect(spec.Quorum).To(Equal(byte(32)))
 		Expect(spec.QuorumMinimumRedundancy).To(Equal(byte(32)))
@@ -3153,7 +3101,7 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 			SystemNetworkNames: []string{"net-1", "net-2"},
 		}
 
-		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.DatameshMemberType(rvr.Spec.Type))
 
 		Expect(spec.SystemNetworks).To(Equal([]string{"net-1", "net-2"}))
 		// Verify no aliasing: mutating the result should not affect datamesh.
@@ -3168,7 +3116,7 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{}
 
-		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.ReplicaTypeAccess)
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, nil, "", v1alpha1.DatameshMemberType(rvr.Spec.Type))
 
 		Expect(spec.State).To(Equal(v1alpha1.DRBDResourceStateUp))
 	})
@@ -3177,8 +3125,8 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 var _ = Describe("computeTargetDRBDRPeers", func() {
 	It("returns nil when datamesh has single member", func() {
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.DatameshMemberTypeDiskful},
 			},
 		}
 		self := &datamesh.Members[0]
@@ -3190,9 +3138,9 @@ var _ = Describe("computeTargetDRBDRPeers", func() {
 
 	It("excludes self from peers", func() {
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.DatameshMemberTypeDiskful},
 			},
 		}
 		self := &datamesh.Members[0]
@@ -3205,10 +3153,10 @@ var _ = Describe("computeTargetDRBDRPeers", func() {
 
 	It("Diskful connects to all peers", func() {
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "pvc-abc-3", Type: v1alpha1.ReplicaTypeAccess},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "pvc-abc-3", Type: v1alpha1.DatameshMemberTypeAccess},
 			},
 		}
 		self := &datamesh.Members[0]
@@ -3220,10 +3168,10 @@ var _ = Describe("computeTargetDRBDRPeers", func() {
 
 	It("Access connects only to Diskful peers", func() {
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeAccess},
-				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "pvc-abc-3", Type: v1alpha1.ReplicaTypeAccess},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.DatameshMemberTypeAccess},
+				{Name: "pvc-abc-2", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "pvc-abc-3", Type: v1alpha1.DatameshMemberTypeAccess},
 			},
 		}
 		self := &datamesh.Members[0]
@@ -3234,12 +3182,12 @@ var _ = Describe("computeTargetDRBDRPeers", func() {
 		Expect(peers[0].Name).To(Equal("pvc-abc-2"))
 	})
 
-	It("TieBreaker transitioning ToDiskful connects to all peers like Diskful", func() {
+	It("liminal Diskful connects to all peers like regular Diskful", func() {
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeTieBreaker, TypeTransition: v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskful},
-				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "pvc-abc-3", Type: v1alpha1.ReplicaTypeAccess},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.DatameshMemberTypeLiminalDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "pvc-abc-3", Type: v1alpha1.DatameshMemberTypeAccess},
 			},
 		}
 		self := &datamesh.Members[0]
@@ -3249,11 +3197,11 @@ var _ = Describe("computeTargetDRBDRPeers", func() {
 		Expect(peers).To(HaveLen(2))
 	})
 
-	It("Access connects to TieBreaker transitioning ToDiskful as Diskful peer", func() {
+	It("Access connects to liminal Diskful as Diskful peer", func() {
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeAccess},
-				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeTieBreaker, TypeTransition: v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskful},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.DatameshMemberTypeAccess},
+				{Name: "pvc-abc-2", Type: v1alpha1.DatameshMemberTypeLiminalDiskful},
 			},
 		}
 		self := &datamesh.Members[0]
@@ -3267,9 +3215,9 @@ var _ = Describe("computeTargetDRBDRPeers", func() {
 
 	It("sets AllowRemoteRead to false for Access peers", func() {
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeAccess},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.DatameshMemberTypeAccess},
 			},
 		}
 		self := &datamesh.Members[0]
@@ -3282,9 +3230,9 @@ var _ = Describe("computeTargetDRBDRPeers", func() {
 
 	It("sets AllowRemoteRead to true for non-Access peers", func() {
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.DatameshMemberTypeDiskful},
 			},
 		}
 		self := &datamesh.Members[0]
@@ -3299,9 +3247,9 @@ var _ = Describe("computeTargetDRBDRPeers", func() {
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
 			SharedSecret:    "secret123",
 			SharedSecretAlg: v1alpha1.SharedSecretAlgSHA256,
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.DatameshMemberTypeDiskful},
 			},
 		}
 		self := &datamesh.Members[0]
@@ -3314,9 +3262,9 @@ var _ = Describe("computeTargetDRBDRPeers", func() {
 
 	It("builds peer paths from member addresses", func() {
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful, Addresses: []v1alpha1.DRBDResourceAddressStatus{
+			Members: []v1alpha1.DatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.DatameshMemberTypeDiskful, Addresses: []v1alpha1.DRBDResourceAddressStatus{
 					{SystemNetworkName: "net-1", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
 				}},
 			},
@@ -3331,11 +3279,11 @@ var _ = Describe("computeTargetDRBDRPeers", func() {
 
 	It("sorts peers by Name for deterministic output", func() {
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "pvc-abc-4", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "pvc-abc-3", Type: v1alpha1.ReplicaTypeDiskful},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "pvc-abc-4", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "pvc-abc-3", Type: v1alpha1.DatameshMemberTypeDiskful},
 			},
 		}
 		self := &datamesh.Members[0]
@@ -3350,10 +3298,10 @@ var _ = Describe("computeTargetDRBDRPeers", func() {
 
 	It("sets Protocol to C for all peers", func() {
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "pvc-abc-1", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "pvc-abc-2", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "pvc-abc-3", Type: v1alpha1.ReplicaTypeTieBreaker},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "pvc-abc-3", Type: v1alpha1.DatameshMemberTypeTieBreaker},
 			},
 		}
 		self := &datamesh.Members[0]
@@ -3404,21 +3352,21 @@ var _ = Describe("applyDRBDConfiguredCondTrue", func() {
 	})
 })
 
-var _ = Describe("computeTargetDRBDRReconciliationCache", func() {
+var _ = Describe("newDRBDRReconciliationCache", func() {
 	It("returns cache with provided values", func() {
-		cache := computeTargetDRBDRReconciliationCache(5, 3, v1alpha1.ReplicaTypeDiskful)
+		cache := newDRBDRReconciliationCache(5, 3, v1alpha1.DatameshMemberTypeDiskful)
 
 		Expect(cache.DatameshRevision).To(Equal(int64(5)))
 		Expect(cache.DRBDRGeneration).To(Equal(int64(3)))
-		Expect(cache.RVRType).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(cache.TargetType).To(Equal(v1alpha1.DatameshMemberTypeDiskful))
 	})
 
 	It("handles zero values", func() {
-		cache := computeTargetDRBDRReconciliationCache(0, 0, "")
+		cache := newDRBDRReconciliationCache(0, 0, "")
 
 		Expect(cache.DatameshRevision).To(Equal(int64(0)))
 		Expect(cache.DRBDRGeneration).To(Equal(int64(0)))
-		Expect(cache.RVRType).To(Equal(v1alpha1.ReplicaType("")))
+		Expect(cache.TargetType).To(Equal(v1alpha1.DatameshMemberType("")))
 	})
 })
 
@@ -3430,7 +3378,7 @@ var _ = Describe("applyRVRDRBDRReconciliationCache", func() {
 		target := v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 			DatameshRevision: 5,
 			DRBDRGeneration:  3,
-			RVRType:          v1alpha1.ReplicaTypeDiskful,
+			TargetType:       v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		changed := applyRVRDRBDRReconciliationCache(rvr, target)
@@ -3443,7 +3391,7 @@ var _ = Describe("applyRVRDRBDRReconciliationCache", func() {
 		target := v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 			DatameshRevision: 5,
 			DRBDRGeneration:  3,
-			RVRType:          v1alpha1.ReplicaTypeDiskful,
+			TargetType:       v1alpha1.DatameshMemberTypeDiskful,
 		}
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
@@ -3464,14 +3412,14 @@ var _ = Describe("applyRVRDRBDRReconciliationCache", func() {
 				DRBDRReconciliationCache: v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 					DatameshRevision: 4,
 					DRBDRGeneration:  3,
-					RVRType:          v1alpha1.ReplicaTypeDiskful,
+					TargetType:       v1alpha1.DatameshMemberTypeDiskful,
 				},
 			},
 		}
 		target := v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 			DatameshRevision: 5,
 			DRBDRGeneration:  3,
-			RVRType:          v1alpha1.ReplicaTypeDiskful,
+			TargetType:       v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		changed := applyRVRDRBDRReconciliationCache(rvr, target)
@@ -3487,14 +3435,14 @@ var _ = Describe("applyRVRDRBDRReconciliationCache", func() {
 				DRBDRReconciliationCache: v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 					DatameshRevision: 5,
 					DRBDRGeneration:  2,
-					RVRType:          v1alpha1.ReplicaTypeDiskful,
+					TargetType:       v1alpha1.DatameshMemberTypeDiskful,
 				},
 			},
 		}
 		target := v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 			DatameshRevision: 5,
 			DRBDRGeneration:  3,
-			RVRType:          v1alpha1.ReplicaTypeDiskful,
+			TargetType:       v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		changed := applyRVRDRBDRReconciliationCache(rvr, target)
@@ -3510,14 +3458,14 @@ var _ = Describe("applyRVRDRBDRReconciliationCache", func() {
 				DRBDRReconciliationCache: v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 					DatameshRevision: 5,
 					DRBDRGeneration:  3,
-					RVRType:          v1alpha1.ReplicaTypeAccess,
+					TargetType:       v1alpha1.DatameshMemberTypeAccess,
 				},
 			},
 		}
 		target := v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 			DatameshRevision: 5,
 			DRBDRGeneration:  3,
-			RVRType:          v1alpha1.ReplicaTypeDiskful,
+			TargetType:       v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		changed := applyRVRDRBDRReconciliationCache(rvr, target)
@@ -3533,7 +3481,7 @@ var _ = Describe("applyRVRDRBDRReconciliationCache", func() {
 				DRBDRReconciliationCache: v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 					DatameshRevision: 5,
 					DRBDRGeneration:  3,
-					RVRType:          v1alpha1.ReplicaTypeDiskful,
+					TargetType:       v1alpha1.DatameshMemberTypeDiskful,
 				},
 			},
 		}
@@ -4301,7 +4249,7 @@ var _ = Describe("patchRVRStatus", func() {
 		rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
 		base := rvr.DeepCopy()
-		rvr.Status.DRBDRReconciliationCache.RVRType = v1alpha1.ReplicaTypeDiskful
+		rvr.Status.DRBDRReconciliationCache.TargetType = v1alpha1.DatameshMemberTypeDiskful
 
 		err := rec.patchRVRStatus(ctx, rvr, base)
 
@@ -4310,7 +4258,7 @@ var _ = Describe("patchRVRStatus", func() {
 		// Verify status was updated
 		var updated v1alpha1.ReplicatedVolumeReplica
 		Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, &updated)).To(Succeed())
-		Expect(updated.Status.DRBDRReconciliationCache.RVRType).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(updated.Status.DRBDRReconciliationCache.TargetType).To(Equal(v1alpha1.DatameshMemberTypeDiskful))
 	})
 })
 
@@ -4747,10 +4695,10 @@ var _ = Describe("Reconciler", func() {
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{
 								Name:               "rvr-1",
-								Type:               v1alpha1.ReplicaTypeDiskful,
+								Type:               v1alpha1.DatameshMemberTypeDiskful,
 								LVMVolumeGroupName: "lvg-1",
 							},
 						},
@@ -4798,10 +4746,10 @@ var _ = Describe("Reconciler", func() {
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{
 								Name:               "rvr-1",
-								Type:               v1alpha1.ReplicaTypeDiskful,
+								Type:               v1alpha1.DatameshMemberTypeDiskful,
 								LVMVolumeGroupName: "lvg-1",
 							},
 						},
@@ -4847,10 +4795,10 @@ var _ = Describe("Reconciler", func() {
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{
 								Name: "rvr-1",
-								Type: v1alpha1.ReplicaTypeAccess, // Diskless
+								Type: v1alpha1.DatameshMemberTypeAccess, // Diskless
 							},
 						},
 					},
@@ -4905,10 +4853,10 @@ var _ = Describe("Reconciler", func() {
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{
 								Name:               "rvr-1",
-								Type:               v1alpha1.ReplicaTypeDiskful,
+								Type:               v1alpha1.DatameshMemberTypeDiskful,
 								LVMVolumeGroupName: "lvg-1",
 							},
 						},
@@ -4981,10 +4929,10 @@ var _ = Describe("Reconciler", func() {
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{
 								Name:               "rvr-1",
-								Type:               v1alpha1.ReplicaTypeDiskful,
+								Type:               v1alpha1.DatameshMemberTypeDiskful,
 								LVMVolumeGroupName: "lvg-2", // Changed LVG
 							},
 						},
@@ -5296,10 +5244,10 @@ var _ = Describe("Reconciler", func() {
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{
 								Name:               "rvr-1",
-								Type:               v1alpha1.ReplicaTypeDiskful,
+								Type:               v1alpha1.DatameshMemberTypeDiskful,
 								LVMVolumeGroupName: "lvg-1",
 							},
 						},
@@ -5419,10 +5367,10 @@ var _ = Describe("Reconciler", func() {
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{
 								Name:               "rvr-1",
-								Type:               v1alpha1.ReplicaTypeDiskful,
+								Type:               v1alpha1.DatameshMemberTypeDiskful,
 								LVMVolumeGroupName: "lvg-1",
 							},
 						},
@@ -5515,10 +5463,10 @@ var _ = Describe("Reconciler", func() {
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{
 								Name:               "rvr-1",
-								Type:               v1alpha1.ReplicaTypeDiskful,
+								Type:               v1alpha1.DatameshMemberTypeDiskful,
 								LVMVolumeGroupName: "lvg-1",
 							},
 						},
@@ -5596,10 +5544,10 @@ var _ = Describe("Reconciler", func() {
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("20Gi"), // Larger than LLV actual size
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{
 								Name:               "rvr-1",
-								Type:               v1alpha1.ReplicaTypeDiskful,
+								Type:               v1alpha1.DatameshMemberTypeDiskful,
 								LVMVolumeGroupName: "lvg-1",
 							},
 						},
@@ -5675,18 +5623,17 @@ var _ = Describe("Reconciler", func() {
 			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizing))
 		})
 
-		It("deletes LLV when datamesh member has TypeTransition=ToDiskless", func() {
+		It("keeps LLV when datamesh member is liminal Diskful", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{
 								Name:               "rvr-1",
-								Type:               v1alpha1.ReplicaTypeDiskful,
-								TypeTransition:     v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskless,
+								Type:               v1alpha1.DatameshMemberTypeLiminalDiskful,
 								LVMVolumeGroupName: "lvg-1",
 							},
 						},
@@ -5747,18 +5694,10 @@ var _ = Describe("Reconciler", func() {
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
 			Expect(err).NotTo(HaveOccurred())
 
-			// Verify LLV was deleted (TypeTransition=ToDiskless triggers deletion)
+			// Verify LLV is retained (liminal members keep their backing volume)
 			var llvList snc.LVMLogicalVolumeList
 			Expect(cl.List(ctx, &llvList)).To(Succeed())
-			Expect(llvList.Items).To(BeEmpty())
-
-			// Verify BackingVolumeReady condition is set with NotApplicable reason
-			var updatedRVR v1alpha1.ReplicatedVolumeReplica
-			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, &updatedRVR)).To(Succeed())
-			cond := obju.GetStatusCondition(&updatedRVR, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
-			Expect(cond).NotTo(BeNil())
-			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
+			Expect(llvList.Items).NotTo(BeEmpty())
 		})
 
 		It("creates new LLV during reprovisioning (LVG change via datamesh member) and sets Reprovisioning condition", func() {
@@ -5768,10 +5707,10 @@ var _ = Describe("Reconciler", func() {
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{
 								Name:               "rvr-1",
-								Type:               v1alpha1.ReplicaTypeDiskful,
+								Type:               v1alpha1.DatameshMemberTypeDiskful,
 								LVMVolumeGroupName: "lvg-2", // Changed from lvg-1 to lvg-2
 							},
 						},
@@ -5899,11 +5838,11 @@ var _ = Describe("Reconciler", func() {
 					},
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							// rvr-1 is NOT in members - only other-rvr is
 							{
 								Name:               "other-rvr",
-								Type:               v1alpha1.ReplicaTypeDiskful,
+								Type:               v1alpha1.DatameshMemberTypeDiskful,
 								LVMVolumeGroupName: "lvg-other",
 							},
 						},
@@ -6090,10 +6029,10 @@ var _ = Describe("Reconciler", func() {
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{
 								Name:               "rvr-1",
-								Type:               v1alpha1.ReplicaTypeDiskful,
+								Type:               v1alpha1.DatameshMemberTypeDiskful,
 								LVMVolumeGroupName: "lvg-1",
 							},
 						},
@@ -6232,10 +6171,10 @@ var _ = Describe("Reconciler", func() {
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{
 								Name:               "rvr-1",
-								Type:               v1alpha1.ReplicaTypeDiskful,
+								Type:               v1alpha1.DatameshMemberTypeDiskful,
 								LVMVolumeGroupName: "lvg-1",
 							},
 						},
@@ -6320,10 +6259,10 @@ var _ = Describe("Reconciler", func() {
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{
 								Name:               "rvr-1",
-								Type:               v1alpha1.ReplicaTypeDiskful,
+								Type:               v1alpha1.DatameshMemberTypeDiskful,
 								LVMVolumeGroupName: "lvg-1",
 							},
 						},
@@ -6409,10 +6348,10 @@ var _ = Describe("Reconciler", func() {
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{
 								Name:               "rvr-1",
-								Type:               v1alpha1.ReplicaTypeDiskful,
+								Type:               v1alpha1.DatameshMemberTypeDiskful,
 								LVMVolumeGroupName: "lvg-1",
 							},
 						},
@@ -6493,10 +6432,10 @@ var _ = Describe("Reconciler", func() {
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("10Gi"),
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{
 								Name:               "rvr-1",
-								Type:               v1alpha1.ReplicaTypeDiskful,
+								Type:               v1alpha1.DatameshMemberTypeDiskful,
 								LVMVolumeGroupName: "lvg-1",
 							},
 						},
@@ -6573,10 +6512,10 @@ var _ = Describe("Reconciler", func() {
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Size: resource.MustParse("20Gi"), // Larger than actual
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{
 								Name:               "rvr-1",
-								Type:               v1alpha1.ReplicaTypeDiskful,
+								Type:               v1alpha1.DatameshMemberTypeDiskful,
 								LVMVolumeGroupName: "lvg-1",
 							},
 						},
@@ -7850,7 +7789,7 @@ var _ = Describe("ensureConditionAttached", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Attached: false,
 		}
 
@@ -7868,7 +7807,7 @@ var _ = Describe("ensureConditionAttached", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Attached: true,
 		}
 
@@ -7889,7 +7828,7 @@ var _ = Describe("ensureConditionAttached", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Attached: true,
 		}
 
@@ -7910,7 +7849,7 @@ var _ = Describe("ensureConditionAttached", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Attached: true,
 		}
 
@@ -7933,7 +7872,7 @@ var _ = Describe("ensureConditionAttached", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Attached: false,
 		}
 
@@ -7956,7 +7895,7 @@ var _ = Describe("ensureConditionAttached", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Attached: true,
 		}
 
@@ -7979,7 +7918,7 @@ var _ = Describe("ensureConditionAttached", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Attached: true,
 		}
 
@@ -8003,7 +7942,7 @@ var _ = Describe("ensureConditionAttached", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Attached: true,
 		}
 
@@ -8329,7 +8268,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 			},
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+			Members: []v1alpha1.DatameshMember{
 				{Name: "other-rvr"}, // rvr-1 is not a member
 			},
 		}
@@ -8352,7 +8291,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 			},
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+			Members: []v1alpha1.DatameshMember{
 				{Name: "peer-1"},
 				{Name: "rvr-1"}, // self is member
 			},
@@ -8382,7 +8321,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 			},
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+			Members: []v1alpha1.DatameshMember{
 				{Name: "rvr-1"}, // only self, no peers
 			},
 		}
@@ -8409,7 +8348,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 			},
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+			Members: []v1alpha1.DatameshMember{
 				{Name: "rvr-1"},
 				{Name: "rvr-2"},
 			},
@@ -8440,9 +8379,9 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 			},
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "peer-1", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "peer-2", Type: v1alpha1.ReplicaTypeDiskful},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "peer-1", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "peer-2", Type: v1alpha1.DatameshMemberTypeDiskful},
 				{Name: "rvr-1"},
 			},
 			SystemNetworkNames: []string{"net-1"},
@@ -8480,8 +8419,8 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 			},
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "peer-1", Type: v1alpha1.ReplicaTypeDiskful},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "peer-1", Type: v1alpha1.DatameshMemberTypeDiskful},
 				{Name: "rvr-1"},
 			},
 			SystemNetworkNames: []string{"net-1", "net-2"},
@@ -8520,8 +8459,8 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 			},
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "peer-1", Type: v1alpha1.ReplicaTypeDiskful},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "peer-1", Type: v1alpha1.DatameshMemberTypeDiskful},
 				{Name: "rvr-1"},
 			},
 			SystemNetworkNames: []string{"net-1", "net-2"},
@@ -8564,9 +8503,9 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 			},
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "peer-1", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "peer-2", Type: v1alpha1.ReplicaTypeDiskful},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "peer-1", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "peer-2", Type: v1alpha1.DatameshMemberTypeDiskful},
 				{Name: "rvr-1"},
 			},
 			SystemNetworkNames: []string{"net-1"},
@@ -8604,8 +8543,8 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 			},
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "peer-1", Type: v1alpha1.ReplicaTypeDiskful},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "peer-1", Type: v1alpha1.DatameshMemberTypeDiskful},
 				// rvr-1 is NOT a member
 			},
 			SystemNetworkNames: []string{"net-1"},
@@ -8643,8 +8582,8 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 			},
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "peer-1", Type: v1alpha1.ReplicaTypeDiskful},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "peer-1", Type: v1alpha1.DatameshMemberTypeDiskful},
 				{Name: "rvr-1"},
 			},
 			SystemNetworkNames: []string{"net-1"},
@@ -8689,9 +8628,9 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 			},
 		}
 		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
-			Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "peer-1", Type: v1alpha1.ReplicaTypeDiskful},
-				{Name: "peer-2", Type: v1alpha1.ReplicaTypeTieBreaker},
+			Members: []v1alpha1.DatameshMember{
+				{Name: "peer-1", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "peer-2", Type: v1alpha1.DatameshMemberTypeTieBreaker},
 				{Name: "rvr-1"},
 			},
 			SystemNetworkNames: []string{"net-1"},
@@ -9408,7 +9347,7 @@ var _ = Describe("ensureConditionReady", func() {
 				Quorum: nil,
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{Name: "rvr-1"}
+		member := &v1alpha1.DatameshMember{Name: "rvr-1"}
 		rvr.Status.QuorumSummary = &v1alpha1.ReplicatedVolumeReplicaStatusQuorumSummary{
 			Quorum: intPtr(1),
 		}
@@ -9428,7 +9367,7 @@ var _ = Describe("ensureConditionReady", func() {
 				Quorum: boolPtr(false),
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{Name: "rvr-1"}
+		member := &v1alpha1.DatameshMember{Name: "rvr-1"}
 		rvr.Status.QuorumSummary = &v1alpha1.ReplicatedVolumeReplicaStatusQuorumSummary{
 			Quorum: intPtr(1),
 		}
@@ -9448,7 +9387,7 @@ var _ = Describe("ensureConditionReady", func() {
 				Quorum: boolPtr(true),
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{Name: "rvr-1"}
+		member := &v1alpha1.DatameshMember{Name: "rvr-1"}
 		rvr.Status.QuorumSummary = &v1alpha1.ReplicatedVolumeReplicaStatusQuorumSummary{
 			Quorum: intPtr(1),
 		}
@@ -9468,7 +9407,7 @@ var _ = Describe("ensureConditionReady", func() {
 				Quorum: boolPtr(true),
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{Name: "rvr-1"}
+		member := &v1alpha1.DatameshMember{Name: "rvr-1"}
 		rvr.Status.QuorumSummary = &v1alpha1.ReplicatedVolumeReplicaStatusQuorumSummary{
 			Quorum: intPtr(1),
 		}
@@ -9545,7 +9484,7 @@ var _ = Describe("ensureConditionReady", func() {
 			ConnectedTieBreakerPeers: 0,
 			ConnectedUpToDatePeers:   2,
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{Name: "rvr-1"}
+		member := &v1alpha1.DatameshMember{Name: "rvr-1"}
 
 		outcome := ensureConditionReady(ctx, rvr, validRV, drbdr, member, true, false)
 
@@ -9571,7 +9510,7 @@ var _ = Describe("ensureConditionReady", func() {
 			ConnectedTieBreakerPeers: 0,
 			ConnectedUpToDatePeers:   0,
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{Name: "rvr-1"}
+		member := &v1alpha1.DatameshMember{Name: "rvr-1"}
 
 		outcome := ensureConditionReady(ctx, rvr, validRV, drbdr, member, true, false)
 
@@ -9614,7 +9553,7 @@ var _ = Describe("ensureConditionReady", func() {
 				Quorum: boolPtr(true),
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{Name: "rvr-1"}
+		member := &v1alpha1.DatameshMember{Name: "rvr-1"}
 		// Diskful member with UpToDate backing volume — self counts as both diskful and UpToDate vote.
 		rvr.Status.Type = v1alpha1.DRBDResourceTypeDiskful
 		rvr.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
@@ -9644,7 +9583,7 @@ var _ = Describe("ensureConditionReady", func() {
 				Quorum: boolPtr(true),
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{Name: "rvr-1"}
+		member := &v1alpha1.DatameshMember{Name: "rvr-1"}
 		rvr.Status.Type = v1alpha1.DRBDResourceTypeDiskful
 		rvr.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
 			State: v1alpha1.DiskStateUpToDate,
@@ -9815,9 +9754,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 			Reason: "PreviousReason",
 		})
 
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, nil, member, true, false)
@@ -9846,9 +9785,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				DiskState: v1alpha1.DiskStateUpToDate,
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeTieBreaker, // not Diskful
+			Type: v1alpha1.DatameshMemberTypeTieBreaker, // not Diskful
 		}
 
 		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
@@ -9863,9 +9802,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				DiskState: v1alpha1.DiskStateUpToDate,
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, false, false)
@@ -9883,9 +9822,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				DiskState: v1alpha1.DiskStateUpToDate,
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, true)
@@ -9907,9 +9846,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
@@ -9931,9 +9870,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
@@ -9955,9 +9894,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
@@ -9978,9 +9917,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
@@ -10000,9 +9939,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
@@ -10022,9 +9961,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
@@ -10044,9 +9983,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 		// No peers with UpToDate disk
 		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
@@ -10071,9 +10010,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
@@ -10094,9 +10033,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{
@@ -10124,9 +10063,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
@@ -10147,9 +10086,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		// First call
@@ -10170,9 +10109,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				ActiveConfiguration: nil,
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
@@ -10190,9 +10129,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{
@@ -10219,9 +10158,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
 			{
@@ -10250,9 +10189,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)
@@ -10273,9 +10212,9 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 				},
 			},
 		}
-		member := &v1alpha1.ReplicatedVolumeDatameshMember{
+		member := &v1alpha1.DatameshMember{
 			Name: "rvr-1",
-			Type: v1alpha1.ReplicaTypeDiskful,
+			Type: v1alpha1.DatameshMemberTypeDiskful,
 		}
 
 		outcome := ensureConditionBackingVolumeUpToDate(ctx, rvr, drbdr, member, true, false)

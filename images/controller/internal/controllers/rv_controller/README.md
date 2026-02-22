@@ -308,7 +308,7 @@ Attachment is the process of making a datamesh volume accessible (Primary in DRB
 
 ### Multiattach lifecycle
 
-- **EnableMultiattach**: triggered when `intendedAttachments > 1` and not already enabled. Bumps revision, creates EnableMultiattach transition. Must be confirmed by all Diskful + potentiallyAttached members before Attach transitions can proceed.
+- **EnableMultiattach**: triggered when `intendedAttachments > 1` and not already enabled. Bumps revision, creates EnableMultiattach transition. Must be confirmed by all members with backing volume + potentiallyAttached members before Attach transitions can proceed.
 - **DisableMultiattach**: triggered when `intendedAttachments <= 1` AND `potentiallyAttached <= 1`. Bumps revision, creates DisableMultiattach transition.
 - Enable and Disable are mutually exclusive — no concurrent multiattach transitions.
 
@@ -812,7 +812,7 @@ Deletion via `deleteRVR` (sets DeletionTimestamp). The existing pipeline handles
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> BuildSets["Build diskfulMembers, accessMembers,<br/>index pendingReplicaTransitions by ID"]
+    Start([Start]) --> BuildSets["Build membersToConnect, accessMembers,<br/>index pendingReplicaTransitions by ID"]
 
     BuildSets --> Loop1["Loop 1: existing transitions<br/>(reverse iteration)"]
     Loop1 --> CheckType{AddAccessReplica or<br/>RemoveAccessReplica?}
@@ -1121,7 +1121,7 @@ All guards passed: set `member.Attached=false`, increment `DatameshRevision`, cr
 | 5 | No datamesh member (defensive) | Block: "Waiting for datamesh member" |
 | 6 | No RVR (defensive) | Block: "Waiting for replica" |
 | 7 | RVR Ready condition not True | Block: "Waiting for replica to become Ready" |
-| 8 | VolumeAccess=Local and member type is not Diskful | Block: "No Diskful replica on this node (volumeAccess is Local for storage class X)" |
+| 8 | VolumeAccess=Local and member type does not have backing volume (`HasBackingVolume`) | Block: "No Diskful replica on this node (volumeAccess is Local for storage class X)" |
 | 9 | potentiallyAttached non-empty + multiattach not enabled or EnableMultiattach in progress | Block: "Waiting for multiattach to be enabled" (with transition progress) |
 | 10 | potentiallyAttached non-empty + DisableMultiattach in progress (defensive) | Block: "Waiting for multiattach to be enabled, but disable is in progress" |
 | 11 | `atts.attachBlocked` (defensive) | Block: global block message. Should not be reached — see note below |
