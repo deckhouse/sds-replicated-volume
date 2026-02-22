@@ -403,6 +403,16 @@ func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResour
 		ac.AllowTwoPrimaries = &atp
 	}
 
+	// NonVoting - get from first volume disk options in show
+	ac.NonVoting = nil
+	if aState.show != nil && len(aState.show.ThisHost.Volumes) > 0 {
+		disk := &aState.show.ThisHost.Volumes[0].Disk
+		if !disk.IsNone {
+			nv := disk.NonVoting
+			ac.NonVoting = &nv
+		}
+	}
+
 	// Type and Size from first volume.
 	// Type is determined from drbdsetup show configuration ("disk" field), not from
 	// the transient disk state in drbdsetup status.

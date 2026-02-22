@@ -36,6 +36,7 @@ import (
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName) > 0 : !has(self.spec.lvmLogicalVolumeName) || size(self.spec.lvmLogicalVolumeName) == 0",message="lvmLogicalVolumeName is required when type is Diskful and must be empty when type is Diskless"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.size) : !has(self.spec.size)",message="size is required when type is Diskful and must be empty when type is Diskless"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.spec.size) || !has(self.spec.size) || self.spec.size >= oldSelf.spec.size",message="spec.size cannot be decreased"
+// +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskless' ? !has(self.spec.nonVoting) || self.spec.nonVoting == false : true",message="nonVoting must be false (or unset) when type is Diskless"
 type DRBDResource struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`
@@ -106,6 +107,12 @@ type DRBDResourceSpec struct {
 	// +kubebuilder:default=false
 	// +optional
 	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
+
+	// When enabled, the disk does not participate in quorum voting while
+	// still replicating data normally. Only valid for Diskful resources.
+	// +kubebuilder:default=false
+	// +optional
+	NonVoting bool `json:"nonVoting,omitempty"`
 
 	// +kubebuilder:validation:Enum=Diskful;Diskless
 	// +kubebuilder:default=Diskful
@@ -294,6 +301,9 @@ type DRBDResourceActiveConfiguration struct {
 
 	// +optional
 	AllowTwoPrimaries *bool `json:"allowTwoPrimaries,omitempty"`
+
+	// +optional
+	NonVoting *bool `json:"nonVoting,omitempty"`
 
 	// Type is the current effective DRBD configuration (diskful or diskless).
 	// This reflects how DRBD is configured, not the transient disk state
