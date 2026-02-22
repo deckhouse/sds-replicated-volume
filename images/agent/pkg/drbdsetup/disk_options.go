@@ -33,6 +33,7 @@ var (
 type DiskOptions struct {
 	DiscardZeroesIfAligned *bool
 	RsDiscardGranularity   *uint
+	NonVoting              *bool // nil = don't set (flant extension)
 }
 
 // DiskOptionsArgs returns arguments for drbdsetup disk-options command.
@@ -52,6 +53,14 @@ var DiskOptionsArgs = func(minor uint, opts DiskOptions) []string {
 
 	if opts.RsDiscardGranularity != nil {
 		args = append(args, "--rs-discard-granularity", strconv.FormatUint(uint64(*opts.RsDiscardGranularity), 10))
+	}
+
+	if opts.NonVoting != nil {
+		if *opts.NonVoting {
+			args = append(args, "--non-voting=yes")
+		} else {
+			args = append(args, "--non-voting=no")
+		}
 	}
 
 	return args

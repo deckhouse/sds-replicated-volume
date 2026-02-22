@@ -231,6 +231,19 @@ type DiskOptions struct {
 	// The default value of disable-write-same is no. This option is available
 	// since 8.4.7.
 	DisableWriteSame *bool `drbd:"disable-write-same"`
+
+	// When enabled, the disk attached to this volume excludes itself from
+	// quorum voting while still replicating data normally. This is the
+	// self-side counterpart to allow-remote-read=no (which excludes a peer
+	// from quorum on the connection side). Together they provide full
+	// two-sided quorum exclusion for shadow replicas.
+	//
+	// A non-voting disk will also reverse sync direction to always be
+	// sync target, preventing it from overwriting voting peers' data.
+	//
+	// The default value is no. This is a Flant extension, available
+	// since the DRBD kernel module version 9.2.16-flant.1.
+	NonVoting *bool `drbd:"non-voting"`
 }
 
 var _ drbdconf.SectionKeyworder = &DiskOptions{}
