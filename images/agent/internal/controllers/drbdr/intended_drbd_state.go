@@ -21,6 +21,7 @@ import (
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
 
 // PortAllocator is a function that allocates a port for a given IP address.
@@ -76,7 +77,8 @@ type IntendedDRBDState interface {
 	// OnSuspendedPrimaryOutdated returns the intended action. Always "force-secondary".
 	OnSuspendedPrimaryOutdated() string
 
-	// QuorumDynamicVoters returns the intended quorum-dynamic-voters setting. Always true (DRBD default).
+	// QuorumDynamicVoters returns the intended quorum-dynamic-voters setting.
+	// Returns false (disable) when Flant extensions are available, true (DRBD default) otherwise.
 	QuorumDynamicVoters() bool
 
 	// DiscardZeroesIfAligned returns the intended setting. Always false.
@@ -169,7 +171,7 @@ func (s *intendedDRBDState) AutoPromote() bool                  { return false }
 func (s *intendedDRBDState) OnNoQuorum() string                 { return "suspend-io" }
 func (s *intendedDRBDState) OnNoDataAccessible() string         { return "suspend-io" }
 func (s *intendedDRBDState) OnSuspendedPrimaryOutdated() string { return "force-secondary" }
-func (s *intendedDRBDState) QuorumDynamicVoters() bool          { return true }
+func (s *intendedDRBDState) QuorumDynamicVoters() bool          { return !drbdsetup.FlantExtensionsSupported }
 
 // Hardcoded disk options defaults
 func (s *intendedDRBDState) DiscardZeroesIfAligned() bool { return false }
