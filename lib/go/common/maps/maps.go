@@ -14,7 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package maps
+// TODO: rename package to avoid conflict with stdlib maps (revive: var-naming).
+package maps //nolint:revive
 
 import (
 	"fmt"

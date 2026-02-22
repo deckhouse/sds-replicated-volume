@@ -221,7 +221,7 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 
 		if !ok {
 			log.Error(nil, fmt.Sprintf("Error getting LVMVolumeGroup %s from LVMVolumeGroups map: %+v", replicatedSPLVMVolumeGroup.Name, lvmVolumeGroups))
-			failedMsgBuilder.WriteString(fmt.Sprintf("Error getting LVMVolumeGroup %s from LVMVolumeGroups map. See logs of %s for details; ", replicatedSPLVMVolumeGroup.Name, ReplicatedStoragePoolControllerName))
+			fmt.Fprintf(&failedMsgBuilder, "Error getting LVMVolumeGroup %s from LVMVolumeGroups map. See logs of %s for details; ", replicatedSPLVMVolumeGroup.Name, ReplicatedStoragePoolControllerName)
 			isSuccessful = false
 			continue
 		}

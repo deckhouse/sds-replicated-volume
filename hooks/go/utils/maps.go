@@ -14,7 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package utils
+// TODO: rename package to something meaningful (revive: var-naming).
+package utils //nolint:revive
 
 func MapEnsureAndSet[K comparable, V any](m *map[K]V, key K, value V) {
 	if m == nil {
