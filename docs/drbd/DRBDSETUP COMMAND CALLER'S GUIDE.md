@@ -213,6 +213,12 @@ drbdsetup new-resource <resource_name> <node_id> [options]
   (ENUM_NUM) - Minimum redundancy
 - `--on-suspended-primary-outdated={disconnect|force-secondary}`
   (ENUM) - Action on suspended primary outdated
+- `--quorum-dynamic-voters={yes|no}` (BOOLEAN) - Controls the "last man standing"
+  quorum optimization. When enabled (default: yes), absent nodes that are known to
+  be outdated or quorumless are excluded from voters, allowing the remaining
+  partition to keep quorum. When disabled, all known nodes always count as voters
+  regardless of state, enforcing strict majority quorum.
+  **Flant extension** (available since DRBD kernel module 9.2.16-flant.1)
 
 **Exit Codes and Errors:**
 - `0` - Resource created successfully
@@ -609,6 +615,12 @@ meta-data
   `when-congested-remote|*K-striping}` (ENUM)
   - Read balancing policy
 - `--rs-discard-granularity=<bytes>` (NUMERIC) - Resync discard granularity
+- `--non-voting={yes|no}` (BOOLEAN) - Exclude this volume from quorum voting
+  while still replicating data normally. A non-voting disk reverses sync direction
+  to always be a sync target, preventing it from overwriting voting peers' data.
+  The self-side counterpart to `allow-remote-read=no` (which excludes a peer on the
+  connection side). Default: no.
+  **Flant extension** (available since DRBD kernel module 9.2.16-flant.1)
 
 **Exit Codes and Errors:**
 - `0` - Device attached successfully

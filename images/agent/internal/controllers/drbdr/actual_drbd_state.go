@@ -65,6 +65,9 @@ type ActualDRBDState interface {
 	// OnSuspendedPrimaryOutdated returns the on-suspended-primary-outdated action.
 	OnSuspendedPrimaryOutdated() string
 
+	// QuorumDynamicVoters returns the quorum-dynamic-voters setting.
+	QuorumDynamicVoters() bool
+
 	// Volumes returns the list of volumes/devices for this resource.
 	Volumes() []ActualVolume
 
@@ -102,6 +105,9 @@ type ActualVolume interface {
 
 	// RsDiscardGranularity returns the rs-discard-granularity setting.
 	RsDiscardGranularity() string
+
+	// NonVoting returns the non-voting setting.
+	NonVoting() bool
 }
 
 type ActualPeer interface {
@@ -228,6 +234,13 @@ func (aState *actualState) OnSuspendedPrimaryOutdated() string {
 		return aState.show.Options.OnSuspendedPrimaryOutdated
 	}
 	return ""
+}
+
+func (aState *actualState) QuorumDynamicVoters() bool {
+	if aState.show != nil {
+		return aState.show.Options.QuorumDynamicVoters
+	}
+	return false
 }
 
 func (aState *actualState) Volumes() []ActualVolume {
@@ -567,6 +580,13 @@ func (v *actualVolume) RsDiscardGranularity() string {
 		return v.showVolume.Disk.RSDiscardGranularity
 	}
 	return ""
+}
+
+func (v *actualVolume) NonVoting() bool {
+	if v.showVolume != nil {
+		return v.showVolume.Disk.NonVoting
+	}
+	return false
 }
 
 var _ ActualVolume = &actualVolume{}

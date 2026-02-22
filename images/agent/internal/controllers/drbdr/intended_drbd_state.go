@@ -75,6 +75,9 @@ type IntendedDRBDState interface {
 	// OnSuspendedPrimaryOutdated returns the intended action. Always "force-secondary".
 	OnSuspendedPrimaryOutdated() string
 
+	// QuorumDynamicVoters returns the intended quorum-dynamic-voters setting. Always true (DRBD default).
+	QuorumDynamicVoters() bool
+
 	// DiscardZeroesIfAligned returns the intended setting. Always false.
 	DiscardZeroesIfAligned() bool
 
@@ -83,6 +86,9 @@ type IntendedDRBDState interface {
 
 	// SymlinkName returns the K8S name used for the stable device symlink path.
 	SymlinkName() string
+
+	// NonVoting returns the intended non-voting setting. Always false.
+	NonVoting() bool
 }
 
 // IntendedPeer represents the intended state of a DRBD peer connection.
@@ -167,10 +173,12 @@ func (s *intendedDRBDState) AutoPromote() bool                  { return false }
 func (s *intendedDRBDState) OnNoQuorum() string                 { return "suspend-io" }
 func (s *intendedDRBDState) OnNoDataAccessible() string         { return "suspend-io" }
 func (s *intendedDRBDState) OnSuspendedPrimaryOutdated() string { return "force-secondary" }
+func (s *intendedDRBDState) QuorumDynamicVoters() bool          { return true }
 
 // Hardcoded disk options defaults
 func (s *intendedDRBDState) DiscardZeroesIfAligned() bool { return false }
 func (s *intendedDRBDState) RsDiscardGranularity() uint   { return 8192 } // TODO: DETECT AUTOMATICALLY FROM LVM
+func (s *intendedDRBDState) NonVoting() bool              { return false }
 
 var _ IntendedDRBDState = (*intendedDRBDState)(nil)
 
