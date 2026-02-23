@@ -337,7 +337,7 @@ Each entry in `peers` contains:
 | Field | Description |
 |-------|-------------|
 | `name` | Peer RVR name |
-| `type` | Replica type (Diskful/TieBreaker/Access), empty if orphan |
+| `type` | Replica type (Diskful/ShadowDiskful/TieBreaker/Access), empty if orphan |
 | `attached` | Whether peer is attached (primary) |
 | `connectionEstablishedOn` | System networks with established connection |
 | `connectionState` | DRBD connection state |
@@ -361,7 +361,7 @@ The `datameshPendingTransition` field describes pending datamesh transition. Onl
 | Field | Description |
 |-------|-------------|
 | `member` | `true` = pending join, `false` = pending leave, absent = type/BV change |
-| `type` | Intended type (Diskful/Access/TieBreaker) when joining or changing type |
+| `type` | Intended type (Diskful/ShadowDiskful/Access/TieBreaker) when joining or changing type |
 | `lvmVolumeGroupName` | LVG name for Diskful type |
 | `thinPoolName` | Thin pool name (optional, for LVMThin) |
 
@@ -389,10 +389,10 @@ A backing volume is needed if **all** conditions are met:
 3. **Configuration is complete** — nodeName and lvmVolumeGroupName are set
 
 For replicas that are members of the datamesh, a disk is needed if:
-- Type is `Diskful` (including liminal Diskful members — they maintain their backing volume)
+- `NeedsBackingVolume()` is true: Diskful, LiminalDiskful, ShadowDiskful, LiminalShadowDiskful
 
 A disk is NOT needed if:
-- Type is diskless (Access/TieBreaker)
+- `NeedsBackingVolume()` is false: Access, TieBreaker
 
 For non-members, a disk is needed if spec.type is `Diskful`.
 
