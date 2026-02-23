@@ -62,6 +62,7 @@ type ResourceOptionsAction struct {
 	OnSuspendedPrimaryOutdated string
 	Quorum                     *uint
 	QuorumMinimumRedundancy    *uint
+	QuorumDynamicVoters        *bool
 }
 
 func (a ResourceOptionsAction) Execute(ctx context.Context) error {
@@ -72,6 +73,7 @@ func (a ResourceOptionsAction) Execute(ctx context.Context) error {
 		OnSuspendedPrimaryOutdated: a.OnSuspendedPrimaryOutdated,
 		Quorum:                     a.Quorum,
 		QuorumMinimumRedundancy:    a.QuorumMinimumRedundancy,
+		QuorumDynamicVoters:        a.QuorumDynamicVoters,
 	})
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonResourceOptionsFailed)
 }
@@ -160,6 +162,7 @@ type DiskOptionsAction struct {
 	Minor                  *uint
 	DiscardZeroesIfAligned *bool
 	RsDiscardGranularity   *uint
+	NonVoting              *bool
 }
 
 func (a DiskOptionsAction) Execute(ctx context.Context) error {
@@ -172,6 +175,7 @@ func (a DiskOptionsAction) Execute(ctx context.Context) error {
 	err := drbdsetup.ExecuteDiskOptions(ctx, *a.Minor, drbdsetup.DiskOptions{
 		DiscardZeroesIfAligned: a.DiscardZeroesIfAligned,
 		RsDiscardGranularity:   a.RsDiscardGranularity,
+		NonVoting:              a.NonVoting,
 	})
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDiskOptionsFailed)
 }

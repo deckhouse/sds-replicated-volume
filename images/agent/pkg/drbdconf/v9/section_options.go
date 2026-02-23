@@ -162,6 +162,20 @@ type Options struct {
 	// driver version 9.0.8.
 	OnNoQuorum OnNoQuorumPolicy `drbd:"on-no-quorum"`
 
+	// Controls the "last man standing" quorum optimization. In upstream
+	// DRBD this behavior is always on and not configurable: when all
+	// absent nodes are known to be D_OUTDATED or quorumless, they are
+	// excluded from voters, allowing the remaining partition to keep
+	// quorum. This Flant extension makes it a toggleable option.
+	//
+	// When enabled (the default), the behavior is identical to upstream
+	// DRBD. When disabled, all known nodes always count as voters
+	// regardless of state, enforcing strict majority quorum.
+	//
+	// The default value is yes. Available since the DRBD kernel module
+	// version 9.2.16-flant.1.
+	QuorumDynamicVoters *bool `drbd:"quorum-dynamic-voters,no-quorum-dynamic-voters"`
+
 	// This setting is only relevant when on-no-quorum is set to suspend-io. It
 	// is relevant in the following scenario. A primary node loses quorum hence
 	// has all IO requests frozen. This primary node then connects to another,

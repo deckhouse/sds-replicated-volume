@@ -1242,7 +1242,7 @@ var _ = Describe("applyLegacyFieldsCleared", func() {
 	It("clears phase and reason when both are set", func() {
 		rsp := &v1alpha1.ReplicatedStoragePool{
 			Status: v1alpha1.ReplicatedStoragePoolStatus{
-				Phase:  v1alpha1.RSPPhaseCompleted,
+				Phase:  v1alpha1.RSPPhaseCompleted, //nolint:staticcheck // SA1019: testing deprecated legacy field cleanup
 				Reason: "pool creation completed",
 			},
 		}
@@ -1250,21 +1250,21 @@ var _ = Describe("applyLegacyFieldsCleared", func() {
 		changed := applyLegacyFieldsCleared(rsp)
 
 		Expect(changed).To(BeTrue())
-		Expect(rsp.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhase("")))
+		Expect(rsp.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhase(""))) //nolint:staticcheck // SA1019: testing deprecated legacy field cleanup
 		Expect(rsp.Status.Reason).To(BeEmpty())
 	})
 
 	It("clears only phase when reason is already empty", func() {
 		rsp := &v1alpha1.ReplicatedStoragePool{
 			Status: v1alpha1.ReplicatedStoragePoolStatus{
-				Phase: v1alpha1.RSPPhaseFailed,
+				Phase: v1alpha1.RSPPhaseFailed, //nolint:staticcheck // SA1019: testing deprecated legacy field cleanup
 			},
 		}
 
 		changed := applyLegacyFieldsCleared(rsp)
 
 		Expect(changed).To(BeTrue())
-		Expect(rsp.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhase("")))
+		Expect(rsp.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhase(""))) //nolint:staticcheck // SA1019: testing deprecated legacy field cleanup
 	})
 
 	It("clears only reason when phase is already empty", func() {
@@ -1288,7 +1288,7 @@ var _ = Describe("applyLegacyFieldsCleared", func() {
 		changed := applyLegacyFieldsCleared(rsp)
 
 		Expect(changed).To(BeFalse())
-		Expect(rsp.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhase("")))
+		Expect(rsp.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhase(""))) //nolint:staticcheck // SA1019: testing deprecated legacy field cleanup
 		Expect(rsp.Status.Reason).To(BeEmpty())
 	})
 })

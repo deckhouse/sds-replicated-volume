@@ -97,6 +97,12 @@ spec:
                 x-kubernetes-validations:
                 - message: nodeName is immutable
                   rule: self == oldSelf
+              nonVoting:
+                default: false
+                description: |-
+                  When enabled, the disk does not participate in quorum voting while
+                  still replicating data normally. Only valid for Diskful resources.
+                type: boolean
               peers:
                 items:
                   properties:
@@ -256,6 +262,8 @@ spec:
                       reverse-computed from that path to the LVMLogicalVolume name.
                     maxLength: 128
                     type: string
+                  nonVoting:
+                    type: boolean
                   quorum:
                     type: integer
                   quorumMinimumRedundancy:
@@ -506,6 +514,9 @@ spec:
         - message: spec.size cannot be decreased
           rule: '!has(oldSelf.spec.size) || !has(self.spec.size) || self.spec.size
             >= oldSelf.spec.size'
+        - message: nonVoting must be false (or unset) when type is Diskless
+          rule: 'self.spec.type == ''Diskless'' ? !has(self.spec.nonVoting) || self.spec.nonVoting
+            == false : true'
     served: true
     storage: true
     subresources:

@@ -65,6 +65,9 @@ type ActualDRBDState interface {
 	// OnSuspendedPrimaryOutdated returns the on-suspended-primary-outdated action.
 	OnSuspendedPrimaryOutdated() string
 
+	// QuorumDynamicVoters returns the quorum-dynamic-voters setting.
+	QuorumDynamicVoters() bool
+
 	// Volumes returns the list of volumes/devices for this resource.
 	Volumes() []ActualVolume
 
@@ -102,6 +105,9 @@ type ActualVolume interface {
 
 	// RsDiscardGranularity returns the rs-discard-granularity setting.
 	RsDiscardGranularity() string
+
+	// NonVoting returns the non-voting setting.
+	NonVoting() bool
 }
 
 type ActualPeer interface {
@@ -228,6 +234,13 @@ func (aState *actualState) OnSuspendedPrimaryOutdated() string {
 		return aState.show.Options.OnSuspendedPrimaryOutdated
 	}
 	return ""
+}
+
+func (aState *actualState) QuorumDynamicVoters() bool {
+	if aState.show != nil {
+		return aState.show.Options.QuorumDynamicVoters
+	}
+	return false
 }
 
 func (aState *actualState) Volumes() []ActualVolume {
@@ -388,6 +401,16 @@ func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResour
 	if aState.show != nil && len(aState.show.Connections) > 0 {
 		atp := aState.show.Connections[0].Net.AllowTwoPrimaries
 		ac.AllowTwoPrimaries = &atp
+	}
+
+	// NonVoting - get from first volume disk options in show
+	ac.NonVoting = nil
+	if aState.show != nil && len(aState.show.ThisHost.Volumes) > 0 {
+		disk := &aState.show.ThisHost.Volumes[0].Disk
+		if !disk.IsNone {
+			nv := disk.NonVoting
+			ac.NonVoting = &nv
+		}
 	}
 
 	// Type and Size from first volume.
@@ -567,6 +590,13 @@ func (v *actualVolume) RsDiscardGranularity() string {
 		return v.showVolume.Disk.RSDiscardGranularity
 	}
 	return ""
+}
+
+func (v *actualVolume) NonVoting() bool {
+	if v.showVolume != nil {
+		return v.showVolume.Disk.NonVoting
+	}
+	return false
 }
 
 var _ ActualVolume = &actualVolume{}

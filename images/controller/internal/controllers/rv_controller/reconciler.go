@@ -577,9 +577,9 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 			// these fields match.
 			pt := rvr.Status.DatameshPendingTransition
 
-			applyDatameshMember(rv, v1alpha1.ReplicatedVolumeDatameshMember{
+			applyDatameshMember(rv, v1alpha1.DatameshMember{
 				Name:                       rvr.Name,
-				Type:                       pt.Type,
+				Type:                       v1alpha1.DatameshMemberType(pt.Type),
 				NodeName:                   rvr.Spec.NodeName,
 				Zone:                       zone,
 				Addresses:                  slices.Clone(rvr.Status.Addresses),
@@ -604,8 +604,8 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 	}
 
 	// Verify datamesh members match active replicas (safety check).
-	dmDiskful := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.ReplicatedVolumeDatameshMember) bool {
-		return m.Type == v1alpha1.ReplicaTypeDiskful
+	dmDiskful := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
+		return m.Type == v1alpha1.DatameshMemberTypeDiskful
 	})
 	if dmDiskful != diskful {
 		msg := fmt.Sprintf(
@@ -729,8 +729,8 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 		applyFormationTransitionMessage(rv, "Starting data bootstrap")
 	}
 
-	dmDiskful := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.ReplicatedVolumeDatameshMember) bool {
-		return m.Type == v1alpha1.ReplicaTypeDiskful
+	dmDiskful := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
+		return m.Type == v1alpha1.DatameshMemberTypeDiskful
 	})
 
 	// Name: rv.Name + "-formation" (rv.Name <= 120, suffix 10 chars, total <= 130 < 253 limit).
@@ -1358,17 +1358,13 @@ func applyFormationTransitionAbsent(rv *v1alpha1.ReplicatedVolume) bool {
 
 // applyDatameshMember adds or updates a member in the datamesh.
 // Returns true if the member was added or any field was changed.
-func applyDatameshMember(rv *v1alpha1.ReplicatedVolume, member v1alpha1.ReplicatedVolumeDatameshMember) bool {
+func applyDatameshMember(rv *v1alpha1.ReplicatedVolume, member v1alpha1.DatameshMember) bool {
 	for i := range rv.Status.Datamesh.Members {
 		if rv.Status.Datamesh.Members[i].ID() == member.ID() {
 			m := &rv.Status.Datamesh.Members[i]
 			changed := false
 			if m.Type != member.Type {
 				m.Type = member.Type
-				changed = true
-			}
-			if m.TypeTransition != member.TypeTransition {
-				m.TypeTransition = member.TypeTransition
 				changed = true
 			}
 			if m.NodeName != member.NodeName {
@@ -1496,8 +1492,8 @@ func computeIntendedDiskfulReplicaCount(rv *v1alpha1.ReplicatedVolume) int {
 
 // computeTargetQuorum computes Quorum and QuorumMinimumRedundancy based on intended diskful members and replication mode.
 func computeTargetQuorum(rv *v1alpha1.ReplicatedVolume) (q, qmr byte) {
-	intendedDiskful := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.ReplicatedVolumeDatameshMember) bool {
-		return m.Type == v1alpha1.ReplicaTypeDiskful || m.TypeTransition == v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskful
+	voters := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
+		return m.Type.IsVoter()
 	})
 
 	var minQ, minQMR byte
@@ -1512,7 +1508,7 @@ func computeTargetQuorum(rv *v1alpha1.ReplicatedVolume) (q, qmr byte) {
 		minQ, minQMR = 2, 2
 	}
 
-	quorum := byte(intendedDiskful.Len()/2 + 1)
+	quorum := byte(voters.Len()/2 + 1)
 
 	q = max(quorum, minQ)
 	qmr = max(quorum, minQMR)
@@ -1520,14 +1516,14 @@ func computeTargetQuorum(rv *v1alpha1.ReplicatedVolume) (q, qmr byte) {
 	return q, qmr
 }
 
-// computeActualQuorum checks whether at least one diskful replica has quorum and a ready agent.
+// computeActualQuorum checks whether at least one voting replica has quorum and a ready agent.
 // Returns (true, "") if quorum is satisfied, or (false, diagnostic) with a diagnostic detail otherwise.
 func computeActualQuorum(
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 ) (satisfied bool, diagnostic string) {
-	diskfulMembers := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.ReplicatedVolumeDatameshMember) bool {
-		return m.Type == v1alpha1.ReplicaTypeDiskful
+	voters := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
+		return m.Type.IsVoter()
 	})
 	agentNotReady := idset.FromWhere(rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 		return obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType).
@@ -1536,27 +1532,27 @@ func computeActualQuorum(
 	})
 	withQuorum := idset.FromWhere(rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 		return rvr.Status.Quorum != nil && *rvr.Status.Quorum
-	}).Intersect(diskfulMembers).Difference(agentNotReady)
+	}).Intersect(voters).Difference(agentNotReady)
 
 	if !withQuorum.IsEmpty() {
 		return true, ""
 	}
 
-	// Diagnostic: which diskful replicas exist and why they don't count.
+	// Diagnostic: which voter replicas exist and why they don't count.
 	allRVRIDs := idset.FromAll(rvrs)
-	diskfulAgentNotReady := diskfulMembers.Intersect(agentNotReady)
-	diskfulNoQuorum := diskfulMembers.Intersect(allRVRIDs).Difference(agentNotReady)
+	voterAgentNotReady := voters.Intersect(agentNotReady)
+	voterNoQuorum := voters.Intersect(allRVRIDs).Difference(agentNotReady)
 
 	switch {
-	case !diskfulNoQuorum.IsEmpty() && !diskfulAgentNotReady.IsEmpty():
+	case !voterNoQuorum.IsEmpty() && !voterAgentNotReady.IsEmpty():
 		diagnostic = fmt.Sprintf("no quorum on [%s]; agent not ready on [%s]",
-			diskfulNoQuorum, diskfulAgentNotReady)
-	case !diskfulNoQuorum.IsEmpty():
-		diagnostic = fmt.Sprintf("no quorum on [%s]", diskfulNoQuorum)
-	case !diskfulAgentNotReady.IsEmpty():
-		diagnostic = fmt.Sprintf("agent not ready on [%s]", diskfulAgentNotReady)
+			voterNoQuorum, voterAgentNotReady)
+	case !voterNoQuorum.IsEmpty():
+		diagnostic = fmt.Sprintf("no quorum on [%s]", voterNoQuorum)
+	case !voterAgentNotReady.IsEmpty():
+		diagnostic = fmt.Sprintf("agent not ready on [%s]", voterAgentNotReady)
 	default:
-		diagnostic = "no diskful replicas available"
+		diagnostic = "no voter replicas available"
 	}
 	return false, diagnostic
 }

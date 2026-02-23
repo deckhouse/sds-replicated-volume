@@ -115,6 +115,7 @@ spec:
                   spec.type and status.effectiveType fields.
                 enum:
                 - Diskful
+                - ShadowDiskful
                 - Access
                 - TieBreaker
                 type: string
@@ -348,13 +349,16 @@ spec:
                       the time DRBDResource spec was last computed.
                     format: int64
                     type: integer
-                  rvrType:
-                    description: RVRType is the effective replica type for which DRBDResource
+                  targetType:
+                    description: TargetType is the target type for which DRBDResource
                       spec was last computed.
                     enum:
                     - Diskful
-                    - Access
+                    - LiminalDiskful
+                    - ShadowDiskful
+                    - LiminalShadowDiskful
                     - TieBreaker
+                    - Access
                     type: string
                 type: object
               peers:

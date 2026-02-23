@@ -146,7 +146,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 		// Find datamesh and datamesh member for this RVR.
 		var datamesh *v1alpha1.ReplicatedVolumeDatamesh
-		var datameshMember *v1alpha1.ReplicatedVolumeDatameshMember
+		var datameshMember *v1alpha1.DatameshMember
 		if rv != nil {
 			datamesh = &rv.Status.Datamesh
 			datameshMember = datamesh.FindMemberByName(rvr.Name)
@@ -192,7 +192,7 @@ func ensureConditionAttached(
 	ctx context.Context,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	drbdr *v1alpha1.DRBDResource,
-	datameshMember *v1alpha1.ReplicatedVolumeDatameshMember,
+	datameshMember *v1alpha1.DatameshMember,
 	agentReady bool,
 	drbdrConfigurationPending bool,
 ) (outcome flow.EnsureOutcome) {
@@ -663,7 +663,7 @@ func ensureConditionBackingVolumeUpToDate(
 	ctx context.Context,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	drbdr *v1alpha1.DRBDResource,
-	datameshMember *v1alpha1.ReplicatedVolumeDatameshMember,
+	datameshMember *v1alpha1.DatameshMember,
 	agentReady bool,
 	drbdrConfigurationPending bool,
 ) (outcome flow.EnsureOutcome) {
@@ -675,10 +675,11 @@ func ensureConditionBackingVolumeUpToDate(
 	// Determine if the BackingVolumeUpToDate condition is relevant.
 	// The condition is relevant only for datamesh members (if not a member, the peer is not
 	// connected and the disk cannot be synchronized by definition), AND when a backing volume
-	// either should exist (intendedType == Diskful) or actually exists (rvr.Status.BackingVolume != nil).
+	// either should exist (NeedsBackingVolume) or actually exists.
 	intendedType := computeIntendedType(rvr, datameshMember)
 	conditionRelevant := datameshMember != nil &&
-		(intendedType == v1alpha1.ReplicaTypeDiskful || rvr.Status.BackingVolume != nil)
+		(intendedType.NeedsBackingVolume() ||
+			rvr.Status.BackingVolume != nil)
 
 	// Guard: no DRBDR or condition not relevant — remove it.
 	if drbdr == nil || !conditionRelevant {
@@ -925,7 +926,7 @@ func ensureConditionReady(
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	rv *v1alpha1.ReplicatedVolume,
 	drbdr *v1alpha1.DRBDResource,
-	datameshMember *v1alpha1.ReplicatedVolumeDatameshMember,
+	datameshMember *v1alpha1.DatameshMember,
 	agentReady bool,
 	drbdrConfigurationPending bool,
 ) (outcome flow.EnsureOutcome) {
@@ -1844,7 +1845,7 @@ func computeActualBackingVolume(drbdr *v1alpha1.DRBDResource, llvs []snc.LVMLogi
 //
 // Algorithm:
 // 1. Check if backing volume is needed:
-//   - If member in datamesh: type == Diskful AND typeTransition != ToDiskless
+//   - If member in datamesh: NeedsBackingVolume()
 //   - If NOT member: type == Diskful AND deletionTimestamp == nil
 //
 // 2. Get configuration from:
@@ -1873,25 +1874,15 @@ func computeIntendedBackingVolume(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1a
 		//   with bitmap), then add the local disk.
 		// - Removing disk: first remove the local disk, then reconfigure peers.
 		//
-		// Therefore member in datamesh:
-		// - Needs backing volume if:
-		//   - Type is Diskful, OR
-		//   - TypeTransition is ToDiskful (preparing disk before becoming Diskful)
-		// - Does NOT need backing volume if:
-		//   - TypeTransition is ToDiskless (removing disk)
-		//   - Type is diskless (Access/TieBreaker) and no transition to Diskful
-
-		// Check if backing volume is needed.
-		isDiskful := member.Type == v1alpha1.ReplicaTypeDiskful
-		transitioningToDiskful := member.TypeTransition == v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskful
-		transitioningToDiskless := member.TypeTransition == v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskless
-		if !isDiskful && !transitioningToDiskful {
+		// The liminal stage exists precisely for this: the member is already Diskful (peers see it,
+		// quorum counts it) but DRBD is configured as diskless — enabling the peer setup phase
+		// before/after the actual disk attach/detach.
+		//
+		// Backing volume is needed for all Diskful members, including liminal ones.
+		// Liminal members maintain their backing volume; it is just not referenced in the DRBDR spec.
+		if !member.Type.NeedsBackingVolume() {
 			return nil, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable,
 				"Backing volume is not applicable for diskless replica type"
-		}
-		if transitioningToDiskless {
-			return nil, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable,
-				"Backing volume is not applicable (transition to diskless)"
 		}
 
 		// Check if configuration is complete (lvgName are required, nodeName is always set for member).
@@ -2262,13 +2253,13 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		}
 		drbdr = newObj
 
-		targetDRBDRReconciliationCache = computeTargetDRBDRReconciliationCache(rv.Status.DatameshRevision, drbdr.Generation, targetType)
+		targetDRBDRReconciliationCache = newDRBDRReconciliationCache(rv.Status.DatameshRevision, drbdr.Generation, targetType)
 	} else {
 		// We need to check DRBDR spec if any of the tracked values changed since last reconciliation:
 		// - DRBDResource.Generation (DRBDR was modified externally)
 		// - DatameshRevision (datamesh configuration changed)
-		// - RVRType (replica type changed, e.g. diskful -> tiebreaker due to missing disk)
-		targetDRBDRReconciliationCache = computeTargetDRBDRReconciliationCache(rv.Status.DatameshRevision, drbdr.Generation, targetType)
+		// - TargetType (effective member type changed, e.g. BV appeared)
+		targetDRBDRReconciliationCache = newDRBDRReconciliationCache(rv.Status.DatameshRevision, drbdr.Generation, targetType)
 		specMayNeedUpdate := rvr.Status.DRBDRReconciliationCache != targetDRBDRReconciliationCache
 
 		if specMayNeedUpdate {
@@ -2365,14 +2356,13 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
-	// 11. If targetType != intendedType, DRBDR is configured as TieBreaker
-	// but we want Diskful — waiting for backing volume to become ready.
-	// This happens when LLV is not yet ready and we preconfigured DRBDR as TieBreaker.
-	// Once LLV becomes ready, targetLLVName will be set and targetType will match intendedType.
+	// 11. If targetType != intendedType, DRBDR is not yet configured for the
+	// intended type (e.g. backing volume is not ready yet). Wait until the
+	// preconditions are met and targetType converges to intendedType.
 	if targetType != intendedType {
 		changed = applyDRBDConfiguredCondFalse(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForBackingVolume,
-			"DRBD preconfigured as TieBreaker, waiting for backing volume to become ready") || changed
+			fmt.Sprintf("DRBD preconfigured as %s, waiting for backing volume to become ready", targetType)) || changed
 		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
@@ -2435,15 +2425,16 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
-	// Invariant: at this point backing volume must be either not needed or fully ready.
+	// Invariant: at this point, for members whose DRBD should be configured with a backing
+	// volume (HasBackingVolume), targetBV must equal intendedBV.
 	//
-	// - Not needed (diskless replica): both targetBV and intendedBV are nil.
-	// - Fully ready: backing volume exists, matches intended configuration (LVG, ThinPool, Size),
-	//   and is attached to DRBDR — targetBV equals intendedBV.
+	// - No BV needed (!HasBackingVolume): both targetBV and intendedBV are nil — invariant trivially holds.
+	// - BV fully ready (HasBackingVolume): backing volume exists, matches intended configuration
+	//   (LVG, ThinPool, Size), and is referenced in DRBDR — targetBV equals intendedBV.
 	//
 	// Any in-progress state (creating, resizing, replacing) would have returned earlier.
-	if !targetBV.Equal(intendedBV) {
-		panic(fmt.Sprintf("BUG: targetBV and intendedBV must be equal, got targetBV=%+v, intendedBV=%+v", targetBV, intendedBV))
+	if targetType.HasBackingVolume() && !targetBV.Equal(intendedBV) {
+		panic(fmt.Sprintf("BUG: targetBV and intendedBV must be equal for Diskful, got targetBV=%+v, intendedBV=%+v", targetBV, intendedBV))
 	}
 
 	// 14. Replica is fully configured to the current datamesh revision — record DatameshRevision.
@@ -2466,46 +2457,38 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 	return drbdr, rf.Continue().ReportChangedIf(changed)
 }
 
-// computeIntendedType returns the intended replica type.
-// If member is nil, returns rvr.Spec.Type.
-// During transitions, uses TieBreaker as intermediate type:
-// - ToDiskful but not yet Diskful → TieBreaker (disk is being prepared)
-// - Diskful with ToDiskless → TieBreaker (data is being moved away)
-func computeIntendedType(rvr *v1alpha1.ReplicatedVolumeReplica, member *v1alpha1.ReplicatedVolumeDatameshMember) v1alpha1.ReplicaType {
+// computeIntendedType returns the intended type for DRBDR configuration.
+// For datamesh members, the type is authoritative from the datamesh.
+// For non-members, it is derived from rvr.Spec.Type and represents the goal state;
+// DRBDR is configured only partially in this case (e.g. local disk mode without peer connections).
+func computeIntendedType(rvr *v1alpha1.ReplicatedVolumeReplica, member *v1alpha1.DatameshMember) v1alpha1.DatameshMemberType {
 	if member == nil {
-		return rvr.Spec.Type
-	}
-
-	// During transitions, use TieBreaker as intermediate type.
-	if member.Type == v1alpha1.ReplicaTypeDiskful &&
-		member.TypeTransition == v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskless {
-		return v1alpha1.ReplicaTypeTieBreaker
+		return v1alpha1.DatameshMemberType(rvr.Spec.Type)
 	}
 
 	return member.Type
 }
 
-// computeTargetType returns the target replica type.
-// If intended is Diskful but there's no backing volume, returns TieBreaker.
-// Otherwise returns the intended type.
-func computeTargetType(intendedType v1alpha1.ReplicaType, targetLLVName string) v1alpha1.ReplicaType {
-	if intendedType == v1alpha1.ReplicaTypeDiskful && targetLLVName == "" {
-		return v1alpha1.ReplicaTypeTieBreaker
+// computeTargetType returns the effective type for DRBDR spec computation.
+// It may differ from intendedType when preconditions are not met — currently,
+// Diskful without a ready backing volume is downgraded to LiminalDiskful.
+func computeTargetType(intendedType v1alpha1.DatameshMemberType, targetLLVName string) v1alpha1.DatameshMemberType {
+	if intendedType.HasBackingVolume() && targetLLVName == "" {
+		return intendedType.ToLiminal()
 	}
 	return intendedType
 }
 
-// computeTargetDRBDRReconciliationCache returns the target reconciliation cache
-// for the current reconciliation iteration.
-func computeTargetDRBDRReconciliationCache(
+// newDRBDRReconciliationCache constructs a reconciliation cache for the current iteration.
+func newDRBDRReconciliationCache(
 	datameshRevision int64,
 	drbdrGeneration int64,
-	rvrType v1alpha1.ReplicaType,
+	targetType v1alpha1.DatameshMemberType,
 ) v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache {
 	return v1alpha1.ReplicatedVolumeReplicaStatusDRBDRReconciliationCache{
 		DatameshRevision: datameshRevision,
 		DRBDRGeneration:  drbdrGeneration,
-		RVRType:          rvrType,
+		TargetType:       targetType,
 	}
 }
 
@@ -2704,17 +2687,13 @@ func applyDatameshPendingTransition(rvr *v1alpha1.ReplicatedVolumeReplica, targe
 	return changed
 }
 
-// computeTargetDRBDRType converts ReplicaType to DRBDResourceType.
-// Diskful → Diskful, Access/TieBreaker → Diskless.
-func computeDRBDRType(replicaType v1alpha1.ReplicaType) v1alpha1.DRBDResourceType {
-	switch replicaType {
-	case v1alpha1.ReplicaTypeDiskful:
+// computeDRBDRType converts DatameshMemberType to DRBDResourceType.
+// Diskful → Diskful; LiminalDiskful/TieBreaker/Access → Diskless.
+func computeDRBDRType(memberType v1alpha1.DatameshMemberType) v1alpha1.DRBDResourceType {
+	if memberType.HasBackingVolume() {
 		return v1alpha1.DRBDResourceTypeDiskful
-	case v1alpha1.ReplicaTypeAccess, v1alpha1.ReplicaTypeTieBreaker:
-		return v1alpha1.DRBDResourceTypeDiskless
-	default:
-		return v1alpha1.DRBDResourceTypeDiskless
 	}
+	return v1alpha1.DRBDResourceTypeDiskless
 }
 
 // newDRBDR constructs a new DRBDResource with ownerRef and finalizer.
@@ -2750,9 +2729,9 @@ func computeTargetDRBDRSpec(
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	drbdr *v1alpha1.DRBDResource,
 	datamesh *v1alpha1.ReplicatedVolumeDatamesh,
-	member *v1alpha1.ReplicatedVolumeDatameshMember,
+	member *v1alpha1.DatameshMember,
 	targetLLVName string,
-	targetType v1alpha1.ReplicaType,
+	targetType v1alpha1.DatameshMemberType,
 ) v1alpha1.DRBDResourceSpec {
 	// Start from existing spec (preserves immutable and user-controlled fields) or create new.
 	var spec v1alpha1.DRBDResourceSpec
@@ -2777,6 +2756,13 @@ func computeTargetDRBDRSpec(
 		spec.Size = nil
 	}
 
+	// NonVoting: DRBD non-voting option can only be set on diskful replicas; it
+	// makes the replica not count itself in its own quorum calculation (peers use
+	// allow-remote-read=false for the other side). Two member types have DRBD
+	// configured with a disk: Diskful and ShadowDiskful. Of those, only
+	// ShadowDiskful needs non-voting.
+	spec.NonVoting = targetType == v1alpha1.DatameshMemberTypeShadowDiskful
+
 	// Membership-dependent configuration.
 	if member == nil {
 		// Cannot become Primary while not in datamesh.
@@ -2798,8 +2784,11 @@ func computeTargetDRBDRSpec(
 		}
 		spec.AllowTwoPrimaries = datamesh.Multiattach
 
-		// Quorum: diskless node quorum depends on connection to enough UpToDate diskful nodes that have quorum.
-		if spec.Type == v1alpha1.DRBDResourceTypeDiskless {
+		// Quorum: non-voters (Access, TieBreaker, ShadowDiskful and their liminal variants)
+		// use q=32 (impossibly high) so they can never satisfy the main quorum condition
+		// on their own; their quorum is determined entirely by the quorate_peers path.
+		// Voters use q from datamesh.
+		if !targetType.IsVoter() {
 			spec.Quorum = 32
 			spec.QuorumMinimumRedundancy = datamesh.QuorumMinimumRedundancy
 		} else {
@@ -2817,17 +2806,16 @@ func computeTargetDRBDRSpec(
 // computeTargetDRBDRPeers computes the target peers from datamesh members (excluding self).
 //
 // Peer connectivity rules:
-//   - Diskful replica (or TieBreaker transitioning ToDiskful) connects to ALL peers,
-//     but sets AllowRemoteRead=false for Access peers (so they are not considered in the tie-breaker mechanism).
-//   - Access/TieBreaker replica connects only to Diskful peers and TieBreaker peers transitioning ToDiskful.
-func computeTargetDRBDRPeers(datamesh *v1alpha1.ReplicatedVolumeDatamesh, self *v1alpha1.ReplicatedVolumeDatameshMember) []v1alpha1.DRBDResourcePeer {
+//   - Full-mesh members (Diskful, LiminalDiskful, ShadowDiskful, LiminalShadowDiskful)
+//     connect to ALL peers. AllowRemoteRead is set based on the peer's role:
+//     true for voters and tiebreakers, false for Access and ShadowDiskful peers.
+//   - Non-full-mesh members (Access, TieBreaker) connect only to full-mesh peers.
+func computeTargetDRBDRPeers(datamesh *v1alpha1.ReplicatedVolumeDatamesh, self *v1alpha1.DatameshMember) []v1alpha1.DRBDResourcePeer {
 	if len(datamesh.Members) <= 1 {
 		return nil
 	}
 
-	// Diskful or TieBreaker transitioning ToDiskful is treated as Diskful for peer connectivity.
-	selfTreatedAsDiskful := self.Type == v1alpha1.ReplicaTypeDiskful ||
-		(self.Type == v1alpha1.ReplicaTypeTieBreaker && self.TypeTransition == v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskful)
+	selfConnectsToAll := self.Type.ConnectsToAllPeers()
 
 	peers := make([]v1alpha1.DRBDResourcePeer, 0, len(datamesh.Members)-1)
 	for i := range datamesh.Members {
@@ -2836,25 +2824,23 @@ func computeTargetDRBDRPeers(datamesh *v1alpha1.ReplicatedVolumeDatamesh, self *
 			continue
 		}
 
-		// Diskful or TieBreaker transitioning ToDiskful is treated as Diskful for peer connectivity.
-		peerTreatedAsDiskful := m.Type == v1alpha1.ReplicaTypeDiskful ||
-			(m.Type == v1alpha1.ReplicaTypeTieBreaker && m.TypeTransition == v1alpha1.ReplicatedVolumeDatameshMemberTypeTransitionToDiskful)
+		peerConnectsToAll := m.Type.ConnectsToAllPeers()
 
-		if !selfTreatedAsDiskful && !peerTreatedAsDiskful {
-			// Access/TieBreaker: only connect to peers treated as Diskful.
+		if !selfConnectsToAll && !peerConnectsToAll {
+			// Access/TieBreaker: only connect to full-mesh peers.
 			continue
 		}
 
-		// AllowRemoteRead=false for Access peers (so they are not considered in the tie-breaker mechanism).
-		peerIsAccess := m.Type == v1alpha1.ReplicaTypeAccess
-		allowRemoteRead := !peerIsAccess
+		// AllowRemoteRead is enabled only for voters and tiebreakers (so other peers
+		// are not considered in the quorum and tie-breaker mechanisms).
+		allowRemoteRead := m.Type.IsVoter() || m.Type == v1alpha1.DatameshMemberTypeTieBreaker
 
 		// Extract ID from the member name (validated by API).
 		id := m.ID()
 
-		// Peer type: if treated as Diskful, use Diskful; otherwise Diskless.
+		// Peer type: full-mesh peers get DRBDResourceTypeDiskful; others get Diskless.
 		peerType := v1alpha1.DRBDResourceTypeDiskless
-		if peerTreatedAsDiskful {
+		if peerConnectsToAll {
 			peerType = v1alpha1.DRBDResourceTypeDiskful
 		}
 

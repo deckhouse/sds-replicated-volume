@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/maps"
 )
 
@@ -219,7 +220,7 @@ func computeResourceOptionsAction(resourceName string, iState IntendedDRBDState)
 	quorum := uint(iState.Quorum())
 	quorumMinRedundancy := uint(iState.QuorumMinimumRedundancy())
 
-	res = append(res, ResourceOptionsAction{
+	action := ResourceOptionsAction{
 		ResourceName:               resourceName,
 		AutoPromote:                &autoPromote,
 		OnNoQuorum:                 iState.OnNoQuorum(),
@@ -227,7 +228,18 @@ func computeResourceOptionsAction(resourceName string, iState IntendedDRBDState)
 		OnSuspendedPrimaryOutdated: iState.OnSuspendedPrimaryOutdated(),
 		Quorum:                     &quorum,
 		QuorumMinimumRedundancy:    &quorumMinRedundancy,
-	})
+	}
+
+	// Include quorum-dynamic-voters when flant extensions are available,
+	// or when the intended value differs from the DRBD built-in default (true).
+	// In the latter case drbdsetup will fail on a non-flant kernel, surfacing
+	// the error instead of silently ignoring the requested setting.
+	if drbdsetup.FlantExtensionsSupported || !iState.QuorumDynamicVoters() {
+		qdv := iState.QuorumDynamicVoters()
+		action.QuorumDynamicVoters = &qdv
+	}
+
+	res = append(res, action)
 	return res
 }
 
@@ -276,6 +288,17 @@ func computeResourceOptionsActionReconcile(resourceName string, iState IntendedD
 		changed = true
 	}
 
+	// Check quorum-dynamic-voters (flant extension).
+	// On non-flant kernels, only include if intended differs from DRBD default (true)
+	// so that drbdsetup surfaces the error instead of silently ignoring the setting.
+	if drbdsetup.FlantExtensionsSupported || !iState.QuorumDynamicVoters() {
+		if iState.QuorumDynamicVoters() != aState.QuorumDynamicVoters() {
+			qdv := iState.QuorumDynamicVoters()
+			action.QuorumDynamicVoters = &qdv
+			changed = true
+		}
+	}
+
 	if changed {
 		res = append(res, action)
 	}
@@ -285,11 +308,20 @@ func computeResourceOptionsActionReconcile(resourceName string, iState IntendedD
 func computeDiskOptionsAction(minor *uint, iState IntendedDRBDState) (res DRBDActions) {
 	discardZeroes := iState.DiscardZeroesIfAligned()
 	rsDiscardGran := iState.RsDiscardGranularity()
-	res = append(res, DiskOptionsAction{
+	action := DiskOptionsAction{
 		Minor:                  minor,
 		DiscardZeroesIfAligned: &discardZeroes,
 		RsDiscardGranularity:   &rsDiscardGran,
-	})
+	}
+
+	// Include non-voting when flant extensions are available,
+	// or when the intended value differs from the DRBD built-in default (false).
+	if drbdsetup.FlantExtensionsSupported || iState.NonVoting() {
+		nv := iState.NonVoting()
+		action.NonVoting = &nv
+	}
+
+	res = append(res, action)
 	return res
 }
 
@@ -316,6 +348,17 @@ func computeDiskOptionsActionReconcile(iState IntendedDRBDState, aState ActualDR
 			rsDiscardGran := iState.RsDiscardGranularity()
 			action.RsDiscardGranularity = &rsDiscardGran
 			changed = true
+		}
+
+		// Check non-voting (flant extension).
+		// On non-flant kernels, only include if intended differs from DRBD default (false)
+		// so that drbdsetup surfaces the error instead of silently ignoring the setting.
+		if drbdsetup.FlantExtensionsSupported || iState.NonVoting() {
+			if iState.NonVoting() != vol.NonVoting() {
+				nv := iState.NonVoting()
+				action.NonVoting = &nv
+				changed = true
+			}
 		}
 
 		if changed {
