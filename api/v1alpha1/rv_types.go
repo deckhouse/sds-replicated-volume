@@ -310,7 +310,7 @@ type ReplicatedVolumeDatamesh struct {
 	// +kubebuilder:validation:MaxItems=32
 	// +kubebuilder:default={}
 	// +listType=atomic
-	Members []ReplicatedVolumeDatameshMember `json:"members"`
+	Members []DatameshMember `json:"members"`
 
 	// Quorum is the quorum value for the datamesh.
 	// +kubebuilder:validation:Minimum=0
@@ -326,7 +326,7 @@ type ReplicatedVolumeDatamesh struct {
 }
 
 // FindMemberByName returns a pointer to the member with the given name, or nil if not found.
-func (dm *ReplicatedVolumeDatamesh) FindMemberByName(name string) *ReplicatedVolumeDatameshMember {
+func (dm *ReplicatedVolumeDatamesh) FindMemberByName(name string) *DatameshMember {
 	for i := range dm.Members {
 		if dm.Members[i].Name == name {
 			return &dm.Members[i]
@@ -352,16 +352,13 @@ func (a SharedSecretAlg) String() string {
 	return string(a)
 }
 
-// ReplicatedVolumeDatameshMember represents a member of the datamesh.
+// DatameshMember represents a member of the datamesh.
 // +kubebuilder:object:generate=true
-// +kubebuilder:validation:XValidation:rule="self.type != 'Diskful' || !has(self.typeTransition) || self.typeTransition == 'ToDiskless'",message="Diskful can only have ToDiskless typeTransition"
-// +kubebuilder:validation:XValidation:rule="self.type != 'TieBreaker' || !has(self.typeTransition) || self.typeTransition == 'ToDiskful'",message="TieBreaker can only have ToDiskful typeTransition"
-// +kubebuilder:validation:XValidation:rule="self.type != 'Access' || !has(self.typeTransition)",message="Access cannot have typeTransition"
 // +kubebuilder:validation:XValidation:rule="self.name.lastIndexOf('-') >= 0",message="name must contain '-' separator"
 // +kubebuilder:validation:XValidation:rule="int(self.name.substring(self.name.lastIndexOf('-') + 1)) <= 31",message="name numeric suffix must be between 0 and 31"
-// +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || self.type == 'Diskful' || (has(self.typeTransition) && self.typeTransition == 'ToDiskful')",message="lvmVolumeGroupName can only be set for Diskful type or when typeTransition is ToDiskful"
+// +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || self.type == 'Diskful' || self.type == 'LiminalDiskful'",message="lvmVolumeGroupName can only be set for Diskful or LiminalDiskful type"
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be set"
-type ReplicatedVolumeDatameshMember struct {
+type DatameshMember struct {
 	// Name is the member name (used as list map key).
 	// Must have format "prefix-N" where N is 0-31.
 	// +kubebuilder:validation:Required
@@ -369,14 +366,10 @@ type ReplicatedVolumeDatameshMember struct {
 	// +kubebuilder:validation:MaxLength=140
 	Name string `json:"name"`
 
-	// Type is the member type (Diskful, Access, or TieBreaker).
+	// Type is the member type.
 	// +kubebuilder:validation:Required
-	Type ReplicaType `json:"type"`
-
-	// TypeTransition indicates the desired type transition for this member.
-	// +kubebuilder:validation:Enum=ToDiskful;ToDiskless
-	// +optional
-	TypeTransition ReplicatedVolumeDatameshMemberTypeTransition `json:"typeTransition,omitempty"`
+	// +kubebuilder:validation:Enum=Diskful;LiminalDiskful;TieBreaker;Access
+	Type DatameshMemberType `json:"type"`
 
 	// NodeName is the Kubernetes node name where the member is located.
 	// +kubebuilder:validation:Required
@@ -413,22 +406,86 @@ type ReplicatedVolumeDatameshMember struct {
 }
 
 // ID extracts ID from the member name (e.g., "pvc-xxx-5" → 5).
-func (m ReplicatedVolumeDatameshMember) ID() uint8 {
+func (m DatameshMember) ID() uint8 {
 	return idFromName(m.Name)
 }
 
-// ReplicatedVolumeDatameshMemberTypeTransition enumerates possible type transitions for datamesh members.
-type ReplicatedVolumeDatameshMemberTypeTransition string
+// DatameshMemberType enumerates possible types for datamesh members.
+// This is separate from ReplicaType because datamesh members have an additional
+// LiminalDiskful state that does not exist for RVR spec types.
+type DatameshMemberType string
 
 const (
-	// ReplicatedVolumeDatameshMemberTypeTransitionToDiskful indicates transition to Diskful type.
-	ReplicatedVolumeDatameshMemberTypeTransitionToDiskful ReplicatedVolumeDatameshMemberTypeTransition = "ToDiskful"
-	// ReplicatedVolumeDatameshMemberTypeTransitionToDiskless indicates transition to a diskless type (Access or TieBreaker).
-	ReplicatedVolumeDatameshMemberTypeTransitionToDiskless ReplicatedVolumeDatameshMemberTypeTransition = "ToDiskless"
+	// DatameshMemberTypeDiskful is a fully operational diskful member.
+	// DRBD is configured with the backing volume attached.
+	DatameshMemberTypeDiskful DatameshMemberType = DatameshMemberType(ReplicaTypeDiskful)
+
+	// DatameshMemberTypeLiminalDiskful is a diskful member in a preparatory
+	// (threshold) stage. A liminal member is already Diskful by role (quorum voter, full peer
+	// connectivity) but DRBD is configured as diskless. The backing volume is maintained but
+	// not attached to DRBD. This stage is entered during PromoteToDiskful and DemoteFromDiskful
+	// transitions but is skipped during Formation.
+	DatameshMemberTypeLiminalDiskful DatameshMemberType = DatameshMemberType("Liminal" + ReplicaTypeDiskful)
+
+	// DatameshMemberTypeTieBreaker is a diskless member that participates
+	// in tiebreaker voting.
+	DatameshMemberTypeTieBreaker DatameshMemberType = DatameshMemberType(ReplicaTypeTieBreaker)
+
+	// DatameshMemberTypeAccess is a diskless member used solely for volume attachment.
+	DatameshMemberTypeAccess DatameshMemberType = DatameshMemberType(ReplicaTypeAccess)
 )
 
-func (t ReplicatedVolumeDatameshMemberTypeTransition) String() string {
+func (t DatameshMemberType) String() string {
 	return string(t)
+}
+
+// IsVoter reports whether this member type participates in quorum voting.
+func (t DatameshMemberType) IsVoter() bool {
+	switch t {
+	case DatameshMemberTypeDiskful, DatameshMemberTypeLiminalDiskful:
+		return true
+	default:
+		return false
+	}
+}
+
+// HasBackingVolume reports whether DRBD is configured with a backing volume
+// for this member type.
+func (t DatameshMemberType) HasBackingVolume() bool {
+	return t == DatameshMemberTypeDiskful
+}
+
+// NeedsBackingVolume reports whether this member type requires a backing volume
+// to be provisioned (even if DRBD is not yet configured with it).
+func (t DatameshMemberType) NeedsBackingVolume() bool {
+	switch t {
+	case DatameshMemberTypeDiskful, DatameshMemberTypeLiminalDiskful:
+		return true
+	default:
+		return false
+	}
+}
+
+// ToLiminal returns the liminal variant of this member type.
+// Panics if this type has no liminal variant (only types with HasBackingVolume have one).
+func (t DatameshMemberType) ToLiminal() DatameshMemberType {
+	switch t {
+	case DatameshMemberTypeDiskful:
+		return DatameshMemberTypeLiminalDiskful
+	default:
+		panic("no liminal variant for " + string(t))
+	}
+}
+
+// ConnectsToAllPeers reports whether this member type has full mesh peer
+// connectivity (connects to every other member in the datamesh).
+func (t DatameshMemberType) ConnectsToAllPeers() bool {
+	switch t {
+	case DatameshMemberTypeDiskful, DatameshMemberTypeLiminalDiskful:
+		return true
+	default:
+		return false
+	}
 }
 
 // ReplicatedVolumeEligibleNodesViolation describes a replica placed on a non-eligible node.

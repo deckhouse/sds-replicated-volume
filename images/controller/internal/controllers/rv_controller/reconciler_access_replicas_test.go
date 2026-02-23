@@ -336,7 +336,7 @@ var _ = Describe("reconcileDeleteAccessReplicas", func() {
 	})
 
 	mkRV := func(
-		members []v1alpha1.ReplicatedVolumeDatameshMember,
+		members []v1alpha1.DatameshMember,
 		transitions []v1alpha1.ReplicatedVolumeDatameshTransition,
 	) *v1alpha1.ReplicatedVolume {
 		return &v1alpha1.ReplicatedVolume{
@@ -401,9 +401,9 @@ var _ = Describe("reconcileDeleteAccessReplicas", func() {
 	})
 
 	It("deletes redundant Access RVR (another datamesh member on same node)", func(ctx SpecContext) {
-		rv := mkRV([]v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-2"},
-			{Name: "rv-1-1", Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-2"},
+		rv := mkRV([]v1alpha1.DatameshMember{
+			{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-2"},
+			{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-2"},
 		}, nil)
 		rvr := mkRVR("rv-1-1", "node-2")
 		cl := newClientBuilder(scheme).WithObjects(rvr).Build()
@@ -419,8 +419,8 @@ var _ = Describe("reconcileDeleteAccessReplicas", func() {
 	})
 
 	It("does not delete attached Access RVR", func(ctx SpecContext) {
-		rv := mkRV([]v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rv-1-1", Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-2", Attached: true},
+		rv := mkRV([]v1alpha1.DatameshMember{
+			{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-2", Attached: true},
 		}, nil)
 		rvr := mkRVR("rv-1-1", "node-2")
 		cl := newClientBuilder(scheme).WithObjects(rvr).Build()
@@ -434,8 +434,8 @@ var _ = Describe("reconcileDeleteAccessReplicas", func() {
 
 	It("does not delete Access RVR with active Detach transition", func(ctx SpecContext) {
 		rv := mkRV(
-			[]v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "rv-1-1", Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-2"},
+			[]v1alpha1.DatameshMember{
+				{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-2"},
 			},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{
 				{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach,
@@ -454,8 +454,8 @@ var _ = Describe("reconcileDeleteAccessReplicas", func() {
 
 	It("does not delete Access RVR with active AddAccessReplica transition", func(ctx SpecContext) {
 		rv := mkRV(
-			[]v1alpha1.ReplicatedVolumeDatameshMember{
-				{Name: "rv-1-1", Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-2"},
+			[]v1alpha1.DatameshMember{
+				{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-2"},
 			},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{
 				{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica,
@@ -543,9 +543,9 @@ var _ = Describe("reconcileDeleteAccessReplicas", func() {
 	})
 
 	It("deletes both Access RVRs when two Access members exist on same node", func(ctx SpecContext) {
-		rv := mkRV([]v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rv-1-1", Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-2"},
-			{Name: "rv-1-2", Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-2"},
+		rv := mkRV([]v1alpha1.DatameshMember{
+			{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-2"},
+			{Name: "rv-1-2", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-2"},
 		}, nil)
 		rvr1 := mkRVR("rv-1-1", "node-2")
 		rvr2 := mkRVR("rv-1-2", "node-2")
@@ -563,8 +563,8 @@ var _ = Describe("reconcileDeleteAccessReplicas", func() {
 	})
 
 	It("deletes non-member Access RVR when datamesh member exists on same node", func(ctx SpecContext) {
-		rv := mkRV([]v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-2"},
+		rv := mkRV([]v1alpha1.DatameshMember{
+			{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-2"},
 		}, nil)
 		// rv-1-1 is an Access RVR on node-2, NOT a datamesh member.
 		rvr := mkRVR("rv-1-1", "node-2")
@@ -581,9 +581,9 @@ var _ = Describe("reconcileDeleteAccessReplicas", func() {
 	})
 
 	It("detects redundancy with TieBreaker member on same node", func(ctx SpecContext) {
-		rv := mkRV([]v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeTieBreaker, NodeName: "node-2"},
-			{Name: "rv-1-1", Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-2"},
+		rv := mkRV([]v1alpha1.DatameshMember{
+			{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeTieBreaker, NodeName: "node-2"},
+			{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-2"},
 		}, nil)
 		rvr := mkRVR("rv-1-1", "node-2")
 		cl := newClientBuilder(scheme).WithObjects(rvr).Build()

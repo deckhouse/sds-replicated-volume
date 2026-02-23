@@ -233,8 +233,7 @@ spec:
                     default: []
                     description: Members is the list of datamesh members.
                     items:
-                      description: ReplicatedVolumeDatameshMember represents a member
-                        of the datamesh.
+                      description: DatameshMember represents a member of the datamesh.
                       properties:
                         addresses:
                           description: Addresses is the list of DRBD addresses for
@@ -301,15 +300,12 @@ spec:
                           minLength: 1
                           type: string
                         type:
-                          description: Type is the member type (Diskful, Access, or
-                            TieBreaker).
-                          type: string
-                        typeTransition:
-                          description: TypeTransition indicates the desired type transition
-                            for this member.
+                          description: Type is the member type.
                           enum:
-                          - ToDiskful
-                          - ToDiskless
+                          - Diskful
+                          - LiminalDiskful
+                          - TieBreaker
+                          - Access
                           type: string
                         zone:
                           description: Zone is the zone where the member is located.
@@ -323,23 +319,15 @@ spec:
                       - type
                       type: object
                       x-kubernetes-validations:
-                      - message: Diskful can only have ToDiskless typeTransition
-                        rule: self.type != 'Diskful' || !has(self.typeTransition)
-                          || self.typeTransition == 'ToDiskless'
-                      - message: TieBreaker can only have ToDiskful typeTransition
-                        rule: self.type != 'TieBreaker' || !has(self.typeTransition)
-                          || self.typeTransition == 'ToDiskful'
-                      - message: Access cannot have typeTransition
-                        rule: self.type != 'Access' || !has(self.typeTransition)
                       - message: name must contain '-' separator
                         rule: self.name.lastIndexOf('-') >= 0
                       - message: name numeric suffix must be between 0 and 31
                         rule: int(self.name.substring(self.name.lastIndexOf('-') +
                           1)) <= 31
-                      - message: lvmVolumeGroupName can only be set for Diskful type
-                          or when typeTransition is ToDiskful
+                      - message: lvmVolumeGroupName can only be set for Diskful or
+                          LiminalDiskful type
                         rule: '!has(self.lvmVolumeGroupName) || self.type == ''Diskful''
-                          || (has(self.typeTransition) && self.typeTransition == ''ToDiskful'')'
+                          || self.type == ''LiminalDiskful'''
                       - message: lvmVolumeGroupThinPoolName requires lvmVolumeGroupName
                           to be set
                         rule: '!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)'

@@ -15,7 +15,7 @@ The controller reconciles `ReplicatedVolumeReplica` with:
 
 | Direction | Resource/Controller | Relationship |
 |-----------|---------------------|--------------|
-| ← input | ReplicatedVolume | Reads datamesh configuration (size, membership, type transitions) |
+| ← input | ReplicatedVolume | Reads datamesh configuration (size, membership, member types) |
 | ← input | ReplicatedStoragePool | Reads eligible nodes for eligibility verification |
 | ← input | Pod (agent) | Checks agent readiness on target node before configuring DRBD |
 | → manages | LVMLogicalVolume | Creates/resizes/deletes backing volumes |
@@ -82,7 +82,7 @@ Reconcile (root) [Pure orchestration]
 │   ├── rvrShouldNotExist → deleteDRBDR + applyDRBDConfiguredCondFalse NotApplicable
 │   ├── RV/datamesh not ready → applyDRBDConfiguredCondFalse WaitingForReplicatedVolume
 │   ├── node not assigned → applyDRBDConfiguredCondFalse PendingScheduling
-│   ├── computeIntendedType / computeTargetType / computeTargetDRBDRReconciliationCache
+│   ├── computeIntendedType / computeTargetType / newDRBDRReconciliationCache
 │   ├── createDRBDR (computeTargetDRBDRSpec) / patchDRBDR
 │   ├── applyRVRDRBDRReconciliationCache
 │   ├── getAgentReady → applyDRBDConfiguredCondFalse AgentNotReady
@@ -328,7 +328,7 @@ The `drbdrReconciliationCache` field caches the target configuration that DRBDR 
 |-------|-------------|
 | `datameshRevision` | Datamesh revision this replica was configured for |
 | `drbdrGeneration` | Generation of the DRBDResource that was last targeted |
-| `rvrType` | RVR type (Diskful/TieBreaker/Access) that was last targeted |
+| `targetType` | Target type (DatameshMemberType) for which DRBDR spec was last computed |
 
 ### PeerStatus
 
@@ -389,12 +389,10 @@ A backing volume is needed if **all** conditions are met:
 3. **Configuration is complete** — nodeName and lvmVolumeGroupName are set
 
 For replicas that are members of the datamesh, a disk is needed if:
-- Type is `Diskful`, OR
-- TypeTransition is `ToDiskful` (disk is being prepared before becoming Diskful)
+- Type is `Diskful` (including liminal Diskful members — they maintain their backing volume)
 
 A disk is NOT needed if:
-- TypeTransition is `ToDiskless` (disk is being removed)
-- Type is diskless (Access/TieBreaker) and no transition to Diskful
+- Type is diskless (Access/TieBreaker)
 
 For non-members, a disk is needed if spec.type is `Diskful`.
 
@@ -463,7 +461,7 @@ Intentionally empty: we need to react to all DRBDResource fields.
 
 ### RV Predicates
 
-- Reacts to DatameshRevision changes (covers Size, membership changes, type transitions)
+- Reacts to DatameshRevision changes (covers Size, membership changes, member type changes)
 - Reacts to Spec.ReplicatedStorageClassName changes (for labels)
 - Reacts to DatameshPendingReplicaTransitions message changes (for condition message enrichment)
 - Does not react to Create/Delete (RVRs handle their own lifecycle)
@@ -749,7 +747,7 @@ flowchart TD
 | Input | Description |
 |-------|-------------|
 | `rvr.Spec` | Node name, replica type, LVG/thin pool for diskful |
-| `rv.Status.Datamesh` | System networks, members, size, type transitions |
+| `rv.Status.Datamesh` | System networks, members, size, member types |
 | `targetBV`, `intendedBV` | Backing volume pointers from reconcileBackingVolume |
 | `agent Pod` | Agent readiness on target node |
 
@@ -758,7 +756,7 @@ flowchart TD
 | `DRBDResource` | Created/patched/deleted DRBD resource |
 | `DRBDConfigured` condition | Reports DRBD configuration state |
 | `status.datameshRevision` | Datamesh revision for which replica was fully configured; reset to 0 when removed from datamesh |
-| `status.drbdrReconciliationCache` | Cache of target configuration (datameshRevision, drbdrGeneration, rvrType) |
+| `status.drbdrReconciliationCache` | Cache of target configuration (datameshRevision, drbdrGeneration, targetType) |
 
 ---
 
