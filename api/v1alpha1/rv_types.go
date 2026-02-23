@@ -368,7 +368,7 @@ type DatameshMember struct {
 
 	// Type is the member type.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=Diskful;LiminalDiskful;TieBreaker;Access
+	// +kubebuilder:validation:Enum=Diskful;LiminalDiskful;ShadowDiskful;LiminalShadowDiskful;TieBreaker;Access
 	Type DatameshMemberType `json:"type"`
 
 	// NodeName is the Kubernetes node name where the member is located.
@@ -427,6 +427,16 @@ const (
 	// transitions but is skipped during Formation.
 	DatameshMemberTypeLiminalDiskful DatameshMemberType = DatameshMemberType("Liminal" + ReplicaTypeDiskful)
 
+	// DatameshMemberTypeShadowDiskful is a diskful member that pre-syncs data
+	// invisibly to quorum. DRBD is configured with the backing volume attached and
+	// non-voting=true. Excluded from quorum on all peers via allow-remote-read=false.
+	DatameshMemberTypeShadowDiskful DatameshMemberType = DatameshMemberType(ReplicaTypeShadowDiskful)
+
+	// DatameshMemberTypeLiminalShadowDiskful is a shadow diskful member in a preparatory
+	// stage. DRBD is configured as diskless. The backing volume is maintained but not
+	// attached to DRBD.
+	DatameshMemberTypeLiminalShadowDiskful DatameshMemberType = DatameshMemberType("Liminal" + ReplicaTypeShadowDiskful)
+
 	// DatameshMemberTypeTieBreaker is a diskless member that participates
 	// in tiebreaker voting.
 	DatameshMemberTypeTieBreaker DatameshMemberType = DatameshMemberType(ReplicaTypeTieBreaker)
@@ -452,14 +462,20 @@ func (t DatameshMemberType) IsVoter() bool {
 // HasBackingVolume reports whether DRBD is configured with a backing volume
 // for this member type.
 func (t DatameshMemberType) HasBackingVolume() bool {
-	return t == DatameshMemberTypeDiskful
+	switch t {
+	case DatameshMemberTypeDiskful, DatameshMemberTypeShadowDiskful:
+		return true
+	default:
+		return false
+	}
 }
 
 // NeedsBackingVolume reports whether this member type requires a backing volume
 // to be provisioned (even if DRBD is not yet configured with it).
 func (t DatameshMemberType) NeedsBackingVolume() bool {
 	switch t {
-	case DatameshMemberTypeDiskful, DatameshMemberTypeLiminalDiskful:
+	case DatameshMemberTypeDiskful, DatameshMemberTypeLiminalDiskful,
+		DatameshMemberTypeShadowDiskful, DatameshMemberTypeLiminalShadowDiskful:
 		return true
 	default:
 		return false
@@ -472,6 +488,8 @@ func (t DatameshMemberType) ToLiminal() DatameshMemberType {
 	switch t {
 	case DatameshMemberTypeDiskful:
 		return DatameshMemberTypeLiminalDiskful
+	case DatameshMemberTypeShadowDiskful:
+		return DatameshMemberTypeLiminalShadowDiskful
 	default:
 		panic("no liminal variant for " + string(t))
 	}
@@ -481,7 +499,8 @@ func (t DatameshMemberType) ToLiminal() DatameshMemberType {
 // connectivity (connects to every other member in the datamesh).
 func (t DatameshMemberType) ConnectsToAllPeers() bool {
 	switch t {
-	case DatameshMemberTypeDiskful, DatameshMemberTypeLiminalDiskful:
+	case DatameshMemberTypeDiskful, DatameshMemberTypeLiminalDiskful,
+		DatameshMemberTypeShadowDiskful, DatameshMemberTypeLiminalShadowDiskful:
 		return true
 	default:
 		return false

@@ -806,4 +806,42 @@ var _ = Describe("ensureDatameshAccessReplicas", func() {
 		Expect(rv.Status.Datamesh.Members).To(HaveLen(1))
 		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Message).To(ContainSubstring("volumeAccess is Local"))
 	})
+
+	It("includes ShadowDiskful in mustConfirm set for AddAccessReplica transition", func(ctx SpecContext) {
+		// ShadowDiskful has ConnectsToAllPeers()=true, so it must confirm transitions.
+		// With Diskful(#0) at rev 6 and ShadowDiskful(#2) at rev 5,
+		// the transition should NOT complete because ShadowDiskful has not confirmed.
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.DatameshMember{
+						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful},
+						{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess},
+						{Name: "rv-1-2", Type: v1alpha1.DatameshMemberTypeShadowDiskful},
+					},
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica,
+						DatameshRevision: 6, ReplicaName: "rv-1-1", StartedAt: metav1.Now()},
+				},
+				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					{Name: "rv-1-1", Transition: v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
+						Member: ptr.To(true), Type: v1alpha1.ReplicaTypeAccess,
+					}},
+				},
+			},
+		}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			{ObjectMeta: metav1.ObjectMeta{Name: "rv-1-0"}, Status: v1alpha1.ReplicatedVolumeReplicaStatus{DatameshRevision: 6}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "rv-1-1"}, Status: v1alpha1.ReplicatedVolumeReplicaStatus{DatameshRevision: 6}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "rv-1-2"}, Status: v1alpha1.ReplicatedVolumeReplicaStatus{DatameshRevision: 5}}, // not confirmed
+		}
+
+		outcome := ensureDatameshAccessReplicas(ctx, rv, rvrs, nil)
+
+		Expect(outcome.DidChange()).To(BeTrue())
+		// Transition should NOT be completed because ShadowDiskful(#2) has not confirmed.
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].Message).To(ContainSubstring("#2"))
+	})
 })

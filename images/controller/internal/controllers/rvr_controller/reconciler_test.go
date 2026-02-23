@@ -2851,6 +2851,67 @@ var _ = Describe("computeIntendedType", func() {
 
 		Expect(result).To(Equal(v1alpha1.DatameshMemberTypeLiminalDiskful))
 	})
+
+	It("returns ShadowDiskful from RVR spec when member is nil", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type: v1alpha1.ReplicaTypeShadowDiskful,
+			},
+		}
+
+		result := computeIntendedType(rvr, nil)
+
+		Expect(result).To(Equal(v1alpha1.DatameshMemberTypeShadowDiskful))
+	})
+
+	It("returns ShadowDiskful member type directly", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{}
+		member := &v1alpha1.DatameshMember{
+			Type: v1alpha1.DatameshMemberTypeShadowDiskful,
+		}
+
+		result := computeIntendedType(rvr, member)
+
+		Expect(result).To(Equal(v1alpha1.DatameshMemberTypeShadowDiskful))
+	})
+})
+
+var _ = Describe("computeTargetType", func() {
+	It("returns LiminalDiskful when intended is Diskful but no BV", func() {
+		result := computeTargetType(v1alpha1.DatameshMemberTypeDiskful, "")
+
+		Expect(result).To(Equal(v1alpha1.DatameshMemberTypeLiminalDiskful))
+	})
+
+	It("returns LiminalShadowDiskful when intended is ShadowDiskful but no BV", func() {
+		result := computeTargetType(v1alpha1.DatameshMemberTypeShadowDiskful, "")
+
+		Expect(result).To(Equal(v1alpha1.DatameshMemberTypeLiminalShadowDiskful))
+	})
+
+	It("returns ShadowDiskful when intended is ShadowDiskful and BV ready", func() {
+		result := computeTargetType(v1alpha1.DatameshMemberTypeShadowDiskful, "llv-1")
+
+		Expect(result).To(Equal(v1alpha1.DatameshMemberTypeShadowDiskful))
+	})
+
+	It("returns Diskful when intended is Diskful and BV ready", func() {
+		result := computeTargetType(v1alpha1.DatameshMemberTypeDiskful, "llv-1")
+
+		Expect(result).To(Equal(v1alpha1.DatameshMemberTypeDiskful))
+	})
+
+	It("returns Access unchanged regardless of BV", func() {
+		result := computeTargetType(v1alpha1.DatameshMemberTypeAccess, "")
+
+		Expect(result).To(Equal(v1alpha1.DatameshMemberTypeAccess))
+	})
+
+	It("returns TieBreaker unchanged regardless of BV", func() {
+		result := computeTargetType(v1alpha1.DatameshMemberTypeTieBreaker, "")
+
+		Expect(result).To(Equal(v1alpha1.DatameshMemberTypeTieBreaker))
+	})
 })
 
 var _ = Describe("computeDRBDRType", func() {
@@ -2868,6 +2929,18 @@ var _ = Describe("computeDRBDRType", func() {
 
 	It("converts TieBreaker to DRBDResourceTypeDiskless", func() {
 		result := computeDRBDRType(v1alpha1.DatameshMemberTypeTieBreaker)
+
+		Expect(result).To(Equal(v1alpha1.DRBDResourceTypeDiskless))
+	})
+
+	It("converts ShadowDiskful to DRBDResourceTypeDiskful", func() {
+		result := computeDRBDRType(v1alpha1.DatameshMemberTypeShadowDiskful)
+
+		Expect(result).To(Equal(v1alpha1.DRBDResourceTypeDiskful))
+	})
+
+	It("converts LiminalShadowDiskful to DRBDResourceTypeDiskless", func() {
+		result := computeDRBDRType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful)
 
 		Expect(result).To(Equal(v1alpha1.DRBDResourceTypeDiskless))
 	})
@@ -3071,6 +3144,64 @@ var _ = Describe("computeTargetDRBDRSpec", func() {
 		}
 
 		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "", member.Type)
+
+		Expect(spec.Quorum).To(Equal(byte(32)))
+		Expect(spec.QuorumMinimumRedundancy).To(Equal(byte(2)))
+	})
+
+	It("sets NonVoting=true for ShadowDiskful member with BV", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1", Type: v1alpha1.ReplicaTypeShadowDiskful},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Size: resource.MustParse("10Gi"),
+		}
+		member := &v1alpha1.DatameshMember{
+			Name: "pvc-abc-1",
+			Type: v1alpha1.DatameshMemberTypeShadowDiskful,
+		}
+
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "llv-1", v1alpha1.DatameshMemberTypeShadowDiskful)
+
+		Expect(spec.NonVoting).To(BeTrue())
+		Expect(spec.Type).To(Equal(v1alpha1.DRBDResourceTypeDiskful))
+	})
+
+	It("sets NonVoting=false for Diskful member with BV", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1", Type: v1alpha1.ReplicaTypeDiskful},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Size: resource.MustParse("10Gi"),
+		}
+		member := &v1alpha1.DatameshMember{
+			Name: "pvc-abc-1",
+			Type: v1alpha1.DatameshMemberTypeDiskful,
+		}
+
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "llv-1", v1alpha1.DatameshMemberTypeDiskful)
+
+		Expect(spec.NonVoting).To(BeFalse())
+	})
+
+	It("sets quorum=32 for ShadowDiskful member (non-voter with disk)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-abc-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1", Type: v1alpha1.ReplicaTypeShadowDiskful},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Quorum:                  3,
+			QuorumMinimumRedundancy: 2,
+			Size:                    resource.MustParse("10Gi"),
+		}
+		member := &v1alpha1.DatameshMember{
+			Name: "pvc-abc-1",
+			Type: v1alpha1.DatameshMemberTypeShadowDiskful,
+		}
+
+		spec := computeTargetDRBDRSpec(rvr, nil, datamesh, member, "llv-1", v1alpha1.DatameshMemberTypeShadowDiskful)
 
 		Expect(spec.Quorum).To(Equal(byte(32)))
 		Expect(spec.QuorumMinimumRedundancy).To(Equal(byte(2)))
@@ -3312,6 +3443,54 @@ var _ = Describe("computeTargetDRBDRPeers", func() {
 		for _, p := range peers {
 			Expect(p.Protocol).To(Equal(v1alpha1.DRBDProtocolC))
 		}
+	})
+
+	It("ShadowDiskful connects to all peers including Access and TieBreaker", func() {
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.DatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.DatameshMemberTypeShadowDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "pvc-abc-3", Type: v1alpha1.DatameshMemberTypeAccess},
+				{Name: "pvc-abc-4", Type: v1alpha1.DatameshMemberTypeTieBreaker},
+			},
+		}
+		self := &datamesh.Members[0]
+
+		peers := computeTargetDRBDRPeers(datamesh, self)
+
+		Expect(peers).To(HaveLen(3))
+	})
+
+	It("sets AllowRemoteRead=false for ShadowDiskful peers", func() {
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.DatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.DatameshMemberTypeDiskful},
+				{Name: "pvc-abc-2", Type: v1alpha1.DatameshMemberTypeShadowDiskful},
+			},
+		}
+		self := &datamesh.Members[0]
+
+		peers := computeTargetDRBDRPeers(datamesh, self)
+
+		Expect(peers).To(HaveLen(1))
+		Expect(peers[0].Name).To(Equal("pvc-abc-2"))
+		Expect(peers[0].AllowRemoteRead).To(BeFalse())
+	})
+
+	It("LiminalShadowDiskful peer type is Diskful", func() {
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.DatameshMember{
+				{Name: "pvc-abc-1", Type: v1alpha1.DatameshMemberTypeAccess},
+				{Name: "pvc-abc-2", Type: v1alpha1.DatameshMemberTypeLiminalShadowDiskful},
+			},
+		}
+		self := &datamesh.Members[0]
+
+		peers := computeTargetDRBDRPeers(datamesh, self)
+
+		Expect(peers).To(HaveLen(1))
+		Expect(peers[0].Name).To(Equal("pvc-abc-2"))
+		Expect(peers[0].Type).To(Equal(v1alpha1.DRBDResourceTypeDiskful))
 	})
 })
 

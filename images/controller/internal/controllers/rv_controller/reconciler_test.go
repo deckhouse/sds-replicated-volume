@@ -3977,6 +3977,29 @@ var _ = Describe("computeTargetQuorum edge cases", func() {
 		Expect(qmr).To(Equal(byte(2)))
 	})
 
+	It("does not count ShadowDiskful as voter", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationAvailability,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "test-pool",
+				},
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.DatameshMember{
+						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0), Type: v1alpha1.DatameshMemberTypeDiskful},
+						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 1), Type: v1alpha1.DatameshMemberTypeDiskful},
+						// ShadowDiskful should NOT be counted as a voter.
+						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2), Type: v1alpha1.DatameshMemberTypeShadowDiskful},
+					},
+				},
+			},
+		}
+		q, qmr := computeTargetQuorum(rv)
+		// Only 2 voters (Diskful) → quorum = 2/2+1 = 2; minQ=2, minQMR=1 → q=2, qmr=2
+		Expect(q).To(Equal(byte(2)))
+		Expect(qmr).To(Equal(byte(2)))
+	})
+
 	It("does not count non-diskful members", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{

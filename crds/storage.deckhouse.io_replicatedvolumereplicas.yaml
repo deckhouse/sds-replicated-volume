@@ -115,6 +115,7 @@ spec:
                   spec.type and status.effectiveType fields.
                 enum:
                 - Diskful
+                - ShadowDiskful
                 - Access
                 - TieBreaker
                 type: string
@@ -354,6 +355,8 @@ spec:
                     enum:
                     - Diskful
                     - LiminalDiskful
+                    - ShadowDiskful
+                    - LiminalShadowDiskful
                     - TieBreaker
                     - Access
                     type: string

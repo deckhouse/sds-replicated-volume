@@ -304,6 +304,8 @@ spec:
                           enum:
                           - Diskful
                           - LiminalDiskful
+                          - ShadowDiskful
+                          - LiminalShadowDiskful
                           - TieBreaker
                           - Access
                           type: string
