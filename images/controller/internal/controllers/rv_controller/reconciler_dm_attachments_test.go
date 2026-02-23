@@ -726,6 +726,36 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 		}
 		Expect(hasDetach).To(BeTrue(), "Detach should still be pending")
 	})
+
+	It("blocks EnableMultiattach completion while ShadowDiskful member has not confirmed", func() {
+		// ShadowDiskful has HasBackingVolume()=true → included in mustConfirm set.
+		rv := mkAttachRV([]v1alpha1.DatameshMember{
+			mkAttachMember("rv-1-0", "node-1", true),
+			{Name: "rv-1-2", Type: v1alpha1.DatameshMemberTypeShadowDiskful, NodeName: "node-3",
+				Addresses: []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "default"}}},
+		}, 10)
+		rv.Spec.MaxAttachments = 2
+		rv.Status.Datamesh.Multiattach = true
+		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, DatameshRevision: 10, StartedAt: metav1.Now()},
+		}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkAttachRVRWithRev("rv-1-0", "node-1", 10),
+			mkAttachRVRWithRev("rv-1-2", "node-3", 5), // ShadowDiskful NOT confirmed
+		}
+
+		_, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, nil, mkAttachRSP("node-1", "node-3"))
+
+		Expect(outcome.Error()).To(BeNil())
+		// EnableMultiattach should NOT be completed because ShadowDiskful has not confirmed.
+		hasEnable := false
+		for _, t := range rv.Status.DatameshTransitions {
+			if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach {
+				hasEnable = true
+			}
+		}
+		Expect(hasEnable).To(BeTrue(), "EnableMultiattach must stay pending while ShadowDiskful member has not confirmed")
+	})
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -841,6 +871,29 @@ var _ = Describe("ensureDatameshAttachments attach", func() {
 		Expect(rv.Status.Datamesh.Members[0].Attached).To(BeFalse())
 		as := atts.findAttachmentStateByNodeName("node-1")
 		Expect(as.conditionMessage).To(ContainSubstring("join datamesh"))
+	})
+
+	It("allows attach for ShadowDiskful member with VolumeAccess=Local", func() {
+		rv := mkAttachRV([]v1alpha1.DatameshMember{
+			mkAttachMember("rv-1-0", "node-1", true), // Diskful voter provides quorum.
+			{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeShadowDiskful, NodeName: "node-2",
+				Addresses: []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "default"}}},
+		}, 10)
+		rv.Spec.MaxAttachments = 2
+		rv.Status.Configuration.VolumeAccess = v1alpha1.VolumeAccessLocal
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkAttachRVR("rv-1-0", "node-1", true),
+			mkAttachRVR("rv-1-1", "node-2", true),
+		}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-2", "node-2")}
+
+		atts, outcome := testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1", "node-2"))
+
+		Expect(outcome.Error()).To(BeNil())
+		Expect(outcome.DidChange()).To(BeTrue())
+		// ShadowDiskful has HasBackingVolume()=true → VolumeAccess=Local guard passes.
+		as := atts.findAttachmentStateByNodeName("node-2")
+		Expect(as.conditionReason).NotTo(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonVolumeAccessLocalityNotSatisfied))
 	})
 })
 

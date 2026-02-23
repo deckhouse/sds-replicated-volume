@@ -2756,6 +2756,13 @@ func computeTargetDRBDRSpec(
 		spec.Size = nil
 	}
 
+	// NonVoting: DRBD non-voting option can only be set on diskful replicas; it
+	// makes the replica not count itself in its own quorum calculation (peers use
+	// allow-remote-read=false for the other side). Two member types have DRBD
+	// configured with a disk: Diskful and ShadowDiskful. Of those, only
+	// ShadowDiskful needs non-voting.
+	spec.NonVoting = targetType == v1alpha1.DatameshMemberTypeShadowDiskful
+
 	// Membership-dependent configuration.
 	if member == nil {
 		// Cannot become Primary while not in datamesh.
@@ -2777,8 +2784,11 @@ func computeTargetDRBDRSpec(
 		}
 		spec.AllowTwoPrimaries = datamesh.Multiattach
 
-		// Quorum: diskless node quorum depends on connection to enough UpToDate diskful nodes that have quorum.
-		if spec.Type == v1alpha1.DRBDResourceTypeDiskless {
+		// Quorum: non-voters (Access, TieBreaker, ShadowDiskful and their liminal variants)
+		// use q=32 (impossibly high) so they can never satisfy the main quorum condition
+		// on their own; their quorum is determined entirely by the quorate_peers path.
+		// Voters use q from datamesh.
+		if !targetType.IsVoter() {
 			spec.Quorum = 32
 			spec.QuorumMinimumRedundancy = datamesh.QuorumMinimumRedundancy
 		} else {
@@ -2796,9 +2806,10 @@ func computeTargetDRBDRSpec(
 // computeTargetDRBDRPeers computes the target peers from datamesh members (excluding self).
 //
 // Peer connectivity rules:
-//   - Diskful replica connects to ALL peers,
-//     but sets AllowRemoteRead=false for Access peers (so they are not considered in the tie-breaker mechanism).
-//   - Access/TieBreaker replica connects only to Diskful peers.
+//   - Full-mesh members (Diskful, LiminalDiskful, ShadowDiskful, LiminalShadowDiskful)
+//     connect to ALL peers. AllowRemoteRead is set based on the peer's role:
+//     true for voters and tiebreakers, false for Access and ShadowDiskful peers.
+//   - Non-full-mesh members (Access, TieBreaker) connect only to full-mesh peers.
 func computeTargetDRBDRPeers(datamesh *v1alpha1.ReplicatedVolumeDatamesh, self *v1alpha1.DatameshMember) []v1alpha1.DRBDResourcePeer {
 	if len(datamesh.Members) <= 1 {
 		return nil
