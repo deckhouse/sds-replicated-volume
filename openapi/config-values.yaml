@@ -62,3 +62,7 @@ properties:
         type: string
         default: "0 3 * * *"
         description: Backup schedule
+  newControlPlane:
+    type: boolean
+    default: false
+    description: When true, use the new control-plane as a backend for the module
