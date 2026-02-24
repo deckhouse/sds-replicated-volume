@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -50,10 +50,10 @@ type VolumeMain struct {
 	client         *kubeutils.Client
 	log            *slog.Logger
 
-	// Disable flags for sub-runners
-	disableVolumeResizer          bool
-	disableVolumeReplicaDestroyer bool
-	disableVolumeReplicaCreator   bool
+	// Enable flags for sub-runners
+	enableVolumeResizer          bool
+	enableVolumeReplicaDestroyer bool
+	enableVolumeReplicaCreator   bool
 
 	// Tracking running volumes
 	runningSubRunners atomic.Int32
@@ -64,6 +64,7 @@ type VolumeMain struct {
 	totalCreateRVTime       *atomic.Int64 // nanoseconds
 	totalDeleteRVTime       *atomic.Int64 // nanoseconds
 	totalWaitForRVReadyTime *atomic.Int64 // nanoseconds
+	createRVErrorCount      *atomic.Int64
 
 	// Callback to register checker stats in MultiVolume
 	registerCheckerStats func(*CheckerStats)
@@ -82,25 +83,27 @@ func NewVolumeMain(
 	totalCreateRVTime *atomic.Int64,
 	totalDeleteRVTime *atomic.Int64,
 	totalWaitForRVReadyTime *atomic.Int64,
+	createRVErrorCount *atomic.Int64,
 	registerCheckerStats func(*CheckerStats),
 	forceCleanupChan <-chan struct{},
 ) *VolumeMain {
 	return &VolumeMain{
-		rvName:                        rvName,
-		storageClass:                  cfg.StorageClassName,
-		volumeLifetime:                cfg.VolumeLifetime,
-		initialSize:                   cfg.InitialSize,
-		client:                        client,
-		log:                           slog.Default().With("runner", "volume-main", "rv_name", rvName, "storage_class", cfg.StorageClassName, "volume_lifetime", cfg.VolumeLifetime),
-		disableVolumeResizer:          cfg.DisableVolumeResizer,
-		disableVolumeReplicaDestroyer: cfg.DisableVolumeReplicaDestroyer,
-		disableVolumeReplicaCreator:   cfg.DisableVolumeReplicaCreator,
-		createdRVCount:                createdRVCount,
-		totalCreateRVTime:             totalCreateRVTime,
-		totalDeleteRVTime:             totalDeleteRVTime,
-		totalWaitForRVReadyTime:       totalWaitForRVReadyTime,
-		registerCheckerStats:          registerCheckerStats,
-		forceCleanupChan:              forceCleanupChan,
+		rvName:                       rvName,
+		storageClass:                 cfg.StorageClassName,
+		volumeLifetime:               cfg.VolumeLifetime,
+		initialSize:                  cfg.InitialSize,
+		client:                       client,
+		log:                          slog.Default().With("runner", "volume-main", "rv_name", rvName, "storage_class", cfg.StorageClassName, "volume_lifetime", cfg.VolumeLifetime),
+		enableVolumeResizer:          cfg.EnableVolumeResizer,
+		enableVolumeReplicaDestroyer: cfg.EnableVolumeReplicaDestroyer,
+		enableVolumeReplicaCreator:   cfg.EnableVolumeReplicaCreator,
+		createdRVCount:               createdRVCount,
+		totalCreateRVTime:            totalCreateRVTime,
+		totalDeleteRVTime:            totalDeleteRVTime,
+		totalWaitForRVReadyTime:      totalWaitForRVReadyTime,
+		createRVErrorCount:           createRVErrorCount,
+		registerCheckerStats:         registerCheckerStats,
+		forceCleanupChan:             forceCleanupChan,
 	}
 }
 
@@ -122,11 +125,18 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 	}
 	v.log.Debug("attached nodes", "nodes", attachNodes)
 
-	// Create RV
-	createDuration, err := v.createRV(ctx, attachNodes)
+	// Create RV and RVAs
+	// We are waiting for the RVA to be ready, so it may take a long time.
+	createDuration, err := measureDurationError(func() error {
+		return v.createRV(ctx, attachNodes)
+	})
 	if err != nil {
-		v.log.Error("failed to create RV", "error", err)
-		return err
+		v.log.Error("failed to create RV and RVAs", "error", err)
+		if v.createRVErrorCount != nil {
+			v.createRVErrorCount.Add(1)
+		}
+		v.cleanup(ctx, lifetimeCtx, v.forceCleanupChan)
+		return nil
 	}
 	if v.totalCreateRVTime != nil {
 		v.totalCreateRVTime.Add(createDuration.Nanoseconds())
@@ -137,11 +147,12 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 	v.startSubRunners(lifetimeCtx)
 
 	// Wait for RV to become ready
-	waitDuration, err := v.waitForRVReady(lifetimeCtx)
+	waitDuration, err := measureDurationError(func() error {
+		return v.waitForRVReady(lifetimeCtx)
+	})
 	if err != nil {
 		v.log.Error("failed waiting for RV to become ready", "error", err)
 		// Continue to cleanup
-		// TODO: run volume-checker before cleanup
 	} else {
 		// Start checker after Ready (to monitor for state changes)
 		v.log.Debug("RV is ready, starting checker")
@@ -208,7 +219,9 @@ waitLoop:
 		v.startVolumeCheckerForFinalState(cleanupCtx, log)
 	}
 
-	deleteDuration, err := v.deleteRVAndWait(cleanupCtx, log)
+	deleteDuration, err := measureDurationError(func() error {
+		return v.deleteRVAndWait(cleanupCtx, log)
+	})
 	if err != nil {
 		v.log.Error("failed to delete RV", "error", err)
 	}
@@ -248,9 +261,8 @@ func (v *VolumeMain) getPublishNodes(ctx context.Context, count int) ([]string, 
 	return names, nil
 }
 
-func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) (time.Duration, error) {
-	startTime := time.Now()
-
+// createRV creates a ReplicatedVolume and RVAs for the given nodes.
+func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) error {
 	rv := &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: v.rvName,
@@ -263,7 +275,12 @@ func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) (time.D
 
 	err := v.client.CreateRV(ctx, rv)
 	if err != nil {
-		return time.Since(startTime), err
+		return err
+	}
+
+	// Increment statistics counter on successful creation
+	if v.createdRVCount != nil {
+		v.createdRVCount.Add(1)
 	}
 
 	// Create initial attachment intents via RVA (if requested).
@@ -272,23 +289,30 @@ func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) (time.D
 			continue
 		}
 		if _, err := v.client.EnsureRVA(ctx, v.rvName, nodeName); err != nil {
-			return time.Since(startTime), err
+			return err
 		}
 		if err := v.client.WaitForRVAReady(ctx, v.rvName, nodeName); err != nil {
-			return time.Since(startTime), err
+			return err
 		}
 	}
 
-	// Increment statistics counter on successful creation
-	if v.createdRVCount != nil {
-		v.createdRVCount.Add(1)
-	}
-
-	return time.Since(startTime), nil
+	return nil
 }
 
-func (v *VolumeMain) deleteRVAndWait(ctx context.Context, log *slog.Logger) (time.Duration, error) {
-	startTime := time.Now()
+func (v *VolumeMain) deleteRVAndWait(ctx context.Context, log *slog.Logger) error {
+	// Unattach from all nodes - delete all RVAs for this RV.
+	rvas, err := v.client.ListRVAsByRVName(ctx, v.rvName)
+	if err != nil {
+		return err
+	}
+	for _, rva := range rvas {
+		if rva.Spec.NodeName == "" {
+			continue
+		}
+		if err := v.client.DeleteRVA(ctx, v.rvName, rva.Spec.NodeName); err != nil {
+			return err
+		}
+	}
 
 	rv := &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
@@ -296,57 +320,47 @@ func (v *VolumeMain) deleteRVAndWait(ctx context.Context, log *slog.Logger) (tim
 		},
 	}
 
-	err := v.client.DeleteRV(ctx, rv)
+	err = v.client.DeleteRV(ctx, rv)
 	if err != nil {
-		return time.Since(startTime), err
+		return err
 	}
 
 	err = v.WaitForRVDeleted(ctx, log)
 	if err != nil {
-		return time.Since(startTime), err
+		return err
 	}
 
-	return time.Since(startTime), nil
+	return nil
 }
 
-func (v *VolumeMain) waitForRVReady(ctx context.Context) (time.Duration, error) {
-	startTime := time.Now()
-
+func (v *VolumeMain) waitForRVReady(ctx context.Context) error {
 	for {
 		v.log.Debug("waiting for RV to become ready")
-
-		select {
-		case <-ctx.Done():
-			return time.Since(startTime), ctx.Err()
-		default:
-		}
 
 		rv, err := v.client.GetRV(ctx, v.rvName)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
-				time.Sleep(500 * time.Millisecond)
+				if err := waitWithContext(ctx, 500*time.Millisecond); err != nil {
+					return err
+				}
 				continue
 			}
-			return time.Since(startTime), err
+			return err
 		}
 
 		if v.client.IsRVReady(rv) {
-			return time.Since(startTime), nil
+			return nil
 		}
 
-		time.Sleep(1 * time.Second)
+		if err := waitWithContext(ctx, 1*time.Second); err != nil {
+			return err
+		}
 	}
 }
 
 func (v *VolumeMain) WaitForRVDeleted(ctx context.Context, log *slog.Logger) error {
 	for {
 		log.Debug("waiting for RV to be deleted")
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
 
 		_, err := v.client.GetRV(ctx, v.rvName)
 		if apierrors.IsNotFound(err) {
@@ -356,7 +370,9 @@ func (v *VolumeMain) WaitForRVDeleted(ctx context.Context, log *slog.Logger) err
 			return err
 		}
 
-		time.Sleep(1 * time.Second)
+		if err := waitWithContext(ctx, 1*time.Second); err != nil {
+			return err
+		}
 	}
 }
 
@@ -381,10 +397,10 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 	}()
 
 	// Start replica destroyer
-	if v.disableVolumeReplicaDestroyer {
+	if !v.enableVolumeReplicaDestroyer {
 		v.log.Debug("volume-replica-destroyer runner is disabled")
 	} else {
-		v.log.Debug("volume-replica-destroyer runner is enabled")
+		v.log.Info("volume-replica-destroyer runner is enabled")
 		replicaDestroyerCfg := config.VolumeReplicaDestroyerConfig{
 			Period: config.DurationMinMax{
 				Min: time.Duration(replicaDestroyerPeriodMinMax[0]) * time.Second,
@@ -405,10 +421,10 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 	}
 
 	// Start replica creator
-	if v.disableVolumeReplicaCreator {
+	if !v.enableVolumeReplicaCreator {
 		v.log.Debug("volume-replica-creator runner is disabled")
 	} else {
-		v.log.Debug("volume-replica-creator runner is enabled")
+		v.log.Info("volume-replica-creator runner is enabled")
 		replicaCreatorCfg := config.VolumeReplicaCreatorConfig{
 			Period: config.DurationMinMax{
 				Min: time.Duration(replicaCreatorPeriodMinMax[0]) * time.Second,
@@ -429,10 +445,10 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 	}
 
 	// Start resizer
-	if v.disableVolumeResizer {
+	if !v.enableVolumeResizer {
 		v.log.Debug("volume-resizer runner is disabled")
 	} else {
-		v.log.Debug("volume-resizer runner is enabled")
+		v.log.Info("volume-resizer runner is enabled")
 		volumeResizerCfg := config.VolumeResizerConfig{
 			Period: config.DurationMinMax{
 				Min: time.Duration(volumeResizerPeriodMinMax[0]) * time.Second,

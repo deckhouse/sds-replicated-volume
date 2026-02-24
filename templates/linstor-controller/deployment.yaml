@@ -3,7 +3,7 @@ cpu: 30m
 memory: 300Mi
 {{- end }}
 
-
+{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
 apiVersion: autoscaling.k8s.io/v1
@@ -18,7 +18,7 @@ spec:
     kind: Deployment
     name: linstor-controller
   updatePolicy:
-    updateMode: "Auto"
+    updateMode: "Initial"
   resourcePolicy:
     containerPolicies:
     - containerName: linstor-controller
@@ -273,3 +273,4 @@ spec:
           secret:
             defaultMode: 420
             secretName: linstor-controller-ssl-cert
+{{- end }}

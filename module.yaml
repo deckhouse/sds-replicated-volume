@@ -1,12 +1,11 @@
 name: sds-replicated-volume
 stage: "Preview"
-weight: 915
 descriptions:
-  en: "SDS Replicated Volume module"
+  en: "Manages replicated block storage based on DRBD."
+  ru: "Управляет реплицируемым блочным хранилищем на базе DRBD."
 requirements:
-  bootstrapped: true
-  deckhouse: ">= 1.67"
+  deckhouse: ">= 1.71"
   modules:
-    sds-node-configurator: ">= 0.0.0"
-    snapshot-controller: ">= 0.0.0"  
+    sds-node-configurator: ">= 0.5.14"
+    snapshot-controller: ">= 0.0.0"
 namespace: "d8-sds-replicated-volume"

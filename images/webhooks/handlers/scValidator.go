@@ -31,7 +31,7 @@ import (
 
 const (
 	replicatedCSIProvisioner = "replicated.csi.storage.deckhouse.io"
-	allowedUserName          = "system:serviceaccount:d8-sds-replicated-volume:sds-replicated-volume-controller"
+	allowedUserName          = "system:serviceaccount:d8-sds-replicated-volume:controller"
 )
 
 func SCValidate(_ context.Context, arReview *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {
@@ -123,11 +123,11 @@ func isStorageClassChangedExceptAnnotations(oldObjectRaw, newObjectRaw []byte) (
 		return true, nil
 	}
 
-	newSC.ObjectMeta.Annotations = nil
-	oldSC.ObjectMeta.Annotations = nil
+	newSC.Annotations = nil
+	oldSC.Annotations = nil
 
-	newSC.ObjectMeta.ManagedFields = nil
-	oldSC.ObjectMeta.ManagedFields = nil
+	newSC.ManagedFields = nil
+	oldSC.ManagedFields = nil
 
 	if !reflect.DeepEqual(oldSC.ObjectMeta, newSC.ObjectMeta) {
 		klog.Infof("ObjectMeta changed from %+v to %+v", oldSC.ObjectMeta, newSC.ObjectMeta)

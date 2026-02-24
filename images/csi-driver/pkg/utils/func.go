@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -255,14 +255,12 @@ func WaitForReplicatedVolumeReady(
 			return attemptCounter, fmt.Errorf("failed to create ReplicatedVolume %s, reason: ReplicatedVolume is being deleted", name)
 		}
 
-		if rv.Status != nil {
-			readyCond := meta.FindStatusCondition(rv.Status.Conditions, srv.ConditionTypeRVIOReady)
-			if readyCond != nil && readyCond.Status == metav1.ConditionTrue {
-				log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] ReplicatedVolume is IOReady", traceID, name))
-				return attemptCounter, nil
-			}
-			log.Trace(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Attempt %d, ReplicatedVolume not IOReady yet. Waiting...", traceID, name, attemptCounter))
+		readyCond := meta.FindStatusCondition(rv.Status.Conditions, srv.ReplicatedVolumeCondIOReadyType)
+		if readyCond != nil && readyCond.Status == metav1.ConditionTrue {
+			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] ReplicatedVolume is IOReady", traceID, name))
+			return attemptCounter, nil
 		}
+		log.Trace(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Attempt %d, ReplicatedVolume not IOReady yet. Waiting...", traceID, name, attemptCounter))
 	}
 }
 
@@ -364,13 +362,13 @@ func GetReplicatedVolumeReplicaForNode(ctx context.Context, kc client.Client, vo
 
 // GetDRBDDevicePath gets DRBD device path from ReplicatedVolumeReplica status
 func GetDRBDDevicePath(rvr *srv.ReplicatedVolumeReplica) (string, error) {
-	if rvr.Status == nil || rvr.Status.DRBD == nil ||
-		rvr.Status.DRBD.Status == nil || len(rvr.Status.DRBD.Status.Devices) == 0 {
-		return "", fmt.Errorf("DRBD status not available or no devices found")
+	if rvr.Status.Attachment == nil {
+		return "", fmt.Errorf("replica is not attached")
 	}
-
-	minor := rvr.Status.DRBD.Status.Devices[0].Minor
-	return fmt.Sprintf("/dev/drbd%d", minor), nil
+	if rvr.Status.Attachment.DevicePath == "" {
+		return "", fmt.Errorf("device path not available")
+	}
+	return rvr.Status.Attachment.DevicePath, nil
 }
 
 // ExpandReplicatedVolume expands a ReplicatedVolume
@@ -582,25 +580,8 @@ func WaitForRVAReady(
 			return fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
 		}
 
-		if rva.Status == nil {
-			if attemptCounter%10 == 0 {
-				log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] Attempt: %d, RVA status is nil", traceID, volumeName, nodeName, attemptCounter))
-			}
-			if err := sleepWithContext(ctx); err != nil {
-				return &RVAWaitError{
-					VolumeName:            volumeName,
-					NodeName:              nodeName,
-					RVAName:               rvaName,
-					LastReadyCondition:    lastReadyCond,
-					LastAttachedCondition: lastAttachedCond,
-					Cause:                 err,
-				}
-			}
-			continue
-		}
-
-		readyCond := meta.FindStatusCondition(rva.Status.Conditions, srv.RVAConditionTypeReady)
-		attachedCond := meta.FindStatusCondition(rva.Status.Conditions, srv.RVAConditionTypeAttached)
+		readyCond := meta.FindStatusCondition(rva.Status.Conditions, srv.ReplicatedVolumeAttachmentCondReadyType)
+		attachedCond := meta.FindStatusCondition(rva.Status.Conditions, srv.ReplicatedVolumeAttachmentCondAttachedType)
 
 		if attachedCond != nil {
 			attachedCopy := *attachedCond
@@ -641,7 +622,7 @@ func WaitForRVAReady(
 		// Waiting here only burns time and hides the real cause from CSI callers.
 		if lastAttachedCond != nil &&
 			lastAttachedCond.Status == metav1.ConditionFalse &&
-			(lastAttachedCond.Reason == srv.RVAAttachedReasonLocalityNotSatisfied || lastAttachedCond.Reason == srv.RVAAttachedReasonUnableToProvideLocalVolumeAccess) {
+			lastAttachedCond.Reason == srv.ReplicatedVolumeAttachmentCondAttachedReasonVolumeAccessLocalityNotSatisfied {
 			return &RVAWaitError{
 				VolumeName:            volumeName,
 				NodeName:              nodeName,
@@ -692,20 +673,16 @@ func WaitForAttachedToProvided(
 			return err
 		}
 
-		if rv.Status != nil {
-			if attemptCounter%10 == 0 {
-				log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status.actuallyAttachedTo: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.ActuallyAttachedTo))
-			}
+		if attemptCounter%10 == 0 {
+			log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status.actuallyAttachedTo: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.ActuallyAttachedTo))
+		}
 
-			// Check if node is in status.actuallyAttachedTo
-			for _, attachedNode := range rv.Status.ActuallyAttachedTo {
-				if attachedNode == nodeName {
-					log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Node is now in status.actuallyAttachedTo", traceID, volumeName, nodeName))
-					return nil
-				}
+		// Check if node is in status.actuallyAttachedTo
+		for _, attachedNode := range rv.Status.ActuallyAttachedTo {
+			if attachedNode == nodeName {
+				log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Node is now in status.actuallyAttachedTo", traceID, volumeName, nodeName))
+				return nil
 			}
-		} else if attemptCounter%10 == 0 {
-			log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status is nil", traceID, volumeName, nodeName, attemptCounter))
 		}
 
 		log.Trace(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Attempt %d, node not in status.actuallyAttachedTo yet. Waiting...", traceID, volumeName, nodeName, attemptCounter))
@@ -741,29 +718,21 @@ func WaitForAttachedToRemoved(
 			return err
 		}
 
-		if rv.Status != nil {
-			if attemptCounter%10 == 0 {
-				log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status.actuallyAttachedTo: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.ActuallyAttachedTo))
-			}
+		if attemptCounter%10 == 0 {
+			log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status.actuallyAttachedTo: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.ActuallyAttachedTo))
+		}
 
-			// Check if node is NOT in status.actuallyAttachedTo
-			found := false
-			for _, attachedNode := range rv.Status.ActuallyAttachedTo {
-				if attachedNode == nodeName {
-					found = true
-					break
-				}
+		// Check if node is NOT in status.actuallyAttachedTo
+		found := false
+		for _, attachedNode := range rv.Status.ActuallyAttachedTo {
+			if attachedNode == nodeName {
+				found = true
+				break
 			}
+		}
 
-			if !found {
-				log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Node is no longer in status.actuallyAttachedTo", traceID, volumeName, nodeName))
-				return nil
-			}
-		} else {
-			if attemptCounter%10 == 0 {
-				log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status is nil, considering node as removed", traceID, volumeName, nodeName, attemptCounter))
-			}
-			// If status is nil, consider node as removed
+		if !found {
+			log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Node is no longer in status.actuallyAttachedTo", traceID, volumeName, nodeName))
 			return nil
 		}
 

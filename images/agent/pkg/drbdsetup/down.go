@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,19 +19,22 @@ package drbdsetup
 import (
 	"context"
 	"fmt"
-	"os/exec"
 )
 
-func ExecuteDown(ctx context.Context, resource string) error {
+// ExecuteDown brings down a DRBD resource.
+func ExecuteDown(ctx context.Context, resource string) (err error) {
 	args := DownArgs(resource)
-	cmd := exec.CommandContext(ctx, Command, args...)
+	cmd := ExecCommandContext(ctx, Command, args...)
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("running command %s %v: %w", Command, args, err)
+		}
+	}()
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf(
-			"running command %s %v: %w; output: %q",
-			Command, args, err, string(out),
-		)
+		return withOutput(err, out)
 	}
 
 	return nil

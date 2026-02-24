@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,56 +21,59 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	rvattachcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_attach_controller"
-	rvdeletepropagation "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_delete_propagation"
-	rvmetadata "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_metadata"
-	rvstatusconditions "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_conditions"
-	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
-	rvstatusconfigquorum "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
-	rvstatusconfigsharedsecret "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_shared_secret"
-	rvraccesscount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_access_count"
-	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
-	rvrfinalizerrelease "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_finalizer_release"
-	rvrmetadata "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_metadata"
+	nodecontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/node_controller"
+	rsccontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rsc_controller"
+	rspcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rsp_controller"
+	rvcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller"
+	rvrcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_controller"
 	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
-	rvrstatusconditions "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_conditions"
-	rvrstatusconfigpeers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_peers"
-	rvrtiebreakercount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_tie_breaker_count"
-	rvrvolume "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_volume"
 )
 
-var registry = []func(mgr manager.Manager) error{}
+// BuildAll builds all controllers.
+// podNamespace is the namespace where the controller pod runs, used by controllers
+// that need to access other pods in this namespace (e.g., agent pods).
+// schedulerExtenderURL is the URL of the scheduler extender service, used by the
+// rvr-scheduling-controller to query LVG scores.
+// isEnabled is a filter function: if it returns false for a controller name,
+// that controller is skipped. When ENABLED_CONTROLLERS env is not set,
+// isEnabled returns true for all names (all controllers are started).
+func BuildAll(mgr manager.Manager, podNamespace string, schedulerExtenderURL string, isEnabled func(string) bool) error {
+	log := mgr.GetLogger().WithName("controller-registry")
 
-func init() {
 	// Must be first: controllers rely on MatchingFields against these indexes.
-	registry = append(registry, RegisterIndexes)
+	if err := RegisterIndexes(mgr); err != nil {
+		return fmt.Errorf("building indexes: %w", err)
+	}
 
-	registry = append(registry, rvrdiskfulcount.BuildController)
-	registry = append(registry, rvrtiebreakercount.BuildController)
-	registry = append(registry, rvstatusconfigquorum.BuildController)
-	registry = append(registry, rvrstatusconfigpeers.BuildController)
-	registry = append(registry, rvstatusconfigdeviceminor.BuildController)
-	registry = append(registry, rvstatusconfigsharedsecret.BuildController)
-	registry = append(registry, rvraccesscount.BuildController)
-	registry = append(registry, rvrvolume.BuildController)
-	registry = append(registry, rvrmetadata.BuildController)
-	registry = append(registry, rvdeletepropagation.BuildController)
-	registry = append(registry, rvrfinalizerrelease.BuildController)
-	registry = append(registry, rvmetadata.BuildController)
-	registry = append(registry, rvrstatusconditions.BuildController)
-	registry = append(registry, rvstatusconditions.BuildController)
-	registry = append(registry, rvrschedulingcontroller.BuildController)
-	registry = append(registry, rvattachcontroller.BuildController)
+	type builder struct {
+		name  string
+		build func(mgr manager.Manager) error
+	}
+	builders := []builder{
+		{name: rvcontroller.RVControllerName, build: rvcontroller.BuildController},
+		{name: rvrschedulingcontroller.RVRSchedulingControllerName, build: func(mgr manager.Manager) error {
+			return rvrschedulingcontroller.BuildController(mgr, schedulerExtenderURL)
+		}},
+		{name: rsccontroller.RSCControllerName, build: rsccontroller.BuildController},
+		{name: nodecontroller.NodeControllerName, build: nodecontroller.BuildController},
+		{name: rspcontroller.RSPControllerName, build: func(mgr manager.Manager) error {
+			return rspcontroller.BuildController(mgr, podNamespace)
+		}},
+		{name: rvrcontroller.RVRControllerName, build: func(mgr manager.Manager) error {
+			return rvrcontroller.BuildController(mgr, podNamespace)
+		}},
+	}
 
-	// ...
-}
-
-func BuildAll(mgr manager.Manager) error {
-	for i, buildCtl := range registry {
-		err := buildCtl(mgr)
-		if err != nil {
-			return fmt.Errorf("building controller %d: %w", i, err)
+	for _, b := range builders {
+		if !isEnabled(b.name) {
+			log.Info("controller disabled, skipping", "controller", b.name)
+			continue
+		}
+		log.Info("building controller", "controller", b.name)
+		if err := b.build(mgr); err != nil {
+			return fmt.Errorf("building controller %s: %w", b.name, err)
 		}
 	}
+
 	return nil
 }

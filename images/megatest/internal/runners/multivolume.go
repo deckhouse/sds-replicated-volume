@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -52,6 +52,7 @@ type Stats struct {
 	TotalCreateRVTime       time.Duration
 	TotalDeleteRVTime       time.Duration
 	TotalWaitForRVReadyTime time.Duration
+	CreateRVErrorCount      int64
 }
 
 // MultiVolume orchestrates multiple volume-main instances and pod-destroyers
@@ -69,6 +70,7 @@ type MultiVolume struct {
 	totalCreateRVTime       atomic.Int64 // nanoseconds
 	totalDeleteRVTime       atomic.Int64 // nanoseconds
 	totalWaitForRVReadyTime atomic.Int64 // nanoseconds
+	createRVErrorCount      atomic.Int64
 
 	// Checker stats from all VolumeCheckers
 	checkerStatsMu sync.Mutex
@@ -92,37 +94,31 @@ func NewMultiVolume(
 // Run starts the multivolume orchestration until context is cancelled
 func (m *MultiVolume) Run(ctx context.Context) error {
 	var disabledRunners []string
-	if m.cfg.DisablePodDestroyer {
+	if !m.cfg.EnablePodDestroyer {
 		disabledRunners = append(disabledRunners, "pod-destroyer")
 	}
-	if m.cfg.DisableVolumeResizer {
+	if !m.cfg.EnableVolumeResizer {
 		disabledRunners = append(disabledRunners, "volume-resizer")
 	}
-	if m.cfg.DisableVolumeReplicaDestroyer {
+	if !m.cfg.EnableVolumeReplicaDestroyer {
 		disabledRunners = append(disabledRunners, "volume-replica-destroyer")
 	}
-	if m.cfg.DisableVolumeReplicaCreator {
+	if !m.cfg.EnableVolumeReplicaCreator {
 		disabledRunners = append(disabledRunners, "volume-replica-creator")
 	}
 
 	m.log.Info("started", "disabled_runners", disabledRunners)
 	defer m.log.Info("finished")
 
-	if m.cfg.DisablePodDestroyer {
-		m.log.Debug("pod-destroyer runners are disabled")
-	} else {
+	if m.cfg.EnablePodDestroyer {
+		m.log.Info("pod-destroyer runners are enabled")
 		m.startPodDestroyers(ctx)
+	} else {
+		m.log.Debug("pod-destroyer runners are disabled")
 	}
 
 	// Main volume creation loop
 	for {
-		select {
-		case <-ctx.Done():
-			m.cleanup(ctx.Err())
-			return nil
-		default:
-		}
-
 		// Check if we can create more volumes
 		currentVolumes := int(m.runningVolumes.Load())
 		if currentVolumes < m.cfg.MaxVolumes {
@@ -142,7 +138,11 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 				rvName := fmt.Sprintf("mgt-%s", uuid.New().String())
 
 				// Start volume-main
-				m.startVolumeMain(ctx, rvName, storageClass, volumeLifetime)
+				if m.cfg.ChaosDebugMode {
+					m.fakeStartVolumeMain(ctx, rvName, storageClass, volumeLifetime)
+				} else {
+					m.startVolumeMain(ctx, rvName, storageClass, volumeLifetime)
+				}
 			}
 		}
 
@@ -163,6 +163,7 @@ func (m *MultiVolume) GetStats() Stats {
 		TotalCreateRVTime:       time.Duration(m.totalCreateRVTime.Load()),
 		TotalDeleteRVTime:       time.Duration(m.totalDeleteRVTime.Load()),
 		TotalWaitForRVReadyTime: time.Duration(m.totalWaitForRVReadyTime.Load()),
+		CreateRVErrorCount:      m.createRVErrorCount.Load(),
 	}
 }
 
@@ -193,16 +194,17 @@ func (m *MultiVolume) cleanup(reason error) {
 
 func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName string, storageClass string, volumeLifetime time.Duration) {
 	cfg := config.VolumeMainConfig{
-		StorageClassName:              storageClass,
-		VolumeLifetime:                volumeLifetime,
-		InitialSize:                   resource.MustParse("100Mi"),
-		DisableVolumeResizer:          m.cfg.DisableVolumeResizer,
-		DisableVolumeReplicaDestroyer: m.cfg.DisableVolumeReplicaDestroyer,
-		DisableVolumeReplicaCreator:   m.cfg.DisableVolumeReplicaCreator,
+		StorageClassName:             storageClass,
+		VolumeLifetime:               volumeLifetime,
+		InitialSize:                  resource.MustParse("100Mi"),
+		EnableVolumeResizer:          m.cfg.EnableVolumeResizer,
+		EnableVolumeReplicaDestroyer: m.cfg.EnableVolumeReplicaDestroyer,
+		EnableVolumeReplicaCreator:   m.cfg.EnableVolumeReplicaCreator,
 	}
 	volumeMain := NewVolumeMain(
 		rvName, cfg, m.client,
 		&m.createdRVCount, &m.totalCreateRVTime, &m.totalDeleteRVTime, &m.totalWaitForRVReadyTime,
+		&m.createRVErrorCount,
 		m.AddCheckerStats, m.forceCleanupChan,
 	)
 
@@ -245,4 +247,18 @@ func (m *MultiVolume) startPodDestroyers(ctx context.Context) {
 	go func() {
 		_ = NewPodDestroyer(controllerCfg, m.client, podDestroyerControllerPodCountMinMax, podDestroyerControllerPeriodMinMax).Run(ctx)
 	}()
+}
+
+func (m *MultiVolume) fakeStartVolumeMain(ctx context.Context, rvName string, storageClass string, volumeLifetime time.Duration) {
+loop1:
+	for {
+		m.log.Info("chaos debug mode: basic runners disabled, using stub", "rvName", rvName, "storageClass", storageClass, "volumeLifetime", volumeLifetime)
+
+		select {
+		case <-ctx.Done():
+			m.log.Info("chaos debug mode: stub finished")
+			break loop1
+		case <-time.After(5 * time.Second):
+		}
+	}
 }

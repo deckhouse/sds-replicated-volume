@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,36 +17,70 @@ limitations under the License.
 package controllers
 
 import (
-	"context"
-	"fmt"
-
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 // RegisterIndexes registers controller-runtime cache indexes used by controllers.
 // It must be invoked before any controller starts listing with MatchingFields.
 func RegisterIndexes(mgr manager.Manager) error {
-	// Index ReplicatedVolumeAttachment by spec.replicatedVolumeName for efficient lookups per RV.
-	if err := mgr.GetFieldIndexer().IndexField(
-		context.Background(),
-		&v1alpha1.ReplicatedVolumeAttachment{},
-		indexes.IndexFieldRVAByReplicatedVolumeName,
-		func(obj client.Object) []string {
-			rva, ok := obj.(*v1alpha1.ReplicatedVolumeAttachment)
-			if !ok {
-				return nil
-			}
-			if rva.Spec.ReplicatedVolumeName == "" {
-				return nil
-			}
-			return []string{rva.Spec.ReplicatedVolumeName}
-		},
-	); err != nil {
-		return fmt.Errorf("index ReplicatedVolumeAttachment by spec.replicatedVolumeName: %w", err)
+	// ReplicatedVolume (RV)
+	if err := indexes.RegisterRVByReplicatedStorageClassName(mgr); err != nil {
+		return err
+	}
+	if err := indexes.RegisterRVByStoragePoolName(mgr); err != nil {
+		return err
+	}
+
+	// ReplicatedVolumeAttachment (RVA)
+	if err := indexes.RegisterRVAByReplicatedVolumeName(mgr); err != nil {
+		return err
+	}
+
+	// ReplicatedVolumeReplica (RVR)
+	if err := indexes.RegisterRVRByNodeName(mgr); err != nil {
+		return err
+	}
+	if err := indexes.RegisterRVRByReplicatedVolumeName(mgr); err != nil {
+		return err
+	}
+	if err := indexes.RegisterRVRByRVAndNode(mgr); err != nil {
+		return err
+	}
+
+	// DRBDResource
+	if err := indexes.RegisterDRBDResourceByNodeName(mgr); err != nil {
+		return err
+	}
+
+	// ReplicatedStorageClass (RSC)
+	if err := indexes.RegisterRSCByStoragePool(mgr); err != nil {
+		return err
+	}
+	if err := indexes.RegisterRSCByStatusStoragePoolName(mgr); err != nil {
+		return err
+	}
+
+	// ReplicatedStoragePool (RSP)
+	if err := indexes.RegisterRSPByLVMVolumeGroupName(mgr); err != nil {
+		return err
+	}
+	if err := indexes.RegisterRSPByEligibleNodeName(mgr); err != nil {
+		return err
+	}
+	if err := indexes.RegisterRSPByUsedByRSCName(mgr); err != nil {
+		return err
+	}
+
+	// LVMLogicalVolume (LLV)
+	if err := indexes.RegisterLLVByRVROwner(mgr); err != nil {
+		return err
+	}
+
+	// Pod
+	if err := indexes.RegisterPodByNodeName(mgr); err != nil {
+		return err
 	}
 
 	return nil

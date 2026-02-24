@@ -29,10 +29,6 @@ properties:
         default: 7999
         description: |
           DRBD ports range end
-  enableThinProvisioning:
-    type: boolean
-    default: false
-    description: Allow thin LVM volumes usage
   dataNodes:
     type: object
     description: Settings for Linstor on nodes with data
@@ -66,3 +62,7 @@ properties:
         type: string
         default: "0 3 * * *"
         description: Backup schedule
+  newControlPlane:
+    type: boolean
+    default: false
+    description: When true, use the new control-plane as a backend for the module

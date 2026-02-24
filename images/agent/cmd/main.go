@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,7 +32,6 @@ import (
 	"github.com/deckhouse/sds-common-lib/slogh"
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scanner"
 )
 
 func main() {
@@ -59,7 +58,19 @@ func main() {
 	)
 }
 
+const drbdUsermodeHelperPath = "/sys/module/drbd/parameters/usermode_helper"
+
+func disableDRBDUsermodeHelper(log *slog.Logger) {
+	if err := os.WriteFile(drbdUsermodeHelperPath, []byte("disabled\n"), 0o644); err != nil {
+		log.Warn("failed to disable DRBD usermode helper", "path", drbdUsermodeHelperPath, "err", err)
+	} else {
+		log.Info("disabled DRBD usermode helper", "path", drbdUsermodeHelperPath)
+	}
+}
+
 func run(ctx context.Context, log *slog.Logger) (err error) {
+	disableDRBDUsermodeHelper(log)
+
 	// The derived Context is canceled the first time a function passed to eg.Go
 	// returns a non-nil error or the first time Wait returns
 	eg, ctx := errgroup.WithContext(ctx)
@@ -76,23 +87,11 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 		return err
 	}
 
-	// DRBD SCANNER
-	s := scanner.NewScanner(ctx, log.With("actor", "scanner"), mgr.GetClient(), envConfig.NodeName())
-	scanner.SetDefaultScanner(s)
-
 	eg.Go(func() error {
 		if err := mgr.Start(ctx); err != nil {
 			return u.LogError(log, fmt.Errorf("starting controller: %w", err))
 		}
 		return ctx.Err()
-	})
-
-	eg.Go(func() error {
-		return s.Run()
-	})
-
-	eg.Go(func() error {
-		return s.ConsumeBatches()
 	})
 
 	return eg.Wait()

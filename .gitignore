@@ -39,5 +39,10 @@ hack.sh
 .secret
 images/**/Makefile
 
+# local caches (Cursor/Go/direnv, etc.)
+.cache/
+.direnv/
+.gocache/
+
 # test data
 images/agent/pkg/drbdconf/testdata/out/

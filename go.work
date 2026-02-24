@@ -1,0 +1,14 @@
+go 1.25.7
+
+use (
+	./api
+	./hooks/go
+	./images/agent
+	./images/controller
+	./images/csi-driver
+	./images/linstor-drbd-wait
+	./images/megatest
+	./images/oldcontroller
+	./images/webhooks
+	./lib/go/common
+)

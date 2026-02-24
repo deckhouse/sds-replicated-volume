@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,14 +22,12 @@ import (
 	"log/slog"
 
 	"github.com/go-logr/logr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	u "github.com/deckhouse/sds-common-lib/utils"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 )
@@ -37,6 +35,7 @@ import (
 type managerConfig interface {
 	HealthProbeBindAddress() string
 	MetricsBindAddress() string
+	IsControllerEnabled(name string) bool
 }
 
 func newManager(
@@ -69,23 +68,6 @@ func newManager(
 		return nil, u.LogError(log, fmt.Errorf("creating manager: %w", err))
 	}
 
-	err = mgr.GetFieldIndexer().IndexField(
-		ctx,
-		&v1alpha1.ReplicatedVolumeReplica{},
-		"spec.nodeName",
-		func(rawObj client.Object) []string {
-			replica := rawObj.(*v1alpha1.ReplicatedVolumeReplica)
-			if replica.Spec.NodeName == "" {
-				return nil
-			}
-			return []string{replica.Spec.NodeName}
-		},
-	)
-	if err != nil {
-		return nil,
-			u.LogError(log, fmt.Errorf("indexing %s: %w", "spec.nodeName", err))
-	}
-
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		return nil, u.LogError(log, fmt.Errorf("AddHealthzCheck: %w", err))
 	}
@@ -94,7 +76,7 @@ func newManager(
 		return nil, u.LogError(log, fmt.Errorf("AddReadyzCheck: %w", err))
 	}
 
-	if err := controllers.BuildAll(mgr); err != nil {
+	if err := controllers.BuildAll(mgr, cfg.IsControllerEnabled); err != nil {
 		return nil, err
 	}
 

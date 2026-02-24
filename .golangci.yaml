@@ -1,41 +1,57 @@
-run:
-  timeout: 10m
-
-issues:
-  exclude:
-    - ST1005.*
-    - "should not use dot imports"
-    - "don't use an underscore in package name"
-    - "exported: .*"
-
-linters-settings:
-  gci:
-    sections:
-      - standard
-      - default
-      - prefix(github.com/deckhouse)
-
-  errcheck:
-    exclude-functions:
-      - fmt:.*,[rR]ead|[wW]rite|[cC]lose
-      - io:Copy
-
+version: "2"
 linters:
-  disable-all: true
+  default: none
   enable:
+    - copyloopvar
     - dogsled
     - errcheck
-    - gci
     - gocritic
-    - gofmt
-    - gosimple
     - govet
     - ineffassign
     - misspell
     - revive
     - staticcheck
-    - typecheck
     - unconvert
     - unparam
     - whitespace
-    - copyloopvar
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt:.*,[rR]ead|[wW]rite|[cC]lose
+        - io:Copy
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - path: (.+)\.go$
+        text: ST1005.*
+      - path: (.+)\.go$
+        text: should not use dot imports
+      - path: (.+)\.go$
+        text: don't use an underscore in package name
+      - path: (.+)\.go$
+        text: 'exported: .*'
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gci
+    - gofmt
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/deckhouse)
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

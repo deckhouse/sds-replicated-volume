@@ -32,7 +32,10 @@ go run k8s.io/code-generator/cmd/deepcopy-gen -v 2 \
     ./linstor
 
 # remove development dependencies
-go mod tidy -go=1.24.11
+go mod tidy -go=1.25.7
+
+# validate generated CRDs (CEL cost budget, schema correctness)
+go run ../hack/validate-crds.go ../crds
 
 cd ..
 

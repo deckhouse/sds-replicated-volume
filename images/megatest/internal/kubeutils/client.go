@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -111,6 +112,9 @@ func NewClientWithKubeconfig(kubeconfigPath string) (*Client, error) {
 	scheme := runtime.NewScheme()
 	if err := corev1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("adding corev1 to scheme: %w", err)
+	}
+	if err := batchv1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("adding batchv1 to scheme: %w", err)
 	}
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("adding v1alpha1 to scheme: %w", err)
@@ -416,11 +420,11 @@ func (c *Client) GetRV(ctx context.Context, name string) (*v1alpha1.ReplicatedVo
 
 // IsRVReady checks if a ReplicatedVolume is in IOReady and Quorum conditions
 func (c *Client) IsRVReady(rv *v1alpha1.ReplicatedVolume) bool {
-	if rv.Status == nil {
+	if rv == nil {
 		return false
 	}
-	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady) &&
-		meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVQuorum)
+	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondIOReadyType) &&
+		meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondQuorumType)
 }
 
 // PatchRV patches a ReplicatedVolume using merge patch strategy
@@ -456,7 +460,7 @@ func buildRVAName(rvName, nodeName string) string {
 	return "rva-" + rvPart + "-" + nodePart + "-" + hash
 }
 
-// EnsureRVA creates a ReplicatedVolumeAttachment for (rvName,nodeName) if it does not exist.
+// EnsureRVA creates a ReplicatedVolumeAttachment for (rvName, nodeName) if it does not exist.
 func (c *Client) EnsureRVA(ctx context.Context, rvName, nodeName string) (*v1alpha1.ReplicatedVolumeAttachment, error) {
 	rvaName := buildRVAName(rvName, nodeName)
 	existing := &v1alpha1.ReplicatedVolumeAttachment{}
@@ -481,7 +485,7 @@ func (c *Client) EnsureRVA(ctx context.Context, rvName, nodeName string) (*v1alp
 	return rva, nil
 }
 
-// DeleteRVA deletes a ReplicatedVolumeAttachment for (rvName,nodeName). It is idempotent.
+// DeleteRVA deletes a ReplicatedVolumeAttachment for (rvName, nodeName). It is idempotent.
 func (c *Client) DeleteRVA(ctx context.Context, rvName, nodeName string) error {
 	rvaName := buildRVAName(rvName, nodeName)
 	rva := &v1alpha1.ReplicatedVolumeAttachment{}
@@ -514,34 +518,31 @@ func (c *Client) ListRVAsByRVName(ctx context.Context, rvName string) ([]v1alpha
 func (c *Client) WaitForRVAReady(ctx context.Context, rvName, nodeName string) error {
 	rvaName := buildRVAName(rvName, nodeName)
 	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
 		rva := &v1alpha1.ReplicatedVolumeAttachment{}
 		if err := c.cl.Get(ctx, client.ObjectKey{Name: rvaName}, rva); err != nil {
 			if client.IgnoreNotFound(err) != nil {
 				return err
 			}
-			time.Sleep(500 * time.Millisecond)
+			if err := waitWithContext(ctx, 500*time.Millisecond); err != nil {
+				return err
+			}
 			continue
 		}
-		if rva.Status == nil {
-			time.Sleep(500 * time.Millisecond)
-			continue
-		}
-		cond := meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.RVAConditionTypeReady)
+		cond := meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondReadyType)
 		if cond != nil && cond.Status == metav1.ConditionTrue {
 			return nil
 		}
 		// Early exit for permanent attach failures: these are reported via Attached condition reason.
-		attachedCond := meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.RVAConditionTypeAttached)
+		attachedCond := meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 		if attachedCond != nil &&
 			attachedCond.Status == metav1.ConditionFalse &&
-			(attachedCond.Reason == v1alpha1.RVAAttachedReasonLocalityNotSatisfied || attachedCond.Reason == v1alpha1.RVAAttachedReasonUnableToProvideLocalVolumeAccess) {
+			attachedCond.Reason == v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonVolumeAccessLocalityNotSatisfied {
 			return fmt.Errorf("RVA %s for volume=%s node=%s not attachable: Attached=%s reason=%s message=%q",
 				rvaName, rvName, nodeName, attachedCond.Status, attachedCond.Reason, attachedCond.Message)
 		}
-		time.Sleep(500 * time.Millisecond)
+		if err := waitWithContext(ctx, 500*time.Millisecond); err != nil {
+			return err
+		}
 	}
 }
 
@@ -594,4 +595,14 @@ func (c *Client) ListPods(ctx context.Context, namespace, labelSelector string) 
 // DeletePod deletes a pod (does not wait for deletion)
 func (c *Client) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 	return c.cl.Delete(ctx, pod)
+}
+
+// waitWithContext waits for the specified duration or until context is cancelled
+func waitWithContext(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
 }

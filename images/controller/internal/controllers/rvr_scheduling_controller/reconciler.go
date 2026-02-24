@@ -17,1337 +17,957 @@ limitations under the License.
 package rvrschedulingcontroller
 
 import (
+	"cmp"
 	"context"
-	"errors"
-	"fmt"
 	"slices"
+	"time"
 
 	"github.com/go-logr/logr"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
+	rvrllvname "github.com/deckhouse/sds-replicated-volume/images/controller/internal/rvr_llv_name"
+	schext "github.com/deckhouse/sds-replicated-volume/images/controller/internal/scheduler_extender"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
-const (
-	nodeZoneLabel      = "topology.kubernetes.io/zone"
-	topologyIgnored    = "Ignored"
-	topologyZonal      = "Zonal"
-	topologyTransZonal = "TransZonal"
-)
-
-var (
-	errSchedulingTopologyConflict = errors.New("scheduling topology conflict")
-	errSchedulingNoCandidateNodes = errors.New("scheduling no candidate nodes")
-	errSchedulingPending          = errors.New("scheduling pending")
-)
+// ──────────────────────────────────────────────────────────────────────────────
+// Wiring / construction
+//
 
 type Reconciler struct {
 	cl             client.Client
 	log            logr.Logger
 	scheme         *runtime.Scheme
-	extenderClient *SchedulerExtenderClient
+	extenderClient schext.Client
 }
 
-var _ reconcile.Reconciler = (*Reconciler)(nil)
-
-func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) (*Reconciler, error) {
-	extenderClient, err := NewSchedulerHTTPClient()
-	if err != nil {
-		log.Error(err, "failed to create scheduler-extender client")
-		return nil, err // TODO: implement graceful shutdown
-	}
-
-	// Initialize reconciler with Kubernetes client, logger, scheme and scheduler-extender client.
+func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme, extenderClient schext.Client) *Reconciler {
 	return &Reconciler{
 		cl:             cl,
 		log:            log,
 		scheme:         scheme,
 		extenderClient: extenderClient,
-	}, nil
+	}
 }
 
-func (r *Reconciler) Reconcile(
-	ctx context.Context,
-	req reconcile.Request,
-) (reconcile.Result, error) {
-	log := r.log.WithName("RVRScheduler").WithValues(
-		"rv", req.Name,
-	)
-	log.V(1).Info("starting reconciliation cycle")
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile
+//
 
-	// Load ReplicatedVolume, its ReplicatedStorageClass and all relevant replicas.
-	sctx, err := r.prepareSchedulingContext(ctx, req, log)
+// Reconcile pattern: Pure orchestration.
+// Each RVR is reconciled independently; errors on one RVR don't block others.
+func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	rf := flow.BeginRootReconcile(ctx)
+
+	rv, err := r.getRV(rf.Ctx(), req.Name)
 	if err != nil {
-		return reconcile.Result{}, r.handlePhaseError(ctx, req.Name, "prepare", err, log)
-	}
-	if sctx == nil {
-		// ReplicatedVolume not found, skip reconciliation
-		return reconcile.Result{}, nil
-	}
-	log.V(1).Info("scheduling context prepared", "rsc", sctx.Rsc.Name, "topology", sctx.Rsc.Spec.Topology, "volumeAccess", sctx.Rsc.Spec.VolumeAccess)
-
-	// Ensure all previously scheduled replicas have correct Scheduled condition
-	// This is done early so that even if phases fail, existing replicas have correct conditions
-	if err := r.ensureScheduledConditionOnExistingReplicas(ctx, sctx, log); err != nil {
-		return reconcile.Result{}, err
+		return rf.Fail(err).ToCtrl()
 	}
 
-	// Phase 1: place Diskful replicas.
-	log.V(1).Info("starting Diskful phase", "unscheduledCount", len(sctx.UnscheduledDiskfulReplicas))
-	if err := r.scheduleDiskfulPhase(ctx, sctx); err != nil {
-		return reconcile.Result{}, r.handlePhaseError(ctx, req.Name, string(v1alpha1.ReplicaTypeDiskful), err, log)
-	}
-	log.V(1).Info("Diskful phase completed", "scheduledCountTotal", len(sctx.RVRsToSchedule))
-
-	// Phase 2: place Access replicas.
-	log.V(1).Info("starting Access phase", "unscheduledCount", len(sctx.UnscheduledAccessReplicas))
-	if err := r.scheduleAccessPhase(sctx); err != nil {
-		return reconcile.Result{}, r.handlePhaseError(ctx, req.Name, string(v1alpha1.ReplicaTypeAccess), err, log)
-	}
-	log.V(1).Info("Access phase completed", "scheduledCountTotal", len(sctx.RVRsToSchedule))
-
-	// Phase 3: place TieBreaker replicas.
-	log.V(1).Info("starting TieBreaker phase", "unscheduledCount", len(sctx.UnscheduledTieBreakerReplicas))
-	if err := r.scheduleTieBreakerPhase(ctx, sctx); err != nil {
-		return reconcile.Result{}, r.handlePhaseError(ctx, req.Name, string(v1alpha1.ReplicaTypeTieBreaker), err, log)
-	}
-	log.V(1).Info("TieBreaker phase completed", "scheduledCountTotal", len(sctx.RVRsToSchedule))
-
-	log.V(1).Info("patching scheduled replicas", "countTotal", len(sctx.RVRsToSchedule))
-	if err := r.patchScheduledReplicas(ctx, sctx, log); err != nil {
-		return reconcile.Result{}, err
+	rvrs, err := r.getRVRsByRVName(rf.Ctx(), req.Name)
+	if err != nil {
+		return rf.Fail(err).ToCtrl()
 	}
 
-	log.V(1).Info("reconciliation completed successfully", "totalScheduled", len(sctx.RVRsToSchedule))
-	return reconcile.Result{}, nil
+	all := idset.FromAll(rvrs)
+
+	// Guard 1: RV not found — nothing to schedule.
+	if rv == nil {
+		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, all,
+			metav1.ConditionUnknown,
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume,
+			"ReplicatedVolume not found; waiting for it to be present").
+			Enrichf("setting WaitingForReplicatedVolume: RV not found").ToCtrl()
+	}
+
+	// Guard 2: RV has no configuration yet — RV controller hasn't reconciled it.
+	if rv.Status.Configuration == nil {
+		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, all,
+			metav1.ConditionUnknown,
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume,
+			"ReplicatedVolume has no configuration yet; waiting for it to appear").
+			Enrichf("setting WaitingForReplicatedVolume: RV has no configuration").ToCtrl()
+	}
+
+	rsp, err := r.getRSP(rf.Ctx(), rv.Status.Configuration.StoragePoolName)
+	if err != nil {
+		return rf.Fail(err).ToCtrl()
+	}
+
+	// Guard 3: RSP not found — storage pool doesn't exist yet.
+	if rsp == nil {
+		return r.reconcileRVRsCondition(rf.Ctx(), rvrs, all,
+			metav1.ConditionUnknown,
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume,
+			"ReplicatedStoragePool not found; waiting for it to be present").
+			Enrichf("setting WaitingForReplicatedVolume: RSP %q not found", rv.Status.Configuration.StoragePoolName).ToCtrl()
+	}
+
+	attachToNodes, err := r.getIntendedAttachments(rf.Ctx(), req.Name)
+	if err != nil {
+		return rf.Fail(err).ToCtrl()
+	}
+
+	// Build the scheduling context: eligible nodes, topology, zone layout,
+	// reservation parameters, and replica-type sets (All, Access, Diskful,
+	// TieBreaker, Deleting, Scheduled) with OccupiedNodes — all computed in
+	// a single pass over rvrs.
+	sctx := computeSchedulingContext(rv, rsp, rvrs, attachToNodes)
+
+	// Access replicas (diskless) don't need scheduling — they are created
+	// directly on the node where they are needed. Remove the Scheduled
+	// condition from them if it was set previously (e.g., the replica
+	// type was changed from Diskful/TieBreaker to Access), and exclude
+	// them from all subsequent scheduling logic.
+	var outcome flow.ReconcileOutcome
+	if sctx.Access.Len() > 0 {
+		outcome := r.reconcileRVRsConditionAbsent(rf.Ctx(), rvrs, sctx.Access)
+		if outcome.ShouldReturn() {
+			return outcome.ToCtrl()
+		}
+	}
+
+	// Mark replicas that already have a node assigned and passed eligible-node
+	// validation as successfully scheduled.
+	if sctx.Scheduled.Len() > 0 {
+		outcome = outcome.Merge(r.reconcileRVRsCondition(rf.Ctx(), rvrs, sctx.Scheduled,
+			metav1.ConditionTrue,
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled,
+			"Replica scheduled successfully"))
+		if outcome.ShouldReturn() {
+			return outcome.ToCtrl()
+		}
+	}
+
+	// All relevant replicas are already scheduled — nothing more to do.
+	// Guard: All != 0 protects against RVRs with non-standard names whose
+	// IDs fall outside the 0-31 range and silently map to 0 in IDSet.
+	scheduledNonAccess := sctx.Scheduled.Difference(sctx.Access)
+	allNonAccess := sctx.All.Difference(sctx.Access)
+	if scheduledNonAccess == allNonAccess {
+		return rf.Done().ToCtrl()
+	}
+
+	// Replicas that still need scheduling. Deleting RVRs (DeletionTimestamp
+	// set) are excluded — they are being removed and should not be placed.
+	unscheduled := sctx.All.Difference(sctx.Scheduled).Difference(sctx.Deleting)
+
+	// Phase 2: Schedule unscheduled Diskful RVRs (per-RVR pipeline).
+	unscheduledDiskful := unscheduled.Intersect(sctx.Diskful)
+	for _, rvr := range rvrs {
+		if !unscheduledDiskful.Contains(rvr.ID()) {
+			continue
+		}
+		outcome = outcome.Merge(r.reconcileOneRVRScheduling(rf.Ctx(), rvr, sctx).
+			Enrichf("scheduling Diskful"))
+	}
+	if outcome.ShouldReturn() {
+		return outcome.ToCtrl()
+	}
+
+	// Phase 3: Schedule unscheduled TieBreaker RVRs (per-RVR pipeline, no scoring).
+	unscheduledTieBreaker := unscheduled.Intersect(sctx.TieBreaker)
+	for _, rvr := range rvrs {
+		if !unscheduledTieBreaker.Contains(rvr.ID()) {
+			continue
+		}
+		outcome = outcome.Merge(r.reconcileOneRVRScheduling(rf.Ctx(), rvr, sctx).
+			Enrichf("scheduling TieBreaker"))
+	}
+
+	return rf.Done().ToCtrl()
 }
 
-// rvrNotReadyReason describes why an RVR is not ready for scheduling.
-type rvrNotReadyReason struct {
-	reason  string
-	message string
-}
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: rvrs-condition-absent
+//
 
-// handlePhaseError handles errors that occur during scheduling phases.
-// It logs the error, sets failed condition on RVRs, and returns the error.
-func (r *Reconciler) handlePhaseError(
+// reconcileRVRsConditionAbsent removes the Scheduled condition from every RVR
+// whose ID is in rvrIDs. RVRs that don't have the condition are skipped.
+// NotFound errors on individual patches are silently ignored.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileRVRsConditionAbsent(
 	ctx context.Context,
-	rvName string,
-	phaseName string,
-	err error,
-	log logr.Logger,
-) error {
-	log.Error(err, phaseName+" phase failed")
-	reason := schedulingErrorToReason(err)
-	if setErr := r.setFailedScheduledConditionOnNonScheduledRVRs(ctx, rvName, reason, log); setErr != nil {
-		log.Error(setErr, "failed to set Scheduled condition on RVRs after scheduling error")
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rvrIDs idset.IDSet,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "rvrs-condition-absent", "rvrIDs", rvrIDs.String())
+	defer rf.OnEnd(&outcome)
+
+	for _, rvr := range rvrs {
+		if !rvrIDs.Contains(rvr.ID()) {
+			continue
+		}
+		if !obju.HasStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType) {
+			continue
+		}
+		base := rvr.DeepCopy()
+		obju.RemoveStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+		if err := r.patchRVRStatus(rf.Ctx(), rvr, base); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return rf.Fail(err)
+		}
 	}
-	return err
+
+	return rf.Continue()
 }
 
-// schedulingErrorToReason converts a scheduling error to rvrNotReadyReason.
-func schedulingErrorToReason(err error) *rvrNotReadyReason {
-	reason := v1alpha1.ReasonSchedulingFailed
-	switch {
-	case errors.Is(err, errSchedulingTopologyConflict):
-		reason = v1alpha1.ReasonSchedulingTopologyConflict
-	case errors.Is(err, errSchedulingNoCandidateNodes):
-		reason = v1alpha1.ReasonSchedulingNoCandidateNodes
-	case errors.Is(err, errSchedulingPending):
-		reason = v1alpha1.ReasonSchedulingPending
-	}
-	return &rvrNotReadyReason{
-		reason:  reason,
-		message: err.Error(),
-	}
-}
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: rvrs-condition
+//
 
-// patchScheduledReplicas patches all scheduled replicas with their assigned node names
-// and sets the Scheduled condition to True.
-func (r *Reconciler) patchScheduledReplicas(
+// reconcileRVRsCondition sets the Scheduled condition (with the given status,
+// reason and message) on every RVR whose ID is in rvrIDs.
+// Pass idset.All to affect all RVRs unconditionally.
+// NotFound errors on individual patches are silently ignored (the RVR may have
+// been deleted concurrently).
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileRVRsCondition(
 	ctx context.Context,
-	sctx *SchedulingContext,
-	log logr.Logger,
-) error {
-	if len(sctx.RVRsToSchedule) == 0 {
-		log.V(1).Info("no scheduled replicas to patch")
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rvrIDs idset.IDSet,
+	status metav1.ConditionStatus,
+	reason,
+	message string,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "rvrs-condition", "rvrIDs", rvrIDs.String())
+	defer rf.OnEnd(&outcome)
+
+	for _, rvr := range rvrs {
+		if !rvrIDs.Contains(rvr.ID()) {
+			continue
+		}
+		outcome = outcome.Merge(r.reconcileRVRCondition(rf.Ctx(), rvr, status, reason, message).
+			Enrichf("setting condition on rvr %s", rvr.Name))
+		if outcome.ShouldReturn() {
+			return outcome
+		}
+	}
+
+	return rf.Continue()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: schedule-rvr
+//
+
+// reconcileOneRVRScheduling builds a fresh candidate pipeline for a single RVR,
+// selects the best candidate, and places the RVR.
+// After successful placement, mutates occupied and ReplicasByZone so subsequent
+// calls see up-to-date state.
+//
+// Reconcile pattern: In-place reconciliation.
+func (r *Reconciler) reconcileOneRVRScheduling(
+	ctx context.Context,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	sctx *schedulingContext,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "schedule-rvr", "rvr", rvr.Name)
+	defer rf.OnEnd(&outcome)
+
+	logger := rf.Log()
+
+	var p SchedulingPipeline
+
+	// Build per-RVR pipeline from scratch.
+	//
+	// RSP.Status.EligibleNodes already contains only the nodes / LVGs /
+	// thin-pools that satisfy the RSC constraints, including the
+	// user-configured zone(s). Therefore we do NOT filter by zone
+	// membership here — that is already handled by the RSP controller.
+	// The zone predicates below (Zonal / TransZonal) only choose which
+	// of the eligible zones to prefer for replica placement.
+	isDiskful := rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful
+	if isDiskful {
+		p = TakeLVGsFromEligibleNodes(sctx.EligibleNodes, logger)
+	} else {
+		p = TakeOnlyNodesFromEligibleNodes(sctx.EligibleNodes, logger)
+	}
+
+	// Exclude nodes that are unschedulable, not ready, or whose agent is down.
+	p = WithPredicate(p, "node not ready", logger, func(e *CandidateEntry) *CandidateEntry {
+		if e.Node.Unschedulable || !e.Node.NodeReady || !e.Node.AgentReady {
+			return nil
+		}
+		return e
+	})
+
+	// Exclude LVGs that are unschedulable or not ready (Diskful only).
+	if isDiskful {
+		p = WithPredicate(p, "LVG not ready", logger, func(e *CandidateEntry) *CandidateEntry {
+			if e.LVG.Unschedulable || !e.LVG.Ready {
+				return nil
+			}
+			return e
+		})
+	}
+
+	// Fully unscheduled RVR (no NodeName): exclude nodes already occupied
+	// by other replicas so each replica lands on a separate node.
+	//
+	// Partially scheduled RVR (NodeName set, but LVG missing): narrow
+	// the pipeline to only the assigned node — we just need to pick an
+	// LVG on it. The "node occupied" filter is intentionally skipped
+	// because the RVR's own node is in OccupiedNodes and would block
+	// itself.
+	if rvr.Spec.NodeName == "" {
+		occupied := sctx.OccupiedNodes
+		p = WithPredicate(p, "node occupied", logger, func(e *CandidateEntry) *CandidateEntry {
+			if _, ok := occupied[e.Node.NodeName]; ok {
+				return nil
+			}
+			return e
+		})
+	} else {
+		nodeName := rvr.Spec.NodeName
+		p = WithPredicate(p, "node mismatch (assigned)", logger, func(e *CandidateEntry) *CandidateEntry {
+			if e.Node.NodeName != nodeName {
+				return nil
+			}
+			return e
+		})
+	}
+
+	// Zonal topology: all replicas (Diskful and TieBreaker) should land in
+	// the same zone. Pick the zone(s) that already hold the majority of
+	// Diskful replicas so that new replicas (of any type) follow them.
+	// If replicas are already spread across multiple zones (user error or
+	// migration), prefer the zone with the most Diskful to minimize
+	// cross-zone divergence.
+	if sctx.Topology == v1alpha1.TopologyZonal {
+		zones := computePreferredZones(sctx.ReplicasByZone, func(a, b idset.IDSet) int {
+			return cmp.Compare(
+				a.Intersect(sctx.Diskful).Len(),
+				b.Intersect(sctx.Diskful).Len(),
+			)
+		})
+
+		if len(zones) > 1 {
+			logger.Info("zonal topology: Diskful replicas are spread across multiple zones; this is an inconsistent state — preferring zones with the most Diskful",
+				"preferredZones", zones)
+		}
+
+		if len(zones) < len(sctx.ReplicasByZone) {
+			p = WithPredicate(p, "zone (zonal majority)", logger, func(e *CandidateEntry) *CandidateEntry {
+				if !slices.Contains(zones, e.Node.ZoneName) {
+					return nil
+				}
+				return e
+			})
+		}
+	}
+
+	// TransZonal topology: replicas should be evenly spread across zones.
+	if sctx.Topology == v1alpha1.TopologyTransZonal {
+		var compare func(a, b idset.IDSet) int
+		if isDiskful {
+			// Diskful replicas participate in the quorum, so they must be spread
+			// evenly across zones for availability. The rv_controller is
+			// responsible for creating the right number of replicas; this
+			// scheduler only decides where to place them.
+			// Preferred zone: fewest Diskful replicas.
+			compare = func(a, b idset.IDSet) int {
+				return -1 * cmp.Compare(
+					a.Intersect(sctx.Diskful).Len(),
+					b.Intersect(sctx.Diskful).Len(),
+				)
+			}
+		} else {
+			// TieBreaker replicas do not participate in the main quorum, but in
+			// some configurations they form a separate tie-breaker quorum used to
+			// sustain the main one — so they must be spread evenly as well.
+			// Preferred zone: fewest total replicas (Diskful + TieBreaker), and
+			// among those — fewest TieBreaker replicas. This ensures TieBreakers
+			// land in zones with less overall load first; when total counts are
+			// equal, they fill zones that have more Diskful relative to TieBreakers,
+			// keeping the tie-breaker quorum balanced independently.
+			allReplicas := sctx.Diskful.Union(sctx.TieBreaker)
+			compare = func(a, b idset.IDSet) int {
+				totalA := a.Intersect(allReplicas).Len()
+				totalB := b.Intersect(allReplicas).Len()
+				if c := cmp.Compare(totalA, totalB); c != 0 {
+					return -c
+				}
+				return -cmp.Compare(
+					a.Intersect(sctx.TieBreaker).Len(),
+					b.Intersect(sctx.TieBreaker).Len(),
+				)
+			}
+		}
+		zones := computePreferredZones(sctx.ReplicasByZone, compare)
+		if len(zones) < len(sctx.ReplicasByZone) {
+			p = WithPredicate(p, "zone (transZonal min replicas)", logger, func(e *CandidateEntry) *CandidateEntry {
+				if !slices.Contains(zones, e.Node.ZoneName) {
+					return nil
+				}
+				return e
+			})
+		}
+	}
+
+	// reservationID identifies the capacity reservation in the scheduler-extender.
+	// It is either namespace/pvc (set by CSI via annotation on the RV) or the
+	// deterministic LVMLogicalVolume name that will be created for this RVR.
+	reservationID := sctx.ReservationID
+	if reservationID == "" {
+		reservationID = rvrllvname.ComputeLLVName(
+			rvr.Name, rvr.Spec.LVMVolumeGroupName, rvr.Spec.LVMVolumeGroupThinPoolName)
+	}
+
+	// Scoring (Diskful only): eagerly query the extender and merge-join scores.
+	if isDiskful {
+		var err error
+		p, err = FilteredAndScoredBySchedulerExtender(rf.Ctx(), p, r.extenderClient, reservationID, 2*time.Second, sctx.Size, logger)
+		if err != nil {
+			return r.reconcileRVRCondition(rf.Ctx(), rvr, metav1.ConditionFalse,
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonExtenderUnavailable,
+				"Scheduling is temporarily unavailable: capacity scoring service is unreachable").
+				Merge(rf.Fail(err))
+		}
+
+		// Attach-to bonus (applied after scoring).
+		// attachToScoreBonus is added to the scheduling score of nodes that are
+		// already listed in RV's attachToNodes, so they are strongly preferred
+		// when placing new replicas.
+		attachToNodes := sctx.AttachToNodes
+		if len(attachToNodes) > 0 {
+			attachSet := make(map[string]struct{}, len(attachToNodes))
+			for _, n := range attachToNodes {
+				attachSet[n] = struct{}{}
+			}
+			p = WithPredicate(p, "attach-to bonus", logger, func(e *CandidateEntry) *CandidateEntry {
+				if _, ok := attachSet[e.Node.NodeName]; ok {
+					e.Score += 1000 // Attach to bonus
+				}
+				return e
+			})
+		}
+	}
+
+	// When volumeAccess != Any, prefer nodes with more than one LVG.
+	// If a disk fails, having a second LVG on the same node allows
+	// migrating the volume locally without violating volumeAccess
+	// constraints (the pod can keep running on the same node).
+	if isDiskful && sctx.VolumeAccess != v1alpha1.VolumeAccessAny {
+		p = WithNodeScore(p, "multi-LVG node bonus", logger,
+			func(_ string, group []*CandidateEntry) int {
+				if len(group) > 1 {
+					return 2
+				}
+				return 0
+			})
+	}
+
+	// Zone capacity penalty (Diskful + Zonal only): penalize zones that do
+	// not have enough free nodes to host the required number of Diskful
+	// replicas. For TransZonal this is unnecessary — replicas are already
+	// spread across zones by the zone filtering predicate above.
+	//
+	// The required Diskful count depends on the replication mode:
+	//   None                       → 1
+	//   Availability/Consistency   → 2
+	//   ConsistencyAndAvailability → 3
+	//
+	// We subtract already-scheduled Diskful to get the remaining demand.
+	// By this point the "node occupied" predicate has already filtered
+	// out occupied nodes, so every candidate in the pipeline is on a
+	// free node. We just count unique nodes per zone.
+	// Zones where free nodes < remaining demand receive a -800 penalty,
+	// making them strongly disfavored (the extender returns scores in
+	// the 0–10 range, so -800 pushes these zones to the bottom and
+	// they will only be chosen as a last resort).
+	if isDiskful && sctx.Topology == v1alpha1.TopologyZonal {
+		requiredDiskful := 1
+		switch sctx.Replication {
+		case v1alpha1.ReplicationAvailability, v1alpha1.ReplicationConsistency:
+			requiredDiskful = 2
+		case v1alpha1.ReplicationConsistencyAndAvailability:
+			requiredDiskful = 3
+		}
+		scheduledDiskful := sctx.Scheduled.Intersect(sctx.Diskful).Len()
+		remainingDemand := requiredDiskful - scheduledDiskful
+		if remainingDemand < 0 {
+			remainingDemand = 0
+		}
+
+		if remainingDemand > 0 {
+			p = WithZoneScore(p, "zone capacity penalty", logger,
+				func(_ string, group []*CandidateEntry) int {
+					// Count unique free nodes (occupied already filtered out).
+					seen := make(map[string]struct{}, len(group))
+					for _, e := range group {
+						seen[e.Node.NodeName] = struct{}{}
+					}
+					if len(seen) < remainingDemand {
+						return -800
+					}
+					return 0
+				})
+		}
+	}
+
+	best, summary := SelectBest(p, func(a, b *CandidateEntry) bool {
+		if a.Score != b.Score {
+			return a.Score > b.Score
+		}
+		if a.Node.NodeName != b.Node.NodeName {
+			return a.Node.NodeName < b.Node.NodeName
+		}
+		return a.LVGName() < b.LVGName()
+	})
+
+	if best == nil {
+		return r.reconcileRVRCondition(rf.Ctx(), rvr, metav1.ConditionFalse,
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed, summary)
+	}
+
+	if isDiskful {
+		if err := r.extenderClient.NarrowReservation(rf.Ctx(), reservationID, 60*time.Second, schext.LVMVolumeGroup{
+			LVGName:      best.LVGName(),
+			ThinPoolName: best.ThinPoolName(),
+		}); err != nil {
+			return r.reconcileRVRCondition(rf.Ctx(), rvr, metav1.ConditionFalse,
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonExtenderUnavailable,
+				"Scheduling is temporarily unavailable: failed to confirm capacity reservation").
+				Merge(rf.Fail(err))
+		}
+	}
+
+	outcome = r.reconcileRVRPlacement(rf.Ctx(), rvr, best)
+	if outcome.ShouldReturn() {
+		return outcome
+	}
+
+	// Placement succeeded — update scheduling context for subsequent RVRs.
+	sctx.Update(rvr, best)
+
+	return rf.Continue()
+}
+
+// --- apply ---
+
+// applyPlacementFromEntry sets node, LVG and thin pool on RVR spec from a
+// CandidateEntry. Returns true if any field changed.
+func applyPlacementFromEntry(rvr *v1alpha1.ReplicatedVolumeReplica, entry *CandidateEntry) bool {
+	changed := false
+
+	if rvr.Spec.NodeName != entry.Node.NodeName {
+		rvr.Spec.NodeName = entry.Node.NodeName
+		changed = true
+	}
+
+	if rvr.Spec.LVMVolumeGroupName != entry.LVGName() {
+		rvr.Spec.LVMVolumeGroupName = entry.LVGName()
+		changed = true
+	}
+
+	if rvr.Spec.LVMVolumeGroupThinPoolName != entry.ThinPoolName() {
+		rvr.Spec.LVMVolumeGroupThinPoolName = entry.ThinPoolName()
+		changed = true
+	}
+
+	return changed
+}
+
+// --- compute ---
+
+// schedulingContext holds mutable scheduling state shared across per-RVR
+// pipeline runs within a single Reconcile invocation.
+type schedulingContext struct {
+	// ReservationID is either the CSI-provided namespace/pvc annotation or
+	// the deterministic LVMLogicalVolume name used as a scheduler-extender
+	// reservation key.
+	ReservationID string
+
+	// Size is the requested volume size in bytes.
+	Size int64
+
+	// EligibleNodes are the candidate nodes from the RSP, sorted by NodeName.
+	// OccupiedNodes tracks nodes already assigned to an RVR in this Reconcile.
+	// AttachToNodes lists nodes where the volume must be attached (from RV).
+	EligibleNodes []v1alpha1.ReplicatedStoragePoolEligibleNode
+	OccupiedNodes map[string]struct{}
+	AttachToNodes []string
+
+	// Topology and zone layout.
+	//
+	// ReplicasByZone maps zone name → IDSet of replicas in that zone.
+	// Keys are derived from EligibleNodes (unique ZoneName values); values
+	// may be empty (no replicas yet).
+	//
+	// TransZonal: RSP always lists explicit non-empty zones, and the RSP
+	// controller guarantees EligibleNodes contains only nodes from those
+	// zones — so ReplicasByZone keys are exactly the RSP zones.
+	//
+	// Zonal / Ignored: RSP MAY have no zones. Nodes may or may not have
+	// a ZoneName set (mixed). ReplicasByZone is built from whatever
+	// ZoneName each node carries, so "" is a valid key ("zone unknown").
+	Topology       v1alpha1.ReplicatedStorageClassTopology
+	ReplicasByZone map[string]idset.IDSet
+
+	// Replication mode and volume access from the resolved RSC configuration.
+	Replication  v1alpha1.ReplicatedStorageClassReplication
+	VolumeAccess v1alpha1.ReplicatedStorageClassVolumeAccess
+
+	// Replica type sets (computed in one pass over rvrs).
+	All        idset.IDSet
+	Access     idset.IDSet
+	Diskful    idset.IDSet
+	TieBreaker idset.IDSet
+	Deleting   idset.IDSet
+	Scheduled  idset.IDSet
+}
+
+// computeSchedulingContext builds a schedulingContext from RV, RSP, RVRs, and
+// the desired attach-to node list (from RVA objects).
+// All replica-type sets (All, Access, Diskful, TieBreaker, Deleting, Scheduled)
+// and OccupiedNodes are computed in a single pass over rvrs.
+// EligibleNodes are sorted by NodeName.
+func computeSchedulingContext(
+	rv *v1alpha1.ReplicatedVolume,
+	rsp *v1alpha1.ReplicatedStoragePool,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	attachToNodes []string,
+) *schedulingContext {
+	eligibleNodes := rsp.Status.EligibleNodes
+
+	// Safety sort: eligible nodes should arrive sorted from the API, but ensure it.
+	slices.SortFunc(eligibleNodes, func(a, b v1alpha1.ReplicatedStoragePoolEligibleNode) int {
+		return cmp.Compare(a.NodeName, b.NodeName)
+	})
+
+	sctx := &schedulingContext{
+		EligibleNodes: eligibleNodes,
+		Topology:      rv.Status.Configuration.Topology,
+		Replication:   rv.Status.Configuration.Replication,
+		VolumeAccess:  rv.Status.Configuration.VolumeAccess,
+		AttachToNodes: attachToNodes,
+		ReservationID: rv.GetAnnotations()[v1alpha1.SchedulingReservationIDAnnotationKey],
+		Size:          rv.Spec.Size.Value(),
+		OccupiedNodes: make(map[string]struct{}, len(rvrs)),
+	}
+
+	poolType := rsp.Spec.Type
+
+	// Single pass: classify each RVR by type, scheduling state, and deletion.
+	for _, rvr := range rvrs {
+		id := rvr.ID()
+		sctx.All.Add(id)
+
+		switch rvr.Spec.Type {
+		case v1alpha1.ReplicaTypeAccess:
+			sctx.Access.Add(id)
+		case v1alpha1.ReplicaTypeDiskful:
+			sctx.Diskful.Add(id)
+		case v1alpha1.ReplicaTypeTieBreaker:
+			sctx.TieBreaker.Add(id)
+		}
+
+		if rvr.DeletionTimestamp != nil {
+			sctx.Deleting.Add(id)
+		}
+
+		if rvr.Spec.NodeName != "" {
+			sctx.OccupiedNodes[rvr.Spec.NodeName] = struct{}{}
+
+			if rvr.Spec.LVMVolumeGroupName != "" {
+				scheduled := false
+				switch poolType {
+				case v1alpha1.ReplicatedStoragePoolTypeLVMThin:
+					scheduled = rvr.Spec.LVMVolumeGroupThinPoolName != ""
+				case v1alpha1.ReplicatedStoragePoolTypeLVM:
+					scheduled = rvr.Spec.LVMVolumeGroupThinPoolName == ""
+				}
+				if scheduled {
+					sctx.Scheduled.Add(id)
+				}
+			}
+		}
+	}
+
+	sctx.ReplicasByZone = computeReplicasByZone(eligibleNodes, rvrs)
+
+	return sctx
+}
+
+// Update records a successful placement: marks the node as occupied and adds
+// the RVR to its zone in ReplicasByZone.
+func (sctx *schedulingContext) Update(rvr *v1alpha1.ReplicatedVolumeReplica, entry *CandidateEntry) {
+	id := rvr.ID()
+	sctx.OccupiedNodes[entry.Node.NodeName] = struct{}{}
+	sctx.Scheduled.Add(id)
+	s := sctx.ReplicasByZone[entry.Node.ZoneName]
+	s.Add(id)
+	sctx.ReplicasByZone[entry.Node.ZoneName] = s
+}
+
+// computeReplicasByZone builds a map of zone → IDSet of all replicas in
+// that zone. Keys are derived from eligibleNodes (not from RSP.Spec.Zones),
+// so it works correctly even when RSP has no explicit zones and nodes carry
+// mixed or empty ZoneNames. Uses binary search on the sorted eligibleNodes
+// slice to resolve node → zone.
+func computeReplicasByZone(
+	eligibleNodes []v1alpha1.ReplicatedStoragePoolEligibleNode,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) map[string]idset.IDSet {
+	// Collect unique zones from eligibleNodes.
+	replicasByZone := make(map[string]idset.IDSet)
+	for i := range eligibleNodes {
+		if _, ok := replicasByZone[eligibleNodes[i].ZoneName]; !ok {
+			replicasByZone[eligibleNodes[i].ZoneName] = 0
+		}
+	}
+
+	// Populate with existing replicas (all types).
+	for _, rvr := range rvrs {
+		// Skip unscheduled replicas — they have no node yet.
+		if rvr.Spec.NodeName == "" {
+			continue
+		}
+
+		// Resolve node → zone via binary search on sorted eligibleNodes.
+		idx, found := slices.BinarySearchFunc(eligibleNodes, rvr.Spec.NodeName, func(n v1alpha1.ReplicatedStoragePoolEligibleNode, name string) int {
+			return cmp.Compare(n.NodeName, name)
+		})
+		if !found {
+			continue
+		}
+		zone := eligibleNodes[idx].ZoneName
+
+		if s, ok := replicasByZone[zone]; ok {
+			s.Add(rvr.ID())
+			replicasByZone[zone] = s
+		}
+	}
+
+	return replicasByZone
+}
+
+// computePreferredZones returns the zone names whose replica set is the "best"
+// according to compare(repIDsA, repIDsB), which follows cmp.Compare semantics.
+// The function finds the maximum: the zone(s) for which compare returns the
+// highest value relative to others.
+func computePreferredZones(
+	replicasByZone map[string]idset.IDSet,
+	compare func(repIDsA, repIDsB idset.IDSet) int,
+) []string {
+	if len(replicasByZone) == 0 {
 		return nil
 	}
 
-	for _, rvr := range sctx.RVRsToSchedule {
-		log.V(2).Info("patching replica", "rvr", rvr.Name, "nodeName", rvr.Spec.NodeName, "type", rvr.Spec.Type)
-		// Create original state for patch (without NodeName and node-name label)
-		original := rvr.DeepCopy()
-		original.Spec.NodeName = ""
-
-		// Set node-name label together with NodeName.
-		// Note: if label is removed manually, it won't be restored until next condition check
-		// in ensureScheduledConditionOnExistingReplicas (which runs on each reconcile).
-		rvr.Labels, _ = v1alpha1.EnsureLabel(rvr.Labels, v1alpha1.LabelNodeName, rvr.Spec.NodeName)
-
-		// Apply the patch; ignore NotFound errors because the replica may have been deleted meanwhile.
-		if err := r.cl.Patch(ctx, rvr, client.MergeFrom(original)); err != nil {
-			if apierrors.IsNotFound(err) {
-				log.V(1).Info("replica not found during patch, skipping", "rvr", rvr.Name)
-				continue // Replica may have been deleted
-			}
-			return fmt.Errorf("failed to patch RVR %s: %w", rvr.Name, err)
-		}
-
-		// Set Scheduled condition to True for successfully scheduled replicas
-		if err := r.setScheduledConditionOnRVR(
-			ctx,
-			rvr,
-			metav1.ConditionTrue,
-			v1alpha1.ReasonSchedulingReplicaScheduled,
-			"",
-		); err != nil {
-			return fmt.Errorf("failed to set Scheduled condition on RVR %s: %w", rvr.Name, err)
+	// Find the "best" replica set (maximum by compare).
+	var best idset.IDSet
+	first := true
+	for _, replicas := range replicasByZone {
+		if first || compare(replicas, best) > 0 {
+			best = replicas
+			first = false
 		}
 	}
-	return nil
+
+	// Collect all zones equivalent to the best (compare == 0).
+	var result []string
+	for zone, replicas := range replicasByZone {
+		if compare(replicas, best) == 0 {
+			result = append(result, zone)
+		}
+	}
+	return result
 }
 
-// ensureScheduledConditionOnExistingReplicas ensures that all already-scheduled replicas
-// (those that had NodeName set before this reconcile) have the correct Scheduled condition.
-// This handles cases where condition was missing or incorrect.
-func (r *Reconciler) ensureScheduledConditionOnExistingReplicas(
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: place-rvr
+//
+
+// reconcileRVRPlacement applies placement from a CandidateEntry to an RVR and
+// patches both the main (spec) and status domains.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileRVRPlacement(ctx context.Context, rvr *v1alpha1.ReplicatedVolumeReplica, entry *CandidateEntry) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "place-rvr")
+	defer rf.OnEnd(&outcome)
+
+	// Main domain: apply placement → patch.
+	base := rvr.DeepCopy()
+	if applyPlacementFromEntry(rvr, entry) {
+		if err := r.patchRVR(rf.Ctx(), rvr, base); err != nil {
+			return rf.Fail(err)
+		}
+	}
+
+	// Status domain: set Scheduled=True.
+	return r.reconcileRVRCondition(rf.Ctx(), rvr, metav1.ConditionTrue,
+		v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled, "Replica scheduled successfully")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: rvr-condition
+//
+
+// reconcileRVRCondition sets the Scheduled condition on a single RVR if it
+// differs from the current state. NotFound errors are silently ignored.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileRVRCondition(
 	ctx context.Context,
-	sctx *SchedulingContext,
-	log logr.Logger,
-) error {
-	// Collect all scheduled replicas that were NOT scheduled in this cycle
-	alreadyScheduledReplicas := make([]*v1alpha1.ReplicatedVolumeReplica, 0)
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	status metav1.ConditionStatus,
+	reason,
+	message string,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "rvr-condition")
+	defer rf.OnEnd(&outcome)
 
-	// Also check for scheduled Access and TieBreaker replicas from RvrList
-	for _, rvr := range sctx.RvrList {
-		if rvr.Spec.NodeName == "" {
-			continue // Skip unscheduled
-		}
-		alreadyScheduledReplicas = append(alreadyScheduledReplicas, rvr)
+	if obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType).
+		StatusEqual(status).ReasonEqual(reason).MessageEqual(message).Eval() {
+		return rf.Continue()
 	}
 
-	for _, rvr := range alreadyScheduledReplicas {
-		log.V(2).Info("fixing Scheduled condition on existing replica", "rvr", rvr.Name)
+	base := rvr.DeepCopy()
 
-		// Ensure node-name label is set (restores label if manually removed)
-		if err := r.ensureNodeNameLabel(ctx, log, rvr); err != nil {
-			return fmt.Errorf("failed to ensure node-name label on RVR %s: %w", rvr.Name, err)
-		}
+	obju.SetStatusCondition(rvr, metav1.Condition{
+		Type:               v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+		Status:             status,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: rvr.Generation,
+	})
 
-		if err := r.setScheduledConditionOnRVR(
-			ctx,
-			rvr,
-			metav1.ConditionTrue,
-			v1alpha1.ReasonSchedulingReplicaScheduled,
-			"",
-		); err != nil {
-			return fmt.Errorf("failed to set Scheduled condition on existing RVR %s: %w", rvr.Name, err)
-		}
-	}
-
-	return nil
-}
-
-// isRVReadyToSchedule checks if the ReplicatedVolume is ready for scheduling.
-// Returns nil if ready, or an error wrapped with errSchedulingPending if not ready.
-func isRVReadyToSchedule(rv *v1alpha1.ReplicatedVolume) error {
-	if rv.Status == nil {
-		return fmt.Errorf("%w: ReplicatedVolume status is not initialized", errSchedulingPending)
-	}
-
-	if rv.Finalizers == nil {
-		return fmt.Errorf("%w: ReplicatedVolume has no finalizers", errSchedulingPending)
-	}
-
-	if !slices.Contains(rv.Finalizers, v1alpha1.ControllerAppFinalizer) {
-		return fmt.Errorf("%w: ReplicatedVolume is missing controller finalizer", errSchedulingPending)
-	}
-
-	if rv.Spec.ReplicatedStorageClassName == "" {
-		return fmt.Errorf("%w: ReplicatedStorageClassName is not specified in ReplicatedVolume spec", errSchedulingPending)
-	}
-
-	if rv.Spec.Size.IsZero() {
-		return fmt.Errorf("%w: ReplicatedVolume size is zero in ReplicatedVolume spec", errSchedulingPending)
-	}
-
-	return nil
-}
-
-func (r *Reconciler) prepareSchedulingContext(
-	ctx context.Context,
-	req reconcile.Request,
-	log logr.Logger,
-) (*SchedulingContext, error) {
-	// Fetch the target ReplicatedVolume for this reconcile request.
-	rv := &v1alpha1.ReplicatedVolume{}
-	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
-		// If the volume no longer exists, exit reconciliation without error.
+	if err := r.patchRVRStatus(rf.Ctx(), rvr, base); err != nil {
 		if apierrors.IsNotFound(err) {
-			log.V(1).Info("ReplicatedVolume not found, skipping reconciliation")
-			return nil, nil
+			return rf.Continue()
 		}
-		return nil, fmt.Errorf("unable to get ReplicatedVolume: %w", err)
+		return rf.Fail(err)
 	}
 
-	if err := isRVReadyToSchedule(rv); err != nil {
+	return rf.Continue()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Single-call I/O helpers
+//
+
+// --- RVR ---
+
+func (r *Reconciler) getRVRsByRVName(ctx context.Context, rvName string) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
+	list := &v1alpha1.ReplicatedVolumeReplicaList{}
+	if err := r.cl.List(ctx, list, client.MatchingFields{
+		indexes.IndexFieldRVRByReplicatedVolumeName: rvName,
+	}); err != nil {
 		return nil, err
 	}
 
-	// Load the referenced ReplicatedStorageClass.
-	rsc := &v1alpha1.ReplicatedStorageClass{}
-	if err := r.cl.Get(ctx, client.ObjectKey{Name: rv.Spec.ReplicatedStorageClassName}, rsc); err != nil {
-		return nil, fmt.Errorf("unable to get ReplicatedStorageClass: %w", err)
+	// HACK: Build a slice of pointers from list.Items (which is []T, not []*T).
+	//
+	// Ideally, ReplicatedVolumeReplicaList.Items should be []*ReplicatedVolumeReplica
+	// so that client.List returns pointers directly and we avoid this copy loop.
+	// However, changing the API type now would require refactoring many other controllers
+	// that use ReplicatedVolumeReplicaList, so we defer that change.
+	//
+	// TODO: Change ReplicatedVolumeReplicaList.Items to []*ReplicatedVolumeReplica,
+	// refactor all dependent code, and remove this workaround.
+	result := make([]*v1alpha1.ReplicatedVolumeReplica, len(list.Items))
+	for i := range list.Items {
+		result[i] = &list.Items[i]
 	}
 
-	// List all ReplicatedVolumeReplica resources in the cluster.
-	replicaList := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err := r.cl.List(ctx, replicaList); err != nil {
-		return nil, fmt.Errorf("unable to list ReplicatedVolumeReplica: %w", err)
-	}
+	slices.SortFunc(result, func(a, b *v1alpha1.ReplicatedVolumeReplica) int {
+		return cmp.Compare(a.ID(), b.ID())
+	})
 
-	// Collect replicas for this RV:
-	// - replicasForRV: non-deleting replicas
-	// - nodesWithRVReplica: all occupied nodes (including nodes with deleting replicas)
-	replicasForRV, nodesWithRVReplica := collectReplicasAndOccupiedNodes(replicaList.Items, rv.Name)
-
-	rsp := &v1alpha1.ReplicatedStoragePool{}
-	if err := r.cl.Get(ctx, client.ObjectKey{Name: rsc.Spec.StoragePool}, rsp); err != nil {
-		return nil, fmt.Errorf("unable to get ReplicatedStoragePool %s: %w", rsc.Spec.StoragePool, err)
-	}
-
-	rspLvgToNodeInfoMap, err := r.getLVGToNodesByStoragePool(ctx, rsp, log)
-	if err != nil {
-		return nil, fmt.Errorf("unable to get LVG to nodes mapping: %w", err)
-	}
-
-	// Build list of RSP nodes WITHOUT replicas - exclude nodes that already have replicas.
-	rspNodesWithoutReplica := []string{}
-	for _, info := range rspLvgToNodeInfoMap {
-		if _, hasReplica := nodesWithRVReplica[info.NodeName]; !hasReplica {
-			rspNodesWithoutReplica = append(rspNodesWithoutReplica, info.NodeName)
-		}
-	}
-
-	nodeNameToZone, err := r.getNodeNameToZoneMap(ctx, log)
-	if err != nil {
-		return nil, fmt.Errorf("unable to get node to zone mapping: %w", err)
-	}
-
-	attachToList := getAttachToNodeList(rv)
-	scheduledDiskfulReplicas, unscheduledDiskfulReplicas := getTypedReplicasLists(replicasForRV, v1alpha1.ReplicaTypeDiskful)
-	_, unscheduledAccessReplicas := getTypedReplicasLists(replicasForRV, v1alpha1.ReplicaTypeAccess)
-	_, unscheduledTieBreakerReplicas := getTypedReplicasLists(replicasForRV, v1alpha1.ReplicaTypeTieBreaker)
-	attachToNodesWithoutAnyReplica := getAttachToNodesWithoutAnyReplica(attachToList, nodesWithRVReplica)
-
-	schedulingCtx := &SchedulingContext{
-		Log:                           log,
-		Rv:                            rv,
-		Rsc:                           rsc,
-		Rsp:                           rsp,
-		RvrList:                       replicasForRV,
-		AttachToNodes:                 attachToList,
-		AttachToNodesWithoutRvReplica: attachToNodesWithoutAnyReplica,
-		RspLvgToNodeInfoMap:           rspLvgToNodeInfoMap,
-		NodesWithAnyReplica:           nodesWithRVReplica,
-		UnscheduledDiskfulReplicas:    unscheduledDiskfulReplicas,
-		ScheduledDiskfulReplicas:      scheduledDiskfulReplicas,
-		UnscheduledAccessReplicas:     unscheduledAccessReplicas,
-		UnscheduledTieBreakerReplicas: unscheduledTieBreakerReplicas,
-		RspNodesWithoutReplica:        rspNodesWithoutReplica,
-		NodeNameToZone:                nodeNameToZone,
-	}
-
-	return schedulingCtx, nil
+	return result, nil
 }
 
-func (r *Reconciler) scheduleDiskfulPhase(
-	ctx context.Context,
-	sctx *SchedulingContext,
-) error {
-	if len(sctx.UnscheduledDiskfulReplicas) == 0 {
-		sctx.Log.V(1).Info("no unscheduled Diskful replicas. Skipping Diskful phase.")
-		return nil
-	}
-
-	candidateNodes := sctx.RspNodesWithoutReplica
-	sctx.Log.V(1).Info("Diskful phase: initial candidate nodes", "count", len(candidateNodes), "nodes", candidateNodes)
-
-	// Try to schedule replicas, collect failure reason if any step fails
-	failureReason := r.tryScheduleDiskfulReplicas(ctx, sctx, candidateNodes)
-
-	// Set Scheduled=False condition on remaining unscheduled Diskful replicas
-	if len(sctx.UnscheduledDiskfulReplicas) > 0 && failureReason != nil {
-		sctx.Log.V(1).Info("setting Scheduled=False on unscheduled Diskful replicas",
-			"count", len(sctx.UnscheduledDiskfulReplicas),
-			"reason", failureReason.reason)
-		return r.setScheduledConditionOnRVRs(
-			ctx,
-			sctx.UnscheduledDiskfulReplicas,
-			metav1.ConditionFalse,
-			failureReason.reason,
-			failureReason.message,
-			sctx.Log,
-		)
-	}
-
-	return nil
-}
-
-// tryScheduleDiskfulReplicas attempts to schedule Diskful replicas and returns failure reason if not all could be scheduled.
-func (r *Reconciler) tryScheduleDiskfulReplicas(
-	ctx context.Context,
-	sctx *SchedulingContext,
-	candidateNodes []string,
-) *rvrNotReadyReason {
-	// Apply topology constraints (also checks for empty candidates)
-	if err := r.applyTopologyFilter(candidateNodes, true, sctx); err != nil {
-		sctx.Log.V(1).Info("topology filter failed", "error", err)
-		return schedulingErrorToReason(err)
-	}
-
-	// Apply capacity filtering
-	if err := r.applyCapacityFilterAndScoreCandidates(ctx, sctx); err != nil {
-		sctx.Log.V(1).Info("capacity filter failed", "error", err)
-		return schedulingErrorToReason(err)
-	}
-	sctx.Log.V(1).Info("capacity filter applied and candidates scored", "zonesCount", len(sctx.ZonesToNodeCandidatesMap))
-
-	sctx.ApplyAttachToBonus()
-	sctx.Log.V(1).Info("attachTo bonus applied")
-
-	// Assign replicas in best-effort mode
-	assignedReplicas, err := r.assignReplicasToNodes(sctx, sctx.UnscheduledDiskfulReplicas, v1alpha1.ReplicaTypeDiskful, true)
-	if err != nil {
-		sctx.Log.Error(err, "unexpected error during replica assignment")
-		return schedulingErrorToReason(err)
-	}
-	sctx.Log.V(1).Info("Diskful replicas assigned", "count", len(assignedReplicas))
-
-	sctx.UpdateAfterScheduling(assignedReplicas)
-
-	// Return failure reason if not all replicas were scheduled
-	if len(sctx.UnscheduledDiskfulReplicas) > 0 {
-		return schedulingErrorToReason(fmt.Errorf("%w: not enough candidate nodes to schedule all Diskful replicas", errSchedulingNoCandidateNodes))
-	}
-
-	return nil
-}
-
-// assignReplicasToNodes assigns nodes to unscheduled replicas based on topology and node scores.
-// For Ignored topology: selects best nodes by score.
-// For Zonal topology: selects the best zone first (by total score), then best nodes from that zone.
-// For TransZonal topology: distributes replicas across zones, picking zones with fewer scheduled replicas first.
-// replicaTypeFilter: for TransZonal, which replica types to count for zone balancing (empty = all types).
-// bestEffort: if true, don't return error when not enough nodes.
-// Note: This function returns the list of replicas that were assigned nodes in this call.
-func (r *Reconciler) assignReplicasToNodes(
-	sctx *SchedulingContext,
-	unscheduledReplicas []*v1alpha1.ReplicatedVolumeReplica,
-	replicaTypeFilter v1alpha1.ReplicaType,
-	bestEffort bool,
-) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
-	if len(unscheduledReplicas) == 0 {
-		sctx.Log.Info("no unscheduled replicas to assign", "rv", sctx.Rv.Name)
-		return nil, nil
-	}
-
-	switch sctx.Rsc.Spec.Topology {
-	case topologyIgnored:
-		return r.assignReplicasIgnoredTopology(sctx, unscheduledReplicas, bestEffort)
-	case topologyZonal:
-		return r.assignReplicasZonalTopology(sctx, unscheduledReplicas, bestEffort)
-	case topologyTransZonal:
-		return r.assignReplicasTransZonalTopology(sctx, unscheduledReplicas, replicaTypeFilter, bestEffort)
-	default:
-		return nil, fmt.Errorf("unknown topology: %s", sctx.Rsc.Spec.Topology)
-	}
-}
-
-// assignReplicasIgnoredTopology assigns replicas to best nodes by score (ignoring zones).
-// If bestEffort=true, assigns as many as possible without error.
-// Returns the list of replicas that were assigned nodes.
-func (r *Reconciler) assignReplicasIgnoredTopology(
-	sctx *SchedulingContext,
-	unscheduledReplicas []*v1alpha1.ReplicatedVolumeReplica,
-	bestEffort bool,
-) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
-	sctx.Log.V(1).Info("assigning replicas with Ignored topology", "replicasCount", len(unscheduledReplicas), "bestEffort", bestEffort)
-	// Collect all candidates from all zones
-	var allCandidates []NodeCandidate
-	for _, candidates := range sctx.ZonesToNodeCandidatesMap {
-		allCandidates = append(allCandidates, candidates...)
-	}
-	sctx.Log.V(2).Info("collected candidates", "count", len(allCandidates))
-
-	// Assign nodes to replicas
-	var assignedReplicas []*v1alpha1.ReplicatedVolumeReplica
-	for _, rvr := range unscheduledReplicas {
-		selectedNode, remaining := SelectAndRemoveBestNode(allCandidates)
-		if selectedNode == "" {
-			sctx.Log.V(1).Info("not enough candidate nodes for all replicas", "assigned", len(assignedReplicas), "total", len(unscheduledReplicas))
-			if bestEffort {
-				break // Best-effort: return what we have
-			}
-			return assignedReplicas, fmt.Errorf("%w: not enough candidate nodes for all replicas", errSchedulingNoCandidateNodes)
-		}
-		allCandidates = remaining
-
-		// Mark replica for scheduling
-		sctx.Log.V(2).Info("assigned replica to node", "rvr", rvr.Name, "node", selectedNode)
-		rvr.Spec.NodeName = selectedNode
-		assignedReplicas = append(assignedReplicas, rvr)
-	}
-
-	return assignedReplicas, nil
-}
-
-// assignReplicasZonalTopology selects the best zone first, then assigns replicas to best nodes in that zone.
-// If bestEffort=true, assigns as many as possible without error.
-// Returns the list of replicas that were assigned nodes.
-func (r *Reconciler) assignReplicasZonalTopology(
-	sctx *SchedulingContext,
-	unscheduledReplicas []*v1alpha1.ReplicatedVolumeReplica,
-	bestEffort bool,
-) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
-	sctx.Log.V(1).Info("assigning replicas with Zonal topology", "replicasCount", len(unscheduledReplicas), "bestEffort", bestEffort)
-	// Find the best zone by combined metric: totalScore * len(candidates)
-	// This ensures zones with more nodes are preferred when scores are comparable
-	var bestZone string
-	bestZoneScore := -1
-
-	for zone, candidates := range sctx.ZonesToNodeCandidatesMap {
-		totalScore := 0
-		for _, c := range candidates {
-			totalScore += c.Score
-		}
-		// Combined metric: zones with more nodes and good scores are preferred
-		zoneScore := totalScore * len(candidates)
-		sctx.Log.V(2).Info("evaluating zone", "zone", zone, "candidatesCount", len(candidates), "totalScore", totalScore, "zoneScore", zoneScore)
-		if zoneScore > bestZoneScore {
-			bestZoneScore = zoneScore
-			bestZone = zone
-		}
-	}
-
-	if bestZone == "" {
-		sctx.Log.V(1).Info("no zones with candidates available")
-		if bestEffort {
-			return nil, nil // Best-effort: no candidates, no error
-		}
-		return nil, fmt.Errorf("%w: no zones with candidates available", errSchedulingNoCandidateNodes)
-	}
-	sctx.Log.V(1).Info("selected best zone", "zone", bestZone, "score", bestZoneScore)
-
-	// Assign nodes to replicas
-	var assignedReplicas []*v1alpha1.ReplicatedVolumeReplica
-	for _, rvr := range unscheduledReplicas {
-		selectedNode, remaining := SelectAndRemoveBestNode(sctx.ZonesToNodeCandidatesMap[bestZone])
-		if selectedNode == "" {
-			sctx.Log.V(1).Info("not enough candidate nodes in zone", "zone", bestZone, "assigned", len(assignedReplicas), "total", len(unscheduledReplicas))
-			if bestEffort {
-				break // Best-effort: return what we have
-			}
-			return assignedReplicas, fmt.Errorf("%w: not enough candidate nodes in zone %s for all replicas", errSchedulingNoCandidateNodes, bestZone)
-		}
-		sctx.ZonesToNodeCandidatesMap[bestZone] = remaining
-
-		// Mark replica for scheduling
-		sctx.Log.V(2).Info("assigned replica to node in zone", "rvr", rvr.Name, "node", selectedNode, "zone", bestZone)
-		rvr.Spec.NodeName = selectedNode
-		assignedReplicas = append(assignedReplicas, rvr)
-	}
-
-	return assignedReplicas, nil
-}
-
-// assignReplicasTransZonalTopology distributes replicas across zones, preferring zones with fewer scheduled replicas of the same type.
-// It modifies rvr.Spec.NodeName and adds replicas to sctx.RVRsToSchedule for later patching.
-// If bestEffort=true, assigns as many as possible without error when distribution constraints can't be met.
-// Returns the list of replicas that were assigned nodes.
-func (r *Reconciler) assignReplicasTransZonalTopology(
-	sctx *SchedulingContext,
-	unscheduledReplicas []*v1alpha1.ReplicatedVolumeReplica,
-	replicaTypeFilter v1alpha1.ReplicaType,
-	bestEffort bool,
-) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
-	if len(unscheduledReplicas) == 0 {
-		return nil, nil
-	}
-
-	sctx.Log.V(1).Info("assigning replicas with TransZonal topology", "replicasCount", len(unscheduledReplicas), "replicaTypeFilter", replicaTypeFilter, "bestEffort", bestEffort)
-
-	// Count already scheduled replicas per zone (filtered by type if specified)
-	zoneReplicaCount := countReplicasByZone(sctx.RvrList, replicaTypeFilter, sctx.NodeNameToZone)
-	sctx.Log.V(2).Info("current zone replica distribution", "zoneReplicaCount", zoneReplicaCount)
-
-	// Get all allowed zones for TransZonal topology
-	allowedZones := getAllowedZones(nil, sctx.Rsc.Spec.Zones, sctx.NodeNameToZone)
-	sctx.Log.V(2).Info("allowed zones for TransZonal", "zones", allowedZones)
-
-	// Build set of zones that have available candidates
-	availableZones := make(map[string]struct{})
-	for zone, candidates := range sctx.ZonesToNodeCandidatesMap {
-		if len(candidates) > 0 {
-			availableZones[zone] = struct{}{}
-		}
-	}
-
-	// For each unscheduled replica, pick the zone with fewest replicas, then best node
-	var assignedReplicas []*v1alpha1.ReplicatedVolumeReplica
-	for i, rvr := range unscheduledReplicas {
-		sctx.Log.V(2).Info("scheduling replica", "index", i, "rvr", rvr.Name)
-
-		// Find zone with minimum replica count among ALL allowed zones
-		globalMinZone, globalMinCount := findZoneWithMinReplicaCount(allowedZones, zoneReplicaCount)
-
-		// Find zone with minimum replica count that has available candidates
-		selectedZone, availableMinCount := findZoneWithMinReplicaCount(availableZones, zoneReplicaCount)
-
-		if selectedZone == "" {
-			// No more zones with available candidates
-			sctx.Log.V(1).Info("no more zones with available candidates", "assigned", len(assignedReplicas), "total", len(unscheduledReplicas))
-			if bestEffort {
-				break // Best-effort: return what we have
-			}
-			return assignedReplicas, fmt.Errorf(
-				"%w: no zones with available nodes to place replica",
-				errSchedulingNoCandidateNodes,
-			)
-		}
-
-		// Check if we can guarantee even distribution:
-		// If the global minimum (across all allowed zones) is less than the minimum among available zones,
-		// it means there's a zone that should have replicas but has no available nodes.
-		if globalMinCount < availableMinCount {
-			sctx.Log.V(1).Info("cannot guarantee even distribution: zone with fewer replicas has no available nodes",
-				"unavailableZone", globalMinZone, "replicasInZone", globalMinCount, "minReplicasInAvailableZones", availableMinCount)
-			if bestEffort {
-				break // Best-effort: return what we have, can't maintain even distribution
-			}
-			return assignedReplicas, fmt.Errorf(
-				"%w: zone %q has %d replicas but no available nodes; replica should be placed there to maintain even distribution across zones",
-				errSchedulingNoCandidateNodes,
-				globalMinZone,
-				globalMinCount,
-			)
-		}
-
-		sctx.Log.V(2).Info("selected zone for replica", "zone", selectedZone, "replicaCount", availableMinCount)
-
-		// Select best node from zone and remove it from candidates
-		selectedNode, remaining := SelectAndRemoveBestNode(sctx.ZonesToNodeCandidatesMap[selectedZone])
-		if selectedNode == "" {
-			// No available node in this zone - stop scheduling remaining replicas
-			sctx.Log.V(1).Info("no available node in selected zone", "zone", selectedZone)
-			return assignedReplicas, nil
-		}
-		sctx.ZonesToNodeCandidatesMap[selectedZone] = remaining
-
-		// Update availableZones if zone has no more candidates
-		if len(remaining) == 0 {
-			delete(availableZones, selectedZone)
-		}
-
-		// Update replica node name
-		sctx.Log.V(2).Info("assigned replica to node", "rvr", rvr.Name, "node", selectedNode, "zone", selectedZone)
-		rvr.Spec.NodeName = selectedNode
-		assignedReplicas = append(assignedReplicas, rvr)
-
-		// Update zone replica count
-		zoneReplicaCount[selectedZone]++
-	}
-
-	sctx.Log.V(1).Info("TransZonal assignment completed", "assigned", len(assignedReplicas))
-	return assignedReplicas, nil
-}
-
-//nolint:unparam // error is always nil by design - Access phase never fails
-func (r *Reconciler) scheduleAccessPhase(
-	sctx *SchedulingContext,
-) error {
-	// Spec «Access»: phase works only when:
-	// - rv.status.desiredAttachTo is set AND not all desiredAttachTo nodes have replicas
-	// - rsc.spec.volumeAccess != Local
-	if len(sctx.AttachToNodes) == 0 {
-		sctx.Log.V(1).Info("skipping Access phase: no attachTo nodes")
-		return nil
-	}
-
-	if sctx.Rsc.Spec.VolumeAccess == "Local" {
-		sctx.Log.V(1).Info("skipping Access phase: volumeAccess is Local")
-		return nil
-	}
-
-	if len(sctx.UnscheduledAccessReplicas) == 0 {
-		sctx.Log.V(1).Info("no unscheduled Access replicas")
-		return nil
-	}
-	sctx.Log.V(1).Info("Access phase: processing replicas", "unscheduledCount", len(sctx.UnscheduledAccessReplicas))
-
-	// Spec «Access»: exclude nodes that already host any replica of this RV (any type)
-	// Use AttachToNodesWithoutRvReplica which already contains attachTo nodes without any replica
-	candidateNodes := sctx.AttachToNodesWithoutRvReplica
-	if len(candidateNodes) == 0 {
-		// All attachTo nodes already have replicas; nothing to do.
-		// Spec «Access»: it is allowed to have replicas that could not be scheduled
-		sctx.Log.V(1).Info("Access phase: all attachTo nodes already have replicas")
-		return nil
-	}
-	sctx.Log.V(1).Info("Access phase: candidate nodes", "count", len(candidateNodes), "nodes", candidateNodes)
-
-	// We are not required to place all Access replicas or to cover all desiredAttachTo nodes.
-	// Spec «Access»: it is allowed to have nodes in rv.status.desiredAttachTo without enough replicas
-	// Spec «Access»: it is allowed to have replicas that could not be scheduled
-	nodesToFill := min(len(candidateNodes), len(sctx.UnscheduledAccessReplicas))
-	sctx.Log.V(1).Info("Access phase: scheduling replicas", "nodesToFill", nodesToFill)
-
-	var assignedReplicas []*v1alpha1.ReplicatedVolumeReplica
-	for i := range nodesToFill {
-		nodeName := candidateNodes[i]
-		rvr := sctx.UnscheduledAccessReplicas[i]
-
-		sctx.Log.V(2).Info("Access phase: assigning replica", "rvr", rvr.Name, "node", nodeName)
-		rvr.Spec.NodeName = nodeName
-		assignedReplicas = append(assignedReplicas, rvr)
-	}
-
-	// Update context after scheduling
-	sctx.UpdateAfterScheduling(assignedReplicas)
-	sctx.Log.V(1).Info("Access phase: completed", "assigned", len(assignedReplicas))
-
-	return nil
-}
-
-func (r *Reconciler) scheduleTieBreakerPhase(
-	ctx context.Context,
-	sctx *SchedulingContext,
-) error {
-	if len(sctx.UnscheduledTieBreakerReplicas) == 0 {
-		sctx.Log.V(1).Info("no unscheduled TieBreaker replicas")
-		return nil
-	}
-	sctx.Log.V(1).Info("TieBreaker phase: processing replicas", "unscheduledCount", len(sctx.UnscheduledTieBreakerReplicas), "topology", sctx.Rsc.Spec.Topology)
-
-	// Build candidate nodes (nodes without any replica of this RV)
-	candidateNodes := r.getTieBreakerCandidateNodes(sctx)
-	sctx.Log.V(2).Info("TieBreaker phase: candidate nodes", "count", len(candidateNodes))
-
-	failureReason := r.tryScheduleTieBreakerReplicas(sctx, candidateNodes)
-
-	// Set Scheduled=False condition on remaining unscheduled TieBreaker replicas
-	if len(sctx.UnscheduledTieBreakerReplicas) > 0 && failureReason != nil {
-		if err := r.setScheduledConditionOnRVRs(
-			ctx,
-			sctx.UnscheduledTieBreakerReplicas,
-			metav1.ConditionFalse,
-			failureReason.reason,
-			failureReason.message,
-			sctx.Log,
-		); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// tryScheduleTieBreakerReplicas attempts to schedule TieBreaker replicas and returns failure reason if not all could be scheduled.
-func (r *Reconciler) tryScheduleTieBreakerReplicas(
-	sctx *SchedulingContext,
-	candidateNodes []string,
-) *rvrNotReadyReason {
-	// Apply topology filter (isDiskfulPhase=false)
-	if err := r.applyTopologyFilter(candidateNodes, false, sctx); err != nil {
-		sctx.Log.V(1).Info("topology filter failed", "error", err)
-		return schedulingErrorToReason(err)
-	}
-
-	// Assign replicas: count ALL replica types for zone balancing, best-effort mode
-	assignedReplicas, err := r.assignReplicasToNodes(sctx, sctx.UnscheduledTieBreakerReplicas, v1alpha1.ReplicaType(""), true)
-	if err != nil {
-		sctx.Log.Error(err, "unexpected error during TieBreaker replica assignment")
-		return schedulingErrorToReason(err)
-	}
-
-	// Update context after scheduling
-	sctx.UpdateAfterScheduling(assignedReplicas)
-	sctx.Log.V(1).Info("TieBreaker phase: completed", "assigned", len(assignedReplicas))
-
-	// Return failure reason if not all replicas were scheduled
-	if len(sctx.UnscheduledTieBreakerReplicas) > 0 {
-		return schedulingErrorToReason(fmt.Errorf("%w: not enough candidate nodes to schedule all TieBreaker replicas", errSchedulingNoCandidateNodes))
-	}
-
-	return nil
-}
-
-// getTieBreakerCandidateNodes returns nodes that can host TieBreaker replicas:
-// - Nodes without any replica of this RV
-// Zone filtering is done later in applyTopologyFilter which considers scheduled Diskful replicas
-func (r *Reconciler) getTieBreakerCandidateNodes(sctx *SchedulingContext) []string {
-	var candidateNodes []string
-	for nodeName := range sctx.NodeNameToZone {
-		if _, hasReplica := sctx.NodesWithAnyReplica[nodeName]; hasReplica {
-			continue
-		}
-		candidateNodes = append(candidateNodes, nodeName)
-	}
-	return candidateNodes
-}
-
-func getAttachToNodeList(rv *v1alpha1.ReplicatedVolume) []string {
-	if rv == nil || rv.Status == nil {
-		return nil
-	}
-	return slices.Clone(rv.Status.DesiredAttachTo)
-}
-
-// collectReplicasAndOccupiedNodes filters replicas for a given RV and returns:
-// - activeReplicas: non-deleting replicas (both scheduled and unscheduled)
-// - occupiedNodes: all nodes with replicas (including deleting ones) to prevent scheduling collisions
-func collectReplicasAndOccupiedNodes(
-	allReplicas []v1alpha1.ReplicatedVolumeReplica,
-	rvName string,
-) (activeReplicas []*v1alpha1.ReplicatedVolumeReplica, occupiedNodes map[string]struct{}) {
-	occupiedNodes = make(map[string]struct{})
-
-	for i := range allReplicas {
-		rvr := &allReplicas[i]
-		if rvr.Spec.ReplicatedVolumeName != rvName {
-			continue
-		}
-		// Track nodes from ALL replicas (including deleting ones) for occupancy
-		// This prevents scheduling new replicas on nodes where replicas are being deleted
-		if rvr.Spec.NodeName != "" {
-			occupiedNodes[rvr.Spec.NodeName] = struct{}{}
-		}
-		// Only include non-deleting replicas (active replicas)
-		if rvr.DeletionTimestamp.IsZero() {
-			activeReplicas = append(activeReplicas, rvr)
-		}
-	}
-	return activeReplicas, occupiedNodes
-}
-
-func getTypedReplicasLists(
-	replicasForRV []*v1alpha1.ReplicatedVolumeReplica,
-	replicaType v1alpha1.ReplicaType,
-) (scheduled, unscheduled []*v1alpha1.ReplicatedVolumeReplica) {
-	// Collect replicas of the given type, separating them by NodeName assignment.
-	for _, rvr := range replicasForRV {
-		if rvr.Spec.Type != replicaType {
-			continue
-		}
-		if rvr.Spec.NodeName != "" {
-			scheduled = append(scheduled, rvr)
-		} else {
-			unscheduled = append(unscheduled, rvr)
-		}
-	}
-
-	return scheduled, unscheduled
-}
-
-// setScheduledConditionOnRVRs sets the Scheduled condition on a list of RVRs.
-func (r *Reconciler) setScheduledConditionOnRVRs(
-	ctx context.Context,
-	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-	status metav1.ConditionStatus,
-	reason string,
-	message string,
-	log logr.Logger,
-) error {
-	for _, rvr := range rvrs {
-		if err := r.setScheduledConditionOnRVR(ctx, rvr, status, reason, message); err != nil {
-			log.Error(err, "failed to set Scheduled condition", "rvr", rvr.Name)
-			return err
-		}
-	}
-	return nil
-}
-
-// setScheduledConditionOnRVR sets the Scheduled condition on a single RVR.
-func (r *Reconciler) setScheduledConditionOnRVR(
+func (r *Reconciler) patchRVR(
 	ctx context.Context,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
-	status metav1.ConditionStatus,
-	reason string,
-	message string,
+	base *v1alpha1.ReplicatedVolumeReplica,
 ) error {
-	patch := client.MergeFrom(rvr.DeepCopy())
-
-	if rvr.Status == nil {
-		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-	}
-
-	changed := meta.SetStatusCondition(
-		&rvr.Status.Conditions,
-		metav1.Condition{
-			Type:               v1alpha1.ConditionTypeScheduled,
-			Status:             status,
-			Reason:             reason,
-			Message:            message,
-			ObservedGeneration: rvr.Generation,
-		},
-	)
-
-	if !changed {
-		return nil
-	}
-
-	err := r.cl.Status().Patch(ctx, rvr, patch)
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-
-	return err
-}
-
-// ensureNodeNameLabel ensures the node-name label is set on RVR matching its NodeName.
-// This restores label if manually removed.
-func (r *Reconciler) ensureNodeNameLabel(
-	ctx context.Context,
-	log logr.Logger,
-	rvr *v1alpha1.ReplicatedVolumeReplica,
-) error {
-	if rvr.Spec.NodeName == "" {
-		return nil
-	}
-
-	labels, changed := v1alpha1.EnsureLabel(rvr.Labels, v1alpha1.LabelNodeName, rvr.Spec.NodeName)
-	if !changed {
-		return nil
-	}
-
-	log.V(2).Info("restoring node-name label on RVR", "rvr", rvr.Name, "node", rvr.Spec.NodeName)
-
-	patch := client.MergeFrom(rvr.DeepCopy())
-	rvr.Labels = labels
+	patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
 	if err := r.cl.Patch(ctx, rvr, patch); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
 		return err
 	}
-
 	return nil
 }
 
-// setFailedScheduledConditionOnNonScheduledRVRs sets the Scheduled condition to False on all RVRs
-// belonging to the given RV when the RV is not ready for scheduling.
-func (r *Reconciler) setFailedScheduledConditionOnNonScheduledRVRs(
+func (r *Reconciler) patchRVRStatus(
 	ctx context.Context,
-	rvName string,
-	notReadyReason *rvrNotReadyReason,
-	log logr.Logger,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	base *v1alpha1.ReplicatedVolumeReplica,
 ) error {
-	// List all ReplicatedVolumeReplica resources in the cluster.
-	replicaList := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err := r.cl.List(ctx, replicaList); err != nil {
-		log.Error(err, "unable to list ReplicatedVolumeReplica")
+	patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
+	if err := r.cl.Status().Patch(ctx, rvr, patch); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
 		return err
 	}
-
-	// Update Scheduled condition on all RVRs belonging to this RV.
-	for _, rvr := range replicaList.Items {
-		// TODO: fix checking for deletion
-		if rvr.Spec.ReplicatedVolumeName != rvName || !rvr.DeletionTimestamp.IsZero() {
-			continue
-		}
-
-		// Skip if the replica is already scheduled (has NodeName assigned).
-		if rvr.Spec.NodeName != "" {
-			continue
-		}
-
-		if err := r.setScheduledConditionOnRVR(
-			ctx,
-			&rvr,
-			metav1.ConditionFalse,
-			notReadyReason.reason,
-			notReadyReason.message,
-		); err != nil {
-			log.Error(err, "failed to set Scheduled condition", "rvr", rvr.Name, "reason", notReadyReason.reason, "message", notReadyReason.message)
-			return err
-		}
-	}
-
 	return nil
 }
 
-func getAttachToNodesWithoutAnyReplica(
-	attachToList []string,
-	nodesWithRVReplica map[string]struct{},
-) []string {
-	attachToNodesWithoutAnyReplica := make([]string, 0, len(attachToList))
+// --- RV ---
 
-	for _, node := range attachToList {
-		if _, hasReplica := nodesWithRVReplica[node]; !hasReplica {
-			attachToNodesWithoutAnyReplica = append(attachToNodesWithoutAnyReplica, node)
+func (r *Reconciler) getRV(ctx context.Context, name string) (*v1alpha1.ReplicatedVolume, error) {
+	rv := &v1alpha1.ReplicatedVolume{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, rv); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
 		}
+		return nil, err
 	}
-	return attachToNodesWithoutAnyReplica
+	return rv, nil
 }
 
-// applyTopologyFilter groups candidate nodes by zones based on RSC topology.
-// isDiskfulPhase affects only Zonal topology:
-//   - true: falls back to attachTo or any allowed zone if no ScheduledDiskfulReplicas
-//   - false: returns error if no ScheduledDiskfulReplicas (TieBreaker needs Diskful zone)
-//
-// For Ignored and TransZonal, logic is the same for both phases.
-func (r *Reconciler) applyTopologyFilter(
-	candidateNodes []string,
-	isDiskfulPhase bool,
-	sctx *SchedulingContext,
-) error {
-	sctx.Log.V(1).Info("applying topology filter", "topology", sctx.Rsc.Spec.Topology, "candidatesCount", len(candidateNodes), "isDiskfulPhase", isDiskfulPhase)
+// --- RSP ---
 
-	switch sctx.Rsc.Spec.Topology {
-	case topologyIgnored:
-		// Same for both phases: all candidates in single "zone"
-		sctx.Log.V(1).Info("topology filter: Ignored - creating single zone with all candidates")
-		nodeCandidates := make([]NodeCandidate, 0, len(candidateNodes))
-		for _, nodeName := range candidateNodes {
-			nodeCandidates = append(nodeCandidates, NodeCandidate{
-				Name:  nodeName,
-				Score: 0,
-			})
+func (r *Reconciler) getRSP(ctx context.Context, name string) (*v1alpha1.ReplicatedStoragePool, error) {
+	rsp := &v1alpha1.ReplicatedStoragePool{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, rsp); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
 		}
-		sctx.ZonesToNodeCandidatesMap = map[string][]NodeCandidate{
-			topologyIgnored: nodeCandidates,
-		}
-
-	case topologyZonal:
-		sctx.Log.V(1).Info("topology filter: Zonal - grouping candidates by zone")
-		if err := r.applyZonalTopologyFilter(candidateNodes, isDiskfulPhase, sctx); err != nil {
-			return err
-		}
-
-	case topologyTransZonal:
-		// Same for both phases: group by allowed zones
-		sctx.Log.V(1).Info("topology filter: TransZonal - distributing across zones")
-		allowedZones := getAllowedZones(nil, sctx.Rsc.Spec.Zones, sctx.NodeNameToZone)
-		sctx.ZonesToNodeCandidatesMap = r.groupCandidateNodesByZone(candidateNodes, allowedZones, sctx)
-
-	default:
-		return fmt.Errorf("unknown RSC topology: %s", sctx.Rsc.Spec.Topology)
+		return nil, err
 	}
-
-	// Check for empty candidates after topology filtering
-	if len(sctx.ZonesToNodeCandidatesMap) == 0 {
-		return fmt.Errorf("%w: no candidate nodes found after topology filtering", errSchedulingNoCandidateNodes)
-	}
-	sctx.Log.V(1).Info("topology filter applied", "zonesCount", len(sctx.ZonesToNodeCandidatesMap))
-	return nil
+	return rsp, nil
 }
 
-// applyZonalTopologyFilter handles Zonal topology logic.
-// For isDiskfulPhase=true: ScheduledDiskfulReplicas -> attachTo -> any allowed zone
-// For isDiskfulPhase=false: ScheduledDiskfulReplicas -> ERROR (TieBreaker needs Diskful zone)
-func (r *Reconciler) applyZonalTopologyFilter(
-	candidateNodes []string,
-	isDiskfulPhase bool,
-	sctx *SchedulingContext,
-) error {
-	sctx.Log.V(1).Info("applyZonalTopologyFilter: starting", "candidatesCount", len(candidateNodes), "isDiskfulPhase", isDiskfulPhase)
+// --- RVA ---
 
-	// Find zones of already scheduled diskful replicas
-	var zonesWithScheduledDiskfulReplicas []string
-	for _, rvr := range sctx.ScheduledDiskfulReplicas {
-		zone, ok := sctx.NodeNameToZone[rvr.Spec.NodeName]
-		if !ok || zone == "" {
-			return fmt.Errorf("%w: scheduled diskful replica %s is on node %s without zone label for Zonal topology",
-				errSchedulingTopologyConflict, rvr.Name, rvr.Spec.NodeName)
-		}
-		if !slices.Contains(zonesWithScheduledDiskfulReplicas, zone) {
-			zonesWithScheduledDiskfulReplicas = append(zonesWithScheduledDiskfulReplicas, zone)
-		}
-	}
-	sctx.Log.V(2).Info("applyZonalTopologyFilter: zones with scheduled diskful replicas", "zones", zonesWithScheduledDiskfulReplicas)
-
-	// For Zonal topology, all scheduled diskful replicas must be in the same zone
-	if len(zonesWithScheduledDiskfulReplicas) > 1 {
-		return fmt.Errorf("%w: scheduled diskful replicas are in multiple zones %v for Zonal topology",
-			errSchedulingTopologyConflict, zonesWithScheduledDiskfulReplicas)
-	}
-
-	// Determine target zones based on phase
-	var targetZones []string
-
-	switch {
-	case len(zonesWithScheduledDiskfulReplicas) > 0:
-		// Use zone of scheduled Diskful replicas
-		targetZones = zonesWithScheduledDiskfulReplicas
-	case !isDiskfulPhase:
-		// TieBreaker phase: no ScheduledDiskfulReplicas is an error
-		return fmt.Errorf("%w: cannot schedule TieBreaker for Zonal topology: no Diskful replicas scheduled",
-			errSchedulingNoCandidateNodes)
-	default:
-		// Diskful phase: fallback to attachTo zones
-		for _, nodeName := range sctx.AttachToNodes {
-			zone, ok := sctx.NodeNameToZone[nodeName]
-			if !ok || zone == "" {
-				return fmt.Errorf("%w: attachTo node %s has no zone label for Zonal topology",
-					errSchedulingTopologyConflict, nodeName)
-			}
-			if !slices.Contains(targetZones, zone) {
-				targetZones = append(targetZones, zone)
-			}
-		}
-		sctx.Log.V(2).Info("applyZonalTopologyFilter: attachTo zones", "zones", targetZones)
-		// If still empty, getAllowedZones will use rsc.spec.zones or all cluster zones
-	}
-
-	sctx.Log.V(2).Info("applyZonalTopologyFilter: target zones", "zones", targetZones)
-
-	// Build candidate nodes map
-	allowedZones := getAllowedZones(targetZones, sctx.Rsc.Spec.Zones, sctx.NodeNameToZone)
-	sctx.Log.V(2).Info("applyZonalTopologyFilter: allowed zones", "zones", allowedZones)
-
-	// Group candidate nodes by zone
-	sctx.ZonesToNodeCandidatesMap = r.groupCandidateNodesByZone(candidateNodes, allowedZones, sctx)
-	sctx.Log.V(1).Info("applyZonalTopologyFilter: completed", "zonesCount", len(sctx.ZonesToNodeCandidatesMap))
-	return nil
-}
-
-// applyCapacityFilterAndScoreCandidates filters nodes by available storage capacity using the scheduler extender.
-// It converts nodes to LVGs, queries the extender for capacity scores, and updates ZonesToNodeCandidatesMap.
-func (r *Reconciler) applyCapacityFilterAndScoreCandidates(
-	ctx context.Context,
-	sctx *SchedulingContext,
-) error {
-	// Collect all candidate nodes from ZonesToNodeCandidatesMap
-	candidateNodeSet := make(map[string]struct{})
-	for _, candidates := range sctx.ZonesToNodeCandidatesMap {
-		for _, candidate := range candidates {
-			candidateNodeSet[candidate.Name] = struct{}{}
-		}
-	}
-
-	// Build LVG list from RspLvgToNodeInfoMap, but only for nodes in candidateNodeSet
-	reqLVGs := make([]schedulerExtenderLVG, 0, len(sctx.RspLvgToNodeInfoMap))
-	for lvgName, info := range sctx.RspLvgToNodeInfoMap {
-		// Skip LVGs whose nodes are not in the candidate list
-		if _, ok := candidateNodeSet[info.NodeName]; !ok {
-			continue
-		}
-		reqLVGs = append(reqLVGs, schedulerExtenderLVG{
-			Name:         lvgName,
-			ThinPoolName: info.ThinPoolName,
-		})
-	}
-
-	if len(reqLVGs) == 0 {
-		// No LVGs to check — no candidate nodes have LVGs from the storage pool
-		sctx.Log.V(1).Info("no candidate nodes have LVGs from storage pool", "storagePool", sctx.Rsc.Spec.StoragePool)
-		return fmt.Errorf("%w: no candidate nodes have LVGs from storage pool %s", errSchedulingNoCandidateNodes, sctx.Rsc.Spec.StoragePool)
-	}
-
-	// Convert RSP volume type to scheduler extender volume type
-	var volType string
-	switch sctx.Rsp.Spec.Type {
-	case "LVMThin":
-		volType = "thin"
-	case "LVM":
-		volType = "thick"
-	default:
-		return fmt.Errorf("RSP volume type is not supported: %s", sctx.Rsp.Spec.Type)
-	}
-	size := sctx.Rv.Spec.Size.Value()
-
-	// Query scheduler extender for LVG scores
-	volumeInfo := VolumeInfo{
-		Name: sctx.Rv.Name,
-		Size: size,
-		Type: volType,
-	}
-	lvgScores, err := r.extenderClient.queryLVGScores(ctx, reqLVGs, volumeInfo)
-	if err != nil {
-		sctx.Log.Error(err, "scheduler extender query failed")
-		return fmt.Errorf("%w: %v", errSchedulingNoCandidateNodes, err)
-	}
-
-	// Build map of node -> score based on LVG scores
-	// Node gets the score of its LVG (if LVG is in the response)
-	nodeScores := make(map[string]int)
-	for lvgName, info := range sctx.RspLvgToNodeInfoMap {
-		if score, ok := lvgScores[lvgName]; ok {
-			nodeScores[info.NodeName] = score
-		}
-	}
-
-	// Filter ZonesToNodeCandidatesMap: keep only nodes that have score (i.e., their LVG was returned)
-	// and update their scores
-	for zone, candidates := range sctx.ZonesToNodeCandidatesMap {
-		filteredCandidates := make([]NodeCandidate, 0, len(candidates))
-		for _, candidate := range candidates {
-			if score, ok := nodeScores[candidate.Name]; ok {
-				filteredCandidates = append(filteredCandidates, NodeCandidate{
-					Name:  candidate.Name,
-					Score: score,
-				})
-			}
-			// Node not in response — skip (no capacity)
-		}
-		if len(filteredCandidates) > 0 {
-			sctx.ZonesToNodeCandidatesMap[zone] = filteredCandidates
-		} else {
-			delete(sctx.ZonesToNodeCandidatesMap, zone)
-		}
-	}
-
-	if len(sctx.ZonesToNodeCandidatesMap) == 0 {
-		sctx.Log.V(1).Info("no nodes with sufficient storage space found after capacity filtering")
-		return fmt.Errorf("%w: no nodes with sufficient storage space found", errSchedulingNoCandidateNodes)
-	}
-
-	return nil
-}
-
-// countReplicasByZone counts how many replicas are scheduled in each zone.
-// If replicaType is not empty, only replicas of that type are counted.
-// If replicaType is empty, all replica types are counted.
-func countReplicasByZone(
-	replicas []*v1alpha1.ReplicatedVolumeReplica,
-	replicaType v1alpha1.ReplicaType,
-	nodeNameToZone map[string]string,
-) map[string]int {
-	zoneReplicaCount := make(map[string]int)
-	for _, rvr := range replicas {
-		if replicaType != "" && rvr.Spec.Type != replicaType {
-			continue
-		}
-		if rvr.Spec.NodeName == "" {
-			continue
-		}
-		zone, ok := nodeNameToZone[rvr.Spec.NodeName]
-		if !ok || zone == "" {
-			continue
-		}
-		zoneReplicaCount[zone]++
-	}
-	return zoneReplicaCount
-}
-
-// groupCandidateNodesByZone groups candidate nodes by their zones, filtering by allowed zones
-func (r *Reconciler) groupCandidateNodesByZone(
-	candidateNodes []string,
-	allowedZones map[string]struct{},
-	sctx *SchedulingContext,
-) map[string][]NodeCandidate {
-	zonesToCandidates := make(map[string][]NodeCandidate)
-
-	for _, nodeName := range candidateNodes {
-		zone, ok := sctx.NodeNameToZone[nodeName]
-		if !ok || zone == "" {
-			continue // Skip nodes without zone label
-		}
-
-		if _, ok := allowedZones[zone]; !ok {
-			continue // Skip nodes not in allowed zones
-		}
-
-		zonesToCandidates[zone] = append(zonesToCandidates[zone], NodeCandidate{
-			Name:  nodeName,
-			Score: 0,
-		})
-	}
-
-	return zonesToCandidates
-}
-
-// getAllowedZones determines which zones should be used for replica placement.
-// Priority order:
-// 1. If targetZones is provided and not empty, use those zones
-// 2. If RSC spec defines zones, use those
-// 3. Otherwise, use all zones from the cluster (from NodeNameToZone map)
-func getAllowedZones(targetZones []string, rscZones []string, nodeNameToZone map[string]string) map[string]struct{} {
-	allowedZones := make(map[string]struct{})
-
-	switch {
-	case len(targetZones) > 0:
-		for _, zone := range targetZones {
-			allowedZones[zone] = struct{}{}
-		}
-	case len(rscZones) > 0:
-		for _, zone := range rscZones {
-			allowedZones[zone] = struct{}{}
-		}
-	default:
-		for _, zone := range nodeNameToZone {
-			if zone != "" {
-				allowedZones[zone] = struct{}{}
-			}
-		}
-	}
-
-	return allowedZones
-}
-
-func (r *Reconciler) getLVGToNodesByStoragePool(
-	ctx context.Context,
-	rsp *v1alpha1.ReplicatedStoragePool,
-	log logr.Logger,
-) (map[string]LvgInfo, error) {
-	if rsp == nil || len(rsp.Spec.LVMVolumeGroups) == 0 {
-		return nil, fmt.Errorf("storage pool does not define any LVGs")
-	}
-
-	lvgList := &snc.LVMVolumeGroupList{}
-	if err := r.cl.List(ctx, lvgList); err != nil {
-		log.Error(err, "unable to list LVMVolumeGroup")
+// getIntendedAttachments lists ReplicatedVolumeAttachment objects for the given
+// RV name using the informer cache (UnsafeDisableDeepCopy) and returns a sorted
+// slice of unique node names. No map allocations are made.
+func (r *Reconciler) getIntendedAttachments(ctx context.Context, rvName string) ([]string, error) {
+	var list v1alpha1.ReplicatedVolumeAttachmentList
+	if err := r.cl.List(ctx, &list,
+		client.MatchingFields{indexes.IndexFieldRVAByReplicatedVolumeName: rvName},
+		client.UnsafeDisableDeepCopy,
+	); err != nil {
 		return nil, err
 	}
 
-	// Build lookup map: LVG name -> LVG object
-	lvgByName := make(map[string]*snc.LVMVolumeGroup, len(lvgList.Items))
-	for i := range lvgList.Items {
-		lvgByName[lvgList.Items[i].Name] = &lvgList.Items[i]
+	if len(list.Items) == 0 {
+		return nil, nil
 	}
 
-	// Build result map from RSP's LVGs
-	result := make(map[string]LvgInfo, len(rsp.Spec.LVMVolumeGroups))
-	for _, rspLvg := range rsp.Spec.LVMVolumeGroups {
-		lvg, ok := lvgByName[rspLvg.Name]
-		if !ok || len(lvg.Status.Nodes) == 0 {
-			continue
-		}
-		result[rspLvg.Name] = LvgInfo{
-			NodeName:     lvg.Status.Nodes[0].Name,
-			ThinPoolName: rspLvg.ThinPoolName,
-		}
+	nodes := make([]string, len(list.Items))
+	for i := range list.Items {
+		nodes[i] = list.Items[i].Spec.NodeName
 	}
-
-	return result, nil
-}
-
-func (r *Reconciler) getNodeNameToZoneMap(
-	ctx context.Context,
-	log logr.Logger,
-) (map[string]string, error) {
-	// List all Kubernetes Nodes to inspect their zone labels.
-	nodes := &corev1.NodeList{}
-	if err := r.cl.List(ctx, nodes); err != nil {
-		log.Error(err, "unable to list Nodes")
-		return nil, err
-	}
-
-	// Build a map from node name to its zone (may be empty if label is missing).
-	nodeNameToZone := make(map[string]string, len(nodes.Items))
-
-	for _, node := range nodes.Items {
-		zone := node.Labels[nodeZoneLabel]
-		nodeNameToZone[node.Name] = zone
-	}
-
-	return nodeNameToZone, nil
+	slices.Sort(nodes)
+	return slices.Compact(nodes), nil
 }

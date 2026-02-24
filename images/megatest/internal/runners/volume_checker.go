@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -160,14 +160,19 @@ func (v *VolumeChecker) checkInitialState(ctx context.Context) {
 
 // processRVUpdate checks for condition changes and logs them
 func (v *VolumeChecker) processRVUpdate(ctx context.Context, rv *v1alpha1.ReplicatedVolume) {
-	// Handle nil Status (can happen during deletion or if RV was just created)
-	if rv == nil || rv.Status == nil {
-		v.log.Debug("RV or Status is nil, skipping condition check")
+	if rv == nil {
+		v.log.Debug("RV is nil, skipping condition check")
 		return
 	}
 
-	newIOReadyStatus := getConditionStatus(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
-	newQuorumStatus := getConditionStatus(rv.Status.Conditions, v1alpha1.ConditionTypeRVQuorum)
+	// Status is a struct in the API, but Conditions can be empty (e.g. just created / during deletion).
+	if len(rv.Status.Conditions) == 0 {
+		v.log.Debug("RV has no conditions yet, skipping condition check")
+		return
+	}
+
+	newIOReadyStatus := getConditionStatus(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondIOReadyType)
+	newQuorumStatus := getConditionStatus(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondQuorumType)
 
 	// Check IOReady transition.
 	// v.state stores previous status (default: True = expected healthy state).
@@ -178,14 +183,14 @@ func (v *VolumeChecker) processRVUpdate(ctx context.Context, rv *v1alpha1.Replic
 		v.state.ioReadyStatus = newIOReadyStatus // Update saved state
 
 		v.log.Warn("condition changed",
-			"condition", v1alpha1.ConditionTypeRVIOReady,
+			"condition", v1alpha1.ReplicatedVolumeCondIOReadyType,
 			"transition", string(oldStatus)+"->"+string(newIOReadyStatus))
 
 		// On False: log failed RVRs for debugging
 		if newIOReadyStatus == metav1.ConditionFalse {
-			reason := getConditionReason(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
-			message := getConditionMessage(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
-			v.logConditionDetails(ctx, v1alpha1.ConditionTypeRVIOReady, reason, message)
+			reason := getConditionReason(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondIOReadyType)
+			message := getConditionMessage(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondIOReadyType)
+			v.logConditionDetails(ctx, v1alpha1.ReplicatedVolumeCondIOReadyType, reason, message)
 		} // FYI: we can make here else block, if we need some details then conditions going from Fase to True
 	}
 
@@ -196,14 +201,14 @@ func (v *VolumeChecker) processRVUpdate(ctx context.Context, rv *v1alpha1.Replic
 		v.state.quorumStatus = newQuorumStatus // Update saved state
 
 		v.log.Warn("condition changed",
-			"condition", v1alpha1.ConditionTypeRVQuorum,
+			"condition", v1alpha1.ReplicatedVolumeCondQuorumType,
 			"transition", string(oldStatus)+"->"+string(newQuorumStatus))
 
 		// Log RVRs only if IOReady didn't just log them (avoid duplicate output)
 		if newQuorumStatus == metav1.ConditionFalse && v.state.ioReadyStatus != metav1.ConditionFalse {
-			reason := getConditionReason(rv.Status.Conditions, v1alpha1.ConditionTypeRVQuorum)
-			message := getConditionMessage(rv.Status.Conditions, v1alpha1.ConditionTypeRVQuorum)
-			v.logConditionDetails(ctx, v1alpha1.ConditionTypeRVQuorum, reason, message)
+			reason := getConditionReason(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondQuorumType)
+			message := getConditionMessage(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondQuorumType)
+			v.logConditionDetails(ctx, v1alpha1.ReplicatedVolumeCondQuorumType, reason, message)
 		} // FYI: we can make here else block, if we need some details then conditions going from Fase to True
 	}
 }
@@ -267,10 +272,7 @@ func (v *VolumeChecker) logConditionDetails(ctx context.Context, condType, reaso
 }
 
 // hasAnyFalseCondition checks if RVR has at least one condition with False status
-func hasAnyFalseCondition(status *v1alpha1.ReplicatedVolumeReplicaStatus) bool {
-	if status == nil {
-		return false
-	}
+func hasAnyFalseCondition(status v1alpha1.ReplicatedVolumeReplicaStatus) bool {
 	for _, cond := range status.Conditions {
 		if cond.Status == metav1.ConditionFalse {
 			return true
@@ -300,8 +302,8 @@ func buildRVRConditionsTable(rvr *v1alpha1.ReplicatedVolumeReplica) string {
 	sb.WriteString(string(rvr.Spec.Type))
 	sb.WriteString(")\n")
 
-	if rvr.Status == nil {
-		sb.WriteString("      (no status available)\n")
+	if len(rvr.Status.Conditions) == 0 {
+		sb.WriteString("      (no status conditions available)\n")
 		return sb.String()
 	}
 

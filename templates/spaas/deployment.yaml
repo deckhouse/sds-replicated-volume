@@ -3,6 +3,7 @@ cpu: 10m
 memory: 25Mi
 {{- end }}
 
+{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
 apiVersion: autoscaling.k8s.io/v1
@@ -17,7 +18,7 @@ spec:
     kind: Deployment
     name: spaas
   updatePolicy:
-    updateMode: "Auto"
+    updateMode: "Initial"
   resourcePolicy:
     containerPolicies:
     - containerName: spaas
@@ -122,3 +123,4 @@ spec:
       - name: certs
         secret:
           secretName: spaas-certs
+{{- end }}
