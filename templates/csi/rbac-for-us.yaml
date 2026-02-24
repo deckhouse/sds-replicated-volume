@@ -125,3 +125,4 @@ roleRef:
   kind: ClusterRole
   name: d8:{{ .Chart.Name }}:replicatedvolumeattachment-manager
   apiGroup: rbac.authorization.k8s.io
+{{- end }}
