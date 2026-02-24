@@ -14,19 +14,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package errors_test
+package ctlerrors_test
 
 import (
 	"testing"
 	"time"
 
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/ctlerrors"
 )
 
 func TestValidateArgNotNil(t *testing.T) {
 	var err error
 
-	err = errors.ValidateArgNotNil(nil, "testArgName")
+	err = ctlerrors.ValidateArgNotNil(nil, "testArgName")
 	if err == nil {
 		t.Fatal("ValidateArgNotNil() succeeded unexpectedly")
 	}
@@ -34,14 +34,14 @@ func TestValidateArgNotNil(t *testing.T) {
 	timeArg := time.Now()
 	timeArgPtr := &timeArg
 
-	err = errors.ValidateArgNotNil(timeArgPtr, "timeArgPtr")
+	err = ctlerrors.ValidateArgNotNil(timeArgPtr, "timeArgPtr")
 	if err != nil {
 		t.Fatalf("ValidateArgNotNil() failed: %v", err)
 	}
 
 	timeArgPtr = nil
 
-	err = errors.ValidateArgNotNil(timeArgPtr, "testArgName")
+	err = ctlerrors.ValidateArgNotNil(timeArgPtr, "testArgName")
 	if err == nil {
 		t.Fatal("ValidateArgNotNil() succeeded unexpectedly")
 	}

@@ -35,9 +35,9 @@ import (
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	drbd_size "github.com/deckhouse/sds-replicated-volume/lib/go/common/drbd/size"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
+	drbd_size "github.com/deckhouse/sds-replicated-volume/lib/go/common/drbd/size"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -1774,21 +1774,22 @@ func ensureConditionScheduled(
 		}
 	}
 
-	if allScheduled {
+	switch {
+	case allScheduled:
 		changed = obju.SetStatusCondition(rv, metav1.Condition{
 			Type:    v1alpha1.ReplicatedVolumeCondScheduledType,
 			Status:  metav1.ConditionTrue,
 			Reason:  v1alpha1.ReplicatedVolumeCondScheduledReasonAllReplicasScheduled,
 			Message: "All replicas are scheduled",
 		})
-	} else if anyInProgress {
+	case anyInProgress:
 		changed = obju.SetStatusCondition(rv, metav1.Condition{
 			Type:    v1alpha1.ReplicatedVolumeCondScheduledType,
 			Status:  metav1.ConditionFalse,
 			Reason:  v1alpha1.ReplicatedVolumeCondScheduledReasonSchedulingInProgress,
 			Message: "Replica scheduling is in progress",
 		})
-	} else {
+	default:
 		changed = obju.SetStatusCondition(rv, metav1.Condition{
 			Type:    v1alpha1.ReplicatedVolumeCondScheduledType,
 			Status:  metav1.ConditionFalse,
@@ -1836,21 +1837,22 @@ func ensureConditionConfigured(
 		}
 	}
 
-	if allConfigured {
+	switch {
+	case allConfigured:
 		changed = obju.SetStatusCondition(rv, metav1.Condition{
 			Type:    v1alpha1.ReplicatedVolumeCondConfiguredType,
 			Status:  metav1.ConditionTrue,
 			Reason:  v1alpha1.ReplicatedVolumeCondConfiguredReasonAllReplicasConfigured,
 			Message: "All replicas are configured",
 		})
-	} else if anyInProgress {
+	case anyInProgress:
 		changed = obju.SetStatusCondition(rv, metav1.Condition{
 			Type:    v1alpha1.ReplicatedVolumeCondConfiguredType,
 			Status:  metav1.ConditionFalse,
 			Reason:  v1alpha1.ReplicatedVolumeCondConfiguredReasonConfigurationInProgress,
 			Message: "Replica configuration is in progress",
 		})
-	} else {
+	default:
 		changed = obju.SetStatusCondition(rv, metav1.Condition{
 			Type:    v1alpha1.ReplicatedVolumeCondConfiguredType,
 			Status:  metav1.ConditionFalse,
@@ -1904,21 +1906,22 @@ func ensureConditionQuorum(
 		}
 	}
 
-	if allQuorum {
+	switch {
+	case allQuorum:
 		changed = obju.SetStatusCondition(rv, metav1.Condition{
 			Type:    v1alpha1.ReplicatedVolumeCondQuorumType,
 			Status:  metav1.ConditionTrue,
 			Reason:  v1alpha1.ReplicatedVolumeCondQuorumReasonQuorumMet,
 			Message: "All replicas have quorum",
 		})
-	} else if anyUnknown {
+	case anyUnknown:
 		changed = obju.SetStatusCondition(rv, metav1.Condition{
 			Type:    v1alpha1.ReplicatedVolumeCondQuorumType,
 			Status:  metav1.ConditionUnknown,
 			Reason:  v1alpha1.ReplicatedVolumeCondQuorumReasonQuorumStatusUnknown,
 			Message: "Quorum status is not yet reported by some replicas",
 		})
-	} else {
+	default:
 		changed = obju.SetStatusCondition(rv, metav1.Condition{
 			Type:    v1alpha1.ReplicatedVolumeCondQuorumType,
 			Status:  metav1.ConditionFalse,
