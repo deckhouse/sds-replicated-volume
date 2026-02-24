@@ -25,7 +25,7 @@ import (
 	"slices"
 	"strings"
 
-	kubeutils "github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/pkg/kubeutils"
+	kubeutils "github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/kubeutils"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
 	corev1 "k8s.io/api/core/v1"
@@ -147,13 +147,14 @@ func runApp(ctx context.Context, log *slog.Logger, opt *Opt) error {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
 
-	// Check LINSTOR DB
-	if err := CRDExists(ctx, kClient, "nodes.internal.linstor.linbit.com"); err != nil {
+	// Skip migration if LINSTOR is not present in the cluster
+	const linstorCrdName = "nodes.internal.linstor.linbit.com"
+	if err := CRDExists(ctx, kClient, linstorCrdName); err != nil {
 		if apierrors.IsNotFound(err) {
-			log.Info("CRD nodes.internal.linstor.linbit.com not found, skipping migration")
+			log.Info("LINSTOR not found in cluster, skipping migration")
 			return nil
 		}
-		return fmt.Errorf("failed to check CRD: %w", err)
+		return fmt.Errorf("failed to check existence of CRD %q: %w", linstorCrdName, err)
 	}
 
 	pvs := &corev1.PersistentVolumeList{}

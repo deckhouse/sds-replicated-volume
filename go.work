@@ -7,6 +7,7 @@ use (
 	./images/controller
 	./images/csi-driver
 	./images/linstor-drbd-wait
+	./images/linstor-migrator
 	./images/megatest
 	./images/oldcontroller
 	./images/webhooks
