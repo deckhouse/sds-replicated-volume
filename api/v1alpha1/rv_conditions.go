@@ -40,7 +40,7 @@ const (
 
 const (
 	// ReplicatedVolumeCondIOReadyType indicates whether the volume is ready for I/O operations.
-	ReplicatedVolumeCondIOReadyType                      = "IOReady"
+	ReplicatedVolumeCondIOReadyType                      = "IOReady"             // ReplicatedVolume is configured and ready to use
 	ReplicatedVolumeCondIOReadyReasonFormationInProgress = "FormationInProgress" // Datamesh formation is still in progress.
 	ReplicatedVolumeCondIOReadyReasonNoConfiguration     = "NoConfiguration"     // Volume has no configuration yet.
 	ReplicatedVolumeCondIOReadyReasonReady               = "Ready"               // Datamesh is formed and ready for I/O.
@@ -50,7 +50,7 @@ const (
 	// ReplicatedVolumeCondQuorumType indicates whether the volume has quorum.
 	//
 	// Reasons describe quorum state.
-	ReplicatedVolumeCondQuorumType                      = "Quorum"
+	ReplicatedVolumeCondQuorumType                      = "Quorum"              // All quorum conditions are met
 	ReplicatedVolumeCondQuorumReasonNoReplicas          = "NoReplicas"          // No replicas exist yet.
 	ReplicatedVolumeCondQuorumReasonQuorumLost          = "QuorumLost"          // One or more replicas lost quorum.
 	ReplicatedVolumeCondQuorumReasonQuorumMet           = "QuorumMet"           // All replicas have quorum.

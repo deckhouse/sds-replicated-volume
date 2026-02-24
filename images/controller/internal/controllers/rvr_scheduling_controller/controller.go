@@ -18,6 +18,7 @@ package rvrschedulingcontroller
 
 import (
 	"context"
+	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -39,15 +40,12 @@ const RVRSchedulingControllerName = "rvr-scheduling-controller"
 func BuildController(mgr manager.Manager, schedulerExtenderURL string) error {
 	cl := mgr.GetClient()
 
-	var extenderClient schext.Client
 	if schedulerExtenderURL == "" {
-		extenderClient = schext.NewNoOpClient()
-	} else {
-		var err error
-		extenderClient, err = schext.NewClient(schedulerExtenderURL)
-		if err != nil {
-			return err
-		}
+		return fmt.Errorf("scheduler extender URL must not be empty")
+	}
+	extenderClient, err := schext.NewClient(schedulerExtenderURL)
+	if err != nil {
+		return err
 	}
 
 	r := NewReconciler(

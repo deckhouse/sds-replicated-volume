@@ -27,6 +27,6 @@ const (
 	// used for capacity reservation during RVR scheduling.
 	SchedulingReservationIDAnnotationKey = annotationPrefix + "scheduling-reservation-id"
 
-	// ReplicatedVolumePVCNamespace is a rv-related pvc namespace
-	ReplicatedVolumePVCNamespace = annotationPrefix + "pvc-namespace"
+	// ReplicatedVolumePVCNamespaceAnnotationKey is a rv-related pvc namespace
+	ReplicatedVolumePVCNamespaceAnnotationKey = annotationPrefix + "pvc-namespace"
 )

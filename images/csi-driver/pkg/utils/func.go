@@ -200,8 +200,8 @@ func CreateReplicatedVolume(
 			OwnerReferences: []metav1.OwnerReference{},
 			Finalizers:      []string{SDSReplicatedVolumeCSIFinalizer},
 			Annotations: map[string]string{
-				srv.SchedulingReservationIDAnnotationKey: pvcName,
-				srv.ReplicatedVolumePVCNamespace:         pvcNamespace,
+				srv.SchedulingReservationIDAnnotationKey:      pvcName,
+				srv.ReplicatedVolumePVCNamespaceAnnotationKey: pvcNamespace,
 			},
 		},
 		Spec: rvSpec,
