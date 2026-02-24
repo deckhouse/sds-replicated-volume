@@ -39,7 +39,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/drbd_size"
+	drbd_size "github.com/deckhouse/sds-replicated-volume/lib/go/common/drbd/size"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 	rvrllvname "github.com/deckhouse/sds-replicated-volume/images/controller/internal/rvr_llv_name"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"

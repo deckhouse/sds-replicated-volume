@@ -35,7 +35,7 @@ import (
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/drbd_size"
+	drbd_size "github.com/deckhouse/sds-replicated-volume/lib/go/common/drbd/size"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"

@@ -21,7 +21,6 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"slices"
 	"strings"
 	"time"
@@ -35,6 +34,7 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	drbdsize "github.com/deckhouse/sds-replicated-volume/lib/go/common/drbd/size"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
@@ -43,13 +43,6 @@ const (
 	KubernetesAPIRequestTimeout     = 1
 	SDSReplicatedVolumeCSIFinalizer = "storage.deckhouse.io/sds-replicated-volume-csi"
 )
-
-func AreSizesEqualWithinDelta(leftSize, rightSize, allowedDelta resource.Quantity) bool {
-	leftSizeFloat := float64(leftSize.Value())
-	rightSizeFloat := float64(rightSize.Value())
-
-	return math.Abs(leftSizeFloat-rightSizeFloat) < float64(allowedDelta.Value())
-}
 
 func GetStorageClassLVGsAndParameters(
 	ctx context.Context,
@@ -233,7 +226,7 @@ func WaitForReplicatedVolumeReady(
 	kc client.Client,
 	log *logger.Logger,
 	traceID, name string,
-) (int, error) {
+) (int, *srv.ReplicatedVolume, error) {
 	var attemptCounter int
 	log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Waiting for ReplicatedVolume to become ready", traceID, name))
 	for {
@@ -241,14 +234,14 @@ func WaitForReplicatedVolumeReady(
 		select {
 		case <-ctx.Done():
 			log.Warning(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] context done. Failed to wait for ReplicatedVolume", traceID, name))
-			return attemptCounter, ctx.Err()
+			return attemptCounter, nil, ctx.Err()
 		default:
 			time.Sleep(500 * time.Millisecond)
 		}
 
 		rv, err := GetReplicatedVolume(ctx, kc, name)
 		if err != nil {
-			return attemptCounter, err
+			return attemptCounter, nil, err
 		}
 
 		if attemptCounter%10 == 0 {
@@ -256,13 +249,13 @@ func WaitForReplicatedVolumeReady(
 		}
 
 		if rv.DeletionTimestamp != nil {
-			return attemptCounter, fmt.Errorf("failed to create ReplicatedVolume %s, reason: ReplicatedVolume is being deleted", name)
+			return attemptCounter, nil, fmt.Errorf("failed to create ReplicatedVolume %s, reason: ReplicatedVolume is being deleted", name)
 		}
 
 		readyCond := meta.FindStatusCondition(rv.Status.Conditions, srv.ReplicatedVolumeCondIOReadyType)
 		if readyCond != nil && readyCond.Status == metav1.ConditionTrue {
 			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] ReplicatedVolume is IOReady", traceID, name))
-			return attemptCounter, nil
+			return attemptCounter, rv, nil
 		}
 		log.Trace(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Attempt %d, ReplicatedVolume not IOReady yet. Waiting...", traceID, name, attemptCounter))
 	}
@@ -375,6 +368,34 @@ func GetDRBDDevicePath(rvr *srv.ReplicatedVolumeReplica) (string, error) {
 		return "", fmt.Errorf("device path not available")
 	}
 	return rvr.Status.Attachment.DevicePath, nil
+}
+
+func GetActualUsableSize(ctx context.Context, kc client.Client, log *logger.Logger, volumeName string, fallback resource.Quantity) resource.Quantity {
+	rvrList := &srv.ReplicatedVolumeReplicaList{}
+	err := kc.List(ctx, rvrList, client.MatchingFields{
+		"spec.replicatedVolumeName": volumeName,
+	})
+	if err != nil {
+		log.Warning(fmt.Sprintf("[GetActualUsableSize][volumeID:%s] failed to list RVRs: %v, using fallback %s", volumeName, err, fallback.String()))
+		return fallback
+	}
+
+	for i := range rvrList.Items {
+		rvr := &rvrList.Items[i]
+		if rvr.Spec.Type != srv.ReplicaTypeDiskful {
+			continue
+		}
+		if rvr.Status.BackingVolume == nil || rvr.Status.BackingVolume.Size == nil {
+			continue
+		}
+		usable := drbdsize.UsableSize(*rvr.Status.BackingVolume.Size)
+		log.Info(fmt.Sprintf("[GetActualUsableSize][volumeID:%s] RVR %s backingVolume.size=%s, usable=%s",
+			volumeName, rvr.Name, rvr.Status.BackingVolume.Size.String(), usable.String()))
+		return usable
+	}
+
+	log.Warning(fmt.Sprintf("[GetActualUsableSize][volumeID:%s] no diskful RVR with backingVolume.size found, using fallback %s", volumeName, fallback.String()))
+	return fallback
 }
 
 // ExpandReplicatedVolume expands a ReplicatedVolume
