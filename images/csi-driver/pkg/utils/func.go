@@ -226,7 +226,7 @@ func WaitForReplicatedVolumeReady(
 	kc client.Client,
 	log *logger.Logger,
 	traceID, name string,
-) (int, *srv.ReplicatedVolume, error) {
+) (int, error) {
 	var attemptCounter int
 	log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Waiting for ReplicatedVolume to become ready", traceID, name))
 	for {
@@ -234,14 +234,14 @@ func WaitForReplicatedVolumeReady(
 		select {
 		case <-ctx.Done():
 			log.Warning(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] context done. Failed to wait for ReplicatedVolume", traceID, name))
-			return attemptCounter, nil, ctx.Err()
+			return attemptCounter, ctx.Err()
 		default:
 			time.Sleep(500 * time.Millisecond)
 		}
 
 		rv, err := GetReplicatedVolume(ctx, kc, name)
 		if err != nil {
-			return attemptCounter, nil, err
+			return attemptCounter, err
 		}
 
 		if attemptCounter%10 == 0 {
@@ -249,13 +249,13 @@ func WaitForReplicatedVolumeReady(
 		}
 
 		if rv.DeletionTimestamp != nil {
-			return attemptCounter, nil, fmt.Errorf("failed to create ReplicatedVolume %s, reason: ReplicatedVolume is being deleted", name)
+			return attemptCounter, fmt.Errorf("failed to create ReplicatedVolume %s, reason: ReplicatedVolume is being deleted", name)
 		}
 
 		readyCond := meta.FindStatusCondition(rv.Status.Conditions, srv.ReplicatedVolumeCondIOReadyType)
 		if readyCond != nil && readyCond.Status == metav1.ConditionTrue {
 			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] ReplicatedVolume is IOReady", traceID, name))
-			return attemptCounter, rv, nil
+			return attemptCounter, nil
 		}
 		log.Trace(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Attempt %d, ReplicatedVolume not IOReady yet. Waiting...", traceID, name, attemptCounter))
 	}

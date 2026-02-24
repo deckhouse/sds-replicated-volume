@@ -120,7 +120,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 	// Wait for ReplicatedVolume to become ready
 	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] start wait ReplicatedVolume", traceID, volumeID))
-	attemptCounter, _, err := utils.WaitForReplicatedVolumeReady(ctx, d.cl, d.log, traceID, volumeID)
+	attemptCounter, err := utils.WaitForReplicatedVolumeReady(ctx, d.cl, d.log, traceID, volumeID)
 	if err != nil {
 		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error WaitForReplicatedVolumeReady. Delete ReplicatedVolume %s", traceID, volumeID, volumeID))
 
@@ -371,7 +371,7 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.Contro
 		return nil, status.Errorf(codes.Internal, "error updating ReplicatedVolume: %v", err)
 	}
 
-	attemptCounter, _, err := utils.WaitForReplicatedVolumeReady(ctx, d.cl, d.log, traceID, volumeID)
+	attemptCounter, err := utils.WaitForReplicatedVolumeReady(ctx, d.cl, d.log, traceID, volumeID)
 	if err != nil {
 		d.log.Error(err, fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] error WaitForReplicatedVolumeReady", traceID, volumeID))
 		return nil, err
@@ -379,10 +379,14 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.Contro
 	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] finish resize ReplicatedVolume, attempt counter = %d", traceID, volumeID, attemptCounter))
 
 	newActualSize := utils.GetActualUsableSize(ctx, d.cl, d.log, volumeID, *requestCapacity)
-	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] Volume expanded successfully, new actual usable size: %s", traceID, volumeID, newActualSize.String()))
+	capacityBytes := newActualSize.Value()
+	if requestCapacity.Value() > capacityBytes {
+		capacityBytes = requestCapacity.Value()
+	}
+	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] Volume expanded successfully, new actual usable size: %s, reporting: %d", traceID, volumeID, newActualSize.String(), capacityBytes))
 
 	return &csi.ControllerExpandVolumeResponse{
-		CapacityBytes:         newActualSize.Value(),
+		CapacityBytes:         capacityBytes,
 		NodeExpansionRequired: nodeExpansionRequired,
 	}, nil
 }
