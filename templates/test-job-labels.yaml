@@ -1,0 +1,26 @@
+{{- if .Values.sdsReplicatedVolume.internal.dataNodesChecksum }}
+{{- if contains ":21" .Values.sdsReplicatedVolume.internal.dataNodesChecksum }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: test-job-labels
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "test-job")) | nindent 2 }}
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      {{- include "helm_lib_module_labels" (list . (dict "app" "test-job")) | nindent 6 }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: main
+        image: ubuntu:22.04
+        command: ["echo", "start"]
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+{{- end }}
+{{- end }}
