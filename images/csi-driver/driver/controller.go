@@ -48,7 +48,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	}
 	volumeID := request.Name
 	if request.VolumeCapabilities == nil {
-		return nil, status.Error(codes.InvalidArgument, "Volume Capability cannot de empty")
+		return nil, status.Error(codes.InvalidArgument, "Volume Capability cannot de empty!")
 	}
 
 	BindingMode := request.Parameters[internal.BindingModeKey]
