@@ -466,8 +466,7 @@ func (d *Driver) NodeGetCapabilities(_ context.Context, request *csi.NodeGetCapa
 }
 
 func (d *Driver) NodeGetInfo(_ context.Context, _ *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
-	d.log.Info("method NodeGetInfo")
-	d.log.Info(fmt.Sprintf("hostID = %s", d.hostID))
+	d.log.Info(fmt.Sprintf("[NodeGetInfo] hostID = %s", d.hostID))
 
 	return &csi.NodeGetInfoResponse{
 		NodeId: d.hostID,
