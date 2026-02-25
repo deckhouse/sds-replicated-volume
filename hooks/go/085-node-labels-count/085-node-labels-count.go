@@ -27,6 +27,8 @@ import (
 
 const snapshotName = "nodes"
 
+const hostnameLabelKey = "kubernetes.io/hostname"
+
 var _ = registry.RegisterFunc(
 	&pkg.HookConfig{
 		Kubernetes: []pkg.KubernetesConfig{
@@ -34,17 +36,12 @@ var _ = registry.RegisterFunc(
 				Name:       snapshotName,
 				APIVersion: "v1",
 				Kind:       "Node",
-				JqFilter:   ".metadata",
+				JqFilter:   ".metadata.labels",
 			},
 		},
 	},
 	countNodeLabels,
 )
-
-type nodeMetadata struct {
-	Name   string            `json:"name"`
-	Labels map[string]string `json:"labels"`
-}
 
 func countNodeLabels(_ context.Context, input *pkg.HookInput) error {
 	snapshots := input.Snapshots.Get(snapshotName)
@@ -57,15 +54,21 @@ func countNodeLabels(_ context.Context, input *pkg.HookInput) error {
 	var nodes []nodeInfo
 
 	for _, snap := range snapshots {
-		var meta nodeMetadata
-		if err := snap.UnmarshalTo(&meta); err != nil {
-			return fmt.Errorf("unmarshal node metadata: %w", err)
+		var labels map[string]string
+		if err := snap.UnmarshalTo(&labels); err != nil {
+			return fmt.Errorf("unmarshal node labels: %w", err)
 		}
 
-		labelCount := len(meta.Labels)
-		nodes = append(nodes, nodeInfo{name: meta.Name, labels: labelCount})
+		hostname, ok := labels[hostnameLabelKey]
+		if !ok {
+			input.Logger.Warn("node has no hostname label, skipping", "labelKey", hostnameLabelKey)
+			continue
+		}
 
-		input.Logger.Info("node labels count", "node", meta.Name, "labelCount", labelCount)
+		labelCount := len(labels)
+		nodes = append(nodes, nodeInfo{name: hostname, labels: labelCount})
+
+		input.Logger.Info("node labels count", "node", hostname, "labelCount", labelCount)
 	}
 
 	sort.Slice(nodes, func(i, j int) bool {
