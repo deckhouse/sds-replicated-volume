@@ -275,78 +275,19 @@ func computeIntendedStorageClass(rsc *v1alpha1.ReplicatedStorageClass, virtualiz
 	reclaimPolicy := corev1.PersistentVolumeReclaimPolicy(rsc.Spec.ReclaimPolicy)
 
 	params := map[string]string{
-		v1alpha1.StorageClassParamFSTypeKey:                     v1alpha1.FsTypeExt4,
-		v1alpha1.StorageClassStoragePoolKey:                     rsc.Status.StoragePoolName,
-		v1alpha1.StorageClassParamPlacementPolicyKey:            v1alpha1.PlacementPolicyAutoPlaceTopology,
-		v1alpha1.StorageClassParamNetProtocolKey:                v1alpha1.NetProtocolC,
-		v1alpha1.StorageClassParamNetRRConflictKey:              v1alpha1.RrConflictRetryConnect,
-		v1alpha1.StorageClassParamAutoAddQuorumTieBreakerKey:    "true",
-		v1alpha1.StorageClassParamOnNoQuorumKey:                 v1alpha1.SuspendIo,
-		v1alpha1.StorageClassParamOnNoDataAccessibleKey:         v1alpha1.SuspendIo,
-		v1alpha1.StorageClassParamOnSuspendedPrimaryOutdatedKey: v1alpha1.PrimaryOutdatedForceSecondary,
-		v1alpha1.ReplicatedStorageClassParamNameKey:             rsc.Name,
-	}
-
-	switch rsc.Spec.Replication {
-	case v1alpha1.ReplicationNone:
-		params[v1alpha1.StorageClassPlacementCountKey] = "1"
-		params[v1alpha1.StorageClassAutoEvictMinReplicaCountKey] = "1"
-		params[v1alpha1.StorageClassParamAutoQuorumKey] = v1alpha1.SuspendIo
-	case v1alpha1.ReplicationAvailability:
-		params[v1alpha1.StorageClassPlacementCountKey] = "2"
-		params[v1alpha1.StorageClassAutoEvictMinReplicaCountKey] = "2"
-		params[v1alpha1.StorageClassParamAutoQuorumKey] = v1alpha1.SuspendIo
-	case v1alpha1.ReplicationConsistencyAndAvailability:
-		params[v1alpha1.StorageClassPlacementCountKey] = "3"
-		params[v1alpha1.StorageClassAutoEvictMinReplicaCountKey] = "3"
-		params[v1alpha1.StorageClassParamAutoQuorumKey] = v1alpha1.SuspendIo
-		params[v1alpha1.QuorumMinimumRedundancyWithPrefixSCKey] = "2"
-	case v1alpha1.ReplicationConsistency:
-		params[v1alpha1.StorageClassPlacementCountKey] = "2"
-		params[v1alpha1.StorageClassAutoEvictMinReplicaCountKey] = "2"
-		params[v1alpha1.StorageClassParamAutoQuorumKey] = v1alpha1.SuspendIo
+		v1alpha1.ReplicatedStorageClassParamNameKey: rsc.Name,
 	}
 
 	var volumeBindingMode storagev1.VolumeBindingMode
 	switch rsc.Spec.VolumeAccess {
 	case v1alpha1.VolumeAccessLocal:
-		params[v1alpha1.StorageClassParamAllowRemoteVolumeAccessKey] = "false"
 		volumeBindingMode = storagev1.VolumeBindingWaitForFirstConsumer
 	case v1alpha1.VolumeAccessEventuallyLocal:
-		params[v1alpha1.StorageClassParamAutoDiskfulKey] = "30"
-		params[v1alpha1.StorageClassParamAutoDiskfulAllowCleanupKey] = "true"
-		params[v1alpha1.StorageClassParamAllowRemoteVolumeAccessKey] = v1alpha1.StorageClassParamAllowRemoteVolumeAccessValue
 		volumeBindingMode = storagev1.VolumeBindingWaitForFirstConsumer
 	case v1alpha1.VolumeAccessPreferablyLocal:
-		params[v1alpha1.StorageClassParamAllowRemoteVolumeAccessKey] = v1alpha1.StorageClassParamAllowRemoteVolumeAccessValue
 		volumeBindingMode = storagev1.VolumeBindingWaitForFirstConsumer
 	case v1alpha1.VolumeAccessAny:
-		params[v1alpha1.StorageClassParamAllowRemoteVolumeAccessKey] = v1alpha1.StorageClassParamAllowRemoteVolumeAccessValue
 		volumeBindingMode = storagev1.VolumeBindingImmediate
-	}
-
-	params[v1alpha1.StorageClassParamTopologyKey] = string(rsc.Spec.Topology)
-	if len(rsc.Spec.Zones) > 0 {
-		var b strings.Builder
-		for i, zone := range rsc.Spec.Zones {
-			if i > 0 {
-				b.WriteString("\n")
-			}
-			b.WriteString("- ")
-			b.WriteString(zone)
-		}
-		params[v1alpha1.StorageClassParamZonesKey] = b.String()
-	}
-
-	switch rsc.Spec.Topology {
-	case v1alpha1.TopologyTransZonal:
-		params[v1alpha1.StorageClassParamReplicasOnSameKey] = fmt.Sprintf("%s/%s", v1alpha1.StorageClassLabelKeyPrefix, rsc.Name)
-		params[v1alpha1.StorageClassParamReplicasOnDifferentKey] = v1alpha1.ZoneLabel
-	case v1alpha1.TopologyZonal:
-		params[v1alpha1.StorageClassParamReplicasOnSameKey] = v1alpha1.ZoneLabel
-		params[v1alpha1.StorageClassParamReplicasOnDifferentKey] = corev1.LabelHostname
-	case v1alpha1.TopologyIgnored:
-		params[v1alpha1.StorageClassParamReplicasOnDifferentKey] = corev1.LabelHostname
 	}
 
 	annotations := map[string]string{
@@ -409,23 +350,8 @@ func canRecreateStorageClass(newSC, oldSC *storagev1.StorageClass) (bool, string
 	newSCCopy := *newSC
 	oldSCCopy := *oldSC
 
-	newSCCopy.Parameters = maps.Clone(newSC.Parameters)
-	oldSCCopy.Parameters = maps.Clone(oldSC.Parameters)
-
-	if oldSCCopy.Parameters[v1alpha1.StorageClassStoragePoolKey] == "" && newSCCopy.Parameters[v1alpha1.StorageClassStoragePoolKey] != "" {
-		delete(newSCCopy.Parameters, v1alpha1.StorageClassStoragePoolKey)
-		delete(oldSCCopy.Parameters, v1alpha1.StorageClassStoragePoolKey)
-	}
-
-	delete(newSCCopy.Parameters, v1alpha1.QuorumMinimumRedundancyWithPrefixSCKey)
-	delete(newSCCopy.Parameters, v1alpha1.ReplicatedStorageClassParamNameKey)
-	delete(newSCCopy.Parameters, v1alpha1.StorageClassParamTopologyKey)
-	delete(newSCCopy.Parameters, v1alpha1.StorageClassParamZonesKey)
-
-	delete(oldSCCopy.Parameters, v1alpha1.QuorumMinimumRedundancyWithPrefixSCKey)
-	delete(oldSCCopy.Parameters, v1alpha1.ReplicatedStorageClassParamNameKey)
-	delete(oldSCCopy.Parameters, v1alpha1.StorageClassParamTopologyKey)
-	delete(oldSCCopy.Parameters, v1alpha1.StorageClassParamZonesKey)
+	newSCCopy.Parameters = nil
+	oldSCCopy.Parameters = nil
 
 	return compareStorageClasses(&newSCCopy, &oldSCCopy)
 }
