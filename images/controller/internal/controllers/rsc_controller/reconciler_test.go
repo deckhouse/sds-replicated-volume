@@ -3437,7 +3437,7 @@ var _ = Describe("Reconciler", func() {
 
 			intended := computeIntendedStorageClass(rsc, false)
 			oldSC := intended.DeepCopy()
-			oldSC.Parameters[v1alpha1.StorageClassStoragePoolKey] = ""
+			oldSC.Parameters["legacy-key"] = "legacy-value"
 
 			cl = testhelpers.WithRSPByUsedByRSCNameIndex(
 				testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
@@ -3454,7 +3454,9 @@ var _ = Describe("Reconciler", func() {
 
 			var sc storagev1.StorageClass
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &sc)).To(Succeed())
-			Expect(sc.Parameters).NotTo(HaveKey(v1alpha1.StorageClassStoragePoolKey))
+			// TODO: improve this check — currently we only verify the single expected parameter;
+			// consider a more robust assertion if additional parameters are introduced.
+			Expect(sc.Parameters).To(HaveLen(1))
 			Expect(sc.Parameters).To(HaveKeyWithValue(v1alpha1.ReplicatedStorageClassParamNameKey, "rsc-1"))
 		})
 

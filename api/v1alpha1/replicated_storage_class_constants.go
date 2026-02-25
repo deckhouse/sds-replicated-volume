@@ -9,13 +9,11 @@ const (
 	StorageClassAPIVersion    = "storage.k8s.io/v1"
 
 	ZoneLabel                  = "topology.kubernetes.io/zone"
-	StorageClassLabelKeyPrefix = "class.storage.deckhouse.io"
 
 	ReclaimPolicyRetain = "Retain"
 	ReclaimPolicyDelete = "Delete"
 
 	StorageClassStoragePoolKey = "replicated.csi.storage.deckhouse.io/storagePool"
-	StorageClassParamAllowRemoteVolumeAccessKey = "replicated.csi.storage.deckhouse.io/allowRemoteVolumeAccess"
 
 	DefaultStorageClassAnnotationKey = "storageclass.kubernetes.io/is-default-class"
 
