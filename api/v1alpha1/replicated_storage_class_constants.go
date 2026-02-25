@@ -14,30 +14,8 @@ const (
 	ReclaimPolicyRetain = "Retain"
 	ReclaimPolicyDelete = "Delete"
 
-	StorageClassPlacementCountKey               = "replicated.csi.storage.deckhouse.io/placementCount"
-	StorageClassAutoEvictMinReplicaCountKey      = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/AutoEvictMinReplicaCount"
-	StorageClassStoragePoolKey                   = "replicated.csi.storage.deckhouse.io/storagePool"
-	StorageClassParamReplicasOnDifferentKey      = "replicated.csi.storage.deckhouse.io/replicasOnDifferent"
-	StorageClassParamReplicasOnSameKey           = "replicated.csi.storage.deckhouse.io/replicasOnSame"
-	StorageClassParamAllowRemoteVolumeAccessKey  = "replicated.csi.storage.deckhouse.io/allowRemoteVolumeAccess"
-
-	StorageClassParamFSTypeKey                     = "csi.storage.k8s.io/fstype"
-	FsTypeExt4                                     = "ext4"
-	StorageClassParamPlacementPolicyKey             = "replicated.csi.storage.deckhouse.io/placementPolicy"
-	PlacementPolicyAutoPlaceTopology                = "AutoPlaceTopology"
-	StorageClassParamNetProtocolKey                 = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Net/protocol"
-	NetProtocolC                                    = "C"
-	StorageClassParamNetRRConflictKey               = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Net/rr-conflict"
-	RrConflictRetryConnect                          = "retry-connect"
-	StorageClassParamAutoQuorumKey                  = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/auto-quorum"
-	SuspendIo                                       = "suspend-io"
-	StorageClassParamAutoAddQuorumTieBreakerKey     = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/auto-add-quorum-tiebreaker"
-	StorageClassParamOnNoQuorumKey                  = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/on-no-quorum"
-	StorageClassParamOnNoDataAccessibleKey          = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/on-no-data-accessible"
-	StorageClassParamOnSuspendedPrimaryOutdatedKey  = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/on-suspended-primary-outdated"
-	PrimaryOutdatedForceSecondary                   = "force-secondary"
-
-	QuorumMinimumRedundancyWithPrefixSCKey = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/quorum-minimum-redundancy"
+	StorageClassStoragePoolKey = "replicated.csi.storage.deckhouse.io/storagePool"
+	StorageClassParamAllowRemoteVolumeAccessKey = "replicated.csi.storage.deckhouse.io/allowRemoteVolumeAccess"
 
 	DefaultStorageClassAnnotationKey = "storageclass.kubernetes.io/is-default-class"
 

@@ -32,7 +32,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
@@ -660,7 +659,7 @@ func setLabelsIfNeeded(
 func setQuorumIfNeeded(ctx context.Context, log logger.Logger, lc *lapi.Client, sc v1.StorageClass, rd lapi.ResourceDefinitionWithVolumeDefinition) {
 	rdPropQuorum := rd.Props[quorumWithPrefixRDKey]
 	if sc.Provisioner == ReplicatedCSIProvisioner &&
-		sc.Parameters[srv.StorageClassPlacementCountKey] != "1" &&
+		sc.Parameters["deleted_const"] != "1" &&
 		slices.Contains([]string{"off", "1", ""}, rdPropQuorum) {
 		log.Info(fmt.Sprintf("[setQuorumIfNeeded] Resource Definition %s quorum value will be set to 'majority'", rd.Name))
 

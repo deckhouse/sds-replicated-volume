@@ -53,22 +53,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		volumeBindingMode           = storagev1.VolumeBindingWaitForFirstConsumer
 		reclaimPolicy               = corev1.PersistentVolumeReclaimPolicy(srv.ReclaimPolicyRetain)
 		storageClassParameters      = map[string]string{
-			srv.StorageClassStoragePoolKey:                     "test-sp",
-			srv.StorageClassParamFSTypeKey:                     srv.FsTypeExt4,
-			srv.StorageClassParamPlacementPolicyKey:            srv.PlacementPolicyAutoPlaceTopology,
-			srv.StorageClassParamNetProtocolKey:                srv.NetProtocolC,
-			srv.StorageClassParamNetRRConflictKey:              srv.RrConflictRetryConnect,
-			srv.StorageClassParamAutoQuorumKey:                 srv.SuspendIo,
-			srv.StorageClassParamAutoAddQuorumTieBreakerKey:    "true",
-			srv.StorageClassParamOnNoQuorumKey:                 srv.SuspendIo,
-			srv.StorageClassParamOnNoDataAccessibleKey:         srv.SuspendIo,
-			srv.StorageClassParamOnSuspendedPrimaryOutdatedKey: srv.PrimaryOutdatedForceSecondary,
-			srv.StorageClassPlacementCountKey:                  "3",
-			srv.StorageClassAutoEvictMinReplicaCountKey:        "3",
-			srv.StorageClassParamReplicasOnSameKey:             fmt.Sprintf("class.storage.deckhouse.io/%s", testName),
-			srv.StorageClassParamReplicasOnDifferentKey:        srv.ZoneLabel,
-			srv.StorageClassParamAllowRemoteVolumeAccessKey:    "false",
-			controller.QuorumMinimumRedundancyWithPrefixSCKey:  "2",
+			srv.ReplicatedStorageClassParamNameKey: testName,
 		}
 
 		validStorageClassResource = &storagev1.StorageClass{
