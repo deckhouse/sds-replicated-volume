@@ -35,9 +35,9 @@ import (
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/drbd_size"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
+	drbd_size "github.com/deckhouse/sds-replicated-volume/lib/go/common/drbd/size"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -155,6 +155,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Ensure conditions.
 	eo = flow.MergeEnsures(
 		ensureConditionConfigurationReady(rf.Ctx(), rv, rsc),
+		ensureConditionIOReady(rf.Ctx(), rv),
+		ensureConditionScheduled(rf.Ctx(), rv, rvrs),
+		ensureConditionConfigured(rf.Ctx(), rv, rvrs),
+		ensureConditionQuorum(rf.Ctx(), rv, rvrs),
 	)
 	if eo.Error() != nil {
 		return rf.Fail(eo.Error()).ToCtrl()
@@ -1693,6 +1697,240 @@ func applyConfigurationReadyCondFalse(rv *v1alpha1.ReplicatedVolume, reason, mes
 		Reason:  reason,
 		Message: message,
 	})
+}
+
+func ensureConditionIOReady(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "cond-io-ready")
+	defer ef.OnEnd(&outcome)
+
+	changed := false
+
+	if rv.Status.Configuration == nil {
+		changed = obju.SetStatusCondition(rv, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeCondIOReadyType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeCondIOReadyReasonNoConfiguration,
+			Message: "Volume has no configuration yet",
+		})
+		return ef.Ok().ReportChangedIf(changed)
+	}
+
+	if forming, _ := isFormationInProgress(rv); forming {
+		changed = obju.SetStatusCondition(rv, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeCondIOReadyType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeCondIOReadyReasonFormationInProgress,
+			Message: "Datamesh formation is in progress",
+		})
+		return ef.Ok().ReportChangedIf(changed)
+	}
+
+	changed = obju.SetStatusCondition(rv, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeCondIOReadyType,
+		Status:  metav1.ConditionTrue,
+		Reason:  v1alpha1.ReplicatedVolumeCondIOReadyReasonReady,
+		Message: "Datamesh is formed and ready for I/O",
+	})
+	return ef.Ok().ReportChangedIf(changed)
+}
+
+func ensureConditionScheduled(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "cond-scheduled")
+	defer ef.OnEnd(&outcome)
+
+	changed := false
+
+	if len(rvrs) == 0 {
+		changed = obju.SetStatusCondition(rv, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeCondScheduledType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeCondScheduledReasonReplicasNotScheduled,
+			Message: "No replicas exist yet",
+		})
+		return ef.Ok().ReportChangedIf(changed)
+	}
+
+	allScheduled := true
+	anyInProgress := false
+	for _, rvr := range rvrs {
+		if rvr.DeletionTimestamp != nil {
+			continue
+		}
+		cond := obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+		if cond.IsTrue().Eval() {
+			continue
+		}
+		allScheduled = false
+		if cond.ReasonEqual(v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume).Eval() ||
+			!cond.Present().Eval() {
+			anyInProgress = true
+		}
+	}
+
+	switch {
+	case allScheduled:
+		changed = obju.SetStatusCondition(rv, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeCondScheduledType,
+			Status:  metav1.ConditionTrue,
+			Reason:  v1alpha1.ReplicatedVolumeCondScheduledReasonAllReplicasScheduled,
+			Message: "All replicas are scheduled",
+		})
+	case anyInProgress:
+		changed = obju.SetStatusCondition(rv, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeCondScheduledType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeCondScheduledReasonSchedulingInProgress,
+			Message: "Replica scheduling is in progress",
+		})
+	default:
+		changed = obju.SetStatusCondition(rv, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeCondScheduledType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeCondScheduledReasonReplicasNotScheduled,
+			Message: "Some replicas are not scheduled",
+		})
+	}
+
+	return ef.Ok().ReportChangedIf(changed)
+}
+
+func ensureConditionConfigured(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "cond-configured")
+	defer ef.OnEnd(&outcome)
+
+	changed := false
+
+	if len(rvrs) == 0 {
+		changed = obju.SetStatusCondition(rv, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeCondConfiguredType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeCondConfiguredReasonReplicasNotConfigured,
+			Message: "No replicas exist yet",
+		})
+		return ef.Ok().ReportChangedIf(changed)
+	}
+
+	allConfigured := true
+	anyInProgress := false
+	for _, rvr := range rvrs {
+		if rvr.DeletionTimestamp != nil {
+			continue
+		}
+		cond := obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		if cond.IsTrue().Eval() {
+			continue
+		}
+		allConfigured = false
+		if !cond.IsFalse().Eval() {
+			anyInProgress = true
+		}
+	}
+
+	switch {
+	case allConfigured:
+		changed = obju.SetStatusCondition(rv, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeCondConfiguredType,
+			Status:  metav1.ConditionTrue,
+			Reason:  v1alpha1.ReplicatedVolumeCondConfiguredReasonAllReplicasConfigured,
+			Message: "All replicas are configured",
+		})
+	case anyInProgress:
+		changed = obju.SetStatusCondition(rv, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeCondConfiguredType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeCondConfiguredReasonConfigurationInProgress,
+			Message: "Replica configuration is in progress",
+		})
+	default:
+		changed = obju.SetStatusCondition(rv, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeCondConfiguredType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeCondConfiguredReasonReplicasNotConfigured,
+			Message: "Some replicas are not configured",
+		})
+	}
+
+	return ef.Ok().ReportChangedIf(changed)
+}
+
+func ensureConditionQuorum(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "cond-quorum")
+	defer ef.OnEnd(&outcome)
+
+	changed := false
+
+	alive := 0
+	for _, rvr := range rvrs {
+		if rvr.DeletionTimestamp == nil {
+			alive++
+		}
+	}
+	if alive == 0 {
+		changed = obju.SetStatusCondition(rv, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeCondQuorumType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeCondQuorumReasonNoReplicas,
+			Message: "No replicas exist yet",
+		})
+		return ef.Ok().ReportChangedIf(changed)
+	}
+
+	allQuorum := true
+	anyUnknown := false
+	for _, rvr := range rvrs {
+		if rvr.DeletionTimestamp != nil {
+			continue
+		}
+		if rvr.Status.Quorum == nil {
+			anyUnknown = true
+			allQuorum = false
+			continue
+		}
+		if !*rvr.Status.Quorum {
+			allQuorum = false
+		}
+	}
+
+	switch {
+	case allQuorum:
+		changed = obju.SetStatusCondition(rv, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeCondQuorumType,
+			Status:  metav1.ConditionTrue,
+			Reason:  v1alpha1.ReplicatedVolumeCondQuorumReasonQuorumMet,
+			Message: "All replicas have quorum",
+		})
+	case anyUnknown:
+		changed = obju.SetStatusCondition(rv, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeCondQuorumType,
+			Status:  metav1.ConditionUnknown,
+			Reason:  v1alpha1.ReplicatedVolumeCondQuorumReasonQuorumStatusUnknown,
+			Message: "Quorum status is not yet reported by some replicas",
+		})
+	default:
+		changed = obju.SetStatusCondition(rv, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeCondQuorumType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeCondQuorumReasonQuorumLost,
+			Message: "One or more replicas lost quorum",
+		})
+	}
+
+	return ef.Ok().ReportChangedIf(changed)
 }
 
 // ensureDatameshPendingReplicaTransitions synchronizes rv.Status.DatameshPendingReplicaTransitions

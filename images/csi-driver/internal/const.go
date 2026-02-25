@@ -30,9 +30,10 @@ const (
 	LVMTypeThick                = "Thick"
 	BindingModeWFFC             = "WaitForFirstConsumer"
 	BindingModeI                = "Immediate"
-	ResizeDelta                 = "32Mi"
 	ReplicatedVolumeNameKey     = "replicatedVolumeName"
 	DRBDDeviceMinorKey          = "drbdDeviceMinor"
+	PVCAnnotationNameKey        = "csi.storage.k8s.io/pvc/name"
+	PVCAnnotationNamespaceKey   = "csi.storage.k8s.io/pvc/namespace"
 
 	FSTypeKey = "csi.storage.k8s.io/fstype"
 

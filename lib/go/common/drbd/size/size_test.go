@@ -1,4 +1,20 @@
-package drbd_size
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package size
 
 import (
 	"testing"
@@ -25,13 +41,11 @@ func TestLowerVolumeSize(t *testing.T) {
 			usable := resource.MustParse(tt.usableSize)
 			lower := LowerVolumeSize(usable)
 
-			// Lower must be >= usable (metadata adds overhead).
 			if lower.Cmp(usable) < 0 {
 				t.Errorf("LowerVolumeSize(%s) = %s, want >= %s",
 					usable.String(), lower.String(), usable.String())
 			}
 
-			// Lower must be aligned to 8 sectors (4096 bytes).
 			if lower.Value()%(8*512) != 0 {
 				t.Errorf("LowerVolumeSize(%s) = %s, not aligned to 4Ki",
 					usable.String(), lower.String())
@@ -57,13 +71,11 @@ func TestUsableSize(t *testing.T) {
 			lower := resource.MustParse(tt.lowerSize)
 			usable := UsableSize(lower)
 
-			// Usable must be < lower (metadata takes space).
 			if usable.Cmp(lower) >= 0 {
 				t.Errorf("UsableSize(%s) = %s, want < %s",
 					lower.String(), usable.String(), lower.String())
 			}
 
-			// Usable must be positive.
 			if usable.Value() <= 0 {
 				t.Errorf("UsableSize(%s) = %s, want > 0",
 					lower.String(), usable.String())
@@ -89,8 +101,6 @@ func TestRoundTrip(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			usable := resource.MustParse(tt.usableSize)
 
-			// usable -> lower -> usable' should give usable' >= usable
-			// because LowerVolumeSize rounds up for alignment.
 			lower := LowerVolumeSize(usable)
 			usableBack := UsableSize(lower)
 
@@ -103,17 +113,12 @@ func TestRoundTrip(t *testing.T) {
 }
 
 func TestMinimumViableLowerSize(t *testing.T) {
-	// DRBD metadata requires at least ~40Ki (superblock + AL + minimal bitmap).
-	// UsableSize for smaller lower volumes would underflow.
-	// This test documents the minimum viable lower volume size.
-
-	// Find minimum size where UsableSize returns positive value.
 	var minViable int64
-	for size := int64(32 * 1024); size <= 128*1024; size += 4096 {
-		q := *resource.NewQuantity(size, resource.BinarySI)
+	for s := int64(32 * 1024); s <= 128*1024; s += 4096 {
+		q := *resource.NewQuantity(s, resource.BinarySI)
 		usable := UsableSize(q)
-		if usable.Value() > 0 && usable.Value() < size {
-			minViable = size
+		if usable.Value() > 0 && usable.Value() < s {
+			minViable = s
 			break
 		}
 	}
@@ -125,7 +130,6 @@ func TestMinimumViableLowerSize(t *testing.T) {
 	t.Logf("Minimum viable lower volume size: %d bytes (%s)",
 		minViable, resource.NewQuantity(minViable, resource.BinarySI).String())
 
-	// Verify LowerVolumeSize(1Ki) produces at least minViable.
 	tiny := resource.MustParse("1Ki")
 	lower := LowerVolumeSize(tiny)
 	if lower.Value() < minViable {
@@ -135,7 +139,6 @@ func TestMinimumViableLowerSize(t *testing.T) {
 }
 
 func TestMetadataOverhead(t *testing.T) {
-	// Verify metadata overhead is reasonable (< 1% for large volumes).
 	tests := []struct {
 		name           string
 		lowerSize      string

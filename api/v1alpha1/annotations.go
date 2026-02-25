@@ -26,4 +26,7 @@ const (
 	// SchedulingReservationIDAnnotationKey stores the scheduler-extender reservation ID
 	// used for capacity reservation during RVR scheduling.
 	SchedulingReservationIDAnnotationKey = annotationPrefix + "scheduling-reservation-id"
+
+	// ReplicatedVolumePVCNamespaceAnnotationKey is a rv-related pvc namespace
+	ReplicatedVolumePVCNamespaceAnnotationKey = annotationPrefix + "pvc-namespace"
 )

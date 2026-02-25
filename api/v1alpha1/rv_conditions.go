@@ -33,20 +33,28 @@ const (
 	//
 	// Reasons describe configuration progress / mismatch.
 	ReplicatedVolumeCondConfiguredType                          = "Configured"
+	ReplicatedVolumeCondConfiguredReasonAllReplicasConfigured   = "AllReplicasConfigured"   // All replicas are configured.
 	ReplicatedVolumeCondConfiguredReasonConfigurationInProgress = "ConfigurationInProgress" // Configuration is still in progress.
-
-// ReplicatedVolumeCondConfiguredReasonAllReplicasConfigured = "AllReplicasConfigured" // All replicas are configured.
-// ReplicatedVolumeCondConfiguredReasonReplicasNotConfigured = "ReplicasNotConfigured" // Some replicas are not configured yet.
+	ReplicatedVolumeCondConfiguredReasonReplicasNotConfigured   = "ReplicasNotConfigured"   // Some replicas are not configured yet.
 )
 
 const (
 	// ReplicatedVolumeCondIOReadyType indicates whether the volume is ready for I/O operations.
-	ReplicatedVolumeCondIOReadyType = "IOReady"
+	ReplicatedVolumeCondIOReadyType                      = "IOReady"             // ReplicatedVolume is configured and ready to use
+	ReplicatedVolumeCondIOReadyReasonFormationInProgress = "FormationInProgress" // Datamesh formation is still in progress.
+	ReplicatedVolumeCondIOReadyReasonNoConfiguration     = "NoConfiguration"     // Volume has no configuration yet.
+	ReplicatedVolumeCondIOReadyReasonReady               = "Ready"               // Datamesh is formed and ready for I/O.
 )
 
 const (
 	// ReplicatedVolumeCondQuorumType indicates whether the volume has quorum.
-	ReplicatedVolumeCondQuorumType = "Quorum"
+	//
+	// Reasons describe quorum state.
+	ReplicatedVolumeCondQuorumType                      = "Quorum"              // All quorum conditions are met
+	ReplicatedVolumeCondQuorumReasonNoReplicas          = "NoReplicas"          // No replicas exist yet.
+	ReplicatedVolumeCondQuorumReasonQuorumLost          = "QuorumLost"          // One or more replicas lost quorum.
+	ReplicatedVolumeCondQuorumReasonQuorumMet           = "QuorumMet"           // All replicas have quorum.
+	ReplicatedVolumeCondQuorumReasonQuorumStatusUnknown = "QuorumStatusUnknown" // Quorum status is not yet reported by some replicas.
 )
 
 const (

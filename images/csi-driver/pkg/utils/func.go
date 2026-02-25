@@ -21,7 +21,6 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"slices"
 	"strings"
 	"time"
@@ -35,6 +34,7 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	drbdsize "github.com/deckhouse/sds-replicated-volume/lib/go/common/drbd/size"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
@@ -43,13 +43,6 @@ const (
 	KubernetesAPIRequestTimeout     = 1
 	SDSReplicatedVolumeCSIFinalizer = "storage.deckhouse.io/sds-replicated-volume-csi"
 )
-
-func AreSizesEqualWithinDelta(leftSize, rightSize, allowedDelta resource.Quantity) bool {
-	leftSizeFloat := float64(leftSize.Value())
-	rightSizeFloat := float64(rightSize.Value())
-
-	return math.Abs(leftSizeFloat-rightSizeFloat) < float64(allowedDelta.Value())
-}
 
 func GetStorageClassLVGsAndParameters(
 	ctx context.Context,
@@ -198,7 +191,7 @@ func CreateReplicatedVolume(
 	ctx context.Context,
 	kc client.Client,
 	log *logger.Logger,
-	traceID, name string,
+	traceID, name, pvcName, pvcNamespace string,
 	rvSpec srv.ReplicatedVolumeSpec,
 ) (*srv.ReplicatedVolume, error) {
 	rv := &srv.ReplicatedVolume{
@@ -206,6 +199,10 @@ func CreateReplicatedVolume(
 			Name:            name,
 			OwnerReferences: []metav1.OwnerReference{},
 			Finalizers:      []string{SDSReplicatedVolumeCSIFinalizer},
+			Annotations: map[string]string{
+				srv.SchedulingReservationIDAnnotationKey:      pvcName,
+				srv.ReplicatedVolumePVCNamespaceAnnotationKey: pvcNamespace,
+			},
 		},
 		Spec: rvSpec,
 	}
@@ -344,15 +341,17 @@ func GetReplicatedVolumeReplicaForNode(ctx context.Context, kc client.Client, vo
 	err := kc.List(
 		ctx,
 		rvrList,
-		client.MatchingFields{"spec.replicatedVolumeName": volumeName},
-		client.MatchingFields{"spec.nodeName": nodeName},
+		client.MatchingFields{
+			"spec.replicatedVolumeName": volumeName,
+			"spec.nodeName":             nodeName,
+		},
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	for i := range rvrList.Items {
-		if rvrList.Items[i].Spec.NodeName == nodeName {
+		if rvrList.Items[i].Spec.ReplicatedVolumeName == volumeName && rvrList.Items[i].Spec.NodeName == nodeName {
 			return &rvrList.Items[i], nil
 		}
 	}
@@ -371,6 +370,34 @@ func GetDRBDDevicePath(rvr *srv.ReplicatedVolumeReplica) (string, error) {
 	return rvr.Status.Attachment.DevicePath, nil
 }
 
+func GetActualUsableSize(ctx context.Context, kc client.Client, log *logger.Logger, volumeName string, fallback resource.Quantity) resource.Quantity {
+	rvrList := &srv.ReplicatedVolumeReplicaList{}
+	err := kc.List(ctx, rvrList, client.MatchingFields{
+		"spec.replicatedVolumeName": volumeName,
+	})
+	if err != nil {
+		log.Warning(fmt.Sprintf("[GetActualUsableSize][volumeID:%s] failed to list RVRs: %v, using fallback %s", volumeName, err, fallback.String()))
+		return fallback
+	}
+
+	for i := range rvrList.Items {
+		rvr := &rvrList.Items[i]
+		if rvr.Spec.Type != srv.ReplicaTypeDiskful {
+			continue
+		}
+		if rvr.Status.BackingVolume == nil || rvr.Status.BackingVolume.Size == nil {
+			continue
+		}
+		usable := drbdsize.UsableSize(*rvr.Status.BackingVolume.Size)
+		log.Info(fmt.Sprintf("[GetActualUsableSize][volumeID:%s] RVR %s backingVolume.size=%s, usable=%s",
+			volumeName, rvr.Name, rvr.Status.BackingVolume.Size.String(), usable.String()))
+		return usable
+	}
+
+	log.Warning(fmt.Sprintf("[GetActualUsableSize][volumeID:%s] no diskful RVR with backingVolume.size found, using fallback %s", volumeName, fallback.String()))
+	return fallback
+}
+
 // ExpandReplicatedVolume expands a ReplicatedVolume
 func ExpandReplicatedVolume(ctx context.Context, kc client.Client, rv *srv.ReplicatedVolume, newSize resource.Quantity) error {
 	rv.Spec.Size = newSize
@@ -385,6 +412,7 @@ func BuildReplicatedVolumeSpec(
 	return srv.ReplicatedVolumeSpec{
 		Size:                       size,
 		ReplicatedStorageClassName: rscName,
+		MaxAttachments:             1, // TODO handle RWX
 	}
 }
 
