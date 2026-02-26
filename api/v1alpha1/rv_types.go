@@ -344,8 +344,6 @@ const (
 	SharedSecretAlgSHA256 SharedSecretAlg = "SHA256"
 	// SharedSecretAlgSHA1 is the SHA1 hashing algorithm for shared secrets.
 	SharedSecretAlgSHA1 SharedSecretAlg = "SHA1"
-	// SharedSecretAlgDummyForTest is a dummy algorithm for testing.
-	SharedSecretAlgDummyForTest SharedSecretAlg = "DummyForTest"
 )
 
 func (a SharedSecretAlg) String() string {

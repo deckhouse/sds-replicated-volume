@@ -18,6 +18,7 @@ package drbdr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -414,10 +415,9 @@ func (a SecondaryAction) String() string {
 	return fmt.Sprintf("Secondary(resource=%s, force=%t)", a.ResourceName, a.Force)
 }
 
-// ResizeAction resizes a DRBD device.
+// ResizeAction resizes a DRBD device by re-examining the backing device.
 type ResizeAction struct {
-	Minor     *uint
-	SizeBytes int64
+	Minor *uint
 }
 
 func (a ResizeAction) Execute(ctx context.Context) error {
@@ -427,7 +427,10 @@ func (a ResizeAction) Execute(ctx context.Context) error {
 			v1alpha1.DRBDResourceCondConfiguredReasonResizeFailed,
 		)
 	}
-	err := drbdsetup.ExecuteResize(ctx, *a.Minor, a.SizeBytes)
+	err := drbdsetup.ExecuteResize(ctx, *a.Minor)
+	if errors.Is(err, drbdsetup.ErrResizeBackingNotGrown) {
+		return nil
+	}
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonResizeFailed)
 }
 
@@ -436,5 +439,5 @@ func (a ResizeAction) String() string {
 	if a.Minor != nil {
 		minor = fmt.Sprintf("%d", *a.Minor)
 	}
-	return fmt.Sprintf("Resize(minor=%s, sizeBytes=%d)", minor, a.SizeBytes)
+	return fmt.Sprintf("Resize(minor=%s)", minor)
 }

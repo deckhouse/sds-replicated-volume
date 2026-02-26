@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 )
 
 var (
@@ -31,22 +30,15 @@ var (
 )
 
 // ResizeArgs returns the arguments for drbdsetup resize command.
-// sizeBytes is the new size in bytes. If 0, DRBD uses the size of the backing device.
-var ResizeArgs = func(minor uint, sizeBytes int64) []string {
-	args := []string{
-		"resize",
-		strconv.FormatUint(uint64(minor), 10),
-	}
-	if sizeBytes > 0 {
-		args = append(args, "--size="+strconv.FormatInt(sizeBytes, 10))
-	}
-	return args
+// DRBD re-examines the backing device and uses whatever space is available.
+var ResizeArgs = func(minor uint) []string {
+	return []string{"resize", fmt.Sprintf("%d", minor)}
 }
 
 // ExecuteResize resizes a replicated device after growing backing devices.
-// sizeBytes is the new size in bytes. If 0, DRBD uses the size of the backing device.
-func ExecuteResize(ctx context.Context, minor uint, sizeBytes int64) (err error) {
-	args := ResizeArgs(minor, sizeBytes)
+// DRBD re-examines the backing device and uses whatever space is available.
+func ExecuteResize(ctx context.Context, minor uint) (err error) {
+	args := ResizeArgs(minor)
 	cmd := ExecCommandContext(ctx, Command, args...)
 
 	defer func() {
