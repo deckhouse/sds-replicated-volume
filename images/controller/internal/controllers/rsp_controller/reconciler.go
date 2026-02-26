@@ -84,6 +84,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Take patch base before mutations.
 	base := rsp.DeepCopy()
 
+	// Clear legacy phase/reason fields set by the old controller (one-time migration).
+	if applyLegacyFieldsCleared(rsp) {
+		if err := r.patchRSPStatus(rf.Ctx(), rsp, base); err != nil {
+			return rf.Fail(err).ToCtrl()
+		}
+		base = rsp.DeepCopy()
+	}
+
 	// Get LVGs referenced by RSP.
 	lvgs, lvgsNotFoundErr, err := r.getLVGsByRSP(rf.Ctx(), rsp)
 	if err != nil {
@@ -446,6 +454,22 @@ func applyReadyCondFalse(rsp *v1alpha1.ReplicatedStoragePool, reason, message st
 	})
 }
 
+// applyLegacyFieldsCleared clears legacy status.phase and status.reason fields
+// that were written by the old controller (sds-replicated-volume-controller).
+// Returns true if any field was changed.
+func applyLegacyFieldsCleared(rsp *v1alpha1.ReplicatedStoragePool) bool {
+	changed := false
+	if rsp.Status.Phase != "" {
+		rsp.Status.Phase = ""
+		changed = true
+	}
+	if rsp.Status.Reason != "" {
+		rsp.Status.Reason = ""
+		changed = true
+	}
+	return changed
+}
+
 // applyEligibleNodesAndIncrementRevisionIfChanged updates eligible nodes in RSP status
 // and increments revision if nodes changed. Returns true if changed.
 func applyEligibleNodesAndIncrementRevisionIfChanged(
@@ -526,10 +550,15 @@ func buildLVGByNodeMap(
 		result[nodeName] = append(result[nodeName], entry)
 	}
 
-	// Sort LVGs by name for deterministic output.
+	// Sort LVGs by (name, thinPoolName) for deterministic output.
+	// Both keys are needed because the same LVG name can appear multiple
+	// times with different thin pools (valid for LVMThin type).
 	for nodeName := range result {
 		sort.Slice(result[nodeName], func(i, j int) bool {
-			return result[nodeName][i].Name < result[nodeName][j].Name
+			if result[nodeName][i].Name != result[nodeName][j].Name {
+				return result[nodeName][i].Name < result[nodeName][j].Name
+			}
+			return result[nodeName][i].ThinPoolName < result[nodeName][j].ThinPoolName
 		})
 	}
 

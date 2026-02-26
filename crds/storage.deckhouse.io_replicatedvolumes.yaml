@@ -22,17 +22,32 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='IOReady')].status
       name: IOReady
       type: string
+    - jsonPath: .status.conditions[?(@.type=='Quorum')].status
+      name: Quorum
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Scheduled')].status
+      name: Scheduled
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Configured')].status
+      name: Configured
+      type: string
     - jsonPath: .spec.size
       name: Size
       type: string
-    - jsonPath: .status.actualSize
-      name: ActualSize
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - jsonPath: .status.conditions[?(@.type=='ConfigurationReady')].status
+      name: ConfigurationReady
+      priority: 1
       type: string
-    - jsonPath: .status.diskfulReplicaCount
-      name: DiskfulReplicas
+    - jsonPath: .status.conditions[?(@.type=='SatisfyEligibleNodes')].status
+      name: SatisfyEligibleNodes
+      priority: 1
       type: string
-    - jsonPath: .status.phase
-      name: Phase
+    - jsonPath: .spec.replicatedStorageClassName
+      name: StorageClass
+      priority: 1
       type: string
     name: v1alpha1
     schema:
@@ -57,6 +72,24 @@ spec:
             type: object
           spec:
             properties:
+              maxAttachments:
+                default: 1
+                description: |-
+                  MaxAttachments is the maximum number of nodes this volume can be attached to simultaneously.
+
+                  WARNING: Values greater than 1 enable multi-attach mode. In this mode the block device
+                  is writable from multiple nodes concurrently. The consuming application MUST guarantee
+                  that it never writes to the same disk regions from different nodes simultaneously.
+                  In particular:
+                    - Mounting the volume as a regular filesystem (ext4, xfs, etc.) from more than one node
+                      is NOT safe unless ALL mounts are read-only. Use a cluster-aware filesystem (e.g. GFS2,
+                      OCFS2) or application-level coordination instead.
+                    - Concurrent writes to overlapping regions from different nodes produce UNDEFINED behavior:
+                      different Diskful replicas may apply writes in different order, leading to divergent data.
+                    - Use at your own risk and with full understanding of the implications.
+                maximum: 32
+                minimum: 1
+                type: integer
               replicatedStorageClassName:
                 minLength: 1
                 type: string
@@ -66,7 +99,11 @@ spec:
                 - type: string
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
+                x-kubernetes-validations:
+                - message: size must be greater than 0
+                  rule: quantity(string(self)).isGreaterThan(quantity('0'))
             required:
+            - maxAttachments
             - replicatedStorageClassName
             - size
             type: object
@@ -146,16 +183,31 @@ spec:
                 properties:
                   replication:
                     description: Replication is the resolved replication mode.
+                    enum:
+                    - None
+                    - Availability
+                    - Consistency
+                    - ConsistencyAndAvailability
                     type: string
                   storagePoolName:
                     description: StoragePoolName is the name of the ReplicatedStoragePool
                       used by this RSC.
+                    minLength: 1
                     type: string
                   topology:
                     description: Topology is the resolved topology setting.
+                    enum:
+                    - TransZonal
+                    - Zonal
+                    - Ignored
                     type: string
                   volumeAccess:
                     description: VolumeAccess is the resolved volume access mode.
+                    enum:
+                    - Local
+                    - EventuallyLocal
+                    - PreferablyLocal
+                    - Any
                     type: string
                 required:
                 - replication
@@ -177,11 +229,6 @@ spec:
                 description: Datamesh is the computed datamesh configuration for the
                   volume.
                 properties:
-                  allowMultiattach:
-                    default: false
-                    description: AllowMultiattach enables multiattach mode for the
-                      datamesh.
-                    type: boolean
                   members:
                     default: []
                     description: Members is the list of datamesh members.
@@ -215,7 +262,7 @@ spec:
                             - address
                             - systemNetworkName
                             type: object
-                          maxItems: 16
+                          maxItems: 10
                           minItems: 1
                           type: array
                           x-kubernetes-list-type: atomic
@@ -291,18 +338,21 @@ spec:
                           1)) <= 31
                       - message: lvmVolumeGroupName can only be set for Diskful type
                           or when typeTransition is ToDiskful
-                        rule: size(self.lvmVolumeGroupName) == 0 || self.type == 'Diskful'
-                          || (has(self.typeTransition) && self.typeTransition == 'ToDiskful')
+                        rule: '!has(self.lvmVolumeGroupName) || self.type == ''Diskful''
+                          || (has(self.typeTransition) && self.typeTransition == ''ToDiskful'')'
                       - message: lvmVolumeGroupThinPoolName requires lvmVolumeGroupName
                           to be set
-                        rule: size(self.lvmVolumeGroupThinPoolName) == 0 || size(self.lvmVolumeGroupName)
-                          > 0
-                    maxItems: 24
+                        rule: '!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)'
+                    maxItems: 32
                     type: array
                     x-kubernetes-list-type: atomic
                     x-kubernetes-validations:
                     - message: members[].name must be unique
                       rule: self.all(x, self.exists_one(y, x.name == y.name))
+                  multiattach:
+                    default: false
+                    description: Multiattach enables multiattach mode for the datamesh.
+                    type: boolean
                   quorum:
                     default: 0
                     description: Quorum is the quorum value for the datamesh.
@@ -342,14 +392,13 @@ spec:
                     items:
                       maxLength: 64
                       type: string
-                    maxItems: 16
+                    maxItems: 10
                     type: array
                     x-kubernetes-list-type: atomic
                     x-kubernetes-validations:
                     - message: systemNetworkNames must be unique
                       rule: self.all(x, self.exists_one(y, x == y))
                 required:
-                - allowMultiattach
                 - members
                 - quorum
                 - quorumMinimumRedundancy
@@ -469,6 +518,15 @@ spec:
                       description: Message is an optional human-readable message about
                         the transition.
                       type: string
+                    replicaName:
+                      description: |-
+                        ReplicaName is the name of the replica this transition applies to.
+                        Required for Attach, Detach, AddAccessReplica, RemoveAccessReplica transitions.
+                        Must not be set for Formation, EnableMultiattach, DisableMultiattach.
+                      maxLength: 123
+                      minLength: 1
+                      pattern: ^.+-([0-9]|[12][0-9]|3[01])$
+                      type: string
                     startedAt:
                       description: StartedAt is the timestamp when this transition
                         started.
@@ -476,6 +534,14 @@ spec:
                       type: string
                     type:
                       description: Type is the transition type.
+                      enum:
+                      - Formation
+                      - AddAccessReplica
+                      - Attach
+                      - Detach
+                      - DisableMultiattach
+                      - EnableMultiattach
+                      - RemoveAccessReplica
                       type: string
                   required:
                   - startedAt
@@ -490,29 +556,16 @@ spec:
                       Formation
                     rule: self.type != 'Formation' || !has(self.datameshRevision)
                       || self.datameshRevision == 0
+                  - message: replicaName is required for Attach, Detach, AddAccessReplica,
+                      RemoveAccessReplica transitions
+                    rule: self.type == 'Formation' || self.type == 'EnableMultiattach'
+                      || self.type == 'DisableMultiattach' || has(self.replicaName)
+                  - message: replicaName must not be set for Formation, EnableMultiattach,
+                      DisableMultiattach transitions
+                    rule: '!has(self.replicaName) || !(self.type == ''Formation''
+                      || self.type == ''EnableMultiattach'' || self.type == ''DisableMultiattach'')'
                 type: array
                 x-kubernetes-list-type: atomic
-              desiredAttachTo:
-                description: |-
-                  DesiredAttachTo is the desired set of nodes where the volume should be attached (up to 2 nodes).
-                  It is computed by controllers from ReplicatedVolumeAttachment (RVA) objects.
-                items:
-                  type: string
-                maxItems: 2
-                type: array
-                x-kubernetes-list-type: atomic
-                x-kubernetes-validations:
-                - message: desiredAttachTo must be unique
-                  rule: self.all(x, self.exists_one(y, x == y))
-              drbd:
-                properties:
-                  config:
-                    properties:
-                      allowTwoPrimaries:
-                        default: false
-                        type: boolean
-                    type: object
-                type: object
               eligibleNodesViolations:
                 description: EligibleNodesViolations lists replicas placed on non-eligible
                   nodes.

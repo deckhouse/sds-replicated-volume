@@ -50,11 +50,14 @@ const (
 	// ReplicatedVolumeReplicaCondDRBDConfiguredType indicates whether the replica's DRBD is fully configured
 	// for the current datamesh revision.
 	//
-	// "DRBDConfigured" (Status=True) means:
+	// True: DRBD is fully configured:
 	//   - DRBD was configured to match the intended state derived from this datamesh revision.
 	//   - Backing volume (if Diskful) was configured: exists and matches intended LVG/ThinPool/Size.
 	//   - Backing volume (if Diskful) is ready: reported ready and actual size >= intended size.
 	//   - DRBD agent confirmed successful configuration.
+	// Unknown: configuration is in progress (agent is applying configuration, waiting for addresses, etc.).
+	// False: configuration is not complete due to a known blocking condition
+	//        (agent not ready, configuration failed, waiting for prerequisites).
 	//
 	// Note: "configured" does NOT mean:
 	//   - DRBD connections are established (happens asynchronously after configuration).
@@ -93,9 +96,9 @@ const (
 	// matches the intended state from spec.
 	//
 	// True: replica is a datamesh member and its actual configuration matches spec.
+	// Unknown: cannot determine configuration state (e.g., waiting for ReplicatedVolume).
 	// False: there are pending changes (join/leave/role change/backing volume change)
 	//        or prerequisites are not met (scheduling, eligibility).
-	// Unknown: configuration data is not yet available.
 	// Absent: replica is being deleted and is no longer a datamesh member.
 	//
 	// Reasons describe the pending operation or blocking condition.
@@ -103,39 +106,42 @@ const (
 	ReplicatedVolumeReplicaCondConfiguredReasonConfigured                 = "Configured"                 // Replica is configured as intended.
 	ReplicatedVolumeReplicaCondConfiguredReasonNodeNotEligible            = "NodeNotEligible"            // Node is not in the eligible nodes list of the storage pool.
 	ReplicatedVolumeReplicaCondConfiguredReasonPendingBackingVolumeChange = "PendingBackingVolumeChange" // Waiting to change backing volume.
-	ReplicatedVolumeReplicaCondConfiguredReasonPendingConfiguration       = "PendingConfiguration"       // Configuration data is not yet available (e.g., RSP not found).
 	ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin                = "PendingJoin"                // Waiting to join the datamesh.
 	ReplicatedVolumeReplicaCondConfiguredReasonPendingLeave               = "PendingLeave"               // Waiting to leave the datamesh (during deletion).
 	ReplicatedVolumeReplicaCondConfiguredReasonPendingRoleChange          = "PendingRoleChange"          // Waiting to change role in the datamesh.
 	ReplicatedVolumeReplicaCondConfiguredReasonPendingScheduling          = "PendingScheduling"          // Waiting for node or storage assignment.
 	ReplicatedVolumeReplicaCondConfiguredReasonStorageNotEligible         = "StorageNotEligible"         // Intended storage (LVG/ThinPool) is not eligible on the node.
+	ReplicatedVolumeReplicaCondConfiguredReasonWaitingForReplicatedVolume = "WaitingForReplicatedVolume" // Waiting for ReplicatedVolume to be ready.
 )
 
 const (
 	// ReplicatedVolumeReplicaCondFullyConnectedType indicates whether the replica is fully connected to all peers.
 	//
 	// Reasons describe connection state or applicability.
-	ReplicatedVolumeReplicaCondFullyConnectedType                        = "FullyConnected"
-	ReplicatedVolumeReplicaCondFullyConnectedReasonAgentNotReady         = "AgentNotReady"         // Agent is not ready.
-	ReplicatedVolumeReplicaCondFullyConnectedReasonApplyingConfiguration = "ApplyingConfiguration" // Configuration is being applied.
-	ReplicatedVolumeReplicaCondFullyConnectedReasonConnectedToAllPeers   = "ConnectedToAllPeers"   // All peers are connected but not all paths are established.
-	ReplicatedVolumeReplicaCondFullyConnectedReasonFullyConnected        = "FullyConnected"        // Fully connected to all peers on all paths.
-	ReplicatedVolumeReplicaCondFullyConnectedReasonNoPeers               = "NoPeers"               // No peers configured.
-	ReplicatedVolumeReplicaCondFullyConnectedReasonNotApplicable         = "NotApplicable"         // No DRBDR exists.
-	ReplicatedVolumeReplicaCondFullyConnectedReasonNotConnected          = "NotConnected"          // Not connected to any peer.
-	ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected    = "PartiallyConnected"    // Connected to some but not all peers.
+	ReplicatedVolumeReplicaCondFullyConnectedType                      = "FullyConnected"
+	ReplicatedVolumeReplicaCondFullyConnectedReasonAgentNotReady       = "AgentNotReady"       // Agent is not ready.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonConnectedToAllPeers = "ConnectedToAllPeers" // All peers are connected but not all paths are established.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonFullyConnected      = "FullyConnected"      // Fully connected to all peers on all paths.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonNoPeers             = "NoPeers"             // No peers configured.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonSoleMember          = "SoleMember"          // Sole datamesh member, no peers expected.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonNotConnected        = "NotConnected"        // Not connected to any peer.
+	ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected  = "PartiallyConnected"  // Connected to some but not all peers.
 )
 
 const (
 	// ReplicatedVolumeReplicaCondReadyType indicates whether the replica is ready for I/O.
 	//
 	// Reasons describe why it is not ready, or confirm it is ready.
-	ReplicatedVolumeReplicaCondReadyType                        = "Ready"
-	ReplicatedVolumeReplicaCondReadyReasonAgentNotReady         = "AgentNotReady"         // Agent is not ready.
-	ReplicatedVolumeReplicaCondReadyReasonApplyingConfiguration = "ApplyingConfiguration" // Configuration is being applied.
-	ReplicatedVolumeReplicaCondReadyReasonDeleting              = "Deleting"              // Replica is being deleted.
-	ReplicatedVolumeReplicaCondReadyReasonQuorumLost            = "QuorumLost"            // Quorum is lost.
-	ReplicatedVolumeReplicaCondReadyReasonReady                 = "Ready"                 // Ready for I/O.
+	ReplicatedVolumeReplicaCondReadyType                             = "Ready"
+	ReplicatedVolumeReplicaCondReadyReasonAgentNotReady              = "AgentNotReady"              // Agent is not ready.
+	ReplicatedVolumeReplicaCondReadyReasonApplyingConfiguration      = "ApplyingConfiguration"      // Configuration is being applied.
+	ReplicatedVolumeReplicaCondReadyReasonDeleting                   = "Deleting"                   // Replica is being deleted.
+	ReplicatedVolumeReplicaCondReadyReasonPendingDatameshJoin        = "PendingDatameshJoin"        // Not a datamesh member; quorum not applicable.
+	ReplicatedVolumeReplicaCondReadyReasonPendingScheduling          = "PendingScheduling"          // Waiting for node assignment.
+	ReplicatedVolumeReplicaCondReadyReasonQuorumLost                 = "QuorumLost"                 // Quorum is lost.
+	ReplicatedVolumeReplicaCondReadyReasonQuorumViaPeers             = "QuorumViaPeers"             // Diskless replica; quorum provided by connected peers.
+	ReplicatedVolumeReplicaCondReadyReasonReady                      = "Ready"                      // Ready for I/O.
+	ReplicatedVolumeReplicaCondReadyReasonWaitingForReplicatedVolume = "WaitingForReplicatedVolume" // Waiting for ReplicatedVolume to be ready.
 )
 
 const (
@@ -143,22 +149,26 @@ const (
 	// the eligible nodes requirements from its storage pool.
 	//
 	// Reasons describe mismatch type or confirmation of satisfaction.
-	ReplicatedVolumeReplicaCondSatisfyEligibleNodesType                         = "SatisfyEligibleNodes"
-	ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonLVMVolumeGroupMismatch = "LVMVolumeGroupMismatch" // Node is eligible, but LVMVolumeGroup is not in the allowed list for this node.
-	ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonNodeMismatch           = "NodeMismatch"           // Node is not in the eligible nodes list.
-	ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonPendingConfiguration   = "PendingConfiguration"   // Configuration not yet available (e.g., ReplicatedStoragePool not found).
-	ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied              = "Satisfied"              // Replica satisfies eligible nodes requirements.
-	ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonThinPoolMismatch       = "ThinPoolMismatch"       // Node and LVMVolumeGroup are eligible, but ThinPool is not allowed for this LVMVolumeGroup.
+	ReplicatedVolumeReplicaCondSatisfyEligibleNodesType                             = "SatisfyEligibleNodes"
+	ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonLVMVolumeGroupMismatch     = "LVMVolumeGroupMismatch"     // Node is eligible, but LVMVolumeGroup is not in the allowed list for this node.
+	ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonNodeMismatch               = "NodeMismatch"               // Node is not in the eligible nodes list.
+	ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied                  = "Satisfied"                  // Replica satisfies eligible nodes requirements.
+	ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonThinPoolMismatch           = "ThinPoolMismatch"           // Node and LVMVolumeGroup are eligible, but ThinPool is not allowed for this LVMVolumeGroup.
+	ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonWaitingForReplicatedVolume = "WaitingForReplicatedVolume" // Waiting for ReplicatedVolume or ReplicatedStoragePool to be ready.
 )
 
 const (
-	// ReplicatedVolumeReplicaCondScheduledType indicates whether the replica has been scheduled to a node.
+	// ReplicatedVolumeReplicaCondScheduledType indicates whether the replica has been fully
+	// scheduled: node, LVM volume group, and (for thin pools) thin pool name are all assigned.
+	//
+	// A replica with a node but no LVG/ThinPool (e.g., after a replica type change)
+	// is considered partially scheduled; the scheduler will resolve the remaining
+	// fields in a subsequent reconciliation.
 	//
 	// Reasons describe scheduling outcome or failure.
-	ReplicatedVolumeReplicaCondScheduledType                            = "Scheduled"
-	ReplicatedVolumeReplicaCondScheduledReasonNoAvailableNodes          = "NoAvailableNodes"          // No nodes are available.
-	ReplicatedVolumeReplicaCondScheduledReasonReplicaScheduled          = "ReplicaScheduled"          // Scheduled successfully.
-	ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed          = "SchedulingFailed"          // Scheduling failed.
-	ReplicatedVolumeReplicaCondScheduledReasonSchedulingPending         = "SchedulingPending"         // Scheduling is pending.
-	ReplicatedVolumeReplicaCondScheduledReasonTopologyConstraintsFailed = "TopologyConstraintsFailed" // Topology constraints prevent scheduling.
+	ReplicatedVolumeReplicaCondScheduledType                             = "Scheduled"
+	ReplicatedVolumeReplicaCondScheduledReasonExtenderUnavailable        = "ExtenderUnavailable"        // Scheduler extender is unavailable; scheduling will be retried.
+	ReplicatedVolumeReplicaCondScheduledReasonScheduled                  = "Scheduled"                  // Node, LVG, and ThinPool (if applicable) are all assigned.
+	ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed           = "SchedulingFailed"           // No suitable candidate found (no available nodes/LVGs, all filtered out, etc.).
+	ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume = "WaitingForReplicatedVolume" // Waiting for ReplicatedVolume to be ready.
 )

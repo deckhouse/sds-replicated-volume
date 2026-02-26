@@ -1,3 +1,4 @@
+{{- if .Values.sdsReplicatedVolume.newControlPlane }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -151,3 +152,4 @@ roleRef:
   kind: Role
   name: controller
   apiGroup: rbac.authorization.k8s.io
+{{- end }}

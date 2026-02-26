@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -28,8 +28,8 @@ import (
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=".spec.state"
-// +kubebuilder:printcolumn:name="Role",type=string,JSONPath=".status.role"
-// +kubebuilder:printcolumn:name="Type",type=string,JSONPath=".spec.type"
+// +kubebuilder:printcolumn:name="Role",type=string,JSONPath=".status.activeConfiguration.role"
+// +kubebuilder:printcolumn:name="Type",type=string,JSONPath=".status.activeConfiguration.type"
 // +kubebuilder:printcolumn:name="DiskState",type=string,JSONPath=".status.diskState"
 // +kubebuilder:printcolumn:name="Quorum",type=boolean,JSONPath=".status.quorum"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
@@ -48,14 +48,14 @@ type DRBDResource struct {
 
 // GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It returns the root object's `.status.conditions`.
-func (drbdr *DRBDResource) GetStatusConditions() []metav1.Condition {
-	return drbdr.Status.Conditions
+func (d *DRBDResource) GetStatusConditions() []metav1.Condition {
+	return d.Status.Conditions
 }
 
 // SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
 // It sets the root object's `.status.conditions`.
-func (drbdr *DRBDResource) SetStatusConditions(conditions []metav1.Condition) {
-	drbdr.Status.Conditions = conditions
+func (d *DRBDResource) SetStatusConditions(conditions []metav1.Condition) {
+	d.Status.Conditions = conditions
 }
 
 // +kubebuilder:object:generate=true
@@ -79,7 +79,7 @@ type DRBDResourceSpec struct {
 
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:MaxItems=10
 	// +kubebuilder:validation:items:MaxLength=64
 	// +listType=set
 	SystemNetworks []string `json:"systemNetworks"`
@@ -187,7 +187,7 @@ type DRBDResourcePeer struct {
 
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))",message="paths[].systemNetworkName must be unique"
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:MaxItems=10
 	// +listType=atomic
 	Paths []DRBDResourcePath `json:"paths"`
 }
@@ -225,12 +225,19 @@ type DRBDResourceStatus struct {
 	Device string `json:"device,omitempty"`
 
 	// DeviceIOSuspended indicates whether I/O is suspended on the device.
-	// Only set when attached (device is present).
+	// Only present on primary
 	// +optional
 	DeviceIOSuspended *bool `json:"deviceIOSuspended,omitempty"`
 
+	// DeviceOpen indicates whether the block device is currently open by a process
+	// (bd_openers > 0). Reflects DRBD's "open: yes/no" from drbdsetup status.
+	// When true, demotion to Secondary will fail.
+	// Only present on primary
+	// +optional
+	DeviceOpen *bool `json:"deviceOpen,omitempty"`
+
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))",message="addresses[].systemNetworkName must be unique"
-	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:MaxItems=10
 	// +listType=atomic
 	// +optional
 	Addresses []DRBDResourceAddressStatus `json:"addresses,omitempty"`
@@ -325,7 +332,7 @@ type DRBDResourcePeerStatus struct {
 	NodeID uint `json:"nodeID"`
 
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))",message="paths[].systemNetworkName must be unique"
-	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:MaxItems=10
 	// +listType=atomic
 	// +optional
 	Paths []DRBDResourcePathStatus `json:"paths,omitempty"`

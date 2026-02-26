@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/controlleroptions"
 )
 
 const (
@@ -60,7 +61,10 @@ func BuildController(mgr manager.Manager) error {
 			rvEventHandler(),
 			builder.WithPredicates(rvPredicates()...),
 		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+			RateLimiter:             controlleroptions.DefaultRateLimiter(),
+		}).
 		Complete(rec)
 }
 

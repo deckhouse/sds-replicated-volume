@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Run Go lint
-        uses: deckhouse/modules-actions/go_linter@v2
+        uses: deckhouse/modules-actions/go_linter@v4
 
   go_tests:
     name: Go tests for images
@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Run Go tests
-        uses: deckhouse/modules-actions/go_tests@v2
+        uses: deckhouse/modules-actions/go_tests@v4
 
   go_test_coverage:
     name: Go test coverage for images
@@ -41,7 +41,7 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Run Go test coverage count
-        uses: deckhouse/modules-actions/go_test_coverage@v2
+        uses: deckhouse/modules-actions/go_test_coverage@v4
 
   go_modules_check:
     name: Go modules version
@@ -52,4 +52,4 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Run Go modules version check
-        uses: deckhouse/modules-actions/go_modules_check@v2
+        uses: deckhouse/modules-actions/go_modules_check@v4

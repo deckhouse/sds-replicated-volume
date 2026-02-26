@@ -26,9 +26,16 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 // +kubebuilder:metadata:labels=heritage=deckhouse
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:metadata:labels=backup.deckhouse.io/cluster-config=true
-// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="Reason",type=string,priority=1,JSONPath=`.status.reason`
-// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,description="The age of this resource"
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
+// +kubebuilder:printcolumn:name="Replication",type=string,JSONPath=`.spec.replication`
+// +kubebuilder:printcolumn:name="Topology",type=string,JSONPath=`.spec.topology`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:printcolumn:name="StoragePool",type=string,priority=1,JSONPath=`.status.storagePoolName`
+// +kubebuilder:printcolumn:name="StoragePoolReady",type=string,priority=1,JSONPath=`.status.conditions[?(@.type=='StoragePoolReady')].status`
+// +kubebuilder:printcolumn:name="ConfigRolledOut",type=string,priority=1,JSONPath=`.status.conditions[?(@.type=='ConfigurationRolledOut')].status`
+// +kubebuilder:printcolumn:name="VolsSatisfyEN",type=string,priority=1,JSONPath=`.status.conditions[?(@.type=='VolumesSatisfyEligibleNodes')].status`
+// +kubebuilder:printcolumn:name="VolumeAccess",type=string,priority=1,JSONPath=`.spec.volumeAccess`
+// +kubebuilder:printcolumn:name="Volumes",type=integer,priority=1,JSONPath=`.status.volumes.total`
 type ReplicatedStorageClass struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -121,7 +128,7 @@ type ReplicatedStorageClassSpec struct {
 	// - Availability, ConsistencyAndAvailability: at least 3 zones required
 	// - Consistency: at least 2 zones required
 	//
-	// When replication is 'None' (topology 'Ignored'), zones act as a node constraint
+	// When replication is 'None', zones act as a node constraint
 	// limiting where the single replica can be placed.
 	// +kubebuilder:validation:MaxItems=10
 	// +kubebuilder:validation:items:MaxLength=63
@@ -138,6 +145,7 @@ type ReplicatedStorageClassSpec struct {
 	//
 	// TODO(systemnetwork): Currently only "Internal" (default node network) is supported.
 	// Custom network support requires NetworkNode watch implementation in the controller.
+	// When multi-network support is implemented, raise MaxItems to 10.
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=1
 	// +kubebuilder:validation:Items={type=string,maxLength=64}
@@ -160,7 +168,7 @@ type ReplicatedStorageClassSpec struct {
 }
 
 // ReplicatedStorageClassStorage defines the storage backend configuration for RSC.
-// +kubebuilder:validation:XValidation:rule="self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, size(g.thinPoolName) > 0)",message="thinPoolName is required for each lvmVolumeGroups entry when type is LVMThin"
+// +kubebuilder:validation:XValidation:rule="self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, has(g.thinPoolName) && size(g.thinPoolName) > 0)",message="thinPoolName is required for each lvmVolumeGroups entry when type is LVMThin"
 // +kubebuilder:validation:XValidation:rule="self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName) || size(g.thinPoolName) == 0)",message="thinPoolName must not be specified when type is LVM"
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassStorage struct {
@@ -386,12 +394,16 @@ func (p ReplicatedStorageClassPhase) String() string {
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassConfiguration struct {
 	// Topology is the resolved topology setting.
+	// +kubebuilder:validation:Enum=TransZonal;Zonal;Ignored
 	Topology ReplicatedStorageClassTopology `json:"topology"`
 	// Replication is the resolved replication mode.
+	// +kubebuilder:validation:Enum=None;Availability;Consistency;ConsistencyAndAvailability
 	Replication ReplicatedStorageClassReplication `json:"replication"`
 	// VolumeAccess is the resolved volume access mode.
+	// +kubebuilder:validation:Enum=Local;EventuallyLocal;PreferablyLocal;Any
 	VolumeAccess ReplicatedStorageClassVolumeAccess `json:"volumeAccess"`
 	// StoragePoolName is the name of the ReplicatedStoragePool used by this RSC.
+	// +kubebuilder:validation:MinLength=1
 	StoragePoolName string `json:"storagePoolName"`
 }
 

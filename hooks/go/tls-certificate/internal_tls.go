@@ -163,7 +163,7 @@ type SelfSignedCertValues struct {
 	KeySize      int
 	SANs         []string
 	Usages       []string
-	CAExpiry     string
+	CAExpiry     time.Duration
 	CertExpiry   time.Duration
 }
 
@@ -231,7 +231,8 @@ func GenerateNewSelfSignedTLS(input SelfSignedCertValues) (*certificate.Certific
 			input.CACN,
 			certificate.WithKeyAlgo(input.KeyAlgorithm),
 			certificate.WithKeySize(input.KeySize),
-			certificate.WithCAExpiry(input.CAExpiry))
+			certificate.WithCAExpiry(input.CAExpiry),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("generate ca: %w", err)
 		}

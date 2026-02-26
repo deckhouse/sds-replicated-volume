@@ -27,7 +27,7 @@ go run -mod=mod sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19 \
     paths=./v1alpha1
 
 # remove development dependencies
-go mod tidy -go=1.24.11
+go mod tidy -go=1.25.7
 
 # validate generated CRDs (CEL cost budget, schema correctness)
 go run ../hack/validate-crds.go ../crds

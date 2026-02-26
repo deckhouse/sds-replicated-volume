@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,20 +20,37 @@ import (
 	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdr"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdrop"
 )
 
-var registry []func(mgr manager.Manager) error
+// BuildAll builds all controllers.
+// isEnabled is a filter function: if it returns false for a controller name,
+// that controller is skipped. When ENABLED_CONTROLLERS env is not set,
+// isEnabled returns true for all names (all controllers are started).
+func BuildAll(mgr manager.Manager, isEnabled func(string) bool) error {
+	log := mgr.GetLogger().WithName("controller-registry")
 
-func init() {
-	// ...
-}
+	type builder struct {
+		name  string
+		build func(mgr manager.Manager) error
+	}
+	builders := []builder{
+		{name: drbdr.ControllerName, build: drbdr.BuildController},
+		{name: drbdrop.ControllerName, build: drbdrop.BuildController},
+	}
 
-func BuildAll(mgr manager.Manager) error {
-	for i, buildCtl := range registry {
-		err := buildCtl(mgr)
-		if err != nil {
-			return fmt.Errorf("building controller %d: %w", i, err)
+	for _, b := range builders {
+		if !isEnabled(b.name) {
+			log.Info("controller disabled, skipping", "controller", b.name)
+			continue
+		}
+		log.Info("building controller", "controller", b.name)
+		if err := b.build(mgr); err != nil {
+			return fmt.Errorf("building controller %s: %w", b.name, err)
 		}
 	}
+
 	return nil
 }

@@ -21,17 +21,42 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.phase
-      name: Phase
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
       type: string
-    - jsonPath: .status.reason
-      name: Reason
-      priority: 1
+    - jsonPath: .spec.replication
+      name: Replication
       type: string
-    - description: The age of this resource
-      jsonPath: .metadata.creationTimestamp
+    - jsonPath: .spec.topology
+      name: Topology
+      type: string
+    - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.storagePoolName
+      name: StoragePool
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='StoragePoolReady')].status
+      name: StoragePoolReady
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='ConfigurationRolledOut')].status
+      name: ConfigRolledOut
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='VolumesSatisfyEligibleNodes')].status
+      name: VolsSatisfyEN
+      priority: 1
+      type: string
+    - jsonPath: .spec.volumeAccess
+      name: VolumeAccess
+      priority: 1
+      type: string
+    - jsonPath: .status.volumes.total
+      name: Volumes
+      priority: 1
+      type: integer
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -279,8 +304,8 @@ spec:
                 x-kubernetes-validations:
                 - message: thinPoolName is required for each lvmVolumeGroups entry
                     when type is LVMThin
-                  rule: self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, size(g.thinPoolName)
-                    > 0)
+                  rule: self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, has(g.thinPoolName)
+                    && size(g.thinPoolName) > 0)
                 - message: thinPoolName must not be specified when type is LVM
                   rule: self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName)
                     || size(g.thinPoolName) == 0)
@@ -300,6 +325,7 @@ spec:
                   At least one network name must be specified. Each name is limited to 64 characters.
 
                   Custom network support requires NetworkNode watch implementation in the controller.
+                  When multi-network support is implemented, raise MaxItems to 10.
                 items:
                   type: string
                 maxItems: 1
@@ -354,7 +380,7 @@ spec:
                   - Availability, ConsistencyAndAvailability: at least 3 zones required
                   - Consistency: at least 2 zones required
 
-                  When replication is 'None' (topology 'Ignored'), zones act as a node constraint
+                  When replication is 'None', zones act as a node constraint
                   limiting where the single replica can be placed.
                 items:
                   maxLength: 63
@@ -459,16 +485,31 @@ spec:
                 properties:
                   replication:
                     description: Replication is the resolved replication mode.
+                    enum:
+                    - None
+                    - Availability
+                    - Consistency
+                    - ConsistencyAndAvailability
                     type: string
                   storagePoolName:
                     description: StoragePoolName is the name of the ReplicatedStoragePool
                       used by this RSC.
+                    minLength: 1
                     type: string
                   topology:
                     description: Topology is the resolved topology setting.
+                    enum:
+                    - TransZonal
+                    - Zonal
+                    - Ignored
                     type: string
                   volumeAccess:
                     description: VolumeAccess is the resolved volume access mode.
+                    enum:
+                    - Local
+                    - EventuallyLocal
+                    - PreferablyLocal
+                    - Any
                     type: string
                 required:
                 - replication

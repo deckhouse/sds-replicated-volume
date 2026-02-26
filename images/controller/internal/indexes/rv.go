@@ -71,7 +71,7 @@ func RegisterRVByStoragePoolName(mgr manager.Manager) error {
 			if !ok {
 				return nil
 			}
-			if rv.Status.Configuration == nil || rv.Status.Configuration.StoragePoolName == "" {
+			if rv.Status.Configuration == nil {
 				return nil
 			}
 			return []string{rv.Status.Configuration.StoragePoolName}

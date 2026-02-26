@@ -32,19 +32,20 @@ import (
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:selectablefield:JSONPath=.spec.nodeName
 // +kubebuilder:selectablefield:JSONPath=.spec.replicatedVolumeName
-// +kubebuilder:printcolumn:name="Volume",type=string,JSONPath=".spec.replicatedVolumeName"
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=".spec.type"
-// +kubebuilder:printcolumn:name="Attached",type=string,JSONPath=".status.conditions[?(@.type=='Attached')].status"
-// +kubebuilder:printcolumn:name="Online",type=string,JSONPath=".status.conditions[?(@.type=='Online')].status"
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
+// +kubebuilder:printcolumn:name="Configured",type=string,JSONPath=".status.conditions[?(@.type=='Configured')].status"
 // +kubebuilder:printcolumn:name="DRBDConfigured",type=string,JSONPath=".status.conditions[?(@.type=='DRBDConfigured')].status"
-// +kubebuilder:printcolumn:name="DataInitialized",type=string,JSONPath=".status.conditions[?(@.type=='DataInitialized')].status"
-// +kubebuilder:printcolumn:name="InQuorum",type=string,JSONPath=".status.conditions[?(@.type=='InQuorum')].status"
-// +kubebuilder:printcolumn:name="InSync",type=string,JSONPath=".status.syncProgress"
+// +kubebuilder:printcolumn:name="DataUpToDate",type=string,JSONPath=".status.conditions[?(@.type=='BackingVolumeUpToDate')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="Scheduled",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='Scheduled')].status"
+// +kubebuilder:printcolumn:name="Attached",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='Attached')].status"
+// +kubebuilder:printcolumn:name="FullyConnected",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='FullyConnected')].status"
+// +kubebuilder:printcolumn:name="BVReady",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='BackingVolumeReady')].status"
+// +kubebuilder:printcolumn:name="SatisfyEligibleNodes",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='SatisfyEligibleNodes')].status"
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.startsWith(self.spec.replicatedVolumeName + '-')",message="metadata.name must start with spec.replicatedVolumeName + '-'"
-// +kubebuilder:validation:XValidation:rule="int(self.metadata.name.substring(self.metadata.name.lastIndexOf('-') + 1)) <= 31",message="numeric suffix must be between 0 and 31"
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.substring(size(self.spec.replicatedVolumeName) + 1).matches('^[0-9][0-9]?$') && int(self.metadata.name.substring(size(self.spec.replicatedVolumeName) + 1)) <= 31",message="metadata.name must be exactly spec.replicatedVolumeName + '-' + id where id is 0..31"
 // +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 123",message="metadata.name must be at most 123 characters (to fit derived LLV name with prefix)"
 type ReplicatedVolumeReplica struct {
 	metav1.TypeMeta `json:",inline"`
@@ -77,56 +78,57 @@ func (rvr *ReplicatedVolumeReplica) SetStatusConditions(conditions []metav1.Cond
 	rvr.Status.Conditions = conditions
 }
 
-// NodeID extracts NodeID from the RVR name (e.g., "pvc-xxx-5" → 5).
+// ID extracts ID from the RVR name (e.g., "pvc-xxx-5" → 5).
 // Result is cached after first successful call
-func (rvr *ReplicatedVolumeReplica) NodeID() uint8 {
-	return nodeIDFromName(rvr.Name)
+func (rvr *ReplicatedVolumeReplica) ID() uint8 {
+	return idFromName(rvr.Name)
 }
 
-// nodeIDSuffixes is a lookup table for nodeID (0-31) to "-N" suffix conversion.
-var nodeIDSuffixes = [32]string{
+// idSuffixes is a lookup table for ID (0-31) to "-N" suffix conversion.
+var idSuffixes = [32]string{
 	"-0", "-1", "-2", "-3", "-4", "-5", "-6", "-7",
 	"-8", "-9", "-10", "-11", "-12", "-13", "-14", "-15",
 	"-16", "-17", "-18", "-19", "-20", "-21", "-22", "-23",
 	"-24", "-25", "-26", "-27", "-28", "-29", "-30", "-31",
 }
 
-// FormatReplicatedVolumeReplicaName returns the RVR name for the given RV name and nodeID.
-// Panics if nodeID > 31.
-func FormatReplicatedVolumeReplicaName(rvName string, nodeID uint8) string {
-	if nodeID > 31 {
-		panic("nodeID must be in range 0-31")
+// FormatReplicatedVolumeReplicaName returns the RVR name for the given RV name and ID.
+// Panics if id > 31.
+func FormatReplicatedVolumeReplicaName(rvName string, id uint8) string {
+	if id > 31 {
+		panic("id must be in range 0-31")
 	}
-	return rvName + nodeIDSuffixes[nodeID]
+	return rvName + idSuffixes[id]
 }
 
-// SetNameWithNodeID sets the RVR name using the ReplicatedVolumeName and the given NodeID.
-func (rvr *ReplicatedVolumeReplica) SetNameWithNodeID(nodeID uint8) {
-	rvr.Name = FormatReplicatedVolumeReplicaName(rvr.Spec.ReplicatedVolumeName, nodeID)
+// SetNameWithID sets the RVR name using the ReplicatedVolumeName and the given ID.
+func (rvr *ReplicatedVolumeReplica) SetNameWithID(id uint8) {
+	rvr.Name = FormatReplicatedVolumeReplicaName(rvr.Spec.ReplicatedVolumeName, id)
 }
 
-// ChooseNewName selects the first available NodeID and sets the RVR name.
-// Returns false if all NodeIDs (0-31) are already taken by other RVRs.
+// ChooseNewName selects the first available ID and sets the RVR name.
+// Returns false if all IDs (0-31) are already taken by other RVRs.
 func (rvr *ReplicatedVolumeReplica) ChooseNewName(otherRVRs []*ReplicatedVolumeReplica) bool {
-	// Bitmask for reserved NodeIDs (0-31 fit in uint32).
+	// Bitmask for reserved IDs (0-31 fit in uint32).
 	var reserved uint32
 
 	for _, otherRVR := range otherRVRs {
 		if otherRVR.Spec.ReplicatedVolumeName != rvr.Spec.ReplicatedVolumeName {
 			continue
 		}
-		reserved |= 1 << otherRVR.NodeID()
+		reserved |= 1 << otherRVR.ID()
 	}
 
 	free := ^reserved
 	if free == 0 {
 		return false
 	}
-	rvr.SetNameWithNodeID(uint8(bits.TrailingZeros32(free)))
+	rvr.SetNameWithID(uint8(bits.TrailingZeros32(free)))
 	return true
 }
 
 // +kubebuilder:object:generate=true
+// +kubebuilder:validation:XValidation:rule="self.type != 'Access' || has(self.nodeName)",message="nodeName is required for Access type"
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || has(self.nodeName)",message="lvmVolumeGroupName requires nodeName to be set"
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || self.type == 'Diskful'",message="lvmVolumeGroupName can only be set for Diskful type"
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be set"
@@ -198,7 +200,7 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:MaxItems=10
 	// +listType=atomic
 	// +optional
 	Addresses []DRBDResourceAddressStatus `json:"addresses,omitempty"`
@@ -264,7 +266,7 @@ type ReplicatedVolumeReplicaStatus struct {
 
 	// Peers contains the status of connections to peer replicas.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="peers[].name must be unique"
-	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:MaxItems=31
 	// +listType=atomic
 	// +optional
 	Peers []ReplicatedVolumeReplicaStatusPeerStatus `json:"peers,omitempty"`
@@ -285,6 +287,9 @@ type ReplicatedVolumeReplicaStatusAttachment struct {
 
 	// IOSuspended indicates whether I/O is suspended on the device.
 	IOSuspended bool `json:"ioSuspended"`
+
+	// InUse indicates whether the replica's block device is currently in use by a process.
+	InUse bool `json:"inUse"`
 }
 
 // ReplicatedVolumeReplicaStatusBackingVolume contains information about the backing LVM logical volume.
@@ -357,7 +362,7 @@ type ReplicatedVolumeReplicaStatusPeerStatus struct {
 
 	// ConnectionEstablishedOn lists system network names where connection to this peer is established.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="connectionEstablishedOn must be unique"
-	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:MaxItems=10
 	// +kubebuilder:validation:items:MaxLength=64
 	// +listType=atomic
 	// +optional
@@ -376,9 +381,9 @@ type ReplicatedVolumeReplicaStatusPeerStatus struct {
 	ReplicationState ReplicationState `json:"replicationState,omitempty"`
 }
 
-// NodeID extracts NodeID from the peer name (e.g., "pvc-xxx-5" → 5).
-func (p ReplicatedVolumeReplicaStatusPeerStatus) NodeID() uint8 {
-	return nodeIDFromName(p.Name)
+// ID extracts ID from the peer name (e.g., "pvc-xxx-5" → 5).
+func (p ReplicatedVolumeReplicaStatusPeerStatus) ID() uint8 {
+	return idFromName(p.Name)
 }
 
 // ReplicatedVolumeReplicaStatusDRBDRReconciliationCache holds cached values used to optimize DRBDResource reconciliation.
@@ -761,15 +766,15 @@ func ParseConnectionState(s string) ConnectionState {
 	}
 }
 
-// DRBD node ID constants for ReplicatedVolumeReplica
+// ID range constants for ReplicatedVolumeReplica
 const (
-	// RVRMinNodeID is the minimum valid node ID for DRBD configuration in ReplicatedVolumeReplica
-	RVRMinNodeID = uint8(0)
-	// RVRMaxNodeID is the maximum valid node ID for DRBD configuration in ReplicatedVolumeReplica
-	RVRMaxNodeID = uint8(31)
+	// RVRMinID is the minimum valid ID for ReplicatedVolumeReplica
+	RVRMinID = uint8(0)
+	// RVRMaxID is the maximum valid ID for ReplicatedVolumeReplica
+	RVRMaxID = uint8(31)
 )
 
-// IsValidNodeID checks if nodeID is within valid range [RVRMinNodeID; RVRMaxNodeID].
-func IsValidNodeID(nodeID uint8) bool {
-	return nodeID >= RVRMinNodeID && nodeID <= RVRMaxNodeID
+// IsValidID checks if id is within valid range [RVRMinID; RVRMaxID].
+func IsValidID(id uint8) bool {
+	return id >= RVRMinID && id <= RVRMaxID
 }

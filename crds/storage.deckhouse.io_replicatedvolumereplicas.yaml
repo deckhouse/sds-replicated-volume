@@ -19,39 +19,47 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.replicatedVolumeName
-      name: Volume
-      type: string
     - jsonPath: .spec.nodeName
       name: Node
       type: string
     - jsonPath: .spec.type
       name: Type
       type: string
-    - jsonPath: .status.conditions[?(@.type=='Attached')].status
-      name: Attached
-      type: string
-    - jsonPath: .status.conditions[?(@.type=='Online')].status
-      name: Online
-      type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Configured')].status
+      name: Configured
       type: string
     - jsonPath: .status.conditions[?(@.type=='DRBDConfigured')].status
       name: DRBDConfigured
       type: string
-    - jsonPath: .status.conditions[?(@.type=='DataInitialized')].status
-      name: DataInitialized
-      type: string
-    - jsonPath: .status.conditions[?(@.type=='InQuorum')].status
-      name: InQuorum
-      type: string
-    - jsonPath: .status.syncProgress
-      name: InSync
+    - jsonPath: .status.conditions[?(@.type=='BackingVolumeUpToDate')].status
+      name: DataUpToDate
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.conditions[?(@.type=='Scheduled')].status
+      name: Scheduled
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Attached')].status
+      name: Attached
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='FullyConnected')].status
+      name: FullyConnected
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='BackingVolumeReady')].status
+      name: BVReady
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='SatisfyEligibleNodes')].status
+      name: SatisfyEligibleNodes
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -115,6 +123,8 @@ spec:
             - type
             type: object
             x-kubernetes-validations:
+            - message: nodeName is required for Access type
+              rule: self.type != 'Access' || has(self.nodeName)
             - message: lvmVolumeGroupName requires nodeName to be set
               rule: '!has(self.lvmVolumeGroupName) || has(self.nodeName)'
             - message: lvmVolumeGroupName can only be set for Diskful type
@@ -148,7 +158,7 @@ spec:
                   - address
                   - systemNetworkName
                   type: object
-                maxItems: 32
+                maxItems: 10
                 type: array
                 x-kubernetes-list-type: atomic
               attachment:
@@ -163,12 +173,17 @@ spec:
                     maxLength: 256
                     minLength: 1
                     type: string
+                  inUse:
+                    description: InUse indicates whether the replica's block device
+                      is currently in use by a process.
+                    type: boolean
                   ioSuspended:
                     description: IOSuspended indicates whether I/O is suspended on
                       the device.
                     type: boolean
                 required:
                 - devicePath
+                - inUse
                 - ioSuspended
                 type: object
               backingVolume:
@@ -362,7 +377,7 @@ spec:
                       items:
                         maxLength: 64
                         type: string
-                      maxItems: 16
+                      maxItems: 10
                       type: array
                       x-kubernetes-list-type: atomic
                       x-kubernetes-validations:
@@ -394,7 +409,7 @@ spec:
                   required:
                   - name
                   type: object
-                maxItems: 32
+                maxItems: 31
                 type: array
                 x-kubernetes-list-type: atomic
                 x-kubernetes-validations:
@@ -457,8 +472,10 @@ spec:
         x-kubernetes-validations:
         - message: metadata.name must start with spec.replicatedVolumeName + '-'
           rule: self.metadata.name.startsWith(self.spec.replicatedVolumeName + '-')
-        - message: numeric suffix must be between 0 and 31
-          rule: int(self.metadata.name.substring(self.metadata.name.lastIndexOf('-')
+        - message: metadata.name must be exactly spec.replicatedVolumeName + '-' +
+            id where id is 0..31
+          rule: self.metadata.name.substring(size(self.spec.replicatedVolumeName)
+            + 1).matches('^[0-9][0-9]?$') && int(self.metadata.name.substring(size(self.spec.replicatedVolumeName)
             + 1)) <= 31
         - message: metadata.name must be at most 123 characters (to fit derived LLV
             name with prefix)

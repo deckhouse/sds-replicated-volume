@@ -29,13 +29,13 @@ import (
 
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 )
 
 type managerConfig interface {
 	HealthProbeBindAddress() string
 	MetricsBindAddress() string
+	IsControllerEnabled(name string) bool
 }
 
 func newManager(
@@ -68,10 +68,6 @@ func newManager(
 		return nil, u.LogError(log, fmt.Errorf("creating manager: %w", err))
 	}
 
-	if err := indexes.RegisterIndexes(ctx, mgr); err != nil {
-		return nil, u.LogError(log, fmt.Errorf("registering indexes: %w", err))
-	}
-
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		return nil, u.LogError(log, fmt.Errorf("AddHealthzCheck: %w", err))
 	}
@@ -80,7 +76,7 @@ func newManager(
 		return nil, u.LogError(log, fmt.Errorf("AddReadyzCheck: %w", err))
 	}
 
-	if err := controllers.BuildAll(mgr); err != nil {
+	if err := controllers.BuildAll(mgr, cfg.IsControllerEnabled); err != nil {
 		return nil, err
 	}
 
