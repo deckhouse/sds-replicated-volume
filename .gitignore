@@ -38,6 +38,7 @@ hack.sh
 **/Dockerfile-dev
 .secret
 images/**/Makefile
+.env.json
 
 # local caches (Cursor/Go/direnv, etc.)
 .cache/
