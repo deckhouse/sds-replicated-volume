@@ -1,0 +1,4 @@
+# Extend centralized base config
+[extend]
+useDefault = false
+path = "/tmp/gitleaks.base.toml"
