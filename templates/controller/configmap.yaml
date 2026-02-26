@@ -1,13 +1,31 @@
+{{- if .Values.sdsReplicatedVolume.newControlPlane }}
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: d8-{{ .Chart.Name }}-controller-config
+  name: controller-config
   namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-controller")) | nindent 2 }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "controller")) | nindent 2 }}
 data:
+  drbdMinPort: "{{ $.Values.sdsReplicatedVolume.drbdPortRange.minPort }}"
+  drbdMaxPort: "{{ $.Values.sdsReplicatedVolume.drbdPortRange.maxPort }}"
 {{- if has "virtualization" .Values.global.enabledModules }}
   virtualizationEnabled: "true"
 {{- else }}
   virtualizationEnabled: "false"
+{{- end }}
+  slogh.cfg: |
+    # those are all keys with default values:
+
+    # any slog level, or just a number
+    level=INFO
+
+    # also supported: "text"
+    format=json
+
+    # for each log print "source" property with information about callsite
+    callsite=true
+
+    render=true
+    stringValues=true
 {{- end }}

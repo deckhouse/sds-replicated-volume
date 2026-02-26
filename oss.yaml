@@ -26,6 +26,13 @@
   description: DRBD userspace utilities for DRBD 9.x (and 8.4, 8.3). User-space tools and daemons for managing and configuring DRBD resources.
   license: GPL-2.0
 
+- id: LVM2
+  version: "2_03_38"
+  name: LVM2
+  link: https://github.com/lvmteam/lvm2
+  description: Logical Volume Manager. Used by agent image for dmsetup.
+  license: GPL-2.0
+
 - id: LINSTOR_AFFINITY_CONTROLLER
   version: "0.3.0"
   name: linstor-affinity-controller

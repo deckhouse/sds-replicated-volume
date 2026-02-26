@@ -1,0 +1,387 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  labels:
+    backup.deckhouse.io/cluster-config: "true"
+    heritage: deckhouse
+    module: sds-replicated-volume
+  name: replicatedstoragepools.storage.deckhouse.io
+spec:
+  group: storage.deckhouse.io
+  names:
+    kind: ReplicatedStoragePool
+    listKind: ReplicatedStoragePoolList
+    plural: replicatedstoragepools
+    shortNames:
+    - rsp
+    singular: replicatedstoragepool
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.type
+      name: Type
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - description: The age of this resource
+      jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ReplicatedStoragePool is a Kubernetes Custom Resource that defines
+          a configuration for Linstor Storage-pools.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: Defines desired rules for Linstor's Storage-pools.
+            properties:
+              eligibleNodesPolicy:
+                default:
+                  notReadyGracePeriod: 10m
+                description: |-
+                  EligibleNodesPolicy defines policies for managing eligible nodes.
+                  Always present with defaults.
+                properties:
+                  notReadyGracePeriod:
+                    default: 10m
+                    description: |-
+                      NotReadyGracePeriod specifies how long to wait before removing
+                      a not-ready node from the eligible nodes list.
+                    type: string
+                required:
+                - notReadyGracePeriod
+                type: object
+              lvmVolumeGroups:
+                description: |-
+                  An array of names of LVMVolumeGroup resources, whose Volume Groups/Thin-pools will be used to allocate
+                  the required space.
+
+                  > Note that every LVMVolumeGroup resource has to have the same type Thin/Thick
+                  as it is in current resource's 'Spec.Type' field.
+                items:
+                  properties:
+                    name:
+                      description: Selected LVMVolumeGroup resource's name.
+                      minLength: 1
+                      pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
+                      type: string
+                    thinPoolName:
+                      description: Selected Thin-pool name.
+                      maxLength: 128
+                      minLength: 1
+                      pattern: ^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$
+                      type: string
+                  required:
+                  - name
+                  type: object
+                minItems: 1
+                type: array
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: Value is immutable.
+                  rule: self == oldSelf
+              nodeLabelSelector:
+                description: |-
+                  NodeLabelSelector filters nodes eligible for storage pool participation.
+                  Only nodes matching this selector can store data.
+                  If not specified, all nodes with matching LVMVolumeGroups are candidates.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: Value is immutable.
+                  rule: self == oldSelf
+                - message: 'matchExpressions[].operator must be one of: In, NotIn,
+                    Exists, DoesNotExist'
+                  rule: '!has(self.matchExpressions) || self.matchExpressions.all(e,
+                    e.operator in [''In'', ''NotIn'', ''Exists'', ''DoesNotExist''])'
+                - message: matchExpressions[].values must be empty for Exists/DoesNotExist
+                    operators, non-empty for In/NotIn
+                  rule: '!has(self.matchExpressions) || self.matchExpressions.all(e,
+                    (e.operator in [''Exists'', ''DoesNotExist'']) ? (!has(e.values)
+                    || size(e.values) == 0) : (has(e.values) && size(e.values) > 0))'
+              systemNetworkNames:
+                default:
+                - Internal
+                description: |-
+                  SystemNetworkNames specifies network names used for DRBD replication traffic.
+                  At least one network name must be specified. Each name is limited to 64 characters.
+
+                  Custom network support requires NetworkNode watch implementation in the controller.
+                  When multi-network support is implemented, raise MaxItems to 10.
+                items:
+                  type: string
+                maxItems: 1
+                minItems: 1
+                type: array
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: Only 'Internal' network is currently supported
+                  rule: self.all(n, n == 'Internal')
+              type:
+                description: |-
+                  Defines the volumes type. Might be:
+                  - LVM (for Thick)
+                  - LVMThin (for Thin)
+                enum:
+                - LVM
+                - LVMThin
+                type: string
+                x-kubernetes-validations:
+                - message: Value is immutable.
+                  rule: self == oldSelf
+              zones:
+                description: Array of zones the Storage pool's volumes should be replicated
+                  in.
+                items:
+                  maxLength: 63
+                  type: string
+                maxItems: 10
+                type: array
+                x-kubernetes-list-type: set
+                x-kubernetes-validations:
+                - message: Value is immutable.
+                  rule: self == oldSelf
+            required:
+            - eligibleNodesPolicy
+            - lvmVolumeGroups
+            - systemNetworkNames
+            - type
+            type: object
+            x-kubernetes-map-type: atomic
+            x-kubernetes-validations:
+            - message: thinPoolName is required for each lvmVolumeGroups entry when
+                type is LVMThin
+              rule: self.type != 'LVMThin' || self.lvmVolumeGroups.all(g, has(g.thinPoolName)
+                && size(g.thinPoolName) > 0)
+            - message: thinPoolName must not be specified when type is LVM
+              rule: self.type != 'LVM' || self.lvmVolumeGroups.all(g, !has(g.thinPoolName)
+                || size(g.thinPoolName) == 0)
+          status:
+            description: Displays current information about the state of the LINSTOR
+              storage pool.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              eligibleNodes:
+                description: EligibleNodes lists nodes eligible for this storage pool.
+                items:
+                  description: ReplicatedStoragePoolEligibleNode represents a node
+                    eligible for placing volumes of this storage pool.
+                  properties:
+                    agentReady:
+                      description: AgentReady indicates whether the sds-replicated-volume
+                        agent on this node is ready.
+                      type: boolean
+                    lvmVolumeGroups:
+                      description: LVMVolumeGroups lists LVM volume groups available
+                        on this node.
+                      items:
+                        description: ReplicatedStoragePoolEligibleNodeLVMVolumeGroup
+                          represents an LVM volume group on an eligible node.
+                        properties:
+                          name:
+                            description: Name is the LVMVolumeGroup resource name.
+                            maxLength: 253
+                            type: string
+                          ready:
+                            description: Ready indicates whether the LVMVolumeGroup
+                              (and its thin pool, if applicable) is ready.
+                            type: boolean
+                          thinPoolName:
+                            description: ThinPoolName is the thin pool name (for LVMThin
+                              storage pools).
+                            maxLength: 128
+                            type: string
+                          unschedulable:
+                            description: Unschedulable indicates whether new volumes
+                              should not use this volume group.
+                            type: boolean
+                        required:
+                        - name
+                        - ready
+                        - unschedulable
+                        type: object
+                      maxItems: 50
+                      type: array
+                      x-kubernetes-list-type: atomic
+                    nodeName:
+                      description: NodeName is the Kubernetes node name.
+                      maxLength: 253
+                      type: string
+                    nodeReady:
+                      description: NodeReady indicates whether the Kubernetes node
+                        is ready.
+                      type: boolean
+                    unschedulable:
+                      description: Unschedulable indicates whether new volumes should
+                        not be scheduled to this node.
+                      type: boolean
+                    zoneName:
+                      description: ZoneName is the zone this node belongs to.
+                      maxLength: 63
+                      type: string
+                  required:
+                  - agentReady
+                  - nodeName
+                  - nodeReady
+                  - unschedulable
+                  type: object
+                maxItems: 1000
+                type: array
+                x-kubernetes-list-type: atomic
+              eligibleNodesRevision:
+                description: EligibleNodesRevision is incremented when eligible nodes
+                  change.
+                format: int64
+                type: integer
+              phase:
+                description: Phase is used only by the old controller and will be
+                  removed in a future version.
+                type: string
+              reason:
+                description: Reason is used only by the old controller and will be
+                  removed in a future version.
+                type: string
+              usedBy:
+                description: UsedBy tracks which resources are using this storage
+                  pool.
+                properties:
+                  replicatedStorageClassNames:
+                    description: ReplicatedStorageClassNames lists RSC names using
+                      this storage pool.
+                    items:
+                      maxLength: 253
+                      type: string
+                    maxItems: 100
+                    type: array
+                    x-kubernetes-list-type: atomic
+                type: object
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

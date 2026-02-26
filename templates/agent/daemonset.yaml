@@ -1,0 +1,175 @@
+{{- define "sds_replicated_volume_agent_resources" }}
+cpu: 50m
+memory: 50Mi
+{{- end }}
+
+{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: agent
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "agent")) | nindent 2 }}
+spec:
+  targetRef:
+    apiVersion: "apps/v1"
+    kind: DaemonSet
+    name: agent
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: "agent"
+      minAllowed:
+        {{- include "sds_replicated_volume_agent_resources" . | nindent 8 }}
+      maxAllowed:
+        cpu: 200m
+        memory: 100Mi
+{{- end }}
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: agent
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "agent")) | nindent 2 }}
+spec:
+  selector:
+    matchLabels:
+      app: agent
+  template:
+    metadata:
+      name: agent
+      namespace: d8-{{ .Chart.Name }}
+      {{- include "helm_lib_module_labels" (list . (dict "app" "agent")) | nindent 6 }}
+    spec:
+      {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 6 }}
+      {{- include "helm_lib_tolerations" (tuple . "any-node" "storage-problems") | nindent 6 }}
+      {{- include "helm_lib_module_pod_security_context_run_as_user_root" . | nindent 6 }}
+      affinity: {}
+      nodeSelector:
+        storage.deckhouse.io/sds-replicated-volume-node: ""
+      dnsPolicy: ClusterFirstWithHostNet
+      imagePullSecrets:
+        - name: {{ .Chart.Name }}-module-registry
+      serviceAccountName: agent
+      hostNetwork: true
+      containers:
+      - name: agent
+        image: {{ include "helm_lib_module_image" (list . "agent") }}
+        imagePullPolicy: IfNotPresent
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            host: 127.0.0.1
+            port: 4269
+            scheme: HTTP
+          initialDelaySeconds: 5
+          failureThreshold: 2
+          periodSeconds: 1
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            host: 127.0.0.1
+            port: 4269
+            scheme: HTTP
+          periodSeconds: 1
+          failureThreshold: 3
+        env:
+          - name: NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+          - name: SLOGH_CONFIG_PATH
+            value: "/etc/config/slogh.cfg"
+        securityContext:
+          privileged: true
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - mountPath: /dev/
+          name: host-device-dir
+        - mountPath: /sys/
+          name: sys-dir
+        - mountPath: /etc/config/
+          name: config
+        - mountPath: /var/run/drbd/lock/
+          name: var-run-drbd-lock
+        ports:
+          - containerPort: 4215
+            hostPort: 4215
+            name: prometheus
+            protocol: TCP
+        resources:
+          requests:
+            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
+            {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+              {{- include "sds_replicated_volume_agent_resources" . | nindent 12 }}
+            {{- end }}
+      - name: kube-rbac-proxy
+        image: {{ include "helm_lib_module_common_image" (list . "kubeRbacProxy") }}
+        imagePullPolicy: IfNotPresent
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        args:
+          - --secure-listen-address=$(KUBE_RBAC_PROXY_LISTEN_ADDRESS):4215
+          - --v=2
+          - --logtostderr=true
+          - --stale-cache-interval=1h30m
+          - "--livez-path=/livez"
+        env:
+          - name: KUBE_RBAC_PROXY_LISTEN_ADDRESS
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: status.podIP
+          - name: KUBE_RBAC_PROXY_CONFIG
+            value: |
+              upstreams:
+              - upstream: http://127.0.0.1:4215
+                path: /
+                authorization:
+                  resourceAttributes:
+                    namespace: d8-{{ .Chart.Name }}
+                    apiGroup: apps
+                    apiVersion: v1
+                    resource: daemonsets
+                    subresource: prometheus-metrics
+                    name: agent
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: 4215
+            scheme: HTTPS
+        readinessProbe:
+          httpGet:
+            path: /livez
+            port: 4215
+            scheme: HTTPS
+        resources:
+          requests:
+            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
+            {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+              {{- include "helm_lib_container_kube_rbac_proxy_resources" . | nindent 12 }}
+            {{- end }}
+        {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 8 }}
+      volumes:
+      - hostPath:
+          path: /dev/
+          type: ""
+        name: host-device-dir
+      - hostPath:
+          path: /sys/
+          type: Directory
+        name: sys-dir
+      - name: config
+        configMap:
+          name: agent-config
+          items:
+            - key: slogh.cfg
+              path: slogh.cfg
+      - name: var-run-drbd-lock
+        emptyDir: {}
+{{- end }}

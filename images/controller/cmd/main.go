@@ -18,162 +18,71 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
-	goruntime "runtime"
+	"time"
 
-	lapi "github.com/LINBIT/golinstor/client"
-	v1 "k8s.io/api/core/v1"
-	sv1 "k8s.io/api/storage/v1"
-	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	apiruntime "k8s.io/apimachinery/pkg/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	controllerruntime "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"github.com/go-logr/logr"
+	"golang.org/x/sync/errgroup"
+	crlog "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/linstor"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/config"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/pkg/controller"
-	kubutils "github.com/deckhouse/sds-replicated-volume/images/controller/pkg/kubeutils"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/pkg/logger"
-)
-
-var (
-	resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
-		srv.AddToScheme,
-		snc.AddToScheme,
-		linstor.AddToScheme,
-		clientgoscheme.AddToScheme,
-		extv1.AddToScheme,
-		v1.AddToScheme,
-		sv1.AddToScheme,
-	}
+	"github.com/deckhouse/sds-common-lib/slogh"
+	u "github.com/deckhouse/sds-common-lib/utils"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/env"
 )
 
 func main() {
-	ctx := context.Background()
+	ctx := signals.SetupSignalHandler()
 
-	cfgParams, err := config.NewConfig()
-	if err != nil {
-		fmt.Println("unable to create NewConfig " + err.Error())
-	}
+	slogh.EnableConfigReload(ctx, nil)
+	logHandler := &slogh.Handler{}
+	log := slog.New(logHandler).
+		With("startedAt", time.Now().Format(time.RFC3339))
+	slog.SetDefault(log)
 
-	log, err := logger.NewLogger(cfgParams.Loglevel)
-	if err != nil {
-		fmt.Printf("unable to create NewLogger, err: %v\n", err)
+	crlog.SetLogger(logr.FromSlogHandler(logHandler))
+
+	log.Info("controller app started")
+
+	err := run(ctx, log)
+	if !errors.Is(err, context.Canceled) || ctx.Err() != context.Canceled {
+		log.Error("exited unexpectedly", "err", err, "ctxerr", ctx.Err())
 		os.Exit(1)
 	}
+	log.Info(
+		"gracefully shutdown",
+		// cleanup errors do not affect status code, but worth logging
+		"err", err,
+	)
+}
 
-	log.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
-	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
+func run(ctx context.Context, log *slog.Logger) (err error) {
+	// The derived Context is canceled the first time a function passed to eg.Go
+	// returns a non-nil error or the first time Wait returns
+	eg, ctx := errgroup.WithContext(ctx)
 
-	// Create default config Kubernetes client
-	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
+	envConfig, err := env.GetConfig()
 	if err != nil {
-		log.Error(err, "error by reading a kubernetes configuration")
+		return fmt.Errorf("getting env config: %w", err)
 	}
-	log.Info("read Kubernetes config")
 
-	// Setup scheme for all resources
-	scheme := apiruntime.NewScheme()
-	for _, f := range resourcesSchemeFuncs {
-		err := f(scheme)
-		if err != nil {
-			log.Error(err, "failed to add to scheme")
-			os.Exit(1)
+	// MANAGER
+	mgr, err := newManager(ctx, log, envConfig)
+	if err != nil {
+		return err
+	}
+
+	eg.Go(func() error {
+		if err := mgr.Start(ctx); err != nil {
+			return u.LogError(log, fmt.Errorf("starting controller: %w", err))
 		}
-	}
-	log.Info("read scheme CR")
+		return ctx.Err()
+	})
 
-	cacheOpt := cache.Options{
-		DefaultNamespaces: map[string]cache.Config{
-			cfgParams.ControllerNamespace: {},
-		},
-	}
+	// ...
 
-	managerOpts := manager.Options{
-		Scheme: scheme,
-		// MetricsBindAddress: cfgParams.MetricsPort,
-		HealthProbeBindAddress:  cfgParams.HealthProbeBindAddress,
-		Cache:                   cacheOpt,
-		LeaderElection:          true,
-		LeaderElectionNamespace: cfgParams.ControllerNamespace,
-		LeaderElectionID:        config.ControllerName,
-	}
-
-	mgr, err := manager.New(kConfig, managerOpts)
-	if err != nil {
-		log.Error(err, "failed to create a manager")
-		os.Exit(1)
-	}
-	log.Info("created kubernetes manager in namespace: " + cfgParams.ControllerNamespace)
-
-	controllerruntime.SetLogger(log.GetLogger())
-	lc, err := lapi.NewClient(lapi.Log(log))
-	if err != nil {
-		log.Error(err, "failed to create a linstor client")
-		os.Exit(1)
-	}
-
-	if _, err := controller.NewLinstorNode(mgr, lc, cfgParams.ConfigSecretName, cfgParams.ScanInterval, *log); err != nil {
-		log.Error(err, "failed to create the NewLinstorNode controller")
-		os.Exit(1)
-	}
-	log.Info("the NewLinstorNode controller starts")
-
-	if _, err := controller.NewReplicatedStorageClass(mgr, cfgParams, *log); err != nil {
-		log.Error(err, "failed to create the NewReplicatedStorageClass controller")
-		os.Exit(1)
-	}
-	log.Info("the NewReplicatedStorageClass controller starts")
-
-	if _, err := controller.NewReplicatedStoragePool(mgr, lc, cfgParams.ScanInterval, *log); err != nil {
-		log.Error(err, "failed to create the NewReplicatedStoragePool controller")
-		os.Exit(1)
-	}
-	log.Info("the NewReplicatedStoragePool controller starts")
-
-	if err = controller.NewLinstorPortRangeWatcher(mgr, lc, cfgParams.ScanInterval, *log); err != nil {
-		log.Error(err, "failed to create the NewLinstorPortRangeWatcher controller")
-		os.Exit(1)
-	}
-	log.Info("the NewLinstorPortRangeWatcher controller starts")
-
-	if err = controller.NewLinstorLeader(mgr, cfgParams.LinstorLeaseName, cfgParams.ScanInterval, *log); err != nil {
-		log.Error(err, "failed to create the NewLinstorLeader controller")
-		os.Exit(1)
-	}
-	log.Info("the NewLinstorLeader controller starts")
-
-	if err = controller.NewStorageClassAnnotationsReconciler(mgr, cfgParams.ScanInterval, *log); err != nil {
-		log.Error(err, "failed to create the NewStorageClassAnnotationsReconciler controller")
-		os.Exit(1)
-	}
-
-	controller.NewLinstorResourcesWatcher(mgr, lc, cfgParams.LinstorResourcesReconcileInterval, *log)
-	log.Info("the NewLinstorResourcesWatcher controller starts")
-
-	controller.RunReplicatedStorageClassWatcher(mgr, lc, cfgParams.ReplicatedStorageClassWatchInterval, *log)
-	log.Info("the RunReplicatedStorageClassWatcher controller starts")
-
-	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		log.Error(err, "unable to set up health check")
-		os.Exit(1)
-	}
-	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		log.Error(err, "unable to set up ready check")
-		os.Exit(1)
-	}
-
-	err = mgr.Start(ctx)
-	if err != nil {
-		log.Error(err, "error by starting the manager")
-		os.Exit(1)
-	}
-
-	log.Info("starting the manager")
+	return eg.Wait()
 }

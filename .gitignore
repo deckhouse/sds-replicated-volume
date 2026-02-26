@@ -34,6 +34,17 @@ __pycache__/
 .pytest_cache/
 
 # dev
-images/sds-replicated-volume-controller/dev/Dockerfile-dev
-images/sds-replicated-volume-controller/src/Makefile
 hack.sh
+**/Dockerfile-dev
+.secret
+images/**/Makefile
+
+# local caches (Cursor/Go/direnv, etc.)
+.cache/
+.direnv/
+.gocache/
+
+# test data
+images/agent/pkg/drbdconf/testdata/out/
+test.log
+.env.json
