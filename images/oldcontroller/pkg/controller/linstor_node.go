@@ -647,7 +647,7 @@ func ReconcileKubernetesNodeLabels(
 	}
 
 	for labelKey := range kubernetesNode.Labels {
-		if strings.HasPrefix(labelKey, "deleted_const") {
+		if strings.HasPrefix(labelKey, StorageClassLabelKeyPrefix) {
 			if _, existsInStorageClassesLabels := storageClassesLabelsForNode[labelKey]; !existsInStorageClassesLabels {
 				labelsToRemove[labelKey] = ""
 			}
@@ -684,7 +684,7 @@ func GetStorageClassesLabelsForNode(kubernetesNode v1.Node, replicatedStorageCla
 		}
 		for _, zone := range replicatedStorageClass.Spec.Zones {
 			if zone == kubernetesNode.Labels[srv.ZoneLabel] {
-				storageClassLabelKey := fmt.Sprintf("%s/%s", "deleted_const", replicatedStorageClass.Name)
+				storageClassLabelKey := fmt.Sprintf("%s/%s", StorageClassLabelKeyPrefix, replicatedStorageClass.Name)
 				storageClassesLabels = labels.Merge(storageClassesLabels, map[string]string{storageClassLabelKey: ""})
 				break
 			}

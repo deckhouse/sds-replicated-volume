@@ -3466,10 +3466,11 @@ var _ = Describe("Reconciler", func() {
 
 			var sc storagev1.StorageClass
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &sc)).To(Succeed())
-			// TODO: improve this check — currently we only verify the single expected parameter;
+			// TODO: improve this check — currently we only verify the expected parameters;
 			// consider a more robust assertion if additional parameters are introduced.
-			Expect(sc.Parameters).To(HaveLen(1))
+			Expect(sc.Parameters).To(HaveLen(2))
 			Expect(sc.Parameters).To(HaveKeyWithValue(v1alpha1.ReplicatedStorageClassParamNameKey, "rsc-1"))
+			Expect(sc.Parameters).To(HaveKeyWithValue(v1alpha1.StorageClassStoragePoolKey, "pool-1"))
 		})
 
 	})

@@ -276,6 +276,7 @@ func computeIntendedStorageClass(rsc *v1alpha1.ReplicatedStorageClass, virtualiz
 
 	params := map[string]string{
 		v1alpha1.ReplicatedStorageClassParamNameKey: rsc.Name,
+		v1alpha1.StorageClassStoragePoolKey:         rsc.Status.StoragePoolName,
 	}
 
 	var volumeBindingMode storagev1.VolumeBindingMode

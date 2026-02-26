@@ -56,6 +56,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		reclaimPolicy          = corev1.PersistentVolumeReclaimPolicy(controller.ReclaimPolicyRetain)
 		storageClassParameters = map[string]string{
 			srv.ReplicatedStorageClassParamNameKey: testName,
+			srv.StorageClassStoragePoolKey:         "test-sp",
 		}
 
 		validStorageClassResource = &storagev1.StorageClass{
