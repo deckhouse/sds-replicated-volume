@@ -439,38 +439,64 @@ func formatAddr(ip string, port uint) string {
 	return fmt.Sprintf("%s:%d", ip, port)
 }
 
-// computeResizeAction computes resize action if the intended size is larger than actual.
+// computeResizeAction computes resize action if the intended usable size is
+// larger than actual. The intended size is the lower volume (backing device)
+// size; it is converted to usable size by subtracting DRBD metadata overhead
+// before comparison.
+//
+// The resize command re-examines the backing device and uses whatever space is
+// available. If the backing device hasn't actually grown, drbdsetup returns
+// ErrResizeBackingNotGrown which ResizeAction treats as a no-op.
 func computeResizeAction(iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
-	// Skip if diskless or no intended size
 	if iState.Type() != v1alpha1.DRBDResourceTypeDiskful || iState.Size() == 0 {
 		return
 	}
 
-	// Need an existing volume to resize
 	if len(aState.Volumes()) == 0 {
 		return
 	}
 
 	actualVol := aState.Volumes()[0]
 
-	// Skip resize if volume has no backing disk or is diskless (not yet attached)
 	if actualVol.BackingDisk() == "" || actualVol.DiskState() == "Diskless" {
 		return
 	}
 
-	actualSize := actualVol.Size()
-	intendedSize := iState.Size()
-
-	// Only resize if intended size is larger (CEL validation prevents decrease)
-	if intendedSize > actualSize {
+	intendedUsable := drbdUsableSizeBytes(iState.Size())
+	if intendedUsable > actualVol.Size() {
 		minor := uint(actualVol.Minor())
-		res = append(res, ResizeAction{
-			Minor:     &minor,
-			SizeBytes: intendedSize,
-		})
+		res = append(res, ResizeAction{Minor: &minor})
 	}
 
 	return
+}
+
+// DRBD internal metadata size calculation.
+// Must stay in sync with images/controller/internal/drbd_size/drbd_size.go.
+const (
+	drbdMaxPeers          = 7
+	drbdSectorSize        = 512
+	drbdBmSectPerBit      = 8  // sectors per bitmap bit (1 << (12 - 9))
+	drbdSuperblockSectors = 8  // 4096 bytes / 512
+	drbdALSizeSectors     = 64 // 1 stripe * 32KB / 512
+)
+
+func drbdAlign(x, a uint64) uint64 {
+	return (x + a - 1) &^ (a - 1)
+}
+
+func drbdMetadataSectors(lowerSectors uint64) uint64 {
+	bits := drbdAlign(drbdAlign(lowerSectors, drbdBmSectPerBit)/drbdBmSectPerBit, 64)
+	bitmapSectors := drbdAlign(bits/8*drbdMaxPeers, 4096) / drbdSectorSize
+	return bitmapSectors + drbdSuperblockSectors + drbdALSizeSectors
+}
+
+// drbdUsableSizeBytes converts a lower volume (backing device) size in bytes
+// to the DRBD usable capacity in bytes, subtracting internal metadata overhead.
+func drbdUsableSizeBytes(lowerBytes int64) int64 {
+	lowerSectors := uint64(lowerBytes) / drbdSectorSize
+	usableSectors := lowerSectors - drbdMetadataSectors(lowerSectors)
+	return int64(usableSectors * drbdSectorSize)
 }
 
 // computeRoleAction computes role change action if actual role differs from intended.
