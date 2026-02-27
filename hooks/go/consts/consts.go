@@ -32,3 +32,22 @@ const (
 	DefaultCertExpiredDuration  = time.Hour * 24 * 365
 	DefaultCertOutdatedDuration = time.Hour * 24 * 30
 )
+
+var AllowedProvisioners = []string{
+	"replicated.csi.storage.deckhouse.io",
+}
+
+var WebhookConfigurationsToDelete = []string{}
+
+var CRGVKsForFinalizerRemoval = []CRGVK{
+	{Group: "storage.deckhouse.io", Version: "v1alpha1", Kind: "ReplicatedStorageClass", Namespaced: false},
+	{Group: "storage.deckhouse.io", Version: "v1alpha1", Kind: "ReplicatedStoragePool", Namespaced: false},
+	{Group: "storage.deckhouse.io", Version: "v1alpha1", Kind: "ReplicatedStorageMetadataBackup", Namespaced: false},
+}
+
+type CRGVK struct {
+	Group      string
+	Version    string
+	Kind       string
+	Namespaced bool
+}

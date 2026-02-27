@@ -1,0 +1,8 @@
+# Use default gitleaks rules + module allowlist
+[extend]
+useDefault = true
+
+[allowlist]
+paths = [
+  '''(?:^|/)images/.*\.patch$''',
+]
