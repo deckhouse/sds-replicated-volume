@@ -1,7 +1,6 @@
-# Extend centralized base config
+# Use default gitleaks rules + module allowlist
 [extend]
-useDefault = false
-path = "/tmp/gitleaks.base.toml"
+useDefault = true
 
 [allowlist]
 paths = [
