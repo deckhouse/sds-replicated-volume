@@ -2,3 +2,8 @@
 [extend]
 useDefault = false
 path = "/tmp/gitleaks.base.toml"
+
+[allowlist]
+paths = [
+  '''(?:^|/)images/.*\.patch$''',
+]
