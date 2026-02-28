@@ -256,7 +256,7 @@ Adds preconfigured replicas to the datamesh and waits for DRBD peer connections.
 **Steps:**
 1. Generate shared secret for DRBD peer authentication
 2. Add diskful replicas as datamesh members (with zone, addresses, LVG info)
-3. Set quorum parameters
+3. Set effective layout (FTT/GMDR from configuration) and quorum parameters
 4. Wait for all replicas to apply DRBD configuration (DRBDConfigured=True)
 5. Wait for all replicas to connect to each other (ConnectionState=Connected)
 6. Wait for data bootstrap readiness (BackingVolume=Inconsistent + Replication=Established)
@@ -287,7 +287,7 @@ When formation stalls (any safety check fails or progress timeout is exceeded), 
 2. Log error (formation timed out)
 3. Delete formation DRBDResourceOperation if exists
 4. Delete all replicas (with finalizer removal)
-5. Reset all status fields (Configuration, DatameshRevision, Datamesh, transitions)
+5. Reset all status fields (Configuration, DatameshRevision, Datamesh, EffectiveLayout, transitions)
 6. Re-derive configuration via `reconcileRVConfiguration` (to avoid ConfigurationReady condition flicker)
 7. Requeue for fresh start
 
@@ -565,7 +565,8 @@ flowchart TD
     CollectDiskful --> CheckMembers{Datamesh members<br/>already set?}
     CheckMembers -->|No| GenSecret[generateSharedSecret]
     GenSecret --> AddMembers["Add diskful replicas as datamesh members<br/>(zone, addresses, LVG from pending transition)"]
-    AddMembers --> SetQuorum[computeTargetQuorum]
+    AddMembers --> SetEL["Set EffectiveLayout<br/>(FTT/GMDR from configuration)"]
+    SetEL --> SetQuorum[computeTargetQuorum]
     SetQuorum --> IncrRevision["DatameshRevision++"]
     IncrRevision --> ReturnChanged([Return changed])
 
@@ -595,7 +596,8 @@ flowchart TD
 |--------|-------------|
 | `rv.Status.Datamesh.SharedSecret` | Generated DRBD shared secret |
 | `rv.Status.Datamesh.Members` | Datamesh member list |
-| `rv.Status.Datamesh.Quorum` | Quorum threshold |
+| `rv.Status.EffectiveLayout` | Set from Configuration (FTT/GMDR) |
+| `rv.Status.Datamesh.Quorum` | Quorum threshold (derived from EffectiveLayout) |
 | `rv.Status.DatameshRevision` | Incremented revision |
 
 ---

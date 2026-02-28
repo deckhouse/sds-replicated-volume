@@ -647,6 +647,28 @@ spec:
                       || self.type == ''EnableMultiattach'' || self.type == ''DisableMultiattach'')'
                 type: array
                 x-kubernetes-list-type: atomic
+              effectiveLayout:
+                description: |-
+                  EffectiveLayout tracks the FTT/GMDR levels that the datamesh actually
+                  provides. q and qmr are computed from these values, not from Configuration.
+                properties:
+                  failuresToTolerate:
+                    default: 0
+                    description: FailuresToTolerate is the effective FTT level.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                  guaranteedMinimumDataRedundancy:
+                    default: 0
+                    description: GuaranteedMinimumDataRedundancy is the effective
+                      GMDR level.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                required:
+                - failuresToTolerate
+                - guaranteedMinimumDataRedundancy
+                type: object
               eligibleNodesViolations:
                 description: EligibleNodesViolations lists replicas placed on non-eligible
                   nodes.
@@ -680,6 +702,7 @@ spec:
             required:
             - datamesh
             - datameshRevision
+            - effectiveLayout
             type: object
         required:
         - metadata

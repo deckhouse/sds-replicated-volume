@@ -595,6 +595,13 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 			})
 		}
 
+		// Set effective layout from the configuration that formation is building towards.
+		// Must be set before computeTargetQuorum, which derives q/qmr from it.
+		rv.Status.EffectiveLayout = v1alpha1.ReplicatedVolumeEffectiveLayout{
+			FailuresToTolerate:              rv.Status.Configuration.FailuresToTolerate,
+			GuaranteedMinimumDataRedundancy: rv.Status.Configuration.GuaranteedMinimumDataRedundancy,
+		}
+
 		// Quorum settings control DRBD split-brain prevention based on replica count.
 		quorum, quorumMinimumRedundancy := computeTargetQuorum(rv)
 		rv.Status.Datamesh.Quorum = quorum
@@ -961,6 +968,7 @@ func (r *Reconciler) reconcileFormationRestartIfTimeoutPassed(
 	rv.Status.ConfigurationObservedGeneration = 0
 	rv.Status.DatameshRevision = 0
 	rv.Status.Datamesh = v1alpha1.ReplicatedVolumeDatamesh{}
+	rv.Status.EffectiveLayout = v1alpha1.ReplicatedVolumeEffectiveLayout{}
 	rv.Status.DatameshTransitions = nil
 	rv.Status.DatameshPendingReplicaTransitions = nil
 
@@ -1490,22 +1498,24 @@ func computeIntendedDiskfulReplicaCount(rv *v1alpha1.ReplicatedVolume) byte {
 	return cfg.FailuresToTolerate + cfg.GuaranteedMinimumDataRedundancy + 1
 }
 
-// computeTargetQuorum computes Quorum and QuorumMinimumRedundancy.
+// computeTargetQuorum computes Quorum and QuorumMinimumRedundancy from the
+// effective layout (not from Configuration — those are the target, not reality).
 //
-//	qmr = GMDR + 1
-//	q   = floor(voters / 2) + 1, but at least floor(D / 2) + 1
-//	D   = FTT + GMDR + 1
+//	qmr = effective_GMDR + 1
+//	q   = floor(voters / 2) + 1, but at least floor(minD / 2) + 1
+//	minD = effective_FTT + effective_GMDR + 1
 func computeTargetQuorum(rv *v1alpha1.ReplicatedVolume) (q, qmr byte) {
-	d := computeIntendedDiskfulReplicaCount(rv)
+	el := rv.Status.EffectiveLayout
+	minD := el.FailuresToTolerate + el.GuaranteedMinimumDataRedundancy + 1
 
-	minQ := d/2 + 1
+	minQ := minD/2 + 1
 	voters := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
 		return m.Type.IsVoter()
 	})
 	quorum := byte(voters.Len()/2 + 1)
 	q = max(quorum, minQ)
 
-	qmr = rv.Status.Configuration.GuaranteedMinimumDataRedundancy + 1
+	qmr = el.GuaranteedMinimumDataRedundancy + 1
 
 	return q, qmr
 }
