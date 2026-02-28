@@ -70,7 +70,7 @@ func mkAttachRV(members []v1alpha1.DatameshMember, rev int64) *v1alpha1.Replicat
 			MaxAttachments: 1,
 		},
 		Status: v1alpha1.ReplicatedVolumeStatus{
-			Configuration:    &v1alpha1.ReplicatedStorageClassConfiguration{},
+			Configuration:    &v1alpha1.ReplicatedVolumeConfiguration{},
 			DatameshRevision: rev,
 			Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 				Members: members,
@@ -451,7 +451,7 @@ var _ = Describe("ensureDatameshAttachments intent", func() {
 		rv := mkAttachRV([]v1alpha1.DatameshMember{
 			mkAttachMember("rv-1-0", "node-1", false),
 		}, 10)
-		rv.Status.Configuration.StoragePoolName = "pool-1"
+		rv.Status.Configuration.ReplicatedStoragePoolName = "pool-1"
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
 

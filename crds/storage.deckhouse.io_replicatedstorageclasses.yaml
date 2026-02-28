@@ -82,6 +82,18 @@ spec:
             type: object
           spec:
             description: |-
+              Legacy replication validations (only fire when replication is set):
+
+              FTT/GMDR mutual exclusivity with replication:
+
+              FTT and GMDR must be specified together:
+
+              Valid FTT/GMDR combinations: |FTT - GMDR| <= 1:
+
+              FTT=0, GMDR=0 requires topology Ignored:
+
+              TransZonal zone count validations for FTT/GMDR:
+
               Defines a Kubernetes Storage class configuration.
 
               > Note that this field is in read-only mode.
@@ -178,6 +190,28 @@ spec:
                 required:
                 - notReadyGracePeriod
                 type: object
+              failuresToTolerate:
+                description: |-
+                  FailuresToTolerate (FTT) specifies how many arbitrary node failures the volume
+                  can tolerate while remaining available for IO.
+                  Mutually exclusive with Replication.
+                  Must be specified together with GuaranteedMinimumDataRedundancy.
+                  Valid range: 0-2. Valid combinations: |FTT - GMDR| <= 1.
+                maximum: 2
+                minimum: 0
+                type: integer
+              guaranteedMinimumDataRedundancy:
+                description: |-
+                  GuaranteedMinimumDataRedundancy (GMDR) specifies the minimum number of additional
+                  data copies maintained while the volume is serving IO. GMDR=0 means the system may
+                  operate with a single data copy in degraded mode (like a RAID-1 mirror after one
+                  disk failure). GMDR=1 means at least 2 copies are always maintained during IO.
+                  Mutually exclusive with Replication.
+                  Must be specified together with FailuresToTolerate.
+                  Valid range: 0-2. Valid combinations: |FTT - GMDR| <= 1.
+                maximum: 2
+                minimum: 0
+                type: integer
               nodeLabelSelector:
                 description: |-
                   NodeLabelSelector filters nodes eligible for DRBD participation.
@@ -239,13 +273,20 @@ spec:
               replication:
                 default: ConsistencyAndAvailability
                 description: |-
-                  The Storage class's replication mode. Might be:
-                  - None — In this mode the Storage class's 'placementCount' and 'AutoEvictMinReplicaCount' params equal '1'.
-                    Requires topology to be 'Ignored' (no replicas to distribute across zones).
-                  - Availability — In this mode the volume remains readable and writable even if one of the replica nodes becomes unavailable. Data is stored in two copies on different nodes. This corresponds to `placementCount = 2` and `AutoEvictMinReplicaCount = 2`. **Important:** this mode does not guarantee data consistency and may lead to split brain and data loss in case of network connectivity issues between nodes. Recommended only for non-critical data and applications that do not require high reliability and data integrity.
-                  - ConsistencyAndAvailability — In this mode the volume remains readable and writable when one replica node fails. Data is stored in three copies on different nodes (`placementCount = 3`, `AutoEvictMinReplicaCount = 3`). This mode provides protection against data loss when two nodes containing volume replicas fail and guarantees data consistency. However, if two replicas are lost, the volume switches to suspend-io mode.
+                  Deprecated: Use FailuresToTolerate and GuaranteedMinimumDataRedundancy instead.
+                  Mutually exclusive with FailuresToTolerate/GuaranteedMinimumDataRedundancy.
 
-                  > Note that default Replication mode is 'ConsistencyAndAvailability'.
+                  The Storage class's replication mode. Might be:
+                  - None — single replica, no replication. Requires topology to be 'Ignored'.
+                  - Availability — 2 replicas; can lose 1 node but may lose data redundancy in degraded mode.
+                  - Consistency — 2 replicas with consistency guarantees; requires both replicas for IO.
+                  - ConsistencyAndAvailability — 3 replicas; can lose 1 node and keeps consistency.
+
+                  Mapping to failuresToTolerate/guaranteedMinimumDataRedundancy:
+                    None                       → failuresToTolerate=0, guaranteedMinimumDataRedundancy=0
+                    Availability               → failuresToTolerate=1, guaranteedMinimumDataRedundancy=0
+                    Consistency                → failuresToTolerate=0, guaranteedMinimumDataRedundancy=1
+                    ConsistencyAndAvailability → failuresToTolerate=1, guaranteedMinimumDataRedundancy=1
                 enum:
                 - None
                 - Availability
@@ -419,6 +460,52 @@ spec:
               rule: self.topology != 'TransZonal' || (has(self.replication) && self.replication
                 != 'ConsistencyAndAvailability') || !has(self.zones) || size(self.zones)
                 == 0 || size(self.zones) >= 3
+            - message: Cannot specify both replication and failuresToTolerate/guaranteedMinimumDataRedundancy.
+              rule: '!(has(self.failuresToTolerate) || has(self.guaranteedMinimumDataRedundancy))
+                || !has(self.replication)'
+            - message: failuresToTolerate and guaranteedMinimumDataRedundancy must
+                be specified together.
+              rule: has(self.failuresToTolerate) == has(self.guaranteedMinimumDataRedundancy)
+            - message: 'Invalid failuresToTolerate/guaranteedMinimumDataRedundancy
+                combination: |FTT - GMDR| must be <= 1.'
+              rule: '!has(self.failuresToTolerate) || (self.failuresToTolerate - self.guaranteedMinimumDataRedundancy
+                <= 1 && self.guaranteedMinimumDataRedundancy - self.failuresToTolerate
+                <= 1)'
+            - message: failuresToTolerate=0 with guaranteedMinimumDataRedundancy=0
+                requires topology Ignored.
+              rule: '!(has(self.failuresToTolerate) && self.failuresToTolerate ==
+                0 && self.guaranteedMinimumDataRedundancy == 0) || self.topology ==
+                ''Ignored'''
+            - message: TransZonal with FTT=0, GMDR=1 requires exactly 2 zones.
+              rule: self.topology != 'TransZonal' || !has(self.failuresToTolerate)
+                || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate
+                != 0 || self.guaranteedMinimumDataRedundancy != 1 || size(self.zones)
+                == 2
+            - message: TransZonal with FTT=1, GMDR=0 requires exactly 3 zones.
+              rule: self.topology != 'TransZonal' || !has(self.failuresToTolerate)
+                || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate
+                != 1 || self.guaranteedMinimumDataRedundancy != 0 || size(self.zones)
+                == 3
+            - message: TransZonal with FTT=1, GMDR=1 requires exactly 3 zones.
+              rule: self.topology != 'TransZonal' || !has(self.failuresToTolerate)
+                || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate
+                != 1 || self.guaranteedMinimumDataRedundancy != 1 || size(self.zones)
+                == 3
+            - message: TransZonal with FTT=1, GMDR=2 requires exactly 3 or 5 zones.
+              rule: self.topology != 'TransZonal' || !has(self.failuresToTolerate)
+                || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate
+                != 1 || self.guaranteedMinimumDataRedundancy != 2 || size(self.zones)
+                == 3 || size(self.zones) == 5
+            - message: TransZonal with FTT=2, GMDR=1 requires exactly 4 zones.
+              rule: self.topology != 'TransZonal' || !has(self.failuresToTolerate)
+                || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate
+                != 2 || self.guaranteedMinimumDataRedundancy != 1 || size(self.zones)
+                == 4
+            - message: TransZonal with FTT=2, GMDR=2 requires exactly 3 or 5 zones.
+              rule: self.topology != 'TransZonal' || !has(self.failuresToTolerate)
+                || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate
+                != 2 || self.guaranteedMinimumDataRedundancy != 2 || size(self.zones)
+                == 3 || size(self.zones) == 5
           status:
             description: Displays current information about the Storage Class.
             properties:
@@ -485,17 +572,20 @@ spec:
                 description: Configuration is the resolved configuration that volumes
                   should align to.
                 properties:
-                  replication:
-                    description: Replication is the resolved replication mode.
-                    enum:
-                    - None
-                    - Availability
-                    - Consistency
-                    - ConsistencyAndAvailability
-                    type: string
-                  storagePoolName:
-                    description: StoragePoolName is the name of the ReplicatedStoragePool
-                      used by this RSC.
+                  failuresToTolerate:
+                    description: FailuresToTolerate is the resolved FTT value.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                  guaranteedMinimumDataRedundancy:
+                    description: GuaranteedMinimumDataRedundancy is the resolved GMDR
+                      value.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                  replicatedStoragePoolName:
+                    description: ReplicatedStoragePoolName is the name of the ReplicatedStoragePool
+                      resource.
                     minLength: 1
                     type: string
                   topology:
@@ -514,11 +604,22 @@ spec:
                     - Any
                     type: string
                 required:
-                - replication
-                - storagePoolName
+                - failuresToTolerate
+                - guaranteedMinimumDataRedundancy
+                - replicatedStoragePoolName
                 - topology
                 - volumeAccess
                 type: object
+                x-kubernetes-validations:
+                - message: 'Invalid failuresToTolerate/guaranteedMinimumDataRedundancy
+                    combination: |FTT - GMDR| must be <= 1.'
+                  rule: self.failuresToTolerate - self.guaranteedMinimumDataRedundancy
+                    <= 1 && self.guaranteedMinimumDataRedundancy - self.failuresToTolerate
+                    <= 1
+                - message: failuresToTolerate=0 with guaranteedMinimumDataRedundancy=0
+                    requires topology Ignored.
+                  rule: '!(self.failuresToTolerate == 0 && self.guaranteedMinimumDataRedundancy
+                    == 0) || self.topology == ''Ignored'''
               configurationGeneration:
                 description: ConfigurationGeneration is the RSC generation when configuration
                   was accepted.

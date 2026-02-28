@@ -367,7 +367,7 @@ func ensureConfiguration(
 	needsValidation := rsp.Status.EligibleNodesRevision != rsc.Status.StoragePoolEligibleNodesRevision ||
 		!isConfigurationInSync(rsc)
 	if needsValidation {
-		if err := validateEligibleNodes(rsp.Status.EligibleNodes, rsc.Spec.Topology, rsc.Spec.Replication); err != nil {
+		if err := validateEligibleNodes(rsp.Status.EligibleNodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR()); err != nil {
 			msg := err.Error()
 			if pendingDiffMsg != "" {
 				msg = pendingDiffMsg + ". " + msg
@@ -488,7 +488,7 @@ func ensureVolumeSummaryAndConditions(
 // rvView is a lightweight projection of ReplicatedVolume fields used by this controller.
 type rvView struct {
 	name                            string
-	configurationStoragePoolName    string
+	replicatedStoragePoolName       string
 	configurationObservedGeneration int64
 	conditions                      rvViewConditions
 }
@@ -515,7 +515,7 @@ func newRVView(unsafeRV *v1alpha1.ReplicatedVolume) rvView {
 	}
 
 	if unsafeRV.Status.Configuration != nil {
-		view.configurationStoragePoolName = unsafeRV.Status.Configuration.StoragePoolName
+		view.replicatedStoragePoolName = unsafeRV.Status.Configuration.ReplicatedStoragePoolName
 	}
 
 	return view
@@ -542,12 +542,14 @@ func computeRollingStrategiesConfiguration(rsc *v1alpha1.ReplicatedStorageClass)
 }
 
 // makeConfiguration computes the intended configuration from RSC spec.
-func makeConfiguration(rsc *v1alpha1.ReplicatedStorageClass, storagePoolName string) v1alpha1.ReplicatedStorageClassConfiguration {
-	return v1alpha1.ReplicatedStorageClassConfiguration{
-		Topology:        rsc.Spec.Topology,
-		Replication:     rsc.Spec.Replication,
-		VolumeAccess:    rsc.Spec.VolumeAccess,
-		StoragePoolName: storagePoolName,
+// Resolves the legacy replication field to FTT/GMDR when new fields are not set.
+func makeConfiguration(rsc *v1alpha1.ReplicatedStorageClass, storagePoolName string) v1alpha1.ReplicatedVolumeConfiguration {
+	return v1alpha1.ReplicatedVolumeConfiguration{
+		ReplicatedStoragePoolName:       storagePoolName,
+		Topology:                        rsc.Spec.Topology,
+		FailuresToTolerate:              rsc.Spec.GetFTT(),
+		GuaranteedMinimumDataRedundancy: rsc.Spec.GetGMDR(),
+		VolumeAccess:                    rsc.Spec.VolumeAccess,
 	}
 }
 
@@ -563,8 +565,11 @@ func computePendingConfigurationDiffMessage(rsc *v1alpha1.ReplicatedStorageClass
 	cur := rsc.Status.Configuration
 	var diffs []string
 
-	if cur.Replication != rsc.Spec.Replication {
-		diffs = append(diffs, fmt.Sprintf("replication %s -> %s", cur.Replication, rsc.Spec.Replication))
+	if cur.FailuresToTolerate != rsc.Spec.GetFTT() {
+		diffs = append(diffs, fmt.Sprintf("failuresToTolerate %d -> %d", cur.FailuresToTolerate, rsc.Spec.GetFTT()))
+	}
+	if cur.GuaranteedMinimumDataRedundancy != rsc.Spec.GetGMDR() {
+		diffs = append(diffs, fmt.Sprintf("guaranteedMinimumDataRedundancy %d -> %d", cur.GuaranteedMinimumDataRedundancy, rsc.Spec.GetGMDR()))
 	}
 	if cur.Topology != rsc.Spec.Topology {
 		diffs = append(diffs, fmt.Sprintf("topology %s -> %s", cur.Topology, rsc.Spec.Topology))
@@ -572,8 +577,8 @@ func computePendingConfigurationDiffMessage(rsc *v1alpha1.ReplicatedStorageClass
 	if cur.VolumeAccess != rsc.Spec.VolumeAccess {
 		diffs = append(diffs, fmt.Sprintf("volumeAccess %s -> %s", cur.VolumeAccess, rsc.Spec.VolumeAccess))
 	}
-	if cur.StoragePoolName != targetStoragePoolName {
-		diffs = append(diffs, fmt.Sprintf("storage: not yet accepted (current pool: %s, pending pool: %s)", cur.StoragePoolName, targetStoragePoolName))
+	if cur.ReplicatedStoragePoolName != targetStoragePoolName {
+		diffs = append(diffs, fmt.Sprintf("storage: not yet accepted (current pool: %s, pending pool: %s)", cur.ReplicatedStoragePoolName, targetStoragePoolName))
 	}
 
 	if len(diffs) == 0 {
@@ -695,25 +700,39 @@ func applyVolumesSatisfyEligibleNodesCondFalse(rsc *v1alpha1.ReplicatedStorageCl
 }
 
 // validateEligibleNodes validates that eligible nodes from RSP meet the requirements
-// for the RSC's replication mode and topology.
+// for the given FTT/GMDR layout and topology.
 //
-// Requirements by replication mode:
-//   - None: at least 1 node
-//   - Availability: at least 3 nodes, at least 2 with disks
-//   - Consistency: 2 nodes, both with disks
-//   - ConsistencyAndAvailability: at least 3 nodes with disks
+// Layout formulas:
+//
+//	D  = FTT + GMDR + 1   (diskful replicas)
+//	TB = 1 if D is even AND FTT == D/2, else 0
+//	Total = D + TB
+//
+// Requirements:
+//   - At least D nodes with disks (for diskful replicas)
+//   - At least D + TB total nodes (tiebreaker needs a node but no disk)
 //
 // Additional topology requirements:
-//   - TransZonal: nodes must be distributed across required number of zones
-//   - Zonal: each zone must independently meet the requirements
+//   - TransZonal: zones with disks >= D, total zones >= D + TB
+//   - Zonal: each zone must independently meet the node requirements
 func validateEligibleNodes(
 	eligibleNodes []v1alpha1.ReplicatedStoragePoolEligibleNode,
 	topology v1alpha1.ReplicatedStorageClassTopology,
-	replication v1alpha1.ReplicatedStorageClassReplication,
+	ftt, gmdr byte,
 ) error {
 	if len(eligibleNodes) == 0 {
 		return fmt.Errorf("No nodes available in the storage pool")
 	}
+
+	// Compute layout parameters from FTT/GMDR.
+	//   D  = FTT + GMDR + 1   (diskful replicas)
+	//   TB = 1 if D is even AND FTT == D/2, else 0
+	d := int(ftt + gmdr + 1)
+	tb := 0
+	if d%2 == 0 && int(ftt) == d/2 {
+		tb = 1
+	}
+	totalReplicas := d + tb
 
 	// Count nodes and nodes with disks.
 	totalNodes := len(eligibleNodes)
@@ -727,14 +746,10 @@ func validateEligibleNodes(
 	// Group nodes by zone.
 	nodesByZone := make(map[string][]v1alpha1.ReplicatedStoragePoolEligibleNode)
 	for _, n := range eligibleNodes {
-		zone := n.ZoneName
-		if zone == "" {
-			zone = "" // empty zone key for nodes without zone
-		}
-		nodesByZone[zone] = append(nodesByZone[zone], n)
+		nodesByZone[n.ZoneName] = append(nodesByZone[n.ZoneName], n)
 	}
 
-	// Count zones and zones with disks.
+	// Count zones with disks.
 	zonesWithDisks := 0
 	for _, nodes := range nodesByZone {
 		for _, n := range nodes {
@@ -745,54 +760,21 @@ func validateEligibleNodes(
 		}
 	}
 
-	switch replication {
-	case v1alpha1.ReplicationNone:
-		// At least 1 node required.
-		if totalNodes < 1 {
-			return fmt.Errorf("Replication None requires at least 1 node, have %d", totalNodes)
-		}
-
-	case v1alpha1.ReplicationAvailability:
-		// At least 3 nodes, at least 2 with disks.
-		if err := validateAvailabilityReplication(topology, totalNodes, nodesWithDisks, nodesByZone, zonesWithDisks); err != nil {
-			return err
-		}
-
-	case v1alpha1.ReplicationConsistency:
-		// 2 nodes, both with disks.
-		if err := validateConsistencyReplication(topology, totalNodes, nodesWithDisks, nodesByZone, zonesWithDisks); err != nil {
-			return err
-		}
-
-	case v1alpha1.ReplicationConsistencyAndAvailability:
-		// At least 3 nodes with disks.
-		if err := validateConsistencyAndAvailabilityReplication(topology, nodesWithDisks, nodesByZone, zonesWithDisks); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// validateAvailabilityReplication validates requirements for Availability replication mode.
-func validateAvailabilityReplication(
-	topology v1alpha1.ReplicatedStorageClassTopology,
-	totalNodes, nodesWithDisks int,
-	nodesByZone map[string][]v1alpha1.ReplicatedStoragePoolEligibleNode,
-	zonesWithDisks int,
-) error {
 	switch topology {
 	case v1alpha1.TopologyTransZonal:
-		// 3 different zones, at least 2 with disks.
-		if len(nodesByZone) < 3 {
-			return fmt.Errorf("Replication Availability with TransZonal topology requires nodes in at least 3 zones, have %d", len(nodesByZone))
+		minZones, minZonesWithDisks := computeTransZonalMinZones(ftt, gmdr)
+
+		if len(nodesByZone) < minZones {
+			return fmt.Errorf("FTT=%d, GMDR=%d with TransZonal topology requires at least %d zones, have %d",
+				ftt, gmdr, minZones, len(nodesByZone))
 		}
-		if zonesWithDisks < 2 {
-			return fmt.Errorf("Replication Availability with TransZonal topology requires at least 2 zones with disks, have %d", zonesWithDisks)
+		if zonesWithDisks < minZonesWithDisks {
+			return fmt.Errorf("FTT=%d, GMDR=%d with TransZonal topology requires at least %d zones with disks, have %d",
+				ftt, gmdr, minZonesWithDisks, zonesWithDisks)
 		}
 
 	case v1alpha1.TopologyZonal:
-		// Per zone: at least 3 nodes, at least 2 with disks.
+		// Per zone: each zone must independently have enough nodes.
 		for zone, nodes := range nodesByZone {
 			zoneNodesWithDisks := 0
 			for _, n := range nodes {
@@ -800,104 +782,62 @@ func validateAvailabilityReplication(
 					zoneNodesWithDisks++
 				}
 			}
-			if len(nodes) < 3 {
-				return fmt.Errorf("Replication Availability with Zonal topology requires at least 3 nodes in each zone, zone %q has %d", zone, len(nodes))
+			if len(nodes) < totalReplicas {
+				return fmt.Errorf("FTT=%d, GMDR=%d with Zonal topology requires at least %d nodes in each zone, zone %q has %d",
+					ftt, gmdr, totalReplicas, zone, len(nodes))
 			}
-			if zoneNodesWithDisks < 2 {
-				return fmt.Errorf("Replication Availability with Zonal topology requires at least 2 nodes with disks in each zone, zone %q has %d", zone, zoneNodesWithDisks)
+			if zoneNodesWithDisks < d {
+				return fmt.Errorf("FTT=%d, GMDR=%d with Zonal topology requires at least %d nodes with disks in each zone, zone %q has %d",
+					ftt, gmdr, d, zone, zoneNodesWithDisks)
 			}
 		}
 
 	default:
 		// Ignored topology or unspecified: global check.
-		if totalNodes < 3 {
-			return fmt.Errorf("Replication Availability requires at least 3 nodes, have %d", totalNodes)
+		if totalNodes < totalReplicas {
+			return fmt.Errorf("FTT=%d, GMDR=%d requires at least %d nodes, have %d",
+				ftt, gmdr, totalReplicas, totalNodes)
 		}
-		if nodesWithDisks < 2 {
-			return fmt.Errorf("Replication Availability requires at least 2 nodes with disks, have %d", nodesWithDisks)
+		if nodesWithDisks < d {
+			return fmt.Errorf("FTT=%d, GMDR=%d requires at least %d nodes with disks, have %d",
+				ftt, gmdr, d, nodesWithDisks)
 		}
 	}
 
 	return nil
 }
 
-// validateConsistencyReplication validates requirements for Consistency replication mode.
-func validateConsistencyReplication(
-	topology v1alpha1.ReplicatedStorageClassTopology,
-	totalNodes, nodesWithDisks int,
-	nodesByZone map[string][]v1alpha1.ReplicatedStoragePoolEligibleNode,
-	zonesWithDisks int,
-) error {
-	switch topology {
-	case v1alpha1.TopologyTransZonal:
-		// 2 different zones with disks.
-		if zonesWithDisks < 2 {
-			return fmt.Errorf("Replication Consistency with TransZonal topology requires at least 2 zones with disks, have %d", zonesWithDisks)
-		}
-
-	case v1alpha1.TopologyZonal:
-		// Per zone: at least 2 nodes with disks.
-		for zone, nodes := range nodesByZone {
-			zoneNodesWithDisks := 0
-			for _, n := range nodes {
-				if len(n.LVMVolumeGroups) > 0 {
-					zoneNodesWithDisks++
-				}
-			}
-			if zoneNodesWithDisks < 2 {
-				return fmt.Errorf("Replication Consistency with Zonal topology requires at least 2 nodes with disks in each zone, zone %q has %d", zone, zoneNodesWithDisks)
-			}
-		}
-
+// computeTransZonalMinZones returns the minimum total zones and minimum zones with disks
+// for a TransZonal layout with the given FTT/GMDR combination.
+// Only called for TransZonal topology (FTT=0,GMDR=0 is not TransZonal — CEL prevents it).
+//
+// Composite mode (multiple replicas per zone) allows fewer zones than pure zone
+// mode (1 replica per zone). The minimum values come from the zone distribution
+// constraints: max D per zone ≤ D − qmr, TB zone must have ≤ 1D.
+//
+//	FTT=0, GMDR=1: 2D        → 2 zones, 2 with disks
+//	FTT=1, GMDR=0: 2D+1TB    → 3 zones, 2 with disks
+//	FTT=1, GMDR=1: 3D        → 3 zones, 3 with disks
+//	FTT=1, GMDR=2: 4D+1TB    → 3 zones, 3 with disks (composite 2D|1D+TB|1D)
+//	FTT=2, GMDR=1: 4D        → 4 zones, 4 with disks
+//	FTT=2, GMDR=2: 5D        → 3 zones, 3 with disks (composite 2D|2D|1D)
+func computeTransZonalMinZones(ftt, gmdr byte) (minZones, minZonesWithDisks int) {
+	switch {
+	case ftt == 0 && gmdr == 1:
+		return 2, 2
+	case ftt == 1 && gmdr == 0:
+		return 3, 2
+	case ftt == 1 && gmdr == 1:
+		return 3, 3
+	case ftt == 1 && gmdr == 2:
+		return 3, 3
+	case ftt == 2 && gmdr == 1:
+		return 4, 4
+	case ftt == 2 && gmdr == 2:
+		return 3, 3
 	default:
-		// Ignored topology or unspecified: global check.
-		if totalNodes < 2 {
-			return fmt.Errorf("Replication Consistency requires at least 2 nodes, have %d", totalNodes)
-		}
-		if nodesWithDisks < 2 {
-			return fmt.Errorf("Replication Consistency requires at least 2 nodes with disks, have %d", nodesWithDisks)
-		}
+		panic(fmt.Sprintf("transZonalMinZones: unsupported FTT=%d, GMDR=%d combination", ftt, gmdr))
 	}
-
-	return nil
-}
-
-// validateConsistencyAndAvailabilityReplication validates requirements for ConsistencyAndAvailability replication mode.
-func validateConsistencyAndAvailabilityReplication(
-	topology v1alpha1.ReplicatedStorageClassTopology,
-	nodesWithDisks int,
-	nodesByZone map[string][]v1alpha1.ReplicatedStoragePoolEligibleNode,
-	zonesWithDisks int,
-) error {
-	switch topology {
-	case v1alpha1.TopologyTransZonal:
-		// 3 zones with disks.
-		if zonesWithDisks < 3 {
-			return fmt.Errorf("Replication ConsistencyAndAvailability with TransZonal topology requires at least 3 zones with disks, have %d", zonesWithDisks)
-		}
-
-	case v1alpha1.TopologyZonal:
-		// Per zone: at least 3 nodes with disks.
-		for zone, nodes := range nodesByZone {
-			zoneNodesWithDisks := 0
-			for _, n := range nodes {
-				if len(n.LVMVolumeGroups) > 0 {
-					zoneNodesWithDisks++
-				}
-			}
-			if zoneNodesWithDisks < 3 {
-				return fmt.Errorf("Replication ConsistencyAndAvailability with Zonal topology requires at least 3 nodes with disks in each zone, zone %q has %d", zone, zoneNodesWithDisks)
-			}
-		}
-
-	default:
-		// Ignored topology or unspecified: global check.
-		if nodesWithDisks < 3 {
-			return fmt.Errorf("Replication ConsistencyAndAvailability requires at least 3 nodes with disks, have %d", nodesWithDisks)
-		}
-	}
-
-	return nil
 }
 
 // isConfigurationInSync checks if the RSC status configuration matches current generation.
@@ -922,8 +862,8 @@ func computeActualVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, rvs []rvV
 		rv := &rvs[i]
 
 		// Collect used storage pool names.
-		if rv.configurationStoragePoolName != "" {
-			usedStoragePoolNames[rv.configurationStoragePoolName] = struct{}{}
+		if rv.replicatedStoragePoolName != "" {
+			usedStoragePoolNames[rv.replicatedStoragePoolName] = struct{}{}
 		}
 
 		// Check nodes condition regardless of acknowledgment.

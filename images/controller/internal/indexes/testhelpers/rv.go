@@ -51,6 +51,6 @@ func WithRVByStoragePoolNameIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
 		if rv.Status.Configuration == nil {
 			return nil
 		}
-		return []string{rv.Status.Configuration.StoragePoolName}
+		return []string{rv.Status.Configuration.ReplicatedStoragePoolName}
 	})
 }

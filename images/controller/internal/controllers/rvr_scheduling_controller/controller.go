@@ -82,7 +82,7 @@ func mapRVRToRV(_ context.Context, obj client.Object) []reconcile.Request {
 }
 
 // mapRSPToRV maps a ReplicatedStoragePool event to reconcile requests for all
-// ReplicatedVolume objects that reference it via status.configuration.storagePoolName.
+// ReplicatedVolume objects that reference it via status.configuration.replicatedStoragePoolName.
 func mapRSPToRV(cl client.Client) handler.MapFunc {
 	return func(ctx context.Context, obj client.Object) []reconcile.Request {
 		rsp, ok := obj.(*v1alpha1.ReplicatedStoragePool)

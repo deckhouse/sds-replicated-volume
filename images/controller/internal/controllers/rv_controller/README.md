@@ -6,7 +6,7 @@ This controller manages `ReplicatedVolume` (RV) resources by orchestrating datam
 
 The controller reconciles `ReplicatedVolume` with:
 
-1. **Configuration initialization** — copies resolved configuration from `ReplicatedStorageClass` (RSC) into RV status
+1. **Configuration initialization** — derives configuration from `ReplicatedStorageClass` (RSC) in Auto mode or from `ManualConfiguration` in Manual mode into RV status
 2. **Datamesh formation** — creates replicas, establishes DRBD connectivity, bootstraps data synchronization
 3. **Normal operation** — steady-state datamesh lifecycle: Access replica create/delete/join/leave, attach/detach transitions, multiattach management *(WIP: missing diskful join/leave, tiebreaker, role changes)*
 4. **Deletion** — cleans up child resources (RVRs, RVAs) and datamesh state
@@ -15,7 +15,8 @@ The controller reconciles `ReplicatedVolume` with:
 
 | Direction | Resource/Controller | Relationship |
 |-----------|---------------------|--------------|
-| ← input | ReplicatedStorageClass | Reads configuration (replication, topology, storage pool) |
+| ← input | ReplicatedStorageClass | Reads configuration (FTT, GMDR, topology, storage pool); Auto mode only |
+| ← input | ReplicatedVolume.Spec.ManualConfiguration | Reads manual configuration directly; Manual mode only |
 | ← input | ReplicatedStoragePool | Reads eligible nodes, system networks, zones for formation and attach eligibility |
 | ← input | ReplicatedVolumeReplica | Reads replica status (scheduling, preconfiguration, connectivity, data sync, quorum, attachment) |
 | ← input | ReplicatedVolumeAttachment | Reads attachment intent (determines which nodes should be attached) |
@@ -40,14 +41,15 @@ if shouldDelete (DeletionTimestamp + no other finalizers + no attached members +
 
 ensure metadata (finalizer + labels)
 
-ensure configuration from RSC
+if config nil: reconcileRVConfiguration (initial set from RSC or ManualConfiguration)
 ensure datamesh pending replica transitions (sync from RVR statuses)
 
 if configuration exists:
     if formation in progress (DatameshRevision == 0 or Formation transition active):
-        reconcile formation (3-phase process)
+        reconcile formation (3-phase process; config frozen)
         reconcileRVAWaiting (datamesh forming)
     else:
+        reconcileRVConfiguration (check for config updates + set ConfigurationReady condition)
         reconcile normal operation (WIP):
             create Access RVRs for Active RVAs on nodes without any RVR
             process Access replica datamesh membership (join/leave)
@@ -55,7 +57,6 @@ if configuration exists:
             update RVA conditions and attachment fields from attachmentsSummary
             delete unnecessary Access RVRs (redundant or unused)
 
-ensure ConfigurationReady condition
 reconcileRVAFinalizers (add/remove RVA finalizers)
 reconcileRVRFinalizers (add/remove RVR finalizers)
 patch status if changed
@@ -83,7 +84,7 @@ Reconcile (root) [Pure orchestration]
 │   ├── isRVMetadataInSync
 │   ├── applyRVMetadata (finalizer + labels)
 │   └── patchRV
-├── ensureRVConfiguration
+├── if config nil: reconcileRVConfiguration [In-place reconciliation] ← details
 ├── ensureDatameshPendingReplicaTransitions ← details
 ├── reconcileFormation [Pure orchestration]
 │   ├── reconcileFormationPhasePreconfigure [Pure orchestration] ← details
@@ -103,6 +104,7 @@ Reconcile (root) [Pure orchestration]
 │   │   ├── reconcileFormationRestartIfTimeoutPassed
 │   │   └── applyFormationTransitionAbsent (formation complete)
 │   └── reconcileRVAWaiting ("Datamesh formation is in progress")
+├── reconcileRVConfiguration [In-place reconciliation] (config updates + ConfigurationReady condition)
 ├── reconcileNormalOperation [Pure orchestration] (WIP)
 │   ├── reconcileCreateAccessReplicas [Pure orchestration] ← details
 │   ├── (MergeEnsures)
@@ -127,7 +129,6 @@ Reconcile (root) [Pure orchestration]
 │   │   ├── isRVAAttachmentFieldsInSync + applyRVAAttachmentFields
 │   │   └── patchRVAStatus
 │   └── reconcileDeleteAccessReplicas [Pure orchestration] ← details
-├── ensureConditionConfigurationReady ← details
 ├── reconcileRVAFinalizers [Target-state driven] (same as deletion branch)
 ├── reconcileRVRFinalizers [Target-state driven]
 │   ├── add RVControllerFinalizer to non-deleting RVRs
@@ -136,7 +137,7 @@ Reconcile (root) [Pure orchestration]
 └── patchRVStatus
 ```
 
-Links to detailed algorithms: [`reconcileDeletion`](#reconciledeletion-details), [`ensureDatameshPendingReplicaTransitions`](#ensuredatameshpendingreplicatransitions-details), [`reconcileFormationPhasePreconfigure`](#reconcileformationphasepreconfigure-details), [`reconcileFormationPhaseEstablishConnectivity`](#reconcileformationphaseestablishconnectivity-details), [`reconcileFormationPhaseBootstrapData`](#reconcileformationphasebootstrapdata-details), [`reconcileCreateAccessReplicas`](#reconcilecreateaccessreplicas-details), [`reconcileDeleteAccessReplicas`](#reconciledeleteaccessreplicas-details), [`ensureDatameshAccessReplicas`](#ensuredatameshaccessreplicas-details), [`ensureDatameshAttachments`](#ensuredatameshattachments-details), [`buildAttachmentsSummary`](#buildattachmentssummary-details), [`computeDatameshAttachmentIntents`](#computedatameshattachmentintents-details), [`ensureDatameshDetachTransitions`](#ensuredatameshdetachtransitions-details), [`ensureDatameshAttachTransitions`](#ensuredatameshattachtransitions-details), [`reconcileRVAConditionsFromAttachmentsSummary`](#reconcilervaconditionsfromattachmentssummary-details), [`ensureConditionConfigurationReady`](#ensureconditionconfigurationready-details)
+Links to detailed algorithms: [`reconcileDeletion`](#reconciledeletion-details), [`ensureDatameshPendingReplicaTransitions`](#ensuredatameshpendingreplicatransitions-details), [`reconcileRVConfiguration`](#reconcilervconfiguration-details), [`reconcileFormationPhasePreconfigure`](#reconcileformationphasepreconfigure-details), [`reconcileFormationPhaseEstablishConnectivity`](#reconcileformationphaseestablishconnectivity-details), [`reconcileFormationPhaseBootstrapData`](#reconcileformationphasebootstrapdata-details), [`reconcileCreateAccessReplicas`](#reconcilecreateaccessreplicas-details), [`reconcileDeleteAccessReplicas`](#reconciledeleteaccessreplicas-details), [`ensureDatameshAccessReplicas`](#ensuredatameshaccessreplicas-details), [`ensureDatameshAttachments`](#ensuredatameshattachments-details), [`buildAttachmentsSummary`](#buildattachmentssummary-details), [`computeDatameshAttachmentIntents`](#computedatameshattachmentintents-details), [`ensureDatameshDetachTransitions`](#ensuredatameshdetachtransitions-details), [`ensureDatameshAttachTransitions`](#ensuredatameshattachtransitions-details), [`reconcileRVAConditionsFromAttachmentsSummary`](#reconcilervaconditionsfromattachmentssummary-details)
 
 ## Algorithm Flow
 
@@ -157,19 +158,23 @@ flowchart TD
     MetaDel --> Done3([Done])
 
     CheckDelete -->|No| Meta[reconcileMetadata]
-    Meta --> EnsureConfig["ensureRVConfiguration +<br/>ensureDatameshPendingReplicaTransitions"]
-    EnsureConfig --> CheckConfig{Configuration exists?}
-    CheckConfig -->|No| Conditions
+    Meta --> CheckConfigNil{Configuration nil?}
+    CheckConfigNil -->|Yes| InitConfig["reconcileRVConfiguration<br/>(initial set)"]
+    InitConfig --> EnsurePending
+    CheckConfigNil -->|No| EnsurePending
+    EnsurePending["ensureDatameshPendingReplicaTransitions"]
+    EnsurePending --> CheckConfig{Configuration exists?}
+    CheckConfig -->|No| Finalizers
 
     CheckConfig -->|Yes| CheckForming{Formation in progress?}
     CheckForming -->|Yes| Formation[reconcileFormation]
     Formation --> FormingRVAWaiting["reconcileRVAWaiting<br/>(datamesh forming)"]
-    FormingRVAWaiting --> Conditions
-    CheckForming -->|No| NormalOp["reconcileNormalOperation<br/>(Access replicas + attachments)"]
-    NormalOp --> Conditions
+    FormingRVAWaiting --> Finalizers
+    CheckForming -->|No| UpdateConfig["reconcileRVConfiguration<br/>(config updates + condition)"]
+    UpdateConfig --> NormalOp["reconcileNormalOperation<br/>(Access replicas + attachments)"]
+    NormalOp --> Finalizers
 
-    Conditions[ensureConditionConfigurationReady]
-    Conditions --> Finalizers["reconcileRVAFinalizers +<br/>reconcileRVRFinalizers"]
+    Finalizers["reconcileRVAFinalizers +<br/>reconcileRVRFinalizers"]
     Finalizers --> PatchDecision{Changed?}
     PatchDecision -->|Yes| Patch[patchRVStatus]
     PatchDecision -->|No| EndNode([Done])
@@ -180,14 +185,13 @@ flowchart TD
 
 ### ConfigurationReady
 
-Indicates whether the RV configuration is initialized and matches the storage class.
+Indicates whether the RV configuration is valid and derived from the appropriate source. Set by `reconcileRVConfiguration`.
 
 | Status | Reason | When |
 |--------|--------|------|
-| True | Ready | Configuration matches storage class generation |
-| False | WaitingForStorageClass | RSC not found or RSC configuration not ready |
-| False | ConfigurationRolloutInProgress | ConfigurationGeneration not yet set (initial rollout) |
-| False | StaleConfiguration | RV configuration generation does not match RSC generation |
+| True | Ready | Configuration is valid and matches the source |
+| False | WaitingForStorageClass | RSC not found or RSC configuration not ready (Auto mode only) |
+| False | InvalidConfiguration | Configuration is invalid: RSP not found or TransZonal zone count mismatch |
 
 ### Attached (on RVA)
 
@@ -284,7 +288,7 @@ When formation stalls (any safety check fails or progress timeout is exceeded), 
 3. Delete formation DRBDResourceOperation if exists
 4. Delete all replicas (with finalizer removal)
 5. Reset all status fields (Configuration, DatameshRevision, Datamesh, transitions)
-6. Re-initialize configuration from RSC (to avoid intermediate nil state that would trigger unnecessary RSC reconciliation)
+6. Re-derive configuration via `reconcileRVConfiguration` (to avoid ConfigurationReady condition flicker)
 7. Requeue for fresh start
 
 ## Attachment Lifecycle
@@ -365,10 +369,12 @@ flowchart TD
     end
 
     subgraph ensures [Ensure Helpers]
-        EnsureConfig[ensureRVConfiguration]
         EnsurePending[ensureDatameshPendingReplicaTransitions]
         EnsureAttachments[ensureDatameshAttachments]
-        EnsureCondConfig[ensureConditionConfigurationReady]
+    end
+
+    subgraph configReconciler [Configuration]
+        ReconcileConfig["reconcileRVConfiguration<br/>(Auto: RSC, Manual: spec)"]
     end
 
     subgraph outputs [Outputs]
@@ -379,8 +385,7 @@ flowchart TD
         RVAConditions[RVA conditions]
     end
 
-    RSCStatus --> EnsureConfig
-    RSCStatus --> EnsureCondConfig
+    RSCStatus --> ReconcileConfig
     RVRStatus --> EnsurePending
     RVRStatus --> ReconcileFormation
     RSP --> ReconcileFormation
@@ -393,10 +398,9 @@ flowchart TD
     RSP --> EnsureAttachments
 
     ReconcileMeta --> RVMeta
-    EnsureConfig --> RVStatus
+    ReconcileConfig --> RVStatus
     EnsurePending --> RVStatus
     EnsureAttachments --> RVStatus
-    EnsureCondConfig --> RVStatus
     ReconcileFormation --> RVStatus
     ReconcileFormation --> RVRManaged
     ReconcileFormation --> DRBDROp
@@ -533,7 +537,7 @@ flowchart TD
 | Input | Description |
 |-------|-------------|
 | `rv.Spec.Size` | Target volume size |
-| `rv.Status.Configuration.Replication` | Replication mode (determines replica count) |
+| `rv.Status.Configuration` (FTT, GMDR) | Determines diskful replica count: D = FTT + GMDR + 1 |
 | `rsp` | Storage pool view (eligible nodes, system network names) |
 | `rvrs` | Current replicas (status: scheduled, preconfigured, addresses, backing volume) |
 
@@ -688,44 +692,70 @@ flowchart TD
 
 ---
 
-### ensureConditionConfigurationReady Details
+### reconcileRVConfiguration Details
 
-**Purpose:** Sets the `ConfigurationReady` condition based on RSC availability and configuration generation matching.
+**Purpose:** Derives `rv.Status.Configuration` from the appropriate source (RSC in Auto mode, `ManualConfiguration` in Manual mode), validates TransZonal zone count via RSP, and sets the `ConfigurationReady` condition. Also updates `ConfigurationGeneration` and `ConfigurationObservedGeneration`.
+
+**Caller control:** This function does NOT have an internal formation freeze guard. Instead, callers decide when to call it:
+- **Root Reconcile:** when `Configuration` is nil (initial set)
+- **Normal operation:** always (check for config updates)
+- **Formation reset:** after clearing `Configuration` to nil (re-derive)
+
+During formation, callers do NOT call this function (config is frozen).
 
 **Algorithm:**
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> CheckRSC{RSC exists?}
-    CheckRSC -->|No| SetWaiting1["False: WaitingForStorageClass<br/>(RSC not found)"]
-    SetWaiting1 --> End([Return])
+    Start([Start]) --> ComputeIntended["Compute intended config:<br/>Auto: from RSC<br/>Manual: from Spec.ManualConfiguration"]
 
-    CheckRSC -->|Yes| CheckRSCConfig{RSC has configuration?}
-    CheckRSCConfig -->|No| SetWaiting2["False: WaitingForStorageClass<br/>(RSC configuration not ready)"]
-    SetWaiting2 --> End
+    ComputeIntended --> CheckAutoSource{"Auto mode:<br/>RSC exists + has config?"}
+    CheckAutoSource -->|"RSC nil or no config"| SetWaiting["False: WaitingForStorageClass"]
+    SetWaiting --> End([Return])
+    CheckAutoSource -->|OK| ContentCheck
 
-    CheckRSCConfig -->|Yes| CheckGen{ConfigurationGeneration == 0?}
-    CheckGen -->|Yes| SetRollout["False: ConfigurationRolloutInProgress"]
-    SetRollout --> End
+    ComputeIntended --> ContentCheck{"Config content<br/>matches intended?"}
+    ContentCheck -->|Yes| UpdateGen["Update generation tracking<br/>(if changed)"]
+    UpdateGen --> SetReady1["True: Ready"]
+    SetReady1 --> End
 
-    CheckGen -->|No| CheckMatch{RV generation == RSC generation?}
-    CheckMatch -->|Yes| SetReady["True: Ready"]
-    CheckMatch -->|No| SetStale["False: StaleConfiguration"]
-    SetReady --> End
-    SetStale --> End
+    ContentCheck -->|No| CheckTransZonal{"TransZonal topology?"}
+    CheckTransZonal -->|Yes| LoadRSP["Load RSP zone count"]
+    LoadRSP --> RSPNotFound{"RSP not found?"}
+    RSPNotFound -->|Yes| SetInvalid1["False: InvalidConfiguration<br/>(RSP not found)"]
+    SetInvalid1 --> End
+    RSPNotFound -->|No| ValidateZones{"Zone count valid?"}
+    ValidateZones -->|No| SetInvalid2["False: InvalidConfiguration<br/>(zone count mismatch)"]
+    SetInvalid2 --> End
+    ValidateZones -->|Yes| SetConfig
+    CheckTransZonal -->|No| SetConfig
+
+    SetConfig["Set rv.Status.Configuration<br/>(DeepCopy) + generation"]
+    SetConfig --> SetReady2["True: Ready"]
+    SetReady2 --> End
 ```
+
+**Generation tracking:**
+- Auto mode: `ConfigurationGeneration` = RSC's `Status.ConfigurationGeneration` (used by rsc_controller for rollout tracking)
+- Manual mode: `ConfigurationGeneration` = 0 (no RSC rollout tracking)
+
+**Content-based fast path:** Instead of generation-based skipping, the function compares `*rv.Status.Configuration == *intended` (struct equality on 5 scalar fields). This avoids generation collision bugs when switching between Auto and Manual modes.
 
 **Data Flow:**
 
 | Input | Description |
 |-------|-------------|
-| `rsc` | ReplicatedStorageClass (may be nil) |
-| `rsc.Status.Configuration` | RSC configuration availability |
-| `rsc.Status.ConfigurationGeneration` | RSC generation for comparison |
-| `rv.Status.ConfigurationGeneration` | RV's stored generation |
+| `rv.Spec.ConfigurationMode` | Auto or Manual |
+| `rv.Spec.ManualConfiguration` | Manual mode source (guaranteed present by CEL) |
+| `rsc` | ReplicatedStorageClass (may be nil; Auto mode only) |
+| `rsc.Status.Configuration` | RSC configuration (Auto mode source) |
+| RSP (loaded via `getRSPZoneCount`) | Zone count for TransZonal validation |
 
 | Output | Description |
 |--------|-------------|
+| `rv.Status.Configuration` | Set/updated configuration |
+| `rv.Status.ConfigurationGeneration` | RSC generation (Auto) or 0 (Manual) |
+| `rv.Status.ConfigurationObservedGeneration` | Same as ConfigurationGeneration |
 | `ConfigurationReady` condition | Reports configuration state |
 
 ---
@@ -1058,7 +1088,7 @@ flowchart TD
 - `"Volume is being deleted"` (global block, not-yet-attached nodes — reason: ReplicatedVolumeDeleting)
 - `"Quorum not satisfied: no quorum on [#0]; agent not ready on [#1]"` (global block — reason: Pending; diagnostic detail from `computeActualQuorum`)
 - `"Waiting for attachment slot (slots occupied N/M)"` (no slot available — reason: Pending)
-- `"Node is not eligible for storage class X (pool Y)"` (RSP check — reason: NodeNotEligible)
+- `"Node is not eligible for storage class X (pool Y)"` (Auto mode) or `"Node is not eligible for pool Y"` (Manual mode) (RSP check — reason: NodeNotEligible)
 - `"Node is not ready"` / `"Agent is not ready on node"` (node health — reason: Pending)
 - `"No Diskful replica on this node (volumeAccess is Local for storage class X)"` (VolumeAccess locality — reason: VolumeAccessLocalityNotSatisfied)
 - `"Waiting for replica on node"` (no RVR on node — reason: WaitingForReplica)

@@ -71,7 +71,73 @@ spec:
           metadata:
             type: object
           spec:
+            description: |-
+              Auto mode requires RSC name, forbids manualConfiguration:
+              Manual mode requires manualConfiguration, forbids RSC name:
             properties:
+              configurationMode:
+                default: Auto
+                description: |-
+                  ConfigurationMode selects how the volume configuration is determined.
+                  Auto (default): configuration is derived from the referenced ReplicatedStorageClass.
+                  Manual: configuration is specified directly in the manualConfiguration field.
+                enum:
+                - Auto
+                - Manual
+                type: string
+              manualConfiguration:
+                description: |-
+                  ManualConfiguration specifies the volume configuration directly.
+                  Required when configurationMode is Manual. Must not be set when configurationMode is Auto.
+                properties:
+                  failuresToTolerate:
+                    description: FailuresToTolerate is the resolved FTT value.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                  guaranteedMinimumDataRedundancy:
+                    description: GuaranteedMinimumDataRedundancy is the resolved GMDR
+                      value.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                  replicatedStoragePoolName:
+                    description: ReplicatedStoragePoolName is the name of the ReplicatedStoragePool
+                      resource.
+                    minLength: 1
+                    type: string
+                  topology:
+                    description: Topology is the resolved topology setting.
+                    enum:
+                    - TransZonal
+                    - Zonal
+                    - Ignored
+                    type: string
+                  volumeAccess:
+                    description: VolumeAccess is the resolved volume access mode.
+                    enum:
+                    - Local
+                    - EventuallyLocal
+                    - PreferablyLocal
+                    - Any
+                    type: string
+                required:
+                - failuresToTolerate
+                - guaranteedMinimumDataRedundancy
+                - replicatedStoragePoolName
+                - topology
+                - volumeAccess
+                type: object
+                x-kubernetes-validations:
+                - message: 'Invalid failuresToTolerate/guaranteedMinimumDataRedundancy
+                    combination: |FTT - GMDR| must be <= 1.'
+                  rule: self.failuresToTolerate - self.guaranteedMinimumDataRedundancy
+                    <= 1 && self.guaranteedMinimumDataRedundancy - self.failuresToTolerate
+                    <= 1
+                - message: failuresToTolerate=0 with guaranteedMinimumDataRedundancy=0
+                    requires topology Ignored.
+                  rule: '!(self.failuresToTolerate == 0 && self.guaranteedMinimumDataRedundancy
+                    == 0) || self.topology == ''Ignored'''
               maxAttachments:
                 default: 1
                 description: |-
@@ -91,6 +157,9 @@ spec:
                 minimum: 1
                 type: integer
               replicatedStorageClassName:
+                description: |-
+                  ReplicatedStorageClassName references the RSC that provides configuration.
+                  Required when configurationMode is Auto. Must not be set when configurationMode is Manual.
                 minLength: 1
                 type: string
               size:
@@ -104,9 +173,17 @@ spec:
                   rule: quantity(string(self)).isGreaterThan(quantity('0'))
             required:
             - maxAttachments
-            - replicatedStorageClassName
             - size
             type: object
+            x-kubernetes-validations:
+            - message: Auto mode requires replicatedStorageClassName and must not
+                have manualConfiguration.
+              rule: self.configurationMode != 'Auto' || (size(self.replicatedStorageClassName)
+                > 0 && !has(self.manualConfiguration))
+            - message: Manual mode requires manualConfiguration and must not have
+                replicatedStorageClassName.
+              rule: self.configurationMode != 'Manual' || (has(self.manualConfiguration)
+                && size(self.replicatedStorageClassName) == 0)
           status:
             properties:
               actuallyAttachedTo:
@@ -181,17 +258,20 @@ spec:
                 description: Configuration is the desired configuration snapshot for
                   this volume.
                 properties:
-                  replication:
-                    description: Replication is the resolved replication mode.
-                    enum:
-                    - None
-                    - Availability
-                    - Consistency
-                    - ConsistencyAndAvailability
-                    type: string
-                  storagePoolName:
-                    description: StoragePoolName is the name of the ReplicatedStoragePool
-                      used by this RSC.
+                  failuresToTolerate:
+                    description: FailuresToTolerate is the resolved FTT value.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                  guaranteedMinimumDataRedundancy:
+                    description: GuaranteedMinimumDataRedundancy is the resolved GMDR
+                      value.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                  replicatedStoragePoolName:
+                    description: ReplicatedStoragePoolName is the name of the ReplicatedStoragePool
+                      resource.
                     minLength: 1
                     type: string
                   topology:
@@ -210,11 +290,22 @@ spec:
                     - Any
                     type: string
                 required:
-                - replication
-                - storagePoolName
+                - failuresToTolerate
+                - guaranteedMinimumDataRedundancy
+                - replicatedStoragePoolName
                 - topology
                 - volumeAccess
                 type: object
+                x-kubernetes-validations:
+                - message: 'Invalid failuresToTolerate/guaranteedMinimumDataRedundancy
+                    combination: |FTT - GMDR| must be <= 1.'
+                  rule: self.failuresToTolerate - self.guaranteedMinimumDataRedundancy
+                    <= 1 && self.guaranteedMinimumDataRedundancy - self.failuresToTolerate
+                    <= 1
+                - message: failuresToTolerate=0 with guaranteedMinimumDataRedundancy=0
+                    requires topology Ignored.
+                  rule: '!(self.failuresToTolerate == 0 && self.guaranteedMinimumDataRedundancy
+                    == 0) || self.topology == ''Ignored'''
               configurationGeneration:
                 description: ConfigurationGeneration is the RSC generation from which
                   configuration was taken.

@@ -33,7 +33,7 @@ const (
 
 	// IndexFieldRVByStoragePoolName is used to quickly list
 	// ReplicatedVolume objects using a specific RSP.
-	IndexFieldRVByStoragePoolName = "status.configuration.storagePoolName"
+	IndexFieldRVByStoragePoolName = "status.configuration.replicatedStoragePoolName"
 )
 
 // RegisterRVByReplicatedStorageClassName registers the index for listing
@@ -74,10 +74,10 @@ func RegisterRVByStoragePoolName(mgr manager.Manager) error {
 			if rv.Status.Configuration == nil {
 				return nil
 			}
-			return []string{rv.Status.Configuration.StoragePoolName}
+			return []string{rv.Status.Configuration.ReplicatedStoragePoolName}
 		},
 	); err != nil {
-		return fmt.Errorf("index ReplicatedVolume by status.configuration.storagePoolName: %w", err)
+		return fmt.Errorf("index ReplicatedVolume by status.configuration.replicatedStoragePoolName: %w", err)
 	}
 	return nil
 }

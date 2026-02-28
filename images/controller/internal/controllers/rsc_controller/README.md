@@ -13,7 +13,7 @@ The controller reconciles `ReplicatedStorageClass` status with:
 5. **Volume statistics** — counts of total, aligned, stale, and conflict volumes
 6. **Deletion cleanup** — releases RSP `usedBy` entries and removes finalizer on RSC deletion
 
-> **Note:** RSC does not calculate eligible nodes directly. It uses `RSP.Status.EligibleNodes` from the associated storage pool and validates them against topology/replication requirements.
+> **Note:** RSC does not calculate eligible nodes directly. It uses `RSP.Status.EligibleNodes` from the associated storage pool and validates them against topology and FTT/GMDR requirements.
 
 ## Interactions
 
@@ -25,7 +25,7 @@ The controller reconciles `ReplicatedStorageClass` status with:
 
 ## Algorithm
 
-The controller creates/updates an RSP from `spec.storage`, validates eligible nodes against topology/replication requirements, and aggregates volume statistics:
+The controller creates/updates an RSP from `spec.storage`, validates eligible nodes against topology and FTT/GMDR requirements, and aggregates volume statistics:
 
 ```
 readiness = storagePoolReady AND eligibleNodesValid
@@ -105,7 +105,7 @@ Indicates overall readiness of the storage class configuration.
 | Status | Reason | When |
 |--------|--------|------|
 | True | Ready | Configuration accepted and validated |
-| False | InsufficientEligibleNodes | RSP eligible nodes do not meet topology/replication requirements |
+| False | InsufficientEligibleNodes | RSP eligible nodes do not meet topology and FTT/GMDR requirements |
 | False | WaitingForStoragePool | Waiting for RSP to become ready |
 
 ### StoragePoolReady
@@ -144,20 +144,34 @@ Indicates whether all volumes' replicas are placed on eligible nodes.
 
 RSC does not calculate eligible nodes. The `rsp_controller` calculates them and stores in `RSP.Status.EligibleNodes`.
 
-RSC validates that the eligible nodes from RSP meet replication and topology requirements:
+RSC validates that the eligible nodes from RSP meet the FTT/GMDR and topology requirements.
 
-| Replication | Topology | Requirement |
-|-------------|----------|-------------|
-| None | any | ≥1 node |
-| Availability | Ignored/default | ≥3 nodes, ≥2 with disks |
-| Availability | TransZonal | ≥3 zones, ≥2 with disks |
-| Availability | Zonal | per zone: ≥3 nodes, ≥2 with disks |
-| Consistency | Ignored/default | ≥2 nodes with disks |
-| Consistency | TransZonal | ≥2 zones with disks |
-| Consistency | Zonal | per zone: ≥2 nodes with disks |
-| ConsistencyAndAvailability | Ignored/default | ≥3 nodes with disks |
-| ConsistencyAndAvailability | TransZonal | ≥3 zones with disks |
-| ConsistencyAndAvailability | Zonal | per zone: ≥3 nodes with disks |
+Layout formulas: `D = FTT + GMDR + 1` (diskful replicas), `TB = 1` if D is even and `FTT = D/2` (else 0), `totalReplicas = D + TB`.
+
+**Ignored/default topology** — global node counts:
+
+| FTT | GMDR | D | TB | Min nodes | Min nodes with disks |
+|-----|------|---|----|-----------|---------------------|
+| 0 | 0 | 1 | 0 | 1 | 1 |
+| 0 | 1 | 2 | 0 | 2 | 2 |
+| 1 | 0 | 2 | 1 | 3 | 2 |
+| 1 | 1 | 3 | 0 | 3 | 3 |
+| 1 | 2 | 4 | 1 | 5 | 4 |
+| 2 | 1 | 4 | 0 | 4 | 4 |
+| 2 | 2 | 5 | 0 | 5 | 5 |
+
+**TransZonal topology** — zone counts (composite mode allows fewer zones for some layouts):
+
+| FTT | GMDR | Min zones | Min zones with disks |
+|-----|------|-----------|---------------------|
+| 0 | 1 | 2 | 2 |
+| 1 | 0 | 3 | 2 |
+| 1 | 1 | 3 | 3 |
+| 1 | 2 | 3 | 3 |
+| 2 | 1 | 4 | 4 |
+| 2 | 2 | 3 | 3 |
+
+**Zonal topology** — per-zone requirements (each zone must independently meet the Ignored/default requirements).
 
 If validation fails, RSC sets `Ready=False` with reason `InsufficientEligibleNodes`.
 
@@ -278,7 +292,7 @@ flowchart TD
 
 ### ensureConfiguration Details
 
-**Purpose:** Validates eligible nodes against topology/replication requirements, updates `status.configuration`, `status.configurationGeneration`, `status.storagePoolEligibleNodesRevision`, and the `Ready` condition.
+**Purpose:** Validates eligible nodes against topology and FTT/GMDR requirements, updates `status.configuration`, `status.configurationGeneration`, `status.storagePoolEligibleNodesRevision`, and the `Ready` condition.
 
 **Algorithm:**
 
@@ -307,9 +321,9 @@ flowchart TD
 
 | Input | Output |
 |-------|--------|
-| `rsp.Status.EligibleNodes` | Validated against topology/replication |
+| `rsp.Status.EligibleNodes` | Validated against topology and FTT/GMDR |
 | `rsp.Status.EligibleNodesRevision` | `status.storagePoolEligibleNodesRevision` |
-| `rsc.Spec` (topology, replication, etc.) | `status.configuration` |
+| `rsc.Spec` (topology, FTT/GMDR, etc.) | `status.configuration` |
 | `rsc.Generation` | `status.configurationGeneration` |
 | Validation result | `Ready` condition |
 

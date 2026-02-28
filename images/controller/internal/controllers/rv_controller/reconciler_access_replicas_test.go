@@ -46,7 +46,7 @@ var _ = Describe("reconcileCreateAccessReplicas", func() {
 		return &v1alpha1.ReplicatedVolume{
 			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
 					VolumeAccess: volumeAccess,
 				},
 			},
