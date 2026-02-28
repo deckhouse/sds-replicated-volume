@@ -484,6 +484,8 @@ flowchart TD
 
 **Purpose:** Creates diskful replicas and waits for them to become preconfigured (DRBD setup complete, ready for datamesh membership). Performs safety checks before advancing.
 
+**File:** `reconciler_formation.go`
+
 **Algorithm:**
 
 ```mermaid
@@ -555,6 +557,8 @@ flowchart TD
 
 **Purpose:** Adds preconfigured replicas to the datamesh (with shared secret and quorum), then waits for DRBD configuration, peer connections, and replication establishment.
 
+**File:** `reconciler_formation.go`
+
 **Algorithm:**
 
 ```mermaid
@@ -605,6 +609,8 @@ flowchart TD
 ### reconcileFormationPhaseBootstrapData Details
 
 **Purpose:** Creates a DRBDResourceOperation to trigger initial data synchronization, waits for completion, and finalizes formation.
+
+**File:** `reconciler_formation.go`
 
 **Algorithm:**
 
