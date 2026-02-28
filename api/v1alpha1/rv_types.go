@@ -193,6 +193,10 @@ type ReplicatedVolumeStatus struct {
 	// Datamesh is the computed datamesh configuration for the volume.
 	Datamesh ReplicatedVolumeDatamesh `json:"datamesh"`
 
+	// EffectiveLayout tracks the FTT/GMDR levels that the datamesh actually
+	// provides. q and qmr are computed from these values, not from Configuration.
+	EffectiveLayout ReplicatedVolumeEffectiveLayout `json:"effectiveLayout"`
+
 	// DatameshTransitions is the list of active datamesh transitions.
 	// +listType=atomic
 	// +optional
@@ -565,6 +569,35 @@ func (t DatameshMemberType) ConnectsToAllPeers() bool {
 	default:
 		return false
 	}
+}
+
+// ReplicatedVolumeEffectiveLayout tracks the FTT/GMDR protection levels
+// that the datamesh actually provides right now. q and qmr are derived
+// from these values, not from rv.Status.Configuration.
+//
+// Monotonic ratchet semantics:
+//   - Values only increase (via layout transitions) until they reach the
+//     levels defined in Configuration.
+//   - Once reached, they are held at that level.
+//   - They decrease only if Configuration is lowered below the current
+//     effective values (explicit downgrade).
+//
+// During an upgrade transition EffectiveLayout < Configuration;
+// during a downgrade transition EffectiveLayout > Configuration;
+// at steady state they are equal.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeEffectiveLayout struct {
+	// FailuresToTolerate is the effective FTT level.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2
+	// +kubebuilder:default=0
+	FailuresToTolerate byte `json:"failuresToTolerate"`
+
+	// GuaranteedMinimumDataRedundancy is the effective GMDR level.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2
+	// +kubebuilder:default=0
+	GuaranteedMinimumDataRedundancy byte `json:"guaranteedMinimumDataRedundancy"`
 }
 
 // ReplicatedVolumeEligibleNodesViolation describes a replica placed on a non-eligible node.
