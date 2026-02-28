@@ -138,12 +138,12 @@ func (r *Reconciler) reconcileDeleteAccessReplicas(
 		return m.Attached
 	})
 
-	// Build idset of IDs with active Detach or AddAccessReplica transitions.
+	// Build idset of IDs with active Detach or AddReplica transitions.
 	// Detach: avoid deleting while demote is in progress (churn).
-	// AddAccessReplica: avoid deleting while join is in progress (would waste a full Add+Remove cycle).
+	// AddReplica: avoid deleting while join is in progress (would waste a full Add+Remove cycle).
 	transitions := idset.FromFunc(rv.Status.DatameshTransitions, func(t v1alpha1.ReplicatedVolumeDatameshTransition) (uint8, bool) {
 		if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach ||
-			t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica {
+			t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica {
 			return t.ReplicaID(), true
 		}
 		return 0, false
@@ -165,7 +165,7 @@ func (r *Reconciler) reconcileDeleteAccessReplicas(
 			continue
 		}
 
-		// Do not delete while Detach or AddAccessReplica is in progress.
+		// Do not delete while Detach or AddReplica is in progress.
 		if transitions.Contains(rvr.ID()) {
 			continue
 		}

@@ -110,8 +110,8 @@ Reconcile (root) [Pure orchestration]
 │   ├── (MergeEnsures)
 │   │   ├── ensureDatameshAccessReplicas ← details
 │   │   │   ├── ensureDatameshAccessReplicaTransitionProgress (loop: active transitions)
-│   │   │   ├── ensureDatameshAddAccessReplica (loop: pending joins)
-│   │   │   └── ensureDatameshRemoveAccessReplica (loop: pending leaves)
+│   │   │   ├── ensureDatameshAddReplica (loop: pending joins)
+│   │   │   └── ensureDatameshRemoveReplica (loop: pending leaves)
 │   │   └── ensureDatameshAttachments ← details
 │   │       ├── buildAttachmentsSummary ← details
 │   │       ├── computeDatameshAttachBlocked (calls computeActualQuorum)
@@ -133,7 +133,7 @@ Reconcile (root) [Pure orchestration]
 ├── reconcileRVRFinalizers [Target-state driven]
 │   ├── add RVControllerFinalizer to non-deleting RVRs
 │   └── remove RVControllerFinalizer from deleting RVRs (when safe)
-│       └── isRVRMemberOrLeavingDatamesh (member + RemoveAccessReplica check)
+│       └── isRVRMemberOrLeavingDatamesh (member + RemoveReplica check)
 └── patchRVStatus
 ```
 
@@ -816,12 +816,12 @@ All guards passed: create Access RVR via `createAccessRVR` (sets `spec.type=Acce
 | 1 | Not Access type | Skip |
 | 2 | Already deleting (DeletionTimestamp set) | Skip |
 | 3 | Attached (datamesh member with attached=true) | Skip (hard invariant) |
-| 4 | Active Detach or AddAccessReplica transition for this replica | Skip (avoid churn) |
+| 4 | Active Detach or AddReplica transition for this replica | Skip (avoid churn) |
 | 5 | Another datamesh member on same node | **Delete** (redundant, even if RVA exists) |
 | 6 | No active (non-deleting) RVA on node | **Delete** (unused) |
 
 Deletion via `deleteRVR` (sets DeletionTimestamp). The existing pipeline handles the rest:
-- If datamesh member: rvr_controller forms leave pending, `ensureDatameshRemoveAccessReplica` creates RemoveAccessReplica transition, `reconcileRVRFinalizers` removes finalizer after completion.
+- If datamesh member: rvr_controller forms leave pending, `ensureDatameshRemoveReplica` creates RemoveReplica transition, `reconcileRVRFinalizers` removes finalizer after completion.
 - If not datamesh member: `reconcileRVRFinalizers` removes finalizer directly.
 
 **Data Flow:**
@@ -829,7 +829,7 @@ Deletion via `deleteRVR` (sets DeletionTimestamp). The existing pipeline handles
 | Input | Description |
 |-------|-------------|
 | `rv.Status.Datamesh.Members` | Attached check, redundancy check (other member on same node) |
-| `rv.Status.DatameshTransitions` | Active Detach/AddAccessReplica check |
+| `rv.Status.DatameshTransitions` | Active Detach/AddReplica check |
 | `rvrs` | Access RVRs to evaluate |
 | `rvas` | Active RVAs determine which nodes still need Access replicas |
 
@@ -852,7 +852,7 @@ flowchart TD
     Start([Start]) --> BuildSets["Build membersToConnect, accessMembers,<br/>index replicaRequests by ID"]
 
     BuildSets --> Loop1["Loop 1: existing transitions<br/>(reverse iteration)"]
-    Loop1 --> CheckType{AddAccessReplica or<br/>RemoveAccessReplica?}
+    Loop1 --> CheckType{AddReplica or<br/>RemoveReplica?}
     CheckType -->|No| SkipTransition[Skip]
     CheckType -->|Yes| Progress[ensureDatameshAccessReplicaTransitionProgress]
     Progress --> Completed{Completed?}
@@ -865,14 +865,14 @@ flowchart TD
 
     Loop1 -->|Done| Loop2["Loop 2: remaining pendings"]
     Loop2 --> CheckJoinLeave{Join or leave?}
-    CheckJoinLeave -->|Join| JoinFn[ensureDatameshAddAccessReplica]
-    CheckJoinLeave -->|Leave| LeaveFn[ensureDatameshRemoveAccessReplica]
+    CheckJoinLeave -->|Join| JoinFn[ensureDatameshAddReplica]
+    CheckJoinLeave -->|Leave| LeaveFn[ensureDatameshRemoveReplica]
     JoinFn --> Loop2
     LeaveFn --> Loop2
     Loop2 -->|Done| EndNode([Return EnsureOutcome])
 ```
 
-#### ensureDatameshAddAccessReplica (join guards)
+#### ensureDatameshAddReplica (join guards)
 
 | # | Guard | Outcome |
 |---|-------|---------|
@@ -885,9 +885,9 @@ flowchart TD
 | 7 | RSP nil | Message: "Waiting for ReplicatedStoragePool to be available" |
 | 8 | Node not in eligible nodes | Message: node name |
 
-All guards passed: add member to datamesh, increment revision, create AddAccessReplica transition.
+All guards passed: add member to datamesh, increment revision, create AddReplica transition.
 
-#### ensureDatameshRemoveAccessReplica (leave guards)
+#### ensureDatameshRemoveReplica (leave guards)
 
 | # | Guard | Outcome |
 |---|-------|---------|
@@ -895,15 +895,15 @@ All guards passed: add member to datamesh, increment revision, create AddAccessR
 | 2 | Member type is not Access | Skip (defensive) |
 | 3 | Member is attached | Message: "Cannot leave datamesh: replica is attached, detach required first" |
 
-All guards passed: remove member from datamesh, increment revision, create RemoveAccessReplica transition.
+All guards passed: remove member from datamesh, increment revision, create RemoveReplica transition.
 
 #### ensureDatameshAccessReplicaTransitionProgress
 
-Checks confirmation progress for a single AddAccessReplica or RemoveAccessReplica transition:
+Checks confirmation progress for a single AddReplica or RemoveReplica transition:
 
 - **Confirmation**: a replica is confirmed when `DatameshRevision >= step.DatameshRevision` (on the active step).
-- **RemoveAccessReplica special case**: the leaving replica also counts as confirmed when `DatameshRevision == 0` (it left the datamesh and reset its revision).
-- **Error reporting**: waiting replicas with `Configured=False` are reported as errors in the transition message. For AddAccessReplica, the subject replica's `Configured=False` with reason `PendingJoin` is expected and skipped (it has not joined the datamesh yet).
+- **RemoveReplica special case**: the leaving replica also counts as confirmed when `DatameshRevision == 0` (it left the datamesh and reset its revision).
+- **Error reporting**: waiting replicas with `Configured=False` are reported as errors in the transition message. For AddReplica, the subject replica's `Configured=False` with reason `PendingJoin` is expected and skipped (it has not joined the datamesh yet).
 
 **Data Flow:**
 
@@ -1154,7 +1154,7 @@ All guards passed: set `member.Attached=false`, increment `DatameshRevision`, cr
 | 1 | Already fully attached (member.Attached=true, no active Attach transition) | Skip (settled); conditionReason=Attached. If RV is deleting, message includes pending-deletion note |
 | 2 | Active Attach transition already exists | Skip |
 | 3 | Active Detach transition on same replica | Block: "Attach pending, waiting for detach to complete first" |
-| 4 | Active AddAccessReplica transition for same replica | Block: "Waiting for replica to join datamesh" |
+| 4 | Active AddReplica transition for same replica | Block: "Waiting for replica to join datamesh" |
 | 5 | No datamesh member (defensive) | Block: "Waiting for datamesh member" |
 | 6 | No RVR (defensive) | Block: "Waiting for replica" |
 | 7 | RVR Ready condition not True | Block: "Waiting for replica to become Ready" |
