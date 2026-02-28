@@ -157,7 +157,7 @@ type ReplicatedVolumeReplicaSpec struct {
 	LVMVolumeGroupThinPoolName string `json:"lvmVolumeGroupThinPoolName,omitempty"`
 
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
+	// +kubebuilder:validation:Enum=Diskful;ShadowDiskful;Access;TieBreaker
 	Type ReplicaType `json:"type"`
 }
 
@@ -167,10 +167,10 @@ type ReplicaType string
 // Replica type values for [ReplicatedVolumeReplica] spec.type field.
 const (
 	// ReplicaTypeDiskful represents a diskful replica that stores data on disk.
-	// Diskful replicas are the primary quorum participants. They participate in quorum
-	// only when their backing volume is present and connected; otherwise they act as
-	// implicit tiebreakers. They contribute to quorumMinimumRedundancy only when their
-	// backing volume state is UpToDate.
+	// Diskful replicas are the primary quorum voters. They fully participate in
+	// quorum when their backing volume is attached and up-to-date; otherwise
+	// (disk detached or not yet up-to-date) they still count toward quorum
+	// reachability but do not contribute to the data redundancy guarantee.
 	ReplicaTypeDiskful ReplicaType = "Diskful"
 
 	// ReplicaTypeTieBreaker represents a diskless replica that can provide a tie-breaking
@@ -181,6 +181,15 @@ const (
 	// vote. TieBreakers can also be used for volume access if the StorageClass permits
 	// it via volumeAccess settings.
 	ReplicaTypeTieBreaker ReplicaType = "TieBreaker"
+
+	// ReplicaTypeShadowDiskful represents a diskful replica that stores and
+	// replicates data but is invisible to quorum. Typical uses include
+	// pre-synchronizing data on a new node before promoting it to a full
+	// Diskful voter (so the promotion requires only a fast configuration
+	// change rather than a lengthy data resync), providing a local data
+	// copy for read-heavy workloads, and maintaining a backup-ready
+	// replica without affecting quorum or availability guarantees.
+	ReplicaTypeShadowDiskful ReplicaType = "ShadowDiskful"
 
 	// ReplicaTypeAccess represents a diskless replica used solely for volume attachment.
 	// Access replicas do not store data and do not participate in quorum in any way.
@@ -387,9 +396,17 @@ func (p ReplicatedVolumeReplicaStatusPeerStatus) ID() uint8 {
 }
 
 // ReplicatedVolumeReplicaStatusDRBDRReconciliationCache holds cached values used to optimize DRBDResource reconciliation.
-// These fields track the TARGET configuration that was last computed for DRBDR spec,
-// NOT the actual state that DRBDR has applied. They allow the controller to skip
-// redundant spec comparisons when the input parameters have not changed.
+// ReplicatedVolumeReplicaStatusDRBDRReconciliationCache is a composite cache key
+// used to skip redundant DRBDResource spec recomputations. The fields together
+// capture the inputs that determine the DRBDR spec:
+//   - DatameshRevision — peer topology (membership, connectivity);
+//   - DRBDRGeneration  — external modifications to DRBDR;
+//   - TargetType       — local resource configuration (disk mode, spec.type changes).
+//
+// When any field changes, the controller recomputes and potentially patches the
+// DRBDR spec. Note: the cache is populated even before the replica becomes a
+// datamesh member; in that case the DRBDR is only partially configured (no peer
+// connections), and DatameshRevision / TargetType reflect the partial inputs.
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeReplicaStatusDRBDRReconciliationCache struct {
 	// DatameshRevision is the datamesh revision for which DRBDResource spec was last computed.
@@ -398,9 +415,9 @@ type ReplicatedVolumeReplicaStatusDRBDRReconciliationCache struct {
 	// DRBDRGeneration is the DRBDResource generation at the time DRBDResource spec was last computed.
 	DRBDRGeneration int64 `json:"drbdrGeneration,omitempty"`
 
-	// RVRType is the effective replica type for which DRBDResource spec was last computed.
-	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
-	RVRType ReplicaType `json:"rvrType,omitempty"`
+	// TargetType is the target type for which DRBDResource spec was last computed.
+	// +kubebuilder:validation:Enum=Diskful;LiminalDiskful;ShadowDiskful;LiminalShadowDiskful;TieBreaker;Access
+	TargetType DatameshMemberType `json:"targetType,omitempty"`
 }
 
 // ReplicatedVolumeReplicaStatusDatameshPendingTransition describes pending datamesh changes for this replica.

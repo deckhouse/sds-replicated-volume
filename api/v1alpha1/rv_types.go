@@ -63,15 +63,33 @@ func (rv *ReplicatedVolume) SetStatusConditions(conditions []metav1.Condition) {
 	rv.Status.Conditions = conditions
 }
 
+// Auto mode requires RSC name, forbids manualConfiguration:
+// +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Auto' || (size(self.replicatedStorageClassName) > 0 && !has(self.manualConfiguration))",message="Auto mode requires replicatedStorageClassName and must not have manualConfiguration."
+// Manual mode requires manualConfiguration, forbids RSC name:
+// +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Manual' || (has(self.manualConfiguration) && size(self.replicatedStorageClassName) == 0)",message="Manual mode requires manualConfiguration and must not have replicatedStorageClassName."
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeSpec struct {
 	// +kubebuilder:validation:Required
 	//	+kubebuilder:validation:XValidation:rule="quantity(string(self)).isGreaterThan(quantity('0'))",message="size must be greater than 0"
 	Size resource.Quantity `json:"size"`
 
-	// +kubebuilder:validation:Required
+	// ConfigurationMode selects how the volume configuration is determined.
+	// Auto (default): configuration is derived from the referenced ReplicatedStorageClass.
+	// Manual: configuration is specified directly in the manualConfiguration field.
+	// +kubebuilder:validation:Enum=Auto;Manual
+	// +kubebuilder:default=Auto
+	ConfigurationMode ReplicatedVolumeConfigurationMode `json:"configurationMode,omitempty"`
+
+	// ReplicatedStorageClassName references the RSC that provides configuration.
+	// Required when configurationMode is Auto. Must not be set when configurationMode is Manual.
+	// +optional
 	// +kubebuilder:validation:MinLength=1
-	ReplicatedStorageClassName string `json:"replicatedStorageClassName"`
+	ReplicatedStorageClassName string `json:"replicatedStorageClassName,omitempty"`
+
+	// ManualConfiguration specifies the volume configuration directly.
+	// Required when configurationMode is Manual. Must not be set when configurationMode is Auto.
+	// +optional
+	ManualConfiguration *ReplicatedVolumeConfiguration `json:"manualConfiguration,omitempty"`
 
 	// MaxAttachments is the maximum number of nodes this volume can be attached to simultaneously.
 	//
@@ -93,6 +111,48 @@ type ReplicatedVolumeSpec struct {
 	MaxAttachments byte `json:"maxAttachments"`
 }
 
+// ReplicatedVolumeConfigurationMode enumerates possible values for ReplicatedVolume spec.configurationMode field.
+type ReplicatedVolumeConfigurationMode string
+
+const (
+	// ReplicatedVolumeConfigurationModeAuto means configuration is derived from the referenced ReplicatedStorageClass.
+	ReplicatedVolumeConfigurationModeAuto ReplicatedVolumeConfigurationMode = "Auto"
+	// ReplicatedVolumeConfigurationModeManual means configuration is specified directly in the manual field.
+	ReplicatedVolumeConfigurationModeManual ReplicatedVolumeConfigurationMode = "Manual"
+)
+
+func (m ReplicatedVolumeConfigurationMode) String() string { return string(m) }
+
+// ReplicatedVolumeConfiguration represents the resolved volume configuration.
+// Always contains the resolved FTT/GMDR parameters (never the legacy replication field).
+// Used in rv.Status.Configuration, rv.Spec.ManualConfiguration, and rsc.Status.Configuration.
+//
+// Valid FTT/GMDR combinations: |FTT - GMDR| <= 1:
+// +kubebuilder:validation:XValidation:rule="self.failuresToTolerate - self.guaranteedMinimumDataRedundancy <= 1 && self.guaranteedMinimumDataRedundancy - self.failuresToTolerate <= 1",message="Invalid failuresToTolerate/guaranteedMinimumDataRedundancy combination: |FTT - GMDR| must be <= 1."
+//
+// FTT=0, GMDR=0 requires topology Ignored:
+// +kubebuilder:validation:XValidation:rule="!(self.failuresToTolerate == 0 && self.guaranteedMinimumDataRedundancy == 0) || self.topology == 'Ignored'",message="failuresToTolerate=0 with guaranteedMinimumDataRedundancy=0 requires topology Ignored."
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeConfiguration struct {
+	// ReplicatedStoragePoolName is the name of the ReplicatedStoragePool resource.
+	// +kubebuilder:validation:MinLength=1
+	ReplicatedStoragePoolName string `json:"replicatedStoragePoolName"`
+	// Topology is the resolved topology setting.
+	// +kubebuilder:validation:Enum=TransZonal;Zonal;Ignored
+	Topology ReplicatedStorageClassTopology `json:"topology"`
+	// FailuresToTolerate is the resolved FTT value.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2
+	FailuresToTolerate byte `json:"failuresToTolerate"`
+	// GuaranteedMinimumDataRedundancy is the resolved GMDR value.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2
+	GuaranteedMinimumDataRedundancy byte `json:"guaranteedMinimumDataRedundancy"`
+	// VolumeAccess is the resolved volume access mode.
+	// +kubebuilder:validation:Enum=Local;EventuallyLocal;PreferablyLocal;Any
+	VolumeAccess ReplicatedStorageClassVolumeAccess `json:"volumeAccess"`
+}
+
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeStatus struct {
 	// +listType=map
@@ -110,7 +170,7 @@ type ReplicatedVolumeStatus struct {
 
 	// Configuration is the desired configuration snapshot for this volume.
 	// +optional
-	Configuration *ReplicatedStorageClassConfiguration `json:"configuration,omitempty"`
+	Configuration *ReplicatedVolumeConfiguration `json:"configuration,omitempty"`
 
 	// ConfigurationGeneration is the RSC generation from which configuration was taken.
 	// +optional
@@ -310,7 +370,7 @@ type ReplicatedVolumeDatamesh struct {
 	// +kubebuilder:validation:MaxItems=32
 	// +kubebuilder:default={}
 	// +listType=atomic
-	Members []ReplicatedVolumeDatameshMember `json:"members"`
+	Members []DatameshMember `json:"members"`
 
 	// Quorum is the quorum value for the datamesh.
 	// +kubebuilder:validation:Minimum=0
@@ -326,7 +386,7 @@ type ReplicatedVolumeDatamesh struct {
 }
 
 // FindMemberByName returns a pointer to the member with the given name, or nil if not found.
-func (dm *ReplicatedVolumeDatamesh) FindMemberByName(name string) *ReplicatedVolumeDatameshMember {
+func (dm *ReplicatedVolumeDatamesh) FindMemberByName(name string) *DatameshMember {
 	for i := range dm.Members {
 		if dm.Members[i].Name == name {
 			return &dm.Members[i]
@@ -350,16 +410,13 @@ func (a SharedSecretAlg) String() string {
 	return string(a)
 }
 
-// ReplicatedVolumeDatameshMember represents a member of the datamesh.
+// DatameshMember represents a member of the datamesh.
 // +kubebuilder:object:generate=true
-// +kubebuilder:validation:XValidation:rule="self.type != 'Diskful' || !has(self.typeTransition) || self.typeTransition == 'ToDiskless'",message="Diskful can only have ToDiskless typeTransition"
-// +kubebuilder:validation:XValidation:rule="self.type != 'TieBreaker' || !has(self.typeTransition) || self.typeTransition == 'ToDiskful'",message="TieBreaker can only have ToDiskful typeTransition"
-// +kubebuilder:validation:XValidation:rule="self.type != 'Access' || !has(self.typeTransition)",message="Access cannot have typeTransition"
 // +kubebuilder:validation:XValidation:rule="self.name.lastIndexOf('-') >= 0",message="name must contain '-' separator"
 // +kubebuilder:validation:XValidation:rule="int(self.name.substring(self.name.lastIndexOf('-') + 1)) <= 31",message="name numeric suffix must be between 0 and 31"
-// +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || self.type == 'Diskful' || (has(self.typeTransition) && self.typeTransition == 'ToDiskful')",message="lvmVolumeGroupName can only be set for Diskful type or when typeTransition is ToDiskful"
+// +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || self.type == 'Diskful' || self.type == 'LiminalDiskful'",message="lvmVolumeGroupName can only be set for Diskful or LiminalDiskful type"
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be set"
-type ReplicatedVolumeDatameshMember struct {
+type DatameshMember struct {
 	// Name is the member name (used as list map key).
 	// Must have format "prefix-N" where N is 0-31.
 	// +kubebuilder:validation:Required
@@ -367,14 +424,10 @@ type ReplicatedVolumeDatameshMember struct {
 	// +kubebuilder:validation:MaxLength=140
 	Name string `json:"name"`
 
-	// Type is the member type (Diskful, Access, or TieBreaker).
+	// Type is the member type.
 	// +kubebuilder:validation:Required
-	Type ReplicaType `json:"type"`
-
-	// TypeTransition indicates the desired type transition for this member.
-	// +kubebuilder:validation:Enum=ToDiskful;ToDiskless
-	// +optional
-	TypeTransition ReplicatedVolumeDatameshMemberTypeTransition `json:"typeTransition,omitempty"`
+	// +kubebuilder:validation:Enum=Diskful;LiminalDiskful;ShadowDiskful;LiminalShadowDiskful;TieBreaker;Access
+	Type DatameshMemberType `json:"type"`
 
 	// NodeName is the Kubernetes node name where the member is located.
 	// +kubebuilder:validation:Required
@@ -411,22 +464,105 @@ type ReplicatedVolumeDatameshMember struct {
 }
 
 // ID extracts ID from the member name (e.g., "pvc-xxx-5" → 5).
-func (m ReplicatedVolumeDatameshMember) ID() uint8 {
+func (m DatameshMember) ID() uint8 {
 	return idFromName(m.Name)
 }
 
-// ReplicatedVolumeDatameshMemberTypeTransition enumerates possible type transitions for datamesh members.
-type ReplicatedVolumeDatameshMemberTypeTransition string
+// DatameshMemberType enumerates possible types for datamesh members.
+// This is separate from ReplicaType because datamesh members have an additional
+// LiminalDiskful state that does not exist for RVR spec types.
+type DatameshMemberType string
 
 const (
-	// ReplicatedVolumeDatameshMemberTypeTransitionToDiskful indicates transition to Diskful type.
-	ReplicatedVolumeDatameshMemberTypeTransitionToDiskful ReplicatedVolumeDatameshMemberTypeTransition = "ToDiskful"
-	// ReplicatedVolumeDatameshMemberTypeTransitionToDiskless indicates transition to a diskless type (Access or TieBreaker).
-	ReplicatedVolumeDatameshMemberTypeTransitionToDiskless ReplicatedVolumeDatameshMemberTypeTransition = "ToDiskless"
+	// DatameshMemberTypeDiskful is a fully operational diskful member.
+	// DRBD is configured with the backing volume attached.
+	DatameshMemberTypeDiskful DatameshMemberType = DatameshMemberType(ReplicaTypeDiskful)
+
+	// DatameshMemberTypeLiminalDiskful is a diskful member in a preparatory
+	// (threshold) stage. A liminal member is already Diskful by role (quorum voter, full peer
+	// connectivity) but DRBD is configured as diskless. The backing volume is maintained but
+	// not attached to DRBD. This stage is entered during PromoteToDiskful and DemoteFromDiskful
+	// transitions but is skipped during Formation.
+	DatameshMemberTypeLiminalDiskful DatameshMemberType = DatameshMemberType("Liminal" + ReplicaTypeDiskful)
+
+	// DatameshMemberTypeShadowDiskful is a diskful member that pre-syncs data
+	// invisibly to quorum. DRBD is configured with the backing volume attached and
+	// non-voting=true. Excluded from quorum on all peers via allow-remote-read=false.
+	DatameshMemberTypeShadowDiskful DatameshMemberType = DatameshMemberType(ReplicaTypeShadowDiskful)
+
+	// DatameshMemberTypeLiminalShadowDiskful is a shadow diskful member in a preparatory
+	// stage. DRBD is configured as diskless. The backing volume is maintained but not
+	// attached to DRBD.
+	DatameshMemberTypeLiminalShadowDiskful DatameshMemberType = DatameshMemberType("Liminal" + ReplicaTypeShadowDiskful)
+
+	// DatameshMemberTypeTieBreaker is a diskless member that participates
+	// in tiebreaker voting.
+	DatameshMemberTypeTieBreaker DatameshMemberType = DatameshMemberType(ReplicaTypeTieBreaker)
+
+	// DatameshMemberTypeAccess is a diskless member used solely for volume attachment.
+	DatameshMemberTypeAccess DatameshMemberType = DatameshMemberType(ReplicaTypeAccess)
 )
 
-func (t ReplicatedVolumeDatameshMemberTypeTransition) String() string {
+func (t DatameshMemberType) String() string {
 	return string(t)
+}
+
+// IsVoter reports whether this member type participates in quorum voting.
+func (t DatameshMemberType) IsVoter() bool {
+	switch t {
+	case DatameshMemberTypeDiskful, DatameshMemberTypeLiminalDiskful:
+		return true
+	default:
+		return false
+	}
+}
+
+// HasBackingVolume reports whether DRBD is configured with a backing volume
+// for this member type.
+func (t DatameshMemberType) HasBackingVolume() bool {
+	switch t {
+	case DatameshMemberTypeDiskful, DatameshMemberTypeShadowDiskful:
+		return true
+	default:
+		return false
+	}
+}
+
+// NeedsBackingVolume reports whether this member type requires a backing volume
+// to be provisioned (even if DRBD is not yet configured with it).
+func (t DatameshMemberType) NeedsBackingVolume() bool {
+	switch t {
+	case DatameshMemberTypeDiskful, DatameshMemberTypeLiminalDiskful,
+		DatameshMemberTypeShadowDiskful, DatameshMemberTypeLiminalShadowDiskful:
+		return true
+	default:
+		return false
+	}
+}
+
+// ToLiminal returns the liminal variant of this member type.
+// Panics if this type has no liminal variant (only types with HasBackingVolume have one).
+func (t DatameshMemberType) ToLiminal() DatameshMemberType {
+	switch t {
+	case DatameshMemberTypeDiskful:
+		return DatameshMemberTypeLiminalDiskful
+	case DatameshMemberTypeShadowDiskful:
+		return DatameshMemberTypeLiminalShadowDiskful
+	default:
+		panic("no liminal variant for " + string(t))
+	}
+}
+
+// ConnectsToAllPeers reports whether this member type has full mesh peer
+// connectivity (connects to every other member in the datamesh).
+func (t DatameshMemberType) ConnectsToAllPeers() bool {
+	switch t {
+	case DatameshMemberTypeDiskful, DatameshMemberTypeLiminalDiskful,
+		DatameshMemberTypeShadowDiskful, DatameshMemberTypeLiminalShadowDiskful:
+		return true
+	default:
+		return false
+	}
 }
 
 // ReplicatedVolumeEligibleNodesViolation describes a replica placed on a non-eligible node.

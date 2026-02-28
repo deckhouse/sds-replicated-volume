@@ -20,7 +20,7 @@
   license: Apache-2.0
 
 - id: DRBD_UTILS
-  version: "9.30.0"
+  version: "9.31.0-flant.1"
   name: drbd-utils
   link: https://github.com/LINBIT/drbd-utils
   description: DRBD userspace utilities for DRBD 9.x (and 8.4, 8.3). User-space tools and daemons for managing and configuring DRBD resources.

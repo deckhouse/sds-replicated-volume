@@ -20,6 +20,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 )
 
 // PortAllocator is a function that allocates a port for a given IP address.
@@ -75,6 +76,10 @@ type IntendedDRBDState interface {
 	// OnSuspendedPrimaryOutdated returns the intended action. Always "force-secondary".
 	OnSuspendedPrimaryOutdated() string
 
+	// QuorumDynamicVoters returns the intended quorum-dynamic-voters setting.
+	// Returns false (disable) when Flant extensions are available, true (DRBD default) otherwise.
+	QuorumDynamicVoters() bool
+
 	// DiscardZeroesIfAligned returns the intended setting. Always false.
 	DiscardZeroesIfAligned() bool
 
@@ -83,6 +88,9 @@ type IntendedDRBDState interface {
 
 	// SymlinkName returns the K8S name used for the stable device symlink path.
 	SymlinkName() string
+
+	// NonVoting returns the intended non-voting setting. Read from spec.
+	NonVoting() bool
 }
 
 // IntendedPeer represents the intended state of a DRBD peer connection.
@@ -141,6 +149,7 @@ type intendedDRBDState struct {
 	quorum                  byte
 	quorumMinimumRedundancy byte
 	allowTwoPrimaries       bool
+	nonVoting               bool
 	role                    v1alpha1.DRBDRole
 	sizeBytes               int64
 	peers                   []IntendedPeer
@@ -167,10 +176,12 @@ func (s *intendedDRBDState) AutoPromote() bool                  { return false }
 func (s *intendedDRBDState) OnNoQuorum() string                 { return "suspend-io" }
 func (s *intendedDRBDState) OnNoDataAccessible() string         { return "suspend-io" }
 func (s *intendedDRBDState) OnSuspendedPrimaryOutdated() string { return "force-secondary" }
+func (s *intendedDRBDState) QuorumDynamicVoters() bool          { return !drbdutils.FlantExtensionsSupported }
 
 // Hardcoded disk options defaults
 func (s *intendedDRBDState) DiscardZeroesIfAligned() bool { return false }
 func (s *intendedDRBDState) RsDiscardGranularity() uint   { return 8192 } // TODO: DETECT AUTOMATICALLY FROM LVM
+func (s *intendedDRBDState) NonVoting() bool              { return s.nonVoting }
 
 var _ IntendedDRBDState = (*intendedDRBDState)(nil)
 
@@ -282,6 +293,7 @@ func computeIntendedDRBDState(
 		quorum:                  drbdr.Spec.Quorum,
 		quorumMinimumRedundancy: drbdr.Spec.QuorumMinimumRedundancy,
 		allowTwoPrimaries:       drbdr.Spec.AllowTwoPrimaries,
+		nonVoting:               drbdr.Spec.NonVoting,
 		role:                    drbdr.Spec.Role,
 		sizeBytes:               sizeBytes,
 		peers:                   peers,

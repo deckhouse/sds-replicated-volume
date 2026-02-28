@@ -5,7 +5,7 @@ from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 git:
-  - url: {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-utils
+  - url: {{ $.Root.SOURCE_REPO }}/deckhouse/3p-drbd-utils
     add: /
     to: /drbd-utils
     tag: v{{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}
@@ -39,7 +39,7 @@ shell:
   setup:
     # clone drbd-utils git repo
     {{- $ctx := dict }}
-    {{- $_ := set $ctx "repo" (printf "%s/LINBIT/drbd-utils" $.Root.SOURCE_REPO) }}
+    {{- $_ := set $ctx "repo" (printf "%s/deckhouse/3p-drbd-utils" $.Root.SOURCE_REPO) }}
     {{- $_ := set $ctx "branch" (printf "v%s" (include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root))) }}
     {{- $_ := set $ctx "folder" "/drbd-utils" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
