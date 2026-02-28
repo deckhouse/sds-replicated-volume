@@ -508,7 +508,7 @@ Uses composite index to efficiently find RVRs by (replicatedVolumeName, nodeName
 | `IndexFieldRVRByReplicatedVolumeName` | `spec.replicatedVolumeName` | Map ReplicatedVolume events to RVRs |
 | `IndexFieldRVRByNodeName` | `spec.nodeName` | Map agent Pod events to RVRs on the same node |
 | `IndexFieldRVRByRVAndNode` | `spec.replicatedVolumeName+nodeName` | Find RVR by RV and node (composite) |
-| `IndexFieldRVByStoragePoolName` | `status.configuration.storagePoolName` | Find RVs using a specific RSP |
+| `IndexFieldRVByStoragePoolName` | `status.configuration.replicatedStoragePoolName` | Find RVs using a specific RSP |
 | `IndexFieldPodByNodeName` | `spec.nodeName` | Find agent Pod on a specific node |
 
 ## Data Flow

@@ -97,7 +97,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			Enrichf("setting WaitingForReplicatedVolume: RV has no configuration").ToCtrl()
 	}
 
-	rsp, err := r.getRSP(rf.Ctx(), rv.Status.Configuration.StoragePoolName)
+	rsp, err := r.getRSP(rf.Ctx(), rv.Status.Configuration.ReplicatedStoragePoolName)
 	if err != nil {
 		return rf.Fail(err).ToCtrl()
 	}
@@ -108,7 +108,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			metav1.ConditionUnknown,
 			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume,
 			"ReplicatedStoragePool not found; waiting for it to be present").
-			Enrichf("setting WaitingForReplicatedVolume: RSP %q not found", rv.Status.Configuration.StoragePoolName).ToCtrl()
+			Enrichf("setting WaitingForReplicatedVolume: RSP %q not found", rv.Status.Configuration.ReplicatedStoragePoolName).ToCtrl()
 	}
 
 	attachToNodes, err := r.getIntendedAttachments(rf.Ctx(), req.Name)
@@ -370,6 +370,13 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	}
 
 	// TransZonal topology: replicas should be evenly spread across zones.
+	//
+	// The scheduler uses greedy round-robin (fewest replicas → preferred zone)
+	// and does NOT enforce the max-D-per-zone constraint (D − qmr) or the
+	// required zone count directly. It relies on RSC-level CEL validation to
+	// restrict TransZonal to valid zone counts for each FTT/GMDR combination
+	// (e.g., FTT=2,GMDR=2 allows only 3 or 5 zones). Given valid zone counts,
+	// the round-robin naturally satisfies the max-D-per-zone constraint.
 	if sctx.Topology == v1alpha1.TopologyTransZonal {
 		var compare func(a, b idset.IDSet) int
 		if isDiskful {
@@ -475,10 +482,7 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	// replicas. For TransZonal this is unnecessary — replicas are already
 	// spread across zones by the zone filtering predicate above.
 	//
-	// The required Diskful count depends on the replication mode:
-	//   None                       → 1
-	//   Availability/Consistency   → 2
-	//   ConsistencyAndAvailability → 3
+	// The required Diskful count: D = FTT + GMDR + 1.
 	//
 	// We subtract already-scheduled Diskful to get the remaining demand.
 	// By this point the "node occupied" predicate has already filtered
@@ -489,13 +493,7 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	// the 0–10 range, so -800 pushes these zones to the bottom and
 	// they will only be chosen as a last resort).
 	if isDiskful && sctx.Topology == v1alpha1.TopologyZonal {
-		requiredDiskful := 1
-		switch sctx.Replication {
-		case v1alpha1.ReplicationAvailability, v1alpha1.ReplicationConsistency:
-			requiredDiskful = 2
-		case v1alpha1.ReplicationConsistencyAndAvailability:
-			requiredDiskful = 3
-		}
+		requiredDiskful := int(sctx.FailuresToTolerate + sctx.GuaranteedMinimumDataRedundancy + 1)
 		scheduledDiskful := sctx.Scheduled.Intersect(sctx.Diskful).Len()
 		remainingDemand := requiredDiskful - scheduledDiskful
 		if remainingDemand < 0 {
@@ -617,9 +615,10 @@ type schedulingContext struct {
 	Topology       v1alpha1.ReplicatedStorageClassTopology
 	ReplicasByZone map[string]idset.IDSet
 
-	// Replication mode and volume access from the resolved RSC configuration.
-	Replication  v1alpha1.ReplicatedStorageClassReplication
-	VolumeAccess v1alpha1.ReplicatedStorageClassVolumeAccess
+	// FTT/GMDR and volume access from the resolved configuration.
+	FailuresToTolerate              byte
+	GuaranteedMinimumDataRedundancy byte
+	VolumeAccess                    v1alpha1.ReplicatedStorageClassVolumeAccess
 
 	// Replica type sets (computed in one pass over rvrs).
 	All        idset.IDSet
@@ -649,14 +648,15 @@ func computeSchedulingContext(
 	})
 
 	sctx := &schedulingContext{
-		EligibleNodes: eligibleNodes,
-		Topology:      rv.Status.Configuration.Topology,
-		Replication:   rv.Status.Configuration.Replication,
-		VolumeAccess:  rv.Status.Configuration.VolumeAccess,
-		AttachToNodes: attachToNodes,
-		ReservationID: rv.GetAnnotations()[v1alpha1.SchedulingReservationIDAnnotationKey],
-		Size:          rv.Spec.Size.Value(),
-		OccupiedNodes: make(map[string]struct{}, len(rvrs)),
+		EligibleNodes:                   eligibleNodes,
+		Topology:                        rv.Status.Configuration.Topology,
+		FailuresToTolerate:              rv.Status.Configuration.FailuresToTolerate,
+		GuaranteedMinimumDataRedundancy: rv.Status.Configuration.GuaranteedMinimumDataRedundancy,
+		VolumeAccess:                    rv.Status.Configuration.VolumeAccess,
+		AttachToNodes:                   attachToNodes,
+		ReservationID:                   rv.GetAnnotations()[v1alpha1.SchedulingReservationIDAnnotationKey],
+		Size:                            rv.Spec.Size.Value(),
+		OccupiedNodes:                   make(map[string]struct{}, len(rvrs)),
 	}
 
 	poolType := rsp.Spec.Type

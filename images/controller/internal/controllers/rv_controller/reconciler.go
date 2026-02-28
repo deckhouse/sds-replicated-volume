@@ -73,10 +73,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return r.reconcileOrphanedRVAs(rf.Ctx(), req.Name).ToCtrl()
 	}
 
-	// Load RSC.
-	rsc, err := r.getRSC(rf.Ctx(), rv.Spec.ReplicatedStorageClassName)
-	if err != nil {
-		return rf.Failf(err, "getting ReplicatedStorageClass").ToCtrl()
+	// Load RSC (Auto mode only; Manual mode has no RSC reference).
+	var rsc *v1alpha1.ReplicatedStorageClass
+	if rv.Spec.ReplicatedStorageClassName != "" {
+		rsc, err = r.getRSC(rf.Ctx(), rv.Spec.ReplicatedStorageClassName)
+		if err != nil {
+			return rf.Failf(err, "getting ReplicatedStorageClass").ToCtrl()
+		}
 	}
 
 	// Load child resources.
@@ -126,9 +129,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	base := rv.DeepCopy()
 
+	// Derive rv.Status.Configuration from the appropriate source (RSC or ManualConfiguration).
+	// Called here only for initial set (config is nil). During normal operation,
+	// reconcileRVConfiguration is called inside reconcileNormalOperation.
+	// During formation, config is frozen (only formation reset calls reconcileRVConfiguration).
+	if rv.Status.Configuration == nil {
+		outcome = outcome.Merge(r.reconcileRVConfiguration(rf.Ctx(), rv, rsc))
+		if outcome.ShouldReturn() {
+			return outcome.ToCtrl()
+		}
+	}
+
 	// Preparatory actions.
 	eo := flow.MergeEnsures(
-		ensureRVConfiguration(rf.Ctx(), rv, rsc),
 		ensureDatameshPendingReplicaTransitions(rf.Ctx(), rv, rvrs),
 	)
 	if eo.Error() != nil {
@@ -138,28 +151,22 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Perform main processing.
 	if rv.Status.Configuration != nil {
-		rsp, err := r.getRSP(rf.Ctx(), rv.Status.Configuration.StoragePoolName, rvrs, rvas)
+		rsp, err := r.getRSP(rf.Ctx(), rv.Status.Configuration.ReplicatedStoragePoolName, rvrs, rvas)
 		if err != nil {
 			return rf.Failf(err, "getting RSP").ToCtrl()
 		}
 		if forming, formationPhase := isFormationInProgress(rv); forming {
 			outcome = outcome.Merge(r.reconcileFormation(rf.Ctx(), rv, &rvrs, rvas, rsp, rsc, formationPhase))
 		} else {
-			outcome = outcome.Merge(r.reconcileNormalOperation(rf.Ctx(), rv, &rvrs, rvas, rsp))
+			outcome = flow.MergeReconciles(outcome,
+				r.reconcileRVConfiguration(rf.Ctx(), rv, rsc),
+				r.reconcileNormalOperation(rf.Ctx(), rv, &rvrs, rvas, rsp),
+			)
 		}
 		if outcome.ShouldReturn() {
 			return outcome.ToCtrl()
 		}
 	}
-
-	// Ensure conditions.
-	eo = flow.MergeEnsures(
-		ensureConditionConfigurationReady(rf.Ctx(), rv, rsc),
-	)
-	if eo.Error() != nil {
-		return rf.Fail(eo.Error()).ToCtrl()
-	}
-	outcome = outcome.WithChangeFrom(eo)
 
 	// Reconcile RVA and RVR finalizers.
 	outcome = flow.MergeReconciles(
@@ -280,7 +287,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 	// Create missing diskful replicas only when there are no replicas being deleted or misplaced.
 	// This prevents zombie accumulation: we wait for all cleanup to finish before creating new ones.
 	if deleting.IsEmpty() && misplaced.IsEmpty() {
-		for diskful.Len() < targetDiskfulCount {
+		for diskful.Len() < int(targetDiskfulCount) {
 			rvr, err := r.createDiskfulRVR(rf.Ctx(), rv, rvrs)
 			if err != nil {
 				if apierrors.IsAlreadyExists(err) {
@@ -318,7 +325,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 
 	// Remove excess diskful replicas (prefer higher ID).
 	// Priority: prefer deleting replicas that are less progressed (not scheduled > not preconfigured > any).
-	for diskful.Len() > targetDiskfulCount {
+	for diskful.Len() > int(targetDiskfulCount) {
 		var candidates idset.IDSet
 		if ns := diskful.Difference(scheduled); !ns.IsEmpty() {
 			candidates = ns
@@ -947,9 +954,8 @@ func (r *Reconciler) reconcileFormationRestartIfTimeoutPassed(
 		}
 	}
 
-	// Reset configuration and datamesh state, then immediately re-initialize
-	// configuration from RSC so the intermediate nil state is never persisted
-	// (avoids unnecessary RSC reconciliation / pendingObservation churn).
+	// Reset configuration and datamesh state, then immediately re-derive
+	// configuration so the ConfigurationReady condition does not flicker.
 	rv.Status.Configuration = nil
 	rv.Status.ConfigurationGeneration = 0
 	rv.Status.ConfigurationObservedGeneration = 0
@@ -958,10 +964,10 @@ func (r *Reconciler) reconcileFormationRestartIfTimeoutPassed(
 	rv.Status.DatameshTransitions = nil
 	rv.Status.DatameshPendingReplicaTransitions = nil
 
-	// Re-initialize configuration from RSC.
-	eo := ensureRVConfiguration(rf.Ctx(), rv, rsc)
-	if eo.Error() != nil {
-		return rf.Fail(eo.Error())
+	// Re-derive configuration from source (Configuration is nil after reset).
+	outcome = r.reconcileRVConfiguration(rf.Ctx(), rv, rsc)
+	if outcome.ShouldReturn() {
+		return outcome
 	}
 
 	return rf.ContinueAndRequeue().ReportChanged()
@@ -1434,7 +1440,7 @@ func applyPendingReplicaMessages(rv *v1alpha1.ReplicatedVolume, repIDs idset.IDS
 // (pending scheduling, scheduling failed with inline error details, preconfiguring).
 func computeFormationPreconfigureWaitMessage(
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-	targetDiskfulCount int,
+	targetDiskfulCount byte,
 	pendingScheduling, schedulingFailed, waitingPreconfiguration idset.IDSet,
 ) string {
 	var waitReasons []string
@@ -1477,43 +1483,53 @@ func computeActualSchedulingFailureMessages(rvrs []*v1alpha1.ReplicatedVolumeRep
 	return msgs
 }
 
-// computeIntendedDiskfulReplicaCount returns the intended number of diskful replicas
-// based on the replication mode from rv.Status.Configuration.
-func computeIntendedDiskfulReplicaCount(rv *v1alpha1.ReplicatedVolume) int {
-	switch rv.Status.Configuration.Replication {
-	case v1alpha1.ReplicationNone:
-		return 1
-	case v1alpha1.ReplicationConsistencyAndAvailability:
-		return 3
-	default:
-		return 2
-	}
+// computeIntendedDiskfulReplicaCount returns the intended number of diskful replicas.
+// D = FTT + GMDR + 1
+func computeIntendedDiskfulReplicaCount(rv *v1alpha1.ReplicatedVolume) byte {
+	cfg := rv.Status.Configuration
+	return cfg.FailuresToTolerate + cfg.GuaranteedMinimumDataRedundancy + 1
 }
 
-// computeTargetQuorum computes Quorum and QuorumMinimumRedundancy based on intended diskful members and replication mode.
+// computeTargetQuorum computes Quorum and QuorumMinimumRedundancy.
+//
+//	qmr = GMDR + 1
+//	q   = floor(voters / 2) + 1, but at least floor(D / 2) + 1
+//	D   = FTT + GMDR + 1
 func computeTargetQuorum(rv *v1alpha1.ReplicatedVolume) (q, qmr byte) {
+	d := computeIntendedDiskfulReplicaCount(rv)
+
+	minQ := d/2 + 1
 	voters := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
 		return m.Type.IsVoter()
 	})
-
-	var minQ, minQMR byte
-	switch rv.Status.Configuration.Replication {
-	case v1alpha1.ReplicationNone:
-		minQ, minQMR = 1, 1
-	case v1alpha1.ReplicationAvailability:
-		minQ, minQMR = 2, 1
-	case v1alpha1.ReplicationConsistency, v1alpha1.ReplicationConsistencyAndAvailability:
-		minQ, minQMR = 2, 2
-	default:
-		minQ, minQMR = 2, 2
-	}
-
 	quorum := byte(voters.Len()/2 + 1)
-
 	q = max(quorum, minQ)
-	qmr = max(quorum, minQMR)
+
+	qmr = rv.Status.Configuration.GuaranteedMinimumDataRedundancy + 1
 
 	return q, qmr
+}
+
+// isTransZonalZoneCountValid checks whether the given zone count is valid for a TransZonal
+// layout with the specified FTT/GMDR combination. Valid zone counts match the RSC-level
+// CEL zone validation.
+func isTransZonalZoneCountValid(ftt, gmdr byte, zoneCount int) bool {
+	switch {
+	case ftt == 0 && gmdr == 1:
+		return zoneCount == 2
+	case ftt == 1 && gmdr == 0:
+		return zoneCount == 3
+	case ftt == 1 && gmdr == 1:
+		return zoneCount == 3
+	case ftt == 1 && gmdr == 2:
+		return zoneCount == 3 || zoneCount == 5
+	case ftt == 2 && gmdr == 1:
+		return zoneCount == 4
+	case ftt == 2 && gmdr == 2:
+		return zoneCount == 3 || zoneCount == 5
+	default:
+		return false // FTT=0,GMDR=0 is not TransZonal; unknown combos are invalid.
+	}
 }
 
 // computeActualQuorum checks whether at least one voting replica has quorum and a ready agent.
@@ -1570,6 +1586,11 @@ func isRVMetadataInSync(rv *v1alpha1.ReplicatedVolume, targetFinalizerPresent bo
 		if !obju.HasLabelValue(rv, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName) {
 			return false
 		}
+	} else {
+		// Manual mode or no RSC: label must not exist.
+		if obju.HasLabel(rv, v1alpha1.ReplicatedStorageClassLabelKey) {
+			return false
+		}
 	}
 
 	return true
@@ -1585,90 +1606,124 @@ func applyRVMetadata(rv *v1alpha1.ReplicatedVolume, targetFinalizerPresent bool)
 		changed = obju.RemoveFinalizer(rv, v1alpha1.RVControllerFinalizer) || changed
 	}
 
-	// Apply replicated-storage-class label.
+	// Apply replicated-storage-class label (set in Auto mode, remove in Manual mode).
 	if rv.Spec.ReplicatedStorageClassName != "" {
 		changed = obju.SetLabel(rv, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName) || changed
+	} else {
+		changed = obju.RemoveLabel(rv, v1alpha1.ReplicatedStorageClassLabelKey) || changed
 	}
 
 	return changed
 }
 
-// ensureRVConfiguration initializes rv.Status.Configuration from RSC.
-func ensureRVConfiguration(
+// reconcileRVConfiguration derives rv.Status.Configuration from the appropriate source
+// (RSC in Auto mode, ManualConfiguration in Manual mode), validates TransZonal zone
+// count via RSP, and sets the ConfigurationReady condition.
+//
+// Callers control when this function is called:
+//   - Root Reconcile: when Configuration is nil (initial set)
+//   - reconcileNormalOperation: always (check for config updates)
+//   - Formation reset: after clearing Configuration to nil (re-derive)
+//
+// During formation, callers do NOT call this function (config is frozen).
+//
+// Generation semantics by mode:
+//   - Auto mode: ConfigurationGeneration = RSC's Status.ConfigurationGeneration
+//   - Manual mode: ConfigurationGeneration = rv.Generation (any spec field bumps it;
+//     deep-compare prevents false-positive config updates)
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileRVConfiguration(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
 	rsc *v1alpha1.ReplicatedStorageClass,
-) (outcome flow.EnsureOutcome) {
-	ef := flow.BeginEnsure(ctx, "configuration")
-	defer ef.OnEnd(&outcome)
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "configuration")
+	defer rf.OnEnd(&outcome)
 
 	changed := false
 
-	// Guard: RSC not found or has no configuration.
-	if rsc == nil || rsc.Status.Configuration == nil {
-		return ef.Ok()
+	// Compute intended configuration and generation from the appropriate source.
+	// intended is a read-only pointer (no DeepCopy); clone only when writing to status.
+	var intended *v1alpha1.ReplicatedVolumeConfiguration
+	var intendedGeneration int64
+
+	switch rv.Spec.ConfigurationMode {
+	case v1alpha1.ReplicatedVolumeConfigurationModeManual:
+		// CEL validation guarantees ManualConfiguration is present in Manual mode.
+		// intendedGeneration stays 0: no RSC rollout tracking for Manual mode.
+		intended = rv.Spec.ManualConfiguration
+	default: // Auto (or empty — default is Auto).
+		if rsc == nil {
+			changed = applyConfigurationReadyCondFalse(rv,
+				v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonWaitingForStorageClass,
+				fmt.Sprintf("ReplicatedStorageClass %q not found", rv.Spec.ReplicatedStorageClassName))
+			return rf.Continue().ReportChangedIf(changed)
+		}
+		if rsc.Status.Configuration == nil {
+			changed = applyConfigurationReadyCondFalse(rv,
+				v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonWaitingForStorageClass,
+				fmt.Sprintf("ReplicatedStorageClass %q configuration not ready", rsc.Name))
+			return rf.Continue().ReportChangedIf(changed)
+		}
+		intended = rsc.Status.Configuration
+		intendedGeneration = rsc.Status.ConfigurationGeneration
 	}
 
-	// Initialize configuration if not set.
-	if rv.Status.Configuration == nil {
-		// DeepCopy to avoid aliasing with the RSC cache object.
-		rv.Status.Configuration = rsc.Status.Configuration.DeepCopy()
-		rv.Status.ConfigurationGeneration = rsc.Status.ConfigurationGeneration
-		rv.Status.ConfigurationObservedGeneration = rsc.Status.ConfigurationGeneration
-		changed = true
-	}
+	// Fast-path: config content matches intended → update generation tracking, skip the rest.
+	if rv.Status.Configuration != nil && *rv.Status.Configuration == *intended {
+		if rv.Status.ConfigurationGeneration != intendedGeneration {
+			rv.Status.ConfigurationGeneration = intendedGeneration
+			changed = true
+		}
 
-	return ef.Ok().ReportChangedIf(changed)
-}
+		if rv.Status.ConfigurationObservedGeneration != intendedGeneration {
+			rv.Status.ConfigurationObservedGeneration = intendedGeneration
+			changed = true
+		}
 
-// ensureConditionConfigurationReady sets the ConfigurationReady condition.
-func ensureConditionConfigurationReady(
-	ctx context.Context,
-	rv *v1alpha1.ReplicatedVolume,
-	rsc *v1alpha1.ReplicatedStorageClass,
-) (outcome flow.EnsureOutcome) {
-	ef := flow.BeginEnsure(ctx, "cond-configuration-ready")
-	defer ef.OnEnd(&outcome)
-
-	changed := false
-
-	// RSC not found.
-	if rsc == nil {
-		changed = applyConfigurationReadyCondFalse(rv,
-			v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonWaitingForStorageClass,
-			fmt.Sprintf("ReplicatedStorageClass %q not found", rv.Spec.ReplicatedStorageClassName))
-		return ef.Ok().ReportChangedIf(changed)
-	}
-
-	// RSC has no configuration.
-	if rsc.Status.Configuration == nil {
-		changed = applyConfigurationReadyCondFalse(rv,
-			v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonWaitingForStorageClass,
-			fmt.Sprintf("ReplicatedStorageClass %q configuration not ready", rsc.Name))
-		return ef.Ok().ReportChangedIf(changed)
-	}
-
-	// ConfigurationGeneration not set = rollout in progress.
-	if rv.Status.ConfigurationGeneration == 0 {
-		changed = applyConfigurationReadyCondFalse(rv,
-			v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonConfigurationRolloutInProgress,
-			"")
-		return ef.Ok().ReportChangedIf(changed)
-	}
-
-	// Check if generation matches.
-	if rv.Status.ConfigurationGeneration == rsc.Status.ConfigurationGeneration {
 		changed = applyConfigurationReadyCondTrue(rv,
 			v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonReady,
-			"Configuration matches storage class")
-	} else {
-		changed = applyConfigurationReadyCondFalse(rv,
-			v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonStaleConfiguration,
-			fmt.Sprintf("Configuration generation %d does not match storage class generation %d",
-				rv.Status.ConfigurationGeneration, rsc.Status.ConfigurationGeneration))
+			"Configuration is ready") || changed
+		return rf.Continue().ReportChangedIf(changed)
 	}
 
-	return ef.Ok().ReportChangedIf(changed)
+	// Validate TransZonal zone count.
+	if intended.Topology == v1alpha1.TopologyTransZonal {
+		rspZoneCount, err := r.getRSPZoneCount(rf.Ctx(), intended.ReplicatedStoragePoolName)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				changed = applyConfigurationReadyCondFalse(rv,
+					v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonInvalidConfiguration,
+					fmt.Sprintf("ReplicatedStoragePool %q not found", intended.ReplicatedStoragePoolName))
+				return rf.Continue().ReportChangedIf(changed)
+			}
+			return rf.Failf(err, "getting RSP zone count for %s", intended.ReplicatedStoragePoolName)
+		}
+
+		if !isTransZonalZoneCountValid(intended.FailuresToTolerate, intended.GuaranteedMinimumDataRedundancy, rspZoneCount) {
+			changed = applyConfigurationReadyCondFalse(rv,
+				v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonInvalidConfiguration,
+				fmt.Sprintf("TransZonal with FTT=%d, GMDR=%d requires a valid zone count, RSP has %d zones",
+					intended.FailuresToTolerate, intended.GuaranteedMinimumDataRedundancy, rspZoneCount))
+			return rf.Continue().ReportChangedIf(changed)
+		}
+	}
+
+	// Set or update configuration.
+	// Content differs from intended (fast-path above ruled out content-equal case).
+	// DeepCopy to avoid aliasing with the RSC cache object or ManualConfiguration.
+	rv.Status.Configuration = intended.DeepCopy()
+	rv.Status.ConfigurationGeneration = intendedGeneration
+	rv.Status.ConfigurationObservedGeneration = intendedGeneration
+	changed = true
+
+	// Configuration is set and valid.
+	changed = applyConfigurationReadyCondTrue(rv,
+		v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonReady,
+		"Configuration is ready") || changed
+
+	return rf.Continue().ReportChangedIf(changed)
 }
 
 // applyConfigurationReadyCondTrue sets ConfigurationReady condition to True.
@@ -1968,6 +2023,16 @@ func (r *Reconciler) deleteDRBDROp(ctx context.Context, obj *v1alpha1.DRBDResour
 }
 
 // --- RSP ---
+
+// getRSPZoneCount fetches an RSP by name and returns the number of zones in its spec.
+// Returns (0, nil) if RSP is not found (lightweight read for zone validation).
+func (r *Reconciler) getRSPZoneCount(ctx context.Context, name string) (int, error) {
+	var rsp v1alpha1.ReplicatedStoragePool
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, &rsp, client.UnsafeDisableDeepCopy); err != nil {
+		return 0, err
+	}
+	return len(rsp.Spec.Zones), nil
+}
 
 // getRSP fetches the RSP and returns a view containing only the eligible nodes
 // that are present in the provided RVRs or active (non-deleting) RVAs.

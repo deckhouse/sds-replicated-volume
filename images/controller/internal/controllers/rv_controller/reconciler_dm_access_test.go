@@ -34,7 +34,7 @@ var _ = Describe("ensureDatameshAddAccessReplica", func() {
 	mkRV := func(members []v1alpha1.DatameshMember, rev int64) *v1alpha1.ReplicatedVolume { //nolint:unparam
 		return &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
 					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal,
 				},
 				DatameshRevision: rev,
@@ -611,7 +611,7 @@ var _ = Describe("ensureDatameshAccessReplicas", func() {
 	It("completes transition and then processes new join", func(ctx SpecContext) {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration:    &v1alpha1.ReplicatedStorageClassConfiguration{VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal},
+				Configuration:    &v1alpha1.ReplicatedVolumeConfiguration{VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal},
 				DatameshRevision: 6,
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 					Members: []v1alpha1.DatameshMember{
@@ -706,7 +706,7 @@ var _ = Describe("ensureDatameshAccessReplicas", func() {
 	It("processes multiple pendings in one call", func(ctx SpecContext) {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration:    &v1alpha1.ReplicatedStorageClassConfiguration{VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal},
+				Configuration:    &v1alpha1.ReplicatedVolumeConfiguration{VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal},
 				DatameshRevision: 5,
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 					Members: []v1alpha1.DatameshMember{
@@ -776,7 +776,7 @@ var _ = Describe("ensureDatameshAccessReplicas", func() {
 	It("blocks join when VolumeAccess is Local", func(ctx SpecContext) {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration:    &v1alpha1.ReplicatedStorageClassConfiguration{VolumeAccess: v1alpha1.VolumeAccessLocal},
+				Configuration:    &v1alpha1.ReplicatedVolumeConfiguration{VolumeAccess: v1alpha1.VolumeAccessLocal},
 				DatameshRevision: 5,
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 					Members: []v1alpha1.DatameshMember{

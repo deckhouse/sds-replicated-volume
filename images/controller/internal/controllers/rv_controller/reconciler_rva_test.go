@@ -109,7 +109,7 @@ var _ = Describe("computeRVAAttachedConditionFromAttachmentsSummary", func() {
 	It("returns NodeNotEligible when node not in RSP", func() {
 		as := &attachmentState{
 			intent:           attachmentIntentPending,
-			conditionMessage: "Node is not eligible for storage class sc-1 (pool pool-1)",
+			conditionMessage: "Node is not eligible for pool pool-1",
 			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonNodeNotEligible,
 		}
 		cond := computeRVAAttachedConditionFromAttachmentsSummary(as)

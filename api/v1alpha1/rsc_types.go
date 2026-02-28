@@ -63,10 +63,33 @@ func (rsc *ReplicatedStorageClass) SetStatusConditions(conditions []metav1.Condi
 	rsc.Status.Conditions = conditions
 }
 
+// Legacy replication validations (only fire when replication is set):
 // +kubebuilder:validation:XValidation:rule="!has(self.replication) || self.replication != 'None' || self.topology == 'Ignored'",message="Replication None requires topology Ignored (no replicas to distribute)."
 // +kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.replication) || self.replication != 'Availability' || !has(self.zones) || size(self.zones) == 0 || size(self.zones) >= 3",message="TransZonal topology with Availability replication requires at least 3 zones (if specified)."
 // +kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.replication) || self.replication != 'Consistency' || !has(self.zones) || size(self.zones) == 0 || size(self.zones) >= 2",message="TransZonal topology with Consistency replication requires at least 2 zones (if specified)."
 // +kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || (has(self.replication) && self.replication != 'ConsistencyAndAvailability') || !has(self.zones) || size(self.zones) == 0 || size(self.zones) >= 3",message="TransZonal topology with ConsistencyAndAvailability replication (default) requires at least 3 zones (if specified)."
+//
+// FTT/GMDR mutual exclusivity with replication:
+// +kubebuilder:validation:XValidation:rule="!(has(self.failuresToTolerate) || has(self.guaranteedMinimumDataRedundancy)) || !has(self.replication)",message="Cannot specify both replication and failuresToTolerate/guaranteedMinimumDataRedundancy."
+//
+// FTT and GMDR must be specified together:
+// +kubebuilder:validation:XValidation:rule="has(self.failuresToTolerate) == has(self.guaranteedMinimumDataRedundancy)",message="failuresToTolerate and guaranteedMinimumDataRedundancy must be specified together."
+//
+// Valid FTT/GMDR combinations: |FTT - GMDR| <= 1:
+// +kubebuilder:validation:XValidation:rule="!has(self.failuresToTolerate) || (self.failuresToTolerate - self.guaranteedMinimumDataRedundancy <= 1 && self.guaranteedMinimumDataRedundancy - self.failuresToTolerate <= 1)",message="Invalid failuresToTolerate/guaranteedMinimumDataRedundancy combination: |FTT - GMDR| must be <= 1."
+//
+// FTT=0, GMDR=0 requires topology Ignored:
+// +kubebuilder:validation:XValidation:rule="!(has(self.failuresToTolerate) && self.failuresToTolerate == 0 && self.guaranteedMinimumDataRedundancy == 0) || self.topology == 'Ignored'",message="failuresToTolerate=0 with guaranteedMinimumDataRedundancy=0 requires topology Ignored."
+//
+// TransZonal zone count validations for FTT/GMDR:
+//
+//	+kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 0 || self.guaranteedMinimumDataRedundancy != 1 || size(self.zones) == 2",message="TransZonal with FTT=0, GMDR=1 requires exactly 2 zones."
+//	+kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 1 || self.guaranteedMinimumDataRedundancy != 0 || size(self.zones) == 3",message="TransZonal with FTT=1, GMDR=0 requires exactly 3 zones."
+//	+kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 1 || self.guaranteedMinimumDataRedundancy != 1 || size(self.zones) == 3",message="TransZonal with FTT=1, GMDR=1 requires exactly 3 zones."
+//	+kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 1 || self.guaranteedMinimumDataRedundancy != 2 || size(self.zones) == 3 || size(self.zones) == 5",message="TransZonal with FTT=1, GMDR=2 requires exactly 3 or 5 zones."
+//	+kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 2 || self.guaranteedMinimumDataRedundancy != 1 || size(self.zones) == 4",message="TransZonal with FTT=2, GMDR=1 requires exactly 4 zones."
+//	+kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 2 || self.guaranteedMinimumDataRedundancy != 2 || size(self.zones) == 3 || size(self.zones) == 5",message="TransZonal with FTT=2, GMDR=2 requires exactly 3 or 5 zones."
+//
 // Defines a Kubernetes Storage class configuration.
 //
 // > Note that this field is in read-only mode.
@@ -88,16 +111,44 @@ type ReplicatedStorageClassSpec struct {
 	// - Retain (If the Persistent Volume Claim is deleted, remains the Persistent Volume and its associated storage)
 	// +kubebuilder:validation:Enum=Delete;Retain
 	ReclaimPolicy ReplicatedStorageClassReclaimPolicy `json:"reclaimPolicy"`
-	// The Storage class's replication mode. Might be:
-	// - None — In this mode the Storage class's 'placementCount' and 'AutoEvictMinReplicaCount' params equal '1'.
-	//   Requires topology to be 'Ignored' (no replicas to distribute across zones).
-	// - Availability — In this mode the volume remains readable and writable even if one of the replica nodes becomes unavailable. Data is stored in two copies on different nodes. This corresponds to `placementCount = 2` and `AutoEvictMinReplicaCount = 2`. **Important:** this mode does not guarantee data consistency and may lead to split brain and data loss in case of network connectivity issues between nodes. Recommended only for non-critical data and applications that do not require high reliability and data integrity.
-	// - ConsistencyAndAvailability — In this mode the volume remains readable and writable when one replica node fails. Data is stored in three copies on different nodes (`placementCount = 3`, `AutoEvictMinReplicaCount = 3`). This mode provides protection against data loss when two nodes containing volume replicas fail and guarantees data consistency. However, if two replicas are lost, the volume switches to suspend-io mode.
+	// Deprecated: Use FailuresToTolerate and GuaranteedMinimumDataRedundancy instead.
+	// Mutually exclusive with FailuresToTolerate/GuaranteedMinimumDataRedundancy.
 	//
-	// > Note that default Replication mode is 'ConsistencyAndAvailability'.
+	// The Storage class's replication mode. Might be:
+	// - None — single replica, no replication. Requires topology to be 'Ignored'.
+	// - Availability — 2 replicas; can lose 1 node but may lose data redundancy in degraded mode.
+	// - Consistency — 2 replicas with consistency guarantees; requires both replicas for IO.
+	// - ConsistencyAndAvailability — 3 replicas; can lose 1 node and keeps consistency.
+	//
+	// Mapping to failuresToTolerate/guaranteedMinimumDataRedundancy:
+	//   None                       → failuresToTolerate=0, guaranteedMinimumDataRedundancy=0
+	//   Availability               → failuresToTolerate=1, guaranteedMinimumDataRedundancy=0
+	//   Consistency                → failuresToTolerate=0, guaranteedMinimumDataRedundancy=1
+	//   ConsistencyAndAvailability → failuresToTolerate=1, guaranteedMinimumDataRedundancy=1
+	//
 	// +kubebuilder:validation:Enum=None;Availability;Consistency;ConsistencyAndAvailability
 	// +kubebuilder:default:=ConsistencyAndAvailability
 	Replication ReplicatedStorageClassReplication `json:"replication,omitempty"`
+	// FailuresToTolerate (FTT) specifies how many arbitrary node failures the volume
+	// can tolerate while remaining available for IO.
+	// Mutually exclusive with Replication.
+	// Must be specified together with GuaranteedMinimumDataRedundancy.
+	// Valid range: 0-2. Valid combinations: |FTT - GMDR| <= 1.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2
+	// +optional
+	FailuresToTolerate *byte `json:"failuresToTolerate,omitempty"`
+	// GuaranteedMinimumDataRedundancy (GMDR) specifies the minimum number of additional
+	// data copies maintained while the volume is serving IO. GMDR=0 means the system may
+	// operate with a single data copy in degraded mode (like a RAID-1 mirror after one
+	// disk failure). GMDR=1 means at least 2 copies are always maintained during IO.
+	// Mutually exclusive with Replication.
+	// Must be specified together with FailuresToTolerate.
+	// Valid range: 0-2. Valid combinations: |FTT - GMDR| <= 1.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2
+	// +optional
+	GuaranteedMinimumDataRedundancy *byte `json:"guaranteedMinimumDataRedundancy,omitempty"`
 	// The Storage class's volume access mode. Defines how pods access the volume. Might be:
 	// - Local — volume is accessed only from the node where a replica resides. Pod scheduling waits for consumer.
 	// - EventuallyLocal — volume can be accessed remotely, but a local replica will be created on the accessing node
@@ -225,6 +276,49 @@ const (
 
 func (r ReplicatedStorageClassReplication) String() string {
 	return string(r)
+}
+
+// GetFTT returns the resolved FailuresToTolerate value.
+// If FailuresToTolerate is set, returns it directly.
+// Otherwise, computes it from the legacy Replication field.
+func (s *ReplicatedStorageClassSpec) GetFTT() byte {
+	if s.FailuresToTolerate != nil {
+		return *s.FailuresToTolerate
+	}
+	ftt, _ := replicationToFTTGMDR(s.Replication)
+	return ftt
+}
+
+// GetGMDR returns the resolved GuaranteedMinimumDataRedundancy value.
+// If GuaranteedMinimumDataRedundancy is set, returns it directly.
+// Otherwise, computes it from the legacy Replication field.
+func (s *ReplicatedStorageClassSpec) GetGMDR() byte {
+	if s.GuaranteedMinimumDataRedundancy != nil {
+		return *s.GuaranteedMinimumDataRedundancy
+	}
+	_, gmdr := replicationToFTTGMDR(s.Replication)
+	return gmdr
+}
+
+// replicationToFTTGMDR maps the legacy Replication enum to FTT/GMDR values.
+//
+//	None                       → FTT=0, GMDR=0
+//	Availability               → FTT=1, GMDR=0
+//	Consistency                → FTT=0, GMDR=1
+//	ConsistencyAndAvailability → FTT=1, GMDR=1
+func replicationToFTTGMDR(replication ReplicatedStorageClassReplication) (ftt, gmdr byte) {
+	switch replication {
+	case ReplicationNone:
+		return 0, 0
+	case ReplicationAvailability:
+		return 1, 0
+	case ReplicationConsistency:
+		return 0, 1
+	case ReplicationConsistencyAndAvailability:
+		return 1, 1
+	default:
+		return 1, 1
+	}
 }
 
 // ReplicatedStorageClassVolumeAccess enumerates possible values for ReplicatedStorageClass spec.volumeAccess field.
@@ -359,7 +453,7 @@ type ReplicatedStorageClassStatus struct {
 	ConfigurationGeneration int64 `json:"configurationGeneration,omitempty"`
 	// Configuration is the resolved configuration that volumes should align to.
 	// +optional
-	Configuration *ReplicatedStorageClassConfiguration `json:"configuration,omitempty"`
+	Configuration *ReplicatedVolumeConfiguration `json:"configuration,omitempty"`
 	// StoragePoolEligibleNodesRevision tracks RSP's eligibleNodesRevision for change detection.
 	// +optional
 	StoragePoolEligibleNodesRevision int64 `json:"storagePoolEligibleNodesRevision,omitempty"`
@@ -390,23 +484,6 @@ const (
 
 func (p ReplicatedStorageClassPhase) String() string {
 	return string(p)
-}
-
-// ReplicatedStorageClassConfiguration represents the resolved configuration that volumes should align to.
-// +kubebuilder:object:generate=true
-type ReplicatedStorageClassConfiguration struct {
-	// Topology is the resolved topology setting.
-	// +kubebuilder:validation:Enum=TransZonal;Zonal;Ignored
-	Topology ReplicatedStorageClassTopology `json:"topology"`
-	// Replication is the resolved replication mode.
-	// +kubebuilder:validation:Enum=None;Availability;Consistency;ConsistencyAndAvailability
-	Replication ReplicatedStorageClassReplication `json:"replication"`
-	// VolumeAccess is the resolved volume access mode.
-	// +kubebuilder:validation:Enum=Local;EventuallyLocal;PreferablyLocal;Any
-	VolumeAccess ReplicatedStorageClassVolumeAccess `json:"volumeAccess"`
-	// StoragePoolName is the name of the ReplicatedStoragePool used by this RSC.
-	// +kubebuilder:validation:MinLength=1
-	StoragePoolName string `json:"storagePoolName"`
 }
 
 // ReplicatedStorageClassVolumesSummary provides aggregated information about volumes in this storage class.
