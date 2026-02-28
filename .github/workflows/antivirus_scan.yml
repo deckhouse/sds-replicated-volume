@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - id: compute_matrix
-        uses: deckhouse/modules-actions/antivirus_scan/compute_matrix@antivirus-scan-for-modules
+        uses: deckhouse/modules-actions/antivirus_scan/compute_matrix@v8
         with:
           scan_branch: ${{ inputs.scan_branch }}
           active_releases_to_scan: 3
@@ -30,25 +30,25 @@ jobs:
       fail-fast: false
       matrix:
         av:
-          - name: drweb            
+          - name: drweb
             path: drweb
           - name: kaspersky
             path: antivirus
         target: ${{ fromJson(needs.compute.outputs.matrix).include }}
     steps:
-      - uses: ./.github/actions/av-run-scan
+      - uses: deckhouse/modules-actions/antivirus_scan/run_scan_module@v8
+        id: av_scan
         with:
           tag: ${{ matrix.target.tag }}
           antivirus_name: ${{ matrix.av.name }}
-          antivirus_container: ${{ matrix.av.container }}
           antivirus_path: ${{ matrix.av.path }}
           scan_results_dir: scans
-          module_name: ${{ github }}
-          prod_registry: ${{ vars.PROD_REGISTRY }}
+          module_name: ${{ github.repository }}
+          prod_registry: registry.deckhouse.io
           dev_registry: ${{ vars.DEV_REGISTRY }}
 
-      - if: always()
+      - if: steps.av_scan.outcome == 'success'
         uses: actions/upload-artifact@v6
         with:
-          name: scans-${{ matrix.av.name }}-${{ matrix.target.tag }}
-          path: scans
+          name: scans-${{ matrix.av.name }}-${{ steps.av_scan.outputs.scan_id }}
+          path: scans/${{ steps.av_scan.outputs.scan_id }}
