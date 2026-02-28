@@ -151,8 +151,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		if err != nil {
 			return rf.Failf(err, "getting RSP").ToCtrl()
 		}
-		if forming, formationPhase := isFormationInProgress(rv); forming {
-			outcome = outcome.Merge(r.reconcileFormation(rf.Ctx(), rv, &rvrs, rvas, rsp, rsc, formationPhase))
+		if forming, formationStepIdx := isFormationInProgress(rv); forming {
+			outcome = outcome.Merge(r.reconcileFormation(rf.Ctx(), rv, &rvrs, rvas, rsp, rsc, formationStepIdx))
 		} else {
 			outcome = flow.MergeReconciles(outcome,
 				r.reconcileRVConfiguration(rf.Ctx(), rv, rsc),
@@ -336,14 +336,40 @@ func removeDatameshMembers(rv *v1alpha1.ReplicatedVolume, ids idset.IDSet) bool 
 	return true
 }
 
-// applyTransitionMessage sets the Message field on a datamesh transition.
-// Returns true if the message was changed.
-func applyTransitionMessage(t *v1alpha1.ReplicatedVolumeDatameshTransition, msg string) bool {
-	if t.Message == msg {
+// applyDatameshTransitionStepMessage sets the Message field on a datamesh transition step.
+// Returns true if the message was changed. No-op if step is nil.
+func applyDatameshTransitionStepMessage(step *v1alpha1.ReplicatedVolumeDatameshTransitionStep, msg string) bool {
+	if step == nil || step.Message == msg {
 		return false
 	}
-	t.Message = msg
+	step.Message = msg
 	return true
+}
+
+// makeDatameshSingleStepTransition creates a transition with a single step that is immediately Active.
+//
+// Exception: uses metav1.Now() for StartedAt. This is controller-owned state
+// (persisted decision timestamp), acceptable here because the value is set once
+// and stabilized across subsequent reconciliations.
+func makeDatameshSingleStepTransition(
+	typ v1alpha1.ReplicatedVolumeDatameshTransitionType,
+	replicaName string,
+	stepName string,
+	datameshRevision int64,
+) v1alpha1.ReplicatedVolumeDatameshTransition {
+	now := metav1.Now()
+	return v1alpha1.ReplicatedVolumeDatameshTransition{
+		Type:        typ,
+		ReplicaName: replicaName,
+		Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+			{
+				Name:             stepName,
+				Status:           v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+				DatameshRevision: datameshRevision,
+				StartedAt:        &now,
+			},
+		},
+	}
 }
 
 // applyDatameshReplicaRequestMessage sets the Message field on the given pending replica

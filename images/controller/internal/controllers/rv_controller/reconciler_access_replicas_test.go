@@ -438,8 +438,7 @@ var _ = Describe("reconcileDeleteAccessReplicas", func() {
 				{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-2"},
 			},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{
-				{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach,
-					ReplicaName: "rv-1-1", DatameshRevision: 5},
+				makeDatameshSingleStepTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, "rv-1-1", "Detach", 5),
 			},
 		)
 		rvr := mkRVR("rv-1-1", "node-2")
@@ -458,8 +457,7 @@ var _ = Describe("reconcileDeleteAccessReplicas", func() {
 				{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-2"},
 			},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{
-				{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica,
-					ReplicaName: "rv-1-1", DatameshRevision: 5},
+				makeDatameshSingleStepTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica, "rv-1-1", "✦ → A", 5),
 			},
 		)
 		rvr := mkRVR("rv-1-1", "node-2")

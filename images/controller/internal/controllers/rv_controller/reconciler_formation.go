@@ -34,6 +34,21 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
+// Formation step indices. Each step function accesses t.Steps[idx] directly.
+const (
+	formationStepIdxPreconfigure          = 0
+	formationStepIdxEstablishConnectivity = 1
+	formationStepIdxBootstrapData         = 2
+	formationStepCount                    = 3
+)
+
+// formationStepNames maps step index to human-readable name (displayed in status).
+var formationStepNames = [formationStepCount]string{
+	formationStepIdxPreconfigure:          "Preconfigure",
+	formationStepIdxEstablishConnectivity: "Establish connectivity",
+	formationStepIdxBootstrapData:         "Bootstrap data",
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Reconcile: formation
 //
@@ -46,20 +61,23 @@ func (r *Reconciler) reconcileFormation(
 	rvas []*v1alpha1.ReplicatedVolumeAttachment,
 	rsp *rspView,
 	rsc *v1alpha1.ReplicatedStorageClass,
-	phase v1alpha1.ReplicatedVolumeFormationPhase,
+	stepIdx int,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "formation")
 	defer rf.OnEnd(&outcome)
 
-	switch phase {
-	case v1alpha1.ReplicatedVolumeFormationPhasePreconfigure, "":
-		outcome = r.reconcileFormationPhasePreconfigure(rf.Ctx(), rv, rvrs, rsp, rsc)
-	case v1alpha1.ReplicatedVolumeFormationPhaseEstablishConnectivity:
-		outcome = r.reconcileFormationPhaseEstablishConnectivity(rf.Ctx(), rv, rvrs, rsp, rsc)
-	case v1alpha1.ReplicatedVolumeFormationPhaseBootstrapData:
-		outcome = r.reconcileFormationPhaseBootstrapData(rf.Ctx(), rv, rvrs, rsp, rsc)
+	// Find or create the Formation transition. Created on first entry (stepIdx=0).
+	t, created := ensureFormationTransition(rv)
+
+	switch stepIdx {
+	case formationStepIdxPreconfigure:
+		outcome = r.reconcileFormationStepPreconfigure(rf.Ctx(), rv, rvrs, rsp, rsc, t, created)
+	case formationStepIdxEstablishConnectivity:
+		outcome = r.reconcileFormationStepEstablishConnectivity(rf.Ctx(), rv, rvrs, rsp, rsc, t)
+	case formationStepIdxBootstrapData:
+		outcome = r.reconcileFormationStepBootstrapData(rf.Ctx(), rv, rvrs, rsp, rsc, t)
 	default:
-		return rf.Fail(fmt.Errorf("invalid formation phase: %s", phase))
+		return rf.Fail(fmt.Errorf("invalid formation step index: %d", stepIdx))
 	}
 
 	// Set "waiting" conditions on all RVAs — datamesh is not ready yet.
@@ -72,22 +90,25 @@ func (r *Reconciler) reconcileFormation(
 // Reconcile: formation-preconfigure
 //
 
-// reconcileFormationPhasePreconfigure handles initial formation: creates replicas, waits for them
+// reconcileFormationStepPreconfigure handles initial formation: creates replicas, waits for them
 // to become preconfigured, and initializes datamesh configuration.
 //
 // Reconcile pattern: Pure orchestration
-func (r *Reconciler) reconcileFormationPhasePreconfigure(
+func (r *Reconciler) reconcileFormationStepPreconfigure(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
 	rsp *rspView,
 	rsc *v1alpha1.ReplicatedStorageClass,
+	t *v1alpha1.ReplicatedVolumeDatameshTransition,
+	created bool,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "preconfigure")
 	defer rf.OnEnd(&outcome)
 
-	changed := applyFormationTransition(rv, v1alpha1.ReplicatedVolumeFormationPhasePreconfigure)
-	if changed {
+	step := &t.Steps[formationStepIdxPreconfigure]
+	changed := created
+	if created {
 		// Initialize datamesh configuration. These values are set once and not synchronized
 		// with external intended state during formation (RSP can't change while
 		// status.Configuration is locked).
@@ -100,7 +121,8 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 		rv.Status.Datamesh.SystemNetworkNames = rsp.SystemNetworkNames
 		rv.Status.Datamesh.Size = rv.Spec.Size
 
-		applyFormationTransitionMessage(rv, "Starting preconfigure phase")
+		step.DatameshRevision = rv.Status.DatameshRevision
+		applyDatameshTransitionStepMessage(step, "Starting preconfigure")
 	}
 
 	// Replicas placed on nodes that violate eligible nodes constraints.
@@ -205,12 +227,12 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 			"Waiting for %d deleting replicas [%s] to be fully removed before proceeding with formation",
 			deleting.Len(), deleting.String(),
 		)
-		changed = applyFormationTransitionMessage(rv, msg) || changed
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
 		changed = applyDatameshReplicaRequestMessages(
 			rv, diskful,
 			"Datamesh is forming, waiting for replica cleanup to complete",
 		) || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
 			ReportChangedIf(changed)
 	}
 
@@ -233,12 +255,12 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 	if !waitingScheduling.IsEmpty() || !waitingPreconfiguration.IsEmpty() {
 		msg := computeFormationPreconfigureWaitMessage(*rvrs, targetDiskfulCount,
 			pendingScheduling, schedulingFailed, waitingPreconfiguration)
-		changed = applyFormationTransitionMessage(rv, msg) || changed
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
 		changed = applyDatameshReplicaRequestMessages(
 			rv, preconfigured,
 			"Datamesh is forming, waiting for other replicas to become preconfigured",
 		) || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
 			ReportChangedIf(changed)
 	}
 
@@ -266,7 +288,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 				"If not resolved automatically, formation will be restarted",
 			missingAddresses.String(), requiredNetworks,
 		)
-		changed = applyFormationTransitionMessage(rv, msg) || changed
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
 		changed = applyDatameshReplicaRequestMessages(
 			rv, okReplicas,
 			"Datamesh is forming, waiting for other replicas to report required addresses",
@@ -275,7 +297,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 			rv, missingAddresses,
 			"Replica addresses do not match required network configuration, blocking datamesh formation",
 		) || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
 			ReportChangedIf(changed)
 	}
 
@@ -292,7 +314,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 				"If not resolved automatically, formation will be restarted",
 			notEligible.String(),
 		)
-		changed = applyFormationTransitionMessage(rv, msg) || changed
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
 		changed = applyDatameshReplicaRequestMessages(
 			rv, okReplicas,
 			"Datamesh is forming, waiting for other replicas to be on eligible nodes",
@@ -301,7 +323,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 			rv, notEligible,
 			"Replica is placed on a node not in the eligible nodes list, blocking datamesh formation",
 		) || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
 			ReportChangedIf(changed)
 	}
 
@@ -327,7 +349,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 				"If not resolved automatically, formation will be restarted",
 			specMismatch.String(),
 		)
-		changed = applyFormationTransitionMessage(rv, msg) || changed
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
 		changed = applyDatameshReplicaRequestMessages(
 			rv, okReplicas,
 			"Datamesh is forming, waiting for other replicas to resolve spec mismatch",
@@ -336,7 +358,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 			rv, specMismatch,
 			"Replica spec does not match pending transition, blocking datamesh formation",
 		) || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
 			ReportChangedIf(changed)
 	}
 
@@ -360,7 +382,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 				"If not resolved automatically, formation will be restarted",
 			insufficientSize.String(), rv.Status.Datamesh.Size.String(),
 		)
-		changed = applyFormationTransitionMessage(rv, msg) || changed
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
 		changed = applyDatameshReplicaRequestMessages(
 			rv, okReplicas,
 			"Datamesh is forming, waiting for other replicas to resolve backing volume size issue",
@@ -369,36 +391,36 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 			rv, insufficientSize,
 			"Replica backing volume size is insufficient for datamesh, blocking formation",
 		) || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
 			ReportChangedIf(changed)
 	}
 
-	// Passing rf.Ctx() produces nested logger scope in the callee — intentional for traceability.
-	return r.reconcileFormationPhaseEstablishConnectivity(rf.Ctx(), rv, rvrs, rsp, rsc)
+	// Advance to next step and fall through.
+	advanceFormationStep(t, formationStepIdxPreconfigure)
+	return r.reconcileFormationStepEstablishConnectivity(rf.Ctx(), rv, rvrs, rsp, rsc, t)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Reconcile: formation-establish-connectivity
 //
 
-// reconcileFormationPhaseEstablishConnectivity handles post-preconfiguration formation: validates datamesh
+// reconcileFormationStepEstablishConnectivity handles post-preconfiguration formation: validates datamesh
 // membership consistency, establishes connectivity, and completes formation.
 //
 // Reconcile pattern: Pure orchestration
-func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
+func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
 	rsp *rspView,
 	rsc *v1alpha1.ReplicatedStorageClass,
+	t *v1alpha1.ReplicatedVolumeDatameshTransition,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "establish-connectivity")
 	defer rf.OnEnd(&outcome)
 
-	changed := applyFormationTransition(rv, v1alpha1.ReplicatedVolumeFormationPhaseEstablishConnectivity)
-	if changed {
-		applyFormationTransitionMessage(rv, "Starting establish connectivity phase")
-	}
+	step := &t.Steps[formationStepIdxEstablishConnectivity]
+	changed := false
 
 	// Collect active diskful replicas (not being deleted).
 	diskful := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
@@ -455,8 +477,9 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 		rv.Status.Datamesh.QuorumMinimumRedundancy = quorumMinimumRedundancy
 
 		rv.Status.DatameshRevision++
+		step.DatameshRevision = rv.Status.DatameshRevision
 		applyDatameshReplicaRequestMessages(rv, diskful, "Datamesh is forming, waiting for replica to apply new configuration")
-		applyFormationTransitionMessage(rv, fmt.Sprintf(
+		applyDatameshTransitionStepMessage(step, fmt.Sprintf(
 			"Replicas [%s] preconfigured and added to datamesh. Waiting for them to establish connections",
 			diskful.String(),
 		))
@@ -475,9 +498,9 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 				"If not resolved automatically, formation will be restarted",
 			dmDiskful.String(), diskful.String(),
 		)
-		changed = applyFormationTransitionMessage(rv, msg) || changed
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
 		changed = applyDatameshReplicaRequestMessages(rv, diskful, msg) || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
 			ReportChangedIf(changed)
 	}
 
@@ -492,13 +515,13 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 	})
 	if configured != diskful {
 		notConfigured := diskful.Difference(configured)
-		changed = applyFormationTransitionMessage(rv, fmt.Sprintf(
+		changed = applyDatameshTransitionStepMessage(step, fmt.Sprintf(
 			"Waiting for replicas [%s] to be fully configured for datamesh revision %d",
 			notConfigured.String(), rv.Status.DatameshRevision,
 		)) || changed
 		changed = applyDatameshReplicaRequestMessages(rv, notConfigured, "Datamesh is forming, waiting for DRBD configuration to continue") || changed
 		changed = applyDatameshReplicaRequestMessages(rv, configured, "Datamesh is forming, DRBD configured, waiting for other replicas") || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
 			ReportChangedIf(changed)
 	}
 
@@ -518,12 +541,12 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 	})
 	if connected != diskful {
 		notConnected := diskful.Difference(connected)
-		changed = applyFormationTransitionMessage(rv, fmt.Sprintf(
+		changed = applyDatameshTransitionStepMessage(step, fmt.Sprintf(
 			"Waiting for replicas [%s] to establish connections with all peers",
 			notConnected.String(),
 		)) || changed
 		changed = applyDatameshReplicaRequestMessages(rv, diskful, "Datamesh is forming, waiting for all replicas to connect to each other") || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
 			ReportChangedIf(changed)
 	}
 
@@ -551,44 +574,44 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 	})
 	if readyForDataBootstrap != diskful {
 		notReady := diskful.Difference(readyForDataBootstrap)
-		changed = applyFormationTransitionMessage(rv, fmt.Sprintf(
+		changed = applyDatameshTransitionStepMessage(step, fmt.Sprintf(
 			"Waiting for replicas [%s] to be ready for data bootstrap "+
 				"(backing volume Inconsistent + Established replication with all peers)",
 			notReady.String(),
 		)) || changed
 		changed = applyDatameshReplicaRequestMessages(rv, notReady, "Datamesh is forming, waiting for data bootstrap readiness (requires backing volume Inconsistent and replication Established with all peers)") || changed
 		changed = applyDatameshReplicaRequestMessages(rv, readyForDataBootstrap, "Datamesh is forming, ready for data bootstrap, waiting for other replicas") || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
 			ReportChangedIf(changed)
 	}
 
-	// Passing rf.Ctx() produces nested logger scope in the callee — intentional for traceability.
-	return r.reconcileFormationPhaseBootstrapData(rf.Ctx(), rv, rvrs, rsp, rsc)
+	// Advance to next step and fall through.
+	advanceFormationStep(t, formationStepIdxEstablishConnectivity)
+	return r.reconcileFormationStepBootstrapData(rf.Ctx(), rv, rvrs, rsp, rsc, t)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Reconcile: formation-bootstrap-data
 //
 
-// reconcileFormationPhaseBootstrapData handles the data bootstrap phase of formation:
+// reconcileFormationStepBootstrapData handles the data bootstrap phase of formation:
 // creates a DRBDResourceOperation (new-current-uuid) to trigger initial data synchronization,
 // waits for the operation to complete, and finalizes formation.
 //
 // Reconcile pattern: Pure orchestration
-func (r *Reconciler) reconcileFormationPhaseBootstrapData(
+func (r *Reconciler) reconcileFormationStepBootstrapData(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
 	rsp *rspView,
 	rsc *v1alpha1.ReplicatedStorageClass,
+	t *v1alpha1.ReplicatedVolumeDatameshTransition,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "bootstrap-data")
 	defer rf.OnEnd(&outcome)
 
-	changed := applyFormationTransition(rv, v1alpha1.ReplicatedVolumeFormationPhaseBootstrapData)
-	if changed {
-		applyFormationTransitionMessage(rv, "Starting data bootstrap")
-	}
+	step := &t.Steps[formationStepIdxBootstrapData]
+	changed := false
 
 	dmDiskful := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
 		return m.Type == v1alpha1.DatameshMemberTypeDiskful
@@ -605,13 +628,7 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 	// If the operation exists but was created before the current formation transition
 	// started, it is stale (leftover from a previous attempt) and must be deleted.
 	if drbdrOp != nil {
-		idx := slices.IndexFunc(rv.Status.DatameshTransitions, func(t v1alpha1.ReplicatedVolumeDatameshTransition) bool {
-			return t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation
-		})
-		if idx < 0 {
-			panic("reconcileFormationPhaseBootstrapData: no Formation transition found")
-		}
-		formationStartedAt := rv.Status.DatameshTransitions[idx].StartedAt.Time
+		formationStartedAt := t.StartedAt().Time
 		if drbdrOp.CreationTimestamp.Time.Before(formationStartedAt) {
 			if err := r.deleteDRBDROp(rf.Ctx(), drbdrOp); err != nil {
 				return rf.Failf(err, "deleting stale DRBDResourceOperation %s", drbdrOpName)
@@ -662,10 +679,10 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 			drbdrOp.Spec.CreateNewUUID == nil ||
 			drbdrOp.Spec.CreateNewUUID.ClearBitmap != drbdrOpFormationParams.ClearBitmap ||
 			drbdrOp.Spec.CreateNewUUID.ForceResync != drbdrOpFormationParams.ForceResync {
-			changed = applyFormationTransitionMessage(rv, "Existing DRBDResourceOperation has unexpected parameters, restarting formation") || changed
+			changed = applyDatameshTransitionStepMessage(step, "Existing DRBDResourceOperation has unexpected parameters, restarting formation") || changed
 			changed = applyDatameshReplicaRequestMessages(rv, dmDiskful, "Datamesh is forming, restarting due to data bootstrap operation parameter mismatch") || changed
 
-			return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
+			return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
 				ReportChangedIf(changed)
 		}
 	}
@@ -701,20 +718,20 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 	if drbdrOp.Status.Phase == v1alpha1.DRBDOperationPhaseFailed {
 		rf.Log().Error(fmt.Errorf("DRBDResourceOperation %s failed: %s", drbdrOpName, drbdrOp.Status.Message), "data bootstrap operation failed, restarting formation")
 
-		changed = applyFormationTransitionMessage(rv, "Data bootstrap operation failed, restarting formation") || changed
+		changed = applyDatameshTransitionStepMessage(step, "Data bootstrap operation failed, restarting formation") || changed
 		changed = applyDatameshReplicaRequestMessages(rv, dmDiskful, "Datamesh is forming, restarting due to failed data bootstrap operation") || changed
 
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
 			ReportChangedIf(changed)
 	}
 
 	// Verify the DRBDResourceOperation has completed successfully.
 	// If it is still running or pending — update messages and wait.
 	if drbdrOp.Status.Phase != v1alpha1.DRBDOperationPhaseSucceeded {
-		changed = applyFormationTransitionMessage(rv, "Data bootstrap initiated, waiting for operation to complete. "+dataBootstrapModeMsg) || changed
+		changed = applyDatameshTransitionStepMessage(step, "Data bootstrap initiated, waiting for operation to complete. "+dataBootstrapModeMsg) || changed
 		changed = applyDatameshReplicaRequestMessages(rv, dmDiskful, "Datamesh is forming, waiting for data bootstrap to complete") || changed
 
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, dataBootstrapTimeout).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, dataBootstrapTimeout).
 			ReportChangedIf(changed)
 	}
 
@@ -732,14 +749,14 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 		// sync progress, we can show something like "Data bootstrap: 42% (3.2 GiB / 7.6 GiB)"
 		// in both the transition message and per-replica messages.
 		notUpToDate := dmDiskful.Difference(upToDate)
-		changed = applyFormationTransitionMessage(rv, fmt.Sprintf(
+		changed = applyDatameshTransitionStepMessage(step, fmt.Sprintf(
 			"Data bootstrap in progress, waiting for replicas [%s] to reach UpToDate state. %s",
 			notUpToDate.String(), dataBootstrapModeMsg,
 		)) || changed
 		changed = applyDatameshReplicaRequestMessages(rv, notUpToDate, "Datamesh is forming, data bootstrap in progress, waiting for backing volume to become UpToDate") || changed
 		changed = applyDatameshReplicaRequestMessages(rv, upToDate, "Datamesh is forming, data bootstrap in progress, replica is UpToDate, waiting for remaining replicas") || changed
 
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, dataBootstrapTimeout).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, dataBootstrapTimeout).
 			ReportChangedIf(changed)
 	}
 
@@ -767,19 +784,13 @@ func (r *Reconciler) reconcileFormationRestartIfTimeoutPassed(
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
 	rsc *v1alpha1.ReplicatedStorageClass,
+	t *v1alpha1.ReplicatedVolumeDatameshTransition,
 	timeout time.Duration,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "restart")
 	defer rf.OnEnd(&outcome)
 
-	// Find Formation transition to get start time.
-	idx := slices.IndexFunc(rv.Status.DatameshTransitions, func(t v1alpha1.ReplicatedVolumeDatameshTransition) bool {
-		return t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation
-	})
-	if idx < 0 {
-		panic("reconcileFormationRestartIfTimeoutPassed called without active Formation transition")
-	}
-	formationStartedAt := rv.Status.DatameshTransitions[idx].StartedAt.Time
+	formationStartedAt := t.StartedAt().Time
 
 	elapsed := time.Since(formationStartedAt)
 	if elapsed < timeout {
@@ -846,71 +857,70 @@ func generateSharedSecret() (string, error) {
 
 // isFormationInProgress returns true if the datamesh is still forming:
 // either has never been formed (DatameshRevision == 0), or has an active Formation transition.
-// When true, also returns the current formation phase
-// (empty if the datamesh has never been formed or no Formation transition exists).
-func isFormationInProgress(rv *v1alpha1.ReplicatedVolume) (bool, v1alpha1.ReplicatedVolumeFormationPhase) {
+// When true, also returns the current step index (0 = Preconfigure, the starting point).
+// stepIdx=0 is returned both for "never formed" and "Preconfigure in progress" — both
+// lead to reconcileFormationStepPreconfigure which creates the transition if absent.
+func isFormationInProgress(rv *v1alpha1.ReplicatedVolume) (bool, int) {
 	if rv.Status.DatameshRevision == 0 {
-		return true, ""
+		return true, 0
 	}
 
 	for i := range rv.Status.DatameshTransitions {
 		if rv.Status.DatameshTransitions[i].Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation {
-			if rv.Status.DatameshTransitions[i].Formation == nil {
-				panic("isFormationInProgress: Formation transition exists but Formation field is nil")
+			// Find the first non-completed step index.
+			for j := range rv.Status.DatameshTransitions[i].Steps {
+				if rv.Status.DatameshTransitions[i].Steps[j].Status != v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted {
+					return true, j
+				}
 			}
-			return true, rv.Status.DatameshTransitions[i].Formation.Phase
+			// All steps completed — should not happen (transition is removed on completion).
+			return true, 0
 		}
 	}
-	return false, ""
+	return false, 0
 }
 
-// applyFormationTransition ensures a Formation transition exists with the given phase.
-// Formation transitions never carry a DatameshRevision (it is always zero/absent).
-// If absent, creates it with StartedAt set to now.
-// If present but phase differs, updates it (StartedAt is preserved).
-// Returns true if the object was changed.
+// ensureFormationTransition finds the existing Formation transition or creates a new one.
+// Returns a pointer to the transition and whether it was just created.
 //
 // Exception: uses metav1.Now() for StartedAt when creating a new transition.
 // This is controller-owned state (persisted decision timestamp), acceptable here
 // because the value is set once and stabilized across subsequent reconciliations.
-func applyFormationTransition(rv *v1alpha1.ReplicatedVolume, phase v1alpha1.ReplicatedVolumeFormationPhase) bool {
+func ensureFormationTransition(rv *v1alpha1.ReplicatedVolume) (*v1alpha1.ReplicatedVolumeDatameshTransition, bool) {
 	for i := range rv.Status.DatameshTransitions {
 		if rv.Status.DatameshTransitions[i].Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation {
-			if rv.Status.DatameshTransitions[i].Formation == nil {
-				panic("applyFormationTransition: Formation transition exists but Formation field is nil")
-			}
-
-			if rv.Status.DatameshTransitions[i].Formation.Phase != phase {
-				rv.Status.DatameshTransitions[i].Formation.Phase = phase
-				return true
-			}
-			return false
+			return &rv.Status.DatameshTransitions[i], false
 		}
 	}
 
-	// Formation transition not found — create it.
+	// Create with all steps pre-declared. First step is Active, rest are Pending.
+	now := metav1.Now()
+	steps := make([]v1alpha1.ReplicatedVolumeDatameshTransitionStep, formationStepCount)
+	for i := range steps {
+		steps[i].Name = formationStepNames[i]
+		steps[i].Status = v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending
+	}
+	steps[0].Status = v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive
+	steps[0].StartedAt = &now
+
 	rv.Status.DatameshTransitions = append(rv.Status.DatameshTransitions, v1alpha1.ReplicatedVolumeDatameshTransition{
-		Type:      v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
-		StartedAt: metav1.Now(),
-		Formation: &v1alpha1.ReplicatedVolumeDatameshTransitionFormation{Phase: phase},
+		Type:  v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
+		Steps: steps,
 	})
-	return true
+	return &rv.Status.DatameshTransitions[len(rv.Status.DatameshTransitions)-1], true
 }
 
-// applyFormationTransitionMessage updates only the message of an existing Formation transition.
-// Panics if no Formation transition exists.
-// Returns true if the message was changed.
-func applyFormationTransitionMessage(rv *v1alpha1.ReplicatedVolume, message string) bool {
-	for i := range rv.Status.DatameshTransitions {
-		if rv.Status.DatameshTransitions[i].Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation {
-			if rv.Status.DatameshTransitions[i].Message != message {
-				rv.Status.DatameshTransitions[i].Message = message
-				return true
-			}
-			return false
-		}
-	}
-	panic("applyFormationTransitionMessage: Formation transition does not exist")
+// advanceFormationStep completes the step at fromIdx and activates the next step.
+// Clears the message on the completed step (no leftover "waiting for..." text).
+//
+// Exception: uses metav1.Now() for timestamps (controller-owned state).
+func advanceFormationStep(t *v1alpha1.ReplicatedVolumeDatameshTransition, fromIdx int) {
+	now := metav1.Now()
+	t.Steps[fromIdx].Status = v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted
+	t.Steps[fromIdx].CompletedAt = &now
+	t.Steps[fromIdx].Message = ""
+	t.Steps[fromIdx+1].Status = v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive
+	t.Steps[fromIdx+1].StartedAt = &now
 }
 
 // applyFormationTransitionAbsent removes the Formation transition if present.

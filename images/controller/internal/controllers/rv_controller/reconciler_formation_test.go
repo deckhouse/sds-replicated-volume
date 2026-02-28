@@ -36,29 +36,59 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
+// mkFormationTransition creates a Formation transition with all steps where the
+// step at activeStepIdx is Active (with startedAt=now) and prior steps are Completed.
+func mkFormationTransition(activeStepIdx int) v1alpha1.ReplicatedVolumeDatameshTransition {
+	now := metav1.Now()
+	steps := make([]v1alpha1.ReplicatedVolumeDatameshTransitionStep, formationStepCount)
+	for i := range steps {
+		steps[i].Name = formationStepNames[i]
+		switch {
+		case i < activeStepIdx:
+			steps[i].Status = v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted
+			steps[i].StartedAt = &now
+			steps[i].CompletedAt = &now
+		case i == activeStepIdx:
+			steps[i].Status = v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive
+			steps[i].StartedAt = &now
+		default:
+			steps[i].Status = v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending
+		}
+	}
+	return v1alpha1.ReplicatedVolumeDatameshTransition{
+		Type:  v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
+		Steps: steps,
+	}
+}
+
+// mkFormationTransitionWithTime creates a Formation transition where the first step
+// has the given startedAt time. Used for timeout tests.
+func mkFormationTransitionWithTime(activeStepIdx int, startedAt metav1.Time) v1alpha1.ReplicatedVolumeDatameshTransition {
+	t := mkFormationTransition(activeStepIdx)
+	t.Steps[0].StartedAt = &startedAt
+	return t
+}
+
 var _ = Describe("isFormationInProgress", func() {
-	It("returns true with empty phase when DatameshRevision is 0", func() {
+	It("returns true with step 0 when DatameshRevision is 0", func() {
 		rv := &v1alpha1.ReplicatedVolume{}
-		forming, phase := isFormationInProgress(rv)
+		forming, stepIdx := isFormationInProgress(rv)
 		Expect(forming).To(BeTrue())
-		Expect(phase).To(BeEmpty())
+		Expect(stepIdx).To(Equal(formationStepIdxPreconfigure))
 	})
 
-	It("returns true with phase when Formation transition exists", func() {
+	It("returns true with correct step index when Formation transition exists", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				DatameshRevision: 2,
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{
-						Type:      v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
-						Formation: &v1alpha1.ReplicatedVolumeDatameshTransitionFormation{Phase: v1alpha1.ReplicatedVolumeFormationPhaseEstablishConnectivity},
-					},
+					mkFormationTransition(formationStepIdxEstablishConnectivity),
 				},
 			},
 		}
-		forming, phase := isFormationInProgress(rv)
+		forming, stepIdx := isFormationInProgress(rv)
 		Expect(forming).To(BeTrue())
-		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeFormationPhaseEstablishConnectivity))
+		Expect(stepIdx).To(Equal(formationStepIdxEstablishConnectivity))
 	})
 
 	It("returns false when DatameshRevision > 0 and no Formation transition", func() {
@@ -81,74 +111,59 @@ var _ = Describe("generateSharedSecret", func() {
 	})
 })
 
-var _ = Describe("applyFormationTransition", func() {
-	It("creates new transition and returns true", func() {
+var _ = Describe("ensureFormationTransition", func() {
+	It("creates new transition with all steps", func() {
 		rv := &v1alpha1.ReplicatedVolume{}
-		changed := applyFormationTransition(rv, v1alpha1.ReplicatedVolumeFormationPhasePreconfigure)
-		Expect(changed).To(BeTrue())
+		t, created := ensureFormationTransition(rv)
+		Expect(created).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
-		Expect(rv.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation))
-		Expect(rv.Status.DatameshTransitions[0].Formation.Phase).To(Equal(v1alpha1.ReplicatedVolumeFormationPhasePreconfigure))
+		Expect(t.Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation))
+		Expect(t.Steps).To(HaveLen(formationStepCount))
+		Expect(t.Steps[0].Name).To(Equal(formationStepNames[0]))
+		Expect(t.Steps[0].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive))
+		Expect(t.Steps[0].StartedAt).NotTo(BeNil())
+		Expect(t.Steps[1].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending))
+		Expect(t.Steps[2].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending))
 	})
 
-	It("returns false when phase is the same", func() {
+	It("returns existing transition without creating", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{
-						Type:      v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
-						Formation: &v1alpha1.ReplicatedVolumeDatameshTransitionFormation{Phase: v1alpha1.ReplicatedVolumeFormationPhasePreconfigure},
-					},
+					mkFormationTransition(formationStepIdxPreconfigure),
 				},
 			},
 		}
-		changed := applyFormationTransition(rv, v1alpha1.ReplicatedVolumeFormationPhasePreconfigure)
-		Expect(changed).To(BeFalse())
-	})
-
-	It("updates phase and returns true when phase differs", func() {
-		rv := &v1alpha1.ReplicatedVolume{
-			Status: v1alpha1.ReplicatedVolumeStatus{
-				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{
-						Type:      v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
-						Formation: &v1alpha1.ReplicatedVolumeDatameshTransitionFormation{Phase: v1alpha1.ReplicatedVolumeFormationPhasePreconfigure},
-					},
-				},
-			},
-		}
-		changed := applyFormationTransition(rv, v1alpha1.ReplicatedVolumeFormationPhaseEstablishConnectivity)
-		Expect(changed).To(BeTrue())
-		Expect(rv.Status.DatameshTransitions[0].Formation.Phase).To(Equal(v1alpha1.ReplicatedVolumeFormationPhaseEstablishConnectivity))
+		t, created := ensureFormationTransition(rv)
+		Expect(created).To(BeFalse())
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(t.Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation))
 	})
 })
 
-var _ = Describe("applyFormationTransitionMessage", func() {
-	mkRVWithFormation := func() *v1alpha1.ReplicatedVolume {
-		return &v1alpha1.ReplicatedVolume{
-			Status: v1alpha1.ReplicatedVolumeStatus{
-				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{
-						Type:      v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
-						Formation: &v1alpha1.ReplicatedVolumeDatameshTransitionFormation{Phase: v1alpha1.ReplicatedVolumeFormationPhasePreconfigure},
-						Message:   "old message",
-					},
-				},
-			},
-		}
-	}
+var _ = Describe("advanceFormationStep", func() {
+	It("completes current step and activates next", func() {
+		rv := &v1alpha1.ReplicatedVolume{}
+		t, _ := ensureFormationTransition(rv)
 
-	It("updates message and returns true", func() {
-		rv := mkRVWithFormation()
-		changed := applyFormationTransitionMessage(rv, "new message")
-		Expect(changed).To(BeTrue())
-		Expect(rv.Status.DatameshTransitions[0].Message).To(Equal("new message"))
+		advanceFormationStep(t, formationStepIdxPreconfigure)
+
+		Expect(t.Steps[0].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted))
+		Expect(t.Steps[0].CompletedAt).NotTo(BeNil())
+		Expect(t.Steps[0].Message).To(BeEmpty())
+		Expect(t.Steps[1].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive))
+		Expect(t.Steps[1].StartedAt).NotTo(BeNil())
+		Expect(t.Steps[2].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending))
 	})
 
-	It("returns false when message is the same", func() {
-		rv := mkRVWithFormation()
-		changed := applyFormationTransitionMessage(rv, "old message")
-		Expect(changed).To(BeFalse())
+	It("clears message on completed step", func() {
+		rv := &v1alpha1.ReplicatedVolume{}
+		t, _ := ensureFormationTransition(rv)
+		t.Steps[0].Message = "waiting for something..."
+
+		advanceFormationStep(t, formationStepIdxPreconfigure)
+
+		Expect(t.Steps[0].Message).To(BeEmpty())
 	})
 })
 
@@ -157,10 +172,7 @@ var _ = Describe("applyFormationTransitionAbsent", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{
-						Type:      v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
-						Formation: &v1alpha1.ReplicatedVolumeDatameshTransitionFormation{Phase: v1alpha1.ReplicatedVolumeFormationPhasePreconfigure},
-					},
+					mkFormationTransition(formationStepIdxPreconfigure),
 				},
 			},
 		}
@@ -332,7 +344,7 @@ var _ = Describe("Formation: Preconfigure", func() {
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
 		Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("pending scheduling"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("pending scheduling"))
 	})
 
 	It("includes scheduling failure details when RVR has Scheduled=False", func(ctx SpecContext) {
@@ -371,8 +383,8 @@ var _ = Describe("Formation: Preconfigure", func() {
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
 		Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("scheduling failed [#0]"))
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("(2 candidates; 2 excluded: node not ready)"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("scheduling failed [#0]"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("(2 candidates; 2 excluded: node not ready)"))
 	})
 
 	It("waits for preconfiguration when RVR is scheduled but not preconfigured", func(ctx SpecContext) {
@@ -417,7 +429,7 @@ var _ = Describe("Formation: Preconfigure", func() {
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
 		Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("preconfiguring"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("preconfiguring"))
 	})
 
 	It("transitions to establish-connectivity when all replicas are preconfigured", func(ctx SpecContext) {
@@ -522,7 +534,7 @@ var _ = Describe("Formation: Preconfigure", func() {
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
 		Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("Address configuration mismatch"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("Address configuration mismatch"))
 	})
 
 	It("detects replicas not on eligible nodes", func(ctx SpecContext) {
@@ -545,7 +557,7 @@ var _ = Describe("Formation: Preconfigure", func() {
 
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("not in eligible nodes"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("not in eligible nodes"))
 	})
 
 	It("detects spec mismatch with membership request", func(ctx SpecContext) {
@@ -569,7 +581,7 @@ var _ = Describe("Formation: Preconfigure", func() {
 
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("spec changes"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("spec changes"))
 	})
 
 	It("detects insufficient backing volume size", func(ctx SpecContext) {
@@ -593,7 +605,7 @@ var _ = Describe("Formation: Preconfigure", func() {
 
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("insufficient backing volume size"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("insufficient backing volume size"))
 	})
 
 	It("returns error when createRVR fails with non-AlreadyExists error", func(ctx SpecContext) {
@@ -783,13 +795,7 @@ var _ = Describe("Formation: EstablishConnectivity", func() {
 					},
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{
-						Type:      v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
-						StartedAt: metav1.Now(),
-						Formation: &v1alpha1.ReplicatedVolumeDatameshTransitionFormation{
-							Phase: v1alpha1.ReplicatedVolumeFormationPhaseEstablishConnectivity,
-						},
-					},
+					mkFormationTransitionWithTime(formationStepIdxEstablishConnectivity, metav1.Now()),
 				},
 			},
 		}
@@ -831,7 +837,7 @@ var _ = Describe("Formation: EstablishConnectivity", func() {
 
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("fully configured"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("fully configured"))
 	})
 
 	It("waits for replicas to establish connections", func(ctx SpecContext) {
@@ -913,7 +919,7 @@ var _ = Describe("Formation: EstablishConnectivity", func() {
 
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("establish connections"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("establish connections"))
 	})
 
 	It("detects datamesh members mismatch with active replicas", func(ctx SpecContext) {
@@ -957,7 +963,7 @@ var _ = Describe("Formation: EstablishConnectivity", func() {
 
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("Datamesh members mismatch"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("Datamesh members mismatch"))
 	})
 
 	It("waits for replicas to be ready for data bootstrap", func(ctx SpecContext) {
@@ -1004,7 +1010,7 @@ var _ = Describe("Formation: EstablishConnectivity", func() {
 
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("ready for data bootstrap"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("ready for data bootstrap"))
 	})
 
 	It("transitions to bootstrap-data when single replica is ready", func(ctx SpecContext) {
@@ -1106,13 +1112,7 @@ var _ = Describe("Formation: BootstrapData", func() {
 					},
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{
-						Type:      v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
-						StartedAt: formationStartedAt,
-						Formation: &v1alpha1.ReplicatedVolumeDatameshTransitionFormation{
-							Phase: v1alpha1.ReplicatedVolumeFormationPhaseBootstrapData,
-						},
-					},
+					mkFormationTransitionWithTime(formationStepIdxBootstrapData, formationStartedAt),
 				},
 			},
 		}
@@ -1248,7 +1248,7 @@ var _ = Describe("Formation: BootstrapData", func() {
 
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("waiting for operation"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("waiting for operation"))
 	})
 
 	It("restarts formation when DRBDResourceOperation fails", func(ctx SpecContext) {
@@ -1288,7 +1288,7 @@ var _ = Describe("Formation: BootstrapData", func() {
 
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("failed"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("failed"))
 	})
 
 	It("deletes stale DRBDResourceOperation created before current formation", func(ctx SpecContext) {
@@ -1304,7 +1304,7 @@ var _ = Describe("Formation: BootstrapData", func() {
 		staleDRBDROp := &v1alpha1.DRBDResourceOperation{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:              "rv-1-formation",
-				CreationTimestamp: metav1.NewTime(rv.Status.DatameshTransitions[0].StartedAt.Add(-1 * time.Hour)),
+				CreationTimestamp: metav1.NewTime(rv.Status.DatameshTransitions[0].StartedAt().Add(-1 * time.Hour)),
 			},
 			Spec: v1alpha1.DRBDResourceOperationSpec{
 				DRBDResourceName: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
@@ -1367,7 +1367,7 @@ var _ = Describe("Formation: BootstrapData", func() {
 
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("unexpected parameters"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("unexpected parameters"))
 	})
 
 	It("waits for replicas to reach UpToDate when DRBDResourceOperation succeeded", func(ctx SpecContext) {
@@ -1409,8 +1409,8 @@ var _ = Describe("Formation: BootstrapData", func() {
 
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("Data bootstrap in progress"))
-		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("UpToDate"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("Data bootstrap in progress"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("UpToDate"))
 	})
 
 	It("returns error when DRBDResourceOperation creation fails", func(ctx SpecContext) {
@@ -1575,13 +1575,7 @@ var _ = Describe("Formation: Restart", func() {
 					VolumeAccess: v1alpha1.VolumeAccessLocal, ReplicatedStoragePoolName: "test-pool",
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{
-						Type:      v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
-						StartedAt: metav1.Now(), // Just started.
-						Formation: &v1alpha1.ReplicatedVolumeDatameshTransitionFormation{
-							Phase: v1alpha1.ReplicatedVolumeFormationPhasePreconfigure,
-						},
-					},
+					mkFormationTransitionWithTime(formationStepIdxPreconfigure, metav1.Now()), // Just started.
 				},
 			},
 		}
@@ -1640,13 +1634,7 @@ var _ = Describe("Formation: Restart", func() {
 					Size:               resource.MustParse("10Gi"),
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{
-						Type:      v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
-						StartedAt: metav1.NewTime(time.Now().Add(-1 * time.Hour)), // Started long ago.
-						Formation: &v1alpha1.ReplicatedVolumeDatameshTransitionFormation{
-							Phase: v1alpha1.ReplicatedVolumeFormationPhasePreconfigure,
-						},
-					},
+					mkFormationTransitionWithTime(formationStepIdxPreconfigure, metav1.NewTime(time.Now().Add(-1*time.Hour))), // Started long ago.
 				},
 			},
 		}
@@ -1718,13 +1706,7 @@ var _ = Describe("Formation: Restart", func() {
 					Size:               resource.MustParse("10Gi"),
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{
-						Type:      v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
-						StartedAt: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
-						Formation: &v1alpha1.ReplicatedVolumeDatameshTransitionFormation{
-							Phase: v1alpha1.ReplicatedVolumeFormationPhasePreconfigure,
-						},
-					},
+					mkFormationTransitionWithTime(formationStepIdxPreconfigure, metav1.NewTime(time.Now().Add(-1*time.Hour))),
 				},
 			},
 		}

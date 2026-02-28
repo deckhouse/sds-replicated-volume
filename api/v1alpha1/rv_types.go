@@ -241,11 +241,10 @@ func (t ReplicatedVolumeDatameshReplicaRequest) ID() uint8 {
 }
 
 // ReplicatedVolumeDatameshTransition represents an active datamesh transition.
+// Each transition has an ordered list of steps that are pre-declared on creation
+// and executed sequentially. The transition's start time is steps[0].startedAt.
 // +kubebuilder:object:generate=true
 //
-//	+kubebuilder:validation:XValidation:rule="self.type != 'Formation' || has(self.formation)",message="formation is required when type is Formation"
-//	+kubebuilder:validation:XValidation:rule="!has(self.formation) || self.type == 'Formation'",message="formation is only allowed when type is Formation"
-//	+kubebuilder:validation:XValidation:rule="self.type != 'Formation' || !has(self.datameshRevision) || self.datameshRevision == 0",message="datameshRevision must be absent (or zero) when type is Formation"
 //	+kubebuilder:validation:XValidation:rule="self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach' || has(self.replicaName)",message="replicaName is required for Attach, Detach, AddAccessReplica, RemoveAccessReplica transitions"
 //	+kubebuilder:validation:XValidation:rule="!has(self.replicaName) || !(self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach')",message="replicaName must not be set for Formation, EnableMultiattach, DisableMultiattach transitions"
 type ReplicatedVolumeDatameshTransition struct {
@@ -253,19 +252,6 @@ type ReplicatedVolumeDatameshTransition struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=Formation;AddAccessReplica;Attach;Detach;DisableMultiattach;EnableMultiattach;RemoveAccessReplica
 	Type ReplicatedVolumeDatameshTransitionType `json:"type"`
-
-	// DatameshRevision is the datamesh revision when this transition was introduced.
-	// Zero means unset. For Formation transitions, must be absent (zero).
-	// +optional
-	DatameshRevision int64 `json:"datameshRevision,omitempty"`
-
-	// Message is an optional human-readable message about the transition.
-	// +optional
-	Message string `json:"message,omitempty"`
-
-	// StartedAt is the timestamp when this transition started.
-	// +kubebuilder:validation:Required
-	StartedAt metav1.Time `json:"startedAt"`
 
 	// ReplicaName is the name of the replica this transition applies to.
 	// Required for Attach, Detach, AddAccessReplica, RemoveAccessReplica transitions.
@@ -276,10 +262,15 @@ type ReplicatedVolumeDatameshTransition struct {
 	// +optional
 	ReplicaName string `json:"replicaName,omitempty"`
 
-	// Formation holds formation-specific details.
-	// Required when type is "Formation"; must not be set otherwise.
-	// +optional
-	Formation *ReplicatedVolumeDatameshTransitionFormation `json:"formation,omitempty"`
+	// Steps is the ordered list of steps for this transition.
+	// All steps are written when the transition is created (with status=Pending,
+	// and the first step immediately set to Active with startedAt).
+	// Steps are executed sequentially — only one step is Active at a time.
+	// Must have at least one element.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=8
+	// +listType=atomic
+	Steps []ReplicatedVolumeDatameshTransitionStep `json:"steps"`
 }
 
 // ReplicaID extracts ID from the replica name (e.g., "pvc-xxx-5" → 5).
@@ -290,6 +281,84 @@ func (t ReplicatedVolumeDatameshTransition) ReplicaID() uint8 {
 	}
 	return idFromName(t.ReplicaName)
 }
+
+// CurrentStep returns a pointer to the first non-Completed step, or nil if all steps are completed.
+func (t *ReplicatedVolumeDatameshTransition) CurrentStep() *ReplicatedVolumeDatameshTransitionStep {
+	for i := range t.Steps {
+		if t.Steps[i].Status != ReplicatedVolumeDatameshTransitionStepStatusCompleted {
+			return &t.Steps[i]
+		}
+	}
+	return nil
+}
+
+// IsCompleted returns true if all steps are completed.
+func (t *ReplicatedVolumeDatameshTransition) IsCompleted() bool {
+	for i := range t.Steps {
+		if t.Steps[i].Status != ReplicatedVolumeDatameshTransitionStepStatusCompleted {
+			return false
+		}
+	}
+	return true
+}
+
+// StartedAt returns the start time of the transition (= first step's StartedAt).
+// Returns zero time if the first step has no StartedAt (should not happen for valid transitions).
+func (t *ReplicatedVolumeDatameshTransition) StartedAt() metav1.Time {
+	if len(t.Steps) > 0 && t.Steps[0].StartedAt != nil {
+		return *t.Steps[0].StartedAt
+	}
+	return metav1.Time{}
+}
+
+// ReplicatedVolumeDatameshTransitionStep represents one step within a transition.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeDatameshTransitionStep struct {
+	// Name is a human-readable step name (e.g., "Preconfigure", "attach", "✦ → D∅").
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=64
+	Name string `json:"name"`
+
+	// Status is the current status of this step.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=Pending;Active;Completed
+	// +kubebuilder:default="Pending"
+	Status ReplicatedVolumeDatameshTransitionStepStatus `json:"status"`
+
+	// DatameshRevision is the revision assigned when this step was activated.
+	// 0 if the step has not been activated yet or does not bump the revision.
+	// +optional
+	DatameshRevision int64 `json:"datameshRevision,omitempty"`
+
+	// StartedAt is set when the step transitions from Pending to Active.
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+
+	// CompletedAt is set when the step transitions from Active to Completed.
+	// +optional
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+
+	// Message is a per-step progress or error message.
+	// Updated every reconciliation while the step is Active.
+	// +kubebuilder:validation:MaxLength=512
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
+// ReplicatedVolumeDatameshTransitionStepStatus enumerates step statuses.
+type ReplicatedVolumeDatameshTransitionStepStatus string
+
+const (
+	// ReplicatedVolumeDatameshTransitionStepStatusPending indicates the step has not started yet.
+	ReplicatedVolumeDatameshTransitionStepStatusPending ReplicatedVolumeDatameshTransitionStepStatus = "Pending"
+	// ReplicatedVolumeDatameshTransitionStepStatusActive indicates the step is currently executing.
+	ReplicatedVolumeDatameshTransitionStepStatusActive ReplicatedVolumeDatameshTransitionStepStatus = "Active"
+	// ReplicatedVolumeDatameshTransitionStepStatusCompleted indicates the step has finished.
+	ReplicatedVolumeDatameshTransitionStepStatusCompleted ReplicatedVolumeDatameshTransitionStepStatus = "Completed"
+)
+
+func (s ReplicatedVolumeDatameshTransitionStepStatus) String() string { return string(s) }
 
 // ReplicatedVolumeDatameshTransitionType enumerates possible datamesh transition types.
 type ReplicatedVolumeDatameshTransitionType string
@@ -314,30 +383,6 @@ const (
 
 func (t ReplicatedVolumeDatameshTransitionType) String() string {
 	return string(t)
-}
-
-// ReplicatedVolumeFormationPhase enumerates formation sub-phases.
-type ReplicatedVolumeFormationPhase string
-
-const (
-	// ReplicatedVolumeFormationPhasePreconfigure is the initial phase where replicas are being created and preconfigured.
-	ReplicatedVolumeFormationPhasePreconfigure ReplicatedVolumeFormationPhase = "Preconfigure"
-	// ReplicatedVolumeFormationPhaseEstablishConnectivity is the phase where replicas establish DRBD connectivity.
-	ReplicatedVolumeFormationPhaseEstablishConnectivity ReplicatedVolumeFormationPhase = "EstablishConnectivity"
-	// ReplicatedVolumeFormationPhaseBootstrapData is the phase where initial data synchronization is bootstrapped.
-	ReplicatedVolumeFormationPhaseBootstrapData ReplicatedVolumeFormationPhase = "BootstrapData"
-)
-
-func (p ReplicatedVolumeFormationPhase) String() string { return string(p) }
-
-// ReplicatedVolumeDatameshTransitionFormation holds formation-specific transition details.
-// +kubebuilder:object:generate=true
-type ReplicatedVolumeDatameshTransitionFormation struct {
-	// Phase is the current formation phase.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:default="Preconfigure"
-	// +kubebuilder:validation:Enum=Preconfigure;EstablishConnectivity;BootstrapData
-	Phase ReplicatedVolumeFormationPhase `json:"phase"`
 }
 
 // ReplicatedVolumeDatamesh holds datamesh configuration for the volume.

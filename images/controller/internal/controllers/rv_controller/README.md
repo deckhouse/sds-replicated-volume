@@ -46,7 +46,7 @@ ensure datamesh replica membership requests (sync from RVR statuses)
 
 if configuration exists:
     if formation in progress (DatameshRevision == 0 or Formation transition active):
-        reconcile formation (3-phase process; config frozen)
+        reconcile formation (3-step process; config frozen)
         reconcileRVAWaiting (datamesh forming)
     else:
         reconcileRVConfiguration (check for config updates + set ConfigurationReady condition)
@@ -87,22 +87,22 @@ Reconcile (root) [Pure orchestration]
 ├── if config nil: reconcileRVConfiguration [In-place reconciliation] ← details
 ├── ensureDatameshReplicaRequests ← details
 ├── reconcileFormation [Pure orchestration]
-│   ├── reconcileFormationPhasePreconfigure [Pure orchestration] ← details
-│   │   ├── applyFormationTransition
+│   │   ensureFormationTransition (find or create Formation transition with all steps)
+│   ├── reconcileFormationStepPreconfigure [Pure orchestration] ← details
 │   │   ├── create/delete RVRs (guards for deleting/misplaced, replica count management)
 │   │   ├── wait for deleting replicas cleanup
 │   │   ├── safety checks (addresses, eligible nodes, spec mismatch, backing volume size)
 │   │   └── reconcileFormationRestartIfTimeoutPassed
-│   ├── reconcileFormationPhaseEstablishConnectivity [Pure orchestration] ← details
+│   ├── reconcileFormationStepEstablishConnectivity [Pure orchestration] ← details
 │   │   ├── generateSharedSecret + applyDatameshMember
 │   │   ├── computeTargetQuorum
 │   │   ├── verify configured, connected, ready for data bootstrap
 │   │   └── reconcileFormationRestartIfTimeoutPassed
-│   ├── reconcileFormationPhaseBootstrapData [Pure orchestration] ← details
+│   ├── reconcileFormationStepBootstrapData [Pure orchestration] ← details
 │   │   ├── createDRBDROp (new-current-uuid)
 │   │   ├── verify operation status + UpToDate replicas
 │   │   ├── reconcileFormationRestartIfTimeoutPassed
-│   │   └── applyFormationTransitionAbsent (formation complete)
+│   │   └── advanceFormationStep / remove transition (formation complete)
 │   └── reconcileRVAWaiting ("Datamesh formation is in progress")
 ├── reconcileRVConfiguration [In-place reconciliation] (config updates + ConfigurationReady condition)
 ├── reconcileNormalOperation [Pure orchestration] (WIP)
@@ -137,7 +137,7 @@ Reconcile (root) [Pure orchestration]
 └── patchRVStatus
 ```
 
-Links to detailed algorithms: [`reconcileDeletion`](#reconciledeletion-details), [`ensureDatameshReplicaRequests`](#ensuredatameshreplicarequests-details), [`reconcileRVConfiguration`](#reconcilervconfiguration-details), [`reconcileFormationPhasePreconfigure`](#reconcileformationphasepreconfigure-details), [`reconcileFormationPhaseEstablishConnectivity`](#reconcileformationphaseestablishconnectivity-details), [`reconcileFormationPhaseBootstrapData`](#reconcileformationphasebootstrapdata-details), [`reconcileCreateAccessReplicas`](#reconcilecreateaccessreplicas-details), [`reconcileDeleteAccessReplicas`](#reconciledeleteaccessreplicas-details), [`ensureDatameshAccessReplicas`](#ensuredatameshaccessreplicas-details), [`ensureDatameshAttachments`](#ensuredatameshattachments-details), [`buildAttachmentsSummary`](#buildattachmentssummary-details), [`computeDatameshAttachmentIntents`](#computedatameshattachmentintents-details), [`ensureDatameshDetachTransitions`](#ensuredatameshdetachtransitions-details), [`ensureDatameshAttachTransitions`](#ensuredatameshattachtransitions-details), [`reconcileRVAConditionsFromAttachmentsSummary`](#reconcilervaconditionsfromattachmentssummary-details)
+Links to detailed algorithms: [`reconcileDeletion`](#reconciledeletion-details), [`ensureDatameshReplicaRequests`](#ensuredatameshreplicarequests-details), [`reconcileRVConfiguration`](#reconcilervconfiguration-details), [`reconcileFormationStepPreconfigure`](#reconcileformationsteppreconfigure-details), [`reconcileFormationStepEstablishConnectivity`](#reconcileformationstepestablishconnectivity-details), [`reconcileFormationStepBootstrapData`](#reconcileformationstepbootstrapdata-details), [`reconcileCreateAccessReplicas`](#reconcilecreateaccessreplicas-details), [`reconcileDeleteAccessReplicas`](#reconciledeleteaccessreplicas-details), [`ensureDatameshAccessReplicas`](#ensuredatameshaccessreplicas-details), [`ensureDatameshAttachments`](#ensuredatameshattachments-details), [`buildAttachmentsSummary`](#buildattachmentssummary-details), [`computeDatameshAttachmentIntents`](#computedatameshattachmentintents-details), [`ensureDatameshDetachTransitions`](#ensuredatameshdetachtransitions-details), [`ensureDatameshAttachTransitions`](#ensuredatameshattachtransitions-details), [`reconcileRVAConditionsFromAttachmentsSummary`](#reconcilervaconditionsfromattachmentssummary-details)
 
 ## Algorithm Flow
 
@@ -231,15 +231,15 @@ Aggregate condition: Ready=True iff Attached=True AND ReplicaReady=True AND not 
 | False | Deleting | RVA has DeletionTimestamp |
 | Unknown | ReplicaNotReady | ReplicaReady is Unknown |
 
-## Formation Phases
+## Formation Steps
 
-Datamesh formation is a 3-phase process that creates and configures DRBD replicas. Each phase has a timeout; if progress stalls, formation restarts from scratch.
+Datamesh formation is a 3-step process that creates and configures DRBD replicas. Each step has a timeout; if progress stalls, formation restarts from scratch. All steps are pre-declared in the Formation transition at creation time and tracked in `rv.Status.DatameshTransitions[].Steps`.
 
-### Phase 1: Preconfigure
+### Step 1: Preconfigure
 
 Creates diskful replicas and waits for them to become preconfigured (DRBD setup complete, ready for datamesh membership).
 
-**Steps:**
+**Actions:**
 1. Initialize datamesh configuration (SystemNetworkNames, Size, DatameshRevision=1)
 2. Identify misplaced replicas (SatisfyEligibleNodes=False) and deleting replicas (DeletionTimestamp set)
 3. Collect active diskful replicas (excluding misplaced and deleting)
@@ -249,11 +249,11 @@ Creates diskful replicas and waits for them to become preconfigured (DRBD setup 
 7. Wait for scheduling and preconfiguration (replicas split into pending scheduling / scheduling failed / preconfiguring; scheduling failure messages from RVR Scheduled=False conditions are shown inline)
 8. Safety checks: addresses, eligible nodes, spec consistency, backing volume size
 
-### Phase 2: Establish Connectivity
+### Step 2: Establish Connectivity
 
 Adds preconfigured replicas to the datamesh and waits for DRBD peer connections.
 
-**Steps:**
+**Actions:**
 1. Generate shared secret for DRBD peer authentication
 2. Add diskful replicas as datamesh members (with zone, addresses, LVG info)
 3. Set effective layout (FTT/GMDR from configuration) and quorum parameters
@@ -261,11 +261,11 @@ Adds preconfigured replicas to the datamesh and waits for DRBD peer connections.
 5. Wait for all replicas to connect to each other (ConnectionState=Connected)
 6. Wait for data bootstrap readiness (BackingVolume=Inconsistent + Replication=Established)
 
-### Phase 3: Bootstrap Data
+### Step 3: Bootstrap Data
 
 Triggers initial data synchronization via DRBDResourceOperation and waits for completion.
 
-**Steps:**
+**Actions:**
 1. Create DRBDResourceOperation (type: CreateNewUUID)
    - Single replica (any pool type): clear-bitmap (no peers to synchronize with)
    - Multiple replicas, thin provisioning: clear-bitmap (no full resync needed)
@@ -318,7 +318,7 @@ Attachment is the process of making a datamesh volume accessible (Primary in DRB
 
 ### Transition confirmation
 
-All transitions are confirmed when the target replicas report `DatameshRevision >= transition.DatameshRevision`. The transition is then removed from `rv.Status.DatameshTransitions`.
+All transitions are confirmed when the target replicas report `DatameshRevision >= step.DatameshRevision` (on the active step). The transition is then removed from `rv.Status.DatameshTransitions`.
 
 Special cases for Detach: also confirmed when the replica has no `attachmentState`, no RVR, or `DatameshRevision == 0` (replica left the datamesh or was deleted).
 
@@ -480,7 +480,7 @@ flowchart TD
 
 ---
 
-### reconcileFormationPhasePreconfigure Details
+### reconcileFormationStepPreconfigure Details
 
 **Purpose:** Creates diskful replicas and waits for them to become preconfigured (DRBD setup complete, ready for datamesh membership). Performs safety checks before advancing.
 
@@ -490,9 +490,10 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> ApplyTransition["applyFormationTransition(Preconfigure)<br/>Init: DatameshRevision=1, SystemNetworkNames, Size"]
-
-    ApplyTransition --> FindMisplaced["Find misplaced replicas<br/>(SatisfyEligibleNodes=False)"]
+    Start([Start]) --> Init{"First entry<br/>(transition just created)?"}
+    Init -->|Yes| InitConfig["Init: DatameshRevision=1,<br/>SystemNetworkNames, Size"]
+    Init -->|No| FindMisplaced
+    InitConfig --> FindMisplaced["Find misplaced replicas<br/>(SatisfyEligibleNodes=False)"]
     FindMisplaced --> FindDeleting["Find deleting replicas<br/>(DeletionTimestamp set)"]
     FindDeleting --> CollectDiskful["Collect active diskful replicas<br/>(exclude misplaced + deleting)"]
     CollectDiskful --> ComputeCount[computeIntendedDiskfulReplicaCount]
@@ -531,7 +532,7 @@ flowchart TD
     CheckSpec -->|Yes| CheckBVSize{"Backing volume<br/>size sufficient?"}
     CheckBVSize -->|No| WaitTimeout5[Wait / restart if timeout]
 
-    CheckBVSize -->|Yes| NextPhase([→ EstablishConnectivity])
+    CheckBVSize -->|Yes| NextStep(["advanceFormationStep → Establish connectivity"])
 ```
 
 **Data Flow:**
@@ -553,7 +554,7 @@ flowchart TD
 
 ---
 
-### reconcileFormationPhaseEstablishConnectivity Details
+### reconcileFormationStepEstablishConnectivity Details
 
 **Purpose:** Adds preconfigured replicas to the datamesh (with shared secret and quorum), then waits for DRBD configuration, peer connections, and replication establishment.
 
@@ -563,8 +564,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> ApplyTransition["applyFormationTransition(EstablishConnectivity)"]
-    ApplyTransition --> CollectDiskful[Collect active diskful replicas]
+    Start([Start]) --> CollectDiskful[Collect active diskful replicas]
 
     CollectDiskful --> CheckMembers{Datamesh members<br/>already set?}
     CheckMembers -->|No| GenSecret[generateSharedSecret]
@@ -586,7 +586,7 @@ flowchart TD
     CheckConnected -->|Yes| CheckBootstrapReady{"All replicas ready for<br/>data bootstrap?<br/>(Inconsistent + Established)"}
     CheckBootstrapReady -->|No| WaitRestart4[Wait / restart if timeout]
 
-    CheckBootstrapReady -->|Yes| NextPhase([→ BootstrapData])
+    CheckBootstrapReady -->|Yes| NextStep(["advanceFormationStep → Bootstrap data"])
 ```
 
 **Data Flow:**
@@ -606,7 +606,7 @@ flowchart TD
 
 ---
 
-### reconcileFormationPhaseBootstrapData Details
+### reconcileFormationStepBootstrapData Details
 
 **Purpose:** Creates a DRBDResourceOperation to trigger initial data synchronization, waits for completion, and finalizes formation.
 
@@ -616,8 +616,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> ApplyTransition["applyFormationTransition(BootstrapData)"]
-    ApplyTransition --> GetOp[getDRBDROp]
+    Start([Start]) --> GetOp[getDRBDROp]
     GetOp --> CheckStale{"Operation exists but<br/>created before current<br/>formation start?"}
     CheckStale -->|Yes| DeleteStale[Delete stale operation]
     DeleteStale --> CheckExists
@@ -637,7 +636,7 @@ flowchart TD
     CheckStatus -->|Succeeded| CheckUpToDate{"All replicas<br/>UpToDate?"}
 
     CheckUpToDate -->|No| WaitSync[Wait / restart if dataBootstrapTimeout]
-    CheckUpToDate -->|Yes| Complete["applyFormationTransitionAbsent<br/>(formation complete!)"]
+    CheckUpToDate -->|Yes| Complete["Remove Formation transition<br/>(formation complete!)"]
     Complete --> End([ContinueAndRequeue])
 ```
 
@@ -902,7 +901,7 @@ All guards passed: remove member from datamesh, increment revision, create Remov
 
 Checks confirmation progress for a single AddAccessReplica or RemoveAccessReplica transition:
 
-- **Confirmation**: a replica is confirmed when `DatameshRevision >= transition.DatameshRevision`.
+- **Confirmation**: a replica is confirmed when `DatameshRevision >= step.DatameshRevision` (on the active step).
 - **RemoveAccessReplica special case**: the leaving replica also counts as confirmed when `DatameshRevision == 0` (it left the datamesh and reset its revision).
 - **Error reporting**: waiting replicas with `Configured=False` are reported as errors in the transition message. For AddAccessReplica, the subject replica's `Configured=False` with reason `PendingJoin` is expected and skipped (it has not joined the datamesh yet).
 
