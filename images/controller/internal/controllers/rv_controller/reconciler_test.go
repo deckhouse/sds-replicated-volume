@@ -1725,7 +1725,7 @@ var _ = Describe("rvShouldNotExist", func() {
 					},
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rvr-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: ptr.To(now)}}},
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rvr-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: ptr.To(now)}}},
 				},
 			},
 		}
@@ -2892,7 +2892,7 @@ var _ = Describe("Root Reconcile deletion with attach state", func() {
 			{Name: "rv-1-0", NodeName: "node-1", Attached: false},
 		}
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: ptr.To(metav1.Now())}}},
 		}
 
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
@@ -3034,33 +3034,48 @@ var _ = Describe("isRVRMemberOrLeavingDatamesh", func() {
 		Expect(isRVRMemberOrLeavingDatamesh(rv, "rv-1-0")).To(BeFalse())
 	})
 
-	It("returns true when RemoveAccessReplica transition exists for the RVR", func() {
+	It("returns true when RemoveReplica transition exists for the RVR", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					makeDatameshSingleStepTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica, "rv-1-0", "", 0),
+					makeDatameshSingleStepTransition(
+						v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+						v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+						"rv-1-0", v1alpha1.ReplicaTypeAccess,
+						"", 0,
+					),
 				},
 			},
 		}
 		Expect(isRVRMemberOrLeavingDatamesh(rv, "rv-1-0")).To(BeTrue())
 	})
 
-	It("returns false when RemoveAccessReplica transition is for a different RVR", func() {
+	It("returns false when RemoveReplica transition is for a different RVR", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					makeDatameshSingleStepTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica, "rv-1-1", "", 0),
+					makeDatameshSingleStepTransition(
+						v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+						v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+						"rv-1-1", v1alpha1.ReplicaTypeAccess,
+						"", 0,
+					),
 				},
 			},
 		}
 		Expect(isRVRMemberOrLeavingDatamesh(rv, "rv-1-0")).To(BeFalse())
 	})
 
-	It("ignores non-RemoveAccessReplica transitions", func() {
+	It("ignores non-RemoveReplica transitions", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					makeDatameshSingleStepTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica, "rv-1-0", "", 0),
+					makeDatameshSingleStepTransition(
+						v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
+						v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+						"rv-1-0", v1alpha1.ReplicaTypeAccess,
+						"", 0,
+					),
 				},
 			},
 		}
@@ -3158,7 +3173,7 @@ var _ = Describe("reconcileRVRFinalizers", func() {
 		Expect(updated.Finalizers).To(ContainElement(v1alpha1.RVControllerFinalizer))
 	})
 
-	It("keeps finalizer on deleting RVR when RemoveAccessReplica transition in progress", func(ctx SpecContext) {
+	It("keeps finalizer on deleting RVR when RemoveReplica transition in progress", func(ctx SpecContext) {
 		rvr := makeDeletingRVR("rv-1-0", "rv-1")
 		cl := newClientBuilder(scheme).WithObjects(rvr).Build()
 		rec := NewReconciler(cl, scheme)
@@ -3166,7 +3181,7 @@ var _ = Describe("reconcileRVRFinalizers", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: ptr.To(metav1.Now())}}},
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: ptr.To(metav1.Now())}}},
 				},
 			},
 		}

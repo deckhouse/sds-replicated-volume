@@ -588,14 +588,51 @@ spec:
                     Each transition has an ordered list of steps that are pre-declared on creation
                     and executed sequentially. The transition's start time is steps[0].startedAt.
                   properties:
+                    fromReplicaType:
+                      description: |-
+                        FromReplicaType is the source replica type for ChangeReplicaType transitions.
+                        Required for ChangeReplicaType. Must not be set for other types.
+                      enum:
+                      - Diskful
+                      - Access
+                      - TieBreaker
+                      - ShadowDiskful
+                      type: string
+                    group:
+                      description: |-
+                        Group is the parallelism group for this transition.
+                        Set by the controller at transition creation time. Read-only for users.
+                        Provides observability: explains why a transition may be waiting.
+                      enum:
+                      - Formation
+                      - VotingMembership
+                      - NonVotingMembership
+                      - Quorum
+                      - Attachment
+                      - Multiattach
+                      - Emergency
+                      type: string
                     replicaName:
                       description: |-
                         ReplicaName is the name of the replica this transition applies to.
-                        Required for Attach, Detach, AddAccessReplica, RemoveAccessReplica transitions.
-                        Must not be set for Formation, EnableMultiattach, DisableMultiattach.
+                        Required for AddReplica, RemoveReplica, ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach.
+                        Must not be set for Formation, EnableMultiattach, DisableMultiattach, ChangeQuorum.
                       maxLength: 123
                       minLength: 1
                       pattern: ^.+-([0-9]|[12][0-9]|3[01])$
+                      type: string
+                    replicaType:
+                      description: |-
+                        ReplicaType is the target replica type for AddReplica/RemoveReplica/ForceRemoveReplica.
+                        Uses ReplicaType (Diskful, Access, TieBreaker, ShadowDiskful) — liminal states
+                        (LiminalDiskful, LiminalShadowDiskful) are internal mechanics visible in step names,
+                        not in transition parameters.
+                        Required for AddReplica, RemoveReplica, ForceRemoveReplica. Must not be set for other types.
+                      enum:
+                      - Diskful
+                      - Access
+                      - TieBreaker
+                      - ShadowDiskful
                       type: string
                     steps:
                       description: |-
@@ -652,30 +689,64 @@ spec:
                       minItems: 1
                       type: array
                       x-kubernetes-list-type: atomic
+                    toReplicaType:
+                      description: |-
+                        ToReplicaType is the target replica type for ChangeReplicaType transitions.
+                        Required for ChangeReplicaType. Must not be set for other types.
+                      enum:
+                      - Diskful
+                      - Access
+                      - TieBreaker
+                      - ShadowDiskful
+                      type: string
                     type:
                       description: Type is the transition type.
                       enum:
                       - Formation
-                      - AddAccessReplica
+                      - AddReplica
                       - Attach
+                      - ChangeQuorum
+                      - ChangeReplicaType
                       - Detach
                       - DisableMultiattach
                       - EnableMultiattach
-                      - RemoveAccessReplica
+                      - ForceDetach
+                      - ForceRemoveReplica
+                      - RemoveReplica
                       type: string
                   required:
+                  - group
                   - steps
                   - type
                   type: object
                   x-kubernetes-validations:
-                  - message: replicaName is required for Attach, Detach, AddAccessReplica,
-                      RemoveAccessReplica transitions
+                  - message: replicaName is required for AddReplica, RemoveReplica,
+                      ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach
+                      transitions
                     rule: self.type == 'Formation' || self.type == 'EnableMultiattach'
-                      || self.type == 'DisableMultiattach' || has(self.replicaName)
+                      || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum'
+                      || has(self.replicaName)
                   - message: replicaName must not be set for Formation, EnableMultiattach,
-                      DisableMultiattach transitions
+                      DisableMultiattach, ChangeQuorum transitions
                     rule: '!has(self.replicaName) || !(self.type == ''Formation''
-                      || self.type == ''EnableMultiattach'' || self.type == ''DisableMultiattach'')'
+                      || self.type == ''EnableMultiattach'' || self.type == ''DisableMultiattach''
+                      || self.type == ''ChangeQuorum'')'
+                  - message: replicaType must only be set for AddReplica, RemoveReplica,
+                      ForceRemoveReplica transitions
+                    rule: self.type == 'AddReplica' || self.type == 'RemoveReplica'
+                      || self.type == 'ForceRemoveReplica' || !has(self.replicaType)
+                  - message: replicaType is required for AddReplica, RemoveReplica,
+                      ForceRemoveReplica transitions
+                    rule: '!(self.type == ''AddReplica'' || self.type == ''RemoveReplica''
+                      || self.type == ''ForceRemoveReplica'') || has(self.replicaType)'
+                  - message: fromReplicaType and toReplicaType must only be set for
+                      ChangeReplicaType transitions
+                    rule: self.type == 'ChangeReplicaType' || (!has(self.fromReplicaType)
+                      && !has(self.toReplicaType))
+                  - message: fromReplicaType and toReplicaType are required for ChangeReplicaType
+                      transitions
+                    rule: self.type != 'ChangeReplicaType' || (has(self.fromReplicaType)
+                      && has(self.toReplicaType))
                 type: array
                 x-kubernetes-list-type: atomic
               effectiveLayout:

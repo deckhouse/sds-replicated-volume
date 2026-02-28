@@ -593,7 +593,7 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 			mkAttachMember("rv-1-0", "node-1", true),
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 10)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
@@ -610,7 +610,7 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 			mkAttachMember("rv-1-0", "node-1", false),
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 10)}
 
@@ -629,7 +629,7 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 		rv.Spec.MaxAttachments = 2
 		rv.Status.Datamesh.Multiattach = true
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkAttachRVRWithRev("rv-1-0", "node-1", 10),
@@ -663,8 +663,8 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 		rv.Spec.MaxAttachments = 2
 		rv.Status.Datamesh.Multiattach = true
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 11, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 11, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkAttachRVRWithRev("rv-1-0", "node-1", 10), // confirmed rev 10
@@ -700,8 +700,8 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 		rv.Spec.MaxAttachments = 2
 		rv.Status.Datamesh.Multiattach = true
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 11, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 11, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkAttachRVRWithRev("rv-1-0", "node-1", 11), // confirmed both
@@ -737,7 +737,7 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 		rv.Spec.MaxAttachments = 2
 		rv.Status.Datamesh.Multiattach = true
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkAttachRVRWithRev("rv-1-0", "node-1", 10),
@@ -838,7 +838,7 @@ var _ = Describe("ensureDatameshAttachments attach", func() {
 			mkAttachMember("rv-1-1", "node-2", false),
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkAttachRVRWithRev("rv-1-0", "node-1", 5),
@@ -856,12 +856,12 @@ var _ = Describe("ensureDatameshAttachments attach", func() {
 		Expect(as.conditionMessage).To(ContainSubstring("Waiting for attachment slot"))
 	})
 
-	It("blocks attach when AddAccessReplica in progress", func() {
+	It("blocks attach when AddReplica in progress", func() {
 		rv := mkAttachRV([]v1alpha1.DatameshMember{
 			mkAttachMember("rv-1-1", "node-1", false),
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica, ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership, ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-1", "node-1", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
@@ -1175,7 +1175,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		}, 10)
 		rv.Status.Datamesh.Multiattach = true
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkAttachRVR("rv-1-0", "node-1", true),
@@ -1200,7 +1200,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		rv.Spec.MaxAttachments = 2
 		rv.Status.Datamesh.Multiattach = true
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkAttachRVRWithRev("rv-1-0", "node-1", 5),
@@ -1255,7 +1255,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachMember("rv-1-1", "node-2", false),
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkAttachRVRWithRev("rv-1-0", "node-1", 10),
@@ -1276,7 +1276,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachMember("rv-1-0", "node-1", true),
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)} // not confirmed
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
@@ -1295,7 +1295,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachMember("rv-1-0", "node-1", false),
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)} // not confirmed
 
@@ -1311,7 +1311,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachMember("rv-1-0", "node-1", true),
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvr := mkAttachRVRWithRev("rv-1-0", "node-1", 5)
 		rvr.Generation = 1
@@ -1349,7 +1349,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachMember("rv-1-0", "node-1", false), // Attached=false, Detach in progress
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)}
 
@@ -1371,7 +1371,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		}, 10)
 		// Active Attach transition (not yet confirmed) + no RVA → intent=Detach
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)}
 
@@ -1402,7 +1402,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachMember("rv-1-0", "node-1", true), // Attached=true, Attach in progress
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
@@ -1424,7 +1424,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachMember("rv-1-0", "node-1", false), // Attached=false, Detach pending
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}

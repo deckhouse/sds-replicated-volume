@@ -905,6 +905,7 @@ func ensureFormationTransition(rv *v1alpha1.ReplicatedVolume) (*v1alpha1.Replica
 
 	rv.Status.DatameshTransitions = append(rv.Status.DatameshTransitions, v1alpha1.ReplicatedVolumeDatameshTransition{
 		Type:  v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
+		Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupFormation,
 		Steps: steps,
 	})
 	return &rv.Status.DatameshTransitions[len(rv.Status.DatameshTransitions)-1], true
