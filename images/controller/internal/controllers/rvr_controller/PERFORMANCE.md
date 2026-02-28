@@ -121,11 +121,11 @@ Objects fetched without `UnsafeDisableDeepCopy` are automatically deep-copied by
 | `[]DRBDResourcePath` | line 2649 | Per peer | N × K × ~50B |
 | `slices.Clone(systemNetworks)` | line 2530 | Always in computeTargetDRBDRSpec | K × 16B |
 
-#### DatameshPendingTransition
+#### DatameshRequest
 
 | Allocation | Location | Condition | Size |
 |------------|----------|-----------|------|
-| `ReplicatedVolumeReplicaStatusDatameshPendingTransition` | lines 2303, 2358, 2382, 2400, 2435 | Pending operation exists | ~60B |
+| `ReplicatedVolumeReplicaStatusDatameshRequest` | lines 2303, 2358, 2382, 2400, 2435 | Membership request exists | ~60B |
 
 #### LLV/DRBDR Creation
 

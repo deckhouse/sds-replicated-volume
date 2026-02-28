@@ -160,20 +160,20 @@ var _ = Describe("rvEventHandler", func() {
 		})
 	})
 
-	Describe("Update with DatameshPendingReplicaTransitions message change", func() {
+	Describe("Update with DatameshReplicaRequests message change", func() {
 		It("enqueues only affected RVRs when message changes", func() {
 			oldRV := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					DatameshRevision: 1,
-					DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 						{Name: "rv-1-0", Message: "old message"},
 						{Name: "rv-1-1", Message: "unchanged"},
 					},
 				},
 			}
 			newRV := oldRV.DeepCopy()
-			newRV.Status.DatameshPendingReplicaTransitions[0].Message = "new message"
+			newRV.Status.DatameshReplicaRequests[0].Message = "new message"
 
 			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 
@@ -190,15 +190,15 @@ var _ = Describe("rvEventHandler", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					DatameshRevision: 1,
-					DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 						{Name: "rv-1-0", Message: "msg"},
 					},
 				},
 			}
 			newRV := oldRV.DeepCopy()
-			newRV.Status.DatameshPendingReplicaTransitions = append(
-				newRV.Status.DatameshPendingReplicaTransitions,
-				v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{Name: "rv-1-1", Message: "new"},
+			newRV.Status.DatameshReplicaRequests = append(
+				newRV.Status.DatameshReplicaRequests,
+				v1alpha1.ReplicatedVolumeDatameshReplicaRequest{Name: "rv-1-1", Message: "new"},
 			)
 
 			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
@@ -216,7 +216,7 @@ var _ = Describe("rvEventHandler", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					DatameshRevision: 1,
-					DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 						{Name: "rv-1-0", Message: "msg"},
 					},
 				},
@@ -243,7 +243,7 @@ var _ = Describe("rvEventHandler", func() {
 							{Name: "rv-1-1"},
 						},
 					},
-					DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 						{Name: "rv-1-3", Message: "old message"},
 					},
 				},
@@ -255,7 +255,7 @@ var _ = Describe("rvEventHandler", func() {
 				{Name: "rv-1-2"}, // Added to datamesh.
 			}
 			// Message also changed for pending replica (not in datamesh).
-			newRV.Status.DatameshPendingReplicaTransitions[0].Message = "new message"
+			newRV.Status.DatameshReplicaRequests[0].Message = "new message"
 
 			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 

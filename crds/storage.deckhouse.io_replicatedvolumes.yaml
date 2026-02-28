@@ -486,21 +486,21 @@ spec:
                 - size
                 - systemNetworkNames
                 type: object
-              datameshPendingReplicaTransitions:
-                description: DatameshPendingReplicaTransitions is the list of pending
-                  replica transitions.
+              datameshReplicaRequests:
+                description: DatameshReplicaRequests is the list of pending membership
+                  requests from replicas.
                 items:
-                  description: ReplicatedVolumeDatameshPendingReplicaTransition represents
-                    a pending transition for a single replica.
+                  description: ReplicatedVolumeDatameshReplicaRequest represents a
+                    pending membership request from a single replica.
                   properties:
                     firstObservedAt:
-                      description: FirstObservedAt is the timestamp when this transition
+                      description: FirstObservedAt is the timestamp when this request
                         was first observed.
                       format: date-time
                       type: string
                     message:
                       description: Message is an optional human-readable message about
-                        the transition state and progress.
+                        the request state and progress.
                       maxLength: 512
                       type: string
                     name:
@@ -511,8 +511,8 @@ spec:
                       minLength: 1
                       pattern: ^.+-([0-9]|[12][0-9]|3[01])$
                       type: string
-                    transition:
-                      description: Transition is the pending datamesh transition details
+                    request:
+                      description: Request is the membership change request details
                         from the replica.
                       properties:
                         lvmVolumeGroupName:
@@ -521,29 +521,42 @@ spec:
                           minLength: 1
                           pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
                           type: string
-                        member:
-                          description: Member indicates whether this replica should
-                            be a datamesh member.
-                          type: boolean
+                        operation:
+                          description: Operation is the type of membership change
+                            requested.
+                          enum:
+                          - Join
+                          - Leave
+                          - ChangeRole
+                          - ChangeBackingVolume
+                          type: string
                         thinPoolName:
                           description: ThinPoolName is the thin pool name (optional,
                             for LVMThin storage pools).
                           type: string
                         type:
-                          description: Type is the intended type when Member is true.
+                          description: Type is the intended replica type. Required
+                            for Join and ChangeRole operations.
                           enum:
                           - Diskful
                           - Access
                           - TieBreaker
                           type: string
+                      required:
+                      - operation
                       type: object
                       x-kubernetes-validations:
-                      - message: when member is false, type/lvmVolumeGroupName/thinPoolName
-                          must not be set
-                        rule: '!has(self.member) || self.member == true || (!has(self.type)
-                          && !has(self.lvmVolumeGroupName) && !has(self.thinPoolName))'
-                      - message: when member is true, type is required
-                        rule: '!has(self.member) || self.member == false || has(self.type)'
+                      - message: type is required for Join and ChangeRole operations
+                        rule: self.operation == 'Leave' || self.operation == 'ChangeBackingVolume'
+                          || has(self.type)
+                      - message: type/lvmVolumeGroupName/thinPoolName must not be
+                          set for Leave
+                        rule: self.operation != 'Leave' || (!has(self.type) && !has(self.lvmVolumeGroupName)
+                          && !has(self.thinPoolName))
+                      - message: ChangeBackingVolume requires lvmVolumeGroupName and
+                          must not set type
+                        rule: self.operation != 'ChangeBackingVolume' || (!has(self.type)
+                          && has(self.lvmVolumeGroupName))
                       - message: lvmVolumeGroupName is required when type is Diskful
                         rule: '!has(self.type) || self.type != ''Diskful'' || has(self.lvmVolumeGroupName)'
                       - message: lvmVolumeGroupName must not be set when type is not
@@ -554,13 +567,13 @@ spec:
                   required:
                   - firstObservedAt
                   - name
-                  - transition
+                  - request
                   type: object
                 maxItems: 32
                 type: array
                 x-kubernetes-list-type: atomic
                 x-kubernetes-validations:
-                - message: datameshPendingReplicaTransitions[].name must be unique
+                - message: datameshReplicaRequests[].name must be unique
                   rule: self.all(x, self.exists_one(y, x.name == y.name))
               datameshRevision:
                 description: DatameshRevision is a counter incremented when datamesh

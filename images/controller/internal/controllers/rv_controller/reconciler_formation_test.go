@@ -204,7 +204,7 @@ var _ = Describe("Formation: Preconfigure", func() {
 	}
 
 	// newPreconfiguredRVR creates an RVR that is fully preconfigured:
-	// scheduled, DRBDConfigured=PendingDatameshJoin, pending transition member=true.
+	// scheduled, DRBDConfigured=PendingDatameshJoin, datamesh request operation=Join.
 	//nolint:unparam // rvName is always "rv-1" in current tests, but kept as param for future extensibility.
 	newPreconfiguredRVR := func(rvName string, id uint8, nodeName string) *v1alpha1.ReplicatedVolumeReplica {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
@@ -226,8 +226,8 @@ var _ = Describe("Formation: Preconfigure", func() {
 					Size:  ptr.To(resource.MustParse("11Gi")),
 					State: v1alpha1.DiskStateInconsistent,
 				},
-				DatameshPendingTransition: &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-					Member:             ptr.To(true),
+				DatameshRequest: &v1alpha1.DatameshMembershipRequest{
+					Operation:          v1alpha1.DatameshMembershipRequestOperationJoin,
 					Type:               v1alpha1.ReplicaTypeDiskful,
 					LVMVolumeGroupName: "lvg-1",
 				},
@@ -548,14 +548,14 @@ var _ = Describe("Formation: Preconfigure", func() {
 		Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("not in eligible nodes"))
 	})
 
-	It("detects spec mismatch with pending transition", func(ctx SpecContext) {
+	It("detects spec mismatch with membership request", func(ctx SpecContext) {
 		rsc := newRSCWithConfiguration("rsc-1")
 		rsp := newTestRSPWithNodes("test-pool", "node-1")
 		rv := newFormationRV("rsc-1")
 
 		rvr := newPreconfiguredRVR("rv-1", 0, "node-1")
 		// Create spec mismatch: RVR spec says lvg-1, but pending transition says lvg-2.
-		rvr.Status.DatameshPendingTransition.LVMVolumeGroupName = "lvg-2"
+		rvr.Status.DatameshRequest.LVMVolumeGroupName = "lvg-2"
 
 		cl := newClientBuilder(scheme).
 			WithObjects(rv, rsc, rsp, rvr).

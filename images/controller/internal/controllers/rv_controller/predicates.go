@@ -182,7 +182,7 @@ func drbdrOpPredicates() []predicate.Predicate {
 // rvrPredicates returns predicates for ReplicatedVolumeReplica events.
 // Reacts to:
 // - Condition changes: Scheduled, DRBDConfigured, SatisfyEligibleNodes (formation progress, misplaced detection)
-// - DatameshPendingTransition changes (preconfiguration readiness)
+// - DatameshRequest changes (preconfiguration readiness)
 // - DatameshRevision changes (rollout progress)
 // - Addresses changes (network readiness during formation)
 // - BackingVolume changes (backing volume state during formation and data bootstrap)
@@ -212,8 +212,8 @@ func rvrPredicates() []predicate.Predicate {
 					return true
 				}
 
-				// React to DatameshPendingTransition change (preconfiguration readiness).
-				if !oldRVR.Status.DatameshPendingTransition.Equals(newRVR.Status.DatameshPendingTransition) {
+				// React to DatameshRequest change (preconfiguration readiness).
+				if !oldRVR.Status.DatameshRequest.Equals(newRVR.Status.DatameshRequest) {
 					return true
 				}
 

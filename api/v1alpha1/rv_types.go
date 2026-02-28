@@ -202,17 +202,17 @@ type ReplicatedVolumeStatus struct {
 	// +optional
 	DatameshTransitions []ReplicatedVolumeDatameshTransition `json:"datameshTransitions,omitempty"`
 
-	// DatameshPendingReplicaTransitions is the list of pending replica transitions.
-	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="datameshPendingReplicaTransitions[].name must be unique"
+	// DatameshReplicaRequests is the list of pending membership requests from replicas.
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="datameshReplicaRequests[].name must be unique"
 	// +kubebuilder:validation:MaxItems=32
 	// +listType=atomic
 	// +optional
-	DatameshPendingReplicaTransitions []ReplicatedVolumeDatameshPendingReplicaTransition `json:"datameshPendingReplicaTransitions,omitempty"`
+	DatameshReplicaRequests []ReplicatedVolumeDatameshReplicaRequest `json:"datameshReplicaRequests,omitempty"`
 }
 
-// ReplicatedVolumeDatameshPendingReplicaTransition represents a pending transition for a single replica.
+// ReplicatedVolumeDatameshReplicaRequest represents a pending membership request from a single replica.
 // +kubebuilder:object:generate=true
-type ReplicatedVolumeDatameshPendingReplicaTransition struct {
+type ReplicatedVolumeDatameshReplicaRequest struct {
 	// Name is the replica name.
 	// Must have format "prefix-N" where N is 0-31.
 	// +kubebuilder:validation:Required
@@ -221,22 +221,22 @@ type ReplicatedVolumeDatameshPendingReplicaTransition struct {
 	// +kubebuilder:validation:Pattern=`^.+-([0-9]|[12][0-9]|3[01])$`
 	Name string `json:"name"`
 
-	// Message is an optional human-readable message about the transition state and progress.
+	// Message is an optional human-readable message about the request state and progress.
 	// +kubebuilder:validation:MaxLength=512
 	// +optional
 	Message string `json:"message,omitempty"`
 
-	// Transition is the pending datamesh transition details from the replica.
+	// Request is the membership change request details from the replica.
 	// +kubebuilder:validation:Required
-	Transition ReplicatedVolumeReplicaStatusDatameshPendingTransition `json:"transition"`
+	Request DatameshMembershipRequest `json:"request"`
 
-	// FirstObservedAt is the timestamp when this transition was first observed.
+	// FirstObservedAt is the timestamp when this request was first observed.
 	// +kubebuilder:validation:Required
 	FirstObservedAt metav1.Time `json:"firstObservedAt"`
 }
 
 // ID extracts ID from the replica name (e.g., "pvc-xxx-5" → 5).
-func (t ReplicatedVolumeDatameshPendingReplicaTransition) ID() uint8 {
+func (t ReplicatedVolumeDatameshReplicaRequest) ID() uint8 {
 	return idFromName(t.Name)
 }
 

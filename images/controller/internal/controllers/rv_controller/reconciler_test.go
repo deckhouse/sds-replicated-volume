@@ -1404,54 +1404,54 @@ var _ = Describe("Reconciler", func() {
 	})
 })
 
-var _ = Describe("ensureDatameshPendingReplicaTransitions", func() {
-	mkRVR := func(name string, pending *v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition) *v1alpha1.ReplicatedVolumeReplica {
+var _ = Describe("ensureDatameshReplicaRequests", func() {
+	mkRVR := func(name string, req *v1alpha1.DatameshMembershipRequest) *v1alpha1.ReplicatedVolumeReplica {
 		return &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: name},
 			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				DatameshPendingTransition: pending,
+				DatameshRequest: req,
 			},
 		}
 	}
 
-	mkPending := func(role v1alpha1.ReplicaType) *v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition {
-		return &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-			Member: ptr.To(true),
-			Type:   role,
+	mkRequest := func(role v1alpha1.ReplicaType) *v1alpha1.DatameshMembershipRequest {
+		return &v1alpha1.DatameshMembershipRequest{
+			Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
+			Type:      role,
 		}
 	}
 
-	mkRVEntry := func(name string, pending v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition, firstObserved time.Time) v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition {
-		return v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+	mkReplicaRequest := func(name string, req v1alpha1.DatameshMembershipRequest, firstObserved time.Time) v1alpha1.ReplicatedVolumeDatameshReplicaRequest {
+		return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 			Name:            name,
-			Transition:      pending,
+			Request:         req,
 			FirstObservedAt: metav1.NewTime(firstObserved),
 		}
 	}
 
-	It("adds new entry when RVR has pending transition", func(ctx SpecContext) {
+	It("adds new entry when RVR has datamesh request", func(ctx SpecContext) {
 		rv := &v1alpha1.ReplicatedVolume{}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVR("rvr-1", mkPending(v1alpha1.ReplicaTypeDiskful)),
+			mkRVR("rvr-1", mkRequest(v1alpha1.ReplicaTypeDiskful)),
 		}
 
-		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+		outcome := ensureDatameshReplicaRequests(ctx, rv, rvrs)
 
 		Expect(outcome.DidChange()).To(BeTrue())
-		Expect(rv.Status.DatameshPendingReplicaTransitions).To(HaveLen(1))
-		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Name).To(Equal("rvr-1"))
-		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Transition.Member).To(Equal(ptr.To(true)))
-		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Transition.Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(rv.Status.DatameshReplicaRequests).To(HaveLen(1))
+		Expect(rv.Status.DatameshReplicaRequests[0].Name).To(Equal("rvr-1"))
+		Expect(rv.Status.DatameshReplicaRequests[0].Request.Operation).To(Equal(v1alpha1.DatameshMembershipRequestOperationJoin))
+		Expect(rv.Status.DatameshReplicaRequests[0].Request.Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
 	})
 
-	It("removes entry when RVR no longer has pending transition", func(ctx SpecContext) {
+	It("removes entry when RVR no longer has datamesh request", func(ctx SpecContext) {
 		oldTime := time.Now().Add(-1 * time.Hour)
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
-					mkRVEntry("rvr-1", v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-						Member: ptr.To(true),
-						Type:   v1alpha1.ReplicaTypeDiskful,
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+					mkReplicaRequest("rvr-1", v1alpha1.DatameshMembershipRequest{
+						Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
+						Type:      v1alpha1.ReplicaTypeDiskful,
 					}, oldTime),
 				},
 			},
@@ -1461,100 +1461,100 @@ var _ = Describe("ensureDatameshPendingReplicaTransitions", func() {
 			mkRVR("rvr-1", nil),
 		}
 
-		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+		outcome := ensureDatameshReplicaRequests(ctx, rv, rvrs)
 
 		Expect(outcome.DidChange()).To(BeTrue())
-		Expect(rv.Status.DatameshPendingReplicaTransitions).To(BeEmpty())
+		Expect(rv.Status.DatameshReplicaRequests).To(BeEmpty())
 	})
 
 	It("updates entry when transition changed", func(ctx SpecContext) {
 		oldTime := time.Now().Add(-1 * time.Hour)
-		oldPending := v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-			Member: ptr.To(true),
-			Type:   v1alpha1.ReplicaTypeDiskful,
+		oldPending := v1alpha1.DatameshMembershipRequest{
+			Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
+			Type:      v1alpha1.ReplicaTypeDiskful,
 		}
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 					{
 						Name:            "rvr-1",
 						Message:         "old message should be cleared",
-						Transition:      oldPending,
+						Request:         oldPending,
 						FirstObservedAt: metav1.NewTime(oldTime),
 					},
 				},
 			},
 		}
 		// New transition with different role.
-		newPending := mkPending(v1alpha1.ReplicaTypeAccess)
+		newPending := mkRequest(v1alpha1.ReplicaTypeAccess)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVR("rvr-1", newPending),
 		}
 
-		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+		outcome := ensureDatameshReplicaRequests(ctx, rv, rvrs)
 
 		Expect(outcome.DidChange()).To(BeTrue())
-		Expect(rv.Status.DatameshPendingReplicaTransitions).To(HaveLen(1))
-		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Name).To(Equal("rvr-1"))
-		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Transition.Type).To(Equal(v1alpha1.ReplicaTypeAccess))
-		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Message).To(BeEmpty())                      // Message cleared.
-		Expect(rv.Status.DatameshPendingReplicaTransitions[0].FirstObservedAt.Time).NotTo(Equal(oldTime)) // Timestamp updated.
+		Expect(rv.Status.DatameshReplicaRequests).To(HaveLen(1))
+		Expect(rv.Status.DatameshReplicaRequests[0].Name).To(Equal("rvr-1"))
+		Expect(rv.Status.DatameshReplicaRequests[0].Request.Type).To(Equal(v1alpha1.ReplicaTypeAccess))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(BeEmpty())                      // Message cleared.
+		Expect(rv.Status.DatameshReplicaRequests[0].FirstObservedAt.Time).NotTo(Equal(oldTime)) // Timestamp updated.
 	})
 
 	It("sorts unsorted existing entries but does not mark changed (sort-only is not a patch reason)", func(ctx SpecContext) {
 		oldTime := time.Now().Add(-1 * time.Hour)
-		pending := v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-			Member: ptr.To(true),
-			Type:   v1alpha1.ReplicaTypeDiskful,
+		req := v1alpha1.DatameshMembershipRequest{
+			Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
+			Type:      v1alpha1.ReplicaTypeDiskful,
 		}
 		// Entries are not sorted by name.
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
-					mkRVEntry("rvr-2", pending, oldTime),
-					mkRVEntry("rvr-1", pending, oldTime),
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+					mkReplicaRequest("rvr-2", req, oldTime),
+					mkReplicaRequest("rvr-1", req, oldTime),
 				},
 			},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVR("rvr-1", mkPending(v1alpha1.ReplicaTypeDiskful)),
-			mkRVR("rvr-2", mkPending(v1alpha1.ReplicaTypeDiskful)),
+			mkRVR("rvr-1", mkRequest(v1alpha1.ReplicaTypeDiskful)),
+			mkRVR("rvr-2", mkRequest(v1alpha1.ReplicaTypeDiskful)),
 		}
 
-		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+		outcome := ensureDatameshReplicaRequests(ctx, rv, rvrs)
 
 		// Sort-only does not mark changed (order is semantically irrelevant for the API).
 		Expect(outcome.DidChange()).To(BeFalse())
-		Expect(rv.Status.DatameshPendingReplicaTransitions).To(HaveLen(2))
+		Expect(rv.Status.DatameshReplicaRequests).To(HaveLen(2))
 	})
 
 	It("no change when already in sync (idempotent)", func(ctx SpecContext) {
-		pending := v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-			Member: ptr.To(true),
-			Type:   v1alpha1.ReplicaTypeDiskful,
+		req := v1alpha1.DatameshMembershipRequest{
+			Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
+			Type:      v1alpha1.ReplicaTypeDiskful,
 		}
 		oldTime := time.Now().Add(-1 * time.Hour)
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 					{
 						Name:            "rvr-1",
-						Transition:      pending,
+						Request:         req,
 						FirstObservedAt: metav1.NewTime(oldTime),
 					},
 				},
 			},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVR("rvr-1", mkPending(v1alpha1.ReplicaTypeDiskful)),
+			mkRVR("rvr-1", mkRequest(v1alpha1.ReplicaTypeDiskful)),
 		}
 
-		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+		outcome := ensureDatameshReplicaRequests(ctx, rv, rvrs)
 
 		Expect(outcome.DidChange()).To(BeFalse())
-		Expect(rv.Status.DatameshPendingReplicaTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshReplicaRequests).To(HaveLen(1))
 		// FirstObservedAt should be preserved.
-		Expect(rv.Status.DatameshPendingReplicaTransitions[0].FirstObservedAt.Time).To(Equal(oldTime))
+		Expect(rv.Status.DatameshReplicaRequests[0].FirstObservedAt.Time).To(Equal(oldTime))
 	})
 
 	It("handles multiple RVRs with mixed add/remove/update", func(ctx SpecContext) {
@@ -1562,18 +1562,18 @@ var _ = Describe("ensureDatameshPendingReplicaTransitions", func() {
 		// Existing entries: rvr-1 (will update), rvr-2 (will remove), rvr-4 (will keep).
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
-					mkRVEntry("rvr-1", v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-						Member: ptr.To(true),
-						Type:   v1alpha1.ReplicaTypeDiskful,
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+					mkReplicaRequest("rvr-1", v1alpha1.DatameshMembershipRequest{
+						Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
+						Type:      v1alpha1.ReplicaTypeDiskful,
 					}, oldTime),
-					mkRVEntry("rvr-2", v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-						Member: ptr.To(true),
-						Type:   v1alpha1.ReplicaTypeDiskful,
+					mkReplicaRequest("rvr-2", v1alpha1.DatameshMembershipRequest{
+						Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
+						Type:      v1alpha1.ReplicaTypeDiskful,
 					}, oldTime),
-					mkRVEntry("rvr-4", v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-						Member: ptr.To(true),
-						Type:   v1alpha1.ReplicaTypeDiskful,
+					mkReplicaRequest("rvr-4", v1alpha1.DatameshMembershipRequest{
+						Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
+						Type:      v1alpha1.ReplicaTypeDiskful,
 					}, oldTime),
 				},
 			},
@@ -1583,58 +1583,58 @@ var _ = Describe("ensureDatameshPendingReplicaTransitions", func() {
 		// rvr-3: new entry (added).
 		// rvr-4: unchanged.
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVR("rvr-1", mkPending(v1alpha1.ReplicaTypeAccess)), // Update.
+			mkRVR("rvr-1", mkRequest(v1alpha1.ReplicaTypeAccess)), // Update.
 			mkRVR("rvr-2", nil), // Remove.
-			mkRVR("rvr-3", mkPending(v1alpha1.ReplicaTypeTieBreaker)), // Add.
-			mkRVR("rvr-4", mkPending(v1alpha1.ReplicaTypeDiskful)),    // Keep.
+			mkRVR("rvr-3", mkRequest(v1alpha1.ReplicaTypeTieBreaker)), // Add.
+			mkRVR("rvr-4", mkRequest(v1alpha1.ReplicaTypeDiskful)),    // Keep.
 		}
 
-		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+		outcome := ensureDatameshReplicaRequests(ctx, rv, rvrs)
 
 		Expect(outcome.DidChange()).To(BeTrue())
-		Expect(rv.Status.DatameshPendingReplicaTransitions).To(HaveLen(3))
+		Expect(rv.Status.DatameshReplicaRequests).To(HaveLen(3))
 
 		// Check rvr-1: updated.
-		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Name).To(Equal("rvr-1"))
-		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Transition.Type).To(Equal(v1alpha1.ReplicaTypeAccess))
+		Expect(rv.Status.DatameshReplicaRequests[0].Name).To(Equal("rvr-1"))
+		Expect(rv.Status.DatameshReplicaRequests[0].Request.Type).To(Equal(v1alpha1.ReplicaTypeAccess))
 
 		// Check rvr-3: added.
-		Expect(rv.Status.DatameshPendingReplicaTransitions[1].Name).To(Equal("rvr-3"))
-		Expect(rv.Status.DatameshPendingReplicaTransitions[1].Transition.Type).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
+		Expect(rv.Status.DatameshReplicaRequests[1].Name).To(Equal("rvr-3"))
+		Expect(rv.Status.DatameshReplicaRequests[1].Request.Type).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
 
 		// Check rvr-4: kept (should have preserved timestamp).
-		Expect(rv.Status.DatameshPendingReplicaTransitions[2].Name).To(Equal("rvr-4"))
-		Expect(rv.Status.DatameshPendingReplicaTransitions[2].FirstObservedAt.Time).To(Equal(oldTime))
+		Expect(rv.Status.DatameshReplicaRequests[2].Name).To(Equal("rvr-4"))
+		Expect(rv.Status.DatameshReplicaRequests[2].FirstObservedAt.Time).To(Equal(oldTime))
 	})
 
 	It("handles empty RVR list", func(ctx SpecContext) {
 		oldTime := time.Now().Add(-1 * time.Hour)
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
-					mkRVEntry("rvr-1", v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-						Member: ptr.To(true),
-						Type:   v1alpha1.ReplicaTypeDiskful,
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+					mkReplicaRequest("rvr-1", v1alpha1.DatameshMembershipRequest{
+						Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
+						Type:      v1alpha1.ReplicaTypeDiskful,
 					}, oldTime),
 				},
 			},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{}
 
-		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+		outcome := ensureDatameshReplicaRequests(ctx, rv, rvrs)
 
 		Expect(outcome.DidChange()).To(BeTrue())
-		Expect(rv.Status.DatameshPendingReplicaTransitions).To(BeEmpty())
+		Expect(rv.Status.DatameshReplicaRequests).To(BeEmpty())
 	})
 
 	It("handles empty existing entries", func(ctx SpecContext) {
 		rv := &v1alpha1.ReplicatedVolume{}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{}
 
-		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+		outcome := ensureDatameshReplicaRequests(ctx, rv, rvrs)
 
 		Expect(outcome.DidChange()).To(BeFalse())
-		Expect(rv.Status.DatameshPendingReplicaTransitions).To(BeEmpty())
+		Expect(rv.Status.DatameshReplicaRequests).To(BeEmpty())
 	})
 
 	It("skips RVRs with nil transition during merge", func(ctx SpecContext) {
@@ -1642,17 +1642,17 @@ var _ = Describe("ensureDatameshPendingReplicaTransitions", func() {
 		// Mixed: some with transition, some without.
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVR("rvr-1", nil), // Skip.
-			mkRVR("rvr-2", mkPending(v1alpha1.ReplicaTypeDiskful)), // Add.
+			mkRVR("rvr-2", mkRequest(v1alpha1.ReplicaTypeDiskful)), // Add.
 			mkRVR("rvr-3", nil), // Skip.
-			mkRVR("rvr-4", mkPending(v1alpha1.ReplicaTypeAccess)), // Add.
+			mkRVR("rvr-4", mkRequest(v1alpha1.ReplicaTypeAccess)), // Add.
 		}
 
-		outcome := ensureDatameshPendingReplicaTransitions(ctx, rv, rvrs)
+		outcome := ensureDatameshReplicaRequests(ctx, rv, rvrs)
 
 		Expect(outcome.DidChange()).To(BeTrue())
-		Expect(rv.Status.DatameshPendingReplicaTransitions).To(HaveLen(2))
-		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Name).To(Equal("rvr-2"))
-		Expect(rv.Status.DatameshPendingReplicaTransitions[1].Name).To(Equal("rvr-4"))
+		Expect(rv.Status.DatameshReplicaRequests).To(HaveLen(2))
+		Expect(rv.Status.DatameshReplicaRequests[0].Name).To(Equal("rvr-2"))
+		Expect(rv.Status.DatameshReplicaRequests[1].Name).To(Equal("rvr-4"))
 	})
 })
 
@@ -2085,11 +2085,11 @@ var _ = Describe("applyDatameshMemberAbsent", func() {
 	})
 })
 
-var _ = Describe("applyPendingReplicaMessages", func() {
+var _ = Describe("applyDatameshReplicaRequestMessages", func() {
 	It("updates message for matching node and returns true", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 					{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0), Message: "old"},
 					{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 1), Message: "other"},
 				},
@@ -2097,37 +2097,37 @@ var _ = Describe("applyPendingReplicaMessages", func() {
 		}
 		var ids idset.IDSet
 		ids.Add(0)
-		changed := applyPendingReplicaMessages(rv, ids, "new")
+		changed := applyDatameshReplicaRequestMessages(rv, ids, "new")
 		Expect(changed).To(BeTrue())
-		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Message).To(Equal("new"))
-		Expect(rv.Status.DatameshPendingReplicaTransitions[1].Message).To(Equal("other"))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("new"))
+		Expect(rv.Status.DatameshReplicaRequests[1].Message).To(Equal("other"))
 	})
 
 	It("returns false when message is already the same", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 					{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0), Message: "same"},
 				},
 			},
 		}
 		var ids idset.IDSet
 		ids.Add(0)
-		changed := applyPendingReplicaMessages(rv, ids, "same")
+		changed := applyDatameshReplicaRequestMessages(rv, ids, "same")
 		Expect(changed).To(BeFalse())
 	})
 
 	It("returns false when no nodes match", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 					{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0), Message: "msg"},
 				},
 			},
 		}
 		var ids idset.IDSet
 		ids.Add(5) // ID 5 does not match any entry.
-		changed := applyPendingReplicaMessages(rv, ids, "new")
+		changed := applyDatameshReplicaRequestMessages(rv, ids, "new")
 		Expect(changed).To(BeFalse())
 	})
 })
@@ -3260,15 +3260,15 @@ var _ = Describe("applyTransitionMessage", func() {
 	})
 })
 
-var _ = Describe("applyPendingReplicaTransitionMessage", func() {
+var _ = Describe("applyDatameshReplicaRequestMessage", func() {
 	It("sets message and returns true when different", func() {
-		p := &v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{Name: "rv-1-1", Message: "old"}
-		Expect(applyPendingReplicaTransitionMessage(p, "new")).To(BeTrue())
+		p := &v1alpha1.ReplicatedVolumeDatameshReplicaRequest{Name: "rv-1-1", Message: "old"}
+		Expect(applyDatameshReplicaRequestMessage(p, "new")).To(BeTrue())
 		Expect(p.Message).To(Equal("new"))
 	})
 
 	It("returns false when message is the same", func() {
-		p := &v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{Name: "rv-1-0", Message: "same"}
-		Expect(applyPendingReplicaTransitionMessage(p, "same")).To(BeFalse())
+		p := &v1alpha1.ReplicatedVolumeDatameshReplicaRequest{Name: "rv-1-0", Message: "same"}
+		Expect(applyDatameshReplicaRequestMessage(p, "same")).To(BeFalse())
 	})
 })
