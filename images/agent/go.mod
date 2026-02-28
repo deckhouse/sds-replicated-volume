@@ -18,6 +18,7 @@ require (
 
 require (
 	github.com/google/btree v1.1.3 // indirect
+	github.com/pilebones/go-udev v0.9.0 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	k8s.io/apiextensions-apiserver v0.34.3 // indirect
 )
