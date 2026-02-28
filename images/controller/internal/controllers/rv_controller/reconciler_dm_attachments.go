@@ -356,8 +356,13 @@ func computeDatameshAttachmentIntents(atts *attachmentsSummary, rv *v1alpha1.Rep
 		case en == nil:
 			as.intent = attachmentIntentPending
 			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonNodeNotEligible
-			as.conditionMessage = fmt.Sprintf("Node is not eligible for storage class %s (pool %s)",
-				rv.Spec.ReplicatedStorageClassName, rv.Status.Configuration.StoragePoolName)
+			if rv.Spec.ReplicatedStorageClassName != "" {
+				as.conditionMessage = fmt.Sprintf("Node is not eligible for storage class %s (pool %s)",
+					rv.Spec.ReplicatedStorageClassName, rv.Status.Configuration.ReplicatedStoragePoolName)
+			} else {
+				as.conditionMessage = fmt.Sprintf("Node is not eligible for pool %s",
+					rv.Status.Configuration.ReplicatedStoragePoolName)
+			}
 			continue
 		case !en.NodeReady:
 			as.intent = attachmentIntentPending

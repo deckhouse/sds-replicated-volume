@@ -103,9 +103,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		!rvrShouldNotExist(rvr) &&
 		rv != nil &&
 		rv.Status.Configuration != nil {
-		rspView, err = r.getRSPEligibilityView(rf.Ctx(), rv.Status.Configuration.StoragePoolName, rvr.Spec.NodeName)
+		rspView, err = r.getRSPEligibilityView(rf.Ctx(), rv.Status.Configuration.ReplicatedStoragePoolName, rvr.Spec.NodeName)
 		if err != nil {
-			return rf.Failf(err, "getting RSP eligibility for %s", rv.Status.Configuration.StoragePoolName).ToCtrl()
+			return rf.Failf(err, "getting RSP eligibility for %s", rv.Status.Configuration.ReplicatedStoragePoolName).ToCtrl()
 		}
 	}
 

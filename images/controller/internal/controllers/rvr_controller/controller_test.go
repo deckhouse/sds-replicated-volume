@@ -750,11 +750,11 @@ var _ = Describe("rspEventHandler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology:        v1alpha1.TopologyIgnored,
-						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "rsp-1",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyIgnored,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "rsp-1",
 					},
 				},
 			}
@@ -808,11 +808,11 @@ var _ = Describe("rspEventHandler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology:        v1alpha1.TopologyIgnored,
-						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "other-rsp",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyIgnored,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "other-rsp",
 					},
 				},
 			}
@@ -864,11 +864,11 @@ var _ = Describe("rspEventHandler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology:        v1alpha1.TopologyIgnored,
-						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "rsp-1",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyIgnored,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "rsp-1",
 					},
 				},
 			}
@@ -943,11 +943,11 @@ var _ = Describe("rspEventHandler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology:        v1alpha1.TopologyIgnored,
-						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "rsp-1",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyIgnored,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "rsp-1",
 					},
 				},
 			}
@@ -1000,11 +1000,11 @@ var _ = Describe("rspEventHandler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology:        v1alpha1.TopologyIgnored,
-						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "rsp-1",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyIgnored,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "rsp-1",
 					},
 				},
 			}

@@ -63,15 +63,33 @@ func (rv *ReplicatedVolume) SetStatusConditions(conditions []metav1.Condition) {
 	rv.Status.Conditions = conditions
 }
 
+// Auto mode requires RSC name, forbids manualConfiguration:
+// +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Auto' || (size(self.replicatedStorageClassName) > 0 && !has(self.manualConfiguration))",message="Auto mode requires replicatedStorageClassName and must not have manualConfiguration."
+// Manual mode requires manualConfiguration, forbids RSC name:
+// +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Manual' || (has(self.manualConfiguration) && size(self.replicatedStorageClassName) == 0)",message="Manual mode requires manualConfiguration and must not have replicatedStorageClassName."
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeSpec struct {
 	// +kubebuilder:validation:Required
 	//	+kubebuilder:validation:XValidation:rule="quantity(string(self)).isGreaterThan(quantity('0'))",message="size must be greater than 0"
 	Size resource.Quantity `json:"size"`
 
-	// +kubebuilder:validation:Required
+	// ConfigurationMode selects how the volume configuration is determined.
+	// Auto (default): configuration is derived from the referenced ReplicatedStorageClass.
+	// Manual: configuration is specified directly in the manualConfiguration field.
+	// +kubebuilder:validation:Enum=Auto;Manual
+	// +kubebuilder:default=Auto
+	ConfigurationMode ReplicatedVolumeConfigurationMode `json:"configurationMode,omitempty"`
+
+	// ReplicatedStorageClassName references the RSC that provides configuration.
+	// Required when configurationMode is Auto. Must not be set when configurationMode is Manual.
+	// +optional
 	// +kubebuilder:validation:MinLength=1
-	ReplicatedStorageClassName string `json:"replicatedStorageClassName"`
+	ReplicatedStorageClassName string `json:"replicatedStorageClassName,omitempty"`
+
+	// ManualConfiguration specifies the volume configuration directly.
+	// Required when configurationMode is Manual. Must not be set when configurationMode is Auto.
+	// +optional
+	ManualConfiguration *ReplicatedVolumeConfiguration `json:"manualConfiguration,omitempty"`
 
 	// MaxAttachments is the maximum number of nodes this volume can be attached to simultaneously.
 	//
@@ -93,6 +111,48 @@ type ReplicatedVolumeSpec struct {
 	MaxAttachments byte `json:"maxAttachments"`
 }
 
+// ReplicatedVolumeConfigurationMode enumerates possible values for ReplicatedVolume spec.configurationMode field.
+type ReplicatedVolumeConfigurationMode string
+
+const (
+	// ReplicatedVolumeConfigurationModeAuto means configuration is derived from the referenced ReplicatedStorageClass.
+	ReplicatedVolumeConfigurationModeAuto ReplicatedVolumeConfigurationMode = "Auto"
+	// ReplicatedVolumeConfigurationModeManual means configuration is specified directly in the manual field.
+	ReplicatedVolumeConfigurationModeManual ReplicatedVolumeConfigurationMode = "Manual"
+)
+
+func (m ReplicatedVolumeConfigurationMode) String() string { return string(m) }
+
+// ReplicatedVolumeConfiguration represents the resolved volume configuration.
+// Always contains the resolved FTT/GMDR parameters (never the legacy replication field).
+// Used in rv.Status.Configuration, rv.Spec.ManualConfiguration, and rsc.Status.Configuration.
+//
+// Valid FTT/GMDR combinations: |FTT - GMDR| <= 1:
+// +kubebuilder:validation:XValidation:rule="self.failuresToTolerate - self.guaranteedMinimumDataRedundancy <= 1 && self.guaranteedMinimumDataRedundancy - self.failuresToTolerate <= 1",message="Invalid failuresToTolerate/guaranteedMinimumDataRedundancy combination: |FTT - GMDR| must be <= 1."
+//
+// FTT=0, GMDR=0 requires topology Ignored:
+// +kubebuilder:validation:XValidation:rule="!(self.failuresToTolerate == 0 && self.guaranteedMinimumDataRedundancy == 0) || self.topology == 'Ignored'",message="failuresToTolerate=0 with guaranteedMinimumDataRedundancy=0 requires topology Ignored."
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeConfiguration struct {
+	// ReplicatedStoragePoolName is the name of the ReplicatedStoragePool resource.
+	// +kubebuilder:validation:MinLength=1
+	ReplicatedStoragePoolName string `json:"replicatedStoragePoolName"`
+	// Topology is the resolved topology setting.
+	// +kubebuilder:validation:Enum=TransZonal;Zonal;Ignored
+	Topology ReplicatedStorageClassTopology `json:"topology"`
+	// FailuresToTolerate is the resolved FTT value.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2
+	FailuresToTolerate byte `json:"failuresToTolerate"`
+	// GuaranteedMinimumDataRedundancy is the resolved GMDR value.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2
+	GuaranteedMinimumDataRedundancy byte `json:"guaranteedMinimumDataRedundancy"`
+	// VolumeAccess is the resolved volume access mode.
+	// +kubebuilder:validation:Enum=Local;EventuallyLocal;PreferablyLocal;Any
+	VolumeAccess ReplicatedStorageClassVolumeAccess `json:"volumeAccess"`
+}
+
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeStatus struct {
 	// +listType=map
@@ -110,7 +170,7 @@ type ReplicatedVolumeStatus struct {
 
 	// Configuration is the desired configuration snapshot for this volume.
 	// +optional
-	Configuration *ReplicatedStorageClassConfiguration `json:"configuration,omitempty"`
+	Configuration *ReplicatedVolumeConfiguration `json:"configuration,omitempty"`
 
 	// ConfigurationGeneration is the RSC generation from which configuration was taken.
 	// +optional

@@ -80,11 +80,11 @@ func newRSCWithConfiguration(name string) *v1alpha1.ReplicatedStorageClass {
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Status: v1alpha1.ReplicatedStorageClassStatus{
 			ConfigurationGeneration: 1,
-			Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-				Topology:        v1alpha1.TopologyIgnored,
-				Replication:     v1alpha1.ReplicationNone,
-				VolumeAccess:    v1alpha1.VolumeAccessLocal,
-				StoragePoolName: "test-pool",
+			Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+				Topology:           v1alpha1.TopologyIgnored,
+				FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+				VolumeAccess:              v1alpha1.VolumeAccessLocal,
+				ReplicatedStoragePoolName: "test-pool",
 			},
 		},
 	}
@@ -506,15 +506,16 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Status: v1alpha1.ReplicatedStorageClassStatus{
 					ConfigurationGeneration: 5,
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology:        v1alpha1.TopologyTransZonal,
-						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "pool-1",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyTransZonal,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "pool-1",
 					},
 				},
 			}
 			rsp := newTestRSP("pool-1")
+			rsp.Spec.Zones = []string{"zone-a", "zone-b", "zone-c"} // 3 zones for FTT=1,GMDR=1.
 
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
@@ -543,9 +544,10 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
 			Expect(updated.Status.Configuration).NotTo(BeNil())
 			Expect(updated.Status.Configuration.Topology).To(Equal(v1alpha1.TopologyTransZonal))
-			Expect(updated.Status.Configuration.Replication).To(Equal(v1alpha1.ReplicationConsistencyAndAvailability))
+			Expect(updated.Status.Configuration.FailuresToTolerate).To(Equal(byte(1)))
+			Expect(updated.Status.Configuration.GuaranteedMinimumDataRedundancy).To(Equal(byte(1)))
 			Expect(updated.Status.Configuration.VolumeAccess).To(Equal(v1alpha1.VolumeAccessPreferablyLocal))
-			Expect(updated.Status.Configuration.StoragePoolName).To(Equal("pool-1"))
+			Expect(updated.Status.Configuration.ReplicatedStoragePoolName).To(Equal("pool-1"))
 			Expect(updated.Status.ConfigurationGeneration).To(Equal(int64(5)))
 
 			// Check ConfigurationReady condition.
@@ -630,20 +632,21 @@ var _ = Describe("Reconciler", func() {
 			Expect(cond.Message).To(ContainSubstring("not found"))
 		})
 
-		It("sets StaleConfiguration condition when generation does not match RSC", func(ctx SpecContext) {
+		It("updates configuration when RSC generation changes (normal operation)", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Status: v1alpha1.ReplicatedStorageClassStatus{
 					ConfigurationGeneration: 10,
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology:        v1alpha1.TopologyZonal,
-						Replication:     v1alpha1.ReplicationAvailability,
-						VolumeAccess:    v1alpha1.VolumeAccessAny,
-						StoragePoolName: "new-pool",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyZonal,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 0,
+						VolumeAccess:              v1alpha1.VolumeAccessAny,
+						ReplicatedStoragePoolName: "new-pool",
 					},
 				},
 			}
-			rsp := newTestRSP("old-pool")
+			rspOld := newTestRSP("old-pool")
+			rspNew := newTestRSP("new-pool")
 
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
@@ -658,18 +661,19 @@ var _ = Describe("Reconciler", func() {
 					ReplicatedStorageClassName: "rsc-1",
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision:        1, // Normal operation.
 					ConfigurationGeneration: 5,
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology:        v1alpha1.TopologyTransZonal,
-						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "old-pool",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyTransZonal,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "old-pool",
 					},
 				},
 			}
 
 			cl := newClientBuilder(scheme).
-				WithObjects(rv, rsc, rsp).
+				WithObjects(rv, rsc, rspOld, rspNew).
 				WithStatusSubresource(rv, rsc).
 				Build()
 			rec := NewReconciler(cl, scheme)
@@ -679,29 +683,29 @@ var _ = Describe("Reconciler", func() {
 
 			var updated v1alpha1.ReplicatedVolume
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
-			// Should still have the original configuration (not overwritten).
+			// Configuration should be updated from RSC.
 			Expect(updated.Status.Configuration).NotTo(BeNil())
-			Expect(updated.Status.Configuration.Topology).To(Equal(v1alpha1.TopologyTransZonal))
-			Expect(updated.Status.Configuration.StoragePoolName).To(Equal("old-pool"))
-			Expect(updated.Status.ConfigurationGeneration).To(Equal(int64(5)))
+			Expect(updated.Status.Configuration.Topology).To(Equal(v1alpha1.TopologyZonal))
+			Expect(updated.Status.Configuration.ReplicatedStoragePoolName).To(Equal("new-pool"))
+			Expect(updated.Status.ConfigurationGeneration).To(Equal(int64(10)))
 
-			// Check ConfigurationReady condition - should be StaleConfiguration.
+			// ConfigurationReady should be Ready.
 			cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondConfigurationReadyType)
 			Expect(cond).NotTo(BeNil())
-			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonStaleConfiguration))
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonReady))
 		})
 
-		It("sets Ready condition when generation matches RSC", func(ctx SpecContext) {
+		It("sets Ready condition when generation matches RSC (normal operation)", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Status: v1alpha1.ReplicatedStorageClassStatus{
 					ConfigurationGeneration: 5,
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology:        v1alpha1.TopologyTransZonal,
-						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "pool-1",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyTransZonal,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "pool-1",
 					},
 				},
 			}
@@ -720,12 +724,13 @@ var _ = Describe("Reconciler", func() {
 					ReplicatedStorageClassName: "rsc-1",
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision:        1, // Normal operation.
 					ConfigurationGeneration: 5,
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology:        v1alpha1.TopologyTransZonal,
-						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "pool-1",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyTransZonal,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "pool-1",
 					},
 				},
 			}
@@ -778,31 +783,92 @@ var _ = Describe("Reconciler", func() {
 			Expect(errors.Is(err, testError)).To(BeTrue())
 		})
 
-		It("sets ConfigurationRolloutInProgress when ConfigurationGeneration is 0", func(ctx SpecContext) {
-			rsc := newRSCWithConfiguration("rsc-1")
-			rsp := newTestRSP("test-pool")
+	})
+
+	Describe("Configuration initialization (Manual mode)", func() {
+		It("initializes configuration from ManualConfiguration and sets ConfigurationReady to Ready", func(ctx SpecContext) {
+			rsp := newTestRSP("manual-pool")
 
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-1",
+					Generation: 1,
 					Finalizers: []string{v1alpha1.RVControllerFinalizer},
-					Labels: map[string]string{
-						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
-					},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
-					Size:                       resource.MustParse("10Gi"),
-					ReplicatedStorageClassName: "rsc-1",
-				},
-				Status: v1alpha1.ReplicatedVolumeStatus{
-					// ConfigurationGeneration is 0 (not set).
-					Configuration: rsc.Status.Configuration.DeepCopy(),
+					Size:              resource.MustParse("10Gi"),
+					ConfigurationMode: v1alpha1.ReplicatedVolumeConfigurationModeManual,
+					ManualConfiguration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:                        v1alpha1.TopologyIgnored,
+						FailuresToTolerate:              1,
+						GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:                    v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName:       "manual-pool",
+					},
 				},
 			}
 
 			cl := newClientBuilder(scheme).
-				WithObjects(rv, rsc, rsp).
-				WithStatusSubresource(rv, rsc).
+				WithObjects(rv, rsp).
+				WithStatusSubresource(rv).
+				Build()
+			rec := NewReconciler(cl, scheme)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(updated.Status.Configuration).NotTo(BeNil())
+			Expect(updated.Status.Configuration.Topology).To(Equal(v1alpha1.TopologyIgnored))
+			Expect(updated.Status.Configuration.FailuresToTolerate).To(Equal(byte(1)))
+			Expect(updated.Status.Configuration.GuaranteedMinimumDataRedundancy).To(Equal(byte(1)))
+			Expect(updated.Status.Configuration.ReplicatedStoragePoolName).To(Equal("manual-pool"))
+			Expect(updated.Status.ConfigurationGeneration).To(Equal(int64(0))) // Manual mode: no RSC generation tracking.
+
+			// ConfigurationReady should be True.
+			cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondConfigurationReadyType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonReady))
+
+			// RSC label should NOT be set (Manual mode).
+			Expect(obju.HasLabel(&updated, v1alpha1.ReplicatedStorageClassLabelKey)).To(BeFalse())
+		})
+
+		It("sets InvalidConfiguration when TransZonal zone count is wrong", func(ctx SpecContext) {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "manual-pool"},
+				Spec: v1alpha1.ReplicatedStoragePoolSpec{
+					Type:               v1alpha1.ReplicatedStoragePoolTypeLVM,
+					SystemNetworkNames: []string{"Internal"},
+					LVMVolumeGroups:    []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
+					Zones:              []string{"zone-a", "zone-b"}, // 2 zones.
+				},
+			}
+
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Generation: 1,
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:              resource.MustParse("10Gi"),
+					ConfigurationMode: v1alpha1.ReplicatedVolumeConfigurationModeManual,
+					ManualConfiguration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:                        v1alpha1.TopologyTransZonal,
+						FailuresToTolerate:              1,
+						GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:                    v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName:       "manual-pool",
+					},
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp).
+				WithStatusSubresource(rv).
 				Build()
 			rec := NewReconciler(cl, scheme)
 
@@ -812,11 +878,69 @@ var _ = Describe("Reconciler", func() {
 			var updated v1alpha1.ReplicatedVolume
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
 
-			// Should be ConfigurationRolloutInProgress.
+			// Configuration should NOT be set (zone validation failed).
+			Expect(updated.Status.Configuration).To(BeNil())
+
+			// ConfigurationReady should report InvalidConfiguration.
 			cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondConfigurationReadyType)
 			Expect(cond).NotTo(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonConfigurationRolloutInProgress))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonInvalidConfiguration))
+		})
+
+		It("removes RSC label when switching from Auto to Manual mode", func(ctx SpecContext) {
+			rsp := newTestRSP("manual-pool")
+			rspOld := newTestRSP("auto-pool")
+
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Generation: 2,
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+					Labels:     map[string]string{v1alpha1.ReplicatedStorageClassLabelKey: "old-rsc"},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:              resource.MustParse("10Gi"),
+					ConfigurationMode: v1alpha1.ReplicatedVolumeConfigurationModeManual,
+					ManualConfiguration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:                        v1alpha1.TopologyIgnored,
+						FailuresToTolerate:              0,
+						GuaranteedMinimumDataRedundancy: 0,
+						VolumeAccess:                    v1alpha1.VolumeAccessLocal,
+						ReplicatedStoragePoolName:       "manual-pool",
+					},
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision:        1,
+					ConfigurationGeneration: 1, // Old RSC generation.
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:                        v1alpha1.TopologyIgnored,
+						FailuresToTolerate:              0,
+						GuaranteedMinimumDataRedundancy: 0,
+						VolumeAccess:                    v1alpha1.VolumeAccessLocal,
+						ReplicatedStoragePoolName:       "auto-pool",
+					},
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, rspOld).
+				WithStatusSubresource(rv).
+				Build()
+			rec := NewReconciler(cl, scheme)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+			// RSC label should be removed (Manual mode).
+			Expect(obju.HasLabel(&updated, v1alpha1.ReplicatedStorageClassLabelKey)).To(BeFalse())
+
+			// Configuration should be updated from ManualConfiguration.
+			Expect(updated.Status.Configuration.ReplicatedStoragePoolName).To(Equal("manual-pool"))
+			Expect(updated.Status.ConfigurationGeneration).To(Equal(int64(0))) // Manual mode: no RSC generation tracking.
 		})
 	})
 
@@ -1104,9 +1228,9 @@ var _ = Describe("Reconciler", func() {
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					ConfigurationGeneration:         1,
 					ConfigurationObservedGeneration: 1,
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationNone,
-						VolumeAccess: v1alpha1.VolumeAccessLocal, StoragePoolName: "test-pool",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+						VolumeAccess: v1alpha1.VolumeAccessLocal, ReplicatedStoragePoolName: "test-pool",
 					},
 					DatameshRevision: 1,
 					DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
@@ -1658,57 +1782,36 @@ var _ = Describe("isFormationInProgress", func() {
 })
 
 var _ = Describe("computeIntendedDiskfulReplicaCount", func() {
-	It("returns 1 for ReplicationNone", func() {
-		rv := &v1alpha1.ReplicatedVolume{
-			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationNone,
-					VolumeAccess: v1alpha1.VolumeAccessLocal, StoragePoolName: "test-pool",
-				},
-			},
+	It("returns D = FTT + GMDR + 1 for all valid FTT/GMDR combinations", func() {
+		cases := []struct {
+			ftt, gmdr byte
+			expected  byte
+		}{
+			{0, 0, 1}, // 1D
+			{1, 0, 2}, // 2D+1TB
+			{0, 1, 2}, // 2D
+			{1, 1, 3}, // 3D
+			{2, 1, 4}, // 4D
+			{1, 2, 4}, // 4D+1TB
+			{2, 2, 5}, // 5D
 		}
-		Expect(computeIntendedDiskfulReplicaCount(rv)).To(Equal(1))
-	})
-
-	It("returns 2 for ReplicationAvailability", func() {
-		rv := &v1alpha1.ReplicatedVolume{
-			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationAvailability,
-					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "test-pool",
+		for _, tc := range cases {
+			rv := &v1alpha1.ReplicatedVolume{
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						FailuresToTolerate: tc.ftt, GuaranteedMinimumDataRedundancy: tc.gmdr,
+						ReplicatedStoragePoolName: "test-pool",
+					},
 				},
-			},
+			}
+			Expect(computeIntendedDiskfulReplicaCount(rv)).To(Equal(tc.expected),
+				"FTT=%d, GMDR=%d", tc.ftt, tc.gmdr)
 		}
-		Expect(computeIntendedDiskfulReplicaCount(rv)).To(Equal(2))
-	})
-
-	It("returns 2 for ReplicationConsistency", func() {
-		rv := &v1alpha1.ReplicatedVolume{
-			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationConsistency,
-					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "test-pool",
-				},
-			},
-		}
-		Expect(computeIntendedDiskfulReplicaCount(rv)).To(Equal(2))
-	})
-
-	It("returns 3 for ReplicationConsistencyAndAvailability", func() {
-		rv := &v1alpha1.ReplicatedVolume{
-			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationConsistencyAndAvailability,
-					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "test-pool",
-				},
-			},
-		}
-		Expect(computeIntendedDiskfulReplicaCount(rv)).To(Equal(3))
 	})
 })
 
 var _ = Describe("computeTargetQuorum", func() {
-	mkRVWithMembers := func(replication v1alpha1.ReplicatedStorageClassReplication, diskfulCount int) *v1alpha1.ReplicatedVolume {
+	mkRVWithMembers := func(ftt, gmdr byte, diskfulCount int) *v1alpha1.ReplicatedVolume {
 		members := make([]v1alpha1.DatameshMember, diskfulCount)
 		for i := range diskfulCount {
 			members[i] = v1alpha1.DatameshMember{
@@ -1718,36 +1821,39 @@ var _ = Describe("computeTargetQuorum", func() {
 		}
 		return &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology: v1alpha1.TopologyIgnored, Replication: replication,
-					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "test-pool",
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					FailuresToTolerate: ftt, GuaranteedMinimumDataRedundancy: gmdr,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, ReplicatedStoragePoolName: "test-pool",
 				},
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{Members: members},
 			},
 		}
 	}
 
-	It("returns q=1 qmr=1 for ReplicationNone with 1 member", func() {
-		q, qmr := computeTargetQuorum(mkRVWithMembers(v1alpha1.ReplicationNone, 1))
+	// q = floor(D/2) + 1 (or floor(voters/2)+1, whichever is larger)
+	// qmr = GMDR + 1
+
+	It("returns q=1 qmr=1 for FTT=0,GMDR=0 with 1 voter", func() {
+		q, qmr := computeTargetQuorum(mkRVWithMembers(0, 0, 1))
 		Expect(q).To(Equal(byte(1)))
 		Expect(qmr).To(Equal(byte(1)))
 	})
 
-	It("returns q=2 qmr=2 for ReplicationAvailability with 2 members", func() {
-		// quorum = 2/2+1 = 2; minQ=2, minQMR=1; q=max(2,2)=2, qmr=max(2,1)=2
-		q, qmr := computeTargetQuorum(mkRVWithMembers(v1alpha1.ReplicationAvailability, 2))
+	It("returns q=2 qmr=1 for FTT=1,GMDR=0 with 2 voters", func() {
+		// D=2, q=max(floor(2/2)+1, floor(2/2)+1)=2; qmr=GMDR+1=1
+		q, qmr := computeTargetQuorum(mkRVWithMembers(1, 0, 2))
+		Expect(q).To(Equal(byte(2)))
+		Expect(qmr).To(Equal(byte(1)))
+	})
+
+	It("returns q=2 qmr=2 for FTT=0,GMDR=1 with 2 voters", func() {
+		q, qmr := computeTargetQuorum(mkRVWithMembers(0, 1, 2))
 		Expect(q).To(Equal(byte(2)))
 		Expect(qmr).To(Equal(byte(2)))
 	})
 
-	It("returns q=2 qmr=2 for ReplicationConsistency with 2 members", func() {
-		q, qmr := computeTargetQuorum(mkRVWithMembers(v1alpha1.ReplicationConsistency, 2))
-		Expect(q).To(Equal(byte(2)))
-		Expect(qmr).To(Equal(byte(2)))
-	})
-
-	It("returns q=2 qmr=2 for ReplicationConsistencyAndAvailability with 3 members", func() {
-		q, qmr := computeTargetQuorum(mkRVWithMembers(v1alpha1.ReplicationConsistencyAndAvailability, 3))
+	It("returns q=2 qmr=2 for FTT=1,GMDR=1 with 3 voters", func() {
+		q, qmr := computeTargetQuorum(mkRVWithMembers(1, 1, 3))
 		Expect(q).To(Equal(byte(2)))
 		Expect(qmr).To(Equal(byte(2)))
 	})
@@ -2260,7 +2366,7 @@ var _ = Describe("Formation: Preconfigure", func() {
 	}
 
 	It("creates diskful RVR when no replicas exist (normal path)", func(ctx SpecContext) {
-		rsc := newRSCWithConfiguration("rsc-1") // ReplicationNone → 1 diskful
+		rsc := newRSCWithConfiguration("rsc-1") // FTT=0,GMDR=0 → 1 diskful
 		rsp := newTestRSPWithNodes("test-pool", "node-1")
 		rv := newFormationRV("rsc-1")
 
@@ -2437,7 +2543,7 @@ var _ = Describe("Formation: Preconfigure", func() {
 	})
 
 	It("removes excess replicas preferring less-progressed ones", func(ctx SpecContext) {
-		// ReplicationNone → wants 1 diskful, but we have 2.
+		// FTT=0,GMDR=0 → wants 1 diskful, but we have 2.
 		rsc := newRSCWithConfiguration("rsc-1")
 		rsp := newTestRSPWithNodes("test-pool", "node-1", "node-2")
 		rv := newFormationRV("rsc-1")
@@ -2587,7 +2693,7 @@ var _ = Describe("Formation: Preconfigure", func() {
 	})
 
 	It("returns error when createRVR fails with non-AlreadyExists error", func(ctx SpecContext) {
-		rsc := newRSCWithConfiguration("rsc-1") // ReplicationNone → 1 diskful
+		rsc := newRSCWithConfiguration("rsc-1") // FTT=0,GMDR=0 → 1 diskful
 		rsp := newTestRSPWithNodes("test-pool", "node-1")
 		rv := newFormationRV("rsc-1")
 
@@ -2612,7 +2718,7 @@ var _ = Describe("Formation: Preconfigure", func() {
 	})
 
 	It("requeues when createRVR returns AlreadyExists", func(ctx SpecContext) {
-		rsc := newRSCWithConfiguration("rsc-1") // ReplicationNone → 1 diskful
+		rsc := newRSCWithConfiguration("rsc-1") // FTT=0,GMDR=0 → 1 diskful
 		rsp := newTestRSPWithNodes("test-pool", "node-1")
 		rv := newFormationRV("rsc-1")
 
@@ -2640,7 +2746,7 @@ var _ = Describe("Formation: Preconfigure", func() {
 	})
 
 	It("removes excess unscheduled replicas first (not-scheduled priority)", func(ctx SpecContext) {
-		// ReplicationNone → wants 1 diskful, but we have 2: one preconfigured, one unscheduled.
+		// FTT=0,GMDR=0 → wants 1 diskful, but we have 2: one preconfigured, one unscheduled.
 		rsc := newRSCWithConfiguration("rsc-1")
 		rsp := newTestRSPWithNodes("test-pool", "node-1", "node-2")
 		rv := newFormationRV("rsc-1")
@@ -2688,7 +2794,7 @@ var _ = Describe("Formation: Preconfigure", func() {
 	})
 
 	It("removes excess replicas with highest ID when all equally progressed", func(ctx SpecContext) {
-		// ReplicationNone → wants 1 diskful, but we have 2 preconfigured replicas.
+		// FTT=0,GMDR=0 → wants 1 diskful, but we have 2 preconfigured replicas.
 		// Both are fully preconfigured → "any" fallback → remove highest ID.
 		rsc := newRSCWithConfiguration("rsc-1")
 		rsp := newTestRSPWithNodes("test-pool", "node-1", "node-2")
@@ -2748,11 +2854,11 @@ var _ = Describe("Formation: EstablishConnectivity", func() {
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				ConfigurationGeneration:         1,
 				ConfigurationObservedGeneration: 1,
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology:        v1alpha1.TopologyIgnored,
-					Replication:     v1alpha1.ReplicationNone,
-					VolumeAccess:    v1alpha1.VolumeAccessLocal,
-					StoragePoolName: "test-pool",
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:           v1alpha1.TopologyIgnored,
+					FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:              v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName: "test-pool",
 				},
 				DatameshRevision: 1,
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
@@ -2831,9 +2937,10 @@ var _ = Describe("Formation: EstablishConnectivity", func() {
 			{NodeName: "node-1", LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{{Name: "lvg-1"}}},
 		}
 
-		// Use a 2-replica setup to test connection checks.
+		// Use a 2-replica setup to test connection checks (FTT=1,GMDR=0 → D=2).
 		rv := newRVInEstablishConnectivity()
-		rv.Status.Configuration.Replication = v1alpha1.ReplicationAvailability
+		rv.Status.Configuration.FailuresToTolerate = 1
+		rv.Status.Configuration.GuaranteedMinimumDataRedundancy = 0
 		rv.Status.Datamesh.Members = append(rv.Status.Datamesh.Members, v1alpha1.DatameshMember{
 			Name:               v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 1),
 			Type:               v1alpha1.DatameshMemberTypeDiskful,
@@ -3076,9 +3183,9 @@ var _ = Describe("Formation: BootstrapData", func() {
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				ConfigurationGeneration:         1,
 				ConfigurationObservedGeneration: 1,
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationNone,
-					VolumeAccess: v1alpha1.VolumeAccessLocal, StoragePoolName: "test-pool",
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess: v1alpha1.VolumeAccessLocal, ReplicatedStoragePoolName: "test-pool",
 				},
 				DatameshRevision: 1,
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
@@ -3467,11 +3574,11 @@ var _ = Describe("Formation: BootstrapData", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 			Status: v1alpha1.ReplicatedStorageClassStatus{
 				ConfigurationGeneration: 1,
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology:        v1alpha1.TopologyIgnored,
-					Replication:     v1alpha1.ReplicationAvailability,
-					VolumeAccess:    v1alpha1.VolumeAccessLocal,
-					StoragePoolName: "test-pool",
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:           v1alpha1.TopologyIgnored,
+					FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:              v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName: "test-pool",
 				},
 			},
 		}
@@ -3482,7 +3589,8 @@ var _ = Describe("Formation: BootstrapData", func() {
 			{NodeName: "node-2", LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{{Name: "lvg-1"}}},
 		}
 		rv := newRVInBootstrapData()
-		rv.Status.Configuration.Replication = v1alpha1.ReplicationAvailability
+		rv.Status.Configuration.FailuresToTolerate = 1
+		rv.Status.Configuration.GuaranteedMinimumDataRedundancy = 0
 		rv.Status.Datamesh.Members = append(rv.Status.Datamesh.Members, v1alpha1.DatameshMember{
 			Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 1), Type: v1alpha1.DatameshMemberTypeDiskful,
 			NodeName: "node-2", Addresses: []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
@@ -3558,9 +3666,9 @@ var _ = Describe("Formation: Restart", func() {
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				ConfigurationGeneration:         1,
 				ConfigurationObservedGeneration: 1,
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationNone,
-					VolumeAccess: v1alpha1.VolumeAccessLocal, StoragePoolName: "test-pool",
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess: v1alpha1.VolumeAccessLocal, ReplicatedStoragePoolName: "test-pool",
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
 					{
@@ -3616,9 +3724,9 @@ var _ = Describe("Formation: Restart", func() {
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				ConfigurationGeneration:         1,
 				ConfigurationObservedGeneration: 1,
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationNone,
-					VolumeAccess: v1alpha1.VolumeAccessLocal, StoragePoolName: "test-pool",
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess: v1alpha1.VolumeAccessLocal, ReplicatedStoragePoolName: "test-pool",
 				},
 				DatameshRevision: 1,
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
@@ -3694,9 +3802,9 @@ var _ = Describe("Formation: Restart", func() {
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				ConfigurationGeneration:         1,
 				ConfigurationObservedGeneration: 1,
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationNone,
-					VolumeAccess: v1alpha1.VolumeAccessLocal, StoragePoolName: "test-pool",
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess: v1alpha1.VolumeAccessLocal, ReplicatedStoragePoolName: "test-pool",
 				},
 				DatameshRevision: 1,
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
@@ -3873,55 +3981,54 @@ var _ = Describe("applyRVMetadata", func() {
 	})
 })
 
-// ──────────────────────────────────────────────────────────────────────────────
-// ensureRVConfiguration unit tests
+// isTransZonalZoneCountValid
 //
 
-var _ = Describe("ensureRVConfiguration", func() {
-	It("does nothing when RSC is nil", func(ctx SpecContext) {
-		rv := &v1alpha1.ReplicatedVolume{}
-		outcome := ensureRVConfiguration(ctx, rv, nil)
-		Expect(outcome.DidChange()).To(BeFalse())
-		Expect(rv.Status.Configuration).To(BeNil())
-	})
-
-	It("does nothing when RSC has no configuration", func(ctx SpecContext) {
-		rv := &v1alpha1.ReplicatedVolume{}
-		rsc := &v1alpha1.ReplicatedStorageClass{}
-		outcome := ensureRVConfiguration(ctx, rv, rsc)
-		Expect(outcome.DidChange()).To(BeFalse())
-		Expect(rv.Status.Configuration).To(BeNil())
-	})
-
-	It("initializes configuration from RSC", func(ctx SpecContext) {
-		rv := &v1alpha1.ReplicatedVolume{}
-		rsc := newRSCWithConfiguration("rsc-1")
-
-		outcome := ensureRVConfiguration(ctx, rv, rsc)
-		Expect(outcome.DidChange()).To(BeTrue())
-		Expect(rv.Status.Configuration).NotTo(BeNil())
-		Expect(rv.Status.Configuration.StoragePoolName).To(Equal("test-pool"))
-		Expect(rv.Status.ConfigurationGeneration).To(Equal(int64(1)))
-	})
-
-	It("does not overwrite existing configuration", func(ctx SpecContext) {
-		rv := &v1alpha1.ReplicatedVolume{
-			Status: v1alpha1.ReplicatedVolumeStatus{
-				ConfigurationGeneration: 5,
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology:        v1alpha1.TopologyTransZonal,
-					Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
-					VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-					StoragePoolName: "old-pool",
-				},
-			},
+var _ = Describe("isTransZonalZoneCountValid", func() {
+	It("validates all FTT/GMDR + zone count combinations", func() {
+		cases := []struct {
+			ftt, gmdr byte
+			zones     int
+			valid     bool
+		}{
+			// FTT=0, GMDR=0: not TransZonal.
+			{0, 0, 1, false},
+			{0, 0, 3, false},
+			// FTT=0, GMDR=1: 2D → exactly 2 zones.
+			{0, 1, 1, false},
+			{0, 1, 2, true},
+			{0, 1, 3, false},
+			// FTT=1, GMDR=0: 2D+1TB → exactly 3 zones.
+			{1, 0, 2, false},
+			{1, 0, 3, true},
+			{1, 0, 4, false},
+			// FTT=1, GMDR=1: 3D → exactly 3 zones.
+			{1, 1, 2, false},
+			{1, 1, 3, true},
+			{1, 1, 4, false},
+			// FTT=1, GMDR=2: 4D+1TB → 3 or 5 zones.
+			{1, 2, 2, false},
+			{1, 2, 3, true},
+			{1, 2, 4, false},
+			{1, 2, 5, true},
+			{1, 2, 6, false},
+			// FTT=2, GMDR=1: 4D → exactly 4 zones.
+			{2, 1, 3, false},
+			{2, 1, 4, true},
+			{2, 1, 5, false},
+			// FTT=2, GMDR=2: 5D → 3 or 5 zones.
+			{2, 2, 2, false},
+			{2, 2, 3, true},
+			{2, 2, 4, false},
+			{2, 2, 5, true},
+			{2, 2, 6, false},
 		}
-		rsc := newRSCWithConfiguration("rsc-1")
-
-		outcome := ensureRVConfiguration(ctx, rv, rsc)
-		Expect(outcome.DidChange()).To(BeFalse())
-		Expect(rv.Status.Configuration.StoragePoolName).To(Equal("old-pool"))
-		Expect(rv.Status.ConfigurationGeneration).To(Equal(int64(5)))
+		for _, tc := range cases {
+			result := isTransZonalZoneCountValid(tc.ftt, tc.gmdr, tc.zones)
+			Expect(result).To(Equal(tc.valid),
+				"FTT=%d, GMDR=%d, zones=%d: expected %v, got %v",
+				tc.ftt, tc.gmdr, tc.zones, tc.valid, result)
+		}
 	})
 })
 
@@ -3933,9 +4040,9 @@ var _ = Describe("computeTargetQuorum edge cases", func() {
 	It("counts liminal Diskful members as intended diskful", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationAvailability,
-					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "test-pool",
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, ReplicatedStoragePoolName: "test-pool",
 				},
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 					Members: []v1alpha1.DatameshMember{
@@ -3950,39 +4057,17 @@ var _ = Describe("computeTargetQuorum edge cases", func() {
 			},
 		}
 		q, qmr := computeTargetQuorum(rv)
-		// 2 intended diskful → quorum = 2/2+1 = 2; minQ=2, minQMR=1 → q=2, qmr=2
+		// 2 voters (D + D∅) → q=max(2/2+1, 2/2+1)=2; qmr=GMDR+1=1
 		Expect(q).To(Equal(byte(2)))
-		Expect(qmr).To(Equal(byte(2)))
-	})
-
-	It("uses default quorum for unknown replication mode", func() {
-		rv := &v1alpha1.ReplicatedVolume{
-			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology: v1alpha1.TopologyIgnored, Replication: "UnknownMode",
-					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "test-pool",
-				},
-				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.DatameshMember{
-						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0), Type: v1alpha1.DatameshMemberTypeDiskful},
-						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 1), Type: v1alpha1.DatameshMemberTypeDiskful},
-						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2), Type: v1alpha1.DatameshMemberTypeDiskful},
-					},
-				},
-			},
-		}
-		q, qmr := computeTargetQuorum(rv)
-		// default: minQ=2, minQMR=2; quorum = 3/2+1 = 2 → q=2, qmr=2
-		Expect(q).To(Equal(byte(2)))
-		Expect(qmr).To(Equal(byte(2)))
+		Expect(qmr).To(Equal(byte(1)))
 	})
 
 	It("does not count ShadowDiskful as voter", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationAvailability,
-					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "test-pool",
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, ReplicatedStoragePoolName: "test-pool",
 				},
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 					Members: []v1alpha1.DatameshMember{
@@ -3995,17 +4080,17 @@ var _ = Describe("computeTargetQuorum edge cases", func() {
 			},
 		}
 		q, qmr := computeTargetQuorum(rv)
-		// Only 2 voters (Diskful) → quorum = 2/2+1 = 2; minQ=2, minQMR=1 → q=2, qmr=2
+		// Only 2 voters (Diskful) → q=max(2/2+1, 2/2+1)=2; qmr=GMDR+1=1
 		Expect(q).To(Equal(byte(2)))
-		Expect(qmr).To(Equal(byte(2)))
+		Expect(qmr).To(Equal(byte(1)))
 	})
 
 	It("does not count non-diskful members", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationNone,
-					VolumeAccess: v1alpha1.VolumeAccessLocal, StoragePoolName: "test-pool",
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess: v1alpha1.VolumeAccessLocal, ReplicatedStoragePoolName: "test-pool",
 				},
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 					Members: []v1alpha1.DatameshMember{
@@ -4346,9 +4431,9 @@ var _ = Describe("Root Reconcile edge cases", func() {
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				ConfigurationGeneration:         1,
 				ConfigurationObservedGeneration: 1,
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationNone,
-					VolumeAccess: v1alpha1.VolumeAccessLocal, StoragePoolName: "test-pool",
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess: v1alpha1.VolumeAccessLocal, ReplicatedStoragePoolName: "test-pool",
 				},
 			},
 		}

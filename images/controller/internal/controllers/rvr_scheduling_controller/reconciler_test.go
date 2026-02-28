@@ -63,7 +63,7 @@ func newClientBuilder(scheme *runtime.Scheme) *fake.ClientBuilder {
 	)
 }
 
-func newRV(cfg *v1alpha1.ReplicatedStorageClassConfiguration) *v1alpha1.ReplicatedVolume {
+func newRV(cfg *v1alpha1.ReplicatedVolumeConfiguration) *v1alpha1.ReplicatedVolume {
 	return &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{Name: testRVName},
 		Spec: v1alpha1.ReplicatedVolumeSpec{
@@ -109,22 +109,23 @@ func newRVA(nodeName string) *v1alpha1.ReplicatedVolumeAttachment {
 	}
 }
 
-func defaultConfig() *v1alpha1.ReplicatedStorageClassConfiguration {
-	return &v1alpha1.ReplicatedStorageClassConfiguration{
-		Topology:        v1alpha1.TopologyIgnored,
-		Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
-		VolumeAccess:    v1alpha1.VolumeAccessLocal,
-		StoragePoolName: "rsp-test",
+func defaultConfig() *v1alpha1.ReplicatedVolumeConfiguration {
+	return &v1alpha1.ReplicatedVolumeConfiguration{
+		Topology:                        v1alpha1.TopologyIgnored,
+		FailuresToTolerate:              1,
+		GuaranteedMinimumDataRedundancy: 1,
+		VolumeAccess:                    v1alpha1.VolumeAccessLocal,
+		ReplicatedStoragePoolName:       "rsp-test",
 	}
 }
 
-func zonalConfig() *v1alpha1.ReplicatedStorageClassConfiguration {
+func zonalConfig() *v1alpha1.ReplicatedVolumeConfiguration {
 	cfg := defaultConfig()
 	cfg.Topology = v1alpha1.TopologyZonal
 	return cfg
 }
 
-func transZonalConfig() *v1alpha1.ReplicatedStorageClassConfiguration {
+func transZonalConfig() *v1alpha1.ReplicatedVolumeConfiguration {
 	cfg := defaultConfig()
 	cfg.Topology = v1alpha1.TopologyTransZonal
 	return cfg
@@ -1001,6 +1002,243 @@ var _ = Describe("Reconciler", func() {
 			expectScheduledCondition(ctx, cl, tb, metav1.ConditionFalse,
 				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed)
 		})
+
+		It("FTT=2,GMDR=2: 5D across 3 zones — composite 2+2+1", func() {
+			cfg := transZonalConfig()
+			cfg.FailuresToTolerate = 2
+			cfg.GuaranteedMinimumDataRedundancy = 2 // D=5
+			rv := newRV(cfg)
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a1", "zone-a", makeLVG("vg-a1", true)),
+					makeNode("node-a2", "zone-a", makeLVG("vg-a2", true)),
+					makeNode("node-b1", "zone-b", makeLVG("vg-b1", true)),
+					makeNode("node-b2", "zone-b", makeLVG("vg-b2", true)),
+					makeNode("node-c1", "zone-c", makeLVG("vg-c1", true)),
+					makeNode("node-c2", "zone-c", makeLVG("vg-c2", true)),
+				})
+
+			rvr0 := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			rvr1 := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+			rvr2 := newRVR(2, v1alpha1.ReplicaTypeDiskful)
+			rvr3 := newRVR(3, v1alpha1.ReplicaTypeDiskful)
+			rvr4 := newRVR(4, v1alpha1.ReplicaTypeDiskful)
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, rvr0, rvr1, rvr2, rvr3, rvr4).
+				WithStatusSubresource(rvr0, rvr1, rvr2, rvr3, rvr4).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			// 5D across 3 zones: round-robin produces 2+2+1 distribution.
+			zones := map[string]int{}
+			for _, rvr := range []*v1alpha1.ReplicatedVolumeReplica{rvr0, rvr1, rvr2, rvr3, rvr4} {
+				updated := getUpdatedRVR(ctx, cl, rvr)
+				Expect(updated.Spec.NodeName).NotTo(BeEmpty(), "%s not scheduled", rvr.Name)
+				for _, n := range rsp.Status.EligibleNodes {
+					if n.NodeName == updated.Spec.NodeName {
+						zones[n.ZoneName]++
+					}
+				}
+			}
+			Expect(zones).To(HaveLen(3), "all 3 zones should be used")
+			maxInZone := 0
+			for _, count := range zones {
+				if count > maxInZone {
+					maxInZone = count
+				}
+			}
+			Expect(maxInZone).To(Equal(2), "max 2 replicas per zone (composite 2+2+1)")
+		})
+
+		It("FTT=1,GMDR=2: 4D across 3 zones — composite 2+1+1", func() {
+			cfg := transZonalConfig()
+			cfg.FailuresToTolerate = 1
+			cfg.GuaranteedMinimumDataRedundancy = 2 // D=4
+			rv := newRV(cfg)
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a1", "zone-a", makeLVG("vg-a1", true)),
+					makeNode("node-a2", "zone-a", makeLVG("vg-a2", true)),
+					makeNode("node-b1", "zone-b", makeLVG("vg-b1", true)),
+					makeNode("node-b2", "zone-b", makeLVG("vg-b2", true)),
+					makeNode("node-c1", "zone-c", makeLVG("vg-c1", true)),
+					makeNode("node-c2", "zone-c", makeLVG("vg-c2", true)),
+				})
+
+			rvr0 := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			rvr1 := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+			rvr2 := newRVR(2, v1alpha1.ReplicaTypeDiskful)
+			rvr3 := newRVR(3, v1alpha1.ReplicaTypeDiskful)
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, rvr0, rvr1, rvr2, rvr3).
+				WithStatusSubresource(rvr0, rvr1, rvr2, rvr3).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			// 4D across 3 zones: round-robin produces 2+1+1 distribution.
+			zones := map[string]int{}
+			for _, rvr := range []*v1alpha1.ReplicatedVolumeReplica{rvr0, rvr1, rvr2, rvr3} {
+				updated := getUpdatedRVR(ctx, cl, rvr)
+				Expect(updated.Spec.NodeName).NotTo(BeEmpty(), "%s not scheduled", rvr.Name)
+				for _, n := range rsp.Status.EligibleNodes {
+					if n.NodeName == updated.Spec.NodeName {
+						zones[n.ZoneName]++
+					}
+				}
+			}
+			Expect(zones).To(HaveLen(3), "all 3 zones should be used")
+			maxInZone := 0
+			for _, count := range zones {
+				if count > maxInZone {
+					maxInZone = count
+				}
+			}
+			Expect(maxInZone).To(Equal(2), "max 2 replicas per zone (composite 2+1+1)")
+		})
+
+		It("FTT=1,GMDR=2: 4D+1TB across 3 zones — TB avoids zone with 2D", func() {
+			cfg := transZonalConfig()
+			cfg.FailuresToTolerate = 1
+			cfg.GuaranteedMinimumDataRedundancy = 2 // D=4, TB=1
+			rv := newRV(cfg)
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a1", "zone-a", makeLVG("vg-a1", true)),
+					makeNode("node-a2", "zone-a", makeLVG("vg-a2", true)),
+					makeNode("node-b1", "zone-b", makeLVG("vg-b1", true)),
+					makeNode("node-b2", "zone-b", makeLVG("vg-b2", true)),
+					makeNode("node-c1", "zone-c", makeLVG("vg-c1", true)),
+					makeNode("node-c2", "zone-c", makeLVG("vg-c2", true)),
+				})
+
+			// Pre-place 4D as 2+1+1 to control the state.
+			d0 := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			d0.Spec.NodeName = "node-a1"
+			d0.Spec.LVMVolumeGroupName = "vg-a1"
+			d1 := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+			d1.Spec.NodeName = "node-a2"
+			d1.Spec.LVMVolumeGroupName = "vg-a2"
+			d2 := newRVR(2, v1alpha1.ReplicaTypeDiskful)
+			d2.Spec.NodeName = "node-b1"
+			d2.Spec.LVMVolumeGroupName = "vg-b1"
+			d3 := newRVR(3, v1alpha1.ReplicaTypeDiskful)
+			d3.Spec.NodeName = "node-c1"
+			d3.Spec.LVMVolumeGroupName = "vg-c1"
+
+			tb := newRVR(4, v1alpha1.ReplicaTypeTieBreaker)
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, d0, d1, d2, d3, tb).
+				WithStatusSubresource(d0, d1, d2, d3, tb).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			// TB placement uses "fewest total replicas" → zone-b and zone-c
+			// each have 1 replica, zone-a has 2. TB goes to zone-b or zone-c
+			// (not zone-a which has 2D).
+			updated := getUpdatedRVR(ctx, cl, tb)
+			Expect(updated.Spec.NodeName).NotTo(BeEmpty())
+			Expect(updated.Spec.NodeName).NotTo(HavePrefix("node-a"),
+				"TB should avoid zone-a (2D); got %s", updated.Spec.NodeName)
+		})
+
+		It("FTT=2,GMDR=1: 4D across 4 zones — pure 1+1+1+1", func() {
+			cfg := transZonalConfig()
+			cfg.FailuresToTolerate = 2
+			cfg.GuaranteedMinimumDataRedundancy = 1 // D=4
+			rv := newRV(cfg)
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a1", "zone-a", makeLVG("vg-a1", true)),
+					makeNode("node-b1", "zone-b", makeLVG("vg-b1", true)),
+					makeNode("node-c1", "zone-c", makeLVG("vg-c1", true)),
+					makeNode("node-d1", "zone-d", makeLVG("vg-d1", true)),
+				})
+
+			rvr0 := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			rvr1 := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+			rvr2 := newRVR(2, v1alpha1.ReplicaTypeDiskful)
+			rvr3 := newRVR(3, v1alpha1.ReplicaTypeDiskful)
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, rvr0, rvr1, rvr2, rvr3).
+				WithStatusSubresource(rvr0, rvr1, rvr2, rvr3).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			// 4D across 4 zones: one per zone.
+			zones := map[string]bool{}
+			for _, rvr := range []*v1alpha1.ReplicatedVolumeReplica{rvr0, rvr1, rvr2, rvr3} {
+				updated := getUpdatedRVR(ctx, cl, rvr)
+				Expect(updated.Spec.NodeName).NotTo(BeEmpty(), "%s not scheduled", rvr.Name)
+				for _, n := range rsp.Status.EligibleNodes {
+					if n.NodeName == updated.Spec.NodeName {
+						zones[n.ZoneName] = true
+					}
+				}
+			}
+			Expect(zones).To(HaveLen(4), "all 4 zones should be used, one D per zone")
+		})
+
+		It("FTT=2,GMDR=2: 5D across 3 zones — existing 2+2+1, new D goes to 1-zone", func() {
+			cfg := transZonalConfig()
+			cfg.FailuresToTolerate = 2
+			cfg.GuaranteedMinimumDataRedundancy = 2 // D=5
+			rv := newRV(cfg)
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a1", "zone-a", makeLVG("vg-a1", true)),
+					makeNode("node-a2", "zone-a", makeLVG("vg-a2", true)),
+					makeNode("node-b1", "zone-b", makeLVG("vg-b1", true)),
+					makeNode("node-b2", "zone-b", makeLVG("vg-b2", true)),
+					makeNode("node-c1", "zone-c", makeLVG("vg-c1", true)),
+					makeNode("node-c2", "zone-c", makeLVG("vg-c2", true)),
+				})
+
+			// Existing: 2 in zone-a, 2 in zone-b
+			d0 := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			d0.Spec.NodeName = "node-a1"
+			d0.Spec.LVMVolumeGroupName = "vg-a1"
+			d1 := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+			d1.Spec.NodeName = "node-a2"
+			d1.Spec.LVMVolumeGroupName = "vg-a2"
+			d2 := newRVR(2, v1alpha1.ReplicaTypeDiskful)
+			d2.Spec.NodeName = "node-b1"
+			d2.Spec.LVMVolumeGroupName = "vg-b1"
+			d3 := newRVR(3, v1alpha1.ReplicaTypeDiskful)
+			d3.Spec.NodeName = "node-b2"
+			d3.Spec.LVMVolumeGroupName = "vg-b2"
+
+			// New: should go to zone-c (fewest Diskful: 0)
+			newD := newRVR(4, v1alpha1.ReplicaTypeDiskful)
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, d0, d1, d2, d3, newD).
+				WithStatusSubresource(d0, d1, d2, d3, newD).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := getUpdatedRVR(ctx, cl, newD)
+			Expect(updated.Spec.NodeName).To(HavePrefix("node-c"),
+				"new D should go to zone-c (fewest Diskful)")
+		})
 	})
 
 	// ────────────────────────────────────────────────────────────────────────
@@ -1768,7 +2006,8 @@ var _ = Describe("Reconciler", func() {
 	Describe("Zonal Zone Capacity Penalty", func() {
 		It("zone with enough free nodes — no penalty, replicas go there", func() {
 			cfg := zonalConfig()
-			cfg.Replication = v1alpha1.ReplicationAvailability // required=2
+			cfg.FailuresToTolerate = 1
+			cfg.GuaranteedMinimumDataRedundancy = 0 // D=2
 			rv := newRV(cfg)
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -1799,7 +2038,8 @@ var _ = Describe("Reconciler", func() {
 
 		It("no zone has enough nodes — all penalized, best score wins", func() {
 			cfg := zonalConfig()
-			cfg.Replication = v1alpha1.ReplicationAvailability // required=2
+			cfg.FailuresToTolerate = 1
+			cfg.GuaranteedMinimumDataRedundancy = 0 // D=2
 			rv := newRV(cfg)
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -1845,7 +2085,8 @@ var _ = Describe("Reconciler", func() {
 
 		It("all Diskful already scheduled — no penalty (remainingDemand=0)", func() {
 			cfg := zonalConfig()
-			cfg.Replication = v1alpha1.ReplicationAvailability // required=2
+			cfg.FailuresToTolerate = 1
+			cfg.GuaranteedMinimumDataRedundancy = 0 // D=2
 			rv := newRV(cfg)
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -1882,7 +2123,8 @@ var _ = Describe("Reconciler", func() {
 
 		It("existing replicas commit zone; penalty does not override sticky", func() {
 			cfg := zonalConfig()
-			cfg.Replication = v1alpha1.ReplicationConsistencyAndAvailability // required=3
+			cfg.FailuresToTolerate = 1
+			cfg.GuaranteedMinimumDataRedundancy = 1 // D=3
 			rv := newRV(cfg)
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -1918,7 +2160,8 @@ var _ = Describe("Reconciler", func() {
 
 		It("penalty pushes replicas away from small zone", func() {
 			cfg := zonalConfig()
-			cfg.Replication = v1alpha1.ReplicationConsistencyAndAvailability // required=3
+			cfg.FailuresToTolerate = 1
+			cfg.GuaranteedMinimumDataRedundancy = 1 // D=3
 			rv := newRV(cfg)
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -1963,9 +2206,10 @@ var _ = Describe("Reconciler", func() {
 			}
 		})
 
-		It("Replication=None — requiredDiskful=1, no penalty when zones have ≥1 node", func() {
+		It("FTT=0,GMDR=0 — D=1, no penalty when zones have ≥1 node", func() {
 			cfg := zonalConfig()
-			cfg.Replication = v1alpha1.ReplicationNone // required=1
+			cfg.FailuresToTolerate = 0
+			cfg.GuaranteedMinimumDataRedundancy = 0 // D=1
 			rv := newRV(cfg)
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -1987,6 +2231,283 @@ var _ = Describe("Reconciler", func() {
 			// Both zones have ≥ 1 node → no penalty. Scheduled somewhere.
 			updated := getUpdatedRVR(ctx, cl, rvr)
 			Expect(updated.Spec.NodeName).NotTo(BeEmpty())
+		})
+
+		It("FTT=1,GMDR=2 — D=4, zone with 4 free nodes gets no penalty", func() {
+			cfg := zonalConfig()
+			cfg.FailuresToTolerate = 1
+			cfg.GuaranteedMinimumDataRedundancy = 2 // D=4
+			rv := newRV(cfg)
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a1", "zone-a", makeLVG("vg-a1", true)),
+					makeNode("node-a2", "zone-a", makeLVG("vg-a2", true)),
+					makeNode("node-a3", "zone-a", makeLVG("vg-a3", true)),
+					makeNode("node-a4", "zone-a", makeLVG("vg-a4", true)),
+					makeNode("node-b1", "zone-b", makeLVG("vg-b1", true)),
+					makeNode("node-b2", "zone-b", makeLVG("vg-b2", true)),
+					makeNode("node-b3", "zone-b", makeLVG("vg-b3", true)),
+				})
+
+			rvr0 := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			rvr1 := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+			rvr2 := newRVR(2, v1alpha1.ReplicaTypeDiskful)
+			rvr3 := newRVR(3, v1alpha1.ReplicaTypeDiskful)
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, rvr0, rvr1, rvr2, rvr3).
+				WithStatusSubresource(rvr0, rvr1, rvr2, rvr3).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			// zone-a has 4 free nodes (≥ D=4 → no penalty), zone-b has 3 (< 4 → penalty).
+			// All 4 replicas should go to zone-a.
+			for _, rvr := range []*v1alpha1.ReplicatedVolumeReplica{rvr0, rvr1, rvr2, rvr3} {
+				updated := getUpdatedRVR(ctx, cl, rvr)
+				Expect(updated.Spec.NodeName).To(HavePrefix("node-a"),
+					"expected zone-a for %s, got %s", rvr.Name, updated.Spec.NodeName)
+			}
+		})
+
+		It("FTT=1,GMDR=2 — D=4, both zones too small → penalty on both, best score wins", func() {
+			cfg := zonalConfig()
+			cfg.FailuresToTolerate = 1
+			cfg.GuaranteedMinimumDataRedundancy = 2 // D=4
+			rv := newRV(cfg)
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a1", "zone-a", makeLVG("vg-a1", true)),
+					makeNode("node-a2", "zone-a", makeLVG("vg-a2", true)),
+					makeNode("node-b1", "zone-b", makeLVG("vg-b1", true)),
+					makeNode("node-b2", "zone-b", makeLVG("vg-b2", true)),
+					makeNode("node-b3", "zone-b", makeLVG("vg-b3", true)),
+				})
+
+			rvr0 := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			rvr1 := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+			rvr2 := newRVR(2, v1alpha1.ReplicaTypeDiskful)
+			rvr3 := newRVR(3, v1alpha1.ReplicaTypeDiskful)
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, rvr0, rvr1, rvr2, rvr3).
+				WithStatusSubresource(rvr0, rvr1, rvr2, rvr3).
+				Build()
+			mock := &reconcilerMockExtender{
+				filterAndScoreFn: func(lvgs []schext.LVMVolumeGroup) ([]schext.ScoredLVMVolumeGroup, error) {
+					var result []schext.ScoredLVMVolumeGroup
+					for _, l := range lvgs {
+						score := 5
+						if l.LVGName == "vg-b1" || l.LVGName == "vg-b2" || l.LVGName == "vg-b3" {
+							score = 8 // zone-b nodes score higher
+						}
+						result = append(result, schext.ScoredLVMVolumeGroup{LVMVolumeGroup: l, Score: score})
+					}
+					return result, nil
+				},
+			}
+			rec := NewReconciler(cl, logr.Discard(), scheme, mock)
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			// zone-a: 2 nodes < D=4 → penalty. zone-b: 3 nodes < D=4 → penalty.
+			// Both penalized. zone-b has higher scores (8-800 > 5-800) → first
+			// replica goes to zone-b. Zonal sticky then locks subsequent replicas
+			// to zone-b (most Diskful). zone-b has 3 nodes → 3 placed, 4th fails
+			// (sticky restricts to zone-b but all 3 nodes occupied).
+			scheduled := 0
+			for _, rvr := range []*v1alpha1.ReplicatedVolumeReplica{rvr0, rvr1, rvr2, rvr3} {
+				updated := getUpdatedRVR(ctx, cl, rvr)
+				if updated.Spec.NodeName != "" {
+					scheduled++
+					Expect(updated.Spec.NodeName).To(HavePrefix("node-b"))
+				}
+			}
+			Expect(scheduled).To(Equal(3))
+		})
+
+		It("FTT=2,GMDR=1 — D=4, penalty pushes away from small zone", func() {
+			cfg := zonalConfig()
+			cfg.FailuresToTolerate = 2
+			cfg.GuaranteedMinimumDataRedundancy = 1 // D=4
+			rv := newRV(cfg)
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a1", "zone-a", makeLVG("vg-a1", true)),
+					makeNode("node-a2", "zone-a", makeLVG("vg-a2", true)),
+					makeNode("node-b1", "zone-b", makeLVG("vg-b1", true)),
+					makeNode("node-b2", "zone-b", makeLVG("vg-b2", true)),
+					makeNode("node-b3", "zone-b", makeLVG("vg-b3", true)),
+					makeNode("node-b4", "zone-b", makeLVG("vg-b4", true)),
+				})
+
+			rvr0 := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			rvr1 := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+			rvr2 := newRVR(2, v1alpha1.ReplicaTypeDiskful)
+			rvr3 := newRVR(3, v1alpha1.ReplicaTypeDiskful)
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, rvr0, rvr1, rvr2, rvr3).
+				WithStatusSubresource(rvr0, rvr1, rvr2, rvr3).
+				Build()
+			mock := &reconcilerMockExtender{
+				filterAndScoreFn: func(lvgs []schext.LVMVolumeGroup) ([]schext.ScoredLVMVolumeGroup, error) {
+					var result []schext.ScoredLVMVolumeGroup
+					for _, l := range lvgs {
+						score := 5
+						if l.LVGName == "vg-a1" || l.LVGName == "vg-a2" {
+							score = 10 // zone-a nodes score highest individually
+						}
+						result = append(result, schext.ScoredLVMVolumeGroup{LVMVolumeGroup: l, Score: score})
+					}
+					return result, nil
+				},
+			}
+			rec := NewReconciler(cl, logr.Discard(), scheme, mock)
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			// zone-a: 2 nodes < D=4 → -800 penalty. zone-b: 4 nodes ≥ 4 → no penalty.
+			// zone-b wins despite lower individual scores (5 vs 10-800=-790).
+			for _, rvr := range []*v1alpha1.ReplicatedVolumeReplica{rvr0, rvr1, rvr2, rvr3} {
+				updated := getUpdatedRVR(ctx, cl, rvr)
+				Expect(updated.Spec.NodeName).To(HavePrefix("node-b"),
+					"expected zone-b for %s, got %s", rvr.Name, updated.Spec.NodeName)
+			}
+		})
+
+		It("FTT=2,GMDR=2 — D=5, zone with 5 free nodes gets no penalty", func() {
+			cfg := zonalConfig()
+			cfg.FailuresToTolerate = 2
+			cfg.GuaranteedMinimumDataRedundancy = 2 // D=5
+			rv := newRV(cfg)
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a1", "zone-a", makeLVG("vg-a1", true)),
+					makeNode("node-a2", "zone-a", makeLVG("vg-a2", true)),
+					makeNode("node-a3", "zone-a", makeLVG("vg-a3", true)),
+					makeNode("node-a4", "zone-a", makeLVG("vg-a4", true)),
+					makeNode("node-a5", "zone-a", makeLVG("vg-a5", true)),
+					makeNode("node-b1", "zone-b", makeLVG("vg-b1", true)),
+					makeNode("node-b2", "zone-b", makeLVG("vg-b2", true)),
+					makeNode("node-b3", "zone-b", makeLVG("vg-b3", true)),
+				})
+
+			rvr0 := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			rvr1 := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+			rvr2 := newRVR(2, v1alpha1.ReplicaTypeDiskful)
+			rvr3 := newRVR(3, v1alpha1.ReplicaTypeDiskful)
+			rvr4 := newRVR(4, v1alpha1.ReplicaTypeDiskful)
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, rvr0, rvr1, rvr2, rvr3, rvr4).
+				WithStatusSubresource(rvr0, rvr1, rvr2, rvr3, rvr4).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			// zone-a has 5 free nodes (≥ D=5 → no penalty), zone-b has 3 (< 5 → penalty).
+			// All 5 replicas should go to zone-a.
+			for _, rvr := range []*v1alpha1.ReplicatedVolumeReplica{rvr0, rvr1, rvr2, rvr3, rvr4} {
+				updated := getUpdatedRVR(ctx, cl, rvr)
+				Expect(updated.Spec.NodeName).To(HavePrefix("node-a"),
+					"expected zone-a for %s, got %s", rvr.Name, updated.Spec.NodeName)
+			}
+		})
+
+		It("FTT=2,GMDR=2 — D=5, partial schedule reduces remaining demand", func() {
+			cfg := zonalConfig()
+			cfg.FailuresToTolerate = 2
+			cfg.GuaranteedMinimumDataRedundancy = 2 // D=5
+			rv := newRV(cfg)
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a1", "zone-a", makeLVG("vg-a1", true)),
+					makeNode("node-a2", "zone-a", makeLVG("vg-a2", true)),
+					makeNode("node-a3", "zone-a", makeLVG("vg-a3", true)),
+					makeNode("node-a4", "zone-a", makeLVG("vg-a4", true)),
+					makeNode("node-a5", "zone-a", makeLVG("vg-a5", true)),
+				})
+
+			// 3 already scheduled in zone-a
+			d0 := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			d0.Spec.NodeName = "node-a1"
+			d0.Spec.LVMVolumeGroupName = "vg-a1"
+			d1 := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+			d1.Spec.NodeName = "node-a2"
+			d1.Spec.LVMVolumeGroupName = "vg-a2"
+			d2 := newRVR(2, v1alpha1.ReplicaTypeDiskful)
+			d2.Spec.NodeName = "node-a3"
+			d2.Spec.LVMVolumeGroupName = "vg-a3"
+
+			// 2 new — remainingDemand = 5 - 3 = 2, zone-a has 2 free nodes (a4, a5) ≥ 2
+			newD3 := newRVR(3, v1alpha1.ReplicaTypeDiskful)
+			newD4 := newRVR(4, v1alpha1.ReplicaTypeDiskful)
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, d0, d1, d2, newD3, newD4).
+				WithStatusSubresource(d0, d1, d2, newD3, newD4).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			// remainingDemand=2, zone-a has 2 free nodes → no penalty. Both placed.
+			expectNodeName(ctx, cl, newD3, "node-a4")
+			expectNodeName(ctx, cl, newD4, "node-a5")
+		})
+
+		It("FTT=2,GMDR=2 — D=5, no zone has 5 nodes → only partial scheduling", func() {
+			cfg := zonalConfig()
+			cfg.FailuresToTolerate = 2
+			cfg.GuaranteedMinimumDataRedundancy = 2 // D=5
+			rv := newRV(cfg)
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a1", "zone-a", makeLVG("vg-a1", true)),
+					makeNode("node-a2", "zone-a", makeLVG("vg-a2", true)),
+					makeNode("node-a3", "zone-a", makeLVG("vg-a3", true)),
+					makeNode("node-b1", "zone-b", makeLVG("vg-b1", true)),
+					makeNode("node-b2", "zone-b", makeLVG("vg-b2", true)),
+				})
+
+			rvr0 := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			rvr1 := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+			rvr2 := newRVR(2, v1alpha1.ReplicaTypeDiskful)
+			rvr3 := newRVR(3, v1alpha1.ReplicaTypeDiskful)
+			rvr4 := newRVR(4, v1alpha1.ReplicaTypeDiskful)
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, rvr0, rvr1, rvr2, rvr3, rvr4).
+				WithStatusSubresource(rvr0, rvr1, rvr2, rvr3, rvr4).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			// zone-a: 3 nodes < D=5 → penalty. zone-b: 2 nodes < D=5 → penalty.
+			// Both penalized. First replica goes to zone-a (equal scores; node-a1
+			// wins tiebreak by name). Zonal sticky then locks to zone-a. zone-a
+			// has 3 nodes → 3 placed, remaining 2 fail (sticky restricts to
+			// zone-a but all 3 nodes occupied). This is correct for Zonal: all
+			// replicas must be in the same zone.
+			scheduled := 0
+			for _, rvr := range []*v1alpha1.ReplicatedVolumeReplica{rvr0, rvr1, rvr2, rvr3, rvr4} {
+				updated := getUpdatedRVR(ctx, cl, rvr)
+				if updated.Spec.NodeName != "" {
+					scheduled++
+					Expect(updated.Spec.NodeName).To(HavePrefix("node-a"))
+				}
+			}
+			Expect(scheduled).To(Equal(3))
 		})
 	})
 
@@ -2628,7 +3149,7 @@ var _ = Describe("Reconciler", func() {
 
 		It("early exit — WaitingForReplicatedVolume on both partial and unscheduled", func() {
 			cfg := defaultConfig()
-			cfg.StoragePoolName = "" // triggers RSP not found
+			cfg.ReplicatedStoragePoolName = "" // triggers RSP not found
 			rv := newRV(cfg)
 
 			partial := newRVR(0, v1alpha1.ReplicaTypeDiskful)
@@ -2909,13 +3430,13 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	// ────────────────────────────────────────────────────────────────────────
-	// Empty StoragePoolName Guard
+	// Empty ReplicatedStoragePoolName Guard
 	//
 
-	Describe("Empty StoragePoolName Guard", func() {
-		It("empty StoragePoolName — WaitingForReplicatedVolume", func() {
+	Describe("Empty ReplicatedStoragePoolName Guard", func() {
+		It("empty ReplicatedStoragePoolName — WaitingForReplicatedVolume", func() {
 			cfg := defaultConfig()
-			cfg.StoragePoolName = ""
+			cfg.ReplicatedStoragePoolName = ""
 			rv := newRV(cfg)
 
 			rvr := newRVR(0, v1alpha1.ReplicaTypeDiskful)
