@@ -134,7 +134,7 @@ func ensureDatameshAccessReplicaTransitionProgress(
 
 	// Replicas that have confirmed the transition.
 	confirmed := idset.FromWhere(rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		return rvr.Status.DatameshRevision >= t.DatameshRevision
+		return rvr.Status.DatameshRevision >= t.Steps[0].DatameshRevision
 	}).Intersect(mustConfirm)
 
 	// For RemoveAccessReplica: the leaving replica confirms by resetting revision to 0
@@ -166,13 +166,13 @@ func ensureDatameshAccessReplicaTransitionProgress(
 	}
 
 	// Transition in progress — update messages.
-	changed = applyTransitionMessage(t,
-		computeDatameshTransitionProgressMessage(rvrs, t.DatameshRevision, mustConfirm, confirmed, skipError,
+	changed = applyDatameshTransitionStepMessage(&t.Steps[0],
+		computeDatameshTransitionProgressMessage(rvrs, t.Steps[0].DatameshRevision, mustConfirm, confirmed, skipError,
 			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
 	)
 
 	progress := fmt.Sprintf("%d/%d replicas confirmed revision %d",
-		confirmed.Len(), mustConfirm.Len(), t.DatameshRevision)
+		confirmed.Len(), mustConfirm.Len(), t.Steps[0].DatameshRevision)
 	switch t.Type {
 	case v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica:
 		changed = applyDatameshReplicaRequestMessage(replicaReq, "Joining datamesh, "+progress) || changed
@@ -262,12 +262,7 @@ func ensureDatameshAddAccessReplica(
 	// Create AddAccessReplica transition. Message is set below by the progress function.
 	rv.Status.DatameshRevision++
 	rv.Status.DatameshTransitions = append(rv.Status.DatameshTransitions,
-		v1alpha1.ReplicatedVolumeDatameshTransition{
-			Type:             v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica,
-			DatameshRevision: rv.Status.DatameshRevision,
-			ReplicaName:      rvr.Name,
-			StartedAt:        metav1.Now(),
-		},
+		makeDatameshSingleStepTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica, rvr.Name, "✦ → A", rv.Status.DatameshRevision),
 	)
 
 	// Set initial messages via the same function used for progress updates.
@@ -312,12 +307,7 @@ func ensureDatameshRemoveAccessReplica(
 	// Create RemoveAccessReplica transition. Message is set below by the progress function.
 	rv.Status.DatameshRevision++
 	rv.Status.DatameshTransitions = append(rv.Status.DatameshTransitions,
-		v1alpha1.ReplicatedVolumeDatameshTransition{
-			Type:             v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica,
-			DatameshRevision: rv.Status.DatameshRevision,
-			ReplicaName:      replicaReq.Name,
-			StartedAt:        metav1.Now(),
-		},
+		makeDatameshSingleStepTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica, replicaReq.Name, "A → ✕", rv.Status.DatameshRevision),
 	)
 
 	// Set initial messages via the same function used for progress updates.

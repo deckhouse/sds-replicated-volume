@@ -1209,7 +1209,7 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	Describe("Formation", func() {
-		It("returns error for invalid formation phase", func(ctx SpecContext) {
+		It("returns error for invalid formation step", func(ctx SpecContext) {
 			rsc := newRSCWithConfiguration("rsc-1")
 			rsp := newTestRSP("test-pool")
 
@@ -1234,11 +1234,18 @@ var _ = Describe("Reconciler", func() {
 					},
 					DatameshRevision: 1,
 					DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+						// All 3 steps completed — isFormationInProgress returns stepIdx=0
+						// which maps to Preconfigure. Formation will proceed normally.
+						// To test invalid step, we'd need a step index >= formationStepCount,
+						// which can't happen through isFormationInProgress.
+						// Instead, add a 4th step as Active to trigger stepIdx=3 (invalid).
 						{
-							Type:      v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
-							StartedAt: metav1.Now(),
-							Formation: &v1alpha1.ReplicatedVolumeDatameshTransitionFormation{
-								Phase: "InvalidPhase",
+							Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
+							Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+								{Name: "Preconfigure", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted, StartedAt: ptr.To(metav1.Now()), CompletedAt: ptr.To(metav1.Now())},
+								{Name: "Establish connectivity", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted, StartedAt: ptr.To(metav1.Now()), CompletedAt: ptr.To(metav1.Now())},
+								{Name: "Bootstrap data", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted, StartedAt: ptr.To(metav1.Now()), CompletedAt: ptr.To(metav1.Now())},
+								{Name: "InvalidStep", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: ptr.To(metav1.Now())},
 							},
 						},
 					},
@@ -1253,7 +1260,7 @@ var _ = Describe("Reconciler", func() {
 
 			_, err := rec.Reconcile(ctx, RequestFor(rv))
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("invalid formation phase"))
+			Expect(err.Error()).To(ContainSubstring("invalid formation step"))
 		})
 
 		It("waits for deleting RVRs before creating new ones", func(ctx SpecContext) {
@@ -1321,9 +1328,9 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
 			Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
 			Expect(updated.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation))
-			Expect(updated.Status.DatameshTransitions[0].Formation.Phase).To(Equal(v1alpha1.ReplicatedVolumeFormationPhasePreconfigure))
-			Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("Waiting for"))
-			Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("deleting replicas"))
+			Expect(updated.Status.DatameshTransitions[0].CurrentStep().Name).To(Equal(formationStepNames[formationStepIdxPreconfigure]))
+			Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("Waiting for"))
+			Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("deleting replicas"))
 		})
 
 		It("blocks creation when misplaced replicas exist", func(ctx SpecContext) {
@@ -1397,9 +1404,9 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
 			Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
 			Expect(updated.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation))
-			Expect(updated.Status.DatameshTransitions[0].Formation.Phase).To(Equal(v1alpha1.ReplicatedVolumeFormationPhasePreconfigure))
-			Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("Waiting for"))
-			Expect(updated.Status.DatameshTransitions[0].Message).To(ContainSubstring("deleting replicas"))
+			Expect(updated.Status.DatameshTransitions[0].CurrentStep().Name).To(Equal(formationStepNames[formationStepIdxPreconfigure]))
+			Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("Waiting for"))
+			Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("deleting replicas"))
 		})
 	})
 })
@@ -1718,7 +1725,7 @@ var _ = Describe("rvShouldNotExist", func() {
 					},
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rvr-1", StartedAt: now},
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rvr-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: ptr.To(now)}}},
 				},
 			},
 		}
@@ -2885,7 +2892,7 @@ var _ = Describe("Root Reconcile deletion with attach state", func() {
 			{Name: "rv-1-0", NodeName: "node-1", Attached: false},
 		}
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: ptr.To(metav1.Now())}}},
 		}
 
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
@@ -3031,11 +3038,7 @@ var _ = Describe("isRVRMemberOrLeavingDatamesh", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{
-						Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica,
-						ReplicaName: "rv-1-0",
-						StartedAt:   metav1.Now(),
-					},
+					makeDatameshSingleStepTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica, "rv-1-0", "", 0),
 				},
 			},
 		}
@@ -3046,11 +3049,7 @@ var _ = Describe("isRVRMemberOrLeavingDatamesh", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{
-						Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica,
-						ReplicaName: "rv-1-1",
-						StartedAt:   metav1.Now(),
-					},
+					makeDatameshSingleStepTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica, "rv-1-1", "", 0),
 				},
 			},
 		}
@@ -3061,11 +3060,7 @@ var _ = Describe("isRVRMemberOrLeavingDatamesh", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{
-						Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica,
-						ReplicaName: "rv-1-0",
-						StartedAt:   metav1.Now(),
-					},
+					makeDatameshSingleStepTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica, "rv-1-0", "", 0),
 				},
 			},
 		}
@@ -3171,7 +3166,7 @@ var _ = Describe("reconcileRVRFinalizers", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: ptr.To(metav1.Now())}}},
 				},
 			},
 		}
@@ -3247,16 +3242,20 @@ var _ = Describe("removeDatameshMembers", func() {
 	})
 })
 
-var _ = Describe("applyTransitionMessage", func() {
+var _ = Describe("applyDatameshTransitionStepMessage", func() {
 	It("sets message and returns true when different", func() {
-		t := &v1alpha1.ReplicatedVolumeDatameshTransition{Message: "old"}
-		Expect(applyTransitionMessage(t, "new")).To(BeTrue())
-		Expect(t.Message).To(Equal("new"))
+		step := &v1alpha1.ReplicatedVolumeDatameshTransitionStep{Message: "old"}
+		Expect(applyDatameshTransitionStepMessage(step, "new")).To(BeTrue())
+		Expect(step.Message).To(Equal("new"))
 	})
 
 	It("returns false when message is the same", func() {
-		t := &v1alpha1.ReplicatedVolumeDatameshTransition{Message: "same"}
-		Expect(applyTransitionMessage(t, "same")).To(BeFalse())
+		step := &v1alpha1.ReplicatedVolumeDatameshTransitionStep{Message: "same"}
+		Expect(applyDatameshTransitionStepMessage(step, "same")).To(BeFalse())
+	})
+
+	It("returns false when step is nil", func() {
+		Expect(applyDatameshTransitionStepMessage(nil, "msg")).To(BeFalse())
 	})
 })
 

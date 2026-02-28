@@ -593,7 +593,7 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 			mkAttachMember("rv-1-0", "node-1", true),
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, DatameshRevision: 10, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 10)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
@@ -610,7 +610,7 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 			mkAttachMember("rv-1-0", "node-1", false),
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, DatameshRevision: 10, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 10)}
 
@@ -629,7 +629,7 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 		rv.Spec.MaxAttachments = 2
 		rv.Status.Datamesh.Multiattach = true
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, DatameshRevision: 10, StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkAttachRVRWithRev("rv-1-0", "node-1", 10),
@@ -663,8 +663,8 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 		rv.Spec.MaxAttachments = 2
 		rv.Status.Datamesh.Multiattach = true
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, DatameshRevision: 10, StartedAt: metav1.Now()},
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, DatameshRevision: 11, ReplicaName: "rv-1-1", StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 11, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkAttachRVRWithRev("rv-1-0", "node-1", 10), // confirmed rev 10
@@ -700,8 +700,8 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 		rv.Spec.MaxAttachments = 2
 		rv.Status.Datamesh.Multiattach = true
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, DatameshRevision: 10, StartedAt: metav1.Now()},
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, DatameshRevision: 11, ReplicaName: "rv-1-1", StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 11, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkAttachRVRWithRev("rv-1-0", "node-1", 11), // confirmed both
@@ -737,7 +737,7 @@ var _ = Describe("ensureDatameshAttachments completion", func() {
 		rv.Spec.MaxAttachments = 2
 		rv.Status.Datamesh.Multiattach = true
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, DatameshRevision: 10, StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkAttachRVRWithRev("rv-1-0", "node-1", 10),
@@ -838,7 +838,7 @@ var _ = Describe("ensureDatameshAttachments attach", func() {
 			mkAttachMember("rv-1-1", "node-2", false),
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, DatameshRevision: 10, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkAttachRVRWithRev("rv-1-0", "node-1", 5),
@@ -861,7 +861,7 @@ var _ = Describe("ensureDatameshAttachments attach", func() {
 			mkAttachMember("rv-1-1", "node-1", false),
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica, DatameshRevision: 10, ReplicaName: "rv-1-1", StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica, ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-1", "node-1", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
@@ -1175,7 +1175,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		}, 10)
 		rv.Status.Datamesh.Multiattach = true
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, DatameshRevision: 10, ReplicaName: "rv-1-1", StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkAttachRVR("rv-1-0", "node-1", true),
@@ -1200,7 +1200,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		rv.Spec.MaxAttachments = 2
 		rv.Status.Datamesh.Multiattach = true
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, DatameshRevision: 10, StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkAttachRVRWithRev("rv-1-0", "node-1", 5),
@@ -1243,8 +1243,8 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		// EnableMultiattach transition should have a Message filled by the progress callback.
 		for _, t := range rv.Status.DatameshTransitions {
 			if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach {
-				Expect(t.Message).NotTo(BeEmpty(), "EnableMultiattach transition should have a progress message")
-				Expect(t.Message).To(ContainSubstring("replicas confirmed revision"))
+				Expect(t.CurrentStep().Message).NotTo(BeEmpty(), "EnableMultiattach transition should have a progress message")
+				Expect(t.CurrentStep().Message).To(ContainSubstring("replicas confirmed revision"))
 			}
 		}
 	})
@@ -1255,7 +1255,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachMember("rv-1-1", "node-2", false),
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach, DatameshRevision: 10, StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach, Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkAttachRVRWithRev("rv-1-0", "node-1", 10),
@@ -1276,7 +1276,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachMember("rv-1-0", "node-1", true),
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, DatameshRevision: 10, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)} // not confirmed
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
@@ -1287,7 +1287,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		Expect(as.conditionMessage).To(ContainSubstring("Attaching"))
 		Expect(as.conditionMessage).To(ContainSubstring("replicas confirmed revision"))
 		// Transition.Message should also be set.
-		Expect(rv.Status.DatameshTransitions[0].Message).To(ContainSubstring("replicas confirmed revision"))
+		Expect(rv.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("replicas confirmed revision"))
 	})
 
 	It("in-progress Detach transition sets conditionMessage", func() {
@@ -1295,7 +1295,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachMember("rv-1-0", "node-1", false),
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, DatameshRevision: 10, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)} // not confirmed
 
@@ -1311,7 +1311,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachMember("rv-1-0", "node-1", true),
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, DatameshRevision: 10, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvr := mkAttachRVRWithRev("rv-1-0", "node-1", 5)
 		rvr.Generation = 1
@@ -1349,7 +1349,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachMember("rv-1-0", "node-1", false), // Attached=false, Detach in progress
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, DatameshRevision: 10, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)}
 
@@ -1371,7 +1371,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		}, 10)
 		// Active Attach transition (not yet confirmed) + no RVA → intent=Detach
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, DatameshRevision: 10, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)}
 
@@ -1402,7 +1402,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachMember("rv-1-0", "node-1", true), // Attached=true, Attach in progress
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, DatameshRevision: 10, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
@@ -1424,7 +1424,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 			mkAttachMember("rv-1-0", "node-1", false), // Attached=false, Detach pending
 		}, 10)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
-			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, DatameshRevision: 10, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 10, StartedAt: ptr.To(metav1.Now())}}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVRWithRev("rv-1-0", "node-1", 5)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}
@@ -1476,7 +1476,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 		_, _ = testEnsureDatameshAttachments(ctx, rv, rvrs, rvas, mkAttachRSP("node-1"))
 
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
-		Expect(rv.Status.DatameshTransitions[0].Message).To(ContainSubstring("replicas confirmed revision"))
+		Expect(rv.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("replicas confirmed revision"))
 	})
 
 	It("attach: Detach transition Message field set on creation", func() {
@@ -1490,7 +1490,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
 		Expect(rv.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach))
-		Expect(rv.Status.DatameshTransitions[0].Message).To(ContainSubstring("replicas confirmed revision"))
+		Expect(rv.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("replicas confirmed revision"))
 	})
 
 	It("attach: potentiallyAttached updated after new Attach creation", func() {

@@ -583,35 +583,11 @@ spec:
               datameshTransitions:
                 description: DatameshTransitions is the list of active datamesh transitions.
                 items:
-                  description: ReplicatedVolumeDatameshTransition represents an active
-                    datamesh transition.
+                  description: |-
+                    ReplicatedVolumeDatameshTransition represents an active datamesh transition.
+                    Each transition has an ordered list of steps that are pre-declared on creation
+                    and executed sequentially. The transition's start time is steps[0].startedAt.
                   properties:
-                    datameshRevision:
-                      description: |-
-                        DatameshRevision is the datamesh revision when this transition was introduced.
-                        Zero means unset. For Formation transitions, must be absent (zero).
-                      format: int64
-                      type: integer
-                    formation:
-                      description: |-
-                        Formation holds formation-specific details.
-                        Required when type is "Formation"; must not be set otherwise.
-                      properties:
-                        phase:
-                          default: Preconfigure
-                          description: Phase is the current formation phase.
-                          enum:
-                          - Preconfigure
-                          - EstablishConnectivity
-                          - BootstrapData
-                          type: string
-                      required:
-                      - phase
-                      type: object
-                    message:
-                      description: Message is an optional human-readable message about
-                        the transition.
-                      type: string
                     replicaName:
                       description: |-
                         ReplicaName is the name of the replica this transition applies to.
@@ -621,11 +597,61 @@ spec:
                       minLength: 1
                       pattern: ^.+-([0-9]|[12][0-9]|3[01])$
                       type: string
-                    startedAt:
-                      description: StartedAt is the timestamp when this transition
-                        started.
-                      format: date-time
-                      type: string
+                    steps:
+                      description: |-
+                        Steps is the ordered list of steps for this transition.
+                        All steps are written when the transition is created (with status=Pending,
+                        and the first step immediately set to Active with startedAt).
+                        Steps are executed sequentially — only one step is Active at a time.
+                        Must have at least one element.
+                      items:
+                        description: ReplicatedVolumeDatameshTransitionStep represents
+                          one step within a transition.
+                        properties:
+                          completedAt:
+                            description: CompletedAt is set when the step transitions
+                              from Active to Completed.
+                            format: date-time
+                            type: string
+                          datameshRevision:
+                            description: |-
+                              DatameshRevision is the revision assigned when this step was activated.
+                              0 if the step has not been activated yet or does not bump the revision.
+                            format: int64
+                            type: integer
+                          message:
+                            description: |-
+                              Message is a per-step progress or error message.
+                              Updated every reconciliation while the step is Active.
+                            maxLength: 512
+                            type: string
+                          name:
+                            description: Name is a human-readable step name (e.g.,
+                              "Preconfigure", "attach", "✦ → D∅").
+                            maxLength: 64
+                            minLength: 1
+                            type: string
+                          startedAt:
+                            description: StartedAt is set when the step transitions
+                              from Pending to Active.
+                            format: date-time
+                            type: string
+                          status:
+                            default: Pending
+                            description: Status is the current status of this step.
+                            enum:
+                            - Pending
+                            - Active
+                            - Completed
+                            type: string
+                        required:
+                        - name
+                        - status
+                        type: object
+                      maxItems: 8
+                      minItems: 1
+                      type: array
+                      x-kubernetes-list-type: atomic
                     type:
                       description: Type is the transition type.
                       enum:
@@ -638,18 +664,10 @@ spec:
                       - RemoveAccessReplica
                       type: string
                   required:
-                  - startedAt
+                  - steps
                   - type
                   type: object
                   x-kubernetes-validations:
-                  - message: formation is required when type is Formation
-                    rule: self.type != 'Formation' || has(self.formation)
-                  - message: formation is only allowed when type is Formation
-                    rule: '!has(self.formation) || self.type == ''Formation'''
-                  - message: datameshRevision must be absent (or zero) when type is
-                      Formation
-                    rule: self.type != 'Formation' || !has(self.datameshRevision)
-                      || self.datameshRevision == 0
                   - message: replicaName is required for Attach, Detach, AddAccessReplica,
                       RemoveAccessReplica transitions
                     rule: self.type == 'Formation' || self.type == 'EnableMultiattach'
