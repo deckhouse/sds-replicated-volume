@@ -497,14 +497,14 @@ var _ = Describe("ensureDatameshAttachments intent", func() {
 		Expect(as.conditionMessage).To(ContainSubstring("Agent is not ready"))
 	})
 
-	It("queues when no member but has RVR with PendingReplicaTransition", func() {
+	It("queues when no member but has RVR with DatameshRequest", func() {
 		// Background diskful member on another node to satisfy global quorum.
 		rv := mkAttachRV([]v1alpha1.DatameshMember{
 			mkAttachMember("rv-1-9", "node-bg", false),
 		}, 10)
-		rv.Status.DatameshPendingReplicaTransitions = []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
-			{Name: "rv-1-0", Message: "scheduling in progress", Transition: v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-				Member: ptr.To(true), Type: v1alpha1.ReplicaTypeAccess,
+		rv.Status.DatameshReplicaRequests = []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+			{Name: "rv-1-0", Message: "scheduling in progress", Request: v1alpha1.DatameshMembershipRequest{
+				Operation: v1alpha1.DatameshMembershipRequestOperationJoin, Type: v1alpha1.ReplicaTypeAccess,
 			}},
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
@@ -1386,7 +1386,7 @@ var _ = Describe("ensureDatameshAttachments combined", func() {
 
 	It("attach: already fully attached is no-op", func() {
 		rv := mkAttachRV([]v1alpha1.DatameshMember{
-			mkAttachMember("rv-1-0", "node-1", true), // fully attached, no pending transition
+			mkAttachMember("rv-1-0", "node-1", true), // fully attached, no pending request
 		}, 10)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkAttachRVR("rv-1-0", "node-1", true)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkAttachRVA("rva-1", "node-1")}

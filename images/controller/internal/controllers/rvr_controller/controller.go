@@ -75,7 +75,7 @@ func BuildController(mgr manager.Manager, agentPodNamespace string) error {
 // rvEventHandler handles ReplicatedVolume events and enqueues RVRs with targeted logic:
 // - DatameshRevision changed: enqueue members from old/new datamesh (or all if initial)
 // - ReplicatedStorageClassName changed: enqueue all RVRs
-// - DatameshPendingReplicaTransitions message changed: enqueue only affected RVRs
+// - DatameshReplicaRequests message changed: enqueue only affected RVRs
 type rvEventHandler struct {
 	cl client.Client
 }
@@ -132,9 +132,9 @@ func (h *rvEventHandler) Update(ctx context.Context, e event.UpdateEvent, q work
 			Union(idset.FromAll(newRV.Status.Datamesh.Members))
 	}
 
-	// DatameshPendingReplicaTransitions messages changed: enqueue affected replicas.
-	oldTx := oldRV.Status.DatameshPendingReplicaTransitions
-	newTx := newRV.Status.DatameshPendingReplicaTransitions
+	// DatameshReplicaRequests messages changed: enqueue affected replicas.
+	oldTx := oldRV.Status.DatameshReplicaRequests
+	newTx := newRV.Status.DatameshReplicaRequests
 	i, j := 0, 0
 	for i < len(oldTx) || j < len(newTx) {
 		switch {

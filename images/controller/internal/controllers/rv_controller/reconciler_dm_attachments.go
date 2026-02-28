@@ -396,14 +396,14 @@ func computeDatameshAttachmentIntents(atts *attachmentsSummary, rv *v1alpha1.Rep
 				as.conditionMessage = "Waiting for replica on node"
 			} else {
 				rvrID := as.rvr.ID()
-				prtIdx := slices.IndexFunc(rv.Status.DatameshPendingReplicaTransitions, func(prt v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition) bool {
-					return prt.Name == as.rvr.Name && prt.Transition.Member != nil && *prt.Transition.Member
+				replicaReqIdx := slices.IndexFunc(rv.Status.DatameshReplicaRequests, func(replicaReq v1alpha1.ReplicatedVolumeDatameshReplicaRequest) bool {
+					return replicaReq.Name == as.rvr.Name && replicaReq.Request.Operation == v1alpha1.DatameshMembershipRequestOperationJoin
 				})
 				readyCond := obju.GetStatusCondition(as.rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
 				switch {
-				case prtIdx >= 0:
+				case replicaReqIdx >= 0:
 					as.conditionMessage = fmt.Sprintf("Waiting for replica [#%d] to join datamesh: %s",
-						rvrID, rv.Status.DatameshPendingReplicaTransitions[prtIdx].Message)
+						rvrID, rv.Status.DatameshReplicaRequests[replicaReqIdx].Message)
 				case readyCond != nil && readyCond.Message != "":
 					as.conditionMessage = fmt.Sprintf("Waiting for replica [#%d] to join datamesh: %s — %s",
 						rvrID, readyCond.Reason, readyCond.Message)

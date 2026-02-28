@@ -138,7 +138,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Preparatory actions.
 	eo := flow.MergeEnsures(
-		ensureDatameshPendingReplicaTransitions(rf.Ctx(), rv, rvrs),
+		ensureDatameshReplicaRequests(rf.Ctx(), rv, rvrs),
 	)
 	if eo.Error() != nil {
 		return rf.Fail(eo.Error()).ToCtrl()
@@ -346,9 +346,9 @@ func applyTransitionMessage(t *v1alpha1.ReplicatedVolumeDatameshTransition, msg 
 	return true
 }
 
-// applyPendingReplicaTransitionMessage sets the Message field on the given pending replica
+// applyDatameshReplicaRequestMessage sets the Message field on the given pending replica
 // transition. Returns true if the message was changed.
-func applyPendingReplicaTransitionMessage(p *v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition, msg string) bool {
+func applyDatameshReplicaRequestMessage(p *v1alpha1.ReplicatedVolumeDatameshReplicaRequest, msg string) bool {
 	if p == nil || p.Message == msg {
 		return false
 	}
@@ -538,12 +538,12 @@ func applyDatameshMemberAbsent(rv *v1alpha1.ReplicatedVolume, repIDs idset.IDSet
 	return true
 }
 
-// applyPendingReplicaMessages updates the Message field for pending replica transitions
+// applyDatameshReplicaRequestMessages updates the Message field for pending replica transitions
 // whose ID is in the given set. Returns true if any message was changed.
-func applyPendingReplicaMessages(rv *v1alpha1.ReplicatedVolume, repIDs idset.IDSet, message string) bool {
+func applyDatameshReplicaRequestMessages(rv *v1alpha1.ReplicatedVolume, repIDs idset.IDSet, message string) bool {
 	changed := false
-	for i := range rv.Status.DatameshPendingReplicaTransitions {
-		t := &rv.Status.DatameshPendingReplicaTransitions[i]
+	for i := range rv.Status.DatameshReplicaRequests {
+		t := &rv.Status.DatameshReplicaRequests[i]
 		if repIDs.Contains(t.ID()) && t.Message != message {
 			t.Message = message
 			changed = true
@@ -865,11 +865,11 @@ func applyConfigurationReadyCondFalse(rv *v1alpha1.ReplicatedVolume, reason, mes
 	})
 }
 
-// ensureDatameshPendingReplicaTransitions synchronizes rv.Status.DatameshPendingReplicaTransitions
-// with the current DatameshPendingTransition from each RVR.
+// ensureDatameshReplicaRequests synchronizes rv.Status.DatameshReplicaRequests
+// with the current DatameshRequest from each RVR.
 // Both lists are kept sorted by name for determinism.
 // Uses sorted merge-in-place algorithm (no map allocation).
-func ensureDatameshPendingReplicaTransitions(
+func ensureDatameshReplicaRequests(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
@@ -878,24 +878,24 @@ func ensureDatameshPendingReplicaTransitions(
 	defer ef.OnEnd(&outcome)
 
 	changed := false
-	existing := rv.Status.DatameshPendingReplicaTransitions
+	existing := rv.Status.DatameshReplicaRequests
 
 	// Ensure existing entries are sorted by name for the merge algorithm below.
 	// Note: sorting does not mark changed=true intentionally. Order is semantically
 	// irrelevant for the API, so a mere reorder is not a reason to patch. If a real
 	// content change occurs, the patch will persist the correctly sorted value.
-	slices.SortFunc(existing, func(a, b v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition) int {
+	slices.SortFunc(existing, func(a, b v1alpha1.ReplicatedVolumeDatameshReplicaRequest) int {
 		return cmp.Compare(a.ID(), b.ID())
 	})
 
 	// Merge-in-place with two pointers.
 	// rvrs are already sorted by caller (getRVRsSorted).
-	result := make([]v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition, 0, len(existing)+len(rvrs))
+	result := make([]v1alpha1.ReplicatedVolumeDatameshReplicaRequest, 0, len(existing)+len(rvrs))
 	i, j := 0, 0
 
 	for i < len(existing) && j < len(rvrs) {
 		// Skip rvrs with nil transition.
-		if rvrs[j].Status.DatameshPendingTransition == nil {
+		if rvrs[j].Status.DatameshRequest == nil {
 			j++
 			continue
 		}
@@ -909,26 +909,26 @@ func ensureDatameshPendingReplicaTransitions(
 			i++
 		case 1: // existingName > rvrName: new entry
 			changed = true
-			result = append(result, v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+			result = append(result, v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 				Name: rvrName,
 				// DeepCopy to avoid aliasing: rvrs is a read-only input,
 				// and the cloned value will live inside rv.Status (mutation target).
-				Transition:      *rvrs[j].Status.DatameshPendingTransition.DeepCopy(),
+				Request:         *rvrs[j].Status.DatameshRequest.DeepCopy(),
 				FirstObservedAt: metav1.Now(),
 			})
 			j++
 		case 0: // equal names
-			if existing[i].Transition.Equals(rvrs[j].Status.DatameshPendingTransition) {
+			if existing[i].Request.Equals(rvrs[j].Status.DatameshRequest) {
 				// Keep as-is.
 				result = append(result, existing[i])
 			} else {
-				// Update: copy transition, clear Message, set new FirstObservedAt.
+				// Update: copy request, clear Message, set new FirstObservedAt.
 				changed = true
-				result = append(result, v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+				result = append(result, v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 					Name: rvrName,
 					// DeepCopy to avoid aliasing: rvrs is a read-only input,
 					// and the cloned value will live inside rv.Status (mutation target).
-					Transition:      *rvrs[j].Status.DatameshPendingTransition.DeepCopy(),
+					Request:         *rvrs[j].Status.DatameshRequest.DeepCopy(),
 					FirstObservedAt: metav1.Now(),
 				})
 			}
@@ -944,13 +944,13 @@ func ensureDatameshPendingReplicaTransitions(
 
 	// Drain remaining rvrs with non-nil transition (added).
 	for j < len(rvrs) {
-		if rvrs[j].Status.DatameshPendingTransition != nil {
+		if rvrs[j].Status.DatameshRequest != nil {
 			changed = true
-			result = append(result, v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+			result = append(result, v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 				Name: rvrs[j].Name,
 				// DeepCopy to avoid aliasing: rvrs is a read-only input,
 				// and the cloned value will live inside rv.Status (mutation target).
-				Transition:      *rvrs[j].Status.DatameshPendingTransition.DeepCopy(),
+				Request:         *rvrs[j].Status.DatameshRequest.DeepCopy(),
 				FirstObservedAt: metav1.Now(),
 			})
 		}
@@ -959,7 +959,7 @@ func ensureDatameshPendingReplicaTransitions(
 
 	// Assign result only if changed.
 	if changed {
-		rv.Status.DatameshPendingReplicaTransitions = result
+		rv.Status.DatameshReplicaRequests = result
 	}
 
 	return ef.Ok().ReportChangedIf(changed)

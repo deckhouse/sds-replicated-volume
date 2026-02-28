@@ -162,8 +162,8 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 	// - a pending transition with Member=true (signaling readiness to become a datamesh member),
 	// - DRBDConfigured condition with reason PendingDatameshJoin (DRBD setup complete, awaiting membership).
 	preconfigured := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		pt := rvr.Status.DatameshPendingTransition
-		return pt != nil && pt.Member != nil && *pt.Member &&
+		req := rvr.Status.DatameshRequest
+		return req != nil && req.Operation == v1alpha1.DatameshMembershipRequestOperationJoin &&
 			obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType).
 				ReasonEqual(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingDatameshJoin).
 				ObservedGenerationCurrent().
@@ -206,7 +206,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 			deleting.Len(), deleting.String(),
 		)
 		changed = applyFormationTransitionMessage(rv, msg) || changed
-		changed = applyPendingReplicaMessages(
+		changed = applyDatameshReplicaRequestMessages(
 			rv, diskful,
 			"Datamesh is forming, waiting for replica cleanup to complete",
 		) || changed
@@ -234,7 +234,7 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 		msg := computeFormationPreconfigureWaitMessage(*rvrs, targetDiskfulCount,
 			pendingScheduling, schedulingFailed, waitingPreconfiguration)
 		changed = applyFormationTransitionMessage(rv, msg) || changed
-		changed = applyPendingReplicaMessages(
+		changed = applyDatameshReplicaRequestMessages(
 			rv, preconfigured,
 			"Datamesh is forming, waiting for other replicas to become preconfigured",
 		) || changed
@@ -267,11 +267,11 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 			missingAddresses.String(), requiredNetworks,
 		)
 		changed = applyFormationTransitionMessage(rv, msg) || changed
-		changed = applyPendingReplicaMessages(
+		changed = applyDatameshReplicaRequestMessages(
 			rv, okReplicas,
 			"Datamesh is forming, waiting for other replicas to report required addresses",
 		) || changed
-		changed = applyPendingReplicaMessages(
+		changed = applyDatameshReplicaRequestMessages(
 			rv, missingAddresses,
 			"Replica addresses do not match required network configuration, blocking datamesh formation",
 		) || changed
@@ -293,11 +293,11 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 			notEligible.String(),
 		)
 		changed = applyFormationTransitionMessage(rv, msg) || changed
-		changed = applyPendingReplicaMessages(
+		changed = applyDatameshReplicaRequestMessages(
 			rv, okReplicas,
 			"Datamesh is forming, waiting for other replicas to be on eligible nodes",
 		) || changed
-		changed = applyPendingReplicaMessages(
+		changed = applyDatameshReplicaRequestMessages(
 			rv, notEligible,
 			"Replica is placed on a node not in the eligible nodes list, blocking datamesh formation",
 		) || changed
@@ -310,13 +310,13 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 		if !diskful.Contains(rvr.ID()) {
 			return false
 		}
-		pt := rvr.Status.DatameshPendingTransition
-		if pt == nil {
+		req := rvr.Status.DatameshRequest
+		if req == nil {
 			return false
 		}
-		return rvr.Spec.Type != pt.Type ||
-			rvr.Spec.LVMVolumeGroupName != pt.LVMVolumeGroupName ||
-			rvr.Spec.LVMVolumeGroupThinPoolName != pt.ThinPoolName
+		return rvr.Spec.Type != req.Type ||
+			rvr.Spec.LVMVolumeGroupName != req.LVMVolumeGroupName ||
+			rvr.Spec.LVMVolumeGroupThinPoolName != req.ThinPoolName
 	})
 	if !specMismatch.IsEmpty() {
 		okReplicas := diskful.Difference(specMismatch)
@@ -328,11 +328,11 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 			specMismatch.String(),
 		)
 		changed = applyFormationTransitionMessage(rv, msg) || changed
-		changed = applyPendingReplicaMessages(
+		changed = applyDatameshReplicaRequestMessages(
 			rv, okReplicas,
 			"Datamesh is forming, waiting for other replicas to resolve spec mismatch",
 		) || changed
-		changed = applyPendingReplicaMessages(
+		changed = applyDatameshReplicaRequestMessages(
 			rv, specMismatch,
 			"Replica spec does not match pending transition, blocking datamesh formation",
 		) || changed
@@ -361,11 +361,11 @@ func (r *Reconciler) reconcileFormationPhasePreconfigure(
 			insufficientSize.String(), rv.Status.Datamesh.Size.String(),
 		)
 		changed = applyFormationTransitionMessage(rv, msg) || changed
-		changed = applyPendingReplicaMessages(
+		changed = applyDatameshReplicaRequestMessages(
 			rv, okReplicas,
 			"Datamesh is forming, waiting for other replicas to resolve backing volume size issue",
 		) || changed
-		changed = applyPendingReplicaMessages(
+		changed = applyDatameshReplicaRequestMessages(
 			rv, insufficientSize,
 			"Replica backing volume size is insufficient for datamesh, blocking formation",
 		) || changed
@@ -426,19 +426,19 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 				zone = en.ZoneName
 			}
 
-			// We could use rv.Status.DatameshPendingReplicaTransitions, but that would require
-			// searching by name. ensureDatameshPendingReplicaTransitions called earlier guarantees
+			// We could use rv.Status.DatameshReplicaRequests, but that would require
+			// searching by name. ensureDatameshReplicaRequests called earlier guarantees
 			// these fields match.
-			pt := rvr.Status.DatameshPendingTransition
+			req := rvr.Status.DatameshRequest
 
 			applyDatameshMember(rv, v1alpha1.DatameshMember{
 				Name:                       rvr.Name,
-				Type:                       v1alpha1.DatameshMemberType(pt.Type),
+				Type:                       v1alpha1.DatameshMemberType(req.Type),
 				NodeName:                   rvr.Spec.NodeName,
 				Zone:                       zone,
 				Addresses:                  slices.Clone(rvr.Status.Addresses),
-				LVMVolumeGroupName:         pt.LVMVolumeGroupName,
-				LVMVolumeGroupThinPoolName: pt.ThinPoolName,
+				LVMVolumeGroupName:         req.LVMVolumeGroupName,
+				LVMVolumeGroupThinPoolName: req.ThinPoolName,
 			})
 		}
 
@@ -455,7 +455,7 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 		rv.Status.Datamesh.QuorumMinimumRedundancy = quorumMinimumRedundancy
 
 		rv.Status.DatameshRevision++
-		applyPendingReplicaMessages(rv, diskful, "Datamesh is forming, waiting for replica to apply new configuration")
+		applyDatameshReplicaRequestMessages(rv, diskful, "Datamesh is forming, waiting for replica to apply new configuration")
 		applyFormationTransitionMessage(rv, fmt.Sprintf(
 			"Replicas [%s] preconfigured and added to datamesh. Waiting for them to establish connections",
 			diskful.String(),
@@ -476,7 +476,7 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 			dmDiskful.String(), diskful.String(),
 		)
 		changed = applyFormationTransitionMessage(rv, msg) || changed
-		changed = applyPendingReplicaMessages(rv, diskful, msg) || changed
+		changed = applyDatameshReplicaRequestMessages(rv, diskful, msg) || changed
 		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
 			ReportChangedIf(changed)
 	}
@@ -496,8 +496,8 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 			"Waiting for replicas [%s] to be fully configured for datamesh revision %d",
 			notConfigured.String(), rv.Status.DatameshRevision,
 		)) || changed
-		changed = applyPendingReplicaMessages(rv, notConfigured, "Datamesh is forming, waiting for DRBD configuration to continue") || changed
-		changed = applyPendingReplicaMessages(rv, configured, "Datamesh is forming, DRBD configured, waiting for other replicas") || changed
+		changed = applyDatameshReplicaRequestMessages(rv, notConfigured, "Datamesh is forming, waiting for DRBD configuration to continue") || changed
+		changed = applyDatameshReplicaRequestMessages(rv, configured, "Datamesh is forming, DRBD configured, waiting for other replicas") || changed
 		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
 			ReportChangedIf(changed)
 	}
@@ -522,7 +522,7 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 			"Waiting for replicas [%s] to establish connections with all peers",
 			notConnected.String(),
 		)) || changed
-		changed = applyPendingReplicaMessages(rv, diskful, "Datamesh is forming, waiting for all replicas to connect to each other") || changed
+		changed = applyDatameshReplicaRequestMessages(rv, diskful, "Datamesh is forming, waiting for all replicas to connect to each other") || changed
 		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
 			ReportChangedIf(changed)
 	}
@@ -556,8 +556,8 @@ func (r *Reconciler) reconcileFormationPhaseEstablishConnectivity(
 				"(backing volume Inconsistent + Established replication with all peers)",
 			notReady.String(),
 		)) || changed
-		changed = applyPendingReplicaMessages(rv, notReady, "Datamesh is forming, waiting for data bootstrap readiness (requires backing volume Inconsistent and replication Established with all peers)") || changed
-		changed = applyPendingReplicaMessages(rv, readyForDataBootstrap, "Datamesh is forming, ready for data bootstrap, waiting for other replicas") || changed
+		changed = applyDatameshReplicaRequestMessages(rv, notReady, "Datamesh is forming, waiting for data bootstrap readiness (requires backing volume Inconsistent and replication Established with all peers)") || changed
+		changed = applyDatameshReplicaRequestMessages(rv, readyForDataBootstrap, "Datamesh is forming, ready for data bootstrap, waiting for other replicas") || changed
 		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
 			ReportChangedIf(changed)
 	}
@@ -663,7 +663,7 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 			drbdrOp.Spec.CreateNewUUID.ClearBitmap != drbdrOpFormationParams.ClearBitmap ||
 			drbdrOp.Spec.CreateNewUUID.ForceResync != drbdrOpFormationParams.ForceResync {
 			changed = applyFormationTransitionMessage(rv, "Existing DRBDResourceOperation has unexpected parameters, restarting formation") || changed
-			changed = applyPendingReplicaMessages(rv, dmDiskful, "Datamesh is forming, restarting due to data bootstrap operation parameter mismatch") || changed
+			changed = applyDatameshReplicaRequestMessages(rv, dmDiskful, "Datamesh is forming, restarting due to data bootstrap operation parameter mismatch") || changed
 
 			return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
 				ReportChangedIf(changed)
@@ -702,7 +702,7 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 		rf.Log().Error(fmt.Errorf("DRBDResourceOperation %s failed: %s", drbdrOpName, drbdrOp.Status.Message), "data bootstrap operation failed, restarting formation")
 
 		changed = applyFormationTransitionMessage(rv, "Data bootstrap operation failed, restarting formation") || changed
-		changed = applyPendingReplicaMessages(rv, dmDiskful, "Datamesh is forming, restarting due to failed data bootstrap operation") || changed
+		changed = applyDatameshReplicaRequestMessages(rv, dmDiskful, "Datamesh is forming, restarting due to failed data bootstrap operation") || changed
 
 		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, 30*time.Second).
 			ReportChangedIf(changed)
@@ -712,7 +712,7 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 	// If it is still running or pending — update messages and wait.
 	if drbdrOp.Status.Phase != v1alpha1.DRBDOperationPhaseSucceeded {
 		changed = applyFormationTransitionMessage(rv, "Data bootstrap initiated, waiting for operation to complete. "+dataBootstrapModeMsg) || changed
-		changed = applyPendingReplicaMessages(rv, dmDiskful, "Datamesh is forming, waiting for data bootstrap to complete") || changed
+		changed = applyDatameshReplicaRequestMessages(rv, dmDiskful, "Datamesh is forming, waiting for data bootstrap to complete") || changed
 
 		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, dataBootstrapTimeout).
 			ReportChangedIf(changed)
@@ -736,8 +736,8 @@ func (r *Reconciler) reconcileFormationPhaseBootstrapData(
 			"Data bootstrap in progress, waiting for replicas [%s] to reach UpToDate state. %s",
 			notUpToDate.String(), dataBootstrapModeMsg,
 		)) || changed
-		changed = applyPendingReplicaMessages(rv, notUpToDate, "Datamesh is forming, data bootstrap in progress, waiting for backing volume to become UpToDate") || changed
-		changed = applyPendingReplicaMessages(rv, upToDate, "Datamesh is forming, data bootstrap in progress, replica is UpToDate, waiting for remaining replicas") || changed
+		changed = applyDatameshReplicaRequestMessages(rv, notUpToDate, "Datamesh is forming, data bootstrap in progress, waiting for backing volume to become UpToDate") || changed
+		changed = applyDatameshReplicaRequestMessages(rv, upToDate, "Datamesh is forming, data bootstrap in progress, replica is UpToDate, waiting for remaining replicas") || changed
 
 		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, dataBootstrapTimeout).
 			ReportChangedIf(changed)
@@ -817,7 +817,7 @@ func (r *Reconciler) reconcileFormationRestartIfTimeoutPassed(
 	rv.Status.Datamesh = v1alpha1.ReplicatedVolumeDatamesh{}
 	rv.Status.EffectiveLayout = v1alpha1.ReplicatedVolumeEffectiveLayout{}
 	rv.Status.DatameshTransitions = nil
-	rv.Status.DatameshPendingReplicaTransitions = nil
+	rv.Status.DatameshReplicaRequests = nil
 
 	// Re-derive configuration from source (Configuration is nil after reset).
 	outcome = r.reconcileRVConfiguration(rf.Ctx(), rv, rsc)

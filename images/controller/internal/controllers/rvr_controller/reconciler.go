@@ -169,7 +169,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			ensureConditionSatisfyEligibleNodes(rf.Ctx(), rvr, rv, rspView),
 
 			// Ensure datamesh pending transition and configured condition.
-			ensureStatusDatameshPendingTransitionAndConfiguredCond(rf.Ctx(), rvr, rv, rspView),
+			ensureStatusDatameshRequestAndConfiguredCond(rf.Ctx(), rvr, rv, rspView),
 		)
 		if eo.Error() != nil {
 			return rf.Failf(eo.Error(), "ensuring status").ToCtrl()
@@ -1291,10 +1291,10 @@ func applySatisfyEligibleNodesCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, re
 	})
 }
 
-// ensureStatusDatameshPendingTransitionAndConfiguredCond determines what datamesh transition is pending
+// ensureStatusDatameshRequestAndConfiguredCond determines what datamesh transition is pending
 // (join, leave, role change, or backing volume change) by comparing rvr.Spec to rvr.Status,
 // and updates status.datameshPending and the Configured condition accordingly.
-func ensureStatusDatameshPendingTransitionAndConfiguredCond(
+func ensureStatusDatameshRequestAndConfiguredCond(
 	ctx context.Context,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	rv *v1alpha1.ReplicatedVolume,
@@ -1306,13 +1306,13 @@ func ensureStatusDatameshPendingTransitionAndConfiguredCond(
 	changed := false
 
 	// Compute target (single call for both status fields).
-	target, condReason, condMessage := computeTargetDatameshPendingTransition(rvr, rv, rspView)
+	target, condReason, condMessage := computeTargetDatameshRequest(rvr, rv, rspView)
 
 	// Append RV datamesh pending transition message to condition message if there's a pending transition.
 	if target != nil && rv != nil {
-		for i := range rv.Status.DatameshPendingReplicaTransitions {
-			if rv.Status.DatameshPendingReplicaTransitions[i].Name == rvr.Name {
-				if msg := rv.Status.DatameshPendingReplicaTransitions[i].Message; msg != "" {
+		for i := range rv.Status.DatameshReplicaRequests {
+			if rv.Status.DatameshReplicaRequests[i].Name == rvr.Name {
+				if msg := rv.Status.DatameshReplicaRequests[i].Message; msg != "" {
 					condMessage += ": " + msg
 				}
 				break
@@ -1321,7 +1321,7 @@ func ensureStatusDatameshPendingTransitionAndConfiguredCond(
 	}
 
 	// Apply datameshPending.
-	changed = applyDatameshPendingTransition(rvr, target) || changed
+	changed = applyDatameshRequest(rvr, target) || changed
 
 	// Apply Configured condition.
 	if condReason == "" {
@@ -2492,7 +2492,7 @@ func newDRBDRReconciliationCache(
 	}
 }
 
-// computeTargetDatameshPendingTransition computes the target datameshPending field based on
+// computeTargetDatameshRequest computes the target datameshPending field based on
 // rvr.Spec (intended state), rvr.Status (actual state), rv readiness, and eligibility in RSP.
 //
 // Returns (target, condReason, condMessage) where:
@@ -2502,17 +2502,17 @@ func newDRBDRReconciliationCache(
 //
 // The condReason/condMessage are always set: when target is nil, they indicate
 // why there's no pending operation (either configured or blocked).
-func computeTargetDatameshPendingTransition(
+func computeTargetDatameshRequest(
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	rv *v1alpha1.ReplicatedVolume,
 	rspView *rspEligibilityView,
-) (target *v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition, condReason, condMessage string) {
+) (target *v1alpha1.DatameshMembershipRequest, condReason, condMessage string) {
 	// Check if being deleted.
 	if rvr.DeletionTimestamp != nil {
 		if rvr.Status.DatameshRevision != 0 {
 			// Currently a datamesh member - need to leave.
-			return &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-					Member: ptr.To(false),
+			return &v1alpha1.DatameshMembershipRequest{
+					Operation: v1alpha1.DatameshMembershipRequestOperationLeave,
 				}, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingLeave,
 				"Deletion in progress, waiting to leave datamesh"
 		}
@@ -2580,15 +2580,15 @@ func computeTargetDatameshPendingTransition(
 
 	if !isMember {
 		// Not a member - need to join.
-		pending := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-			Member: ptr.To(true),
-			Type:   rvr.Spec.Type,
+		req := &v1alpha1.DatameshMembershipRequest{
+			Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
+			Type:      rvr.Spec.Type,
 		}
 		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
-			pending.LVMVolumeGroupName = rvr.Spec.LVMVolumeGroupName
-			pending.ThinPoolName = rvr.Spec.LVMVolumeGroupThinPoolName
+			req.LVMVolumeGroupName = rvr.Spec.LVMVolumeGroupName
+			req.ThinPoolName = rvr.Spec.LVMVolumeGroupThinPoolName
 		}
-		return pending, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin,
+		return req, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingJoin,
 			fmt.Sprintf("Waiting to join datamesh as %s", rvr.Spec.Type)
 	}
 
@@ -2603,15 +2603,16 @@ func computeTargetDatameshPendingTransition(
 	}
 
 	if !typeInSync {
-		// Type differs - need type change.
-		pending := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-			Type: rvr.Spec.Type,
+		// Type differs - need role change.
+		req := &v1alpha1.DatameshMembershipRequest{
+			Operation: v1alpha1.DatameshMembershipRequestOperationChangeRole,
+			Type:      rvr.Spec.Type,
 		}
 		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
-			pending.LVMVolumeGroupName = rvr.Spec.LVMVolumeGroupName
-			pending.ThinPoolName = rvr.Spec.LVMVolumeGroupThinPoolName
+			req.LVMVolumeGroupName = rvr.Spec.LVMVolumeGroupName
+			req.ThinPoolName = rvr.Spec.LVMVolumeGroupThinPoolName
 		}
-		return pending, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingRoleChange,
+		return req, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingRoleChange,
 			fmt.Sprintf("Waiting to change role to %s", rvr.Spec.Type)
 	}
 
@@ -2622,7 +2623,8 @@ func computeTargetDatameshPendingTransition(
 			rvr.Status.BackingVolume.LVMVolumeGroupThinPoolName == rvr.Spec.LVMVolumeGroupThinPoolName
 		if !bvInSync {
 			// Backing volume differs - need BV change.
-			pending := &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
+			req := &v1alpha1.DatameshMembershipRequest{
+				Operation:          v1alpha1.DatameshMembershipRequestOperationChangeBackingVolume,
 				LVMVolumeGroupName: rvr.Spec.LVMVolumeGroupName,
 				ThinPoolName:       rvr.Spec.LVMVolumeGroupThinPoolName,
 			}
@@ -2630,7 +2632,7 @@ func computeTargetDatameshPendingTransition(
 			if rvr.Spec.LVMVolumeGroupThinPoolName != "" {
 				storageDesc += "/" + rvr.Spec.LVMVolumeGroupThinPoolName
 			}
-			return pending, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingBackingVolumeChange,
+			return req, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingBackingVolumeChange,
 				fmt.Sprintf("Waiting to change backing volume to %s", storageDesc)
 		}
 	}
@@ -2640,16 +2642,16 @@ func computeTargetDatameshPendingTransition(
 		"Replica is configured as intended"
 }
 
-// applyDatameshPendingTransition applies the target datameshPending to rvr.Status in-place.
+// applyDatameshRequest applies the target datameshPending to rvr.Status in-place.
 // Returns true if the field was changed.
-func applyDatameshPendingTransition(rvr *v1alpha1.ReplicatedVolumeReplica, target *v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition) bool {
+func applyDatameshRequest(rvr *v1alpha1.ReplicatedVolumeReplica, target *v1alpha1.DatameshMembershipRequest) bool {
 	changed := false
-	current := rvr.Status.DatameshPendingTransition
+	current := rvr.Status.DatameshRequest
 
 	// Handle target == nil case.
 	if target == nil {
 		if current != nil {
-			rvr.Status.DatameshPendingTransition = nil
+			rvr.Status.DatameshRequest = nil
 			changed = true
 		}
 		return changed
@@ -2657,18 +2659,14 @@ func applyDatameshPendingTransition(rvr *v1alpha1.ReplicatedVolumeReplica, targe
 
 	// Target is not nil — ensure current exists.
 	if current == nil {
-		rvr.Status.DatameshPendingTransition = &v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{}
-		current = rvr.Status.DatameshPendingTransition
+		rvr.Status.DatameshRequest = &v1alpha1.DatameshMembershipRequest{}
+		current = rvr.Status.DatameshRequest
 		changed = true
 	}
 
 	// Compare and update each field.
-	if !ptr.Equal(current.Member, target.Member) {
-		if target.Member != nil {
-			current.Member = ptr.To(*target.Member)
-		} else {
-			current.Member = nil
-		}
+	if current.Operation != target.Operation {
+		current.Operation = target.Operation
 		changed = true
 	}
 	if current.Type != target.Type {
