@@ -600,7 +600,11 @@ flowchart TD
 
 ### reconcileBackingVolume Details
 
+**File:** `reconciler_backing_volume.go`
+
 **Purpose**: Manages LVMLogicalVolume (LLV) lifecycle for diskful replicas — creation, resize, and deletion.
+
+**File:** `reconciler_backing_volume.go`
 
 **Algorithm**:
 
@@ -672,6 +676,8 @@ flowchart TD
 ---
 
 ### reconcileDRBDResource Details
+
+**File:** `reconciler_drbd_resource.go`
 
 **Purpose**: Manages DRBDResource lifecycle — creation, configuration, resize, and deletion. Coordinates with agent for DRBD configuration.
 
@@ -762,6 +768,8 @@ flowchart TD
 
 ### ensureConditionSatisfyEligibleNodes Details
 
+**File:** `reconciler_conditions.go`
+
 **Purpose**: Verifies that the replica's node, LVMVolumeGroup, and ThinPool satisfy the eligible nodes requirements from the ReplicatedStoragePool. This is a non-I/O EnsureReconcileHelper that receives pre-fetched RSP eligibility data.
 
 **Algorithm**:
@@ -823,6 +831,8 @@ flowchart TD
 
 ### ensureStatusAddressesAndType Details
 
+**File:** `reconciler_status.go`
+
 **Purpose**: Updates the `status.addresses` and `status.type` fields from DRBDR status.
 
 **Algorithm**:
@@ -853,6 +863,8 @@ flowchart TD
 ---
 
 ### ensureStatusAttachment Details
+
+**File:** `reconciler_status.go`
 
 **Purpose**: Updates the `status.attachment` field with device path, I/O suspension status, and device open (in-use) status.
 
@@ -890,6 +902,8 @@ flowchart TD
 ---
 
 ### ensureConditionAttached Details
+
+**File:** `reconciler_conditions.go`
 
 **Purpose**: Reports whether the replica is attached (primary) and ready for I/O.
 
@@ -938,6 +952,8 @@ flowchart TD
 
 ### ensureStatusPeers Details
 
+**File:** `reconciler_status.go`
+
 **Purpose**: Mirrors DRBDR peer status to RVR status. Populates `rvr.Status.Peers` directly from `drbdr.Status.Peers`.
 
 **Algorithm**:
@@ -972,6 +988,8 @@ flowchart TD
 ---
 
 ### ensureConditionFullyConnected Details
+
+**File:** `reconciler_conditions.go`
 
 **Purpose**: Reports peer connectivity status via the `FullyConnected` condition. Uses `rvr.Status.Addresses` to determine expected system networks.
 
@@ -1021,6 +1039,8 @@ flowchart TD
 
 ### ensureStatusBackingVolume Details
 
+**File:** `reconciler_status.go`
+
 **Purpose**: Populates the `rvr.Status.BackingVolume` struct fields (size, state, LVM volume group info) from DRBDR and LLV status.
 
 **Algorithm**:
@@ -1067,6 +1087,8 @@ flowchart TD
 ---
 
 ### ensureConditionBackingVolumeUpToDate Details
+
+**File:** `reconciler_conditions.go`
 
 **Purpose**: Reports local backing volume synchronization state for diskful replicas via the `BackingVolumeUpToDate` condition.
 
@@ -1144,6 +1166,8 @@ flowchart TD
 
 ### ensureStatusQuorum Details
 
+**File:** `reconciler_status.go`
+
 **Purpose**: Populates the `rvr.Status.Quorum` and `rvr.Status.QuorumSummary` fields from DRBDR state.
 
 **Algorithm**:
@@ -1173,6 +1197,8 @@ flowchart TD
 ---
 
 ### ensureConditionReady Details
+
+**File:** `reconciler_conditions.go`
 
 **Purpose**: Reports overall replica readiness via the `Ready` condition. Quorum handling depends on replica role: not-yet-member, diskless member, or diskful member.
 
@@ -1241,6 +1267,8 @@ flowchart TD
 ---
 
 ### ensureStatusDatameshRequestAndConfiguredCond Details
+
+**File:** `reconciler_status.go`
 
 **Purpose**: Populates both `rvr.Status.DatameshRequest` field and the `Configured` condition based on comparison of `rvr.Spec` (intended) vs `rvr.Status` (actual) and eligibility checks.
 
