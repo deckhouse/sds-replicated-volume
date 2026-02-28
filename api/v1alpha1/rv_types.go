@@ -245,22 +245,54 @@ func (t ReplicatedVolumeDatameshReplicaRequest) ID() uint8 {
 // and executed sequentially. The transition's start time is steps[0].startedAt.
 // +kubebuilder:object:generate=true
 //
-//	+kubebuilder:validation:XValidation:rule="self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach' || has(self.replicaName)",message="replicaName is required for Attach, Detach, AddAccessReplica, RemoveAccessReplica transitions"
-//	+kubebuilder:validation:XValidation:rule="!has(self.replicaName) || !(self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach')",message="replicaName must not be set for Formation, EnableMultiattach, DisableMultiattach transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum' || has(self.replicaName)",message="replicaName is required for AddReplica, RemoveReplica, ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach transitions"
+//	+kubebuilder:validation:XValidation:rule="!has(self.replicaName) || !(self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum')",message="replicaName must not be set for Formation, EnableMultiattach, DisableMultiattach, ChangeQuorum transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type == 'AddReplica' || self.type == 'RemoveReplica' || self.type == 'ForceRemoveReplica' || !has(self.replicaType)",message="replicaType must only be set for AddReplica, RemoveReplica, ForceRemoveReplica transitions"
+//	+kubebuilder:validation:XValidation:rule="!(self.type == 'AddReplica' || self.type == 'RemoveReplica' || self.type == 'ForceRemoveReplica') || has(self.replicaType)",message="replicaType is required for AddReplica, RemoveReplica, ForceRemoveReplica transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type == 'ChangeReplicaType' || (!has(self.fromReplicaType) && !has(self.toReplicaType))",message="fromReplicaType and toReplicaType must only be set for ChangeReplicaType transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type != 'ChangeReplicaType' || (has(self.fromReplicaType) && has(self.toReplicaType))",message="fromReplicaType and toReplicaType are required for ChangeReplicaType transitions"
 type ReplicatedVolumeDatameshTransition struct {
 	// Type is the transition type.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=Formation;AddAccessReplica;Attach;Detach;DisableMultiattach;EnableMultiattach;RemoveAccessReplica
+	// +kubebuilder:validation:Enum=Formation;AddReplica;Attach;ChangeQuorum;ChangeReplicaType;Detach;DisableMultiattach;EnableMultiattach;ForceDetach;ForceRemoveReplica;RemoveReplica
 	Type ReplicatedVolumeDatameshTransitionType `json:"type"`
 
 	// ReplicaName is the name of the replica this transition applies to.
-	// Required for Attach, Detach, AddAccessReplica, RemoveAccessReplica transitions.
-	// Must not be set for Formation, EnableMultiattach, DisableMultiattach.
+	// Required for AddReplica, RemoveReplica, ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach.
+	// Must not be set for Formation, EnableMultiattach, DisableMultiattach, ChangeQuorum.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=123
 	// +kubebuilder:validation:Pattern=`^.+-([0-9]|[12][0-9]|3[01])$`
 	// +optional
 	ReplicaName string `json:"replicaName,omitempty"`
+
+	// ReplicaType is the target replica type for AddReplica/RemoveReplica/ForceRemoveReplica.
+	// Uses ReplicaType (Diskful, Access, TieBreaker, ShadowDiskful) — liminal states
+	// (LiminalDiskful, LiminalShadowDiskful) are internal mechanics visible in step names,
+	// not in transition parameters.
+	// Required for AddReplica, RemoveReplica, ForceRemoveReplica. Must not be set for other types.
+	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker;ShadowDiskful
+	// +optional
+	ReplicaType ReplicaType `json:"replicaType,omitempty"`
+
+	// FromReplicaType is the source replica type for ChangeReplicaType transitions.
+	// Required for ChangeReplicaType. Must not be set for other types.
+	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker;ShadowDiskful
+	// +optional
+	FromReplicaType ReplicaType `json:"fromReplicaType,omitempty"`
+
+	// ToReplicaType is the target replica type for ChangeReplicaType transitions.
+	// Required for ChangeReplicaType. Must not be set for other types.
+	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker;ShadowDiskful
+	// +optional
+	ToReplicaType ReplicaType `json:"toReplicaType,omitempty"`
+
+	// Group is the parallelism group for this transition.
+	// Set by the controller at transition creation time. Read-only for users.
+	// Provides observability: explains why a transition may be waiting.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=Formation;VotingMembership;NonVotingMembership;Quorum;Attachment;Multiattach;Emergency
+	Group ReplicatedVolumeDatameshTransitionGroup `json:"group"`
 
 	// Steps is the ordered list of steps for this transition.
 	// All steps are written when the transition is created (with status=Pending,
@@ -367,23 +399,54 @@ const (
 	// ReplicatedVolumeDatameshTransitionTypeFormation indicates initial datamesh formation.
 	ReplicatedVolumeDatameshTransitionTypeFormation ReplicatedVolumeDatameshTransitionType = "Formation"
 
-	// ReplicatedVolumeDatameshTransitionTypeAddAccessReplica indicates adding an Access replica to the datamesh.
-	ReplicatedVolumeDatameshTransitionTypeAddAccessReplica ReplicatedVolumeDatameshTransitionType = "AddAccessReplica"
+	// ReplicatedVolumeDatameshTransitionTypeAddReplica indicates adding a replica to the datamesh.
+	ReplicatedVolumeDatameshTransitionTypeAddReplica ReplicatedVolumeDatameshTransitionType = "AddReplica"
 	// ReplicatedVolumeDatameshTransitionTypeAttach indicates attaching a replica (promoting to Primary in DRBD terms).
 	ReplicatedVolumeDatameshTransitionTypeAttach ReplicatedVolumeDatameshTransitionType = "Attach"
+	// ReplicatedVolumeDatameshTransitionTypeChangeQuorum indicates a standalone quorum (q/qmr) change.
+	ReplicatedVolumeDatameshTransitionTypeChangeQuorum ReplicatedVolumeDatameshTransitionType = "ChangeQuorum"
+	// ReplicatedVolumeDatameshTransitionTypeChangeReplicaType indicates changing a member's type (e.g., Access to Diskful).
+	ReplicatedVolumeDatameshTransitionTypeChangeReplicaType ReplicatedVolumeDatameshTransitionType = "ChangeReplicaType"
 	// ReplicatedVolumeDatameshTransitionTypeDetach indicates detaching a replica (demoting from Primary in DRBD terms).
 	ReplicatedVolumeDatameshTransitionTypeDetach ReplicatedVolumeDatameshTransitionType = "Detach"
 	// ReplicatedVolumeDatameshTransitionTypeDisableMultiattach indicates disabling multi-attach (allowTwoPrimaries).
 	ReplicatedVolumeDatameshTransitionTypeDisableMultiattach ReplicatedVolumeDatameshTransitionType = "DisableMultiattach"
 	// ReplicatedVolumeDatameshTransitionTypeEnableMultiattach indicates enabling multi-attach (allowTwoPrimaries).
 	ReplicatedVolumeDatameshTransitionTypeEnableMultiattach ReplicatedVolumeDatameshTransitionType = "EnableMultiattach"
-	// ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica indicates removing an Access replica from the datamesh.
-	ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica ReplicatedVolumeDatameshTransitionType = "RemoveAccessReplica"
+	// ReplicatedVolumeDatameshTransitionTypeForceDetach indicates emergency IO detach for a dead member.
+	ReplicatedVolumeDatameshTransitionTypeForceDetach ReplicatedVolumeDatameshTransitionType = "ForceDetach"
+	// ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica indicates emergency removal of a dead member.
+	ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica ReplicatedVolumeDatameshTransitionType = "ForceRemoveReplica"
+	// ReplicatedVolumeDatameshTransitionTypeRemoveReplica indicates removing a replica from the datamesh.
+	ReplicatedVolumeDatameshTransitionTypeRemoveReplica ReplicatedVolumeDatameshTransitionType = "RemoveReplica"
 )
 
 func (t ReplicatedVolumeDatameshTransitionType) String() string {
 	return string(t)
 }
+
+// ReplicatedVolumeDatameshTransitionGroup enumerates parallelism groups for transitions.
+// The group determines serialization and exclusivity rules (see TRANSITION_ENGINE.md §9).
+type ReplicatedVolumeDatameshTransitionGroup string
+
+const (
+	// ReplicatedVolumeDatameshTransitionGroupFormation is the formation group (exclusive).
+	ReplicatedVolumeDatameshTransitionGroupFormation ReplicatedVolumeDatameshTransitionGroup = "Formation"
+	// ReplicatedVolumeDatameshTransitionGroupVotingMembership is the voting membership group (serialized).
+	ReplicatedVolumeDatameshTransitionGroupVotingMembership ReplicatedVolumeDatameshTransitionGroup = "VotingMembership"
+	// ReplicatedVolumeDatameshTransitionGroupNonVotingMembership is the non-voting membership group (parallel).
+	ReplicatedVolumeDatameshTransitionGroupNonVotingMembership ReplicatedVolumeDatameshTransitionGroup = "NonVotingMembership"
+	// ReplicatedVolumeDatameshTransitionGroupQuorum is the quorum group (exclusive).
+	ReplicatedVolumeDatameshTransitionGroupQuorum ReplicatedVolumeDatameshTransitionGroup = "Quorum"
+	// ReplicatedVolumeDatameshTransitionGroupAttachment is the attachment group (parallel).
+	ReplicatedVolumeDatameshTransitionGroupAttachment ReplicatedVolumeDatameshTransitionGroup = "Attachment"
+	// ReplicatedVolumeDatameshTransitionGroupMultiattach is the multiattach group (exclusive with Attachment).
+	ReplicatedVolumeDatameshTransitionGroupMultiattach ReplicatedVolumeDatameshTransitionGroup = "Multiattach"
+	// ReplicatedVolumeDatameshTransitionGroupEmergency is the emergency group (preemptive).
+	ReplicatedVolumeDatameshTransitionGroupEmergency ReplicatedVolumeDatameshTransitionGroup = "Emergency"
+)
+
+func (g ReplicatedVolumeDatameshTransitionGroup) String() string { return string(g) }
 
 // ReplicatedVolumeDatamesh holds datamesh configuration for the volume.
 // +kubebuilder:object:generate=true

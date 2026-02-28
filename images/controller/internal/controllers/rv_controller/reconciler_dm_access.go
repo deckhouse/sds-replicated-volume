@@ -83,8 +83,8 @@ func ensureDatameshAccessReplicas(
 	for i := len(rv.Status.DatameshTransitions) - 1; i >= 0; i-- {
 		t := &rv.Status.DatameshTransitions[i]
 
-		if t.Type != v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica &&
-			t.Type != v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica {
+		if t.Type != v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica &&
+			t.Type != v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica {
 			continue
 		}
 
@@ -107,9 +107,9 @@ func ensureDatameshAccessReplicas(
 			continue
 		}
 		if replicaReq.Request.Operation == v1alpha1.DatameshMembershipRequestOperationJoin {
-			changed = ensureDatameshAddAccessReplica(rv, rvrs, replicaReq, membersToConnect, rsp) || changed
+			changed = ensureDatameshAddReplica(rv, rvrs, replicaReq, membersToConnect, rsp) || changed
 		} else {
-			changed = ensureDatameshRemoveAccessReplica(rv, rvrs, replicaReq, membersToConnect) || changed
+			changed = ensureDatameshRemoveReplica(rv, rvrs, replicaReq, membersToConnect) || changed
 		}
 	}
 
@@ -121,7 +121,7 @@ func ensureDatameshAccessReplicas(
 //
 
 // ensureDatameshAccessReplicaTransitionProgress checks confirmation progress for a single
-// AddAccessReplica or RemoveAccessReplica transition and updates messages.
+// AddReplica or RemoveReplica transition and updates messages.
 // Returns (completed, changed). Does NOT delete the transition — the caller handles that.
 func ensureDatameshAccessReplicaTransitionProgress(
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
@@ -137,9 +137,9 @@ func ensureDatameshAccessReplicaTransitionProgress(
 		return rvr.Status.DatameshRevision >= t.Steps[0].DatameshRevision
 	}).Intersect(mustConfirm)
 
-	// For RemoveAccessReplica: the leaving replica confirms by resetting revision to 0
+	// For RemoveReplica: the leaving replica confirms by resetting revision to 0
 	// (it left the datamesh and no longer tracks the revision).
-	if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica {
+	if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica {
 		if rvr := findRVRByID(rvrs, replicaID); rvr != nil && rvr.Status.DatameshRevision == 0 {
 			confirmed.Add(replicaID)
 		}
@@ -148,18 +148,18 @@ func ensureDatameshAccessReplicaTransitionProgress(
 	if confirmed == mustConfirm {
 		// Transition complete — set completion message.
 		switch t.Type {
-		case v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica:
+		case v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica:
 			changed = applyDatameshReplicaRequestMessage(replicaReq, "Joined datamesh successfully")
-		case v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica:
+		case v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica:
 			changed = applyDatameshReplicaRequestMessage(replicaReq, "Left datamesh successfully")
 		}
 		return true, changed
 	}
 
-	// For AddAccessReplica: the subject replica is expected to have DRBDConfigured=False
+	// For AddReplica: the subject replica is expected to have DRBDConfigured=False
 	// with reason PendingDatameshJoin (it has not joined the datamesh yet) — not an error.
 	var skipError func(uint8, *metav1.Condition) bool
-	if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica {
+	if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica {
 		skipError = func(id uint8, cond *metav1.Condition) bool {
 			return id == replicaID && cond.Reason == v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingDatameshJoin
 		}
@@ -174,9 +174,9 @@ func ensureDatameshAccessReplicaTransitionProgress(
 	progress := fmt.Sprintf("%d/%d replicas confirmed revision %d",
 		confirmed.Len(), mustConfirm.Len(), t.Steps[0].DatameshRevision)
 	switch t.Type {
-	case v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica:
+	case v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica:
 		changed = applyDatameshReplicaRequestMessage(replicaReq, "Joining datamesh, "+progress) || changed
-	case v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica:
+	case v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica:
 		changed = applyDatameshReplicaRequestMessage(replicaReq, "Leaving datamesh, "+progress) || changed
 	}
 
@@ -184,12 +184,12 @@ func ensureDatameshAccessReplicaTransitionProgress(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ensureDatameshAddAccessReplica
+// ensureDatameshAddReplica
 //
 
-// ensureDatameshAddAccessReplica checks guards and creates an AddAccessReplica transition
+// ensureDatameshAddReplica checks guards and creates an AddReplica transition
 // for a single pending join request. Returns true if rv was changed.
-func ensureDatameshAddAccessReplica(
+func ensureDatameshAddReplica(
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 	replicaReq *v1alpha1.ReplicatedVolumeDatameshReplicaRequest,
@@ -249,7 +249,7 @@ func ensureDatameshAddAccessReplica(
 	}
 	zone := eligibleNode.ZoneName
 
-	// All guards passed — add member and create AddAccessReplica transition.
+	// All guards passed — add member and create AddReplica transition.
 	applyDatameshMember(rv, v1alpha1.DatameshMember{
 		Name:      rvr.Name,
 		Type:      v1alpha1.DatameshMemberTypeAccess,
@@ -259,10 +259,15 @@ func ensureDatameshAddAccessReplica(
 		Attached:  false,
 	})
 
-	// Create AddAccessReplica transition. Message is set below by the progress function.
+	// Create AddReplica transition. Message is set below by the progress function.
 	rv.Status.DatameshRevision++
 	rv.Status.DatameshTransitions = append(rv.Status.DatameshTransitions,
-		makeDatameshSingleStepTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica, rvr.Name, "✦ → A", rv.Status.DatameshRevision),
+		makeDatameshSingleStepTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+			rvr.Name, v1alpha1.ReplicaTypeAccess,
+			"✦ → A", rv.Status.DatameshRevision,
+		),
 	)
 
 	// Set initial messages via the same function used for progress updates.
@@ -273,12 +278,12 @@ func ensureDatameshAddAccessReplica(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ensureDatameshRemoveAccessReplica
+// ensureDatameshRemoveReplica
 //
 
-// ensureDatameshRemoveAccessReplica checks guards and creates a RemoveAccessReplica transition
+// ensureDatameshRemoveReplica checks guards and creates a RemoveReplica transition
 // for a single pending leave request. Returns true if rv was changed.
-func ensureDatameshRemoveAccessReplica(
+func ensureDatameshRemoveReplica(
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 	replicaReq *v1alpha1.ReplicatedVolumeDatameshReplicaRequest,
@@ -304,10 +309,15 @@ func ensureDatameshRemoveAccessReplica(
 	// All guards passed — remove the member from datamesh.
 	removeDatameshMembers(rv, idset.Of(replicaReq.ID()))
 
-	// Create RemoveAccessReplica transition. Message is set below by the progress function.
+	// Create RemoveReplica transition. Message is set below by the progress function.
 	rv.Status.DatameshRevision++
 	rv.Status.DatameshTransitions = append(rv.Status.DatameshTransitions,
-		makeDatameshSingleStepTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica, replicaReq.Name, "A → ✕", rv.Status.DatameshRevision),
+		makeDatameshSingleStepTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+			replicaReq.Name, v1alpha1.ReplicaTypeAccess,
+			"A → ✕", rv.Status.DatameshRevision,
+		),
 	)
 
 	// Set initial messages via the same function used for progress updates.

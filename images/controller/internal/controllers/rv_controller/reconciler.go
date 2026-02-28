@@ -353,14 +353,18 @@ func applyDatameshTransitionStepMessage(step *v1alpha1.ReplicatedVolumeDatameshT
 // and stabilized across subsequent reconciliations.
 func makeDatameshSingleStepTransition(
 	typ v1alpha1.ReplicatedVolumeDatameshTransitionType,
+	group v1alpha1.ReplicatedVolumeDatameshTransitionGroup,
 	replicaName string,
+	replicaType v1alpha1.ReplicaType,
 	stepName string,
 	datameshRevision int64,
 ) v1alpha1.ReplicatedVolumeDatameshTransition {
 	now := metav1.Now()
 	return v1alpha1.ReplicatedVolumeDatameshTransition{
 		Type:        typ,
+		Group:       group,
 		ReplicaName: replicaName,
+		ReplicaType: replicaType,
 		Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
 			{
 				Name:             stepName,
@@ -429,7 +433,7 @@ func (r *Reconciler) reconcileMetadata(
 //
 
 // reconcileRVRFinalizers adds RVControllerFinalizer to non-deleting RVRs (including user-created)
-// and removes it from deleting RVRs when safe (not a datamesh member and no RemoveAccessReplica
+// and removes it from deleting RVRs when safe (not a datamesh member and no RemoveReplica
 // transition in progress).
 //
 // Reconcile pattern: Target-state driven
@@ -465,7 +469,7 @@ func (r *Reconciler) reconcileRVRFinalizers(
 			}
 
 			// Not safe to remove if the RVR is still a datamesh member or leaving datamesh
-			// (RemoveAccessReplica transition in progress).
+			// (RemoveReplica transition in progress).
 			if isRVRMemberOrLeavingDatamesh(rv, rvr.Name) {
 				continue
 			}
@@ -483,7 +487,7 @@ func (r *Reconciler) reconcileRVRFinalizers(
 }
 
 // isRVRMemberOrLeavingDatamesh returns true if the RVR is a datamesh member or has an active
-// RemoveAccessReplica transition (still leaving datamesh). Returns false when rv is nil.
+// RemoveReplica transition (still leaving datamesh). Returns false when rv is nil.
 func isRVRMemberOrLeavingDatamesh(rv *v1alpha1.ReplicatedVolume, rvrName string) bool {
 	if rv == nil {
 		return false
@@ -494,10 +498,10 @@ func isRVRMemberOrLeavingDatamesh(rv *v1alpha1.ReplicatedVolume, rvrName string)
 		return true
 	}
 
-	// Check for active RemoveAccessReplica transition for this replica.
+	// Check for active RemoveReplica transition for this replica.
 	for i := range rv.Status.DatameshTransitions {
 		t := &rv.Status.DatameshTransitions[i]
-		if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica && t.ReplicaName == rvrName {
+		if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica && t.ReplicaName == rvrName {
 			return true
 		}
 	}
