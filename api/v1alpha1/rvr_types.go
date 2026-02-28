@@ -21,7 +21,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 )
 
 // ReplicatedVolumeReplica is a Kubernetes Custom Resource that represents a replica of a ReplicatedVolume.
@@ -232,18 +231,18 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	BackingVolume *ReplicatedVolumeReplicaStatusBackingVolume `json:"backingVolume,omitempty"`
 
-	// DatameshPending describes the pending datamesh membership state for this replica.
+	// DatameshRequest describes the pending datamesh membership request for this replica.
 	//
-	// This field contains changes that have been validated and are ready from the RVR's
-	// perspective, waiting to be applied to the datamesh. The controller sets this field
-	// only after all prerequisites are satisfied.
+	// This field contains a membership change request that has been validated and is ready
+	// from the RVR's perspective, waiting to be applied to the datamesh. The controller
+	// sets this field only after all prerequisites are satisfied.
 	//
-	// For example, member=true will not be set until scheduling completes: the spec.nodeName,
+	// For example, operation=Join will not be set until scheduling completes: the spec.nodeName,
 	// spec.lvmVolumeGroupName, and spec.lvmVolumeGroupThinPoolName fields must be populated
-	// and validated before the replica can be marked as a pending datamesh member.
+	// and validated before the replica can request datamesh membership.
 	//
 	// +optional
-	DatameshPendingTransition *ReplicatedVolumeReplicaStatusDatameshPendingTransition `json:"datameshPendingTransition,omitempty"`
+	DatameshRequest *DatameshMembershipRequest `json:"datameshRequest,omitempty"`
 
 	// DatameshRevision is the datamesh revision for which the replica was fully configured.
 	//
@@ -420,94 +419,67 @@ type ReplicatedVolumeReplicaStatusDRBDRReconciliationCache struct {
 	TargetType DatameshMemberType `json:"targetType,omitempty"`
 }
 
-// ReplicatedVolumeReplicaStatusDatameshPendingTransition describes pending datamesh changes for this replica.
+// DatameshMembershipRequest describes a pending datamesh membership change for a replica.
 //
-// This field contains changes that have been validated and are ready from the RVR's
-// perspective, waiting to be applied to the datamesh. The controller sets this field
-// only after all prerequisites are satisfied (e.g., scheduling completed, spec fields
-// populated and validated).
+// This struct contains a validated request that is ready from the replica's perspective,
+// waiting to be applied to the datamesh by the rv_controller.
 //
-// # Supported Operations
+// # Operations
 //
-// 1. Datamesh Join (member=true): Add this replica to the datamesh with specified type.
-//   - Type is required when joining.
-//   - For Diskful type: lvmVolumeGroupName is required, thinPoolName is optional.
-//   - For TieBreaker/Access types: no backing volume fields allowed.
+// Join: add this replica to the datamesh with specified type.
+//   - Type is required.
+//   - For Diskful: lvmVolumeGroupName is required, thinPoolName is optional.
+//   - For TieBreaker/Access: no backing volume fields allowed.
 //
-// 2. Datamesh Leave (member=false): Remove this replica from the datamesh.
-//   - No other fields allowed when leaving.
+// Leave: remove this replica from the datamesh.
+//   - No other fields allowed.
 //
-// 3. Type Change (member=nil, type set): Change the type of an existing datamesh member.
-//   - For change to Diskful: lvmVolumeGroupName required, thinPoolName optional.
-//   - For change to TieBreaker/Access: no backing volume fields allowed.
+// ChangeRole: change the type of an existing datamesh member.
+//   - Type is required.
+//   - For Diskful: lvmVolumeGroupName required, thinPoolName optional.
+//   - For TieBreaker/Access: no backing volume fields allowed.
 //
-// 4. Backing Volume Change (member=nil, type=nil): Replace backing volume for existing Diskful.
+// ChangeBackingVolume: replace backing volume for existing Diskful.
 //   - Used when migrating storage (e.g., between LVGs or between thick/thin).
 //   - Only lvmVolumeGroupName (and optionally thinPoolName) is set, no type.
-//   - Implies the replica is already Diskful and remains Diskful.
 //
-// # Field Combinations and Their Meanings
+// # Examples
 //
 // Join as Diskful on thin pool:
 //
-//	member: true, type: Diskful, lvmVolumeGroupName: "vg-1", thinPoolName: "tp-1"
+//	operation: Join, type: Diskful, lvmVolumeGroupName: "vg-1", thinPoolName: "tp-1"
 //
-// Join as Diskful on thick LVM:
+// Join as Access:
 //
-//	member: true, type: Diskful, lvmVolumeGroupName: "vg-1"
-//
-// Join as TieBreaker (diskless quorum voter):
-//
-//	member: true, type: TieBreaker
-//
-// Join as Access (diskless data accessor):
-//
-//	member: true, type: Access
+//	operation: Join, type: Access
 //
 // Leave datamesh:
 //
-//	member: false
+//	operation: Leave
 //
-// Change type to Diskful:
+// Change role to Diskful:
 //
-//	type: Diskful, lvmVolumeGroupName: "vg-2", thinPoolName: "tp-2"
+//	operation: ChangeRole, type: Diskful, lvmVolumeGroupName: "vg-2"
 //
-// Change type to TieBreaker:
+// Replace backing volume:
 //
-//	type: TieBreaker
-//
-// Change type to Access:
-//
-//	type: Access
-//
-// Replace backing volume for existing Diskful (migrate from thin to thick):
-//
-//	lvmVolumeGroupName: "vg-thick"
-//
-// Replace backing volume for existing Diskful (migrate from thick to thin):
-//
-//	lvmVolumeGroupName: "vg-thin", thinPoolName: "tp-1"
-//
-// Replace backing volume for existing Diskful (migrate between LVGs):
-//
-//	lvmVolumeGroupName: "vg-new", thinPoolName: "tp-1"
-//
-// No pending changes (field is nil or absent):
-//
-//	datameshPending: nil
+//	operation: ChangeBackingVolume, lvmVolumeGroupName: "vg-new", thinPoolName: "tp-1"
 //
 // +kubebuilder:object:generate=true
-// +kubebuilder:validation:XValidation:rule="!has(self.member) || self.member == true || (!has(self.type) && !has(self.lvmVolumeGroupName) && !has(self.thinPoolName))",message="when member is false, type/lvmVolumeGroupName/thinPoolName must not be set"
-// +kubebuilder:validation:XValidation:rule="!has(self.member) || self.member == false || has(self.type)",message="when member is true, type is required"
-// +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type != 'Diskful' || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupName is required when type is Diskful"
-// +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type == 'Diskful' || !has(self.lvmVolumeGroupName)",message="lvmVolumeGroupName must not be set when type is not Diskful"
-// +kubebuilder:validation:XValidation:rule="!has(self.thinPoolName) || has(self.lvmVolumeGroupName)",message="thinPoolName requires lvmVolumeGroupName to be set"
-type ReplicatedVolumeReplicaStatusDatameshPendingTransition struct {
-	// Member indicates whether this replica should be a datamesh member.
-	// +optional
-	Member *bool `json:"member,omitempty"`
+//
+//	+kubebuilder:validation:XValidation:rule="self.operation == 'Leave' || self.operation == 'ChangeBackingVolume' || has(self.type)",message="type is required for Join and ChangeRole operations"
+//	+kubebuilder:validation:XValidation:rule="self.operation != 'Leave' || (!has(self.type) && !has(self.lvmVolumeGroupName) && !has(self.thinPoolName))",message="type/lvmVolumeGroupName/thinPoolName must not be set for Leave"
+//	+kubebuilder:validation:XValidation:rule="self.operation != 'ChangeBackingVolume' || (!has(self.type) && has(self.lvmVolumeGroupName))",message="ChangeBackingVolume requires lvmVolumeGroupName and must not set type"
+//	+kubebuilder:validation:XValidation:rule="!has(self.type) || self.type != 'Diskful' || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupName is required when type is Diskful"
+//	+kubebuilder:validation:XValidation:rule="!has(self.type) || self.type == 'Diskful' || !has(self.lvmVolumeGroupName)",message="lvmVolumeGroupName must not be set when type is not Diskful"
+//	+kubebuilder:validation:XValidation:rule="!has(self.thinPoolName) || has(self.lvmVolumeGroupName)",message="thinPoolName requires lvmVolumeGroupName to be set"
+type DatameshMembershipRequest struct {
+	// Operation is the type of membership change requested.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=Join;Leave;ChangeRole;ChangeBackingVolume
+	Operation DatameshMembershipRequestOperation `json:"operation"`
 
-	// Type is the intended type when Member is true.
+	// Type is the intended replica type. Required for Join and ChangeRole operations.
 	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
 	// +optional
 	Type ReplicaType `json:"type,omitempty"`
@@ -523,12 +495,34 @@ type ReplicatedVolumeReplicaStatusDatameshPendingTransition struct {
 	ThinPoolName string `json:"thinPoolName,omitempty"`
 }
 
+// DatameshMembershipRequestOperation defines the type of membership change requested.
+type DatameshMembershipRequestOperation string
+
+const (
+	// DatameshMembershipRequestOperationJoin requests joining the datamesh as a new member.
+	DatameshMembershipRequestOperationJoin DatameshMembershipRequestOperation = "Join"
+
+	// DatameshMembershipRequestOperationLeave requests leaving the datamesh.
+	DatameshMembershipRequestOperationLeave DatameshMembershipRequestOperation = "Leave"
+
+	// DatameshMembershipRequestOperationChangeRole requests changing the member role
+	// (e.g., Diskful to Access, Access to TieBreaker).
+	DatameshMembershipRequestOperationChangeRole DatameshMembershipRequestOperation = "ChangeRole"
+
+	// DatameshMembershipRequestOperationChangeBackingVolume requests migrating
+	// the backing volume to a different LVMVolumeGroup/ThinPool.
+	DatameshMembershipRequestOperationChangeBackingVolume DatameshMembershipRequestOperation = "ChangeBackingVolume"
+)
+
+// String returns the string representation of the operation.
+func (o DatameshMembershipRequestOperation) String() string { return string(o) }
+
 // Equals returns true if all fields match.
-func (t *ReplicatedVolumeReplicaStatusDatameshPendingTransition) Equals(other *ReplicatedVolumeReplicaStatusDatameshPendingTransition) bool {
+func (t *DatameshMembershipRequest) Equals(other *DatameshMembershipRequest) bool {
 	if t == nil || other == nil {
 		return t == other
 	}
-	return ptr.Equal(t.Member, other.Member) &&
+	return t.Operation == other.Operation &&
 		t.Type == other.Type &&
 		t.LVMVolumeGroupName == other.LVMVolumeGroupName &&
 		t.ThinPoolName == other.ThinPoolName

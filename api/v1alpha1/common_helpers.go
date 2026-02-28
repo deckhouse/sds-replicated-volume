@@ -21,7 +21,7 @@ package v1alpha1
 
 // idFromName extracts ID from a name with format "prefix-N" (e.g., "pvc-xxx-5" → 5).
 // Used by ReplicatedVolumeReplica.ID(), ReplicatedVolumeDatameshMember.ID(),
-// and ReplicatedVolumeDatameshPendingReplicaTransition.ID().
+// and ReplicatedVolumeDatameshReplicaRequest.ID().
 //
 // IMPORTANT: This function assumes the name is already validated by kubebuilder markers.
 // Only use with validated names (ending with -0 to -31).

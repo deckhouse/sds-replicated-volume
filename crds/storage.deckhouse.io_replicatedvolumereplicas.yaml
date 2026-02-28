@@ -273,17 +273,17 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              datameshPendingTransition:
+              datameshRequest:
                 description: |-
-                  DatameshPending describes the pending datamesh membership state for this replica.
+                  DatameshRequest describes the pending datamesh membership request for this replica.
 
-                  This field contains changes that have been validated and are ready from the RVR's
-                  perspective, waiting to be applied to the datamesh. The controller sets this field
-                  only after all prerequisites are satisfied.
+                  This field contains a membership change request that has been validated and is ready
+                  from the RVR's perspective, waiting to be applied to the datamesh. The controller
+                  sets this field only after all prerequisites are satisfied.
 
-                  For example, member=true will not be set until scheduling completes: the spec.nodeName,
+                  For example, operation=Join will not be set until scheduling completes: the spec.nodeName,
                   spec.lvmVolumeGroupName, and spec.lvmVolumeGroupThinPoolName fields must be populated
-                  and validated before the replica can be marked as a pending datamesh member.
+                  and validated before the replica can request datamesh membership.
                 properties:
                   lvmVolumeGroupName:
                     description: LVMVolumeGroupName is the LVMVolumeGroup resource
@@ -291,29 +291,41 @@ spec:
                     minLength: 1
                     pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
                     type: string
-                  member:
-                    description: Member indicates whether this replica should be a
-                      datamesh member.
-                    type: boolean
+                  operation:
+                    description: Operation is the type of membership change requested.
+                    enum:
+                    - Join
+                    - Leave
+                    - ChangeRole
+                    - ChangeBackingVolume
+                    type: string
                   thinPoolName:
                     description: ThinPoolName is the thin pool name (optional, for
                       LVMThin storage pools).
                     type: string
                   type:
-                    description: Type is the intended type when Member is true.
+                    description: Type is the intended replica type. Required for Join
+                      and ChangeRole operations.
                     enum:
                     - Diskful
                     - Access
                     - TieBreaker
                     type: string
+                required:
+                - operation
                 type: object
                 x-kubernetes-validations:
-                - message: when member is false, type/lvmVolumeGroupName/thinPoolName
-                    must not be set
-                  rule: '!has(self.member) || self.member == true || (!has(self.type)
-                    && !has(self.lvmVolumeGroupName) && !has(self.thinPoolName))'
-                - message: when member is true, type is required
-                  rule: '!has(self.member) || self.member == false || has(self.type)'
+                - message: type is required for Join and ChangeRole operations
+                  rule: self.operation == 'Leave' || self.operation == 'ChangeBackingVolume'
+                    || has(self.type)
+                - message: type/lvmVolumeGroupName/thinPoolName must not be set for
+                    Leave
+                  rule: self.operation != 'Leave' || (!has(self.type) && !has(self.lvmVolumeGroupName)
+                    && !has(self.thinPoolName))
+                - message: ChangeBackingVolume requires lvmVolumeGroupName and must
+                    not set type
+                  rule: self.operation != 'ChangeBackingVolume' || (!has(self.type)
+                    && has(self.lvmVolumeGroupName))
                 - message: lvmVolumeGroupName is required when type is Diskful
                   rule: '!has(self.type) || self.type != ''Diskful'' || has(self.lvmVolumeGroupName)'
                 - message: lvmVolumeGroupName must not be set when type is not Diskful

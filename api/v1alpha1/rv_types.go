@@ -193,22 +193,26 @@ type ReplicatedVolumeStatus struct {
 	// Datamesh is the computed datamesh configuration for the volume.
 	Datamesh ReplicatedVolumeDatamesh `json:"datamesh"`
 
+	// EffectiveLayout tracks the FTT/GMDR levels that the datamesh actually
+	// provides. q and qmr are computed from these values, not from Configuration.
+	EffectiveLayout ReplicatedVolumeEffectiveLayout `json:"effectiveLayout"`
+
 	// DatameshTransitions is the list of active datamesh transitions.
 	// +listType=atomic
 	// +optional
 	DatameshTransitions []ReplicatedVolumeDatameshTransition `json:"datameshTransitions,omitempty"`
 
-	// DatameshPendingReplicaTransitions is the list of pending replica transitions.
-	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="datameshPendingReplicaTransitions[].name must be unique"
+	// DatameshReplicaRequests is the list of pending membership requests from replicas.
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="datameshReplicaRequests[].name must be unique"
 	// +kubebuilder:validation:MaxItems=32
 	// +listType=atomic
 	// +optional
-	DatameshPendingReplicaTransitions []ReplicatedVolumeDatameshPendingReplicaTransition `json:"datameshPendingReplicaTransitions,omitempty"`
+	DatameshReplicaRequests []ReplicatedVolumeDatameshReplicaRequest `json:"datameshReplicaRequests,omitempty"`
 }
 
-// ReplicatedVolumeDatameshPendingReplicaTransition represents a pending transition for a single replica.
+// ReplicatedVolumeDatameshReplicaRequest represents a pending membership request from a single replica.
 // +kubebuilder:object:generate=true
-type ReplicatedVolumeDatameshPendingReplicaTransition struct {
+type ReplicatedVolumeDatameshReplicaRequest struct {
 	// Name is the replica name.
 	// Must have format "prefix-N" where N is 0-31.
 	// +kubebuilder:validation:Required
@@ -217,22 +221,22 @@ type ReplicatedVolumeDatameshPendingReplicaTransition struct {
 	// +kubebuilder:validation:Pattern=`^.+-([0-9]|[12][0-9]|3[01])$`
 	Name string `json:"name"`
 
-	// Message is an optional human-readable message about the transition state and progress.
+	// Message is an optional human-readable message about the request state and progress.
 	// +kubebuilder:validation:MaxLength=512
 	// +optional
 	Message string `json:"message,omitempty"`
 
-	// Transition is the pending datamesh transition details from the replica.
+	// Request is the membership change request details from the replica.
 	// +kubebuilder:validation:Required
-	Transition ReplicatedVolumeReplicaStatusDatameshPendingTransition `json:"transition"`
+	Request DatameshMembershipRequest `json:"request"`
 
-	// FirstObservedAt is the timestamp when this transition was first observed.
+	// FirstObservedAt is the timestamp when this request was first observed.
 	// +kubebuilder:validation:Required
 	FirstObservedAt metav1.Time `json:"firstObservedAt"`
 }
 
 // ID extracts ID from the replica name (e.g., "pvc-xxx-5" → 5).
-func (t ReplicatedVolumeDatameshPendingReplicaTransition) ID() uint8 {
+func (t ReplicatedVolumeDatameshReplicaRequest) ID() uint8 {
 	return idFromName(t.Name)
 }
 
@@ -563,6 +567,35 @@ func (t DatameshMemberType) ConnectsToAllPeers() bool {
 	default:
 		return false
 	}
+}
+
+// ReplicatedVolumeEffectiveLayout tracks the FTT/GMDR protection levels
+// that the datamesh actually provides right now. q and qmr are derived
+// from these values, not from rv.Status.Configuration.
+//
+// Monotonic ratchet semantics:
+//   - Values only increase (via layout transitions) until they reach the
+//     levels defined in Configuration.
+//   - Once reached, they are held at that level.
+//   - They decrease only if Configuration is lowered below the current
+//     effective values (explicit downgrade).
+//
+// During an upgrade transition EffectiveLayout < Configuration;
+// during a downgrade transition EffectiveLayout > Configuration;
+// at steady state they are equal.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeEffectiveLayout struct {
+	// FailuresToTolerate is the effective FTT level.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2
+	// +kubebuilder:default=0
+	FailuresToTolerate byte `json:"failuresToTolerate"`
+
+	// GuaranteedMinimumDataRedundancy is the effective GMDR level.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2
+	// +kubebuilder:default=0
+	GuaranteedMinimumDataRedundancy byte `json:"guaranteedMinimumDataRedundancy"`
 }
 
 // ReplicatedVolumeEligibleNodesViolation describes a replica placed on a non-eligible node.
