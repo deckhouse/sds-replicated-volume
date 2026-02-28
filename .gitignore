@@ -38,6 +38,7 @@ hack.sh
 **/Dockerfile-dev
 .secret
 images/**/Makefile
+.env.json
 
 # local caches (Cursor/Go/direnv, etc.)
 .cache/
@@ -46,3 +47,5 @@ images/**/Makefile
 
 # test data
 images/agent/pkg/drbdconf/testdata/out/
+test.log
+.env.json

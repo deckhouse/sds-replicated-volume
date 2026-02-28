@@ -58,6 +58,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&DRBDResourceOperationList{},
 		&DRBDNodeOperation{},
 		&DRBDNodeOperationList{},
+		&DRBDMapper{},
+		&DRBDMapperList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil

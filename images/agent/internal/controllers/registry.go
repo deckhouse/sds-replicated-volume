@@ -21,6 +21,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdm"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdr"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdrop"
 )
@@ -37,6 +38,7 @@ func BuildAll(mgr manager.Manager, isEnabled func(string) bool) error {
 		build func(mgr manager.Manager) error
 	}
 	builders := []builder{
+		{name: drbdm.ControllerName, build: drbdm.BuildController},
 		{name: drbdr.ControllerName, build: drbdr.BuildController},
 		{name: drbdrop.ControllerName, build: drbdrop.BuildController},
 	}

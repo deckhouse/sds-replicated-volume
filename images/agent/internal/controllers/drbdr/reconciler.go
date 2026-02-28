@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -161,6 +162,14 @@ func (r *Reconciler) reconcileDRBDR(
 		intendedDisk, llvErr = r.reconcileLLVFinalizerAdd(rf.Ctx(), drbdr.Spec.LVMLogicalVolumeName)
 	}
 
+	// Phase 3b: Release finalizer from previously-attached LLV before detaching.
+	// The status still carries the attached LLV name at this point; after DRBD
+	// convergence (Phase 4) the disk may already be detached and the status will
+	// be cleared, making it impossible to identify which LLV to release.
+	if releaseErr := r.reconcileLLVFinalizerRelease(rf.Ctx(), drbdr); releaseErr != nil {
+		llvErr = errors.Join(llvErr, releaseErr)
+	}
+
 	// Phase 4: DRBD convergence
 	iState := computeIntendedDRBDState(drbdr, intendedDisk)
 
@@ -179,12 +188,8 @@ func (r *Reconciler) reconcileDRBDR(
 		aErr2 = ConfiguredReasonError(aErr2, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 	}
 
-	// Remove finalizer from previous LLV (only if DRBD has actually detached from it)
-	// Also computes actualLLVName for report state
-	actualLLVName, actualLLVErr := r.reconcileLLVFinalizerRemove(rf.Ctx(), aState, drbdr.Status.ActiveConfiguration)
-	if actualLLVErr != nil {
-		llvErr = errors.Join(llvErr, actualLLVErr)
-	}
+	// Compute actualLLVName from DRBD actual state for status reporting.
+	actualLLVName := computeActualLLVName(rf.Ctx(), r, aState)
 
 	// Phase 5: Report and status patch
 	reconcileErr := errors.Join(addrErr, llvErr, aErr, aErr2, drbdErr)
@@ -353,60 +358,76 @@ func (r *Reconciler) reconcileLLVFinalizerAdd(ctx context.Context, llvName strin
 	return formatLVMDevicePath(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode), nil
 }
 
-// reconcileLLVFinalizerRemove removes AgentFinalizer from an LLV if it's no longer in use.
-// It computes actualLLVName from the DRBD actual state and only removes the finalizer if
-// previousLLVName != actualLLVName (meaning DRBD has detached from it).
-// Returns actualLLVName for use in report state.
-func (r *Reconciler) reconcileLLVFinalizerRemove(
+// reconcileLLVFinalizerRelease removes the agent finalizer from the
+// previously-attached LLV when the resource is moving away from it (switching
+// to a different LLV, becoming diskless, or being deleted/downed). This runs
+// BEFORE DRBD convergence so the status still carries the attached LLV name.
+func (r *Reconciler) reconcileLLVFinalizerRelease(
 	ctx context.Context,
-	aState ActualDRBDState,
-	statusActiveConfig *v1alpha1.DRBDResourceActiveConfiguration,
-) (actualLLVName string, err error) {
-	// Compute actualLLVName from actualDisk
-	if !aState.IsZero() && len(aState.Volumes()) > 0 {
-		if actualDisk := aState.Volumes()[0].BackingDisk(); actualDisk != "" {
-			lvgsOnNode, err := r.getLVGsOnNode(ctx)
-			if err != nil {
-				return "", ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
-			}
-
-			var allLLVs []snc.LVMLogicalVolume
-			for i := range lvgsOnNode {
-				llvs, err := r.getLLVsForLVG(ctx, lvgsOnNode[i].Name)
-				if err != nil {
-					return "", ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
-				}
-				allLLVs = append(allLLVs, llvs...)
-			}
-
-			actualLLVName = computeLLVNameFromDiskPath(actualDisk, lvgsOnNode, allLLVs)
-		}
+	drbdr *v1alpha1.DRBDResource,
+) error {
+	if drbdr.Status.ActiveConfiguration == nil {
+		return nil
+	}
+	attachedLLVName := drbdr.Status.ActiveConfiguration.LVMLogicalVolumeName
+	if attachedLLVName == "" {
+		return nil
 	}
 
-	// Only remove finalizer if previous LLV differs from actual
-	if statusActiveConfig == nil ||
-		statusActiveConfig.LVMLogicalVolumeName == "" ||
-		statusActiveConfig.LVMLogicalVolumeName == actualLLVName {
-		return actualLLVName, nil
+	// Determine the intended LLV name. If spec is diskless or the resource is
+	// going down/being deleted, the intended LLV is empty (no disk).
+	intendedLLVName := drbdr.Spec.LVMLogicalVolumeName
+
+	// Still attached to the same LLV — nothing to release.
+	if attachedLLVName == intendedLLVName {
+		return nil
 	}
 
-	llv, err := r.getLVMLogicalVolume(ctx, statusActiveConfig.LVMLogicalVolumeName)
+	llv, err := r.getLVMLogicalVolume(ctx, attachedLLVName)
 	if err != nil {
-		return actualLLVName, flow.Wrapf(err, "getting previous LLV %q", statusActiveConfig.LVMLogicalVolumeName)
+		return flow.Wrapf(err, "getting attached LLV %q for finalizer release", attachedLLVName)
 	}
 	if llv == nil {
-		return actualLLVName, nil
+		return nil
 	}
 
 	if obju.HasFinalizer(llv, v1alpha1.AgentFinalizer) {
 		llvBase := llv.DeepCopy()
 		obju.RemoveFinalizer(llv, v1alpha1.AgentFinalizer)
 		if err := r.patchLLV(ctx, llv, llvBase); err != nil {
-			return actualLLVName, flow.Wrapf(err, "removing finalizer on LLV %q", llv.Name)
+			return flow.Wrapf(err, "releasing finalizer on attached LLV %q", attachedLLVName)
 		}
 	}
 
-	return actualLLVName, nil
+	return nil
+}
+
+// computeActualLLVName reverse-computes the LLV name from the DRBD actual
+// backing disk path. Returns empty if DRBD has no disk attached.
+func computeActualLLVName(ctx context.Context, r *Reconciler, aState ActualDRBDState) string {
+	if aState.IsZero() || len(aState.Volumes()) == 0 {
+		return ""
+	}
+	actualDisk := aState.Volumes()[0].BackingDisk()
+	if actualDisk == "" {
+		return ""
+	}
+
+	lvgsOnNode, err := r.getLVGsOnNode(ctx)
+	if err != nil {
+		return ""
+	}
+
+	var allLLVs []snc.LVMLogicalVolume
+	for i := range lvgsOnNode {
+		llvs, err := r.getLLVsForLVG(ctx, lvgsOnNode[i].Name)
+		if err != nil {
+			return ""
+		}
+		allLLVs = append(allLLVs, llvs...)
+	}
+
+	return computeLLVNameFromDiskPath(actualDisk, lvgsOnNode, allLLVs)
 }
 
 // reconcileFinalizer adds or removes the agent finalizer based on resource state.
@@ -436,6 +457,9 @@ func (r *Reconciler) reconcileFinalizer(
 	// Patch main object if finalizers changed
 	if ensureOutcome.DidChange() {
 		if err := r.patchDRBDR(rf.Ctx(), drbdr, base, true); err != nil {
+			if apierrors.IsNotFound(err) {
+				return rf.Done()
+			}
 			return rf.Fail(err)
 		}
 	}
