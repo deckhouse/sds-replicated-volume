@@ -30,6 +30,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/dmsetup"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
@@ -198,6 +199,13 @@ func (r *Reconciler) reconcileDRBDR(
 		// Ignore "not found" error if object was being deleted
 		if statusPatchErr != nil && (drbdr.DeletionTimestamp == nil || client.IgnoreNotFound(statusPatchErr) != nil) {
 			reconcileErr = errors.Join(reconcileErr, statusPatchErr)
+		}
+	}
+
+	// Phase 5b: Resume DRBDMapper upper device if DRBD was configured successfully
+	if drbdErr == nil && aState != nil && aState.ResourceExists() {
+		if resumeErr := r.resumeDRBDMapper(rf.Ctx(), drbdr); resumeErr != nil {
+			reconcileErr = errors.Join(reconcileErr, resumeErr)
 		}
 	}
 
@@ -508,6 +516,44 @@ func convergeDRBDState(ctx context.Context, actions DRBDActions, maintenanceMode
 		refreshNeeded = true
 	}
 	return refreshNeeded, nil
+}
+
+// resumeDRBDMapper finds the DRBDMapper whose lowerDevicePath matches this
+// DRBDResource's device and idempotently resumes its upper dm-linear device
+// if it is SUSPENDED.
+func (r *Reconciler) resumeDRBDMapper(ctx context.Context, drbdr *v1alpha1.DRBDResource) error {
+	device := drbdr.Status.Device
+	if device == "" {
+		return nil
+	}
+
+	var mappers v1alpha1.DRBDMapperList
+	if err := r.cl.List(ctx, &mappers); err != nil {
+		return flow.Wrapf(err, "listing DRBDMappers")
+	}
+
+	for i := range mappers.Items {
+		m := &mappers.Items[i]
+		if m.Spec.NodeName != r.nodeName || m.Spec.LowerDevicePath != device {
+			continue
+		}
+
+		info, err := dmsetup.Info(ctx, m.Name)
+		if err != nil || info == nil {
+			return nil
+		}
+
+		if info.State == "SUSPENDED" {
+			log.FromContext(ctx).Info("Resuming DRBDMapper upper device after DRBD configured",
+				"drbdMapper", m.Name)
+			if err := dmsetup.Resume(ctx, m.Name); err != nil {
+				return flow.Wrapf(err, "resuming DRBDMapper %q upper device", m.Name)
+			}
+		}
+		return nil
+	}
+
+	return nil
 }
 
 // formatLVMDevicePath formats the path to an LVM logical volume device.

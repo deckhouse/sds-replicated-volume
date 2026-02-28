@@ -32,6 +32,7 @@ import (
 	"github.com/deckhouse/sds-common-lib/slogh"
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/upgrade"
 )
 
 func main() {
@@ -85,6 +86,11 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 	mgr, err := newManager(ctx, log, envConfig)
 	if err != nil {
 		return err
+	}
+
+	// DRBD MODULE UPGRADE (before controllers start)
+	if err := upgrade.RunIfNeeded(ctx, log, mgr.GetAPIReader(), envConfig.NodeName()); err != nil {
+		return u.LogError(log, fmt.Errorf("DRBD module upgrade: %w", err))
 	}
 
 	eg.Go(func() error {
