@@ -294,6 +294,12 @@ type ReplicatedVolumeDatameshTransition struct {
 	// +kubebuilder:validation:Enum=Formation;VotingMembership;NonVotingMembership;Quorum;Attachment;Multiattach;Emergency
 	Group ReplicatedVolumeDatameshTransitionGroup `json:"group"`
 
+	// PlanID identifies the transition plan used to create this transition.
+	// Used by the engine to look up step callbacks from the plan registry.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	PlanID string `json:"planID,omitempty"`
+
 	// Steps is the ordered list of steps for this transition.
 	// All steps are written when the transition is created (with status=Pending,
 	// and the first step immediately set to Active with startedAt).

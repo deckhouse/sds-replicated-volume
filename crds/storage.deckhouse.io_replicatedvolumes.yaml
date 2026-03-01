@@ -612,6 +612,12 @@ spec:
                       - Multiattach
                       - Emergency
                       type: string
+                    planID:
+                      description: |-
+                        PlanID identifies the transition plan used to create this transition.
+                        Used by the engine to look up step callbacks from the plan registry.
+                      minLength: 1
+                      type: string
                     replicaName:
                       description: |-
                         ReplicaName is the name of the replica this transition applies to.

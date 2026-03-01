@@ -308,15 +308,13 @@ func computeDatameshTransitionProgressMessage(
 }
 
 // findRVRByID returns the RVR with the given ID, or nil if not found.
-// rvrs must be sorted by ID (as returned by getRVRsSorted).
 func findRVRByID(rvrs []*v1alpha1.ReplicatedVolumeReplica, id uint8) *v1alpha1.ReplicatedVolumeReplica {
-	idx, found := slices.BinarySearchFunc(rvrs, id, func(rvr *v1alpha1.ReplicatedVolumeReplica, target uint8) int {
-		return cmp.Compare(rvr.ID(), target)
-	})
-	if !found {
-		return nil
+	for _, rvr := range rvrs {
+		if rvr.ID() == id {
+			return rvr
+		}
 	}
-	return rvrs[idx]
+	return nil
 }
 
 // removeDatameshMembers removes members whose ID is in the given set.
@@ -1319,6 +1317,9 @@ func (r *Reconciler) getRVRsSorted(ctx context.Context, rvName string) ([]*v1alp
 	}
 
 	slices.SortFunc(result, func(a, b *v1alpha1.ReplicatedVolumeReplica) int {
+		if c := cmp.Compare(a.Spec.NodeName, b.Spec.NodeName); c != 0 {
+			return c
+		}
 		return cmp.Compare(a.ID(), b.ID())
 	})
 	return result, nil
