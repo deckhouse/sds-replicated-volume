@@ -287,12 +287,18 @@ type ReplicatedVolumeDatameshTransition struct {
 	// +optional
 	ToReplicaType ReplicaType `json:"toReplicaType,omitempty"`
 
-	// Group is the parallelism group for this transition.
+	// Group is the concurrency group for this transition.
 	// Set by the controller at transition creation time. Read-only for users.
 	// Provides observability: explains why a transition may be waiting.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=Formation;VotingMembership;NonVotingMembership;Quorum;Attachment;Multiattach;Emergency
 	Group ReplicatedVolumeDatameshTransitionGroup `json:"group"`
+
+	// PlanID identifies the transition plan used to create this transition.
+	// Used by the engine to look up step callbacks from the plan registry.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	PlanID string `json:"planID,omitempty"`
 
 	// Steps is the ordered list of steps for this transition.
 	// All steps are written when the transition is created (with status=Pending,
@@ -425,7 +431,7 @@ func (t ReplicatedVolumeDatameshTransitionType) String() string {
 	return string(t)
 }
 
-// ReplicatedVolumeDatameshTransitionGroup enumerates parallelism groups for transitions.
+// ReplicatedVolumeDatameshTransitionGroup enumerates concurrency groups for transitions.
 // The group determines serialization and exclusivity rules (see TRANSITION_ENGINE.md §9).
 type ReplicatedVolumeDatameshTransitionGroup string
 

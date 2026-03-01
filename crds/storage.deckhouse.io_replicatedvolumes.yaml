@@ -600,7 +600,7 @@ spec:
                       type: string
                     group:
                       description: |-
-                        Group is the parallelism group for this transition.
+                        Group is the concurrency group for this transition.
                         Set by the controller at transition creation time. Read-only for users.
                         Provides observability: explains why a transition may be waiting.
                       enum:
@@ -611,6 +611,12 @@ spec:
                       - Attachment
                       - Multiattach
                       - Emergency
+                      type: string
+                    planID:
+                      description: |-
+                        PlanID identifies the transition plan used to create this transition.
+                        Used by the engine to look up step callbacks from the plan registry.
+                      minLength: 1
                       type: string
                     replicaName:
                       description: |-
