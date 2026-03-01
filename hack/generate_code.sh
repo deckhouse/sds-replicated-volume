@@ -26,6 +26,11 @@ go run -mod=mod sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19 \
     crd paths=./v1alpha1 output:crd:dir=../crds \
     paths=./v1alpha1
 
+go run k8s.io/code-generator/cmd/deepcopy-gen -v 2 \
+    --output-file zz_generated.deepcopy_linstor.go \
+    --go-header-file ../hack/boilerplate.txt \
+    ./linstor
+
 # remove development dependencies
 go mod tidy -go=1.25.7
 

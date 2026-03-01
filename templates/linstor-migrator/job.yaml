@@ -1,0 +1,22 @@
+{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if not (contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration)) }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: control-plane-migrator
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "control-plane-migrator")) | nindent 2 }}
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      {{- include "helm_lib_module_labels" (list . (dict "app" "control-plane-migrator")) | nindent 6 }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: main
+        image: ubuntu:22.04
+        command: ["echo", "start"]
+{{- end }}
+{{- end }}

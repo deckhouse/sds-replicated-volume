@@ -1,0 +1,25 @@
+{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- /*
+ConfigMap stores control-plane migration state.
+
+Important: this object is updated by migration job, so we must not reset `data.state`
+on each Helm render. We preserve current state via lookup.
+{{- $ns := (printf "d8-%s" .Chart.Name) -}}
+{{- $existing := (lookup "v1" "ConfigMap" $ns "control-plane-migration") -}}
+{{- $state := "" -}}
+{{- if $existing -}}
+{{- $data := (get $existing "data") | default dict -}}
+{{- $state = (get $data "state") | default "" -}}
+{{- end -}}
+*/ -}}
+{{- $state := "" -}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: control-plane-migration
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "control-plane-migrator")) | nindent 2 }}
+data:
+  state: {{ default "not_started" $state | quote }}
+{{- end }}
