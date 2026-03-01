@@ -14,76 +14,62 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package nodelabelscount
+package controlplanemigrationstatesync
 
 import (
 	"context"
-	"fmt"
-	"sort"
 
 	"github.com/deckhouse/module-sdk/pkg"
+	objectpatch "github.com/deckhouse/module-sdk/pkg/object-patch"
 	"github.com/deckhouse/module-sdk/pkg/registry"
+	"github.com/deckhouse/module-sdk/pkg/utils/ptr"
+	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 )
 
-const snapshotName = "nodes"
-
-const hostnameLabelKey = "kubernetes.io/hostname"
+const (
+	snapshotName          = "control-plane-migration-state"
+	controlPlaneCMName    = "control-plane-migration"
+	defaultMigrationState = "not_started"
+)
 
 var _ = registry.RegisterFunc(
 	&pkg.HookConfig{
 		Kubernetes: []pkg.KubernetesConfig{
 			{
-				Name:       snapshotName,
-				APIVersion: "v1",
-				Kind:       "Node",
-				JqFilter:   ".metadata.labels",
+				Name:                         snapshotName,
+				APIVersion:                   "v1",
+				Kind:                         "ConfigMap",
+				JqFilter:                     ".data.state // \"\"",
+				ExecuteHookOnSynchronization: ptr.Bool(true),
+				ExecuteHookOnEvents:          ptr.Bool(true),
+				NamespaceSelector: &pkg.NamespaceSelector{
+					NameSelector: &pkg.NameSelector{
+						MatchNames: []string{consts.ModuleNamespace},
+					},
+				},
+				NameSelector: &pkg.NameSelector{
+					MatchNames: []string{controlPlaneCMName},
+				},
 			},
 		},
+		Queue: "modules/" + consts.ModuleName,
 	},
-	countNodeLabels,
+	syncControlPlaneMigrationState,
 )
 
-func countNodeLabels(_ context.Context, input *pkg.HookInput) error {
-	snapshots := input.Snapshots.Get(snapshotName)
-
-	type nodeInfo struct {
-		name   string
-		labels int
+func syncControlPlaneMigrationState(_ context.Context, input *pkg.HookInput) error {
+	stateList, err := objectpatch.UnmarshalToStruct[string](input.Snapshots, snapshotName)
+	if err != nil {
+		return err
 	}
 
-	var nodes []nodeInfo
-
-	for _, snap := range snapshots {
-		var labels map[string]string
-		if err := snap.UnmarshalTo(&labels); err != nil {
-			return fmt.Errorf("unmarshal node labels: %w", err)
-		}
-
-		hostname, ok := labels[hostnameLabelKey]
-		if !ok {
-			input.Logger.Warn("node has no hostname label, skipping", "labelKey", hostnameLabelKey)
-			continue
-		}
-
-		labelCount := len(labels)
-		nodes = append(nodes, nodeInfo{name: hostname, labels: labelCount})
-
-		input.Logger.Info("node labels count", "node", hostname, "labelCount", labelCount)
+	state := defaultMigrationState
+	if len(stateList) > 0 && stateList[0] != "" {
+		state = stateList[0]
 	}
 
-	sort.Slice(nodes, func(i, j int) bool {
-		return nodes[i].name < nodes[j].name
-	})
-
-	var result string
-	for i, n := range nodes {
-		if i > 0 {
-			result += ","
-		}
-		result += fmt.Sprintf("%s:%d", n.name, n.labels)
-	}
-
-	input.Values.Set("sdsReplicatedVolume.internal.dataNodesChecksum", result)
+	input.Values.Set("sdsReplicatedVolume.internal.controlPlaneMigration", state)
+	input.Logger.Info("synced control-plane migration state", "state", state)
 
 	return nil
 }

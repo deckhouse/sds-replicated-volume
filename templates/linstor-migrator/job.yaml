@@ -1,5 +1,5 @@
-{{- if .Values.sdsReplicatedVolume.internal.dataNodesChecksum }}
-{{- if contains ":21" .Values.sdsReplicatedVolume.internal.dataNodesChecksum }}
+{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if not (contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration)) }}
 ---
 apiVersion: batch/v1
 kind: Job
@@ -18,9 +18,5 @@ spec:
       - name: main
         image: ubuntu:22.04
         command: ["echo", "start"]
-        resources:
-          requests:
-            cpu: 10m
-            memory: 16Mi
 {{- end }}
 {{- end }}
