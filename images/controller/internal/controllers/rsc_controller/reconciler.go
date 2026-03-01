@@ -22,10 +22,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"maps"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -43,13 +47,17 @@ import (
 //
 
 type Reconciler struct {
-	cl client.Client
+	cl           client.Client
+	controllerNS string
 }
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
-func NewReconciler(cl client.Client) *Reconciler {
-	return &Reconciler{cl: cl}
+func NewReconciler(cl client.Client, controllerNamespace string) *Reconciler {
+	return &Reconciler{
+		cl:           cl,
+		controllerNS: controllerNamespace,
+	}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -66,10 +74,23 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Fail(err).ToCtrl()
 	}
 
+	if rsc == nil {
+		usedStoragePoolNames, err := r.getUsedStoragePoolNames(rf.Ctx(), req.Name)
+		if err != nil {
+			return rf.Fail(err).ToCtrl()
+		}
+		return r.reconcileDeletion(rf.Ctx(), req.Name, nil, usedStoragePoolNames).ToCtrl()
+	}
+
 	// Get RVs referencing this RSC.
 	rvs, err := r.getSortedRVsByRSC(rf.Ctx(), req.Name)
 	if err != nil {
 		return rf.Fail(err).ToCtrl()
+	}
+
+	outcome := r.reconcileStorageClass(rf.Ctx(), rsc)
+	if outcome.ShouldReturn() {
+		return outcome.ToCtrl()
 	}
 
 	// Get all RSPs that reference this RSC (via usedBy).
@@ -135,6 +156,263 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 // rscShouldBeDeleted returns true if the RSC is marked for deletion and has no RVs blocking it.
 func rscShouldBeDeleted(rsc *v1alpha1.ReplicatedStorageClass, rvs []rvView) bool {
 	return rsc == nil || (rsc.DeletionTimestamp != nil && len(rvs) == 0)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: storageclass
+//
+
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileStorageClass(ctx context.Context, rsc *v1alpha1.ReplicatedStorageClass) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "storageclass")
+	defer rf.OnEnd(&outcome)
+
+	oldSC, err := r.getStorageClass(rf.Ctx(), rsc.Name)
+	if err != nil {
+		return rf.Fail(err)
+	}
+
+	if oldSC != nil && oldSC.Provisioner != v1alpha1.StorageClassProvisioner {
+		return rf.Fail(fmt.Errorf("reconcile StorageClass with provisioner %s is not allowed", oldSC.Provisioner))
+	}
+
+	if rsc.DeletionTimestamp != nil {
+		if oldSC == nil {
+			return rf.Continue()
+		}
+
+		if len(oldSC.Finalizers) > 0 {
+			if len(oldSC.Finalizers) != 1 {
+				return rf.Fail(fmt.Errorf("deletion of StorageClass with multiple(%v) finalizers is not allowed", oldSC.Finalizers))
+			}
+			if oldSC.Finalizers[0] != v1alpha1.StorageClassFinalizerName {
+				return rf.Fail(fmt.Errorf("deletion of StorageClass with finalizer %s is not allowed", oldSC.Finalizers[0]))
+			}
+
+			base := oldSC.DeepCopy()
+			oldSC.Finalizers = nil
+			if err := r.patchStorageClass(rf.Ctx(), oldSC, base); err != nil {
+				return rf.Fail(err)
+			}
+		}
+
+		if err := r.deleteStorageClass(rf.Ctx(), oldSC); err != nil {
+			return rf.Fail(err)
+		}
+		return rf.Continue()
+	}
+
+	virtualizationEnabled := false
+	if rsc.Spec.VolumeAccess == v1alpha1.VolumeAccessLocal {
+		virtualizationEnabled, err = r.getVirtualizationModuleEnabled(rf.Ctx())
+		if err != nil {
+			return rf.Fail(err)
+		}
+	}
+
+	newSC := computeIntendedStorageClass(rsc, virtualizationEnabled)
+
+	if oldSC == nil {
+		if err := r.createStorageClass(rf.Ctx(), newSC); err != nil {
+			return rf.Fail(err)
+		}
+		return rf.Continue()
+	}
+
+	doUpdateStorageClass(newSC, oldSC)
+
+	equal, _ := compareStorageClasses(newSC, oldSC)
+	if !equal {
+		canRecreate, msg := canRecreateStorageClass(newSC, oldSC)
+		if !canRecreate {
+			return rf.Fail(fmt.Errorf("the StorageClass cannot be recreated because its parameters are not equal: %s", msg))
+		}
+
+		if len(oldSC.Finalizers) > 0 {
+			if len(oldSC.Finalizers) != 1 {
+				return rf.Fail(fmt.Errorf("deletion of StorageClass with multiple(%v) finalizers is not allowed", oldSC.Finalizers))
+			}
+			if oldSC.Finalizers[0] != v1alpha1.StorageClassFinalizerName {
+				return rf.Fail(fmt.Errorf("deletion of StorageClass with finalizer %s is not allowed", oldSC.Finalizers[0]))
+			}
+
+			base := oldSC.DeepCopy()
+			oldSC.Finalizers = nil
+			if err := r.patchStorageClass(rf.Ctx(), oldSC, base); err != nil {
+				return rf.Fail(err)
+			}
+		}
+
+		if err := r.deleteStorageClass(rf.Ctx(), oldSC); err != nil {
+			return rf.Fail(err)
+		}
+		if err := r.createStorageClass(rf.Ctx(), newSC); err != nil {
+			return rf.Fail(err)
+		}
+
+		return rf.Continue()
+	}
+
+	needsUpdate := !maps.Equal(oldSC.Labels, newSC.Labels) ||
+		!maps.Equal(oldSC.Annotations, newSC.Annotations) ||
+		!areSlicesEqualIgnoreOrder(newSC.Finalizers, oldSC.Finalizers)
+	if needsUpdate {
+		base := oldSC.DeepCopy()
+		oldSC.Labels = maps.Clone(newSC.Labels)
+		oldSC.Annotations = maps.Clone(newSC.Annotations)
+		oldSC.Finalizers = slices.Clone(newSC.Finalizers)
+
+		if err := r.patchStorageClass(rf.Ctx(), oldSC, base); err != nil {
+			return rf.Fail(err)
+		}
+	}
+
+	return rf.Continue()
+}
+
+func computeIntendedStorageClass(rsc *v1alpha1.ReplicatedStorageClass, virtualizationEnabled bool) *storagev1.StorageClass {
+	allowVolumeExpansion := true
+	reclaimPolicy := corev1.PersistentVolumeReclaimPolicy(rsc.Spec.ReclaimPolicy)
+
+	params := map[string]string{
+		v1alpha1.ReplicatedStorageClassParamNameKey: rsc.Name,
+		v1alpha1.StorageClassStoragePoolKey:         rsc.Status.StoragePoolName,
+	}
+
+	var volumeBindingMode storagev1.VolumeBindingMode
+	switch rsc.Spec.VolumeAccess {
+	case v1alpha1.VolumeAccessLocal:
+		volumeBindingMode = storagev1.VolumeBindingWaitForFirstConsumer
+	case v1alpha1.VolumeAccessEventuallyLocal:
+		volumeBindingMode = storagev1.VolumeBindingWaitForFirstConsumer
+	case v1alpha1.VolumeAccessPreferablyLocal:
+		volumeBindingMode = storagev1.VolumeBindingWaitForFirstConsumer
+	case v1alpha1.VolumeAccessAny:
+		volumeBindingMode = storagev1.VolumeBindingImmediate
+	}
+
+	annotations := map[string]string{
+		v1alpha1.RSCStorageClassVolumeSnapshotClassAnnotationKey: v1alpha1.RSCStorageClassVolumeSnapshotClassAnnotationValue,
+	}
+
+	if rsc.Spec.VolumeAccess == v1alpha1.VolumeAccessLocal && virtualizationEnabled {
+		ignoreLocal, _ := strconv.ParseBool(rsc.Annotations[v1alpha1.StorageClassIgnoreLocalAnnotationKey])
+		if !ignoreLocal {
+			annotations[v1alpha1.StorageClassVirtualizationAnnotationKey] = v1alpha1.StorageClassVirtualizationAnnotationValue
+		}
+	}
+
+	return &storagev1.StorageClass{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       v1alpha1.StorageClassKind,
+			APIVersion: v1alpha1.StorageClassAPIVersion,
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        rsc.Name,
+			Namespace:   rsc.Namespace,
+			Finalizers:  []string{v1alpha1.StorageClassFinalizerName},
+			Labels:      map[string]string{v1alpha1.ManagedLabelKey: v1alpha1.ManagedLabelValue},
+			Annotations: annotations,
+		},
+		AllowVolumeExpansion: &allowVolumeExpansion,
+		Parameters:           params,
+		Provisioner:          v1alpha1.StorageClassProvisioner,
+		ReclaimPolicy:        &reclaimPolicy,
+		VolumeBindingMode:    &volumeBindingMode,
+	}
+}
+
+func compareStorageClasses(newSC, oldSC *storagev1.StorageClass) (bool, string) {
+	var b strings.Builder
+	equal := true
+	b.WriteString("Old StorageClass and New StorageClass are not equal: ")
+
+	if !maps.Equal(oldSC.Parameters, newSC.Parameters) {
+		equal = false
+		b.WriteString(fmt.Sprintf("Parameters are not equal (ReplicatedStorageClass parameters: %+v, StorageClass parameters: %+v); ", newSC.Parameters, oldSC.Parameters))
+	}
+	if oldSC.Provisioner != newSC.Provisioner {
+		equal = false
+		b.WriteString(fmt.Sprintf("Provisioner are not equal (Old StorageClass: %s, New StorageClass: %s); ", oldSC.Provisioner, newSC.Provisioner))
+	}
+	if oldSC.ReclaimPolicy != nil && newSC.ReclaimPolicy != nil && *oldSC.ReclaimPolicy != *newSC.ReclaimPolicy {
+		equal = false
+		b.WriteString(fmt.Sprintf("ReclaimPolicy are not equal (Old StorageClass: %s, New StorageClass: %s", string(*oldSC.ReclaimPolicy), string(*newSC.ReclaimPolicy)))
+	}
+	if oldSC.VolumeBindingMode != nil && newSC.VolumeBindingMode != nil && *oldSC.VolumeBindingMode != *newSC.VolumeBindingMode {
+		equal = false
+		b.WriteString(fmt.Sprintf("VolumeBindingMode are not equal (Old StorageClass: %s, New StorageClass: %s); ", string(*oldSC.VolumeBindingMode), string(*newSC.VolumeBindingMode)))
+	}
+
+	return equal, b.String()
+}
+
+func canRecreateStorageClass(newSC, oldSC *storagev1.StorageClass) (bool, string) {
+	newSCCopy := *newSC
+	oldSCCopy := *oldSC
+
+	newSCCopy.Parameters = nil
+	oldSCCopy.Parameters = nil
+
+	return compareStorageClasses(&newSCCopy, &oldSCCopy)
+}
+
+func areSlicesEqualIgnoreOrder(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := make(map[string]struct{}, len(a))
+	for _, item := range a {
+		set[item] = struct{}{}
+	}
+	for _, item := range b {
+		if _, found := set[item]; !found {
+			return false
+		}
+	}
+	return true
+}
+
+func doUpdateStorageClass(newSC *storagev1.StorageClass, oldSC *storagev1.StorageClass) {
+	if len(oldSC.Labels) > 0 {
+		if newSC.Labels == nil {
+			newSC.Labels = maps.Clone(oldSC.Labels)
+		} else {
+			updateMap(newSC.Labels, oldSC.Labels)
+		}
+	}
+
+	copyAnnotations := maps.Clone(oldSC.Annotations)
+	delete(copyAnnotations, v1alpha1.StorageClassVirtualizationAnnotationKey)
+
+	if len(copyAnnotations) > 0 {
+		if newSC.Annotations == nil {
+			newSC.Annotations = copyAnnotations
+		} else {
+			updateMap(newSC.Annotations, copyAnnotations)
+		}
+	}
+
+	if len(oldSC.Finalizers) > 0 {
+		finalizersSet := make(map[string]struct{}, len(newSC.Finalizers))
+		for _, f := range newSC.Finalizers {
+			finalizersSet[f] = struct{}{}
+		}
+		for _, f := range oldSC.Finalizers {
+			if _, exists := finalizersSet[f]; !exists {
+				newSC.Finalizers = append(newSC.Finalizers, f)
+				finalizersSet[f] = struct{}{}
+			}
+		}
+	}
+}
+
+func updateMap(dst, src map[string]string) {
+	for k, v := range src {
+		if _, exists := dst[k]; !exists {
+			dst[k] = v
+		}
+	}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -712,14 +990,14 @@ func validateEligibleNodes(
 	replication v1alpha1.ReplicatedStorageClassReplication,
 ) error {
 	if len(eligibleNodes) == 0 {
-		return fmt.Errorf("No nodes available in the storage pool")
+		return fmt.Errorf("no nodes available in the storage pool")
 	}
 
 	// Count nodes and nodes with disks.
 	totalNodes := len(eligibleNodes)
 	nodesWithDisks := 0
 	for _, n := range eligibleNodes {
-		if len(n.LVMVolumeGroups) > 0 {
+		if isNodeSchedulable(n) {
 			nodesWithDisks++
 		}
 	}
@@ -738,7 +1016,7 @@ func validateEligibleNodes(
 	zonesWithDisks := 0
 	for _, nodes := range nodesByZone {
 		for _, n := range nodes {
-			if len(n.LVMVolumeGroups) > 0 {
+			if isNodeSchedulable(n) {
 				zonesWithDisks++
 				break
 			}
@@ -796,7 +1074,7 @@ func validateAvailabilityReplication(
 		for zone, nodes := range nodesByZone {
 			zoneNodesWithDisks := 0
 			for _, n := range nodes {
-				if len(n.LVMVolumeGroups) > 0 {
+				if isNodeSchedulable(n) {
 					zoneNodesWithDisks++
 				}
 			}
@@ -840,7 +1118,7 @@ func validateConsistencyReplication(
 		for zone, nodes := range nodesByZone {
 			zoneNodesWithDisks := 0
 			for _, n := range nodes {
-				if len(n.LVMVolumeGroups) > 0 {
+				if isNodeSchedulable(n) {
 					zoneNodesWithDisks++
 				}
 			}
@@ -881,7 +1159,7 @@ func validateConsistencyAndAvailabilityReplication(
 		for zone, nodes := range nodesByZone {
 			zoneNodesWithDisks := 0
 			for _, n := range nodes {
-				if len(n.LVMVolumeGroups) > 0 {
+				if isNodeSchedulable(n) {
 					zoneNodesWithDisks++
 				}
 			}
@@ -898,6 +1176,26 @@ func validateConsistencyAndAvailabilityReplication(
 	}
 
 	return nil
+}
+
+// isNodeSchedulable checks if a node is eligible for scheduling new replicas.
+// A node is schedulable if:
+//  1. Node is not explicitly marked unschedulable
+//  2. Node (Kubernetes) is ready
+//  3. Agent (sds-replicated-volume) is ready
+//  4. Node has at least one ready and schedulable LVG
+func isNodeSchedulable(node v1alpha1.ReplicatedStoragePoolEligibleNode) bool {
+	if node.Unschedulable || !node.NodeReady || !node.AgentReady {
+		return false
+	}
+
+	for _, lvg := range node.LVMVolumeGroups {
+		if lvg.Ready && !lvg.Unschedulable {
+			return true
+		}
+	}
+
+	return false
 }
 
 // isConfigurationInSync checks if the RSC status configuration matches current generation.
@@ -1326,6 +1624,24 @@ func (r *Reconciler) getRSC(ctx context.Context, name string) (*v1alpha1.Replica
 	return &rsc, nil
 }
 
+// patchRSC patches the RSC main resource.
+func (r *Reconciler) patchRSC(
+	ctx context.Context,
+	rsc *v1alpha1.ReplicatedStorageClass,
+	base *v1alpha1.ReplicatedStorageClass,
+) error {
+	return r.cl.Patch(ctx, rsc, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
+}
+
+// patchRSCStatus patches the RSC status subresource.
+func (r *Reconciler) patchRSCStatus(
+	ctx context.Context,
+	rsc *v1alpha1.ReplicatedStorageClass,
+	base *v1alpha1.ReplicatedStorageClass,
+) error {
+	return r.cl.Status().Patch(ctx, rsc, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
+}
+
 // getRSP fetches an RSP by name. Returns (nil, nil) if not found.
 func (r *Reconciler) getRSP(ctx context.Context, name string) (*v1alpha1.ReplicatedStoragePool, error) {
 	var rsp v1alpha1.ReplicatedStoragePool
@@ -1354,46 +1670,6 @@ func (r *Reconciler) getUsedStoragePoolNames(ctx context.Context, rscName string
 		names[i] = unsafeList.Items[i].Name
 	}
 	return names, nil
-}
-
-// getSortedRVsByRSC fetches RVs referencing a specific RSC using the index, sorted by name.
-func (r *Reconciler) getSortedRVsByRSC(ctx context.Context, rscName string) ([]rvView, error) {
-	var unsafeList v1alpha1.ReplicatedVolumeList
-	if err := r.cl.List(ctx, &unsafeList,
-		client.MatchingFields{indexes.IndexFieldRVByReplicatedStorageClassName: rscName},
-		client.UnsafeDisableDeepCopy,
-	); err != nil {
-		return nil, err
-	}
-
-	rvs := make([]rvView, len(unsafeList.Items))
-	for i := range unsafeList.Items {
-		rvs[i] = newRVView(&unsafeList.Items[i])
-	}
-
-	sort.Slice(rvs, func(i, j int) bool {
-		return rvs[i].name < rvs[j].name
-	})
-
-	return rvs, nil
-}
-
-// patchRSC patches the RSC main resource.
-func (r *Reconciler) patchRSC(
-	ctx context.Context,
-	rsc *v1alpha1.ReplicatedStorageClass,
-	base *v1alpha1.ReplicatedStorageClass,
-) error {
-	return r.cl.Patch(ctx, rsc, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
-}
-
-// patchRSCStatus patches the RSC status subresource.
-func (r *Reconciler) patchRSCStatus(
-	ctx context.Context,
-	rsc *v1alpha1.ReplicatedStorageClass,
-	base *v1alpha1.ReplicatedStorageClass,
-) error {
-	return r.cl.Status().Patch(ctx, rsc, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 // createRSP creates an RSP.
@@ -1432,4 +1708,75 @@ func (r *Reconciler) deleteRSP(ctx context.Context, rsp *v1alpha1.ReplicatedStor
 	}
 	rsp.DeletionTimestamp = ptr.To(metav1.Now())
 	return nil
+}
+
+// getSortedRVsByRSC fetches RVs referencing a specific RSC using the index, sorted by name.
+func (r *Reconciler) getSortedRVsByRSC(ctx context.Context, rscName string) ([]rvView, error) {
+	var unsafeList v1alpha1.ReplicatedVolumeList
+	if err := r.cl.List(ctx, &unsafeList,
+		client.MatchingFields{indexes.IndexFieldRVByReplicatedStorageClassName: rscName},
+		client.UnsafeDisableDeepCopy,
+	); err != nil {
+		return nil, err
+	}
+
+	rvs := make([]rvView, len(unsafeList.Items))
+	for i := range unsafeList.Items {
+		rvs[i] = newRVView(&unsafeList.Items[i])
+	}
+
+	sort.Slice(rvs, func(i, j int) bool {
+		return rvs[i].name < rvs[j].name
+	})
+
+	return rvs, nil
+}
+
+// getStorageClass fetches a StorageClass by name. Returns (nil, nil) if not found.
+func (r *Reconciler) getStorageClass(ctx context.Context, name string) (*storagev1.StorageClass, error) {
+	var sc storagev1.StorageClass
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, &sc); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &sc, nil
+}
+
+// createStorageClass creates a StorageClass.
+func (r *Reconciler) createStorageClass(ctx context.Context, sc *storagev1.StorageClass) error {
+	return r.cl.Create(ctx, sc)
+}
+
+// patchStorageClass patches the StorageClass main resource.
+func (r *Reconciler) patchStorageClass(ctx context.Context, sc *storagev1.StorageClass, base *storagev1.StorageClass) error {
+	return r.cl.Patch(ctx, sc, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
+}
+
+// deleteStorageClass deletes a StorageClass.
+func (r *Reconciler) deleteStorageClass(ctx context.Context, sc *storagev1.StorageClass) error {
+	if sc.DeletionTimestamp != nil {
+		return nil
+	}
+	if err := client.IgnoreNotFound(r.cl.Delete(ctx, sc)); err != nil {
+		return err
+	}
+	sc.DeletionTimestamp = ptr.To(metav1.Now())
+	return nil
+}
+
+func (r *Reconciler) getVirtualizationModuleEnabled(ctx context.Context) (bool, error) {
+	var cm corev1.ConfigMap
+	if err := r.cl.Get(ctx, client.ObjectKey{Namespace: r.controllerNS, Name: v1alpha1.ControllerConfigMapName}, &cm); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	value, exists := cm.Data[v1alpha1.VirtualizationModuleEnabledKey]
+	if !exists {
+		return false, nil
+	}
+	return value == "true", nil
 }

@@ -34,6 +34,11 @@ const (
 	allowedUserName          = "system:serviceaccount:d8-sds-replicated-volume:controller"
 )
 
+var allowedUserNames = map[string]struct{}{
+	"system:serviceaccount:d8-sds-replicated-volume:sds-replicated-volume-controller": {},
+	"system:serviceaccount:d8-sds-replicated-volume:controller":                       {},
+}
+
 func SCValidate(_ context.Context, arReview *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {
 	sc, ok := obj.(*storagev1.StorageClass)
 	if !ok {
@@ -42,7 +47,7 @@ func SCValidate(_ context.Context, arReview *model.AdmissionReview, obj metav1.O
 	}
 
 	if sc.Provisioner == replicatedCSIProvisioner {
-		if arReview.UserInfo.Username == allowedUserName {
+		if _, ok := allowedUserNames[arReview.UserInfo.Username]; ok {
 			klog.Infof("User %s is allowed to manage storage classes with provisioner %s", arReview.UserInfo.Username, replicatedCSIProvisioner)
 			return &kwhvalidating.ValidatorResult{Valid: true}, nil
 		}

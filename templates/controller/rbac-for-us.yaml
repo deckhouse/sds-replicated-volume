@@ -14,50 +14,86 @@ metadata:
   name: d8:{{ .Chart.Name }}:controller
   {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-controller")) | nindent 2 }}
 rules:
-  # --- storage.deckhouse.io: read + patch (finalizers, labels) ---
-  - apiGroups: ["storage.deckhouse.io"]
+  - apiGroups: [""]
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - persistentvolumes
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - storage.deckhouse.io
     resources:
       - replicatedstorageclasses
+      - replicatedstoragepools
       - replicatedvolumes
       - replicatedvolumeattachments
-    verbs: ["get", "list", "watch", "patch"]
-
-  # --- storage.deckhouse.io: full lifecycle (create, patch, delete) ---
-  - apiGroups: ["storage.deckhouse.io"]
-    resources:
-      - replicatedstoragepools
       - replicatedvolumereplicas
       - drbdresources
-      - lvmlogicalvolumes
-    verbs: ["get", "list", "watch", "create", "patch", "delete"]
-
-  # --- storage.deckhouse.io: read + create + delete (no patch) ---
-  - apiGroups: ["storage.deckhouse.io"]
-    resources:
       - drbdresourceoperations
       - drbdnodeoperations
-    verbs: ["get", "list", "watch", "create", "delete"]
-
-  # --- storage.deckhouse.io: read-only ---
-  - apiGroups: ["storage.deckhouse.io"]
-    resources:
       - lvmvolumegroups
-    verbs: ["get", "list", "watch"]
-
-  # --- storage.deckhouse.io: status subresources ---
-  - apiGroups: ["storage.deckhouse.io"]
+      - lvmlogicalvolumes
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - storage.deckhouse.io
     resources:
       - replicatedstorageclasses/status
       - replicatedstoragepools/status
       - replicatedvolumes/status
-      - replicatedvolumereplicas/status
       - replicatedvolumeattachments/status
-    verbs: ["patch"]
-
-  # --- Nodes: read + patch labels ---
-  - apiGroups: [""]
-    resources: ["nodes"]
-    verbs: ["get", "list", "watch", "patch"]
+      - replicatedvolumereplicas/status
+      - drbdresources/status
+      - drbdresourceoperations/status
+      - drbdnodeoperations/status
+      - lvmvolumegroups/status
+      - lvmlogicalvolumes/status
+    verbs:
+      - get
+      - update
+      - patch
+  - apiGroups:
+      - storage.deckhouse.io
+    resources:
+      - replicatedstorageclasses/finalizers
+      - replicatedstoragepools/finalizers
+      - replicatedvolumes/finalizers
+      - replicatedvolumeattachments/finalizers
+      - replicatedvolumereplicas/finalizers
+      - drbdresources/finalizers
+      - drbdresourceoperations/finalizers
+      - drbdnodeoperations/finalizers
+      - lvmvolumegroups/finalizers
+      - lvmlogicalvolumes/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - storage.k8s.io
+    resources:
+      - storageclasses
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1

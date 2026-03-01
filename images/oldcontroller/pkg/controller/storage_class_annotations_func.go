@@ -45,7 +45,7 @@ func ReconcileControllerConfigMapEvent(ctx context.Context, cl client.Client, lo
 	}
 	log.Debug(fmt.Sprintf("[ReconcileControllerConfigMapEvent] Virtualization module enabled: %t", virtualizationEnabled))
 
-	storageClassList, err := getStorageClassListForAnnotationsReconcile(ctx, cl, log, StorageClassProvisioner, virtualizationEnabled)
+	storageClassList, err := getStorageClassListForAnnotationsReconcile(ctx, cl, log, srv.StorageClassProvisioner, virtualizationEnabled)
 	if err != nil {
 		log.Error(err, "[ReconcileControllerConfigMapEvent] Failed to get storage class list for annotations reconcile")
 		return true, err
@@ -86,40 +86,42 @@ func getStorageClassListForAnnotationsReconcile(ctx context.Context, cl client.C
 	storageClassList := &storagev1.StorageClassList{}
 	for _, storageClass := range storageClassesWithReplicatedVolumeProvisioner.Items {
 		log.Trace(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] Processing storage class %+v", storageClass))
-		if storageClass.Parameters[StorageClassParamAllowRemoteVolumeAccessKey] == "false" {
-			if storageClass.Annotations == nil {
-				storageClass.Annotations = make(map[string]string)
+
+		replicatedSC := &srv.ReplicatedStorageClass{}
+		err = cl.Get(ctx, client.ObjectKey{Name: storageClass.Name}, replicatedSC)
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[getStorageClassForAnnotationsReconcile] Failed to get replicated storage class %s", storageClass.Name))
+			return nil, err
+		}
+
+		if replicatedSC.Spec.VolumeAccess != srv.VolumeAccessLocal { 
+			continue
+		}
+
+		if storageClass.Annotations == nil {
+			storageClass.Annotations = make(map[string]string)
+		}
+
+		value, exists := storageClass.Annotations[StorageClassVirtualizationAnnotationKey]
+
+		ignoreLocal, _ := strconv.ParseBool(
+			replicatedSC.Annotations[StorageClassIgnoreLocalAnnotationKey],
+		)
+
+		if virtualizationEnabled && !ignoreLocal {
+			if value != StorageClassVirtualizationAnnotationValue {
+				storageClass.Annotations[StorageClassVirtualizationAnnotationKey] = StorageClassVirtualizationAnnotationValue
+				storageClassList.Items = append(storageClassList.Items, storageClass)
+				log.Debug(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] storage class %s has no annotation %s with value %s and virtualizationEnabled is true. Add the annotation with the proper value and add the storage class to the reconcile list.", storageClass.Name, StorageClassVirtualizationAnnotationKey, StorageClassVirtualizationAnnotationValue))
 			}
-
-			value, exists := storageClass.Annotations[StorageClassVirtualizationAnnotationKey]
-
-			replicatedSC := &srv.ReplicatedStorageClass{}
-			log.Debug(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] Virtualization enabled. Get replicated storage class %s for annotations reconcile", storageClass.Name))
-			err = cl.Get(ctx, client.ObjectKey{Name: storageClass.Name}, replicatedSC)
-			if err != nil {
-				log.Error(err, fmt.Sprintf("[getStorageClassForAnnotationsReconcile] Failed to get replicated storage class %s", storageClass.Name))
-				return nil, err
-			}
-
-			ignoreLocal, _ := strconv.ParseBool(
-				replicatedSC.Annotations[StorageClassIgnoreLocalAnnotationKey],
-			)
-
-			if virtualizationEnabled && !ignoreLocal {
-				if value != StorageClassVirtualizationAnnotationValue {
-					storageClass.Annotations[StorageClassVirtualizationAnnotationKey] = StorageClassVirtualizationAnnotationValue
-					storageClassList.Items = append(storageClassList.Items, storageClass)
-					log.Debug(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] storage class %s has no annotation %s with value %s and virtualizationEnabled is true. Add the annotation with the proper value and add the storage class to the reconcile list.", storageClass.Name, StorageClassVirtualizationAnnotationKey, StorageClassVirtualizationAnnotationValue))
+		} else {
+			if exists {
+				delete(storageClass.Annotations, StorageClassVirtualizationAnnotationKey)
+				if len(storageClass.Annotations) == 0 {
+					storageClass.Annotations = nil
 				}
-			} else {
-				if exists {
-					delete(storageClass.Annotations, StorageClassVirtualizationAnnotationKey)
-					if len(storageClass.Annotations) == 0 {
-						storageClass.Annotations = nil
-					}
-					storageClassList.Items = append(storageClassList.Items, storageClass)
-					log.Debug(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] storage class %s has annotation %s and virtualizationEnabled is false. Remove the annotation and add the storage class to the reconcile list.", storageClass.Name, StorageClassVirtualizationAnnotationKey))
-				}
+				storageClassList.Items = append(storageClassList.Items, storageClass)
+				log.Debug(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] storage class %s has annotation %s and virtualizationEnabled is false. Remove the annotation and add the storage class to the reconcile list.", storageClass.Name, StorageClassVirtualizationAnnotationKey))
 			}
 		}
 	}

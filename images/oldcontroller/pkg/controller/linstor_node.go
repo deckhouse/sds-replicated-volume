@@ -683,7 +683,7 @@ func GetStorageClassesLabelsForNode(kubernetesNode v1.Node, replicatedStorageCla
 			continue
 		}
 		for _, zone := range replicatedStorageClass.Spec.Zones {
-			if zone == kubernetesNode.Labels[ZoneLabel] {
+			if zone == kubernetesNode.Labels[srv.ZoneLabel] {
 				storageClassLabelKey := fmt.Sprintf("%s/%s", StorageClassLabelKeyPrefix, replicatedStorageClass.Name)
 				storageClassesLabels = labels.Merge(storageClassesLabels, map[string]string{storageClassLabelKey: ""})
 				break
