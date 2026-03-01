@@ -13,6 +13,7 @@ deletionPolicy: Delete
 
 
 {{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
 {{- if (.Values.global.enabledModules | has "snapshot-controller") }}
 ---
 apiVersion: snapshot.storage.k8s.io/v1
@@ -22,5 +23,6 @@ metadata:
   name: {{ .Chart.Name }}
 driver: replicated.csi.storage.deckhouse.io
 deletionPolicy: Delete
+{{- end }}
 {{- end }}
 {{- end }}

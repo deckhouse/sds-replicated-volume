@@ -1,0 +1,35 @@
+{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if not (contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration)) }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: control-plane-migrator
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "control-plane-migrator")) | nindent 2 }}
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: d8:{{ .Chart.Name }}:control-plane-migrator
+  {{- include "helm_lib_module_labels" (list . (dict "app" "control-plane-migrator")) | nindent 2 }}
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs:  ["*"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: d8:{{ .Chart.Name }}:control-plane-migrator
+  {{- include "helm_lib_module_labels" (list . (dict "app" "control-plane-migrator")) | nindent 2 }}
+subjects:
+  - kind: ServiceAccount
+    name: control-plane-migrator
+    namespace: d8-{{ .Chart.Name }}
+roleRef:
+  kind: ClusterRole
+  name: d8:{{ .Chart.Name }}:control-plane-migrator
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}

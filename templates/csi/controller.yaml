@@ -21,7 +21,9 @@
 {{- end }}
 
 {{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
 - --csi-endpoint=unix://$(ADDRESS)
+{{- end }}
 {{- end }}
 {{- end }}
 
@@ -55,6 +57,7 @@
 {{- end }}
 
 {{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
 - name: ADDRESS
   value: /csi/csi.sock
 - name: KUBE_NODE_NAME
@@ -73,6 +76,7 @@
   value: "3"
 {{- else if eq .Values.sdsReplicatedVolume.logLevel "TRACE" }}
   value: "4"
+{{- end }}
 {{- end }}
 {{- end }}
 
@@ -154,6 +158,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 
 
 {{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
 {{- $csiControllerImage := include "helm_lib_module_image" (list . "csiDriver") }}
 
 {{- $csiControllerConfig := dict }}
@@ -175,6 +180,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 
 {{- include "helm_lib_csi_controller_manifests" (list . $csiControllerConfig) }}
 {{- end }}
+{{- end }}
 
 ###
 ### node
@@ -189,7 +195,9 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- end }}
 
 {{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
 - --csi-endpoint=unix://$(CSI_ADDRESS)
+{{- end }}
 {{- end }}
 {{- end }}
 
@@ -225,6 +233,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- end }}
 
 {{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
 - name: CSI_ADDRESS
   value: /csi/csi.sock
 - name: DRIVER_REG_SOCK_PATH
@@ -244,6 +253,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
   value: "3"
 {{- else if eq .Values.sdsReplicatedVolume.logLevel "TRACE" }}
   value: "4"
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -325,6 +335,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 
 
 {{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
 {{- $csiNodeImage := include "helm_lib_module_image" (list . "csiDriver") }}
 
 {{- $csiNodeConfig := dict }}
@@ -342,4 +353,5 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- $_ := set $csiNodeConfig "forceCsiNodeAndStaticNodesDepoloy" true }}
 
 {{- include "helm_lib_csi_node_manifests" (list . $csiNodeConfig) }}
+{{- end }}
 {{- end }}

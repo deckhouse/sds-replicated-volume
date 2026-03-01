@@ -1,4 +1,3 @@
-{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
 apiVersion: deckhouse.io/v1alpha1
 kind: NodeGroupConfiguration
 metadata:
@@ -214,4 +213,3 @@ spec:
         bb-flag-set reboot
       fi
     fi
-{{- end }}
