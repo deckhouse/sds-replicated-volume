@@ -55,14 +55,14 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		volumeBindingMode      = storagev1.VolumeBindingWaitForFirstConsumer
 		reclaimPolicy          = corev1.PersistentVolumeReclaimPolicy(controller.ReclaimPolicyRetain)
 		storageClassParameters = map[string]string{
-			srv.ReplicatedStorageClassParamNameKey: testName,
-			srv.StorageClassStoragePoolKey:         "test-sp",
+			controller.ReplicatedStorageClassParamNameKey: testName,
+			controller.StorageClassStoragePoolKey:         "test-sp",
 		}
 
 		validStorageClassResource = &storagev1.StorageClass{
 			TypeMeta: metav1.TypeMeta{
-				Kind:       srv.StorageClassKind,
-				APIVersion: srv.StorageClassAPIVersion,
+				Kind:       controller.StorageClassKind,
+				APIVersion: controller.StorageClassAPIVersion,
 			},
 			ObjectMeta: metav1.ObjectMeta{
 				Name:            testName,
@@ -77,7 +77,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 			ReclaimPolicy:        &reclaimPolicy,
 			AllowVolumeExpansion: &allowVolumeExpansion,
 			VolumeBindingMode:    &volumeBindingMode,
-			Provisioner:          srv.StorageClassProvisioner,
+			Provisioner:          controller.StorageClassProvisioner,
 		}
 
 		storageClassResource           *storagev1.StorageClass
@@ -233,11 +233,11 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 						if storageClassResource.Annotations == nil {
 							storageClassResource.Annotations = make(map[string]string)
 						}
-						storageClassResource.Annotations[srv.DefaultStorageClassAnnotationKey] = "true"
+						storageClassResource.Annotations[controller.DefaultStorageClassAnnotationKey] = "true"
 					})
 					JustBeforeEach(func() {
 						Expect(storageClassResource).ToNot(BeNil())
-						Expect(storageClassResource.Annotations).To(HaveKeyWithValue(srv.DefaultStorageClassAnnotationKey, "true"))
+						Expect(storageClassResource.Annotations).To(HaveKeyWithValue(controller.DefaultStorageClassAnnotationKey, "true"))
 					})
 					foo()
 				})
@@ -303,7 +303,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 				Expect(storageClass).NotTo(BeNil())
 				Expect(storageClass.Annotations).NotTo(BeNil())
 				Expect(storageClass.Annotations).To(HaveLen(1))
-				Expect(storageClass.Annotations).To(HaveKeyWithValue(srv.DefaultStorageClassAnnotationKey, "true"))
+				Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.DefaultStorageClassAnnotationKey, "true"))
 			})
 		}
 
@@ -369,7 +369,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 								Expect(storageClass).NotTo(BeNil())
 								Expect(storageClass.Annotations).NotTo(BeNil())
 								Expect(storageClass.Annotations).To(HaveLen(2))
-								Expect(storageClass.Annotations).To(HaveKeyWithValue(srv.DefaultStorageClassAnnotationKey, "true"))
+								Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.DefaultStorageClassAnnotationKey, "true"))
 								Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.StorageClassVirtualizationAnnotationKey, controller.StorageClassVirtualizationAnnotationValue))
 							})
 						})
@@ -382,7 +382,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 						var anotherProvisioner string
 						BeforeEach(func() {
 							anotherProvisioner = "another.provisioner"
-							storageClassResource.Annotations = map[string]string{srv.DefaultStorageClassAnnotationKey: "true"}
+							storageClassResource.Annotations = map[string]string{controller.DefaultStorageClassAnnotationKey: "true"}
 							replicatedStorageClassResource.Spec.VolumeAccess = srv.VolumeAccessLocal
 							storageClassResource.Provisioner = anotherProvisioner
 						})

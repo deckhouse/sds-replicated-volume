@@ -46,6 +46,27 @@ import (
 // Wiring / construction
 //
 
+const (
+	storageClassFinalizerName  = "storage.deckhouse.io/sds-replicated-volume"
+	storageClassProvisioner    = "replicated.csi.storage.deckhouse.io"
+	storageClassKind           = "StorageClass"
+	storageClassAPIVersion     = "storage.k8s.io/v1"
+	storageClassStoragePoolKey = "replicated.csi.storage.deckhouse.io/storagePool"
+	managedLabelKey            = "storage.deckhouse.io/managed-by"
+	managedLabelValue          = "sds-replicated-volume"
+
+	rscStorageClassVolumeSnapshotClassAnnotationKey   = "storage.deckhouse.io/volumesnapshotclass"
+	rscStorageClassVolumeSnapshotClassAnnotationValue = "sds-replicated-volume"
+	replicatedStorageClassParamNameKey                = "replicated.csi.storage.deckhouse.io/replicatedStorageClassName"
+
+	storageClassVirtualizationAnnotationKey   = "virtualdisk.virtualization.deckhouse.io/access-mode"
+	storageClassVirtualizationAnnotationValue = "ReadWriteOnce"
+	storageClassIgnoreLocalAnnotationKey      = "replicatedstorageclass.storage.deckhouse.io/ignore-local"
+
+	controllerConfigMapName        = "sds-replicated-volume-controller-config"
+	virtualizationModuleEnabledKey = "virtualizationEnabled"
+)
+
 type Reconciler struct {
 	cl           client.Client
 	controllerNS string
@@ -172,7 +193,7 @@ func (r *Reconciler) reconcileStorageClass(ctx context.Context, rsc *v1alpha1.Re
 		return rf.Fail(err)
 	}
 
-	if oldSC != nil && oldSC.Provisioner != v1alpha1.StorageClassProvisioner {
+	if oldSC != nil && oldSC.Provisioner != storageClassProvisioner {
 		return rf.Fail(fmt.Errorf("reconcile StorageClass with provisioner %s is not allowed", oldSC.Provisioner))
 	}
 
@@ -185,7 +206,7 @@ func (r *Reconciler) reconcileStorageClass(ctx context.Context, rsc *v1alpha1.Re
 			if len(oldSC.Finalizers) != 1 {
 				return rf.Fail(fmt.Errorf("deletion of StorageClass with multiple(%v) finalizers is not allowed", oldSC.Finalizers))
 			}
-			if oldSC.Finalizers[0] != v1alpha1.StorageClassFinalizerName {
+			if oldSC.Finalizers[0] != storageClassFinalizerName {
 				return rf.Fail(fmt.Errorf("deletion of StorageClass with finalizer %s is not allowed", oldSC.Finalizers[0]))
 			}
 
@@ -232,7 +253,7 @@ func (r *Reconciler) reconcileStorageClass(ctx context.Context, rsc *v1alpha1.Re
 			if len(oldSC.Finalizers) != 1 {
 				return rf.Fail(fmt.Errorf("deletion of StorageClass with multiple(%v) finalizers is not allowed", oldSC.Finalizers))
 			}
-			if oldSC.Finalizers[0] != v1alpha1.StorageClassFinalizerName {
+			if oldSC.Finalizers[0] != storageClassFinalizerName {
 				return rf.Fail(fmt.Errorf("deletion of StorageClass with finalizer %s is not allowed", oldSC.Finalizers[0]))
 			}
 
@@ -275,8 +296,8 @@ func computeIntendedStorageClass(rsc *v1alpha1.ReplicatedStorageClass, virtualiz
 	reclaimPolicy := corev1.PersistentVolumeReclaimPolicy(rsc.Spec.ReclaimPolicy)
 
 	params := map[string]string{
-		v1alpha1.ReplicatedStorageClassParamNameKey: rsc.Name,
-		v1alpha1.StorageClassStoragePoolKey:         rsc.Status.StoragePoolName,
+		replicatedStorageClassParamNameKey: rsc.Name,
+		storageClassStoragePoolKey:         rsc.Status.StoragePoolName,
 	}
 
 	var volumeBindingMode storagev1.VolumeBindingMode
@@ -292,31 +313,31 @@ func computeIntendedStorageClass(rsc *v1alpha1.ReplicatedStorageClass, virtualiz
 	}
 
 	annotations := map[string]string{
-		v1alpha1.RSCStorageClassVolumeSnapshotClassAnnotationKey: v1alpha1.RSCStorageClassVolumeSnapshotClassAnnotationValue,
+		rscStorageClassVolumeSnapshotClassAnnotationKey: rscStorageClassVolumeSnapshotClassAnnotationValue,
 	}
 
 	if rsc.Spec.VolumeAccess == v1alpha1.VolumeAccessLocal && virtualizationEnabled {
-		ignoreLocal, _ := strconv.ParseBool(rsc.Annotations[v1alpha1.StorageClassIgnoreLocalAnnotationKey])
+		ignoreLocal, _ := strconv.ParseBool(rsc.Annotations[storageClassIgnoreLocalAnnotationKey])
 		if !ignoreLocal {
-			annotations[v1alpha1.StorageClassVirtualizationAnnotationKey] = v1alpha1.StorageClassVirtualizationAnnotationValue
+			annotations[storageClassVirtualizationAnnotationKey] = storageClassVirtualizationAnnotationValue
 		}
 	}
 
 	return &storagev1.StorageClass{
 		TypeMeta: metav1.TypeMeta{
-			Kind:       v1alpha1.StorageClassKind,
-			APIVersion: v1alpha1.StorageClassAPIVersion,
+			Kind:       storageClassKind,
+			APIVersion: storageClassAPIVersion,
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        rsc.Name,
 			Namespace:   rsc.Namespace,
-			Finalizers:  []string{v1alpha1.StorageClassFinalizerName},
-			Labels:      map[string]string{v1alpha1.ManagedLabelKey: v1alpha1.ManagedLabelValue},
+			Finalizers:  []string{storageClassFinalizerName},
+			Labels:      map[string]string{managedLabelKey: managedLabelValue},
 			Annotations: annotations,
 		},
 		AllowVolumeExpansion: &allowVolumeExpansion,
 		Parameters:           params,
-		Provisioner:          v1alpha1.StorageClassProvisioner,
+		Provisioner:          storageClassProvisioner,
 		ReclaimPolicy:        &reclaimPolicy,
 		VolumeBindingMode:    &volumeBindingMode,
 	}
@@ -383,7 +404,7 @@ func doUpdateStorageClass(newSC *storagev1.StorageClass, oldSC *storagev1.Storag
 	}
 
 	copyAnnotations := maps.Clone(oldSC.Annotations)
-	delete(copyAnnotations, v1alpha1.StorageClassVirtualizationAnnotationKey)
+	delete(copyAnnotations, storageClassVirtualizationAnnotationKey)
 
 	if len(copyAnnotations) > 0 {
 		if newSC.Annotations == nil {
@@ -1768,13 +1789,13 @@ func (r *Reconciler) deleteStorageClass(ctx context.Context, sc *storagev1.Stora
 
 func (r *Reconciler) getVirtualizationModuleEnabled(ctx context.Context) (bool, error) {
 	var cm corev1.ConfigMap
-	if err := r.cl.Get(ctx, client.ObjectKey{Namespace: r.controllerNS, Name: v1alpha1.ControllerConfigMapName}, &cm); err != nil {
+	if err := r.cl.Get(ctx, client.ObjectKey{Namespace: r.controllerNS, Name: controllerConfigMapName}, &cm); err != nil {
 		if apierrors.IsNotFound(err) {
 			return false, nil
 		}
 		return false, err
 	}
-	value, exists := cm.Data[v1alpha1.VirtualizationModuleEnabledKey]
+	value, exists := cm.Data[virtualizationModuleEnabledKey]
 	if !exists {
 		return false, nil
 	}

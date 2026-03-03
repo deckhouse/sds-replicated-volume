@@ -45,7 +45,7 @@ func ReconcileControllerConfigMapEvent(ctx context.Context, cl client.Client, lo
 	}
 	log.Debug(fmt.Sprintf("[ReconcileControllerConfigMapEvent] Virtualization module enabled: %t", virtualizationEnabled))
 
-	storageClassList, err := getStorageClassListForAnnotationsReconcile(ctx, cl, log, srv.StorageClassProvisioner, virtualizationEnabled)
+	storageClassList, err := getStorageClassListForAnnotationsReconcile(ctx, cl, log, StorageClassProvisioner, virtualizationEnabled)
 	if err != nil {
 		log.Error(err, "[ReconcileControllerConfigMapEvent] Failed to get storage class list for annotations reconcile")
 		return true, err
@@ -94,7 +94,7 @@ func getStorageClassListForAnnotationsReconcile(ctx context.Context, cl client.C
 			return nil, err
 		}
 
-		if replicatedSC.Spec.VolumeAccess != srv.VolumeAccessLocal { 
+		if replicatedSC.Spec.VolumeAccess != srv.VolumeAccessLocal {
 			continue
 		}
 

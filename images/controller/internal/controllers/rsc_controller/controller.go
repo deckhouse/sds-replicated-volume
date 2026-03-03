@@ -34,15 +34,16 @@ import (
 )
 
 const (
-	// RSCControllerName is the controller name for rsc_controller.
-	RSCControllerName = "rsc-controller"
+	RSCControllerName          = "rsc-controller"
+	podNamespaceEnvVar         = "POD_NAMESPACE"
+	controllerNamespaceDefault = "d8-sds-replicated-volume"
 )
 
 func BuildController(mgr manager.Manager) error {
 	cl := mgr.GetClient()
 
-	ns := v1alpha1.ControllerNamespaceDefault
-	if v := os.Getenv(v1alpha1.PodNamespaceEnvVar); v != "" {
+	ns := controllerNamespaceDefault
+	if v := os.Getenv(podNamespaceEnvVar); v != "" {
 		ns = v
 	}
 

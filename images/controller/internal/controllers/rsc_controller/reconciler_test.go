@@ -3285,8 +3285,8 @@ var _ = Describe("Reconciler", func() {
 
 			var sc storagev1.StorageClass
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &sc)).To(Succeed())
-			Expect(sc.Provisioner).To(Equal(v1alpha1.StorageClassProvisioner))
-			Expect(sc.Annotations).NotTo(HaveKey(v1alpha1.StorageClassVirtualizationAnnotationKey))
+			Expect(sc.Provisioner).To(Equal(storageClassProvisioner))
+			Expect(sc.Annotations).NotTo(HaveKey(storageClassVirtualizationAnnotationKey))
 		})
 
 		It("returns error when StorageClass has different provisioner", func() {
@@ -3374,7 +3374,7 @@ var _ = Describe("Reconciler", func() {
 			var sc storagev1.StorageClass
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &sc)).To(Succeed())
 			Expect(sc.Labels).To(HaveKeyWithValue("custom", "1"))
-			Expect(sc.Labels).To(HaveKeyWithValue(v1alpha1.ManagedLabelKey, v1alpha1.ManagedLabelValue))
+			Expect(sc.Labels).To(HaveKeyWithValue(managedLabelKey, managedLabelValue))
 		})
 
 		It("updates StorageClass metadata when needed", func() {
@@ -3421,7 +3421,7 @@ var _ = Describe("Reconciler", func() {
 
 			var sc storagev1.StorageClass
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &sc)).To(Succeed())
-			Expect(sc.Labels).To(HaveKeyWithValue(v1alpha1.ManagedLabelKey, v1alpha1.ManagedLabelValue))
+			Expect(sc.Labels).To(HaveKeyWithValue(managedLabelKey, managedLabelValue))
 		})
 
 		It("recreates StorageClass when old SC has extra legacy parameters", func() {
@@ -3469,8 +3469,8 @@ var _ = Describe("Reconciler", func() {
 			// TODO: improve this check — currently we only verify the expected parameters;
 			// consider a more robust assertion if additional parameters are introduced.
 			Expect(sc.Parameters).To(HaveLen(2))
-			Expect(sc.Parameters).To(HaveKeyWithValue(v1alpha1.ReplicatedStorageClassParamNameKey, "rsc-1"))
-			Expect(sc.Parameters).To(HaveKeyWithValue(v1alpha1.StorageClassStoragePoolKey, "pool-1"))
+			Expect(sc.Parameters).To(HaveKeyWithValue(replicatedStorageClassParamNameKey, "rsc-1"))
+			Expect(sc.Parameters).To(HaveKeyWithValue(storageClassStoragePoolKey, "pool-1"))
 		})
 
 	})

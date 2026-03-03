@@ -411,7 +411,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode1,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -419,7 +419,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode2,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone2,
+							ZoneLabel: zone2,
 						},
 					},
 				},
@@ -455,7 +455,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode1,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -532,7 +532,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode1,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -540,7 +540,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode2,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -548,7 +548,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: noLabelNode,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -622,7 +622,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode1,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -630,7 +630,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode2,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -638,7 +638,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: noLabelNode,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -785,7 +785,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode1,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -793,7 +793,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode2,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone2,
+							ZoneLabel: zone2,
 						},
 					},
 				},
@@ -801,7 +801,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: noLabelNode,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone3,
+							ZoneLabel: zone3,
 						},
 					},
 				},
@@ -952,7 +952,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: noLabelNode1,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1018,7 +1018,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: noLabelNode1,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1026,7 +1026,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: noLabelNode2,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1034,7 +1034,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: noLabelNode,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1075,7 +1075,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode1,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1142,7 +1142,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode1,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1150,7 +1150,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode2,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone2,
+							ZoneLabel: zone2,
 						},
 					},
 				},
@@ -1158,7 +1158,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: noLabelNode,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone3,
+							ZoneLabel: zone3,
 						},
 					},
 				},
@@ -1306,7 +1306,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode1,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1314,7 +1314,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode2,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone2,
+							ZoneLabel: zone2,
 						},
 					},
 				},
@@ -1391,7 +1391,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode1,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1399,7 +1399,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode2,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1407,7 +1407,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode3,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1481,7 +1481,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode1,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1489,7 +1489,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode2,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1497,7 +1497,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode3,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1572,7 +1572,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode1,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1580,7 +1580,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode2,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone2,
+							ZoneLabel: zone2,
 						},
 					},
 				},
@@ -1588,7 +1588,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode3,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone3,
+							ZoneLabel: zone3,
 						},
 					},
 				},
@@ -1813,7 +1813,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode1,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1821,7 +1821,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode2,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone2,
+							ZoneLabel: zone2,
 						},
 					},
 				},
@@ -1887,7 +1887,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode1,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1895,7 +1895,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode2,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1903,7 +1903,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode3,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1945,7 +1945,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode1,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -1953,7 +1953,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode2,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone2,
+							ZoneLabel: zone2,
 						},
 					},
 				},
@@ -2020,7 +2020,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode1,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone1,
+							ZoneLabel: zone1,
 						},
 					},
 				},
@@ -2028,7 +2028,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode2,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone2,
+							ZoneLabel: zone2,
 						},
 					},
 				},
@@ -2036,7 +2036,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: labelNode3,
 						Labels: map[string]string{
-							srv.ZoneLabel: zone3,
+							ZoneLabel: zone3,
 						},
 					},
 				},

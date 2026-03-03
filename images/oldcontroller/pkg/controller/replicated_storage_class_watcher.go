@@ -149,7 +149,7 @@ func ReconcileReplicatedStorageClassReplication(
 			nodes := spNodes[rsc.Spec.StoragePool]
 			zoneNodesCount := make(map[string]int, len(nodes))
 			for _, node := range nodes {
-				if zone, exist := node.Labels[srv.ZoneLabel]; exist {
+				if zone, exist := node.Labels[ZoneLabel]; exist {
 					zoneNodesCount[zone]++
 				}
 			}
@@ -312,7 +312,7 @@ func GetReplicatedStoragePoolsZones(spNodes map[string][]v1.Node) map[string][]s
 
 	for sp, nodes := range spNodes {
 		for _, node := range nodes {
-			if zone, exist := node.Labels[srv.ZoneLabel]; exist {
+			if zone, exist := node.Labels[ZoneLabel]; exist {
 				if spZones[sp] == nil {
 					spZones[sp] = make(map[string]struct{}, len(nodes))
 				}
