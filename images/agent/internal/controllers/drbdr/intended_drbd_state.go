@@ -81,6 +81,9 @@ type IntendedDRBDState interface {
 
 	// RsDiscardGranularity returns the intended rs-discard-granularity. Always 8192.
 	RsDiscardGranularity() uint
+
+	// SymlinkName returns the K8S name used for the stable device symlink path.
+	SymlinkName() string
 }
 
 // IntendedPeer represents the intended state of a DRBD peer connection.
@@ -132,6 +135,7 @@ type IntendedPath interface {
 type intendedDRBDState struct {
 	isUpAndNotInCleanup     bool
 	resourceName            string
+	symlinkName             string
 	nodeID                  uint8
 	resourceType            v1alpha1.DRBDResourceType
 	backingDisk             string
@@ -146,6 +150,7 @@ type intendedDRBDState struct {
 func (s *intendedDRBDState) IsZero() bool              { return s == nil }
 func (s *intendedDRBDState) IsUpAndNotInCleanup() bool { return s.isUpAndNotInCleanup }
 func (s *intendedDRBDState) ResourceName() string      { return s.resourceName }
+func (s *intendedDRBDState) SymlinkName() string       { return s.symlinkName }
 func (s *intendedDRBDState) NodeID() uint8             { return s.nodeID }
 func (s *intendedDRBDState) Type() v1alpha1.DRBDResourceType {
 	return s.resourceType
@@ -278,6 +283,7 @@ func computeIntendedDRBDState(
 	return &intendedDRBDState{
 		isUpAndNotInCleanup:     isUpAndNotInCleanup,
 		resourceName:            DRBDResourceNameOnTheNode(drbdr),
+		symlinkName:             drbdr.Name,
 		nodeID:                  drbdr.Spec.NodeID,
 		resourceType:            drbdr.Spec.Type,
 		backingDisk:             backingDisk,
