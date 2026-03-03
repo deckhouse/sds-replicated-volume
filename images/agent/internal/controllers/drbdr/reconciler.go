@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -231,6 +232,10 @@ func (r *Reconciler) reconcileOrphanDRBD(
 	defer rf.OnEnd(&outcome)
 
 	rf.Log().Info("Cleaning up orphan DRBD resource")
+
+	if k8sName, hasPrefix := ParseDRBDResourceNameOnTheNode(actualName); hasPrefix {
+		_ = os.Remove(DeviceSymlinkPath(k8sName))
+	}
 
 	downAction := DownAction{ResourceName: actualName}
 	if err := downAction.Execute(rf.Ctx()); err != nil {

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdmeta"
@@ -440,4 +441,67 @@ func (a ResizeAction) String() string {
 		minor = fmt.Sprintf("%d", *a.Minor)
 	}
 	return fmt.Sprintf("Resize(minor=%s)", minor)
+}
+
+// EnsureDeviceSymlinkAction creates or updates the stable device symlink
+// /dev/sdsrv/{name} -> /dev/drbd{minor}.
+type EnsureDeviceSymlinkAction struct {
+	Name  string
+	Minor *uint
+}
+
+func (a EnsureDeviceSymlinkAction) Execute(_ context.Context) error {
+	if a.Minor == nil {
+		return ConfiguredReasonError(
+			fmt.Errorf("EnsureDeviceSymlinkAction: minor not set"),
+			v1alpha1.DRBDResourceCondConfiguredReasonSymlinkFailed,
+		)
+	}
+
+	symlinkPath := DeviceSymlinkPath(a.Name)
+	target := fmt.Sprintf("/dev/drbd%d", *a.Minor)
+
+	current, err := os.Readlink(symlinkPath)
+	if err == nil && current == target {
+		return nil
+	}
+
+	// Remove stale symlink (or anything at that path) before creating.
+	_ = os.Remove(symlinkPath)
+
+	if err := os.Symlink(target, symlinkPath); err != nil {
+		return ConfiguredReasonError(
+			fmt.Errorf("creating device symlink %s -> %s: %w", symlinkPath, target, err),
+			v1alpha1.DRBDResourceCondConfiguredReasonSymlinkFailed,
+		)
+	}
+	return nil
+}
+
+func (a EnsureDeviceSymlinkAction) String() string {
+	minor := "<nil>"
+	if a.Minor != nil {
+		minor = fmt.Sprintf("%d", *a.Minor)
+	}
+	return fmt.Sprintf("EnsureDeviceSymlink(name=%s, minor=%s)", a.Name, minor)
+}
+
+// RemoveDeviceSymlinkAction removes the stable device symlink before teardown.
+type RemoveDeviceSymlinkAction struct {
+	Name string
+}
+
+func (a RemoveDeviceSymlinkAction) Execute(_ context.Context) error {
+	err := os.Remove(DeviceSymlinkPath(a.Name))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return ConfiguredReasonError(
+			fmt.Errorf("removing device symlink: %w", err),
+			v1alpha1.DRBDResourceCondConfiguredReasonSymlinkFailed,
+		)
+	}
+	return nil
+}
+
+func (a RemoveDeviceSymlinkAction) String() string {
+	return fmt.Sprintf("RemoveDeviceSymlink(name=%s)", a.Name)
 }
