@@ -31,7 +31,6 @@ import (
 
 const (
 	replicatedCSIProvisioner = "replicated.csi.storage.deckhouse.io"
-	allowedUserName          = "system:serviceaccount:d8-sds-replicated-volume:controller"
 )
 
 var allowedUserNames = map[string]struct{}{
