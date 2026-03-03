@@ -144,8 +144,8 @@ func ReconcileReplicatedStorageClassReplication(
 	for _, rsc := range rscs {
 		log.Debug(fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] ReplicatedStorageClass %s replication type %s", rsc.Name, rsc.Spec.Replication))
 		switch rsc.Spec.Replication {
-		case ReplicationNone:
-		case ReplicationAvailability, ReplicationConsistencyAndAvailability:
+		case srv.ReplicationNone:
+		case srv.ReplicationAvailability, srv.ReplicationConsistencyAndAvailability:
 			nodes := spNodes[rsc.Spec.StoragePool]
 			zoneNodesCount := make(map[string]int, len(nodes))
 			for _, node := range nodes {
@@ -156,7 +156,7 @@ func ReconcileReplicatedStorageClassReplication(
 			log.Debug(fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] ReplicatedStorageClass %s topology type %s", rsc.Name, rsc.Spec.Topology))
 			switch rsc.Spec.Topology {
 			// As we need to place 3 storage replicas in a some random zone, we check if at least one zone has enough nodes for quorum.
-			case TopologyZonal:
+			case srv.TopologyZonal:
 				var enoughNodes bool
 				for _, nodesCount := range zoneNodesCount {
 					if nodesCount > 2 {
@@ -173,7 +173,7 @@ func ReconcileReplicatedStorageClassReplication(
 					removeNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByReplicasLabel)
 				}
 				// As we need to place every storage replica in a different zone, we check if at least one node is available in every selected zone.
-			case TopologyTransZonal:
+			case srv.TopologyTransZonal:
 				enoughNodes := true
 				for _, zone := range rsc.Spec.Zones {
 					nodesCount := zoneNodesCount[zone]
@@ -191,7 +191,7 @@ func ReconcileReplicatedStorageClassReplication(
 					removeNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByReplicasLabel)
 				}
 				// As we do not care about zones, we just check if selected storage pool has enough nodes for quorum.
-			case TopologyIgnored:
+			case srv.TopologyIgnored:
 				if len(spNodes[rsc.Spec.StoragePool]) < 3 {
 					err := errors.New("not enough nodes are available in the zones for a quorum")
 					log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] replicas validation failed for ReplicatedStorageClass %s", rsc.Name))
