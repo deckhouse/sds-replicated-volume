@@ -29,32 +29,13 @@ const (
 )
 
 const (
-	// ReplicatedVolumeCondConfiguredType indicates whether all replicas are configured.
-	//
-	// Reasons describe configuration progress / mismatch.
-	ReplicatedVolumeCondConfiguredType                          = "Configured"
-	ReplicatedVolumeCondConfiguredReasonAllReplicasConfigured   = "AllReplicasConfigured"   // All replicas are configured.
-	ReplicatedVolumeCondConfiguredReasonConfigurationInProgress = "ConfigurationInProgress" // Configuration is still in progress.
-	ReplicatedVolumeCondConfiguredReasonReplicasNotConfigured   = "ReplicasNotConfigured"   // Some replicas are not configured yet.
-)
-
-const (
 	// ReplicatedVolumeCondIOReadyType indicates whether the volume is ready for I/O operations.
-	ReplicatedVolumeCondIOReadyType                      = "IOReady"             // ReplicatedVolume is configured and ready to use
-	ReplicatedVolumeCondIOReadyReasonFormationInProgress = "FormationInProgress" // Datamesh formation is still in progress.
-	ReplicatedVolumeCondIOReadyReasonNoConfiguration     = "NoConfiguration"     // Volume has no configuration yet.
-	ReplicatedVolumeCondIOReadyReasonReady               = "Ready"               // Datamesh is formed and ready for I/O.
+	ReplicatedVolumeCondIOReadyType = "IOReady"
 )
 
 const (
 	// ReplicatedVolumeCondQuorumType indicates whether the volume has quorum.
-	//
-	// Reasons describe quorum state.
-	ReplicatedVolumeCondQuorumType                      = "Quorum"              // All quorum conditions are met
-	ReplicatedVolumeCondQuorumReasonNoReplicas          = "NoReplicas"          // No replicas exist yet.
-	ReplicatedVolumeCondQuorumReasonQuorumLost          = "QuorumLost"          // One or more replicas lost quorum.
-	ReplicatedVolumeCondQuorumReasonQuorumMet           = "QuorumMet"           // All replicas have quorum.
-	ReplicatedVolumeCondQuorumReasonQuorumStatusUnknown = "QuorumStatusUnknown" // Quorum status is not yet reported by some replicas.
+	ReplicatedVolumeCondQuorumType = "Quorum"
 )
 
 const (
@@ -70,10 +51,5 @@ const (
 
 const (
 	// ReplicatedVolumeCondScheduledType indicates whether all replicas have been scheduled.
-	//
-	// Reasons describe scheduling progress / deficit.
-	ReplicatedVolumeCondScheduledType                       = "Scheduled"
-	ReplicatedVolumeCondScheduledReasonAllReplicasScheduled = "AllReplicasScheduled" // All replicas are scheduled.
-	ReplicatedVolumeCondScheduledReasonReplicasNotScheduled = "ReplicasNotScheduled" // Some replicas are not scheduled yet.
-	ReplicatedVolumeCondScheduledReasonSchedulingInProgress = "SchedulingInProgress" // Scheduling is still in progress.
+	ReplicatedVolumeCondScheduledType = "Scheduled"
 )
