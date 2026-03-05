@@ -169,6 +169,18 @@ func mkJoinRequestTB(name string) v1alpha1.ReplicatedVolumeDatameshReplicaReques
 	}
 }
 
+// mkJoinRequestSD creates a Join request for ShadowDiskful type.
+func mkJoinRequestSD(name string) v1alpha1.ReplicatedVolumeDatameshReplicaRequest { //nolint:unparam
+	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+		Name: name,
+		Request: v1alpha1.DatameshMembershipRequest{
+			Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
+			Type:      v1alpha1.ReplicaTypeShadowDiskful,
+		},
+		FirstObservedAt: metav1.Now(),
+	}
+}
+
 // mkLeaveRequest creates a Leave request.
 func mkLeaveRequest(name string) v1alpha1.ReplicatedVolumeDatameshReplicaRequest { //nolint:unparam
 	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{

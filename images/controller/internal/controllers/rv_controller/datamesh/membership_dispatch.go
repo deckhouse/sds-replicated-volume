@@ -101,6 +101,8 @@ func planAddReplica(_ *globalContext, rctx *ReplicaContext) (dmte.PlanID, string
 		return "access/v1", ""
 	case v1alpha1.ReplicaTypeTieBreaker:
 		return "tiebreaker/v1", ""
+	case v1alpha1.ReplicaTypeShadowDiskful:
+		return "shadow-diskful/v1", ""
 	default:
 		return "", "Not implemented"
 	}
@@ -117,6 +119,9 @@ func planRemoveReplica(_ *globalContext, rctx *ReplicaContext) (dmte.PlanID, str
 		return "access/v1", ""
 	case v1alpha1.DatameshMemberTypeTieBreaker:
 		return "tiebreaker/v1", ""
+	case v1alpha1.DatameshMemberTypeShadowDiskful,
+		v1alpha1.DatameshMemberTypeLiminalShadowDiskful:
+		return "shadow-diskful/v1", ""
 	default:
 		return "", "Not implemented"
 	}
