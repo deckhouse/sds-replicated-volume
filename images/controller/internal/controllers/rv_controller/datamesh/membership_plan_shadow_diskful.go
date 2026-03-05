@@ -27,16 +27,14 @@ func registerShadowDiskfulPlans(
 ) {
 	// AddReplica(sD): ✦ → sD∅ → sD
 	//
-	// Two steps because DRBD configuration order matters:
+	// Two steps because DRBD bitmap ordering matters:
 	//
-	// Step 1 (✦ → sD∅): creates a liminal member with full-mesh connectivity
-	// but no disk. All peers must configure bitmaps and connections for this
-	// member BEFORE it attaches its disk. Without bitmaps on peers, the member
-	// cannot establish connections or start resync after disk attach — causing
-	// DRBD errors and delayed synchronization.
+	// Step 1 (✦ → sD∅): creates a liminal member. Peers enable bitmaps
+	// (and add full-mesh connections) for this member BEFORE it attaches
+	// its disk. DRBD will refuse to attach a disk if peers do not have
+	// bitmaps allocated.
 	//
-	// Step 2 (sD∅ → sD): attaches the disk. By this point all peers are ready,
-	// so DRBD resync starts immediately.
+	// Step 2 (sD∅ → sD): attaches the disk. Bitmaps are already in place.
 	addReplica.Plan("shadow-diskful/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
 		ReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
