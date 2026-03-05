@@ -636,13 +636,13 @@ func computeIntendedDiskfulReplicaCount(rv *v1alpha1.ReplicatedVolume) byte {
 }
 
 // computeTargetQuorum computes Quorum and QuorumMinimumRedundancy from the
-// effective layout (not from Configuration — those are the target, not reality).
+// baseline layout (not from Configuration — those are the target, not reality).
 //
-//	qmr = effective_GMDR + 1
+//	qmr = baseline_GMDR + 1
 //	q   = floor(voters / 2) + 1, but at least floor(minD / 2) + 1
-//	minD = effective_FTT + effective_GMDR + 1
+//	minD = baseline_FTT + baseline_GMDR + 1
 func computeTargetQuorum(rv *v1alpha1.ReplicatedVolume) (q, qmr byte) {
-	el := rv.Status.EffectiveLayout
+	el := rv.Status.BaselineLayout
 	minD := el.FailuresToTolerate + el.GuaranteedMinimumDataRedundancy + 1
 
 	minQ := minD/2 + 1

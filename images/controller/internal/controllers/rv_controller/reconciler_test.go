@@ -1796,9 +1796,8 @@ var _ = Describe("computeTargetQuorum", func() {
 					FailuresToTolerate: ftt, GuaranteedMinimumDataRedundancy: gmdr,
 					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, ReplicatedStoragePoolName: "test-pool",
 				},
-				EffectiveLayout: v1alpha1.ReplicatedVolumeEffectiveLayout{
-					FailuresToTolerate:              ftt,
-					GuaranteedMinimumDataRedundancy: gmdr,
+				BaselineLayout: v1alpha1.ReplicatedVolumeLayout{
+					FailuresToTolerate: ftt, GuaranteedMinimumDataRedundancy: gmdr,
 				},
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{Members: members},
 			},
@@ -2320,7 +2319,7 @@ var _ = Describe("computeTargetQuorum edge cases", func() {
 					Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 0,
 					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, ReplicatedStoragePoolName: "test-pool",
 				},
-				EffectiveLayout: v1alpha1.ReplicatedVolumeEffectiveLayout{
+				BaselineLayout: v1alpha1.ReplicatedVolumeLayout{
 					FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 0,
 				},
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
@@ -2348,7 +2347,7 @@ var _ = Describe("computeTargetQuorum edge cases", func() {
 					Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 0,
 					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, ReplicatedStoragePoolName: "test-pool",
 				},
-				EffectiveLayout: v1alpha1.ReplicatedVolumeEffectiveLayout{
+				BaselineLayout: v1alpha1.ReplicatedVolumeLayout{
 					FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 0,
 				},
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
@@ -2374,7 +2373,7 @@ var _ = Describe("computeTargetQuorum edge cases", func() {
 					Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
 					VolumeAccess: v1alpha1.VolumeAccessLocal, ReplicatedStoragePoolName: "test-pool",
 				},
-				EffectiveLayout: v1alpha1.ReplicatedVolumeEffectiveLayout{
+				BaselineLayout: v1alpha1.ReplicatedVolumeLayout{
 					FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
 				},
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{

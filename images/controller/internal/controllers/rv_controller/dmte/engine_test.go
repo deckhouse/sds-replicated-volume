@@ -272,7 +272,7 @@ var _ = Describe("Process", func() {
 		Expect(slot.statusMessages[5]).To(ContainSubstring("Joining"))
 	})
 
-	It("dispatch slot conflict writes blocked-by-active message", func() {
+	It("same-type dispatch silently preserves settle progress message", func() {
 		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
 		slot := newRecordingSlotAccessor()
 		reg.RegisterReplicaSlot(0, slot)
@@ -297,8 +297,45 @@ var _ = Describe("Process", func() {
 
 		// Settle updates the step message → changed is true.
 		Expect(changed).To(BeTrue())
+		// Same-type dispatch is silently ignored — slot keeps the settle
+		// progress message, not the blocked-by-active message.
+		Expect(slot.statusMessages[5]).To(ContainSubstring("Joining"))
+		Expect(slot.statusMessages[5]).To(ContainSubstring("replicas confirmed revision"))
+		Expect(slot.statusMessages[5]).NotTo(ContainSubstring("waiting for"))
+	})
+
+	It("different-type dispatch slot conflict writes blocked-by-active message", func() {
+		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+		slot := newRecordingSlotAccessor()
+		reg.RegisterReplicaSlot(0, slot)
+
+		// Active plan that never completes.
+		neverConfirm := func(_ *testGCtx, _ *testReplicaCtx, _ int64) ConfirmResult {
+			return ConfirmResult{MustConfirm: ids(0, 1), Confirmed: ids(0)}
+		}
+		reg.ReplicaTransition("AddReplica", 0).
+			Plan("access/v1").Group("G").DisplayName("Joining").
+			Steps(ReplicaStep("s", stubReplicaApply, neverConfirm)).Build()
+
+		// New plan of a DIFFERENT type on the same slot.
+		reg.ReplicaTransition("RemoveReplica", 0).
+			Plan("remove/v1").Group("G").DisplayName("Leaving").
+			Steps(ReplicaStep("s", stubReplicaApply, stubReplicaConfirm)).Build()
+
+		// Pre-existing AddReplica transition occupies the slot.
+		transitions := []Transition{newTestTransition("AddReplica", "access/v1", "rv-1-5")}
+
+		rctx5 := &testReplicaCtx{id: 5, name: "rv-1-5"}
+
+		var rev int64
+		e := NewEngine(context.Background(), reg, &mockTracker{}, []DispatchFunc[testCtxProvider]{singleReplicaDispatcher(rctx5, "RemoveReplica", "remove/v1")}, &rev, transitions, testCtx(rctx5))
+
+		e.Process(context.Background())
+
+		// Different type → blocked-by-active message overwrites the slot.
 		Expect(slot.statusMessages[5]).To(ContainSubstring("waiting for"))
 		Expect(slot.statusMessages[5]).To(ContainSubstring("Joining"))
+		Expect(slot.statusMessages[5]).To(ContainSubstring("Leaving"))
 	})
 
 	It("no-dispatch decision writes message to slot", func() {
@@ -354,6 +391,88 @@ var _ = Describe("Process", func() {
 		// Both steps auto-confirmed → transition completed and removed.
 		Expect(changed).To(BeTrue())
 		Expect(e.Finalize()).To(BeEmpty())
+	})
+
+	It("step-level onComplete is called after confirmation before advancing", func() {
+		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+
+		var callOrder []string
+		step1OnComplete := func(*testGCtx, *testReplicaCtx) { callOrder = append(callOrder, "step1-onComplete") }
+		step2Apply := func(*testGCtx, *testReplicaCtx) { callOrder = append(callOrder, "step2-apply") }
+		step2OnComplete := func(*testGCtx, *testReplicaCtx) { callOrder = append(callOrder, "step2-onComplete") }
+		planOnComplete := func(*testGCtx, *testReplicaCtx) { callOrder = append(callOrder, "plan-onComplete") }
+
+		// Both steps auto-confirm (empty MustConfirm).
+		reg.ReplicaTransition("AddReplica", 0).
+			Plan("diskful/v1").Group("G").DisplayName("Adding").
+			Steps(
+				ReplicaStep("✦ → D∅", stubReplicaApply, stubReplicaConfirm).
+					OnComplete(step1OnComplete),
+				ReplicaStep("D∅ → D", step2Apply, stubReplicaConfirm).
+					OnComplete(step2OnComplete),
+			).
+			OnComplete(planOnComplete).
+			Build()
+
+		now := metav1.Now()
+		transitions := []Transition{{
+			Type:        "AddReplica",
+			PlanID:      "diskful/v1",
+			ReplicaName: "rv-1-0",
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "✦ → D∅", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: &now},
+				{Name: "D∅ → D", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending},
+			},
+		}}
+
+		rctx0 := &testReplicaCtx{id: 0, name: "rv-1-0"}
+		var rev int64
+		e := newTestEngine(reg, &mockTracker{}, &rev, transitions, testCtx(rctx0))
+
+		e.Process(context.Background())
+
+		// Step1 confirmed → step1-onComplete → step2-apply → step2 confirmed → step2-onComplete → plan-onComplete.
+		Expect(callOrder).To(Equal([]string{
+			"step1-onComplete",
+			"step2-apply",
+			"step2-onComplete",
+			"plan-onComplete",
+		}))
+		Expect(e.Finalize()).To(BeEmpty())
+	})
+
+	It("step-level onComplete is not called when step is not yet confirmed", func() {
+		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+
+		step1OnCompleteCalled := false
+
+		// Step requires confirmation from replica 0, which never confirms (rev stays 0).
+		reg.ReplicaTransition("AddReplica", 0).
+			Plan("test/v1").Group("G").DisplayName("Test").
+			Steps(
+				ReplicaStep("step", stubReplicaApply, func(_ *testGCtx, _ *testReplicaCtx, _ int64) ConfirmResult {
+					return ConfirmResult{MustConfirm: 0b1} // replica 0 must confirm
+				}).OnComplete(func(*testGCtx, *testReplicaCtx) { step1OnCompleteCalled = true }),
+			).Build()
+
+		now := metav1.Now()
+		transitions := []Transition{{
+			Type:        "AddReplica",
+			PlanID:      "test/v1",
+			ReplicaName: "rv-1-0",
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "step", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: &now, DatameshRevision: 1},
+			},
+		}}
+
+		rctx0 := &testReplicaCtx{id: 0, name: "rv-1-0"}
+		var rev int64 = 1
+		e := newTestEngine(reg, &mockTracker{}, &rev, transitions, testCtx(rctx0))
+
+		e.Process(context.Background())
+
+		Expect(step1OnCompleteCalled).To(BeFalse())
+		Expect(e.Finalize()).To(HaveLen(1)) // transition still active
 	})
 
 	It("onComplete callback is called when transition completes", func() {
@@ -548,7 +667,7 @@ var _ = Describe("CreateReplicaTransition", func() {
 		Expect(reason).To(Equal("blocked by quorum"))
 	})
 
-	It("blocks when slot is occupied", func() {
+	It("silently ignores when same type is already active on the slot", func() {
 		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
 		slot := newRecordingSlotAccessor()
 		reg.RegisterReplicaSlot(0, slot)
@@ -563,6 +682,29 @@ var _ = Describe("CreateReplicaTransition", func() {
 		e := newTestEngine(reg, &mockTracker{}, &rev, transitions, testCtx(rctx5))
 
 		t, reason := e.CreateReplicaTransition("AddReplica", "access/v1", 5)
+
+		Expect(t).To(BeNil())
+		Expect(reason).To(BeEmpty())
+	})
+
+	It("blocks when slot is occupied by a different type", func() {
+		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+		slot := newRecordingSlotAccessor()
+		reg.RegisterReplicaSlot(0, slot)
+
+		reg.ReplicaTransition("AddReplica", 0).
+			Plan("access/v1").Group("G").DisplayName("Joining").
+			Steps(ReplicaStep("s", stubReplicaApply, neverReplicaConfirm)).Build()
+		reg.ReplicaTransition("RemoveReplica", 0).
+			Plan("remove/v1").Group("G").DisplayName("Leaving").
+			Steps(ReplicaStep("s", stubReplicaApply, stubReplicaConfirm)).Build()
+
+		rctx5 := &testReplicaCtx{id: 5, name: "rv-1-5"}
+		var rev int64
+		transitions := []Transition{newTestTransition("AddReplica", "access/v1", "rv-1-5")}
+		e := newTestEngine(reg, &mockTracker{}, &rev, transitions, testCtx(rctx5))
+
+		t, reason := e.CreateReplicaTransition("RemoveReplica", "remove/v1", 5)
 
 		Expect(t).To(BeNil())
 		Expect(reason).To(ContainSubstring("waiting for"))

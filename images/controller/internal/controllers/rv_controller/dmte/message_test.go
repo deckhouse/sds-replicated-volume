@@ -76,9 +76,9 @@ var _ = Describe("generateProgressMessage", func() {
 				{Type: "DRBDConfigured", Status: metav1.ConditionFalse, Reason: "PendingJoin", ObservedGeneration: 1},
 			}},
 		)
-		skip := SkipErrorFunc[*testReplicaCtx](func(_ *testReplicaCtx, _ uint8, cond *metav1.Condition) bool {
+		skip := func(_ *testReplicaCtx, _ uint8, cond *metav1.Condition) bool {
 			return cond.Reason == "PendingJoin"
-		})
+		}
 		msg := generateProgressMessage(cp, 5, ConfirmResult{
 			MustConfirm: idset.Of(2),
 			Confirmed:   idset.IDSet(0),

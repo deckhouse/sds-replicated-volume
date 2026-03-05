@@ -65,6 +65,23 @@ var _ = Describe("ReplicaStepBuilder", func() {
 		Expect(b.build().diagnosticSkipError).NotTo(BeNil())
 	})
 
+	It("OnComplete sets callback", func() {
+		called := false
+		b := ReplicaStep("step", stubReplicaApply, stubReplicaConfirm).
+			OnComplete(func(*testGCtx, *testReplicaCtx) { called = true })
+		s := b.build()
+		Expect(s.replicaOnComplete).NotTo(BeNil())
+		s.callOnComplete(&testGCtx{}, &testReplicaCtx{})
+		Expect(called).To(BeTrue())
+	})
+
+	It("OnComplete defaults to nil (no-op)", func() {
+		s := ReplicaStep("step", stubReplicaApply, stubReplicaConfirm).build()
+		Expect(s.replicaOnComplete).To(BeNil())
+		// callOnComplete is a no-op when nil.
+		Expect(func() { s.callOnComplete(&testGCtx{}, &testReplicaCtx{}) }).NotTo(Panic())
+	})
+
 	It("fluent chaining returns same builder", func() {
 		b := ReplicaStep("step", stubReplicaApply, stubReplicaConfirm)
 		b2 := b.Details("X").DiagnosticConditions("Y")
@@ -108,6 +125,22 @@ var _ = Describe("GlobalStepBuilder", func() {
 			DiagnosticConditions("DRBDConfigured")
 		s := buildGlobalStep[*testGCtx, *testReplicaCtx](b)
 		Expect(s.diagnosticConditionTypes).To(Equal([]string{"DRBDConfigured"}))
+	})
+
+	It("OnComplete sets callback", func() {
+		called := false
+		b := GlobalStep("step", stubGlobalApply, stubGlobalConfirm).
+			OnComplete(func(*testGCtx) { called = true })
+		s := buildGlobalStep[*testGCtx, *testReplicaCtx](b)
+		Expect(s.globalOnComplete).NotTo(BeNil())
+		s.callOnComplete(&testGCtx{}, &testReplicaCtx{})
+		Expect(called).To(BeTrue())
+	})
+
+	It("OnComplete defaults to nil (no-op)", func() {
+		s := buildGlobalStep[*testGCtx, *testReplicaCtx](GlobalStep("step", stubGlobalApply, stubGlobalConfirm))
+		Expect(s.globalOnComplete).To(BeNil())
+		Expect(func() { s.callOnComplete(&testGCtx{}, &testReplicaCtx{}) }).NotTo(Panic())
 	})
 
 	It("fluent chaining returns same builder", func() {

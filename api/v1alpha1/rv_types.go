@@ -193,9 +193,26 @@ type ReplicatedVolumeStatus struct {
 	// Datamesh is the computed datamesh configuration for the volume.
 	Datamesh ReplicatedVolumeDatamesh `json:"datamesh"`
 
-	// EffectiveLayout tracks the FTT/GMDR levels that the datamesh actually
-	// provides. q and qmr are computed from these values, not from Configuration.
-	EffectiveLayout ReplicatedVolumeEffectiveLayout `json:"effectiveLayout"`
+	// EffectiveLayout is the FTT/GMDR protection level that the datamesh
+	// actually provides right now. Reflects the real state of the cluster:
+	//   - May exceed BaselineLayout and Configuration during transitions
+	//     (e.g., a new voter was added but BaselineLayout has not been raised yet).
+	//   - May be less than BaselineLayout in degraded state (e.g., a lost voter
+	//     reduces effective FTT).
+	//   - Equals BaselineLayout when healthy; equals Configuration at steady state.
+	//   - Nil when the effective layout cannot be determined (e.g., no voter
+	//     replicas with ready agents to observe).
+	// +optional
+	EffectiveLayout *ReplicatedVolumeLayout `json:"effectiveLayout,omitempty"`
+
+	// BaselineLayout is the FTT/GMDR level that the datamesh has reached and
+	// committed to maintain. Computed from the committed datamesh topology
+	// (member count, q, qmr) and capped by Configuration:
+	//   - Rises toward Configuration as members are added and q/qmr confirmed.
+	//   - Never exceeds Configuration (capped at the target level).
+	//   - Decreases when Configuration is lowered (cap takes effect immediately).
+	//   - q and qmr are derived from these values.
+	BaselineLayout ReplicatedVolumeLayout `json:"baselineLayout"`
 
 	// DatameshTransitions is the list of active datamesh transitions.
 	// +listType=atomic
@@ -683,29 +700,20 @@ func (t DatameshMemberType) ConnectsToAllPeers() bool {
 	}
 }
 
-// ReplicatedVolumeEffectiveLayout tracks the FTT/GMDR protection levels
-// that the datamesh actually provides right now. q and qmr are derived
-// from these values, not from rv.Status.Configuration.
+// ReplicatedVolumeLayout describes the FTT/GMDR protection level of a volume.
+// FTT and GMDR together determine the DRBD layout, quorum (q), and
+// quorum-minimum-redundancy (qmr) parameters.
 //
-// Monotonic ratchet semantics:
-//   - Values only increase (via layout transitions) until they reach the
-//     levels defined in Configuration.
-//   - Once reached, they are held at that level.
-//   - They decrease only if Configuration is lowered below the current
-//     effective values (explicit downgrade).
-//
-// During an upgrade transition EffectiveLayout < Configuration;
-// during a downgrade transition EffectiveLayout > Configuration;
-// at steady state they are equal.
+// Used for both EffectiveLayout (observability) and BaselineLayout (committed floor).
 // +kubebuilder:object:generate=true
-type ReplicatedVolumeEffectiveLayout struct {
-	// FailuresToTolerate is the effective FTT level.
+type ReplicatedVolumeLayout struct {
+	// FailuresToTolerate is the FTT level.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=2
 	// +kubebuilder:default=0
 	FailuresToTolerate byte `json:"failuresToTolerate"`
 
-	// GuaranteedMinimumDataRedundancy is the effective GMDR level.
+	// GuaranteedMinimumDataRedundancy is the GMDR level.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=2
 	// +kubebuilder:default=0

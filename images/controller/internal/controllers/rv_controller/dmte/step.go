@@ -29,12 +29,14 @@ type step[G any, R ReplicaCtx] struct {
 	scope Scope
 
 	// Global step callbacks (scope == GlobalScope).
-	globalApply   GlobalApplyFunc[G]
-	globalConfirm GlobalConfirmFunc[G]
+	globalApply      GlobalApplyFunc[G]
+	globalConfirm    GlobalConfirmFunc[G]
+	globalOnComplete GlobalOnCompleteFunc[G]
 
 	// Replica step callbacks (scope == ReplicaScope).
-	replicaApply   ReplicaApplyFunc[G, R]
-	replicaConfirm ReplicaConfirmFunc[G, R]
+	replicaApply      ReplicaApplyFunc[G, R]
+	replicaConfirm    ReplicaConfirmFunc[G, R]
+	replicaOnComplete ReplicaOnCompleteFunc[G, R]
 
 	// Step options.
 	details                  any
@@ -66,6 +68,23 @@ func (s *step[G, R]) confirm(gctx G, rctx R, stepRevision int64) ConfirmResult {
 	}
 }
 
+// callOnComplete calls the optional step-level onComplete callback.
+// Called by the engine after the step's confirmation is fully satisfied,
+// before advancing to the next step (or completing the plan).
+// No-op if onComplete is not set.
+func (s *step[G, R]) callOnComplete(gctx G, rctx R) {
+	switch s.scope {
+	case GlobalScope:
+		if s.globalOnComplete != nil {
+			s.globalOnComplete(gctx)
+		}
+	case ReplicaScope:
+		if s.replicaOnComplete != nil {
+			s.replicaOnComplete(gctx, rctx)
+		}
+	}
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // ReplicaStepBuilder
 //
@@ -76,6 +95,7 @@ type ReplicaStepBuilder[G any, R ReplicaCtx] struct {
 	name                     string
 	applyFn                  ReplicaApplyFunc[G, R]
 	confirmFn                ReplicaConfirmFunc[G, R]
+	onCompleteFn             ReplicaOnCompleteFunc[G, R]
 	details                  any
 	diagnosticConditionTypes []string
 	diagnosticSkipError      SkipErrorFunc[R]
@@ -122,6 +142,15 @@ func (b *ReplicaStepBuilder[G, R]) DiagnosticSkipError(fn SkipErrorFunc[R]) *Rep
 	return b
 }
 
+// OnComplete sets an optional callback invoked after this step's confirmation
+// is fully satisfied, before the engine advances to the next step (or completes
+// the plan). Use for post-confirmation side effects (e.g., updating
+// EffectiveLayout after replicas confirmed a q/qmr change).
+func (b *ReplicaStepBuilder[G, R]) OnComplete(fn ReplicaOnCompleteFunc[G, R]) *ReplicaStepBuilder[G, R] {
+	b.onCompleteFn = fn
+	return b
+}
+
 // build returns the internal step. Called by PlanBuilder.Steps().
 func (b *ReplicaStepBuilder[G, R]) build() step[G, R] {
 	return step[G, R]{
@@ -129,6 +158,7 @@ func (b *ReplicaStepBuilder[G, R]) build() step[G, R] {
 		scope:                    ReplicaScope,
 		replicaApply:             b.applyFn,
 		replicaConfirm:           b.confirmFn,
+		replicaOnComplete:        b.onCompleteFn,
 		details:                  b.details,
 		diagnosticConditionTypes: b.diagnosticConditionTypes,
 		diagnosticSkipError:      b.diagnosticSkipError,
@@ -145,6 +175,7 @@ type GlobalStepBuilder[G any] struct {
 	name                     string
 	applyFn                  GlobalApplyFunc[G]
 	confirmFn                GlobalConfirmFunc[G]
+	onCompleteFn             GlobalOnCompleteFunc[G]
 	details                  any
 	diagnosticConditionTypes []string
 }
@@ -183,6 +214,15 @@ func (b *GlobalStepBuilder[G]) DiagnosticConditions(types ...string) *GlobalStep
 	return b
 }
 
+// OnComplete sets an optional callback invoked after this step's confirmation
+// is fully satisfied, before the engine advances to the next step (or completes
+// the plan). Use for post-confirmation side effects (e.g., updating
+// EffectiveLayout after replicas confirmed a q/qmr change).
+func (b *GlobalStepBuilder[G]) OnComplete(fn GlobalOnCompleteFunc[G]) *GlobalStepBuilder[G] {
+	b.onCompleteFn = fn
+	return b
+}
+
 // buildStep converts the GlobalStepBuilder into a step[G, R].
 // R is provided by PlanBuilder[G, R].Steps() — GlobalStepBuilder itself
 // does not know R. Global callbacks are typed; replica callbacks are nil.
@@ -192,6 +232,7 @@ func buildGlobalStep[G any, R ReplicaCtx](b *GlobalStepBuilder[G]) step[G, R] {
 		scope:                    GlobalScope,
 		globalApply:              b.applyFn,
 		globalConfirm:            b.confirmFn,
+		globalOnComplete:         b.onCompleteFn,
 		details:                  b.details,
 		diagnosticConditionTypes: b.diagnosticConditionTypes,
 	}

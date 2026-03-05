@@ -195,6 +195,32 @@ spec:
                 x-kubernetes-validations:
                 - message: actuallyAttachedTo must be unique
                   rule: self.all(x, self.exists_one(y, x == y))
+              baselineLayout:
+                description: |-
+                  BaselineLayout is the FTT/GMDR level that the datamesh has reached and
+                  committed to maintain. Computed from the committed datamesh topology
+                  (member count, q, qmr) and capped by Configuration:
+                    - Rises toward Configuration as members are added and q/qmr confirmed.
+                    - Never exceeds Configuration (capped at the target level).
+                    - Decreases when Configuration is lowered (cap takes effect immediately).
+                    - q and qmr are derived from these values.
+                properties:
+                  failuresToTolerate:
+                    default: 0
+                    description: FailuresToTolerate is the FTT level.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                  guaranteedMinimumDataRedundancy:
+                    default: 0
+                    description: GuaranteedMinimumDataRedundancy is the GMDR level.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                required:
+                - failuresToTolerate
+                - guaranteedMinimumDataRedundancy
+                type: object
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -757,19 +783,25 @@ spec:
                 x-kubernetes-list-type: atomic
               effectiveLayout:
                 description: |-
-                  EffectiveLayout tracks the FTT/GMDR levels that the datamesh actually
-                  provides. q and qmr are computed from these values, not from Configuration.
+                  EffectiveLayout is the FTT/GMDR protection level that the datamesh
+                  actually provides right now. Reflects the real state of the cluster:
+                    - May exceed BaselineLayout and Configuration during transitions
+                      (e.g., a new voter was added but BaselineLayout has not been raised yet).
+                    - May be less than BaselineLayout in degraded state (e.g., a lost voter
+                      reduces effective FTT).
+                    - Equals BaselineLayout when healthy; equals Configuration at steady state.
+                    - Nil when the effective layout cannot be determined (e.g., no voter
+                      replicas with ready agents to observe).
                 properties:
                   failuresToTolerate:
                     default: 0
-                    description: FailuresToTolerate is the effective FTT level.
+                    description: FailuresToTolerate is the FTT level.
                     maximum: 2
                     minimum: 0
                     type: integer
                   guaranteedMinimumDataRedundancy:
                     default: 0
-                    description: GuaranteedMinimumDataRedundancy is the effective
-                      GMDR level.
+                    description: GuaranteedMinimumDataRedundancy is the GMDR level.
                     maximum: 2
                     minimum: 0
                     type: integer
@@ -808,9 +840,9 @@ spec:
                 - message: eligibleNodesViolations[].replicaName must be unique
                   rule: self.all(x, self.exists_one(y, x.replicaName == y.replicaName))
             required:
+            - baselineLayout
             - datamesh
             - datameshRevision
-            - effectiveLayout
             type: object
         required:
         - metadata

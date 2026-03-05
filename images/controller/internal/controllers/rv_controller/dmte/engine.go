@@ -157,8 +157,10 @@ func NewEngine[G any, R ReplicaCtx, C ContextProvider[G, R]](
 //
 
 // CreateReplicaTransition creates a replica-scoped transition.
-// Returns (transition, "") on success, or (nil, reason) if blocked
-// by a guard, tracker, or slot conflict.
+//
+// Returns (transition, "") on success, (nil, "") if the same transition
+// type is already active on the slot (silent ignore), or (nil, reason) if
+// blocked by a different-type slot conflict, guard, or tracker.
 // Panics if the engine is already finalized, the plan is unknown, or
 // the replica ID is not in the context provider.
 func (e *Engine[G, R, C]) CreateReplicaTransition(
@@ -380,6 +382,9 @@ func (e *Engine[G, R, C]) settleTransitions(ctx context.Context) (changed, progr
 			continue
 		}
 
+		// Step confirmed — call step-level onComplete (if set).
+		p.steps[stepIdx].callOnComplete(e.cp.Global(), rctx)
+
 		if stepIdx+1 < len(t.Steps) {
 			// Advance to next step.
 			advanceStep(t, stepIdx)
@@ -471,7 +476,13 @@ func (e *Engine[G, R, C]) runDispatch(dispatch DispatchFunc[C]) bool {
 // apply step[0] → confirm → slot.SetStatus.
 //
 // slot may be nil for global plans. rctx may be zero for global plans.
-// Returns (transition, "") on success, or (nil, reason) if blocked.
+//
+// Returns:
+//   - (transition, "") on success,
+//   - (nil, "") if the same transition type is already active on the slot
+//     (silent ignore — preserves the settle progress message),
+//   - (nil, reason) if blocked by a different-type slot conflict, guard,
+//     or tracker.
 func (e *Engine[G, R, C]) dispatchOne(
 	p *plan[G, R],
 	planID PlanID,
@@ -497,6 +508,13 @@ func (e *Engine[G, R, C]) dispatchOne(
 	// Slot conflict check.
 	if hasSlot {
 		if active := slot.GetActiveTransition(rctx); active != nil {
+			// Same transition type already active on this slot — silently
+			// ignore to preserve the settle progress message.
+			if active.Type == p.transitionType {
+				return nil, ""
+			}
+
+			// Different type — report blocked by active transition.
 			activePlan := e.registry.get(active.Type, PlanID(active.PlanID))
 			activePlanDisplayName := ""
 			if activePlan != nil {
