@@ -21,7 +21,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
 )
 
-// registerChangeTypePlans registers ChangeReplicaType plans for star↔star transitions.
+// registerChangeTypePlans registers ChangeReplicaType plans for non-voter type transitions.
 func registerChangeTypePlans(
 	changeReplicaType *dmte.RegisteredTransition[*globalContext, *ReplicaContext],
 ) {
@@ -57,6 +57,66 @@ func registerChangeTypePlans(
 			dmte.ReplicaStep("TB → A",
 				applySetType(v1alpha1.DatameshMemberTypeAccess),
 				confirmFMPlusSubject,
+			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
+
+	// ChangeReplicaType(A → sD): A → sD∅ → sD
+	//
+	// Two steps because DRBD bitmap ordering matters (same as AddReplica(sD)):
+	//
+	// Step 1 (A → sD∅): peers enable bitmaps for this member (and add
+	// full-mesh connections). Must happen BEFORE disk attach — DRBD will
+	// refuse to attach a disk if peers do not have bitmaps allocated.
+	//
+	// Step 2 (sD∅ → sD): attaches the disk. Bitmaps are already in place.
+	changeReplicaType.Plan("a-to-sd/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeAccess).
+		ToReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
+		DisplayName("Changing replica type").
+		Guards(guardShadowDiskfulSupported).
+		Steps(
+			dmte.ReplicaStep("A → sD∅",
+				applySetType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+				confirmAllMembers,
+			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			dmte.ReplicaStep("sD∅ → sD",
+				applySetType(v1alpha1.DatameshMemberTypeShadowDiskful),
+				confirmSubjectOnly,
+			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
+
+	// ChangeReplicaType(sD → A): sD → sD∅ → A
+	//
+	// Two steps — reverse of A → sD:
+	//
+	// Step 1 (sD → sD∅): detach disk locally. Must happen BEFORE peers
+	// disable bitmaps — DRBD will refuse to disable bitmaps for a peer
+	// that still has a disk attached.
+	//
+	// Step 2 (sD∅ → A): peers disable bitmaps (and switch to star
+	// connections). Disk is already detached so this succeeds.
+	//
+	// Also handles transition from sD∅ state (interrupted A→sD): step 1 is a
+	// no-op if already liminal.
+	changeReplicaType.Plan("sd-to-a/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
+		ToReplicaType(v1alpha1.ReplicaTypeAccess).
+		DisplayName("Changing replica type").
+		Guards(guardVolumeAccessNotLocal).
+		Steps(
+			dmte.ReplicaStep("sD → sD∅",
+				applySetType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+				confirmSubjectOnly,
+			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			dmte.ReplicaStep("sD∅ → A",
+				applySetType(v1alpha1.DatameshMemberTypeAccess),
+				confirmAllMembers,
 			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
 		).
 		OnComplete(onChangeTypeComplete).
