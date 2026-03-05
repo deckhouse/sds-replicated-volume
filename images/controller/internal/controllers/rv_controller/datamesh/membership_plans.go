@@ -32,5 +32,6 @@ func registerMembershipPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]
 
 	registerAccessPlans(addReplica, removeReplica)
 	registerTieBreakerPlans(addReplica, removeReplica)
+	registerShadowDiskfulPlans(addReplica, removeReplica)
 	// TODO: register Diskful plans (future)
 }

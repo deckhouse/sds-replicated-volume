@@ -378,3 +378,20 @@ func guardZoneTBSufficient(gctx *globalContext, rctx *ReplicaContext) dmte.Guard
 		Message: fmt.Sprintf("Would violate zone TB coverage for zone %s", removedZone),
 	}
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Feature flag guards
+//
+
+// guardShadowDiskfulSupported blocks if the ShadowDiskful feature is not available.
+// Requires the Flant DRBD kernel extension with the non-voting disk option.
+// Used by AddReplica(sD) and AddReplica(D) via sD paths.
+func guardShadowDiskfulSupported(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
+	if !gctx.features.ShadowDiskful {
+		return dmte.GuardResult{
+			Blocked: true,
+			Message: "ShadowDiskful not supported (requires Flant DRBD extension)",
+		}
+	}
+	return dmte.GuardResult{}
+}
