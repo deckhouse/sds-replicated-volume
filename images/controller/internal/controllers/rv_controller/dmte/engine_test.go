@@ -202,9 +202,9 @@ var _ = Describe("Process", func() {
 
 		reg.ReplicaTransition("AddReplica", 0).
 			Plan("access/v1").Group("G").DisplayName("Joining").
-			Guards(ReplicaGuardFunc[*testGCtx, *testReplicaCtx](func(*testGCtx, *testReplicaCtx) GuardResult {
+			Guards(func(*testGCtx, *testReplicaCtx) GuardResult {
 				return GuardResult{Blocked: true, Message: "node not eligible"}
-			})).
+			}).
 			Steps(ReplicaStep("s", stubReplicaApply, stubReplicaConfirm)).Build()
 
 		rctx5 := &testReplicaCtx{id: 5, name: "rv-1-5"}
@@ -511,9 +511,9 @@ var _ = Describe("CreateReplicaTransition", func() {
 
 		reg.ReplicaTransition("AddReplica", 0).
 			Plan("access/v1").Group("G").DisplayName("Joining").
-			Guards(ReplicaGuardFunc[*testGCtx, *testReplicaCtx](func(*testGCtx, *testReplicaCtx) GuardResult {
+			Guards(func(*testGCtx, *testReplicaCtx) GuardResult {
 				return GuardResult{Blocked: true, Message: "not ready"}
-			})).
+			}).
 			Steps(ReplicaStep("s", stubReplicaApply, stubReplicaConfirm)).Build()
 
 		var rev int64
@@ -628,9 +628,9 @@ var _ = Describe("CreateGlobalTransition", func() {
 
 		reg.GlobalTransition("ChangeQuorum").
 			Plan("qmr/v1").Group("Quorum").DisplayName("Changing quorum").
-			Guards(GlobalGuardFunc[*testGCtx](func(*testGCtx) GuardResult {
+			Guards(func(*testGCtx) GuardResult {
 				return GuardResult{Blocked: true, Message: "not safe"}
-			})).
+			}).
 			Steps(GlobalStep("s", stubGlobalApply, stubGlobalConfirm)).Build()
 
 		var rev int64
@@ -773,6 +773,94 @@ var _ = Describe("Finalize", func() {
 		e.Finalize()
 
 		Expect(func() { e.Process(context.Background()) }).To(Panic())
+	})
+
+	It("updates slot pointers after deletion shifts surviving transitions", func() {
+		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+		slot := newRecordingSlotAccessor()
+		reg.RegisterReplicaSlot(0, slot)
+
+		// Auto-confirming plan → completes during settle.
+		reg.ReplicaTransition("AutoDone", 0).
+			Plan("auto/v1").Group("G").DisplayName("Auto").
+			Steps(ReplicaStep("s", stubReplicaApply, stubReplicaConfirm)).Build()
+
+		// Never-confirming plan → survives settle.
+		reg.ReplicaTransition("Persist", 0).
+			Plan("persist/v1").Group("G").DisplayName("Persist").
+			Steps(ReplicaStep("s", stubReplicaApply, neverReplicaConfirm)).Build()
+
+		rctx0 := &testReplicaCtx{id: 0, name: "rv-1-0"}
+		rctx3 := &testReplicaCtx{id: 3, name: "rv-1-3"}
+
+		transitions := []Transition{
+			newTestTransition("AutoDone", "auto/v1", "rv-1-0"),
+			newTestTransition("Persist", "persist/v1", "rv-1-3"),
+		}
+
+		var rev int64
+		e := newTestEngine(reg, &mockTracker{}, &rev, transitions, testCtx(rctx0, rctx3))
+
+		e.Process(context.Background())
+		result := e.Finalize()
+
+		// First transition completed → deleted, second shifted to index 0.
+		Expect(result).To(HaveLen(1))
+		Expect(result[0].Type).To(Equal(TransitionType("Persist")))
+		// Slot pointer must reference the returned slice element, not the old address.
+		Expect(slot.activeTransitions[3]).To(BeIdenticalTo(&result[0]))
+	})
+
+	It("updates slot pointers when deletion and creation exceed original capacity", func() {
+		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+		slot := newRecordingSlotAccessor()
+		reg.RegisterReplicaSlot(0, slot)
+
+		// Auto-confirming plan → completes during settle.
+		reg.ReplicaTransition("AutoDone", 0).
+			Plan("auto/v1").Group("G").DisplayName("Auto").
+			Steps(ReplicaStep("s", stubReplicaApply, stubReplicaConfirm)).Build()
+
+		// Never-confirming plan → survives settle / stays after dispatch.
+		reg.ReplicaTransition("Persist", 0).
+			Plan("persist/v1").Group("G").DisplayName("Persist").
+			Steps(ReplicaStep("s", stubReplicaApply, neverReplicaConfirm)).Build()
+
+		rctx0 := &testReplicaCtx{id: 0, name: "rv-1-0"}
+		rctx3 := &testReplicaCtx{id: 3, name: "rv-1-3"}
+		rctx5 := &testReplicaCtx{id: 5, name: "rv-1-5"}
+		rctx7 := &testReplicaCtx{id: 7, name: "rv-1-7"}
+
+		// Two initial transitions with cap=2: first auto-confirms (deleted),
+		// second persists. Dispatch adds two more → total 3 > original 2,
+		// forcing slices.Grow to reallocate.
+		transitions := make([]Transition, 2)
+		transitions[0] = newTestTransition("AutoDone", "auto/v1", "rv-1-0")
+		transitions[1] = newTestTransition("Persist", "persist/v1", "rv-1-3")
+
+		dispatcher := func(_ testCtxProvider) iter.Seq[DispatchDecision] {
+			return func(yield func(DispatchDecision) bool) {
+				if !yield(DispatchReplica(rctx5, "Persist", "persist/v1")) {
+					return
+				}
+				yield(DispatchReplica(rctx7, "Persist", "persist/v1"))
+			}
+		}
+
+		var rev int64
+		e := NewEngine(context.Background(), reg, &mockTracker{},
+			[]DispatchFunc[testCtxProvider]{dispatcher}, &rev, transitions,
+			testCtx(rctx0, rctx3, rctx5, rctx7))
+
+		e.Process(context.Background())
+		result := e.Finalize()
+
+		// 1 deleted + 1 surviving + 2 new = 3 transitions.
+		Expect(result).To(HaveLen(3))
+		// All slot pointers must reference the returned slice, not stale memory.
+		Expect(slot.activeTransitions[3]).To(BeIdenticalTo(&result[0]))
+		Expect(slot.activeTransitions[5]).To(BeIdenticalTo(&result[1]))
+		Expect(slot.activeTransitions[7]).To(BeIdenticalTo(&result[2]))
 	})
 
 	It("handles deletion and creation in the same Process", func() {

@@ -81,20 +81,22 @@ func testCtx(entries ...*testReplicaCtx) testCtxProvider {
 // Stub callbacks
 //
 
-var (
-	stubReplicaApply   ReplicaApplyFunc[*testGCtx, *testReplicaCtx]   = func(*testGCtx, *testReplicaCtx) {}
-	stubReplicaConfirm ReplicaConfirmFunc[*testGCtx, *testReplicaCtx] = func(*testGCtx, *testReplicaCtx, int64) ConfirmResult {
-		return ConfirmResult{}
-	}
-	// neverReplicaConfirm is a confirm callback that never completes (MustConfirm is never fully confirmed).
-	neverReplicaConfirm ReplicaConfirmFunc[*testGCtx, *testReplicaCtx] = func(*testGCtx, *testReplicaCtx, int64) ConfirmResult {
-		return ConfirmResult{MustConfirm: ids(0, 1)}
-	}
-	stubGlobalApply   GlobalApplyFunc[*testGCtx]   = func(*testGCtx) {}
-	stubGlobalConfirm GlobalConfirmFunc[*testGCtx] = func(*testGCtx, int64) ConfirmResult {
-		return ConfirmResult{}
-	}
-)
+func stubReplicaApply(*testGCtx, *testReplicaCtx) {}
+
+func stubReplicaConfirm(*testGCtx, *testReplicaCtx, int64) ConfirmResult {
+	return ConfirmResult{}
+}
+
+// neverReplicaConfirm is a confirm callback that never completes (MustConfirm is never fully confirmed).
+func neverReplicaConfirm(*testGCtx, *testReplicaCtx, int64) ConfirmResult {
+	return ConfirmResult{MustConfirm: ids(0, 1)}
+}
+
+func stubGlobalApply(*testGCtx) {}
+
+func stubGlobalConfirm(*testGCtx, int64) ConfirmResult {
+	return ConfirmResult{}
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Mock implementations

@@ -270,6 +270,14 @@ func (e *Engine[G, R, C]) Finalize() []Transition {
 
 	orig := e.originalTransitions
 
+	// Pre-grow before the copy loop so that all &orig[i] references below
+	// point into the final backing array. Without this, a later grow could
+	// reallocate, leaving slot pointers set by replaceSlotPointer dangling
+	// on the old backing array.
+	if len(e.transitions) > len(orig) {
+		orig = slices.Grow(orig, len(e.transitions)-len(orig))
+	}
+
 	// Walk in parallel: copy only where addresses differ.
 	minLen := min(len(orig), len(e.transitions))
 	for i := 0; i < minLen; i++ {
@@ -284,8 +292,7 @@ func (e *Engine[G, R, C]) Finalize() []Transition {
 		return orig[:len(e.transitions)]
 	}
 
-	// Creations beyond original length: grow once, then append.
-	orig = slices.Grow(orig, len(e.transitions)-minLen)
+	// Append new transitions (backing array already has capacity from pre-grow).
 	for i := minLen; i < len(e.transitions); i++ {
 		orig = append(orig, *e.transitions[i])
 		e.replaceSlotPointer(e.transitions[i], &orig[len(orig)-1])
