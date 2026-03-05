@@ -68,7 +68,8 @@ and one optional:
   after apply.
 - **Confirm** — checks convergence by returning two `IDSet`s: `MustConfirm`
   (replicas that need to see the new revision) and `Confirmed` (replicas that
-  already have). When `Confirmed == MustConfirm`, the step is complete.
+  already have). The engine normalizes `Confirmed` to `Confirmed ∩ MustConfirm`
+  before checking completion (`Confirmed == MustConfirm`).
 - **OnComplete** (optional) — called after confirmation is fully satisfied,
   before the engine advances to the next step or completes the plan. Use for
   post-confirmation side effects that depend on all replicas having applied the

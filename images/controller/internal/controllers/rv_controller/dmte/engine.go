@@ -375,6 +375,11 @@ func (e *Engine[G, R, C]) settleTransitions(ctx context.Context) (changed, progr
 			slot.SetStatus(rctx, composed, p.steps[stepIdx].details)
 		}
 
+		// Normalize: Confirmed must not contain IDs outside MustConfirm.
+		// This ensures equality check works correctly and diagnostic messages
+		// show accurate counts (e.g., "1/2" not "2/1").
+		cr.Confirmed = cr.Confirmed.Intersect(cr.MustConfirm)
+
 		// Check completion.
 		confirmed := cr.Confirmed == cr.MustConfirm
 		if !confirmed {
