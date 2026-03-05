@@ -464,9 +464,10 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 			})
 		}
 
-		// Set effective layout from the configuration that formation is building towards.
+		// Set baseline layout from the configuration that formation is building towards.
+		// Formation creates the exact layout matching configuration, so baseline = configuration.
 		// Must be set before computeTargetQuorum, which derives q/qmr from it.
-		rv.Status.EffectiveLayout = v1alpha1.ReplicatedVolumeEffectiveLayout{
+		rv.Status.BaselineLayout = v1alpha1.ReplicatedVolumeLayout{
 			FailuresToTolerate:              rv.Status.Configuration.FailuresToTolerate,
 			GuaranteedMinimumDataRedundancy: rv.Status.Configuration.GuaranteedMinimumDataRedundancy,
 		}
@@ -826,7 +827,7 @@ func (r *Reconciler) reconcileFormationRestartIfTimeoutPassed(
 	rv.Status.ConfigurationObservedGeneration = 0
 	rv.Status.DatameshRevision = 0
 	rv.Status.Datamesh = v1alpha1.ReplicatedVolumeDatamesh{}
-	rv.Status.EffectiveLayout = v1alpha1.ReplicatedVolumeEffectiveLayout{}
+	rv.Status.BaselineLayout = v1alpha1.ReplicatedVolumeLayout{}
 	rv.Status.DatameshTransitions = nil
 	rv.Status.DatameshReplicaRequests = nil
 

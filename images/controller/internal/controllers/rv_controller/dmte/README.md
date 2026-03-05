@@ -60,7 +60,8 @@ evolution across rolling upgrades.
 
 ### Step
 
-A **Step** is one phase within a plan. Each step has two callbacks:
+A **Step** is one phase within a plan. Each step has two required callbacks
+and one optional:
 
 - **Apply** — mutates state (e.g., add a member to the datamesh, change quorum).
   Called once when the step is activated. The engine bumps `DatameshRevision`
@@ -68,6 +69,10 @@ A **Step** is one phase within a plan. Each step has two callbacks:
 - **Confirm** — checks convergence by returning two `IDSet`s: `MustConfirm`
   (replicas that need to see the new revision) and `Confirmed` (replicas that
   already have). When `Confirmed == MustConfirm`, the step is complete.
+- **OnComplete** (optional) — called after confirmation is fully satisfied,
+  before the engine advances to the next step or completes the plan. Use for
+  post-confirmation side effects that depend on all replicas having applied the
+  change (e.g., updating `BaselineLayout` after replicas confirmed a q/qmr change).
 
 Steps can be **replica-scoped** (receive both global and replica context) or
 **global-scoped** (receive only global context). A plan can mix both scopes
@@ -424,6 +429,7 @@ Create step builders. Both support:
 | `.Details(d)` | Opaque data passed to `slot.SetStatus` alongside the message. |
 | `.DiagnosticConditions(types...)` | Condition types to check on unconfirmed replicas for error reporting. |
 | `.DiagnosticSkipError(fn)` | Skip specific error conditions during diagnostic reporting. |
+| `.OnComplete(fn)` | Optional callback invoked after confirmation, before advancing to the next step. |
 
 ### Dispatch Decision Constructors
 
@@ -469,6 +475,7 @@ pointer-based identity tracking for slot management.
 4. If all steps completed (index == -1) — call `completeTransition`.
 5. Otherwise, run `confirmStep` (confirm callback + progress message generation).
 6. If the step is confirmed:
+   - Call step `OnComplete` (if set) — post-confirmation side effects.
    - If more steps remain — `advanceStep` + `applyStep` + `confirmStep` for the new step.
    - If last step — `completeTransition`.
 
