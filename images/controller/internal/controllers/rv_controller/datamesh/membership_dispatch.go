@@ -154,6 +154,13 @@ func planChangeReplicaType(_ *globalContext, rctx *ReplicaContext) (dmte.PlanID,
 		rctx.member.Type == v1alpha1.DatameshMemberTypeLiminalShadowDiskful) &&
 		targetType == v1alpha1.ReplicaTypeAccess:
 		return "sd-to-a/v1", ""
+	case rctx.member.Type == v1alpha1.DatameshMemberTypeTieBreaker &&
+		targetType == v1alpha1.ReplicaTypeShadowDiskful:
+		return "tb-to-sd/v1", ""
+	case (rctx.member.Type == v1alpha1.DatameshMemberTypeShadowDiskful ||
+		rctx.member.Type == v1alpha1.DatameshMemberTypeLiminalShadowDiskful) &&
+		targetType == v1alpha1.ReplicaTypeTieBreaker:
+		return "sd-to-tb/v1", ""
 	case rctx.member.Type == v1alpha1.DatameshMemberType(targetType):
 		return "", "" // already target type
 	default:
