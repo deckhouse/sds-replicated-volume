@@ -35,9 +35,9 @@ var _ = Describe("PlanBuilder", func() {
 				ReplicaType(v1alpha1.ReplicaTypeAccess).
 				DisplayName("Joining datamesh").
 				Guards(
-					ReplicaGuardFunc[*testGCtx, *testReplicaCtx](func(*testGCtx, *testReplicaCtx) GuardResult {
+					func(*testGCtx, *testReplicaCtx) GuardResult {
 						return GuardResult{}
-					}),
+					},
 				).
 				Steps(
 					ReplicaStep("✦ → A", stubReplicaApply, stubReplicaConfirm).
@@ -173,7 +173,7 @@ var _ = Describe("PlanBuilder", func() {
 			reg := NewRegistry[*testGCtx, *testReplicaCtx]()
 			Expect(func() {
 				replicaPlan(reg, "test/v1").
-					Guards(GlobalGuardFunc[*testGCtx](func(*testGCtx) GuardResult { return GuardResult{} })).
+					Guards(func(*testGCtx) GuardResult { return GuardResult{} }).
 					Steps(ReplicaStep("s", stubReplicaApply, stubReplicaConfirm)).Build()
 			}).To(Panic())
 		})
@@ -182,7 +182,7 @@ var _ = Describe("PlanBuilder", func() {
 			reg := NewRegistry[*testGCtx, *testReplicaCtx]()
 			Expect(func() {
 				globalPlan(reg, "test/v1").
-					Guards(ReplicaGuardFunc[*testGCtx, *testReplicaCtx](func(*testGCtx, *testReplicaCtx) GuardResult { return GuardResult{} })).
+					Guards(func(*testGCtx, *testReplicaCtx) GuardResult { return GuardResult{} }).
 					Steps(GlobalStep("s", stubGlobalApply, stubGlobalConfirm)).Build()
 			}).To(Panic())
 		})
@@ -292,15 +292,15 @@ var _ = Describe("PlanBuilder", func() {
 			rt := reg.ReplicaTransition("T", 0)
 			rt.Plan("test/v1").Group("G").
 				Guards(
-					ReplicaGuardFunc[*testGCtx, *testReplicaCtx](func(*testGCtx, *testReplicaCtx) GuardResult {
+					func(*testGCtx, *testReplicaCtx) GuardResult {
 						return GuardResult{} // pass
-					}),
-					ReplicaGuardFunc[*testGCtx, *testReplicaCtx](func(*testGCtx, *testReplicaCtx) GuardResult {
+					},
+					func(*testGCtx, *testReplicaCtx) GuardResult {
 						return GuardResult{Blocked: true, Message: "blocked by guard 2"}
-					}),
-					ReplicaGuardFunc[*testGCtx, *testReplicaCtx](func(*testGCtx, *testReplicaCtx) GuardResult {
+					},
+					func(*testGCtx, *testReplicaCtx) GuardResult {
 						return GuardResult{Blocked: true, Message: "should not reach"}
-					}),
+					},
 				).
 				Steps(ReplicaStep("s", stubReplicaApply, stubReplicaConfirm)).Build()
 
@@ -315,12 +315,12 @@ var _ = Describe("PlanBuilder", func() {
 			rt := reg.GlobalTransition("T")
 			rt.Plan("test/v1").Group("G").
 				Guards(
-					GlobalGuardFunc[*testGCtx](func(*testGCtx) GuardResult {
+					func(*testGCtx) GuardResult {
 						return GuardResult{} // pass
-					}),
-					GlobalGuardFunc[*testGCtx](func(*testGCtx) GuardResult {
+					},
+					func(*testGCtx) GuardResult {
 						return GuardResult{Blocked: true, Message: "global guard blocked"}
-					}),
+					},
 				).
 				Steps(GlobalStep("s", stubGlobalApply, stubGlobalConfirm)).Build()
 
@@ -335,9 +335,9 @@ var _ = Describe("PlanBuilder", func() {
 			rt := reg.ReplicaTransition("T", 0)
 			rt.Plan("test/v1").Group("G").
 				Guards(
-					ReplicaGuardFunc[*testGCtx, *testReplicaCtx](func(*testGCtx, *testReplicaCtx) GuardResult {
+					func(*testGCtx, *testReplicaCtx) GuardResult {
 						return GuardResult{}
-					}),
+					},
 				).
 				Steps(ReplicaStep("s", stubReplicaApply, stubReplicaConfirm)).Build()
 

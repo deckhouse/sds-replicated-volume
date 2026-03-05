@@ -236,13 +236,13 @@ func (b *PlanBuilder[G, R]) Build() {
 	if b.rawOnComplete != nil {
 		switch b.p.scope {
 		case ReplicaScope:
-			fn, ok := b.rawOnComplete.(func(G, R))
+			fn, ok := b.rawOnComplete.(ReplicaOnCompleteFunc[G, R])
 			if !ok {
 				panic("dmte.PlanBuilder.Build: OnComplete must be func(G, R) for replica plan " + string(id))
 			}
 			b.p.replicaOnComplete = fn
 		case GlobalScope:
-			fn, ok := b.rawOnComplete.(func(G))
+			fn, ok := b.rawOnComplete.(GlobalOnCompleteFunc[G])
 			if !ok {
 				panic("dmte.PlanBuilder.Build: OnComplete must be func(G) for global plan " + string(id))
 			}

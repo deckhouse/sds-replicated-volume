@@ -120,34 +120,30 @@ var _ = Describe("GlobalStepBuilder", func() {
 var _ = Describe("step dispatch", func() {
 	It("apply dispatches to replica callback", func() {
 		called := false
-		apply := ReplicaApplyFunc[*testGCtx, *testReplicaCtx](func(*testGCtx, *testReplicaCtx) { called = true })
-		s := ReplicaStep("step", apply, stubReplicaConfirm).build()
+		s := ReplicaStep("step", func(*testGCtx, *testReplicaCtx) { called = true }, stubReplicaConfirm).build()
 		s.apply(&testGCtx{}, &testReplicaCtx{})
 		Expect(called).To(BeTrue())
 	})
 
 	It("apply dispatches to global callback", func() {
 		called := false
-		apply := GlobalApplyFunc[*testGCtx](func(*testGCtx) { called = true })
-		s := buildGlobalStep[*testGCtx, *testReplicaCtx](GlobalStep("step", apply, stubGlobalConfirm))
+		s := buildGlobalStep[*testGCtx, *testReplicaCtx](GlobalStep("step", func(*testGCtx) { called = true }, stubGlobalConfirm))
 		s.apply(&testGCtx{}, &testReplicaCtx{})
 		Expect(called).To(BeTrue())
 	})
 
 	It("confirm dispatches to replica callback", func() {
-		confirm := ReplicaConfirmFunc[*testGCtx, *testReplicaCtx](func(*testGCtx, *testReplicaCtx, int64) ConfirmResult {
+		s := ReplicaStep("step", stubReplicaApply, func(*testGCtx, *testReplicaCtx, int64) ConfirmResult {
 			return ConfirmResult{MustConfirm: 0b111}
-		})
-		s := ReplicaStep("step", stubReplicaApply, confirm).build()
+		}).build()
 		cr := s.confirm(&testGCtx{}, &testReplicaCtx{}, 5)
 		Expect(cr.MustConfirm.Len()).To(Equal(3))
 	})
 
 	It("confirm dispatches to global callback", func() {
-		confirm := GlobalConfirmFunc[*testGCtx](func(*testGCtx, int64) ConfirmResult {
+		s := buildGlobalStep[*testGCtx, *testReplicaCtx](GlobalStep("step", stubGlobalApply, func(*testGCtx, int64) ConfirmResult {
 			return ConfirmResult{MustConfirm: 0b11}
-		})
-		s := buildGlobalStep[*testGCtx, *testReplicaCtx](GlobalStep("step", stubGlobalApply, confirm))
+		}))
 		cr := s.confirm(&testGCtx{}, &testReplicaCtx{}, 5)
 		Expect(cr.MustConfirm.Len()).To(Equal(2))
 	})

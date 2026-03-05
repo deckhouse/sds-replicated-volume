@@ -253,11 +253,11 @@ func NoDispatch[R ReplicaCtx](rctx R, slot ReplicaSlotID, msg string, details an
 
 // ReplicaGuardFunc checks a precondition for a replica-scoped transition.
 // Returns GuardResult with Blocked=true and a message if the guard blocks.
-type ReplicaGuardFunc[G any, R ReplicaCtx] func(gctx G, rctx R) GuardResult
+type ReplicaGuardFunc[G any, R ReplicaCtx] = func(gctx G, rctx R) GuardResult
 
 // GlobalGuardFunc checks a precondition for a global-scoped transition.
 // Returns GuardResult with Blocked=true and a message if the guard blocks.
-type GlobalGuardFunc[G any] func(gctx G) GuardResult
+type GlobalGuardFunc[G any] = func(gctx G) GuardResult
 
 // GuardResult is the result of a guard check.
 type GuardResult struct {
@@ -275,11 +275,11 @@ type GuardResult struct {
 
 // ReplicaOnCompleteFunc is called when all steps of a replica-scoped plan are
 // confirmed (before the transition is removed). Optional.
-type ReplicaOnCompleteFunc[G any, R ReplicaCtx] func(gctx G, rctx R)
+type ReplicaOnCompleteFunc[G any, R ReplicaCtx] = func(gctx G, rctx R)
 
 // GlobalOnCompleteFunc is called when all steps of a global-scoped plan are
 // confirmed (before the transition is removed). Optional.
-type GlobalOnCompleteFunc[G any] func(gctx G)
+type GlobalOnCompleteFunc[G any] = func(gctx G)
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Step callbacks
@@ -289,20 +289,20 @@ type GlobalOnCompleteFunc[G any] func(gctx G)
 // It mutates state through gctx (e.g., add/remove member, set Attached flag).
 // DatameshRevision bump, step.DatameshRevision, and message generation are
 // handled by the engine.
-type ReplicaApplyFunc[G any, R ReplicaCtx] func(gctx G, rctx R)
+type ReplicaApplyFunc[G any, R ReplicaCtx] = func(gctx G, rctx R)
 
 // GlobalApplyFunc is called when a global-scoped step is activated.
 // It mutates state through gctx (e.g., change qmr, update EffectiveLayout).
-type GlobalApplyFunc[G any] func(gctx G)
+type GlobalApplyFunc[G any] = func(gctx G)
 
 // ReplicaConfirmFunc computes the confirmation sets for a replica-scoped step.
 // stepRevision is the DatameshRevision assigned to this step by the engine.
 // The engine determines completion (Confirmed == MustConfirm) and generates messages.
-type ReplicaConfirmFunc[G any, R ReplicaCtx] func(gctx G, rctx R, stepRevision int64) ConfirmResult
+type ReplicaConfirmFunc[G any, R ReplicaCtx] = func(gctx G, rctx R, stepRevision int64) ConfirmResult
 
 // GlobalConfirmFunc computes the confirmation sets for a global-scoped step.
 // stepRevision is the DatameshRevision assigned to this step by the engine.
-type GlobalConfirmFunc[G any] func(gctx G, stepRevision int64) ConfirmResult
+type GlobalConfirmFunc[G any] = func(gctx G, stepRevision int64) ConfirmResult
 
 // ConfirmResult holds the confirmation sets computed by a confirm callback.
 // The engine checks completion (Confirmed == MustConfirm) and auto-generates
@@ -318,4 +318,4 @@ type ConfirmResult struct {
 // message generation. Returns true if the error condition should be skipped
 // (not reported as an error in progress messages).
 // Only used on ReplicaStepBuilder (global steps have no per-replica skip logic).
-type SkipErrorFunc[R ReplicaCtx] func(rctx R, id uint8, cond *metav1.Condition) bool
+type SkipErrorFunc[R ReplicaCtx] = func(rctx R, id uint8, cond *metav1.Condition) bool
