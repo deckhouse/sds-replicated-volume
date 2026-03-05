@@ -41,10 +41,9 @@ import (
 //
 
 // registerAccessPlans registers AddReplica(A) and RemoveReplica(A) plans.
-func registerAccessPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
-	addReplica := reg.ReplicaTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica, membershipSlot)
-	removeReplica := reg.ReplicaTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica, membershipSlot)
-
+func registerAccessPlans(
+	addReplica, removeReplica *dmte.RegisteredTransition[*globalContext, *ReplicaContext],
+) {
 	// AddReplica(A): ✦ → A
 	addReplica.Plan("access/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
