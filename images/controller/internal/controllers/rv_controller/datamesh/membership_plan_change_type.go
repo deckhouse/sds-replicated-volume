@@ -121,4 +121,58 @@ func registerChangeTypePlans(
 		).
 		OnComplete(onChangeTypeComplete).
 		Build()
+
+	// ChangeReplicaType(TB → sD): TB → sD∅ → sD
+	//
+	// Same bitmap ordering as A → sD:
+	// Step 1 (TB → sD∅): peers enable bitmaps. Must happen before disk attach.
+	// Step 2 (sD∅ → sD): disk attach.
+	//
+	// Guarded: feature flag (sD requires Flant DRBD) + leaving-TB guards.
+	changeReplicaType.Plan("tb-to-sd/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeTieBreaker).
+		ToReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
+		DisplayName("Changing replica type").
+		Guards(guardShadowDiskfulSupported).
+		Guards(leavingTBGuards...).
+		Steps(
+			dmte.ReplicaStep("TB → sD∅",
+				applySetType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+				confirmAllMembers,
+			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			dmte.ReplicaStep("sD∅ → sD",
+				applySetType(v1alpha1.DatameshMemberTypeShadowDiskful),
+				confirmSubjectOnly,
+			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
+
+	// ChangeReplicaType(sD → TB): sD → sD∅ → TB
+	//
+	// Same bitmap ordering as sD → A:
+	// Step 1 (sD → sD∅): disk detach. Must happen before peers disable bitmaps.
+	// Step 2 (sD∅ → TB): peers disable bitmaps.
+	//
+	// Guarded: VolumeAccess=Local blocks TB (TB cannot serve IO locally).
+	// Also handles sD∅ → TB (liminal state, step 1 is no-op).
+	changeReplicaType.Plan("sd-to-tb/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
+		ToReplicaType(v1alpha1.ReplicaTypeTieBreaker).
+		DisplayName("Changing replica type").
+		Guards(guardVolumeAccessNotLocal).
+		Steps(
+			dmte.ReplicaStep("sD → sD∅",
+				applySetType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+				confirmSubjectOnly,
+			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			dmte.ReplicaStep("sD∅ → TB",
+				applySetType(v1alpha1.DatameshMemberTypeTieBreaker),
+				confirmAllMembers,
+			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
 }
