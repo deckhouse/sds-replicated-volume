@@ -35,6 +35,11 @@ func onLeaveComplete(_ *globalContext, rctx *ReplicaContext) {
 	rctx.membershipMessage = "Left datamesh successfully"
 }
 
+// onChangeTypeComplete sets the completion message after a ChangeReplicaType plan finishes.
+func onChangeTypeComplete(_ *globalContext, rctx *ReplicaContext) {
+	rctx.membershipMessage = "Replica type changed successfully"
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Computation helpers
 //

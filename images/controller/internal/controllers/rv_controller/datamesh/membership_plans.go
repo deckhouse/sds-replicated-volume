@@ -34,4 +34,7 @@ func registerMembershipPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]
 	registerTieBreakerPlans(addReplica, removeReplica)
 	registerShadowDiskfulPlans(addReplica, removeReplica)
 	// TODO: register Diskful plans (future)
+
+	changeReplicaType := reg.ReplicaTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType, membershipSlot)
+	registerChangeTypePlans(changeReplicaType)
 }

@@ -128,6 +128,28 @@ func planRemoveReplica(_ *globalContext, rctx *ReplicaContext) (dmte.PlanID, str
 }
 
 // planChangeReplicaType selects the plan for a ChangeRole request.
-func planChangeReplicaType(_ *globalContext, _ *ReplicaContext) (dmte.PlanID, string) {
-	return "", "Not implemented"
+// Not a member → skip. Already target type → skip.
+func planChangeReplicaType(_ *globalContext, rctx *ReplicaContext) (dmte.PlanID, string) {
+	if rctx.member == nil {
+		return "", ""
+	}
+
+	if rctx.membershipTransition != nil &&
+		rctx.membershipTransition.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica {
+		return "", "" // skip: AddReplica in progress, change type after it completes
+	}
+
+	targetType := rctx.membershipRequest.Request.Type
+	switch {
+	case rctx.member.Type == v1alpha1.DatameshMemberTypeAccess &&
+		targetType == v1alpha1.ReplicaTypeTieBreaker:
+		return "a-to-tb/v1", ""
+	case rctx.member.Type == v1alpha1.DatameshMemberTypeTieBreaker &&
+		targetType == v1alpha1.ReplicaTypeAccess:
+		return "tb-to-a/v1", ""
+	case rctx.member.Type == v1alpha1.DatameshMemberType(targetType):
+		return "", "" // already target type
+	default:
+		return "", "Not implemented"
+	}
 }

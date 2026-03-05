@@ -181,6 +181,18 @@ func mkJoinRequestSD(name string) v1alpha1.ReplicatedVolumeDatameshReplicaReques
 	}
 }
 
+// mkChangeRoleRequest creates a ChangeRole request with the given target type.
+func mkChangeRoleRequest(name string, targetType v1alpha1.ReplicaType) v1alpha1.ReplicatedVolumeDatameshReplicaRequest {
+	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+		Name: name,
+		Request: v1alpha1.DatameshMembershipRequest{
+			Operation: v1alpha1.DatameshMembershipRequestOperationChangeRole,
+			Type:      targetType,
+		},
+		FirstObservedAt: metav1.Now(),
+	}
+}
+
 // mkLeaveRequest creates a Leave request.
 func mkLeaveRequest(name string) v1alpha1.ReplicatedVolumeDatameshReplicaRequest { //nolint:unparam
 	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
