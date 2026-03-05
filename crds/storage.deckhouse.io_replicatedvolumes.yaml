@@ -195,6 +195,32 @@ spec:
                 x-kubernetes-validations:
                 - message: actuallyAttachedTo must be unique
                   rule: self.all(x, self.exists_one(y, x == y))
+              baselineLayout:
+                description: |-
+                  BaselineLayout is the FTT/GMDR level that the datamesh has reached and
+                  committed to maintain. Computed from the committed datamesh topology
+                  (member count, q, qmr) and capped by Configuration:
+                    - Rises toward Configuration as members are added and q/qmr confirmed.
+                    - Never exceeds Configuration (capped at the target level).
+                    - Decreases when Configuration is lowered (cap takes effect immediately).
+                    - q and qmr are derived from these values.
+                properties:
+                  failuresToTolerate:
+                    default: 0
+                    description: FailuresToTolerate is the FTT level.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                  guaranteedMinimumDataRedundancy:
+                    default: 0
+                    description: GuaranteedMinimumDataRedundancy is the GMDR level.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                required:
+                - failuresToTolerate
+                - guaranteedMinimumDataRedundancy
+                type: object
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -583,98 +609,199 @@ spec:
               datameshTransitions:
                 description: DatameshTransitions is the list of active datamesh transitions.
                 items:
-                  description: ReplicatedVolumeDatameshTransition represents an active
-                    datamesh transition.
+                  description: |-
+                    ReplicatedVolumeDatameshTransition represents an active datamesh transition.
+                    Each transition has an ordered list of steps that are pre-declared on creation
+                    and executed sequentially. The transition's start time is steps[0].startedAt.
                   properties:
-                    datameshRevision:
+                    fromReplicaType:
                       description: |-
-                        DatameshRevision is the datamesh revision when this transition was introduced.
-                        Zero means unset. For Formation transitions, must be absent (zero).
-                      format: int64
-                      type: integer
-                    formation:
+                        FromReplicaType is the source replica type for ChangeReplicaType transitions.
+                        Required for ChangeReplicaType. Must not be set for other types.
+                      enum:
+                      - Diskful
+                      - Access
+                      - TieBreaker
+                      - ShadowDiskful
+                      type: string
+                    group:
                       description: |-
-                        Formation holds formation-specific details.
-                        Required when type is "Formation"; must not be set otherwise.
-                      properties:
-                        phase:
-                          default: Preconfigure
-                          description: Phase is the current formation phase.
-                          enum:
-                          - Preconfigure
-                          - EstablishConnectivity
-                          - BootstrapData
-                          type: string
-                      required:
-                      - phase
-                      type: object
-                    message:
-                      description: Message is an optional human-readable message about
-                        the transition.
+                        Group is the concurrency group for this transition.
+                        Set by the controller at transition creation time. Read-only for users.
+                        Provides observability: explains why a transition may be waiting.
+                      enum:
+                      - Formation
+                      - VotingMembership
+                      - NonVotingMembership
+                      - Quorum
+                      - Attachment
+                      - Multiattach
+                      - Emergency
+                      type: string
+                    planID:
+                      description: |-
+                        PlanID identifies the transition plan used to create this transition.
+                        Used by the engine to look up step callbacks from the plan registry.
+                      minLength: 1
                       type: string
                     replicaName:
                       description: |-
                         ReplicaName is the name of the replica this transition applies to.
-                        Required for Attach, Detach, AddAccessReplica, RemoveAccessReplica transitions.
-                        Must not be set for Formation, EnableMultiattach, DisableMultiattach.
+                        Required for AddReplica, RemoveReplica, ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach.
+                        Must not be set for Formation, EnableMultiattach, DisableMultiattach, ChangeQuorum.
                       maxLength: 123
                       minLength: 1
                       pattern: ^.+-([0-9]|[12][0-9]|3[01])$
                       type: string
-                    startedAt:
-                      description: StartedAt is the timestamp when this transition
-                        started.
-                      format: date-time
+                    replicaType:
+                      description: |-
+                        ReplicaType is the target replica type for AddReplica/RemoveReplica/ForceRemoveReplica.
+                        Uses ReplicaType (Diskful, Access, TieBreaker, ShadowDiskful) — liminal states
+                        (LiminalDiskful, LiminalShadowDiskful) are internal mechanics visible in step names,
+                        not in transition parameters.
+                        Required for AddReplica, RemoveReplica, ForceRemoveReplica. Must not be set for other types.
+                      enum:
+                      - Diskful
+                      - Access
+                      - TieBreaker
+                      - ShadowDiskful
+                      type: string
+                    steps:
+                      description: |-
+                        Steps is the ordered list of steps for this transition.
+                        All steps are written when the transition is created (with status=Pending,
+                        and the first step immediately set to Active with startedAt).
+                        Steps are executed sequentially — only one step is Active at a time.
+                        Must have at least one element.
+                      items:
+                        description: ReplicatedVolumeDatameshTransitionStep represents
+                          one step within a transition.
+                        properties:
+                          completedAt:
+                            description: CompletedAt is set when the step transitions
+                              from Active to Completed.
+                            format: date-time
+                            type: string
+                          datameshRevision:
+                            description: |-
+                              DatameshRevision is the revision assigned when this step was activated.
+                              0 if the step has not been activated yet or does not bump the revision.
+                            format: int64
+                            type: integer
+                          message:
+                            description: |-
+                              Message is a per-step progress or error message.
+                              Updated every reconciliation while the step is Active.
+                            maxLength: 512
+                            type: string
+                          name:
+                            description: Name is a human-readable step name (e.g.,
+                              "Preconfigure", "attach", "✦ → D∅").
+                            maxLength: 64
+                            minLength: 1
+                            type: string
+                          startedAt:
+                            description: StartedAt is set when the step transitions
+                              from Pending to Active.
+                            format: date-time
+                            type: string
+                          status:
+                            default: Pending
+                            description: Status is the current status of this step.
+                            enum:
+                            - Pending
+                            - Active
+                            - Completed
+                            type: string
+                        required:
+                        - name
+                        - status
+                        type: object
+                      maxItems: 8
+                      minItems: 1
+                      type: array
+                      x-kubernetes-list-type: atomic
+                    toReplicaType:
+                      description: |-
+                        ToReplicaType is the target replica type for ChangeReplicaType transitions.
+                        Required for ChangeReplicaType. Must not be set for other types.
+                      enum:
+                      - Diskful
+                      - Access
+                      - TieBreaker
+                      - ShadowDiskful
                       type: string
                     type:
                       description: Type is the transition type.
                       enum:
                       - Formation
-                      - AddAccessReplica
+                      - AddReplica
                       - Attach
+                      - ChangeQuorum
+                      - ChangeReplicaType
                       - Detach
                       - DisableMultiattach
                       - EnableMultiattach
-                      - RemoveAccessReplica
+                      - ForceDetach
+                      - ForceRemoveReplica
+                      - RemoveReplica
                       type: string
                   required:
-                  - startedAt
+                  - group
+                  - steps
                   - type
                   type: object
                   x-kubernetes-validations:
-                  - message: formation is required when type is Formation
-                    rule: self.type != 'Formation' || has(self.formation)
-                  - message: formation is only allowed when type is Formation
-                    rule: '!has(self.formation) || self.type == ''Formation'''
-                  - message: datameshRevision must be absent (or zero) when type is
-                      Formation
-                    rule: self.type != 'Formation' || !has(self.datameshRevision)
-                      || self.datameshRevision == 0
-                  - message: replicaName is required for Attach, Detach, AddAccessReplica,
-                      RemoveAccessReplica transitions
+                  - message: replicaName is required for AddReplica, RemoveReplica,
+                      ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach
+                      transitions
                     rule: self.type == 'Formation' || self.type == 'EnableMultiattach'
-                      || self.type == 'DisableMultiattach' || has(self.replicaName)
+                      || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum'
+                      || has(self.replicaName)
                   - message: replicaName must not be set for Formation, EnableMultiattach,
-                      DisableMultiattach transitions
+                      DisableMultiattach, ChangeQuorum transitions
                     rule: '!has(self.replicaName) || !(self.type == ''Formation''
-                      || self.type == ''EnableMultiattach'' || self.type == ''DisableMultiattach'')'
+                      || self.type == ''EnableMultiattach'' || self.type == ''DisableMultiattach''
+                      || self.type == ''ChangeQuorum'')'
+                  - message: replicaType must only be set for AddReplica, RemoveReplica,
+                      ForceRemoveReplica transitions
+                    rule: self.type == 'AddReplica' || self.type == 'RemoveReplica'
+                      || self.type == 'ForceRemoveReplica' || !has(self.replicaType)
+                  - message: replicaType is required for AddReplica, RemoveReplica,
+                      ForceRemoveReplica transitions
+                    rule: '!(self.type == ''AddReplica'' || self.type == ''RemoveReplica''
+                      || self.type == ''ForceRemoveReplica'') || has(self.replicaType)'
+                  - message: fromReplicaType and toReplicaType must only be set for
+                      ChangeReplicaType transitions
+                    rule: self.type == 'ChangeReplicaType' || (!has(self.fromReplicaType)
+                      && !has(self.toReplicaType))
+                  - message: fromReplicaType and toReplicaType are required for ChangeReplicaType
+                      transitions
+                    rule: self.type != 'ChangeReplicaType' || (has(self.fromReplicaType)
+                      && has(self.toReplicaType))
                 type: array
                 x-kubernetes-list-type: atomic
               effectiveLayout:
                 description: |-
-                  EffectiveLayout tracks the FTT/GMDR levels that the datamesh actually
-                  provides. q and qmr are computed from these values, not from Configuration.
+                  EffectiveLayout is the FTT/GMDR protection level that the datamesh
+                  actually provides right now. Reflects the real state of the cluster:
+                    - May exceed BaselineLayout and Configuration during transitions
+                      (e.g., a new voter was added but BaselineLayout has not been raised yet).
+                    - May be less than BaselineLayout in degraded state (e.g., a lost voter
+                      reduces effective FTT).
+                    - Equals BaselineLayout when healthy; equals Configuration at steady state.
+                    - Nil when the effective layout cannot be determined (e.g., no voter
+                      replicas with ready agents to observe).
                 properties:
                   failuresToTolerate:
                     default: 0
-                    description: FailuresToTolerate is the effective FTT level.
+                    description: FailuresToTolerate is the FTT level.
                     maximum: 2
                     minimum: 0
                     type: integer
                   guaranteedMinimumDataRedundancy:
                     default: 0
-                    description: GuaranteedMinimumDataRedundancy is the effective
-                      GMDR level.
+                    description: GuaranteedMinimumDataRedundancy is the GMDR level.
                     maximum: 2
                     minimum: 0
                     type: integer
@@ -713,9 +840,9 @@ spec:
                 - message: eligibleNodesViolations[].replicaName must be unique
                   rule: self.all(x, self.exists_one(y, x.replicaName == y.replicaName))
             required:
+            - baselineLayout
             - datamesh
             - datameshRevision
-            - effectiveLayout
             type: object
         required:
         - metadata

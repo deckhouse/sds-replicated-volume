@@ -438,8 +438,12 @@ var _ = Describe("reconcileDeleteAccessReplicas", func() {
 				{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-2"},
 			},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{
-				{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach,
-					ReplicaName: "rv-1-1", DatameshRevision: 5},
+				makeDatameshSingleStepTransition(
+					v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach,
+					v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment,
+					"rv-1-1", "",
+					"Detach", 5,
+				),
 			},
 		)
 		rvr := mkRVR("rv-1-1", "node-2")
@@ -452,14 +456,18 @@ var _ = Describe("reconcileDeleteAccessReplicas", func() {
 		Expect(rvr.DeletionTimestamp).To(BeNil())
 	})
 
-	It("does not delete Access RVR with active AddAccessReplica transition", func(ctx SpecContext) {
+	It("does not delete Access RVR with active AddReplica transition", func(ctx SpecContext) {
 		rv := mkRV(
 			[]v1alpha1.DatameshMember{
 				{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-2"},
 			},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{
-				{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica,
-					ReplicaName: "rv-1-1", DatameshRevision: 5},
+				makeDatameshSingleStepTransition(
+					v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
+					v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+					"rv-1-1", v1alpha1.ReplicaTypeAccess,
+					"✦ → A", 5,
+				),
 			},
 		)
 		rvr := mkRVR("rv-1-1", "node-2")
