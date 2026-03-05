@@ -268,7 +268,7 @@ var _ = Describe("Attach", func() {
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-0"),
 				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-1"),
 			},
-			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequest("rv-1-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{addT},
 		)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{

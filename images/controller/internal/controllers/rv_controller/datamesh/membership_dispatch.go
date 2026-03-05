@@ -99,6 +99,8 @@ func planAddReplica(_ *globalContext, rctx *ReplicaContext) (dmte.PlanID, string
 	switch rctx.membershipRequest.Request.Type {
 	case v1alpha1.ReplicaTypeAccess:
 		return "access/v1", ""
+	case v1alpha1.ReplicaTypeTieBreaker:
+		return "tiebreaker/v1", ""
 	default:
 		return "", "Not implemented"
 	}
@@ -113,6 +115,8 @@ func planRemoveReplica(_ *globalContext, rctx *ReplicaContext) (dmte.PlanID, str
 	switch rctx.member.Type {
 	case v1alpha1.DatameshMemberTypeAccess:
 		return "access/v1", ""
+	case v1alpha1.DatameshMemberTypeTieBreaker:
+		return "tiebreaker/v1", ""
 	default:
 		return "", "Not implemented"
 	}

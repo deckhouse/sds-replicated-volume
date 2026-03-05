@@ -37,7 +37,7 @@ var _ = Describe("AddReplica(A)", func() {
 			[]v1alpha1.DatameshMember{
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
 			},
-			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequest("rv-1-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")},
 			nil,
 		)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
@@ -79,7 +79,7 @@ var _ = Describe("AddReplica(A)", func() {
 	})
 
 	It("guard: RV deleting", func() {
-		rv := mkRV(5, nil, []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequest("rv-1-1")}, nil)
+		rv := mkRV(5, nil, []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")}, nil)
 		rv.DeletionTimestamp = ptr.To(metav1.Now())
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-1", "node-2", 0)}
 
@@ -91,7 +91,7 @@ var _ = Describe("AddReplica(A)", func() {
 	})
 
 	It("guard: VolumeAccess Local", func() {
-		rv := mkRV(5, nil, []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequest("rv-1-1")}, nil)
+		rv := mkRV(5, nil, []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")}, nil)
 		rv.Status.Configuration = &v1alpha1.ReplicatedVolumeConfiguration{
 			ReplicatedStoragePoolName: "test-pool",
 			Topology:                  v1alpha1.TopologyIgnored,
@@ -107,7 +107,7 @@ var _ = Describe("AddReplica(A)", func() {
 	})
 
 	It("guard: addresses empty", func() {
-		rv := mkRV(5, nil, []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequest("rv-1-1")}, nil)
+		rv := mkRV(5, nil, []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")}, nil)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVRBare("rv-1-1", "node-2")}
 
 		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-2"), rvrs, nil, FeatureFlags{})
@@ -120,7 +120,7 @@ var _ = Describe("AddReplica(A)", func() {
 	It("guard: member on same node", func() {
 		rv := mkRV(5,
 			[]v1alpha1.DatameshMember{mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-2")},
-			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequest("rv-1-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")},
 			nil,
 		)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
@@ -137,7 +137,7 @@ var _ = Describe("AddReplica(A)", func() {
 	})
 
 	It("guard: RSP nil", func() {
-		rv := mkRV(5, nil, []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequest("rv-1-1")}, nil)
+		rv := mkRV(5, nil, []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")}, nil)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-1", "node-2", 0)}
 
 		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
@@ -148,7 +148,7 @@ var _ = Describe("AddReplica(A)", func() {
 	})
 
 	It("guard: node not eligible", func() {
-		rv := mkRV(5, nil, []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequest("rv-1-1")}, nil)
+		rv := mkRV(5, nil, []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")}, nil)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-1", "node-2", 0)}
 
 		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1"), rvrs, nil, FeatureFlags{})
@@ -161,7 +161,7 @@ var _ = Describe("AddReplica(A)", func() {
 	It("plan selection: already a member", func() {
 		rv := mkRV(5,
 			[]v1alpha1.DatameshMember{mkMember("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-2")},
-			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequest("rv-1-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")},
 			nil,
 		)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-1", "node-2", 5)}
@@ -176,7 +176,7 @@ var _ = Describe("AddReplica(A)", func() {
 	It("extracts zone from RSP", func() {
 		rv := mkRV(5,
 			[]v1alpha1.DatameshMember{mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1")},
-			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequest("rv-1-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")},
 			nil,
 		)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
@@ -325,7 +325,7 @@ var _ = Describe("Settle Access transitions", func() {
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
 				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-2"),
 			},
-			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequest("rv-1-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
 		)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-0", "node-1", 6), mkRVR("rv-1-1", "node-2", 6)}
@@ -364,7 +364,7 @@ var _ = Describe("Settle Access transitions", func() {
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
 				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-2"),
 			},
-			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequest("rv-1-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
 		)
 		// Diskful confirmed, subject not yet.
@@ -385,7 +385,7 @@ var _ = Describe("Settle Access transitions", func() {
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
 				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-2"),
 			},
-			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequest("rv-1-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
 		)
 		subjectRVR := &v1alpha1.ReplicatedVolumeReplica{
@@ -417,7 +417,7 @@ var _ = Describe("Settle Access transitions", func() {
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
 				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-2"),
 			},
-			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequest("rv-1-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
 		)
 		subjectRVR := &v1alpha1.ReplicatedVolumeReplica{
@@ -450,7 +450,7 @@ var _ = Describe("Settle Access transitions", func() {
 				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-2"),
 				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeShadowDiskful, "node-3"),
 			},
-			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequest("rv-1-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
 		)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
@@ -515,8 +515,8 @@ var _ = Describe("Access integration", func() {
 				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-2"),
 			},
 			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
-				mkJoinRequest("rv-1-1"),
-				mkJoinRequest("rv-1-2"),
+				mkJoinRequestAccess("rv-1-1"),
+				mkJoinRequestAccess("rv-1-2"),
 			},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
 		)
@@ -547,8 +547,8 @@ var _ = Describe("Access integration", func() {
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
 			},
 			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
-				mkJoinRequest("rv-1-1"),
-				mkJoinRequest("rv-1-2"),
+				mkJoinRequestAccess("rv-1-1"),
+				mkJoinRequestAccess("rv-1-2"),
 			},
 			nil,
 		)
@@ -595,7 +595,7 @@ var _ = Describe("Access integration", func() {
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
 				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-2"),
 			},
-			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequest("rv-1-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
 		)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5)}

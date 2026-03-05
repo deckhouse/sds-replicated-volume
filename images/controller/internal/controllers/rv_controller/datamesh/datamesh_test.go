@@ -145,13 +145,25 @@ func mkRVRBare(name, nodeName string) *v1alpha1.ReplicatedVolumeReplica {
 	}
 }
 
-// mkJoinRequest creates a Join request for Access type.
-func mkJoinRequest(name string) v1alpha1.ReplicatedVolumeDatameshReplicaRequest {
+// mkJoinRequestAccess creates a Join request for Access type.
+func mkJoinRequestAccess(name string) v1alpha1.ReplicatedVolumeDatameshReplicaRequest {
 	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 		Name: name,
 		Request: v1alpha1.DatameshMembershipRequest{
 			Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
 			Type:      v1alpha1.ReplicaTypeAccess,
+		},
+		FirstObservedAt: metav1.Now(),
+	}
+}
+
+// mkJoinRequestTB creates a Join request for TieBreaker type.
+func mkJoinRequestTB(name string) v1alpha1.ReplicatedVolumeDatameshReplicaRequest { //nolint:unparam
+	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+		Name: name,
+		Request: v1alpha1.DatameshMembershipRequest{
+			Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
+			Type:      v1alpha1.ReplicaTypeTieBreaker,
 		},
 		FirstObservedAt: metav1.Now(),
 	}

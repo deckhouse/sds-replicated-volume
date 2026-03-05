@@ -17,12 +17,20 @@ limitations under the License.
 package datamesh
 
 import (
+	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
 )
 
 // registerMembershipPlans registers AddReplica, RemoveReplica (and future membership)
 // transition plans in the registry.
+//
+// Transition handles are created once here and passed to plan registration functions.
+// Each plan file registers its plans on the shared handles.
 func registerMembershipPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
-	registerAccessPlans(reg)
+	addReplica := reg.ReplicaTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica, membershipSlot)
+	removeReplica := reg.ReplicaTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica, membershipSlot)
+
+	registerAccessPlans(addReplica, removeReplica)
+	registerTieBreakerPlans(addReplica, removeReplica)
 	// TODO: register Diskful plans (future)
 }
