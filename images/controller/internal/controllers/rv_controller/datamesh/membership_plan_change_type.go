@@ -498,4 +498,180 @@ func registerChangeTypePlans(
 		).
 		OnComplete(onChangeTypeComplete).
 		Build()
+
+	// ════════════════════════════════════════════════════════════════════════
+	// TB ↔ D (voter promotion/demotion from/to TieBreaker)
+	// ════════════════════════════════════════════════════════════════════════
+	//
+	// Structurally identical to A↔D. Key difference: TB→D has leavingTBGuards
+	// (TB leaving its role — if TB required for tiebreaker, guard blocks;
+	// user adds another TB first, then converts).
+
+	// ChangeReplicaType(TB → D): TB → D∅ → D (even→odd, no sD)
+	changeReplicaType.Plan("tb-to-d/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeTieBreaker).
+		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		DisplayName("Changing replica type").
+		Guards(leavingTBGuards...).
+		Guards(guardVotersEven).
+		Steps(
+			mrStep("TB → D∅",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
+					setBackingVolumeFromRequest,
+				),
+				asReplicaConfirm(confirmAllMembers),
+			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			mrStep("D∅ → D",
+				setType(v1alpha1.DatameshMemberTypeDiskful),
+				confirmSubjectOnly,
+			),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
+
+	// ChangeReplicaType(TB → D) + q↑: TB → D∅ + q↑ → D (odd→even, no sD)
+	changeReplicaType.Plan("tb-to-d-q-up/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeTieBreaker).
+		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		DisplayName("Changing replica type").
+		Guards(leavingTBGuards...).
+		Guards(guardVotersOdd).
+		Steps(
+			mrStep("TB → D∅ + q↑",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
+					setBackingVolumeFromRequest,
+					asReplicaApply(raiseQ),
+				),
+				asReplicaConfirm(confirmAllMembers),
+			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			mrStep("D∅ → D",
+				setType(v1alpha1.DatameshMemberTypeDiskful),
+				confirmSubjectOnly,
+			),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
+
+	// ChangeReplicaType(TB → D) via sD: TB → sD∅ → sD → D (even→odd, sD)
+	changeReplicaType.Plan("tb-to-d-via-sd/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeTieBreaker).
+		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		DisplayName("Changing replica type").
+		Guards(leavingTBGuards...).
+		Guards(guardVotersEven, guardShadowDiskfulSupported).
+		Steps(
+			mrStep("TB → sD∅",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+					setBackingVolumeFromRequest,
+				),
+				asReplicaConfirm(confirmAllMembers),
+			),
+			mrStep("sD∅ → sD",
+				setType(v1alpha1.DatameshMemberTypeShadowDiskful),
+				confirmSubjectOnly,
+			),
+			mrStep("sD → D",
+				setType(v1alpha1.DatameshMemberTypeDiskful),
+				asReplicaConfirm(confirmAllMembers),
+			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
+
+	// ChangeReplicaType(TB → D) via sD + q↑: TB → sD∅ → sD → sD∅ → D∅ + q↑ → D (odd→even, sD)
+	// Same detach-before-promote — see membership_plan_diskful.go.
+	changeReplicaType.Plan("tb-to-d-via-sd-q-up/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeTieBreaker).
+		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		DisplayName("Changing replica type").
+		Guards(leavingTBGuards...).
+		Guards(guardVotersOdd, guardShadowDiskfulSupported).
+		Steps(
+			mrStep("TB → sD∅",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+					setBackingVolumeFromRequest,
+				),
+				asReplicaConfirm(confirmAllMembers),
+			),
+			mrStep("sD∅ → sD",
+				setType(v1alpha1.DatameshMemberTypeShadowDiskful),
+				confirmSubjectOnly,
+			),
+			mrStep("sD → sD∅",
+				setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+				confirmSubjectOnly,
+			),
+			mrStep("sD∅ → D∅ + q↑",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
+					asReplicaApply(raiseQ),
+				),
+				asReplicaConfirm(confirmAllMembers),
+			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			mrStep("D∅ → D",
+				setType(v1alpha1.DatameshMemberTypeDiskful),
+				confirmSubjectOnly,
+			),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
+
+	// ChangeReplicaType(D → TB): D → D∅ → TB (odd→even, no q change)
+	changeReplicaType.Plan("d-to-tb/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
+		ToReplicaType(v1alpha1.ReplicaTypeTieBreaker).
+		DisplayName("Changing replica type").
+		Guards(leavingDGuards...).
+		Guards(guardVolumeAccessNotLocal, guardVotersOdd, guardQMRNotTooHigh).
+		Steps(
+			mrStep("D → D∅",
+				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
+				confirmSubjectOnly,
+			),
+			mrStep("D∅ → TB",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeTieBreaker),
+					clearBackingVolume,
+					asReplicaApply(updateBaselineLayout),
+				),
+				asReplicaConfirm(confirmAllMembers),
+			),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
+
+	// ChangeReplicaType(D → TB) + q↓: D → D∅ → TB + q↓ (even→odd)
+	changeReplicaType.Plan("d-to-tb-q-down/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
+		ToReplicaType(v1alpha1.ReplicaTypeTieBreaker).
+		DisplayName("Changing replica type").
+		Guards(leavingDGuards...).
+		Guards(guardVolumeAccessNotLocal, guardVotersEven, guardQMRNotTooHigh).
+		Steps(
+			mrStep("D → D∅",
+				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
+				confirmSubjectOnly,
+			),
+			mrStep("D∅ → TB + q↓",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeTieBreaker),
+					clearBackingVolume,
+					asReplicaApply(lowerQ),
+					asReplicaApply(updateBaselineLayout),
+				),
+				asReplicaConfirm(confirmAllMembers),
+			),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
 }

@@ -1977,3 +1977,574 @@ var _ = Describe("ChangeReplicaType(D→A) additional", func() {
 		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("d-to-a/v1"))
 	})
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ChangeReplicaType(TB → D)
+//
+
+var _ = Describe("ChangeReplicaType(TB→D) dispatch", func() {
+	It("even voters, no sD → tb-to-d/v1", func() {
+		// 2D + 1TB. Voters=2 (even).
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeTieBreaker, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeDiskful),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5), mkRVR("rv-1-2", "node-3", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("tb-to-d/v1"))
+	})
+
+	It("odd voters, no sD → tb-to-d-q-up/v1", func() {
+		// 1D + 1TB. Voters=1 (odd).
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeTieBreaker, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-1", v1alpha1.ReplicaTypeDiskful),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("tb-to-d-q-up/v1"))
+	})
+
+	It("even voters, sD → tb-to-d-via-sd/v1", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeTieBreaker, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeDiskful),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5), mkRVR("rv-1-2", "node-3", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{ShadowDiskful: true})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("tb-to-d-via-sd/v1"))
+	})
+
+	It("odd voters, sD → tb-to-d-via-sd-q-up/v1", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeTieBreaker, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-1", v1alpha1.ReplicaTypeDiskful),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{ShadowDiskful: true})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("tb-to-d-via-sd-q-up/v1"))
+	})
+})
+
+var _ = Describe("ChangeReplicaType(TB→D) plans", func() {
+	It("tb-to-d/v1: creates (2 steps), BV set", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeTieBreaker, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeDiskful),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5), mkRVR("rv-1-2", "node-3", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-2")
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeLiminalDiskful))
+		Expect(m.LVMVolumeGroupName).To(Equal("test-lvg"))
+
+		t := &rv.Status.DatameshTransitions[0]
+		Expect(t.PlanID).To(Equal("tb-to-d/v1"))
+		Expect(t.Steps).To(HaveLen(2))
+		Expect(t.Steps[0].Name).To(Equal("TB → D∅"))
+		Expect(t.Steps[1].Name).To(Equal("D∅ → D"))
+	})
+
+	It("tb-to-d-q-up/v1: creates (2 steps), q raised on confirm", func() {
+		t := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			ReplicaName: "rv-1-1", PlanID: "tb-to-d-q-up/v1",
+			FromReplicaType: v1alpha1.ReplicaTypeTieBreaker,
+			ToReplicaType:   v1alpha1.ReplicaTypeDiskful,
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "TB → D∅ + q↑", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())},
+				{Name: "D∅ → D", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending},
+			},
+		}
+		rv := mkRV(6,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeLiminalDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-1", v1alpha1.ReplicaTypeDiskful),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		rv.Status.Datamesh.Quorum = 2
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 6), mkRVR("rv-1-1", "node-2", 6),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeDiskful))
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2)))
+	})
+
+	It("tb-to-d-via-sd/v1: creates (3 steps)", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeTieBreaker, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeDiskful),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5), mkRVR("rv-1-2", "node-3", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{ShadowDiskful: true})
+		Expect(changed).To(BeTrue())
+
+		t := &rv.Status.DatameshTransitions[0]
+		Expect(t.PlanID).To(Equal("tb-to-d-via-sd/v1"))
+		Expect(t.Steps).To(HaveLen(3))
+		Expect(t.Steps[0].Name).To(Equal("TB → sD∅"))
+		Expect(t.Steps[1].Name).To(Equal("sD∅ → sD"))
+		Expect(t.Steps[2].Name).To(Equal("sD → D"))
+	})
+
+	It("tb-to-d-via-sd-q-up/v1: creates (5 steps)", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeTieBreaker, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-1", v1alpha1.ReplicaTypeDiskful),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{ShadowDiskful: true})
+		Expect(changed).To(BeTrue())
+
+		t := &rv.Status.DatameshTransitions[0]
+		Expect(t.PlanID).To(Equal("tb-to-d-via-sd-q-up/v1"))
+		Expect(t.Steps).To(HaveLen(5))
+		Expect(t.Steps[0].Name).To(Equal("TB → sD∅"))
+		Expect(t.Steps[1].Name).To(Equal("sD∅ → sD"))
+		Expect(t.Steps[2].Name).To(Equal("sD → sD∅"))
+		Expect(t.Steps[3].Name).To(Equal("sD∅ → D∅ + q↑"))
+		Expect(t.Steps[4].Name).To(Equal("D∅ → D"))
+	})
+
+	It("guard: leavingTBGuards block when TB required", func() {
+		// 2D + 1TB (even D, FTT=1 = D/2). TB required. Guard blocks.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeTieBreaker, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeDiskful),
+			},
+			nil,
+		)
+		rv.Status.Configuration.FailuresToTolerate = 1
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5), mkRVR("rv-1-2", "node-3", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("TB"))
+	})
+
+	It("tb-to-d/v1: baseline raised (OnComplete)", func() {
+		t := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			ReplicaName: "rv-1-2", PlanID: "tb-to-d/v1",
+			FromReplicaType: v1alpha1.ReplicaTypeTieBreaker,
+			ToReplicaType:   v1alpha1.ReplicaTypeDiskful,
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "TB → D∅", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())},
+				{Name: "D∅ → D", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending},
+			},
+		}
+		rv := mkRV(6,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeLiminalDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeDiskful),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		rv.Status.Configuration.FailuresToTolerate = 1
+		rv.Status.Datamesh.Quorum = 2
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 6), mkRVR("rv-1-1", "node-2", 6), mkRVR("rv-1-2", "node-3", 6),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.BaselineLayout.FailuresToTolerate).To(Equal(byte(1)))
+	})
+
+	It("tb-to-d/v1: completed → message", func() {
+		t := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			ReplicaName: "rv-1-2", PlanID: "tb-to-d/v1",
+			FromReplicaType: v1alpha1.ReplicaTypeTieBreaker,
+			ToReplicaType:   v1alpha1.ReplicaTypeDiskful,
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "TB → D∅", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted, DatameshRevision: 6},
+				{Name: "D∅ → D", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 7, StartedAt: ptr.To(metav1.Now())},
+			},
+		}
+		rv := mkRV(7,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeDiskful),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 6), mkRVR("rv-1-1", "node-2", 6), mkRVR("rv-1-2", "node-3", 7),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Replica type changed successfully"))
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ChangeReplicaType(D → TB)
+//
+
+var _ = Describe("ChangeReplicaType(D→TB) dispatch", func() {
+	It("odd voters → d-to-tb/v1", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeTieBreaker),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
+			mkRVRUpToDate("rv-1-2", "node-3", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("d-to-tb/v1"))
+	})
+
+	It("even voters → d-to-tb-q-down/v1", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-1", v1alpha1.ReplicaTypeTieBreaker),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("d-to-tb-q-down/v1"))
+	})
+})
+
+var _ = Describe("ChangeReplicaType(D→TB) plans", func() {
+	It("d-to-tb/v1: creates (2 steps), BV cleared", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeTieBreaker),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
+			mkRVRUpToDate("rv-1-2", "node-3", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-2")
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeLiminalDiskful))
+
+		t := &rv.Status.DatameshTransitions[0]
+		Expect(t.PlanID).To(Equal("d-to-tb/v1"))
+		Expect(t.Steps).To(HaveLen(2))
+		Expect(t.Steps[0].Name).To(Equal("D → D∅"))
+		Expect(t.Steps[1].Name).To(Equal("D∅ → TB"))
+	})
+
+	It("d-to-tb-q-down/v1: q lowered, BV cleared", func() {
+		t := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			ReplicaName: "rv-1-1", PlanID: "d-to-tb-q-down/v1",
+			FromReplicaType: v1alpha1.ReplicaTypeDiskful,
+			ToReplicaType:   v1alpha1.ReplicaTypeTieBreaker,
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "D → D∅", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())},
+				{Name: "D∅ → TB + q↓", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending},
+			},
+		}
+		rv := mkRV(6,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeLiminalDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-1", v1alpha1.ReplicaTypeTieBreaker),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		rv.Status.Datamesh.Quorum = 2
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 6),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeTieBreaker))
+		Expect(m.LVMVolumeGroupName).To(BeEmpty())
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)))
+	})
+
+	It("guard: VolumeAccessLocal blocks D→TB", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeTieBreaker),
+			},
+			nil,
+		)
+		rv.Status.Configuration.VolumeAccess = v1alpha1.VolumeAccessLocal
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
+			mkRVRUpToDate("rv-1-2", "node-3", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("Local"))
+	})
+
+	It("guard: leavingDGuards block D→TB (GMDR)", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-1", v1alpha1.ReplicaTypeTieBreaker),
+			},
+			nil,
+		)
+		rv.Status.Configuration.GuaranteedMinimumDataRedundancy = 1
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("GMDR"))
+	})
+
+	It("d-to-tb/v1: baseline lowered (apply)", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeTieBreaker),
+			},
+			nil,
+		)
+		rv.Status.Configuration.FailuresToTolerate = 1
+		rv.Status.BaselineLayout.FailuresToTolerate = 1
+		rv.Status.Datamesh.Quorum = 2
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
+			mkRVRUpToDate("rv-1-2", "node-3", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		// Step 1 (D→D∅) applied. Baseline stays FTT=1 (D∅ still voter).
+		Expect(rv.Status.BaselineLayout.FailuresToTolerate).To(Equal(byte(1)))
+	})
+
+	It("d-to-tb/v1: completed → message", func() {
+		t := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			ReplicaName: "rv-1-2", PlanID: "d-to-tb/v1",
+			FromReplicaType: v1alpha1.ReplicaTypeDiskful,
+			ToReplicaType:   v1alpha1.ReplicaTypeTieBreaker,
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "D → D∅", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted, DatameshRevision: 6},
+				{Name: "D∅ → TB", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 7, StartedAt: ptr.To(metav1.Now())},
+			},
+		}
+		rv := mkRV(7,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeTieBreaker, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeTieBreaker),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 7), mkRVR("rv-1-1", "node-2", 7), mkRVR("rv-1-2", "node-3", 7),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Replica type changed successfully"))
+	})
+
+	It("dispatch: LiminalDiskful → TieBreaker", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeLiminalDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeTieBreaker),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
+			mkRVRUpToDate("rv-1-2", "node-3", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("d-to-tb/v1"))
+	})
+})
+
+var _ = Describe("ChangeReplicaType(D→TB) additional", func() {
+	It("d-to-tb/v1: step 2 D∅→TB applied, BV cleared", func() {
+		t := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			ReplicaName: "rv-1-2", PlanID: "d-to-tb/v1",
+			FromReplicaType: v1alpha1.ReplicaTypeDiskful,
+			ToReplicaType:   v1alpha1.ReplicaTypeTieBreaker,
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "D → D∅", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())},
+				{Name: "D∅ → TB", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending},
+			},
+		}
+		rv := mkRV(6,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeLiminalDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeTieBreaker),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		// Subject confirmed (subjectOnly for step 1).
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5), mkRVR("rv-1-2", "node-3", 6),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-2")
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeTieBreaker))
+		Expect(m.LVMVolumeGroupName).To(BeEmpty())
+		Expect(m.LVMVolumeGroupThinPoolName).To(BeEmpty())
+	})
+})
