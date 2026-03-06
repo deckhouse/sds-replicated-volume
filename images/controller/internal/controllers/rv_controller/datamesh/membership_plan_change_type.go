@@ -314,4 +314,188 @@ func registerChangeTypePlans(
 		).
 		OnComplete(onChangeTypeComplete).
 		Build()
+
+	// ════════════════════════════════════════════════════════════════════════
+	// A ↔ D (voter promotion/demotion from/to Access)
+	// ════════════════════════════════════════════════════════════════════════
+
+	// ChangeReplicaType(A → D): A → D∅ → D (even→odd, no sD)
+	//
+	// A (star, non-voter) becomes D∅ (full-mesh, voter) with BV set,
+	// then disk attaches. Baseline raised on A→D∅ confirmation (voter added).
+	changeReplicaType.Plan("a-to-d/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeAccess).
+		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		DisplayName("Changing replica type").
+		Guards(guardVotersEven).
+		Steps(
+			mrStep("A → D∅",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
+					setBackingVolumeFromRequest,
+				),
+				asReplicaConfirm(confirmAllMembers),
+			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			mrStep("D∅ → D",
+				setType(v1alpha1.DatameshMemberTypeDiskful),
+				confirmSubjectOnly,
+			),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
+
+	// ChangeReplicaType(A → D) + q↑: A → D∅ + q↑ → D (odd→even, no sD)
+	changeReplicaType.Plan("a-to-d-q-up/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeAccess).
+		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		DisplayName("Changing replica type").
+		Guards(guardVotersOdd).
+		Steps(
+			mrStep("A → D∅ + q↑",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
+					setBackingVolumeFromRequest,
+					asReplicaApply(raiseQ),
+				),
+				asReplicaConfirm(confirmAllMembers),
+			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			mrStep("D∅ → D",
+				setType(v1alpha1.DatameshMemberTypeDiskful),
+				confirmSubjectOnly,
+			),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
+
+	// ChangeReplicaType(A → D) via sD: A → sD∅ → sD → D (even→odd, sD)
+	//
+	// sD pre-syncs data invisibly before voter promotion.
+	// No BV changes after A→sD∅ (BV set once, preserved throughout).
+	changeReplicaType.Plan("a-to-d-via-sd/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeAccess).
+		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		DisplayName("Changing replica type").
+		Guards(guardVotersEven, guardShadowDiskfulSupported).
+		Steps(
+			mrStep("A → sD∅",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+					setBackingVolumeFromRequest,
+				),
+				asReplicaConfirm(confirmAllMembers),
+			),
+			mrStep("sD∅ → sD",
+				setType(v1alpha1.DatameshMemberTypeShadowDiskful),
+				confirmSubjectOnly,
+			),
+			// sD → D: non-voter becomes voter. All peers update config.
+			mrStep("sD → D",
+				setType(v1alpha1.DatameshMemberTypeDiskful),
+				asReplicaConfirm(confirmAllMembers),
+			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
+
+	// ChangeReplicaType(A → D) via sD + q↑: A → sD∅ → sD → sD∅ → D∅ + q↑ → D (odd→even, sD)
+	//
+	// Same detach-before-promote as diskful-via-sd-q-up — see
+	// membership_plan_diskful.go for rationale (async apply safety).
+	// No BV changes after A→sD∅ — BV present throughout.
+	changeReplicaType.Plan("a-to-d-via-sd-q-up/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeAccess).
+		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		DisplayName("Changing replica type").
+		Guards(guardVotersOdd, guardShadowDiskfulSupported).
+		Steps(
+			mrStep("A → sD∅",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+					setBackingVolumeFromRequest,
+				),
+				asReplicaConfirm(confirmAllMembers),
+			),
+			mrStep("sD∅ → sD",
+				setType(v1alpha1.DatameshMemberTypeShadowDiskful),
+				confirmSubjectOnly,
+			),
+			mrStep("sD → sD∅",
+				setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+				confirmSubjectOnly,
+			),
+			mrStep("sD∅ → D∅ + q↑",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
+					asReplicaApply(raiseQ),
+				),
+				asReplicaConfirm(confirmAllMembers),
+			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			mrStep("D∅ → D",
+				setType(v1alpha1.DatameshMemberTypeDiskful),
+				confirmSubjectOnly,
+			),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
+
+	// ChangeReplicaType(D → A): D → D∅ → A (odd→even, no q change)
+	//
+	// Voter becomes non-voter (Access). BV cleared on D∅→A.
+	// Baseline updated in apply (lowering: voter removed).
+	// Guarded: VolumeAccess=Local blocks (A not allowed in Local mode).
+	changeReplicaType.Plan("d-to-a/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
+		ToReplicaType(v1alpha1.ReplicaTypeAccess).
+		DisplayName("Changing replica type").
+		Guards(leavingDGuards...).
+		Guards(guardVolumeAccessNotLocal, guardVotersOdd, guardQMRNotTooHigh).
+		Steps(
+			mrStep("D → D∅",
+				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
+				confirmSubjectOnly,
+			),
+			mrStep("D∅ → A",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeAccess),
+					clearBackingVolume,
+					asReplicaApply(updateBaselineLayout),
+				),
+				asReplicaConfirm(confirmAllMembers),
+			),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
+
+	// ChangeReplicaType(D → A) + q↓: D → D∅ → A + q↓ (even→odd)
+	//
+	// Same vestibule pattern as RemoveReplica(D)+q↓, but ends at A.
+	changeReplicaType.Plan("d-to-a-q-down/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
+		ToReplicaType(v1alpha1.ReplicaTypeAccess).
+		DisplayName("Changing replica type").
+		Guards(leavingDGuards...).
+		Guards(guardVolumeAccessNotLocal, guardVotersEven, guardQMRNotTooHigh).
+		Steps(
+			mrStep("D → D∅",
+				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
+				confirmSubjectOnly,
+			),
+			mrStep("D∅ → A + q↓",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeAccess),
+					clearBackingVolume,
+					asReplicaApply(lowerQ),
+					asReplicaApply(updateBaselineLayout),
+				),
+				asReplicaConfirm(confirmAllMembers),
+			),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
 }
