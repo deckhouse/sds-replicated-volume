@@ -62,9 +62,10 @@ func registerAttachmentPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]
 			guardNoActiveMembershipTransition,
 		).
 		Steps(
-			dmte.ReplicaStep("Attach", applyAttach, confirmSubjectOnly).
-				Details(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching).
-				DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			arStep("Attach",
+				applyAttach,
+				confirmSubjectOnly,
+			).Details(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching),
 		).
 		Build()
 
@@ -76,9 +77,10 @@ func registerAttachmentPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]
 			guardDeviceNotInUse,
 		).
 		Steps(
-			dmte.ReplicaStep("Detach", applyDetach, confirmSubjectOnlyLeavingOrGone).
-				Details(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching).
-				DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			arStep("Detach",
+				applyDetach,
+				confirmSubjectOnlyLeavingOrGone,
+			).Details(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching),
 		).
 		Build()
 
@@ -88,8 +90,10 @@ func registerAttachmentPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]
 		DisplayName("Enabling multiattach").
 		Guards(guardMaxAttachmentsAllowsMultiattach).
 		Steps(
-			dmte.GlobalStep("Enable multiattach", applyEnableMultiattach, confirmMultiattach).
-				DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			agStep("Enable multiattach",
+				applyEnableMultiattach,
+				confirmMultiattach,
+			),
 		).
 		Build()
 
@@ -99,10 +103,38 @@ func registerAttachmentPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]
 		DisplayName("Disabling multiattach").
 		Guards(guardCanDisableMultiattach).
 		Steps(
-			dmte.GlobalStep("Disable multiattach", applyDisableMultiattach, confirmMultiattach).
-				DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			agStep("Disable multiattach",
+				applyDisableMultiattach,
+				confirmMultiattach,
+			),
 		).
 		Build()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Step constructors
+//
+
+// arStep creates an attachment ReplicaStep with standard DiagnosticConditions.
+func arStep(
+	name string,
+	apply func(*globalContext, *ReplicaContext),
+	confirm func(*globalContext, *ReplicaContext, int64) dmte.ConfirmResult,
+) *dmte.ReplicaStepBuilder[*globalContext, *ReplicaContext] {
+	return dmte.ReplicaStep(name, apply, confirm).
+		DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
+}
+
+// agStep creates an attachment GlobalStep with standard DiagnosticConditions.
+//
+//nolint:unparam // name will vary with future plans
+func agStep(
+	name string,
+	apply func(*globalContext),
+	confirm func(*globalContext, int64) dmte.ConfirmResult,
+) *dmte.GlobalStepBuilder[*globalContext] {
+	return dmte.GlobalStep(name, apply, confirm).
+		DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

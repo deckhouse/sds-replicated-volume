@@ -54,6 +54,8 @@ var _ = Describe("AddReplica(sD)", func() {
 		newMember := rv.Status.Datamesh.FindMemberByName("rv-1-1")
 		Expect(newMember).NotTo(BeNil())
 		Expect(newMember.Type).To(Equal(v1alpha1.DatameshMemberTypeLiminalShadowDiskful))
+		Expect(newMember.LVMVolumeGroupName).To(Equal("test-lvg"))
+		Expect(newMember.LVMVolumeGroupThinPoolName).To(Equal("test-thin"))
 
 		// Transition has 2 steps, step 1 active.
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))

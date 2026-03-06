@@ -105,7 +105,7 @@ func confirmAllMembers(gctx *globalContext, stepRevision int64) dmte.ConfirmResu
 
 // confirmAllMembersLeaving checks confirmation for all-members leaving steps.
 // MustConfirm = all datamesh members ∪ {subject}. Leaving replica confirms by rev == 0.
-// The subject must be in MustConfirm because applyRemoveMember sets rctx.member = nil,
+// The subject must be in MustConfirm because removeMember sets rctx.member = nil,
 // so allMemberIDs does not include it. The engine normalizes Confirmed ∩ MustConfirm,
 // so the subject must be in both sets for completion to work.
 // Used by: D∅→✕, sD∅→✕, sD→✕.

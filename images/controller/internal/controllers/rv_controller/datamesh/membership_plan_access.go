@@ -52,8 +52,10 @@ func registerAccessPlans(
 		Guards(commonAddGuards...).
 		Guards(guardVolumeAccessNotLocal).
 		Steps(
-			dmte.ReplicaStep("✦ → A", applyCreateMember(v1alpha1.DatameshMemberTypeAccess), confirmFMPlusSubject).
-				DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType).
+			mrStep("✦ → A",
+				createMember(v1alpha1.DatameshMemberTypeAccess),
+				confirmFMPlusSubject,
+			).
 				DiagnosticSkipError(skipPendingDatameshJoin),
 		).
 		OnComplete(onJoinComplete).
@@ -66,8 +68,10 @@ func registerAccessPlans(
 		DisplayName("Leaving datamesh").
 		Guards(commonRemoveGuards...).
 		Steps(
-			dmte.ReplicaStep("A → ✕", applyRemoveMember, confirmFMPlusSubjectLeaving).
-				DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			mrStep("A → ✕",
+				removeMember,
+				confirmFMPlusSubjectLeaving,
+			),
 		).
 		OnComplete(onLeaveComplete).
 		Build()
