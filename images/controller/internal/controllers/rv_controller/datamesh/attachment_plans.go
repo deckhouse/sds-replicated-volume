@@ -44,6 +44,7 @@ import (
 func registerAttachmentPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
 	attach := reg.ReplicaTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, attachmentSlot)
 	detach := reg.ReplicaTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, attachmentSlot)
+	forceDetach := reg.ReplicaTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceDetach, attachmentSlot)
 	enableMultiattach := reg.GlobalTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach)
 	disableMultiattach := reg.GlobalTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach)
 
@@ -81,6 +82,24 @@ func registerAttachmentPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]
 				applyDetach,
 				confirmSubjectOnlyLeavingOrGone,
 			).Details(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching),
+		).
+		Build()
+
+	// ForceDetach: emergency detach for a dead member.
+	// Clears Attached flag so ForceLeave can proceed. CancelActiveOnCreate
+	// cancels in-flight Attach/Detach for the dead member. No confirmation
+	// needed — the node is dead, there's no one to wait for. Completes
+	// immediately after apply.
+	forceDetach.Plan("force-detach/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupEmergency).
+		DisplayName("Force-detaching volume").
+		CancelActiveOnCreate(true).
+		Guards(guardMemberUnreachable).
+		Steps(
+			arStep("Force detach",
+				applyDetach,
+				confirmImmediate,
+			),
 		).
 		Build()
 

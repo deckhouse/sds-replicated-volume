@@ -122,16 +122,10 @@ func confirmAllMembersLeaving(gctx *globalContext, rctx *ReplicaContext, stepRev
 	return dmte.ConfirmResult{MustConfirm: mustConfirm, Confirmed: confirmed}
 }
 
-// confirmAllMembersExcluding checks confirmation for all members minus a dead member.
-// MustConfirm = all datamesh members except the excluded ID (dead member cannot confirm).
-// Used by: ForceRemoveReplica.
-func confirmAllMembersExcluding(excludedID uint8) func(*globalContext, int64) dmte.ConfirmResult {
-	return func(gctx *globalContext, stepRevision int64) dmte.ConfirmResult {
-		mustConfirm := allMemberIDs(gctx)
-		mustConfirm.Remove(excludedID)
-		confirmed := confirmedReplicas(gctx, stepRevision).Intersect(mustConfirm)
-		return dmte.ConfirmResult{MustConfirm: mustConfirm, Confirmed: confirmed}
-	}
+// confirmImmediate returns an immediately-confirmed result (empty MustConfirm == empty Confirmed).
+// Used by: ForceDetach — the node is dead, no one to wait for.
+func confirmImmediate(_ *globalContext, _ *ReplicaContext, _ int64) dmte.ConfirmResult {
+	return dmte.ConfirmResult{}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

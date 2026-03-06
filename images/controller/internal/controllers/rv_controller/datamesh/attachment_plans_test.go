@@ -971,3 +971,164 @@ var _ = Describe("Attachment combined", func() {
 		Expect(rv.Status.DatameshTransitions[0].Steps[0].Message).To(ContainSubstring("ConfigurationFailed"))
 	})
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ForceDetach
+//
+
+var _ = Describe("ForceDetach", func() {
+	It("dispatch + apply: member detached", func() {
+		member := mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2")
+		member.Attached = true
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				member,
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkForceDetachRequest("rv-1-1")},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 0),
+		}
+
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeTrue())
+		// Member detached by apply.
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
+		Expect(m).NotTo(BeNil())
+		Expect(m.Attached).To(BeFalse())
+		// ForceDetach transition created (completes on next reconcile via confirmImmediate).
+		var forceDetachFound bool
+		for _, t := range rv.Status.DatameshTransitions {
+			if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceDetach {
+				forceDetachFound = true
+			}
+		}
+		Expect(forceDetachFound).To(BeTrue())
+	})
+
+	It("settles immediately on next reconcile", func() {
+		member := mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2")
+		member.Attached = true
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				member,
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkForceDetachRequest("rv-1-1")},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 0),
+		}
+
+		// First call: dispatch + apply.
+		ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+
+		// Second call: settle completes (confirmImmediate).
+		changed2, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed2).To(BeTrue())
+		for _, t := range rv.Status.DatameshTransitions {
+			Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceDetach))
+		}
+	})
+
+	It("guard: MemberUnreachable blocks", func() {
+		member := mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2")
+		member.Attached = true
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				member,
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkForceDetachRequest("rv-1-1")},
+			nil,
+		)
+		rvr0 := mkRVR("rv-1-0", "node-1", 5)
+		rvr0.Status.Conditions = []metav1.Condition{
+			{Type: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+				Status: metav1.ConditionTrue,
+				Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured},
+		}
+		rvr0.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+			{Name: "rv-1-1", ConnectionState: v1alpha1.ConnectionStateConnected},
+		}
+		// RVA for rv-1-1 to prevent normal Detach from firing.
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-2")}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr0, mkRVR("rv-1-1", "node-2", 5)}
+
+		ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, rvas, FeatureFlags{})
+
+		// No ForceDetach transition (guard blocked).
+		for _, t := range rv.Status.DatameshTransitions {
+			Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceDetach))
+		}
+		// Member still attached (normal Attach keeps it, no Detach triggered).
+		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-1").Attached).To(BeTrue())
+	})
+
+	It("CancelActiveOnCreate: in-flight Attach cancelled", func() {
+		member := mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2")
+		member.Attached = true
+		attachT := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment,
+			ReplicaName: "rv-1-1", PlanID: "attach/v1",
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "Attach", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 5, StartedAt: ptr.To(metav1.Now())},
+			},
+		}
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				member,
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkForceDetachRequest("rv-1-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{attachT},
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 0),
+		}
+
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeTrue())
+		// Attach cancelled, ForceDetach dispatched.
+		for _, t := range rv.Status.DatameshTransitions {
+			Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach))
+		}
+		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-1").Attached).To(BeFalse())
+	})
+
+	It("ForceDetach → ForceLeave sequence", func() {
+		member := mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2")
+		member.Attached = false // Already detached in previous cycle.
+		rv := mkRV(7,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+				member,
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkForceLeaveRequest("rv-1-1")},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 7), mkRVR("rv-1-2", "node-3", 7),
+		}
+
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeTrue())
+		var forceRemoveFound bool
+		for _, t := range rv.Status.DatameshTransitions {
+			if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica {
+				forceRemoveFound = true
+			}
+		}
+		Expect(forceRemoveFound).To(BeTrue())
+		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-1")).To(BeNil())
+	})
+})
