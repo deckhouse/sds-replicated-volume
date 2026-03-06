@@ -233,6 +233,17 @@ func mkChangeRoleRequest(name string, targetType v1alpha1.ReplicaType) v1alpha1.
 	}
 }
 
+// mkForceLeaveRequest creates a ForceLeave request.
+func mkForceLeaveRequest(name string) v1alpha1.ReplicatedVolumeDatameshReplicaRequest {
+	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+		Name: name,
+		Request: v1alpha1.DatameshMembershipRequest{
+			Operation: v1alpha1.DatameshMembershipRequestOperationForceLeave,
+		},
+		FirstObservedAt: metav1.Now(),
+	}
+}
+
 // mkLeaveRequest creates a Leave request.
 func mkLeaveRequest(name string) v1alpha1.ReplicatedVolumeDatameshReplicaRequest { //nolint:unparam
 	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{

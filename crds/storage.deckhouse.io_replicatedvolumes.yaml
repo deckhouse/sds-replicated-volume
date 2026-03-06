@@ -553,6 +553,7 @@ spec:
                           enum:
                           - Join
                           - Leave
+                          - ForceLeave
                           - ChangeRole
                           - ChangeBackingVolume
                           type: string

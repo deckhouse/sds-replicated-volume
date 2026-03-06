@@ -65,6 +65,11 @@ func onLeaveComplete(_ *globalContext, rctx *ReplicaContext) {
 	rctx.membershipMessage = "Left datamesh successfully"
 }
 
+// onForceRemoveComplete sets the completion message after a ForceRemoveReplica plan finishes.
+func onForceRemoveComplete(_ *globalContext, rctx *ReplicaContext) {
+	rctx.membershipMessage = "Force-removed from datamesh"
+}
+
 // onChangeTypeComplete sets the completion message after a ChangeReplicaType plan finishes.
 func onChangeTypeComplete(_ *globalContext, rctx *ReplicaContext) {
 	rctx.membershipMessage = "Replica type changed successfully"

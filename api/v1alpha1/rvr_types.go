@@ -476,7 +476,7 @@ type ReplicatedVolumeReplicaStatusDRBDRReconciliationCache struct {
 type DatameshMembershipRequest struct {
 	// Operation is the type of membership change requested.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=Join;Leave;ChangeRole;ChangeBackingVolume
+	// +kubebuilder:validation:Enum=Join;Leave;ForceLeave;ChangeRole;ChangeBackingVolume
 	Operation DatameshMembershipRequestOperation `json:"operation"`
 
 	// Type is the intended replica type. Required for Join and ChangeRole operations.
@@ -504,6 +504,15 @@ const (
 
 	// DatameshMembershipRequestOperationLeave requests leaving the datamesh.
 	DatameshMembershipRequestOperationLeave DatameshMembershipRequestOperation = "Leave"
+
+	// DatameshMembershipRequestOperationForceLeave requests emergency removal from the
+	// datamesh. Used when the member's node has permanently failed. Removes the member
+	// directly without intermediate steps and without waiting for the dead replica to
+	// confirm. Bypasses normal safety preconditions (FTT/GMDR preservation, etc.) — the
+	// node is already lost; the operation restores configuration to match reality.
+	// Blocked only if the member is still attached (ForceDetach first) or reachable
+	// (use normal Leave instead).
+	DatameshMembershipRequestOperationForceLeave DatameshMembershipRequestOperation = "ForceLeave"
 
 	// DatameshMembershipRequestOperationChangeRole requests changing the member role
 	// (e.g., Diskful to Access, Access to TieBreaker).

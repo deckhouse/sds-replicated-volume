@@ -43,25 +43,38 @@ func membershipDispatcher() dmte.DispatchFunc[provider] {
 
 			for i := range gctx.allReplicas {
 				rctx := &gctx.allReplicas[i]
-				req := rctx.membershipRequest
-				if req == nil || rctx.name == "" {
+				if rctx.name == "" {
 					continue
 				}
 
-				// Map operation to transition type + plan selection function.
+				// Determine transition type + plan selection function.
 				var tt dmte.TransitionType
 				var planFn func(*globalContext, *ReplicaContext) (dmte.PlanID, string)
-				switch req.Request.Operation {
-				case v1alpha1.DatameshMembershipRequestOperationJoin:
-					tt = v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica
-					planFn = planAddReplica
-				case v1alpha1.DatameshMembershipRequestOperationLeave:
-					tt = v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica
-					planFn = planRemoveReplica
-				case v1alpha1.DatameshMembershipRequestOperationChangeRole:
-					tt = v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType
-					planFn = planChangeReplicaType
-				default:
+
+				if req := rctx.membershipRequest; req != nil {
+					// Explicit request from DatameshReplicaRequests.
+					switch req.Request.Operation {
+					case v1alpha1.DatameshMembershipRequestOperationJoin:
+						tt = v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica
+						planFn = planAddReplica
+					case v1alpha1.DatameshMembershipRequestOperationLeave:
+						tt = v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica
+						planFn = planRemoveReplica
+					case v1alpha1.DatameshMembershipRequestOperationChangeRole:
+						tt = v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType
+						planFn = planChangeReplicaType
+					case v1alpha1.DatameshMembershipRequestOperationForceLeave:
+						tt = v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica
+						planFn = planForceRemoveReplica
+					default:
+						continue
+					}
+				} else if rctx.member != nil && rctx.rvr == nil {
+					// Orphan member: member exists but RVR is gone (node permanently lost).
+					// Auto-dispatch ForceRemoveReplica to restore configuration.
+					tt = v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica
+					planFn = planForceRemoveReplica
+				} else {
 					continue
 				}
 
@@ -89,6 +102,32 @@ func membershipDispatcher() dmte.DispatchFunc[provider] {
 //
 // Each function selects the appropriate PlanID for a given transition type.
 // Returns (planID, "") on selection, ("", blockedMsg) if blocked, ("", "") to skip.
+
+// planForceRemoveReplica selects the ForceRemoveReplica plan based on member type
+// and voter parity. Not a member → skip.
+func planForceRemoveReplica(gctx *globalContext, rctx *ReplicaContext) (dmte.PlanID, string) {
+	if rctx.member == nil {
+		return "", ""
+	}
+	switch rctx.member.Type {
+	case v1alpha1.DatameshMemberTypeAccess:
+		return "access/v1", ""
+	case v1alpha1.DatameshMemberTypeTieBreaker:
+		return "tiebreaker/v1", ""
+	case v1alpha1.DatameshMemberTypeShadowDiskful,
+		v1alpha1.DatameshMemberTypeLiminalShadowDiskful:
+		return "shadow-diskful/v1", ""
+	case v1alpha1.DatameshMemberTypeDiskful,
+		v1alpha1.DatameshMemberTypeLiminalDiskful:
+		voters := voterCount(gctx)
+		if voters%2 != 0 {
+			return "diskful/v1", "" // odd→even, no q↓
+		}
+		return "diskful-q-down/v1", "" // even→odd, q↓
+	default:
+		return "", "Not implemented"
+	}
+}
 
 // planAddReplica selects the plan for a Join request.
 // Already a member → skip (transient: request not yet cleaned up after transition).
