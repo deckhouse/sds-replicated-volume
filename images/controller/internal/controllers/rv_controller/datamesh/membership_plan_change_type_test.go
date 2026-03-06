@@ -338,10 +338,12 @@ var _ = Describe("ChangeReplicaType(A→sD)", func() {
 
 		Expect(changed).To(BeTrue())
 
-		// Step 1 applied: type changed to LiminalShadowDiskful.
+		// Step 1 applied: type changed to LiminalShadowDiskful with BV fields.
 		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
 		Expect(m).NotTo(BeNil())
 		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeLiminalShadowDiskful))
+		Expect(m.LVMVolumeGroupName).To(Equal("test-lvg"))
+		Expect(m.LVMVolumeGroupThinPoolName).To(Equal("test-thin"))
 
 		// Transition: 2 steps, correct metadata.
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
@@ -487,10 +489,12 @@ var _ = Describe("ChangeReplicaType(sD→A)", func() {
 
 		Expect(changed).To(BeTrue())
 
-		// Step 1 applied: type changed to LiminalShadowDiskful (disk detach).
+		// Step 1 applied: type changed to LiminalShadowDiskful (disk detach), BV preserved.
 		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
 		Expect(m).NotTo(BeNil())
 		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeLiminalShadowDiskful))
+		Expect(m.LVMVolumeGroupName).To(Equal("test-lvg"))
+		Expect(m.LVMVolumeGroupThinPoolName).To(Equal("test-thin"))
 
 		// Transition metadata.
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
@@ -561,10 +565,12 @@ var _ = Describe("ChangeReplicaType(sD→A)", func() {
 
 		Expect(changed).To(BeTrue())
 
-		// Type changed to Access (step 2 applied).
+		// Type changed to Access (step 2 applied), BV fields cleared.
 		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
 		Expect(m).NotTo(BeNil())
 		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeAccess))
+		Expect(m.LVMVolumeGroupName).To(BeEmpty())
+		Expect(m.LVMVolumeGroupThinPoolName).To(BeEmpty())
 
 		// Step 1 completed, step 2 active.
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
@@ -666,10 +672,12 @@ var _ = Describe("ChangeReplicaType(TB→sD)", func() {
 
 		Expect(changed).To(BeTrue())
 
-		// Step 1 applied: type = LiminalShadowDiskful.
+		// Step 1 applied: type = LiminalShadowDiskful with BV fields.
 		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
 		Expect(m).NotTo(BeNil())
 		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeLiminalShadowDiskful))
+		Expect(m.LVMVolumeGroupName).To(Equal("test-lvg"))
+		Expect(m.LVMVolumeGroupThinPoolName).To(Equal("test-thin"))
 
 		// Transition metadata.
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
@@ -798,10 +806,12 @@ var _ = Describe("ChangeReplicaType(sD→TB)", func() {
 
 		Expect(changed).To(BeTrue())
 
-		// Step 1 applied: type = LiminalShadowDiskful (disk detach).
+		// Step 1 applied: type = LiminalShadowDiskful (disk detach), BV fields preserved.
 		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
 		Expect(m).NotTo(BeNil())
 		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeLiminalShadowDiskful))
+		Expect(m.LVMVolumeGroupName).To(Equal("test-lvg"))
+		Expect(m.LVMVolumeGroupThinPoolName).To(Equal("test-thin"))
 
 		// Transition metadata.
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
@@ -837,6 +847,52 @@ var _ = Describe("ChangeReplicaType(sD→TB)", func() {
 		Expect(changed).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("volumeAccess is Local"))
+	})
+
+	It("step 1 confirmed → step 2 applied, BV fields cleared", func() {
+		t := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+			ReplicaName: "rv-1-1", PlanID: "sd-to-tb/v1",
+			FromReplicaType: v1alpha1.ReplicaTypeShadowDiskful,
+			ToReplicaType:   v1alpha1.ReplicaTypeTieBreaker,
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "sD → sD∅", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())},
+				{Name: "sD∅ → TB", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending},
+			},
+		}
+		rv := mkRV(6,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeLiminalShadowDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-1", v1alpha1.ReplicaTypeTieBreaker),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		// Subject confirmed rev 6 (step 1 = subjectOnly).
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5),
+			mkRVR("rv-1-1", "node-2", 6),
+		}
+
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeTrue())
+
+		// Type changed to TB (step 2 applied), BV fields cleared.
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
+		Expect(m).NotTo(BeNil())
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeTieBreaker))
+		Expect(m.LVMVolumeGroupName).To(BeEmpty())
+		Expect(m.LVMVolumeGroupThinPoolName).To(BeEmpty())
+
+		// Step 1 completed, step 2 active.
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].Steps[0].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted))
+		Expect(rv.Status.DatameshTransitions[0].Steps[1].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive))
 	})
 
 	It("completes full lifecycle", func() {

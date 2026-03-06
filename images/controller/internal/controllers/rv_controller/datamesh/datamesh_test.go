@@ -104,10 +104,11 @@ func mkRV(
 	requests []v1alpha1.ReplicatedVolumeDatameshReplicaRequest,
 	transitions []v1alpha1.ReplicatedVolumeDatameshTransition,
 ) *v1alpha1.ReplicatedVolume {
+	cfg := *minimalConfig // copy so tests can safely mutate rv.Status.Configuration
 	return &v1alpha1.ReplicatedVolume{
 		Spec: v1alpha1.ReplicatedVolumeSpec{MaxAttachments: 1},
 		Status: v1alpha1.ReplicatedVolumeStatus{
-			Configuration:           minimalConfig,
+			Configuration:           &cfg,
 			DatameshRevision:        revision,
 			Datamesh:                v1alpha1.ReplicatedVolumeDatamesh{Members: members},
 			DatameshReplicaRequests: requests,
@@ -118,11 +119,18 @@ func mkRV(
 
 // mkMember creates a DatameshMember with name, type, and nodeName.
 func mkMember(name string, memberType v1alpha1.DatameshMemberType, nodeName string) v1alpha1.DatameshMember {
-	return v1alpha1.DatameshMember{
+	m := v1alpha1.DatameshMember{
 		Name:     name,
 		Type:     memberType,
 		NodeName: nodeName,
 	}
+	if memberType.HasBackingVolume() ||
+		memberType == v1alpha1.DatameshMemberTypeLiminalDiskful ||
+		memberType == v1alpha1.DatameshMemberTypeLiminalShadowDiskful {
+		m.LVMVolumeGroupName = "test-lvg"
+		m.LVMVolumeGroupThinPoolName = "test-thin"
+	}
+	return m
 }
 
 // mkRVR creates a ReplicatedVolumeReplica with a default address.
@@ -169,25 +177,44 @@ func mkJoinRequestTB(name string) v1alpha1.ReplicatedVolumeDatameshReplicaReques
 	}
 }
 
-// mkJoinRequestSD creates a Join request for ShadowDiskful type.
+// mkJoinRequestSD creates a Join request for ShadowDiskful type with BV fields.
 func mkJoinRequestSD(name string) v1alpha1.ReplicatedVolumeDatameshReplicaRequest { //nolint:unparam
 	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 		Name: name,
 		Request: v1alpha1.DatameshMembershipRequest{
-			Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
-			Type:      v1alpha1.ReplicaTypeShadowDiskful,
+			Operation:          v1alpha1.DatameshMembershipRequestOperationJoin,
+			Type:               v1alpha1.ReplicaTypeShadowDiskful,
+			LVMVolumeGroupName: "test-lvg",
+			ThinPoolName:       "test-thin",
+		},
+		FirstObservedAt: metav1.Now(),
+	}
+}
+
+// mkJoinRequestD creates a Join request for Diskful type with BV fields.
+func mkJoinRequestD(name string) v1alpha1.ReplicatedVolumeDatameshReplicaRequest { //nolint:unparam
+	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+		Name: name,
+		Request: v1alpha1.DatameshMembershipRequest{
+			Operation:          v1alpha1.DatameshMembershipRequestOperationJoin,
+			Type:               v1alpha1.ReplicaTypeDiskful,
+			LVMVolumeGroupName: "test-lvg",
+			ThinPoolName:       "test-thin",
 		},
 		FirstObservedAt: metav1.Now(),
 	}
 }
 
 // mkChangeRoleRequest creates a ChangeRole request with the given target type.
+// LVG/ThinPool are always set; they are ignored for non-BV transitions.
 func mkChangeRoleRequest(name string, targetType v1alpha1.ReplicaType) v1alpha1.ReplicatedVolumeDatameshReplicaRequest {
 	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 		Name: name,
 		Request: v1alpha1.DatameshMembershipRequest{
-			Operation: v1alpha1.DatameshMembershipRequestOperationChangeRole,
-			Type:      targetType,
+			Operation:          v1alpha1.DatameshMembershipRequestOperationChangeRole,
+			Type:               targetType,
+			LVMVolumeGroupName: "test-lvg",
+			ThinPoolName:       "test-thin",
 		},
 		FirstObservedAt: metav1.Now(),
 	}

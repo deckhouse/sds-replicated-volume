@@ -35,10 +35,10 @@ func registerChangeTypePlans(
 		ToReplicaType(v1alpha1.ReplicaTypeTieBreaker).
 		DisplayName("Changing replica type").
 		Steps(
-			dmte.ReplicaStep("A → TB",
-				applySetType(v1alpha1.DatameshMemberTypeTieBreaker),
+			mrStep("A → TB",
+				setType(v1alpha1.DatameshMemberTypeTieBreaker),
 				confirmFMPlusSubject,
-			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			),
 		).
 		OnComplete(onChangeTypeComplete).
 		Build()
@@ -54,10 +54,10 @@ func registerChangeTypePlans(
 		Guards(guardVolumeAccessNotLocal).
 		Guards(leavingTBGuards...).
 		Steps(
-			dmte.ReplicaStep("TB → A",
-				applySetType(v1alpha1.DatameshMemberTypeAccess),
+			mrStep("TB → A",
+				setType(v1alpha1.DatameshMemberTypeAccess),
 				confirmFMPlusSubject,
-			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			),
 		).
 		OnComplete(onChangeTypeComplete).
 		Build()
@@ -78,14 +78,17 @@ func registerChangeTypePlans(
 		DisplayName("Changing replica type").
 		Guards(guardShadowDiskfulSupported).
 		Steps(
-			dmte.ReplicaStep("A → sD∅",
-				applySetType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+			mrStep("A → sD∅",
+				composeApply(
+					setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+					setBackingVolumeFromRequest,
+				),
 				asReplicaConfirm(confirmAllMembers),
-			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
-			dmte.ReplicaStep("sD∅ → sD",
-				applySetType(v1alpha1.DatameshMemberTypeShadowDiskful),
+			),
+			mrStep("sD∅ → sD",
+				setType(v1alpha1.DatameshMemberTypeShadowDiskful),
 				confirmSubjectOnly,
-			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			),
 		).
 		OnComplete(onChangeTypeComplete).
 		Build()
@@ -110,14 +113,17 @@ func registerChangeTypePlans(
 		DisplayName("Changing replica type").
 		Guards(guardVolumeAccessNotLocal).
 		Steps(
-			dmte.ReplicaStep("sD → sD∅",
-				applySetType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+			mrStep("sD → sD∅",
+				setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 				confirmSubjectOnly,
-			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
-			dmte.ReplicaStep("sD∅ → A",
-				applySetType(v1alpha1.DatameshMemberTypeAccess),
+			),
+			mrStep("sD∅ → A",
+				composeApply(
+					setType(v1alpha1.DatameshMemberTypeAccess),
+					clearBackingVolume,
+				),
 				asReplicaConfirm(confirmAllMembers),
-			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			),
 		).
 		OnComplete(onChangeTypeComplete).
 		Build()
@@ -137,14 +143,17 @@ func registerChangeTypePlans(
 		Guards(guardShadowDiskfulSupported).
 		Guards(leavingTBGuards...).
 		Steps(
-			dmte.ReplicaStep("TB → sD∅",
-				applySetType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+			mrStep("TB → sD∅",
+				composeApply(
+					setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+					setBackingVolumeFromRequest,
+				),
 				asReplicaConfirm(confirmAllMembers),
-			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
-			dmte.ReplicaStep("sD∅ → sD",
-				applySetType(v1alpha1.DatameshMemberTypeShadowDiskful),
+			),
+			mrStep("sD∅ → sD",
+				setType(v1alpha1.DatameshMemberTypeShadowDiskful),
 				confirmSubjectOnly,
-			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			),
 		).
 		OnComplete(onChangeTypeComplete).
 		Build()
@@ -164,14 +173,17 @@ func registerChangeTypePlans(
 		DisplayName("Changing replica type").
 		Guards(guardVolumeAccessNotLocal).
 		Steps(
-			dmte.ReplicaStep("sD → sD∅",
-				applySetType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+			mrStep("sD → sD∅",
+				setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 				confirmSubjectOnly,
-			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
-			dmte.ReplicaStep("sD∅ → TB",
-				applySetType(v1alpha1.DatameshMemberTypeTieBreaker),
+			),
+			mrStep("sD∅ → TB",
+				composeApply(
+					setType(v1alpha1.DatameshMemberTypeTieBreaker),
+					clearBackingVolume,
+				),
 				asReplicaConfirm(confirmAllMembers),
-			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			),
 		).
 		OnComplete(onChangeTypeComplete).
 		Build()

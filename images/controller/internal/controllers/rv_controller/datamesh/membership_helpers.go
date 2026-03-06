@@ -19,7 +19,37 @@ package datamesh
 import (
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
 )
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Step constructors
+//
+// mrStep / mgStep create ReplicaStep / GlobalStep with the standard membership
+// DiagnosticConditions pre-applied. Callers may chain additional builder
+// methods (e.g. DiagnosticSkipError) on the returned builder.
+
+// mrStep creates a membership ReplicaStep with standard DiagnosticConditions.
+func mrStep(
+	name string,
+	apply func(*globalContext, *ReplicaContext),
+	confirm func(*globalContext, *ReplicaContext, int64) dmte.ConfirmResult,
+) *dmte.ReplicaStepBuilder[*globalContext, *ReplicaContext] {
+	return dmte.ReplicaStep(name, apply, confirm).
+		DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
+}
+
+// mgStep creates a membership GlobalStep with standard DiagnosticConditions.
+//
+//nolint:unparam // name is currently always "qmr↑" but will vary with future plans
+func mgStep(
+	name string,
+	apply func(*globalContext),
+	confirm func(*globalContext, int64) dmte.ConfirmResult,
+) *dmte.GlobalStepBuilder[*globalContext] {
+	return dmte.GlobalStep(name, apply, confirm).
+		DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // OnComplete callbacks
@@ -33,6 +63,13 @@ func onJoinComplete(_ *globalContext, rctx *ReplicaContext) {
 // onLeaveComplete sets the completion message after a RemoveReplica plan finishes.
 func onLeaveComplete(_ *globalContext, rctx *ReplicaContext) {
 	rctx.membershipMessage = "Left datamesh successfully"
+}
+
+// onJoinCompleteWithBaselineLayoutUpdate sets the completion message and updates the
+// baseline layout after an AddReplica plan with qmr↑ finishes.
+func onJoinCompleteWithBaselineLayoutUpdate(gctx *globalContext, rctx *ReplicaContext) {
+	updateBaselineLayout(gctx)
+	onJoinComplete(gctx, rctx)
 }
 
 // onChangeTypeComplete sets the completion message after a ChangeReplicaType plan finishes.

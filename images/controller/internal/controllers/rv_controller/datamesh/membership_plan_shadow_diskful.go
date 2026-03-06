@@ -42,14 +42,17 @@ func registerShadowDiskfulPlans(
 		Guards(commonAddGuards...).
 		Guards(guardShadowDiskfulSupported).
 		Steps(
-			dmte.ReplicaStep("✦ → sD∅",
-				applyCreateMember(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+			mrStep("✦ → sD∅",
+				composeApply(
+					createMember(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+					setBackingVolumeFromRequest,
+				),
 				asReplicaConfirm(confirmAllMembers),
-			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
-			dmte.ReplicaStep("sD∅ → sD",
-				applySetType(v1alpha1.DatameshMemberTypeShadowDiskful),
+			),
+			mrStep("sD∅ → sD",
+				setType(v1alpha1.DatameshMemberTypeShadowDiskful),
 				confirmSubjectOnly,
-			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			),
 		).
 		OnComplete(onJoinComplete).
 		Build()
@@ -67,10 +70,10 @@ func registerShadowDiskfulPlans(
 		DisplayName("Leaving datamesh").
 		Guards(commonRemoveGuards...).
 		Steps(
-			dmte.ReplicaStep("sD → ✕",
-				applyRemoveMember,
+			mrStep("sD → ✕",
+				removeMember,
 				confirmAllMembersLeaving,
-			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			),
 		).
 		OnComplete(onLeaveComplete).
 		Build()

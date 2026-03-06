@@ -92,7 +92,7 @@ func membershipDispatcher() dmte.DispatchFunc[provider] {
 
 // planAddReplica selects the plan for a Join request.
 // Already a member → skip (transient: request not yet cleaned up after transition).
-func planAddReplica(_ *globalContext, rctx *ReplicaContext) (dmte.PlanID, string) {
+func planAddReplica(gctx *globalContext, rctx *ReplicaContext) (dmte.PlanID, string) {
 	if rctx.member != nil {
 		return "", ""
 	}
@@ -103,6 +103,38 @@ func planAddReplica(_ *globalContext, rctx *ReplicaContext) (dmte.PlanID, string
 		return "tiebreaker/v1", ""
 	case v1alpha1.ReplicaTypeShadowDiskful:
 		return "shadow-diskful/v1", ""
+	case v1alpha1.ReplicaTypeDiskful:
+		return planAddDiskful(gctx, rctx)
+	default:
+		return "", "Not implemented"
+	}
+}
+
+// planAddDiskful selects the AddReplica(D) plan variant based on voter parity,
+// sD feature availability, and whether qmr needs to be raised.
+func planAddDiskful(gctx *globalContext, _ *ReplicaContext) (dmte.PlanID, string) {
+	voters := voterCount(gctx)
+	needsQUp := voters%2 != 0 // odd voters → adding makes even → q↑ needed
+	needsQMRUp := gctx.baselineLayout.GuaranteedMinimumDataRedundancy < gctx.configuration.GuaranteedMinimumDataRedundancy
+	viaSd := gctx.features.ShadowDiskful
+
+	switch {
+	case !viaSd && !needsQUp && !needsQMRUp:
+		return "diskful/v1", ""
+	case !viaSd && !needsQUp && needsQMRUp:
+		return "diskful-qmr-up/v1", ""
+	case !viaSd && needsQUp && !needsQMRUp:
+		return "diskful-q-up/v1", ""
+	case !viaSd && needsQUp && needsQMRUp:
+		return "diskful-q-up-qmr-up/v1", ""
+	case viaSd && !needsQUp && !needsQMRUp:
+		return "diskful-via-sd/v1", ""
+	case viaSd && !needsQUp && needsQMRUp:
+		return "diskful-via-sd-qmr-up/v1", ""
+	case viaSd && needsQUp && !needsQMRUp:
+		return "diskful-via-sd-q-up/v1", ""
+	case viaSd && needsQUp && needsQMRUp:
+		return "diskful-via-sd-q-up-qmr-up/v1", ""
 	default:
 		return "", "Not implemented"
 	}

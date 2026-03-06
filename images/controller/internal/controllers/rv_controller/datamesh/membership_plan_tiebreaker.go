@@ -33,8 +33,10 @@ func registerTieBreakerPlans(
 		DisplayName("Joining datamesh").
 		Guards(commonAddGuards...).
 		Steps(
-			dmte.ReplicaStep("✦ → TB", applyCreateMember(v1alpha1.DatameshMemberTypeTieBreaker), confirmFMPlusSubject).
-				DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			mrStep("✦ → TB",
+				createMember(v1alpha1.DatameshMemberTypeTieBreaker),
+				confirmFMPlusSubject,
+			),
 		).
 		OnComplete(onJoinComplete).
 		Build()
@@ -47,8 +49,10 @@ func registerTieBreakerPlans(
 		Guards(commonRemoveGuards...).
 		Guards(leavingTBGuards...).
 		Steps(
-			dmte.ReplicaStep("TB → ✕", applyRemoveMember, confirmFMPlusSubjectLeaving).
-				DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			mrStep("TB → ✕",
+				removeMember,
+				confirmFMPlusSubjectLeaving,
+			),
 		).
 		OnComplete(onLeaveComplete).
 		Build()
