@@ -1,0 +1,24 @@
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
+{{- if not (contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration)) }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: control-plane-migrator
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "control-plane-migrator")) | nindent 2 }}
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 1
+  template:
+    metadata:
+      {{- include "helm_lib_module_labels" (list . (dict "app" "control-plane-migrator")) | nindent 6 }}
+    spec:
+      serviceAccountName: control-plane-migrator
+      restartPolicy: OnFailure
+      containers:
+      - name: migrator
+        image: alpine:latest
+        command: ["sleep", "infinity"]
+{{- end }}
+{{- end }}
