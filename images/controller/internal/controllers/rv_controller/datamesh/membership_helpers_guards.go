@@ -35,6 +35,11 @@ import (
 
 // commonAddGuards are guards shared by all AddReplica plans.
 // Typed as []any to be directly spreadable into PlanBuilder.Guards(...any).
+//
+// AddReplica(D) plans MUST also add defense-in-depth guards explicitly:
+//   - Voter parity: guardVotersEven or guardVotersOdd
+//   - QMR: guardQMRRaiseNeeded (qmr↑ plans)
+//   - Feature: guardShadowDiskfulSupported (sD variants)
 var commonAddGuards = []any{
 	guardRVNotDeleting,
 	guardAddressesPopulated,
@@ -51,9 +56,13 @@ var commonRemoveGuards = []any{
 
 // leavingDGuards are guards for transitions that remove a D voter
 // (RemoveReplica(D), ChangeReplicaType(D→...)).
+//
+// Plans MUST also add defense-in-depth guards explicitly:
+//   - Voter parity: guardVotersEven or guardVotersOdd
+//   - QMR: guardQMRNotTooHigh (no qmr change) or guardQMRLowerNeeded (qmr↓)
+//   - Feature: guardShadowDiskfulSupported (sD variants)
 var leavingDGuards = []any{
 	guardVolumeAccessLocalForDemotion,
-	guardQMRReady,
 	guardGMDRPreserved,
 	guardFTTPreserved,
 	guardZoneGMDRPreserved,
@@ -171,16 +180,19 @@ func guardVolumeAccessLocalForDemotion(gctx *globalContext, rctx *ReplicaContext
 	return dmte.GuardResult{}
 }
 
-// guardQMRReady blocks if the current qmr has not yet converged to the target.
-// Required before qmr↓ transitions: all replicas must have the current qmr
-// before it can be lowered.
-func guardQMRReady(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
-	targetGMDR := gctx.configuration.GuaranteedMinimumDataRedundancy
-	if gctx.datamesh.QuorumMinimumRedundancy > targetGMDR+1 {
+// guardQMRNotTooHigh is a defense-in-depth guard that blocks voter removal
+// if QMR is higher than configuration requires (config.GMDR + 1). Normally
+// the dispatch selects a qmr↓ plan variant when QMR needs lowering; this
+// guard catches unexpected inconsistencies.
+// Plans with embedded qmr↓ don't use this guard — they handle lowering internally.
+func guardQMRNotTooHigh(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
+	configGMDR := gctx.configuration.GuaranteedMinimumDataRedundancy
+	maxQMR := configGMDR + 1
+	if gctx.datamesh.QuorumMinimumRedundancy > maxQMR {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("ChangeQuorum not yet applied: qmr=%d, target=%d",
-				gctx.datamesh.QuorumMinimumRedundancy, targetGMDR+1),
+			Message: fmt.Sprintf("Voter removal blocked: qmr=%d exceeds configuration (GMDR=%d, expected qmr≤%d); waiting for qmr to be lowered",
+				gctx.datamesh.QuorumMinimumRedundancy, configGMDR, maxQMR),
 		}
 	}
 	return dmte.GuardResult{}
@@ -377,6 +389,67 @@ func guardZoneTBSufficient(gctx *globalContext, rctx *ReplicaContext) dmte.Guard
 		Blocked: true,
 		Message: fmt.Sprintf("Would violate zone TB coverage for zone %s", removedZone),
 	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Defense-in-depth guards
+//
+// These guards verify dispatch decisions. They should never fire in normal
+// operation — dispatch already guarantees correct plan selection. They exist
+// as safety nets against dispatch bugs or future refactoring regressions.
+
+// guardVotersEven blocks if the current voter count is not even.
+// Defense: plans without q↑/q↓ expect even voters (even→odd transition).
+func guardVotersEven(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
+	voters := voterCount(gctx)
+	if voters%2 != 0 {
+		return dmte.GuardResult{
+			Blocked: true,
+			Message: fmt.Sprintf("Defense: expected even voters, got %d", voters),
+		}
+	}
+	return dmte.GuardResult{}
+}
+
+// guardVotersOdd blocks if the current voter count is not odd.
+// Defense: plans with q↑/q↓ expect odd voters (odd→even transition).
+func guardVotersOdd(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
+	voters := voterCount(gctx)
+	if voters%2 == 0 {
+		return dmte.GuardResult{
+			Blocked: true,
+			Message: fmt.Sprintf("Defense: expected odd voters, got %d", voters),
+		}
+	}
+	return dmte.GuardResult{}
+}
+
+// guardQMRRaiseNeeded blocks if baseline GMDR is already at or above config GMDR.
+// Defense: plans with qmr↑ expect baseline.GMDR < config.GMDR.
+func guardQMRRaiseNeeded(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
+	if gctx.baselineLayout.GuaranteedMinimumDataRedundancy >= gctx.configuration.GuaranteedMinimumDataRedundancy {
+		return dmte.GuardResult{
+			Blocked: true,
+			Message: fmt.Sprintf("Defense: qmr↑ not needed, baseline GMDR=%d >= config GMDR=%d",
+				gctx.baselineLayout.GuaranteedMinimumDataRedundancy,
+				gctx.configuration.GuaranteedMinimumDataRedundancy),
+		}
+	}
+	return dmte.GuardResult{}
+}
+
+// guardQMRLowerNeeded blocks if baseline GMDR is already at or below config GMDR.
+// Defense: plans with qmr↓ expect baseline.GMDR > config.GMDR.
+func guardQMRLowerNeeded(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
+	if gctx.baselineLayout.GuaranteedMinimumDataRedundancy <= gctx.configuration.GuaranteedMinimumDataRedundancy {
+		return dmte.GuardResult{
+			Blocked: true,
+			Message: fmt.Sprintf("Defense: qmr↓ not needed, baseline GMDR=%d <= config GMDR=%d",
+				gctx.baselineLayout.GuaranteedMinimumDataRedundancy,
+				gctx.configuration.GuaranteedMinimumDataRedundancy),
+		}
+	}
+	return dmte.GuardResult{}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

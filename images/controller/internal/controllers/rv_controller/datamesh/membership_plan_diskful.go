@@ -14,6 +14,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// IMPORTANT: PlanID versioning
+//
+// PlanIDs are persisted in rv.Status.DatameshTransitions. Changing a plan
+// in a way that breaks in-flight transitions requires a NEW version:
+//   - Step composition changed (added, removed, reordered)
+//   - Step apply semantics changed (different mutations)
+//
+// Safe changes (no new version needed):
+//   - Guards, confirm, DisplayName, diagnostics, OnComplete
+//
+// To introduce a new version: keep the old version registered (settle-only),
+// register the new version, update the dispatcher to yield the new PlanID.
+
 package datamesh
 
 import (
@@ -37,7 +50,7 @@ import (
 // invisibly before promotion, reducing the D∅ resync from hours to a
 // delta resync (seconds).
 func registerDiskfulPlans(
-	addReplica *dmte.RegisteredTransition[*globalContext, *ReplicaContext],
+	addReplica, removeReplica *dmte.RegisteredTransition[*globalContext, *ReplicaContext],
 ) {
 	// ════════════════════════════════════════════════════════════════════════
 	// Without sD (A vestibule for odd→even)
@@ -49,9 +62,10 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
+		Guards(guardVotersEven).
 		Steps(
 			mrStep("✦ → D∅",
-				composeApply(
+				composeReplicaApply(
 					createMember(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -71,9 +85,10 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
+		Guards(guardVotersEven, guardQMRRaiseNeeded).
 		Steps(
 			mrStep("✦ → D∅",
-				composeApply(
+				composeReplicaApply(
 					createMember(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -86,9 +101,9 @@ func registerDiskfulPlans(
 			mgStep("qmr↑",
 				raiseQMR,
 				confirmAllMembers,
-			),
+			).OnComplete(updateBaselineLayout),
 		).
-		OnComplete(onJoinCompleteWithBaselineLayoutUpdate).
+		OnComplete(onJoinComplete).
 		Build()
 
 	// AddReplica(D) + q↑: ✦ → A → D∅ + q↑ → D (odd→even, no qmr↑)
@@ -97,19 +112,20 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
+		Guards(guardVotersOdd).
 		Steps(
 			mrStep("✦ → A",
 				createMember(v1alpha1.DatameshMemberTypeAccess),
 				confirmFMPlusSubject,
 			),
 			mrStep("A → D∅ + q↑",
-				composeApply(
+				composeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					setBackingVolumeFromRequest,
 					asReplicaApply(raiseQ),
 				),
 				asReplicaConfirm(confirmAllMembers),
-			),
+			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
 			mrStep("D∅ → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				confirmSubjectOnly,
@@ -124,19 +140,20 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
+		Guards(guardVotersOdd, guardQMRRaiseNeeded).
 		Steps(
 			mrStep("✦ → A",
 				createMember(v1alpha1.DatameshMemberTypeAccess),
 				confirmFMPlusSubject,
 			),
 			mrStep("A → D∅ + q↑",
-				composeApply(
+				composeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					setBackingVolumeFromRequest,
 					asReplicaApply(raiseQ),
 				),
 				asReplicaConfirm(confirmAllMembers),
-			),
+			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
 			mrStep("D∅ → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				confirmSubjectOnly,
@@ -144,9 +161,9 @@ func registerDiskfulPlans(
 			mgStep("qmr↑",
 				raiseQMR,
 				confirmAllMembers,
-			),
+			).OnComplete(updateBaselineLayout),
 		).
-		OnComplete(onJoinCompleteWithBaselineLayoutUpdate).
+		OnComplete(onJoinComplete).
 		Build()
 
 	// ════════════════════════════════════════════════════════════════════════
@@ -159,10 +176,10 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
-		Guards(guardShadowDiskfulSupported).
+		Guards(guardVotersEven, guardShadowDiskfulSupported).
 		Steps(
 			mrStep("✦ → sD∅",
-				composeApply(
+				composeReplicaApply(
 					createMember(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -172,10 +189,13 @@ func registerDiskfulPlans(
 				setType(v1alpha1.DatameshMemberTypeShadowDiskful),
 				confirmSubjectOnly,
 			),
+			// sD → D: non-voter becomes voter. All peers must update
+			// connection config (arr, voting) — unlike disk attach (D∅→D),
+			// this is not automatic.
 			mrStep("sD → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				asReplicaConfirm(confirmAllMembers),
-			),
+			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
 		).
 		OnComplete(onJoinComplete).
 		Build()
@@ -186,10 +206,10 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
-		Guards(guardShadowDiskfulSupported).
+		Guards(guardVotersEven, guardQMRRaiseNeeded, guardShadowDiskfulSupported).
 		Steps(
 			mrStep("✦ → sD∅",
-				composeApply(
+				composeReplicaApply(
 					createMember(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -202,25 +222,43 @@ func registerDiskfulPlans(
 			mrStep("sD → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				asReplicaConfirm(confirmAllMembers),
-			),
+			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
 			mgStep("qmr↑",
 				raiseQMR,
 				confirmAllMembers,
-			),
+			).OnComplete(updateBaselineLayout),
 		).
-		OnComplete(onJoinCompleteWithBaselineLayoutUpdate).
+		OnComplete(onJoinComplete).
 		Build()
 
 	// AddReplica(D) via sD + q↑: ✦ → sD∅ → sD → sD∅ → D∅ + q↑ → D (odd→even, no qmr↑)
+	//
+	// sD pre-syncs data invisibly (steps 1-2). Then the critical sequence:
+	//
+	// sD→D direct promotion CANNOT be used here. Adding a voter to odd voters
+	// makes them even, and with even voters the old (low) q allows a symmetric
+	// partition — split-brain. q MUST be raised together with the voter addition.
+	//
+	// But datamesh is a target configuration that asynchronous agents apply in
+	// unpredictable order. Any change we publish must be safe regardless of
+	// which replicas apply it first. Publishing sD→D + q↑ in one revision is
+	// unsafe: a peer might see the new voter before raising q, creating a
+	// window with even voters and old q.
+	//
+	// Solution: detach disk (step 3: sD→sD∅), then sD∅→D∅+q↑ (step 4).
+	// Both sD∅ and D∅ are diskless — the change is a pure config update
+	// (voter status + q) that is safe in any application order. Then D∅→D
+	// (step 5) re-attaches with a delta resync (seconds, not hours — data
+	// already synced during the sD phase).
 	addReplica.Plan("diskful-via-sd-q-up/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
-		Guards(guardShadowDiskfulSupported).
+		Guards(guardVotersOdd, guardShadowDiskfulSupported).
 		Steps(
 			mrStep("✦ → sD∅",
-				composeApply(
+				composeReplicaApply(
 					createMember(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -235,13 +273,13 @@ func registerDiskfulPlans(
 				confirmSubjectOnly,
 			),
 			mrStep("sD∅ → D∅ + q↑",
-				composeApply(
+				composeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					setBackingVolumeFromRequest,
 					asReplicaApply(raiseQ),
 				),
 				asReplicaConfirm(confirmAllMembers),
-			),
+			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
 			mrStep("D∅ → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				confirmSubjectOnly,
@@ -251,15 +289,16 @@ func registerDiskfulPlans(
 		Build()
 
 	// AddReplica(D) via sD + q↑ + qmr↑: ✦ → sD∅ → sD → sD∅ → D∅ + q↑ → D → qmr↑ (odd→even, qmr↑)
+	// Same sD detach-before-promote sequence as diskful-via-sd-q-up — see comment above.
 	addReplica.Plan("diskful-via-sd-q-up-qmr-up/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
-		Guards(guardShadowDiskfulSupported).
+		Guards(guardVotersOdd, guardQMRRaiseNeeded, guardShadowDiskfulSupported).
 		Steps(
 			mrStep("✦ → sD∅",
-				composeApply(
+				composeReplicaApply(
 					createMember(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -274,13 +313,13 @@ func registerDiskfulPlans(
 				confirmSubjectOnly,
 			),
 			mrStep("sD∅ → D∅ + q↑",
-				composeApply(
+				composeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					setBackingVolumeFromRequest,
 					asReplicaApply(raiseQ),
 				),
 				asReplicaConfirm(confirmAllMembers),
-			),
+			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
 			mrStep("D∅ → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				confirmSubjectOnly,
@@ -288,8 +327,144 @@ func registerDiskfulPlans(
 			mgStep("qmr↑",
 				raiseQMR,
 				confirmAllMembers,
+			).OnComplete(updateBaselineLayout),
+		).
+		OnComplete(onJoinComplete).
+		Build()
+
+	// ════════════════════════════════════════════════════════════════════════
+	// RemoveReplica(D)
+	// ════════════════════════════════════════════════════════════════════════
+	//
+	// D → D∅ detaches disk (subject-only confirm). For even→odd voter plans
+	// (q↓ variants): D∅ → A + q↓ uses the A vestibule — the mirror of the
+	// add path (A → D∅ + q↑). D∅ (voter, full-mesh) becomes A (non-voter,
+	// star) with q lowered in one revision. A is invisible to quorum, so
+	// the change is safe regardless of which agents apply it first. Then
+	// A → ✕ is a simple star member removal. BV fields are cleared on D∅→A.
+	//
+	// qmr↓ is always the FIRST step — must relax quorum constraint before
+	// removing the voter.
+
+	// RemoveReplica(D): D → D∅ → ✕ (odd→even voters, no qmr↓)
+	removeReplica.Plan("remove-diskful/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		DisplayName("Removing diskful replica").
+		Guards(commonRemoveGuards...).
+		Guards(leavingDGuards...).
+		Guards(guardVotersOdd, guardQMRNotTooHigh).
+		Steps(
+			mrStep("D → D∅",
+				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
+				confirmSubjectOnly,
+			),
+			mrStep("D∅ → ✕",
+				composeReplicaApply(
+					removeMember,
+					asReplicaApply(updateBaselineLayout),
+				),
+				confirmAllMembersLeaving,
 			),
 		).
-		OnComplete(onJoinCompleteWithBaselineLayoutUpdate).
+		OnComplete(onLeaveComplete).
+		Build()
+
+	// qmr↓ + RemoveReplica(D): qmr↓ → D → D∅ → ✕ (odd→even, qmr↓)
+	removeReplica.Plan("remove-diskful-qmr-down/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		DisplayName("Removing diskful replica").
+		Guards(commonRemoveGuards...).
+		Guards(leavingDGuards...).
+		Guards(guardVotersOdd, guardQMRLowerNeeded).
+		Steps(
+			mgStep("qmr↓",
+				composeGlobalApply(
+					lowerQMR,
+					updateBaselineLayout,
+				),
+				confirmAllMembers,
+			),
+			mrStep("D → D∅",
+				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
+				confirmSubjectOnly,
+			),
+			mrStep("D∅ → ✕",
+				composeReplicaApply(
+					removeMember,
+					asReplicaApply(updateBaselineLayout),
+				),
+				confirmAllMembersLeaving,
+			),
+		).
+		OnComplete(onLeaveComplete).
+		Build()
+
+	// RemoveReplica(D) + q↓: D → D∅ → A + q↓ → ✕ (even→odd, no qmr↓)
+	removeReplica.Plan("remove-diskful-q-down/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		DisplayName("Removing diskful replica").
+		Guards(commonRemoveGuards...).
+		Guards(leavingDGuards...).
+		Guards(guardVotersEven, guardQMRNotTooHigh).
+		Steps(
+			mrStep("D → D∅",
+				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
+				confirmSubjectOnly,
+			),
+			mrStep("D∅ → A + q↓",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeAccess),
+					clearBackingVolume,
+					asReplicaApply(lowerQ),
+					asReplicaApply(updateBaselineLayout),
+				),
+				asReplicaConfirm(confirmAllMembers),
+			),
+			mrStep("A → ✕",
+				removeMember,
+				confirmFMPlusSubjectLeaving,
+			),
+		).
+		OnComplete(onLeaveComplete).
+		Build()
+
+	// qmr↓ + RemoveReplica(D) + q↓: qmr↓ → D → D∅ → A + q↓ → ✕ (even→odd, qmr↓)
+	removeReplica.Plan("remove-diskful-qmr-down-q-down/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		DisplayName("Removing diskful replica").
+		Guards(commonRemoveGuards...).
+		Guards(leavingDGuards...).
+		Guards(guardVotersEven, guardQMRLowerNeeded).
+		Steps(
+			mgStep("qmr↓",
+				composeGlobalApply(
+					lowerQMR,
+					updateBaselineLayout,
+				),
+				confirmAllMembers,
+			),
+			mrStep("D → D∅",
+				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
+				confirmSubjectOnly,
+			),
+			mrStep("D∅ → A + q↓",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeAccess),
+					clearBackingVolume,
+					asReplicaApply(lowerQ),
+					asReplicaApply(updateBaselineLayout),
+				),
+				asReplicaConfirm(confirmAllMembers),
+			),
+			mrStep("A → ✕",
+				removeMember,
+				confirmFMPlusSubjectLeaving,
+			),
+		).
+		OnComplete(onLeaveComplete).
 		Build()
 }
