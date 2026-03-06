@@ -554,6 +554,7 @@ spec:
                           - Join
                           - Leave
                           - ForceLeave
+                          - ForceDetach
                           - ChangeRole
                           - ChangeBackingVolume
                           type: string
