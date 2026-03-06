@@ -200,4 +200,118 @@ func registerChangeTypePlans(
 		).
 		OnComplete(onChangeTypeComplete).
 		Build()
+
+	// ════════════════════════════════════════════════════════════════════════
+	// sD ↔ D (voter promotion/demotion, requires Flant DRBD)
+	// ════════════════════════════════════════════════════════════════════════
+
+	// ChangeReplicaType(sD → D): sD → D (even→odd, hot promotion)
+	//
+	// Non-voter becomes voter. All peers update arr/voting config.
+	// No BV changes (both sD and D have backing volume).
+	// No q change (even→odd voters).
+	changeReplicaType.Plan("sd-to-d/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
+		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		DisplayName("Changing replica type").
+		Guards(guardShadowDiskfulSupported, guardVotersEven).
+		Steps(
+			mrStep("sD → D",
+				setType(v1alpha1.DatameshMemberTypeDiskful),
+				asReplicaConfirm(confirmAllMembers),
+			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
+
+	// ChangeReplicaType(sD → D) + q↑: sD → sD∅ → D∅ + q↑ → D (odd→even)
+	//
+	// Same detach-before-promote as AddReplica(D) via sD + q↑ — see
+	// membership_plan_diskful.go for rationale (async apply safety).
+	// No BV changes — BV already present from sD throughout.
+	changeReplicaType.Plan("sd-to-d-q-up/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
+		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		DisplayName("Changing replica type").
+		Guards(guardShadowDiskfulSupported, guardVotersOdd).
+		Steps(
+			mrStep("sD → sD∅",
+				setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+				confirmSubjectOnly,
+			),
+			mrStep("sD∅ → D∅ + q↑",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
+					asReplicaApply(raiseQ),
+				),
+				asReplicaConfirm(confirmAllMembers),
+			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			mrStep("D∅ → D",
+				setType(v1alpha1.DatameshMemberTypeDiskful),
+				confirmSubjectOnly,
+			),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
+
+	// ChangeReplicaType(D → sD): D → sD (odd→even, hot demotion)
+	//
+	// Voter becomes non-voter. All peers update arr/voting config.
+	// No BV changes (both D and sD have backing volume).
+	// No q change (odd→even voters).
+	// Baseline updated in apply (lowering: voter removed).
+	changeReplicaType.Plan("d-to-sd/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
+		ToReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
+		DisplayName("Changing replica type").
+		Guards(leavingDGuards...).
+		Guards(guardShadowDiskfulSupported, guardVotersOdd, guardQMRNotTooHigh).
+		Steps(
+			mrStep("D → sD",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeShadowDiskful),
+					asReplicaApply(updateBaselineLayout),
+				),
+				asReplicaConfirm(confirmAllMembers),
+			),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
+
+	// ChangeReplicaType(D → sD) + q↓: D → D∅ → sD∅ + q↓ → sD (even→odd)
+	//
+	// Mirror of sD→D+q↑: D detaches, converts to sD∅+q↓ (voter→non-voter
+	// + q lowered atomically), re-attaches as sD with delta resync.
+	// No BV changes — BV present throughout.
+	// Baseline updated in apply on the D∅→sD∅+q↓ step (lowering).
+	changeReplicaType.Plan("d-to-sd-q-down/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
+		ToReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
+		DisplayName("Changing replica type").
+		Guards(leavingDGuards...).
+		Guards(guardShadowDiskfulSupported, guardVotersEven, guardQMRNotTooHigh).
+		Steps(
+			mrStep("D → D∅",
+				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
+				confirmSubjectOnly,
+			),
+			mrStep("D∅ → sD∅ + q↓",
+				composeReplicaApply(
+					setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
+					asReplicaApply(lowerQ),
+					asReplicaApply(updateBaselineLayout),
+				),
+				asReplicaConfirm(confirmAllMembers),
+			),
+			mrStep("sD∅ → sD",
+				setType(v1alpha1.DatameshMemberTypeShadowDiskful),
+				confirmSubjectOnly,
+			),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
 }

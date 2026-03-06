@@ -185,7 +185,7 @@ func planRemoveDiskful(gctx *globalContext, _ *ReplicaContext) (dmte.PlanID, str
 
 // planChangeReplicaType selects the plan for a ChangeRole request.
 // Not a member → skip. Already target type → skip.
-func planChangeReplicaType(_ *globalContext, rctx *ReplicaContext) (dmte.PlanID, string) {
+func planChangeReplicaType(gctx *globalContext, rctx *ReplicaContext) (dmte.PlanID, string) {
 	if rctx.member == nil {
 		return "", ""
 	}
@@ -217,9 +217,35 @@ func planChangeReplicaType(_ *globalContext, rctx *ReplicaContext) (dmte.PlanID,
 		rctx.member.Type == v1alpha1.DatameshMemberTypeLiminalShadowDiskful) &&
 		targetType == v1alpha1.ReplicaTypeTieBreaker:
 		return "sd-to-tb/v1", ""
+	case (rctx.member.Type == v1alpha1.DatameshMemberTypeShadowDiskful ||
+		rctx.member.Type == v1alpha1.DatameshMemberTypeLiminalShadowDiskful) &&
+		targetType == v1alpha1.ReplicaTypeDiskful:
+		return planChangeSDToD(gctx, rctx)
+	case (rctx.member.Type == v1alpha1.DatameshMemberTypeDiskful ||
+		rctx.member.Type == v1alpha1.DatameshMemberTypeLiminalDiskful) &&
+		targetType == v1alpha1.ReplicaTypeShadowDiskful:
+		return planChangeDToSD(gctx, rctx)
 	case rctx.member.Type == v1alpha1.DatameshMemberType(targetType):
 		return "", "" // already target type
 	default:
 		return "", "Not implemented"
 	}
+}
+
+// planChangeSDToD selects the ChangeReplicaType(sD→D) plan variant.
+func planChangeSDToD(gctx *globalContext, _ *ReplicaContext) (dmte.PlanID, string) {
+	voters := voterCount(gctx)
+	if voters%2 == 0 {
+		return "sd-to-d/v1", "" // even→odd, no q change
+	}
+	return "sd-to-d-q-up/v1", "" // odd→even, q↑ needed
+}
+
+// planChangeDToSD selects the ChangeReplicaType(D→sD) plan variant.
+func planChangeDToSD(gctx *globalContext, _ *ReplicaContext) (dmte.PlanID, string) {
+	voters := voterCount(gctx)
+	if voters%2 != 0 {
+		return "d-to-sd/v1", "" // odd→even, no q change
+	}
+	return "d-to-sd-q-down/v1", "" // even→odd, q↓ needed
 }
