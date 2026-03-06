@@ -1,4 +1,4 @@
-{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 ---
 apiVersion: storage.k8s.io/v1
 kind: CSIDriver
@@ -17,7 +17,7 @@ spec:
 {{- end }}
 
 
-{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
 {{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
 ---
 apiVersion: storage.k8s.io/v1

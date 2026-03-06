@@ -3,7 +3,7 @@
 ###
 
 {{- define "additional_pull_secrets" }}
-{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 - name: {{ .Chart.Name }}-module-registry
 {{- end }}
 {{- end }}
@@ -13,14 +13,14 @@
 ###
 
 {{- define "csi_controller_args" }}
-{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 - --csi-endpoint=unix://$(ADDRESS)
 - --node=$(KUBE_NODE_NAME)
 - --linstor-endpoint=$(LS_CONTROLLERS)
 - --log-level=info
 {{- end }}
 
-{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
 {{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
 - --csi-endpoint=unix://$(ADDRESS)
 {{- end }}
@@ -29,7 +29,7 @@
 
 
 {{- define "csi_controller_envs" }}
-{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 - name: ADDRESS
   value: /csi/csi.sock
 - name: KUBE_NODE_NAME
@@ -56,7 +56,7 @@
       name: linstor-client-https-cert
 {{- end }}
 
-{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
 {{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
 - name: ADDRESS
   value: /csi/csi.sock
@@ -85,7 +85,7 @@
 
 
 {{- define "csi_controller_init_containers" }}
-{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 - command:
   - /linstor-wait-until
   - api-online
@@ -132,7 +132,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- end }}
 
 
-{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 {{- $csiControllerImage := include "helm_lib_module_image" (list . "linstorCsi") }}
 
 {{- $csiControllerConfig := dict }}
@@ -157,7 +157,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- end }}
 
 
-{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
 {{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
 {{- $csiControllerImage := include "helm_lib_module_image" (list . "csiDriver") }}
 
@@ -187,14 +187,14 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 ###
 
 {{- define "csi_node_args" }}
-{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 - --csi-endpoint=unix://$(CSI_ENDPOINT)
 - --node=$(KUBE_NODE_NAME)
 - --linstor-endpoint=$(LS_CONTROLLERS)
 - --log-level=info
 {{- end }}
 
-{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
 {{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
 - --csi-endpoint=unix://$(CSI_ADDRESS)
 {{- end }}
@@ -203,7 +203,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 
 
 {{- define "csi_node_envs" }}
-{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 - name: CSI_ENDPOINT
   value: /csi/csi.sock
 - name: DRIVER_REG_SOCK_PATH
@@ -232,7 +232,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
       name: linstor-client-https-cert
 {{- end }}
 
-{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
 {{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
 - name: CSI_ADDRESS
   value: /csi/csi.sock
@@ -264,7 +264,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 
 
 {{- define "csi_node_init_containers" }}
-{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 - command:
     - /linstor-wait-until
     - satellite-online
@@ -312,7 +312,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- end }}
 
 
-{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 {{- $csiNodeImage := include "helm_lib_module_image" (list . "linstorCsi") }}
 
 {{- $csiNodeConfig := dict }}
@@ -334,7 +334,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- end }}
 
 
-{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
 {{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
 {{- $csiNodeImage := include "helm_lib_module_image" (list . "csiDriver") }}
 

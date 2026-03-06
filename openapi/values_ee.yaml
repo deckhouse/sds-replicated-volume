@@ -13,6 +13,7 @@ properties:
     - drbdVersion
     - dataNodesChecksum
     - controlPlaneMigration
+    - newControlPlane
     properties:
       drbdVersion:
         type: string
@@ -23,6 +24,11 @@ properties:
       controlPlaneMigration:
         type: string
         default: "not_started"
+      newControlPlane:
+        type: boolean
+        default: false
+        description: |
+          Internal value determining whether to use the new control plane.
       masterPassphrase:
         type: string
       csiMigrationHook:

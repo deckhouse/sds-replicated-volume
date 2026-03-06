@@ -1,4 +1,4 @@
-{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
 ---
 apiVersion: v1
 kind: Service

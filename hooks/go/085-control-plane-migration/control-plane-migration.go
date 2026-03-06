@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,16 +38,14 @@ const (
 	defaultMigrationState = "not_started"
 )
 
-// Register OnBeforeHelm hook
 var _ = registry.RegisterFunc(
 	&pkg.HookConfig{
 		OnBeforeHelm: &pkg.OrderedConfig{Order: 5},
 		Queue:        "modules/" + consts.ModuleName,
 	},
-	guardAgainstResetNewControlPlane,
+	computeInternalNewControlPlane,
 )
 
-// Register Kubernetes hook
 var _ = registry.RegisterFunc(
 	&pkg.HookConfig{
 		Kubernetes: []pkg.KubernetesConfig{
@@ -72,10 +71,20 @@ var _ = registry.RegisterFunc(
 	syncControlPlaneMigrationState,
 )
 
-func guardAgainstResetNewControlPlane(ctx context.Context, input *pkg.HookInput) error {
-	newControlPlane := input.Values.Get("sdsReplicatedVolume.newControlPlane").Bool()
+func computeInternalNewControlPlane(ctx context.Context, input *pkg.HookInput) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("hook panicked: %v", r)
+		}
+	}()
 
-	if !newControlPlane {
+	userNewControlPlane := input.Values.Get("sdsReplicatedVolume.newControlPlane").Bool()
+
+	var internalNewControlPlane bool
+
+	if userNewControlPlane {
+		internalNewControlPlane = true
+	} else {
 		cl := input.DC.MustGetK8sClient()
 
 		list := &unstructured.UnstructuredList{}
@@ -85,16 +94,20 @@ func guardAgainstResetNewControlPlane(ctx context.Context, input *pkg.HookInput)
 			Kind:    "ReplicatedVolumeList",
 		})
 
-		err := cl.List(ctx, list, &client.ListOptions{Limit: 10})
-		if err != nil {
-			input.Logger.Warn("could not list ReplicatedVolume resources (likely CRD not installed yet), proceeding", "err", err)
-			return nil
-		}
-
-		if len(list.Items) > 0 {
-			return fmt.Errorf("cannot set newControlPlane=false: found %d ReplicatedVolume resource(s) in cluster. Changing back to old control-plane is prohibited after migration begins", len(list.Items))
+		if err := cl.List(ctx, list, &client.ListOptions{Limit: 1}); err != nil {
+			if meta.IsNoMatchError(err) {
+				input.Logger.Info("ReplicatedVolume CRD not installed, defaulting newControlPlane to false")
+			} else {
+				return fmt.Errorf("list ReplicatedVolume resources: %w", err)
+			}
+		} else if len(list.Items) > 0 {
+			internalNewControlPlane = true
+			input.Logger.Info("found ReplicatedVolume resources, enabling new control plane")
 		}
 	}
+
+	input.Values.Set("sdsReplicatedVolume.internal.newControlPlane", internalNewControlPlane)
+	input.Logger.Info("computed internal newControlPlane value", "value", internalNewControlPlane)
 
 	return nil
 }
@@ -102,11 +115,10 @@ func guardAgainstResetNewControlPlane(ctx context.Context, input *pkg.HookInput)
 func syncControlPlaneMigrationState(_ context.Context, input *pkg.HookInput) error {
 	stateList, err := objectpatch.UnmarshalToStruct[string](input.Snapshots, snapshotName)
 	if err != nil {
-		return err
+		return fmt.Errorf("unmarshal %s snapshot: %w", snapshotName, err)
 	}
 
 	if len(stateList) == 0 {
-		// ConfigMap does not exist, do nothing
 		return nil
 	}
 

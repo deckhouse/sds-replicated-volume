@@ -49,7 +49,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 
 
-{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
 {{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

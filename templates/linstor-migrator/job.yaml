@@ -1,4 +1,4 @@
-{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
 {{- if not (contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration)) }}
 ---
 apiVersion: batch/v1
