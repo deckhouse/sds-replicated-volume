@@ -97,7 +97,7 @@ func confirmFMPlusSubjectLeaving(gctx *globalContext, rctx *ReplicaContext, step
 // confirmAllMembers checks confirmation for all-members steps.
 // MustConfirm = all datamesh members.
 // Used by: ✦→D∅, ✦→sD∅, A→D∅, sD∅→D∅, sD→D, D→sD, qmr↑, qmr↓, etc.
-func confirmAllMembers(gctx *globalContext, _ *ReplicaContext, stepRevision int64) dmte.ConfirmResult {
+func confirmAllMembers(gctx *globalContext, stepRevision int64) dmte.ConfirmResult {
 	mustConfirm := allMemberIDs(gctx)
 	confirmed := confirmedReplicas(gctx, stepRevision).Intersect(mustConfirm)
 	return dmte.ConfirmResult{MustConfirm: mustConfirm, Confirmed: confirmed}
@@ -125,8 +125,8 @@ func confirmAllMembersLeaving(gctx *globalContext, rctx *ReplicaContext, stepRev
 // confirmAllMembersExcluding checks confirmation for all members minus a dead member.
 // MustConfirm = all datamesh members except the excluded ID (dead member cannot confirm).
 // Used by: ForceRemoveReplica.
-func confirmAllMembersExcluding(excludedID uint8) func(*globalContext, *ReplicaContext, int64) dmte.ConfirmResult {
-	return func(gctx *globalContext, _ *ReplicaContext, stepRevision int64) dmte.ConfirmResult {
+func confirmAllMembersExcluding(excludedID uint8) func(*globalContext, int64) dmte.ConfirmResult {
+	return func(gctx *globalContext, stepRevision int64) dmte.ConfirmResult {
 		mustConfirm := allMemberIDs(gctx)
 		mustConfirm.Remove(excludedID)
 		confirmed := confirmedReplicas(gctx, stepRevision).Intersect(mustConfirm)
@@ -163,6 +163,21 @@ func confirmedReplicas(gctx *globalContext, stepRevision int64) idset.IDSet {
 	}
 	return s
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Adapters
+//
+
+// asReplicaConfirm adapts a global-scoped confirm callback for use in ReplicaStep.
+func asReplicaConfirm(fn func(*globalContext, int64) dmte.ConfirmResult) func(*globalContext, *ReplicaContext, int64) dmte.ConfirmResult {
+	return func(gctx *globalContext, _ *ReplicaContext, rev int64) dmte.ConfirmResult {
+		return fn(gctx, rev)
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Confirm helper functions
+//
 
 // allMemberIDs returns the IDSet of all datamesh members.
 func allMemberIDs(gctx *globalContext) idset.IDSet {
