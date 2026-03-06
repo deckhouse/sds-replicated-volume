@@ -85,17 +85,28 @@ func applyRemoveMember(gctx *globalContext, rctx *ReplicaContext) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// q/qmr apply callbacks
+// Adapters
+//
+
+// asReplicaApply adapts a global-scoped apply callback for use in ReplicaStep.
+func asReplicaApply(fn func(*globalContext)) func(*globalContext, *ReplicaContext) {
+	return func(gctx *globalContext, _ *ReplicaContext) {
+		fn(gctx)
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// q/qmr apply callbacks (global-scoped)
 //
 // These mutate gctx.datamesh.Quorum / QuorumMinimumRedundancy.
-// They are plain func(gctx, rctx) (not closures) because they compute from
-// the current state of gctx.allReplicas (which reflects member changes from
-// earlier apply callbacks in the same composite step).
+// Global-scoped because they don't depend on the subject replica —
+// they compute from the current state of gctx.allReplicas.
+// Use asReplicaApply() when passing to ReplicaStep.
 
 // applyRaiseQ recomputes and raises q after a voter was added.
 // q = max(floor(voters/2)+1, floor(minD/2)+1), where
 // minD = baseline.FTT + baseline.GMDR + 1.
-func applyRaiseQ(gctx *globalContext, _ *ReplicaContext) {
+func applyRaiseQ(gctx *globalContext) {
 	voters := voterCount(gctx)
 	minD := gctx.baselineLayout.FailuresToTolerate + gctx.baselineLayout.GuaranteedMinimumDataRedundancy + 1
 	minQ := minD/2 + 1
@@ -106,7 +117,7 @@ func applyRaiseQ(gctx *globalContext, _ *ReplicaContext) {
 // applyLowerQ recomputes and lowers q after a voter was removed.
 // Same formula as applyRaiseQ — the voter count in gctx.allReplicas already
 // reflects the removal (from an earlier applySetType in the same composite step).
-func applyLowerQ(gctx *globalContext, _ *ReplicaContext) {
+func applyLowerQ(gctx *globalContext) {
 	voters := voterCount(gctx)
 	minD := gctx.baselineLayout.FailuresToTolerate + gctx.baselineLayout.GuaranteedMinimumDataRedundancy + 1
 	minQ := minD/2 + 1
@@ -116,12 +127,12 @@ func applyLowerQ(gctx *globalContext, _ *ReplicaContext) {
 
 // applyRaiseQMR raises qmr to match the target GMDR from Configuration.
 // qmr = target_GMDR + 1.
-func applyRaiseQMR(gctx *globalContext, _ *ReplicaContext) {
+func applyRaiseQMR(gctx *globalContext) {
 	gctx.datamesh.QuorumMinimumRedundancy = gctx.configuration.GuaranteedMinimumDataRedundancy + 1
 }
 
 // applyLowerQMR lowers qmr to match the target GMDR from Configuration.
 // qmr = target_GMDR + 1 (Configuration already has the lowered target).
-func applyLowerQMR(gctx *globalContext, _ *ReplicaContext) {
+func applyLowerQMR(gctx *globalContext) {
 	gctx.datamesh.QuorumMinimumRedundancy = gctx.configuration.GuaranteedMinimumDataRedundancy + 1
 }

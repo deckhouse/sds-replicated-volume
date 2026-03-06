@@ -80,7 +80,7 @@ func registerChangeTypePlans(
 		Steps(
 			dmte.ReplicaStep("A → sD∅",
 				applySetType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
-				confirmAllMembers,
+				asReplicaConfirm(confirmAllMembers),
 			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
 			dmte.ReplicaStep("sD∅ → sD",
 				applySetType(v1alpha1.DatameshMemberTypeShadowDiskful),
@@ -116,7 +116,7 @@ func registerChangeTypePlans(
 			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
 			dmte.ReplicaStep("sD∅ → A",
 				applySetType(v1alpha1.DatameshMemberTypeAccess),
-				confirmAllMembers,
+				asReplicaConfirm(confirmAllMembers),
 			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
 		).
 		OnComplete(onChangeTypeComplete).
@@ -139,7 +139,7 @@ func registerChangeTypePlans(
 		Steps(
 			dmte.ReplicaStep("TB → sD∅",
 				applySetType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
-				confirmAllMembers,
+				asReplicaConfirm(confirmAllMembers),
 			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
 			dmte.ReplicaStep("sD∅ → sD",
 				applySetType(v1alpha1.DatameshMemberTypeShadowDiskful),
@@ -170,7 +170,7 @@ func registerChangeTypePlans(
 			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
 			dmte.ReplicaStep("sD∅ → TB",
 				applySetType(v1alpha1.DatameshMemberTypeTieBreaker),
-				confirmAllMembers,
+				asReplicaConfirm(confirmAllMembers),
 			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
 		).
 		OnComplete(onChangeTypeComplete).

@@ -44,7 +44,7 @@ func registerShadowDiskfulPlans(
 		Steps(
 			dmte.ReplicaStep("✦ → sD∅",
 				applyCreateMember(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
-				confirmAllMembers,
+				asReplicaConfirm(confirmAllMembers),
 			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
 			dmte.ReplicaStep("sD∅ → sD",
 				applySetType(v1alpha1.DatameshMemberTypeShadowDiskful),
