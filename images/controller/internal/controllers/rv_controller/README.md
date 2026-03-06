@@ -6,7 +6,7 @@ This controller manages `ReplicatedVolume` (RV) resources by orchestrating datam
 
 The controller reconciles `ReplicatedVolume` with:
 
-1. **Configuration initialization** — copies resolved configuration from `ReplicatedStorageClass` (RSC) into RV status
+1. **Configuration initialization** — derives configuration from `ReplicatedStorageClass` (RSC) in Auto mode or from `ManualConfiguration` in Manual mode into RV status
 2. **Datamesh formation** — creates replicas, establishes DRBD connectivity, bootstraps data synchronization
 3. **Normal operation** — steady-state datamesh lifecycle: Access replica create/delete/join/leave, attach/detach transitions, multiattach management *(WIP: missing diskful join/leave, tiebreaker, role changes)*
 4. **Deletion** — cleans up child resources (RVRs, RVAs) and datamesh state
@@ -15,7 +15,8 @@ The controller reconciles `ReplicatedVolume` with:
 
 | Direction | Resource/Controller | Relationship |
 |-----------|---------------------|--------------|
-| ← input | ReplicatedStorageClass | Reads configuration (replication, topology, storage pool) |
+| ← input | ReplicatedStorageClass | Reads configuration (FTT, GMDR, topology, storage pool); Auto mode only |
+| ← input | ReplicatedVolume.Spec.ManualConfiguration | Reads manual configuration directly; Manual mode only |
 | ← input | ReplicatedStoragePool | Reads eligible nodes, system networks, zones for formation and attach eligibility |
 | ← input | ReplicatedVolumeReplica | Reads replica status (scheduling, preconfiguration, connectivity, data sync, quorum, attachment) |
 | ← input | ReplicatedVolumeAttachment | Reads attachment intent (determines which nodes should be attached) |
@@ -40,14 +41,15 @@ if shouldDelete (DeletionTimestamp + no other finalizers + no attached members +
 
 ensure metadata (finalizer + labels)
 
-ensure configuration from RSC
-ensure datamesh pending replica transitions (sync from RVR statuses)
+if config nil: reconcileRVConfiguration (initial set from RSC or ManualConfiguration)
+ensure datamesh replica membership requests (sync from RVR statuses)
 
 if configuration exists:
     if formation in progress (DatameshRevision == 0 or Formation transition active):
-        reconcile formation (3-phase process)
+        reconcile formation (3-step process; config frozen)
         reconcileRVAWaiting (datamesh forming)
     else:
+        reconcileRVConfiguration (check for config updates + set ConfigurationReady condition)
         reconcile normal operation (WIP):
             create Access RVRs for Active RVAs on nodes without any RVR
             process Access replica datamesh membership (join/leave)
@@ -55,7 +57,6 @@ if configuration exists:
             update RVA conditions and attachment fields from attachmentsSummary
             delete unnecessary Access RVRs (redundant or unused)
 
-ensure ConfigurationReady condition
 reconcileRVAFinalizers (add/remove RVA finalizers)
 reconcileRVRFinalizers (add/remove RVR finalizers)
 patch status if changed
@@ -83,33 +84,34 @@ Reconcile (root) [Pure orchestration]
 │   ├── isRVMetadataInSync
 │   ├── applyRVMetadata (finalizer + labels)
 │   └── patchRV
-├── ensureRVConfiguration
-├── ensureDatameshPendingReplicaTransitions ← details
+├── if config nil: reconcileRVConfiguration [In-place reconciliation] ← details
+├── ensureDatameshReplicaRequests ← details
 ├── reconcileFormation [Pure orchestration]
-│   ├── reconcileFormationPhasePreconfigure [Pure orchestration] ← details
-│   │   ├── applyFormationTransition
+│   │   ensureFormationTransition (find or create Formation transition with all steps)
+│   ├── reconcileFormationStepPreconfigure [Pure orchestration] ← details
 │   │   ├── create/delete RVRs (guards for deleting/misplaced, replica count management)
 │   │   ├── wait for deleting replicas cleanup
 │   │   ├── safety checks (addresses, eligible nodes, spec mismatch, backing volume size)
 │   │   └── reconcileFormationRestartIfTimeoutPassed
-│   ├── reconcileFormationPhaseEstablishConnectivity [Pure orchestration] ← details
+│   ├── reconcileFormationStepEstablishConnectivity [Pure orchestration] ← details
 │   │   ├── generateSharedSecret + applyDatameshMember
 │   │   ├── computeTargetQuorum
 │   │   ├── verify configured, connected, ready for data bootstrap
 │   │   └── reconcileFormationRestartIfTimeoutPassed
-│   ├── reconcileFormationPhaseBootstrapData [Pure orchestration] ← details
+│   ├── reconcileFormationStepBootstrapData [Pure orchestration] ← details
 │   │   ├── createDRBDROp (new-current-uuid)
 │   │   ├── verify operation status + UpToDate replicas
 │   │   ├── reconcileFormationRestartIfTimeoutPassed
-│   │   └── applyFormationTransitionAbsent (formation complete)
+│   │   └── advanceFormationStep / remove transition (formation complete)
 │   └── reconcileRVAWaiting ("Datamesh formation is in progress")
+├── reconcileRVConfiguration [In-place reconciliation] (config updates + ConfigurationReady condition)
 ├── reconcileNormalOperation [Pure orchestration] (WIP)
 │   ├── reconcileCreateAccessReplicas [Pure orchestration] ← details
 │   ├── (MergeEnsures)
 │   │   ├── ensureDatameshAccessReplicas ← details
 │   │   │   ├── ensureDatameshAccessReplicaTransitionProgress (loop: active transitions)
-│   │   │   ├── ensureDatameshAddAccessReplica (loop: pending joins)
-│   │   │   └── ensureDatameshRemoveAccessReplica (loop: pending leaves)
+│   │   │   ├── ensureDatameshAddReplica (loop: pending joins)
+│   │   │   └── ensureDatameshRemoveReplica (loop: pending leaves)
 │   │   └── ensureDatameshAttachments ← details
 │   │       ├── buildAttachmentsSummary ← details
 │   │       ├── computeDatameshAttachBlocked (calls computeActualQuorum)
@@ -127,16 +129,15 @@ Reconcile (root) [Pure orchestration]
 │   │   ├── isRVAAttachmentFieldsInSync + applyRVAAttachmentFields
 │   │   └── patchRVAStatus
 │   └── reconcileDeleteAccessReplicas [Pure orchestration] ← details
-├── ensureConditionConfigurationReady ← details
 ├── reconcileRVAFinalizers [Target-state driven] (same as deletion branch)
 ├── reconcileRVRFinalizers [Target-state driven]
 │   ├── add RVControllerFinalizer to non-deleting RVRs
 │   └── remove RVControllerFinalizer from deleting RVRs (when safe)
-│       └── isRVRMemberOrLeavingDatamesh (member + RemoveAccessReplica check)
+│       └── isRVRMemberOrLeavingDatamesh (member + RemoveReplica check)
 └── patchRVStatus
 ```
 
-Links to detailed algorithms: [`reconcileDeletion`](#reconciledeletion-details), [`ensureDatameshPendingReplicaTransitions`](#ensuredatameshpendingreplicatransitions-details), [`reconcileFormationPhasePreconfigure`](#reconcileformationphasepreconfigure-details), [`reconcileFormationPhaseEstablishConnectivity`](#reconcileformationphaseestablishconnectivity-details), [`reconcileFormationPhaseBootstrapData`](#reconcileformationphasebootstrapdata-details), [`reconcileCreateAccessReplicas`](#reconcilecreateaccessreplicas-details), [`reconcileDeleteAccessReplicas`](#reconciledeleteaccessreplicas-details), [`ensureDatameshAccessReplicas`](#ensuredatameshaccessreplicas-details), [`ensureDatameshAttachments`](#ensuredatameshattachments-details), [`buildAttachmentsSummary`](#buildattachmentssummary-details), [`computeDatameshAttachmentIntents`](#computedatameshattachmentintents-details), [`ensureDatameshDetachTransitions`](#ensuredatameshdetachtransitions-details), [`ensureDatameshAttachTransitions`](#ensuredatameshattachtransitions-details), [`reconcileRVAConditionsFromAttachmentsSummary`](#reconcilervaconditionsfromattachmentssummary-details), [`ensureConditionConfigurationReady`](#ensureconditionconfigurationready-details)
+Links to detailed algorithms: [`reconcileDeletion`](#reconciledeletion-details), [`ensureDatameshReplicaRequests`](#ensuredatameshreplicarequests-details), [`reconcileRVConfiguration`](#reconcilervconfiguration-details), [`reconcileFormationStepPreconfigure`](#reconcileformationsteppreconfigure-details), [`reconcileFormationStepEstablishConnectivity`](#reconcileformationstepestablishconnectivity-details), [`reconcileFormationStepBootstrapData`](#reconcileformationstepbootstrapdata-details), [`reconcileCreateAccessReplicas`](#reconcilecreateaccessreplicas-details), [`reconcileDeleteAccessReplicas`](#reconciledeleteaccessreplicas-details), [`ensureDatameshAccessReplicas`](#ensuredatameshaccessreplicas-details), [`ensureDatameshAttachments`](#ensuredatameshattachments-details), [`buildAttachmentsSummary`](#buildattachmentssummary-details), [`computeDatameshAttachmentIntents`](#computedatameshattachmentintents-details), [`ensureDatameshDetachTransitions`](#ensuredatameshdetachtransitions-details), [`ensureDatameshAttachTransitions`](#ensuredatameshattachtransitions-details), [`reconcileRVAConditionsFromAttachmentsSummary`](#reconcilervaconditionsfromattachmentssummary-details)
 
 ## Algorithm Flow
 
@@ -157,19 +158,23 @@ flowchart TD
     MetaDel --> Done3([Done])
 
     CheckDelete -->|No| Meta[reconcileMetadata]
-    Meta --> EnsureConfig["ensureRVConfiguration +<br/>ensureDatameshPendingReplicaTransitions"]
-    EnsureConfig --> CheckConfig{Configuration exists?}
-    CheckConfig -->|No| Conditions
+    Meta --> CheckConfigNil{Configuration nil?}
+    CheckConfigNil -->|Yes| InitConfig["reconcileRVConfiguration<br/>(initial set)"]
+    InitConfig --> EnsurePending
+    CheckConfigNil -->|No| EnsurePending
+    EnsurePending["ensureDatameshReplicaRequests"]
+    EnsurePending --> CheckConfig{Configuration exists?}
+    CheckConfig -->|No| Finalizers
 
     CheckConfig -->|Yes| CheckForming{Formation in progress?}
     CheckForming -->|Yes| Formation[reconcileFormation]
     Formation --> FormingRVAWaiting["reconcileRVAWaiting<br/>(datamesh forming)"]
-    FormingRVAWaiting --> Conditions
-    CheckForming -->|No| NormalOp["reconcileNormalOperation<br/>(Access replicas + attachments)"]
-    NormalOp --> Conditions
+    FormingRVAWaiting --> Finalizers
+    CheckForming -->|No| UpdateConfig["reconcileRVConfiguration<br/>(config updates + condition)"]
+    UpdateConfig --> NormalOp["reconcileNormalOperation<br/>(Access replicas + attachments)"]
+    NormalOp --> Finalizers
 
-    Conditions[ensureConditionConfigurationReady]
-    Conditions --> Finalizers["reconcileRVAFinalizers +<br/>reconcileRVRFinalizers"]
+    Finalizers["reconcileRVAFinalizers +<br/>reconcileRVRFinalizers"]
     Finalizers --> PatchDecision{Changed?}
     PatchDecision -->|Yes| Patch[patchRVStatus]
     PatchDecision -->|No| EndNode([Done])
@@ -180,14 +185,13 @@ flowchart TD
 
 ### ConfigurationReady
 
-Indicates whether the RV configuration is initialized and matches the storage class.
+Indicates whether the RV configuration is valid and derived from the appropriate source. Set by `reconcileRVConfiguration`.
 
 | Status | Reason | When |
 |--------|--------|------|
-| True | Ready | Configuration matches storage class generation |
-| False | WaitingForStorageClass | RSC not found or RSC configuration not ready |
-| False | ConfigurationRolloutInProgress | ConfigurationGeneration not yet set (initial rollout) |
-| False | StaleConfiguration | RV configuration generation does not match RSC generation |
+| True | Ready | Configuration is valid and matches the source |
+| False | WaitingForStorageClass | RSC not found or RSC configuration not ready (Auto mode only) |
+| False | InvalidConfiguration | Configuration is invalid: RSP not found or TransZonal zone count mismatch |
 
 ### Attached (on RVA)
 
@@ -227,15 +231,15 @@ Aggregate condition: Ready=True iff Attached=True AND ReplicaReady=True AND not 
 | False | Deleting | RVA has DeletionTimestamp |
 | Unknown | ReplicaNotReady | ReplicaReady is Unknown |
 
-## Formation Phases
+## Formation Steps
 
-Datamesh formation is a 3-phase process that creates and configures DRBD replicas. Each phase has a timeout; if progress stalls, formation restarts from scratch.
+Datamesh formation is a 3-step process that creates and configures DRBD replicas. Each step has a timeout; if progress stalls, formation restarts from scratch. All steps are pre-declared in the Formation transition at creation time and tracked in `rv.Status.DatameshTransitions[].Steps`.
 
-### Phase 1: Preconfigure
+### Step 1: Preconfigure
 
 Creates diskful replicas and waits for them to become preconfigured (DRBD setup complete, ready for datamesh membership).
 
-**Steps:**
+**Actions:**
 1. Initialize datamesh configuration (SystemNetworkNames, Size, DatameshRevision=1)
 2. Identify misplaced replicas (SatisfyEligibleNodes=False) and deleting replicas (DeletionTimestamp set)
 3. Collect active diskful replicas (excluding misplaced and deleting)
@@ -245,23 +249,23 @@ Creates diskful replicas and waits for them to become preconfigured (DRBD setup 
 7. Wait for scheduling and preconfiguration (replicas split into pending scheduling / scheduling failed / preconfiguring; scheduling failure messages from RVR Scheduled=False conditions are shown inline)
 8. Safety checks: addresses, eligible nodes, spec consistency, backing volume size
 
-### Phase 2: Establish Connectivity
+### Step 2: Establish Connectivity
 
 Adds preconfigured replicas to the datamesh and waits for DRBD peer connections.
 
-**Steps:**
+**Actions:**
 1. Generate shared secret for DRBD peer authentication
 2. Add diskful replicas as datamesh members (with zone, addresses, LVG info)
-3. Set quorum parameters
+3. Set effective layout (FTT/GMDR from configuration) and quorum parameters
 4. Wait for all replicas to apply DRBD configuration (DRBDConfigured=True)
 5. Wait for all replicas to connect to each other (ConnectionState=Connected)
 6. Wait for data bootstrap readiness (BackingVolume=Inconsistent + Replication=Established)
 
-### Phase 3: Bootstrap Data
+### Step 3: Bootstrap Data
 
 Triggers initial data synchronization via DRBDResourceOperation and waits for completion.
 
-**Steps:**
+**Actions:**
 1. Create DRBDResourceOperation (type: CreateNewUUID)
    - Single replica (any pool type): clear-bitmap (no peers to synchronize with)
    - Multiple replicas, thin provisioning: clear-bitmap (no full resync needed)
@@ -283,8 +287,8 @@ When formation stalls (any safety check fails or progress timeout is exceeded), 
 2. Log error (formation timed out)
 3. Delete formation DRBDResourceOperation if exists
 4. Delete all replicas (with finalizer removal)
-5. Reset all status fields (Configuration, DatameshRevision, Datamesh, transitions)
-6. Re-initialize configuration from RSC (to avoid intermediate nil state that would trigger unnecessary RSC reconciliation)
+5. Reset all status fields (Configuration, DatameshRevision, Datamesh, EffectiveLayout, transitions)
+6. Re-derive configuration via `reconcileRVConfiguration` (to avoid ConfigurationReady condition flicker)
 7. Requeue for fresh start
 
 ## Attachment Lifecycle
@@ -308,13 +312,13 @@ Attachment is the process of making a datamesh volume accessible (Primary in DRB
 
 ### Multiattach lifecycle
 
-- **EnableMultiattach**: triggered when `intendedAttachments > 1` and not already enabled. Bumps revision, creates EnableMultiattach transition. Must be confirmed by all Diskful + potentiallyAttached members before Attach transitions can proceed.
+- **EnableMultiattach**: triggered when `intendedAttachments > 1` and not already enabled. Bumps revision, creates EnableMultiattach transition. Must be confirmed by all members with backing volume + potentiallyAttached members before Attach transitions can proceed.
 - **DisableMultiattach**: triggered when `intendedAttachments <= 1` AND `potentiallyAttached <= 1`. Bumps revision, creates DisableMultiattach transition.
 - Enable and Disable are mutually exclusive — no concurrent multiattach transitions.
 
 ### Transition confirmation
 
-All transitions are confirmed when the target replicas report `DatameshRevision >= transition.DatameshRevision`. The transition is then removed from `rv.Status.DatameshTransitions`.
+All transitions are confirmed when the target replicas report `DatameshRevision >= step.DatameshRevision` (on the active step). The transition is then removed from `rv.Status.DatameshTransitions`.
 
 Special cases for Detach: also confirmed when the replica has no `attachmentState`, no RVR, or `DatameshRevision == 0` (replica left the datamesh or was deleted).
 
@@ -335,7 +339,7 @@ Special cases for Detach: also confirmed when the replica has no `attachmentStat
 | ReplicatedVolume | Generation, DeletionTimestamp, ReplicatedStorageClass label, Finalizers changes | For() (primary) |
 | ReplicatedStorageClass | ConfigurationGeneration changes | mapRSCToRVs (index lookup) |
 | ReplicatedVolumeAttachment | DeletionTimestamp, Finalizers, Attached condition status changes | mapRVAToRV |
-| ReplicatedVolumeReplica | Conditions (Scheduled, DRBDConfigured, SatisfyEligibleNodes), DatameshPendingTransition, DatameshRevision, Addresses, BackingVolume, Peers, DeletionTimestamp, Finalizers changes | mapRVRToRV |
+| ReplicatedVolumeReplica | Conditions (Scheduled, DRBDConfigured, SatisfyEligibleNodes), DatameshRequest, DatameshRevision, Addresses, BackingVolume, Peers, DeletionTimestamp, Finalizers changes | mapRVRToRV |
 | DRBDResourceOperation | Create/Delete of *-formation ops, Phase changes, Generation changes | Owns() |
 
 ## Indexes
@@ -365,10 +369,12 @@ flowchart TD
     end
 
     subgraph ensures [Ensure Helpers]
-        EnsureConfig[ensureRVConfiguration]
-        EnsurePending[ensureDatameshPendingReplicaTransitions]
+        EnsurePending[ensureDatameshReplicaRequests]
         EnsureAttachments[ensureDatameshAttachments]
-        EnsureCondConfig[ensureConditionConfigurationReady]
+    end
+
+    subgraph configReconciler [Configuration]
+        ReconcileConfig["reconcileRVConfiguration<br/>(Auto: RSC, Manual: spec)"]
     end
 
     subgraph outputs [Outputs]
@@ -379,8 +385,7 @@ flowchart TD
         RVAConditions[RVA conditions]
     end
 
-    RSCStatus --> EnsureConfig
-    RSCStatus --> EnsureCondConfig
+    RSCStatus --> ReconcileConfig
     RVRStatus --> EnsurePending
     RVRStatus --> ReconcileFormation
     RSP --> ReconcileFormation
@@ -393,10 +398,9 @@ flowchart TD
     RSP --> EnsureAttachments
 
     ReconcileMeta --> RVMeta
-    EnsureConfig --> RVStatus
+    ReconcileConfig --> RVStatus
     EnsurePending --> RVStatus
     EnsureAttachments --> RVStatus
-    EnsureCondConfig --> RVStatus
     ReconcileFormation --> RVStatus
     ReconcileFormation --> RVRManaged
     ReconcileFormation --> DRBDROp
@@ -439,9 +443,9 @@ flowchart TD
 
 ---
 
-### ensureDatameshPendingReplicaTransitions Details
+### ensureDatameshReplicaRequests Details
 
-**Purpose:** Synchronizes `rv.Status.DatameshPendingReplicaTransitions` with the current `DatameshPendingTransition` from each RVR. Uses a sorted merge algorithm for determinism.
+**Purpose:** Synchronizes `rv.Status.DatameshReplicaRequests` with the current `DatameshRequest` from each RVR. Uses a sorted merge algorithm for determinism.
 
 **Algorithm:**
 
@@ -467,26 +471,29 @@ flowchart TD
 
 | Input | Description |
 |-------|-------------|
-| `rv.Status.DatameshPendingReplicaTransitions` | Existing pending transitions |
-| `rvrs[].Status.DatameshPendingTransition` | Current pending transition per RVR |
+| `rv.Status.DatameshReplicaRequests` | Existing membership requests |
+| `rvrs[].Status.DatameshRequest` | Current membership request per RVR |
 
 | Output | Description |
 |--------|-------------|
-| `rv.Status.DatameshPendingReplicaTransitions` | Synchronized list (sorted by ID) |
+| `rv.Status.DatameshReplicaRequests` | Synchronized list (sorted by ID) |
 
 ---
 
-### reconcileFormationPhasePreconfigure Details
+### reconcileFormationStepPreconfigure Details
 
 **Purpose:** Creates diskful replicas and waits for them to become preconfigured (DRBD setup complete, ready for datamesh membership). Performs safety checks before advancing.
+
+**File:** `reconciler_formation.go`
 
 **Algorithm:**
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> ApplyTransition["applyFormationTransition(Preconfigure)<br/>Init: DatameshRevision=1, SystemNetworkNames, Size"]
-
-    ApplyTransition --> FindMisplaced["Find misplaced replicas<br/>(SatisfyEligibleNodes=False)"]
+    Start([Start]) --> Init{"First entry<br/>(transition just created)?"}
+    Init -->|Yes| InitConfig["Init: DatameshRevision=1,<br/>SystemNetworkNames, Size"]
+    Init -->|No| FindMisplaced
+    InitConfig --> FindMisplaced["Find misplaced replicas<br/>(SatisfyEligibleNodes=False)"]
     FindMisplaced --> FindDeleting["Find deleting replicas<br/>(DeletionTimestamp set)"]
     FindDeleting --> CollectDiskful["Collect active diskful replicas<br/>(exclude misplaced + deleting)"]
     CollectDiskful --> ComputeCount[computeIntendedDiskfulReplicaCount]
@@ -519,13 +526,13 @@ flowchart TD
     CheckAddresses -->|Yes| CheckEligible{"All on eligible nodes?"}
     CheckEligible -->|No| WaitTimeout3[Wait / restart if timeout]
 
-    CheckEligible -->|Yes| CheckSpec{"Spec matches<br/>pending transition?"}
+    CheckEligible -->|Yes| CheckSpec{"Spec matches<br/>membership request?"}
     CheckSpec -->|No| WaitTimeout4[Wait / restart if timeout]
 
     CheckSpec -->|Yes| CheckBVSize{"Backing volume<br/>size sufficient?"}
     CheckBVSize -->|No| WaitTimeout5[Wait / restart if timeout]
 
-    CheckBVSize -->|Yes| NextPhase([→ EstablishConnectivity])
+    CheckBVSize -->|Yes| NextStep(["advanceFormationStep → Establish connectivity"])
 ```
 
 **Data Flow:**
@@ -533,7 +540,7 @@ flowchart TD
 | Input | Description |
 |-------|-------------|
 | `rv.Spec.Size` | Target volume size |
-| `rv.Status.Configuration.Replication` | Replication mode (determines replica count) |
+| `rv.Status.Configuration` (FTT, GMDR) | Determines diskful replica count: D = FTT + GMDR + 1 |
 | `rsp` | Storage pool view (eligible nodes, system network names) |
 | `rvrs` | Current replicas (status: scheduled, preconfigured, addresses, backing volume) |
 
@@ -547,21 +554,23 @@ flowchart TD
 
 ---
 
-### reconcileFormationPhaseEstablishConnectivity Details
+### reconcileFormationStepEstablishConnectivity Details
 
 **Purpose:** Adds preconfigured replicas to the datamesh (with shared secret and quorum), then waits for DRBD configuration, peer connections, and replication establishment.
+
+**File:** `reconciler_formation.go`
 
 **Algorithm:**
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> ApplyTransition["applyFormationTransition(EstablishConnectivity)"]
-    ApplyTransition --> CollectDiskful[Collect active diskful replicas]
+    Start([Start]) --> CollectDiskful[Collect active diskful replicas]
 
     CollectDiskful --> CheckMembers{Datamesh members<br/>already set?}
     CheckMembers -->|No| GenSecret[generateSharedSecret]
-    GenSecret --> AddMembers["Add diskful replicas as datamesh members<br/>(zone, addresses, LVG from pending transition)"]
-    AddMembers --> SetQuorum[computeTargetQuorum]
+    GenSecret --> AddMembers["Add diskful replicas as datamesh members<br/>(zone, addresses, LVG from membership request)"]
+    AddMembers --> SetEL["Set EffectiveLayout<br/>(FTT/GMDR from configuration)"]
+    SetEL --> SetQuorum[computeTargetQuorum]
     SetQuorum --> IncrRevision["DatameshRevision++"]
     IncrRevision --> ReturnChanged([Return changed])
 
@@ -577,7 +586,7 @@ flowchart TD
     CheckConnected -->|Yes| CheckBootstrapReady{"All replicas ready for<br/>data bootstrap?<br/>(Inconsistent + Established)"}
     CheckBootstrapReady -->|No| WaitRestart4[Wait / restart if timeout]
 
-    CheckBootstrapReady -->|Yes| NextPhase([→ BootstrapData])
+    CheckBootstrapReady -->|Yes| NextStep(["advanceFormationStep → Bootstrap data"])
 ```
 
 **Data Flow:**
@@ -591,21 +600,23 @@ flowchart TD
 |--------|-------------|
 | `rv.Status.Datamesh.SharedSecret` | Generated DRBD shared secret |
 | `rv.Status.Datamesh.Members` | Datamesh member list |
-| `rv.Status.Datamesh.Quorum` | Quorum threshold |
+| `rv.Status.EffectiveLayout` | Set from Configuration (FTT/GMDR) |
+| `rv.Status.Datamesh.Quorum` | Quorum threshold (derived from EffectiveLayout) |
 | `rv.Status.DatameshRevision` | Incremented revision |
 
 ---
 
-### reconcileFormationPhaseBootstrapData Details
+### reconcileFormationStepBootstrapData Details
 
 **Purpose:** Creates a DRBDResourceOperation to trigger initial data synchronization, waits for completion, and finalizes formation.
+
+**File:** `reconciler_formation.go`
 
 **Algorithm:**
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> ApplyTransition["applyFormationTransition(BootstrapData)"]
-    ApplyTransition --> GetOp[getDRBDROp]
+    Start([Start]) --> GetOp[getDRBDROp]
     GetOp --> CheckStale{"Operation exists but<br/>created before current<br/>formation start?"}
     CheckStale -->|Yes| DeleteStale[Delete stale operation]
     DeleteStale --> CheckExists
@@ -625,7 +636,7 @@ flowchart TD
     CheckStatus -->|Succeeded| CheckUpToDate{"All replicas<br/>UpToDate?"}
 
     CheckUpToDate -->|No| WaitSync[Wait / restart if dataBootstrapTimeout]
-    CheckUpToDate -->|Yes| Complete["applyFormationTransitionAbsent<br/>(formation complete!)"]
+    CheckUpToDate -->|Yes| Complete["Remove Formation transition<br/>(formation complete!)"]
     Complete --> End([ContinueAndRequeue])
 ```
 
@@ -688,44 +699,70 @@ flowchart TD
 
 ---
 
-### ensureConditionConfigurationReady Details
+### reconcileRVConfiguration Details
 
-**Purpose:** Sets the `ConfigurationReady` condition based on RSC availability and configuration generation matching.
+**Purpose:** Derives `rv.Status.Configuration` from the appropriate source (RSC in Auto mode, `ManualConfiguration` in Manual mode), validates TransZonal zone count via RSP, and sets the `ConfigurationReady` condition. Also updates `ConfigurationGeneration` and `ConfigurationObservedGeneration`.
+
+**Caller control:** This function does NOT have an internal formation freeze guard. Instead, callers decide when to call it:
+- **Root Reconcile:** when `Configuration` is nil (initial set)
+- **Normal operation:** always (check for config updates)
+- **Formation reset:** after clearing `Configuration` to nil (re-derive)
+
+During formation, callers do NOT call this function (config is frozen).
 
 **Algorithm:**
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> CheckRSC{RSC exists?}
-    CheckRSC -->|No| SetWaiting1["False: WaitingForStorageClass<br/>(RSC not found)"]
-    SetWaiting1 --> End([Return])
+    Start([Start]) --> ComputeIntended["Compute intended config:<br/>Auto: from RSC<br/>Manual: from Spec.ManualConfiguration"]
 
-    CheckRSC -->|Yes| CheckRSCConfig{RSC has configuration?}
-    CheckRSCConfig -->|No| SetWaiting2["False: WaitingForStorageClass<br/>(RSC configuration not ready)"]
-    SetWaiting2 --> End
+    ComputeIntended --> CheckAutoSource{"Auto mode:<br/>RSC exists + has config?"}
+    CheckAutoSource -->|"RSC nil or no config"| SetWaiting["False: WaitingForStorageClass"]
+    SetWaiting --> End([Return])
+    CheckAutoSource -->|OK| ContentCheck
 
-    CheckRSCConfig -->|Yes| CheckGen{ConfigurationGeneration == 0?}
-    CheckGen -->|Yes| SetRollout["False: ConfigurationRolloutInProgress"]
-    SetRollout --> End
+    ComputeIntended --> ContentCheck{"Config content<br/>matches intended?"}
+    ContentCheck -->|Yes| UpdateGen["Update generation tracking<br/>(if changed)"]
+    UpdateGen --> SetReady1["True: Ready"]
+    SetReady1 --> End
 
-    CheckGen -->|No| CheckMatch{RV generation == RSC generation?}
-    CheckMatch -->|Yes| SetReady["True: Ready"]
-    CheckMatch -->|No| SetStale["False: StaleConfiguration"]
-    SetReady --> End
-    SetStale --> End
+    ContentCheck -->|No| CheckTransZonal{"TransZonal topology?"}
+    CheckTransZonal -->|Yes| LoadRSP["Load RSP zone count"]
+    LoadRSP --> RSPNotFound{"RSP not found?"}
+    RSPNotFound -->|Yes| SetInvalid1["False: InvalidConfiguration<br/>(RSP not found)"]
+    SetInvalid1 --> End
+    RSPNotFound -->|No| ValidateZones{"Zone count valid?"}
+    ValidateZones -->|No| SetInvalid2["False: InvalidConfiguration<br/>(zone count mismatch)"]
+    SetInvalid2 --> End
+    ValidateZones -->|Yes| SetConfig
+    CheckTransZonal -->|No| SetConfig
+
+    SetConfig["Set rv.Status.Configuration<br/>(DeepCopy) + generation"]
+    SetConfig --> SetReady2["True: Ready"]
+    SetReady2 --> End
 ```
+
+**Generation tracking:**
+- Auto mode: `ConfigurationGeneration` = RSC's `Status.ConfigurationGeneration` (used by rsc_controller for rollout tracking)
+- Manual mode: `ConfigurationGeneration` = 0 (no RSC rollout tracking)
+
+**Content-based fast path:** Instead of generation-based skipping, the function compares `*rv.Status.Configuration == *intended` (struct equality on 5 scalar fields). This avoids generation collision bugs when switching between Auto and Manual modes.
 
 **Data Flow:**
 
 | Input | Description |
 |-------|-------------|
-| `rsc` | ReplicatedStorageClass (may be nil) |
-| `rsc.Status.Configuration` | RSC configuration availability |
-| `rsc.Status.ConfigurationGeneration` | RSC generation for comparison |
-| `rv.Status.ConfigurationGeneration` | RV's stored generation |
+| `rv.Spec.ConfigurationMode` | Auto or Manual |
+| `rv.Spec.ManualConfiguration` | Manual mode source (guaranteed present by CEL) |
+| `rsc` | ReplicatedStorageClass (may be nil; Auto mode only) |
+| `rsc.Status.Configuration` | RSC configuration (Auto mode source) |
+| RSP (loaded via `getRSPZoneCount`) | Zone count for TransZonal validation |
 
 | Output | Description |
 |--------|-------------|
+| `rv.Status.Configuration` | Set/updated configuration |
+| `rv.Status.ConfigurationGeneration` | RSC generation (Auto) or 0 (Manual) |
+| `rv.Status.ConfigurationObservedGeneration` | Same as ConfigurationGeneration |
 | `ConfigurationReady` condition | Reports configuration state |
 
 ---
@@ -779,12 +816,12 @@ All guards passed: create Access RVR via `createAccessRVR` (sets `spec.type=Acce
 | 1 | Not Access type | Skip |
 | 2 | Already deleting (DeletionTimestamp set) | Skip |
 | 3 | Attached (datamesh member with attached=true) | Skip (hard invariant) |
-| 4 | Active Detach or AddAccessReplica transition for this replica | Skip (avoid churn) |
+| 4 | Active Detach or AddReplica transition for this replica | Skip (avoid churn) |
 | 5 | Another datamesh member on same node | **Delete** (redundant, even if RVA exists) |
 | 6 | No active (non-deleting) RVA on node | **Delete** (unused) |
 
 Deletion via `deleteRVR` (sets DeletionTimestamp). The existing pipeline handles the rest:
-- If datamesh member: rvr_controller forms leave pending, `ensureDatameshRemoveAccessReplica` creates RemoveAccessReplica transition, `reconcileRVRFinalizers` removes finalizer after completion.
+- If datamesh member: rvr_controller forms leave pending, `ensureDatameshRemoveReplica` creates RemoveReplica transition, `reconcileRVRFinalizers` removes finalizer after completion.
 - If not datamesh member: `reconcileRVRFinalizers` removes finalizer directly.
 
 **Data Flow:**
@@ -792,7 +829,7 @@ Deletion via `deleteRVR` (sets DeletionTimestamp). The existing pipeline handles
 | Input | Description |
 |-------|-------------|
 | `rv.Status.Datamesh.Members` | Attached check, redundancy check (other member on same node) |
-| `rv.Status.DatameshTransitions` | Active Detach/AddAccessReplica check |
+| `rv.Status.DatameshTransitions` | Active Detach/AddReplica check |
 | `rvrs` | Access RVRs to evaluate |
 | `rvas` | Active RVAs determine which nodes still need Access replicas |
 
@@ -812,10 +849,10 @@ Deletion via `deleteRVR` (sets DeletionTimestamp). The existing pipeline handles
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> BuildSets["Build diskfulMembers, accessMembers,<br/>index pendingReplicaTransitions by ID"]
+    Start([Start]) --> BuildSets["Build membersToConnect, accessMembers,<br/>index replicaRequests by ID"]
 
     BuildSets --> Loop1["Loop 1: existing transitions<br/>(reverse iteration)"]
-    Loop1 --> CheckType{AddAccessReplica or<br/>RemoveAccessReplica?}
+    Loop1 --> CheckType{AddReplica or<br/>RemoveReplica?}
     CheckType -->|No| SkipTransition[Skip]
     CheckType -->|Yes| Progress[ensureDatameshAccessReplicaTransitionProgress]
     Progress --> Completed{Completed?}
@@ -828,14 +865,14 @@ flowchart TD
 
     Loop1 -->|Done| Loop2["Loop 2: remaining pendings"]
     Loop2 --> CheckJoinLeave{Join or leave?}
-    CheckJoinLeave -->|Join| JoinFn[ensureDatameshAddAccessReplica]
-    CheckJoinLeave -->|Leave| LeaveFn[ensureDatameshRemoveAccessReplica]
+    CheckJoinLeave -->|Join| JoinFn[ensureDatameshAddReplica]
+    CheckJoinLeave -->|Leave| LeaveFn[ensureDatameshRemoveReplica]
     JoinFn --> Loop2
     LeaveFn --> Loop2
     Loop2 -->|Done| EndNode([Return EnsureOutcome])
 ```
 
-#### ensureDatameshAddAccessReplica (join guards)
+#### ensureDatameshAddReplica (join guards)
 
 | # | Guard | Outcome |
 |---|-------|---------|
@@ -848,9 +885,9 @@ flowchart TD
 | 7 | RSP nil | Message: "Waiting for ReplicatedStoragePool to be available" |
 | 8 | Node not in eligible nodes | Message: node name |
 
-All guards passed: add member to datamesh, increment revision, create AddAccessReplica transition.
+All guards passed: add member to datamesh, increment revision, create AddReplica transition.
 
-#### ensureDatameshRemoveAccessReplica (leave guards)
+#### ensureDatameshRemoveReplica (leave guards)
 
 | # | Guard | Outcome |
 |---|-------|---------|
@@ -858,21 +895,21 @@ All guards passed: add member to datamesh, increment revision, create AddAccessR
 | 2 | Member type is not Access | Skip (defensive) |
 | 3 | Member is attached | Message: "Cannot leave datamesh: replica is attached, detach required first" |
 
-All guards passed: remove member from datamesh, increment revision, create RemoveAccessReplica transition.
+All guards passed: remove member from datamesh, increment revision, create RemoveReplica transition.
 
 #### ensureDatameshAccessReplicaTransitionProgress
 
-Checks confirmation progress for a single AddAccessReplica or RemoveAccessReplica transition:
+Checks confirmation progress for a single AddReplica or RemoveReplica transition:
 
-- **Confirmation**: a replica is confirmed when `DatameshRevision >= transition.DatameshRevision`.
-- **RemoveAccessReplica special case**: the leaving replica also counts as confirmed when `DatameshRevision == 0` (it left the datamesh and reset its revision).
-- **Error reporting**: waiting replicas with `Configured=False` are reported as errors in the transition message. For AddAccessReplica, the subject replica's `Configured=False` with reason `PendingJoin` is expected and skipped (it has not joined the datamesh yet).
+- **Confirmation**: a replica is confirmed when `DatameshRevision >= step.DatameshRevision` (on the active step).
+- **RemoveReplica special case**: the leaving replica also counts as confirmed when `DatameshRevision == 0` (it left the datamesh and reset its revision).
+- **Error reporting**: waiting replicas with `Configured=False` are reported as errors in the transition message. For AddReplica, the subject replica's `Configured=False` with reason `PendingJoin` is expected and skipped (it has not joined the datamesh yet).
 
 **Data Flow:**
 
 | Input | Description |
 |-------|-------------|
-| `rv.Status.DatameshPendingReplicaTransitions` | Pending join/leave requests from RVRs |
+| `rv.Status.DatameshReplicaRequests` | Pending join/leave requests from RVRs |
 | `rv.Status.DatameshTransitions` | Active transitions |
 | `rv.Status.Datamesh.Members` | Current datamesh members |
 | `rv.Status.Configuration.VolumeAccess` | Volume access mode (Local blocks join) |
@@ -886,7 +923,7 @@ Checks confirmation progress for a single AddAccessReplica or RemoveAccessReplic
 | `rv.Status.Datamesh.Members` | Members added/removed |
 | `rv.Status.DatameshRevision` | Incremented on join/leave |
 | `rv.Status.DatameshTransitions` | Transitions created/completed/removed |
-| `rv.Status.DatameshPendingReplicaTransitions[].Message` | Progress/error messages |
+| `rv.Status.DatameshReplicaRequests[].Message` | Progress/error messages |
 
 ---
 
@@ -1058,11 +1095,11 @@ flowchart TD
 - `"Volume is being deleted"` (global block, not-yet-attached nodes — reason: ReplicatedVolumeDeleting)
 - `"Quorum not satisfied: no quorum on [#0]; agent not ready on [#1]"` (global block — reason: Pending; diagnostic detail from `computeActualQuorum`)
 - `"Waiting for attachment slot (slots occupied N/M)"` (no slot available — reason: Pending)
-- `"Node is not eligible for storage class X (pool Y)"` (RSP check — reason: NodeNotEligible)
+- `"Node is not eligible for storage class X (pool Y)"` (Auto mode) or `"Node is not eligible for pool Y"` (Manual mode) (RSP check — reason: NodeNotEligible)
 - `"Node is not ready"` / `"Agent is not ready on node"` (node health — reason: Pending)
 - `"No Diskful replica on this node (volumeAccess is Local for storage class X)"` (VolumeAccess locality — reason: VolumeAccessLocalityNotSatisfied)
 - `"Waiting for replica on node"` (no RVR on node — reason: WaitingForReplica)
-- `"Waiting for replica [#N] to join datamesh: ..."` (RVR exists but not a member yet, with pending transition message or Ready condition details — reason: WaitingForReplica)
+- `"Waiting for replica [#N] to join datamesh: ..."` (RVR exists but not a member yet, with membership request message or Ready condition details — reason: WaitingForReplica)
 
 **Data Flow:**
 
@@ -1117,11 +1154,11 @@ All guards passed: set `member.Attached=false`, increment `DatameshRevision`, cr
 | 1 | Already fully attached (member.Attached=true, no active Attach transition) | Skip (settled); conditionReason=Attached. If RV is deleting, message includes pending-deletion note |
 | 2 | Active Attach transition already exists | Skip |
 | 3 | Active Detach transition on same replica | Block: "Attach pending, waiting for detach to complete first" |
-| 4 | Active AddAccessReplica transition for same replica | Block: "Waiting for replica to join datamesh" |
+| 4 | Active AddReplica transition for same replica | Block: "Waiting for replica to join datamesh" |
 | 5 | No datamesh member (defensive) | Block: "Waiting for datamesh member" |
 | 6 | No RVR (defensive) | Block: "Waiting for replica" |
 | 7 | RVR Ready condition not True | Block: "Waiting for replica to become Ready" |
-| 8 | VolumeAccess=Local and member type is not Diskful | Block: "No Diskful replica on this node (volumeAccess is Local for storage class X)" |
+| 8 | VolumeAccess=Local and member type does not have backing volume (`HasBackingVolume`) | Block: "No Diskful replica on this node (volumeAccess is Local for storage class X)" |
 | 9 | potentiallyAttached non-empty + multiattach not enabled or EnableMultiattach in progress | Block: "Waiting for multiattach to be enabled" (with transition progress) |
 | 10 | potentiallyAttached non-empty + DisableMultiattach in progress (defensive) | Block: "Waiting for multiattach to be enabled, but disable is in progress" |
 | 11 | `atts.attachBlocked` (defensive) | Block: global block message. Should not be reached — see note below |

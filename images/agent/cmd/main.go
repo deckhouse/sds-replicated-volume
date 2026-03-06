@@ -32,6 +32,7 @@ import (
 	"github.com/deckhouse/sds-common-lib/slogh"
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
 
 func main() {
@@ -70,6 +71,9 @@ func disableDRBDUsermodeHelper(log *slog.Logger) {
 
 func run(ctx context.Context, log *slog.Logger) (err error) {
 	disableDRBDUsermodeHelper(log)
+
+	drbdsetup.DetectCapabilities()
+	log.Info("DRBD capabilities detected", "flantExtensions", drbdsetup.FlantExtensionsSupported)
 
 	// The derived Context is canceled the first time a function passed to eg.Go
 	// returns a non-nil error or the first time Wait returns

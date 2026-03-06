@@ -46,10 +46,10 @@ func RegisterRSCByStoragePool(mgr manager.Manager) error {
 			if !ok {
 				return nil
 			}
-			if rsc.Spec.StoragePool == "" {
+			if rsc.Spec.StoragePool == "" { //nolint:staticcheck // SA1019: migration from deprecated StoragePool
 				return nil
 			}
-			return []string{rsc.Spec.StoragePool}
+			return []string{rsc.Spec.StoragePool} //nolint:staticcheck // SA1019: migration from deprecated StoragePool
 		},
 	); err != nil {
 		return fmt.Errorf("index ReplicatedStorageClass by spec.storagePool: %w", err)

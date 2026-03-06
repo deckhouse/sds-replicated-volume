@@ -390,12 +390,12 @@ func ValidateReplicatedStorageClass(replicatedSC *srv.ReplicatedStorageClass, zo
 			case ReplicationAvailability, ReplicationConsistencyAndAvailability:
 				if len(replicatedSC.Spec.Zones) != 3 {
 					validationPassed = false
-					failedMsgBuilder.WriteString(fmt.Sprintf("Selected unacceptable amount of zones for replication type: %s; correct number of zones should be 3; ", replicatedSC.Spec.Replication))
+					fmt.Fprintf(&failedMsgBuilder, "Selected unacceptable amount of zones for replication type: %s; correct number of zones should be 3; ", replicatedSC.Spec.Replication)
 				}
 			case ReplicationNone:
 			default:
 				validationPassed = false
-				failedMsgBuilder.WriteString(fmt.Sprintf("Selected unsupported replication type: %s; ", replicatedSC.Spec.Replication))
+				fmt.Fprintf(&failedMsgBuilder, "Selected unsupported replication type: %s; ", replicatedSC.Spec.Replication)
 			}
 		}
 	case TopologyZonal:
@@ -414,7 +414,7 @@ func ValidateReplicatedStorageClass(replicatedSC *srv.ReplicatedStorageClass, zo
 		}
 	default:
 		validationPassed = false
-		failedMsgBuilder.WriteString(fmt.Sprintf("Selected unsupported topology: %s; ", replicatedSC.Spec.Topology))
+		fmt.Fprintf(&failedMsgBuilder, "Selected unsupported topology: %s; ", replicatedSC.Spec.Topology)
 	}
 
 	return validationPassed, failedMsgBuilder.String()
@@ -438,22 +438,22 @@ func CompareStorageClasses(newSC, oldSC *storagev1.StorageClass) (bool, string) 
 
 	if !reflect.DeepEqual(oldSC.Parameters, newSC.Parameters) {
 		equal = false
-		failedMsgBuilder.WriteString(fmt.Sprintf("Parameters are not equal (ReplicatedStorageClass parameters: %+v, StorageClass parameters: %+v); ", newSC.Parameters, oldSC.Parameters))
+		fmt.Fprintf(&failedMsgBuilder, "Parameters are not equal (ReplicatedStorageClass parameters: %+v, StorageClass parameters: %+v); ", newSC.Parameters, oldSC.Parameters)
 	}
 
 	if oldSC.Provisioner != newSC.Provisioner {
 		equal = false
-		failedMsgBuilder.WriteString(fmt.Sprintf("Provisioner are not equal (Old StorageClass: %s, New StorageClass: %s); ", oldSC.Provisioner, newSC.Provisioner))
+		fmt.Fprintf(&failedMsgBuilder, "Provisioner are not equal (Old StorageClass: %s, New StorageClass: %s); ", oldSC.Provisioner, newSC.Provisioner)
 	}
 
 	if *oldSC.ReclaimPolicy != *newSC.ReclaimPolicy {
 		equal = false
-		failedMsgBuilder.WriteString(fmt.Sprintf("ReclaimPolicy are not equal (Old StorageClass: %s, New StorageClass: %s", string(*oldSC.ReclaimPolicy), string(*newSC.ReclaimPolicy)))
+		fmt.Fprintf(&failedMsgBuilder, "ReclaimPolicy are not equal (Old StorageClass: %s, New StorageClass: %s", string(*oldSC.ReclaimPolicy), string(*newSC.ReclaimPolicy))
 	}
 
 	if *oldSC.VolumeBindingMode != *newSC.VolumeBindingMode {
 		equal = false
-		failedMsgBuilder.WriteString(fmt.Sprintf("VolumeBindingMode are not equal (Old StorageClass: %s, New StorageClass: %s); ", string(*oldSC.VolumeBindingMode), string(*newSC.VolumeBindingMode)))
+		fmt.Fprintf(&failedMsgBuilder, "VolumeBindingMode are not equal (Old StorageClass: %s, New StorageClass: %s); ", string(*oldSC.VolumeBindingMode), string(*newSC.VolumeBindingMode))
 	}
 
 	return equal, failedMsgBuilder.String()

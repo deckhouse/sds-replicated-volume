@@ -14,7 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package driver
+// TODO: rename package to avoid conflict with database/sql/driver (revive: var-naming).
+package driver //nolint:revive
 
 import (
 	"context"

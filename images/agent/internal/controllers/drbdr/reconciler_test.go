@@ -331,6 +331,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			drbdsetup.ResetNextDeviceMinor()
+			drbdsetup.FlantExtensionsSupported = false
 
 			// Build client with objects
 			clientBuilder := fake.NewClientBuilder().

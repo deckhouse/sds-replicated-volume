@@ -27,14 +27,14 @@ import (
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Tests: ensureDatameshAddAccessReplica
+// Tests: ensureDatameshAddReplica
 //
 
-var _ = Describe("ensureDatameshAddAccessReplica", func() {
-	mkRV := func(members []v1alpha1.ReplicatedVolumeDatameshMember, rev int64) *v1alpha1.ReplicatedVolume { //nolint:unparam
+var _ = Describe("ensureDatameshAddReplica", func() {
+	mkRV := func(members []v1alpha1.DatameshMember, rev int64) *v1alpha1.ReplicatedVolume { //nolint:unparam
 		return &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
 					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal,
 				},
 				DatameshRevision: rev,
@@ -45,12 +45,12 @@ var _ = Describe("ensureDatameshAddAccessReplica", func() {
 		}
 	}
 
-	mkJoinPending := func(name string) *v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition { //nolint:unparam
-		return &v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+	mkJoinRequest := func(name string) *v1alpha1.ReplicatedVolumeDatameshReplicaRequest { //nolint:unparam
+		return &v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 			Name: name,
-			Transition: v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-				Member: ptr.To(true),
-				Type:   v1alpha1.ReplicaTypeAccess,
+			Request: v1alpha1.DatameshMembershipRequest{
+				Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
+				Type:      v1alpha1.ReplicaTypeAccess,
 			},
 			FirstObservedAt: metav1.Now(),
 		}
@@ -77,14 +77,14 @@ var _ = Describe("ensureDatameshAddAccessReplica", func() {
 		}
 	}
 
-	It("creates AddAccessReplica transition and member", func() {
-		rv := mkRV([]v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-1"},
+	It("creates AddReplica transition and member", func() {
+		rv := mkRV([]v1alpha1.DatameshMember{
+			{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1"},
 		}, 5)
-		prt := mkJoinPending("rv-1-1")
+		replicaReq := mkJoinRequest("rv-1-1")
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-1", "node-2")}
 
-		changed := ensureDatameshAddAccessReplica(rv, rvrs, prt, idset.Of(0), mkRSP("node-1", "node-2"))
+		changed := ensureDatameshAddReplica(rv, rvrs, replicaReq, idset.Of(0), mkRSP("node-1", "node-2"))
 
 		Expect(changed).To(BeTrue())
 
@@ -92,7 +92,7 @@ var _ = Describe("ensureDatameshAddAccessReplica", func() {
 		Expect(rv.Status.Datamesh.Members).To(HaveLen(2))
 		newMember := rv.Status.Datamesh.FindMemberByName("rv-1-1")
 		Expect(newMember).NotTo(BeNil())
-		Expect(newMember.Type).To(Equal(v1alpha1.ReplicaTypeAccess))
+		Expect(newMember.Type).To(Equal(v1alpha1.DatameshMemberTypeAccess))
 		Expect(newMember.NodeName).To(Equal("node-2"))
 		Expect(newMember.Attached).To(BeFalse())
 
@@ -102,72 +102,72 @@ var _ = Describe("ensureDatameshAddAccessReplica", func() {
 		// Transition created with message from progress function.
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
 		t := rv.Status.DatameshTransitions[0]
-		Expect(t.Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica))
+		Expect(t.Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica))
 		Expect(t.ReplicaName).To(Equal("rv-1-1"))
-		Expect(t.DatameshRevision).To(Equal(int64(6)))
-		Expect(t.Message).To(ContainSubstring("0/2"))
-		Expect(t.Message).To(ContainSubstring("revision 6"))
+		Expect(t.Steps[0].DatameshRevision).To(Equal(int64(6)))
+		Expect(t.CurrentStep().Message).To(ContainSubstring("0/2"))
+		Expect(t.CurrentStep().Message).To(ContainSubstring("revision 6"))
 	})
 
 	It("skips when RV is deleting", func() {
 		rv := mkRV(nil, 5)
 		rv.DeletionTimestamp = ptr.To(metav1.Now())
-		prt := mkJoinPending("rv-1-1")
+		replicaReq := mkJoinRequest("rv-1-1")
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-1", "node-2")}
 
-		changed := ensureDatameshAddAccessReplica(rv, rvrs, prt, 0, nil)
+		changed := ensureDatameshAddReplica(rv, rvrs, replicaReq, 0, nil)
 
 		Expect(changed).To(BeTrue()) // message changed
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
-		Expect(prt.Message).To(ContainSubstring("Will not join datamesh"))
+		Expect(replicaReq.Message).To(ContainSubstring("Will not join datamesh"))
 	})
 
 	It("skips when already a datamesh member", func() {
-		rv := mkRV([]v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rv-1-1", Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-2"},
+		rv := mkRV([]v1alpha1.DatameshMember{
+			{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-2"},
 		}, 5)
-		prt := mkJoinPending("rv-1-1")
+		replicaReq := mkJoinRequest("rv-1-1")
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-1", "node-2")}
 
-		changed := ensureDatameshAddAccessReplica(rv, rvrs, prt, 0, nil)
+		changed := ensureDatameshAddReplica(rv, rvrs, replicaReq, 0, nil)
 
 		Expect(changed).To(BeFalse())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 	})
 
 	It("skips when any member on same node", func() {
-		rv := mkRV([]v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-2"},
+		rv := mkRV([]v1alpha1.DatameshMember{
+			{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-2"},
 		}, 5)
-		prt := mkJoinPending("rv-1-1")
+		replicaReq := mkJoinRequest("rv-1-1")
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-1", "node-2")}
 
-		changed := ensureDatameshAddAccessReplica(rv, rvrs, prt, idset.Of(0), nil)
+		changed := ensureDatameshAddReplica(rv, rvrs, replicaReq, idset.Of(0), nil)
 
 		Expect(changed).To(BeTrue()) // message changed
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
-		Expect(prt.Message).To(ContainSubstring("Diskful"))
-		Expect(prt.Message).To(ContainSubstring("node-2"))
+		Expect(replicaReq.Message).To(ContainSubstring("Diskful"))
+		Expect(replicaReq.Message).To(ContainSubstring("node-2"))
 	})
 
 	It("skips when VolumeAccess is Local", func() {
 		rv := mkRV(nil, 5)
 		rv.Status.Configuration.VolumeAccess = v1alpha1.VolumeAccessLocal
-		prt := mkJoinPending("rv-1-1")
+		replicaReq := mkJoinRequest("rv-1-1")
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-1", "node-2")}
 
-		changed := ensureDatameshAddAccessReplica(rv, rvrs, prt, 0, nil)
+		changed := ensureDatameshAddReplica(rv, rvrs, replicaReq, 0, nil)
 
 		Expect(changed).To(BeTrue()) // message changed
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
-		Expect(prt.Message).To(ContainSubstring("volumeAccess is Local"))
+		Expect(replicaReq.Message).To(ContainSubstring("volumeAccess is Local"))
 	})
 
 	It("skips silently when RVR not found", func() {
 		rv := mkRV(nil, 5)
-		prt := mkJoinPending("rv-1-1")
+		replicaReq := mkJoinRequest("rv-1-1")
 
-		changed := ensureDatameshAddAccessReplica(rv, nil, prt, 0, mkRSP("node-2"))
+		changed := ensureDatameshAddReplica(rv, nil, replicaReq, 0, mkRSP("node-2"))
 
 		Expect(changed).To(BeFalse())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
@@ -175,56 +175,56 @@ var _ = Describe("ensureDatameshAddAccessReplica", func() {
 
 	It("waits when addresses empty", func() {
 		rv := mkRV(nil, 5)
-		prt := mkJoinPending("rv-1-1")
+		replicaReq := mkJoinRequest("rv-1-1")
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rv-1-1"},
 			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-2"},
 		}
 
-		changed := ensureDatameshAddAccessReplica(rv, []*v1alpha1.ReplicatedVolumeReplica{rvr}, prt, 0, mkRSP("node-2"))
+		changed := ensureDatameshAddReplica(rv, []*v1alpha1.ReplicatedVolumeReplica{rvr}, replicaReq, 0, mkRSP("node-2"))
 
 		Expect(changed).To(BeTrue()) // message changed
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
-		Expect(prt.Message).To(ContainSubstring("addresses"))
+		Expect(replicaReq.Message).To(ContainSubstring("addresses"))
 	})
 
 	It("waits when RSP is nil", func() {
 		rv := mkRV(nil, 5)
-		prt := mkJoinPending("rv-1-1")
+		replicaReq := mkJoinRequest("rv-1-1")
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-1", "node-2")}
 
-		changed := ensureDatameshAddAccessReplica(rv, rvrs, prt, 0, nil)
+		changed := ensureDatameshAddReplica(rv, rvrs, replicaReq, 0, nil)
 
 		Expect(changed).To(BeTrue()) // message changed
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
-		Expect(prt.Message).To(ContainSubstring("ReplicatedStoragePool"))
+		Expect(replicaReq.Message).To(ContainSubstring("ReplicatedStoragePool"))
 	})
 
 	It("skips when node not in eligible nodes", func() {
 		rv := mkRV(nil, 5)
-		prt := mkJoinPending("rv-1-1")
+		replicaReq := mkJoinRequest("rv-1-1")
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-1", "node-2")}
 
-		changed := ensureDatameshAddAccessReplica(rv, rvrs, prt, 0, mkRSP("node-1"))
+		changed := ensureDatameshAddReplica(rv, rvrs, replicaReq, 0, mkRSP("node-1"))
 
 		Expect(changed).To(BeTrue()) // message changed
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
-		Expect(prt.Message).To(ContainSubstring("node-2"))
-		Expect(prt.Message).To(ContainSubstring("eligible"))
+		Expect(replicaReq.Message).To(ContainSubstring("node-2"))
+		Expect(replicaReq.Message).To(ContainSubstring("eligible"))
 	})
 
 	It("extracts zone from RSP eligible node", func() {
-		rv := mkRV([]v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-1"},
+		rv := mkRV([]v1alpha1.DatameshMember{
+			{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1"},
 		}, 5)
-		prt := mkJoinPending("rv-1-1")
+		replicaReq := mkJoinRequest("rv-1-1")
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-1", "node-2")}
 		rsp := &rspView{EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
 			{NodeName: "node-1", ZoneName: "zone-a"},
 			{NodeName: "node-2", ZoneName: "zone-b"},
 		}}
 
-		changed := ensureDatameshAddAccessReplica(rv, rvrs, prt, idset.Of(0), rsp)
+		changed := ensureDatameshAddReplica(rv, rvrs, replicaReq, idset.Of(0), rsp)
 
 		Expect(changed).To(BeTrue())
 		newMember := rv.Status.Datamesh.FindMemberByName("rv-1-1")
@@ -234,11 +234,11 @@ var _ = Describe("ensureDatameshAddAccessReplica", func() {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Tests: ensureDatameshRemoveAccessReplica
+// Tests: ensureDatameshRemoveReplica
 //
 
-var _ = Describe("ensureDatameshRemoveAccessReplica", func() {
-	mkRV := func(members []v1alpha1.ReplicatedVolumeDatameshMember, rev int64) *v1alpha1.ReplicatedVolume { //nolint:unparam
+var _ = Describe("ensureDatameshRemoveReplica", func() {
+	mkRV := func(members []v1alpha1.DatameshMember, rev int64) *v1alpha1.ReplicatedVolume { //nolint:unparam
 		return &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				DatameshRevision: rev,
@@ -249,24 +249,24 @@ var _ = Describe("ensureDatameshRemoveAccessReplica", func() {
 		}
 	}
 
-	mkLeavePending := func(name string) *v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition { //nolint:unparam
-		return &v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+	mkLeaveRequest := func(name string) *v1alpha1.ReplicatedVolumeDatameshReplicaRequest { //nolint:unparam
+		return &v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 			Name: name,
-			Transition: v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-				Member: ptr.To(false),
+			Request: v1alpha1.DatameshMembershipRequest{
+				Operation: v1alpha1.DatameshMembershipRequestOperationLeave,
 			},
 			FirstObservedAt: metav1.Now(),
 		}
 	}
 
-	It("creates RemoveAccessReplica transition and removes member", func() {
-		rv := mkRV([]v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-1"},
-			{Name: "rv-1-1", Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-2", Attached: false},
+	It("creates RemoveReplica transition and removes member", func() {
+		rv := mkRV([]v1alpha1.DatameshMember{
+			{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1"},
+			{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-2", Attached: false},
 		}, 5)
-		prt := mkLeavePending("rv-1-1")
+		replicaReq := mkLeaveRequest("rv-1-1")
 
-		changed := ensureDatameshRemoveAccessReplica(rv, nil, prt, idset.Of(0))
+		changed := ensureDatameshRemoveReplica(rv, nil, replicaReq, idset.Of(0))
 
 		Expect(changed).To(BeTrue())
 
@@ -280,59 +280,59 @@ var _ = Describe("ensureDatameshRemoveAccessReplica", func() {
 		// Transition created with message from progress function.
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
 		t := rv.Status.DatameshTransitions[0]
-		Expect(t.Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica))
+		Expect(t.Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica))
 		Expect(t.ReplicaName).To(Equal("rv-1-1"))
-		Expect(t.DatameshRevision).To(Equal(int64(6)))
-		Expect(t.Message).To(ContainSubstring("0/"))
+		Expect(t.Steps[0].DatameshRevision).To(Equal(int64(6)))
+		Expect(t.CurrentStep().Message).To(ContainSubstring("0/"))
 	})
 
 	It("skips when not a datamesh member", func() {
 		rv := mkRV(nil, 5)
-		prt := mkLeavePending("rv-1-1")
+		replicaReq := mkLeaveRequest("rv-1-1")
 
-		changed := ensureDatameshRemoveAccessReplica(rv, nil, prt, 0)
+		changed := ensureDatameshRemoveReplica(rv, nil, replicaReq, 0)
 
 		Expect(changed).To(BeFalse())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 	})
 
 	It("skips when member is attached", func() {
-		rv := mkRV([]v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rv-1-1", Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-2", Attached: true},
+		rv := mkRV([]v1alpha1.DatameshMember{
+			{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-2", Attached: true},
 		}, 5)
-		prt := mkLeavePending("rv-1-1")
+		replicaReq := mkLeaveRequest("rv-1-1")
 
-		changed := ensureDatameshRemoveAccessReplica(rv, nil, prt, 0)
+		changed := ensureDatameshRemoveReplica(rv, nil, replicaReq, 0)
 
 		Expect(changed).To(BeTrue()) // message changed
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.Datamesh.Members).To(HaveLen(1))
-		Expect(prt.Message).To(ContainSubstring("attached"))
+		Expect(replicaReq.Message).To(ContainSubstring("attached"))
 	})
 
 	It("works in detach-only mode (RV deleting)", func() {
-		rv := mkRV([]v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-1"},
-			{Name: "rv-1-1", Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-2", Attached: false},
+		rv := mkRV([]v1alpha1.DatameshMember{
+			{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1"},
+			{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-2", Attached: false},
 		}, 5)
 		rv.DeletionTimestamp = ptr.To(metav1.Now())
-		prt := mkLeavePending("rv-1-1")
+		replicaReq := mkLeaveRequest("rv-1-1")
 
-		changed := ensureDatameshRemoveAccessReplica(rv, nil, prt, idset.Of(0))
+		changed := ensureDatameshRemoveReplica(rv, nil, replicaReq, idset.Of(0))
 
 		// Leave still proceeds when RV is deleting (per section 13).
 		Expect(changed).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
-		Expect(rv.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica))
+		Expect(rv.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica))
 	})
 
 	It("skips when member type is not Access (defensive)", func() {
-		rv := mkRV([]v1alpha1.ReplicatedVolumeDatameshMember{
-			{Name: "rv-1-1", Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-2"},
+		rv := mkRV([]v1alpha1.DatameshMember{
+			{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-2"},
 		}, 5)
-		prt := mkLeavePending("rv-1-1")
+		replicaReq := mkLeaveRequest("rv-1-1")
 
-		changed := ensureDatameshRemoveAccessReplica(rv, nil, prt, 0)
+		changed := ensureDatameshRemoveReplica(rv, nil, replicaReq, 0)
 
 		Expect(changed).To(BeFalse())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
@@ -354,70 +354,74 @@ var _ = Describe("ensureDatameshAccessReplicaTransitionProgress", func() {
 		}
 	}
 
-	mkPRT := func(name string, join bool) *v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition { //nolint:unparam
-		return &v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
-			Name: name,
-			Transition: v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-				Member: ptr.To(join),
-				Type:   v1alpha1.ReplicaTypeAccess,
-			},
+	mkReplicaRequest := func(name string, join bool) *v1alpha1.ReplicatedVolumeDatameshReplicaRequest { //nolint:unparam
+		req := v1alpha1.DatameshMembershipRequest{}
+		if join {
+			req.Operation = v1alpha1.DatameshMembershipRequestOperationJoin
+			req.Type = v1alpha1.ReplicaTypeAccess
+		} else {
+			req.Operation = v1alpha1.DatameshMembershipRequestOperationLeave
+		}
+		return &v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+			Name:    name,
+			Request: req,
 		}
 	}
 
-	It("completes RemoveAccessReplica when all confirmed normally", func() {
+	It("completes RemoveReplica when all confirmed normally", func() {
 		t := &v1alpha1.ReplicatedVolumeDatameshTransition{
-			Type:             v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica,
-			DatameshRevision: 6, ReplicaName: "rv-1-1", StartedAt: metav1.Now(),
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+			ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())}},
 		}
-		prt := mkPRT("rv-1-1", false)
+		replicaReq := mkReplicaRequest("rv-1-1", false)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-0", 6), mkRVR("rv-1-1", 6)}
 
-		completed, changed := ensureDatameshAccessReplicaTransitionProgress(rvrs, t, prt, idset.Of(0))
+		completed, changed := ensureDatameshAccessReplicaTransitionProgress(rvrs, t, replicaReq, idset.Of(0))
 
 		Expect(completed).To(BeTrue())
 		Expect(changed).To(BeTrue())
-		Expect(prt.Message).To(Equal("Left datamesh successfully"))
+		Expect(replicaReq.Message).To(Equal("Left datamesh successfully"))
 	})
 
-	It("completes RemoveAccessReplica when subject has revision 0", func() {
+	It("completes RemoveReplica when subject has revision 0", func() {
 		t := &v1alpha1.ReplicatedVolumeDatameshTransition{
-			Type:             v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica,
-			DatameshRevision: 6, ReplicaName: "rv-1-1", StartedAt: metav1.Now(),
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+			ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())}},
 		}
-		prt := mkPRT("rv-1-1", false)
+		replicaReq := mkReplicaRequest("rv-1-1", false)
 		// Diskful confirmed (rev 6), subject reset revision to 0 (left datamesh).
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-0", 6), mkRVR("rv-1-1", 0)}
 
-		completed, changed := ensureDatameshAccessReplicaTransitionProgress(rvrs, t, prt, idset.Of(0))
+		completed, changed := ensureDatameshAccessReplicaTransitionProgress(rvrs, t, replicaReq, idset.Of(0))
 
 		Expect(completed).To(BeTrue())
 		Expect(changed).To(BeTrue())
-		Expect(prt.Message).To(Equal("Left datamesh successfully"))
+		Expect(replicaReq.Message).To(Equal("Left datamesh successfully"))
 	})
 
 	It("stays in progress when subject has revision 0 but diskful not confirmed", func() {
 		t := &v1alpha1.ReplicatedVolumeDatameshTransition{
-			Type:             v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica,
-			DatameshRevision: 6, ReplicaName: "rv-1-1", StartedAt: metav1.Now(),
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+			ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())}},
 		}
-		prt := mkPRT("rv-1-1", false)
+		replicaReq := mkReplicaRequest("rv-1-1", false)
 		// Subject reset (rev 0 = confirmed), but diskful still at rev 4.
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-0", 4), mkRVR("rv-1-1", 0)}
 
-		completed, changed := ensureDatameshAccessReplicaTransitionProgress(rvrs, t, prt, idset.Of(0))
+		completed, changed := ensureDatameshAccessReplicaTransitionProgress(rvrs, t, replicaReq, idset.Of(0))
 
 		Expect(completed).To(BeFalse())
 		Expect(changed).To(BeTrue()) // messages set
-		Expect(t.Message).To(ContainSubstring("1/2"))
-		Expect(prt.Message).To(ContainSubstring("Leaving datamesh"))
+		Expect(t.CurrentStep().Message).To(ContainSubstring("1/2"))
+		Expect(replicaReq.Message).To(ContainSubstring("Leaving datamesh"))
 	})
 
-	It("does not show PendingDatameshJoin as error for AddAccessReplica subject", func() {
+	It("does not show PendingDatameshJoin as error for AddReplica subject", func() {
 		t := &v1alpha1.ReplicatedVolumeDatameshTransition{
-			Type:             v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica,
-			DatameshRevision: 6, ReplicaName: "rv-1-1", StartedAt: metav1.Now(),
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
+			ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())}},
 		}
-		prt := mkPRT("rv-1-1", true)
+		replicaReq := mkReplicaRequest("rv-1-1", true)
 		// Diskful confirmed. Subject waiting with DRBDConfigured=False/PendingDatameshJoin.
 		subjectRVR := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rv-1-1", Generation: 1},
@@ -431,22 +435,22 @@ var _ = Describe("ensureDatameshAccessReplicaTransitionProgress", func() {
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-0", 6), subjectRVR}
 
-		completed, changed := ensureDatameshAccessReplicaTransitionProgress(rvrs, t, prt, idset.Of(0))
+		completed, changed := ensureDatameshAccessReplicaTransitionProgress(rvrs, t, replicaReq, idset.Of(0))
 
 		Expect(completed).To(BeFalse())
 		Expect(changed).To(BeTrue())
 		// PendingDatameshJoin should NOT appear in errors.
-		Expect(t.Message).NotTo(ContainSubstring("Errors"))
-		Expect(t.Message).NotTo(ContainSubstring("PendingDatameshJoin"))
-		Expect(t.Message).To(ContainSubstring("1/2"))
+		Expect(t.CurrentStep().Message).NotTo(ContainSubstring("Errors"))
+		Expect(t.CurrentStep().Message).NotTo(ContainSubstring("PendingDatameshJoin"))
+		Expect(t.CurrentStep().Message).To(ContainSubstring("1/2"))
 	})
 
-	It("shows other DRBDConfigured=False reasons as errors for AddAccessReplica subject", func() {
+	It("shows other DRBDConfigured=False reasons as errors for AddReplica subject", func() {
 		t := &v1alpha1.ReplicatedVolumeDatameshTransition{
-			Type:             v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica,
-			DatameshRevision: 6, ReplicaName: "rv-1-1", StartedAt: metav1.Now(),
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
+			ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())}},
 		}
-		prt := mkPRT("rv-1-1", true)
+		replicaReq := mkReplicaRequest("rv-1-1", true)
 		// Subject waiting with DRBDConfigured=False/ConfigurationFailed — this IS an error.
 		subjectRVR := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rv-1-1", Generation: 1},
@@ -460,12 +464,12 @@ var _ = Describe("ensureDatameshAccessReplicaTransitionProgress", func() {
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-0", 6), subjectRVR}
 
-		completed, changed := ensureDatameshAccessReplicaTransitionProgress(rvrs, t, prt, idset.Of(0))
+		completed, changed := ensureDatameshAccessReplicaTransitionProgress(rvrs, t, replicaReq, idset.Of(0))
 
 		Expect(completed).To(BeFalse())
 		Expect(changed).To(BeTrue())
-		Expect(t.Message).To(ContainSubstring("Errors"))
-		Expect(t.Message).To(ContainSubstring("ConfigurationFailed"))
+		Expect(t.CurrentStep().Message).To(ContainSubstring("Errors"))
+		Expect(t.CurrentStep().Message).To(ContainSubstring("ConfigurationFailed"))
 	})
 })
 
@@ -487,18 +491,18 @@ var _ = Describe("ensureDatameshAccessReplicas", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful},
-						{Name: "rv-1-1", Type: v1alpha1.ReplicaTypeAccess},
+					Members: []v1alpha1.DatameshMember{
+						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful},
+						{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess},
 					},
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica,
-						DatameshRevision: 6, ReplicaName: "rv-1-1", StartedAt: metav1.Now()},
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+						ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())}}},
 				},
-				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
-					{Name: "rv-1-1", Transition: v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-						Member: ptr.To(true), Type: v1alpha1.ReplicaTypeAccess,
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+					{Name: "rv-1-1", Request: v1alpha1.DatameshMembershipRequest{
+						Operation: v1alpha1.DatameshMembershipRequestOperationJoin, Type: v1alpha1.ReplicaTypeAccess,
 					}},
 				},
 			},
@@ -509,25 +513,25 @@ var _ = Describe("ensureDatameshAccessReplicas", func() {
 
 		Expect(outcome.DidChange()).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
-		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Message).To(ContainSubstring("Joined datamesh successfully"))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("Joined datamesh successfully"))
 	})
 
 	It("updates progress when transition not complete", func(ctx SpecContext) {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful},
-						{Name: "rv-1-1", Type: v1alpha1.ReplicaTypeAccess},
+					Members: []v1alpha1.DatameshMember{
+						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful},
+						{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess},
 					},
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica,
-						DatameshRevision: 6, ReplicaName: "rv-1-1", StartedAt: metav1.Now()},
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+						ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())}}},
 				},
-				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
-					{Name: "rv-1-1", Transition: v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-						Member: ptr.To(true), Type: v1alpha1.ReplicaTypeAccess,
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+					{Name: "rv-1-1", Request: v1alpha1.DatameshMembershipRequest{
+						Operation: v1alpha1.DatameshMembershipRequestOperationJoin, Type: v1alpha1.ReplicaTypeAccess,
 					}},
 				},
 			},
@@ -538,8 +542,8 @@ var _ = Describe("ensureDatameshAccessReplicas", func() {
 
 		Expect(outcome.DidChange()).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
-		Expect(rv.Status.DatameshTransitions[0].Message).To(ContainSubstring("1/2"))
-		Expect(rv.Status.DatameshTransitions[0].Message).To(ContainSubstring("#1"))
+		Expect(rv.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("1/2"))
+		Expect(rv.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("#1"))
 	})
 
 	It("surfaces errors from DRBDConfigured condition", func(ctx SpecContext) {
@@ -556,18 +560,18 @@ var _ = Describe("ensureDatameshAccessReplicas", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful},
-						{Name: "rv-1-1", Type: v1alpha1.ReplicaTypeAccess},
+					Members: []v1alpha1.DatameshMember{
+						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful},
+						{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess},
 					},
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica,
-						DatameshRevision: 6, ReplicaName: "rv-1-1", StartedAt: metav1.Now()},
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+						ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())}}},
 				},
-				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
-					{Name: "rv-1-1", Transition: v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-						Member: ptr.To(true), Type: v1alpha1.ReplicaTypeAccess,
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+					{Name: "rv-1-1", Request: v1alpha1.DatameshMembershipRequest{
+						Operation: v1alpha1.DatameshMembershipRequestOperationJoin, Type: v1alpha1.ReplicaTypeAccess,
 					}},
 				},
 			},
@@ -577,25 +581,25 @@ var _ = Describe("ensureDatameshAccessReplicas", func() {
 		outcome := ensureDatameshAccessReplicas(ctx, rv, rvrs, nil)
 
 		Expect(outcome.DidChange()).To(BeTrue())
-		Expect(rv.Status.DatameshTransitions[0].Message).To(ContainSubstring("Errors"))
-		Expect(rv.Status.DatameshTransitions[0].Message).To(ContainSubstring("ConfigurationFailed"))
+		Expect(rv.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("Errors"))
+		Expect(rv.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("ConfigurationFailed"))
 	})
 
 	It("handles missing RVR in progress message", func(ctx SpecContext) {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful},
+					Members: []v1alpha1.DatameshMember{
+						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful},
 					},
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica,
-						DatameshRevision: 6, ReplicaName: "rv-1-1", StartedAt: metav1.Now()},
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+						ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())}}},
 				},
-				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
-					{Name: "rv-1-1", Transition: v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-						Member: ptr.To(true), Type: v1alpha1.ReplicaTypeAccess,
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+					{Name: "rv-1-1", Request: v1alpha1.DatameshMembershipRequest{
+						Operation: v1alpha1.DatameshMembershipRequestOperationJoin, Type: v1alpha1.ReplicaTypeAccess,
 					}},
 				},
 			},
@@ -605,30 +609,30 @@ var _ = Describe("ensureDatameshAccessReplicas", func() {
 		outcome := ensureDatameshAccessReplicas(ctx, rv, rvrs, nil)
 
 		Expect(outcome.DidChange()).To(BeTrue())
-		Expect(rv.Status.DatameshTransitions[0].Message).To(ContainSubstring("#1 Replica not found"))
+		Expect(rv.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("#1 Replica not found"))
 	})
 
 	It("completes transition and then processes new join", func(ctx SpecContext) {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration:    &v1alpha1.ReplicatedStorageClassConfiguration{VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal},
+				Configuration:    &v1alpha1.ReplicatedVolumeConfiguration{VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal},
 				DatameshRevision: 6,
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-1"},
-						{Name: "rv-1-1", Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-2"},
+					Members: []v1alpha1.DatameshMember{
+						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1"},
+						{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-2"},
 					},
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica,
-						DatameshRevision: 6, ReplicaName: "rv-1-1", StartedAt: metav1.Now()},
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+						ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())}}},
 				},
-				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
-					{Name: "rv-1-1", Transition: v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-						Member: ptr.To(true), Type: v1alpha1.ReplicaTypeAccess,
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+					{Name: "rv-1-1", Request: v1alpha1.DatameshMembershipRequest{
+						Operation: v1alpha1.DatameshMembershipRequestOperationJoin, Type: v1alpha1.ReplicaTypeAccess,
 					}},
-					{Name: "rv-1-2", Transition: v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-						Member: ptr.To(true), Type: v1alpha1.ReplicaTypeAccess,
+					{Name: "rv-1-2", Request: v1alpha1.DatameshMembershipRequest{
+						Operation: v1alpha1.DatameshMembershipRequestOperationJoin, Type: v1alpha1.ReplicaTypeAccess,
 					}},
 				},
 			},
@@ -665,22 +669,22 @@ var _ = Describe("ensureDatameshAccessReplicas", func() {
 		Expect(rv.Status.DatameshRevision).To(Equal(int64(7)))
 	})
 
-	It("does not create join when RemoveAccessReplica is in progress (loop structure)", func(ctx SpecContext) {
+	It("does not create join when RemoveReplica is in progress (loop structure)", func(ctx SpecContext) {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				DatameshRevision: 6,
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-1"},
+					Members: []v1alpha1.DatameshMember{
+						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1"},
 					},
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica,
-						DatameshRevision: 5, ReplicaName: "rv-1-1", StartedAt: metav1.Now()},
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+						ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 5, StartedAt: ptr.To(metav1.Now())}}},
 				},
-				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
-					{Name: "rv-1-1", Transition: v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-						Member: ptr.To(true), Type: v1alpha1.ReplicaTypeAccess,
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+					{Name: "rv-1-1", Request: v1alpha1.DatameshMembershipRequest{
+						Operation: v1alpha1.DatameshMembershipRequestOperationJoin, Type: v1alpha1.ReplicaTypeAccess,
 					}},
 				},
 			},
@@ -696,29 +700,29 @@ var _ = Describe("ensureDatameshAccessReplicas", func() {
 		outcome := ensureDatameshAccessReplicas(ctx, rv, rvrs, nil)
 
 		Expect(outcome.DidChange()).To(BeTrue()) // progress message updated
-		// RemoveAccessReplica still in progress — not completed.
+		// RemoveReplica still in progress — not completed.
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
-		Expect(rv.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica))
-		// No AddAccessReplica created — loop structure prevents it.
+		Expect(rv.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica))
+		// No AddReplica created — loop structure prevents it.
 		Expect(rv.Status.Datamesh.Members).To(HaveLen(1))
 	})
 
 	It("processes multiple pendings in one call", func(ctx SpecContext) {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration:    &v1alpha1.ReplicatedStorageClassConfiguration{VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal},
+				Configuration:    &v1alpha1.ReplicatedVolumeConfiguration{VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal},
 				DatameshRevision: 5,
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-1"},
+					Members: []v1alpha1.DatameshMember{
+						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1"},
 					},
 				},
-				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
-					{Name: "rv-1-1", Transition: v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-						Member: ptr.To(true), Type: v1alpha1.ReplicaTypeAccess,
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+					{Name: "rv-1-1", Request: v1alpha1.DatameshMembershipRequest{
+						Operation: v1alpha1.DatameshMembershipRequestOperationJoin, Type: v1alpha1.ReplicaTypeAccess,
 					}},
-					{Name: "rv-1-2", Transition: v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-						Member: ptr.To(true), Type: v1alpha1.ReplicaTypeAccess,
+					{Name: "rv-1-2", Request: v1alpha1.DatameshMembershipRequest{
+						Operation: v1alpha1.DatameshMembershipRequestOperationJoin, Type: v1alpha1.ReplicaTypeAccess,
 					}},
 				},
 			},
@@ -742,25 +746,25 @@ var _ = Describe("ensureDatameshAccessReplicas", func() {
 		Expect(rv.Status.DatameshRevision).To(Equal(int64(7)))
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(2))
 		// Each has its own revision.
-		revs := []int64{rv.Status.DatameshTransitions[0].DatameshRevision, rv.Status.DatameshTransitions[1].DatameshRevision}
+		revs := []int64{rv.Status.DatameshTransitions[0].Steps[0].DatameshRevision, rv.Status.DatameshTransitions[1].Steps[0].DatameshRevision}
 		Expect(revs).To(ConsistOf(int64(6), int64(7)))
 	})
 
-	It("completes RemoveAccessReplica when subject has revision 0", func(ctx SpecContext) {
-		// After RemoveAccessReplica transition is created, the member is already removed from
+	It("completes RemoveReplica when subject has revision 0", func(ctx SpecContext) {
+		// After RemoveReplica transition is created, the member is already removed from
 		// datamesh. The pending leave for the (now non-member) replica is not indexed by the
-		// parent function (filtered as non-Access member), so prt is nil when checking progress.
+		// parent function (filtered as non-Access member), so replicaReq is nil when checking progress.
 		// The transition still completes based on confirmed revisions.
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful},
+					Members: []v1alpha1.DatameshMember{
+						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful},
 					},
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica,
-						DatameshRevision: 6, ReplicaName: "rv-1-1", StartedAt: metav1.Now()},
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+						ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())}}},
 				},
 			},
 		}
@@ -776,16 +780,16 @@ var _ = Describe("ensureDatameshAccessReplicas", func() {
 	It("blocks join when VolumeAccess is Local", func(ctx SpecContext) {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
-				Configuration:    &v1alpha1.ReplicatedStorageClassConfiguration{VolumeAccess: v1alpha1.VolumeAccessLocal},
+				Configuration:    &v1alpha1.ReplicatedVolumeConfiguration{VolumeAccess: v1alpha1.VolumeAccessLocal},
 				DatameshRevision: 5,
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-1"},
+					Members: []v1alpha1.DatameshMember{
+						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1"},
 					},
 				},
-				DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
-					{Name: "rv-1-1", Transition: v1alpha1.ReplicatedVolumeReplicaStatusDatameshPendingTransition{
-						Member: ptr.To(true), Type: v1alpha1.ReplicaTypeAccess,
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+					{Name: "rv-1-1", Request: v1alpha1.DatameshMembershipRequest{
+						Operation: v1alpha1.DatameshMembershipRequestOperationJoin, Type: v1alpha1.ReplicaTypeAccess,
 					}},
 				},
 			},
@@ -804,6 +808,44 @@ var _ = Describe("ensureDatameshAccessReplicas", func() {
 		Expect(outcome.DidChange()).To(BeTrue()) // message changed
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.Datamesh.Members).To(HaveLen(1))
-		Expect(rv.Status.DatameshPendingReplicaTransitions[0].Message).To(ContainSubstring("volumeAccess is Local"))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("volumeAccess is Local"))
+	})
+
+	It("includes ShadowDiskful in mustConfirm set for AddReplica transition", func(ctx SpecContext) {
+		// ShadowDiskful has ConnectsToAllPeers()=true, so it must confirm transitions.
+		// With Diskful(#0) at rev 6 and ShadowDiskful(#2) at rev 5,
+		// the transition should NOT complete because ShadowDiskful has not confirmed.
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.DatameshMember{
+						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful},
+						{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess},
+						{Name: "rv-1-2", Type: v1alpha1.DatameshMemberTypeShadowDiskful},
+					},
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+						ReplicaName: "rv-1-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())}}},
+				},
+				DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+					{Name: "rv-1-1", Request: v1alpha1.DatameshMembershipRequest{
+						Operation: v1alpha1.DatameshMembershipRequestOperationJoin, Type: v1alpha1.ReplicaTypeAccess,
+					}},
+				},
+			},
+		}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			{ObjectMeta: metav1.ObjectMeta{Name: "rv-1-0"}, Status: v1alpha1.ReplicatedVolumeReplicaStatus{DatameshRevision: 6}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "rv-1-1"}, Status: v1alpha1.ReplicatedVolumeReplicaStatus{DatameshRevision: 6}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "rv-1-2"}, Status: v1alpha1.ReplicatedVolumeReplicaStatus{DatameshRevision: 5}}, // not confirmed
+		}
+
+		outcome := ensureDatameshAccessReplicas(ctx, rv, rvrs, nil)
+
+		Expect(outcome.DidChange()).To(BeTrue())
+		// Transition should NOT be completed because ShadowDiskful(#2) has not confirmed.
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("#2"))
 	})
 })

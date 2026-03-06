@@ -63,15 +63,33 @@ func (rv *ReplicatedVolume) SetStatusConditions(conditions []metav1.Condition) {
 	rv.Status.Conditions = conditions
 }
 
+// Auto mode requires RSC name, forbids manualConfiguration:
+// +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Auto' || (size(self.replicatedStorageClassName) > 0 && !has(self.manualConfiguration))",message="Auto mode requires replicatedStorageClassName and must not have manualConfiguration."
+// Manual mode requires manualConfiguration, forbids RSC name:
+// +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Manual' || (has(self.manualConfiguration) && size(self.replicatedStorageClassName) == 0)",message="Manual mode requires manualConfiguration and must not have replicatedStorageClassName."
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeSpec struct {
 	// +kubebuilder:validation:Required
 	//	+kubebuilder:validation:XValidation:rule="quantity(string(self)).isGreaterThan(quantity('0'))",message="size must be greater than 0"
 	Size resource.Quantity `json:"size"`
 
-	// +kubebuilder:validation:Required
+	// ConfigurationMode selects how the volume configuration is determined.
+	// Auto (default): configuration is derived from the referenced ReplicatedStorageClass.
+	// Manual: configuration is specified directly in the manualConfiguration field.
+	// +kubebuilder:validation:Enum=Auto;Manual
+	// +kubebuilder:default=Auto
+	ConfigurationMode ReplicatedVolumeConfigurationMode `json:"configurationMode,omitempty"`
+
+	// ReplicatedStorageClassName references the RSC that provides configuration.
+	// Required when configurationMode is Auto. Must not be set when configurationMode is Manual.
+	// +optional
 	// +kubebuilder:validation:MinLength=1
-	ReplicatedStorageClassName string `json:"replicatedStorageClassName"`
+	ReplicatedStorageClassName string `json:"replicatedStorageClassName,omitempty"`
+
+	// ManualConfiguration specifies the volume configuration directly.
+	// Required when configurationMode is Manual. Must not be set when configurationMode is Auto.
+	// +optional
+	ManualConfiguration *ReplicatedVolumeConfiguration `json:"manualConfiguration,omitempty"`
 
 	// MaxAttachments is the maximum number of nodes this volume can be attached to simultaneously.
 	//
@@ -93,6 +111,48 @@ type ReplicatedVolumeSpec struct {
 	MaxAttachments byte `json:"maxAttachments"`
 }
 
+// ReplicatedVolumeConfigurationMode enumerates possible values for ReplicatedVolume spec.configurationMode field.
+type ReplicatedVolumeConfigurationMode string
+
+const (
+	// ReplicatedVolumeConfigurationModeAuto means configuration is derived from the referenced ReplicatedStorageClass.
+	ReplicatedVolumeConfigurationModeAuto ReplicatedVolumeConfigurationMode = "Auto"
+	// ReplicatedVolumeConfigurationModeManual means configuration is specified directly in the manual field.
+	ReplicatedVolumeConfigurationModeManual ReplicatedVolumeConfigurationMode = "Manual"
+)
+
+func (m ReplicatedVolumeConfigurationMode) String() string { return string(m) }
+
+// ReplicatedVolumeConfiguration represents the resolved volume configuration.
+// Always contains the resolved FTT/GMDR parameters (never the legacy replication field).
+// Used in rv.Status.Configuration, rv.Spec.ManualConfiguration, and rsc.Status.Configuration.
+//
+// Valid FTT/GMDR combinations: |FTT - GMDR| <= 1:
+// +kubebuilder:validation:XValidation:rule="self.failuresToTolerate - self.guaranteedMinimumDataRedundancy <= 1 && self.guaranteedMinimumDataRedundancy - self.failuresToTolerate <= 1",message="Invalid failuresToTolerate/guaranteedMinimumDataRedundancy combination: |FTT - GMDR| must be <= 1."
+//
+// FTT=0, GMDR=0 requires topology Ignored:
+// +kubebuilder:validation:XValidation:rule="!(self.failuresToTolerate == 0 && self.guaranteedMinimumDataRedundancy == 0) || self.topology == 'Ignored'",message="failuresToTolerate=0 with guaranteedMinimumDataRedundancy=0 requires topology Ignored."
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeConfiguration struct {
+	// ReplicatedStoragePoolName is the name of the ReplicatedStoragePool resource.
+	// +kubebuilder:validation:MinLength=1
+	ReplicatedStoragePoolName string `json:"replicatedStoragePoolName"`
+	// Topology is the resolved topology setting.
+	// +kubebuilder:validation:Enum=TransZonal;Zonal;Ignored
+	Topology ReplicatedStorageClassTopology `json:"topology"`
+	// FailuresToTolerate is the resolved FTT value.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2
+	FailuresToTolerate byte `json:"failuresToTolerate"`
+	// GuaranteedMinimumDataRedundancy is the resolved GMDR value.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2
+	GuaranteedMinimumDataRedundancy byte `json:"guaranteedMinimumDataRedundancy"`
+	// VolumeAccess is the resolved volume access mode.
+	// +kubebuilder:validation:Enum=Local;EventuallyLocal;PreferablyLocal;Any
+	VolumeAccess ReplicatedStorageClassVolumeAccess `json:"volumeAccess"`
+}
+
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeStatus struct {
 	// +listType=map
@@ -110,7 +170,7 @@ type ReplicatedVolumeStatus struct {
 
 	// Configuration is the desired configuration snapshot for this volume.
 	// +optional
-	Configuration *ReplicatedStorageClassConfiguration `json:"configuration,omitempty"`
+	Configuration *ReplicatedVolumeConfiguration `json:"configuration,omitempty"`
 
 	// ConfigurationGeneration is the RSC generation from which configuration was taken.
 	// +optional
@@ -133,22 +193,43 @@ type ReplicatedVolumeStatus struct {
 	// Datamesh is the computed datamesh configuration for the volume.
 	Datamesh ReplicatedVolumeDatamesh `json:"datamesh"`
 
+	// EffectiveLayout is the FTT/GMDR protection level that the datamesh
+	// actually provides right now. Reflects the real state of the cluster:
+	//   - May exceed BaselineLayout and Configuration during transitions
+	//     (e.g., a new voter was added but BaselineLayout has not been raised yet).
+	//   - May be less than BaselineLayout in degraded state (e.g., a lost voter
+	//     reduces effective FTT).
+	//   - Equals BaselineLayout when healthy; equals Configuration at steady state.
+	//   - Nil when the effective layout cannot be determined (e.g., no voter
+	//     replicas with ready agents to observe).
+	// +optional
+	EffectiveLayout *ReplicatedVolumeLayout `json:"effectiveLayout,omitempty"`
+
+	// BaselineLayout is the FTT/GMDR level that the datamesh has reached and
+	// committed to maintain. Computed from the committed datamesh topology
+	// (member count, q, qmr) and capped by Configuration:
+	//   - Rises toward Configuration as members are added and q/qmr confirmed.
+	//   - Never exceeds Configuration (capped at the target level).
+	//   - Decreases when Configuration is lowered (cap takes effect immediately).
+	//   - q and qmr are derived from these values.
+	BaselineLayout ReplicatedVolumeLayout `json:"baselineLayout"`
+
 	// DatameshTransitions is the list of active datamesh transitions.
 	// +listType=atomic
 	// +optional
 	DatameshTransitions []ReplicatedVolumeDatameshTransition `json:"datameshTransitions,omitempty"`
 
-	// DatameshPendingReplicaTransitions is the list of pending replica transitions.
-	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="datameshPendingReplicaTransitions[].name must be unique"
+	// DatameshReplicaRequests is the list of pending membership requests from replicas.
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="datameshReplicaRequests[].name must be unique"
 	// +kubebuilder:validation:MaxItems=32
 	// +listType=atomic
 	// +optional
-	DatameshPendingReplicaTransitions []ReplicatedVolumeDatameshPendingReplicaTransition `json:"datameshPendingReplicaTransitions,omitempty"`
+	DatameshReplicaRequests []ReplicatedVolumeDatameshReplicaRequest `json:"datameshReplicaRequests,omitempty"`
 }
 
-// ReplicatedVolumeDatameshPendingReplicaTransition represents a pending transition for a single replica.
+// ReplicatedVolumeDatameshReplicaRequest represents a pending membership request from a single replica.
 // +kubebuilder:object:generate=true
-type ReplicatedVolumeDatameshPendingReplicaTransition struct {
+type ReplicatedVolumeDatameshReplicaRequest struct {
 	// Name is the replica name.
 	// Must have format "prefix-N" where N is 0-31.
 	// +kubebuilder:validation:Required
@@ -157,65 +238,94 @@ type ReplicatedVolumeDatameshPendingReplicaTransition struct {
 	// +kubebuilder:validation:Pattern=`^.+-([0-9]|[12][0-9]|3[01])$`
 	Name string `json:"name"`
 
-	// Message is an optional human-readable message about the transition state and progress.
+	// Message is an optional human-readable message about the request state and progress.
 	// +kubebuilder:validation:MaxLength=512
 	// +optional
 	Message string `json:"message,omitempty"`
 
-	// Transition is the pending datamesh transition details from the replica.
+	// Request is the membership change request details from the replica.
 	// +kubebuilder:validation:Required
-	Transition ReplicatedVolumeReplicaStatusDatameshPendingTransition `json:"transition"`
+	Request DatameshMembershipRequest `json:"request"`
 
-	// FirstObservedAt is the timestamp when this transition was first observed.
+	// FirstObservedAt is the timestamp when this request was first observed.
 	// +kubebuilder:validation:Required
 	FirstObservedAt metav1.Time `json:"firstObservedAt"`
 }
 
 // ID extracts ID from the replica name (e.g., "pvc-xxx-5" → 5).
-func (t ReplicatedVolumeDatameshPendingReplicaTransition) ID() uint8 {
+func (t ReplicatedVolumeDatameshReplicaRequest) ID() uint8 {
 	return idFromName(t.Name)
 }
 
 // ReplicatedVolumeDatameshTransition represents an active datamesh transition.
+// Each transition has an ordered list of steps that are pre-declared on creation
+// and executed sequentially. The transition's start time is steps[0].startedAt.
 // +kubebuilder:object:generate=true
 //
-//	+kubebuilder:validation:XValidation:rule="self.type != 'Formation' || has(self.formation)",message="formation is required when type is Formation"
-//	+kubebuilder:validation:XValidation:rule="!has(self.formation) || self.type == 'Formation'",message="formation is only allowed when type is Formation"
-//	+kubebuilder:validation:XValidation:rule="self.type != 'Formation' || !has(self.datameshRevision) || self.datameshRevision == 0",message="datameshRevision must be absent (or zero) when type is Formation"
-//	+kubebuilder:validation:XValidation:rule="self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach' || has(self.replicaName)",message="replicaName is required for Attach, Detach, AddAccessReplica, RemoveAccessReplica transitions"
-//	+kubebuilder:validation:XValidation:rule="!has(self.replicaName) || !(self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach')",message="replicaName must not be set for Formation, EnableMultiattach, DisableMultiattach transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum' || has(self.replicaName)",message="replicaName is required for AddReplica, RemoveReplica, ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach transitions"
+//	+kubebuilder:validation:XValidation:rule="!has(self.replicaName) || !(self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum')",message="replicaName must not be set for Formation, EnableMultiattach, DisableMultiattach, ChangeQuorum transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type == 'AddReplica' || self.type == 'RemoveReplica' || self.type == 'ForceRemoveReplica' || !has(self.replicaType)",message="replicaType must only be set for AddReplica, RemoveReplica, ForceRemoveReplica transitions"
+//	+kubebuilder:validation:XValidation:rule="!(self.type == 'AddReplica' || self.type == 'RemoveReplica' || self.type == 'ForceRemoveReplica') || has(self.replicaType)",message="replicaType is required for AddReplica, RemoveReplica, ForceRemoveReplica transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type == 'ChangeReplicaType' || (!has(self.fromReplicaType) && !has(self.toReplicaType))",message="fromReplicaType and toReplicaType must only be set for ChangeReplicaType transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type != 'ChangeReplicaType' || (has(self.fromReplicaType) && has(self.toReplicaType))",message="fromReplicaType and toReplicaType are required for ChangeReplicaType transitions"
 type ReplicatedVolumeDatameshTransition struct {
 	// Type is the transition type.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=Formation;AddAccessReplica;Attach;Detach;DisableMultiattach;EnableMultiattach;RemoveAccessReplica
+	// +kubebuilder:validation:Enum=Formation;AddReplica;Attach;ChangeQuorum;ChangeReplicaType;Detach;DisableMultiattach;EnableMultiattach;ForceDetach;ForceRemoveReplica;RemoveReplica
 	Type ReplicatedVolumeDatameshTransitionType `json:"type"`
 
-	// DatameshRevision is the datamesh revision when this transition was introduced.
-	// Zero means unset. For Formation transitions, must be absent (zero).
-	// +optional
-	DatameshRevision int64 `json:"datameshRevision,omitempty"`
-
-	// Message is an optional human-readable message about the transition.
-	// +optional
-	Message string `json:"message,omitempty"`
-
-	// StartedAt is the timestamp when this transition started.
-	// +kubebuilder:validation:Required
-	StartedAt metav1.Time `json:"startedAt"`
-
 	// ReplicaName is the name of the replica this transition applies to.
-	// Required for Attach, Detach, AddAccessReplica, RemoveAccessReplica transitions.
-	// Must not be set for Formation, EnableMultiattach, DisableMultiattach.
+	// Required for AddReplica, RemoveReplica, ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach.
+	// Must not be set for Formation, EnableMultiattach, DisableMultiattach, ChangeQuorum.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=123
 	// +kubebuilder:validation:Pattern=`^.+-([0-9]|[12][0-9]|3[01])$`
 	// +optional
 	ReplicaName string `json:"replicaName,omitempty"`
 
-	// Formation holds formation-specific details.
-	// Required when type is "Formation"; must not be set otherwise.
+	// ReplicaType is the target replica type for AddReplica/RemoveReplica/ForceRemoveReplica.
+	// Uses ReplicaType (Diskful, Access, TieBreaker, ShadowDiskful) — liminal states
+	// (LiminalDiskful, LiminalShadowDiskful) are internal mechanics visible in step names,
+	// not in transition parameters.
+	// Required for AddReplica, RemoveReplica, ForceRemoveReplica. Must not be set for other types.
+	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker;ShadowDiskful
 	// +optional
-	Formation *ReplicatedVolumeDatameshTransitionFormation `json:"formation,omitempty"`
+	ReplicaType ReplicaType `json:"replicaType,omitempty"`
+
+	// FromReplicaType is the source replica type for ChangeReplicaType transitions.
+	// Required for ChangeReplicaType. Must not be set for other types.
+	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker;ShadowDiskful
+	// +optional
+	FromReplicaType ReplicaType `json:"fromReplicaType,omitempty"`
+
+	// ToReplicaType is the target replica type for ChangeReplicaType transitions.
+	// Required for ChangeReplicaType. Must not be set for other types.
+	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker;ShadowDiskful
+	// +optional
+	ToReplicaType ReplicaType `json:"toReplicaType,omitempty"`
+
+	// Group is the concurrency group for this transition.
+	// Set by the controller at transition creation time. Read-only for users.
+	// Provides observability: explains why a transition may be waiting.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=Formation;VotingMembership;NonVotingMembership;Quorum;Attachment;Multiattach;Emergency
+	Group ReplicatedVolumeDatameshTransitionGroup `json:"group"`
+
+	// PlanID identifies the transition plan used to create this transition.
+	// Used by the engine to look up step callbacks from the plan registry.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	PlanID string `json:"planID,omitempty"`
+
+	// Steps is the ordered list of steps for this transition.
+	// All steps are written when the transition is created (with status=Pending,
+	// and the first step immediately set to Active with startedAt).
+	// Steps are executed sequentially — only one step is Active at a time.
+	// Must have at least one element.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=8
+	// +listType=atomic
+	Steps []ReplicatedVolumeDatameshTransitionStep `json:"steps"`
 }
 
 // ReplicaID extracts ID from the replica name (e.g., "pvc-xxx-5" → 5).
@@ -227,6 +337,84 @@ func (t ReplicatedVolumeDatameshTransition) ReplicaID() uint8 {
 	return idFromName(t.ReplicaName)
 }
 
+// CurrentStep returns a pointer to the first non-Completed step, or nil if all steps are completed.
+func (t *ReplicatedVolumeDatameshTransition) CurrentStep() *ReplicatedVolumeDatameshTransitionStep {
+	for i := range t.Steps {
+		if t.Steps[i].Status != ReplicatedVolumeDatameshTransitionStepStatusCompleted {
+			return &t.Steps[i]
+		}
+	}
+	return nil
+}
+
+// IsCompleted returns true if all steps are completed.
+func (t *ReplicatedVolumeDatameshTransition) IsCompleted() bool {
+	for i := range t.Steps {
+		if t.Steps[i].Status != ReplicatedVolumeDatameshTransitionStepStatusCompleted {
+			return false
+		}
+	}
+	return true
+}
+
+// StartedAt returns the start time of the transition (= first step's StartedAt).
+// Returns zero time if the first step has no StartedAt (should not happen for valid transitions).
+func (t *ReplicatedVolumeDatameshTransition) StartedAt() metav1.Time {
+	if len(t.Steps) > 0 && t.Steps[0].StartedAt != nil {
+		return *t.Steps[0].StartedAt
+	}
+	return metav1.Time{}
+}
+
+// ReplicatedVolumeDatameshTransitionStep represents one step within a transition.
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeDatameshTransitionStep struct {
+	// Name is a human-readable step name (e.g., "Preconfigure", "attach", "✦ → D∅").
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=64
+	Name string `json:"name"`
+
+	// Status is the current status of this step.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=Pending;Active;Completed
+	// +kubebuilder:default="Pending"
+	Status ReplicatedVolumeDatameshTransitionStepStatus `json:"status"`
+
+	// DatameshRevision is the revision assigned when this step was activated.
+	// 0 if the step has not been activated yet or does not bump the revision.
+	// +optional
+	DatameshRevision int64 `json:"datameshRevision,omitempty"`
+
+	// StartedAt is set when the step transitions from Pending to Active.
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+
+	// CompletedAt is set when the step transitions from Active to Completed.
+	// +optional
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+
+	// Message is a per-step progress or error message.
+	// Updated every reconciliation while the step is Active.
+	// +kubebuilder:validation:MaxLength=512
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
+// ReplicatedVolumeDatameshTransitionStepStatus enumerates step statuses.
+type ReplicatedVolumeDatameshTransitionStepStatus string
+
+const (
+	// ReplicatedVolumeDatameshTransitionStepStatusPending indicates the step has not started yet.
+	ReplicatedVolumeDatameshTransitionStepStatusPending ReplicatedVolumeDatameshTransitionStepStatus = "Pending"
+	// ReplicatedVolumeDatameshTransitionStepStatusActive indicates the step is currently executing.
+	ReplicatedVolumeDatameshTransitionStepStatusActive ReplicatedVolumeDatameshTransitionStepStatus = "Active"
+	// ReplicatedVolumeDatameshTransitionStepStatusCompleted indicates the step has finished.
+	ReplicatedVolumeDatameshTransitionStepStatusCompleted ReplicatedVolumeDatameshTransitionStepStatus = "Completed"
+)
+
+func (s ReplicatedVolumeDatameshTransitionStepStatus) String() string { return string(s) }
+
 // ReplicatedVolumeDatameshTransitionType enumerates possible datamesh transition types.
 type ReplicatedVolumeDatameshTransitionType string
 
@@ -234,47 +422,54 @@ const (
 	// ReplicatedVolumeDatameshTransitionTypeFormation indicates initial datamesh formation.
 	ReplicatedVolumeDatameshTransitionTypeFormation ReplicatedVolumeDatameshTransitionType = "Formation"
 
-	// ReplicatedVolumeDatameshTransitionTypeAddAccessReplica indicates adding an Access replica to the datamesh.
-	ReplicatedVolumeDatameshTransitionTypeAddAccessReplica ReplicatedVolumeDatameshTransitionType = "AddAccessReplica"
+	// ReplicatedVolumeDatameshTransitionTypeAddReplica indicates adding a replica to the datamesh.
+	ReplicatedVolumeDatameshTransitionTypeAddReplica ReplicatedVolumeDatameshTransitionType = "AddReplica"
 	// ReplicatedVolumeDatameshTransitionTypeAttach indicates attaching a replica (promoting to Primary in DRBD terms).
 	ReplicatedVolumeDatameshTransitionTypeAttach ReplicatedVolumeDatameshTransitionType = "Attach"
+	// ReplicatedVolumeDatameshTransitionTypeChangeQuorum indicates a standalone quorum (q/qmr) change.
+	ReplicatedVolumeDatameshTransitionTypeChangeQuorum ReplicatedVolumeDatameshTransitionType = "ChangeQuorum"
+	// ReplicatedVolumeDatameshTransitionTypeChangeReplicaType indicates changing a member's type (e.g., Access to Diskful).
+	ReplicatedVolumeDatameshTransitionTypeChangeReplicaType ReplicatedVolumeDatameshTransitionType = "ChangeReplicaType"
 	// ReplicatedVolumeDatameshTransitionTypeDetach indicates detaching a replica (demoting from Primary in DRBD terms).
 	ReplicatedVolumeDatameshTransitionTypeDetach ReplicatedVolumeDatameshTransitionType = "Detach"
 	// ReplicatedVolumeDatameshTransitionTypeDisableMultiattach indicates disabling multi-attach (allowTwoPrimaries).
 	ReplicatedVolumeDatameshTransitionTypeDisableMultiattach ReplicatedVolumeDatameshTransitionType = "DisableMultiattach"
 	// ReplicatedVolumeDatameshTransitionTypeEnableMultiattach indicates enabling multi-attach (allowTwoPrimaries).
 	ReplicatedVolumeDatameshTransitionTypeEnableMultiattach ReplicatedVolumeDatameshTransitionType = "EnableMultiattach"
-	// ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica indicates removing an Access replica from the datamesh.
-	ReplicatedVolumeDatameshTransitionTypeRemoveAccessReplica ReplicatedVolumeDatameshTransitionType = "RemoveAccessReplica"
+	// ReplicatedVolumeDatameshTransitionTypeForceDetach indicates emergency IO detach for a dead member.
+	ReplicatedVolumeDatameshTransitionTypeForceDetach ReplicatedVolumeDatameshTransitionType = "ForceDetach"
+	// ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica indicates emergency removal of a dead member.
+	ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica ReplicatedVolumeDatameshTransitionType = "ForceRemoveReplica"
+	// ReplicatedVolumeDatameshTransitionTypeRemoveReplica indicates removing a replica from the datamesh.
+	ReplicatedVolumeDatameshTransitionTypeRemoveReplica ReplicatedVolumeDatameshTransitionType = "RemoveReplica"
 )
 
 func (t ReplicatedVolumeDatameshTransitionType) String() string {
 	return string(t)
 }
 
-// ReplicatedVolumeFormationPhase enumerates formation sub-phases.
-type ReplicatedVolumeFormationPhase string
+// ReplicatedVolumeDatameshTransitionGroup enumerates concurrency groups for transitions.
+// The group determines serialization and exclusivity rules (see TRANSITION_ENGINE.md §9).
+type ReplicatedVolumeDatameshTransitionGroup string
 
 const (
-	// ReplicatedVolumeFormationPhasePreconfigure is the initial phase where replicas are being created and preconfigured.
-	ReplicatedVolumeFormationPhasePreconfigure ReplicatedVolumeFormationPhase = "Preconfigure"
-	// ReplicatedVolumeFormationPhaseEstablishConnectivity is the phase where replicas establish DRBD connectivity.
-	ReplicatedVolumeFormationPhaseEstablishConnectivity ReplicatedVolumeFormationPhase = "EstablishConnectivity"
-	// ReplicatedVolumeFormationPhaseBootstrapData is the phase where initial data synchronization is bootstrapped.
-	ReplicatedVolumeFormationPhaseBootstrapData ReplicatedVolumeFormationPhase = "BootstrapData"
+	// ReplicatedVolumeDatameshTransitionGroupFormation is the formation group (exclusive).
+	ReplicatedVolumeDatameshTransitionGroupFormation ReplicatedVolumeDatameshTransitionGroup = "Formation"
+	// ReplicatedVolumeDatameshTransitionGroupVotingMembership is the voting membership group (serialized).
+	ReplicatedVolumeDatameshTransitionGroupVotingMembership ReplicatedVolumeDatameshTransitionGroup = "VotingMembership"
+	// ReplicatedVolumeDatameshTransitionGroupNonVotingMembership is the non-voting membership group (parallel).
+	ReplicatedVolumeDatameshTransitionGroupNonVotingMembership ReplicatedVolumeDatameshTransitionGroup = "NonVotingMembership"
+	// ReplicatedVolumeDatameshTransitionGroupQuorum is the quorum group (exclusive).
+	ReplicatedVolumeDatameshTransitionGroupQuorum ReplicatedVolumeDatameshTransitionGroup = "Quorum"
+	// ReplicatedVolumeDatameshTransitionGroupAttachment is the attachment group (parallel).
+	ReplicatedVolumeDatameshTransitionGroupAttachment ReplicatedVolumeDatameshTransitionGroup = "Attachment"
+	// ReplicatedVolumeDatameshTransitionGroupMultiattach is the multiattach group (exclusive with Attachment).
+	ReplicatedVolumeDatameshTransitionGroupMultiattach ReplicatedVolumeDatameshTransitionGroup = "Multiattach"
+	// ReplicatedVolumeDatameshTransitionGroupEmergency is the emergency group (preemptive).
+	ReplicatedVolumeDatameshTransitionGroupEmergency ReplicatedVolumeDatameshTransitionGroup = "Emergency"
 )
 
-func (p ReplicatedVolumeFormationPhase) String() string { return string(p) }
-
-// ReplicatedVolumeDatameshTransitionFormation holds formation-specific transition details.
-// +kubebuilder:object:generate=true
-type ReplicatedVolumeDatameshTransitionFormation struct {
-	// Phase is the current formation phase.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:default="Preconfigure"
-	// +kubebuilder:validation:Enum=Preconfigure;EstablishConnectivity;BootstrapData
-	Phase ReplicatedVolumeFormationPhase `json:"phase"`
-}
+func (g ReplicatedVolumeDatameshTransitionGroup) String() string { return string(g) }
 
 // ReplicatedVolumeDatamesh holds datamesh configuration for the volume.
 // +kubebuilder:object:generate=true
@@ -310,7 +505,7 @@ type ReplicatedVolumeDatamesh struct {
 	// +kubebuilder:validation:MaxItems=32
 	// +kubebuilder:default={}
 	// +listType=atomic
-	Members []ReplicatedVolumeDatameshMember `json:"members"`
+	Members []DatameshMember `json:"members"`
 
 	// Quorum is the quorum value for the datamesh.
 	// +kubebuilder:validation:Minimum=0
@@ -326,7 +521,7 @@ type ReplicatedVolumeDatamesh struct {
 }
 
 // FindMemberByName returns a pointer to the member with the given name, or nil if not found.
-func (dm *ReplicatedVolumeDatamesh) FindMemberByName(name string) *ReplicatedVolumeDatameshMember {
+func (dm *ReplicatedVolumeDatamesh) FindMemberByName(name string) *DatameshMember {
 	for i := range dm.Members {
 		if dm.Members[i].Name == name {
 			return &dm.Members[i]
@@ -350,16 +545,13 @@ func (a SharedSecretAlg) String() string {
 	return string(a)
 }
 
-// ReplicatedVolumeDatameshMember represents a member of the datamesh.
+// DatameshMember represents a member of the datamesh.
 // +kubebuilder:object:generate=true
-// +kubebuilder:validation:XValidation:rule="self.type != 'Diskful' || !has(self.typeTransition) || self.typeTransition == 'ToDiskless'",message="Diskful can only have ToDiskless typeTransition"
-// +kubebuilder:validation:XValidation:rule="self.type != 'TieBreaker' || !has(self.typeTransition) || self.typeTransition == 'ToDiskful'",message="TieBreaker can only have ToDiskful typeTransition"
-// +kubebuilder:validation:XValidation:rule="self.type != 'Access' || !has(self.typeTransition)",message="Access cannot have typeTransition"
 // +kubebuilder:validation:XValidation:rule="self.name.lastIndexOf('-') >= 0",message="name must contain '-' separator"
 // +kubebuilder:validation:XValidation:rule="int(self.name.substring(self.name.lastIndexOf('-') + 1)) <= 31",message="name numeric suffix must be between 0 and 31"
-// +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || self.type == 'Diskful' || (has(self.typeTransition) && self.typeTransition == 'ToDiskful')",message="lvmVolumeGroupName can only be set for Diskful type or when typeTransition is ToDiskful"
+// +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || self.type == 'Diskful' || self.type == 'LiminalDiskful'",message="lvmVolumeGroupName can only be set for Diskful or LiminalDiskful type"
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be set"
-type ReplicatedVolumeDatameshMember struct {
+type DatameshMember struct {
 	// Name is the member name (used as list map key).
 	// Must have format "prefix-N" where N is 0-31.
 	// +kubebuilder:validation:Required
@@ -367,14 +559,10 @@ type ReplicatedVolumeDatameshMember struct {
 	// +kubebuilder:validation:MaxLength=140
 	Name string `json:"name"`
 
-	// Type is the member type (Diskful, Access, or TieBreaker).
+	// Type is the member type.
 	// +kubebuilder:validation:Required
-	Type ReplicaType `json:"type"`
-
-	// TypeTransition indicates the desired type transition for this member.
-	// +kubebuilder:validation:Enum=ToDiskful;ToDiskless
-	// +optional
-	TypeTransition ReplicatedVolumeDatameshMemberTypeTransition `json:"typeTransition,omitempty"`
+	// +kubebuilder:validation:Enum=Diskful;LiminalDiskful;ShadowDiskful;LiminalShadowDiskful;TieBreaker;Access
+	Type DatameshMemberType `json:"type"`
 
 	// NodeName is the Kubernetes node name where the member is located.
 	// +kubebuilder:validation:Required
@@ -411,22 +599,125 @@ type ReplicatedVolumeDatameshMember struct {
 }
 
 // ID extracts ID from the member name (e.g., "pvc-xxx-5" → 5).
-func (m ReplicatedVolumeDatameshMember) ID() uint8 {
+func (m DatameshMember) ID() uint8 {
 	return idFromName(m.Name)
 }
 
-// ReplicatedVolumeDatameshMemberTypeTransition enumerates possible type transitions for datamesh members.
-type ReplicatedVolumeDatameshMemberTypeTransition string
+// DatameshMemberType enumerates possible types for datamesh members.
+// This is separate from ReplicaType because datamesh members have an additional
+// LiminalDiskful state that does not exist for RVR spec types.
+type DatameshMemberType string
 
 const (
-	// ReplicatedVolumeDatameshMemberTypeTransitionToDiskful indicates transition to Diskful type.
-	ReplicatedVolumeDatameshMemberTypeTransitionToDiskful ReplicatedVolumeDatameshMemberTypeTransition = "ToDiskful"
-	// ReplicatedVolumeDatameshMemberTypeTransitionToDiskless indicates transition to a diskless type (Access or TieBreaker).
-	ReplicatedVolumeDatameshMemberTypeTransitionToDiskless ReplicatedVolumeDatameshMemberTypeTransition = "ToDiskless"
+	// DatameshMemberTypeDiskful is a fully operational diskful member.
+	// DRBD is configured with the backing volume attached.
+	DatameshMemberTypeDiskful DatameshMemberType = DatameshMemberType(ReplicaTypeDiskful)
+
+	// DatameshMemberTypeLiminalDiskful is a diskful member in a preparatory
+	// (threshold) stage. A liminal member is already Diskful by role (quorum voter, full peer
+	// connectivity) but DRBD is configured as diskless. The backing volume is maintained but
+	// not attached to DRBD. This stage is entered during PromoteToDiskful and DemoteFromDiskful
+	// transitions but is skipped during Formation.
+	DatameshMemberTypeLiminalDiskful DatameshMemberType = DatameshMemberType("Liminal" + ReplicaTypeDiskful)
+
+	// DatameshMemberTypeShadowDiskful is a diskful member that pre-syncs data
+	// invisibly to quorum. DRBD is configured with the backing volume attached and
+	// non-voting=true. Excluded from quorum on all peers via allow-remote-read=false.
+	DatameshMemberTypeShadowDiskful DatameshMemberType = DatameshMemberType(ReplicaTypeShadowDiskful)
+
+	// DatameshMemberTypeLiminalShadowDiskful is a shadow diskful member in a preparatory
+	// stage. DRBD is configured as diskless. The backing volume is maintained but not
+	// attached to DRBD.
+	DatameshMemberTypeLiminalShadowDiskful DatameshMemberType = DatameshMemberType("Liminal" + ReplicaTypeShadowDiskful)
+
+	// DatameshMemberTypeTieBreaker is a diskless member that participates
+	// in tiebreaker voting.
+	DatameshMemberTypeTieBreaker DatameshMemberType = DatameshMemberType(ReplicaTypeTieBreaker)
+
+	// DatameshMemberTypeAccess is a diskless member used solely for volume attachment.
+	DatameshMemberTypeAccess DatameshMemberType = DatameshMemberType(ReplicaTypeAccess)
 )
 
-func (t ReplicatedVolumeDatameshMemberTypeTransition) String() string {
+func (t DatameshMemberType) String() string {
 	return string(t)
+}
+
+// IsVoter reports whether this member type participates in quorum voting.
+func (t DatameshMemberType) IsVoter() bool {
+	switch t {
+	case DatameshMemberTypeDiskful, DatameshMemberTypeLiminalDiskful:
+		return true
+	default:
+		return false
+	}
+}
+
+// HasBackingVolume reports whether DRBD is configured with a backing volume
+// for this member type.
+func (t DatameshMemberType) HasBackingVolume() bool {
+	switch t {
+	case DatameshMemberTypeDiskful, DatameshMemberTypeShadowDiskful:
+		return true
+	default:
+		return false
+	}
+}
+
+// NeedsBackingVolume reports whether this member type requires a backing volume
+// to be provisioned (even if DRBD is not yet configured with it).
+func (t DatameshMemberType) NeedsBackingVolume() bool {
+	switch t {
+	case DatameshMemberTypeDiskful, DatameshMemberTypeLiminalDiskful,
+		DatameshMemberTypeShadowDiskful, DatameshMemberTypeLiminalShadowDiskful:
+		return true
+	default:
+		return false
+	}
+}
+
+// ToLiminal returns the liminal variant of this member type.
+// Panics if this type has no liminal variant (only types with HasBackingVolume have one).
+func (t DatameshMemberType) ToLiminal() DatameshMemberType {
+	switch t {
+	case DatameshMemberTypeDiskful:
+		return DatameshMemberTypeLiminalDiskful
+	case DatameshMemberTypeShadowDiskful:
+		return DatameshMemberTypeLiminalShadowDiskful
+	default:
+		panic("no liminal variant for " + string(t))
+	}
+}
+
+// ConnectsToAllPeers reports whether this member type has full mesh peer
+// connectivity (connects to every other member in the datamesh).
+func (t DatameshMemberType) ConnectsToAllPeers() bool {
+	switch t {
+	case DatameshMemberTypeDiskful, DatameshMemberTypeLiminalDiskful,
+		DatameshMemberTypeShadowDiskful, DatameshMemberTypeLiminalShadowDiskful:
+		return true
+	default:
+		return false
+	}
+}
+
+// ReplicatedVolumeLayout describes the FTT/GMDR protection level of a volume.
+// FTT and GMDR together determine the DRBD layout, quorum (q), and
+// quorum-minimum-redundancy (qmr) parameters.
+//
+// Used for both EffectiveLayout (observability) and BaselineLayout (committed floor).
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeLayout struct {
+	// FailuresToTolerate is the FTT level.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2
+	// +kubebuilder:default=0
+	FailuresToTolerate byte `json:"failuresToTolerate"`
+
+	// GuaranteedMinimumDataRedundancy is the GMDR level.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2
+	// +kubebuilder:default=0
+	GuaranteedMinimumDataRedundancy byte `json:"guaranteedMinimumDataRedundancy"`
 }
 
 // ReplicatedVolumeEligibleNodesViolation describes a replica placed on a non-eligible node.

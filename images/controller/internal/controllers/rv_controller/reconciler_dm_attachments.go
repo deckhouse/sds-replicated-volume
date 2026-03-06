@@ -106,7 +106,7 @@ type attachmentState struct {
 
 	// Pointer into rv.Status.Datamesh.Members. nil = no member on this node.
 	// Mutations (member.Attached) go through this pointer.
-	member *v1alpha1.ReplicatedVolumeDatameshMember
+	member *v1alpha1.DatameshMember
 
 	// Pointer into rvrs slice. nil = no RVR found for this node's member.
 	// Read-only — any RVR field available without extra lookups.
@@ -162,12 +162,12 @@ func buildAttachmentsSummary(
 	rvas []*v1alpha1.ReplicatedVolumeAttachment,
 ) *attachmentsSummary {
 	// Sort members by NodeName for merge. Stack-allocated array avoids heap allocation.
-	var sortedMembers [32]*v1alpha1.ReplicatedVolumeDatameshMember
+	var sortedMembers [32]*v1alpha1.DatameshMember
 	numMembers := min(len(rv.Status.Datamesh.Members), 32)
 	for i := range numMembers {
 		sortedMembers[i] = &rv.Status.Datamesh.Members[i]
 	}
-	slices.SortFunc(sortedMembers[:numMembers], func(a, b *v1alpha1.ReplicatedVolumeDatameshMember) int {
+	slices.SortFunc(sortedMembers[:numMembers], func(a, b *v1alpha1.DatameshMember) int {
 		return cmp.Compare(a.NodeName, b.NodeName)
 	})
 
@@ -356,8 +356,13 @@ func computeDatameshAttachmentIntents(atts *attachmentsSummary, rv *v1alpha1.Rep
 		case en == nil:
 			as.intent = attachmentIntentPending
 			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonNodeNotEligible
-			as.conditionMessage = fmt.Sprintf("Node is not eligible for storage class %s (pool %s)",
-				rv.Spec.ReplicatedStorageClassName, rv.Status.Configuration.StoragePoolName)
+			if rv.Spec.ReplicatedStorageClassName != "" {
+				as.conditionMessage = fmt.Sprintf("Node is not eligible for storage class %s (pool %s)",
+					rv.Spec.ReplicatedStorageClassName, rv.Status.Configuration.ReplicatedStoragePoolName)
+			} else {
+				as.conditionMessage = fmt.Sprintf("Node is not eligible for pool %s",
+					rv.Status.Configuration.ReplicatedStoragePoolName)
+			}
 			continue
 		case !en.NodeReady:
 			as.intent = attachmentIntentPending
@@ -391,14 +396,14 @@ func computeDatameshAttachmentIntents(atts *attachmentsSummary, rv *v1alpha1.Rep
 				as.conditionMessage = "Waiting for replica on node"
 			} else {
 				rvrID := as.rvr.ID()
-				prtIdx := slices.IndexFunc(rv.Status.DatameshPendingReplicaTransitions, func(prt v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition) bool {
-					return prt.Name == as.rvr.Name && prt.Transition.Member != nil && *prt.Transition.Member
+				replicaReqIdx := slices.IndexFunc(rv.Status.DatameshReplicaRequests, func(replicaReq v1alpha1.ReplicatedVolumeDatameshReplicaRequest) bool {
+					return replicaReq.Name == as.rvr.Name && replicaReq.Request.Operation == v1alpha1.DatameshMembershipRequestOperationJoin
 				})
 				readyCond := obju.GetStatusCondition(as.rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
 				switch {
-				case prtIdx >= 0:
+				case replicaReqIdx >= 0:
 					as.conditionMessage = fmt.Sprintf("Waiting for replica [#%d] to join datamesh: %s",
-						rvrID, rv.Status.DatameshPendingReplicaTransitions[prtIdx].Message)
+						rvrID, rv.Status.DatameshReplicaRequests[replicaReqIdx].Message)
 				case readyCond != nil && readyCond.Message != "":
 					as.conditionMessage = fmt.Sprintf("Waiting for replica [#%d] to join datamesh: %s — %s",
 						rvrID, readyCond.Reason, readyCond.Message)
@@ -528,7 +533,7 @@ func ensureDatameshAttachDetachTransitionProgress(
 
 			// Attach completion: replica confirmed the revision.
 			if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach {
-				if as != nil && as.rvr != nil && as.rvr.Status.DatameshRevision >= t.DatameshRevision {
+				if as != nil && as.rvr != nil && as.rvr.Status.DatameshRevision >= t.Steps[0].DatameshRevision {
 					rv.Status.DatameshTransitions = slices.Delete(rv.Status.DatameshTransitions, i, i+1)
 					changed = true
 					continue
@@ -537,7 +542,7 @@ func ensureDatameshAttachDetachTransitionProgress(
 
 			// Detach completion: replica confirmed the revision, is no longer a datamesh member, or doesn't exist.
 			if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach {
-				if as == nil || as.rvr == nil || as.rvr.Status.DatameshRevision == 0 || as.rvr.Status.DatameshRevision >= t.DatameshRevision {
+				if as == nil || as.rvr == nil || as.rvr.Status.DatameshRevision == 0 || as.rvr.Status.DatameshRevision >= t.Steps[0].DatameshRevision {
 					rv.Status.DatameshTransitions = slices.Delete(rv.Status.DatameshTransitions, i, i+1)
 					changed = true
 					continue
@@ -556,9 +561,9 @@ func ensureDatameshAttachDetachTransitionProgress(
 			}
 
 			// Update transition and attachmentState progress messages.
-			progressMsg := computeDatameshTransitionProgressMessage(rvrs, t.DatameshRevision, idset.Of(replicaID), idset.IDSet(0), nil,
+			progressMsg := computeDatameshTransitionProgressMessage(rvrs, t.Steps[0].DatameshRevision, idset.Of(replicaID), idset.IDSet(0), nil,
 				v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
-			changed = applyTransitionMessage(t, progressMsg) || changed
+			changed = applyDatameshTransitionStepMessage(&t.Steps[0], progressMsg) || changed
 
 			if as != nil {
 				switch t.Type {
@@ -571,7 +576,7 @@ func ensureDatameshAttachDetachTransitionProgress(
 				}
 			}
 
-		case v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddAccessReplica:
+		case v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica:
 			// Not completed here (handled by ensureDatameshAccessReplicas), only index flag.
 			replicaID := t.ReplicaID()
 			if as := atts.attachmentStateByReplicaID[replicaID]; as != nil {
@@ -628,14 +633,14 @@ func ensureDatameshMultiattachTransitionProgress(
 			continue
 		}
 
-		// Must be confirmed by all Diskful members + any potentially-attached member.
-		mustConfirm := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.ReplicatedVolumeDatameshMember) bool {
-			return m.Type == v1alpha1.ReplicaTypeDiskful || m.Attached
+		// Must be confirmed by all members that have a backing volume + any potentially-attached member.
+		mustConfirm := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
+			return m.Type.HasBackingVolume() || m.Attached
 		}).Union(atts.potentiallyAttached)
 
 		// Completion: all required members confirmed revision.
 		confirmed := idset.FromWhere(rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-			return rvr.Status.DatameshRevision >= t.DatameshRevision
+			return rvr.Status.DatameshRevision >= t.Steps[0].DatameshRevision
 		}).Intersect(mustConfirm)
 
 		if confirmed == mustConfirm {
@@ -652,8 +657,8 @@ func ensureDatameshMultiattachTransitionProgress(
 		}
 
 		// Update transition progress message.
-		changed = applyTransitionMessage(t,
-			computeDatameshTransitionProgressMessage(rvrs, t.DatameshRevision, mustConfirm, confirmed, nil,
+		changed = applyDatameshTransitionStepMessage(&t.Steps[0],
+			computeDatameshTransitionProgressMessage(rvrs, t.Steps[0].DatameshRevision, mustConfirm, confirmed, nil,
 				v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
 		) || changed
 	}
@@ -682,11 +687,12 @@ func ensureDatameshMultiattachToggle(
 		rv.Status.Datamesh.Multiattach = true
 		rv.Status.DatameshRevision++
 		rv.Status.DatameshTransitions = append(rv.Status.DatameshTransitions,
-			v1alpha1.ReplicatedVolumeDatameshTransition{
-				Type:             v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach,
-				DatameshRevision: rv.Status.DatameshRevision,
-				StartedAt:        metav1.Now(),
-			},
+			makeDatameshSingleStepTransition(
+				v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach,
+				v1alpha1.ReplicatedVolumeDatameshTransitionGroupMultiattach,
+				"", "",
+				"Enable multiattach", rv.Status.DatameshRevision,
+			),
 		)
 		atts.hasActiveEnableMultiattachTransition = true
 		changed = true
@@ -699,11 +705,12 @@ func ensureDatameshMultiattachToggle(
 		rv.Status.Datamesh.Multiattach = false
 		rv.Status.DatameshRevision++
 		rv.Status.DatameshTransitions = append(rv.Status.DatameshTransitions,
-			v1alpha1.ReplicatedVolumeDatameshTransition{
-				Type:             v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach,
-				DatameshRevision: rv.Status.DatameshRevision,
-				StartedAt:        metav1.Now(),
-			},
+			makeDatameshSingleStepTransition(
+				v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach,
+				v1alpha1.ReplicatedVolumeDatameshTransitionGroupMultiattach,
+				"", "",
+				"Disable multiattach", rv.Status.DatameshRevision,
+			),
 		)
 		atts.hasActiveDisableMultiattachTransition = true
 		changed = true
@@ -775,15 +782,14 @@ func ensureDatameshDetachTransitions(
 		rv.Status.DatameshRevision++
 		msg := computeDatameshTransitionProgressMessage(rvrs, rv.Status.DatameshRevision, idset.Of(as.member.ID()), idset.IDSet(0), nil,
 			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
-		rv.Status.DatameshTransitions = append(rv.Status.DatameshTransitions,
-			v1alpha1.ReplicatedVolumeDatameshTransition{
-				Type:             v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach,
-				DatameshRevision: rv.Status.DatameshRevision,
-				ReplicaName:      as.member.Name,
-				StartedAt:        metav1.Now(),
-				Message:          msg,
-			},
+		t := makeDatameshSingleStepTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment,
+			as.member.Name, "",
+			"Detach", rv.Status.DatameshRevision,
 		)
+		t.Steps[0].Message = msg
+		rv.Status.DatameshTransitions = append(rv.Status.DatameshTransitions, t)
 		changed = true
 		as.hasActiveDetachTransition = true
 		as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching
@@ -836,7 +842,7 @@ func ensureDatameshAttachTransitions(
 			continue
 		}
 
-		// Guard: AddAccessReplica in progress for same replica.
+		// Guard: AddReplica in progress for same replica.
 		if as.hasActiveAddAccessTransition {
 			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica
 			as.conditionMessage = "Waiting for replica to join datamesh"
@@ -852,7 +858,7 @@ func ensureDatameshAttachTransitions(
 		}
 
 		// Defensive: should not happen — RVR is protected by a finalizer while the member
-		// is part of datamesh, so it cannot be deleted before RemoveAccessReplica completes.
+		// is part of datamesh, so it cannot be deleted before RemoveReplica completes.
 		if as.rvr == nil {
 			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica
 			as.conditionMessage = "Waiting for replica"
@@ -866,9 +872,9 @@ func ensureDatameshAttachTransitions(
 			continue
 		}
 
-		// Guard: VolumeAccess=Local requires a Diskful member on this node.
+		// Guard: VolumeAccess=Local requires a member with backing volume on this node.
 		if rv.Status.Configuration.VolumeAccess == v1alpha1.VolumeAccessLocal &&
-			as.member.Type != v1alpha1.ReplicaTypeDiskful {
+			!as.member.Type.HasBackingVolume() {
 			as.conditionReason = v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonVolumeAccessLocalityNotSatisfied
 			as.conditionMessage = fmt.Sprintf(
 				"No Diskful replica on this node (volumeAccess is Local for storage class %s)",
@@ -883,8 +889,8 @@ func ensureDatameshAttachTransitions(
 				as.conditionMessage = "Waiting for multiattach to be enabled"
 				for i := range rv.Status.DatameshTransitions {
 					if rv.Status.DatameshTransitions[i].Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach {
-						if m := rv.Status.DatameshTransitions[i].Message; m != "" {
-							as.conditionMessage += ". " + m
+						if step := rv.Status.DatameshTransitions[i].CurrentStep(); step != nil && step.Message != "" {
+							as.conditionMessage += ". " + step.Message
 						}
 						break
 					}
@@ -899,8 +905,8 @@ func ensureDatameshAttachTransitions(
 				as.conditionMessage = "Waiting for multiattach to be enabled, but disable is in progress and must complete first"
 				for i := range rv.Status.DatameshTransitions {
 					if rv.Status.DatameshTransitions[i].Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach {
-						if m := rv.Status.DatameshTransitions[i].Message; m != "" {
-							as.conditionMessage += ". " + m
+						if step := rv.Status.DatameshTransitions[i].CurrentStep(); step != nil && step.Message != "" {
+							as.conditionMessage += ". " + step.Message
 						}
 						break
 					}
@@ -923,15 +929,14 @@ func ensureDatameshAttachTransitions(
 		rv.Status.DatameshRevision++
 		msg := computeDatameshTransitionProgressMessage(rvrs, rv.Status.DatameshRevision, idset.Of(as.member.ID()), idset.IDSet(0), nil,
 			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
-		rv.Status.DatameshTransitions = append(rv.Status.DatameshTransitions,
-			v1alpha1.ReplicatedVolumeDatameshTransition{
-				Type:             v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach,
-				DatameshRevision: rv.Status.DatameshRevision,
-				ReplicaName:      as.member.Name,
-				StartedAt:        metav1.Now(),
-				Message:          msg,
-			},
+		t := makeDatameshSingleStepTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment,
+			as.member.Name, "",
+			"Attach", rv.Status.DatameshRevision,
 		)
+		t.Steps[0].Message = msg
+		rv.Status.DatameshTransitions = append(rv.Status.DatameshTransitions, t)
 		changed = true
 		as.hasActiveAttachTransition = true
 		atts.potentiallyAttached.Add(as.member.ID())

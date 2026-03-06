@@ -71,7 +71,73 @@ spec:
           metadata:
             type: object
           spec:
+            description: |-
+              Auto mode requires RSC name, forbids manualConfiguration:
+              Manual mode requires manualConfiguration, forbids RSC name:
             properties:
+              configurationMode:
+                default: Auto
+                description: |-
+                  ConfigurationMode selects how the volume configuration is determined.
+                  Auto (default): configuration is derived from the referenced ReplicatedStorageClass.
+                  Manual: configuration is specified directly in the manualConfiguration field.
+                enum:
+                - Auto
+                - Manual
+                type: string
+              manualConfiguration:
+                description: |-
+                  ManualConfiguration specifies the volume configuration directly.
+                  Required when configurationMode is Manual. Must not be set when configurationMode is Auto.
+                properties:
+                  failuresToTolerate:
+                    description: FailuresToTolerate is the resolved FTT value.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                  guaranteedMinimumDataRedundancy:
+                    description: GuaranteedMinimumDataRedundancy is the resolved GMDR
+                      value.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                  replicatedStoragePoolName:
+                    description: ReplicatedStoragePoolName is the name of the ReplicatedStoragePool
+                      resource.
+                    minLength: 1
+                    type: string
+                  topology:
+                    description: Topology is the resolved topology setting.
+                    enum:
+                    - TransZonal
+                    - Zonal
+                    - Ignored
+                    type: string
+                  volumeAccess:
+                    description: VolumeAccess is the resolved volume access mode.
+                    enum:
+                    - Local
+                    - EventuallyLocal
+                    - PreferablyLocal
+                    - Any
+                    type: string
+                required:
+                - failuresToTolerate
+                - guaranteedMinimumDataRedundancy
+                - replicatedStoragePoolName
+                - topology
+                - volumeAccess
+                type: object
+                x-kubernetes-validations:
+                - message: 'Invalid failuresToTolerate/guaranteedMinimumDataRedundancy
+                    combination: |FTT - GMDR| must be <= 1.'
+                  rule: self.failuresToTolerate - self.guaranteedMinimumDataRedundancy
+                    <= 1 && self.guaranteedMinimumDataRedundancy - self.failuresToTolerate
+                    <= 1
+                - message: failuresToTolerate=0 with guaranteedMinimumDataRedundancy=0
+                    requires topology Ignored.
+                  rule: '!(self.failuresToTolerate == 0 && self.guaranteedMinimumDataRedundancy
+                    == 0) || self.topology == ''Ignored'''
               maxAttachments:
                 default: 1
                 description: |-
@@ -91,6 +157,9 @@ spec:
                 minimum: 1
                 type: integer
               replicatedStorageClassName:
+                description: |-
+                  ReplicatedStorageClassName references the RSC that provides configuration.
+                  Required when configurationMode is Auto. Must not be set when configurationMode is Manual.
                 minLength: 1
                 type: string
               size:
@@ -104,9 +173,17 @@ spec:
                   rule: quantity(string(self)).isGreaterThan(quantity('0'))
             required:
             - maxAttachments
-            - replicatedStorageClassName
             - size
             type: object
+            x-kubernetes-validations:
+            - message: Auto mode requires replicatedStorageClassName and must not
+                have manualConfiguration.
+              rule: self.configurationMode != 'Auto' || (size(self.replicatedStorageClassName)
+                > 0 && !has(self.manualConfiguration))
+            - message: Manual mode requires manualConfiguration and must not have
+                replicatedStorageClassName.
+              rule: self.configurationMode != 'Manual' || (has(self.manualConfiguration)
+                && size(self.replicatedStorageClassName) == 0)
           status:
             properties:
               actuallyAttachedTo:
@@ -118,6 +195,32 @@ spec:
                 x-kubernetes-validations:
                 - message: actuallyAttachedTo must be unique
                   rule: self.all(x, self.exists_one(y, x == y))
+              baselineLayout:
+                description: |-
+                  BaselineLayout is the FTT/GMDR level that the datamesh has reached and
+                  committed to maintain. Computed from the committed datamesh topology
+                  (member count, q, qmr) and capped by Configuration:
+                    - Rises toward Configuration as members are added and q/qmr confirmed.
+                    - Never exceeds Configuration (capped at the target level).
+                    - Decreases when Configuration is lowered (cap takes effect immediately).
+                    - q and qmr are derived from these values.
+                properties:
+                  failuresToTolerate:
+                    default: 0
+                    description: FailuresToTolerate is the FTT level.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                  guaranteedMinimumDataRedundancy:
+                    default: 0
+                    description: GuaranteedMinimumDataRedundancy is the GMDR level.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                required:
+                - failuresToTolerate
+                - guaranteedMinimumDataRedundancy
+                type: object
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -181,17 +284,20 @@ spec:
                 description: Configuration is the desired configuration snapshot for
                   this volume.
                 properties:
-                  replication:
-                    description: Replication is the resolved replication mode.
-                    enum:
-                    - None
-                    - Availability
-                    - Consistency
-                    - ConsistencyAndAvailability
-                    type: string
-                  storagePoolName:
-                    description: StoragePoolName is the name of the ReplicatedStoragePool
-                      used by this RSC.
+                  failuresToTolerate:
+                    description: FailuresToTolerate is the resolved FTT value.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                  guaranteedMinimumDataRedundancy:
+                    description: GuaranteedMinimumDataRedundancy is the resolved GMDR
+                      value.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                  replicatedStoragePoolName:
+                    description: ReplicatedStoragePoolName is the name of the ReplicatedStoragePool
+                      resource.
                     minLength: 1
                     type: string
                   topology:
@@ -210,11 +316,22 @@ spec:
                     - Any
                     type: string
                 required:
-                - replication
-                - storagePoolName
+                - failuresToTolerate
+                - guaranteedMinimumDataRedundancy
+                - replicatedStoragePoolName
                 - topology
                 - volumeAccess
                 type: object
+                x-kubernetes-validations:
+                - message: 'Invalid failuresToTolerate/guaranteedMinimumDataRedundancy
+                    combination: |FTT - GMDR| must be <= 1.'
+                  rule: self.failuresToTolerate - self.guaranteedMinimumDataRedundancy
+                    <= 1 && self.guaranteedMinimumDataRedundancy - self.failuresToTolerate
+                    <= 1
+                - message: failuresToTolerate=0 with guaranteedMinimumDataRedundancy=0
+                    requires topology Ignored.
+                  rule: '!(self.failuresToTolerate == 0 && self.guaranteedMinimumDataRedundancy
+                    == 0) || self.topology == ''Ignored'''
               configurationGeneration:
                 description: ConfigurationGeneration is the RSC generation from which
                   configuration was taken.
@@ -233,8 +350,7 @@ spec:
                     default: []
                     description: Members is the list of datamesh members.
                     items:
-                      description: ReplicatedVolumeDatameshMember represents a member
-                        of the datamesh.
+                      description: DatameshMember represents a member of the datamesh.
                       properties:
                         addresses:
                           description: Addresses is the list of DRBD addresses for
@@ -301,15 +417,14 @@ spec:
                           minLength: 1
                           type: string
                         type:
-                          description: Type is the member type (Diskful, Access, or
-                            TieBreaker).
-                          type: string
-                        typeTransition:
-                          description: TypeTransition indicates the desired type transition
-                            for this member.
+                          description: Type is the member type.
                           enum:
-                          - ToDiskful
-                          - ToDiskless
+                          - Diskful
+                          - LiminalDiskful
+                          - ShadowDiskful
+                          - LiminalShadowDiskful
+                          - TieBreaker
+                          - Access
                           type: string
                         zone:
                           description: Zone is the zone where the member is located.
@@ -323,23 +438,15 @@ spec:
                       - type
                       type: object
                       x-kubernetes-validations:
-                      - message: Diskful can only have ToDiskless typeTransition
-                        rule: self.type != 'Diskful' || !has(self.typeTransition)
-                          || self.typeTransition == 'ToDiskless'
-                      - message: TieBreaker can only have ToDiskful typeTransition
-                        rule: self.type != 'TieBreaker' || !has(self.typeTransition)
-                          || self.typeTransition == 'ToDiskful'
-                      - message: Access cannot have typeTransition
-                        rule: self.type != 'Access' || !has(self.typeTransition)
                       - message: name must contain '-' separator
                         rule: self.name.lastIndexOf('-') >= 0
                       - message: name numeric suffix must be between 0 and 31
                         rule: int(self.name.substring(self.name.lastIndexOf('-') +
                           1)) <= 31
-                      - message: lvmVolumeGroupName can only be set for Diskful type
-                          or when typeTransition is ToDiskful
+                      - message: lvmVolumeGroupName can only be set for Diskful or
+                          LiminalDiskful type
                         rule: '!has(self.lvmVolumeGroupName) || self.type == ''Diskful''
-                          || (has(self.typeTransition) && self.typeTransition == ''ToDiskful'')'
+                          || self.type == ''LiminalDiskful'''
                       - message: lvmVolumeGroupThinPoolName requires lvmVolumeGroupName
                           to be set
                         rule: '!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)'
@@ -405,21 +512,21 @@ spec:
                 - size
                 - systemNetworkNames
                 type: object
-              datameshPendingReplicaTransitions:
-                description: DatameshPendingReplicaTransitions is the list of pending
-                  replica transitions.
+              datameshReplicaRequests:
+                description: DatameshReplicaRequests is the list of pending membership
+                  requests from replicas.
                 items:
-                  description: ReplicatedVolumeDatameshPendingReplicaTransition represents
-                    a pending transition for a single replica.
+                  description: ReplicatedVolumeDatameshReplicaRequest represents a
+                    pending membership request from a single replica.
                   properties:
                     firstObservedAt:
-                      description: FirstObservedAt is the timestamp when this transition
+                      description: FirstObservedAt is the timestamp when this request
                         was first observed.
                       format: date-time
                       type: string
                     message:
                       description: Message is an optional human-readable message about
-                        the transition state and progress.
+                        the request state and progress.
                       maxLength: 512
                       type: string
                     name:
@@ -430,8 +537,8 @@ spec:
                       minLength: 1
                       pattern: ^.+-([0-9]|[12][0-9]|3[01])$
                       type: string
-                    transition:
-                      description: Transition is the pending datamesh transition details
+                    request:
+                      description: Request is the membership change request details
                         from the replica.
                       properties:
                         lvmVolumeGroupName:
@@ -440,29 +547,42 @@ spec:
                           minLength: 1
                           pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
                           type: string
-                        member:
-                          description: Member indicates whether this replica should
-                            be a datamesh member.
-                          type: boolean
+                        operation:
+                          description: Operation is the type of membership change
+                            requested.
+                          enum:
+                          - Join
+                          - Leave
+                          - ChangeRole
+                          - ChangeBackingVolume
+                          type: string
                         thinPoolName:
                           description: ThinPoolName is the thin pool name (optional,
                             for LVMThin storage pools).
                           type: string
                         type:
-                          description: Type is the intended type when Member is true.
+                          description: Type is the intended replica type. Required
+                            for Join and ChangeRole operations.
                           enum:
                           - Diskful
                           - Access
                           - TieBreaker
                           type: string
+                      required:
+                      - operation
                       type: object
                       x-kubernetes-validations:
-                      - message: when member is false, type/lvmVolumeGroupName/thinPoolName
-                          must not be set
-                        rule: '!has(self.member) || self.member == true || (!has(self.type)
-                          && !has(self.lvmVolumeGroupName) && !has(self.thinPoolName))'
-                      - message: when member is true, type is required
-                        rule: '!has(self.member) || self.member == false || has(self.type)'
+                      - message: type is required for Join and ChangeRole operations
+                        rule: self.operation == 'Leave' || self.operation == 'ChangeBackingVolume'
+                          || has(self.type)
+                      - message: type/lvmVolumeGroupName/thinPoolName must not be
+                          set for Leave
+                        rule: self.operation != 'Leave' || (!has(self.type) && !has(self.lvmVolumeGroupName)
+                          && !has(self.thinPoolName))
+                      - message: ChangeBackingVolume requires lvmVolumeGroupName and
+                          must not set type
+                        rule: self.operation != 'ChangeBackingVolume' || (!has(self.type)
+                          && has(self.lvmVolumeGroupName))
                       - message: lvmVolumeGroupName is required when type is Diskful
                         rule: '!has(self.type) || self.type != ''Diskful'' || has(self.lvmVolumeGroupName)'
                       - message: lvmVolumeGroupName must not be set when type is not
@@ -473,13 +593,13 @@ spec:
                   required:
                   - firstObservedAt
                   - name
-                  - transition
+                  - request
                   type: object
                 maxItems: 32
                 type: array
                 x-kubernetes-list-type: atomic
                 x-kubernetes-validations:
-                - message: datameshPendingReplicaTransitions[].name must be unique
+                - message: datameshReplicaRequests[].name must be unique
                   rule: self.all(x, self.exists_one(y, x.name == y.name))
               datameshRevision:
                 description: DatameshRevision is a counter incremented when datamesh
@@ -489,83 +609,206 @@ spec:
               datameshTransitions:
                 description: DatameshTransitions is the list of active datamesh transitions.
                 items:
-                  description: ReplicatedVolumeDatameshTransition represents an active
-                    datamesh transition.
+                  description: |-
+                    ReplicatedVolumeDatameshTransition represents an active datamesh transition.
+                    Each transition has an ordered list of steps that are pre-declared on creation
+                    and executed sequentially. The transition's start time is steps[0].startedAt.
                   properties:
-                    datameshRevision:
+                    fromReplicaType:
                       description: |-
-                        DatameshRevision is the datamesh revision when this transition was introduced.
-                        Zero means unset. For Formation transitions, must be absent (zero).
-                      format: int64
-                      type: integer
-                    formation:
+                        FromReplicaType is the source replica type for ChangeReplicaType transitions.
+                        Required for ChangeReplicaType. Must not be set for other types.
+                      enum:
+                      - Diskful
+                      - Access
+                      - TieBreaker
+                      - ShadowDiskful
+                      type: string
+                    group:
                       description: |-
-                        Formation holds formation-specific details.
-                        Required when type is "Formation"; must not be set otherwise.
-                      properties:
-                        phase:
-                          default: Preconfigure
-                          description: Phase is the current formation phase.
-                          enum:
-                          - Preconfigure
-                          - EstablishConnectivity
-                          - BootstrapData
-                          type: string
-                      required:
-                      - phase
-                      type: object
-                    message:
-                      description: Message is an optional human-readable message about
-                        the transition.
+                        Group is the concurrency group for this transition.
+                        Set by the controller at transition creation time. Read-only for users.
+                        Provides observability: explains why a transition may be waiting.
+                      enum:
+                      - Formation
+                      - VotingMembership
+                      - NonVotingMembership
+                      - Quorum
+                      - Attachment
+                      - Multiattach
+                      - Emergency
+                      type: string
+                    planID:
+                      description: |-
+                        PlanID identifies the transition plan used to create this transition.
+                        Used by the engine to look up step callbacks from the plan registry.
+                      minLength: 1
                       type: string
                     replicaName:
                       description: |-
                         ReplicaName is the name of the replica this transition applies to.
-                        Required for Attach, Detach, AddAccessReplica, RemoveAccessReplica transitions.
-                        Must not be set for Formation, EnableMultiattach, DisableMultiattach.
+                        Required for AddReplica, RemoveReplica, ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach.
+                        Must not be set for Formation, EnableMultiattach, DisableMultiattach, ChangeQuorum.
                       maxLength: 123
                       minLength: 1
                       pattern: ^.+-([0-9]|[12][0-9]|3[01])$
                       type: string
-                    startedAt:
-                      description: StartedAt is the timestamp when this transition
-                        started.
-                      format: date-time
+                    replicaType:
+                      description: |-
+                        ReplicaType is the target replica type for AddReplica/RemoveReplica/ForceRemoveReplica.
+                        Uses ReplicaType (Diskful, Access, TieBreaker, ShadowDiskful) — liminal states
+                        (LiminalDiskful, LiminalShadowDiskful) are internal mechanics visible in step names,
+                        not in transition parameters.
+                        Required for AddReplica, RemoveReplica, ForceRemoveReplica. Must not be set for other types.
+                      enum:
+                      - Diskful
+                      - Access
+                      - TieBreaker
+                      - ShadowDiskful
+                      type: string
+                    steps:
+                      description: |-
+                        Steps is the ordered list of steps for this transition.
+                        All steps are written when the transition is created (with status=Pending,
+                        and the first step immediately set to Active with startedAt).
+                        Steps are executed sequentially — only one step is Active at a time.
+                        Must have at least one element.
+                      items:
+                        description: ReplicatedVolumeDatameshTransitionStep represents
+                          one step within a transition.
+                        properties:
+                          completedAt:
+                            description: CompletedAt is set when the step transitions
+                              from Active to Completed.
+                            format: date-time
+                            type: string
+                          datameshRevision:
+                            description: |-
+                              DatameshRevision is the revision assigned when this step was activated.
+                              0 if the step has not been activated yet or does not bump the revision.
+                            format: int64
+                            type: integer
+                          message:
+                            description: |-
+                              Message is a per-step progress or error message.
+                              Updated every reconciliation while the step is Active.
+                            maxLength: 512
+                            type: string
+                          name:
+                            description: Name is a human-readable step name (e.g.,
+                              "Preconfigure", "attach", "✦ → D∅").
+                            maxLength: 64
+                            minLength: 1
+                            type: string
+                          startedAt:
+                            description: StartedAt is set when the step transitions
+                              from Pending to Active.
+                            format: date-time
+                            type: string
+                          status:
+                            default: Pending
+                            description: Status is the current status of this step.
+                            enum:
+                            - Pending
+                            - Active
+                            - Completed
+                            type: string
+                        required:
+                        - name
+                        - status
+                        type: object
+                      maxItems: 8
+                      minItems: 1
+                      type: array
+                      x-kubernetes-list-type: atomic
+                    toReplicaType:
+                      description: |-
+                        ToReplicaType is the target replica type for ChangeReplicaType transitions.
+                        Required for ChangeReplicaType. Must not be set for other types.
+                      enum:
+                      - Diskful
+                      - Access
+                      - TieBreaker
+                      - ShadowDiskful
                       type: string
                     type:
                       description: Type is the transition type.
                       enum:
                       - Formation
-                      - AddAccessReplica
+                      - AddReplica
                       - Attach
+                      - ChangeQuorum
+                      - ChangeReplicaType
                       - Detach
                       - DisableMultiattach
                       - EnableMultiattach
-                      - RemoveAccessReplica
+                      - ForceDetach
+                      - ForceRemoveReplica
+                      - RemoveReplica
                       type: string
                   required:
-                  - startedAt
+                  - group
+                  - steps
                   - type
                   type: object
                   x-kubernetes-validations:
-                  - message: formation is required when type is Formation
-                    rule: self.type != 'Formation' || has(self.formation)
-                  - message: formation is only allowed when type is Formation
-                    rule: '!has(self.formation) || self.type == ''Formation'''
-                  - message: datameshRevision must be absent (or zero) when type is
-                      Formation
-                    rule: self.type != 'Formation' || !has(self.datameshRevision)
-                      || self.datameshRevision == 0
-                  - message: replicaName is required for Attach, Detach, AddAccessReplica,
-                      RemoveAccessReplica transitions
+                  - message: replicaName is required for AddReplica, RemoveReplica,
+                      ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach
+                      transitions
                     rule: self.type == 'Formation' || self.type == 'EnableMultiattach'
-                      || self.type == 'DisableMultiattach' || has(self.replicaName)
+                      || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum'
+                      || has(self.replicaName)
                   - message: replicaName must not be set for Formation, EnableMultiattach,
-                      DisableMultiattach transitions
+                      DisableMultiattach, ChangeQuorum transitions
                     rule: '!has(self.replicaName) || !(self.type == ''Formation''
-                      || self.type == ''EnableMultiattach'' || self.type == ''DisableMultiattach'')'
+                      || self.type == ''EnableMultiattach'' || self.type == ''DisableMultiattach''
+                      || self.type == ''ChangeQuorum'')'
+                  - message: replicaType must only be set for AddReplica, RemoveReplica,
+                      ForceRemoveReplica transitions
+                    rule: self.type == 'AddReplica' || self.type == 'RemoveReplica'
+                      || self.type == 'ForceRemoveReplica' || !has(self.replicaType)
+                  - message: replicaType is required for AddReplica, RemoveReplica,
+                      ForceRemoveReplica transitions
+                    rule: '!(self.type == ''AddReplica'' || self.type == ''RemoveReplica''
+                      || self.type == ''ForceRemoveReplica'') || has(self.replicaType)'
+                  - message: fromReplicaType and toReplicaType must only be set for
+                      ChangeReplicaType transitions
+                    rule: self.type == 'ChangeReplicaType' || (!has(self.fromReplicaType)
+                      && !has(self.toReplicaType))
+                  - message: fromReplicaType and toReplicaType are required for ChangeReplicaType
+                      transitions
+                    rule: self.type != 'ChangeReplicaType' || (has(self.fromReplicaType)
+                      && has(self.toReplicaType))
                 type: array
                 x-kubernetes-list-type: atomic
+              effectiveLayout:
+                description: |-
+                  EffectiveLayout is the FTT/GMDR protection level that the datamesh
+                  actually provides right now. Reflects the real state of the cluster:
+                    - May exceed BaselineLayout and Configuration during transitions
+                      (e.g., a new voter was added but BaselineLayout has not been raised yet).
+                    - May be less than BaselineLayout in degraded state (e.g., a lost voter
+                      reduces effective FTT).
+                    - Equals BaselineLayout when healthy; equals Configuration at steady state.
+                    - Nil when the effective layout cannot be determined (e.g., no voter
+                      replicas with ready agents to observe).
+                properties:
+                  failuresToTolerate:
+                    default: 0
+                    description: FailuresToTolerate is the FTT level.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                  guaranteedMinimumDataRedundancy:
+                    default: 0
+                    description: GuaranteedMinimumDataRedundancy is the GMDR level.
+                    maximum: 2
+                    minimum: 0
+                    type: integer
+                required:
+                - failuresToTolerate
+                - guaranteedMinimumDataRedundancy
+                type: object
               eligibleNodesViolations:
                 description: EligibleNodesViolations lists replicas placed on non-eligible
                   nodes.
@@ -597,6 +840,7 @@ spec:
                 - message: eligibleNodesViolations[].replicaName must be unique
                   rule: self.all(x, self.exists_one(y, x.replicaName == y.replicaName))
             required:
+            - baselineLayout
             - datamesh
             - datameshRevision
             type: object

@@ -16,7 +16,7 @@ The controller reconciles all RVRs belonging to a single `ReplicatedVolume` (RV)
 
 | Direction | Resource/Controller | Relationship |
 |-----------|---------------------|--------------|
-| ← input | ReplicatedVolume | Reads configuration (topology, replication, volumeAccess, storagePoolName), reservation annotation, volume size |
+| ← input | ReplicatedVolume | Reads configuration (topology, FTT, GMDR, volumeAccess, replicatedStoragePoolName), reservation annotation, volume size |
 | ← input | ReplicatedVolumeAttachment | Lists RVAs for the RV to determine attach-to nodes (via `getIntendedAttachments`) |
 | ← input | ReplicatedStoragePool | Reads eligible nodes (with node/LVG readiness and zone info), pool type |
 | ← input | ReplicatedVolumeReplica | Reads spec (type, nodeName, LVG), classifies by type/scheduling state/deletion |
@@ -196,15 +196,7 @@ All replicas (Diskful and TieBreaker) should land in the **same zone**.
 
 **Zone preference**: `computePreferredZones` selects zones with the **most Diskful replicas** (sticky behavior). If replicas are already spread across multiple zones (inconsistent state), all tied zones are preferred and a warning is logged.
 
-**Zone capacity penalty** (Diskful only): zones where the number of free nodes is less than `remainingDemand` receive a **-800** score penalty.
-
-| Replication mode | Required Diskful |
-|------------------|-----------------|
-| None | 1 |
-| Availability / Consistency | 2 |
-| ConsistencyAndAvailability | 3 |
-
-`remainingDemand = requiredDiskful - alreadyScheduledDiskful`. When `remainingDemand <= 0`, no penalty is applied.
+**Zone capacity penalty** (Diskful only): zones where the number of free nodes is less than `remainingDemand` receive a **-800** score penalty. Required Diskful count: `D = FTT + GMDR + 1`. `remainingDemand = D - alreadyScheduledDiskful`. When `remainingDemand <= 0`, no penalty is applied.
 
 ### TransZonal (round-robin)
 
@@ -215,6 +207,8 @@ Replicas should be **evenly spread** across zones.
 **TieBreaker zone preference**: zones with the fewest total replicas (Diskful + TieBreaker); among ties, zones with the fewest TieBreaker replicas (balances the tie-breaker quorum independently).
 
 No zone capacity penalty is applied for TransZonal — replicas are already spread by the zone filter.
+
+The scheduler uses greedy round-robin and does not enforce the max-D-per-zone constraint (`D − qmr`) or required zone counts directly. It relies on RSC-level CEL validation to restrict TransZonal to valid zone counts for each FTT/GMDR combination (e.g., FTT=2,GMDR=2 allows only 3 or 5 zones). Given valid zone counts, the round-robin naturally satisfies the distribution constraints.
 
 ## Scheduling Context
 
@@ -228,7 +222,8 @@ The `schedulingContext` is built once per Reconcile invocation by `computeSchedu
 | `ReservationID` | RV annotation or computed from LLV name | Scheduler-extender reservation key |
 | `Size` | `rv.Spec.Size` | Volume size in bytes |
 | `Topology` | `rv.Status.Configuration.Topology` | Zonal / TransZonal / Ignored |
-| `Replication` | `rv.Status.Configuration.Replication` | None / Availability / Consistency / ConsistencyAndAvailability |
+| `FailuresToTolerate` | `rv.Status.Configuration.FailuresToTolerate` | 0–2 |
+| `GuaranteedMinimumDataRedundancy` | `rv.Status.Configuration.GuaranteedMinimumDataRedundancy` | 0–2 |
 | `VolumeAccess` | `rv.Status.Configuration.VolumeAccess` | Any / Local / PreferablyLocal |
 | `ReplicasByZone` | Computed from eligible nodes + RVRs | Zone → IDSet of replicas in that zone |
 | `All` | RVRs | IDSet of all RVR IDs |
@@ -285,7 +280,7 @@ This controller does not manage finalizers, labels, or owner references. It only
 |-------|-------|---------|
 | `IndexFieldRVRByReplicatedVolumeName` | `spec.replicatedVolumeName` | List RVRs for an RV (used by `getRVRsByRVName`) |
 | `IndexFieldRVAByReplicatedVolumeName` | `spec.replicatedVolumeName` | List RVAs for an RV (used by `getIntendedAttachments`) |
-| `IndexFieldRVByStoragePoolName` | `status.configuration.storagePoolName` | Map RSP events to RVs (used by `mapRSPToRV`) |
+| `IndexFieldRVByStoragePoolName` | `status.configuration.replicatedStoragePoolName` | Map RSP events to RVs (used by `mapRSPToRV`) |
 
 ## Data Flow
 
@@ -348,7 +343,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     Start([computeSchedulingContext]) --> SortNodes[Sort eligibleNodes by NodeName]
-    SortNodes --> InitCtx["Initialize context:<br/>topology, replication, volumeAccess,<br/>attachToNodes, reservationID, size"]
+    SortNodes --> InitCtx["Initialize context:<br/>topology, FTT, GMDR, volumeAccess,<br/>attachToNodes, reservationID, size"]
 
     InitCtx --> LoopRVR{For each RVR}
     LoopRVR -->|Done| ComputeZones[computeReplicasByZone]
@@ -370,7 +365,7 @@ flowchart TD
 
 | Input | Description |
 |-------|-------------|
-| `rv.Status.Configuration` | Topology, replication, volumeAccess |
+| `rv.Status.Configuration` | Topology, FTT, GMDR, volumeAccess |
 | `attachToNodes` (from RVAs via `getIntendedAttachments`) | Preferred attachment nodes (sorted, deduplicated) |
 | `rv.Annotations[SchedulingReservationIDAnnotationKey]` | CSI reservation ID (if set) |
 | `rv.Spec.Size` | Volume size |

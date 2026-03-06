@@ -80,6 +80,7 @@ type ShowOptions struct {
 	OnNoQuorum                 string `json:"on-no-quorum"`
 	QuorumMinimumRedundancy    string `json:"quorum-minimum-redundancy"`
 	OnSuspendedPrimaryOutdated string `json:"on-suspended-primary-outdated"`
+	QuorumDynamicVoters        bool   `json:"quorum-dynamic-voters"`
 }
 
 type ShowThisHost struct {
@@ -115,6 +116,7 @@ type ShowVolumeDisk struct {
 	DiskTimeout            string `json:"disk-timeout"`
 	ReadBalancing          string `json:"read-balancing"`
 	RSDiscardGranularity   string `json:"rs-discard-granularity"`
+	NonVoting              bool   `json:"non-voting"`
 }
 
 type ShowConnection struct {
