@@ -58,9 +58,18 @@ func setType(memberType v1alpha1.DatameshMemberType) func(*globalContext, *Repli
 	}
 }
 
-// composeApply combines multiple apply callbacks into one.
+// composeGlobalApply combines multiple global-scoped apply callbacks into one.
+func composeGlobalApply(fns ...func(*globalContext)) func(*globalContext) {
+	return func(gctx *globalContext) {
+		for _, fn := range fns {
+			fn(gctx)
+		}
+	}
+}
+
+// composeReplicaApply combines multiple apply callbacks into one.
 // Used for composite steps (e.g., type change + q↑ in a single step).
-func composeApply(fns ...func(*globalContext, *ReplicaContext)) func(*globalContext, *ReplicaContext) {
+func composeReplicaApply(fns ...func(*globalContext, *ReplicaContext)) func(*globalContext, *ReplicaContext) {
 	return func(gctx *globalContext, rctx *ReplicaContext) {
 		for _, fn := range fns {
 			fn(gctx, rctx)
@@ -69,16 +78,15 @@ func composeApply(fns ...func(*globalContext, *ReplicaContext)) func(*globalCont
 }
 
 // setBackingVolumeFromRequest sets LVMVolumeGroupName and ThinPoolName
-// on the member from the membership request. Used via composeApply on steps
-// that first introduce a backing volume requirement (✦→D∅, ✦→sD∅, A→D∅, A→sD∅, TB→sD∅).
+// on the member from the membership request.
+// Steps: ✦→D∅, ✦→sD∅, A→D∅, A→sD∅, TB→sD∅.
 func setBackingVolumeFromRequest(_ *globalContext, rctx *ReplicaContext) {
 	rctx.member.LVMVolumeGroupName = rctx.membershipRequest.Request.LVMVolumeGroupName
 	rctx.member.LVMVolumeGroupThinPoolName = rctx.membershipRequest.Request.ThinPoolName
 }
 
-// clearBackingVolume clears LVMVolumeGroupName and ThinPoolName
-// from the member. Used via composeApply on steps that transition from a
-// disk-backed type to a diskless type (sD∅→A, sD∅→TB).
+// clearBackingVolume clears LVMVolumeGroupName and ThinPoolName from the member.
+// Steps: sD∅→A, sD∅→TB, D∅→A+q↓.
 func clearBackingVolume(_ *globalContext, rctx *ReplicaContext) {
 	rctx.member.LVMVolumeGroupName = ""
 	rctx.member.LVMVolumeGroupThinPoolName = ""

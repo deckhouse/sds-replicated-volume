@@ -990,3 +990,628 @@ var _ = Describe("AddReplica(D) diskful-via-sd-q-up-qmr-up/v1", func() {
 		Expect(rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy).To(Equal(byte(1)))
 	})
 })
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RemoveReplica(D)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Dispatch
+//
+
+var _ = Describe("RemoveReplica(D) dispatch", func() {
+	It("odd voters, no qmr↓ → remove-diskful/v1", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5), mkRVRUpToDate("rv-1-2", "node-3", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("remove-diskful/v1"))
+	})
+
+	It("odd voters, qmr↓ → remove-diskful-qmr-down/v1", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
+			nil,
+		)
+		rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy = 1
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5), mkRVRUpToDate("rv-1-2", "node-3", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("remove-diskful-qmr-down/v1"))
+	})
+
+	It("even voters, no qmr↓ → remove-diskful-q-down/v1", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-1")},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("remove-diskful-q-down/v1"))
+	})
+
+	It("even voters, qmr↓ → remove-diskful-qmr-down-q-down/v1", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-1")},
+			nil,
+		)
+		rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy = 1
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("remove-diskful-qmr-down-q-down/v1"))
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// remove-diskful/v1 (odd→even, no qmr↓) — 2 steps
+//
+
+var _ = Describe("RemoveReplica(D) remove-diskful/v1", func() {
+	It("creates transition, member = D∅", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5), mkRVRUpToDate("rv-1-2", "node-3", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.Datamesh.Members).To(HaveLen(3))
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-2")
+		Expect(m).NotTo(BeNil())
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeLiminalDiskful))
+		t := &rv.Status.DatameshTransitions[0]
+		Expect(t.Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica))
+		Expect(t.PlanID).To(Equal("remove-diskful/v1"))
+		Expect(t.Steps).To(HaveLen(2))
+		Expect(t.Steps[0].Name).To(Equal("D → D∅"))
+		Expect(t.Steps[1].Name).To(Equal("D∅ → ✕"))
+	})
+
+	It("step 1 confirmed → D∅ removed", func() {
+		t := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			ReplicaName: "rv-1-2", PlanID: "remove-diskful/v1",
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "D → D∅", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())},
+				{Name: "D∅ → ✕", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending},
+			},
+		}
+		rv := mkRV(6,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeLiminalDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5), mkRVRUpToDate("rv-1-2", "node-3", 6),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.Datamesh.Members).To(HaveLen(2))
+		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-2")).To(BeNil())
+		Expect(rv.Status.DatameshTransitions[0].Steps[0].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted))
+		Expect(rv.Status.DatameshTransitions[0].Steps[1].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive))
+	})
+
+	It("both confirmed → completed", func() {
+		t := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			ReplicaName: "rv-1-2", PlanID: "remove-diskful/v1",
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "D → D∅", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted, DatameshRevision: 6},
+				{Name: "D∅ → ✕", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 7, StartedAt: ptr.To(metav1.Now())},
+			},
+		}
+		rv := mkRV(7,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 7), mkRVRUpToDate("rv-1-1", "node-2", 7), mkRVRUpToDate("rv-1-2", "node-3", 0),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Left datamesh successfully"))
+	})
+
+	It("not a member → skip", func() {
+		rv := mkRV(5, nil, []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")}, nil)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-2", "node-3", 5)}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeFalse())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// remove-diskful-q-down/v1 (even→odd, A vestibule, q↓) — 3 steps
+//
+
+var _ = Describe("RemoveReplica(D) remove-diskful-q-down/v1", func() {
+	It("creates transition (3 steps)", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-1")},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		t := &rv.Status.DatameshTransitions[0]
+		Expect(t.PlanID).To(Equal("remove-diskful-q-down/v1"))
+		Expect(t.Steps).To(HaveLen(3))
+		Expect(t.Steps[0].Name).To(Equal("D → D∅"))
+		Expect(t.Steps[1].Name).To(Equal("D∅ → A + q↓"))
+		Expect(t.Steps[2].Name).To(Equal("A → ✕"))
+	})
+
+	It("D∅ → A + q↓: type, BV cleared, q lowered", func() {
+		t := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			ReplicaName: "rv-1-1", PlanID: "remove-diskful-q-down/v1",
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "D → D∅", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())},
+				{Name: "D∅ → A + q↓", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending},
+				{Name: "A → ✕", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending},
+			},
+		}
+		rv := mkRV(6,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeLiminalDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		rv.Status.Datamesh.Quorum = 2
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 6),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
+		Expect(m).NotTo(BeNil())
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeAccess))
+		Expect(m.LVMVolumeGroupName).To(BeEmpty())
+		Expect(m.LVMVolumeGroupThinPoolName).To(BeEmpty())
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)))
+	})
+
+	It("A removed → completed", func() {
+		t := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			ReplicaName: "rv-1-1", PlanID: "remove-diskful-q-down/v1",
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "D → D∅", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted, DatameshRevision: 6},
+				{Name: "D∅ → A + q↓", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted, DatameshRevision: 7},
+				{Name: "A → ✕", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 8, StartedAt: ptr.To(metav1.Now())},
+			},
+		}
+		rv := mkRV(8,
+			[]v1alpha1.DatameshMember{mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 8), mkRVRUpToDate("rv-1-1", "node-2", 0),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Left datamesh successfully"))
+	})
+
+	It("guard: FTT blocks removal", func() {
+		// 2D with FTT=1: D_min = FTT + GMDR + 1 = 1+0+1 = 2. D_count(2) <= D_min(2) → blocked.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-1")},
+			nil,
+		)
+		rv.Status.Configuration.FailuresToTolerate = 1
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("FTT"))
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// remove-diskful-qmr-down/v1 (odd→even, qmr↓) — 3 steps
+//
+
+var _ = Describe("RemoveReplica(D) remove-diskful-qmr-down/v1", func() {
+	It("creates transition (3 steps), qmr↓ first", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
+			nil,
+		)
+		rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy = 1
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5), mkRVRUpToDate("rv-1-2", "node-3", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		t := &rv.Status.DatameshTransitions[0]
+		Expect(t.PlanID).To(Equal("remove-diskful-qmr-down/v1"))
+		Expect(t.Steps).To(HaveLen(3))
+		Expect(t.Steps[0].Name).To(Equal("qmr↓"))
+		Expect(t.Steps[1].Name).To(Equal("D → D∅"))
+		Expect(t.Steps[2].Name).To(Equal("D∅ → ✕"))
+	})
+
+	It("qmr↓ applied and confirmed → advances to D→D∅", func() {
+		// Step 0 (qmr↓) active at rev 6, waiting for all members to confirm.
+		t := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			ReplicaName: "rv-1-2", PlanID: "remove-diskful-qmr-down/v1",
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "qmr↓", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())},
+				{Name: "D → D∅", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending},
+				{Name: "D∅ → ✕", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending},
+			},
+		}
+		rv := mkRV(6,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy = 0 // already updated by qmr↓ apply
+		rv.Status.Datamesh.QuorumMinimumRedundancy = 1               // already lowered by qmr↓ apply
+		// All 3 members confirmed rev 6.
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 6), mkRVRUpToDate("rv-1-1", "node-2", 6), mkRVRUpToDate("rv-1-2", "node-3", 6),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+
+		// qmr↓ confirmed, step 1 (D→D∅) applied: member becomes LiminalDiskful.
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-2")
+		Expect(m).NotTo(BeNil())
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeLiminalDiskful))
+		Expect(rv.Status.DatameshTransitions[0].Steps[0].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted))
+		Expect(rv.Status.DatameshTransitions[0].Steps[1].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive))
+	})
+
+	It("completed", func() {
+		t := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			ReplicaName: "rv-1-2", PlanID: "remove-diskful-qmr-down/v1",
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "qmr↓", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted, DatameshRevision: 6},
+				{Name: "D → D∅", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted, DatameshRevision: 7},
+				{Name: "D∅ → ✕", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 8, StartedAt: ptr.To(metav1.Now())},
+			},
+		}
+		rv := mkRV(8,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy = 0 // already updated by qmr↓ apply
+		rv.Status.Datamesh.Quorum = 2
+		rv.Status.Datamesh.QuorumMinimumRedundancy = 1
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 8), mkRVRUpToDate("rv-1-1", "node-2", 8), mkRVRUpToDate("rv-1-2", "node-3", 0),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Left datamesh successfully"))
+		Expect(rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy).To(Equal(byte(0)))
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// remove-diskful-qmr-down-q-down/v1 (even→odd, qmr↓ + q↓) — 4 steps
+//
+
+var _ = Describe("RemoveReplica(D) remove-diskful-qmr-down-q-down/v1", func() {
+	It("creates transition (4 steps)", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-1")},
+			nil,
+		)
+		rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy = 1
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		t := &rv.Status.DatameshTransitions[0]
+		Expect(t.PlanID).To(Equal("remove-diskful-qmr-down-q-down/v1"))
+		Expect(t.Steps).To(HaveLen(4))
+		Expect(t.Steps[0].Name).To(Equal("qmr↓"))
+		Expect(t.Steps[1].Name).To(Equal("D → D∅"))
+		Expect(t.Steps[2].Name).To(Equal("D∅ → A + q↓"))
+		Expect(t.Steps[3].Name).To(Equal("A → ✕"))
+	})
+
+	It("full lifecycle → q + qmr lowered, baseline updated", func() {
+		t := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			ReplicaName: "rv-1-1", PlanID: "remove-diskful-qmr-down-q-down/v1",
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "qmr↓", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted, DatameshRevision: 6},
+				{Name: "D → D∅", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted, DatameshRevision: 7},
+				{Name: "D∅ → A + q↓", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted, DatameshRevision: 8},
+				{Name: "A → ✕", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 9, StartedAt: ptr.To(metav1.Now())},
+			},
+		}
+		rv := mkRV(9,
+			[]v1alpha1.DatameshMember{mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy = 0 // already updated by qmr↓ apply
+		rv.Status.Datamesh.Quorum = 1
+		rv.Status.Datamesh.QuorumMinimumRedundancy = 1
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 9), mkRVRUpToDate("rv-1-1", "node-2", 0),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Left datamesh successfully"))
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)))
+		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(1)))
+		Expect(rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy).To(Equal(byte(0)))
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// RemoveReplica(D) guards
+//
+
+var _ = Describe("RemoveReplica(D) guards", func() {
+	It("guardNotAttached blocks", func() {
+		member := mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3")
+		member.Attached = true
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				member,
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5), mkRVRUpToDate("rv-1-2", "node-3", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		// No RemoveReplica transition created (guard blocked).
+		// A Detach transition may be created by the attachment dispatcher — that's expected.
+		for _, t := range rv.Status.DatameshTransitions {
+			Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica))
+		}
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("attached"))
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Additional coverage
+//
+
+var _ = Describe("AddReplica(D) additional", func() {
+	It("q formula for larger layout: 3D + add D → q=3", func() {
+		// 3D (odd) + add D → 4D (even). q↑: 4/2+1 = 3.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestD("rv-1-3")},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5),
+			mkRVR("rv-1-2", "node-3", 5), mkRVR("rv-1-3", "node-4", 0),
+		}
+
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3", "node-4"), rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeTrue())
+		// Plan with q↑ selected (odd voters).
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("diskful-q-up/v1"))
+		// Step 1 (✦→A) applied. Verify q is NOT yet raised (A is non-voter).
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(0))) // unchanged from default
+
+		// Now simulate step 1 confirmed → step 2 (A→D∅+q↑) applied.
+		t := rv.Status.DatameshTransitions[0]
+		t.Steps[0].Status = v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive
+		t.Steps[0].DatameshRevision = 6
+		rv2 := mkRV(6,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+				mkMember("rv-1-3", v1alpha1.DatameshMemberTypeAccess, "node-4"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestD("rv-1-3")},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		rv2.Status.Datamesh.Quorum = 2
+		rvrs2 := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 6), mkRVR("rv-1-1", "node-2", 6),
+			mkRVR("rv-1-2", "node-3", 6), mkRVR("rv-1-3", "node-4", 6),
+		}
+
+		changed2, _ := ProcessTransitions(context.Background(), rv2, mkRSP("node-1", "node-2", "node-3", "node-4"), rvrs2, nil, FeatureFlags{})
+
+		Expect(changed2).To(BeTrue())
+		// q raised: 4 voters → q = 4/2+1 = 3.
+		Expect(rv2.Status.Datamesh.Quorum).To(Equal(byte(3)))
+	})
+})
+
+var _ = Describe("RemoveReplica(D) additional", func() {
+	It("D∅ removal dispatch: LiminalDiskful member → remove plan selected", func() {
+		// Member stuck in D∅ (interrupted AddReplica). Leave request.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeLiminalDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
+			mkRVRUpToDate("rv-1-2", "node-3", 5),
+		}
+
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		// D∅ routes to remove-diskful plan (3 voters = odd → no q↓).
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("remove-diskful/v1"))
+	})
+
+	It("guard: GMDR blocks when UpToDate D too low", func() {
+		// 2D with config.GMDR=1 (qmr=2). One D is NOT UpToDate.
+		// ADR = UpToDate_D - 1 = 1 - 1 = 0. 0 > 1 is false → blocked.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-1")},
+			nil,
+		)
+		rv.Status.Configuration.GuaranteedMinimumDataRedundancy = 1
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5),
+			mkRVR("rv-1-1", "node-2", 5), // NOT UpToDate
+		}
+
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("GMDR"))
+	})
+
+	It("guard: VolumeAccessLocal blocks attached D removal", func() {
+		// Attached D with VolumeAccess=Local. guardNotAttached (commonRemoveGuards)
+		// fires first — attached members cannot be removed regardless of VolumeAccess.
+		// guardVolumeAccessLocalForDemotion is relevant for ChangeReplicaType(D→...),
+		// not RemoveReplica. Here we verify the NotAttached guard works for D.
+		member := mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2")
+		member.Attached = true
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+				member,
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-1")},
+			nil,
+		)
+		rv.Status.Configuration.VolumeAccess = v1alpha1.VolumeAccessLocal
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
+			mkRVRUpToDate("rv-1-2", "node-3", 5),
+		}
+
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeTrue())
+		for _, t := range rv.Status.DatameshTransitions {
+			Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica))
+		}
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("attached"))
+	})
+})

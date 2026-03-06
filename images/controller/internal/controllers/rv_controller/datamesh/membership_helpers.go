@@ -65,13 +65,6 @@ func onLeaveComplete(_ *globalContext, rctx *ReplicaContext) {
 	rctx.membershipMessage = "Left datamesh successfully"
 }
 
-// onJoinCompleteWithBaselineLayoutUpdate sets the completion message and updates the
-// baseline layout after an AddReplica plan with qmr↑ finishes.
-func onJoinCompleteWithBaselineLayoutUpdate(gctx *globalContext, rctx *ReplicaContext) {
-	updateBaselineLayout(gctx)
-	onJoinComplete(gctx, rctx)
-}
-
 // onChangeTypeComplete sets the completion message after a ChangeReplicaType plan finishes.
 func onChangeTypeComplete(_ *globalContext, rctx *ReplicaContext) {
 	rctx.membershipMessage = "Replica type changed successfully"

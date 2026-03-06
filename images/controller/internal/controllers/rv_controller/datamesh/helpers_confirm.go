@@ -175,6 +175,13 @@ func asReplicaConfirm(fn func(*globalContext, int64) dmte.ConfirmResult) func(*g
 	}
 }
 
+// asReplicaOnComplete adapts a global-scoped callback for use as ReplicaStep OnComplete.
+func asReplicaOnComplete(fn func(*globalContext)) func(*globalContext, *ReplicaContext) {
+	return func(gctx *globalContext, _ *ReplicaContext) {
+		fn(gctx)
+	}
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Confirm helper functions
 //

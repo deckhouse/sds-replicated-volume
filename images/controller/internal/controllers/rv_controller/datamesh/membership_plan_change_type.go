@@ -14,6 +14,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// IMPORTANT: PlanID versioning
+//
+// PlanIDs are persisted in rv.Status.DatameshTransitions. Changing a plan
+// in a way that breaks in-flight transitions requires a NEW version:
+//   - Step composition changed (added, removed, reordered)
+//   - Step apply semantics changed (different mutations)
+//
+// Safe changes (no new version needed):
+//   - Guards, confirm, DisplayName, diagnostics, OnComplete
+//
+// To introduce a new version: keep the old version registered (settle-only),
+// register the new version, update the dispatcher to yield the new PlanID.
+
 package datamesh
 
 import (
@@ -79,7 +92,7 @@ func registerChangeTypePlans(
 		Guards(guardShadowDiskfulSupported).
 		Steps(
 			mrStep("A → sD∅",
-				composeApply(
+				composeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -118,7 +131,7 @@ func registerChangeTypePlans(
 				confirmSubjectOnly,
 			),
 			mrStep("sD∅ → A",
-				composeApply(
+				composeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeAccess),
 					clearBackingVolume,
 				),
@@ -144,7 +157,7 @@ func registerChangeTypePlans(
 		Guards(leavingTBGuards...).
 		Steps(
 			mrStep("TB → sD∅",
-				composeApply(
+				composeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -178,7 +191,7 @@ func registerChangeTypePlans(
 				confirmSubjectOnly,
 			),
 			mrStep("sD∅ → TB",
-				composeApply(
+				composeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeTieBreaker),
 					clearBackingVolume,
 				),

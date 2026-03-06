@@ -145,6 +145,19 @@ func mkRVR(name, nodeName string, datameshRevision int64) *v1alpha1.ReplicatedVo
 	}
 }
 
+// mkRVRUpToDate creates a ReplicatedVolumeReplica with BackingVolumeUpToDate=True.
+// Used for D removal tests where guards check UpToDate D count.
+func mkRVRUpToDate(name, nodeName string, datameshRevision int64) *v1alpha1.ReplicatedVolumeReplica {
+	rvr := mkRVR(name, nodeName, datameshRevision)
+	rvr.Status.Conditions = []metav1.Condition{
+		{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType,
+			Status: metav1.ConditionTrue,
+		},
+	}
+	return rvr
+}
+
 // mkRVRBare creates a ReplicatedVolumeReplica without addresses (for guard tests).
 func mkRVRBare(name, nodeName string) *v1alpha1.ReplicatedVolumeReplica {
 	return &v1alpha1.ReplicatedVolumeReplica{

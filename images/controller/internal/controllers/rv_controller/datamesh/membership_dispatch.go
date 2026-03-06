@@ -142,7 +142,7 @@ func planAddDiskful(gctx *globalContext, _ *ReplicaContext) (dmte.PlanID, string
 
 // planRemoveReplica selects the plan for a Leave request.
 // Not a member → skip (transient: request not yet cleaned up after transition).
-func planRemoveReplica(_ *globalContext, rctx *ReplicaContext) (dmte.PlanID, string) {
+func planRemoveReplica(gctx *globalContext, rctx *ReplicaContext) (dmte.PlanID, string) {
 	if rctx.member == nil {
 		return "", ""
 	}
@@ -154,6 +154,30 @@ func planRemoveReplica(_ *globalContext, rctx *ReplicaContext) (dmte.PlanID, str
 	case v1alpha1.DatameshMemberTypeShadowDiskful,
 		v1alpha1.DatameshMemberTypeLiminalShadowDiskful:
 		return "shadow-diskful/v1", ""
+	case v1alpha1.DatameshMemberTypeDiskful,
+		v1alpha1.DatameshMemberTypeLiminalDiskful:
+		return planRemoveDiskful(gctx, rctx)
+	default:
+		return "", "Not implemented"
+	}
+}
+
+// planRemoveDiskful selects the RemoveReplica(D) plan variant based on voter parity
+// and whether qmr needs to be lowered.
+func planRemoveDiskful(gctx *globalContext, _ *ReplicaContext) (dmte.PlanID, string) {
+	voters := voterCount(gctx)
+	needsQDown := voters%2 == 0 // even voters → removing makes odd → q↓ needed
+	needsQMRDown := gctx.baselineLayout.GuaranteedMinimumDataRedundancy > gctx.configuration.GuaranteedMinimumDataRedundancy
+
+	switch {
+	case !needsQDown && !needsQMRDown:
+		return "remove-diskful/v1", ""
+	case !needsQDown && needsQMRDown:
+		return "remove-diskful-qmr-down/v1", ""
+	case needsQDown && !needsQMRDown:
+		return "remove-diskful-q-down/v1", ""
+	case needsQDown && needsQMRDown:
+		return "remove-diskful-qmr-down-q-down/v1", ""
 	default:
 		return "", "Not implemented"
 	}
