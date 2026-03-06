@@ -42,7 +42,8 @@ func computeTargetDRBDActions(iState IntendedDRBDState, aState ActualDRBDState) 
 	}
 
 	if !iState.IsUpAndNotInCleanup() {
-		// Teardown: generate Down action if resource exists
+		// Teardown: remove symlink before down to prevent dangling references
+		res = append(res, RemoveDeviceSymlinkAction{Name: iState.SymlinkName()})
 		if aState.ResourceExists() {
 			res = append(res, DownAction{ResourceName: iState.ResourceName()})
 		}
@@ -79,6 +80,9 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 	// 3. Compute minor actions (create if missing)
 	minor, minorActions := computeMinorActions(resourceName, &allocatedMinor, iState, aState)
 	res = append(res, minorActions...)
+
+	// 3b. Ensure stable device symlink points to the correct minor
+	res = append(res, EnsureDeviceSymlinkAction{Name: iState.SymlinkName(), Minor: minor})
 
 	// 4. Handle disk (detach if changing, attach if missing, reconcile options)
 	res = append(res, computeDiskActions(minor, iState, aState)...)

@@ -19,6 +19,8 @@ package drbdr_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -66,7 +68,6 @@ type reconcileTestCase struct {
 }
 
 func TestReconciler_Reconcile(t *testing.T) {
-	// Helper to create configured status (resource exists with volume)
 	configuredStatus := func(resName string) drbdsetup.StatusResult {
 		return drbdsetup.StatusResult{
 			{
@@ -76,6 +77,20 @@ func TestReconciler_Reconcile(t *testing.T) {
 				Devices: []drbdsetup.Device{
 					{Volume: 0, Minor: 1000, DiskState: "UpToDate", Quorum: true},
 				},
+			},
+		}
+	}
+
+	configuredShow := func(resName string) *drbdsetup.ShowResource {
+		return &drbdsetup.ShowResource{
+			Resource: resName,
+			Options: drbdsetup.ShowOptions{
+				AutoPromote:                false,
+				Quorum:                     "off",
+				QuorumMinimumRedundancy:    "off",
+				OnNoQuorum:                 "suspend-io",
+				OnNoDataAccessible:         "suspend-io",
+				OnSuspendedPrimaryOutdated: "force-secondary",
 			},
 		}
 	}
@@ -111,19 +126,10 @@ func TestReconciler_Reconcile(t *testing.T) {
 				resourceOptionsCmd(testDRBDResName),
 				// NewMinorAction calls ExecuteNewAutoMinor which tries nextDeviceMinor=0 first
 				newMinorCmd(testDRBDResName, 0, 0, false),
+				// EnsureDeviceSymlinkAction runs (filesystem, not drbdsetup)
 				// After actions, refresh actual state
 				statusCmd(configuredStatus(testDRBDResName)),
-				showCmd(&drbdsetup.ShowResource{
-					Resource: testDRBDResName,
-					Options: drbdsetup.ShowOptions{
-						AutoPromote:                false,
-						Quorum:                     "off",
-						QuorumMinimumRedundancy:    "off",
-						OnNoQuorum:                 "suspend-io",
-						OnNoDataAccessible:         "suspend-io",
-						OnSuspendedPrimaryOutdated: "force-secondary",
-					},
-				}),
+				showCmd(configuredShow(testDRBDResName)),
 			},
 			postCheck: func(t *testing.T, cl client.Client) {
 				dr := &v1alpha1.DRBDResource{}
@@ -131,6 +137,10 @@ func TestReconciler_Reconcile(t *testing.T) {
 					t.Fatalf("failed to get DRBDResource: %v", err)
 				}
 				expectFinalizers(t, dr.Finalizers, v1alpha1.AgentFinalizer)
+				expectDeviceSymlink(t, testDRBDRName, 0)
+				if dr.Status.Device != drbdr.DeviceSymlinkPath(testDRBDRName) {
+					t.Errorf("status.device = %q, want %q", dr.Status.Device, drbdr.DeviceSymlinkPath(testDRBDRName))
+				}
 			},
 		},
 		{
@@ -138,18 +148,14 @@ func TestReconciler_Reconcile(t *testing.T) {
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp),
 			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
 				statusCmd(configuredStatus(testDRBDResName)),
-				showCmd(&drbdsetup.ShowResource{
-					Resource: testDRBDResName,
-					Options: drbdsetup.ShowOptions{
-						AutoPromote:                false,
-						Quorum:                     "off",
-						QuorumMinimumRedundancy:    "off",
-						OnNoQuorum:                 "suspend-io",
-						OnNoDataAccessible:         "suspend-io",
-						OnSuspendedPrimaryOutdated: "force-secondary",
-					},
-				}),
-				// Resource exists and options match - no additional commands
+				showCmd(configuredShow(testDRBDResName)),
+				// Resource exists and options match - EnsureDeviceSymlinkAction runs (filesystem only)
+				// Refresh after symlink action
+				statusCmd(configuredStatus(testDRBDResName)),
+				showCmd(configuredShow(testDRBDResName)),
+			},
+			postCheck: func(t *testing.T, cl client.Client) {
+				expectDeviceSymlink(t, testDRBDRName, 1000)
 			},
 		},
 
@@ -159,6 +165,9 @@ func TestReconciler_Reconcile(t *testing.T) {
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateDown),
 			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
 				statusCmd(drbdsetup.StatusResult{}),
+				// RemoveDeviceSymlinkAction runs (filesystem only)
+				// Refresh after symlink action
+				statusCmd(drbdsetup.StatusResult{}),
 			},
 		},
 
@@ -167,6 +176,9 @@ func TestReconciler_Reconcile(t *testing.T) {
 			name:  "deleting resource - queries status",
 			drbdr: deletingDRBDR(testNodeName, v1alpha1.AgentFinalizer),
 			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
+				statusCmd(drbdsetup.StatusResult{}),
+				// RemoveDeviceSymlinkAction runs (filesystem only)
+				// Refresh after symlink action
 				statusCmd(drbdsetup.StatusResult{}),
 			},
 		},
@@ -227,19 +239,10 @@ func TestReconciler_Reconcile(t *testing.T) {
 				resourceOptionsCmd(testDRBDResName),
 				// ExecuteNewAutoMinor tries nextDeviceMinor=0 first
 				newMinorCmd(testDRBDResName, 0, 0, false),
+				// EnsureDeviceSymlinkAction runs (filesystem, not drbdsetup)
 				// Refresh after actions
 				statusCmd(configuredStatus(testDRBDResName)),
-				showCmd(&drbdsetup.ShowResource{
-					Resource: testDRBDResName,
-					Options: drbdsetup.ShowOptions{
-						AutoPromote:                false,
-						Quorum:                     "off",
-						QuorumMinimumRedundancy:    "off",
-						OnNoQuorum:                 "suspend-io",
-						OnNoDataAccessible:         "suspend-io",
-						OnSuspendedPrimaryOutdated: "force-secondary",
-					},
-				}),
+				showCmd(configuredShow(testDRBDResName)),
 			},
 		},
 
@@ -249,17 +252,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 			drbdr: drbdrInMaintenance(testNodeName, v1alpha1.MaintenanceModeNoResourceReconciliation),
 			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
 				statusCmd(configuredStatus(testDRBDResName)),
-				showCmd(&drbdsetup.ShowResource{
-					Resource: testDRBDResName,
-					Options: drbdsetup.ShowOptions{
-						AutoPromote:                false,
-						Quorum:                     "off",
-						QuorumMinimumRedundancy:    "off",
-						OnNoQuorum:                 "suspend-io",
-						OnNoDataAccessible:         "suspend-io",
-						OnSuspendedPrimaryOutdated: "force-secondary",
-					},
-				}),
+				showCmd(configuredShow(testDRBDResName)),
+				// Maintenance mode skips all actions (including EnsureDeviceSymlinkAction)
 			},
 		},
 
@@ -302,23 +296,14 @@ func TestReconciler_Reconcile(t *testing.T) {
 						{PeerNodeID: 1, Net: drbdsetup.ShowNet{Protocol: "C"}},
 					},
 				}),
+				// EnsureDeviceSymlinkAction runs (filesystem, not drbdsetup)
 				// Stale peer (in actual but not in intended spec): disconnect + del-peer + forget-peer
 				disconnectCmd(testDRBDResName, 1),
 				delPeerCmd(testDRBDResName, 1),
 				forgetPeerCmd(testDRBDResName, 1),
 				// Refresh after actions
 				statusCmd(configuredStatus(testDRBDResName)),
-				showCmd(&drbdsetup.ShowResource{
-					Resource: testDRBDResName,
-					Options: drbdsetup.ShowOptions{
-						AutoPromote:                false,
-						Quorum:                     "off",
-						QuorumMinimumRedundancy:    "off",
-						OnNoQuorum:                 "suspend-io",
-						OnNoDataAccessible:         "suspend-io",
-						OnSuspendedPrimaryOutdated: "force-secondary",
-					},
-				}),
+				showCmd(configuredShow(testDRBDResName)),
 			},
 		},
 	}
@@ -331,6 +316,9 @@ func TestReconciler_Reconcile(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			drbdsetup.ResetNextDeviceMinor()
+
+			symlinkDir := t.TempDir() + "/"
+			drbdr.OverrideDeviceSymlinkDir(symlinkDir)
 
 			// Build client with objects
 			clientBuilder := fake.NewClientBuilder().
@@ -608,5 +596,18 @@ func testNode(name string) *corev1.Node {
 				{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
 			},
 		},
+	}
+}
+
+func expectDeviceSymlink(t *testing.T, k8sName string, expectedMinor uint) {
+	t.Helper()
+	symlinkPath := drbdr.DeviceSymlinkPath(k8sName)
+	target, err := os.Readlink(symlinkPath)
+	if err != nil {
+		t.Fatalf("expected symlink at %s: %v", symlinkPath, err)
+	}
+	wantTarget := fmt.Sprintf("/dev/drbd%d", expectedMinor)
+	if target != wantTarget {
+		t.Errorf("symlink %s -> %s, want -> %s", symlinkPath, target, wantTarget)
 	}
 }

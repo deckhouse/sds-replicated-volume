@@ -329,7 +329,7 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 		}
 
 		vol := &volumes[0]
-		status.Device = fmt.Sprintf("/dev/drbd%d", vol.Minor)
+		status.Device = DeviceSymlinkPath(drbdr.Name)
 		status.DiskState = v1alpha1.DiskState(vol.DiskState)
 		status.Quorum = &vol.Quorum
 	}
