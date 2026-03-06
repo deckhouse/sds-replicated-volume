@@ -79,6 +79,61 @@ var leavingTBGuards = []any{
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Backing volume capacity guard
+//
+
+// maxDiskMembers is the maximum number of members with a backing volume.
+// DRBD metadata is configured for max 7 peers (8 replicas total, including self).
+const maxDiskMembers = 8
+
+// guardMaxDiskMembers blocks if adding another disk-bearing member would exceed
+// the DRBD limit. Counts current disk-bearing members plus in-flight transitions
+// that will produce a disk-bearing member (ChangeType to disk type, or AddReplica
+// for a disk type currently in a non-disk vestibule state like A).
+func guardMaxDiskMembers(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
+	var current, pending int
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		if rc.member == nil {
+			continue
+		}
+		if rc.member.Type.HasBackingVolume() ||
+			rc.member.Type == v1alpha1.DatameshMemberTypeLiminalDiskful ||
+			rc.member.Type == v1alpha1.DatameshMemberTypeLiminalShadowDiskful {
+			current++
+			continue
+		}
+		if rc.membershipTransition == nil {
+			continue
+		}
+		// Non-disk member with ChangeType transition to a disk type.
+		if rc.membershipTransition.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType &&
+			(rc.membershipTransition.ToReplicaType == v1alpha1.ReplicaTypeDiskful ||
+				rc.membershipTransition.ToReplicaType == v1alpha1.ReplicaTypeShadowDiskful) {
+			pending++
+			continue
+		}
+		// Non-disk member with AddReplica for a disk type (A vestibule:
+		// member created as A, will become D∅ in a later step).
+		if rc.membershipTransition.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica &&
+			(rc.membershipTransition.ReplicaType == v1alpha1.ReplicaTypeDiskful ||
+				rc.membershipTransition.ReplicaType == v1alpha1.ReplicaTypeShadowDiskful) {
+			pending++
+		}
+	}
+
+	total := current + pending
+	if total >= maxDiskMembers {
+		return dmte.GuardResult{
+			Blocked: true,
+			Message: fmt.Sprintf("Cannot add replica with backing volume: %d/%d members with backing volume (%d current + %d pending)",
+				total, maxDiskMembers, current, pending),
+		}
+	}
+	return dmte.GuardResult{}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Shared Add guards
 //
 

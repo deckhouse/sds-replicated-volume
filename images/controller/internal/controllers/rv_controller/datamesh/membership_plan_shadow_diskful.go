@@ -53,7 +53,7 @@ func registerShadowDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
 		DisplayName("Joining datamesh").
 		Guards(commonAddGuards...).
-		Guards(guardShadowDiskfulSupported).
+		Guards(guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("✦ → sD∅",
 				composeReplicaApply(

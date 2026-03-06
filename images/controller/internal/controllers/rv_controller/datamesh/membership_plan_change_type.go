@@ -89,7 +89,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeAccess).
 		ToReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
 		DisplayName("Changing replica type").
-		Guards(guardShadowDiskfulSupported).
+		Guards(guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("A → sD∅",
 				composeReplicaApply(
@@ -153,7 +153,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeTieBreaker).
 		ToReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
 		DisplayName("Changing replica type").
-		Guards(guardShadowDiskfulSupported).
+		Guards(guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Guards(leavingTBGuards...).
 		Steps(
 			mrStep("TB → sD∅",
@@ -328,7 +328,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeAccess).
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
-		Guards(guardVotersEven).
+		Guards(guardVotersEven, guardMaxDiskMembers).
 		Steps(
 			mrStep("A → D∅",
 				composeReplicaApply(
@@ -351,7 +351,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeAccess).
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
-		Guards(guardVotersOdd).
+		Guards(guardVotersOdd, guardMaxDiskMembers).
 		Steps(
 			mrStep("A → D∅ + q↑",
 				composeReplicaApply(
@@ -378,7 +378,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeAccess).
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
-		Guards(guardVotersEven, guardShadowDiskfulSupported).
+		Guards(guardVotersEven, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("A → sD∅",
 				composeReplicaApply(
@@ -410,7 +410,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeAccess).
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
-		Guards(guardVotersOdd, guardShadowDiskfulSupported).
+		Guards(guardVotersOdd, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("A → sD∅",
 				composeReplicaApply(
@@ -514,7 +514,7 @@ func registerChangeTypePlans(
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
 		Guards(leavingTBGuards...).
-		Guards(guardVotersEven).
+		Guards(guardVotersEven, guardMaxDiskMembers).
 		Steps(
 			mrStep("TB → D∅",
 				composeReplicaApply(
@@ -538,7 +538,7 @@ func registerChangeTypePlans(
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
 		Guards(leavingTBGuards...).
-		Guards(guardVotersOdd).
+		Guards(guardVotersOdd, guardMaxDiskMembers).
 		Steps(
 			mrStep("TB → D∅ + q↑",
 				composeReplicaApply(
@@ -563,7 +563,7 @@ func registerChangeTypePlans(
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
 		Guards(leavingTBGuards...).
-		Guards(guardVotersEven, guardShadowDiskfulSupported).
+		Guards(guardVotersEven, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("TB → sD∅",
 				composeReplicaApply(
@@ -592,7 +592,7 @@ func registerChangeTypePlans(
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
 		Guards(leavingTBGuards...).
-		Guards(guardVotersOdd, guardShadowDiskfulSupported).
+		Guards(guardVotersOdd, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("TB → sD∅",
 				composeReplicaApply(
