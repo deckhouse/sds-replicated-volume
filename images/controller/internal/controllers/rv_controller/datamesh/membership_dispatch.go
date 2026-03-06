@@ -217,6 +217,13 @@ func planChangeReplicaType(gctx *globalContext, rctx *ReplicaContext) (dmte.Plan
 		rctx.member.Type == v1alpha1.DatameshMemberTypeLiminalShadowDiskful) &&
 		targetType == v1alpha1.ReplicaTypeTieBreaker:
 		return "sd-to-tb/v1", ""
+	case rctx.member.Type == v1alpha1.DatameshMemberTypeAccess &&
+		targetType == v1alpha1.ReplicaTypeDiskful:
+		return planChangeAToD(gctx, rctx)
+	case (rctx.member.Type == v1alpha1.DatameshMemberTypeDiskful ||
+		rctx.member.Type == v1alpha1.DatameshMemberTypeLiminalDiskful) &&
+		targetType == v1alpha1.ReplicaTypeAccess:
+		return planChangeDToA(gctx, rctx)
 	case (rctx.member.Type == v1alpha1.DatameshMemberTypeShadowDiskful ||
 		rctx.member.Type == v1alpha1.DatameshMemberTypeLiminalShadowDiskful) &&
 		targetType == v1alpha1.ReplicaTypeDiskful:
@@ -230,6 +237,35 @@ func planChangeReplicaType(gctx *globalContext, rctx *ReplicaContext) (dmte.Plan
 	default:
 		return "", "Not implemented"
 	}
+}
+
+// planChangeAToD selects the ChangeReplicaType(A→D) plan variant
+// based on voter parity and sD feature availability.
+func planChangeAToD(gctx *globalContext, _ *ReplicaContext) (dmte.PlanID, string) {
+	voters := voterCount(gctx)
+	viaSd := gctx.features.ShadowDiskful
+
+	switch {
+	case !viaSd && voters%2 == 0:
+		return "a-to-d/v1", ""
+	case !viaSd && voters%2 != 0:
+		return "a-to-d-q-up/v1", ""
+	case viaSd && voters%2 == 0:
+		return "a-to-d-via-sd/v1", ""
+	case viaSd && voters%2 != 0:
+		return "a-to-d-via-sd-q-up/v1", ""
+	default:
+		return "", "Not implemented"
+	}
+}
+
+// planChangeDToA selects the ChangeReplicaType(D→A) plan variant.
+func planChangeDToA(gctx *globalContext, _ *ReplicaContext) (dmte.PlanID, string) {
+	voters := voterCount(gctx)
+	if voters%2 != 0 {
+		return "d-to-a/v1", "" // odd→even, no q change
+	}
+	return "d-to-a-q-down/v1", "" // even→odd, q↓ needed
 }
 
 // planChangeSDToD selects the ChangeReplicaType(sD→D) plan variant.
