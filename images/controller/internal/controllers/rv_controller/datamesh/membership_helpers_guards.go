@@ -19,8 +19,10 @@ package datamesh
 import (
 	"fmt"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -389,6 +391,54 @@ func guardZoneTBSufficient(gctx *globalContext, rctx *ReplicaContext) dmte.Guard
 		Blocked: true,
 		Message: fmt.Sprintf("Would violate zone TB coverage for zone %s", removedZone),
 	}
+}
+
+// forceRemoveGuards are guards shared by all ForceRemoveReplica plans.
+var forceRemoveGuards = []any{
+	guardNotAttached,
+	guardMemberUnreachable,
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ForceRemove guards
+//
+
+// guardMemberUnreachable blocks force-removal if any member with a ready agent
+// reports a Connected DRBD connection to the subject. Prevents accidental
+// force-removal of a member that is actually alive and participating.
+func guardMemberUnreachable(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
+	memberName := rctx.Name()
+	var connectedFrom idset.IDSet
+
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		if rc.member == nil || rc.rvr == nil || rc.id == rctx.ID() {
+			continue
+		}
+
+		// Skip replicas with stale status (agent not ready — Peers may be outdated).
+		if obju.StatusCondition(rc.rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType).
+			ReasonEqual(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady).Eval() {
+			continue
+		}
+
+		for _, peer := range rc.rvr.Status.Peers {
+			if peer.Name == memberName && peer.ConnectionState == v1alpha1.ConnectionStateConnected {
+				connectedFrom.Add(rc.id)
+				break
+			}
+		}
+	}
+
+	if !connectedFrom.IsEmpty() {
+		return dmte.GuardResult{
+			Blocked: true,
+			Message: fmt.Sprintf("Force-removal blocked: member is reachable (connected from %d replica(s): [%s])",
+				connectedFrom.Len(), connectedFrom),
+		}
+	}
+
+	return dmte.GuardResult{}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

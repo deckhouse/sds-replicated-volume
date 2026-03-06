@@ -544,7 +544,10 @@ var _ = Describe("Attachment settle", func() {
 		changed, _ := ProcessTransitions(context.Background(), rv, nil, nil, nil, FeatureFlags{})
 
 		Expect(changed).To(BeTrue())
-		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		// Detach completed. ForceRemove auto-dispatched for orphan member (no RVR).
+		for _, tr := range rv.Status.DatameshTransitions {
+			Expect(tr.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach))
+		}
 	})
 
 	It("completes Detach when rvr revision is 0", func() {
