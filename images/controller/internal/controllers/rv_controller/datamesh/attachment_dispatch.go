@@ -104,14 +104,14 @@ func decideMultiattachToggle(gctx *globalContext) (dmte.DispatchDecision, bool) 
 
 	needMultiattach := intendedCount > 1
 
-	if needMultiattach && !gctx.datamesh.Multiattach && !gctx.hasMultiattachTransition {
+	if needMultiattach && !gctx.datamesh.multiattach && !gctx.hasMultiattachTransition {
 		return dmte.DispatchGlobal(
 			v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach,
 			"enable-multiattach/v1",
 		), true
 	}
 
-	if !needMultiattach && gctx.datamesh.Multiattach && !gctx.hasMultiattachTransition {
+	if !needMultiattach && gctx.datamesh.multiattach && !gctx.hasMultiattachTransition {
 		return dmte.DispatchGlobal(
 			v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach,
 			"disable-multiattach/v1",

@@ -104,7 +104,7 @@ func registerForceRemovePlans(
 	// ════════════════════════════════════════════════════════════════════════
 
 	// ForceRemoveReplica(D): D → ✕ (odd→even voters, no q↓)
-	// Also handles D∅. Baseline updated in apply (lowering: voter removed).
+	// Also handles D∅. No qmr change → no baseline update needed.
 	forceRemove.Plan("diskful/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupEmergency).
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
@@ -114,10 +114,7 @@ func registerForceRemovePlans(
 		Guards(guardVotersOdd).
 		Steps(
 			mrStep("Force remove",
-				composeReplicaApply(
-					removeMember,
-					asReplicaApply(updateBaselineLayout),
-				),
+				removeMember,
 				asReplicaConfirm(confirmAllMembers),
 			),
 		).
@@ -125,7 +122,7 @@ func registerForceRemovePlans(
 		Build()
 
 	// ForceRemoveReplica(D) + q↓: D → ✕ + q↓ (even→odd voters)
-	// Also handles D∅. q↓ + baseline in apply.
+	// Also handles D∅. No qmr change → no baseline update needed.
 	forceRemove.Plan("diskful-q-down/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupEmergency).
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
@@ -138,7 +135,6 @@ func registerForceRemovePlans(
 				composeReplicaApply(
 					removeMember,
 					asReplicaApply(lowerQ),
-					asReplicaApply(updateBaselineLayout),
 				),
 				asReplicaConfirm(confirmAllMembers),
 			),

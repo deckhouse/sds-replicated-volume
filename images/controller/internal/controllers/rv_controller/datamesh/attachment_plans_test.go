@@ -296,6 +296,16 @@ var _ = Describe("Attach", func() {
 			[]v1alpha1.DatameshMember{mkMemberAttached("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1")},
 			nil, nil,
 		)
+		// Pre-set effective layout to match updateEffectiveLayout output
+		// (1D with Quorum=true but no BackingVolume → FTT=-1, GMDR=-1).
+		rv.Status.EffectiveLayout = v1alpha1.ReplicatedVolumeEffectiveLayout{
+			FailuresToTolerate:              ptr.To(int8(-1)),
+			GuaranteedMinimumDataRedundancy: ptr.To(int8(-1)),
+			TotalVoters:                     1,
+			ReachableVoters:                 1,
+			UpToDateVoters:                  0,
+			Message:                         "1/1 voters reachable, 0/1 UpToDate; FTT=-1, GMDR=-1",
+		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVRReady("rv-1-0", "node-1", 5)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-1")}
 
@@ -881,6 +891,14 @@ var _ = Describe("Attachment combined", func() {
 			[]v1alpha1.DatameshMember{mkMemberAttached("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1")},
 			nil, nil,
 		)
+		rv.Status.EffectiveLayout = v1alpha1.ReplicatedVolumeEffectiveLayout{
+			FailuresToTolerate:              ptr.To(int8(-1)),
+			GuaranteedMinimumDataRedundancy: ptr.To(int8(-1)),
+			TotalVoters:                     1,
+			ReachableVoters:                 1,
+			UpToDateVoters:                  0,
+			Message:                         "1/1 voters reachable, 0/1 UpToDate; FTT=-1, GMDR=-1",
+		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVRReady("rv-1-0", "node-1", 5)}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-1")}
 
@@ -892,6 +910,7 @@ var _ = Describe("Attachment combined", func() {
 
 	It("empty state: no members, no RVAs", func() {
 		rv := mkRV(5, nil, nil, nil)
+		settleEffectiveLayout(rv, nil)
 
 		changed, _ := ProcessTransitions(context.Background(), rv, nil, nil, nil, FeatureFlags{})
 

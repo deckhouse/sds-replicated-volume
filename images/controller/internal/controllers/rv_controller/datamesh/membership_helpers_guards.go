@@ -61,7 +61,7 @@ var commonRemoveGuards = []any{
 //
 // Plans MUST also add defense-in-depth guards explicitly:
 //   - Voter parity: guardVotersEven or guardVotersOdd
-//   - QMR: guardQMRNotTooHigh (no qmr change) or guardQMRLowerNeeded (qmr↓)
+//   - QMR: guardQMRLowerNeeded (qmr↓ plans)
 //   - Feature: guardShadowDiskfulSupported (sD variants)
 var leavingDGuards = []any{
 	guardVolumeAccessLocalForDemotion,
@@ -232,24 +232,6 @@ func guardVolumeAccessLocalForDemotion(gctx *globalContext, rctx *ReplicaContext
 		return dmte.GuardResult{
 			Blocked: true,
 			Message: "Cannot demote Diskful: volumeAccess=Local requires D on attached node",
-		}
-	}
-	return dmte.GuardResult{}
-}
-
-// guardQMRNotTooHigh is a defense-in-depth guard that blocks voter removal
-// if QMR is higher than configuration requires (config.GMDR + 1). Normally
-// the dispatch selects a qmr↓ plan variant when QMR needs lowering; this
-// guard catches unexpected inconsistencies.
-// Plans with embedded qmr↓ don't use this guard — they handle lowering internally.
-func guardQMRNotTooHigh(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
-	configGMDR := gctx.configuration.GuaranteedMinimumDataRedundancy
-	maxQMR := configGMDR + 1
-	if gctx.datamesh.QuorumMinimumRedundancy > maxQMR {
-		return dmte.GuardResult{
-			Blocked: true,
-			Message: fmt.Sprintf("Voter removal blocked: qmr=%d exceeds configuration (GMDR=%d, expected qmr≤%d); waiting for qmr to be lowered",
-				gctx.datamesh.QuorumMinimumRedundancy, configGMDR, maxQMR),
 		}
 	}
 	return dmte.GuardResult{}
@@ -529,29 +511,29 @@ func guardVotersOdd(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
 	return dmte.GuardResult{}
 }
 
-// guardQMRRaiseNeeded blocks if baseline GMDR is already at or above config GMDR.
-// Defense: plans with qmr↑ expect baseline.GMDR < config.GMDR.
+// guardQMRRaiseNeeded blocks if qmr is already at or above the target (config.GMDR + 1).
+// Defense: plans with qmr↑ expect qmr < config.GMDR + 1.
 func guardQMRRaiseNeeded(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
-	if gctx.baselineLayout.GuaranteedMinimumDataRedundancy >= gctx.configuration.GuaranteedMinimumDataRedundancy {
+	targetQMR := gctx.configuration.GuaranteedMinimumDataRedundancy + 1
+	if gctx.datamesh.quorumMinimumRedundancy >= targetQMR {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("Defense: qmr↑ not needed, baseline GMDR=%d >= config GMDR=%d",
-				gctx.baselineLayout.GuaranteedMinimumDataRedundancy,
-				gctx.configuration.GuaranteedMinimumDataRedundancy),
+			Message: fmt.Sprintf("Defense: qmr↑ not needed, qmr=%d >= target qmr=%d",
+				gctx.datamesh.quorumMinimumRedundancy, targetQMR),
 		}
 	}
 	return dmte.GuardResult{}
 }
 
-// guardQMRLowerNeeded blocks if baseline GMDR is already at or below config GMDR.
-// Defense: plans with qmr↓ expect baseline.GMDR > config.GMDR.
+// guardQMRLowerNeeded blocks if qmr is already at or below the target (config.GMDR + 1).
+// Defense: plans with qmr↓ expect qmr > config.GMDR + 1.
 func guardQMRLowerNeeded(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
-	if gctx.baselineLayout.GuaranteedMinimumDataRedundancy <= gctx.configuration.GuaranteedMinimumDataRedundancy {
+	targetQMR := gctx.configuration.GuaranteedMinimumDataRedundancy + 1
+	if gctx.datamesh.quorumMinimumRedundancy <= targetQMR {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("Defense: qmr↓ not needed, baseline GMDR=%d <= config GMDR=%d",
-				gctx.baselineLayout.GuaranteedMinimumDataRedundancy,
-				gctx.configuration.GuaranteedMinimumDataRedundancy),
+			Message: fmt.Sprintf("Defense: qmr↓ not needed, qmr=%d <= target qmr=%d",
+				gctx.datamesh.quorumMinimumRedundancy, targetQMR),
 		}
 	}
 	return dmte.GuardResult{}

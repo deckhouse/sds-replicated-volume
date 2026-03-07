@@ -122,41 +122,35 @@ func asReplicaApply(fn func(*globalContext)) func(*globalContext, *ReplicaContex
 // ──────────────────────────────────────────────────────────────────────────────
 // q/qmr apply callbacks (global-scoped)
 //
-// These mutate gctx.datamesh.Quorum / QuorumMinimumRedundancy.
+// These mutate gctx.datamesh.quorum / quorumMinimumRedundancy.
 // Global-scoped because they don't depend on the subject replica —
 // they compute from the current state of gctx.allReplicas.
 // Use asReplicaApply() when passing to ReplicaStep.
 
-// raiseQ recomputes and raises q after a voter was added.
-// q = max(floor(voters/2)+1, floor(minD/2)+1), where
-// minD = baseline.FTT + baseline.GMDR + 1.
+// raiseQ increments q by 1 after a voter was added (odd→even voters).
+// Precondition: q is already correct before the voter addition, and the
+// plan has guardVotersOdd ensuring odd→even parity.
 func raiseQ(gctx *globalContext) {
-	voters := voterCount(gctx)
-	minD := gctx.baselineLayout.FailuresToTolerate + gctx.baselineLayout.GuaranteedMinimumDataRedundancy + 1
-	minQ := minD/2 + 1
-	q := voters/2 + 1
-	gctx.datamesh.Quorum = max(q, minQ)
+	gctx.datamesh.quorum++
 }
 
-// lowerQ recomputes and lowers q after a voter was removed.
-// Same formula as raiseQ — the voter count in gctx.allReplicas already
-// reflects the removal (from an earlier setType in the same composite step).
+// lowerQ decrements q by 1 after a voter was removed (even→odd voters).
+// Precondition: q is already correct before the voter removal, and the
+// plan has guardVotersEven ensuring even→odd parity.
 func lowerQ(gctx *globalContext) {
-	voters := voterCount(gctx)
-	minD := gctx.baselineLayout.FailuresToTolerate + gctx.baselineLayout.GuaranteedMinimumDataRedundancy + 1
-	minQ := minD/2 + 1
-	q := voters/2 + 1
-	gctx.datamesh.Quorum = max(q, minQ)
+	gctx.datamesh.quorum--
 }
 
-// raiseQMR raises qmr to match the target GMDR from Configuration.
-// qmr = target_GMDR + 1.
+// raiseQMR increments qmr by 1.
+// Precondition: qmr is already correct, and guardQMRRaiseNeeded verified
+// that baseline.GMDR < config.GMDR.
 func raiseQMR(gctx *globalContext) {
-	gctx.datamesh.QuorumMinimumRedundancy = gctx.configuration.GuaranteedMinimumDataRedundancy + 1
+	gctx.datamesh.quorumMinimumRedundancy++
 }
 
-// lowerQMR lowers qmr to match the target GMDR from Configuration.
-// qmr = target_GMDR + 1 (Configuration already has the lowered target).
+// lowerQMR decrements qmr by 1.
+// Precondition: qmr is already correct, and guardQMRLowerNeeded verified
+// that baseline.GMDR > config.GMDR.
 func lowerQMR(gctx *globalContext) {
-	gctx.datamesh.QuorumMinimumRedundancy = gctx.configuration.GuaranteedMinimumDataRedundancy + 1
+	gctx.datamesh.quorumMinimumRedundancy--
 }

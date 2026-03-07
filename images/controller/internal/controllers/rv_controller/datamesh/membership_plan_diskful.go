@@ -101,7 +101,7 @@ func registerDiskfulPlans(
 			mgStep("qmr↑",
 				raiseQMR,
 				confirmAllMembers,
-			).OnComplete(updateBaselineLayout),
+			).OnComplete(updateBaselineGMDR),
 		).
 		OnComplete(onJoinComplete).
 		Build()
@@ -125,7 +125,7 @@ func registerDiskfulPlans(
 					asReplicaApply(raiseQ),
 				),
 				asReplicaConfirm(confirmAllMembers),
-			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			),
 			mrStep("D∅ → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				confirmSubjectOnly,
@@ -153,7 +153,7 @@ func registerDiskfulPlans(
 					asReplicaApply(raiseQ),
 				),
 				asReplicaConfirm(confirmAllMembers),
-			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			),
 			mrStep("D∅ → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				confirmSubjectOnly,
@@ -161,7 +161,7 @@ func registerDiskfulPlans(
 			mgStep("qmr↑",
 				raiseQMR,
 				confirmAllMembers,
-			).OnComplete(updateBaselineLayout),
+			).OnComplete(updateBaselineGMDR),
 		).
 		OnComplete(onJoinComplete).
 		Build()
@@ -191,11 +191,11 @@ func registerDiskfulPlans(
 			),
 			// sD → D: non-voter becomes voter. All peers must update
 			// connection config (arr, voting) — unlike disk attach (D∅→D),
-			// this is not automatic.
+			// this is not automatic. No qmr change → no baseline update.
 			mrStep("sD → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				asReplicaConfirm(confirmAllMembers),
-			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			),
 		).
 		OnComplete(onJoinComplete).
 		Build()
@@ -222,11 +222,11 @@ func registerDiskfulPlans(
 			mrStep("sD → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				asReplicaConfirm(confirmAllMembers),
-			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			),
 			mgStep("qmr↑",
 				raiseQMR,
 				confirmAllMembers,
-			).OnComplete(updateBaselineLayout),
+			).OnComplete(updateBaselineGMDR),
 		).
 		OnComplete(onJoinComplete).
 		Build()
@@ -279,7 +279,7 @@ func registerDiskfulPlans(
 					asReplicaApply(raiseQ),
 				),
 				asReplicaConfirm(confirmAllMembers),
-			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			),
 			mrStep("D∅ → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				confirmSubjectOnly,
@@ -319,7 +319,7 @@ func registerDiskfulPlans(
 					asReplicaApply(raiseQ),
 				),
 				asReplicaConfirm(confirmAllMembers),
-			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			),
 			mrStep("D∅ → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				confirmSubjectOnly,
@@ -327,7 +327,7 @@ func registerDiskfulPlans(
 			mgStep("qmr↑",
 				raiseQMR,
 				confirmAllMembers,
-			).OnComplete(updateBaselineLayout),
+			).OnComplete(updateBaselineGMDR),
 		).
 		OnComplete(onJoinComplete).
 		Build()
@@ -353,17 +353,14 @@ func registerDiskfulPlans(
 		DisplayName("Removing diskful replica").
 		Guards(commonRemoveGuards...).
 		Guards(leavingDGuards...).
-		Guards(guardVotersOdd, guardQMRNotTooHigh).
+		Guards(guardVotersOdd).
 		Steps(
 			mrStep("D → D∅",
 				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
 				confirmSubjectOnly,
 			),
 			mrStep("D∅ → ✕",
-				composeReplicaApply(
-					removeMember,
-					asReplicaApply(updateBaselineLayout),
-				),
+				removeMember,
 				confirmAllMembersLeaving,
 			),
 		).
@@ -382,7 +379,7 @@ func registerDiskfulPlans(
 			mgStep("qmr↓",
 				composeGlobalApply(
 					lowerQMR,
-					updateBaselineLayout,
+					updateBaselineGMDR,
 				),
 				confirmAllMembers,
 			),
@@ -391,10 +388,7 @@ func registerDiskfulPlans(
 				confirmSubjectOnly,
 			),
 			mrStep("D∅ → ✕",
-				composeReplicaApply(
-					removeMember,
-					asReplicaApply(updateBaselineLayout),
-				),
+				removeMember,
 				confirmAllMembersLeaving,
 			),
 		).
@@ -408,7 +402,7 @@ func registerDiskfulPlans(
 		DisplayName("Removing diskful replica").
 		Guards(commonRemoveGuards...).
 		Guards(leavingDGuards...).
-		Guards(guardVotersEven, guardQMRNotTooHigh).
+		Guards(guardVotersEven).
 		Steps(
 			mrStep("D → D∅",
 				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
@@ -419,7 +413,6 @@ func registerDiskfulPlans(
 					setType(v1alpha1.DatameshMemberTypeAccess),
 					clearBackingVolume,
 					asReplicaApply(lowerQ),
-					asReplicaApply(updateBaselineLayout),
 				),
 				asReplicaConfirm(confirmAllMembers),
 			),
@@ -443,7 +436,7 @@ func registerDiskfulPlans(
 			mgStep("qmr↓",
 				composeGlobalApply(
 					lowerQMR,
-					updateBaselineLayout,
+					updateBaselineGMDR,
 				),
 				confirmAllMembers,
 			),
@@ -456,7 +449,6 @@ func registerDiskfulPlans(
 					setType(v1alpha1.DatameshMemberTypeAccess),
 					clearBackingVolume,
 					asReplicaApply(lowerQ),
-					asReplicaApply(updateBaselineLayout),
 				),
 				asReplicaConfirm(confirmAllMembers),
 			),
