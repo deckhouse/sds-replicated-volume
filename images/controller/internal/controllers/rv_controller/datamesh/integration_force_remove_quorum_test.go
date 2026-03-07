@@ -47,122 +47,220 @@ func removeRVR(rvrs *[]*v1alpha1.ReplicatedVolumeReplica, name string) {
 	}
 }
 
-var _ = DescribeTable("integration: ForceRemove quorum invariants",
-	func(e layoutEntry) {
-		rv, rsp, rvrs := setupLayout(e)
+var _ = Describe("integration: ForceRemove quorum invariants", func() {
+	for _, ff := range featureVariants {
 
-		initialQMR := e.initQMR
-		initialGMDR := e.gmdr
+		Context(featureLabel(ff), func() {
+			DescribeTable("",
+				func(e layoutEntry) {
+					rv, rsp, rvrs := setupLayout(e)
 
-		// ── ForceRemove D members one by one (last to first) ───────────
-		for d := e.initD - 1; d >= 1; d-- {
-			deadName := fmt.Sprintf("rv-1-%d", d)
+					initialQMR := e.initQMR
+					initialGMDR := e.gmdr
 
-			// Simulate dead node: remove RVR.
-			removeRVR(&rvrs, deadName)
+					// ── ForceRemove D members one by one (last to first) ───────────
+					for d := e.initD - 1; d >= 1; d-- {
+						deadName := fmt.Sprintf("rv-1-%d", d)
 
-			// Add ForceLeave request.
-			rv.Status.DatameshReplicaRequests = []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
-				mkForceLeaveRequest(deadName),
-			}
+						// Simulate dead node: remove RVR.
+						removeRVR(&rvrs, deadName)
 
-			runUntilStable(rv, rsp, rvrs, FeatureFlags{})
+						// Add ForceLeave request.
+						rv.Status.DatameshReplicaRequests = []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+							mkForceLeaveRequest(deadName),
+						}
 
-			// Count surviving voters.
-			var voters int
-			for _, m := range rv.Status.Datamesh.Members {
-				if m.Type.IsVoter() {
-					voters++
+						runUntilStable(rv, rsp, rvrs, ff)
+
+						// Count surviving voters.
+						var voters int
+						for _, m := range rv.Status.Datamesh.Members {
+							if m.Type.IsVoter() {
+								voters++
+							}
+						}
+
+						step := fmt.Sprintf("after ForceRemove %s (D=%d)", deadName, voters)
+
+						// Invariants.
+						Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(
+							BeNumerically(">=", initialQMR),
+							"%s: qmr must never drop", step)
+						Expect(rv.Status.BaselineGuaranteedMinimumDataRedundancy).To(
+							BeNumerically(">=", initialGMDR),
+							"%s: baseline.GMDR must never drop", step)
+						Expect(rv.Status.Datamesh.Quorum).To(
+							Equal(expectedQ(voters)),
+							"%s: q must equal voters/2+1", step)
+
+						// Clear request for next iteration.
+						rv.Status.DatameshReplicaRequests = nil
+					}
+
+					// ── ForceRemove TB (if present) ────────────────────────────────
+					for t := 0; t < e.initTB; t++ {
+						tbID := e.initD + t
+						deadName := fmt.Sprintf("rv-1-%d", tbID)
+
+						removeRVR(&rvrs, deadName)
+
+						rv.Status.DatameshReplicaRequests = []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+							mkForceLeaveRequest(deadName),
+						}
+
+						runUntilStable(rv, rsp, rvrs, ff)
+
+						// qmr and baseline.GMDR must still not drop.
+						Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(
+							BeNumerically(">=", initialQMR),
+							"after ForceRemove TB: qmr must never drop")
+						Expect(rv.Status.BaselineGuaranteedMinimumDataRedundancy).To(
+							BeNumerically(">=", initialGMDR),
+							"after ForceRemove TB: baseline.GMDR must never drop")
+
+						rv.Status.DatameshReplicaRequests = nil
+					}
+
+					// ── State after cascade: 1D remaining ──────────────────────────
+					Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)), "final: q=1")
+					Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(
+						BeNumerically(">=", initialQMR), "final: qmr preserved")
+
+					// ── Recovery: lower config.GMDR to 0 ───────────────────────────
+					rv.Status.Configuration.FailuresToTolerate = 0
+					rv.Status.Configuration.GuaranteedMinimumDataRedundancy = 0
+
+					runUntilStable(rv, rsp, rvrs, ff)
+
+					Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)), "recovery: q=1")
+					Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(1)), "recovery: qmr=1")
+					Expect(rv.Status.BaselineGuaranteedMinimumDataRedundancy).To(Equal(byte(0)), "recovery: baseline.GMDR=0")
+					Expect(rv.Status.DatameshTransitions).To(BeEmpty(), "recovery: no active transitions")
+				},
+				// Ignored topology.
+				Entry("1D (FTT=0 GMDR=0)", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}),
+				Entry("2D+1TB (FTT=1 GMDR=0)", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}),
+				Entry("2D (FTT=0 GMDR=1)", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}),
+				Entry("3D (FTT=1 GMDR=1)", layoutEntry{ftt: 1, gmdr: 1, initD: 3, initTB: 0, initQ: 2, initQMR: 2}),
+				Entry("4D+1TB (FTT=2 GMDR=1)", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}),
+				Entry("4D (FTT=1 GMDR=2)", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}),
+				Entry("5D (FTT=2 GMDR=2)", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}),
+
+				// TransZonal topology (3 zones).
+				Entry("1D (FTT=0 GMDR=0) [TZ 3z]", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}.transZonal(3)),
+				Entry("2D+1TB (FTT=1 GMDR=0) [TZ 3z]", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}.transZonal(3)),
+				Entry("2D (FTT=0 GMDR=1) [TZ 3z]", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}.transZonal(3)),
+				Entry("3D (FTT=1 GMDR=1) [TZ 3z]", layoutEntry{ftt: 1, gmdr: 1, initD: 3, initTB: 0, initQ: 2, initQMR: 2}.transZonal(3)),
+				Entry("4D+1TB (FTT=2 GMDR=1) [TZ 3z]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.transZonal(3)),
+				Entry("5D (FTT=2 GMDR=2) [TZ 3z]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.transZonal(3)),
+
+				// TransZonal topology (4 zones — 4D).
+				Entry("4D (FTT=1 GMDR=2) [TZ 4z]", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}.transZonal(4)),
+
+				// TransZonal topology (5 zones — pure).
+				Entry("4D+1TB (FTT=2 GMDR=1) [TZ 5z]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.transZonal(5)),
+				Entry("5D (FTT=2 GMDR=2) [TZ 5z]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.transZonal(5)),
+
+				// Zonal topology.
+				Entry("1D (FTT=0 GMDR=0) [Zonal]", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}.zonal()),
+				Entry("2D+1TB (FTT=1 GMDR=0) [Zonal]", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}.zonal()),
+				Entry("2D (FTT=0 GMDR=1) [Zonal]", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}.zonal()),
+				Entry("3D (FTT=1 GMDR=1) [Zonal]", layoutEntry{ftt: 1, gmdr: 1, initD: 3, initTB: 0, initQ: 2, initQMR: 2}.zonal()),
+				Entry("4D+1TB (FTT=2 GMDR=1) [Zonal]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.zonal()),
+				Entry("4D (FTT=1 GMDR=2) [Zonal]", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}.zonal()),
+				Entry("5D (FTT=2 GMDR=2) [Zonal]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.zonal()),
+			)
+		})
+	}
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Simultaneous ForceRemove (multiple dead nodes in one cycle)
+//
+// Multiple ForceRemoveReplica operations can execute in a single
+// reconciliation (e.g., two nodes failed). q is computed once for
+// the final voter count.
+
+var _ = Describe("integration: simultaneous ForceRemove", func() {
+	for _, ff := range featureVariants {
+
+		Context(featureLabel(ff), func() {
+			It("2 D die simultaneously from 3D", func() {
+				e := layoutEntry{ftt: 1, gmdr: 1, initD: 3, initTB: 0, initQ: 2, initQMR: 2}
+				rv, rsp, rvrs := setupLayout(e)
+
+				removeRVR(&rvrs, "rv-1-1")
+				removeRVR(&rvrs, "rv-1-2")
+				rv.Status.DatameshReplicaRequests = []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+					mkForceLeaveRequest("rv-1-1"),
+					mkForceLeaveRequest("rv-1-2"),
 				}
-			}
 
-			step := fmt.Sprintf("after ForceRemove %s (D=%d)", deadName, voters)
+				runUntilStable(rv, rsp, rvrs, ff)
 
-			// Invariants.
-			Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(
-				BeNumerically(">=", initialQMR),
-				"%s: qmr must never drop", step)
-			Expect(rv.Status.BaselineGuaranteedMinimumDataRedundancy).To(
-				BeNumerically(">=", initialGMDR),
-				"%s: baseline.GMDR must never drop", step)
-			Expect(rv.Status.Datamesh.Quorum).To(
-				Equal(expectedQ(voters)),
-				"%s: q must equal voters/2+1", step)
+				Expect(rv.Status.Datamesh.Members).To(HaveLen(1))
+				Expect(rv.Status.Datamesh.Members[0].Name).To(Equal("rv-1-0"))
+				Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)))
+				Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(
+					BeNumerically(">=", e.initQMR), "qmr must never drop")
+				Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+			})
 
-			// Clear request for next iteration.
-			rv.Status.DatameshReplicaRequests = nil
-		}
+			It("D + TB die simultaneously from 4D+TB", func() {
+				e := layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}
+				rv, rsp, rvrs := setupLayout(e)
 
-		// ── ForceRemove TB (if present) ────────────────────────────────
-		for t := 0; t < e.initTB; t++ {
-			tbID := e.initD + t
-			deadName := fmt.Sprintf("rv-1-%d", tbID)
+				removeRVR(&rvrs, "rv-1-3")
+				removeRVR(&rvrs, "rv-1-4")
+				rv.Status.DatameshReplicaRequests = []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+					mkForceLeaveRequest("rv-1-3"),
+					mkForceLeaveRequest("rv-1-4"),
+				}
 
-			removeRVR(&rvrs, deadName)
+				runUntilStable(rv, rsp, rvrs, ff)
 
-			rv.Status.DatameshReplicaRequests = []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
-				mkForceLeaveRequest(deadName),
-			}
+				var voters, tbs int
+				for _, m := range rv.Status.Datamesh.Members {
+					if m.Type.IsVoter() {
+						voters++
+					}
+					if m.Type == v1alpha1.DatameshMemberTypeTieBreaker {
+						tbs++
+					}
+				}
+				Expect(voters).To(Equal(3))
+				Expect(tbs).To(Equal(0))
+				Expect(rv.Status.Datamesh.Quorum).To(Equal(expectedQ(3)))
+				Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(
+					BeNumerically(">=", e.initQMR), "qmr must never drop")
+				Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+			})
 
-			runUntilStable(rv, rsp, rvrs, FeatureFlags{})
+			It("2 D die simultaneously from 5D", func() {
+				e := layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}
+				rv, rsp, rvrs := setupLayout(e)
 
-			// qmr and baseline.GMDR must still not drop.
-			Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(
-				BeNumerically(">=", initialQMR),
-				"after ForceRemove TB: qmr must never drop")
-			Expect(rv.Status.BaselineGuaranteedMinimumDataRedundancy).To(
-				BeNumerically(">=", initialGMDR),
-				"after ForceRemove TB: baseline.GMDR must never drop")
+				removeRVR(&rvrs, "rv-1-3")
+				removeRVR(&rvrs, "rv-1-4")
+				rv.Status.DatameshReplicaRequests = []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+					mkForceLeaveRequest("rv-1-3"),
+					mkForceLeaveRequest("rv-1-4"),
+				}
 
-			rv.Status.DatameshReplicaRequests = nil
-		}
+				runUntilStable(rv, rsp, rvrs, ff)
 
-		// ── State after cascade: 1D remaining ──────────────────────────
-		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)), "final: q=1")
-		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(
-			BeNumerically(">=", initialQMR), "final: qmr preserved")
-
-		// ── Recovery: lower config.GMDR to 0 ───────────────────────────
-		rv.Status.Configuration.FailuresToTolerate = 0
-		rv.Status.Configuration.GuaranteedMinimumDataRedundancy = 0
-
-		runUntilStable(rv, rsp, rvrs, FeatureFlags{})
-
-		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)), "recovery: q=1")
-		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(1)), "recovery: qmr=1")
-		Expect(rv.Status.BaselineGuaranteedMinimumDataRedundancy).To(Equal(byte(0)), "recovery: baseline.GMDR=0")
-		Expect(rv.Status.DatameshTransitions).To(BeEmpty(), "recovery: no active transitions")
-	},
-	// Ignored topology.
-	Entry("1D (FTT=0 GMDR=0)", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}),
-	Entry("2D+1TB (FTT=1 GMDR=0)", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}),
-	Entry("2D (FTT=0 GMDR=1)", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}),
-	Entry("3D (FTT=1 GMDR=1)", layoutEntry{ftt: 1, gmdr: 1, initD: 3, initTB: 0, initQ: 2, initQMR: 2}),
-	Entry("4D+1TB (FTT=2 GMDR=1)", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}),
-	Entry("4D (FTT=1 GMDR=2)", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}),
-	Entry("5D (FTT=2 GMDR=2)", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}),
-
-	// TransZonal topology (3 zones).
-	Entry("1D (FTT=0 GMDR=0) [TZ 3z]", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}.transZonal(3)),
-	Entry("2D+1TB (FTT=1 GMDR=0) [TZ 3z]", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}.transZonal(3)),
-	Entry("2D (FTT=0 GMDR=1) [TZ 3z]", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}.transZonal(3)),
-	Entry("3D (FTT=1 GMDR=1) [TZ 3z]", layoutEntry{ftt: 1, gmdr: 1, initD: 3, initTB: 0, initQ: 2, initQMR: 2}.transZonal(3)),
-	Entry("4D+1TB (FTT=2 GMDR=1) [TZ 3z]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.transZonal(3)),
-	Entry("5D (FTT=2 GMDR=2) [TZ 3z]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.transZonal(3)),
-
-	// TransZonal topology (4 zones — 4D).
-	Entry("4D (FTT=1 GMDR=2) [TZ 4z]", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}.transZonal(4)),
-
-	// TransZonal topology (5 zones — pure).
-	Entry("4D+1TB (FTT=2 GMDR=1) [TZ 5z]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.transZonal(5)),
-	Entry("5D (FTT=2 GMDR=2) [TZ 5z]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.transZonal(5)),
-
-	// Zonal topology.
-	Entry("1D (FTT=0 GMDR=0) [Zonal]", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}.zonal()),
-	Entry("2D+1TB (FTT=1 GMDR=0) [Zonal]", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}.zonal()),
-	Entry("2D (FTT=0 GMDR=1) [Zonal]", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}.zonal()),
-	Entry("3D (FTT=1 GMDR=1) [Zonal]", layoutEntry{ftt: 1, gmdr: 1, initD: 3, initTB: 0, initQ: 2, initQMR: 2}.zonal()),
-	Entry("4D+1TB (FTT=2 GMDR=1) [Zonal]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.zonal()),
-	Entry("4D (FTT=1 GMDR=2) [Zonal]", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}.zonal()),
-	Entry("5D (FTT=2 GMDR=2) [Zonal]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.zonal()),
-)
+				var voters int
+				for _, m := range rv.Status.Datamesh.Members {
+					if m.Type.IsVoter() {
+						voters++
+					}
+				}
+				Expect(voters).To(Equal(3))
+				Expect(rv.Status.Datamesh.Quorum).To(Equal(expectedQ(3)))
+				Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(
+					BeNumerically(">=", e.initQMR), "qmr must never drop")
+				Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+			})
+		})
+	}
+})

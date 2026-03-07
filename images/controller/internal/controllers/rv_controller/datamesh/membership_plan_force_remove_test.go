@@ -409,6 +409,72 @@ var _ = Describe("ForceRemoveReplica additional", func() {
 		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("shadow-diskful/v1"))
 	})
 
+	It("Emergency preempts in-flight AddReplica(D)", func() {
+		// Setup: 3D layout. AddReplica(D)+q↑ for rv-1-3 is dispatched.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestD("rv-1-3")},
+			nil,
+		)
+		rv.Status.Datamesh.Quorum = 2
+		rv.Status.Datamesh.QuorumMinimumRedundancy = 2
+		rv.Status.Configuration.FailuresToTolerate = 1
+		rv.Status.Configuration.GuaranteedMinimumDataRedundancy = 1
+
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5),
+			mkRVRUpToDate("rv-1-1", "node-2", 5),
+			mkRVRUpToDate("rv-1-2", "node-3", 5),
+			mkRVR("rv-1-3", "node-4", 0), // new replica for AddD
+		}
+		rsp := mkRSP("node-1", "node-2", "node-3", "node-4")
+
+		// Step 1: dispatch AddReplica(D)+q↑. First step (✦→A) applied.
+		changed, _ := ProcessTransitions(context.Background(), rv, rsp, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].Type).To(Equal(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica))
+
+		// Confirm step 1 (all replicas see the new revision).
+		for _, rvr := range rvrs {
+			rvr.Status.DatameshRevision = rv.Status.DatameshRevision
+		}
+
+		// Step 2: rv-1-2 dies mid-flight. Remove RVR + add ForceLeave.
+		rvrs = rvrs[:3] // remove rv-1-3's position — keep only 0,1,2
+		// Actually we need to remove rv-1-2 (dead) and keep rv-1-3 (new).
+		filteredRVRs := []*v1alpha1.ReplicatedVolumeReplica{rvrs[0], rvrs[1], mkRVR("rv-1-3", "node-4", rv.Status.DatameshRevision)}
+
+		rv.Status.DatameshReplicaRequests = append(
+			rv.Status.DatameshReplicaRequests,
+			mkForceLeaveRequest("rv-1-2"),
+		)
+
+		// Run until stable: ForceRemove should preempt and the system should stabilize.
+		runUntilStable(rv, rsp, filteredRVRs, FeatureFlags{})
+
+		// rv-1-2 should be removed.
+		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-2")).To(BeNil())
+
+		// System must stabilize: no stuck transitions.
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+
+		// q must be correct for final voter count.
+		var voters int
+		for _, m := range rv.Status.Datamesh.Members {
+			if m.Type.IsVoter() {
+				voters++
+			}
+		}
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(expectedQ(voters)),
+			"q must match actual voter count %d", voters)
+	})
+
 	It("orphan D (even voters) → auto ForceRemove with q↓", func() {
 		// 2D members, rv-1-1 has no RVR (node lost). Even voters → q↓.
 		rv := mkRV(5,
@@ -429,5 +495,47 @@ var _ = Describe("ForceRemoveReplica additional", func() {
 		// Member removed, q lowered.
 		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-1")).To(BeNil())
 		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)))
+	})
+
+	It("orphan attached D: full ForceDetach → ForceRemove cycle", func() {
+		// 3D layout. rv-1-2 dies: RVR removed, member still Attached=true.
+		// Both ForceDetach and ForceLeave requests provided simultaneously.
+		// ForceDetach runs first (attachment dispatcher), clears Attached.
+		// Then ForceRemove runs (membership dispatcher), removes the member.
+		member := mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3")
+		member.Attached = true
+
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				member,
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkForceDetachRequest("rv-1-2"),
+				mkForceLeaveRequest("rv-1-2"),
+			},
+			nil,
+		)
+		// Only surviving RVRs (dead node has no RVR).
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5),
+			mkRVRUpToDate("rv-1-1", "node-2", 5),
+		}
+
+		runUntilStable(rv, nil, rvrs, FeatureFlags{})
+
+		// rv-1-2 must be fully removed.
+		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-2")).To(BeNil())
+		// 2 surviving voters, q correct.
+		var voters int
+		for _, m := range rv.Status.Datamesh.Members {
+			if m.Type.IsVoter() {
+				voters++
+			}
+		}
+		Expect(voters).To(Equal(2))
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(expectedQ(2)))
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 	})
 })

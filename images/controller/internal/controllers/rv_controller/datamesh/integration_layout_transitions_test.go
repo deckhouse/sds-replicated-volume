@@ -79,7 +79,7 @@ var (
 // transitionLayout sets up the `from` layout, changes config to `to`,
 // provides all needed RVRs and requests at once, and runs until stable.
 // Then asserts the final state matches `to`.
-func transitionLayout(from, to layoutEntry) {
+func transitionLayout(from, to layoutEntry, features FeatureFlags) {
 	rv, _, rvrs := setupLayout(from)
 
 	// RSP with plenty of nodes for both layouts (zone-aware for TransZonal).
@@ -151,7 +151,7 @@ func transitionLayout(from, to layoutEntry) {
 	rv.Status.DatameshReplicaRequests = requests
 
 	// Run until all transitions complete.
-	runUntilStable(rv, rsp, rvrs, FeatureFlags{})
+	runUntilStable(rv, rsp, rvrs, features)
 
 	// Assert final state.
 	// Count D and TB members.
@@ -306,7 +306,7 @@ func hasMixedOps(from, to layoutEntry) bool {
 
 // transitionLayoutStepwise feeds requests one at a time in the given ordering,
 // checking q = voters/2+1 at every intermediate step.
-func transitionLayoutStepwise(from, to layoutEntry, dFirst bool) {
+func transitionLayoutStepwise(from, to layoutEntry, dFirst bool, features FeatureFlags) {
 	rv, _, rvrs := setupLayout(from)
 
 	// RSP with plenty of nodes.
@@ -358,7 +358,7 @@ func transitionLayoutStepwise(from, to layoutEntry, dFirst bool) {
 			)
 		}
 
-		runUntilStable(rv, rsp, rvrs, FeatureFlags{})
+		runUntilStable(rv, rsp, rvrs, features)
 
 		// Intermediate invariant: q = voters/2+1.
 		var voters int
@@ -489,30 +489,37 @@ var allLayoutPairs = func() []layoutPair {
 //
 
 var _ = Describe("integration: layout transitions", func() {
-	// ── All at once (42 pairs) ─────────────────────────────────────────
-	//
-	// All requests provided simultaneously. Engine processes them in the
-	// correct order via dispatch + guards + concurrency tracker.
-	Context("all at once", func() {
-		for _, tc := range allLayoutPairs {
-			It(tc.name, func() { transitionLayout(tc.from, tc.to) })
-		}
-	})
+	for _, ff := range featureVariants {
 
-	// ── Step by step (42 D-first + 16 TB-first = 58 entries) ──────────
-	//
-	// Requests fed one at a time. q invariant checked at every step.
-	// Two orderings for transitions with both D and TB ops.
-	Context("step by step", func() {
-		for _, tc := range allLayoutPairs {
-			It(tc.name+" (D-first)", func() {
-				transitionLayoutStepwise(tc.from, tc.to, true)
+		Context(featureLabel(ff), func() {
+			// ── All at once (42 pairs) ─────────────────────────────────────────
+			//
+			// All requests provided simultaneously. Engine processes them in the
+			// correct order via dispatch + guards + concurrency tracker.
+			Context("all at once", func() {
+				for _, tc := range allLayoutPairs {
+
+					It(tc.name, func() { transitionLayout(tc.from, tc.to, ff) })
+				}
 			})
-			if hasMixedOps(tc.from, tc.to) {
-				It(tc.name+" (TB-first)", func() {
-					transitionLayoutStepwise(tc.from, tc.to, false)
-				})
-			}
-		}
-	})
+
+			// ── Step by step (42 D-first + 16 TB-first = 58 entries) ──────────
+			//
+			// Requests fed one at a time. q invariant checked at every step.
+			// Two orderings for transitions with both D and TB ops.
+			Context("step by step", func() {
+				for _, tc := range allLayoutPairs {
+
+					It(tc.name+" (D-first)", func() {
+						transitionLayoutStepwise(tc.from, tc.to, true, ff)
+					})
+					if hasMixedOps(tc.from, tc.to) {
+						It(tc.name+" (TB-first)", func() {
+							transitionLayoutStepwise(tc.from, tc.to, false, ff)
+						})
+					}
+				}
+			})
+		})
+	}
 })

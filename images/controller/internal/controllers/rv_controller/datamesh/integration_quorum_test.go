@@ -48,21 +48,41 @@ import (
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Feature flag variants
+//
+
+// featureVariants defines the FeatureFlags variants that all integration tests
+// run with. Each integration DescribeTable/Describe wraps its content in a
+// for-loop over these variants so every scenario is tested with and without
+// ShadowDiskful (sD-vestibule vs A-vestibule paths for D transitions).
+var featureVariants = []FeatureFlags{{}, {ShadowDiskful: true}}
+
+// featureLabel returns a human-readable Context label for the given FeatureFlags.
+func featureLabel(ff FeatureFlags) string {
+	if ff.ShadowDiskful {
+		return "[sD]"
+	}
+	return "[default]"
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Helpers
 //
 
 // runUntilStable runs ProcessTransitions in a loop, confirming each step
 // by setting all RVR revisions to the current DatameshRevision.
+// After each iteration, assertSafetyInvariants verifies quorum correctness.
 // Fails the test if max iterations exceeded.
 func runUntilStable(
 	rv *v1alpha1.ReplicatedVolume,
 	rsp RSP,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-	features FeatureFlags, //nolint:unparam // structurally needed for ProcessTransitions signature
+	features FeatureFlags,
 ) {
 	const maxIter = 30
-	for range maxIter {
+	for i := range maxIter {
 		changed, _ := ProcessTransitions(context.Background(), rv, rsp, rvrs, nil, features)
+		assertSafetyInvariants(rv, i, changed)
 		if !changed {
 			return
 		}
@@ -75,6 +95,51 @@ func runUntilStable(
 		}
 	}
 	Fail(fmt.Sprintf("runUntilStable: did not stabilize after %d iterations", maxIter))
+}
+
+// assertSafetyInvariants checks core safety invariants after each
+// ProcessTransitions call:
+//   - q == voters/2+1 (majority quorum: no split-brain, IO continuity)
+//   - qmr >= 1 (minimum valid quorum minimum redundancy)
+//
+// changed indicates whether ProcessTransitions mutated the state. The check
+// is skipped when changed=true AND the invariant doesn't hold — this allows
+// the engine to fix intentionally corrupted state (e.g. corruption recovery
+// tests set q=18 or q=0 to verify the engine converges to the correct value).
+// Once the engine reports no changes, the invariant MUST hold.
+func assertSafetyInvariants(rv *v1alpha1.ReplicatedVolume, iteration int, changed bool) {
+	var voters int
+	for _, m := range rv.Status.Datamesh.Members {
+		if m.Type.IsVoter() {
+			voters++
+		}
+	}
+	if voters == 0 {
+		return // no voters — q is undefined (degenerate state during full teardown)
+	}
+
+	expected := expectedQ(voters)
+	qOK := rv.Status.Datamesh.Quorum == expected
+	qmrOK := rv.Status.Datamesh.QuorumMinimumRedundancy >= 1
+
+	// If the engine is still making changes, skip — it may be fixing corrupted state.
+	if changed && (!qOK || !qmrOK) {
+		return
+	}
+
+	step := fmt.Sprintf("iteration %d", iteration)
+
+	// Invariant: q == voters/2+1 (majority quorum, no split-brain, IO continuity).
+	ExpectWithOffset(2, rv.Status.Datamesh.Quorum).To(
+		Equal(expected),
+		"%s: safety invariant violated: q=%d but expected %d for %d voters",
+		step, rv.Status.Datamesh.Quorum, expected, voters)
+
+	// Invariant: qmr >= 1 (minimum valid quorum minimum redundancy).
+	ExpectWithOffset(2, rv.Status.Datamesh.QuorumMinimumRedundancy).To(
+		BeNumerically(">=", byte(1)),
+		"%s: safety invariant violated: qmr=%d < 1",
+		step, rv.Status.Datamesh.QuorumMinimumRedundancy)
 }
 
 // layoutEntry describes a canonical layout for the table-driven test.
@@ -202,6 +267,7 @@ func addD(
 	rsp *testRSP,
 	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
 	nextID int,
+	features FeatureFlags,
 ) {
 	name := fmt.Sprintf("rv-1-%d", nextID)
 	node := fmt.Sprintf("node-%d", nextID)
@@ -212,7 +278,7 @@ func addD(
 		mkJoinRequestD(name),
 	}
 
-	runUntilStable(rv, rsp, *rvrs, FeatureFlags{})
+	runUntilStable(rv, rsp, *rvrs, features)
 
 	// Clear requests after completion.
 	rv.Status.DatameshReplicaRequests = nil
@@ -225,6 +291,7 @@ func removeD(
 	rsp *testRSP,
 	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
 	memberName string,
+	features FeatureFlags,
 ) {
 	// Make all RVRs UpToDate for GMDR guard.
 	for _, rvr := range *rvrs {
@@ -245,7 +312,7 @@ func removeD(
 		mkLeaveRequest(memberName),
 	}
 
-	runUntilStable(rv, rsp, *rvrs, FeatureFlags{})
+	runUntilStable(rv, rsp, *rvrs, features)
 
 	// Clear requests after completion.
 	rv.Status.DatameshReplicaRequests = nil
@@ -267,132 +334,139 @@ func assertQuorum(rv *v1alpha1.ReplicatedVolume, voters int, expectedQMR byte, c
 // Tests
 //
 
-var _ = DescribeTable("integration: quorum invariants",
-	func(e layoutEntry) {
-		rv, rsp, rvrs := setupLayout(e)
+var _ = Describe("integration: quorum invariants", func() {
+	for _, ff := range featureVariants {
 
-		// Verify initial state.
-		assertQuorum(rv, e.initD, e.initQMR, "initial")
+		Context(featureLabel(ff), func() {
+			DescribeTable("",
+				func(e layoutEntry) {
+					rv, rsp, rvrs := setupLayout(e)
 
-		// ── Step 1: try remove D at minimum → blocked ──────────────────
-		{
-			lastD := fmt.Sprintf("rv-1-%d", e.initD-1)
-			// Make all D RVRs UpToDate so only FTT guard blocks (not GMDR).
-			for _, rvr := range rvrs {
-				for _, m := range rv.Status.Datamesh.Members {
-					if m.Name == rvr.Name && m.Type.HasBackingVolume() {
-						rvr.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
-							State: v1alpha1.DiskStateUpToDate,
+					// Verify initial state.
+					assertQuorum(rv, e.initD, e.initQMR, "initial")
+
+					// ── Step 1: try remove D at minimum → blocked ──────────────────
+					{
+						lastD := fmt.Sprintf("rv-1-%d", e.initD-1)
+						// Make all D RVRs UpToDate so only FTT guard blocks (not GMDR).
+						for _, rvr := range rvrs {
+							for _, m := range rv.Status.Datamesh.Members {
+								if m.Name == rvr.Name && m.Type.HasBackingVolume() {
+									rvr.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+										State: v1alpha1.DiskStateUpToDate,
+									}
+								}
+							}
 						}
+						rv.Status.DatameshReplicaRequests = []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+							mkLeaveRequest(lastD),
+						}
+
+						ProcessTransitions(context.Background(), rv, rsp, rvrs, nil, ff)
+
+						// No RemoveReplica transition should be created.
+						for _, t := range rv.Status.DatameshTransitions {
+							Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica),
+								"removal at minimum should be blocked")
+						}
+						rv.Status.DatameshReplicaRequests = nil
+						rv.Status.DatameshTransitions = nil
 					}
-				}
-			}
-			rv.Status.DatameshReplicaRequests = []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
-				mkLeaveRequest(lastD),
-			}
 
-			ProcessTransitions(context.Background(), rv, rsp, rvrs, nil, FeatureFlags{})
+					// ── Step 2: add +1, +2, +3 D ──────────────────────────────────
+					nextID := e.initD + e.initTB // first available ID after D + TB members
+					for i := 1; i <= 3; i++ {
+						addD(rv, rsp, &rvrs, nextID, ff)
+						nextID++
 
-			// No RemoveReplica transition should be created.
-			for _, t := range rv.Status.DatameshTransitions {
-				Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica),
-					"removal at minimum should be blocked")
-			}
-			rv.Status.DatameshReplicaRequests = nil
-			rv.Status.DatameshTransitions = nil
-		}
+						// Count actual voters (zone placement guards may block some adds in TransZonal).
+						var voters int
+						for _, m := range rv.Status.Datamesh.Members {
+							if m.Type.IsVoter() {
+								voters++
+							}
+						}
+						step := fmt.Sprintf("after add +%d (D=%d)", i, voters)
+						ExpectWithOffset(1, rv.Status.Datamesh.Quorum).To(
+							Equal(expectedQ(voters)),
+							"%s: q should be %d for %d voters", step, expectedQ(voters), voters)
+						ExpectWithOffset(1, rv.Status.DatameshTransitions).To(BeEmpty(),
+							"%s: no active transitions expected", step)
+					}
 
-		// ── Step 2: add +1, +2, +3 D ──────────────────────────────────
-		nextID := e.initD + e.initTB // first available ID after D + TB members
-		for i := 1; i <= 3; i++ {
-			addD(rv, rsp, &rvrs, nextID)
-			nextID++
+					// ── Step 3: remove -1, -2, -3 D back to canonical ─────────────
+					for i := 1; i <= 3; i++ {
+						// Remove the last-added D (in reverse order).
+						removedID := nextID - i
+						removedName := fmt.Sprintf("rv-1-%d", removedID)
+						removeD(rv, rsp, &rvrs, removedName, ff)
 
-			// Count actual voters (zone placement guards may block some adds in TransZonal).
-			var voters int
-			for _, m := range rv.Status.Datamesh.Members {
-				if m.Type.IsVoter() {
-					voters++
-				}
-			}
-			step := fmt.Sprintf("after add +%d (D=%d)", i, voters)
-			ExpectWithOffset(1, rv.Status.Datamesh.Quorum).To(
-				Equal(expectedQ(voters)),
-				"%s: q should be %d for %d voters", step, expectedQ(voters), voters)
-			ExpectWithOffset(1, rv.Status.DatameshTransitions).To(BeEmpty(),
-				"%s: no active transitions expected", step)
-		}
+						// Count actual voters (zone guards may block some removals in TransZonal).
+						var voters int
+						for _, m := range rv.Status.Datamesh.Members {
+							if m.Type.IsVoter() {
+								voters++
+							}
+						}
 
-		// ── Step 3: remove -1, -2, -3 D back to canonical ─────────────
-		for i := 1; i <= 3; i++ {
-			// Remove the last-added D (in reverse order).
-			removedID := nextID - i
-			removedName := fmt.Sprintf("rv-1-%d", removedID)
-			removeD(rv, rsp, &rvrs, removedName)
+						step := fmt.Sprintf("after remove -%d (D=%d)", i, voters)
+						ExpectWithOffset(1, rv.Status.Datamesh.Quorum).To(
+							Equal(expectedQ(voters)),
+							"%s: q should be %d for %d voters", step, expectedQ(voters), voters)
+						ExpectWithOffset(1, rv.Status.DatameshTransitions).To(BeEmpty(),
+							"%s: no active transitions expected", step)
+					}
 
-			// Count actual voters (zone guards may block some removals in TransZonal).
-			var voters int
-			for _, m := range rv.Status.Datamesh.Members {
-				if m.Type.IsVoter() {
-					voters++
-				}
-			}
+					// ── Step 4: try remove D at minimum again → blocked ────────────
+					{
+						lastD := fmt.Sprintf("rv-1-%d", e.initD-1)
+						rv.Status.DatameshReplicaRequests = []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+							mkLeaveRequest(lastD),
+						}
 
-			step := fmt.Sprintf("after remove -%d (D=%d)", i, voters)
-			ExpectWithOffset(1, rv.Status.Datamesh.Quorum).To(
-				Equal(expectedQ(voters)),
-				"%s: q should be %d for %d voters", step, expectedQ(voters), voters)
-			ExpectWithOffset(1, rv.Status.DatameshTransitions).To(BeEmpty(),
-				"%s: no active transitions expected", step)
-		}
+						ProcessTransitions(context.Background(), rv, rsp, rvrs, nil, ff)
 
-		// ── Step 4: try remove D at minimum again → blocked ────────────
-		{
-			lastD := fmt.Sprintf("rv-1-%d", e.initD-1)
-			rv.Status.DatameshReplicaRequests = []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
-				mkLeaveRequest(lastD),
-			}
+						for _, t := range rv.Status.DatameshTransitions {
+							Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica),
+								"removal at minimum should be blocked (after cycle)")
+						}
+						rv.Status.DatameshReplicaRequests = nil
+						rv.Status.DatameshTransitions = nil
+					}
+				},
+				// Ignored topology (default).
+				Entry("1D (FTT=0 GMDR=0)", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}),
+				Entry("2D+1TB (FTT=1 GMDR=0)", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}),
+				Entry("2D (FTT=0 GMDR=1)", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}),
+				Entry("3D (FTT=1 GMDR=1)", layoutEntry{ftt: 1, gmdr: 1, initD: 3, initTB: 0, initQ: 2, initQMR: 2}),
+				Entry("4D+1TB (FTT=2 GMDR=1)", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}),
+				Entry("4D (FTT=1 GMDR=2)", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}),
+				Entry("5D (FTT=2 GMDR=2)", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}),
 
-			ProcessTransitions(context.Background(), rv, rsp, rvrs, nil, FeatureFlags{})
+				// TransZonal topology (3 zones — composite for 4D+TB/5D).
+				Entry("1D (FTT=0 GMDR=0) [TZ 3z]", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}.transZonal(3)),
+				Entry("2D+1TB (FTT=1 GMDR=0) [TZ 3z]", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}.transZonal(3)),
+				Entry("2D (FTT=0 GMDR=1) [TZ 3z]", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}.transZonal(3)),
+				Entry("3D (FTT=1 GMDR=1) [TZ 3z]", layoutEntry{ftt: 1, gmdr: 1, initD: 3, initTB: 0, initQ: 2, initQMR: 2}.transZonal(3)),
+				Entry("4D+1TB (FTT=2 GMDR=1) [TZ 3z]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.transZonal(3)),
+				Entry("5D (FTT=2 GMDR=2) [TZ 3z]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.transZonal(3)),
 
-			for _, t := range rv.Status.DatameshTransitions {
-				Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica),
-					"removal at minimum should be blocked (after cycle)")
-			}
-			rv.Status.DatameshReplicaRequests = nil
-			rv.Status.DatameshTransitions = nil
-		}
-	},
-	// Ignored topology (default).
-	Entry("1D (FTT=0 GMDR=0)", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}),
-	Entry("2D+1TB (FTT=1 GMDR=0)", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}),
-	Entry("2D (FTT=0 GMDR=1)", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}),
-	Entry("3D (FTT=1 GMDR=1)", layoutEntry{ftt: 1, gmdr: 1, initD: 3, initTB: 0, initQ: 2, initQMR: 2}),
-	Entry("4D+1TB (FTT=2 GMDR=1)", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}),
-	Entry("4D (FTT=1 GMDR=2)", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}),
-	Entry("5D (FTT=2 GMDR=2)", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}),
+				// TransZonal topology (4 zones — 4D only valid option).
+				Entry("4D (FTT=1 GMDR=2) [TZ 4z]", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}.transZonal(4)),
 
-	// TransZonal topology (3 zones — composite for 4D+TB/5D).
-	Entry("1D (FTT=0 GMDR=0) [TZ 3z]", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}.transZonal(3)),
-	Entry("2D+1TB (FTT=1 GMDR=0) [TZ 3z]", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}.transZonal(3)),
-	Entry("2D (FTT=0 GMDR=1) [TZ 3z]", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}.transZonal(3)),
-	Entry("3D (FTT=1 GMDR=1) [TZ 3z]", layoutEntry{ftt: 1, gmdr: 1, initD: 3, initTB: 0, initQ: 2, initQMR: 2}.transZonal(3)),
-	Entry("4D+1TB (FTT=2 GMDR=1) [TZ 3z]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.transZonal(3)),
-	Entry("5D (FTT=2 GMDR=2) [TZ 3z]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.transZonal(3)),
+				// TransZonal topology (5 zones — pure zone failure domain for 4D+TB/5D).
+				Entry("4D+1TB (FTT=2 GMDR=1) [TZ 5z]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.transZonal(5)),
+				Entry("5D (FTT=2 GMDR=2) [TZ 5z]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.transZonal(5)),
 
-	// TransZonal topology (4 zones — 4D only valid option).
-	Entry("4D (FTT=1 GMDR=2) [TZ 4z]", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}.transZonal(4)),
-
-	// TransZonal topology (5 zones — pure zone failure domain for 4D+TB/5D).
-	Entry("4D+1TB (FTT=2 GMDR=1) [TZ 5z]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.transZonal(5)),
-	Entry("5D (FTT=2 GMDR=2) [TZ 5z]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.transZonal(5)),
-
-	// Zonal topology (all replicas in one zone).
-	Entry("1D (FTT=0 GMDR=0) [Zonal]", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}.zonal()),
-	Entry("2D+1TB (FTT=1 GMDR=0) [Zonal]", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}.zonal()),
-	Entry("2D (FTT=0 GMDR=1) [Zonal]", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}.zonal()),
-	Entry("3D (FTT=1 GMDR=1) [Zonal]", layoutEntry{ftt: 1, gmdr: 1, initD: 3, initTB: 0, initQ: 2, initQMR: 2}.zonal()),
-	Entry("4D+1TB (FTT=2 GMDR=1) [Zonal]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.zonal()),
-	Entry("4D (FTT=1 GMDR=2) [Zonal]", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}.zonal()),
-	Entry("5D (FTT=2 GMDR=2) [Zonal]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.zonal()),
-)
+				// Zonal topology (all replicas in one zone).
+				Entry("1D (FTT=0 GMDR=0) [Zonal]", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}.zonal()),
+				Entry("2D+1TB (FTT=1 GMDR=0) [Zonal]", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}.zonal()),
+				Entry("2D (FTT=0 GMDR=1) [Zonal]", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}.zonal()),
+				Entry("3D (FTT=1 GMDR=1) [Zonal]", layoutEntry{ftt: 1, gmdr: 1, initD: 3, initTB: 0, initQ: 2, initQMR: 2}.zonal()),
+				Entry("4D+1TB (FTT=2 GMDR=1) [Zonal]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.zonal()),
+				Entry("4D (FTT=1 GMDR=2) [Zonal]", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}.zonal()),
+				Entry("5D (FTT=2 GMDR=2) [Zonal]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.zonal()),
+			)
+		})
+	}
+})

@@ -222,12 +222,22 @@ func guardNodeEligible(_ *globalContext, rctx *ReplicaContext) dmte.GuardResult 
 // Shared Remove guards
 //
 
-// guardNotAttached blocks if the member is currently attached.
+// guardNotAttached blocks if the member is attached or an Attach/Detach
+// transition is in progress. Prevents removal while the attachment state
+// is changing (an in-flight Attach would set Attached=true after the
+// member is removed, leaving an orphan attachment).
 func guardNotAttached(_ *globalContext, rctx *ReplicaContext) dmte.GuardResult {
 	if rctx.member != nil && rctx.member.Attached {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Cannot leave datamesh: replica is attached, detach required first",
+			Message: "Cannot remove: replica is attached, detach required first",
+		}
+	}
+	if rctx.attachmentTransition != nil {
+		return dmte.GuardResult{
+			Blocked: true,
+			Message: fmt.Sprintf("Cannot remove: %s transition in progress, wait for completion",
+				rctx.attachmentTransition.Type),
 		}
 	}
 	return dmte.GuardResult{}
