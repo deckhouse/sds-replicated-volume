@@ -73,6 +73,10 @@ func featureLabel(ff FeatureFlags) string {
 // by setting all RVR revisions to the current DatameshRevision.
 // After each iteration, assertSafetyInvariants verifies quorum correctness.
 // Fails the test if max iterations exceeded.
+//
+// Use runUntilStableUnchecked for tests that intentionally start with
+// corrupted state (e.g. q=18) or create transient intermediate violations
+// (e.g. emergency preemption of in-flight AddReplica).
 func runUntilStable(
 	rv *v1alpha1.ReplicatedVolume,
 	rsp RSP,
@@ -82,7 +86,7 @@ func runUntilStable(
 	const maxIter = 30
 	for i := range maxIter {
 		changed, _ := ProcessTransitions(context.Background(), rv, rsp, rvrs, nil, features)
-		assertSafetyInvariants(rv, i, changed)
+		assertSafetyInvariants(rv, i)
 		if !changed {
 			return
 		}
@@ -97,17 +101,41 @@ func runUntilStable(
 	Fail(fmt.Sprintf("runUntilStable: did not stabilize after %d iterations", maxIter))
 }
 
+// runUntilStableUnchecked is like runUntilStable but without per-step safety
+// invariant checks. Use for tests that intentionally create or encounter
+// broken intermediate states:
+//   - corruption recovery tests (q=18, qmr=0)
+//   - emergency preemption tests (ForceRemove mid-AddReplica leaves transient q > expected)
+func runUntilStableUnchecked(
+	rv *v1alpha1.ReplicatedVolume,
+	rsp RSP,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	features FeatureFlags,
+) {
+	const maxIter = 30
+	for range maxIter {
+		changed, _ := ProcessTransitions(context.Background(), rv, rsp, rvrs, nil, features)
+		if !changed {
+			return
+		}
+		for _, rvr := range rvrs {
+			rvr.Status.DatameshRevision = rv.Status.DatameshRevision
+		}
+		if len(rv.Status.DatameshTransitions) == 0 {
+			return
+		}
+	}
+	Fail(fmt.Sprintf("runUntilStableUnchecked: did not stabilize after %d iterations", maxIter))
+}
+
 // assertSafetyInvariants checks core safety invariants after each
 // ProcessTransitions call:
 //   - q == voters/2+1 (majority quorum: no split-brain, IO continuity)
 //   - qmr >= 1 (minimum valid quorum minimum redundancy)
 //
-// changed indicates whether ProcessTransitions mutated the state. The check
-// is skipped when changed=true AND the invariant doesn't hold — this allows
-// the engine to fix intentionally corrupted state (e.g. corruption recovery
-// tests set q=18 or q=0 to verify the engine converges to the correct value).
-// Once the engine reports no changes, the invariant MUST hold.
-func assertSafetyInvariants(rv *v1alpha1.ReplicatedVolume, iteration int, changed bool) {
+// Always asserts unconditionally — no exceptions for "engine is still fixing".
+// Tests with intentionally broken state must use runUntilStableUnchecked.
+func assertSafetyInvariants(rv *v1alpha1.ReplicatedVolume, iteration int) {
 	var voters int
 	for _, m := range rv.Status.Datamesh.Members {
 		if m.Type.IsVoter() {
@@ -118,22 +146,13 @@ func assertSafetyInvariants(rv *v1alpha1.ReplicatedVolume, iteration int, change
 		return // no voters — q is undefined (degenerate state during full teardown)
 	}
 
-	expected := expectedQ(voters)
-	qOK := rv.Status.Datamesh.Quorum == expected
-	qmrOK := rv.Status.Datamesh.QuorumMinimumRedundancy >= 1
-
-	// If the engine is still making changes, skip — it may be fixing corrupted state.
-	if changed && (!qOK || !qmrOK) {
-		return
-	}
-
 	step := fmt.Sprintf("iteration %d", iteration)
 
 	// Invariant: q == voters/2+1 (majority quorum, no split-brain, IO continuity).
 	ExpectWithOffset(2, rv.Status.Datamesh.Quorum).To(
-		Equal(expected),
+		Equal(expectedQ(voters)),
 		"%s: safety invariant violated: q=%d but expected %d for %d voters",
-		step, rv.Status.Datamesh.Quorum, expected, voters)
+		step, rv.Status.Datamesh.Quorum, expectedQ(voters), voters)
 
 	// Invariant: qmr >= 1 (minimum valid quorum minimum redundancy).
 	ExpectWithOffset(2, rv.Status.Datamesh.QuorumMinimumRedundancy).To(
