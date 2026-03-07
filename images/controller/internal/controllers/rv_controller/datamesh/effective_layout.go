@@ -136,11 +136,7 @@ func updateEffectiveLayout(gctx *globalContext, el *v1alpha1.ReplicatedVolumeEff
 
 	// ── Build diagnostic message ───────────────────────────────────────
 
-	msg := buildEffectiveLayoutMessage(el, canCompute, staleVoters, staleTBs)
-	if el.Message != msg {
-		el.Message = msg
-		changed = true
-	}
+	changed = setEffectiveLayoutMessage(el, canCompute, staleVoters, staleTBs) || changed
 
 	return changed
 }
@@ -167,19 +163,29 @@ func setOptInt8(dst **int8, val *int8) bool {
 	return true
 }
 
-// buildEffectiveLayoutMessage builds a human-readable summary of the effective layout.
-func buildEffectiveLayoutMessage(
+// setEffectiveLayoutMessage builds a human-readable summary of the effective
+// layout into a stack-allocated buffer and sets el.Message only if changed.
+// Returns true if the message changed.
+//
+// Zero heap allocations on the no-change path (stack buffer + string comparison
+// optimization). One allocation (string(buf)) only when the message differs.
+func setEffectiveLayoutMessage(
 	el *v1alpha1.ReplicatedVolumeEffectiveLayout,
 	canCompute bool,
 	staleVoters, staleTBs idset.IDSet,
-) string {
-	var buf []byte
+) bool {
+	// Stack-allocated buffer. Typical messages are 60-120 bytes;
+	// 256 covers the worst case (32 stale voters + 32 stale TBs with IDs).
+	var arr [256]byte
+	buf := arr[:0]
 
 	// Voter summary.
 	if el.TotalVoters > 0 {
 		buf = fmt.Appendf(buf, "%d/%d voters reachable", el.ReachableVoters, el.TotalVoters)
 		if !staleVoters.IsEmpty() {
-			buf = fmt.Appendf(buf, " (%d stale [%s])", staleVoters.Len(), staleVoters.String())
+			buf = fmt.Appendf(buf, " (%d stale [", staleVoters.Len())
+			buf = staleVoters.AppendString(buf)
+			buf = append(buf, ']', ')')
 		}
 		buf = fmt.Appendf(buf, ", %d/%d UpToDate", el.UpToDateVoters, el.TotalVoters)
 	} else {
@@ -190,7 +196,9 @@ func buildEffectiveLayoutMessage(
 	if el.TotalTieBreakers > 0 {
 		buf = fmt.Appendf(buf, ", %d/%d TB reachable", el.ReachableTieBreakers, el.TotalTieBreakers)
 		if !staleTBs.IsEmpty() {
-			buf = fmt.Appendf(buf, " (%d stale [%s])", staleTBs.Len(), staleTBs.String())
+			buf = fmt.Appendf(buf, " (%d stale [", staleTBs.Len())
+			buf = staleTBs.AppendString(buf)
+			buf = append(buf, ']', ')')
 		}
 	}
 
@@ -204,7 +212,12 @@ func buildEffectiveLayoutMessage(
 		buf = append(buf, "; FTT and GMDR unavailable: no fresh agent data"...)
 	}
 
-	return string(buf)
+	// Compare without allocating (Go compiler optimizes string([]byte) == string).
+	if string(buf) == el.Message {
+		return false
+	}
+	el.Message = string(buf)
+	return true
 }
 
 // isAgentNotReady returns true if the RVR's agent is not ready (DRBDConfigured
