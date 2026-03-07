@@ -55,6 +55,57 @@ func TestOf(t *testing.T) {
 	}
 }
 
+func TestOf_Variadic(t *testing.T) {
+	// Zero args → empty set.
+	s := idset.Of()
+	if !s.IsEmpty() {
+		t.Fatal("Of() should return empty set")
+	}
+
+	// Multiple args.
+	s = idset.Of(0, 3, 7, 31)
+	if s.Len() != 4 {
+		t.Fatalf("expected len=4, got %d", s.Len())
+	}
+	for _, id := range []uint8{0, 3, 7, 31} {
+		if !s.Contains(id) {
+			t.Fatalf("Of(0,3,7,31) does not contain %d", id)
+		}
+	}
+	// Not in set.
+	for _, id := range []uint8{1, 2, 4, 30} {
+		if s.Contains(id) {
+			t.Fatalf("Of(0,3,7,31) should not contain %d", id)
+		}
+	}
+
+	// Duplicates are harmless.
+	s = idset.Of(5, 5, 5)
+	if s.Len() != 1 {
+		t.Fatalf("expected len=1 for duplicates, got %d", s.Len())
+	}
+
+	// Equivalent to manual Add.
+	var manual idset.IDSet
+	manual.Add(1)
+	manual.Add(10)
+	manual.Add(20)
+	if idset.Of(1, 10, 20) != manual {
+		t.Fatal("Of(1,10,20) should equal manual {1,10,20}")
+	}
+}
+
+func TestAll_Constant(t *testing.T) {
+	if idset.All.Len() != 32 {
+		t.Fatalf("All.Len() = %d, want 32", idset.All.Len())
+	}
+	for id := uint8(0); id < 32; id++ {
+		if !idset.All.Contains(id) {
+			t.Fatalf("All should contain %d", id)
+		}
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Basic operations
 // ----------------------------------------------------------------------------

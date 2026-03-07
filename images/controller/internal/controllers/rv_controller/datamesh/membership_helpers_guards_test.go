@@ -1240,3 +1240,262 @@ var _ = Describe("guardTransZonalTBPlacement", func() {
 		Expect(r.Blocked).To(BeFalse())
 	})
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// guardMemberUnreachable
+//
+
+var _ = Describe("guardMemberUnreachable", func() {
+	// mkPeerGctx sets up a gctx with the subject (id=0) and peers.
+	// Each peer entry: (id, peerName, connState, agentReady).
+	type peerEntry struct {
+		id         uint8
+		connState  v1alpha1.ConnectionState
+		agentReady bool
+	}
+	mkPeerGctx := func(peers []peerEntry) (*globalContext, *ReplicaContext) {
+		gctx := &globalContext{}
+		all := make([]ReplicaContext, 1+len(peers))
+		// Subject: id=0, member "rv-1-0".
+		all[0] = ReplicaContext{gctx: gctx, id: 0, name: "rv-1-0",
+			member: &v1alpha1.DatameshMember{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful}}
+		gctx.replicas[0] = &all[0]
+
+		for i, p := range peers {
+			name := fmt.Sprintf("rv-1-%d", p.id)
+			rc := &all[1+i]
+			rc.gctx = gctx
+			rc.id = p.id
+			rc.name = name
+			rc.member = &v1alpha1.DatameshMember{Name: name, Type: v1alpha1.DatameshMemberTypeDiskful}
+			rc.rvr = &v1alpha1.ReplicatedVolumeReplica{}
+			rc.rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+				{Name: "rv-1-0", ConnectionState: p.connState},
+			}
+			if !p.agentReady {
+				rc.rvr.Status.Conditions = []metav1.Condition{{
+					Type:   v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+					Status: metav1.ConditionFalse,
+					Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady,
+				}}
+			}
+			gctx.replicas[p.id] = rc
+		}
+		gctx.allReplicas = all
+		return gctx, &all[0]
+	}
+
+	It("passes: no peers at all", func() {
+		gctx, rctx := mkPeerGctx(nil)
+		r := guardMemberUnreachable(gctx, rctx)
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("blocks: peer sees Connected", func() {
+		gctx, rctx := mkPeerGctx([]peerEntry{
+			{id: 1, connState: v1alpha1.ConnectionStateConnected, agentReady: true},
+		})
+		r := guardMemberUnreachable(gctx, rctx)
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("1 replica(s)"))
+	})
+
+	It("passes: peer sees Connected but agent not ready (stale)", func() {
+		gctx, rctx := mkPeerGctx([]peerEntry{
+			{id: 1, connState: v1alpha1.ConnectionStateConnected, agentReady: false},
+		})
+		r := guardMemberUnreachable(gctx, rctx)
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("passes: peer sees non-Connected", func() {
+		gctx, rctx := mkPeerGctx([]peerEntry{
+			{id: 1, connState: v1alpha1.ConnectionStateStandAlone, agentReady: true},
+		})
+		r := guardMemberUnreachable(gctx, rctx)
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("blocks: multiple peers, two Connected", func() {
+		gctx, rctx := mkPeerGctx([]peerEntry{
+			{id: 1, connState: v1alpha1.ConnectionStateConnected, agentReady: true},
+			{id: 2, connState: v1alpha1.ConnectionStateStandAlone, agentReady: true},
+			{id: 3, connState: v1alpha1.ConnectionStateConnected, agentReady: true},
+		})
+		r := guardMemberUnreachable(gctx, rctx)
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("2 replica(s)"))
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// guardNotAttached
+//
+
+var _ = Describe("guardNotAttached", func() {
+	It("passes: not attached", func() {
+		rc := &ReplicaContext{member: &v1alpha1.DatameshMember{Attached: false}}
+		r := guardNotAttached(nil, rc)
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("blocks: attached", func() {
+		rc := &ReplicaContext{member: &v1alpha1.DatameshMember{Attached: true}}
+		r := guardNotAttached(nil, rc)
+		Expect(r.Blocked).To(BeTrue())
+	})
+
+	It("passes: member is nil", func() {
+		rc := &ReplicaContext{}
+		r := guardNotAttached(nil, rc)
+		Expect(r.Blocked).To(BeFalse())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// guardVolumeAccessLocalForDemotion
+//
+
+var _ = Describe("guardVolumeAccessLocalForDemotion", func() {
+	It("passes: not attached", func() {
+		gctx := &globalContext{configuration: v1alpha1.ReplicatedVolumeConfiguration{VolumeAccess: v1alpha1.VolumeAccessLocal}}
+		rc := &ReplicaContext{member: &v1alpha1.DatameshMember{Attached: false}}
+		r := guardVolumeAccessLocalForDemotion(gctx, rc)
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("blocks: attached + Local", func() {
+		gctx := &globalContext{configuration: v1alpha1.ReplicatedVolumeConfiguration{VolumeAccess: v1alpha1.VolumeAccessLocal}}
+		rc := &ReplicaContext{member: &v1alpha1.DatameshMember{Attached: true}}
+		r := guardVolumeAccessLocalForDemotion(gctx, rc)
+		Expect(r.Blocked).To(BeTrue())
+	})
+
+	It("passes: attached + non-Local", func() {
+		gctx := &globalContext{configuration: v1alpha1.ReplicatedVolumeConfiguration{VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal}}
+		rc := &ReplicaContext{member: &v1alpha1.DatameshMember{Attached: true}}
+		r := guardVolumeAccessLocalForDemotion(gctx, rc)
+		Expect(r.Blocked).To(BeFalse())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// guardVotersEven / guardVotersOdd
+//
+
+var _ = Describe("guardVotersEven", func() {
+	mkVoterGctx := func(n int) *globalContext {
+		gctx := &globalContext{}
+		gctx.allReplicas = make([]ReplicaContext, n)
+		for i := 0; i < n; i++ {
+			gctx.allReplicas[i] = ReplicaContext{
+				member: &v1alpha1.DatameshMember{Type: v1alpha1.DatameshMemberTypeDiskful},
+			}
+		}
+		return gctx
+	}
+
+	It("passes: 2 voters (even)", func() {
+		r := guardVotersEven(mkVoterGctx(2), nil)
+		Expect(r.Blocked).To(BeFalse())
+	})
+	It("blocks: 3 voters (odd)", func() {
+		r := guardVotersEven(mkVoterGctx(3), nil)
+		Expect(r.Blocked).To(BeTrue())
+	})
+	It("passes: 0 voters (even)", func() {
+		r := guardVotersEven(mkVoterGctx(0), nil)
+		Expect(r.Blocked).To(BeFalse())
+	})
+})
+
+var _ = Describe("guardVotersOdd", func() {
+	mkVoterGctx := func(n int) *globalContext {
+		gctx := &globalContext{}
+		gctx.allReplicas = make([]ReplicaContext, n)
+		for i := 0; i < n; i++ {
+			gctx.allReplicas[i] = ReplicaContext{
+				member: &v1alpha1.DatameshMember{Type: v1alpha1.DatameshMemberTypeDiskful},
+			}
+		}
+		return gctx
+	}
+
+	It("passes: 3 voters (odd)", func() {
+		r := guardVotersOdd(mkVoterGctx(3), nil)
+		Expect(r.Blocked).To(BeFalse())
+	})
+	It("blocks: 2 voters (even)", func() {
+		r := guardVotersOdd(mkVoterGctx(2), nil)
+		Expect(r.Blocked).To(BeTrue())
+	})
+	It("passes: 1 voter (odd)", func() {
+		r := guardVotersOdd(mkVoterGctx(1), nil)
+		Expect(r.Blocked).To(BeFalse())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// guardQMRRaiseNeeded / guardQMRLowerNeeded
+//
+
+var _ = Describe("guardQMRRaiseNeeded", func() {
+	mk := func(qmr, gmdr byte) *globalContext {
+		return &globalContext{
+			datamesh:      datameshContext{quorumMinimumRedundancy: qmr},
+			configuration: v1alpha1.ReplicatedVolumeConfiguration{GuaranteedMinimumDataRedundancy: gmdr},
+		}
+	}
+
+	It("passes: qmr < target (raise needed)", func() {
+		r := guardQMRRaiseNeeded(mk(1, 1), nil) // target=2, qmr=1
+		Expect(r.Blocked).To(BeFalse())
+	})
+	It("blocks: qmr = target", func() {
+		r := guardQMRRaiseNeeded(mk(2, 1), nil) // target=2, qmr=2
+		Expect(r.Blocked).To(BeTrue())
+	})
+	It("blocks: qmr > target", func() {
+		r := guardQMRRaiseNeeded(mk(3, 1), nil) // target=2, qmr=3
+		Expect(r.Blocked).To(BeTrue())
+	})
+})
+
+var _ = Describe("guardQMRLowerNeeded", func() {
+	mk := func(qmr, gmdr byte) *globalContext {
+		return &globalContext{
+			datamesh:      datameshContext{quorumMinimumRedundancy: qmr},
+			configuration: v1alpha1.ReplicatedVolumeConfiguration{GuaranteedMinimumDataRedundancy: gmdr},
+		}
+	}
+
+	It("passes: qmr > target (lower needed)", func() {
+		r := guardQMRLowerNeeded(mk(3, 1), nil) // target=2, qmr=3
+		Expect(r.Blocked).To(BeFalse())
+	})
+	It("blocks: qmr = target", func() {
+		r := guardQMRLowerNeeded(mk(2, 1), nil) // target=2, qmr=2
+		Expect(r.Blocked).To(BeTrue())
+	})
+	It("blocks: qmr < target", func() {
+		r := guardQMRLowerNeeded(mk(1, 1), nil) // target=2, qmr=1
+		Expect(r.Blocked).To(BeTrue())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// guardShadowDiskfulSupported
+//
+
+var _ = Describe("guardShadowDiskfulSupported", func() {
+	It("passes: feature on", func() {
+		gctx := &globalContext{features: FeatureFlags{ShadowDiskful: true}}
+		r := guardShadowDiskfulSupported(gctx, nil)
+		Expect(r.Blocked).To(BeFalse())
+	})
+	It("blocks: feature off", func() {
+		gctx := &globalContext{features: FeatureFlags{ShadowDiskful: false}}
+		r := guardShadowDiskfulSupported(gctx, nil)
+		Expect(r.Blocked).To(BeTrue())
+	})
+})
