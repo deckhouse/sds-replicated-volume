@@ -46,10 +46,10 @@ type globalContext struct {
 	// Apply callbacks mutate these; the reconciler writes them back to rv.Status after engine processing.
 	datamesh datameshContext
 
-	// baselineLayout is the committed FTT/GMDR floor from which q and qmr are derived.
-	// Mutated by step OnComplete callbacks after replicas confirm q/qmr changes;
-	// the reconciler writes it back to rv.Status.BaselineLayout after engine processing.
-	baselineLayout v1alpha1.ReplicatedVolumeLayout
+	// baselineGMDR is the committed GMDR level: min(qmr-1, config.GMDR).
+	// Mutated by step callbacks after replicas confirm qmr changes;
+	// written back to rv.Status.BaselineGuaranteedMinimumDataRedundancy.
+	baselineGMDR byte
 
 	// maxAttachments is the maximum number of simultaneously attached nodes (from rv.Spec).
 	maxAttachments byte
@@ -155,12 +155,12 @@ type RSP interface {
 // Apply callbacks mutate these during engine processing.
 // The reconciler writes them back to rv.Status after engine processing.
 type datameshContext struct {
-	// Quorum is the current quorum value (q).
-	Quorum byte
-	// QuorumMinimumRedundancy is the current qmr value.
-	QuorumMinimumRedundancy byte
-	// Multiattach indicates whether multiattach is enabled.
-	Multiattach bool
+	// quorum is the current quorum value (q).
+	quorum byte
+	// quorumMinimumRedundancy is the current qmr value.
+	quorumMinimumRedundancy byte
+	// multiattach indicates whether multiattach is enabled.
+	multiattach bool
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -354,11 +354,11 @@ func buildContexts(
 		deletionTimestamp: rv.DeletionTimestamp.DeepCopy(),
 		configuration:     *rv.Status.Configuration,
 		datamesh: datameshContext{
-			Quorum:                  rv.Status.Datamesh.Quorum,
-			QuorumMinimumRedundancy: rv.Status.Datamesh.QuorumMinimumRedundancy,
-			Multiattach:             rv.Status.Datamesh.Multiattach,
+			quorum:                  rv.Status.Datamesh.Quorum,
+			quorumMinimumRedundancy: rv.Status.Datamesh.QuorumMinimumRedundancy,
+			multiattach:             rv.Status.Datamesh.Multiattach,
 		},
-		baselineLayout:             rv.Status.BaselineLayout,
+		baselineGMDR:               rv.Status.BaselineGuaranteedMinimumDataRedundancy,
 		maxAttachments:             rv.Spec.MaxAttachments,
 		replicatedStorageClassName: rv.Spec.ReplicatedStorageClassName,
 		rsp:                        rsp,
@@ -544,15 +544,15 @@ func writebackMembersFromContexts(rv *v1alpha1.ReplicatedVolume, gctx *globalCon
 // writebackDatameshFromContext writes mutable datamesh scalar parameters from
 // the datameshContext back to rv.Status.Datamesh.
 func writebackDatameshFromContext(rv *v1alpha1.ReplicatedVolume, gctx *globalContext) {
-	rv.Status.Datamesh.Quorum = gctx.datamesh.Quorum
-	rv.Status.Datamesh.QuorumMinimumRedundancy = gctx.datamesh.QuorumMinimumRedundancy
-	rv.Status.Datamesh.Multiattach = gctx.datamesh.Multiattach
+	rv.Status.Datamesh.Quorum = gctx.datamesh.quorum
+	rv.Status.Datamesh.QuorumMinimumRedundancy = gctx.datamesh.quorumMinimumRedundancy
+	rv.Status.Datamesh.Multiattach = gctx.datamesh.multiattach
 }
 
-// writebackBaselineLayoutFromContext writes the baseline layout from the
-// globalContext back to rv.Status.BaselineLayout.
-func writebackBaselineLayoutFromContext(rv *v1alpha1.ReplicatedVolume, gctx *globalContext) {
-	rv.Status.BaselineLayout = gctx.baselineLayout
+// writebackBaselineGMDRFromContext writes the baseline GMDR from the
+// globalContext back to rv.Status.BaselineGuaranteedMinimumDataRedundancy.
+func writebackBaselineGMDRFromContext(rv *v1alpha1.ReplicatedVolume, gctx *globalContext) {
+	rv.Status.BaselineGuaranteedMinimumDataRedundancy = gctx.baselineGMDR
 }
 
 // writebackRequestMessagesFromContexts writes membership messages from replica

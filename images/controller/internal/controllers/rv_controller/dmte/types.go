@@ -305,8 +305,8 @@ type ReplicaConfirmFunc[G any, R ReplicaCtx] = func(gctx G, rctx R, stepRevision
 type GlobalConfirmFunc[G any] = func(gctx G, stepRevision int64) ConfirmResult
 
 // ConfirmResult holds the confirmation sets computed by a confirm callback.
-// The engine checks completion (Confirmed == MustConfirm) and auto-generates
-// progress messages using the step's DisplayName, DiagnosticConditions, etc.
+// The engine normalizes Confirmed to Confirmed ∩ MustConfirm, then checks
+// completion (Confirmed == MustConfirm) and auto-generates progress messages.
 type ConfirmResult struct {
 	// MustConfirm is the set of replica IDs that must confirm this step's revision.
 	MustConfirm idset.IDSet

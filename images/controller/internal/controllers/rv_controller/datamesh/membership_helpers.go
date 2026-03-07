@@ -17,9 +17,38 @@ limitations under the License.
 package datamesh
 
 import (
-	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
 )
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Step constructors
+//
+// mrStep / mgStep create ReplicaStep / GlobalStep with the standard membership
+// DiagnosticConditions pre-applied. Callers may chain additional builder
+// methods (e.g. DiagnosticSkipError) on the returned builder.
+
+// mrStep creates a membership ReplicaStep with standard DiagnosticConditions.
+func mrStep(
+	name string,
+	apply func(*globalContext, *ReplicaContext),
+	confirm func(*globalContext, *ReplicaContext, int64) dmte.ConfirmResult,
+) *dmte.ReplicaStepBuilder[*globalContext, *ReplicaContext] {
+	return dmte.ReplicaStep(name, apply, confirm).
+		DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
+}
+
+// mgStep creates a membership GlobalStep with standard DiagnosticConditions.
+//
+//nolint:unparam // name is currently always "qmr↑" but will vary with future plans
+func mgStep(
+	name string,
+	apply func(*globalContext),
+	confirm func(*globalContext, int64) dmte.ConfirmResult,
+) *dmte.GlobalStepBuilder[*globalContext] {
+	return dmte.GlobalStep(name, apply, confirm).
+		DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // OnComplete callbacks
@@ -33,6 +62,16 @@ func onJoinComplete(_ *globalContext, rctx *ReplicaContext) {
 // onLeaveComplete sets the completion message after a RemoveReplica plan finishes.
 func onLeaveComplete(_ *globalContext, rctx *ReplicaContext) {
 	rctx.membershipMessage = "Left datamesh successfully"
+}
+
+// onForceRemoveComplete sets the completion message after a ForceRemoveReplica plan finishes.
+func onForceRemoveComplete(_ *globalContext, rctx *ReplicaContext) {
+	rctx.membershipMessage = "Force-removed from datamesh"
+}
+
+// onChangeTypeComplete sets the completion message after a ChangeReplicaType plan finishes.
+func onChangeTypeComplete(_ *globalContext, rctx *ReplicaContext) {
+	rctx.membershipMessage = "Replica type changed successfully"
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -51,7 +90,7 @@ func voterCount(gctx *globalContext) byte {
 }
 
 // upToDateDiskfulCount returns the number of voter members that have a backing
-// volume and are UpToDate (BackingVolumeUpToDate condition is True).
+// volume and are UpToDate (BackingVolume.State == UpToDate).
 // D∅ members are excluded (they are voters but have no attached disk).
 func upToDateDiskfulCount(gctx *globalContext) byte {
 	var n byte
@@ -60,8 +99,8 @@ func upToDateDiskfulCount(gctx *globalContext) byte {
 		if rc.member == nil || !rc.member.Type.IsVoter() || !rc.member.Type.HasBackingVolume() {
 			continue
 		}
-		if rc.rvr != nil &&
-			obju.StatusCondition(rc.rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType).IsTrue().Eval() {
+		if rc.rvr != nil && rc.rvr.Status.BackingVolume != nil &&
+			rc.rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate {
 			n++
 		}
 	}
@@ -104,8 +143,8 @@ func upToDateDiskfulCountPerZone(gctx *globalContext) map[string]byte {
 		if rc.member == nil || !rc.member.Type.IsVoter() || !rc.member.Type.HasBackingVolume() {
 			continue
 		}
-		if rc.rvr != nil &&
-			obju.StatusCondition(rc.rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType).IsTrue().Eval() {
+		if rc.rvr != nil && rc.rvr.Status.BackingVolume != nil &&
+			rc.rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate {
 			m[rc.member.Zone]++
 		}
 	}

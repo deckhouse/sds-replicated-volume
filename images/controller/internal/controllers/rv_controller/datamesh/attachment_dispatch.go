@@ -43,6 +43,21 @@ func attachmentDispatcher() dmte.DispatchFunc[provider] {
 		return func(yield func(dmte.DispatchDecision) bool) {
 			gctx := cp.Global()
 
+			// 0. ForceDetach from requests (before normal attachment decisions).
+			// Skip if member is not attached (already detached or never was).
+			for i := range gctx.allReplicas {
+				rctx := &gctx.allReplicas[i]
+				if rctx.membershipRequest != nil &&
+					rctx.membershipRequest.Request.Operation == v1alpha1.DatameshMembershipRequestOperationForceDetach &&
+					rctx.member != nil && rctx.member.Attached {
+					if !yield(dmte.DispatchReplica(rctx,
+						v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceDetach,
+						"force-detach/v1")) {
+						return
+					}
+				}
+			}
+
 			// 1. Multiattach toggle.
 			if d, ok := decideMultiattachToggle(gctx); ok {
 				if !yield(d) {
@@ -89,14 +104,14 @@ func decideMultiattachToggle(gctx *globalContext) (dmte.DispatchDecision, bool) 
 
 	needMultiattach := intendedCount > 1
 
-	if needMultiattach && !gctx.datamesh.Multiattach && !gctx.hasMultiattachTransition {
+	if needMultiattach && !gctx.datamesh.multiattach && !gctx.hasMultiattachTransition {
 		return dmte.DispatchGlobal(
 			v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach,
 			"enable-multiattach/v1",
 		), true
 	}
 
-	if !needMultiattach && gctx.datamesh.Multiattach && !gctx.hasMultiattachTransition {
+	if !needMultiattach && gctx.datamesh.multiattach && !gctx.hasMultiattachTransition {
 		return dmte.DispatchGlobal(
 			v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach,
 			"disable-multiattach/v1",

@@ -44,6 +44,7 @@ import (
 func registerAttachmentPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
 	attach := reg.ReplicaTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, attachmentSlot)
 	detach := reg.ReplicaTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, attachmentSlot)
+	forceDetach := reg.ReplicaTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceDetach, attachmentSlot)
 	enableMultiattach := reg.GlobalTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach)
 	disableMultiattach := reg.GlobalTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach)
 
@@ -62,9 +63,10 @@ func registerAttachmentPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]
 			guardNoActiveMembershipTransition,
 		).
 		Steps(
-			dmte.ReplicaStep("Attach", applyAttach, confirmSubjectOnly).
-				Details(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching).
-				DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			arStep("Attach",
+				applyAttach,
+				confirmSubjectOnly,
+			).Details(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching),
 		).
 		Build()
 
@@ -76,9 +78,28 @@ func registerAttachmentPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]
 			guardDeviceNotInUse,
 		).
 		Steps(
-			dmte.ReplicaStep("Detach", applyDetach, confirmSubjectOnlyLeavingOrGone).
-				Details(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching).
-				DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			arStep("Detach",
+				applyDetach,
+				confirmSubjectOnlyLeavingOrGone,
+			).Details(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching),
+		).
+		Build()
+
+	// ForceDetach: emergency detach for a dead member.
+	// Clears Attached flag so ForceLeave can proceed. CancelActiveOnCreate
+	// cancels in-flight Attach/Detach for the dead member. No confirmation
+	// needed — the node is dead, there's no one to wait for. Completes
+	// immediately after apply.
+	forceDetach.Plan("force-detach/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupEmergency).
+		DisplayName("Force-detaching volume").
+		CancelActiveOnCreate(true).
+		Guards(guardMemberUnreachable).
+		Steps(
+			arStep("Force detach",
+				applyDetach,
+				confirmImmediate,
+			),
 		).
 		Build()
 
@@ -88,8 +109,10 @@ func registerAttachmentPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]
 		DisplayName("Enabling multiattach").
 		Guards(guardMaxAttachmentsAllowsMultiattach).
 		Steps(
-			dmte.GlobalStep("Enable multiattach", applyEnableMultiattach, confirmMultiattach).
-				DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			agStep("Enable multiattach",
+				applyEnableMultiattach,
+				confirmMultiattach,
+			),
 		).
 		Build()
 
@@ -99,10 +122,38 @@ func registerAttachmentPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]
 		DisplayName("Disabling multiattach").
 		Guards(guardCanDisableMultiattach).
 		Steps(
-			dmte.GlobalStep("Disable multiattach", applyDisableMultiattach, confirmMultiattach).
-				DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			agStep("Disable multiattach",
+				applyDisableMultiattach,
+				confirmMultiattach,
+			),
 		).
 		Build()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Step constructors
+//
+
+// arStep creates an attachment ReplicaStep with standard DiagnosticConditions.
+func arStep(
+	name string,
+	apply func(*globalContext, *ReplicaContext),
+	confirm func(*globalContext, *ReplicaContext, int64) dmte.ConfirmResult,
+) *dmte.ReplicaStepBuilder[*globalContext, *ReplicaContext] {
+	return dmte.ReplicaStep(name, apply, confirm).
+		DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
+}
+
+// agStep creates an attachment GlobalStep with standard DiagnosticConditions.
+//
+//nolint:unparam // name will vary with future plans
+func agStep(
+	name string,
+	apply func(*globalContext),
+	confirm func(*globalContext, int64) dmte.ConfirmResult,
+) *dmte.GlobalStepBuilder[*globalContext] {
+	return dmte.GlobalStep(name, apply, confirm).
+		DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -351,13 +402,13 @@ func applyDetach(_ *globalContext, rctx *ReplicaContext) {
 // applyEnableMultiattach enables multiattach on the datamesh.
 // The engine bumps DatameshRevision after this callback.
 func applyEnableMultiattach(gctx *globalContext) {
-	gctx.datamesh.Multiattach = true
+	gctx.datamesh.multiattach = true
 }
 
 // applyDisableMultiattach disables multiattach on the datamesh.
 // The engine bumps DatameshRevision after this callback.
 func applyDisableMultiattach(gctx *globalContext) {
-	gctx.datamesh.Multiattach = false
+	gctx.datamesh.multiattach = false
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -41,10 +41,9 @@ import (
 //
 
 // registerAccessPlans registers AddReplica(A) and RemoveReplica(A) plans.
-func registerAccessPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
-	addReplica := reg.ReplicaTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica, membershipSlot)
-	removeReplica := reg.ReplicaTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica, membershipSlot)
-
+func registerAccessPlans(
+	addReplica, removeReplica *dmte.RegisteredTransition[*globalContext, *ReplicaContext],
+) {
 	// AddReplica(A): ✦ → A
 	addReplica.Plan("access/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
@@ -53,8 +52,10 @@ func registerAccessPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
 		Guards(commonAddGuards...).
 		Guards(guardVolumeAccessNotLocal).
 		Steps(
-			dmte.ReplicaStep("✦ → A", applyCreateMember(v1alpha1.DatameshMemberTypeAccess), confirmFMPlusSubject).
-				DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType).
+			mrStep("✦ → A",
+				createMember(v1alpha1.DatameshMemberTypeAccess),
+				confirmFMPlusSubject,
+			).
 				DiagnosticSkipError(skipPendingDatameshJoin),
 		).
 		OnComplete(onJoinComplete).
@@ -67,8 +68,10 @@ func registerAccessPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
 		DisplayName("Leaving datamesh").
 		Guards(commonRemoveGuards...).
 		Steps(
-			dmte.ReplicaStep("A → ✕", applyRemoveMember, confirmFMPlusSubjectLeaving).
-				DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType),
+			mrStep("A → ✕",
+				removeMember,
+				confirmFMPlusSubjectLeaving,
+			),
 		).
 		OnComplete(onLeaveComplete).
 		Build()

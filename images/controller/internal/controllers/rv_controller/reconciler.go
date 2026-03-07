@@ -636,14 +636,14 @@ func computeIntendedDiskfulReplicaCount(rv *v1alpha1.ReplicatedVolume) byte {
 }
 
 // computeTargetQuorum computes Quorum and QuorumMinimumRedundancy from the
-// baseline layout (not from Configuration — those are the target, not reality).
+// configuration. Used during formation to set initial q/qmr values.
 //
-//	qmr = baseline_GMDR + 1
+//	qmr = config.GMDR + 1
 //	q   = floor(voters / 2) + 1, but at least floor(minD / 2) + 1
-//	minD = baseline_FTT + baseline_GMDR + 1
+//	minD = config.FTT + config.GMDR + 1
 func computeTargetQuorum(rv *v1alpha1.ReplicatedVolume) (q, qmr byte) {
-	el := rv.Status.BaselineLayout
-	minD := el.FailuresToTolerate + el.GuaranteedMinimumDataRedundancy + 1
+	cfg := rv.Status.Configuration
+	minD := cfg.FailuresToTolerate + cfg.GuaranteedMinimumDataRedundancy + 1
 
 	minQ := minD/2 + 1
 	voters := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
@@ -652,7 +652,7 @@ func computeTargetQuorum(rv *v1alpha1.ReplicatedVolume) (q, qmr byte) {
 	quorum := byte(voters.Len()/2 + 1)
 	q = max(quorum, minQ)
 
-	qmr = el.GuaranteedMinimumDataRedundancy + 1
+	qmr = cfg.GuaranteedMinimumDataRedundancy + 1
 
 	return q, qmr
 }

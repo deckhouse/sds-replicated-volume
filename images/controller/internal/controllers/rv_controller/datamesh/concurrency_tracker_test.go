@@ -172,7 +172,7 @@ var _ = Describe("concurrencyTracker", func() {
 		Expect(reason).To(ContainSubstring("Formation"))
 	})
 
-	It("blocks duplicate Multiattach", func() {
+	It("blocks duplicate multiattach", func() {
 		tracker := newConcurrencyTracker(&globalContext{})
 		tracker.Add(mkTransition(
 			v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach,
@@ -257,7 +257,7 @@ var _ = Describe("concurrencyTracker", func() {
 	})
 
 	It("allows Attachment on different replicas in parallel when multiattach enabled", func() {
-		gctx := &globalContext{datamesh: datameshContext{Multiattach: true}}
+		gctx := &globalContext{datamesh: datameshContext{multiattach: true}}
 		tracker := newConcurrencyTracker(gctx)
 		tracker.Add(mkTransition(
 			v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach,
@@ -289,7 +289,7 @@ var _ = Describe("concurrencyTracker", func() {
 	})
 
 	It("blocks second Attach when multiattach not enabled", func() {
-		gctx := &globalContext{datamesh: datameshContext{Multiattach: false}}
+		gctx := &globalContext{datamesh: datameshContext{multiattach: false}}
 		tracker := newConcurrencyTracker(gctx)
 		// First attach adds to potentiallyAttached.
 		tracker.Add(mkTransition(
@@ -304,7 +304,7 @@ var _ = Describe("concurrencyTracker", func() {
 	})
 
 	It("blocks Attach when EnableMultiattach is active", func() {
-		gctx := &globalContext{datamesh: datameshContext{Multiattach: true}}
+		gctx := &globalContext{datamesh: datameshContext{multiattach: true}}
 		// One member already attached (from init).
 		gctx.allReplicas = []ReplicaContext{{id: 0, member: &v1alpha1.DatameshMember{Name: "rv-1-0", Attached: true}}}
 		tracker := newConcurrencyTracker(gctx)
@@ -321,16 +321,16 @@ var _ = Describe("concurrencyTracker", func() {
 	})
 
 	It("allows second Attach when multiattach enabled and confirmed", func() {
-		gctx := &globalContext{datamesh: datameshContext{Multiattach: true}}
+		gctx := &globalContext{datamesh: datameshContext{multiattach: true}}
 		gctx.allReplicas = []ReplicaContext{{id: 0, member: &v1alpha1.DatameshMember{Name: "rv-1-0", Attached: true}}}
 		tracker := newConcurrencyTracker(gctx)
 
-		// No active Multiattach transition — multiattach is confirmed.
+		// No active multiattach transition — multiattach is confirmed.
 		allowed, _, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, "rv-1-5"))
 		Expect(allowed).To(BeTrue())
 	})
 
-	It("allows Multiattach when Attachment is active", func() {
+	It("allows multiattach when Attachment is active", func() {
 		gctx := &globalContext{}
 		tracker := newConcurrencyTracker(gctx)
 		tracker.Add(mkTransition(
@@ -344,7 +344,7 @@ var _ = Describe("concurrencyTracker", func() {
 	})
 
 	It("Remove Detach clears potentiallyAttached", func() {
-		gctx := &globalContext{datamesh: datameshContext{Multiattach: false}}
+		gctx := &globalContext{datamesh: datameshContext{multiattach: false}}
 		gctx.allReplicas = []ReplicaContext{
 			{id: 0, member: &v1alpha1.DatameshMember{Name: "rv-1-0", Attached: true}},
 		}

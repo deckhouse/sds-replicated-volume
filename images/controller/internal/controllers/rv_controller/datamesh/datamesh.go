@@ -44,6 +44,7 @@ func BuildRegistry() {
 	registry = dmte.NewRegistry[*globalContext, *ReplicaContext]()
 	registerSlots(registry)
 	registerMembershipPlans(registry)
+	registerQuorumPlans(registry)
 	registerAttachmentPlans(registry)
 }
 
@@ -72,6 +73,7 @@ func ProcessTransitions(
 
 	// 2. Create engine.
 	dispatchers := []dmte.DispatchFunc[provider]{
+		quorumDispatcher(),
 		membershipDispatcher(),
 		attachmentDispatcher(),
 	}
@@ -89,7 +91,7 @@ func ProcessTransitions(
 	if changed {
 		writebackMembersFromContexts(rv, gctx)
 		writebackDatameshFromContext(rv, gctx)
-		writebackBaselineLayoutFromContext(rv, gctx)
+		writebackBaselineGMDRFromContext(rv, gctx)
 	}
 
 	// 6. Always writeback request messages.
@@ -100,9 +102,7 @@ func ProcessTransitions(
 	// 7. Always compute effective layout (not gated by engine changed —
 	// effective layout reflects actual cluster state, which may change even
 	// without engine mutations, e.g. due to voter failure/recovery).
-	// If the computed value differs from the current one, mark changed.
-	if el := computeEffectiveLayout(gctx); !effectiveLayoutEqual(rv.Status.EffectiveLayout, el) {
-		rv.Status.EffectiveLayout = el
+	if updateEffectiveLayout(gctx, &rv.Status.EffectiveLayout) {
 		changed = true
 	}
 

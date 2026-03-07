@@ -19,8 +19,10 @@ package datamesh
 import (
 	"fmt"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -35,6 +37,11 @@ import (
 
 // commonAddGuards are guards shared by all AddReplica plans.
 // Typed as []any to be directly spreadable into PlanBuilder.Guards(...any).
+//
+// AddReplica(D) plans MUST also add defense-in-depth guards explicitly:
+//   - Voter parity: guardVotersEven or guardVotersOdd
+//   - QMR: guardQMRRaiseNeeded (qmr↑ plans)
+//   - Feature: guardShadowDiskfulSupported (sD variants)
 var commonAddGuards = []any{
 	guardRVNotDeleting,
 	guardAddressesPopulated,
@@ -51,9 +58,13 @@ var commonRemoveGuards = []any{
 
 // leavingDGuards are guards for transitions that remove a D voter
 // (RemoveReplica(D), ChangeReplicaType(D→...)).
+//
+// Plans MUST also add defense-in-depth guards explicitly:
+//   - Voter parity: guardVotersEven or guardVotersOdd
+//   - QMR: guardQMRLowerNeeded (qmr↓ plans)
+//   - Feature: guardShadowDiskfulSupported (sD variants)
 var leavingDGuards = []any{
 	guardVolumeAccessLocalForDemotion,
-	guardQMRReady,
 	guardGMDRPreserved,
 	guardFTTPreserved,
 	guardZoneGMDRPreserved,
@@ -65,6 +76,61 @@ var leavingDGuards = []any{
 var leavingTBGuards = []any{
 	guardTBSufficient,
 	guardZoneTBSufficient,
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Backing volume capacity guard
+//
+
+// maxDiskMembers is the maximum number of members with a backing volume.
+// DRBD metadata is configured for max 7 peers (8 replicas total, including self).
+const maxDiskMembers = 8
+
+// guardMaxDiskMembers blocks if adding another disk-bearing member would exceed
+// the DRBD limit. Counts current disk-bearing members plus in-flight transitions
+// that will produce a disk-bearing member (ChangeType to disk type, or AddReplica
+// for a disk type currently in a non-disk vestibule state like A).
+func guardMaxDiskMembers(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
+	var current, pending int
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		if rc.member == nil {
+			continue
+		}
+		if rc.member.Type.HasBackingVolume() ||
+			rc.member.Type == v1alpha1.DatameshMemberTypeLiminalDiskful ||
+			rc.member.Type == v1alpha1.DatameshMemberTypeLiminalShadowDiskful {
+			current++
+			continue
+		}
+		if rc.membershipTransition == nil {
+			continue
+		}
+		// Non-disk member with ChangeType transition to a disk type.
+		if rc.membershipTransition.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType &&
+			(rc.membershipTransition.ToReplicaType == v1alpha1.ReplicaTypeDiskful ||
+				rc.membershipTransition.ToReplicaType == v1alpha1.ReplicaTypeShadowDiskful) {
+			pending++
+			continue
+		}
+		// Non-disk member with AddReplica for a disk type (A vestibule:
+		// member created as A, will become D∅ in a later step).
+		if rc.membershipTransition.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica &&
+			(rc.membershipTransition.ReplicaType == v1alpha1.ReplicaTypeDiskful ||
+				rc.membershipTransition.ReplicaType == v1alpha1.ReplicaTypeShadowDiskful) {
+			pending++
+		}
+	}
+
+	total := current + pending
+	if total >= maxDiskMembers {
+		return dmte.GuardResult{
+			Blocked: true,
+			Message: fmt.Sprintf("Cannot add replica with backing volume: %d/%d members with backing volume (%d current + %d pending)",
+				total, maxDiskMembers, current, pending),
+		}
+	}
+	return dmte.GuardResult{}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -166,21 +232,6 @@ func guardVolumeAccessLocalForDemotion(gctx *globalContext, rctx *ReplicaContext
 		return dmte.GuardResult{
 			Blocked: true,
 			Message: "Cannot demote Diskful: volumeAccess=Local requires D on attached node",
-		}
-	}
-	return dmte.GuardResult{}
-}
-
-// guardQMRReady blocks if the current qmr has not yet converged to the target.
-// Required before qmr↓ transitions: all replicas must have the current qmr
-// before it can be lowered.
-func guardQMRReady(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
-	targetGMDR := gctx.configuration.GuaranteedMinimumDataRedundancy
-	if gctx.datamesh.QuorumMinimumRedundancy > targetGMDR+1 {
-		return dmte.GuardResult{
-			Blocked: true,
-			Message: fmt.Sprintf("ChangeQuorum not yet applied: qmr=%d, target=%d",
-				gctx.datamesh.QuorumMinimumRedundancy, targetGMDR+1),
 		}
 	}
 	return dmte.GuardResult{}
@@ -377,4 +428,130 @@ func guardZoneTBSufficient(gctx *globalContext, rctx *ReplicaContext) dmte.Guard
 		Blocked: true,
 		Message: fmt.Sprintf("Would violate zone TB coverage for zone %s", removedZone),
 	}
+}
+
+// forceRemoveGuards are guards shared by all ForceRemoveReplica plans.
+var forceRemoveGuards = []any{
+	guardNotAttached,
+	guardMemberUnreachable,
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ForceRemove guards
+//
+
+// guardMemberUnreachable blocks force-removal if any member with a ready agent
+// reports a Connected DRBD connection to the subject. Prevents accidental
+// force-removal of a member that is actually alive and participating.
+func guardMemberUnreachable(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
+	memberName := rctx.Name()
+	var connectedFrom idset.IDSet
+
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		if rc.member == nil || rc.rvr == nil || rc.id == rctx.ID() {
+			continue
+		}
+
+		// Skip replicas with stale status (agent not ready — Peers may be outdated).
+		if obju.StatusCondition(rc.rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType).
+			ReasonEqual(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady).Eval() {
+			continue
+		}
+
+		for _, peer := range rc.rvr.Status.Peers {
+			if peer.Name == memberName && peer.ConnectionState == v1alpha1.ConnectionStateConnected {
+				connectedFrom.Add(rc.id)
+				break
+			}
+		}
+	}
+
+	if !connectedFrom.IsEmpty() {
+		return dmte.GuardResult{
+			Blocked: true,
+			Message: fmt.Sprintf("Force-removal blocked: member is reachable (connected from %d replica(s): [%s])",
+				connectedFrom.Len(), connectedFrom),
+		}
+	}
+
+	return dmte.GuardResult{}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Defense-in-depth guards
+//
+// These guards verify dispatch decisions. They should never fire in normal
+// operation — dispatch already guarantees correct plan selection. They exist
+// as safety nets against dispatch bugs or future refactoring regressions.
+
+// guardVotersEven blocks if the current voter count is not even.
+// Defense: plans without q↑/q↓ expect even voters (even→odd transition).
+func guardVotersEven(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
+	voters := voterCount(gctx)
+	if voters%2 != 0 {
+		return dmte.GuardResult{
+			Blocked: true,
+			Message: fmt.Sprintf("Defense: expected even voters, got %d", voters),
+		}
+	}
+	return dmte.GuardResult{}
+}
+
+// guardVotersOdd blocks if the current voter count is not odd.
+// Defense: plans with q↑/q↓ expect odd voters (odd→even transition).
+func guardVotersOdd(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
+	voters := voterCount(gctx)
+	if voters%2 == 0 {
+		return dmte.GuardResult{
+			Blocked: true,
+			Message: fmt.Sprintf("Defense: expected odd voters, got %d", voters),
+		}
+	}
+	return dmte.GuardResult{}
+}
+
+// guardQMRRaiseNeeded blocks if qmr is already at or above the target (config.GMDR + 1).
+// Defense: plans with qmr↑ expect qmr < config.GMDR + 1.
+func guardQMRRaiseNeeded(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
+	targetQMR := gctx.configuration.GuaranteedMinimumDataRedundancy + 1
+	if gctx.datamesh.quorumMinimumRedundancy >= targetQMR {
+		return dmte.GuardResult{
+			Blocked: true,
+			Message: fmt.Sprintf("Defense: qmr↑ not needed, qmr=%d >= target qmr=%d",
+				gctx.datamesh.quorumMinimumRedundancy, targetQMR),
+		}
+	}
+	return dmte.GuardResult{}
+}
+
+// guardQMRLowerNeeded blocks if qmr is already at or below the target (config.GMDR + 1).
+// Defense: plans with qmr↓ expect qmr > config.GMDR + 1.
+func guardQMRLowerNeeded(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
+	targetQMR := gctx.configuration.GuaranteedMinimumDataRedundancy + 1
+	if gctx.datamesh.quorumMinimumRedundancy <= targetQMR {
+		return dmte.GuardResult{
+			Blocked: true,
+			Message: fmt.Sprintf("Defense: qmr↓ not needed, qmr=%d <= target qmr=%d",
+				gctx.datamesh.quorumMinimumRedundancy, targetQMR),
+		}
+	}
+	return dmte.GuardResult{}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Feature flag guards
+//
+
+// guardShadowDiskfulSupported blocks if the ShadowDiskful feature is not available.
+// Requires the Flant DRBD kernel extension with the non-voting disk option.
+// Used by AddReplica(sD) and AddReplica(D) via sD paths.
+func guardShadowDiskfulSupported(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
+	if !gctx.features.ShadowDiskful {
+		return dmte.GuardResult{
+			Blocked: true,
+			Message: "ShadowDiskful not supported (requires Flant DRBD extension)",
+		}
+	}
+	return dmte.GuardResult{}
 }

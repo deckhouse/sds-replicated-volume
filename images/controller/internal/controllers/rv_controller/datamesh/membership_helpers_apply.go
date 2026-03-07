@@ -26,12 +26,12 @@ import (
 // Parameterized apply callbacks
 //
 
-// applyCreateMember returns an apply callback that creates a new DatameshMember
+// createMember returns an apply callback that creates a new DatameshMember
 // with the given type. Zone is resolved from the RSP eligible node; addresses
 // are cloned from the RVR status.
 //
 // Used by all AddReplica plans (replaces per-type create callbacks).
-func applyCreateMember(memberType v1alpha1.DatameshMemberType) func(*globalContext, *ReplicaContext) {
+func createMember(memberType v1alpha1.DatameshMemberType) func(*globalContext, *ReplicaContext) {
 	return func(_ *globalContext, rctx *ReplicaContext) {
 		zone := ""
 		if en := rctx.getEligibleNode(); en != nil {
@@ -49,18 +49,27 @@ func applyCreateMember(memberType v1alpha1.DatameshMemberType) func(*globalConte
 	}
 }
 
-// applySetType returns an apply callback that sets the member type.
+// setType returns an apply callback that sets the member type.
 // Covers ALL type conversions (A↔TB, A↔D∅, D∅↔D, sD∅↔sD, sD↔D, etc.)
 // because the "from" type does not affect the mutation.
-func applySetType(memberType v1alpha1.DatameshMemberType) func(*globalContext, *ReplicaContext) {
+func setType(memberType v1alpha1.DatameshMemberType) func(*globalContext, *ReplicaContext) {
 	return func(_ *globalContext, rctx *ReplicaContext) {
 		rctx.member.Type = memberType
 	}
 }
 
-// composeApply combines multiple apply callbacks into one.
+// composeGlobalApply combines multiple global-scoped apply callbacks into one.
+func composeGlobalApply(fns ...func(*globalContext)) func(*globalContext) {
+	return func(gctx *globalContext) {
+		for _, fn := range fns {
+			fn(gctx)
+		}
+	}
+}
+
+// composeReplicaApply combines multiple apply callbacks into one.
 // Used for composite steps (e.g., type change + q↑ in a single step).
-func composeApply(fns ...func(*globalContext, *ReplicaContext)) func(*globalContext, *ReplicaContext) {
+func composeReplicaApply(fns ...func(*globalContext, *ReplicaContext)) func(*globalContext, *ReplicaContext) {
 	return func(gctx *globalContext, rctx *ReplicaContext) {
 		for _, fn := range fns {
 			fn(gctx, rctx)
@@ -68,16 +77,31 @@ func composeApply(fns ...func(*globalContext, *ReplicaContext)) func(*globalCont
 	}
 }
 
+// setBackingVolumeFromRequest sets LVMVolumeGroupName and ThinPoolName
+// on the member from the membership request.
+// Steps: ✦→D∅, ✦→sD∅, A→D∅, A→sD∅, TB→sD∅.
+func setBackingVolumeFromRequest(_ *globalContext, rctx *ReplicaContext) {
+	rctx.member.LVMVolumeGroupName = rctx.membershipRequest.Request.LVMVolumeGroupName
+	rctx.member.LVMVolumeGroupThinPoolName = rctx.membershipRequest.Request.ThinPoolName
+}
+
+// clearBackingVolume clears LVMVolumeGroupName and ThinPoolName from the member.
+// Steps: sD∅→A, sD∅→TB, D∅→A+q↓.
+func clearBackingVolume(_ *globalContext, rctx *ReplicaContext) {
+	rctx.member.LVMVolumeGroupName = ""
+	rctx.member.LVMVolumeGroupThinPoolName = ""
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Non-parameterized shared apply callbacks
 //
 
-// applyRemoveMember removes a member from the datamesh.
+// removeMember removes a member from the datamesh.
 // Sets rctx.member to nil. If the replica has no RVR, also removes it from
 // the global ID index (no member + no RVR = no reason to keep in the index).
 // The engine bumps DatameshRevision after this callback.
 // Reusable across all member types (A, TB, D, sD, etc.).
-func applyRemoveMember(gctx *globalContext, rctx *ReplicaContext) {
+func removeMember(gctx *globalContext, rctx *ReplicaContext) {
 	rctx.member = nil
 	if rctx.rvr == nil {
 		gctx.replicas[rctx.id] = nil
@@ -85,43 +109,48 @@ func applyRemoveMember(gctx *globalContext, rctx *ReplicaContext) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// q/qmr apply callbacks
+// Adapters
 //
-// These mutate gctx.datamesh.Quorum / QuorumMinimumRedundancy.
-// They are plain func(gctx, rctx) (not closures) because they compute from
-// the current state of gctx.allReplicas (which reflects member changes from
-// earlier apply callbacks in the same composite step).
 
-// applyRaiseQ recomputes and raises q after a voter was added.
-// q = max(floor(voters/2)+1, floor(minD/2)+1), where
-// minD = baseline.FTT + baseline.GMDR + 1.
-func applyRaiseQ(gctx *globalContext, _ *ReplicaContext) {
-	voters := voterCount(gctx)
-	minD := gctx.baselineLayout.FailuresToTolerate + gctx.baselineLayout.GuaranteedMinimumDataRedundancy + 1
-	minQ := minD/2 + 1
-	q := voters/2 + 1
-	gctx.datamesh.Quorum = max(q, minQ)
+// asReplicaApply adapts a global-scoped apply callback for use in ReplicaStep.
+func asReplicaApply(fn func(*globalContext)) func(*globalContext, *ReplicaContext) {
+	return func(gctx *globalContext, _ *ReplicaContext) {
+		fn(gctx)
+	}
 }
 
-// applyLowerQ recomputes and lowers q after a voter was removed.
-// Same formula as applyRaiseQ — the voter count in gctx.allReplicas already
-// reflects the removal (from an earlier applySetType in the same composite step).
-func applyLowerQ(gctx *globalContext, _ *ReplicaContext) {
-	voters := voterCount(gctx)
-	minD := gctx.baselineLayout.FailuresToTolerate + gctx.baselineLayout.GuaranteedMinimumDataRedundancy + 1
-	minQ := minD/2 + 1
-	q := voters/2 + 1
-	gctx.datamesh.Quorum = max(q, minQ)
+// ──────────────────────────────────────────────────────────────────────────────
+// q/qmr apply callbacks (global-scoped)
+//
+// These mutate gctx.datamesh.quorum / quorumMinimumRedundancy.
+// Global-scoped because they don't depend on the subject replica —
+// they compute from the current state of gctx.allReplicas.
+// Use asReplicaApply() when passing to ReplicaStep.
+
+// raiseQ increments q by 1 after a voter was added (odd→even voters).
+// Precondition: q is already correct before the voter addition, and the
+// plan has guardVotersOdd ensuring odd→even parity.
+func raiseQ(gctx *globalContext) {
+	gctx.datamesh.quorum++
 }
 
-// applyRaiseQMR raises qmr to match the target GMDR from Configuration.
-// qmr = target_GMDR + 1.
-func applyRaiseQMR(gctx *globalContext, _ *ReplicaContext) {
-	gctx.datamesh.QuorumMinimumRedundancy = gctx.configuration.GuaranteedMinimumDataRedundancy + 1
+// lowerQ decrements q by 1 after a voter was removed (even→odd voters).
+// Precondition: q is already correct before the voter removal, and the
+// plan has guardVotersEven ensuring even→odd parity.
+func lowerQ(gctx *globalContext) {
+	gctx.datamesh.quorum--
 }
 
-// applyLowerQMR lowers qmr to match the target GMDR from Configuration.
-// qmr = target_GMDR + 1 (Configuration already has the lowered target).
-func applyLowerQMR(gctx *globalContext, _ *ReplicaContext) {
-	gctx.datamesh.QuorumMinimumRedundancy = gctx.configuration.GuaranteedMinimumDataRedundancy + 1
+// raiseQMR increments qmr by 1.
+// Precondition: qmr is already correct, and guardQMRRaiseNeeded verified
+// that baseline.GMDR < config.GMDR.
+func raiseQMR(gctx *globalContext) {
+	gctx.datamesh.quorumMinimumRedundancy++
+}
+
+// lowerQMR decrements qmr by 1.
+// Precondition: qmr is already correct, and guardQMRLowerNeeded verified
+// that baseline.GMDR > config.GMDR.
+func lowerQMR(gctx *globalContext) {
+	gctx.datamesh.quorumMinimumRedundancy--
 }

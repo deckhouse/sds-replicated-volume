@@ -98,31 +98,69 @@ func mkRSPWithZones(pairs ...string) *testRSP {
 }
 
 // mkRV creates a ReplicatedVolume with Configuration and the given status fields.
+// EffectiveLayout is left at zero value. Tests that assert changed=false must
+// call settleEffectiveLayout after mkRV to pre-populate the layout.
 func mkRV(
 	revision int64,
 	members []v1alpha1.DatameshMember,
 	requests []v1alpha1.ReplicatedVolumeDatameshReplicaRequest,
 	transitions []v1alpha1.ReplicatedVolumeDatameshTransition,
 ) *v1alpha1.ReplicatedVolume {
+	cfg := *minimalConfig // copy so tests can safely mutate rv.Status.Configuration
+
+	// Compute correct q from voter count so the quorum dispatcher doesn't fire.
+	var voters byte
+	for _, m := range members {
+		if m.Type.IsVoter() {
+			voters++
+		}
+	}
+	q := byte(1)
+	if voters > 0 {
+		q = voters/2 + 1
+	}
+
 	return &v1alpha1.ReplicatedVolume{
 		Spec: v1alpha1.ReplicatedVolumeSpec{MaxAttachments: 1},
 		Status: v1alpha1.ReplicatedVolumeStatus{
-			Configuration:           minimalConfig,
-			DatameshRevision:        revision,
-			Datamesh:                v1alpha1.ReplicatedVolumeDatamesh{Members: members},
+			Configuration:    &cfg,
+			DatameshRevision: revision,
+			Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+				Members:                 members,
+				Quorum:                  q,
+				QuorumMinimumRedundancy: 1, // minimum valid qmr (GMDR=0 → qmr=1)
+			},
 			DatameshReplicaRequests: requests,
 			DatameshTransitions:     transitions,
 		},
 	}
 }
 
+// settleEffectiveLayout pre-computes and sets rv.Status.EffectiveLayout to match
+// what updateEffectiveLayout would produce for the given RV + RVRs combination.
+// Call after mkRV when the test asserts changed=false (i.e., expects no mutations).
+func settleEffectiveLayout(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) {
+	p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{})
+	updateEffectiveLayout(p.Global(), &rv.Status.EffectiveLayout)
+}
+
 // mkMember creates a DatameshMember with name, type, and nodeName.
 func mkMember(name string, memberType v1alpha1.DatameshMemberType, nodeName string) v1alpha1.DatameshMember {
-	return v1alpha1.DatameshMember{
+	m := v1alpha1.DatameshMember{
 		Name:     name,
 		Type:     memberType,
 		NodeName: nodeName,
 	}
+	if memberType.HasBackingVolume() ||
+		memberType == v1alpha1.DatameshMemberTypeLiminalDiskful ||
+		memberType == v1alpha1.DatameshMemberTypeLiminalShadowDiskful {
+		m.LVMVolumeGroupName = "test-lvg"
+		m.LVMVolumeGroupThinPoolName = "test-thin"
+	}
+	return m
 }
 
 // mkRVR creates a ReplicatedVolumeReplica with a default address.
@@ -137,6 +175,16 @@ func mkRVR(name, nodeName string, datameshRevision int64) *v1alpha1.ReplicatedVo
 	}
 }
 
+// mkRVRUpToDate creates a ReplicatedVolumeReplica with BackingVolume.State=UpToDate.
+// Used for D removal tests where guards check UpToDate D count.
+func mkRVRUpToDate(name, nodeName string, datameshRevision int64) *v1alpha1.ReplicatedVolumeReplica {
+	rvr := mkRVR(name, nodeName, datameshRevision)
+	rvr.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+		State: v1alpha1.DiskStateUpToDate,
+	}
+	return rvr
+}
+
 // mkRVRBare creates a ReplicatedVolumeReplica without addresses (for guard tests).
 func mkRVRBare(name, nodeName string) *v1alpha1.ReplicatedVolumeReplica {
 	return &v1alpha1.ReplicatedVolumeReplica{
@@ -145,13 +193,90 @@ func mkRVRBare(name, nodeName string) *v1alpha1.ReplicatedVolumeReplica {
 	}
 }
 
-// mkJoinRequest creates a Join request for Access type.
-func mkJoinRequest(name string) v1alpha1.ReplicatedVolumeDatameshReplicaRequest {
+// mkJoinRequestAccess creates a Join request for Access type.
+func mkJoinRequestAccess(name string) v1alpha1.ReplicatedVolumeDatameshReplicaRequest {
 	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 		Name: name,
 		Request: v1alpha1.DatameshMembershipRequest{
 			Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
 			Type:      v1alpha1.ReplicaTypeAccess,
+		},
+		FirstObservedAt: metav1.Now(),
+	}
+}
+
+// mkJoinRequestTB creates a Join request for TieBreaker type.
+func mkJoinRequestTB(name string) v1alpha1.ReplicatedVolumeDatameshReplicaRequest { //nolint:unparam
+	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+		Name: name,
+		Request: v1alpha1.DatameshMembershipRequest{
+			Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
+			Type:      v1alpha1.ReplicaTypeTieBreaker,
+		},
+		FirstObservedAt: metav1.Now(),
+	}
+}
+
+// mkJoinRequestSD creates a Join request for ShadowDiskful type with BV fields.
+func mkJoinRequestSD(name string) v1alpha1.ReplicatedVolumeDatameshReplicaRequest { //nolint:unparam
+	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+		Name: name,
+		Request: v1alpha1.DatameshMembershipRequest{
+			Operation:          v1alpha1.DatameshMembershipRequestOperationJoin,
+			Type:               v1alpha1.ReplicaTypeShadowDiskful,
+			LVMVolumeGroupName: "test-lvg",
+			ThinPoolName:       "test-thin",
+		},
+		FirstObservedAt: metav1.Now(),
+	}
+}
+
+// mkJoinRequestD creates a Join request for Diskful type with BV fields.
+func mkJoinRequestD(name string) v1alpha1.ReplicatedVolumeDatameshReplicaRequest { //nolint:unparam
+	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+		Name: name,
+		Request: v1alpha1.DatameshMembershipRequest{
+			Operation:          v1alpha1.DatameshMembershipRequestOperationJoin,
+			Type:               v1alpha1.ReplicaTypeDiskful,
+			LVMVolumeGroupName: "test-lvg",
+			ThinPoolName:       "test-thin",
+		},
+		FirstObservedAt: metav1.Now(),
+	}
+}
+
+// mkChangeRoleRequest creates a ChangeRole request with the given target type.
+// LVG/ThinPool are always set; they are ignored for non-BV transitions.
+func mkChangeRoleRequest(name string, targetType v1alpha1.ReplicaType) v1alpha1.ReplicatedVolumeDatameshReplicaRequest {
+	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+		Name: name,
+		Request: v1alpha1.DatameshMembershipRequest{
+			Operation:          v1alpha1.DatameshMembershipRequestOperationChangeRole,
+			Type:               targetType,
+			LVMVolumeGroupName: "test-lvg",
+			ThinPoolName:       "test-thin",
+		},
+		FirstObservedAt: metav1.Now(),
+	}
+}
+
+// mkForceDetachRequest creates a ForceDetach request.
+func mkForceDetachRequest(name string) v1alpha1.ReplicatedVolumeDatameshReplicaRequest { //nolint:unparam
+	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+		Name: name,
+		Request: v1alpha1.DatameshMembershipRequest{
+			Operation: v1alpha1.DatameshMembershipRequestOperationForceDetach,
+		},
+		FirstObservedAt: metav1.Now(),
+	}
+}
+
+// mkForceLeaveRequest creates a ForceLeave request.
+func mkForceLeaveRequest(name string) v1alpha1.ReplicatedVolumeDatameshReplicaRequest {
+	return v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+		Name: name,
+		Request: v1alpha1.DatameshMembershipRequest{
+			Operation: v1alpha1.DatameshMembershipRequestOperationForceLeave,
 		},
 		FirstObservedAt: metav1.Now(),
 	}
