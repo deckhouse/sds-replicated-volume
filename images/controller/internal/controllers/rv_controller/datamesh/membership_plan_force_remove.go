@@ -43,7 +43,7 @@ import (
 //
 // Guards: guardNotAttached (must ForceDetach first) + guardMemberUnreachable
 // (prevents accidental force-removal of a reachable member).
-// No leavingDGuards — emergency bypasses preconditions.
+// No loseVoterGuards — emergency bypasses preconditions.
 func registerForceRemovePlans(
 	forceRemove *dmte.RegisteredTransition[*globalContext, *ReplicaContext],
 ) {

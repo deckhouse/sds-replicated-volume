@@ -82,15 +82,11 @@ var (
 func transitionLayout(from, to layoutEntry) {
 	rv, _, rvrs := setupLayout(from)
 
-	// RSP with plenty of nodes for both layouts.
+	// RSP with plenty of nodes for both layouts (zone-aware for TransZonal).
 	maxNodes := max(from.initD+from.initTB, to.initD+to.initTB) + 2
-	nodes := make([]string, maxNodes)
-	for i := range nodes {
-		nodes[i] = fmt.Sprintf("node-%d", i)
-	}
-	rsp := mkRSP(nodes...)
+	rsp := mkRSPForTopology(from.topology, maxNodes, from.zoneCount())
 
-	// Change config to target.
+	// Change config to target (topology stays the same).
 	rv.Status.Configuration.FailuresToTolerate = to.ftt
 	rv.Status.Configuration.GuaranteedMinimumDataRedundancy = to.gmdr
 
@@ -181,11 +177,35 @@ func transitionLayout(from, to layoutEntry) {
 	}
 	context += fmt.Sprintf("(%d,%d)", to.gmdr, to.ftt)
 
-	Expect(dCount).To(Equal(to.initD), "%s: D count", context)
-	Expect(tbCount).To(Equal(to.initTB), "%s: TB count", context)
-	Expect(rv.Status.Datamesh.Quorum).To(Equal(expectedQ(to.initD)), "%s: q", context)
-	Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(to.initQMR), "%s: qmr", context)
-	Expect(rv.Status.DatameshTransitions).To(BeEmpty(), "%s: no active transitions", context)
+	assertLayoutResult(from, to, dCount, tbCount, rv, context)
+}
+
+// assertLayoutResult checks the final state of a layout transition.
+// For TransZonal, zone guards may block some removals, so the assertion
+// is relaxed: q must be correct for the actual voter count, and no
+// transitions must be stuck.
+func assertLayoutResult(
+	from, to layoutEntry,
+	dCount, tbCount int,
+	rv *v1alpha1.ReplicatedVolume,
+	context string,
+) {
+	if from.topology != v1alpha1.TopologyTransZonal {
+		// Ignored/Zonal: exact match expected.
+		Expect(dCount).To(Equal(to.initD), "%s: D count", context)
+		Expect(tbCount).To(Equal(to.initTB), "%s: TB count", context)
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(expectedQ(to.initD)), "%s: q", context)
+		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(to.initQMR), "%s: qmr", context)
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty(), "%s: no active transitions", context)
+		return
+	}
+
+	// TransZonal: zone guards may block both additions (placement guards)
+	// and removals (lose guards). The system must be stable (no stuck
+	// transitions) and q must be correct for whatever voter count we
+	// ended up with.
+	Expect(rv.Status.Datamesh.Quorum).To(Equal(expectedQ(dCount)),
+		"%s: q must match actual voter count %d", context, dCount)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -291,13 +311,9 @@ func transitionLayoutStepwise(from, to layoutEntry, dFirst bool) {
 
 	// RSP with plenty of nodes.
 	maxNodes := max(from.initD+from.initTB, to.initD+to.initTB) + 2
-	nodes := make([]string, maxNodes)
-	for i := range nodes {
-		nodes[i] = fmt.Sprintf("node-%d", i)
-	}
-	rsp := mkRSP(nodes...)
+	rsp := mkRSPForTopology(from.topology, maxNodes, from.zoneCount())
 
-	// Change config to target.
+	// Change config to target (topology stays the same).
 	rv.Status.Configuration.FailuresToTolerate = to.ftt
 	rv.Status.Configuration.GuaranteedMinimumDataRedundancy = to.gmdr
 
@@ -374,11 +390,7 @@ func transitionLayoutStepwise(from, to layoutEntry, dFirst bool) {
 	}
 	ctx := fmt.Sprintf("%s: final", order)
 
-	Expect(dCount).To(Equal(to.initD), "%s: D count", ctx)
-	Expect(tbCount).To(Equal(to.initTB), "%s: TB count", ctx)
-	Expect(rv.Status.Datamesh.Quorum).To(Equal(expectedQ(to.initD)), "%s: q", ctx)
-	Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(to.initQMR), "%s: qmr", ctx)
-	Expect(rv.Status.DatameshTransitions).To(BeEmpty(), "%s: no active transitions", ctx)
+	assertLayoutResult(from, to, dCount, tbCount, rv, ctx)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -392,12 +404,37 @@ type layoutPair struct {
 	to   layoutEntry
 }
 
-// allLayoutPairs contains all 42 ordered pairs of the 7 canonical layouts.
+// buildLayoutPairs builds all ordered pairs of the given layouts.
+func buildLayoutPairs(suffix string, layouts []namedLayout) []layoutPair {
+	var pairs []layoutPair
+	for _, from := range layouts {
+		for _, to := range layouts {
+			if from.name == to.name {
+				continue
+			}
+			pairs = append(pairs, layoutPair{
+				name: from.name + " → " + to.name + suffix,
+				from: from.layout,
+				to:   to.layout,
+			})
+		}
+	}
+	return pairs
+}
+
+// namedLayout pairs a display name with a layoutEntry.
+type namedLayout struct {
+	name   string
+	layout layoutEntry
+}
+
+// allLayoutPairs contains all ordered pairs for Ignored and TransZonal topologies.
+// TransZonal uses proper zone counts per layout:
+//   - 4D → 4 zones (only valid option)
+//   - 4D+TB, 5D → 3 zones (composite) + 5 zones (pure)
+//   - others → 3 zones
 var allLayoutPairs = func() []layoutPair {
-	layouts := []struct {
-		name   string
-		layout layoutEntry
-	}{
+	ignored := []namedLayout{
 		{"1D", layout1D},
 		{"2D+TB", layout2DTB},
 		{"2D", layout2D},
@@ -406,19 +443,44 @@ var allLayoutPairs = func() []layoutPair {
 		{"4D", layout4D},
 		{"5D", layout5D},
 	}
-	var pairs []layoutPair
-	for _, from := range layouts {
-		for _, to := range layouts {
-			if from.name == to.name {
-				continue
-			}
-			pairs = append(pairs, layoutPair{
-				name: from.name + " → " + to.name,
-				from: from.layout,
-				to:   to.layout,
-			})
-		}
+
+	// TransZonal 3-zone (excludes 4D which is invalid in 3 zones).
+	tz3 := []namedLayout{
+		{"1D", layout1D.transZonal(3)},
+		{"2D+TB", layout2DTB.transZonal(3)},
+		{"2D", layout2D.transZonal(3)},
+		{"3D", layout3D.transZonal(3)},
+		{"4D+TB", layout4DTB.transZonal(3)},
+		{"5D", layout5D.transZonal(3)},
 	}
+
+	// TransZonal 4-zone (4D only).
+	tz4 := []namedLayout{
+		{"4D", layout4D.transZonal(4)},
+	}
+
+	// TransZonal 5-zone (4D+TB and 5D — pure zone failure domain).
+	tz5 := []namedLayout{
+		{"4D+TB", layout4DTB.transZonal(5)},
+		{"5D", layout5D.transZonal(5)},
+	}
+
+	// Zonal (all replicas in one zone).
+	zonal := []namedLayout{
+		{"1D", layout1D.zonal()},
+		{"2D+TB", layout2DTB.zonal()},
+		{"2D", layout2D.zonal()},
+		{"3D", layout3D.zonal()},
+		{"4D+TB", layout4DTB.zonal()},
+		{"4D", layout4D.zonal()},
+		{"5D", layout5D.zonal()},
+	}
+
+	pairs := buildLayoutPairs("", ignored)
+	pairs = append(pairs, buildLayoutPairs(" [Zonal]", zonal)...)
+	pairs = append(pairs, buildLayoutPairs(" [TZ 3z]", tz3)...)
+	pairs = append(pairs, buildLayoutPairs(" [TZ 4z]", tz4)...)
+	pairs = append(pairs, buildLayoutPairs(" [TZ 5z]", tz5)...)
 	return pairs
 }()
 

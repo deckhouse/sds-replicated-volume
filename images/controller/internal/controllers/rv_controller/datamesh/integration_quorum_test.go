@@ -84,6 +84,38 @@ type layoutEntry struct {
 	initTB    int
 	initQ     byte
 	initQMR   byte
+	topology  v1alpha1.ReplicatedStorageClassTopology // "" = Ignored
+	zones     int                                     // zone count for TransZonal (0 = default 3)
+}
+
+// transZonal returns a copy of the layout entry with TransZonal topology.
+func (e layoutEntry) transZonal(zones int) layoutEntry {
+	e.topology = v1alpha1.TopologyTransZonal
+	e.zones = zones
+	return e
+}
+
+// zonal returns a copy of the layout entry with Zonal topology (1 zone).
+func (e layoutEntry) zonal() layoutEntry {
+	e.topology = v1alpha1.TopologyZonal
+	e.zones = 1
+	return e
+}
+
+// zoneCount returns the effective zone count (default 3 if not set).
+func (e layoutEntry) zoneCount() int {
+	if e.zones > 0 {
+		return e.zones
+	}
+	return 3
+}
+
+// Zone name pool (max 5 zones: a..e).
+var zoneNames = []string{"zone-a", "zone-b", "zone-c", "zone-d", "zone-e"}
+
+// zoneForIndex returns the zone for a given member index (round-robin across zoneCount zones).
+func zoneForIndex(idx, zoneCount int) string {
+	return zoneNames[idx%zoneCount]
 }
 
 // expectedQ returns the expected quorum for the given voter count.
@@ -91,14 +123,35 @@ func expectedQ(voters int) byte {
 	return byte(voters/2 + 1)
 }
 
+// mkRSPForTopology creates an RSP with the given number of nodes.
+// For TransZonal, nodes get round-robin zone assignment across zoneCount zones.
+// For other topologies, nodes have no zone.
+func mkRSPForTopology(topology v1alpha1.ReplicatedStorageClassTopology, nodeCount, zoneCount int) *testRSP {
+	if topology == v1alpha1.TopologyTransZonal {
+		pairs := make([]string, 0, nodeCount*2)
+		for i := 0; i < nodeCount; i++ {
+			pairs = append(pairs, fmt.Sprintf("node-%d", i), zoneForIndex(i, zoneCount))
+		}
+		return mkRSPWithZones(pairs...)
+	}
+	nodes := make([]string, nodeCount)
+	for i := range nodes {
+		nodes[i] = fmt.Sprintf("node-%d", i)
+	}
+	return mkRSP(nodes...)
+}
+
 // setupLayout builds the initial state for a canonical layout: RV with correct
 // config/q/qmr/baseline, members, UpToDate RVRs, and an RSP with extra nodes.
+// For TransZonal topology, members get round-robin zone assignment and RSP
+// nodes have matching zones.
 func setupLayout(e layoutEntry) (
 	*v1alpha1.ReplicatedVolume,
 	*testRSP,
 	[]*v1alpha1.ReplicatedVolumeReplica,
 ) {
 	total := e.initD + e.initTB
+	zc := e.zoneCount()
 	members := make([]v1alpha1.DatameshMember, 0, total)
 	rvrs := make([]*v1alpha1.ReplicatedVolumeReplica, 0, total+3)
 
@@ -106,7 +159,11 @@ func setupLayout(e layoutEntry) (
 	for i := 0; i < e.initD; i++ {
 		name := fmt.Sprintf("rv-1-%d", i)
 		node := fmt.Sprintf("node-%d", i)
-		members = append(members, mkMember(name, v1alpha1.DatameshMemberTypeDiskful, node))
+		m := mkMember(name, v1alpha1.DatameshMemberTypeDiskful, node)
+		if e.topology == v1alpha1.TopologyTransZonal {
+			m.Zone = zoneForIndex(i, zc)
+		}
+		members = append(members, m)
 		rvrs = append(rvrs, mkRVRUpToDate(name, node, 5))
 	}
 
@@ -115,21 +172,22 @@ func setupLayout(e layoutEntry) (
 		id := e.initD + i
 		name := fmt.Sprintf("rv-1-%d", id)
 		node := fmt.Sprintf("node-%d", id)
-		members = append(members, mkMember(name, v1alpha1.DatameshMemberTypeTieBreaker, node))
+		m := mkMember(name, v1alpha1.DatameshMemberTypeTieBreaker, node)
+		if e.topology == v1alpha1.TopologyTransZonal {
+			m.Zone = zoneForIndex(id, zc)
+		}
+		members = append(members, m)
 		rvrs = append(rvrs, mkRVR(name, node, 5))
 	}
 
 	// RSP: all existing nodes + 3 extra for adds.
-	nodes := make([]string, 0, total+3)
-	for i := 0; i < total+3; i++ {
-		nodes = append(nodes, fmt.Sprintf("node-%d", i))
-	}
-	rsp := mkRSP(nodes...)
+	rsp := mkRSPForTopology(e.topology, total+3, zc)
 
 	// RV with correct config, q, qmr, baseline.
 	rv := mkRV(5, members, nil, nil)
 	rv.Status.Configuration.FailuresToTolerate = e.ftt
 	rv.Status.Configuration.GuaranteedMinimumDataRedundancy = e.gmdr
+	rv.Status.Configuration.Topology = e.topology
 	rv.Status.Datamesh.Quorum = e.initQ
 	rv.Status.Datamesh.QuorumMinimumRedundancy = e.initQMR
 	rv.Status.BaselineGuaranteedMinimumDataRedundancy = e.gmdr
@@ -249,9 +307,20 @@ var _ = DescribeTable("integration: quorum invariants",
 		for i := 1; i <= 3; i++ {
 			addD(rv, rsp, &rvrs, nextID)
 			nextID++
-			voters := e.initD + i
-			assertQuorum(rv, voters, e.initQMR,
-				fmt.Sprintf("after add +%d (D=%d)", i, voters))
+
+			// Count actual voters (zone placement guards may block some adds in TransZonal).
+			var voters int
+			for _, m := range rv.Status.Datamesh.Members {
+				if m.Type.IsVoter() {
+					voters++
+				}
+			}
+			step := fmt.Sprintf("after add +%d (D=%d)", i, voters)
+			ExpectWithOffset(1, rv.Status.Datamesh.Quorum).To(
+				Equal(expectedQ(voters)),
+				"%s: q should be %d for %d voters", step, expectedQ(voters), voters)
+			ExpectWithOffset(1, rv.Status.DatameshTransitions).To(BeEmpty(),
+				"%s: no active transitions expected", step)
 		}
 
 		// ── Step 3: remove -1, -2, -3 D back to canonical ─────────────
@@ -260,9 +329,21 @@ var _ = DescribeTable("integration: quorum invariants",
 			removedID := nextID - i
 			removedName := fmt.Sprintf("rv-1-%d", removedID)
 			removeD(rv, rsp, &rvrs, removedName)
-			voters := e.initD + 3 - i
-			assertQuorum(rv, voters, e.initQMR,
-				fmt.Sprintf("after remove -%d (D=%d)", i, voters))
+
+			// Count actual voters (zone guards may block some removals in TransZonal).
+			var voters int
+			for _, m := range rv.Status.Datamesh.Members {
+				if m.Type.IsVoter() {
+					voters++
+				}
+			}
+
+			step := fmt.Sprintf("after remove -%d (D=%d)", i, voters)
+			ExpectWithOffset(1, rv.Status.Datamesh.Quorum).To(
+				Equal(expectedQ(voters)),
+				"%s: q should be %d for %d voters", step, expectedQ(voters), voters)
+			ExpectWithOffset(1, rv.Status.DatameshTransitions).To(BeEmpty(),
+				"%s: no active transitions expected", step)
 		}
 
 		// ── Step 4: try remove D at minimum again → blocked ────────────
@@ -282,6 +363,7 @@ var _ = DescribeTable("integration: quorum invariants",
 			rv.Status.DatameshTransitions = nil
 		}
 	},
+	// Ignored topology (default).
 	Entry("1D (FTT=0 GMDR=0)", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}),
 	Entry("2D+1TB (FTT=1 GMDR=0)", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}),
 	Entry("2D (FTT=0 GMDR=1)", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}),
@@ -289,4 +371,28 @@ var _ = DescribeTable("integration: quorum invariants",
 	Entry("4D+1TB (FTT=2 GMDR=1)", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}),
 	Entry("4D (FTT=1 GMDR=2)", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}),
 	Entry("5D (FTT=2 GMDR=2)", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}),
+
+	// TransZonal topology (3 zones — composite for 4D+TB/5D).
+	Entry("1D (FTT=0 GMDR=0) [TZ 3z]", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}.transZonal(3)),
+	Entry("2D+1TB (FTT=1 GMDR=0) [TZ 3z]", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}.transZonal(3)),
+	Entry("2D (FTT=0 GMDR=1) [TZ 3z]", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}.transZonal(3)),
+	Entry("3D (FTT=1 GMDR=1) [TZ 3z]", layoutEntry{ftt: 1, gmdr: 1, initD: 3, initTB: 0, initQ: 2, initQMR: 2}.transZonal(3)),
+	Entry("4D+1TB (FTT=2 GMDR=1) [TZ 3z]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.transZonal(3)),
+	Entry("5D (FTT=2 GMDR=2) [TZ 3z]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.transZonal(3)),
+
+	// TransZonal topology (4 zones — 4D only valid option).
+	Entry("4D (FTT=1 GMDR=2) [TZ 4z]", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}.transZonal(4)),
+
+	// TransZonal topology (5 zones — pure zone failure domain for 4D+TB/5D).
+	Entry("4D+1TB (FTT=2 GMDR=1) [TZ 5z]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.transZonal(5)),
+	Entry("5D (FTT=2 GMDR=2) [TZ 5z]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.transZonal(5)),
+
+	// Zonal topology (all replicas in one zone).
+	Entry("1D (FTT=0 GMDR=0) [Zonal]", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}.zonal()),
+	Entry("2D+1TB (FTT=1 GMDR=0) [Zonal]", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}.zonal()),
+	Entry("2D (FTT=0 GMDR=1) [Zonal]", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}.zonal()),
+	Entry("3D (FTT=1 GMDR=1) [Zonal]", layoutEntry{ftt: 1, gmdr: 1, initD: 3, initTB: 0, initQ: 2, initQMR: 2}.zonal()),
+	Entry("4D+1TB (FTT=2 GMDR=1) [Zonal]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.zonal()),
+	Entry("4D (FTT=1 GMDR=2) [Zonal]", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}.zonal()),
+	Entry("5D (FTT=2 GMDR=2) [Zonal]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.zonal()),
 )

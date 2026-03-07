@@ -825,3 +825,68 @@ var _ = Describe("getEligibleNode", func() {
 		Expect(rc.eligibleNodeChecked).To(BeTrue())
 	})
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// syncMemberZones
+//
+
+var _ = Describe("updateMemberZonesFromRSP", func() {
+	It("no RSP → no changes", func() {
+		gctx := &globalContext{rsp: nil}
+		gctx.allReplicas = []ReplicaContext{{
+			gctx:     gctx,
+			nodeName: "node-0",
+			member:   &v1alpha1.DatameshMember{Zone: ""},
+		}}
+		Expect(updateMemberZonesFromRSP(gctx)).To(BeFalse())
+	})
+
+	It("no members → no changes", func() {
+		gctx := &globalContext{rsp: mkRSPWithZones("node-0", "a")}
+		Expect(updateMemberZonesFromRSP(gctx)).To(BeFalse())
+	})
+
+	It("zone already correct → no changes", func() {
+		gctx := &globalContext{rsp: mkRSPWithZones("node-0", "a")}
+		gctx.allReplicas = []ReplicaContext{{
+			gctx:     gctx,
+			nodeName: "node-0",
+			member:   &v1alpha1.DatameshMember{Zone: "a"},
+		}}
+		Expect(updateMemberZonesFromRSP(gctx)).To(BeFalse())
+		Expect(gctx.allReplicas[0].member.Zone).To(Equal("a"))
+	})
+
+	It("zone updated from RSP", func() {
+		gctx := &globalContext{rsp: mkRSPWithZones("node-0", "a")}
+		gctx.allReplicas = []ReplicaContext{{
+			gctx:     gctx,
+			nodeName: "node-0",
+			member:   &v1alpha1.DatameshMember{Zone: ""},
+		}}
+		Expect(updateMemberZonesFromRSP(gctx)).To(BeTrue())
+		Expect(gctx.allReplicas[0].member.Zone).To(Equal("a"))
+	})
+
+	It("node not in RSP → skip", func() {
+		gctx := &globalContext{rsp: mkRSPWithZones("node-0", "a")}
+		gctx.allReplicas = []ReplicaContext{{
+			gctx:     gctx,
+			nodeName: "node-unknown",
+			member:   &v1alpha1.DatameshMember{Zone: ""},
+		}}
+		Expect(updateMemberZonesFromRSP(gctx)).To(BeFalse())
+		Expect(gctx.allReplicas[0].member.Zone).To(Equal(""))
+	})
+
+	It("multiple members, one changes", func() {
+		gctx := &globalContext{rsp: mkRSPWithZones("node-0", "a", "node-1", "b")}
+		gctx.allReplicas = []ReplicaContext{
+			{gctx: gctx, nodeName: "node-0", member: &v1alpha1.DatameshMember{Zone: "a"}},
+			{gctx: gctx, nodeName: "node-1", member: &v1alpha1.DatameshMember{Zone: ""}},
+		}
+		Expect(updateMemberZonesFromRSP(gctx)).To(BeTrue())
+		Expect(gctx.allReplicas[0].member.Zone).To(Equal("a"))
+		Expect(gctx.allReplicas[1].member.Zone).To(Equal("b"))
+	})
+})

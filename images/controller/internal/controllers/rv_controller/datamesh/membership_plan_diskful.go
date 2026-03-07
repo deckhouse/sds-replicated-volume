@@ -62,6 +62,7 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
+		Guards(gainVoterGuards...).
 		Guards(guardVotersEven, guardMaxDiskMembers).
 		Steps(
 			mrStep("✦ → D∅",
@@ -85,6 +86,7 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
+		Guards(gainVoterGuards...).
 		Guards(guardVotersEven, guardQMRRaiseNeeded, guardMaxDiskMembers).
 		Steps(
 			mrStep("✦ → D∅",
@@ -112,6 +114,7 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
+		Guards(gainVoterGuards...).
 		Guards(guardVotersOdd, guardMaxDiskMembers).
 		Steps(
 			mrStep("✦ → A",
@@ -140,6 +143,7 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
+		Guards(gainVoterGuards...).
 		Guards(guardVotersOdd, guardQMRRaiseNeeded, guardMaxDiskMembers).
 		Steps(
 			mrStep("✦ → A",
@@ -176,6 +180,7 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
+		Guards(gainVoterGuards...).
 		Guards(guardVotersEven, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("✦ → sD∅",
@@ -206,6 +211,7 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
+		Guards(gainVoterGuards...).
 		Guards(guardVotersEven, guardQMRRaiseNeeded, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("✦ → sD∅",
@@ -255,6 +261,7 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
+		Guards(gainVoterGuards...).
 		Guards(guardVotersOdd, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("✦ → sD∅",
@@ -295,6 +302,7 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
+		Guards(gainVoterGuards...).
 		Guards(guardVotersOdd, guardQMRRaiseNeeded, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("✦ → sD∅",
@@ -352,7 +360,7 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Removing diskful replica").
 		Guards(commonRemoveGuards...).
-		Guards(leavingDGuards...).
+		Guards(loseVoterGuards...).
 		Guards(guardVotersOdd).
 		Steps(
 			mrStep("D → D∅",
@@ -373,7 +381,7 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Removing diskful replica").
 		Guards(commonRemoveGuards...).
-		Guards(leavingDGuards...).
+		Guards(loseVoterGuards...).
 		Guards(guardVotersOdd, guardQMRLowerNeeded).
 		Steps(
 			mgStep("qmr↓",
@@ -401,7 +409,7 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Removing diskful replica").
 		Guards(commonRemoveGuards...).
-		Guards(leavingDGuards...).
+		Guards(loseVoterGuards...).
 		Guards(guardVotersEven).
 		Steps(
 			mrStep("D → D∅",
@@ -430,7 +438,7 @@ func registerDiskfulPlans(
 		ReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Removing diskful replica").
 		Guards(commonRemoveGuards...).
-		Guards(leavingDGuards...).
+		Guards(loseVoterGuards...).
 		Guards(guardVotersEven, guardQMRLowerNeeded).
 		Steps(
 			mgStep("qmr↓",
