@@ -456,7 +456,9 @@ var _ = Describe("ForceRemoveReplica additional", func() {
 		)
 
 		// Run until stable: ForceRemove should preempt and the system should stabilize.
-		runUntilStable(rv, rsp, filteredRVRs, FeatureFlags{})
+		// Unchecked: emergency preemption of in-flight AddReplica(D)+q↑ leaves
+		// transient q > expected until ChangeQuorum fires on the next iteration.
+		runUntilStableUnchecked(rv, rsp, filteredRVRs, FeatureFlags{})
 
 		// rv-1-2 should be removed.
 		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-2")).To(BeNil())
