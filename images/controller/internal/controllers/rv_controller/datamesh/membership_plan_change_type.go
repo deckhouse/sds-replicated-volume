@@ -47,6 +47,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeAccess).
 		ToReplicaType(v1alpha1.ReplicaTypeTieBreaker).
 		DisplayName("Changing replica type").
+		Guards(gainTBGuards...).
 		Steps(
 			mrStep("A → TB",
 				setType(v1alpha1.DatameshMemberTypeTieBreaker),
@@ -65,7 +66,7 @@ func registerChangeTypePlans(
 		ToReplicaType(v1alpha1.ReplicaTypeAccess).
 		DisplayName("Changing replica type").
 		Guards(guardVolumeAccessNotLocal).
-		Guards(leavingTBGuards...).
+		Guards(loseTBGuards...).
 		Steps(
 			mrStep("TB → A",
 				setType(v1alpha1.DatameshMemberTypeAccess),
@@ -154,7 +155,7 @@ func registerChangeTypePlans(
 		ToReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
 		DisplayName("Changing replica type").
 		Guards(guardShadowDiskfulSupported, guardMaxDiskMembers).
-		Guards(leavingTBGuards...).
+		Guards(loseTBGuards...).
 		Steps(
 			mrStep("TB → sD∅",
 				composeReplicaApply(
@@ -185,6 +186,7 @@ func registerChangeTypePlans(
 		ToReplicaType(v1alpha1.ReplicaTypeTieBreaker).
 		DisplayName("Changing replica type").
 		Guards(guardVolumeAccessNotLocal).
+		Guards(gainTBGuards...).
 		Steps(
 			mrStep("sD → sD∅",
 				setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
@@ -215,6 +217,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
+		Guards(gainVoterGuards...).
 		Guards(guardShadowDiskfulSupported, guardVotersEven).
 		Steps(
 			mrStep("sD → D",
@@ -235,6 +238,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
+		Guards(gainVoterGuards...).
 		Guards(guardShadowDiskfulSupported, guardVotersOdd).
 		Steps(
 			mrStep("sD → sD∅",
@@ -266,7 +270,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
 		ToReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
 		DisplayName("Changing replica type").
-		Guards(leavingDGuards...).
+		Guards(loseVoterGuards...).
 		Guards(guardShadowDiskfulSupported, guardVotersOdd).
 		Steps(
 			mrStep("D → sD",
@@ -288,7 +292,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
 		ToReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
 		DisplayName("Changing replica type").
-		Guards(leavingDGuards...).
+		Guards(loseVoterGuards...).
 		Guards(guardShadowDiskfulSupported, guardVotersEven).
 		Steps(
 			mrStep("D → D∅",
@@ -323,6 +327,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeAccess).
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
+		Guards(gainVoterGuards...).
 		Guards(guardVotersEven, guardMaxDiskMembers).
 		Steps(
 			mrStep("A → D∅",
@@ -346,6 +351,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeAccess).
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
+		Guards(gainVoterGuards...).
 		Guards(guardVotersOdd, guardMaxDiskMembers).
 		Steps(
 			mrStep("A → D∅ + q↑",
@@ -373,6 +379,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeAccess).
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
+		Guards(gainVoterGuards...).
 		Guards(guardVotersEven, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("A → sD∅",
@@ -405,6 +412,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeAccess).
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
+		Guards(gainVoterGuards...).
 		Guards(guardVotersOdd, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("A → sD∅",
@@ -447,7 +455,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
 		ToReplicaType(v1alpha1.ReplicaTypeAccess).
 		DisplayName("Changing replica type").
-		Guards(leavingDGuards...).
+		Guards(loseVoterGuards...).
 		Guards(guardVolumeAccessNotLocal, guardVotersOdd).
 		Steps(
 			mrStep("D → D∅",
@@ -473,7 +481,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
 		ToReplicaType(v1alpha1.ReplicaTypeAccess).
 		DisplayName("Changing replica type").
-		Guards(leavingDGuards...).
+		Guards(loseVoterGuards...).
 		Guards(guardVolumeAccessNotLocal, guardVotersEven).
 		Steps(
 			mrStep("D → D∅",
@@ -496,7 +504,7 @@ func registerChangeTypePlans(
 	// TB ↔ D (voter promotion/demotion from/to TieBreaker)
 	// ════════════════════════════════════════════════════════════════════════
 	//
-	// Structurally identical to A↔D. Key difference: TB→D has leavingTBGuards
+	// Structurally identical to A↔D. Key difference: TB→D has loseTBGuards
 	// (TB leaving its role — if TB required for tiebreaker, guard blocks;
 	// user adds another TB first, then converts).
 
@@ -506,7 +514,8 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeTieBreaker).
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
-		Guards(leavingTBGuards...).
+		Guards(loseTBGuards...).
+		Guards(gainVoterGuards...).
 		Guards(guardVotersEven, guardMaxDiskMembers).
 		Steps(
 			mrStep("TB → D∅",
@@ -530,7 +539,8 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeTieBreaker).
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
-		Guards(leavingTBGuards...).
+		Guards(loseTBGuards...).
+		Guards(gainVoterGuards...).
 		Guards(guardVotersOdd, guardMaxDiskMembers).
 		Steps(
 			mrStep("TB → D∅ + q↑",
@@ -555,7 +565,8 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeTieBreaker).
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
-		Guards(leavingTBGuards...).
+		Guards(loseTBGuards...).
+		Guards(gainVoterGuards...).
 		Guards(guardVotersEven, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("TB → sD∅",
@@ -584,7 +595,8 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeTieBreaker).
 		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
 		DisplayName("Changing replica type").
-		Guards(leavingTBGuards...).
+		Guards(loseTBGuards...).
+		Guards(gainVoterGuards...).
 		Guards(guardVotersOdd, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("TB → sD∅",
@@ -623,7 +635,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
 		ToReplicaType(v1alpha1.ReplicaTypeTieBreaker).
 		DisplayName("Changing replica type").
-		Guards(leavingDGuards...).
+		Guards(loseVoterGuards...).
 		Guards(guardVolumeAccessNotLocal, guardVotersOdd).
 		Steps(
 			mrStep("D → D∅",
@@ -647,7 +659,7 @@ func registerChangeTypePlans(
 		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
 		ToReplicaType(v1alpha1.ReplicaTypeTieBreaker).
 		DisplayName("Changing replica type").
-		Guards(leavingDGuards...).
+		Guards(loseVoterGuards...).
 		Guards(guardVolumeAccessNotLocal, guardVotersEven).
 		Steps(
 			mrStep("D → D∅",

@@ -45,6 +45,7 @@ func registerTieBreakerPlans(
 		ReplicaType(v1alpha1.ReplicaTypeTieBreaker).
 		DisplayName("Joining datamesh").
 		Guards(commonAddGuards...).
+		Guards(gainTBGuards...).
 		Steps(
 			mrStep("✦ → TB",
 				createMember(v1alpha1.DatameshMemberTypeTieBreaker),
@@ -60,7 +61,7 @@ func registerTieBreakerPlans(
 		ReplicaType(v1alpha1.ReplicaTypeTieBreaker).
 		DisplayName("Leaving datamesh").
 		Guards(commonRemoveGuards...).
-		Guards(leavingTBGuards...).
+		Guards(loseTBGuards...).
 		Steps(
 			mrStep("TB → ✕",
 				removeMember,

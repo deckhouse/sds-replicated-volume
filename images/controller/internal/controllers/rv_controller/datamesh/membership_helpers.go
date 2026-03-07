@@ -17,6 +17,9 @@ limitations under the License.
 package datamesh
 
 import (
+	"cmp"
+	"slices"
+
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
 )
@@ -123,42 +126,74 @@ func computeTargetQ(voters byte) byte {
 	return voters/2 + 1
 }
 
-// voterCountPerZone returns per-zone voter counts (D + D∅).
-func voterCountPerZone(gctx *globalContext) map[string]byte {
-	m := make(map[string]byte)
-	for i := range gctx.allReplicas {
-		rc := &gctx.allReplicas[i]
-		if rc.member != nil && rc.member.Type.IsVoter() {
-			m[rc.member.Zone]++
-		}
-	}
-	return m
+// zoneCount is a zone name + count pair returned by per-zone count helpers.
+// Sorted by Zone for deterministic iteration (stable guard messages).
+type zoneCount struct {
+	Zone  string
+	Count byte
 }
 
-// upToDateDiskfulCountPerZone returns per-zone UpToDate D counts.
-func upToDateDiskfulCountPerZone(gctx *globalContext) map[string]byte {
-	m := make(map[string]byte)
+// findZoneCount returns the count for the given zone name, or 0 if not found.
+// Linear scan — max 5 zones.
+func findZoneCount(zones []zoneCount, zone string) byte {
+	for _, zc := range zones {
+		if zc.Zone == zone {
+			return zc.Count
+		}
+	}
+	return 0
+}
+
+// countPerZone counts members matching include, grouped by zone.
+// Returns a sorted []zoneCount (by zone name). No intermediate map —
+// builds the slice directly via linear scan (max 5 zones × 8 members).
+func countPerZone(gctx *globalContext, include func(*ReplicaContext) bool) []zoneCount {
+	var zcs []zoneCount
 	for i := range gctx.allReplicas {
 		rc := &gctx.allReplicas[i]
-		if rc.member == nil || !rc.member.Type.IsVoter() || !rc.member.Type.HasBackingVolume() {
+		if !include(rc) {
 			continue
 		}
-		if rc.rvr != nil && rc.rvr.Status.BackingVolume != nil &&
-			rc.rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate {
-			m[rc.member.Zone]++
+		zone := rc.member.Zone
+		found := false
+		for j := range zcs {
+			if zcs[j].Zone == zone {
+				zcs[j].Count++
+				found = true
+				break
+			}
+		}
+		if !found {
+			zcs = append(zcs, zoneCount{Zone: zone, Count: 1})
 		}
 	}
-	return m
+	slices.SortFunc(zcs, func(a, b zoneCount) int {
+		return cmp.Compare(a.Zone, b.Zone)
+	})
+	return zcs
 }
 
-// tbCountPerZone returns per-zone TieBreaker counts.
-func tbCountPerZone(gctx *globalContext) map[string]byte {
-	m := make(map[string]byte)
-	for i := range gctx.allReplicas {
-		rc := &gctx.allReplicas[i]
-		if rc.member != nil && rc.member.Type == v1alpha1.DatameshMemberTypeTieBreaker {
-			m[rc.member.Zone]++
+// voterCountPerZone returns per-zone voter counts (D + D∅), sorted by zone name.
+func voterCountPerZone(gctx *globalContext) []zoneCount {
+	return countPerZone(gctx, func(rc *ReplicaContext) bool {
+		return rc.member != nil && rc.member.Type.IsVoter()
+	})
+}
+
+// upToDateDiskfulCountPerZone returns per-zone UpToDate D counts, sorted by zone name.
+func upToDateDiskfulCountPerZone(gctx *globalContext) []zoneCount {
+	return countPerZone(gctx, func(rc *ReplicaContext) bool {
+		if rc.member == nil || !rc.member.Type.IsVoter() || !rc.member.Type.HasBackingVolume() {
+			return false
 		}
-	}
-	return m
+		return rc.rvr != nil && rc.rvr.Status.BackingVolume != nil &&
+			rc.rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate
+	})
+}
+
+// tbCountPerZone returns per-zone TieBreaker counts, sorted by zone name.
+func tbCountPerZone(gctx *globalContext) []zoneCount {
+	return countPerZone(gctx, func(rc *ReplicaContext) bool {
+		return rc.member != nil && rc.member.Type == v1alpha1.DatameshMemberTypeTieBreaker
+	})
 }

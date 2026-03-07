@@ -555,6 +555,32 @@ func writebackBaselineGMDRFromContext(rv *v1alpha1.ReplicatedVolume, gctx *globa
 	rv.Status.BaselineGuaranteedMinimumDataRedundancy = gctx.baselineGMDR
 }
 
+// updateMemberZonesFromRSP updates member Zone from RSP eligible nodes.
+// Called once after buildContexts and before engine processing, so that
+// guards and dispatchers see up-to-date zone information.
+// Returns true if any member zone was changed.
+func updateMemberZonesFromRSP(gctx *globalContext) bool {
+	if gctx.rsp == nil {
+		return false
+	}
+	changed := false
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		if rc.member == nil || rc.nodeName == "" {
+			continue
+		}
+		en := rc.gctx.rsp.FindEligibleNode(rc.nodeName)
+		if en == nil {
+			continue
+		}
+		if rc.member.Zone != en.ZoneName {
+			rc.member.Zone = en.ZoneName
+			changed = true
+		}
+	}
+	return changed
+}
+
 // writebackRequestMessagesFromContexts writes membership messages from replica
 // contexts back to rv.Status.DatameshReplicaRequests[].Message.
 //

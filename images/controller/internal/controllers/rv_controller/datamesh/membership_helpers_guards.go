@@ -56,14 +56,14 @@ var commonRemoveGuards = []any{
 	guardNotAttached,
 }
 
-// leavingDGuards are guards for transitions that remove a D voter
+// loseVoterGuards are guards for transitions where a replica loses voter status
 // (RemoveReplica(D), ChangeReplicaType(D→...)).
 //
 // Plans MUST also add defense-in-depth guards explicitly:
 //   - Voter parity: guardVotersEven or guardVotersOdd
 //   - QMR: guardQMRLowerNeeded (qmr↓ plans)
 //   - Feature: guardShadowDiskfulSupported (sD variants)
-var leavingDGuards = []any{
+var loseVoterGuards = []any{
 	guardVolumeAccessLocalForDemotion,
 	guardGMDRPreserved,
 	guardFTTPreserved,
@@ -71,11 +71,25 @@ var leavingDGuards = []any{
 	guardZoneFTTPreserved,
 }
 
-// leavingTBGuards are guards for transitions that remove a TB
+// loseTBGuards are guards for transitions where a replica loses TieBreaker status
 // (RemoveReplica(TB), ChangeReplicaType(TB→...)).
-var leavingTBGuards = []any{
+var loseTBGuards = []any{
 	guardTBSufficient,
 	guardZoneTBSufficient,
+}
+
+// gainVoterGuards are guards for transitions where a replica gains voter status
+// (AddReplica(D), ChangeReplicaType(→D)).
+var gainVoterGuards = []any{
+	guardZonalSameZone,
+	guardTransZonalVoterPlacement,
+}
+
+// gainTBGuards are guards for transitions where a replica gains TieBreaker status
+// (AddReplica(TB), ChangeReplicaType(→TB)).
+var gainTBGuards = []any{
+	guardZonalSameZone,
+	guardTransZonalTBPlacement,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -271,6 +285,195 @@ func guardFTTPreserved(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult 
 	return dmte.GuardResult{}
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Zonal guards
+//
+
+// guardZonalSameZone blocks if the replica is in a zone that is not the
+// primary zone for Zonal topology. The primary zone is the zone with the
+// maximum number of voter members. If multiple zones tie for the maximum,
+// all are acceptable. Only applies to Zonal topology.
+func guardZonalSameZone(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
+	if gctx.configuration.Topology != v1alpha1.TopologyZonal {
+		return dmte.GuardResult{}
+	}
+
+	// Find primary zone(s): zone(s) with max voter count.
+	perZone := voterCountPerZone(gctx)
+	if len(perZone) == 0 {
+		return dmte.GuardResult{} // no voters yet, any zone OK
+	}
+
+	var maxCount byte
+	for _, zc := range perZone {
+		if zc.Count > maxCount {
+			maxCount = zc.Count
+		}
+	}
+
+	// Determine replica zone: from member (ChangeType) or RSP (AddReplica).
+	replicaZone := ""
+	if rctx.member != nil {
+		replicaZone = rctx.member.Zone
+	} else if en := rctx.getEligibleNode(); en != nil {
+		replicaZone = en.ZoneName
+	} else {
+		return dmte.GuardResult{} // RSP/node guards will block
+	}
+
+	// Check if replica's zone is among primary zones (max count).
+	for _, zc := range perZone {
+		if zc.Zone == replicaZone && zc.Count == maxCount {
+			return dmte.GuardResult{}
+		}
+	}
+
+	return dmte.GuardResult{
+		Blocked: true,
+		Message: fmt.Sprintf("Zonal topology: zone %q does not match primary zone(s)", replicaZone),
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// TransZonal placement guards (gain)
+//
+
+// guardTransZonalVoterPlacement blocks adding a voter (D) into a zone if,
+// after the addition, losing any zone would violate quorum (FTT) or data
+// redundancy (GMDR). Only applies to TransZonal topology.
+//
+// For each zone z (including the added zone):
+//
+//	votersInZ = current voters in z (+ 1 if z == addedZone)
+//	dSurviving = votersAfter - votersInZ
+//	FTT: dSurviving >= qAfter, or dSurviving == qAfter-1 with TB tiebreaker
+//	GMDR: dSurviving >= qmr
+func guardTransZonalVoterPlacement(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
+	if gctx.configuration.Topology != v1alpha1.TopologyTransZonal {
+		return dmte.GuardResult{}
+	}
+
+	// Determine added zone.
+	addedZone := ""
+	if rctx.member != nil {
+		addedZone = rctx.member.Zone
+	} else if en := rctx.getEligibleNode(); en != nil {
+		addedZone = en.ZoneName
+	} else {
+		return dmte.GuardResult{} // RSP/node guards will block
+	}
+
+	voters := voterCount(gctx)
+	votersAfter := voters + 1
+	qAfter := computeTargetQ(votersAfter)
+	qmr := gctx.datamesh.quorumMinimumRedundancy
+
+	votersPerZone := voterCountPerZone(gctx)
+	tbPerZone := tbCountPerZone(gctx)
+	totalTB := tbCount(gctx)
+
+	// Check every zone (including addedZone which may be new).
+	checked := false
+	for _, zc := range votersPerZone {
+		zone := zc.Zone
+		votersInZ := zc.Count
+		if zone == addedZone {
+			votersInZ++
+			checked = true
+		}
+
+		dSurviving := votersAfter - votersInZ
+		tbSurviving := totalTB - findZoneCount(tbPerZone, zone)
+
+		// FTT check.
+		if dSurviving < qAfter {
+			if dSurviving != qAfter-1 || tbSurviving == 0 {
+				return dmte.GuardResult{
+					Blocked: true,
+					Message: fmt.Sprintf(
+						"TransZonal: adding voter to zone %q would violate zone FTT — losing zone %s would leave %d D voters, q=%d, TB=%d",
+						addedZone, zone, dSurviving, qAfter, tbSurviving),
+				}
+			}
+		}
+
+		// GMDR check.
+		if dSurviving < qmr {
+			return dmte.GuardResult{
+				Blocked: true,
+				Message: fmt.Sprintf(
+					"TransZonal: adding voter to zone %q would violate zone GMDR — losing zone %s would leave %d D voters, need >= %d (qmr)",
+					addedZone, zone, dSurviving, qmr),
+			}
+		}
+	}
+
+	// If addedZone is new (not in votersPerZone), check it separately.
+	if !checked {
+		// New zone with 1 voter after addition. Losing it: dSurviving = votersAfter - 1 = voters.
+		// This is always safe (we had `voters` before, adding 1 to a fresh zone can't hurt others).
+		// But still check for completeness.
+		dSurviving := votersAfter - 1
+		if dSurviving < qAfter {
+			tbSurviving := totalTB - findZoneCount(tbPerZone, addedZone)
+			if dSurviving != qAfter-1 || tbSurviving == 0 {
+				return dmte.GuardResult{
+					Blocked: true,
+					Message: fmt.Sprintf(
+						"TransZonal: adding voter to new zone %q would violate zone FTT — losing it would leave %d D voters, q=%d",
+						addedZone, dSurviving, qAfter),
+				}
+			}
+		}
+		if dSurviving < qmr {
+			return dmte.GuardResult{
+				Blocked: true,
+				Message: fmt.Sprintf(
+					"TransZonal: adding voter to new zone %q would violate zone GMDR — losing it would leave %d D voters, need >= %d (qmr)",
+					addedZone, dSurviving, qmr),
+			}
+		}
+	}
+
+	return dmte.GuardResult{}
+}
+
+// guardTransZonalTBPlacement blocks adding a TB to a zone that already has
+// more than 1 D voter. If TB shares a zone with 2D, losing that zone removes
+// 2D + TB — the tiebreaker is gone precisely when it's most needed.
+// Only applies to TransZonal topology.
+func guardTransZonalTBPlacement(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
+	if gctx.configuration.Topology != v1alpha1.TopologyTransZonal {
+		return dmte.GuardResult{}
+	}
+
+	// Determine TB zone.
+	tbZone := ""
+	if rctx.member != nil {
+		tbZone = rctx.member.Zone
+	} else if en := rctx.getEligibleNode(); en != nil {
+		tbZone = en.ZoneName
+	} else {
+		return dmte.GuardResult{} // RSP/node guards will block
+	}
+
+	votersInTBZone := findZoneCount(voterCountPerZone(gctx), tbZone)
+	if votersInTBZone > 1 {
+		return dmte.GuardResult{
+			Blocked: true,
+			Message: fmt.Sprintf(
+				"TransZonal: TB zone %q has %d D voters, must have ≤ 1",
+				tbZone, votersInTBZone),
+		}
+	}
+
+	return dmte.GuardResult{}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// TransZonal guards (lose)
+//
+
 // guardZoneGMDRPreserved blocks if removing this voter would cause any zone
 // loss to violate the GMDR guarantee. Only applies to TransZonal topology.
 //
@@ -292,7 +495,8 @@ func guardZoneGMDRPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.Guar
 		removedZone = rctx.member.Zone
 	}
 
-	for zone, zoneUTD := range perZone {
+	for _, zc := range perZone {
+		zone, zoneUTD := zc.Zone, zc.Count
 		adjustedZoneUTD := zoneUTD
 		if zone == removedZone {
 			if adjustedZoneUTD > 0 {
@@ -346,13 +550,14 @@ func guardZoneFTTPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.Guard
 		removedZone = rctx.member.Zone
 	}
 
-	for zone, zoneVoters := range votersPerZone {
+	for _, zc := range votersPerZone {
+		zone, zoneVoters := zc.Zone, zc.Count
 		adjustedZoneVoters := zoneVoters
 		if zone == removedZone && adjustedZoneVoters > 0 {
 			adjustedZoneVoters--
 		}
 		dSurviving := votersAfter - adjustedZoneVoters
-		tbSurviving := totalTB - tbPerZone[zone]
+		tbSurviving := totalTB - findZoneCount(tbPerZone, zone)
 
 		if dSurviving >= qAfter {
 			continue

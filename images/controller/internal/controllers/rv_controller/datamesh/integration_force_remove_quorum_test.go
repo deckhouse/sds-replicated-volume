@@ -133,6 +133,7 @@ var _ = DescribeTable("integration: ForceRemove quorum invariants",
 		Expect(rv.Status.BaselineGuaranteedMinimumDataRedundancy).To(Equal(byte(0)), "recovery: baseline.GMDR=0")
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty(), "recovery: no active transitions")
 	},
+	// Ignored topology.
 	Entry("1D (FTT=0 GMDR=0)", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}),
 	Entry("2D+1TB (FTT=1 GMDR=0)", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}),
 	Entry("2D (FTT=0 GMDR=1)", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}),
@@ -140,4 +141,28 @@ var _ = DescribeTable("integration: ForceRemove quorum invariants",
 	Entry("4D+1TB (FTT=2 GMDR=1)", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}),
 	Entry("4D (FTT=1 GMDR=2)", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}),
 	Entry("5D (FTT=2 GMDR=2)", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}),
+
+	// TransZonal topology (3 zones).
+	Entry("1D (FTT=0 GMDR=0) [TZ 3z]", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}.transZonal(3)),
+	Entry("2D+1TB (FTT=1 GMDR=0) [TZ 3z]", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}.transZonal(3)),
+	Entry("2D (FTT=0 GMDR=1) [TZ 3z]", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}.transZonal(3)),
+	Entry("3D (FTT=1 GMDR=1) [TZ 3z]", layoutEntry{ftt: 1, gmdr: 1, initD: 3, initTB: 0, initQ: 2, initQMR: 2}.transZonal(3)),
+	Entry("4D+1TB (FTT=2 GMDR=1) [TZ 3z]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.transZonal(3)),
+	Entry("5D (FTT=2 GMDR=2) [TZ 3z]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.transZonal(3)),
+
+	// TransZonal topology (4 zones — 4D).
+	Entry("4D (FTT=1 GMDR=2) [TZ 4z]", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}.transZonal(4)),
+
+	// TransZonal topology (5 zones — pure).
+	Entry("4D+1TB (FTT=2 GMDR=1) [TZ 5z]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.transZonal(5)),
+	Entry("5D (FTT=2 GMDR=2) [TZ 5z]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.transZonal(5)),
+
+	// Zonal topology.
+	Entry("1D (FTT=0 GMDR=0) [Zonal]", layoutEntry{ftt: 0, gmdr: 0, initD: 1, initTB: 0, initQ: 1, initQMR: 1}.zonal()),
+	Entry("2D+1TB (FTT=1 GMDR=0) [Zonal]", layoutEntry{ftt: 1, gmdr: 0, initD: 2, initTB: 1, initQ: 2, initQMR: 1}.zonal()),
+	Entry("2D (FTT=0 GMDR=1) [Zonal]", layoutEntry{ftt: 0, gmdr: 1, initD: 2, initTB: 0, initQ: 2, initQMR: 2}.zonal()),
+	Entry("3D (FTT=1 GMDR=1) [Zonal]", layoutEntry{ftt: 1, gmdr: 1, initD: 3, initTB: 0, initQ: 2, initQMR: 2}.zonal()),
+	Entry("4D+1TB (FTT=2 GMDR=1) [Zonal]", layoutEntry{ftt: 2, gmdr: 1, initD: 4, initTB: 1, initQ: 3, initQMR: 2}.zonal()),
+	Entry("4D (FTT=1 GMDR=2) [Zonal]", layoutEntry{ftt: 1, gmdr: 2, initD: 4, initTB: 0, initQ: 3, initQMR: 3}.zonal()),
+	Entry("5D (FTT=2 GMDR=2) [Zonal]", layoutEntry{ftt: 2, gmdr: 2, initD: 5, initTB: 0, initQ: 3, initQMR: 3}.zonal()),
 )

@@ -50,12 +50,10 @@ func BuildRegistry() {
 
 // ProcessTransitions runs the datamesh transition engine for one reconciliation cycle.
 //
-//  1. Builds contexts from the current state.
-//  2. Creates and runs the engine (settle + dispatch).
-//  3. Finalizes transitions back to rv.Status.DatameshTransitions.
-//  4. If the engine mutated transitions — writes back members and datamesh scalars.
-//  5. Always writes back request messages (slot status updates happen even without
-//     transition changes).
+// Synchronizes member zone info from RSP, settles in-flight transitions,
+// dispatches new transitions from pending requests, writes back all mutations
+// (members, q/qmr, baseline GMDR, request messages), and computes the
+// effective layout from observable cluster state.
 //
 // Returns (changed, allReplicas): changed is true if rv.Status was mutated,
 // allReplicas is the full slice of replica contexts including orphan RVA nodes.
@@ -71,7 +69,10 @@ func ProcessTransitions(
 	cp := buildContexts(rv, rsp, rvrs, rvas, features)
 	gctx := cp.Global()
 
-	// 2. Create engine.
+	// 2. Update member zones from RSP (zone may change if RSP is updated).
+	zonesChanged := updateMemberZonesFromRSP(gctx)
+
+	// 3. Create engine.
 	dispatchers := []dmte.DispatchFunc[provider]{
 		quorumDispatcher(),
 		membershipDispatcher(),
@@ -81,25 +82,28 @@ func ProcessTransitions(
 	engine := dmte.NewEngine(ctx, registry, tracker, dispatchers,
 		&rv.Status.DatameshRevision, rv.Status.DatameshTransitions, cp)
 
-	// 3. Process.
+	// 4. Process.
 	changed := engine.Process(ctx)
 
-	// 4. Finalize transitions.
+	// 5. Finalize transitions.
 	rv.Status.DatameshTransitions = engine.Finalize()
 
-	// 5. If engine changed — writeback members + datamesh scalars + baseline layout.
-	if changed {
+	// 6. If engine or zone sync changed — writeback members + datamesh scalars + baseline layout.
+	if changed || zonesChanged {
 		writebackMembersFromContexts(rv, gctx)
-		writebackDatameshFromContext(rv, gctx)
-		writebackBaselineGMDRFromContext(rv, gctx)
+		if changed {
+			writebackDatameshFromContext(rv, gctx)
+			writebackBaselineGMDRFromContext(rv, gctx)
+		}
+		changed = true
 	}
 
-	// 6. Always writeback request messages.
+	// 7. Always writeback request messages.
 	if writebackRequestMessagesFromContexts(gctx) {
 		changed = true
 	}
 
-	// 7. Always compute effective layout (not gated by engine changed —
+	// 8. Always compute effective layout (not gated by engine changed —
 	// effective layout reflects actual cluster state, which may change even
 	// without engine mutations, e.g. due to voter failure/recovery).
 	if updateEffectiveLayout(gctx, &rv.Status.EffectiveLayout) {
