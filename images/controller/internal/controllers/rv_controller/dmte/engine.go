@@ -230,19 +230,37 @@ func (e *Engine[G, R, C]) Process(ctx context.Context) bool {
 
 	changed := false
 
-	// Settle existing transitions until no more progress can be made.
-	for {
-		settleChanged, progressed := e.settleTransitions(ctx)
-		changed = changed || settleChanged
-		if !progressed {
-			break
+	// Outer convergence loop: settle → dispatch → repeat.
+	//
+	// When an apply callback returns changed=false (no-op), the engine does
+	// not bump revision. The settle pass that follows will immediately confirm
+	// the no-op step (agents already confirmed the current revision) and
+	// advance to the next step — all within a single Process() call.
+	//
+	// The loop breaks when dispatch creates no new transitions (steady state).
+	// Safety bound prevents infinite loops from bugs.
+	const maxOuter = 10
+	for range maxOuter {
+		// Settle existing transitions until no more progress can be made.
+		for {
+			settleChanged, progressed := e.settleTransitions(ctx)
+			changed = changed || settleChanged
+			if !progressed {
+				break
+			}
 		}
-	}
 
-	// Run each dispatcher.
-	for _, dispatch := range e.dispatchers {
-		if e.runDispatch(dispatch) {
-			changed = true
+		// Run each dispatcher.
+		dispatched := false
+		for _, dispatch := range e.dispatchers {
+			if e.runDispatch(dispatch) {
+				dispatched = true
+				changed = true
+			}
+		}
+
+		if !dispatched {
+			break
 		}
 	}
 
@@ -420,10 +438,15 @@ func (e *Engine[G, R, C]) settleTransitions(ctx context.Context) (changed, progr
 //
 // rctx and slot are passed by the caller (settleTransitions) which already
 // resolved them. For global transitions both are zero/nil.
+// rctx may also be zero for replica-scoped transitions when the replica
+// was removed from the context index (e.g., ForceRemove + outer loop
+// completes the transition in the same Process() call).
 func (e *Engine[G, R, C]) completeTransition(p *plan[G, R], idx int, rctx R, slot ReplicaSlotAccessor[R]) {
+	var zeroR R
+
 	p.callOnComplete(e.cp.Global(), rctx)
 
-	if slot != nil {
+	if slot != nil && rctx != zeroR {
 		slot.SetActiveTransition(rctx, nil)
 	}
 
@@ -625,16 +648,23 @@ func (e *Engine[G, R, C]) createTransition(
 	return &t
 }
 
-// applyStep applies a step callback, bumps the engine's revision, and records
-// the new revision on the transition step.
+// applyStep applies a step callback, conditionally bumps the engine's revision
+// (only if the callback changed state), and records the revision on the step.
+//
+// When the apply callback returns false (no-op), the revision is NOT bumped.
+// Agents that already confirmed the current revision will immediately satisfy
+// the confirm check, allowing the engine to advance through no-op steps
+// within a single Process() call via the outer settle-dispatch loop.
 func (e *Engine[G, R, C]) applyStep(
 	p *plan[G, R],
 	t *Transition,
 	rctx R,
 	stepIdx int,
 ) {
-	p.steps[stepIdx].apply(e.cp.Global(), rctx)
-	*e.revision++
+	changed := p.steps[stepIdx].apply(e.cp.Global(), rctx)
+	if changed {
+		*e.revision++
+	}
 	t.Steps[stepIdx].DatameshRevision = *e.revision
 }
 

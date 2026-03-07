@@ -296,6 +296,8 @@ var _ = Describe("ForceRemoveReplica guards", func() {
 	})
 
 	It("guardNotAttached blocks", func() {
+		// Member attached with active RVA → attachment dispatcher settles (no Detach).
+		// ForceRemove is blocked by guardNotAttached because member is still attached.
 		member := mkMember("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-2")
 		member.Attached = true
 		rv := mkRV(5,
@@ -306,12 +308,17 @@ var _ = Describe("ForceRemoveReplica guards", func() {
 			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkForceLeaveRequest("rv-1-1")},
 			nil,
 		)
-		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-0", "node-1", 5)}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRReady("rv-1-0", "node-1", 5),
+			mkRVRReady("rv-1-1", "node-2", 5),
+		}
+		// Active RVA keeps member settled (attached + RVA = no Detach).
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-2")}
 
-		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, rvas, FeatureFlags{})
 
 		Expect(changed).To(BeTrue())
-		// No ForceRemove transition (guard blocked). Detach may be created by attachment dispatcher.
+		// No ForceRemove transition (guardNotAttached blocks: member attached).
 		for _, t := range rv.Status.DatameshTransitions {
 			Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica))
 		}

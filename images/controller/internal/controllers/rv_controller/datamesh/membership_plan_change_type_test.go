@@ -641,10 +641,11 @@ var _ = Describe("ChangeReplicaType(sD→A)", func() {
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
 		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("sd-to-a/v1"))
 
-		// Step 1 is no-op (type already LiminalShadowDiskful).
+		// Step 0 (sD→sD∅) is a no-op (already liminal) — apply returns changed=false,
+		// settle confirms immediately, engine advances to step 1 (sD∅→A) in the same call.
 		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
 		Expect(m).NotTo(BeNil())
-		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeLiminalShadowDiskful))
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeAccess))
 	})
 })
 
@@ -956,10 +957,11 @@ var _ = Describe("ChangeReplicaType(sD→TB)", func() {
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
 		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("sd-to-tb/v1"))
 
-		// Step 1 is no-op (already liminal).
+		// Step 0 (sD→sD∅) is a no-op (already liminal) — apply returns changed=false,
+		// settle confirms immediately, engine advances to step 1 (sD∅→TB) in the same call.
 		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
 		Expect(m).NotTo(BeNil())
-		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeLiminalShadowDiskful))
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeTieBreaker))
 	})
 })
 

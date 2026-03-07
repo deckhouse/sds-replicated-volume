@@ -81,7 +81,7 @@ func testCtx(entries ...*testReplicaCtx) testCtxProvider {
 // Stub callbacks
 //
 
-func stubReplicaApply(*testGCtx, *testReplicaCtx) {}
+func stubReplicaApply(*testGCtx, *testReplicaCtx) bool { return true }
 
 func stubReplicaConfirm(*testGCtx, *testReplicaCtx, int64) ConfirmResult {
 	return ConfirmResult{}
@@ -92,10 +92,15 @@ func neverReplicaConfirm(*testGCtx, *testReplicaCtx, int64) ConfirmResult {
 	return ConfirmResult{MustConfirm: ids(0, 1)}
 }
 
-func stubGlobalApply(*testGCtx) {}
+func stubGlobalApply(*testGCtx) bool { return true }
 
 func stubGlobalConfirm(*testGCtx, int64) ConfirmResult {
 	return ConfirmResult{}
+}
+
+// neverGlobalConfirm is a confirm callback that never completes.
+func neverGlobalConfirm(*testGCtx, int64) ConfirmResult {
+	return ConfirmResult{MustConfirm: ids(0, 1)}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -110,18 +115,40 @@ func (testSlotAccessor) SetActiveTransition(*testReplicaCtx, *Transition) {}
 func (testSlotAccessor) SetStatus(*testReplicaCtx, string, any)           {}
 
 // mockTracker is a Tracker that records Add/Remove calls.
-// By default admits all transitions; set canAdmitFn to override.
+// By default admits all transitions but prevents duplicates for global
+// transitions (same Type) — mirrors real tracker behavior.
+// Set canAdmitFn to override admission logic entirely.
 type mockTracker struct {
-	added      []*Transition
-	removed    []*Transition
-	canAdmitFn func(*Transition) (bool, string, any)
+	added             []*Transition
+	removed           []*Transition
+	canAdmitFn        func(*Transition) (bool, string, any)
+	activeGlobalTypes map[TransitionType]bool
 }
 
-func (m *mockTracker) Add(t *Transition)    { m.added = append(m.added, t) }
-func (m *mockTracker) Remove(t *Transition) { m.removed = append(m.removed, t) }
+func (m *mockTracker) Add(t *Transition) {
+	m.added = append(m.added, t)
+	if t.ReplicaName == "" {
+		if m.activeGlobalTypes == nil {
+			m.activeGlobalTypes = make(map[TransitionType]bool)
+		}
+		m.activeGlobalTypes[t.Type] = true
+	}
+}
+
+func (m *mockTracker) Remove(t *Transition) {
+	m.removed = append(m.removed, t)
+	if t.ReplicaName == "" {
+		delete(m.activeGlobalTypes, t.Type)
+	}
+}
+
 func (m *mockTracker) CanAdmit(t *Transition) (bool, string, any) {
 	if m.canAdmitFn != nil {
 		return m.canAdmitFn(t)
+	}
+	// Block duplicate global transitions (same Type already active).
+	if t.ReplicaName == "" && m.activeGlobalTypes[t.Type] {
+		return false, "duplicate global transition", nil
 	}
 	return true, "", nil
 }

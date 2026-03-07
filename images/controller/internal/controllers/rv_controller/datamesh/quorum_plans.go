@@ -46,7 +46,7 @@ import (
 // All plans are 2-step. Each step applies one component (q or qmr) with
 // the correct baseline update timing:
 //   - qmr-dropping step: compose with updateBaselineGMDR (apply).
-//   - qmr-raising step: OnComplete(updateBaselineGMDR).
+//   - qmr-raising step: OnComplete(asGlobalOnComplete(updateBaselineGMDR)).
 //   - q-only steps: no updateBaselineGMDR (baseline depends only on qmr).
 //
 // When only one of q/qmr changes, the other step is a no-op (sets the
@@ -89,7 +89,7 @@ func registerQuorumPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
 			mgStep("qmr↑",
 				setCorrectQMR,
 				confirmAllMembers,
-			).OnComplete(updateBaselineGMDR),
+			).OnComplete(asGlobalOnComplete(updateBaselineGMDR)),
 		).
 		Build()
 
@@ -107,7 +107,7 @@ func registerQuorumPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
 			mgStep("qmr↑",
 				setCorrectQMR,
 				confirmAllMembers,
-			).OnComplete(updateBaselineGMDR),
+			).OnComplete(asGlobalOnComplete(updateBaselineGMDR)),
 		).
 		Build()
 
@@ -131,20 +131,4 @@ func registerQuorumPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
 			),
 		).
 		Build()
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Apply functions
-//
-
-// setCorrectQ sets only q from computeCorrectQuorum.
-func setCorrectQ(gctx *globalContext) {
-	q, _ := computeCorrectQuorum(gctx)
-	gctx.datamesh.quorum = q
-}
-
-// setCorrectQMR sets only qmr from computeCorrectQuorum.
-func setCorrectQMR(gctx *globalContext) {
-	_, qmr := computeCorrectQuorum(gctx)
-	gctx.datamesh.quorumMinimumRedundancy = qmr
 }

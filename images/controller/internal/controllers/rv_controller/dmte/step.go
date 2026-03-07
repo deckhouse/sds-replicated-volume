@@ -45,12 +45,13 @@ type step[G any, R ReplicaCtx] struct {
 }
 
 // apply dispatches to the correct apply callback based on scope.
-func (s *step[G, R]) apply(gctx G, rctx R) {
+// Returns true if the callback changed any state.
+func (s *step[G, R]) apply(gctx G, rctx R) bool {
 	switch s.scope {
 	case GlobalScope:
-		s.globalApply(gctx)
+		return s.globalApply(gctx)
 	case ReplicaScope:
-		s.replicaApply(gctx, rctx)
+		return s.replicaApply(gctx, rctx)
 	default:
 		panic("dmte: step.apply: invalid scope")
 	}
