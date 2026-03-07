@@ -110,7 +110,7 @@ func runUntilStableUnchecked(
 	rv *v1alpha1.ReplicatedVolume,
 	rsp RSP,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-	features FeatureFlags,
+	features FeatureFlags, //nolint:unparam // signature mirrors runUntilStable; callers currently pass FeatureFlags{} but may vary in future
 ) {
 	const maxIter = 30
 	for range maxIter {

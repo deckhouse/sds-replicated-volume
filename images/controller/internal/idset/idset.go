@@ -106,20 +106,27 @@ func (s IDSet) String() string {
 	if s == 0 {
 		return ""
 	}
-	// Max capacity: 32 '#' + 10 one-digit (0-9) + 22 two-digit (10-31) + 31 separators (", ") = 148 bytes.
 	var buf [148]byte
-	b := buf[:0]
+	return string(s.AppendString(buf[:0]))
+}
+
+// AppendString appends the string representation of the IDSet to buf and
+// returns the extended buffer. Zero-allocation when buf has sufficient capacity.
+// Follows the Go convention (strconv.AppendInt, time.AppendFormat).
+func (s IDSet) AppendString(buf []byte) []byte {
 	x := uint32(s)
+	first := true
 	for x != 0 {
-		if len(b) > 0 {
-			b = append(b, ',', ' ')
+		if !first {
+			buf = append(buf, ',', ' ')
 		}
+		first = false
 		i := bits.TrailingZeros32(x)
-		b = append(b, '#')
-		b = append(b, idStr[i]...)
+		buf = append(buf, '#')
+		buf = append(buf, idStr[i]...)
 		x &^= 1 << uint(i)
 	}
-	return string(b)
+	return buf
 }
 
 // ---- Set algebra

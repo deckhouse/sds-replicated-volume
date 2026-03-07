@@ -213,6 +213,149 @@ func BenchmarkNoOp_32D_TransZonal(b *testing.B) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Go benchmarks: real work (dispatch + guards + settle + confirm)
+//
+
+// BenchmarkDispatch_AddD_3D benchmarks a single ProcessTransitions call that
+// dispatches AddReplica(D) from 3D layout: plan selection + full guard chain.
+// The RV is reset each iteration to re-dispatch.
+func BenchmarkDispatch_AddD_3D(b *testing.B) {
+	ensureRegistry()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-0"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestD("rv-1-3")},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-0", 5), mkRVR("rv-1-1", "node-1", 5),
+			mkRVR("rv-1-2", "node-2", 5), mkRVR("rv-1-3", "node-3", 0),
+		}
+		ProcessTransitions(context.Background(), rv, mkRSP("node-0", "node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
+	}
+}
+
+// BenchmarkDispatch_AddD_3D_TransZonal benchmarks AddReplica(D) dispatch with
+// TransZonal zone placement guards (the heaviest guard chain).
+func BenchmarkDispatch_AddD_3D_TransZonal(b *testing.B) {
+	ensureRegistry()
+	rsp := mkRSPWithZones("node-0", "zone-a", "node-1", "zone-b", "node-2", "zone-c", "node-3", "zone-a")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		m0 := mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-0")
+		m0.Zone = "zone-a"
+		m1 := mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-1")
+		m1.Zone = "zone-b"
+		m2 := mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-2")
+		m2.Zone = "zone-c"
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{m0, m1, m2},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestD("rv-1-3")},
+			nil,
+		)
+		rv.Status.Configuration.Topology = v1alpha1.TopologyTransZonal
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-0", 5), mkRVR("rv-1-1", "node-1", 5),
+			mkRVR("rv-1-2", "node-2", 5), mkRVR("rv-1-3", "node-3", 0),
+		}
+		ProcessTransitions(context.Background(), rv, rsp, rvrs, nil, FeatureFlags{})
+	}
+}
+
+// BenchmarkSettle_Confirm_3D benchmarks settling an active AddReplica transition:
+// confirm callback checks all replicas, updates progress message.
+func BenchmarkSettle_Confirm_3D(b *testing.B) {
+	ensureRegistry()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		t := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			ReplicaName: "rv-1-3", PlanID: "diskful-q-up/v1",
+			ReplicaType: v1alpha1.ReplicaTypeDiskful,
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "✦ → A", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted},
+				{Name: "A → D∅ + q↑", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 6},
+			},
+		}
+		rv := mkRV(6,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-0"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-3", v1alpha1.DatameshMemberTypeLiminalDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestD("rv-1-3")},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-0", 5), mkRVR("rv-1-1", "node-1", 5),
+			mkRVR("rv-1-2", "node-2", 5), mkRVR("rv-1-3", "node-3", 5),
+		}
+		ProcessTransitions(context.Background(), rv, mkRSP("node-0", "node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
+	}
+}
+
+// BenchmarkFullCycle_AddD_3D benchmarks a complete AddReplica(D) lifecycle:
+// dispatch → apply → confirm → settle → done. Uses runUntilStableUnchecked
+// to avoid safety check overhead in the benchmark.
+func BenchmarkFullCycle_AddD_3D(b *testing.B) {
+	ensureRegistry()
+	rsp := mkRSP("node-0", "node-1", "node-2", "node-3")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-0"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestD("rv-1-3")},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-0", 5), mkRVR("rv-1-1", "node-1", 5),
+			mkRVR("rv-1-2", "node-2", 5), mkRVR("rv-1-3", "node-3", 0),
+		}
+		runUntilStableUnchecked(rv, rsp, rvrs, FeatureFlags{})
+	}
+}
+
+// BenchmarkFullCycle_ForceRemove_3D benchmarks a complete ForceRemoveReplica
+// lifecycle: dispatch → cancel → apply → confirm → settle.
+func BenchmarkFullCycle_ForceRemove_3D(b *testing.B) {
+	ensureRegistry()
+	rsp := mkRSP("node-0", "node-1", "node-2")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-0"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkForceLeaveRequest("rv-1-2")},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-0", 5), mkRVR("rv-1-1", "node-1", 5),
+		}
+		runUntilStableUnchecked(rv, rsp, rvrs, FeatureFlags{})
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Ginkgo allocation tests
 //
 
@@ -238,48 +381,48 @@ var _ = Describe("performance", func() {
 	// These thresholds are set generously above observed values.
 	// If a refactor causes a regression, the test will catch it.
 
-	// Thresholds: ~2x above observed values (1D=21, 3D=24, 5D=25,
-	// 4D+TB=28, 8D=28, 16D=36, 32D=52 allocs/op on Apple M3).
+	// Thresholds: ~2x above observed values. All layouts = 14 allocs/op
+	// after obju.StatusCondition value-type fix + message stack buffer.
 	It("no-op 1D: bounded allocations", func() {
 		allocs := noOpAllocs(1, 0, FeatureFlags{})
-		Expect(allocs).To(BeNumerically("<", 50),
-			"1D no-op: %.0f allocs, expected < 50", allocs)
+		Expect(allocs).To(BeNumerically("<", 30),
+			"1D no-op: %.0f allocs, expected < 30", allocs)
 	})
 
 	It("no-op 3D: bounded allocations", func() {
 		allocs := noOpAllocs(3, 0, FeatureFlags{})
-		Expect(allocs).To(BeNumerically("<", 55),
-			"3D no-op: %.0f allocs, expected < 55", allocs)
+		Expect(allocs).To(BeNumerically("<", 30),
+			"3D no-op: %.0f allocs, expected < 30", allocs)
 	})
 
 	It("no-op 5D: bounded allocations", func() {
 		allocs := noOpAllocs(5, 0, FeatureFlags{})
-		Expect(allocs).To(BeNumerically("<", 55),
-			"5D no-op: %.0f allocs, expected < 55", allocs)
+		Expect(allocs).To(BeNumerically("<", 30),
+			"5D no-op: %.0f allocs, expected < 30", allocs)
 	})
 
 	It("no-op 4D+1TB: bounded allocations", func() {
 		allocs := noOpAllocs(4, 1, FeatureFlags{})
-		Expect(allocs).To(BeNumerically("<", 60),
-			"4D+1TB no-op: %.0f allocs, expected < 60", allocs)
+		Expect(allocs).To(BeNumerically("<", 30),
+			"4D+1TB no-op: %.0f allocs, expected < 30", allocs)
 	})
 
 	It("no-op 8D: bounded allocations", func() {
 		allocs := noOpAllocs(8, 0, FeatureFlags{})
-		Expect(allocs).To(BeNumerically("<", 60),
-			"8D no-op: %.0f allocs, expected < 60", allocs)
+		Expect(allocs).To(BeNumerically("<", 30),
+			"8D no-op: %.0f allocs, expected < 30", allocs)
 	})
 
 	It("no-op 16D: bounded allocations", func() {
 		allocs := noOpAllocs(16, 0, FeatureFlags{})
-		Expect(allocs).To(BeNumerically("<", 80),
-			"16D no-op: %.0f allocs, expected < 80", allocs)
+		Expect(allocs).To(BeNumerically("<", 30),
+			"16D no-op: %.0f allocs, expected < 30", allocs)
 	})
 
 	It("no-op 32D: bounded allocations", func() {
 		allocs := noOpAllocs(32, 0, FeatureFlags{})
-		Expect(allocs).To(BeNumerically("<", 110),
-			"32D no-op: %.0f allocs, expected < 110", allocs)
+		Expect(allocs).To(BeNumerically("<", 30),
+			"32D no-op: %.0f allocs, expected < 30", allocs)
 	})
 
 	It("no-op 5D [sD]: same order as default", func() {
@@ -294,20 +437,20 @@ var _ = Describe("performance", func() {
 
 	It("no-op 5D [Zonal]: bounded allocations", func() {
 		allocs := noOpAllocsTopo(5, v1alpha1.TopologyZonal, 1)
-		Expect(allocs).To(BeNumerically("<", 55),
-			"5D Zonal no-op: %.0f allocs, expected < 55", allocs)
+		Expect(allocs).To(BeNumerically("<", 30),
+			"5D Zonal no-op: %.0f allocs, expected < 30", allocs)
 	})
 
 	It("no-op 5D [TZ 3z]: bounded allocations", func() {
 		allocs := noOpAllocsTopo(5, v1alpha1.TopologyTransZonal, 3)
-		Expect(allocs).To(BeNumerically("<", 55),
-			"5D TZ 3z no-op: %.0f allocs, expected < 55", allocs)
+		Expect(allocs).To(BeNumerically("<", 30),
+			"5D TZ 3z no-op: %.0f allocs, expected < 30", allocs)
 	})
 
 	It("no-op 32D [TZ 5z]: bounded allocations", func() {
 		allocs := noOpAllocsTopo(32, v1alpha1.TopologyTransZonal, 5)
-		Expect(allocs).To(BeNumerically("<", 110),
-			"32D TZ 5z no-op: %.0f allocs, expected < 110", allocs)
+		Expect(allocs).To(BeNumerically("<", 30),
+			"32D TZ 5z no-op: %.0f allocs, expected < 30", allocs)
 	})
 
 	It("topology overhead: 5D TZ vs Ignored within 2x", func() {

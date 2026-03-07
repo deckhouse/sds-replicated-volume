@@ -436,6 +436,43 @@ func TestIDSet_String(t *testing.T) {
 	}
 }
 
+func TestIDSet_AppendString(t *testing.T) {
+	tests := []struct {
+		name   string
+		set    idset.IDSet
+		prefix string
+		want   string
+	}{
+		{"empty_no_prefix", 0, "", ""},
+		{"empty_with_prefix", 0, "stale: ", "stale: "},
+		{"single_no_prefix", 1 << 0, "", "#0"},
+		{"single_with_prefix", 1 << 5, "IDs: ", "IDs: #5"},
+		{"two_elements_with_prefix", (1 << 3) | (1 << 7), "[", "[#3, #7"},
+		{"consistent_with_String", (1 << 0) | (1 << 10) | (1 << 31), "", "#0, #10, #31"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := []byte(tt.prefix)
+			got := string(tt.set.AppendString(buf))
+			if got != tt.want {
+				t.Fatalf("expected %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestIDSet_AppendString_NoAlloc(t *testing.T) {
+	set := idset.Of(0, 5, 10)
+	var buf [64]byte
+	allocs := testing.AllocsPerRun(100, func() {
+		_ = set.AppendString(buf[:0])
+	})
+	if allocs > 0 {
+		t.Fatalf("AppendString allocated %.0f times, expected 0", allocs)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Set algebra
 // ----------------------------------------------------------------------------
