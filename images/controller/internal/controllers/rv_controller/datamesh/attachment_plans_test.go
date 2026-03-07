@@ -360,6 +360,46 @@ var _ = Describe("Attach", func() {
 		Expect(rv.Status.DatameshTransitions[0].ReplicaName).To(Equal("rv-1-0"))
 	})
 
+	It("FIFO: already-attached keeps slot over older RVA", func() {
+		// node-1 already attached; node-2 has OLDER RVA but is not attached.
+		// The already-attached member settles (NoDispatch) and keeps the slot
+		// via potentiallyAttached — FIFO ordering cannot preempt it.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMemberAttached("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+			},
+			nil, nil,
+		)
+		rv.Status.EffectiveLayout = v1alpha1.ReplicatedVolumeEffectiveLayout{
+			FailuresToTolerate:              ptr.To(int8(0)),
+			GuaranteedMinimumDataRedundancy: ptr.To(int8(0)),
+			TotalVoters:                     2,
+			ReachableVoters:                 2,
+			UpToDateVoters:                  0,
+			Message:                         "2/2 voters reachable, 0/2 UpToDate; FTT=0, GMDR=0",
+		}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRReady("rv-1-0", "node-1", 5),
+			mkRVRReady("rv-1-1", "node-2", 5),
+		}
+		// node-2 RVA OLDER than node-1 RVA.
+		rva2 := mkRVA("rva-2", "node-2")
+		rva2.CreationTimestamp = metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+		rva1 := mkRVA("rva-1", "node-1")
+		rva1.CreationTimestamp = metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 1, 0, time.UTC))
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rva1, rva2}
+
+		_, replicas := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, rvas, FeatureFlags{})
+
+		// node-1 settled (already attached), node-2 blocked by slot.
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		rc0 := findReplicaContext(replicas, 0)
+		Expect(rc0.AttachmentConditionReason()).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
+		rc1 := findReplicaContext(replicas, 1)
+		Expect(rc1.AttachmentConditionMessage()).To(ContainSubstring("slot"))
+	})
+
 	It("maxAttachments=2: first Attach + EnableMultiattach, second waits", func() {
 		rv := mkRV(5,
 			[]v1alpha1.DatameshMember{
@@ -467,6 +507,27 @@ var _ = Describe("Detach", func() {
 		Expect(changed).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
 		Expect(rv.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach))
+	})
+
+	It("proceeds when RVR not Ready", func() {
+		// Detach only checks guardDeviceNotInUse — no guardRVRReady.
+		// A not-Ready RVR must not block detach.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{mkMemberAttached("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1")},
+			nil, nil,
+		)
+		// RVR exists but not Ready (no Ready condition). Quorum set to pass quorum check.
+		rvr := mkRVR("rv-1-0", "node-1", 5)
+		rvr.Status.Quorum = ptr.To(true)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr}
+		// No active RVA → detach intent.
+
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach))
+		Expect(rv.Status.Datamesh.Members[0].Attached).To(BeFalse())
 	})
 
 	It("orphan: only deleting RVAs, no member", func() {
@@ -851,6 +912,62 @@ var _ = Describe("Multiattach", func() {
 			Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach))
 		}
 	})
+
+	It("full cycle: EnableMultiattach settles, second node attaches", func() {
+		// Phase 1: 2 members, MaxAttachments=2, multiattach=false.
+		// Expect: EnableMultiattach + Attach(node-1); node-2 blocked.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+			},
+			nil, nil,
+		)
+		rv.Spec.MaxAttachments = 2
+		rsp := mkRSP("node-1", "node-2")
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRReady("rv-1-0", "node-1", 5),
+			mkRVRReady("rv-1-1", "node-2", 5),
+		}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-1"), mkRVA("rva-2", "node-2")}
+
+		changed1, _ := ProcessTransitions(context.Background(), rv, rsp, rvrs, rvas, FeatureFlags{})
+		Expect(changed1).To(BeTrue())
+
+		// Verify phase 1 produced EnableMultiattach + 1 Attach.
+		attachCount := 0
+		hasEnable := false
+		for _, t := range rv.Status.DatameshTransitions {
+			if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach {
+				attachCount++
+			}
+			if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach {
+				hasEnable = true
+			}
+		}
+		Expect(attachCount).To(Equal(1))
+		Expect(hasEnable).To(BeTrue())
+
+		// Phase 2: Both RVRs confirm at the bumped revision.
+		bumpedRevision := rv.Status.DatameshRevision
+		rvrs[0] = mkRVRReady("rv-1-0", "node-1", bumpedRevision)
+		rvrs[1] = mkRVRReady("rv-1-1", "node-2", bumpedRevision)
+
+		changed2, _ := ProcessTransitions(context.Background(), rv, rsp, rvrs, rvas, FeatureFlags{})
+		Expect(changed2).To(BeTrue())
+
+		// Attach(node-1) settled, EnableMultiattach settled.
+		// Second Attach(node-2) created.
+		hasAttachNode2 := false
+		for _, t := range rv.Status.DatameshTransitions {
+			Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach))
+			if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach && t.ReplicaName == "rv-1-1" {
+				hasAttachNode2 = true
+			}
+		}
+		Expect(hasAttachNode2).To(BeTrue())
+		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-1").Attached).To(BeTrue())
+	})
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -988,6 +1105,38 @@ var _ = Describe("Attachment combined", func() {
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
 		Expect(rv.Status.DatameshTransitions[0].Steps[0].Message).To(ContainSubstring("Errors"))
 		Expect(rv.Status.DatameshTransitions[0].Steps[0].Message).To(ContainSubstring("ConfigurationFailed"))
+	})
+
+	It("maxAttachments decrease: no forced detach", func() {
+		// Both members already attached. MaxAttachments decreased to 1.
+		// The engine must NOT force-detach any member — both settle as NoDispatch.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMemberAttached("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMemberAttached("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+			},
+			nil, nil,
+		)
+		rv.Spec.MaxAttachments = 1 // decreased from 2
+		rv.Status.Datamesh.Multiattach = true
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRReady("rv-1-0", "node-1", 5),
+			mkRVRReady("rv-1-1", "node-2", 5),
+		}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-1"), mkRVA("rva-2", "node-2")}
+		settleEffectiveLayout(rv, rvrs)
+
+		changed, replicas := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, rvas, FeatureFlags{})
+
+		// No Detach, no ForceDetach, both stay attached.
+		Expect(changed).To(BeFalse())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.Datamesh.Members[0].Attached).To(BeTrue())
+		Expect(rv.Status.Datamesh.Members[1].Attached).To(BeTrue())
+		rc0 := findReplicaContext(replicas, 0)
+		Expect(rc0.AttachmentConditionReason()).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
+		rc1 := findReplicaContext(replicas, 1)
+		Expect(rc1.AttachmentConditionReason()).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
 	})
 })
 

@@ -26,6 +26,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1333,7 +1334,7 @@ var _ = Describe("guardMemberUnreachable", func() {
 //
 
 var _ = Describe("guardNotAttached", func() {
-	It("passes: not attached", func() {
+	It("passes: not attached, no transition", func() {
 		rc := &ReplicaContext{member: &v1alpha1.DatameshMember{Attached: false}}
 		r := guardNotAttached(nil, rc)
 		Expect(r.Blocked).To(BeFalse())
@@ -1349,6 +1350,26 @@ var _ = Describe("guardNotAttached", func() {
 		rc := &ReplicaContext{}
 		r := guardNotAttached(nil, rc)
 		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("blocks: not attached but Attach transition in progress", func() {
+		rc := &ReplicaContext{
+			member:               &v1alpha1.DatameshMember{Attached: false},
+			attachmentTransition: &dmte.Transition{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach},
+		}
+		r := guardNotAttached(nil, rc)
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("Attach"))
+	})
+
+	It("blocks: not attached but Detach transition in progress", func() {
+		rc := &ReplicaContext{
+			member:               &v1alpha1.DatameshMember{Attached: false},
+			attachmentTransition: &dmte.Transition{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach},
+		}
+		r := guardNotAttached(nil, rc)
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("Detach"))
 	})
 })
 

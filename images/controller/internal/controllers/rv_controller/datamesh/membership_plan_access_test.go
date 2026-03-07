@@ -117,6 +117,20 @@ var _ = Describe("AddReplica(A)", func() {
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("addresses"))
 	})
 
+	It("guard: RVR nil (no RVR at all)", func() {
+		// Join request exists but the RVR has not been created yet.
+		// guardAddressesPopulated checks rctx.rvr == nil and blocks.
+		rv := mkRV(5, nil, []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")}, nil)
+		// Only the Diskful RVR — no RVR for rv-1-1.
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{}
+
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-2"), rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("addresses"))
+	})
+
 	It("guard: member on same node", func() {
 		rv := mkRV(5,
 			[]v1alpha1.DatameshMember{mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-2")},
@@ -488,6 +502,29 @@ var _ = Describe("Settle Access transitions", func() {
 		Expect(rv.Status.DatameshTransitions[0].Steps[0].Message).To(ContainSubstring("0/2"))
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("Leaving datamesh"))
 	})
+
+	It("subject RVR disappears during active transition", func() {
+		// Active AddReplica for rv-1-1. Diskful confirmed, but subject RVR is gone.
+		// confirmFMPlusSubject: mustConfirm={#0,#1}, confirmed={#0} (subject missing).
+		t := mkActiveTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica, "rv-1-1", 6)
+		rv := mkRV(6,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		// Only Diskful RVR — subject RVR is completely gone.
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-0", "node-1", 6)}
+
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeTrue())
+		// Transition NOT completed — subject not confirmed.
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].Steps[0].Message).To(ContainSubstring("1/2"))
+	})
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -607,6 +644,44 @@ var _ = Describe("Access integration", func() {
 		// Still exactly one transition (no duplicate created).
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
 		Expect(rv.Status.DatameshTransitions[0].ReplicaName).To(Equal("rv-1-1"))
+	})
+
+	It("RemoveReplica in-progress blocks AddReplica for same replica", func() {
+		// Active RemoveReplica for rv-1-1 (not yet confirmed).
+		// Join request for rv-1-1 (re-join after leave).
+		// Engine slot conflict: RemoveReplica occupies the membership slot,
+		// so AddReplica for the same replica is blocked.
+		removeT := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+			ReplicaName: "rv-1-1",
+			PlanID:      "access/v1",
+			ReplicaType: v1alpha1.ReplicaTypeAccess,
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{
+				Name:             "A → ✕",
+				Status:           v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+				DatameshRevision: 6,
+				StartedAt:        ptr.To(metav1.Now()),
+			}},
+		}
+		rv := mkRV(6,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				// rv-1-1 already removed from members (RemoveReplica apply removes it)
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{removeT},
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 4), // not yet confirmed
+			mkRVR("rv-1-1", "node-2", 4), // not yet confirmed
+		}
+
+		ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{})
+
+		// Only RemoveReplica present — no AddReplica created.
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica))
 	})
 })
 
