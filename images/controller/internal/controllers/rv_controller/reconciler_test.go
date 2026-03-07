@@ -1796,10 +1796,8 @@ var _ = Describe("computeTargetQuorum", func() {
 					FailuresToTolerate: ftt, GuaranteedMinimumDataRedundancy: gmdr,
 					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, ReplicatedStoragePoolName: "test-pool",
 				},
-				BaselineLayout: v1alpha1.ReplicatedVolumeLayout{
-					FailuresToTolerate: ftt, GuaranteedMinimumDataRedundancy: gmdr,
-				},
-				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{Members: members},
+				BaselineGuaranteedMinimumDataRedundancy: gmdr,
+				Datamesh:                                v1alpha1.ReplicatedVolumeDatamesh{Members: members},
 			},
 		}
 	}
@@ -2319,9 +2317,7 @@ var _ = Describe("computeTargetQuorum edge cases", func() {
 					Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 0,
 					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, ReplicatedStoragePoolName: "test-pool",
 				},
-				BaselineLayout: v1alpha1.ReplicatedVolumeLayout{
-					FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 0,
-				},
+				BaselineGuaranteedMinimumDataRedundancy: 0,
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 					Members: []v1alpha1.DatameshMember{
 						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0), Type: v1alpha1.DatameshMemberTypeDiskful},
@@ -2347,9 +2343,7 @@ var _ = Describe("computeTargetQuorum edge cases", func() {
 					Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 0,
 					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, ReplicatedStoragePoolName: "test-pool",
 				},
-				BaselineLayout: v1alpha1.ReplicatedVolumeLayout{
-					FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 0,
-				},
+				BaselineGuaranteedMinimumDataRedundancy: 0,
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 					Members: []v1alpha1.DatameshMember{
 						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0), Type: v1alpha1.DatameshMemberTypeDiskful},
@@ -2373,9 +2367,7 @@ var _ = Describe("computeTargetQuorum edge cases", func() {
 					Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
 					VolumeAccess: v1alpha1.VolumeAccessLocal, ReplicatedStoragePoolName: "test-pool",
 				},
-				BaselineLayout: v1alpha1.ReplicatedVolumeLayout{
-					FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
-				},
+				BaselineGuaranteedMinimumDataRedundancy: 0,
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 					Members: []v1alpha1.DatameshMember{
 						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0), Type: v1alpha1.DatameshMemberTypeDiskful},

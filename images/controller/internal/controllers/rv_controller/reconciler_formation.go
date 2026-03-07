@@ -464,13 +464,9 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 			})
 		}
 
-		// Set baseline layout from the configuration that formation is building towards.
-		// Formation creates the exact layout matching configuration, so baseline = configuration.
-		// Must be set before computeTargetQuorum, which derives q/qmr from it.
-		rv.Status.BaselineLayout = v1alpha1.ReplicatedVolumeLayout{
-			FailuresToTolerate:              rv.Status.Configuration.FailuresToTolerate,
-			GuaranteedMinimumDataRedundancy: rv.Status.Configuration.GuaranteedMinimumDataRedundancy,
-		}
+		// Set baseline GMDR from the configuration that formation is building towards.
+		// Formation creates the exact layout matching configuration, so baseline = config.
+		rv.Status.BaselineGuaranteedMinimumDataRedundancy = rv.Status.Configuration.GuaranteedMinimumDataRedundancy
 
 		// Quorum settings control DRBD split-brain prevention based on replica count.
 		quorum, quorumMinimumRedundancy := computeTargetQuorum(rv)
@@ -827,7 +823,7 @@ func (r *Reconciler) reconcileFormationRestartIfTimeoutPassed(
 	rv.Status.ConfigurationObservedGeneration = 0
 	rv.Status.DatameshRevision = 0
 	rv.Status.Datamesh = v1alpha1.ReplicatedVolumeDatamesh{}
-	rv.Status.BaselineLayout = v1alpha1.ReplicatedVolumeLayout{}
+	rv.Status.BaselineGuaranteedMinimumDataRedundancy = 0
 	rv.Status.DatameshTransitions = nil
 	rv.Status.DatameshReplicaRequests = nil
 

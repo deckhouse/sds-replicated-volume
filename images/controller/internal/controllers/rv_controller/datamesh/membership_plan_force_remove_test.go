@@ -202,7 +202,6 @@ var _ = Describe("ForceRemoveReplica step flow", func() {
 			nil,
 		)
 		rv.Status.Configuration.FailuresToTolerate = 1
-		rv.Status.BaselineLayout.FailuresToTolerate = 1
 		rv.Status.Datamesh.Quorum = 2
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5),
@@ -213,7 +212,6 @@ var _ = Describe("ForceRemoveReplica step flow", func() {
 		Expect(changed).To(BeTrue())
 		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-2")).To(BeNil())
 		// Baseline updated in apply (lowering). 2D, q=2 → FTT=0.
-		Expect(rv.Status.BaselineLayout.FailuresToTolerate).To(Equal(byte(0)))
 	})
 
 	It("ForceRemove(D) + q↓: q lowered", func() {

@@ -195,32 +195,17 @@ spec:
                 x-kubernetes-validations:
                 - message: actuallyAttachedTo must be unique
                   rule: self.all(x, self.exists_one(y, x == y))
-              baselineLayout:
+              baselineGuaranteedMinimumDataRedundancy:
+                default: 0
                 description: |-
-                  BaselineLayout is the FTT/GMDR level that the datamesh has reached and
-                  committed to maintain. Computed from the committed datamesh topology
-                  (member count, q, qmr) and capped by Configuration:
-                    - Rises toward Configuration as members are added and q/qmr confirmed.
+                  BaselineGuaranteedMinimumDataRedundancy is the GMDR level that the datamesh
+                  has reached and committed to maintain. Computed as min(qmr-1, config.GMDR).
+                    - Rises toward Configuration as members are added and qmr confirmed.
                     - Never exceeds Configuration (capped at the target level).
-                    - Decreases when Configuration is lowered (cap takes effect immediately).
-                    - q and qmr are derived from these values.
-                properties:
-                  failuresToTolerate:
-                    default: 0
-                    description: FailuresToTolerate is the FTT level.
-                    maximum: 2
-                    minimum: 0
-                    type: integer
-                  guaranteedMinimumDataRedundancy:
-                    default: 0
-                    description: GuaranteedMinimumDataRedundancy is the GMDR level.
-                    maximum: 2
-                    minimum: 0
-                    type: integer
-                required:
-                - failuresToTolerate
-                - guaranteedMinimumDataRedundancy
-                type: object
+                    - Decreases when Configuration GMDR is lowered.
+                maximum: 2
+                minimum: 0
+                type: integer
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -785,31 +770,64 @@ spec:
                 x-kubernetes-list-type: atomic
               effectiveLayout:
                 description: |-
-                  EffectiveLayout is the FTT/GMDR protection level that the datamesh
-                  actually provides right now. Reflects the real state of the cluster:
-                    - May exceed BaselineLayout and Configuration during transitions
-                      (e.g., a new voter was added but BaselineLayout has not been raised yet).
-                    - May be less than BaselineLayout in degraded state (e.g., a lost voter
-                      reduces effective FTT).
-                    - Equals BaselineLayout when healthy; equals Configuration at steady state.
-                    - Nil when the effective layout cannot be determined (e.g., no voter
-                      replicas with ready agents to observe).
+                  EffectiveLayout describes the real-time protection level and health
+                  of the datamesh, based on observable cluster state.
                 properties:
                   failuresToTolerate:
-                    default: 0
-                    description: FailuresToTolerate is the FTT level.
-                    maximum: 2
-                    minimum: 0
+                    description: |-
+                      FailuresToTolerate is the effective FTT level.
+                      Positive: can tolerate this many node failures.
+                      Zero: quorum is met but any failure causes quorum loss.
+                      Negative: quorum is lost, need this many more voters.
+                      Nil: cannot be determined (no voters or no fresh agent data).
                     type: integer
                   guaranteedMinimumDataRedundancy:
-                    default: 0
-                    description: GuaranteedMinimumDataRedundancy is the GMDR level.
-                    maximum: 2
-                    minimum: 0
+                    description: |-
+                      GuaranteedMinimumDataRedundancy is the effective GMDR level.
+                      Positive: can lose this many disks without data loss.
+                      Zero: IO works but any disk loss risks data.
+                      Negative: IO blocked, need this many more UpToDate replicas.
+                      Nil: cannot be determined (no voters or no fresh agent data).
+                    type: integer
+                  message:
+                    description: Message is a human-readable summary of the effective
+                      layout state.
+                    type: string
+                  reachableTieBreakers:
+                    description: |-
+                      ReachableTieBreakers is the number of TieBreakers confirmed reachable
+                      (agent ready or seen Connected by peers).
+                    type: integer
+                  reachableVoters:
+                    description: |-
+                      ReachableVoters is the number of voters confirmed reachable
+                      (own Quorum=true or seen Connected by peers).
+                    type: integer
+                  staleAgents:
+                    description: |-
+                      StaleAgents is the number of members whose agent data is stale
+                      (AgentNotReady or Quorum not yet reported). These members are
+                      reconstructed from peer observations when possible.
+                    type: integer
+                  totalTieBreakers:
+                    description: TotalTieBreakers is the number of TieBreaker members.
+                    type: integer
+                  totalVoters:
+                    description: TotalVoters is the number of voter members (Diskful
+                      and liminal variants).
+                    type: integer
+                  upToDateVoters:
+                    description: |-
+                      UpToDateVoters is the number of voters with UpToDate backing volume
+                      (own BackingVolume=UpToDate or seen UpToDate by peers).
                     type: integer
                 required:
-                - failuresToTolerate
-                - guaranteedMinimumDataRedundancy
+                - reachableTieBreakers
+                - reachableVoters
+                - staleAgents
+                - totalTieBreakers
+                - totalVoters
+                - upToDateVoters
                 type: object
               eligibleNodesViolations:
                 description: EligibleNodesViolations lists replicas placed on non-eligible
@@ -842,9 +860,10 @@ spec:
                 - message: eligibleNodesViolations[].replicaName must be unique
                   rule: self.all(x, self.exists_one(y, x.replicaName == y.replicaName))
             required:
-            - baselineLayout
+            - baselineGuaranteedMinimumDataRedundancy
             - datamesh
             - datameshRevision
+            - effectiveLayout
             type: object
         required:
         - metadata

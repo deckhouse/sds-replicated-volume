@@ -220,7 +220,7 @@ func registerChangeTypePlans(
 			mrStep("sD → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				asReplicaConfirm(confirmAllMembers),
-			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			),
 		).
 		OnComplete(onChangeTypeComplete).
 		Build()
@@ -247,7 +247,7 @@ func registerChangeTypePlans(
 					asReplicaApply(raiseQ),
 				),
 				asReplicaConfirm(confirmAllMembers),
-			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			),
 			mrStep("D∅ → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				confirmSubjectOnly,
@@ -261,20 +261,16 @@ func registerChangeTypePlans(
 	// Voter becomes non-voter. All peers update arr/voting config.
 	// No BV changes (both D and sD have backing volume).
 	// No q change (odd→even voters).
-	// Baseline updated in apply (lowering: voter removed).
 	changeReplicaType.Plan("d-to-sd/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
 		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
 		ToReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
 		DisplayName("Changing replica type").
 		Guards(leavingDGuards...).
-		Guards(guardShadowDiskfulSupported, guardVotersOdd, guardQMRNotTooHigh).
+		Guards(guardShadowDiskfulSupported, guardVotersOdd).
 		Steps(
 			mrStep("D → sD",
-				composeReplicaApply(
-					setType(v1alpha1.DatameshMemberTypeShadowDiskful),
-					asReplicaApply(updateBaselineLayout),
-				),
+				setType(v1alpha1.DatameshMemberTypeShadowDiskful),
 				asReplicaConfirm(confirmAllMembers),
 			),
 		).
@@ -286,14 +282,14 @@ func registerChangeTypePlans(
 	// Mirror of sD→D+q↑: D detaches, converts to sD∅+q↓ (voter→non-voter
 	// + q lowered atomically), re-attaches as sD with delta resync.
 	// No BV changes — BV present throughout.
-	// Baseline updated in apply on the D∅→sD∅+q↓ step (lowering).
+	// No qmr change → no baseline update needed.
 	changeReplicaType.Plan("d-to-sd-q-down/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
 		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
 		ToReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
 		DisplayName("Changing replica type").
 		Guards(leavingDGuards...).
-		Guards(guardShadowDiskfulSupported, guardVotersEven, guardQMRNotTooHigh).
+		Guards(guardShadowDiskfulSupported, guardVotersEven).
 		Steps(
 			mrStep("D → D∅",
 				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
@@ -303,7 +299,6 @@ func registerChangeTypePlans(
 				composeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					asReplicaApply(lowerQ),
-					asReplicaApply(updateBaselineLayout),
 				),
 				asReplicaConfirm(confirmAllMembers),
 			),
@@ -322,7 +317,7 @@ func registerChangeTypePlans(
 	// ChangeReplicaType(A → D): A → D∅ → D (even→odd, no sD)
 	//
 	// A (star, non-voter) becomes D∅ (full-mesh, voter) with BV set,
-	// then disk attaches. Baseline raised on A→D∅ confirmation (voter added).
+	// then disk attaches. No qmr change → no baseline update.
 	changeReplicaType.Plan("a-to-d/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
 		FromReplicaType(v1alpha1.ReplicaTypeAccess).
@@ -336,7 +331,7 @@ func registerChangeTypePlans(
 					setBackingVolumeFromRequest,
 				),
 				asReplicaConfirm(confirmAllMembers),
-			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			),
 			mrStep("D∅ → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				confirmSubjectOnly,
@@ -360,7 +355,7 @@ func registerChangeTypePlans(
 					asReplicaApply(raiseQ),
 				),
 				asReplicaConfirm(confirmAllMembers),
-			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			),
 			mrStep("D∅ → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				confirmSubjectOnly,
@@ -395,7 +390,7 @@ func registerChangeTypePlans(
 			mrStep("sD → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				asReplicaConfirm(confirmAllMembers),
-			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			),
 		).
 		OnComplete(onChangeTypeComplete).
 		Build()
@@ -433,7 +428,7 @@ func registerChangeTypePlans(
 					asReplicaApply(raiseQ),
 				),
 				asReplicaConfirm(confirmAllMembers),
-			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			),
 			mrStep("D∅ → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				confirmSubjectOnly,
@@ -445,7 +440,7 @@ func registerChangeTypePlans(
 	// ChangeReplicaType(D → A): D → D∅ → A (odd→even, no q change)
 	//
 	// Voter becomes non-voter (Access). BV cleared on D∅→A.
-	// Baseline updated in apply (lowering: voter removed).
+	// No qmr change → no baseline update needed.
 	// Guarded: VolumeAccess=Local blocks (A not allowed in Local mode).
 	changeReplicaType.Plan("d-to-a/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
@@ -453,7 +448,7 @@ func registerChangeTypePlans(
 		ToReplicaType(v1alpha1.ReplicaTypeAccess).
 		DisplayName("Changing replica type").
 		Guards(leavingDGuards...).
-		Guards(guardVolumeAccessNotLocal, guardVotersOdd, guardQMRNotTooHigh).
+		Guards(guardVolumeAccessNotLocal, guardVotersOdd).
 		Steps(
 			mrStep("D → D∅",
 				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
@@ -463,7 +458,6 @@ func registerChangeTypePlans(
 				composeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeAccess),
 					clearBackingVolume,
-					asReplicaApply(updateBaselineLayout),
 				),
 				asReplicaConfirm(confirmAllMembers),
 			),
@@ -480,7 +474,7 @@ func registerChangeTypePlans(
 		ToReplicaType(v1alpha1.ReplicaTypeAccess).
 		DisplayName("Changing replica type").
 		Guards(leavingDGuards...).
-		Guards(guardVolumeAccessNotLocal, guardVotersEven, guardQMRNotTooHigh).
+		Guards(guardVolumeAccessNotLocal, guardVotersEven).
 		Steps(
 			mrStep("D → D∅",
 				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
@@ -491,7 +485,6 @@ func registerChangeTypePlans(
 					setType(v1alpha1.DatameshMemberTypeAccess),
 					clearBackingVolume,
 					asReplicaApply(lowerQ),
-					asReplicaApply(updateBaselineLayout),
 				),
 				asReplicaConfirm(confirmAllMembers),
 			),
@@ -522,7 +515,7 @@ func registerChangeTypePlans(
 					setBackingVolumeFromRequest,
 				),
 				asReplicaConfirm(confirmAllMembers),
-			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			),
 			mrStep("D∅ → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				confirmSubjectOnly,
@@ -547,7 +540,7 @@ func registerChangeTypePlans(
 					asReplicaApply(raiseQ),
 				),
 				asReplicaConfirm(confirmAllMembers),
-			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			),
 			mrStep("D∅ → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				confirmSubjectOnly,
@@ -579,7 +572,7 @@ func registerChangeTypePlans(
 			mrStep("sD → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				asReplicaConfirm(confirmAllMembers),
-			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			),
 		).
 		OnComplete(onChangeTypeComplete).
 		Build()
@@ -615,7 +608,7 @@ func registerChangeTypePlans(
 					asReplicaApply(raiseQ),
 				),
 				asReplicaConfirm(confirmAllMembers),
-			).OnComplete(asReplicaOnComplete(updateBaselineLayout)),
+			),
 			mrStep("D∅ → D",
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				confirmSubjectOnly,
@@ -631,7 +624,7 @@ func registerChangeTypePlans(
 		ToReplicaType(v1alpha1.ReplicaTypeTieBreaker).
 		DisplayName("Changing replica type").
 		Guards(leavingDGuards...).
-		Guards(guardVolumeAccessNotLocal, guardVotersOdd, guardQMRNotTooHigh).
+		Guards(guardVolumeAccessNotLocal, guardVotersOdd).
 		Steps(
 			mrStep("D → D∅",
 				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
@@ -641,7 +634,6 @@ func registerChangeTypePlans(
 				composeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeTieBreaker),
 					clearBackingVolume,
-					asReplicaApply(updateBaselineLayout),
 				),
 				asReplicaConfirm(confirmAllMembers),
 			),
@@ -656,7 +648,7 @@ func registerChangeTypePlans(
 		ToReplicaType(v1alpha1.ReplicaTypeTieBreaker).
 		DisplayName("Changing replica type").
 		Guards(leavingDGuards...).
-		Guards(guardVolumeAccessNotLocal, guardVotersEven, guardQMRNotTooHigh).
+		Guards(guardVolumeAccessNotLocal, guardVotersEven).
 		Steps(
 			mrStep("D → D∅",
 				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
@@ -667,7 +659,6 @@ func registerChangeTypePlans(
 					setType(v1alpha1.DatameshMemberTypeTieBreaker),
 					clearBackingVolume,
 					asReplicaApply(lowerQ),
-					asReplicaApply(updateBaselineLayout),
 				),
 				asReplicaConfirm(confirmAllMembers),
 			),

@@ -402,13 +402,13 @@ func applyDetach(_ *globalContext, rctx *ReplicaContext) {
 // applyEnableMultiattach enables multiattach on the datamesh.
 // The engine bumps DatameshRevision after this callback.
 func applyEnableMultiattach(gctx *globalContext) {
-	gctx.datamesh.Multiattach = true
+	gctx.datamesh.multiattach = true
 }
 
 // applyDisableMultiattach disables multiattach on the datamesh.
 // The engine bumps DatameshRevision after this callback.
 func applyDisableMultiattach(gctx *globalContext) {
-	gctx.datamesh.Multiattach = false
+	gctx.datamesh.multiattach = false
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

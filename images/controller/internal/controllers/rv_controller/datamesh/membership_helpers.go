@@ -17,7 +17,6 @@ limitations under the License.
 package datamesh
 
 import (
-	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
 )
@@ -91,7 +90,7 @@ func voterCount(gctx *globalContext) byte {
 }
 
 // upToDateDiskfulCount returns the number of voter members that have a backing
-// volume and are UpToDate (BackingVolumeUpToDate condition is True).
+// volume and are UpToDate (BackingVolume.State == UpToDate).
 // D∅ members are excluded (they are voters but have no attached disk).
 func upToDateDiskfulCount(gctx *globalContext) byte {
 	var n byte
@@ -100,8 +99,8 @@ func upToDateDiskfulCount(gctx *globalContext) byte {
 		if rc.member == nil || !rc.member.Type.IsVoter() || !rc.member.Type.HasBackingVolume() {
 			continue
 		}
-		if rc.rvr != nil &&
-			obju.StatusCondition(rc.rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType).IsTrue().Eval() {
+		if rc.rvr != nil && rc.rvr.Status.BackingVolume != nil &&
+			rc.rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate {
 			n++
 		}
 	}
@@ -144,8 +143,8 @@ func upToDateDiskfulCountPerZone(gctx *globalContext) map[string]byte {
 		if rc.member == nil || !rc.member.Type.IsVoter() || !rc.member.Type.HasBackingVolume() {
 			continue
 		}
-		if rc.rvr != nil &&
-			obju.StatusCondition(rc.rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType).IsTrue().Eval() {
+		if rc.rvr != nil && rc.rvr.Status.BackingVolume != nil &&
+			rc.rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate {
 			m[rc.member.Zone]++
 		}
 	}

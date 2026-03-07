@@ -193,26 +193,19 @@ type ReplicatedVolumeStatus struct {
 	// Datamesh is the computed datamesh configuration for the volume.
 	Datamesh ReplicatedVolumeDatamesh `json:"datamesh"`
 
-	// EffectiveLayout is the FTT/GMDR protection level that the datamesh
-	// actually provides right now. Reflects the real state of the cluster:
-	//   - May exceed BaselineLayout and Configuration during transitions
-	//     (e.g., a new voter was added but BaselineLayout has not been raised yet).
-	//   - May be less than BaselineLayout in degraded state (e.g., a lost voter
-	//     reduces effective FTT).
-	//   - Equals BaselineLayout when healthy; equals Configuration at steady state.
-	//   - Nil when the effective layout cannot be determined (e.g., no voter
-	//     replicas with ready agents to observe).
-	// +optional
-	EffectiveLayout *ReplicatedVolumeLayout `json:"effectiveLayout,omitempty"`
+	// EffectiveLayout describes the real-time protection level and health
+	// of the datamesh, based on observable cluster state.
+	EffectiveLayout ReplicatedVolumeEffectiveLayout `json:"effectiveLayout"`
 
-	// BaselineLayout is the FTT/GMDR level that the datamesh has reached and
-	// committed to maintain. Computed from the committed datamesh topology
-	// (member count, q, qmr) and capped by Configuration:
-	//   - Rises toward Configuration as members are added and q/qmr confirmed.
+	// BaselineGuaranteedMinimumDataRedundancy is the GMDR level that the datamesh
+	// has reached and committed to maintain. Computed as min(qmr-1, config.GMDR).
+	//   - Rises toward Configuration as members are added and qmr confirmed.
 	//   - Never exceeds Configuration (capped at the target level).
-	//   - Decreases when Configuration is lowered (cap takes effect immediately).
-	//   - q and qmr are derived from these values.
-	BaselineLayout ReplicatedVolumeLayout `json:"baselineLayout"`
+	//   - Decreases when Configuration GMDR is lowered.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2
+	// +kubebuilder:default=0
+	BaselineGuaranteedMinimumDataRedundancy byte `json:"baselineGuaranteedMinimumDataRedundancy"`
 
 	// DatameshTransitions is the list of active datamesh transitions.
 	// +listType=atomic
@@ -700,24 +693,57 @@ func (t DatameshMemberType) ConnectsToAllPeers() bool {
 	}
 }
 
-// ReplicatedVolumeLayout describes the FTT/GMDR protection level of a volume.
-// FTT and GMDR together determine the DRBD layout, quorum (q), and
-// quorum-minimum-redundancy (qmr) parameters.
+// ReplicatedVolumeEffectiveLayout describes the real-time protection level
+// and health of a datamesh, based on observable cluster state.
 //
-// Used for both EffectiveLayout (observability) and BaselineLayout (committed floor).
+// Counts (TotalVoters, ReachableVoters, etc.) are always populated.
+// FailuresToTolerate and GuaranteedMinimumDataRedundancy are nil when
+// they cannot be determined (e.g., no voter members or no fresh agent data).
+//
 // +kubebuilder:object:generate=true
-type ReplicatedVolumeLayout struct {
-	// FailuresToTolerate is the FTT level.
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=2
-	// +kubebuilder:default=0
-	FailuresToTolerate byte `json:"failuresToTolerate"`
+type ReplicatedVolumeEffectiveLayout struct {
+	// FailuresToTolerate is the effective FTT level.
+	// Positive: can tolerate this many node failures.
+	// Zero: quorum is met but any failure causes quorum loss.
+	// Negative: quorum is lost, need this many more voters.
+	// Nil: cannot be determined (no voters or no fresh agent data).
+	// +optional
+	FailuresToTolerate *int8 `json:"failuresToTolerate,omitempty"`
 
-	// GuaranteedMinimumDataRedundancy is the GMDR level.
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=2
-	// +kubebuilder:default=0
-	GuaranteedMinimumDataRedundancy byte `json:"guaranteedMinimumDataRedundancy"`
+	// GuaranteedMinimumDataRedundancy is the effective GMDR level.
+	// Positive: can lose this many disks without data loss.
+	// Zero: IO works but any disk loss risks data.
+	// Negative: IO blocked, need this many more UpToDate replicas.
+	// Nil: cannot be determined (no voters or no fresh agent data).
+	// +optional
+	GuaranteedMinimumDataRedundancy *int8 `json:"guaranteedMinimumDataRedundancy,omitempty"`
+
+	// TotalVoters is the number of voter members (Diskful and liminal variants).
+	TotalVoters int8 `json:"totalVoters"`
+
+	// ReachableVoters is the number of voters confirmed reachable
+	// (own Quorum=true or seen Connected by peers).
+	ReachableVoters int8 `json:"reachableVoters"`
+
+	// UpToDateVoters is the number of voters with UpToDate backing volume
+	// (own BackingVolume=UpToDate or seen UpToDate by peers).
+	UpToDateVoters int8 `json:"upToDateVoters"`
+
+	// TotalTieBreakers is the number of TieBreaker members.
+	TotalTieBreakers int8 `json:"totalTieBreakers"`
+
+	// ReachableTieBreakers is the number of TieBreakers confirmed reachable
+	// (agent ready or seen Connected by peers).
+	ReachableTieBreakers int8 `json:"reachableTieBreakers"`
+
+	// StaleAgents is the number of members whose agent data is stale
+	// (AgentNotReady or Quorum not yet reported). These members are
+	// reconstructed from peer observations when possible.
+	StaleAgents int8 `json:"staleAgents"`
+
+	// Message is a human-readable summary of the effective layout state.
+	// +optional
+	Message string `json:"message,omitempty"`
 }
 
 // ReplicatedVolumeEligibleNodesViolation describes a replica placed on a non-eligible node.

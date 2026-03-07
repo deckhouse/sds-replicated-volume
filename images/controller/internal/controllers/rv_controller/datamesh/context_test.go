@@ -600,9 +600,9 @@ var _ = Describe("writebackDatameshFromContext", func() {
 		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
 
 		gctx := p.Global()
-		gctx.datamesh.Quorum = 3
-		gctx.datamesh.QuorumMinimumRedundancy = 2
-		gctx.datamesh.Multiattach = true
+		gctx.datamesh.quorum = 3
+		gctx.datamesh.quorumMinimumRedundancy = 2
+		gctx.datamesh.multiattach = true
 
 		writebackDatameshFromContext(rv, gctx)
 

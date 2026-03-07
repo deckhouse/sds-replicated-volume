@@ -292,6 +292,7 @@ var _ = Describe("RemoveReplica(sD)", func() {
 	It("plan selection: not a member", func() {
 		rv := mkRV(5, nil, []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-1")}, nil)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-1", "node-2", 5)}
+		settleEffectiveLayout(rv, rvrs)
 
 		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
 

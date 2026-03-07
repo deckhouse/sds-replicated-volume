@@ -98,6 +98,8 @@ func mkRSPWithZones(pairs ...string) *testRSP {
 }
 
 // mkRV creates a ReplicatedVolume with Configuration and the given status fields.
+// EffectiveLayout is left at zero value. Tests that assert changed=false must
+// call settleEffectiveLayout after mkRV to pre-populate the layout.
 func mkRV(
 	revision int64,
 	members []v1alpha1.DatameshMember,
@@ -105,16 +107,44 @@ func mkRV(
 	transitions []v1alpha1.ReplicatedVolumeDatameshTransition,
 ) *v1alpha1.ReplicatedVolume {
 	cfg := *minimalConfig // copy so tests can safely mutate rv.Status.Configuration
+
+	// Compute correct q from voter count so the quorum dispatcher doesn't fire.
+	var voters byte
+	for _, m := range members {
+		if m.Type.IsVoter() {
+			voters++
+		}
+	}
+	q := byte(1)
+	if voters > 0 {
+		q = voters/2 + 1
+	}
+
 	return &v1alpha1.ReplicatedVolume{
 		Spec: v1alpha1.ReplicatedVolumeSpec{MaxAttachments: 1},
 		Status: v1alpha1.ReplicatedVolumeStatus{
-			Configuration:           &cfg,
-			DatameshRevision:        revision,
-			Datamesh:                v1alpha1.ReplicatedVolumeDatamesh{Members: members},
+			Configuration:    &cfg,
+			DatameshRevision: revision,
+			Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+				Members:                 members,
+				Quorum:                  q,
+				QuorumMinimumRedundancy: 1, // minimum valid qmr (GMDR=0 → qmr=1)
+			},
 			DatameshReplicaRequests: requests,
 			DatameshTransitions:     transitions,
 		},
 	}
+}
+
+// settleEffectiveLayout pre-computes and sets rv.Status.EffectiveLayout to match
+// what updateEffectiveLayout would produce for the given RV + RVRs combination.
+// Call after mkRV when the test asserts changed=false (i.e., expects no mutations).
+func settleEffectiveLayout(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) {
+	p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{})
+	updateEffectiveLayout(p.Global(), &rv.Status.EffectiveLayout)
 }
 
 // mkMember creates a DatameshMember with name, type, and nodeName.
@@ -145,15 +175,12 @@ func mkRVR(name, nodeName string, datameshRevision int64) *v1alpha1.ReplicatedVo
 	}
 }
 
-// mkRVRUpToDate creates a ReplicatedVolumeReplica with BackingVolumeUpToDate=True.
+// mkRVRUpToDate creates a ReplicatedVolumeReplica with BackingVolume.State=UpToDate.
 // Used for D removal tests where guards check UpToDate D count.
 func mkRVRUpToDate(name, nodeName string, datameshRevision int64) *v1alpha1.ReplicatedVolumeReplica {
 	rvr := mkRVR(name, nodeName, datameshRevision)
-	rvr.Status.Conditions = []metav1.Condition{
-		{
-			Type:   v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType,
-			Status: metav1.ConditionTrue,
-		},
+	rvr.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+		State: v1alpha1.DiskStateUpToDate,
 	}
 	return rvr
 }

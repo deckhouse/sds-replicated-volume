@@ -193,7 +193,7 @@ func (c *concurrencyTracker) CanAdmit(t *dmte.Transition) (bool, string, any) {
 			others = others.Difference(idset.Of(t.ReplicaID()))
 		}
 		if !others.IsEmpty() {
-			if !gctx.datamesh.Multiattach || gctx.hasMultiattachTransition {
+			if !gctx.datamesh.multiattach || gctx.hasMultiattachTransition {
 				return false, "Waiting for multiattach to be enabled",
 					v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching
 			}

@@ -539,6 +539,7 @@ var _ = Describe("AddReplica(D) diskful-qmr-up/v1", func() {
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
 		)
 		rv.Status.Configuration.GuaranteedMinimumDataRedundancy = 1
+		rv.Status.Datamesh.QuorumMinimumRedundancy = 1 // pre-raise: GMDR=0 → qmr=1
 		// Subject confirmed (subjectOnly for step 2).
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVR("rv-1-0", "node-1", 6), mkRVR("rv-1-1", "node-2", 6), mkRVR("rv-1-2", "node-3", 7),
@@ -548,7 +549,7 @@ var _ = Describe("AddReplica(D) diskful-qmr-up/v1", func() {
 
 		Expect(changed).To(BeTrue())
 
-		// qmr raised: config.GMDR + 1 = 2.
+		// qmr raised: 1 → 2 (qmr++).
 		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(2)))
 
 		// Step 2 completed, step 3 (qmr↑) active.
@@ -592,7 +593,7 @@ var _ = Describe("AddReplica(D) diskful-qmr-up/v1", func() {
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Joined datamesh successfully"))
 
 		// Baseline layout updated by OnComplete.
-		Expect(rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy).To(Equal(byte(1)))
+		Expect(rv.Status.BaselineGuaranteedMinimumDataRedundancy).To(Equal(byte(1)))
 	})
 })
 
@@ -663,7 +664,7 @@ var _ = Describe("AddReplica(D) diskful-q-up-qmr-up/v1", func() {
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Joined datamesh successfully"))
 		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2)))
 		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(2)))
-		Expect(rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy).To(Equal(byte(1)))
+		Expect(rv.Status.BaselineGuaranteedMinimumDataRedundancy).To(Equal(byte(1)))
 	})
 })
 
@@ -987,7 +988,7 @@ var _ = Describe("AddReplica(D) diskful-via-sd-q-up-qmr-up/v1", func() {
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Joined datamesh successfully"))
 		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2)))
 		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(2)))
-		Expect(rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy).To(Equal(byte(1)))
+		Expect(rv.Status.BaselineGuaranteedMinimumDataRedundancy).To(Equal(byte(1)))
 	})
 })
 
@@ -1029,7 +1030,8 @@ var _ = Describe("RemoveReplica(D) dispatch", func() {
 			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
 			nil,
 		)
-		rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy = 1
+		rv.Status.Datamesh.QuorumMinimumRedundancy = 2 // GMDR was 1 → qmr=2, now config.GMDR=0 → needs qmr↓
+		rv.Status.BaselineGuaranteedMinimumDataRedundancy = 1
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5), mkRVRUpToDate("rv-1-2", "node-3", 5),
 		}
@@ -1064,7 +1066,8 @@ var _ = Describe("RemoveReplica(D) dispatch", func() {
 			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-1")},
 			nil,
 		)
-		rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy = 1
+		rv.Status.Datamesh.QuorumMinimumRedundancy = 2 // GMDR was 1 → qmr=2, now config.GMDR=0 → needs qmr↓
+		rv.Status.BaselineGuaranteedMinimumDataRedundancy = 1
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
 		}
@@ -1168,6 +1171,7 @@ var _ = Describe("RemoveReplica(D) remove-diskful/v1", func() {
 	It("not a member → skip", func() {
 		rv := mkRV(5, nil, []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")}, nil)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-2", "node-3", 5)}
+		settleEffectiveLayout(rv, rvrs)
 		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
 		Expect(changed).To(BeFalse())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
@@ -1297,7 +1301,8 @@ var _ = Describe("RemoveReplica(D) remove-diskful-qmr-down/v1", func() {
 			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
 			nil,
 		)
-		rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy = 1
+		rv.Status.Datamesh.QuorumMinimumRedundancy = 2
+		rv.Status.BaselineGuaranteedMinimumDataRedundancy = 1
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5), mkRVRUpToDate("rv-1-2", "node-3", 5),
 		}
@@ -1333,8 +1338,8 @@ var _ = Describe("RemoveReplica(D) remove-diskful-qmr-down/v1", func() {
 			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
 		)
-		rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy = 0 // already updated by qmr↓ apply
-		rv.Status.Datamesh.QuorumMinimumRedundancy = 1               // already lowered by qmr↓ apply
+		rv.Status.BaselineGuaranteedMinimumDataRedundancy = 0 // already updated by qmr↓ apply
+		rv.Status.Datamesh.QuorumMinimumRedundancy = 1        // already lowered by qmr↓ apply
 		// All 3 members confirmed rev 6.
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRUpToDate("rv-1-0", "node-1", 6), mkRVRUpToDate("rv-1-1", "node-2", 6), mkRVRUpToDate("rv-1-2", "node-3", 6),
@@ -1370,7 +1375,7 @@ var _ = Describe("RemoveReplica(D) remove-diskful-qmr-down/v1", func() {
 			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
 		)
-		rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy = 0 // already updated by qmr↓ apply
+		rv.Status.BaselineGuaranteedMinimumDataRedundancy = 0 // already updated by qmr↓ apply
 		rv.Status.Datamesh.Quorum = 2
 		rv.Status.Datamesh.QuorumMinimumRedundancy = 1
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
@@ -1380,7 +1385,7 @@ var _ = Describe("RemoveReplica(D) remove-diskful-qmr-down/v1", func() {
 		Expect(changed).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Left datamesh successfully"))
-		Expect(rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy).To(Equal(byte(0)))
+		Expect(rv.Status.BaselineGuaranteedMinimumDataRedundancy).To(Equal(byte(0)))
 	})
 })
 
@@ -1398,7 +1403,8 @@ var _ = Describe("RemoveReplica(D) remove-diskful-qmr-down-q-down/v1", func() {
 			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-1")},
 			nil,
 		)
-		rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy = 1
+		rv.Status.Datamesh.QuorumMinimumRedundancy = 2
+		rv.Status.BaselineGuaranteedMinimumDataRedundancy = 1
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
 		}
@@ -1431,7 +1437,7 @@ var _ = Describe("RemoveReplica(D) remove-diskful-qmr-down-q-down/v1", func() {
 			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-1")},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
 		)
-		rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy = 0 // already updated by qmr↓ apply
+		rv.Status.BaselineGuaranteedMinimumDataRedundancy = 0 // already updated by qmr↓ apply
 		rv.Status.Datamesh.Quorum = 1
 		rv.Status.Datamesh.QuorumMinimumRedundancy = 1
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
@@ -1443,7 +1449,7 @@ var _ = Describe("RemoveReplica(D) remove-diskful-qmr-down-q-down/v1", func() {
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Left datamesh successfully"))
 		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)))
 		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(1)))
-		Expect(rv.Status.BaselineLayout.GuaranteedMinimumDataRedundancy).To(Equal(byte(0)))
+		Expect(rv.Status.BaselineGuaranteedMinimumDataRedundancy).To(Equal(byte(0)))
 	})
 })
 
@@ -1505,7 +1511,7 @@ var _ = Describe("AddReplica(D) additional", func() {
 		// Plan with q↑ selected (odd voters).
 		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("diskful-q-up/v1"))
 		// Step 1 (✦→A) applied. Verify q is NOT yet raised (A is non-voter).
-		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(0))) // unchanged from default
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2))) // unchanged from initial (3D → q=2)
 
 		// Now simulate step 1 confirmed → step 2 (A→D∅+q↑) applied.
 		t := rv.Status.DatameshTransitions[0]

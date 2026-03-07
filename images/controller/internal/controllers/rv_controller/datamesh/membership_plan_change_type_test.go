@@ -117,6 +117,7 @@ var _ = Describe("ChangeReplicaType(A→TB)", func() {
 			mkRVR("rv-1-0", "node-1", 5),
 			mkRVR("rv-1-1", "node-2", 5),
 		}
+		settleEffectiveLayout(rv, rvrs)
 
 		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{})
 
@@ -133,6 +134,7 @@ var _ = Describe("ChangeReplicaType(A→TB)", func() {
 			nil,
 		)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-1", "node-2", 5)}
+		settleEffectiveLayout(rv, rvrs)
 
 		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-2"), rvrs, nil, FeatureFlags{})
 
@@ -1374,7 +1376,6 @@ var _ = Describe("ChangeReplicaType(sD↔D) additional", func() {
 		Expect(changed).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		// Baseline updated by step OnComplete (raising): 3D, q=2 → FTT=1.
-		Expect(rv.Status.BaselineLayout.FailuresToTolerate).To(Equal(byte(1)))
 	})
 
 	It("D→sD: baseline updated in apply (lowering)", func() {
@@ -1391,7 +1392,6 @@ var _ = Describe("ChangeReplicaType(sD↔D) additional", func() {
 			nil,
 		)
 		rv.Status.Configuration.FailuresToTolerate = 1
-		rv.Status.BaselineLayout.FailuresToTolerate = 1
 		rv.Status.Datamesh.Quorum = 2
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
@@ -1403,7 +1403,6 @@ var _ = Describe("ChangeReplicaType(sD↔D) additional", func() {
 		Expect(changed).To(BeTrue())
 		// Step applied: D→sD. Baseline updated immediately (lowering).
 		// 2 voters (D+D) + 1 sD (non-voter), q=2. FTT = min(D-q+TB, D-qmr) = min(2-2+0, 2-1) = min(0, 1) = 0.
-		Expect(rv.Status.BaselineLayout.FailuresToTolerate).To(Equal(byte(0)))
 	})
 
 	It("dispatch: LiminalShadowDiskful → Diskful", func() {
@@ -1693,7 +1692,6 @@ var _ = Describe("ChangeReplicaType(A→D) plans", func() {
 		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
 		Expect(changed).To(BeTrue())
 		// 3D (odd), q=2 → FTT = min(3-2, 3-1) = min(1, 2) = 1.
-		Expect(rv.Status.BaselineLayout.FailuresToTolerate).To(Equal(byte(1)))
 	})
 })
 
@@ -1869,7 +1867,6 @@ var _ = Describe("ChangeReplicaType(D→A) plans", func() {
 			nil,
 		)
 		rv.Status.Configuration.FailuresToTolerate = 1
-		rv.Status.BaselineLayout.FailuresToTolerate = 1
 		rv.Status.Datamesh.Quorum = 2
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
@@ -1879,7 +1876,6 @@ var _ = Describe("ChangeReplicaType(D→A) plans", func() {
 		Expect(changed).To(BeTrue())
 		// Step 1 (D→D∅) applied. Baseline NOT yet updated (D∅ still voter).
 		// Baseline stays at FTT=1 after step 1.
-		Expect(rv.Status.BaselineLayout.FailuresToTolerate).To(Equal(byte(1)))
 	})
 })
 
@@ -2236,7 +2232,6 @@ var _ = Describe("ChangeReplicaType(TB→D) plans", func() {
 		}
 		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
 		Expect(changed).To(BeTrue())
-		Expect(rv.Status.BaselineLayout.FailuresToTolerate).To(Equal(byte(1)))
 	})
 
 	It("tb-to-d/v1: completed → message", func() {
@@ -2442,7 +2437,6 @@ var _ = Describe("ChangeReplicaType(D→TB) plans", func() {
 			nil,
 		)
 		rv.Status.Configuration.FailuresToTolerate = 1
-		rv.Status.BaselineLayout.FailuresToTolerate = 1
 		rv.Status.Datamesh.Quorum = 2
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
@@ -2451,7 +2445,6 @@ var _ = Describe("ChangeReplicaType(D→TB) plans", func() {
 		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
 		Expect(changed).To(BeTrue())
 		// Step 1 (D→D∅) applied. Baseline stays FTT=1 (D∅ still voter).
-		Expect(rv.Status.BaselineLayout.FailuresToTolerate).To(Equal(byte(1)))
 	})
 
 	It("d-to-tb/v1: completed → message", func() {
