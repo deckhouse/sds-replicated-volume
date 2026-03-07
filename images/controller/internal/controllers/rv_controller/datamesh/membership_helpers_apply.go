@@ -28,11 +28,9 @@ import (
 
 // createMember returns an apply callback that creates a new DatameshMember
 // with the given type. Zone is resolved from the RSP eligible node; addresses
-// are cloned from the RVR status.
-//
-// Used by all AddReplica plans (replaces per-type create callbacks).
-func createMember(memberType v1alpha1.DatameshMemberType) func(*globalContext, *ReplicaContext) {
-	return func(_ *globalContext, rctx *ReplicaContext) {
+// are cloned from the RVR status. Always returns true (always creates).
+func createMember(memberType v1alpha1.DatameshMemberType) func(*globalContext, *ReplicaContext) bool {
+	return func(_ *globalContext, rctx *ReplicaContext) bool {
 		zone := ""
 		if en := rctx.getEligibleNode(); en != nil {
 			zone = en.ZoneName
@@ -46,77 +44,46 @@ func createMember(memberType v1alpha1.DatameshMemberType) func(*globalContext, *
 			Addresses: slices.Clone(rctx.rvr.Status.Addresses),
 			Attached:  false,
 		}
+		return true
 	}
 }
 
 // setType returns an apply callback that sets the member type.
-// Covers ALL type conversions (A↔TB, A↔D∅, D∅↔D, sD∅↔sD, sD↔D, etc.)
-// because the "from" type does not affect the mutation.
-func setType(memberType v1alpha1.DatameshMemberType) func(*globalContext, *ReplicaContext) {
-	return func(_ *globalContext, rctx *ReplicaContext) {
-		rctx.member.Type = memberType
-	}
-}
-
-// composeGlobalApply combines multiple global-scoped apply callbacks into one.
-func composeGlobalApply(fns ...func(*globalContext)) func(*globalContext) {
-	return func(gctx *globalContext) {
-		for _, fn := range fns {
-			fn(gctx)
-		}
-	}
-}
-
-// composeReplicaApply combines multiple apply callbacks into one.
-// Used for composite steps (e.g., type change + q↑ in a single step).
-func composeReplicaApply(fns ...func(*globalContext, *ReplicaContext)) func(*globalContext, *ReplicaContext) {
-	return func(gctx *globalContext, rctx *ReplicaContext) {
-		for _, fn := range fns {
-			fn(gctx, rctx)
-		}
+// Returns false if the type is already the target (no-op).
+// Key no-op case: Remove(D) step `D→D∅` when member is already LiminalDiskful.
+func setType(memberType v1alpha1.DatameshMemberType) func(*globalContext, *ReplicaContext) bool {
+	return func(_ *globalContext, rctx *ReplicaContext) bool {
+		return assign(&rctx.member.Type, memberType)
 	}
 }
 
 // setBackingVolumeFromRequest sets LVMVolumeGroupName and ThinPoolName
-// on the member from the membership request.
-// Steps: ✦→D∅, ✦→sD∅, A→D∅, A→sD∅, TB→sD∅.
-func setBackingVolumeFromRequest(_ *globalContext, rctx *ReplicaContext) {
-	rctx.member.LVMVolumeGroupName = rctx.membershipRequest.Request.LVMVolumeGroupName
-	rctx.member.LVMVolumeGroupThinPoolName = rctx.membershipRequest.Request.ThinPoolName
+// on the member from the membership request. Returns false if both already set.
+func setBackingVolumeFromRequest(_ *globalContext, rctx *ReplicaContext) bool {
+	c1 := assign(&rctx.member.LVMVolumeGroupName, rctx.membershipRequest.Request.LVMVolumeGroupName)
+	c2 := assign(&rctx.member.LVMVolumeGroupThinPoolName, rctx.membershipRequest.Request.ThinPoolName)
+	return c1 || c2
 }
 
 // clearBackingVolume clears LVMVolumeGroupName and ThinPoolName from the member.
-// Steps: sD∅→A, sD∅→TB, D∅→A+q↓.
-func clearBackingVolume(_ *globalContext, rctx *ReplicaContext) {
-	rctx.member.LVMVolumeGroupName = ""
-	rctx.member.LVMVolumeGroupThinPoolName = ""
+// Returns false if both already empty.
+func clearBackingVolume(_ *globalContext, rctx *ReplicaContext) bool {
+	c1 := assign(&rctx.member.LVMVolumeGroupName, "")
+	c2 := assign(&rctx.member.LVMVolumeGroupThinPoolName, "")
+	return c1 || c2
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Non-parameterized shared apply callbacks
 //
 
-// removeMember removes a member from the datamesh.
-// Sets rctx.member to nil. If the replica has no RVR, also removes it from
-// the global ID index (no member + no RVR = no reason to keep in the index).
-// The engine bumps DatameshRevision after this callback.
-// Reusable across all member types (A, TB, D, sD, etc.).
-func removeMember(gctx *globalContext, rctx *ReplicaContext) {
+// removeMember removes a member from the datamesh. Always returns true.
+func removeMember(gctx *globalContext, rctx *ReplicaContext) bool {
 	rctx.member = nil
 	if rctx.rvr == nil {
 		gctx.replicas[rctx.id] = nil
 	}
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Adapters
-//
-
-// asReplicaApply adapts a global-scoped apply callback for use in ReplicaStep.
-func asReplicaApply(fn func(*globalContext)) func(*globalContext, *ReplicaContext) {
-	return func(gctx *globalContext, _ *ReplicaContext) {
-		fn(gctx)
-	}
+	return true
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -127,30 +94,40 @@ func asReplicaApply(fn func(*globalContext)) func(*globalContext, *ReplicaContex
 // they compute from the current state of gctx.allReplicas.
 // Use asReplicaApply() when passing to ReplicaStep.
 
-// raiseQ increments q by 1 after a voter was added (odd→even voters).
-// Precondition: q is already correct before the voter addition, and the
-// plan has guardVotersOdd ensuring odd→even parity.
-func raiseQ(gctx *globalContext) {
+// raiseQ increments q by 1. Always returns true (guards guarantee change needed).
+func raiseQ(gctx *globalContext) bool {
 	gctx.datamesh.quorum++
+	return true
 }
 
-// lowerQ decrements q by 1 after a voter was removed (even→odd voters).
-// Precondition: q is already correct before the voter removal, and the
-// plan has guardVotersEven ensuring even→odd parity.
-func lowerQ(gctx *globalContext) {
+// lowerQ decrements q by 1. Always returns true (guards guarantee change needed).
+func lowerQ(gctx *globalContext) bool {
 	gctx.datamesh.quorum--
+	return true
 }
 
-// raiseQMR increments qmr by 1.
-// Precondition: qmr is already correct, and guardQMRRaiseNeeded verified
-// that baseline.GMDR < config.GMDR.
-func raiseQMR(gctx *globalContext) {
+// raiseQMR increments qmr by 1. Always returns true (guards guarantee change needed).
+func raiseQMR(gctx *globalContext) bool {
 	gctx.datamesh.quorumMinimumRedundancy++
+	return true
 }
 
-// lowerQMR decrements qmr by 1.
-// Precondition: qmr is already correct, and guardQMRLowerNeeded verified
-// that baseline.GMDR > config.GMDR.
-func lowerQMR(gctx *globalContext) {
+// lowerQMR decrements qmr by 1. Always returns true (guards guarantee change needed).
+func lowerQMR(gctx *globalContext) bool {
 	gctx.datamesh.quorumMinimumRedundancy--
+	return true
+}
+
+// setCorrectQ sets q from computeCorrectQuorum.
+// Returns false if q is already correct (no-op in ChangeQuorum when only qmr differs).
+func setCorrectQ(gctx *globalContext) bool {
+	q, _ := computeCorrectQuorum(gctx)
+	return assign(&gctx.datamesh.quorum, q)
+}
+
+// setCorrectQMR sets qmr from computeCorrectQuorum.
+// Returns false if qmr is already correct (no-op in ChangeQuorum when only q differs).
+func setCorrectQMR(gctx *globalContext) bool {
+	_, qmr := computeCorrectQuorum(gctx)
+	return assign(&gctx.datamesh.quorumMinimumRedundancy, qmr)
 }

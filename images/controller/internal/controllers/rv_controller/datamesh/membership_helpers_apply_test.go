@@ -161,39 +161,53 @@ var _ = Describe("raiseQMR / lowerQMR", func() {
 })
 
 var _ = Describe("composeReplicaApply", func() {
-	It("calls all functions in order", func() {
+	It("calls all functions in order and ORs results", func() {
 		var order []string
-		fn1 := func(_ *globalContext, _ *ReplicaContext) { order = append(order, "a") }
-		fn2 := func(_ *globalContext, _ *ReplicaContext) { order = append(order, "b") }
-		fn3 := func(_ *globalContext, _ *ReplicaContext) { order = append(order, "c") }
+		fn1 := func(_ *globalContext, _ *ReplicaContext) bool { order = append(order, "a"); return false }
+		fn2 := func(_ *globalContext, _ *ReplicaContext) bool { order = append(order, "b"); return true }
+		fn3 := func(_ *globalContext, _ *ReplicaContext) bool { order = append(order, "c"); return false }
 
 		composed := composeReplicaApply(fn1, fn2, fn3)
-		composed(nil, nil)
+		changed := composed(nil, nil)
 		Expect(order).To(Equal([]string{"a", "b", "c"}))
+		Expect(changed).To(BeTrue())
+	})
+
+	It("returns false when all return false", func() {
+		fn1 := func(_ *globalContext, _ *ReplicaContext) bool { return false }
+		fn2 := func(_ *globalContext, _ *ReplicaContext) bool { return false }
+
+		Expect(composeReplicaApply(fn1, fn2)(nil, nil)).To(BeFalse())
 	})
 })
 
 var _ = Describe("composeGlobalApply", func() {
-	It("calls all functions in order", func() {
+	It("calls all functions in order and ORs results", func() {
 		var order []string
-		fn1 := func(_ *globalContext) { order = append(order, "x") }
-		fn2 := func(_ *globalContext) { order = append(order, "y") }
+		fn1 := func(_ *globalContext) bool { order = append(order, "x"); return true }
+		fn2 := func(_ *globalContext) bool { order = append(order, "y"); return false }
 
 		composed := composeGlobalApply(fn1, fn2)
-		composed(nil)
+		changed := composed(nil)
 		Expect(order).To(Equal([]string{"x", "y"}))
+		Expect(changed).To(BeTrue())
+	})
+
+	It("returns false when all return false", func() {
+		fn1 := func(_ *globalContext) bool { return false }
+		fn2 := func(_ *globalContext) bool { return false }
+
+		Expect(composeGlobalApply(fn1, fn2)(nil)).To(BeFalse())
 	})
 })
 
 var _ = Describe("asReplicaApply", func() {
-	It("ignores rctx and calls global fn", func() {
-		called := false
-		fn := func(gctx *globalContext) {
-			called = true
+	It("ignores rctx and forwards bool", func() {
+		fn := func(gctx *globalContext) bool {
 			Expect(gctx).NotTo(BeNil())
+			return true
 		}
 		adapted := asReplicaApply(fn)
-		adapted(&globalContext{}, &ReplicaContext{})
-		Expect(called).To(BeTrue())
+		Expect(adapted(&globalContext{}, &ReplicaContext{})).To(BeTrue())
 	})
 })

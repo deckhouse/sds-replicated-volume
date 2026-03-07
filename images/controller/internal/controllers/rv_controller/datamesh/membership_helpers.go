@@ -34,7 +34,7 @@ import (
 // mrStep creates a membership ReplicaStep with standard DiagnosticConditions.
 func mrStep(
 	name string,
-	apply func(*globalContext, *ReplicaContext),
+	apply func(*globalContext, *ReplicaContext) bool,
 	confirm func(*globalContext, *ReplicaContext, int64) dmte.ConfirmResult,
 ) *dmte.ReplicaStepBuilder[*globalContext, *ReplicaContext] {
 	return dmte.ReplicaStep(name, apply, confirm).
@@ -46,7 +46,7 @@ func mrStep(
 //nolint:unparam // name is currently always "qmr↑" but will vary with future plans
 func mgStep(
 	name string,
-	apply func(*globalContext),
+	apply func(*globalContext) bool,
 	confirm func(*globalContext, int64) dmte.ConfirmResult,
 ) *dmte.GlobalStepBuilder[*globalContext] {
 	return dmte.GlobalStep(name, apply, confirm).
@@ -63,12 +63,22 @@ func onJoinComplete(_ *globalContext, rctx *ReplicaContext) {
 }
 
 // onLeaveComplete sets the completion message after a RemoveReplica plan finishes.
+// rctx may be nil if the member was removed from the context index (see onForceRemoveComplete).
 func onLeaveComplete(_ *globalContext, rctx *ReplicaContext) {
+	if rctx == nil {
+		return
+	}
 	rctx.membershipMessage = "Left datamesh successfully"
 }
 
 // onForceRemoveComplete sets the completion message after a ForceRemoveReplica plan finishes.
+// rctx may be nil if the member was removed from the context index (removeMember sets
+// gctx.replicas[id] = nil when the RVR is also gone). This happens when ForceRemove
+// completes within the same Process() call via the outer settle-dispatch loop.
 func onForceRemoveComplete(_ *globalContext, rctx *ReplicaContext) {
+	if rctx == nil {
+		return
+	}
 	rctx.membershipMessage = "Force-removed from datamesh"
 }
 

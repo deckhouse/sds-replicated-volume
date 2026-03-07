@@ -185,6 +185,32 @@ var _ = Describe("concurrencyTracker", func() {
 		Expect(reason).To(ContainSubstring("Multiattach transition is already"))
 	})
 
+	It("blocks duplicate quorum", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		tracker.Add(mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeQuorum,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupQuorum,
+			"",
+		))
+
+		allowed, reason, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupQuorum, ""))
+		Expect(allowed).To(BeFalse())
+		Expect(reason).To(ContainSubstring("ChangeQuorum transition is already"))
+	})
+
+	It("blocks duplicate formation", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		tracker.Add(mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupFormation,
+			"",
+		))
+
+		allowed, reason, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupFormation, ""))
+		Expect(allowed).To(BeFalse())
+		Expect(reason).To(ContainSubstring("Formation"))
+	})
+
 	It("blocks per-member attachment when same replica has active attachment", func() {
 		tracker := newConcurrencyTracker(&globalContext{})
 		tracker.Add(mkTransition(

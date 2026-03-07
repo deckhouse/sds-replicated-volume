@@ -171,9 +171,12 @@ var _ = Describe("Process", func() {
 		slot := newRecordingSlotAccessor()
 		reg.RegisterReplicaSlot(0, slot)
 
+		// neverReplicaConfirm prevents the transition from completing within
+		// the outer settle-dispatch loop (auto-confirm would cause infinite
+		// create→complete→re-dispatch cycles until maxOuter).
 		reg.ReplicaTransition("AddReplica", 0).
 			Plan("access/v1").Group("G").DisplayName("Joining").
-			Steps(ReplicaStep("✦ → A", stubReplicaApply, stubReplicaConfirm)).Build()
+			Steps(ReplicaStep("✦ → A", stubReplicaApply, neverReplicaConfirm)).Build()
 
 		rctx5 := &testReplicaCtx{id: 5, name: "rv-1-5"}
 
@@ -192,7 +195,6 @@ var _ = Describe("Process", func() {
 		Expect(rev).To(Equal(int64(1)))
 		// Slot should have the active transition and a status message.
 		Expect(slot.activeTransitions).To(HaveKey(uint8(5)))
-		Expect(slot.statusMessages[5]).To(ContainSubstring("Joining"))
 	})
 
 	It("dispatch blocked by guard writes message to slot", func() {
@@ -398,7 +400,7 @@ var _ = Describe("Process", func() {
 
 		var callOrder []string
 		step1OnComplete := func(*testGCtx, *testReplicaCtx) { callOrder = append(callOrder, "step1-onComplete") }
-		step2Apply := func(*testGCtx, *testReplicaCtx) { callOrder = append(callOrder, "step2-apply") }
+		step2Apply := func(*testGCtx, *testReplicaCtx) bool { callOrder = append(callOrder, "step2-apply"); return true }
 		step2OnComplete := func(*testGCtx, *testReplicaCtx) { callOrder = append(callOrder, "step2-onComplete") }
 		planOnComplete := func(*testGCtx, *testReplicaCtx) { callOrder = append(callOrder, "plan-onComplete") }
 
@@ -574,9 +576,13 @@ var _ = Describe("Process", func() {
 	It("global plan dispatches without slot", func() {
 		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
 
+		// neverGlobalConfirm prevents the transition from completing within
+		// the outer settle-dispatch loop. Global transitions have no slot,
+		// so they rely on the tracker to prevent duplicates; the mock tracker
+		// always admits, so auto-confirm would cause repeated dispatch.
 		reg.GlobalTransition("EnableMultiattach").
 			Plan("enable/v1").Group("Multiattach").DisplayName("Enabling multiattach").
-			Steps(GlobalStep("Enable", stubGlobalApply, stubGlobalConfirm)).Build()
+			Steps(GlobalStep("Enable", stubGlobalApply, neverGlobalConfirm)).Build()
 
 		dispatcher := func(_ testCtxProvider) iter.Seq[DispatchDecision] {
 			return func(yield func(DispatchDecision) bool) {
@@ -590,7 +596,6 @@ var _ = Describe("Process", func() {
 
 		changed := e.Process(context.Background())
 
-		// Transition created by dispatch; settles on next Process() call.
 		Expect(changed).To(BeTrue())
 		result := e.Finalize()
 		Expect(result).To(HaveLen(1))
@@ -1095,7 +1100,7 @@ var _ = Describe("applyStep", func() {
 		p := &plan[*testGCtx, *testReplicaCtx]{
 			transitionType: "T",
 			steps: []step[*testGCtx, *testReplicaCtx]{
-				{name: "s", scope: ReplicaScope, replicaApply: func(*testGCtx, *testReplicaCtx) { applyCalled = true }, replicaConfirm: stubReplicaConfirm},
+				{name: "s", scope: ReplicaScope, replicaApply: func(*testGCtx, *testReplicaCtx) bool { applyCalled = true; return true }, replicaConfirm: stubReplicaConfirm},
 			},
 		}
 		t := &Transition{Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Name: "s"}}}

@@ -175,6 +175,10 @@ func (c *concurrencyTracker) CanAdmit(t *dmte.Transition) (bool, string, any) {
 		// Can overlap with everything (per-member check above handles same-replica).
 
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupQuorum:
+		// Serialized: only one ChangeQuorum at a time.
+		if gctx.hasQuorumTransition {
+			return false, "Another ChangeQuorum transition is already in progress", nil
+		}
 		// Quorum is blocked by active voting membership transitions (they change
 		// the voter set that quorum depends on). Non-voting membership, attachment,
 		// and multiattach transitions do not affect quorum and can run in parallel.

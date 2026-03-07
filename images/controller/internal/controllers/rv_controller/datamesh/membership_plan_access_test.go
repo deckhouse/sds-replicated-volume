@@ -258,10 +258,11 @@ var _ = Describe("RemoveReplica(A)", func() {
 
 		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
 
-		Expect(changed).To(BeTrue()) // message changed + Detach transition created by attachment dispatcher
-		// Membership guard blocks leave — message says "attached".
-		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("attached"))
-		// Attachment dispatcher creates Detach (member attached, no RVA).
+		Expect(changed).To(BeTrue())
+		// Outer loop: iteration 1 dispatches Detach (Attached→false). Iteration 2
+		// re-dispatches RemoveReplica → guardNotAttached sees active Detach → blocks.
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("transition in progress"))
+		// Detach still active (awaiting RVR confirmation).
 		hasDetach := false
 		for _, t := range rv.Status.DatameshTransitions {
 			if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach {

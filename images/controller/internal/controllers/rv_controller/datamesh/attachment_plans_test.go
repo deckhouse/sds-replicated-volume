@@ -1145,7 +1145,9 @@ var _ = Describe("Attachment combined", func() {
 //
 
 var _ = Describe("ForceDetach", func() {
-	It("dispatch + apply: member detached", func() {
+	It("dispatch + apply + settle: member detached in one call", func() {
+		// ForceDetach uses confirmImmediate, so the outer settle-dispatch loop
+		// dispatches, applies, and completes the transition in a single call.
 		member := mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2")
 		member.Attached = true
 		rv := mkRV(5,
@@ -1167,37 +1169,7 @@ var _ = Describe("ForceDetach", func() {
 		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
 		Expect(m).NotTo(BeNil())
 		Expect(m.Attached).To(BeFalse())
-		// ForceDetach transition created (completes on next reconcile via confirmImmediate).
-		var forceDetachFound bool
-		for _, t := range rv.Status.DatameshTransitions {
-			if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceDetach {
-				forceDetachFound = true
-			}
-		}
-		Expect(forceDetachFound).To(BeTrue())
-	})
-
-	It("settles immediately on next reconcile", func() {
-		member := mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2")
-		member.Attached = true
-		rv := mkRV(5,
-			[]v1alpha1.DatameshMember{
-				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
-				member,
-			},
-			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkForceDetachRequest("rv-1-1")},
-			nil,
-		)
-		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 0),
-		}
-
-		// First call: dispatch + apply.
-		ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
-
-		// Second call: settle completes (confirmImmediate).
-		changed2, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
-		Expect(changed2).To(BeTrue())
+		// ForceDetach completed in the same call (confirmImmediate).
 		for _, t := range rv.Status.DatameshTransitions {
 			Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceDetach))
 		}

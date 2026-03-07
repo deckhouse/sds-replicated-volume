@@ -103,7 +103,7 @@ func registerDiskfulPlans(
 			mgStep("qmr↑",
 				raiseQMR,
 				confirmAllMembers,
-			).OnComplete(updateBaselineGMDR),
+			).OnComplete(asGlobalOnComplete(updateBaselineGMDR)),
 		).
 		OnComplete(onJoinComplete).
 		Build()
@@ -165,7 +165,7 @@ func registerDiskfulPlans(
 			mgStep("qmr↑",
 				raiseQMR,
 				confirmAllMembers,
-			).OnComplete(updateBaselineGMDR),
+			).OnComplete(asGlobalOnComplete(updateBaselineGMDR)),
 		).
 		OnComplete(onJoinComplete).
 		Build()
@@ -232,7 +232,7 @@ func registerDiskfulPlans(
 			mgStep("qmr↑",
 				raiseQMR,
 				confirmAllMembers,
-			).OnComplete(updateBaselineGMDR),
+			).OnComplete(asGlobalOnComplete(updateBaselineGMDR)),
 		).
 		OnComplete(onJoinComplete).
 		Build()
@@ -335,7 +335,7 @@ func registerDiskfulPlans(
 			mgStep("qmr↑",
 				raiseQMR,
 				confirmAllMembers,
-			).OnComplete(updateBaselineGMDR),
+			).OnComplete(asGlobalOnComplete(updateBaselineGMDR)),
 		).
 		OnComplete(onJoinComplete).
 		Build()
