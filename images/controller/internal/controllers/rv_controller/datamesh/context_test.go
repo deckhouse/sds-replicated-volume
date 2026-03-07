@@ -890,3 +890,24 @@ var _ = Describe("updateMemberZonesFromRSP", func() {
 		Expect(gctx.allReplicas[1].member.Zone).To(Equal("b"))
 	})
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// writebackBaselineGMDRFromContext
+//
+
+var _ = Describe("writebackBaselineGMDRFromContext", func() {
+	It("writes non-zero baselineGMDR", func() {
+		rv := mkRV(1, nil, nil, nil)
+		gctx := &globalContext{baselineGMDR: 2}
+		writebackBaselineGMDRFromContext(rv, gctx)
+		Expect(rv.Status.BaselineGuaranteedMinimumDataRedundancy).To(Equal(byte(2)))
+	})
+
+	It("writes zero baselineGMDR", func() {
+		rv := mkRV(1, nil, nil, nil)
+		rv.Status.BaselineGuaranteedMinimumDataRedundancy = 5 // pre-existing
+		gctx := &globalContext{baselineGMDR: 0}
+		writebackBaselineGMDRFromContext(rv, gctx)
+		Expect(rv.Status.BaselineGuaranteedMinimumDataRedundancy).To(Equal(byte(0)))
+	})
+})

@@ -35,8 +35,14 @@ type IDSet uint32
 // All is an IDSet with all 32 IDs present.
 const All IDSet = 0xFFFF_FFFF
 
-// Of returns a singleton IDSet containing only the given ID.
-func Of(id uint8) IDSet { return 1 << id }
+// Of returns an IDSet containing the given IDs.
+func Of(ids ...uint8) IDSet {
+	var s IDSet
+	for _, id := range ids {
+		s |= 1 << id
+	}
+	return s
+}
 
 // Contains reports whether the set contains id.
 func (s IDSet) Contains(id uint8) bool { return s&(1<<id) != 0 }
