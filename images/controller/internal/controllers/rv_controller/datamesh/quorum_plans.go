@@ -54,7 +54,7 @@ import (
 func registerQuorumPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
 	changeQuorum := reg.GlobalTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeQuorum)
 
-	// lower/v1: q↓ and/or qmr↓.
+	// ChangeQuorum(lower): q↓ and/or qmr↓.
 	// Step 1: qmr↓ drops GMDR → baseline in apply.
 	// Step 2: q↓ only (no qmr change, no baseline update needed).
 	changeQuorum.Plan("lower/v1").
@@ -75,7 +75,7 @@ func registerQuorumPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
 		).
 		Build()
 
-	// raise/v1: q↑ and/or qmr↑.
+	// ChangeQuorum(raise): q↑ and/or qmr↑.
 	// Step 1: q↑ only (no qmr change, no baseline update needed).
 	// Step 2: qmr↑ raises GMDR → baseline in OnComplete.
 	changeQuorum.Plan("raise/v1").
@@ -93,7 +93,7 @@ func registerQuorumPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
 		).
 		Build()
 
-	// lower-q-raise-qmr/v1: q↓ + qmr↑.
+	// ChangeQuorum(lower-q-raise-qmr): q↓ + qmr↑.
 	// Step 1: q↓ only (no qmr change, no baseline update needed).
 	// Step 2: qmr↑ raises GMDR → baseline in OnComplete.
 	changeQuorum.Plan("lower-q-raise-qmr/v1").
@@ -111,7 +111,7 @@ func registerQuorumPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
 		).
 		Build()
 
-	// raise-q-lower-qmr/v1: q↑ + qmr↓.
+	// ChangeQuorum(raise-q-lower-qmr): q↑ + qmr↓.
 	// Step 1: q↑ only (no qmr change, no baseline update needed).
 	// Step 2: qmr↓ drops GMDR → baseline in apply.
 	changeQuorum.Plan("raise-q-lower-qmr/v1").

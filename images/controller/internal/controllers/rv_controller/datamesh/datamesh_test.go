@@ -64,7 +64,8 @@ var minimalConfig = &v1alpha1.ReplicatedVolumeConfiguration{
 // testRSP is a simple RSP implementation for tests.
 // Uses linear scan (no sort requirement).
 type testRSP struct {
-	nodes []v1alpha1.ReplicatedStoragePoolEligibleNode
+	nodes              []v1alpha1.ReplicatedStoragePoolEligibleNode
+	systemNetworkNames []string
 }
 
 func (r *testRSP) FindEligibleNode(nodeName string) *v1alpha1.ReplicatedStoragePoolEligibleNode {
@@ -74,6 +75,13 @@ func (r *testRSP) FindEligibleNode(nodeName string) *v1alpha1.ReplicatedStorageP
 		}
 	}
 	return nil
+}
+
+func (r *testRSP) GetSystemNetworkNames() []string {
+	if r.systemNetworkNames != nil {
+		return r.systemNetworkNames
+	}
+	return []string{"default"}
 }
 
 // mkRSP creates a testRSP with one EligibleNode per node name.

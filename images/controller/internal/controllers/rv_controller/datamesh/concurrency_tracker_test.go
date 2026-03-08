@@ -418,4 +418,125 @@ var _ = Describe("concurrencyTracker", func() {
 		_, _, details := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, "rv-1-0"))
 		Expect(details).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending))
 	})
+
+	// ── Network group ────────────────────────────────────────────────────
+
+	It("Network blocks VotingMembership", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		tracker.Add(mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork,
+			"",
+		))
+
+		allowed, reason, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership, "rv-1-0"))
+		Expect(allowed).To(BeFalse())
+		Expect(reason).To(ContainSubstring("Network"))
+	})
+
+	It("Network blocks Quorum", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		tracker.Add(mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork,
+			"",
+		))
+
+		allowed, reason, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupQuorum, ""))
+		Expect(allowed).To(BeFalse())
+		Expect(reason).To(ContainSubstring("Network"))
+	})
+
+	It("VotingMembership does NOT block Network", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		tracker.Add(mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			"rv-1-0",
+		))
+
+		allowed, _, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork, ""))
+		Expect(allowed).To(BeTrue())
+	})
+
+	It("Quorum does NOT block Network", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		tracker.Add(mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeQuorum,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupQuorum,
+			"",
+		))
+
+		allowed, _, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork, ""))
+		Expect(allowed).To(BeTrue())
+	})
+
+	It("Network serialized (duplicate blocked)", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		tracker.Add(mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork,
+			"",
+		))
+
+		allowed, reason, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork, ""))
+		Expect(allowed).To(BeFalse())
+		Expect(reason).To(ContainSubstring("Network transition is already"))
+	})
+
+	It("Network does NOT block NonVotingMembership", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		tracker.Add(mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork,
+			"",
+		))
+
+		allowed, _, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership, "rv-1-5"))
+		Expect(allowed).To(BeTrue())
+	})
+
+	It("Network does NOT block Attachment", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		tracker.Add(mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork,
+			"",
+		))
+
+		allowed, _, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, "rv-1-0"))
+		Expect(allowed).To(BeTrue())
+	})
+
+	It("Formation does NOT block Network", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		tracker.Add(mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupFormation,
+			"",
+		))
+
+		allowed, _, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork, ""))
+		Expect(allowed).To(BeTrue())
+	})
+
+	It("Remove Network unblocks VotingMembership", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		t := mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork,
+			"",
+		)
+		tracker.Add(t)
+
+		// Blocked before Remove.
+		allowed, _, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership, "rv-1-0"))
+		Expect(allowed).To(BeFalse())
+
+		tracker.Remove(t)
+
+		// Allowed after Remove.
+		allowed, _, _ = tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership, "rv-1-0"))
+		Expect(allowed).To(BeTrue())
+	})
 })

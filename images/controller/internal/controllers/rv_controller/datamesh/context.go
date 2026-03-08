@@ -62,6 +62,12 @@ type globalContext struct {
 	// features describes cluster-level feature availability for path resolution.
 	features FeatureFlags
 
+	// targetSystemNetworkNames points to TargetSystemNetworkNames from the active
+	// ChangeSystemNetwork transition. Nil if no such transition exists.
+	// Read-only — must not be mutated by callbacks. Set/cleared by the
+	// concurrency tracker in Add/Remove.
+	targetSystemNetworkNames *[]string
+
 	// replicas is the per-ID index (0-31). Nil for unused IDs.
 	replicas [32]*ReplicaContext
 	// allReplicas is the full backing slice including orphan RVA contexts.
@@ -79,6 +85,7 @@ type globalContext struct {
 	hasFormationTransition   bool
 	hasQuorumTransition      bool
 	hasMultiattachTransition bool
+	hasNetworkTransition     bool
 
 	// Replica scope groups (idset — which replicas have active transitions).
 	votingMembershipTransitions    idset.IDSet
@@ -149,6 +156,7 @@ func computeQuorumCheck(gctx *globalContext) (bool, string) {
 // Implemented by the caller's RSP view; nil means RSP is unavailable.
 type RSP interface {
 	FindEligibleNode(nodeName string) *v1alpha1.ReplicatedStoragePoolEligibleNode
+	GetSystemNetworkNames() []string
 }
 
 // datameshContext holds mutable datamesh scalar parameters.
@@ -161,6 +169,8 @@ type datameshContext struct {
 	quorumMinimumRedundancy byte
 	// multiattach indicates whether multiattach is enabled.
 	multiattach bool
+	// systemNetworkNames is the current system network name list.
+	systemNetworkNames []string
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -357,6 +367,7 @@ func buildContexts(
 			quorum:                  rv.Status.Datamesh.Quorum,
 			quorumMinimumRedundancy: rv.Status.Datamesh.QuorumMinimumRedundancy,
 			multiattach:             rv.Status.Datamesh.Multiattach,
+			systemNetworkNames:      rv.Status.Datamesh.SystemNetworkNames,
 		},
 		baselineGMDR:               rv.Status.BaselineGuaranteedMinimumDataRedundancy,
 		maxAttachments:             rv.Spec.MaxAttachments,
@@ -547,6 +558,7 @@ func writebackDatameshFromContext(rv *v1alpha1.ReplicatedVolume, gctx *globalCon
 	rv.Status.Datamesh.Quorum = gctx.datamesh.quorum
 	rv.Status.Datamesh.QuorumMinimumRedundancy = gctx.datamesh.quorumMinimumRedundancy
 	rv.Status.Datamesh.Multiattach = gctx.datamesh.multiattach
+	rv.Status.Datamesh.SystemNetworkNames = gctx.datamesh.systemNetworkNames
 }
 
 // writebackBaselineGMDRFromContext writes the baseline GMDR from the

@@ -30,7 +30,7 @@ import (
 //
 // Single-pass classification builds IDSets, then set algebra derives counts:
 //
-//   - Ready agent (fresh data): !isAgentNotReady && Quorum != nil.
+//   - Ready agent (fresh data): isAgentReady && Quorum != nil.
 //   - Voter reachable = own Quorum==true OR stale but peer sees Connected.
 //   - Voter upToDate = own BackingVolume==UpToDate OR stale but peer sees UpToDate.
 //   - TB reachable = agent ready OR stale but peer sees Connected.
@@ -67,7 +67,7 @@ func updateEffectiveLayout(gctx *globalContext, el *v1alpha1.ReplicatedVolumeEff
 			continue
 		}
 
-		if isAgentNotReady(rc.rvr) || rc.rvr.Status.Quorum == nil {
+		if !isAgentReady(rc.rvr) || rc.rvr.Status.Quorum == nil {
 			continue
 		}
 		ready.Add(rc.id)
@@ -220,10 +220,10 @@ func setEffectiveLayoutMessage(
 	return true
 }
 
-// isAgentNotReady returns true if the RVR's agent is not ready (DRBDConfigured
-// condition has reason AgentNotReady). When true, rvr.Status fields (Peers,
-// QuorumSummary, BackingVolume, Quorum) are stale and must not be trusted.
-func isAgentNotReady(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-	return obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType).
+// isAgentReady returns true if the RVR's agent is ready (DRBDConfigured
+// condition does not have reason AgentNotReady). When false, rvr.Status fields
+// (Peers, QuorumSummary, BackingVolume, Quorum) are stale and must not be trusted.
+func isAgentReady(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+	return !obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType).
 		ReasonEqual(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady).Eval()
 }

@@ -617,13 +617,14 @@ spec:
                         Set by the controller at transition creation time. Read-only for users.
                         Provides observability: explains why a transition may be waiting.
                       enum:
+                      - Attachment
+                      - Emergency
                       - Formation
-                      - VotingMembership
+                      - Multiattach
+                      - Network
                       - NonVotingMembership
                       - Quorum
-                      - Attachment
-                      - Multiattach
-                      - Emergency
+                      - VotingMembership
                       type: string
                     planID:
                       description: |-
@@ -708,6 +709,18 @@ spec:
                       minItems: 1
                       type: array
                       x-kubernetes-list-type: atomic
+                    targetSystemNetworkNames:
+                      description: |-
+                        TargetSystemNetworkNames is the desired set of system network names for
+                        ChangeSystemNetworks transitions. Captured at dispatch time to ensure
+                        deterministic apply even if rvr.Status.Addresses changes mid-transition.
+                        Required for ChangeSystemNetworks. Must not be set for other types.
+                      items:
+                        maxLength: 64
+                        type: string
+                      maxItems: 10
+                      type: array
+                      x-kubernetes-list-type: atomic
                     toReplicaType:
                       description: |-
                         ToReplicaType is the target replica type for ChangeReplicaType transitions.
@@ -721,17 +734,19 @@ spec:
                     type:
                       description: Type is the transition type.
                       enum:
-                      - Formation
                       - AddReplica
                       - Attach
                       - ChangeQuorum
                       - ChangeReplicaType
+                      - ChangeSystemNetworks
                       - Detach
                       - DisableMultiattach
                       - EnableMultiattach
                       - ForceDetach
                       - ForceRemoveReplica
+                      - Formation
                       - RemoveReplica
+                      - RepairNetworkAddresses
                       type: string
                   required:
                   - group
@@ -744,12 +759,15 @@ spec:
                       transitions
                     rule: self.type == 'Formation' || self.type == 'EnableMultiattach'
                       || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum'
+                      || self.type == 'RepairNetworkAddresses' || self.type == 'ChangeSystemNetworks'
                       || has(self.replicaName)
                   - message: replicaName must not be set for Formation, EnableMultiattach,
-                      DisableMultiattach, ChangeQuorum transitions
+                      DisableMultiattach, ChangeQuorum, RepairNetworkAddresses, ChangeSystemNetworks
+                      transitions
                     rule: '!has(self.replicaName) || !(self.type == ''Formation''
                       || self.type == ''EnableMultiattach'' || self.type == ''DisableMultiattach''
-                      || self.type == ''ChangeQuorum'')'
+                      || self.type == ''ChangeQuorum'' || self.type == ''RepairNetworkAddresses''
+                      || self.type == ''ChangeSystemNetworks'')'
                   - message: replicaType must only be set for AddReplica, RemoveReplica,
                       ForceRemoveReplica transitions
                     rule: self.type == 'AddReplica' || self.type == 'RemoveReplica'
@@ -766,6 +784,12 @@ spec:
                       transitions
                     rule: self.type != 'ChangeReplicaType' || (has(self.fromReplicaType)
                       && has(self.toReplicaType))
+                  - message: targetSystemNetworkNames must only be set for ChangeSystemNetworks
+                      transitions
+                    rule: self.type == 'ChangeSystemNetworks' || !has(self.targetSystemNetworkNames)
+                  - message: targetSystemNetworkNames is required for ChangeSystemNetworks
+                      transitions
+                    rule: self.type != 'ChangeSystemNetworks' || has(self.targetSystemNetworkNames)
                 type: array
                 x-kubernetes-list-type: atomic
               effectiveLayout:

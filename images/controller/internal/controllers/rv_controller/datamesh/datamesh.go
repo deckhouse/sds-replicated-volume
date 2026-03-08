@@ -46,6 +46,7 @@ func BuildRegistry() {
 	registerMembershipPlans(registry)
 	registerQuorumPlans(registry)
 	registerAttachmentPlans(registry)
+	registerNetworkPlans(registry)
 }
 
 // ProcessTransitions runs the datamesh transition engine for one reconciliation cycle.
@@ -74,6 +75,7 @@ func ProcessTransitions(
 
 	// 3. Create engine.
 	dispatchers := []dmte.DispatchFunc[provider]{
+		networkDispatcher(),
 		quorumDispatcher(),
 		membershipDispatcher(),
 		attachmentDispatcher(),

@@ -64,6 +64,11 @@ func (c *concurrencyTracker) Add(t *dmte.Transition) {
 		c.gctx.hasQuorumTransition = true
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupMultiattach:
 		c.gctx.hasMultiattachTransition = true
+	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork:
+		c.gctx.hasNetworkTransition = true
+		if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeSystemNetworks {
+			c.gctx.targetSystemNetworkNames = &t.TargetSystemNetworkNames
+		}
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership:
 		c.gctx.votingMembershipTransitions.Add(t.ReplicaID())
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership:
@@ -86,6 +91,9 @@ func (c *concurrencyTracker) Remove(t *dmte.Transition) {
 		c.gctx.hasQuorumTransition = false
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupMultiattach:
 		c.gctx.hasMultiattachTransition = false
+	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork:
+		c.gctx.hasNetworkTransition = false
+		c.gctx.targetSystemNetworkNames = nil
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership:
 		c.gctx.votingMembershipTransitions.Remove(t.ReplicaID())
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership:
@@ -107,12 +115,16 @@ func (c *concurrencyTracker) Remove(t *dmte.Transition) {
 // Global transitions have ReplicaName == "".
 //
 // Universal parallelism rules:
-//   - Formation blocks everything.
+//   - Formation blocks everything except Network and Emergency.
 //   - Per-member: at most one membership and one attachment transition per replica
 //     (except Emergency which cancels conflicts first).
 //   - VotingMembership: serialized — only one active at a time.
 //     VotingMembership and Quorum are mutually exclusive (voter set must be stable).
+//     Blocked by active Network (addresses must be stable before voter changes).
 //   - Quorum: blocked by VotingMembership (voter set must be stable).
+//     Blocked by active Network (addresses must be stable before quorum changes).
+//   - Network: serialized (at most one active). Blocks VotingMembership and Quorum
+//     (semi-emergency: not blocked by Formation, VotingMembership, or Quorum).
 //   - Attachment: multiattach readiness checked via potentiallyAttached state
 //     (second+ attach requires multiattach enabled and confirmed).
 //   - Multiattach: serialized (no double-toggle).
@@ -133,8 +145,9 @@ func (c *concurrencyTracker) CanAdmit(t *dmte.Transition) (bool, string, any) {
 		return nil
 	}
 
-	// Formation blocks everything.
-	if gctx.hasFormationTransition {
+	// Formation blocks everything except Network (semi-emergency) and Emergency.
+	if gctx.hasFormationTransition &&
+		proposedGroup != v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork {
 		return false, "Blocked by active Formation",
 			attachmentDetails(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending)
 	}
@@ -170,6 +183,9 @@ func (c *concurrencyTracker) CanAdmit(t *dmte.Transition) (bool, string, any) {
 		if gctx.hasQuorumTransition {
 			return false, "Blocked by active ChangeQuorum transition", nil
 		}
+		if gctx.hasNetworkTransition {
+			return false, "Blocked by active Network transition", nil
+		}
 
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership:
 		// Can overlap with everything (per-member check above handles same-replica).
@@ -184,6 +200,9 @@ func (c *concurrencyTracker) CanAdmit(t *dmte.Transition) (bool, string, any) {
 		// and multiattach transitions do not affect quorum and can run in parallel.
 		if gctx.votingMembershipTransitions.Len() > 0 {
 			return false, "Cannot start ChangeQuorum: voting membership transition is active", nil
+		}
+		if gctx.hasNetworkTransition {
+			return false, "Blocked by active Network transition", nil
 		}
 
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment:
@@ -207,6 +226,12 @@ func (c *concurrencyTracker) CanAdmit(t *dmte.Transition) (bool, string, any) {
 		// Serialized only — dispatcher decides when to toggle.
 		if gctx.hasMultiattachTransition {
 			return false, "Another Multiattach transition is already in progress", nil
+		}
+
+	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork:
+		// Serialized: at most one Network transition at a time.
+		if gctx.hasNetworkTransition {
+			return false, "Another Network transition is already in progress", nil
 		}
 	}
 
