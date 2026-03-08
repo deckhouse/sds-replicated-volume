@@ -47,7 +47,7 @@ func registerAccessPlans(
 	// AddReplica(A): ✦ → A
 	addReplica.Plan("access/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeAccess).
+		Init(setReplicaType(v1alpha1.ReplicaTypeAccess)).
 		DisplayName("Joining datamesh").
 		Guards(commonAddGuards...).
 		Guards(guardVolumeAccessNotLocal).
@@ -64,7 +64,7 @@ func registerAccessPlans(
 	// RemoveReplica(A): A → ✕
 	removeReplica.Plan("access/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeAccess).
+		Init(setReplicaType(v1alpha1.ReplicaTypeAccess)).
 		DisplayName("Leaving datamesh").
 		Guards(commonRemoveGuards...).
 		Steps(

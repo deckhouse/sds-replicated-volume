@@ -255,16 +255,20 @@ func (t ReplicatedVolumeDatameshReplicaRequest) ID() uint8 {
 // and executed sequentially. The transition's start time is steps[0].startedAt.
 // +kubebuilder:object:generate=true
 //
-//	+kubebuilder:validation:XValidation:rule="self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum' || has(self.replicaName)",message="replicaName is required for AddReplica, RemoveReplica, ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach transitions"
-//	+kubebuilder:validation:XValidation:rule="!has(self.replicaName) || !(self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum')",message="replicaName must not be set for Formation, EnableMultiattach, DisableMultiattach, ChangeQuorum transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum' || self.type == 'RepairNetworkAddresses' || self.type == 'ChangeSystemNetworks' || has(self.replicaName)",message="replicaName is required for AddReplica, RemoveReplica, ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach transitions"
+//	+kubebuilder:validation:XValidation:rule="!has(self.replicaName) || !(self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum' || self.type == 'RepairNetworkAddresses' || self.type == 'ChangeSystemNetworks')",message="replicaName must not be set for Formation, EnableMultiattach, DisableMultiattach, ChangeQuorum, RepairNetworkAddresses, ChangeSystemNetworks transitions"
 //	+kubebuilder:validation:XValidation:rule="self.type == 'AddReplica' || self.type == 'RemoveReplica' || self.type == 'ForceRemoveReplica' || !has(self.replicaType)",message="replicaType must only be set for AddReplica, RemoveReplica, ForceRemoveReplica transitions"
 //	+kubebuilder:validation:XValidation:rule="!(self.type == 'AddReplica' || self.type == 'RemoveReplica' || self.type == 'ForceRemoveReplica') || has(self.replicaType)",message="replicaType is required for AddReplica, RemoveReplica, ForceRemoveReplica transitions"
 //	+kubebuilder:validation:XValidation:rule="self.type == 'ChangeReplicaType' || (!has(self.fromReplicaType) && !has(self.toReplicaType))",message="fromReplicaType and toReplicaType must only be set for ChangeReplicaType transitions"
 //	+kubebuilder:validation:XValidation:rule="self.type != 'ChangeReplicaType' || (has(self.fromReplicaType) && has(self.toReplicaType))",message="fromReplicaType and toReplicaType are required for ChangeReplicaType transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type == 'ChangeSystemNetworks' || !has(self.fromSystemNetworkNames)",message="fromSystemNetworkNames must only be set for ChangeSystemNetworks transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type == 'ChangeSystemNetworks' || !has(self.toSystemNetworkNames)",message="toSystemNetworkNames must only be set for ChangeSystemNetworks transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type != 'ChangeSystemNetworks' || has(self.fromSystemNetworkNames)",message="fromSystemNetworkNames is required for ChangeSystemNetworks transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type != 'ChangeSystemNetworks' || has(self.toSystemNetworkNames)",message="toSystemNetworkNames is required for ChangeSystemNetworks transitions"
 type ReplicatedVolumeDatameshTransition struct {
 	// Type is the transition type.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=Formation;AddReplica;Attach;ChangeQuorum;ChangeReplicaType;Detach;DisableMultiattach;EnableMultiattach;ForceDetach;ForceRemoveReplica;RemoveReplica
+	// +kubebuilder:validation:Enum=AddReplica;Attach;ChangeQuorum;ChangeReplicaType;ChangeSystemNetworks;Detach;DisableMultiattach;EnableMultiattach;ForceDetach;ForceRemoveReplica;Formation;RemoveReplica;RepairNetworkAddresses
 	Type ReplicatedVolumeDatameshTransitionType `json:"type"`
 
 	// ReplicaName is the name of the replica this transition applies to.
@@ -297,11 +301,31 @@ type ReplicatedVolumeDatameshTransition struct {
 	// +optional
 	ToReplicaType ReplicaType `json:"toReplicaType,omitempty"`
 
+	// FromSystemNetworkNames is the source set of system network names for
+	// ChangeSystemNetworks transitions. Captured from datamesh.systemNetworkNames
+	// at dispatch time. Required for ChangeSystemNetworks. Must not be set for
+	// other types.
+	// +kubebuilder:validation:MaxItems=10
+	// +kubebuilder:validation:items:MaxLength=64
+	// +listType=atomic
+	// +optional
+	FromSystemNetworkNames []string `json:"fromSystemNetworkNames,omitempty"`
+
+	// ToSystemNetworkNames is the target set of system network names for
+	// ChangeSystemNetworks transitions. Captured from RSP configuration at
+	// dispatch time. Required for ChangeSystemNetworks. Must not be set for
+	// other types.
+	// +kubebuilder:validation:MaxItems=10
+	// +kubebuilder:validation:items:MaxLength=64
+	// +listType=atomic
+	// +optional
+	ToSystemNetworkNames []string `json:"toSystemNetworkNames,omitempty"`
+
 	// Group is the concurrency group for this transition.
 	// Set by the controller at transition creation time. Read-only for users.
 	// Provides observability: explains why a transition may be waiting.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=Formation;VotingMembership;NonVotingMembership;Quorum;Attachment;Multiattach;Emergency
+	// +kubebuilder:validation:Enum=Attachment;Emergency;Formation;Multiattach;Network;NonVotingMembership;Quorum;VotingMembership
 	Group ReplicatedVolumeDatameshTransitionGroup `json:"group"`
 
 	// PlanID identifies the transition plan used to create this transition.
@@ -423,6 +447,8 @@ const (
 	ReplicatedVolumeDatameshTransitionTypeChangeQuorum ReplicatedVolumeDatameshTransitionType = "ChangeQuorum"
 	// ReplicatedVolumeDatameshTransitionTypeChangeReplicaType indicates changing a member's type (e.g., Access to Diskful).
 	ReplicatedVolumeDatameshTransitionTypeChangeReplicaType ReplicatedVolumeDatameshTransitionType = "ChangeReplicaType"
+	// ReplicatedVolumeDatameshTransitionTypeChangeSystemNetworks indicates a system network add, remove, or replace.
+	ReplicatedVolumeDatameshTransitionTypeChangeSystemNetworks ReplicatedVolumeDatameshTransitionType = "ChangeSystemNetworks"
 	// ReplicatedVolumeDatameshTransitionTypeDetach indicates detaching a replica (demoting from Primary in DRBD terms).
 	ReplicatedVolumeDatameshTransitionTypeDetach ReplicatedVolumeDatameshTransitionType = "Detach"
 	// ReplicatedVolumeDatameshTransitionTypeDisableMultiattach indicates disabling multi-attach (allowTwoPrimaries).
@@ -435,6 +461,8 @@ const (
 	ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica ReplicatedVolumeDatameshTransitionType = "ForceRemoveReplica"
 	// ReplicatedVolumeDatameshTransitionTypeRemoveReplica indicates removing a replica from the datamesh.
 	ReplicatedVolumeDatameshTransitionTypeRemoveReplica ReplicatedVolumeDatameshTransitionType = "RemoveReplica"
+	// ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses indicates address repair for existing system networks.
+	ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses ReplicatedVolumeDatameshTransitionType = "RepairNetworkAddresses"
 )
 
 func (t ReplicatedVolumeDatameshTransitionType) String() string {
@@ -458,6 +486,8 @@ const (
 	ReplicatedVolumeDatameshTransitionGroupAttachment ReplicatedVolumeDatameshTransitionGroup = "Attachment"
 	// ReplicatedVolumeDatameshTransitionGroupMultiattach is the multiattach group (exclusive with Attachment).
 	ReplicatedVolumeDatameshTransitionGroupMultiattach ReplicatedVolumeDatameshTransitionGroup = "Multiattach"
+	// ReplicatedVolumeDatameshTransitionGroupNetwork is the network group (serialized, semi-emergency: blocks VotingMembership and Quorum).
+	ReplicatedVolumeDatameshTransitionGroupNetwork ReplicatedVolumeDatameshTransitionGroup = "Network"
 	// ReplicatedVolumeDatameshTransitionGroupEmergency is the emergency group (preemptive).
 	ReplicatedVolumeDatameshTransitionGroupEmergency ReplicatedVolumeDatameshTransitionGroup = "Emergency"
 )

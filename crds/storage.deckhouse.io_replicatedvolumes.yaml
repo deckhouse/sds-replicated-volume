@@ -611,19 +611,32 @@ spec:
                       - TieBreaker
                       - ShadowDiskful
                       type: string
+                    fromSystemNetworkNames:
+                      description: |-
+                        FromSystemNetworkNames is the source set of system network names for
+                        ChangeSystemNetworks transitions. Captured from datamesh.systemNetworkNames
+                        at dispatch time. Required for ChangeSystemNetworks. Must not be set for
+                        other types.
+                      items:
+                        maxLength: 64
+                        type: string
+                      maxItems: 10
+                      type: array
+                      x-kubernetes-list-type: atomic
                     group:
                       description: |-
                         Group is the concurrency group for this transition.
                         Set by the controller at transition creation time. Read-only for users.
                         Provides observability: explains why a transition may be waiting.
                       enum:
+                      - Attachment
+                      - Emergency
                       - Formation
-                      - VotingMembership
+                      - Multiattach
+                      - Network
                       - NonVotingMembership
                       - Quorum
-                      - Attachment
-                      - Multiattach
-                      - Emergency
+                      - VotingMembership
                       type: string
                     planID:
                       description: |-
@@ -718,20 +731,34 @@ spec:
                       - TieBreaker
                       - ShadowDiskful
                       type: string
+                    toSystemNetworkNames:
+                      description: |-
+                        ToSystemNetworkNames is the target set of system network names for
+                        ChangeSystemNetworks transitions. Captured from RSP configuration at
+                        dispatch time. Required for ChangeSystemNetworks. Must not be set for
+                        other types.
+                      items:
+                        maxLength: 64
+                        type: string
+                      maxItems: 10
+                      type: array
+                      x-kubernetes-list-type: atomic
                     type:
                       description: Type is the transition type.
                       enum:
-                      - Formation
                       - AddReplica
                       - Attach
                       - ChangeQuorum
                       - ChangeReplicaType
+                      - ChangeSystemNetworks
                       - Detach
                       - DisableMultiattach
                       - EnableMultiattach
                       - ForceDetach
                       - ForceRemoveReplica
+                      - Formation
                       - RemoveReplica
+                      - RepairNetworkAddresses
                       type: string
                   required:
                   - group
@@ -744,12 +771,15 @@ spec:
                       transitions
                     rule: self.type == 'Formation' || self.type == 'EnableMultiattach'
                       || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum'
+                      || self.type == 'RepairNetworkAddresses' || self.type == 'ChangeSystemNetworks'
                       || has(self.replicaName)
                   - message: replicaName must not be set for Formation, EnableMultiattach,
-                      DisableMultiattach, ChangeQuorum transitions
+                      DisableMultiattach, ChangeQuorum, RepairNetworkAddresses, ChangeSystemNetworks
+                      transitions
                     rule: '!has(self.replicaName) || !(self.type == ''Formation''
                       || self.type == ''EnableMultiattach'' || self.type == ''DisableMultiattach''
-                      || self.type == ''ChangeQuorum'')'
+                      || self.type == ''ChangeQuorum'' || self.type == ''RepairNetworkAddresses''
+                      || self.type == ''ChangeSystemNetworks'')'
                   - message: replicaType must only be set for AddReplica, RemoveReplica,
                       ForceRemoveReplica transitions
                     rule: self.type == 'AddReplica' || self.type == 'RemoveReplica'
@@ -766,6 +796,18 @@ spec:
                       transitions
                     rule: self.type != 'ChangeReplicaType' || (has(self.fromReplicaType)
                       && has(self.toReplicaType))
+                  - message: fromSystemNetworkNames must only be set for ChangeSystemNetworks
+                      transitions
+                    rule: self.type == 'ChangeSystemNetworks' || !has(self.fromSystemNetworkNames)
+                  - message: toSystemNetworkNames must only be set for ChangeSystemNetworks
+                      transitions
+                    rule: self.type == 'ChangeSystemNetworks' || !has(self.toSystemNetworkNames)
+                  - message: fromSystemNetworkNames is required for ChangeSystemNetworks
+                      transitions
+                    rule: self.type != 'ChangeSystemNetworks' || has(self.fromSystemNetworkNames)
+                  - message: toSystemNetworkNames is required for ChangeSystemNetworks
+                      transitions
+                    rule: self.type != 'ChangeSystemNetworks' || has(self.toSystemNetworkNames)
                 type: array
                 x-kubernetes-list-type: atomic
               effectiveLayout:

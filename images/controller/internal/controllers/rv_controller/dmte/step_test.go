@@ -153,16 +153,18 @@ var _ = Describe("GlobalStepBuilder", func() {
 var _ = Describe("step dispatch", func() {
 	It("apply dispatches to replica callback", func() {
 		called := false
-		s := ReplicaStep("step", func(*testGCtx, *testReplicaCtx) { called = true }, stubReplicaConfirm).build()
-		s.apply(&testGCtx{}, &testReplicaCtx{})
+		s := ReplicaStep("step", func(*testGCtx, *testReplicaCtx) bool { called = true; return true }, stubReplicaConfirm).build()
+		changed := s.apply(&testGCtx{}, &testReplicaCtx{})
 		Expect(called).To(BeTrue())
+		Expect(changed).To(BeTrue())
 	})
 
 	It("apply dispatches to global callback", func() {
 		called := false
-		s := buildGlobalStep[*testGCtx, *testReplicaCtx](GlobalStep("step", func(*testGCtx) { called = true }, stubGlobalConfirm))
-		s.apply(&testGCtx{}, &testReplicaCtx{})
+		s := buildGlobalStep[*testGCtx, *testReplicaCtx](GlobalStep("step", func(*testGCtx) bool { called = true; return true }, stubGlobalConfirm))
+		changed := s.apply(&testGCtx{}, &testReplicaCtx{})
 		Expect(called).To(BeTrue())
+		Expect(changed).To(BeTrue())
 	})
 
 	It("confirm dispatches to replica callback", func() {

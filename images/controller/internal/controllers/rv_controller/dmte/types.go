@@ -281,19 +281,35 @@ type ReplicaOnCompleteFunc[G any, R ReplicaCtx] = func(gctx G, rctx R)
 // confirmed (before the transition is removed). Optional.
 type GlobalOnCompleteFunc[G any] = func(gctx G)
 
+// ReplicaInitFunc is called after a replica-scoped transition is created,
+// before it is added to the tracker. Populates transition-specific metadata.
+// Optional.
+type ReplicaInitFunc[G any, R ReplicaCtx] = func(gctx G, rctx R, t *Transition)
+
+// GlobalInitFunc is called after a global-scoped transition is created,
+// before it is added to the tracker. Populates transition-specific metadata.
+// Optional.
+type GlobalInitFunc[G any] = func(gctx G, t *Transition)
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Step callbacks
 //
 
 // ReplicaApplyFunc is called when a replica-scoped step is activated.
-// It mutates state through gctx (e.g., add/remove member, set Attached flag).
-// DatameshRevision bump, step.DatameshRevision, and message generation are
-// handled by the engine.
-type ReplicaApplyFunc[G any, R ReplicaCtx] = func(gctx G, rctx R)
+// It mutates state through gctx (e.g., add/remove member, set Attached flag)
+// and returns true if any state was actually changed.
+//
+// When the callback returns false (no-op), the engine does NOT bump
+// DatameshRevision — agents that already confirmed the current revision
+// will immediately satisfy the confirm check, allowing the step to
+// complete without an external roundtrip.
+type ReplicaApplyFunc[G any, R ReplicaCtx] = func(gctx G, rctx R) bool
 
 // GlobalApplyFunc is called when a global-scoped step is activated.
-// It mutates state through gctx (e.g., change qmr, update EffectiveLayout).
-type GlobalApplyFunc[G any] = func(gctx G)
+// It mutates state through gctx (e.g., change qmr, update EffectiveLayout)
+// and returns true if any state was actually changed. See ReplicaApplyFunc
+// for no-op semantics.
+type GlobalApplyFunc[G any] = func(gctx G) bool
 
 // ReplicaConfirmFunc computes the confirmation sets for a replica-scoped step.
 // stepRevision is the DatameshRevision assigned to this step by the engine.

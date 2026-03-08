@@ -251,7 +251,7 @@ var _ = Describe("ChangeQuorum step flow", func() {
 			mkRVRUpToDate("rv-1-2", "node-3", 5),
 		}
 
-		runUntilStable(rv, mkRSP("node-1", "node-2", "node-3"), rvrs, FeatureFlags{})
+		runUntilStableUnchecked(rv, mkRSP("node-1", "node-2", "node-3"), rvrs, FeatureFlags{})
 
 		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2)))
 		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(1)))
@@ -275,7 +275,7 @@ var _ = Describe("ChangeQuorum step flow", func() {
 			mkRVRUpToDate("rv-1-2", "node-3", 5),
 		}
 
-		runUntilStable(rv, mkRSP("node-1", "node-2", "node-3"), rvrs, FeatureFlags{})
+		runUntilStableUnchecked(rv, mkRSP("node-1", "node-2", "node-3"), rvrs, FeatureFlags{})
 
 		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2)))
 		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(1)))

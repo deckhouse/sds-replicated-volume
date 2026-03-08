@@ -1476,11 +1476,12 @@ var _ = Describe("RemoveReplica(D) guards", func() {
 		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
 		Expect(changed).To(BeTrue())
 		// No RemoveReplica transition created (guard blocked).
-		// A Detach transition may be created by the attachment dispatcher — that's expected.
+		// Outer loop: Detach dispatched first (Attached→false), then guardNotAttached
+		// sees the active Detach transition on the second dispatch pass.
 		for _, t := range rv.Status.DatameshTransitions {
 			Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica))
 		}
-		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("attached"))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("transition in progress"))
 	})
 })
 
@@ -1593,8 +1594,8 @@ var _ = Describe("RemoveReplica(D) additional", func() {
 	It("guard: VolumeAccessLocal blocks attached D removal", func() {
 		// Attached D with VolumeAccess=Local. guardNotAttached (commonRemoveGuards)
 		// fires first — attached members cannot be removed regardless of VolumeAccess.
-		// guardVolumeAccessLocalForDemotion is relevant for ChangeReplicaType(D→...),
-		// not RemoveReplica. Here we verify the NotAttached guard works for D.
+		// Outer loop: Detach fires (Attached→false), then guardNotAttached sees the
+		// active Detach transition on the second dispatch pass.
 		member := mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2")
 		member.Attached = true
 		rv := mkRV(5,
@@ -1618,6 +1619,6 @@ var _ = Describe("RemoveReplica(D) additional", func() {
 		for _, t := range rv.Status.DatameshTransitions {
 			Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica))
 		}
-		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("attached"))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("transition in progress"))
 	})
 })

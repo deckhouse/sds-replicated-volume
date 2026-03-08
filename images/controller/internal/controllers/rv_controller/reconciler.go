@@ -1087,6 +1087,11 @@ type rspView struct {
 	EligibleNodes []v1alpha1.ReplicatedStoragePoolEligibleNode
 }
 
+// GetSystemNetworkNames returns the intended system network names from the RSP spec.
+func (v *rspView) GetSystemNetworkNames() []string {
+	return v.SystemNetworkNames
+}
+
 // FindEligibleNode returns a pointer to the eligible node with the given name, or nil if not found.
 // Uses binary search (EligibleNodes is sorted by NodeName).
 func (v *rspView) FindEligibleNode(nodeName string) *v1alpha1.ReplicatedStoragePoolEligibleNode {

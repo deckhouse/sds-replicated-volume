@@ -137,7 +137,7 @@ func registerAttachmentPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]
 // arStep creates an attachment ReplicaStep with standard DiagnosticConditions.
 func arStep(
 	name string,
-	apply func(*globalContext, *ReplicaContext),
+	apply func(*globalContext, *ReplicaContext) bool,
 	confirm func(*globalContext, *ReplicaContext, int64) dmte.ConfirmResult,
 ) *dmte.ReplicaStepBuilder[*globalContext, *ReplicaContext] {
 	return dmte.ReplicaStep(name, apply, confirm).
@@ -149,7 +149,7 @@ func arStep(
 //nolint:unparam // name will vary with future plans
 func agStep(
 	name string,
-	apply func(*globalContext),
+	apply func(*globalContext) bool,
 	confirm func(*globalContext, int64) dmte.ConfirmResult,
 ) *dmte.GlobalStepBuilder[*globalContext] {
 	return dmte.GlobalStep(name, apply, confirm).
@@ -387,28 +387,24 @@ func guardDeviceNotInUse(_ *globalContext, rctx *ReplicaContext) dmte.GuardResul
 // Apply callbacks
 //
 
-// applyAttach sets the member as attached.
-// The engine bumps DatameshRevision after this callback.
-func applyAttach(_ *globalContext, rctx *ReplicaContext) {
-	rctx.member.Attached = true
+// applyAttach sets the member as attached. Returns false if already attached.
+func applyAttach(_ *globalContext, rctx *ReplicaContext) bool {
+	return assign(&rctx.member.Attached, true)
 }
 
-// applyDetach sets the member as not attached.
-// The engine bumps DatameshRevision after this callback.
-func applyDetach(_ *globalContext, rctx *ReplicaContext) {
-	rctx.member.Attached = false
+// applyDetach sets the member as not attached. Returns false if already detached.
+func applyDetach(_ *globalContext, rctx *ReplicaContext) bool {
+	return assign(&rctx.member.Attached, false)
 }
 
-// applyEnableMultiattach enables multiattach on the datamesh.
-// The engine bumps DatameshRevision after this callback.
-func applyEnableMultiattach(gctx *globalContext) {
-	gctx.datamesh.multiattach = true
+// applyEnableMultiattach enables multiattach. Returns false if already enabled.
+func applyEnableMultiattach(gctx *globalContext) bool {
+	return assign(&gctx.datamesh.multiattach, true)
 }
 
-// applyDisableMultiattach disables multiattach on the datamesh.
-// The engine bumps DatameshRevision after this callback.
-func applyDisableMultiattach(gctx *globalContext) {
-	gctx.datamesh.multiattach = false
+// applyDisableMultiattach disables multiattach. Returns false if already disabled.
+func applyDisableMultiattach(gctx *globalContext) bool {
+	return assign(&gctx.datamesh.multiattach, false)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

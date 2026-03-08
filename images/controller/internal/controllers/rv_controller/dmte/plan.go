@@ -19,8 +19,6 @@ package dmte
 import (
 	"regexp"
 	"strconv"
-
-	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 // planIDRegexp validates the PlanID format: "{name}/v{N}" where N >= 1.
@@ -39,12 +37,6 @@ type plan[G any, R ReplicaCtx] struct {
 	group          TransitionGroup // concurrency group for Tracker admission
 	displayName    string          // for progress and blocked-by messages
 
-	// Transition metadata: written to the transition object at creation,
-	// not used by the engine.
-	replicaType     v1alpha1.ReplicaType
-	fromReplicaType v1alpha1.ReplicaType
-	toReplicaType   v1alpha1.ReplicaType
-
 	// Slot routing and pre-creation behavior (ReplicaScope only).
 	slot                 ReplicaSlotID // routes status output and conflict checks
 	cancelActiveOnCreate bool          // cancel active transition in the slot before creating
@@ -53,6 +45,11 @@ type plan[G any, R ReplicaCtx] struct {
 	// Exactly one slice is populated, matching scope.
 	replicaGuards []ReplicaGuardFunc[G, R]
 	globalGuards  []GlobalGuardFunc[G]
+
+	// Init: optional callback invoked after transition creation, before tracker
+	// admission. Populates transition-specific metadata. At most one is set.
+	replicaInit ReplicaInitFunc[G, R]
+	globalInit  GlobalInitFunc[G]
 
 	// Execution: steps (at least one), then optional completion callback.
 	// For onComplete, at most one is set, matching scope.
@@ -74,6 +71,22 @@ func (p *plan[G, R]) callOnComplete(gctx G, rctx R) {
 		}
 	default:
 		panic("dmte: plan.callOnComplete: invalid scope")
+	}
+}
+
+// callInit dispatches the init callback based on scope.
+func (p *plan[G, R]) callInit(gctx G, rctx R, t *Transition) {
+	switch p.scope {
+	case GlobalScope:
+		if p.globalInit != nil {
+			p.globalInit(gctx, t)
+		}
+	case ReplicaScope:
+		if p.replicaInit != nil {
+			p.replicaInit(gctx, rctx, t)
+		}
+	default:
+		panic("dmte: plan.callInit: invalid scope")
 	}
 }
 
@@ -111,6 +124,7 @@ type PlanBuilder[G any, R ReplicaCtx] struct {
 	p             plan[G, R]
 	rawSteps      []any // *ReplicaStepBuilder[G, R] or *GlobalStepBuilder[G]
 	rawGuards     []any // ReplicaGuardFunc[G, R] or GlobalGuardFunc[G]
+	rawInit       any   // func(G, *Transition) or func(G, R, *Transition)
 	rawOnComplete any   // func(G, R) or func(G)
 }
 
@@ -119,24 +133,6 @@ type PlanBuilder[G any, R ReplicaCtx] struct {
 // Required — panics at Build() if not set.
 func (b *PlanBuilder[G, R]) Group(g TransitionGroup) *PlanBuilder[G, R] {
 	b.p.group = g
-	return b
-}
-
-// ReplicaType sets the replica type written to transition.ReplicaType at creation.
-func (b *PlanBuilder[G, R]) ReplicaType(t v1alpha1.ReplicaType) *PlanBuilder[G, R] {
-	b.p.replicaType = t
-	return b
-}
-
-// FromReplicaType sets the source replica type written to transition.FromReplicaType at creation.
-func (b *PlanBuilder[G, R]) FromReplicaType(t v1alpha1.ReplicaType) *PlanBuilder[G, R] {
-	b.p.fromReplicaType = t
-	return b
-}
-
-// ToReplicaType sets the target replica type written to transition.ToReplicaType at creation.
-func (b *PlanBuilder[G, R]) ToReplicaType(t v1alpha1.ReplicaType) *PlanBuilder[G, R] {
-	b.p.toReplicaType = t
 	return b
 }
 
@@ -167,6 +163,15 @@ func (b *PlanBuilder[G, R]) Steps(steps ...any) *PlanBuilder[G, R] {
 // Validated at Build() time.
 func (b *PlanBuilder[G, R]) OnComplete(fn any) *PlanBuilder[G, R] {
 	b.rawOnComplete = fn
+	return b
+}
+
+// Init sets an optional callback invoked after the transition is created,
+// before it is added to the tracker. Populates transition-specific metadata.
+// Accepts func(G, *Transition) for global plans or func(G, R, *Transition)
+// for replica plans. Validated at Build() time.
+func (b *PlanBuilder[G, R]) Init(fn any) *PlanBuilder[G, R] {
+	b.rawInit = fn
 	return b
 }
 
@@ -232,6 +237,24 @@ func (b *PlanBuilder[G, R]) Build() {
 		}
 	}
 
+	// Validate and store Init.
+	if b.rawInit != nil {
+		switch b.p.scope {
+		case ReplicaScope:
+			fn, ok := b.rawInit.(ReplicaInitFunc[G, R])
+			if !ok {
+				panic("dmte.PlanBuilder.Build: Init must be func(G, R, *Transition) for replica plan " + string(id))
+			}
+			b.p.replicaInit = fn
+		case GlobalScope:
+			fn, ok := b.rawInit.(GlobalInitFunc[G])
+			if !ok {
+				panic("dmte.PlanBuilder.Build: Init must be func(G, *Transition) for global plan " + string(id))
+			}
+			b.p.globalInit = fn
+		}
+	}
+
 	// Validate and store OnComplete.
 	if b.rawOnComplete != nil {
 		switch b.p.scope {
@@ -253,11 +276,6 @@ func (b *PlanBuilder[G, R]) Build() {
 	// CancelActiveOnCreate only valid for replica plans.
 	if b.p.cancelActiveOnCreate && b.p.scope == GlobalScope {
 		panic("dmte.PlanBuilder.Build: CancelActiveOnCreate is only valid for replica plans, not global plan " + string(id))
-	}
-
-	// ReplicaType / FromReplicaType / ToReplicaType only valid for replica plans.
-	if b.p.scope == GlobalScope && (b.p.replicaType != "" || b.p.fromReplicaType != "" || b.p.toReplicaType != "") {
-		panic("dmte.PlanBuilder.Build: ReplicaType/FromReplicaType/ToReplicaType are only valid for replica plans, not global plan " + string(id))
 	}
 
 	// Duplicate check.

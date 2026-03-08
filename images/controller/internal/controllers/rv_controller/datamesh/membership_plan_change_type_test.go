@@ -622,7 +622,7 @@ var _ = Describe("ChangeReplicaType(sD→A)", func() {
 		rv := mkRV(5,
 			[]v1alpha1.DatameshMember{
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
-				{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeLiminalShadowDiskful, NodeName: "node-2"},
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeLiminalShadowDiskful, "node-2"),
 			},
 			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 				mkChangeRoleRequest("rv-1-1", v1alpha1.ReplicaTypeAccess),
@@ -641,10 +641,11 @@ var _ = Describe("ChangeReplicaType(sD→A)", func() {
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
 		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("sd-to-a/v1"))
 
-		// Step 1 is no-op (type already LiminalShadowDiskful).
+		// Step 0 (sD→sD∅) is a no-op (already liminal) — apply returns changed=false,
+		// settle confirms immediately, engine advances to step 1 (sD∅→A) in the same call.
 		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
 		Expect(m).NotTo(BeNil())
-		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeLiminalShadowDiskful))
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeAccess))
 	})
 })
 
@@ -938,7 +939,7 @@ var _ = Describe("ChangeReplicaType(sD→TB)", func() {
 		rv := mkRV(5,
 			[]v1alpha1.DatameshMember{
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
-				{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeLiminalShadowDiskful, NodeName: "node-2"},
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeLiminalShadowDiskful, "node-2"),
 			},
 			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 				mkChangeRoleRequest("rv-1-1", v1alpha1.ReplicaTypeTieBreaker),
@@ -956,10 +957,11 @@ var _ = Describe("ChangeReplicaType(sD→TB)", func() {
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
 		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("sd-to-tb/v1"))
 
-		// Step 1 is no-op (already liminal).
+		// Step 0 (sD→sD∅) is a no-op (already liminal) — apply returns changed=false,
+		// settle confirms immediately, engine advances to step 1 (sD∅→TB) in the same call.
 		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
 		Expect(m).NotTo(BeNil())
-		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeLiminalShadowDiskful))
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeTieBreaker))
 	})
 })
 
@@ -2539,5 +2541,99 @@ var _ = Describe("ChangeReplicaType(D→TB) additional", func() {
 		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeTieBreaker))
 		Expect(m.LVMVolumeGroupName).To(BeEmpty())
 		Expect(m.LVMVolumeGroupThinPoolName).To(BeEmpty())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ChangeReplicaType + automatic ChangeQuorum for qmr
+//
+// ChangeReplicaType plans do NOT embed qmr steps (unlike AddReplica(D)).
+// After completion, the ChangeQuorum dispatcher should fire automatically
+// if qmr diverges from the target.
+
+var _ = Describe("ChangeReplicaType + ChangeQuorum for qmr", func() {
+	It("A→D + qmr raise: ChangeQuorum fires after ChangeType completes", func() {
+		// 2D (q=2, qmr=2, config GMDR=1) + 1A. Config changed to GMDR=2 → target qmr=3.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeAccess, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeDiskful),
+			},
+			nil,
+		)
+		rv.Status.Datamesh.Quorum = 2
+		rv.Status.Datamesh.QuorumMinimumRedundancy = 2
+		rv.Status.Configuration.FailuresToTolerate = 1
+		rv.Status.Configuration.GuaranteedMinimumDataRedundancy = 2 // target qmr=3
+
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5),
+			mkRVRUpToDate("rv-1-1", "node-2", 5),
+			mkRVRUpToDate("rv-1-2", "node-3", 5), // UpToDate: simulates completed resync after A→D
+		}
+		rsp := mkRSP("node-1", "node-2", "node-3")
+
+		runUntilStable(rv, rsp, rvrs, FeatureFlags{})
+
+		// 3D, q=2, qmr=3 (raised by ChangeQuorum after ChangeType).
+		var voters int
+		for _, m := range rv.Status.Datamesh.Members {
+			if m.Type.IsVoter() {
+				voters++
+			}
+		}
+		Expect(voters).To(Equal(3))
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2)))
+		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(3)))
+		Expect(rv.Status.BaselineGuaranteedMinimumDataRedundancy).To(Equal(byte(2)))
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+	})
+
+	It("D→A + qmr lower: ChangeQuorum fires after ChangeType completes", func() {
+		// 3D (q=2, qmr=2, config GMDR=1). Config changed to GMDR=0 → target qmr=1.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeAccess),
+			},
+			nil,
+		)
+		rv.Status.Datamesh.Quorum = 2
+		rv.Status.Datamesh.QuorumMinimumRedundancy = 2
+		rv.Status.Configuration.FailuresToTolerate = 0
+		rv.Status.Configuration.GuaranteedMinimumDataRedundancy = 0 // target qmr=1
+
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5),
+			mkRVRUpToDate("rv-1-1", "node-2", 5),
+			mkRVRUpToDate("rv-1-2", "node-3", 5),
+		}
+		rsp := mkRSP("node-1", "node-2", "node-3")
+
+		runUntilStable(rv, rsp, rvrs, FeatureFlags{})
+
+		// 2D + 1A, q=2, qmr=1 (lowered by ChangeQuorum after ChangeType).
+		var dCount, aCount int
+		for _, m := range rv.Status.Datamesh.Members {
+			switch m.Type {
+			case v1alpha1.DatameshMemberTypeDiskful, v1alpha1.DatameshMemberTypeLiminalDiskful:
+				dCount++
+			case v1alpha1.DatameshMemberTypeAccess:
+				aCount++
+			}
+		}
+		Expect(dCount).To(Equal(2))
+		Expect(aCount).To(Equal(1))
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2)))
+		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(1)))
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 	})
 })

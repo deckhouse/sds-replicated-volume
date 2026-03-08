@@ -64,7 +64,8 @@ var minimalConfig = &v1alpha1.ReplicatedVolumeConfiguration{
 // testRSP is a simple RSP implementation for tests.
 // Uses linear scan (no sort requirement).
 type testRSP struct {
-	nodes []v1alpha1.ReplicatedStoragePoolEligibleNode
+	nodes              []v1alpha1.ReplicatedStoragePoolEligibleNode
+	systemNetworkNames []string
 }
 
 func (r *testRSP) FindEligibleNode(nodeName string) *v1alpha1.ReplicatedStoragePoolEligibleNode {
@@ -74,6 +75,13 @@ func (r *testRSP) FindEligibleNode(nodeName string) *v1alpha1.ReplicatedStorageP
 		}
 	}
 	return nil
+}
+
+func (r *testRSP) GetSystemNetworkNames() []string {
+	if r.systemNetworkNames != nil {
+		return r.systemNetworkNames
+	}
+	return []string{"default"}
 }
 
 // mkRSP creates a testRSP with one EligibleNode per node name.
@@ -128,7 +136,8 @@ func mkRV(
 			Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 				Members:                 members,
 				Quorum:                  q,
-				QuorumMinimumRedundancy: 1, // minimum valid qmr (GMDR=0 → qmr=1)
+				QuorumMinimumRedundancy: 1,                   // minimum valid qmr (GMDR=0 → qmr=1)
+				SystemNetworkNames:      []string{"default"}, // matches testRSP default
 			},
 			DatameshReplicaRequests: requests,
 			DatameshTransitions:     transitions,
@@ -153,6 +162,9 @@ func mkMember(name string, memberType v1alpha1.DatameshMemberType, nodeName stri
 		Name:     name,
 		Type:     memberType,
 		NodeName: nodeName,
+		Addresses: []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "default"}, // matches testRSP default
+		},
 	}
 	if memberType.HasBackingVolume() ||
 		memberType == v1alpha1.DatameshMemberTypeLiminalDiskful ||
@@ -160,6 +172,13 @@ func mkMember(name string, memberType v1alpha1.DatameshMemberType, nodeName stri
 		m.LVMVolumeGroupName = "test-lvg"
 		m.LVMVolumeGroupThinPoolName = "test-thin"
 	}
+	return m
+}
+
+// mkZonedMember creates a DatameshMember with name, type, nodeName, and zone.
+func mkZonedMember(name string, memberType v1alpha1.DatameshMemberType, nodeName, zone string) v1alpha1.DatameshMember {
+	m := mkMember(name, memberType, nodeName)
+	m.Zone = zone
 	return m
 }
 

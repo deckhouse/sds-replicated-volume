@@ -323,7 +323,9 @@ reg.ReplicaTransition(TransitionTypeAddReplica, MembershipSlot).
     Plan("diskful-odd/v1").
     Group(GroupVotingMembership).
     DisplayName("Adding diskful replica").
-    ReplicaType(ReplicaTypeDiskful).
+    Init(func(gctx *GlobalCtx, rctx *ReplicaCtx, t *dmte.Transition) {
+        t.ReplicaType = ReplicaTypeDiskful
+    }).
     Guards(
         ReplicaGuardFunc[*GlobalCtx, *ReplicaCtx](guardNodeEligible),
     ).
@@ -407,9 +409,7 @@ Creates a `PlanBuilder`. `PlanID` must match `"{name}/v{N}"` format
 |---|---|
 | `.Group(g)` | **Required.** Concurrency group for Tracker admission. |
 | `.DisplayName(name)` | Human-readable name for progress and blocked messages. |
-| `.ReplicaType(t)` | Replica type metadata (replica plans only). |
-| `.FromReplicaType(t)` | Source type for ChangeReplicaType transitions. |
-| `.ToReplicaType(t)` | Target type for ChangeReplicaType transitions. |
+| `.Init(fn)` | Callback after transition creation, before tracker. Populates metadata. |
 | `.Guards(guards...)` | Precondition checks. `ReplicaGuardFunc` or `GlobalGuardFunc`. |
 | `.Steps(steps...)` | **Required.** At least one step. |
 | `.OnComplete(fn)` | Callback after all steps are confirmed. |

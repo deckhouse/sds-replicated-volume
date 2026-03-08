@@ -17,17 +17,20 @@ limitations under the License.
 package datamesh
 
 // updateBaselineGMDR recomputes gctx.baselineGMDR from committed qmr.
-// Called from step callbacks after replicas confirm qmr/membership changes.
+// Returns false if baseline is already correct (no-op).
 //
 // Formula: GMDR = min(qmr − 1, config.GMDR).
 // Cap at Configuration ensures baseline never exceeds the target level.
-func updateBaselineGMDR(gctx *globalContext) {
+//
+// Used as both apply callback (via composeGlobalApply) and OnComplete
+// callback (via updateBaselineGMDROnComplete wrapper).
+func updateBaselineGMDR(gctx *globalContext) bool {
 	qmr := gctx.datamesh.quorumMinimumRedundancy
 	var gmdr byte
 	if qmr > 0 {
 		gmdr = qmr - 1
 	}
-	gctx.baselineGMDR = min(gmdr, gctx.configuration.GuaranteedMinimumDataRedundancy)
+	return assign(&gctx.baselineGMDR, min(gmdr, gctx.configuration.GuaranteedMinimumDataRedundancy))
 }
 
 // computeCorrectQuorum returns the correct q and qmr for the current datamesh

@@ -205,6 +205,8 @@ func RemoveStatusCondition(obj StatusConditionObject, condType string) (changed 
 // ----------------------------------------------------------------------------
 
 // StatusConditionChecker provides a fluent API for checking status conditions.
+// Value-type: all methods return copies, keeping the checker on the stack
+// (zero heap allocations).
 //
 // Example:
 //
@@ -223,9 +225,9 @@ type StatusConditionChecker struct {
 //
 // The chain evaluates to true if the condition is present and all checks pass.
 // If the condition is not present, all checks will fail.
-func StatusCondition(obj StatusConditionObject, condType string) *StatusConditionChecker {
+func StatusCondition(obj StatusConditionObject, condType string) StatusConditionChecker {
 	cond := meta.FindStatusCondition(obj.GetStatusConditions(), condType)
-	return &StatusConditionChecker{
+	return StatusConditionChecker{
 		obj:    obj,
 		cond:   cond,
 		result: cond != nil,
@@ -233,19 +235,19 @@ func StatusCondition(obj StatusConditionObject, condType string) *StatusConditio
 }
 
 // Present checks that the condition exists.
-func (c *StatusConditionChecker) Present() *StatusConditionChecker {
+func (c StatusConditionChecker) Present() StatusConditionChecker {
 	// result is already false if cond == nil
 	return c
 }
 
 // Absent checks that the condition does not exist.
-func (c *StatusConditionChecker) Absent() *StatusConditionChecker {
+func (c StatusConditionChecker) Absent() StatusConditionChecker {
 	c.result = c.cond == nil
 	return c
 }
 
 // StatusEqual checks that the condition status equals the given value.
-func (c *StatusConditionChecker) StatusEqual(status metav1.ConditionStatus) *StatusConditionChecker {
+func (c StatusConditionChecker) StatusEqual(status metav1.ConditionStatus) StatusConditionChecker {
 	if c.result {
 		c.result = c.cond.Status == status
 	}
@@ -253,17 +255,17 @@ func (c *StatusConditionChecker) StatusEqual(status metav1.ConditionStatus) *Sta
 }
 
 // IsTrue is a shortcut for StatusEqual(metav1.ConditionTrue).
-func (c *StatusConditionChecker) IsTrue() *StatusConditionChecker {
+func (c StatusConditionChecker) IsTrue() StatusConditionChecker {
 	return c.StatusEqual(metav1.ConditionTrue)
 }
 
 // IsFalse is a shortcut for StatusEqual(metav1.ConditionFalse).
-func (c *StatusConditionChecker) IsFalse() *StatusConditionChecker {
+func (c StatusConditionChecker) IsFalse() StatusConditionChecker {
 	return c.StatusEqual(metav1.ConditionFalse)
 }
 
 // ReasonEqual checks that the condition reason equals the given value.
-func (c *StatusConditionChecker) ReasonEqual(reason string) *StatusConditionChecker {
+func (c StatusConditionChecker) ReasonEqual(reason string) StatusConditionChecker {
 	if c.result {
 		c.result = c.cond.Reason == reason
 	}
@@ -271,7 +273,7 @@ func (c *StatusConditionChecker) ReasonEqual(reason string) *StatusConditionChec
 }
 
 // ReasonNotEqual checks that the condition reason does not equal the given value.
-func (c *StatusConditionChecker) ReasonNotEqual(reason string) *StatusConditionChecker {
+func (c StatusConditionChecker) ReasonNotEqual(reason string) StatusConditionChecker {
 	if c.result {
 		c.result = c.cond.Reason != reason
 	}
@@ -279,7 +281,7 @@ func (c *StatusConditionChecker) ReasonNotEqual(reason string) *StatusConditionC
 }
 
 // MessageEqual checks that the condition message equals the given value.
-func (c *StatusConditionChecker) MessageEqual(message string) *StatusConditionChecker {
+func (c StatusConditionChecker) MessageEqual(message string) StatusConditionChecker {
 	if c.result {
 		c.result = c.cond.Message == message
 	}
@@ -287,7 +289,7 @@ func (c *StatusConditionChecker) MessageEqual(message string) *StatusConditionCh
 }
 
 // MessageContains checks that the condition message contains the given substring.
-func (c *StatusConditionChecker) MessageContains(substr string) *StatusConditionChecker {
+func (c StatusConditionChecker) MessageContains(substr string) StatusConditionChecker {
 	if c.result {
 		c.result = strings.Contains(c.cond.Message, substr)
 	}
@@ -295,7 +297,7 @@ func (c *StatusConditionChecker) MessageContains(substr string) *StatusCondition
 }
 
 // ObservedGenerationCurrent checks that ObservedGeneration equals the object's Generation.
-func (c *StatusConditionChecker) ObservedGenerationCurrent() *StatusConditionChecker {
+func (c StatusConditionChecker) ObservedGenerationCurrent() StatusConditionChecker {
 	if c.result {
 		c.result = c.cond.ObservedGeneration == c.obj.GetGeneration()
 	}
@@ -303,6 +305,6 @@ func (c *StatusConditionChecker) ObservedGenerationCurrent() *StatusConditionChe
 }
 
 // Eval returns the result of all checks.
-func (c *StatusConditionChecker) Eval() bool {
+func (c StatusConditionChecker) Eval() bool {
 	return c.result
 }

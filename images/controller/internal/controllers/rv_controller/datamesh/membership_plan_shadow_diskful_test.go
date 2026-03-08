@@ -270,7 +270,7 @@ var _ = Describe("RemoveReplica(sD)", func() {
 		rv := mkRV(5,
 			[]v1alpha1.DatameshMember{
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
-				{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeLiminalShadowDiskful, NodeName: "node-2"},
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeLiminalShadowDiskful, "node-2"),
 			},
 			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-1")},
 			nil,
