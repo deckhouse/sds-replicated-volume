@@ -281,6 +281,16 @@ type ReplicaOnCompleteFunc[G any, R ReplicaCtx] = func(gctx G, rctx R)
 // confirmed (before the transition is removed). Optional.
 type GlobalOnCompleteFunc[G any] = func(gctx G)
 
+// ReplicaInitFunc is called after a replica-scoped transition is created,
+// before it is added to the tracker. Populates transition-specific metadata.
+// Optional.
+type ReplicaInitFunc[G any, R ReplicaCtx] = func(gctx G, rctx R, t *Transition)
+
+// GlobalInitFunc is called after a global-scoped transition is created,
+// before it is added to the tracker. Populates transition-specific metadata.
+// Optional.
+type GlobalInitFunc[G any] = func(gctx G, t *Transition)
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Step callbacks
 //

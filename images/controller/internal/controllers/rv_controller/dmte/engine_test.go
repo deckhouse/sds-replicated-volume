@@ -831,6 +831,50 @@ var _ = Describe("CreateGlobalTransition", func() {
 	})
 })
 
+var _ = Describe("Init callback", func() {
+	It("global plan: Init populates transition metadata", func() {
+		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+
+		reg.GlobalTransition("ChangeSystemNetworks").
+			Plan("add/v1").Group("Network").DisplayName("Adding").
+			Init(func(_ *testGCtx, t *Transition) {
+				t.FromSystemNetworkNames = []string{"net-A"}
+				t.ToSystemNetworkNames = []string{"net-A", "net-B"}
+			}).
+			Steps(GlobalStep("s", stubGlobalApply, stubGlobalConfirm)).Build()
+
+		var rev int64
+		e := newTestEngine(reg, &mockTracker{}, &rev, nil, testCtx())
+
+		t, reason := e.CreateGlobalTransition("ChangeSystemNetworks", "add/v1")
+
+		Expect(reason).To(BeEmpty())
+		Expect(t).NotTo(BeNil())
+		Expect(t.FromSystemNetworkNames).To(Equal([]string{"net-A"}))
+		Expect(t.ToSystemNetworkNames).To(Equal([]string{"net-A", "net-B"}))
+	})
+
+	It("replica plan: Init populates transition metadata", func() {
+		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+
+		reg.ReplicaTransition("AddReplica", 0).
+			Plan("access/v1").Group("Membership").DisplayName("Adding").
+			Init(func(_ *testGCtx, rctx *testReplicaCtx, t *Transition) {
+				t.ReplicaType = "Access"
+			}).
+			Steps(ReplicaStep("s", stubReplicaApply, stubReplicaConfirm)).Build()
+
+		var rev int64
+		e := newTestEngine(reg, &mockTracker{}, &rev, nil, testCtx(&testReplicaCtx{id: 0, name: "rv-1-0"}))
+
+		t, reason := e.CreateReplicaTransition("AddReplica", "access/v1", 0)
+
+		Expect(reason).To(BeEmpty())
+		Expect(t).NotTo(BeNil())
+		Expect(string(t.ReplicaType)).To(Equal("Access"))
+	})
+})
+
 var _ = Describe("Finalize", func() {
 	It("returns original slice when nothing changed", func() {
 		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
@@ -1054,7 +1098,6 @@ var _ = Describe("createTransition", func() {
 		Expect(t.Type).To(Equal(TransitionType("AddReplica")))
 		Expect(t.Group).To(Equal(TransitionGroup("VotingMembership")))
 		Expect(t.PlanID).To(Equal("diskful-odd/v1"))
-		Expect(t.ReplicaType).To(Equal(v1alpha1.ReplicaTypeDiskful))
 		Expect(t.ReplicaName).To(Equal("rv-1-7"))
 	})
 

@@ -728,6 +728,210 @@ var _ = Describe("guardReplicasMatchTargetNetworks", func() {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
+// addedNetworks
+//
+
+var _ = Describe("addedNetworks", func() {
+	mkTransition := func(from, to []string) *v1alpha1.ReplicatedVolumeDatameshTransition {
+		return &v1alpha1.ReplicatedVolumeDatameshTransition{
+			FromSystemNetworkNames: from,
+			ToSystemNetworkNames:   to,
+		}
+	}
+
+	It("nil transition → nil", func() {
+		gctx := &globalContext{}
+		Expect(addedNetworks(gctx)).To(BeNil())
+	})
+
+	It("from=[A], to=[A,B] → [B]", func() {
+		gctx := &globalContext{}
+		gctx.changeSystemNetworksTransition = mkTransition([]string{"net-A"}, []string{"net-A", "net-B"})
+		Expect(addedNetworks(gctx)).To(Equal([]string{"net-B"}))
+	})
+
+	It("from=[A,B], to=[A] → nil (no added)", func() {
+		gctx := &globalContext{}
+		gctx.changeSystemNetworksTransition = mkTransition([]string{"net-A", "net-B"}, []string{"net-A"})
+		Expect(addedNetworks(gctx)).To(BeNil())
+	})
+
+	It("from=[A], to=[B] → [B] (full replacement)", func() {
+		gctx := &globalContext{}
+		gctx.changeSystemNetworksTransition = mkTransition([]string{"net-A"}, []string{"net-B"})
+		Expect(addedNetworks(gctx)).To(Equal([]string{"net-B"}))
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// confirmAddedAddressesAvailable
+//
+
+var _ = Describe("confirmAddedAddressesAvailable", func() {
+	mkTransition := func(from, to []string) *v1alpha1.ReplicatedVolumeDatameshTransition {
+		return &v1alpha1.ReplicatedVolumeDatameshTransition{
+			FromSystemNetworkNames: from,
+			ToSystemNetworkNames:   to,
+		}
+	}
+
+	It("all confirmed: both RVRs have added address + rev", func() {
+		gctx := buildConnCtx([]connSetup{
+			{id: 0, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 10},
+			{id: 1, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 10},
+		})
+		gctx.changeSystemNetworksTransition = mkTransition([]string{"net-A"}, []string{"net-A", "net-B"})
+		gctx.allReplicas[0].rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-B"},
+		}
+		gctx.allReplicas[1].rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-B"},
+		}
+
+		res := confirmAddedAddressesAvailable(gctx, 10)
+		Expect(res.Confirmed).To(Equal(idset.Of(0, 1)))
+	})
+
+	It("one missing address → only one confirmed", func() {
+		gctx := buildConnCtx([]connSetup{
+			{id: 0, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 10},
+			{id: 1, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 10},
+		})
+		gctx.changeSystemNetworksTransition = mkTransition([]string{"net-A"}, []string{"net-A", "net-B"})
+		gctx.allReplicas[0].rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-B"},
+		}
+		// RVR 1 has no net-B address.
+		gctx.allReplicas[1].rvr.Status.Addresses = nil
+
+		res := confirmAddedAddressesAvailable(gctx, 10)
+		Expect(res.Confirmed).To(Equal(idset.Of(0)))
+	})
+
+	It("rev not confirmed → empty", func() {
+		gctx := buildConnCtx([]connSetup{
+			{id: 0, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 5},
+			{id: 1, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 5},
+		})
+		gctx.changeSystemNetworksTransition = mkTransition([]string{"net-A"}, []string{"net-A", "net-B"})
+		gctx.allReplicas[0].rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-B"},
+		}
+		gctx.allReplicas[1].rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-B"},
+		}
+
+		res := confirmAddedAddressesAvailable(gctx, 10)
+		Expect(res.Confirmed.IsEmpty()).To(BeTrue())
+	})
+
+	It("no transition → pure revision confirm", func() {
+		gctx := buildConnCtx([]connSetup{
+			{id: 0, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 10},
+			{id: 1, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 10},
+		})
+		// No transition set.
+
+		res := confirmAddedAddressesAvailable(gctx, 10)
+		Expect(res.Confirmed).To(Equal(idset.Of(0, 1)))
+	})
+
+	It("multiple added: one RVR has both, other only one", func() {
+		gctx := buildConnCtx([]connSetup{
+			{id: 0, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 10},
+			{id: 1, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 10},
+		})
+		gctx.changeSystemNetworksTransition = mkTransition([]string{"net-A"}, []string{"net-A", "net-B", "net-C"})
+		gctx.allReplicas[0].rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-B"}, {SystemNetworkName: "net-C"},
+		}
+		// RVR 1 has only net-B, missing net-C.
+		gctx.allReplicas[1].rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-B"},
+		}
+
+		res := confirmAddedAddressesAvailable(gctx, 10)
+		Expect(res.Confirmed).To(Equal(idset.Of(0)))
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// confirmAllConnectedOnAddedNetworks
+//
+
+var _ = Describe("confirmAllConnectedOnAddedNetworks", func() {
+	mkTransition := func(from, to []string) *v1alpha1.ReplicatedVolumeDatameshTransition {
+		return &v1alpha1.ReplicatedVolumeDatameshTransition{
+			FromSystemNetworkNames: from,
+			ToSystemNetworkNames:   to,
+		}
+	}
+
+	It("all connected on added net → all confirmed", func() {
+		gctx := buildConnCtx([]connSetup{
+			{id: 0, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 10,
+				peers: []peerSetup{{peerID: 1, connected: true, establishedOn: []string{"net-B"}}}},
+			{id: 1, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 10,
+				peers: []peerSetup{{peerID: 0, connected: true, establishedOn: []string{"net-B"}}}},
+		})
+		gctx.changeSystemNetworksTransition = mkTransition([]string{"net-A"}, []string{"net-A", "net-B"})
+
+		res := confirmAllConnectedOnAddedNetworks(gctx, 10)
+		Expect(res.Confirmed).To(Equal(idset.Of(0, 1)))
+	})
+
+	It("not connected on added net → empty", func() {
+		gctx := buildConnCtx([]connSetup{
+			{id: 0, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 10,
+				peers: []peerSetup{{peerID: 1, connected: true, establishedOn: []string{"net-A"}}}},
+			{id: 1, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 10,
+				peers: []peerSetup{{peerID: 0, connected: true, establishedOn: []string{"net-A"}}}},
+		})
+		gctx.changeSystemNetworksTransition = mkTransition([]string{"net-A"}, []string{"net-A", "net-B"})
+
+		res := confirmAllConnectedOnAddedNetworks(gctx, 10)
+		Expect(res.Confirmed.IsEmpty()).To(BeTrue())
+	})
+
+	It("rev not confirmed → empty", func() {
+		gctx := buildConnCtx([]connSetup{
+			{id: 0, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 5,
+				peers: []peerSetup{{peerID: 1, connected: true, establishedOn: []string{"net-B"}}}},
+			{id: 1, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 5,
+				peers: []peerSetup{{peerID: 0, connected: true, establishedOn: []string{"net-B"}}}},
+		})
+		gctx.changeSystemNetworksTransition = mkTransition([]string{"net-A"}, []string{"net-A", "net-B"})
+
+		res := confirmAllConnectedOnAddedNetworks(gctx, 10)
+		Expect(res.Confirmed.IsEmpty()).To(BeTrue())
+	})
+
+	It("no transition → pure revision confirm", func() {
+		gctx := buildConnCtx([]connSetup{
+			{id: 0, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 10},
+			{id: 1, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 10},
+		})
+		// No transition set.
+
+		res := confirmAllConnectedOnAddedNetworks(gctx, 10)
+		Expect(res.Confirmed).To(Equal(idset.Of(0, 1)))
+	})
+
+	It("partial: one side sees added net connected → both confirmed", func() {
+		gctx := buildConnCtx([]connSetup{
+			{id: 0, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: true, rev: 10,
+				peers: []peerSetup{{peerID: 1, connected: true, establishedOn: []string{"net-B"}}}},
+			{id: 1, mType: v1alpha1.DatameshMemberTypeDiskful, agentReady: false, rev: 10},
+		})
+		gctx.changeSystemNetworksTransition = mkTransition([]string{"net-A"}, []string{"net-A", "net-B"})
+
+		res := confirmAllConnectedOnAddedNetworks(gctx, 10)
+		// id=0 ready, sees 1 on net-B → 0↔1 verified on net-B. Both confirmed.
+		Expect(res.Confirmed).To(Equal(idset.Of(0, 1)))
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Per-member mutation helpers
 //
 

@@ -91,14 +91,10 @@ var _ = Describe("integration: topology switch", func() {
 				// Non-zone FTT: D=3 > D_min=2 → passes. This is the case!
 				rv := mkRV(5,
 					[]v1alpha1.DatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-0", Zone: "a",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
-						{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1", Zone: "a",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
-						{Name: "rv-1-2", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-2", Zone: "b",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
-						{Name: "rv-1-3", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-3", Zone: "c",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
+						mkZonedMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-0", "a"),
+						mkZonedMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-1", "a"),
+						mkZonedMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-2", "b"),
+						mkZonedMember("rv-1-3", v1alpha1.DatameshMemberTypeDiskful, "node-3", "c"),
 					},
 					[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
 					nil,
@@ -151,10 +147,8 @@ var _ = Describe("integration: topology switch", func() {
 				// 2D Ignored in zone-a.
 				rv := mkRV(5,
 					[]v1alpha1.DatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-0", Zone: "a",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
-						{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1", Zone: "a",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
+						mkZonedMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-0", "a"),
+						mkZonedMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-1", "a"),
 					},
 					[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestD("rv-1-2")},
 					nil,
@@ -193,10 +187,8 @@ var _ = Describe("integration: topology switch", func() {
 				// 2D Zonal in zone-a. Add D request for node in zone-b.
 				rv := mkRV(5,
 					[]v1alpha1.DatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-0", Zone: "a",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
-						{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1", Zone: "a",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
+						mkZonedMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-0", "a"),
+						mkZonedMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-1", "a"),
 					},
 					[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestD("rv-1-2")},
 					nil,
@@ -245,12 +237,9 @@ var _ = Describe("integration: topology switch", func() {
 				// 3D Ignored with Zone="" (no zone info, RSP without zones).
 				rv := mkRV(5,
 					[]v1alpha1.DatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-0", Zone: "",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
-						{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1", Zone: "",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
-						{Name: "rv-1-2", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-2", Zone: "",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
+						mkZonedMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-0", ""),
+						mkZonedMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-1", ""),
+						mkZonedMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-2", ""),
 					},
 					[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestD("rv-1-3")},
 					nil,
@@ -337,10 +326,8 @@ var _ = Describe("integration: topology switch", func() {
 				// Losing any zone: surviving=2 ≥ 2 ✓. Pass!
 				rv := mkRV(5,
 					[]v1alpha1.DatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-0", Zone: "a",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
-						{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1", Zone: "b",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
+						mkZonedMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-0", "a"),
+						mkZonedMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-1", "b"),
 					},
 					[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestD("rv-1-2")},
 					nil,
@@ -435,11 +422,9 @@ var _ = Describe("integration: topology switch", func() {
 				// Start: 2D+TB TZ 3z.
 				rv := mkRV(5,
 					[]v1alpha1.DatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-0", Zone: "zone-a",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
-						{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1", Zone: "zone-b",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
-						{Name: "rv-1-2", Type: v1alpha1.DatameshMemberTypeTieBreaker, NodeName: "node-2", Zone: "zone-c"},
+						mkZonedMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-0", "zone-a"),
+						mkZonedMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-1", "zone-b"),
+						mkZonedMember("rv-1-2", v1alpha1.DatameshMemberTypeTieBreaker, "node-2", "zone-c"),
 					},
 					nil, nil,
 				)
@@ -505,15 +490,11 @@ var _ = Describe("integration: topology switch", func() {
 				// Start: 4D+TB TZ 3z: zone-a=D+D, zone-b=D, zone-c=D+TB.
 				rv := mkRV(5,
 					[]v1alpha1.DatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-0", Zone: "zone-a",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
-						{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1", Zone: "zone-a",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
-						{Name: "rv-1-2", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-2", Zone: "zone-b",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
-						{Name: "rv-1-3", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-3", Zone: "zone-c",
-							LVMVolumeGroupName: "test-lvg", LVMVolumeGroupThinPoolName: "test-thin"},
-						{Name: "rv-1-4", Type: v1alpha1.DatameshMemberTypeTieBreaker, NodeName: "node-4", Zone: "zone-c"},
+						mkZonedMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-0", "zone-a"),
+						mkZonedMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-1", "zone-a"),
+						mkZonedMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-2", "zone-b"),
+						mkZonedMember("rv-1-3", v1alpha1.DatameshMemberTypeDiskful, "node-3", "zone-c"),
+						mkZonedMember("rv-1-4", v1alpha1.DatameshMemberTypeTieBreaker, "node-4", "zone-c"),
 					},
 					nil, nil,
 				)

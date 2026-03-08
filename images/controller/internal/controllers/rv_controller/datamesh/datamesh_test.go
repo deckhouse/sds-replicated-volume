@@ -136,7 +136,8 @@ func mkRV(
 			Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 				Members:                 members,
 				Quorum:                  q,
-				QuorumMinimumRedundancy: 1, // minimum valid qmr (GMDR=0 → qmr=1)
+				QuorumMinimumRedundancy: 1,                   // minimum valid qmr (GMDR=0 → qmr=1)
+				SystemNetworkNames:      []string{"default"}, // matches testRSP default
 			},
 			DatameshReplicaRequests: requests,
 			DatameshTransitions:     transitions,
@@ -161,6 +162,9 @@ func mkMember(name string, memberType v1alpha1.DatameshMemberType, nodeName stri
 		Name:     name,
 		Type:     memberType,
 		NodeName: nodeName,
+		Addresses: []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "default"}, // matches testRSP default
+		},
 	}
 	if memberType.HasBackingVolume() ||
 		memberType == v1alpha1.DatameshMemberTypeLiminalDiskful ||
@@ -168,6 +172,13 @@ func mkMember(name string, memberType v1alpha1.DatameshMemberType, nodeName stri
 		m.LVMVolumeGroupName = "test-lvg"
 		m.LVMVolumeGroupThinPoolName = "test-thin"
 	}
+	return m
+}
+
+// mkZonedMember creates a DatameshMember with name, type, nodeName, and zone.
+func mkZonedMember(name string, memberType v1alpha1.DatameshMemberType, nodeName, zone string) v1alpha1.DatameshMember {
+	m := mkMember(name, memberType, nodeName)
+	m.Zone = zone
 	return m
 }
 

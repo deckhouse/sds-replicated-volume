@@ -48,6 +48,7 @@ var commonAddGuards = []any{
 	guardNoMemberOnSameNode,
 	guardRSPAvailable,
 	guardNodeEligible,
+	guardNodeHasAllSystemNetworks,
 }
 
 // commonRemoveGuards are guards shared by all RemoveReplica plans.

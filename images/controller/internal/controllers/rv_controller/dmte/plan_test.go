@@ -19,8 +19,6 @@ package dmte
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
-	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 var _ = Describe("PlanBuilder", func() {
@@ -32,7 +30,6 @@ var _ = Describe("PlanBuilder", func() {
 			completeCalled := false
 			rt.Plan("access/v1").
 				Group("NonVotingMembership").
-				ReplicaType(v1alpha1.ReplicaTypeAccess).
 				DisplayName("Joining datamesh").
 				Guards(
 					func(*testGCtx, *testReplicaCtx) GuardResult {
@@ -51,7 +48,6 @@ var _ = Describe("PlanBuilder", func() {
 			Expect(p.scope).To(Equal(ReplicaScope))
 			Expect(p.group).To(Equal(TransitionGroup("NonVotingMembership")))
 			Expect(p.displayName).To(Equal("Joining datamesh"))
-			Expect(p.replicaType).To(Equal(v1alpha1.ReplicaTypeAccess))
 			Expect(p.steps).To(HaveLen(1))
 			Expect(p.steps[0].name).To(Equal("✦ → A"))
 			Expect(p.steps[0].details).To(Equal("Attaching"))
@@ -91,7 +87,6 @@ var _ = Describe("PlanBuilder", func() {
 			rt := reg.ReplicaTransition("AddReplica", 0)
 			rt.Plan("diskful-odd/v1").
 				Group("VotingMembership").
-				ReplicaType(v1alpha1.ReplicaTypeDiskful).
 				DisplayName("Adding diskful").
 				Steps(
 					ReplicaStep("✦ → D∅", stubReplicaApply, stubReplicaConfirm),
@@ -207,6 +202,26 @@ var _ = Describe("PlanBuilder", func() {
 			}).To(Panic())
 		})
 
+		It("panics on wrong Init type for replica plan", func() {
+			reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+			Expect(func() {
+				replicaPlan(reg, "test/v1").
+					Steps(ReplicaStep("s", stubReplicaApply, stubReplicaConfirm)).
+					Init(func(*testGCtx, *Transition) {}). // should be func(G, R, *Transition)
+					Build()
+			}).To(Panic())
+		})
+
+		It("panics on wrong Init type for global plan", func() {
+			reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+			Expect(func() {
+				globalPlan(reg, "test/v1").
+					Steps(GlobalStep("s", stubGlobalApply, stubGlobalConfirm)).
+					Init(func(*testGCtx, *testReplicaCtx, *Transition) {}). // should be func(G, *Transition)
+					Build()
+			}).To(Panic())
+		})
+
 		It("panics on CancelActiveOnCreate for global plan", func() {
 			reg := NewRegistry[*testGCtx, *testReplicaCtx]()
 			Expect(func() {
@@ -224,57 +239,9 @@ var _ = Describe("PlanBuilder", func() {
 			}).To(Panic())
 		})
 
-		It("panics on ReplicaType for global plan", func() {
-			reg := NewRegistry[*testGCtx, *testReplicaCtx]()
-			Expect(func() {
-				globalPlan(reg, "test/v1").
-					ReplicaType(v1alpha1.ReplicaTypeAccess).
-					Steps(GlobalStep("s", stubGlobalApply, stubGlobalConfirm)).Build()
-			}).To(Panic())
-		})
-
-		It("panics on FromReplicaType for global plan", func() {
-			reg := NewRegistry[*testGCtx, *testReplicaCtx]()
-			Expect(func() {
-				globalPlan(reg, "test/v1").
-					FromReplicaType(v1alpha1.ReplicaTypeDiskful).
-					Steps(GlobalStep("s", stubGlobalApply, stubGlobalConfirm)).Build()
-			}).To(Panic())
-		})
-
-		It("panics on ToReplicaType for global plan", func() {
-			reg := NewRegistry[*testGCtx, *testReplicaCtx]()
-			Expect(func() {
-				globalPlan(reg, "test/v1").
-					ToReplicaType(v1alpha1.ReplicaTypeAccess).
-					Steps(GlobalStep("s", stubGlobalApply, stubGlobalConfirm)).Build()
-			}).To(Panic())
-		})
 	})
 
 	Describe("metadata", func() {
-		It("ReplicaType stored", func() {
-			reg := NewRegistry[*testGCtx, *testReplicaCtx]()
-			rt := reg.ReplicaTransition("T", 0)
-			rt.Plan("test/v1").Group("G").
-				ReplicaType(v1alpha1.ReplicaTypeAccess).
-				Steps(ReplicaStep("s", stubReplicaApply, stubReplicaConfirm)).Build()
-			p := reg.get("T", "test/v1")
-			Expect(p.replicaType).To(Equal(v1alpha1.ReplicaTypeAccess))
-		})
-
-		It("FromReplicaType and ToReplicaType stored", func() {
-			reg := NewRegistry[*testGCtx, *testReplicaCtx]()
-			rt := reg.ReplicaTransition("T", 0)
-			rt.Plan("test/v1").Group("G").
-				FromReplicaType(v1alpha1.ReplicaTypeDiskful).
-				ToReplicaType(v1alpha1.ReplicaTypeAccess).
-				Steps(ReplicaStep("s", stubReplicaApply, stubReplicaConfirm)).Build()
-			p := reg.get("T", "test/v1")
-			Expect(p.fromReplicaType).To(Equal(v1alpha1.ReplicaTypeDiskful))
-			Expect(p.toReplicaType).To(Equal(v1alpha1.ReplicaTypeAccess))
-		})
-
 		It("CancelActiveOnCreate stored for replica plan", func() {
 			reg := NewRegistry[*testGCtx, *testReplicaCtx]()
 			rt := reg.ReplicaTransition("T", 0)

@@ -38,29 +38,108 @@ import (
 // Plan registration
 //
 
-// registerNetworkPlans registers RepairNetworkAddresses plans.
+// registerNetworkPlans registers RepairNetworkAddresses and ChangeSystemNetworks plans.
 func registerNetworkPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
-	repair := reg.GlobalTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses)
+	repairNetworkAddresses := reg.GlobalTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses)
+	changeSystemNetworks := reg.GlobalTransition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeSystemNetworks)
 
 	// RepairNetworkAddresses: sync member addresses from RVR.
 	//
 	// When this triggers, DRBD is already listening on the new IP/port —
 	// connections on the old address are already broken and IO is already
-	// frozen. So we act aggressively: replace member addresses immediately
-	// to restore connectivity as fast as possible.
-	//
-	// Guarded: all replicas' RVR addresses must match the datamesh target
-	// network list before repair can proceed (ensures stable network set).
-	// Confirms when all expected peer connections are verified (at least
-	// one side with a ready agent reports Connected).
-	repair.Plan("repair/v1").
+	// frozen. We act aggressively to restore connectivity ASAP.
+	repairNetworkAddresses.Plan("repair/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork).
 		DisplayName("Repairing connectivity").
 		Guards(guardReplicasMatchTargetNetworks).
 		Steps(
 			ngStep("Repair",
 				repairAddresses,
-				confirmAllMembersConnected,
+				confirmAllConnected,
+			),
+		).
+		Build()
+
+	// ChangeSystemNetworks(add): introduce new system networks.
+	//
+	// Adding networks is always safe for existing connections.
+	changeSystemNetworks.Plan("add/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork).
+		Init(setSystemNetworks).
+		DisplayName("Adding system networks").
+		Guards(guardNodesHaveAddedNetworks).
+		Steps(
+			ngStep("Listen",
+				addNewNetworks,
+				confirmAddedAddressesAvailable,
+			),
+			ngStep("Connect",
+				addNewAddresses,
+				confirmAllConnectedOnAddedNetworks,
+			),
+		).
+		Build()
+
+	// ChangeSystemNetworks(remove): decommission system networks.
+	//
+	// Guarded: remaining networks must have full connectivity.
+	changeSystemNetworks.Plan("remove/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork).
+		Init(setSystemNetworks).
+		DisplayName("Removing system networks").
+		Guards(guardRemainingNetworksConnected).
+		Steps(
+			ngStep("Disconnect",
+				removeOldNetworksAndAddresses,
+				confirmAllMembers,
+			),
+		).
+		Build()
+
+	// ChangeSystemNetworks(update): add new and remove old simultaneously.
+	//
+	// Remaining networks (intersection) carry traffic during the transition.
+	changeSystemNetworks.Plan("update/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork).
+		Init(setSystemNetworks).
+		DisplayName("Updating system networks").
+		Guards(guardRemainingNetworksConnected, guardNodesHaveAddedNetworks).
+		Steps(
+			ngStep("Listen new & Disconnect old",
+				composeGlobalApply(
+					removeOldNetworksAndAddresses,
+					addNewNetworks,
+				),
+				confirmAddedAddressesAvailable,
+			),
+			ngStep("Connect",
+				addNewAddresses,
+				confirmAllConnectedOnAddedNetworks,
+			),
+		).
+		Build()
+
+	// ChangeSystemNetworks(migrate): full replacement (no remaining networks).
+	//
+	// No connectivity guard — intersection is empty, old network may already
+	// be broken. Establishes new connectivity first, then removes old.
+	changeSystemNetworks.Plan("migrate/v1").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork).
+		Init(setSystemNetworks).
+		DisplayName("Migrating system networks").
+		Guards(guardNodesHaveAddedNetworks).
+		Steps(
+			ngStep("Listen new",
+				addNewNetworks,
+				confirmAddedAddressesAvailable,
+			),
+			ngStep("Connect new",
+				addNewAddresses,
+				confirmAllConnectedOnAddedNetworks,
+			),
+			ngStep("Disconnect old",
+				removeOldNetworksAndAddresses,
+				confirmAllMembers,
 			),
 		).
 		Build()

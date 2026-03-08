@@ -62,11 +62,11 @@ type globalContext struct {
 	// features describes cluster-level feature availability for path resolution.
 	features FeatureFlags
 
-	// targetSystemNetworkNames points to TargetSystemNetworkNames from the active
-	// ChangeSystemNetwork transition. Nil if no such transition exists.
-	// Read-only — must not be mutated by callbacks. Set/cleared by the
-	// concurrency tracker in Add/Remove.
-	targetSystemNetworkNames *[]string
+	// changeSystemNetworksTransition points to the active ChangeSystemNetworks
+	// transition. Nil if no such transition exists. Read-only — must not be
+	// mutated by callbacks. Set/cleared by the concurrency tracker in Add/Remove.
+	// Provides access to FromSystemNetworkNames and ToSystemNetworkNames.
+	changeSystemNetworksTransition *v1alpha1.ReplicatedVolumeDatameshTransition
 
 	// replicas is the per-ID index (0-31). Nil for unused IDs.
 	replicas [32]*ReplicaContext

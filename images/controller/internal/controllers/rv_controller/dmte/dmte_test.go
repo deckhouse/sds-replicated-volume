@@ -213,9 +213,8 @@ func newTestReplicaPlan() *plan[*testGCtx, *testReplicaCtx] {
 		scope:          ReplicaScope,
 		transitionType: "AddReplica",
 		group:          "VotingMembership",
-		displayName:    "Adding replica",
-		replicaType:    v1alpha1.ReplicaTypeDiskful,
-		slot:           0,
+		displayName: "Adding replica",
+		slot:        0,
 		steps: []step[*testGCtx, *testReplicaCtx]{
 			{name: "✦ → D∅", scope: ReplicaScope, replicaApply: stubReplicaApply, replicaConfirm: stubReplicaConfirm},
 			{name: "D∅ → D", scope: ReplicaScope, replicaApply: stubReplicaApply, replicaConfirm: stubReplicaConfirm},

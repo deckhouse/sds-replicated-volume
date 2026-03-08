@@ -54,7 +54,7 @@ func registerForceRemovePlans(
 	// ForceRemoveReplica(A): A → ✕
 	forceRemove.Plan("access/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupEmergency).
-		ReplicaType(v1alpha1.ReplicaTypeAccess).
+		Init(setReplicaType(v1alpha1.ReplicaTypeAccess)).
 		DisplayName("Force-removing replica").
 		CancelActiveOnCreate(true).
 		Guards(forceRemoveGuards...).
@@ -70,7 +70,7 @@ func registerForceRemovePlans(
 	// ForceRemoveReplica(TB): TB → ✕
 	forceRemove.Plan("tiebreaker/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupEmergency).
-		ReplicaType(v1alpha1.ReplicaTypeTieBreaker).
+		Init(setReplicaType(v1alpha1.ReplicaTypeTieBreaker)).
 		DisplayName("Force-removing replica").
 		CancelActiveOnCreate(true).
 		Guards(forceRemoveGuards...).
@@ -86,7 +86,7 @@ func registerForceRemovePlans(
 	// ForceRemoveReplica(sD): sD → ✕ (also handles sD∅)
 	forceRemove.Plan("shadow-diskful/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupEmergency).
-		ReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
+		Init(setReplicaType(v1alpha1.ReplicaTypeShadowDiskful)).
 		DisplayName("Force-removing replica").
 		CancelActiveOnCreate(true).
 		Guards(forceRemoveGuards...).
@@ -107,7 +107,7 @@ func registerForceRemovePlans(
 	// Also handles D∅. No qmr change → no baseline update needed.
 	forceRemove.Plan("diskful/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupEmergency).
-		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Force-removing replica").
 		CancelActiveOnCreate(true).
 		Guards(forceRemoveGuards...).
@@ -125,7 +125,7 @@ func registerForceRemovePlans(
 	// Also handles D∅. No qmr change → no baseline update needed.
 	forceRemove.Plan("diskful-q-down/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupEmergency).
-		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Force-removing replica").
 		CancelActiveOnCreate(true).
 		Guards(forceRemoveGuards...).

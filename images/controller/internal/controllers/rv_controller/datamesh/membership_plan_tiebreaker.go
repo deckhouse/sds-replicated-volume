@@ -42,7 +42,7 @@ func registerTieBreakerPlans(
 	// No TB-specific guards — adding a TB is always safe.
 	addReplica.Plan("tiebreaker/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeTieBreaker).
+		Init(setReplicaType(v1alpha1.ReplicaTypeTieBreaker)).
 		DisplayName("Joining datamesh").
 		Guards(commonAddGuards...).
 		Guards(gainTBGuards...).
@@ -58,7 +58,7 @@ func registerTieBreakerPlans(
 	// RemoveReplica(TB): TB → ✕
 	removeReplica.Plan("tiebreaker/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeTieBreaker).
+		Init(setReplicaType(v1alpha1.ReplicaTypeTieBreaker)).
 		DisplayName("Leaving datamesh").
 		Guards(commonRemoveGuards...).
 		Guards(loseTBGuards...).

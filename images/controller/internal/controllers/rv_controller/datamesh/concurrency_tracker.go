@@ -67,7 +67,7 @@ func (c *concurrencyTracker) Add(t *dmte.Transition) {
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork:
 		c.gctx.hasNetworkTransition = true
 		if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeSystemNetworks {
-			c.gctx.targetSystemNetworkNames = &t.TargetSystemNetworkNames
+			c.gctx.changeSystemNetworksTransition = t
 		}
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership:
 		c.gctx.votingMembershipTransitions.Add(t.ReplicaID())
@@ -93,7 +93,7 @@ func (c *concurrencyTracker) Remove(t *dmte.Transition) {
 		c.gctx.hasMultiattachTransition = false
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork:
 		c.gctx.hasNetworkTransition = false
-		c.gctx.targetSystemNetworkNames = nil
+		c.gctx.changeSystemNetworksTransition = nil
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership:
 		c.gctx.votingMembershipTransitions.Remove(t.ReplicaID())
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership:

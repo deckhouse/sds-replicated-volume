@@ -50,7 +50,7 @@ func registerShadowDiskfulPlans(
 	// Step 2 (sD∅ → sD): attaches the disk. Bitmaps are already in place.
 	addReplica.Plan("shadow-diskful/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
+		Init(setReplicaType(v1alpha1.ReplicaTypeShadowDiskful)).
 		DisplayName("Joining datamesh").
 		Guards(commonAddGuards...).
 		Guards(guardShadowDiskfulSupported, guardMaxDiskMembers).
@@ -79,7 +79,7 @@ func registerShadowDiskfulPlans(
 	// Also handles removal from sD∅ state (member already liminal).
 	removeReplica.Plan("shadow-diskful/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
+		Init(setReplicaType(v1alpha1.ReplicaTypeShadowDiskful)).
 		DisplayName("Leaving datamesh").
 		Guards(commonRemoveGuards...).
 		Steps(

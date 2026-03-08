@@ -633,16 +633,16 @@ func (e *Engine[G, R, C]) createTransition(
 		Steps:  steps,
 	}
 
-	// Replica-scoped: set ReplicaName and optional replica type metadata.
+	// Replica-scoped: set ReplicaName.
 	if p.scope == ReplicaScope {
 		t.ReplicaName = rctx.Name()
 		if t.ReplicaName == "" {
 			panic("dmte.Engine.createTransition: rctx.Name() returned empty for replica-scoped plan " + string(planID))
 		}
-		t.ReplicaType = p.replicaType
-		t.FromReplicaType = p.fromReplicaType
-		t.ToReplicaType = p.toReplicaType
 	}
+
+	// Call Init callback to populate transition-specific metadata.
+	p.callInit(e.cp.Global(), rctx, &t)
 
 	e.transitions = append(e.transitions, &t)
 	return &t

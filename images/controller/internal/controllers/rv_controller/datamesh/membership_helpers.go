@@ -54,6 +54,28 @@ func mgStep(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Init callbacks
+//
+
+// setReplicaType returns an Init callback that sets transition.ReplicaType.
+// Used by AddReplica, RemoveReplica, and ForceRemoveReplica plans.
+func setReplicaType(rt v1alpha1.ReplicaType) func(*globalContext, *ReplicaContext, *dmte.Transition) {
+	return func(_ *globalContext, _ *ReplicaContext, t *dmte.Transition) {
+		t.ReplicaType = rt
+	}
+}
+
+// setReplicaFromToType returns an Init callback that sets
+// transition.FromReplicaType and transition.ToReplicaType.
+// Used by ChangeReplicaType plans.
+func setReplicaFromToType(from, to v1alpha1.ReplicaType) func(*globalContext, *ReplicaContext, *dmte.Transition) {
+	return func(_ *globalContext, _ *ReplicaContext, t *dmte.Transition) {
+		t.FromReplicaType = from
+		t.ToReplicaType = to
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // OnComplete callbacks
 //
 

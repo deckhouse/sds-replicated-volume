@@ -59,7 +59,7 @@ func registerDiskfulPlans(
 	// AddReplica(D): ✦ → D∅ → D (even→odd voters, no qmr↑)
 	addReplica.Plan("diskful/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
 		Guards(gainVoterGuards...).
@@ -83,7 +83,7 @@ func registerDiskfulPlans(
 	// AddReplica(D) + qmr↑: ✦ → D∅ → D → qmr↑ (even→odd, qmr↑)
 	addReplica.Plan("diskful-qmr-up/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
 		Guards(gainVoterGuards...).
@@ -111,7 +111,7 @@ func registerDiskfulPlans(
 	// AddReplica(D) + q↑: ✦ → A → D∅ + q↑ → D (odd→even, no qmr↑)
 	addReplica.Plan("diskful-q-up/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
 		Guards(gainVoterGuards...).
@@ -140,7 +140,7 @@ func registerDiskfulPlans(
 	// AddReplica(D) + q↑ + qmr↑: ✦ → A → D∅ + q↑ → D → qmr↑ (odd→even, qmr↑)
 	addReplica.Plan("diskful-q-up-qmr-up/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
 		Guards(gainVoterGuards...).
@@ -177,7 +177,7 @@ func registerDiskfulPlans(
 	// AddReplica(D) via sD: ✦ → sD∅ → sD → D (even→odd, no qmr↑)
 	addReplica.Plan("diskful-via-sd/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
 		Guards(gainVoterGuards...).
@@ -208,7 +208,7 @@ func registerDiskfulPlans(
 	// AddReplica(D) via sD + qmr↑: ✦ → sD∅ → sD → D → qmr↑ (even→odd, qmr↑)
 	addReplica.Plan("diskful-via-sd-qmr-up/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
 		Guards(gainVoterGuards...).
@@ -258,7 +258,7 @@ func registerDiskfulPlans(
 	// already synced during the sD phase).
 	addReplica.Plan("diskful-via-sd-q-up/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
 		Guards(gainVoterGuards...).
@@ -299,7 +299,7 @@ func registerDiskfulPlans(
 	// Same sD detach-before-promote sequence as diskful-via-sd-q-up — see comment above.
 	addReplica.Plan("diskful-via-sd-q-up-qmr-up/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Adding diskful replica").
 		Guards(commonAddGuards...).
 		Guards(gainVoterGuards...).
@@ -357,7 +357,7 @@ func registerDiskfulPlans(
 	// RemoveReplica(D): D → D∅ → ✕ (odd→even voters, no qmr↓)
 	removeReplica.Plan("remove-diskful/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Removing diskful replica").
 		Guards(commonRemoveGuards...).
 		Guards(loseVoterGuards...).
@@ -378,7 +378,7 @@ func registerDiskfulPlans(
 	// qmr↓ + RemoveReplica(D): qmr↓ → D → D∅ → ✕ (odd→even, qmr↓)
 	removeReplica.Plan("remove-diskful-qmr-down/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Removing diskful replica").
 		Guards(commonRemoveGuards...).
 		Guards(loseVoterGuards...).
@@ -406,7 +406,7 @@ func registerDiskfulPlans(
 	// RemoveReplica(D) + q↓: D → D∅ → A + q↓ → ✕ (even→odd, no qmr↓)
 	removeReplica.Plan("remove-diskful-q-down/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Removing diskful replica").
 		Guards(commonRemoveGuards...).
 		Guards(loseVoterGuards...).
@@ -435,7 +435,7 @@ func registerDiskfulPlans(
 	// qmr↓ + RemoveReplica(D) + q↓: qmr↓ → D → D∅ → A + q↓ → ✕ (even→odd, qmr↓)
 	removeReplica.Plan("remove-diskful-qmr-down-q-down/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		ReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Removing diskful replica").
 		Guards(commonRemoveGuards...).
 		Guards(loseVoterGuards...).

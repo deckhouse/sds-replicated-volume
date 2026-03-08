@@ -55,6 +55,22 @@ func findAddressByNetwork(addrs []v1alpha1.DRBDResourceAddressStatus, network st
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Init callback
+//
+
+// setSystemNetworks is an Init callback for ChangeSystemNetworks plans.
+// Captures from (current datamesh) and to (RSP configuration) system network
+// names into the transition at creation time.
+func setSystemNetworks(gctx *globalContext, t *dmte.Transition) {
+	if gctx.rsp == nil {
+		// Dispatcher must not dispatch ChangeSystemNetworks without RSP.
+		panic("setSystemNetworks: RSP is nil — dispatcher should not have dispatched ChangeSystemNetworks")
+	}
+	t.FromSystemNetworkNames = slices.Clone(gctx.datamesh.systemNetworkNames)
+	t.ToSystemNetworkNames = gctx.rsp.GetSystemNetworkNames()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Apply callbacks (global scope)
 //
 
@@ -72,6 +88,104 @@ func repairAddresses(gctx *globalContext) bool {
 			continue
 		}
 		if repairMemberAddresses(rctx.member, rctx.rvr.Status.Addresses, targetNets) {
+			changed = true
+		}
+	}
+	return changed
+}
+
+// addNewNetworks appends added networks to datamesh.systemNetworkNames.
+// Used by add/v1 step 1, and composed in update/v1 step 1 and migrate/v1 step 1.
+func addNewNetworks(gctx *globalContext) bool {
+	added := addedNetworks(gctx)
+	if len(added) == 0 {
+		return false
+	}
+	changed := false
+	for _, net := range added {
+		if !slices.Contains(gctx.datamesh.systemNetworkNames, net) {
+			gctx.datamesh.systemNetworkNames = append(gctx.datamesh.systemNetworkNames, net)
+			changed = true
+		}
+	}
+	return changed
+}
+
+// removeOldNetworksAndAddresses removes old networks from
+// datamesh.systemNetworkNames and their addresses from all members.
+// Used by remove/v1 step 1, and composed in update/v1 step 1 and migrate/v1 step 1.
+func removeOldNetworksAndAddresses(gctx *globalContext) bool {
+	removed := removedNetworks(gctx)
+	if len(removed) == 0 {
+		return false
+	}
+
+	changed := false
+
+	// Remove from datamesh.systemNetworkNames.
+	n := 0
+	for _, net := range gctx.datamesh.systemNetworkNames {
+		if !slices.Contains(removed, net) {
+			gctx.datamesh.systemNetworkNames[n] = net
+			n++
+		}
+	}
+	if n != len(gctx.datamesh.systemNetworkNames) { // something was actually removed
+		clear(gctx.datamesh.systemNetworkNames[n:])
+		gctx.datamesh.systemNetworkNames = gctx.datamesh.systemNetworkNames[:n]
+		changed = true
+	}
+
+	// Remove addresses from members.
+	for i := range gctx.allReplicas {
+		rctx := &gctx.allReplicas[i]
+		if rctx.member == nil {
+			continue
+		}
+		m := 0
+		for j := range rctx.member.Addresses {
+			if !slices.Contains(removed, rctx.member.Addresses[j].SystemNetworkName) {
+				rctx.member.Addresses[m] = rctx.member.Addresses[j]
+				m++
+			}
+		}
+		if m != len(rctx.member.Addresses) { // something was actually removed
+			clear(rctx.member.Addresses[m:])
+			rctx.member.Addresses = rctx.member.Addresses[:m]
+			changed = true
+		}
+	}
+
+	return changed
+}
+
+// addNewAddresses copies addresses for added networks from RVR to members.
+// Used by add/v1 step 2, update/v1 step 2, migrate/v1 step 2.
+func addNewAddresses(gctx *globalContext) bool {
+	added := addedNetworks(gctx)
+	if len(added) == 0 {
+		return false
+	}
+	changed := false
+	for i := range gctx.allReplicas {
+		rctx := &gctx.allReplicas[i]
+		if rctx.member == nil || rctx.rvr == nil {
+			continue
+		}
+		for _, net := range added {
+			ra := findAddressByNetwork(rctx.rvr.Status.Addresses, net)
+			if ra == nil {
+				continue // RVR hasn't reported yet (defensive)
+			}
+			if ma := findAddressByNetwork(rctx.member.Addresses, net); ma != nil {
+				// Already present (should not happen) — update address.
+				if ma.Address != ra.Address {
+					ma.Address = ra.Address
+					changed = true
+				}
+				continue
+			}
+			rctx.member.Addresses = append(rctx.member.Addresses, *ra)
 			changed = true
 		}
 	}
@@ -128,13 +242,6 @@ func addressesEqual(a, b []v1alpha1.DRBDResourceAddressStatus) bool {
 func needsAddressRepair(gctx *globalContext) bool {
 	targetNets := gctx.datamesh.systemNetworkNames
 
-	// No datamesh system networks configured — nothing to repair against.
-	// Should not happen in production (Formation sets systemNetworkNames),
-	// but common in tests that don't set up network context.
-	if len(targetNets) == 0 {
-		return false
-	}
-
 	for i := range gctx.allReplicas {
 		rctx := &gctx.allReplicas[i]
 		if rctx.member == nil || rctx.rvr == nil {
@@ -168,12 +275,12 @@ func needsAddressRepair(gctx *globalContext) bool {
 // Confirm callbacks
 //
 
-// confirmAllMembersConnected checks confirmation for RepairNetworkAddresses.
+// confirmAllConnected checks confirmation for RepairNetworkAddresses.
 // MustConfirm = all datamesh members.
 // A member is confirmed when DatameshRevision >= stepRevision AND all of its
 // expected connections are verified (at least one side with a ready agent
 // reports Connected).
-func confirmAllMembersConnected(gctx *globalContext, stepRevision int64) dmte.ConfirmResult {
+func confirmAllConnected(gctx *globalContext, stepRevision int64) dmte.ConfirmResult {
 	mustConfirm := allMemberIDs(gctx)
 	revisionConfirmed := confirmedReplicas(gctx, stepRevision).Intersect(mustConfirm)
 
@@ -186,6 +293,109 @@ func confirmAllMembersConnected(gctx *globalContext, stepRevision int64) dmte.Co
 	for id := range revisionConfirmed.All() {
 		rctx := gctx.replicas[id]
 		if rctx != nil && rctx.member != nil && allConnectionsOfMemberVerified(gctx, rctx, stepRevision, allMembers, fmMembers, peerConnected) {
+			confirmed.Add(id)
+		}
+	}
+	return dmte.ConfirmResult{MustConfirm: mustConfirm, Confirmed: confirmed}
+}
+
+// addedNetworks returns the networks being added by the active
+// ChangeSystemNetworks transition (to - from). Returns nil if no such
+// transition exists. Used by confirm callbacks.
+func addedNetworks(gctx *globalContext) []string {
+	t := gctx.changeSystemNetworksTransition
+	if t == nil {
+		return nil
+	}
+	var added []string
+	for _, net := range t.ToSystemNetworkNames {
+		if !slices.Contains(t.FromSystemNetworkNames, net) {
+			added = append(added, net)
+		}
+	}
+	return added
+}
+
+// removedNetworks returns the networks being removed by the active
+// ChangeSystemNetworks transition (from - to). Returns nil if no such
+// transition exists. Used by apply callbacks.
+func removedNetworks(gctx *globalContext) []string {
+	t := gctx.changeSystemNetworksTransition
+	if t == nil {
+		return nil
+	}
+	var removed []string
+	for _, net := range t.FromSystemNetworkNames {
+		if !slices.Contains(t.ToSystemNetworkNames, net) {
+			removed = append(removed, net)
+		}
+	}
+	return removed
+}
+
+// confirmAddedAddressesAvailable checks that all RVRs have reported
+// addresses on every added network. Used by add/v1 step 1, update/v1
+// step 1, migrate/v1 step 1.
+//
+// MustConfirm = all datamesh members.
+// A member is confirmed when DatameshRevision >= stepRevision AND
+// rvr.Status.Addresses contains an entry for every added network.
+func confirmAddedAddressesAvailable(gctx *globalContext, stepRevision int64) dmte.ConfirmResult {
+	mustConfirm := allMemberIDs(gctx)
+	revisionConfirmed := confirmedReplicas(gctx, stepRevision).Intersect(mustConfirm)
+	added := addedNetworks(gctx)
+
+	var confirmed idset.IDSet
+	for id := range revisionConfirmed.All() {
+		rctx := gctx.replicas[id]
+		if rctx == nil || rctx.rvr == nil {
+			continue
+		}
+		hasAllAddedAddresses := true
+		for _, net := range added {
+			if findAddressByNetwork(rctx.rvr.Status.Addresses, net) == nil {
+				hasAllAddedAddresses = false
+				break
+			}
+		}
+		if hasAllAddedAddresses {
+			confirmed.Add(id)
+		}
+	}
+	return dmte.ConfirmResult{MustConfirm: mustConfirm, Confirmed: confirmed}
+}
+
+// confirmAllConnectedOnAddedNetworks checks that all expected peer
+// connections are established on every added network. Used by add/v1
+// step 2, update/v1 step 2, migrate/v1 step 2.
+//
+// MustConfirm = all datamesh members.
+// A member is confirmed when DatameshRevision >= stepRevision AND for
+// every added network, all expected peer connections are verified via
+// peerConnectedOnNetwork.
+func confirmAllConnectedOnAddedNetworks(gctx *globalContext, stepRevision int64) dmte.ConfirmResult {
+	mustConfirm := allMemberIDs(gctx)
+	revisionConfirmed := confirmedReplicas(gctx, stepRevision).Intersect(mustConfirm)
+	added := addedNetworks(gctx)
+
+	// Precompute member sets once for all iterations.
+	allMembers := allMemberIDs(gctx)
+	fmMembers := fullMeshMemberIDs(gctx)
+
+	var confirmed idset.IDSet
+	for id := range revisionConfirmed.All() {
+		rctx := gctx.replicas[id]
+		if rctx == nil || rctx.member == nil {
+			continue
+		}
+		allNetsOK := true
+		for _, net := range added {
+			if !allConnectionsOfMemberVerified(gctx, rctx, stepRevision, allMembers, fmMembers, peerConnectedOnNetwork(net)) {
+				allNetsOK = false
+				break
+			}
+		}
+		if allNetsOK {
 			confirmed.Add(id)
 		}
 	}
@@ -305,6 +515,31 @@ func guardReplicasMatchTargetNetworks(gctx *globalContext) dmte.GuardResult {
 		return dmte.GuardResult{Blocked: true, Message: msg}
 	}
 
+	return dmte.GuardResult{}
+}
+
+// guardNodesHaveAddedNetworks checks that every added system network is
+// available on every node that has a replica. This ensures that agents
+// will be able to listen on the new networks after the transition applies.
+//
+// TODO: not yet implemented — requires per-node network availability data
+// in RSP (e.g., RSP.Spec.EligibleNodes[].AvailableSystemNetworks). Currently
+// always passes. Used by ChangeSystemNetworks add/v1, update/v1, migrate/v1.
+func guardNodesHaveAddedNetworks(_ *globalContext) dmte.GuardResult {
+	// TODO: check that each added network (to - from) is available on every
+	// node with a member. Requires RSP to expose per-node network availability.
+	return dmte.GuardResult{}
+}
+
+// guardNodeHasAllSystemNetworks checks that the replica's node has all
+// system networks from datamesh.systemNetworkNames. This ensures that
+// a newly added member will be able to listen on all required networks.
+//
+// TODO: not yet implemented — requires per-node network availability data
+// in RSP. Currently always passes. Used by commonAddGuards.
+func guardNodeHasAllSystemNetworks(_ *globalContext, _ *ReplicaContext) dmte.GuardResult {
+	// TODO: check that rctx's node supports all datamesh system networks.
+	// Requires RSP to expose per-node network availability.
 	return dmte.GuardResult{}
 }
 

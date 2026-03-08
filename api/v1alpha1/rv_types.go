@@ -261,8 +261,10 @@ func (t ReplicatedVolumeDatameshReplicaRequest) ID() uint8 {
 //	+kubebuilder:validation:XValidation:rule="!(self.type == 'AddReplica' || self.type == 'RemoveReplica' || self.type == 'ForceRemoveReplica') || has(self.replicaType)",message="replicaType is required for AddReplica, RemoveReplica, ForceRemoveReplica transitions"
 //	+kubebuilder:validation:XValidation:rule="self.type == 'ChangeReplicaType' || (!has(self.fromReplicaType) && !has(self.toReplicaType))",message="fromReplicaType and toReplicaType must only be set for ChangeReplicaType transitions"
 //	+kubebuilder:validation:XValidation:rule="self.type != 'ChangeReplicaType' || (has(self.fromReplicaType) && has(self.toReplicaType))",message="fromReplicaType and toReplicaType are required for ChangeReplicaType transitions"
-//	+kubebuilder:validation:XValidation:rule="self.type == 'ChangeSystemNetworks' || !has(self.targetSystemNetworkNames)",message="targetSystemNetworkNames must only be set for ChangeSystemNetworks transitions"
-//	+kubebuilder:validation:XValidation:rule="self.type != 'ChangeSystemNetworks' || has(self.targetSystemNetworkNames)",message="targetSystemNetworkNames is required for ChangeSystemNetworks transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type == 'ChangeSystemNetworks' || !has(self.fromSystemNetworkNames)",message="fromSystemNetworkNames must only be set for ChangeSystemNetworks transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type == 'ChangeSystemNetworks' || !has(self.toSystemNetworkNames)",message="toSystemNetworkNames must only be set for ChangeSystemNetworks transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type != 'ChangeSystemNetworks' || has(self.fromSystemNetworkNames)",message="fromSystemNetworkNames is required for ChangeSystemNetworks transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type != 'ChangeSystemNetworks' || has(self.toSystemNetworkNames)",message="toSystemNetworkNames is required for ChangeSystemNetworks transitions"
 type ReplicatedVolumeDatameshTransition struct {
 	// Type is the transition type.
 	// +kubebuilder:validation:Required
@@ -299,15 +301,25 @@ type ReplicatedVolumeDatameshTransition struct {
 	// +optional
 	ToReplicaType ReplicaType `json:"toReplicaType,omitempty"`
 
-	// TargetSystemNetworkNames is the desired set of system network names for
-	// ChangeSystemNetworks transitions. Captured at dispatch time to ensure
-	// deterministic apply even if rvr.Status.Addresses changes mid-transition.
-	// Required for ChangeSystemNetworks. Must not be set for other types.
+	// FromSystemNetworkNames is the source set of system network names for
+	// ChangeSystemNetworks transitions. Captured from datamesh.systemNetworkNames
+	// at dispatch time. Required for ChangeSystemNetworks. Must not be set for
+	// other types.
 	// +kubebuilder:validation:MaxItems=10
 	// +kubebuilder:validation:items:MaxLength=64
 	// +listType=atomic
 	// +optional
-	TargetSystemNetworkNames []string `json:"targetSystemNetworkNames,omitempty"`
+	FromSystemNetworkNames []string `json:"fromSystemNetworkNames,omitempty"`
+
+	// ToSystemNetworkNames is the target set of system network names for
+	// ChangeSystemNetworks transitions. Captured from RSP configuration at
+	// dispatch time. Required for ChangeSystemNetworks. Must not be set for
+	// other types.
+	// +kubebuilder:validation:MaxItems=10
+	// +kubebuilder:validation:items:MaxLength=64
+	// +listType=atomic
+	// +optional
+	ToSystemNetworkNames []string `json:"toSystemNetworkNames,omitempty"`
 
 	// Group is the concurrency group for this transition.
 	// Set by the controller at transition creation time. Read-only for users.

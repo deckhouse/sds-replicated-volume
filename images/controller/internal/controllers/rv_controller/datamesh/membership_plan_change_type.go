@@ -44,8 +44,7 @@ func registerChangeTypePlans(
 	// star members, so the transition is safe while attached.
 	changeReplicaType.Plan("a-to-tb/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeAccess).
-		ToReplicaType(v1alpha1.ReplicaTypeTieBreaker).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeAccess, v1alpha1.ReplicaTypeTieBreaker)).
 		DisplayName("Changing replica type").
 		Guards(gainTBGuards...).
 		Steps(
@@ -62,8 +61,7 @@ func registerChangeTypePlans(
 	// and leaving-TB guards ensure TB coverage is maintained.
 	changeReplicaType.Plan("tb-to-a/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeTieBreaker).
-		ToReplicaType(v1alpha1.ReplicaTypeAccess).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeTieBreaker, v1alpha1.ReplicaTypeAccess)).
 		DisplayName("Changing replica type").
 		Guards(guardVolumeAccessNotLocal).
 		Guards(loseTBGuards...).
@@ -87,8 +85,7 @@ func registerChangeTypePlans(
 	// Step 2 (sD∅ → sD): attaches the disk. Bitmaps are already in place.
 	changeReplicaType.Plan("a-to-sd/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeAccess).
-		ToReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeAccess, v1alpha1.ReplicaTypeShadowDiskful)).
 		DisplayName("Changing replica type").
 		Guards(guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
@@ -122,8 +119,7 @@ func registerChangeTypePlans(
 	// no-op if already liminal.
 	changeReplicaType.Plan("sd-to-a/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
-		ToReplicaType(v1alpha1.ReplicaTypeAccess).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeShadowDiskful, v1alpha1.ReplicaTypeAccess)).
 		DisplayName("Changing replica type").
 		Guards(guardVolumeAccessNotLocal).
 		Steps(
@@ -151,8 +147,7 @@ func registerChangeTypePlans(
 	// Guarded: feature flag (sD requires Flant DRBD) + leaving-TB guards.
 	changeReplicaType.Plan("tb-to-sd/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeTieBreaker).
-		ToReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeTieBreaker, v1alpha1.ReplicaTypeShadowDiskful)).
 		DisplayName("Changing replica type").
 		Guards(guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Guards(loseTBGuards...).
@@ -182,8 +177,7 @@ func registerChangeTypePlans(
 	// Also handles sD∅ → TB (liminal state, step 1 is no-op).
 	changeReplicaType.Plan("sd-to-tb/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
-		ToReplicaType(v1alpha1.ReplicaTypeTieBreaker).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeShadowDiskful, v1alpha1.ReplicaTypeTieBreaker)).
 		DisplayName("Changing replica type").
 		Guards(guardVolumeAccessNotLocal).
 		Guards(gainTBGuards...).
@@ -214,8 +208,7 @@ func registerChangeTypePlans(
 	// No q change (even→odd voters).
 	changeReplicaType.Plan("sd-to-d/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
-		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeShadowDiskful, v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Changing replica type").
 		Guards(gainVoterGuards...).
 		Guards(guardShadowDiskfulSupported, guardVotersEven).
@@ -235,8 +228,7 @@ func registerChangeTypePlans(
 	// No BV changes — BV already present from sD throughout.
 	changeReplicaType.Plan("sd-to-d-q-up/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
-		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeShadowDiskful, v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Changing replica type").
 		Guards(gainVoterGuards...).
 		Guards(guardShadowDiskfulSupported, guardVotersOdd).
@@ -267,8 +259,7 @@ func registerChangeTypePlans(
 	// No q change (odd→even voters).
 	changeReplicaType.Plan("d-to-sd/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
-		ToReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeDiskful, v1alpha1.ReplicaTypeShadowDiskful)).
 		DisplayName("Changing replica type").
 		Guards(loseVoterGuards...).
 		Guards(guardShadowDiskfulSupported, guardVotersOdd).
@@ -289,8 +280,7 @@ func registerChangeTypePlans(
 	// No qmr change → no baseline update needed.
 	changeReplicaType.Plan("d-to-sd-q-down/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
-		ToReplicaType(v1alpha1.ReplicaTypeShadowDiskful).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeDiskful, v1alpha1.ReplicaTypeShadowDiskful)).
 		DisplayName("Changing replica type").
 		Guards(loseVoterGuards...).
 		Guards(guardShadowDiskfulSupported, guardVotersEven).
@@ -324,8 +314,7 @@ func registerChangeTypePlans(
 	// then disk attaches. No qmr change → no baseline update.
 	changeReplicaType.Plan("a-to-d/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeAccess).
-		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeAccess, v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Changing replica type").
 		Guards(gainVoterGuards...).
 		Guards(guardVotersEven, guardMaxDiskMembers).
@@ -348,8 +337,7 @@ func registerChangeTypePlans(
 	// ChangeReplicaType(A → D) + q↑: A → D∅ + q↑ → D (odd→even, no sD)
 	changeReplicaType.Plan("a-to-d-q-up/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeAccess).
-		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeAccess, v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Changing replica type").
 		Guards(gainVoterGuards...).
 		Guards(guardVotersOdd, guardMaxDiskMembers).
@@ -376,8 +364,7 @@ func registerChangeTypePlans(
 	// No BV changes after A→sD∅ (BV set once, preserved throughout).
 	changeReplicaType.Plan("a-to-d-via-sd/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeAccess).
-		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeAccess, v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Changing replica type").
 		Guards(gainVoterGuards...).
 		Guards(guardVotersEven, guardShadowDiskfulSupported, guardMaxDiskMembers).
@@ -409,8 +396,7 @@ func registerChangeTypePlans(
 	// No BV changes after A→sD∅ — BV present throughout.
 	changeReplicaType.Plan("a-to-d-via-sd-q-up/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeAccess).
-		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeAccess, v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Changing replica type").
 		Guards(gainVoterGuards...).
 		Guards(guardVotersOdd, guardShadowDiskfulSupported, guardMaxDiskMembers).
@@ -452,8 +438,7 @@ func registerChangeTypePlans(
 	// Guarded: VolumeAccess=Local blocks (A not allowed in Local mode).
 	changeReplicaType.Plan("d-to-a/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
-		ToReplicaType(v1alpha1.ReplicaTypeAccess).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeDiskful, v1alpha1.ReplicaTypeAccess)).
 		DisplayName("Changing replica type").
 		Guards(loseVoterGuards...).
 		Guards(guardVolumeAccessNotLocal, guardVotersOdd).
@@ -478,8 +463,7 @@ func registerChangeTypePlans(
 	// Same vestibule pattern as RemoveReplica(D)+q↓, but ends at A.
 	changeReplicaType.Plan("d-to-a-q-down/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
-		ToReplicaType(v1alpha1.ReplicaTypeAccess).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeDiskful, v1alpha1.ReplicaTypeAccess)).
 		DisplayName("Changing replica type").
 		Guards(loseVoterGuards...).
 		Guards(guardVolumeAccessNotLocal, guardVotersEven).
@@ -511,8 +495,7 @@ func registerChangeTypePlans(
 	// ChangeReplicaType(TB → D): TB → D∅ → D (even→odd, no sD)
 	changeReplicaType.Plan("tb-to-d/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeTieBreaker).
-		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeTieBreaker, v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Changing replica type").
 		Guards(loseTBGuards...).
 		Guards(gainVoterGuards...).
@@ -536,8 +519,7 @@ func registerChangeTypePlans(
 	// ChangeReplicaType(TB → D) + q↑: TB → D∅ + q↑ → D (odd→even, no sD)
 	changeReplicaType.Plan("tb-to-d-q-up/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeTieBreaker).
-		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeTieBreaker, v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Changing replica type").
 		Guards(loseTBGuards...).
 		Guards(gainVoterGuards...).
@@ -562,8 +544,7 @@ func registerChangeTypePlans(
 	// ChangeReplicaType(TB → D) via sD: TB → sD∅ → sD → D (even→odd, sD)
 	changeReplicaType.Plan("tb-to-d-via-sd/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeTieBreaker).
-		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeTieBreaker, v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Changing replica type").
 		Guards(loseTBGuards...).
 		Guards(gainVoterGuards...).
@@ -592,8 +573,7 @@ func registerChangeTypePlans(
 	// Same detach-before-promote — see membership_plan_diskful.go.
 	changeReplicaType.Plan("tb-to-d-via-sd-q-up/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeTieBreaker).
-		ToReplicaType(v1alpha1.ReplicaTypeDiskful).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeTieBreaker, v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Changing replica type").
 		Guards(loseTBGuards...).
 		Guards(gainVoterGuards...).
@@ -632,8 +612,7 @@ func registerChangeTypePlans(
 	// ChangeReplicaType(D → TB): D → D∅ → TB (odd→even, no q change)
 	changeReplicaType.Plan("d-to-tb/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
-		ToReplicaType(v1alpha1.ReplicaTypeTieBreaker).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeDiskful, v1alpha1.ReplicaTypeTieBreaker)).
 		DisplayName("Changing replica type").
 		Guards(loseVoterGuards...).
 		Guards(guardVolumeAccessNotLocal, guardVotersOdd).
@@ -656,8 +635,7 @@ func registerChangeTypePlans(
 	// ChangeReplicaType(D → TB) + q↓: D → D∅ → TB + q↓ (even→odd)
 	changeReplicaType.Plan("d-to-tb-q-down/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
-		FromReplicaType(v1alpha1.ReplicaTypeDiskful).
-		ToReplicaType(v1alpha1.ReplicaTypeTieBreaker).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeDiskful, v1alpha1.ReplicaTypeTieBreaker)).
 		DisplayName("Changing replica type").
 		Guards(loseVoterGuards...).
 		Guards(guardVolumeAccessNotLocal, guardVotersEven).
