@@ -37,6 +37,7 @@ import (
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/datamesh"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
@@ -45,6 +46,10 @@ func TestRvControllerReconciler(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "rv_controller Reconciler Suite")
 }
+
+var _ = BeforeSuite(func() {
+	datamesh.BuildRegistry()
+})
 
 func RequestFor(object client.Object) reconcile.Request {
 	return reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)}
@@ -2046,49 +2051,6 @@ var _ = Describe("applyDatameshMember", func() {
 	})
 })
 
-var _ = Describe("applyDatameshMemberAbsent", func() {
-	It("returns false when all members are in the set", func() {
-		rv := &v1alpha1.ReplicatedVolume{
-			Status: v1alpha1.ReplicatedVolumeStatus{
-				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.DatameshMember{
-						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0), Type: v1alpha1.DatameshMemberTypeDiskful},
-						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 1), Type: v1alpha1.DatameshMemberTypeDiskful},
-					},
-				},
-			},
-		}
-		var ids idset.IDSet
-		ids.Add(0)
-		ids.Add(1)
-		changed := applyDatameshMemberAbsent(rv, ids)
-		Expect(changed).To(BeFalse())
-		Expect(rv.Status.Datamesh.Members).To(HaveLen(2))
-	})
-
-	It("removes members not in set and returns true", func() {
-		rv := &v1alpha1.ReplicatedVolume{
-			Status: v1alpha1.ReplicatedVolumeStatus{
-				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.DatameshMember{
-						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0), Type: v1alpha1.DatameshMemberTypeDiskful},
-						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 1), Type: v1alpha1.DatameshMemberTypeDiskful},
-						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2), Type: v1alpha1.DatameshMemberTypeDiskful},
-					},
-				},
-			},
-		}
-		var ids idset.IDSet
-		ids.Add(0)
-		ids.Add(2)
-		changed := applyDatameshMemberAbsent(rv, ids)
-		Expect(changed).To(BeTrue())
-		Expect(rv.Status.Datamesh.Members).To(HaveLen(2))
-		Expect(rv.Status.Datamesh.Members[0].Name).To(Equal(v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0)))
-		Expect(rv.Status.Datamesh.Members[1].Name).To(Equal(v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2)))
-	})
-})
-
 var _ = Describe("applyDatameshReplicaRequestMessages", func() {
 	It("updates message for matching node and returns true", func() {
 		rv := &v1alpha1.ReplicatedVolume{
@@ -3212,42 +3174,6 @@ var _ = Describe("reconcileRVRFinalizers", func() {
 	})
 })
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Tests: datamesh access replicas
-//
-
-var _ = Describe("removeDatameshMembers", func() {
-	It("removes members in the set and returns true", func() {
-		rv := &v1alpha1.ReplicatedVolume{
-			Status: v1alpha1.ReplicatedVolumeStatus{
-				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.DatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1"},
-						{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-2"},
-					},
-				},
-			},
-		}
-		Expect(removeDatameshMembers(rv, idset.Of(1))).To(BeTrue())
-		Expect(rv.Status.Datamesh.Members).To(HaveLen(1))
-		Expect(rv.Status.Datamesh.Members[0].Name).To(Equal("rv-1-0"))
-	})
-
-	It("returns false when no member matches", func() {
-		rv := &v1alpha1.ReplicatedVolume{
-			Status: v1alpha1.ReplicatedVolumeStatus{
-				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.DatameshMember{
-						{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful},
-					},
-				},
-			},
-		}
-		Expect(removeDatameshMembers(rv, idset.Of(5))).To(BeFalse())
-		Expect(rv.Status.Datamesh.Members).To(HaveLen(1))
-	})
-})
-
 var _ = Describe("applyDatameshTransitionStepMessage", func() {
 	It("sets message and returns true when different", func() {
 		step := &v1alpha1.ReplicatedVolumeDatameshTransitionStep{Message: "old"}
@@ -3262,18 +3188,5 @@ var _ = Describe("applyDatameshTransitionStepMessage", func() {
 
 	It("returns false when step is nil", func() {
 		Expect(applyDatameshTransitionStepMessage(nil, "msg")).To(BeFalse())
-	})
-})
-
-var _ = Describe("applyDatameshReplicaRequestMessage", func() {
-	It("sets message and returns true when different", func() {
-		p := &v1alpha1.ReplicatedVolumeDatameshReplicaRequest{Name: "rv-1-1", Message: "old"}
-		Expect(applyDatameshReplicaRequestMessage(p, "new")).To(BeTrue())
-		Expect(p.Message).To(Equal("new"))
-	})
-
-	It("returns false when message is the same", func() {
-		p := &v1alpha1.ReplicatedVolumeDatameshReplicaRequest{Name: "rv-1-0", Message: "same"}
-		Expect(applyDatameshReplicaRequestMessage(p, "same")).To(BeFalse())
 	})
 })

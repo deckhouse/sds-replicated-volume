@@ -32,6 +32,7 @@ import (
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/datamesh"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
@@ -207,131 +208,22 @@ func (r *Reconciler) reconcileNormalOperation(
 		return outcome
 	}
 
-	var atts *attachmentsSummary
-	eo := flow.MergeEnsures(
-		// Process datamesh Access replica membership transitions.
-		ensureDatameshAccessReplicas(rf.Ctx(), rv, *rvrs, rsp),
-
-		// Process attach/detach transitions.
-		ensureDatameshAttachments(rf.Ctx(), rv, *rvrs, rvas, rsp, &atts),
-	)
-	if eo.Error() != nil {
-		return rf.Fail(eo.Error())
+	// Run datamesh transition engine: membership, quorum, attachment, network transitions.
+	changed, dmrctxs := datamesh.ProcessTransitions(
+		rf.Ctx(), rv, rsp, *rvrs, rvas, datamesh.FeatureFlags{})
+	if changed {
+		outcome = outcome.ReportChanged()
 	}
-	outcome = outcome.WithChangeFrom(eo)
 
 	outcome = outcome.Merge(
-		// Update RVA conditions and status fields.
-		r.reconcileRVAConditionsFromAttachmentsSummary(rf.Ctx(), atts),
+		// Update RVA conditions and status fields from datamesh replica contexts.
+		r.reconcileRVAConditionsFromDatameshReplicaContext(rf.Ctx(), dmrctxs),
 
 		// Delete unnecessary Access RVRs (redundant or unused).
 		r.reconcileDeleteAccessReplicas(rf.Ctx(), rv, rvrs, rvas),
 	)
 
 	return outcome
-}
-
-// computeDatameshTransitionProgressMessage builds a detailed transition message showing
-// confirmation progress and errors from waiting replicas.
-//
-// skipError (optional) is called for each waiting replica that has a False condition
-// from conditionTypes. If it returns true, the replica is not reported as an error.
-func computeDatameshTransitionProgressMessage(
-	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-	revision int64,
-	mustConfirm, confirmed idset.IDSet,
-	skipError func(id uint8, cond *metav1.Condition) bool,
-	conditionTypes ...string,
-) string {
-	waiting := mustConfirm.Difference(confirmed)
-
-	var msg strings.Builder
-	fmt.Fprintf(&msg, "%d/%d replicas confirmed revision %d",
-		confirmed.Len(), mustConfirm.Len(), revision)
-
-	if waiting.IsEmpty() {
-		return msg.String()
-	}
-
-	fmt.Fprintf(&msg, ". Waiting: [%s]", waiting)
-
-	var found idset.IDSet
-	errorGroups := 0
-	for _, rvr := range rvrs {
-		id := rvr.ID()
-		if !waiting.Contains(id) {
-			continue
-		}
-		found.Add(id)
-
-		replicaHasError := false
-		for _, condType := range conditionTypes {
-			cond := obju.GetStatusCondition(rvr, condType)
-			if cond == nil || cond.Status != metav1.ConditionFalse || cond.ObservedGeneration != rvr.Generation {
-				continue
-			}
-			if skipError != nil && skipError(id, cond) {
-				continue
-			}
-
-			if !replicaHasError {
-				if errorGroups == 0 {
-					msg.WriteString(". Errors: ")
-				} else {
-					msg.WriteString(" | ")
-				}
-				fmt.Fprintf(&msg, "#%d ", id)
-				replicaHasError = true
-				errorGroups++
-			} else {
-				msg.WriteString(", ")
-			}
-			fmt.Fprintf(&msg, "%s/%s", condType, cond.Reason)
-			if cond.Message != "" {
-				msg.WriteString(": ")
-				msg.WriteString(cond.Message)
-			}
-		}
-	}
-
-	for id := range waiting.Difference(found).All() {
-		if errorGroups == 0 {
-			msg.WriteString(". Errors: ")
-		} else {
-			msg.WriteString(" | ")
-		}
-		fmt.Fprintf(&msg, "#%d Replica not found", id)
-		errorGroups++
-	}
-
-	return msg.String()
-}
-
-// findRVRByID returns the RVR with the given ID, or nil if not found.
-func findRVRByID(rvrs []*v1alpha1.ReplicatedVolumeReplica, id uint8) *v1alpha1.ReplicatedVolumeReplica {
-	for _, rvr := range rvrs {
-		if rvr.ID() == id {
-			return rvr
-		}
-	}
-	return nil
-}
-
-// removeDatameshMembers removes members whose ID is in the given set.
-// Returns true if any member was removed.
-func removeDatameshMembers(rv *v1alpha1.ReplicatedVolume, ids idset.IDSet) bool {
-	n := 0
-	for i := range rv.Status.Datamesh.Members {
-		if !ids.Contains(rv.Status.Datamesh.Members[i].ID()) {
-			rv.Status.Datamesh.Members[n] = rv.Status.Datamesh.Members[i]
-			n++
-		}
-	}
-	if n == len(rv.Status.Datamesh.Members) {
-		return false
-	}
-	rv.Status.Datamesh.Members = rv.Status.Datamesh.Members[:n]
-	return true
 }
 
 // applyDatameshTransitionStepMessage sets the Message field on a datamesh transition step.
@@ -372,16 +264,6 @@ func makeDatameshSingleStepTransition(
 			},
 		},
 	}
-}
-
-// applyDatameshReplicaRequestMessage sets the Message field on the given pending replica
-// transition. Returns true if the message was changed.
-func applyDatameshReplicaRequestMessage(p *v1alpha1.ReplicatedVolumeDatameshReplicaRequest, msg string) bool {
-	if p == nil || p.Message == msg {
-		return false
-	}
-	p.Message = msg
-	return true
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -549,23 +431,6 @@ func applyDatameshMember(rv *v1alpha1.ReplicatedVolume, member v1alpha1.Datamesh
 	return true
 }
 
-// applyDatameshMemberAbsent removes members whose ID is NOT in the given set.
-// Returns true if any member was removed.
-func applyDatameshMemberAbsent(rv *v1alpha1.ReplicatedVolume, repIDs idset.IDSet) bool {
-	n := 0
-	for i := range rv.Status.Datamesh.Members {
-		if repIDs.Contains(rv.Status.Datamesh.Members[i].ID()) {
-			rv.Status.Datamesh.Members[n] = rv.Status.Datamesh.Members[i]
-			n++
-		}
-	}
-	if n == len(rv.Status.Datamesh.Members) {
-		return false
-	}
-	rv.Status.Datamesh.Members = rv.Status.Datamesh.Members[:n]
-	return true
-}
-
 // applyDatameshReplicaRequestMessages updates the Message field for pending replica transitions
 // whose ID is in the given set. Returns true if any message was changed.
 func applyDatameshReplicaRequestMessages(rv *v1alpha1.ReplicatedVolume, repIDs idset.IDSet, message string) bool {
@@ -677,47 +542,6 @@ func isTransZonalZoneCountValid(ftt, gmdr byte, zoneCount int) bool {
 	default:
 		return false // FTT=0,GMDR=0 is not TransZonal; unknown combos are invalid.
 	}
-}
-
-// computeActualQuorum checks whether at least one voting replica has quorum and a ready agent.
-// Returns (true, "") if quorum is satisfied, or (false, diagnostic) with a diagnostic detail otherwise.
-func computeActualQuorum(
-	rv *v1alpha1.ReplicatedVolume,
-	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-) (satisfied bool, diagnostic string) {
-	voters := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
-		return m.Type.IsVoter()
-	})
-	agentNotReady := idset.FromWhere(rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		return obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType).
-			ReasonEqual(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonAgentNotReady).
-			Eval()
-	})
-	withQuorum := idset.FromWhere(rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		return rvr.Status.Quorum != nil && *rvr.Status.Quorum
-	}).Intersect(voters).Difference(agentNotReady)
-
-	if !withQuorum.IsEmpty() {
-		return true, ""
-	}
-
-	// Diagnostic: which voter replicas exist and why they don't count.
-	allRVRIDs := idset.FromAll(rvrs)
-	voterAgentNotReady := voters.Intersect(agentNotReady)
-	voterNoQuorum := voters.Intersect(allRVRIDs).Difference(agentNotReady)
-
-	switch {
-	case !voterNoQuorum.IsEmpty() && !voterAgentNotReady.IsEmpty():
-		diagnostic = fmt.Sprintf("no quorum on [%s]; agent not ready on [%s]",
-			voterNoQuorum, voterAgentNotReady)
-	case !voterNoQuorum.IsEmpty():
-		diagnostic = fmt.Sprintf("no quorum on [%s]", voterNoQuorum)
-	case !voterAgentNotReady.IsEmpty():
-		diagnostic = fmt.Sprintf("agent not ready on [%s]", voterAgentNotReady)
-	default:
-		diagnostic = "no voter replicas available"
-	}
-	return false, diagnostic
 }
 
 // isRVMetadataInSync checks if the RV metadata (finalizer + labels) is in sync with the target state.
