@@ -106,7 +106,7 @@ func registerNetworkPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
 		Guards(guardRemainingNetworksConnected, guardNodesHaveAddedNetworks).
 		Steps(
 			ngStep("Listen new & Disconnect old",
-				composeGlobalApply(
+				dmte.ComposeGlobalApply(
 					removeOldNetworksAndAddresses,
 					addNewNetworks,
 				),

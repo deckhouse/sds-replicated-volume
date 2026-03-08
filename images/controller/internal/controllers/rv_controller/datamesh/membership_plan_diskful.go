@@ -66,7 +66,7 @@ func registerDiskfulPlans(
 		Guards(guardVotersEven, guardMaxDiskMembers).
 		Steps(
 			mrStep("✦ → D∅",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					createMember(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -90,7 +90,7 @@ func registerDiskfulPlans(
 		Guards(guardVotersEven, guardQMRRaiseNeeded, guardMaxDiskMembers).
 		Steps(
 			mrStep("✦ → D∅",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					createMember(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -103,7 +103,7 @@ func registerDiskfulPlans(
 			mgStep("qmr↑",
 				raiseQMR,
 				confirmAllMembers,
-			).OnComplete(asGlobalOnComplete(updateBaselineGMDR)),
+			).OnComplete(dmte.AdaptApplyToOnComplete(updateBaselineGMDR)),
 		).
 		OnComplete(onJoinComplete).
 		Build()
@@ -122,7 +122,7 @@ func registerDiskfulPlans(
 				confirmFMPlusSubject,
 			),
 			mrStep("A → D∅ + q↑",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					setBackingVolumeFromRequest,
 					asReplicaApply(raiseQ),
@@ -151,7 +151,7 @@ func registerDiskfulPlans(
 				confirmFMPlusSubject,
 			),
 			mrStep("A → D∅ + q↑",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					setBackingVolumeFromRequest,
 					asReplicaApply(raiseQ),
@@ -165,7 +165,7 @@ func registerDiskfulPlans(
 			mgStep("qmr↑",
 				raiseQMR,
 				confirmAllMembers,
-			).OnComplete(asGlobalOnComplete(updateBaselineGMDR)),
+			).OnComplete(dmte.AdaptApplyToOnComplete(updateBaselineGMDR)),
 		).
 		OnComplete(onJoinComplete).
 		Build()
@@ -184,7 +184,7 @@ func registerDiskfulPlans(
 		Guards(guardVotersEven, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("✦ → sD∅",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					createMember(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -215,7 +215,7 @@ func registerDiskfulPlans(
 		Guards(guardVotersEven, guardQMRRaiseNeeded, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("✦ → sD∅",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					createMember(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -232,7 +232,7 @@ func registerDiskfulPlans(
 			mgStep("qmr↑",
 				raiseQMR,
 				confirmAllMembers,
-			).OnComplete(asGlobalOnComplete(updateBaselineGMDR)),
+			).OnComplete(dmte.AdaptApplyToOnComplete(updateBaselineGMDR)),
 		).
 		OnComplete(onJoinComplete).
 		Build()
@@ -265,7 +265,7 @@ func registerDiskfulPlans(
 		Guards(guardVotersOdd, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("✦ → sD∅",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					createMember(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -280,7 +280,7 @@ func registerDiskfulPlans(
 				confirmSubjectOnly,
 			),
 			mrStep("sD∅ → D∅ + q↑",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					setBackingVolumeFromRequest,
 					asReplicaApply(raiseQ),
@@ -306,7 +306,7 @@ func registerDiskfulPlans(
 		Guards(guardVotersOdd, guardQMRRaiseNeeded, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("✦ → sD∅",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					createMember(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -321,7 +321,7 @@ func registerDiskfulPlans(
 				confirmSubjectOnly,
 			),
 			mrStep("sD∅ → D∅ + q↑",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					setBackingVolumeFromRequest,
 					asReplicaApply(raiseQ),
@@ -335,7 +335,7 @@ func registerDiskfulPlans(
 			mgStep("qmr↑",
 				raiseQMR,
 				confirmAllMembers,
-			).OnComplete(asGlobalOnComplete(updateBaselineGMDR)),
+			).OnComplete(dmte.AdaptApplyToOnComplete(updateBaselineGMDR)),
 		).
 		OnComplete(onJoinComplete).
 		Build()
@@ -385,7 +385,7 @@ func registerDiskfulPlans(
 		Guards(guardVotersOdd, guardQMRLowerNeeded).
 		Steps(
 			mgStep("qmr↓",
-				composeGlobalApply(
+				dmte.ComposeGlobalApply(
 					lowerQMR,
 					updateBaselineGMDR,
 				),
@@ -417,7 +417,7 @@ func registerDiskfulPlans(
 				confirmSubjectOnly,
 			),
 			mrStep("D∅ → A + q↓",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeAccess),
 					clearBackingVolume,
 					asReplicaApply(lowerQ),
@@ -442,7 +442,7 @@ func registerDiskfulPlans(
 		Guards(guardVotersEven, guardQMRLowerNeeded).
 		Steps(
 			mgStep("qmr↓",
-				composeGlobalApply(
+				dmte.ComposeGlobalApply(
 					lowerQMR,
 					updateBaselineGMDR,
 				),
@@ -453,7 +453,7 @@ func registerDiskfulPlans(
 				confirmSubjectOnly,
 			),
 			mrStep("D∅ → A + q↓",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeAccess),
 					clearBackingVolume,
 					asReplicaApply(lowerQ),

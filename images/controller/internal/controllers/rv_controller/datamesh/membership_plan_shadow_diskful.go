@@ -56,7 +56,7 @@ func registerShadowDiskfulPlans(
 		Guards(guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("✦ → sD∅",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					createMember(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					setBackingVolumeFromRequest,
 				),

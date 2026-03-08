@@ -859,7 +859,7 @@ var _ = Describe("Init callback", func() {
 
 		reg.ReplicaTransition("AddReplica", 0).
 			Plan("access/v1").Group("Membership").DisplayName("Adding").
-			Init(func(_ *testGCtx, rctx *testReplicaCtx, t *Transition) {
+			Init(func(_ *testGCtx, _ *testReplicaCtx, t *Transition) {
 				t.ReplicaType = "Access"
 			}).
 			Steps(ReplicaStep("s", stubReplicaApply, stubReplicaConfirm)).Build()

@@ -46,7 +46,7 @@ import (
 // All plans are 2-step. Each step applies one component (q or qmr) with
 // the correct baseline update timing:
 //   - qmr-dropping step: compose with updateBaselineGMDR (apply).
-//   - qmr-raising step: OnComplete(asGlobalOnComplete(updateBaselineGMDR)).
+//   - qmr-raising step: OnComplete(dmte.AdaptApplyToOnComplete(updateBaselineGMDR)).
 //   - q-only steps: no updateBaselineGMDR (baseline depends only on qmr).
 //
 // When only one of q/qmr changes, the other step is a no-op (sets the
@@ -62,7 +62,7 @@ func registerQuorumPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
 		DisplayName("Adjusting quorum").
 		Steps(
 			mgStep("qmr↓",
-				composeGlobalApply(
+				dmte.ComposeGlobalApply(
 					setCorrectQMR,
 					updateBaselineGMDR,
 				),
@@ -89,7 +89,7 @@ func registerQuorumPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
 			mgStep("qmr↑",
 				setCorrectQMR,
 				confirmAllMembers,
-			).OnComplete(asGlobalOnComplete(updateBaselineGMDR)),
+			).OnComplete(dmte.AdaptApplyToOnComplete(updateBaselineGMDR)),
 		).
 		Build()
 
@@ -107,7 +107,7 @@ func registerQuorumPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
 			mgStep("qmr↑",
 				setCorrectQMR,
 				confirmAllMembers,
-			).OnComplete(asGlobalOnComplete(updateBaselineGMDR)),
+			).OnComplete(dmte.AdaptApplyToOnComplete(updateBaselineGMDR)),
 		).
 		Build()
 
@@ -123,7 +123,7 @@ func registerQuorumPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]) {
 				confirmAllMembers,
 			),
 			mgStep("qmr↓",
-				composeGlobalApply(
+				dmte.ComposeGlobalApply(
 					setCorrectQMR,
 					updateBaselineGMDR,
 				),

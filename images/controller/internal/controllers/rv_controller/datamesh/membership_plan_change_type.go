@@ -90,7 +90,7 @@ func registerChangeTypePlans(
 		Guards(guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("A → sD∅",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -128,7 +128,7 @@ func registerChangeTypePlans(
 				confirmSubjectOnly,
 			),
 			mrStep("sD∅ → A",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeAccess),
 					clearBackingVolume,
 				),
@@ -153,7 +153,7 @@ func registerChangeTypePlans(
 		Guards(loseTBGuards...).
 		Steps(
 			mrStep("TB → sD∅",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -187,7 +187,7 @@ func registerChangeTypePlans(
 				confirmSubjectOnly,
 			),
 			mrStep("sD∅ → TB",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeTieBreaker),
 					clearBackingVolume,
 				),
@@ -238,7 +238,7 @@ func registerChangeTypePlans(
 				confirmSubjectOnly,
 			),
 			mrStep("sD∅ → D∅ + q↑",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					asReplicaApply(raiseQ),
 				),
@@ -290,7 +290,7 @@ func registerChangeTypePlans(
 				confirmSubjectOnly,
 			),
 			mrStep("D∅ → sD∅ + q↓",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					asReplicaApply(lowerQ),
 				),
@@ -320,7 +320,7 @@ func registerChangeTypePlans(
 		Guards(guardVotersEven, guardMaxDiskMembers).
 		Steps(
 			mrStep("A → D∅",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -343,7 +343,7 @@ func registerChangeTypePlans(
 		Guards(guardVotersOdd, guardMaxDiskMembers).
 		Steps(
 			mrStep("A → D∅ + q↑",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					setBackingVolumeFromRequest,
 					asReplicaApply(raiseQ),
@@ -370,7 +370,7 @@ func registerChangeTypePlans(
 		Guards(guardVotersEven, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("A → sD∅",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -402,7 +402,7 @@ func registerChangeTypePlans(
 		Guards(guardVotersOdd, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("A → sD∅",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -417,7 +417,7 @@ func registerChangeTypePlans(
 				confirmSubjectOnly,
 			),
 			mrStep("sD∅ → D∅ + q↑",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					asReplicaApply(raiseQ),
 				),
@@ -448,7 +448,7 @@ func registerChangeTypePlans(
 				confirmSubjectOnly,
 			),
 			mrStep("D∅ → A",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeAccess),
 					clearBackingVolume,
 				),
@@ -473,7 +473,7 @@ func registerChangeTypePlans(
 				confirmSubjectOnly,
 			),
 			mrStep("D∅ → A + q↓",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeAccess),
 					clearBackingVolume,
 					asReplicaApply(lowerQ),
@@ -502,7 +502,7 @@ func registerChangeTypePlans(
 		Guards(guardVotersEven, guardMaxDiskMembers).
 		Steps(
 			mrStep("TB → D∅",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -526,7 +526,7 @@ func registerChangeTypePlans(
 		Guards(guardVotersOdd, guardMaxDiskMembers).
 		Steps(
 			mrStep("TB → D∅ + q↑",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					setBackingVolumeFromRequest,
 					asReplicaApply(raiseQ),
@@ -551,7 +551,7 @@ func registerChangeTypePlans(
 		Guards(guardVotersEven, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("TB → sD∅",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -580,7 +580,7 @@ func registerChangeTypePlans(
 		Guards(guardVotersOdd, guardShadowDiskfulSupported, guardMaxDiskMembers).
 		Steps(
 			mrStep("TB → sD∅",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalShadowDiskful),
 					setBackingVolumeFromRequest,
 				),
@@ -595,7 +595,7 @@ func registerChangeTypePlans(
 				confirmSubjectOnly,
 			),
 			mrStep("sD∅ → D∅ + q↑",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
 					asReplicaApply(raiseQ),
 				),
@@ -622,7 +622,7 @@ func registerChangeTypePlans(
 				confirmSubjectOnly,
 			),
 			mrStep("D∅ → TB",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeTieBreaker),
 					clearBackingVolume,
 				),
@@ -645,7 +645,7 @@ func registerChangeTypePlans(
 				confirmSubjectOnly,
 			),
 			mrStep("D∅ → TB + q↓",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					setType(v1alpha1.DatameshMemberTypeTieBreaker),
 					clearBackingVolume,
 					asReplicaApply(lowerQ),

@@ -389,22 +389,22 @@ func guardDeviceNotInUse(_ *globalContext, rctx *ReplicaContext) dmte.GuardResul
 
 // applyAttach sets the member as attached. Returns false if already attached.
 func applyAttach(_ *globalContext, rctx *ReplicaContext) bool {
-	return assign(&rctx.member.Attached, true)
+	return dmte.SetChanged(&rctx.member.Attached, true)
 }
 
 // applyDetach sets the member as not attached. Returns false if already detached.
 func applyDetach(_ *globalContext, rctx *ReplicaContext) bool {
-	return assign(&rctx.member.Attached, false)
+	return dmte.SetChanged(&rctx.member.Attached, false)
 }
 
 // applyEnableMultiattach enables multiattach. Returns false if already enabled.
 func applyEnableMultiattach(gctx *globalContext) bool {
-	return assign(&gctx.datamesh.multiattach, true)
+	return dmte.SetChanged(&gctx.datamesh.multiattach, true)
 }
 
 // applyDisableMultiattach disables multiattach. Returns false if already disabled.
 func applyDisableMultiattach(gctx *globalContext) bool {
-	return assign(&gctx.datamesh.multiattach, false)
+	return dmte.SetChanged(&gctx.datamesh.multiattach, false)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
