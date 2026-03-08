@@ -77,8 +77,10 @@ var _ = Describe("Attach", func() {
 			[]v1alpha1.DatameshMember{mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1")},
 			nil, nil,
 		)
-		// mkRVR (not Ready) — no Quorum field set → quorum not satisfied.
-		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVR("rv-1-0", "node-1", 5)}
+		// RVR Ready but Quorum=false → guardQuorumSatisfied blocks.
+		rvr := mkRVRReady("rv-1-0", "node-1", 5)
+		rvr.Status.Quorum = ptr.To(false)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr}
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-1")}
 
 		_, replicas := ProcessTransitions(context.Background(), rv, mkRSP("node-1"), rvrs, rvas, FeatureFlags{})
@@ -289,6 +291,149 @@ var _ = Describe("Attach", func() {
 		Expect(hasAttach).To(BeFalse())
 		rc := findReplicaContext(replicas, 1)
 		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("membership transition"))
+	})
+
+	It("guard: RSP nil → blocked", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1")},
+			nil, nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVRReady("rv-1-0", "node-1", 5)}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-1")}
+
+		_, replicas := ProcessTransitions(context.Background(), rv, nil, rvrs, rvas, FeatureFlags{})
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		rc := findReplicaContext(replicas, 0)
+		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("ReplicatedStoragePool"))
+	})
+
+	It("guard: node not eligible, no storage class → pool-only message", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1")},
+			nil, nil,
+		)
+		rv.Spec.ReplicatedStorageClassName = "" // no storage class
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVRReady("rv-1-0", "node-1", 5)}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-1")}
+
+		_, replicas := ProcessTransitions(context.Background(), rv, mkRSP("node-2"), rvrs, rvas, FeatureFlags{})
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		rc := findReplicaContext(replicas, 0)
+		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("not eligible for pool"))
+		Expect(rc.AttachmentConditionMessage()).NotTo(ContainSubstring("storage class"))
+	})
+
+	It("guard: RVR nil → waiting for replica", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1")},
+			nil, nil,
+		)
+		// Node operational (in RSP), member exists, but no RVR.
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-1")}
+
+		_, replicas := ProcessTransitions(context.Background(), rv, mkRSP("node-1"), nil, rvas, FeatureFlags{})
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		rc := findReplicaContext(replicas, 0)
+		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("Waiting for replica"))
+	})
+
+	It("guard: RVR not Ready with condition message", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1")},
+			nil, nil,
+		)
+		rvr := mkRVR("rv-1-0", "node-1", 5)
+		rvr.Status.Quorum = ptr.To(true)
+		rvr.Generation = 1
+		rvr.Status.Conditions = []metav1.Condition{{
+			Type:               v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			Status:             metav1.ConditionFalse,
+			Reason:             "Syncing",
+			Message:            "Disk is syncing",
+			ObservedGeneration: 1,
+		}}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-1")}
+
+		_, replicas := ProcessTransitions(context.Background(), rv, mkRSP("node-1"), rvrs, rvas, FeatureFlags{})
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		rc := findReplicaContext(replicas, 0)
+		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("Syncing"))
+		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("Disk is syncing"))
+	})
+
+	It("guard: VolumeAccess Local, no storage class → pool-only message", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-2"), // voter for quorum
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-1"),
+			},
+			nil, nil,
+		)
+		rv.Status.Configuration.VolumeAccess = v1alpha1.VolumeAccessLocal
+		rv.Spec.ReplicatedStorageClassName = ""
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRReady("rv-1-0", "node-2", 5),
+			mkRVRReady("rv-1-1", "node-1", 5),
+		}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-1")}
+
+		_, replicas := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, rvas, FeatureFlags{})
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		rc := findReplicaContext(replicas, 1)
+		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("volumeAccess is Local"))
+		Expect(rc.AttachmentConditionMessage()).NotTo(ContainSubstring("storage class"))
+	})
+
+	It("guard: member nil, RVR exists, no request → generic waiting", func() {
+		// D member on node-2 for quorum. RVA for node-1 where no member exists.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-2")},
+			nil, nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRReady("rv-1-0", "node-2", 5),
+			mkRVRReady("rv-1-1", "node-1", 0),
+		}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-1")}
+
+		_, replicas := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, rvas, FeatureFlags{})
+
+		rc := findReplicaContext(replicas, 1)
+		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("join datamesh"))
+	})
+
+	It("guard: member nil, RVR with Ready condition message", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-2")},
+			nil, nil,
+		)
+		rvr1 := mkRVR("rv-1-1", "node-1", 0)
+		rvr1.Status.Quorum = ptr.To(true)
+		rvr1.Generation = 1
+		rvr1.Status.Conditions = []metav1.Condition{{
+			Type:               v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			Status:             metav1.ConditionFalse,
+			Reason:             "Initializing",
+			Message:            "Creating backing volume",
+			ObservedGeneration: 1,
+		}}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRReady("rv-1-0", "node-2", 5),
+			rvr1,
+		}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-1")}
+
+		_, replicas := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, rvas, FeatureFlags{})
+
+		rc := findReplicaContext(replicas, 1)
+		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("Initializing"))
+		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("Creating backing volume"))
 	})
 
 	It("settled: already attached + active RVA", func() {
@@ -1270,5 +1415,104 @@ var _ = Describe("ForceDetach", func() {
 		}
 		Expect(forceRemoveFound).To(BeTrue())
 		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-1")).To(BeNil())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// E2E settle
+//
+
+var _ = Describe("Attachment e2e settle", func() {
+	It("attach/v1: dispatch → complete", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1")},
+			nil, nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVRReady("rv-1-0", "node-1", 5)}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-1")}
+
+		runSettleLoop(rv, mkRSP("node-1"), rvrs, rvas, FeatureFlags{}, nil, nil)
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.Datamesh.Members[0].Attached).To(BeTrue())
+	})
+
+	It("detach/v1: dispatch → complete", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{mkMemberAttached("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1")},
+			nil, nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVRReady("rv-1-0", "node-1", 5)}
+
+		runSettleLoop(rv, nil, rvrs, nil, FeatureFlags{}, nil, nil)
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.Datamesh.Members[0].Attached).To(BeFalse())
+	})
+
+	It("force-detach/v1: dispatch → complete", func() {
+		member := mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2")
+		member.Attached = true
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				member,
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkForceDetachRequest("rv-1-1")},
+			nil,
+		)
+		// rv-1-1 has rev=0 (node dead / not responding).
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 0),
+		}
+
+		runSettleLoop(rv, nil, rvrs, nil, FeatureFlags{}, nil, nil)
+
+		// ForceDetach completed (confirmImmediate). Member detached.
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
+		Expect(m).NotTo(BeNil())
+		Expect(m.Attached).To(BeFalse())
+		// No ForceDetach transition remaining.
+		for _, t := range rv.Status.DatameshTransitions {
+			Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceDetach))
+		}
+	})
+
+	It("enable-multiattach/v1: dispatch → complete", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-2"),
+			},
+			nil, nil,
+		)
+		rv.Spec.MaxAttachments = 2
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRReady("rv-1-0", "node-1", 5),
+			mkRVRReady("rv-1-1", "node-2", 5),
+		}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-1"), mkRVA("rva-2", "node-2")}
+
+		runSettleLoop(rv, mkRSP("node-1", "node-2"), rvrs, rvas, FeatureFlags{}, nil, nil)
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.Datamesh.Multiattach).To(BeTrue())
+	})
+
+	It("disable-multiattach/v1: dispatch → complete", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMemberAttached("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+			},
+			nil, nil,
+		)
+		rv.Status.Datamesh.Multiattach = true
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVRReady("rv-1-0", "node-1", 5)}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-1")}
+
+		runSettleLoop(rv, mkRSP("node-1"), rvrs, rvas, FeatureFlags{}, nil, nil)
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.Datamesh.Multiattach).To(BeFalse())
 	})
 })

@@ -51,7 +51,7 @@ var _ = Describe("integration: topology switch", func() {
 				}
 
 				// Stabilize with Ignored topology.
-				runUntilStable(rv, rsp, rvrs, ff)
+				runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
 				settleEffectiveLayout(rv, rvrs)
 
 				// Switch to TransZonal.
@@ -131,7 +131,7 @@ var _ = Describe("integration: topology switch", func() {
 				rv.Status.Configuration.Topology = ""
 				rv.Status.DatameshTransitions = nil
 
-				runUntilStable(rv, rsp, rvrs, ff)
+				runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
 
 				var voters int
 				for _, m := range rv.Status.Datamesh.Members {
@@ -221,7 +221,7 @@ var _ = Describe("integration: topology switch", func() {
 				rv.Status.Configuration.Topology = ""
 				rv.Status.DatameshTransitions = nil
 
-				runUntilStable(rv, rsp, rvrs, ff)
+				runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
 
 				var voters int
 				for _, m := range rv.Status.Datamesh.Members {
@@ -299,7 +299,7 @@ var _ = Describe("integration: topology switch", func() {
 					mkForceLeaveRequest("rv-1-2"),
 				}
 
-				runUntilStable(rv, rsp, rvrs, ff)
+				runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
 
 				// ForceRemove should complete (Emergency bypasses all guards).
 				var voters int
@@ -362,7 +362,7 @@ var _ = Describe("integration: topology switch", func() {
 				rv.Status.Configuration.Topology = v1alpha1.TopologyTransZonal
 				rv.Status.DatameshTransitions = nil
 
-				runUntilStable(rv, rsp, rvrs, ff)
+				runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
 
 				// TransZonal: zone-c is a new zone, 1+1+1 distribution is balanced → passes.
 				var voters int
@@ -401,7 +401,7 @@ var _ = Describe("integration: topology switch", func() {
 				}
 
 				// Run until stable.
-				runUntilStable(rv, rsp, rvrs, ff)
+				runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
 
 				// 4th D should NOT be added — guard blocks it.
 				var voters int
@@ -460,7 +460,7 @@ var _ = Describe("integration: topology switch", func() {
 					mkRVR("rv-1-3", "node-3", 0),
 				)
 
-				runUntilStable(rv, rsp, rvrs, ff)
+				runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
 
 				// Final: 2D + 1TB, q=2 unchanged.
 				var dCount, tbCount int
@@ -534,7 +534,7 @@ var _ = Describe("integration: topology switch", func() {
 					mkRVR("rv-1-5", "node-5", 0),
 				)
 
-				runUntilStable(rv, rsp, rvrs, ff)
+				runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
 
 				// Final: 4D + 1TB, q=3 unchanged.
 				var dCount, tbCount int

@@ -21,7 +21,7 @@ package datamesh
 // Simulates node and zone failures (ForceRemove) followed by recovery
 // (new replica joins). Verifies that the datamesh engine converges back
 // to the original canonical layout with safety invariants preserved at
-// every intermediate step (via assertSafetyInvariants in runUntilStable).
+// every intermediate step (via assertSafetyInvariants in runSettleLoop).
 //
 // Four test groups:
 //   - Single D failure + recovery (all layouts × topologies)
@@ -81,7 +81,7 @@ func killAndRecover(
 	}
 	rv.Status.DatameshReplicaRequests = requests
 
-	runUntilStable(rv, rsp, rvrs, features)
+	runSettleLoop(rv, rsp, rvrs, nil, features, nil, assertSafetyInvariants)
 
 	// Assert intermediate state.
 	for _, id := range killIDs {
@@ -115,7 +115,7 @@ func killAndRecover(
 	}
 	rv.Status.DatameshReplicaRequests = requests
 
-	runUntilStable(rv, rsp, rvrs, features)
+	runSettleLoop(rv, rsp, rvrs, nil, features, nil, assertSafetyInvariants)
 
 	// Assert final state: recovered to original layout.
 	var dCount, tbCount int

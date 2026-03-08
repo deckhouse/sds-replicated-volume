@@ -54,13 +54,13 @@ func registerAttachmentPlans(reg *dmte.Registry[*globalContext, *ReplicaContext]
 		DisplayName("Attaching volume").
 		Guards(
 			guardAttachNotDeleting,
+			guardNodeOperational,
+			guardRVRReady,
+			guardMemberExists,
+			guardNoActiveMembershipTransition,
 			guardQuorumSatisfied,
 			guardSlotAvailable,
 			guardVolumeAccessLocalForAttach,
-			guardMemberExists,
-			guardNodeOperational,
-			guardRVRReady,
-			guardNoActiveMembershipTransition,
 		).
 		Steps(
 			arStep("Attach",

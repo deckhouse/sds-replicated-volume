@@ -251,7 +251,7 @@ var _ = Describe("ChangeQuorum step flow", func() {
 			mkRVRUpToDate("rv-1-2", "node-3", 5),
 		}
 
-		runUntilStableUnchecked(rv, mkRSP("node-1", "node-2", "node-3"), rvrs, FeatureFlags{})
+		runSettleLoop(rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{}, nil, nil)
 
 		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2)))
 		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(1)))
@@ -275,7 +275,7 @@ var _ = Describe("ChangeQuorum step flow", func() {
 			mkRVRUpToDate("rv-1-2", "node-3", 5),
 		}
 
-		runUntilStableUnchecked(rv, mkRSP("node-1", "node-2", "node-3"), rvrs, FeatureFlags{})
+		runSettleLoop(rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{}, nil, nil)
 
 		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2)))
 		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(1)))
@@ -296,7 +296,7 @@ var _ = Describe("ChangeQuorum step flow", func() {
 			mkRVRUpToDate("rv-1-1", "node-2", 5),
 		}
 
-		runUntilStable(rv, nil, rvrs, FeatureFlags{})
+		runSettleLoop(rv, nil, rvrs, nil, FeatureFlags{}, nil, assertSafetyInvariants)
 
 		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2)))
 		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(2)))
@@ -318,7 +318,7 @@ var _ = Describe("ChangeQuorum step flow", func() {
 			mkRVRUpToDate("rv-1-1", "node-2", 5),
 		}
 
-		runUntilStable(rv, nil, rvrs, FeatureFlags{})
+		runSettleLoop(rv, nil, rvrs, nil, FeatureFlags{}, nil, assertSafetyInvariants)
 
 		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2)))
 		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(1)))
@@ -343,7 +343,7 @@ var _ = Describe("ChangeQuorum step flow", func() {
 			mkRVRUpToDate("rv-1-2", "node-3", 5),
 		}
 
-		runUntilStable(rv, nil, rvrs, FeatureFlags{})
+		runSettleLoop(rv, nil, rvrs, nil, FeatureFlags{}, nil, assertSafetyInvariants)
 
 		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(1)))
 		Expect(rv.Status.BaselineGuaranteedMinimumDataRedundancy).To(Equal(byte(0)))
@@ -366,7 +366,7 @@ var _ = Describe("ChangeQuorum step flow", func() {
 			mkRVRUpToDate("rv-1-1", "node-2", 5),
 		}
 
-		runUntilStable(rv, nil, rvrs, FeatureFlags{})
+		runSettleLoop(rv, nil, rvrs, nil, FeatureFlags{}, nil, assertSafetyInvariants)
 
 		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2)))
 		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(2)))

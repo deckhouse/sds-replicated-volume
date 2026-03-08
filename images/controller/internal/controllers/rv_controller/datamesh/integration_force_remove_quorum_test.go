@@ -70,7 +70,7 @@ var _ = Describe("integration: ForceRemove quorum invariants", func() {
 							mkForceLeaveRequest(deadName),
 						}
 
-						runUntilStable(rv, rsp, rvrs, ff)
+						runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
 
 						// Count surviving voters.
 						var voters int
@@ -108,7 +108,7 @@ var _ = Describe("integration: ForceRemove quorum invariants", func() {
 							mkForceLeaveRequest(deadName),
 						}
 
-						runUntilStable(rv, rsp, rvrs, ff)
+						runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
 
 						// qmr and baseline.GMDR must still not drop.
 						Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(
@@ -130,7 +130,7 @@ var _ = Describe("integration: ForceRemove quorum invariants", func() {
 					rv.Status.Configuration.FailuresToTolerate = 0
 					rv.Status.Configuration.GuaranteedMinimumDataRedundancy = 0
 
-					runUntilStable(rv, rsp, rvrs, ff)
+					runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
 
 					Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)), "recovery: q=1")
 					Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(1)), "recovery: qmr=1")
@@ -196,7 +196,7 @@ var _ = Describe("integration: simultaneous ForceRemove", func() {
 					mkForceLeaveRequest("rv-1-2"),
 				}
 
-				runUntilStable(rv, rsp, rvrs, ff)
+				runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
 
 				Expect(rv.Status.Datamesh.Members).To(HaveLen(1))
 				Expect(rv.Status.Datamesh.Members[0].Name).To(Equal("rv-1-0"))
@@ -217,7 +217,7 @@ var _ = Describe("integration: simultaneous ForceRemove", func() {
 					mkForceLeaveRequest("rv-1-4"),
 				}
 
-				runUntilStable(rv, rsp, rvrs, ff)
+				runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
 
 				var voters, tbs int
 				for _, m := range rv.Status.Datamesh.Members {
@@ -247,7 +247,7 @@ var _ = Describe("integration: simultaneous ForceRemove", func() {
 					mkForceLeaveRequest("rv-1-4"),
 				}
 
-				runUntilStable(rv, rsp, rvrs, ff)
+				runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
 
 				var voters int
 				for _, m := range rv.Status.Datamesh.Members {

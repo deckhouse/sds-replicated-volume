@@ -2577,7 +2577,7 @@ var _ = Describe("ChangeReplicaType + ChangeQuorum for qmr", func() {
 		}
 		rsp := mkRSP("node-1", "node-2", "node-3")
 
-		runUntilStable(rv, rsp, rvrs, FeatureFlags{})
+		runSettleLoop(rv, rsp, rvrs, nil, FeatureFlags{}, nil, assertSafetyInvariants)
 
 		// 3D, q=2, qmr=3 (raised by ChangeQuorum after ChangeType).
 		var voters int
@@ -2618,7 +2618,7 @@ var _ = Describe("ChangeReplicaType + ChangeQuorum for qmr", func() {
 		}
 		rsp := mkRSP("node-1", "node-2", "node-3")
 
-		runUntilStable(rv, rsp, rvrs, FeatureFlags{})
+		runSettleLoop(rv, rsp, rvrs, nil, FeatureFlags{}, nil, assertSafetyInvariants)
 
 		// 2D + 1A, q=2, qmr=1 (lowered by ChangeQuorum after ChangeType).
 		var dCount, aCount int
@@ -2635,5 +2635,144 @@ var _ = Describe("ChangeReplicaType + ChangeQuorum for qmr", func() {
 		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2)))
 		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(1)))
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// E2E settle: dispatch → all steps → completion
+//
+// One representative test per step-count family. Uses runSettleLoop with
+// default simulateRevisionBump (sufficient for all membership confirms).
+
+var _ = Describe("ChangeReplicaType e2e settle", func() {
+	It("a-to-tb/v1: 1-step (A → TB)", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-1", v1alpha1.ReplicaTypeTieBreaker),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5),
+		}
+
+		runSettleLoop(rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{}, nil, assertSafetyInvariants)
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
+		Expect(m).NotTo(BeNil())
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeTieBreaker))
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Replica type changed successfully"))
+	})
+
+	It("a-to-sd/v1: 2-step (A → sD∅ → sD)", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-1", v1alpha1.ReplicaTypeShadowDiskful),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5),
+		}
+
+		runSettleLoop(rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{ShadowDiskful: true}, nil, assertSafetyInvariants)
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
+		Expect(m).NotTo(BeNil())
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeShadowDiskful))
+		Expect(m.LVMVolumeGroupName).To(Equal("test-lvg"))
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Replica type changed successfully"))
+	})
+
+	It("a-to-d/v1: 2-step (A → D∅ → D)", func() {
+		// 2D + 1A. Even voters — a-to-d/v1 (no q↑).
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeAccess, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeDiskful),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5), mkRVR("rv-1-2", "node-3", 5),
+		}
+
+		runSettleLoop(rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{}, nil, assertSafetyInvariants)
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-2")
+		Expect(m).NotTo(BeNil())
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeDiskful))
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2)))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Replica type changed successfully"))
+	})
+
+	It("a-to-d-via-sd/v1: 3-step (A → sD∅ → sD → D)", func() {
+		// 2D + 1A. ShadowDiskful enabled, even voters — a-to-d-via-sd/v1.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeAccess, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeDiskful),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5), mkRVR("rv-1-2", "node-3", 5),
+		}
+
+		runSettleLoop(rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{ShadowDiskful: true}, nil, assertSafetyInvariants)
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-2")
+		Expect(m).NotTo(BeNil())
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeDiskful))
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2)))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Replica type changed successfully"))
+	})
+
+	It("a-to-d-via-sd-q-up/v1: 5-step (A → sD∅ → sD → sD∅ → D∅+q↑ → D)", func() {
+		// 1D + 1A. ShadowDiskful enabled, odd voters — a-to-d-via-sd-q-up/v1.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-1", v1alpha1.ReplicaTypeDiskful),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5),
+		}
+
+		runSettleLoop(rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{ShadowDiskful: true}, nil, assertSafetyInvariants)
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
+		Expect(m).NotTo(BeNil())
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeDiskful))
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2))) // was 1, raised mid-plan
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Replica type changed successfully"))
 	})
 })

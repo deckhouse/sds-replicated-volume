@@ -119,16 +119,15 @@ var _ = Describe("AddReplica(A)", func() {
 
 	It("guard: RVR nil (no RVR at all)", func() {
 		// Join request exists but the RVR has not been created yet.
-		// guardAddressesPopulated checks rctx.rvr == nil and blocks.
+		// guardNodeEligible blocks first — no node name known without RVR.
 		rv := mkRV(5, nil, []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")}, nil)
-		// Only the Diskful RVR — no RVR for rv-1-1.
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{}
 
 		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-2"), rvrs, nil, FeatureFlags{})
 
 		Expect(changed).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
-		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("addresses"))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("not in eligible nodes"))
 	})
 
 	It("guard: member on same node", func() {
@@ -699,3 +698,54 @@ func findReplicaContext(replicas []ReplicaContext, id uint8) *ReplicaContext {
 	}
 	return nil
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// E2E settle
+//
+
+var _ = Describe("Access e2e settle", func() {
+	It("AddReplica(A): dispatch → complete", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestAccess("rv-1-1")},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 0),
+		}
+
+		runSettleLoop(rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{}, nil, assertSafetyInvariants)
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.Datamesh.Members).To(HaveLen(2))
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
+		Expect(m).NotTo(BeNil())
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeAccess))
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Joined datamesh successfully"))
+	})
+
+	It("RemoveReplica(A): dispatch → complete", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-1")},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5),
+		}
+
+		runSettleLoop(rv, nil, rvrs, nil, FeatureFlags{}, nil, assertSafetyInvariants)
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.Datamesh.Members).To(HaveLen(1))
+		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-1")).To(BeNil())
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Left datamesh successfully"))
+	})
+})

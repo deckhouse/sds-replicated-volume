@@ -25,7 +25,7 @@ package datamesh
 // The engine should process transitions step-by-step, following the
 // multi-step ordering: GMDR-first on upgrade, FTT-first on downgrade.
 // Each step is a single VotingMembership or NonVotingMembership transition
-// dispatched and completed via runUntilStable.
+// dispatched and completed via runSettleLoop.
 //
 // After all transitions complete, the final state must match the target
 // layout exactly: correct D/TB member counts, q = voters/2+1, and
@@ -151,7 +151,7 @@ func transitionLayout(from, to layoutEntry, features FeatureFlags) {
 	rv.Status.DatameshReplicaRequests = requests
 
 	// Run until all transitions complete.
-	runUntilStable(rv, rsp, rvrs, features)
+	runSettleLoop(rv, rsp, rvrs, nil, features, nil, assertSafetyInvariants)
 
 	// Assert final state.
 	// Count D and TB members.
@@ -358,7 +358,7 @@ func transitionLayoutStepwise(from, to layoutEntry, dFirst bool, features Featur
 			)
 		}
 
-		runUntilStable(rv, rsp, rvrs, features)
+		runSettleLoop(rv, rsp, rvrs, nil, features, nil, assertSafetyInvariants)
 
 		// Intermediate invariant: q = voters/2+1.
 		var voters int

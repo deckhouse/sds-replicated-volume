@@ -306,7 +306,7 @@ func BenchmarkSettle_Confirm_3D(b *testing.B) {
 }
 
 // BenchmarkFullCycle_AddD_3D benchmarks a complete AddReplica(D) lifecycle:
-// dispatch → apply → confirm → settle → done. Uses runUntilStableUnchecked
+// dispatch → apply → confirm → settle → done. Uses runSettleLoop (without check)
 // to avoid safety check overhead in the benchmark.
 func BenchmarkFullCycle_AddD_3D(b *testing.B) {
 	ensureRegistry()
@@ -327,7 +327,7 @@ func BenchmarkFullCycle_AddD_3D(b *testing.B) {
 			mkRVR("rv-1-0", "node-0", 5), mkRVR("rv-1-1", "node-1", 5),
 			mkRVR("rv-1-2", "node-2", 5), mkRVR("rv-1-3", "node-3", 0),
 		}
-		runUntilStableUnchecked(rv, rsp, rvrs, FeatureFlags{})
+		runSettleLoop(rv, rsp, rvrs, nil, FeatureFlags{}, nil, nil)
 	}
 }
 
@@ -351,7 +351,7 @@ func BenchmarkFullCycle_ForceRemove_3D(b *testing.B) {
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVR("rv-1-0", "node-0", 5), mkRVR("rv-1-1", "node-1", 5),
 		}
-		runUntilStableUnchecked(rv, rsp, rvrs, FeatureFlags{})
+		runSettleLoop(rv, rsp, rvrs, nil, FeatureFlags{}, nil, nil)
 	}
 }
 
