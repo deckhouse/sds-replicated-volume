@@ -70,14 +70,14 @@ func (m *mockT) Log(args ...any) { m.logs = append(m.logs, fmt.Sprint(args...)) 
 func (m *mockT) Logf(format string, args ...any) {
 	m.logs = append(m.logs, fmt.Sprintf(format, args...))
 }
-func (m *mockT) Name() string             { return m.name }
-func (m *mockT) Parallel()                {}
-func (m *mockT) Setenv(_, _ string)       {}
-func (m *mockT) Skip(_ ...any)            { m.skipped = true; runtime.Goexit() }
-func (m *mockT) Skipf(_ string, _ ...any) { m.skipped = true; runtime.Goexit() }
-func (m *mockT) SkipNow()                 { m.skipped = true; runtime.Goexit() }
-func (m *mockT) Skipped() bool            { return m.skipped }
-func (m *mockT) TempDir() string          { return "" }
+func (m *mockT) Name() string         { return m.name }
+func (m *mockT) Parallel()            {}
+func (m *mockT) Setenv(_, _ string)   {}
+func (m *mockT) Skip(...any)          { m.skipped = true; runtime.Goexit() }
+func (m *mockT) Skipf(string, ...any) { m.skipped = true; runtime.Goexit() }
+func (m *mockT) SkipNow()             { m.skipped = true; runtime.Goexit() }
+func (m *mockT) Skipped() bool        { return m.skipped }
+func (m *mockT) TempDir() string      { return "" }
 
 func (m *mockT) Run(name string, fn func(*mockT)) bool {
 	child := &mockT{ctx: m.ctx, name: m.name + "/" + name}
