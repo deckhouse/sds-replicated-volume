@@ -218,8 +218,9 @@ type DRBDAddress struct {
 
 // +kubebuilder:object:generate=true
 type DRBDResourceStatus struct {
-	// Device path, e.g. /dev/drbd10012 or /dev/sds-replicated/<rvrName>
-	// Only present on primary
+	// Device is the stable symlink path to the DRBD block device,
+	// e.g. /dev/sdsrv/<resourceName>. The symlink target is /dev/drbd<minor>.
+	// Only present when the resource is Up and has an allocated minor.
 	// +kubebuilder:validation:MaxLength=256
 	// +optional
 	Device string `json:"device,omitempty"`

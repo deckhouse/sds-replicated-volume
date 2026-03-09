@@ -46,5 +46,6 @@ const (
 	DRBDResourceCondConfiguredReasonResourceOptionsFailed = "ResourceOptionsFailed"
 	DRBDResourceCondConfiguredReasonSecondaryFailed       = "SecondaryFailed"
 	DRBDResourceCondConfiguredReasonStateQueryFailed      = "StateQueryFailed"
+	DRBDResourceCondConfiguredReasonSymlinkFailed         = "SymlinkFailed"
 	DRBDResourceCondConfiguredReasonInMaintenance         = "InMaintenance"
 )

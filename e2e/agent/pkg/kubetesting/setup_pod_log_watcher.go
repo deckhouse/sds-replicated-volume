@@ -33,6 +33,7 @@ import (
 type PodLogMonitorOptions struct {
 	Namespace     string `json:"namespace"`
 	LabelSelector string `json:"labelSelector"`
+	Container     string `json:"container,omitempty"`
 }
 
 // PodLogLine is a log line tagged with the pod name it came from.
@@ -49,6 +50,7 @@ func SetupPodLogWatcher(
 	cs *kubernetes.Clientset,
 	namespace string,
 	podName string,
+	container string,
 ) <-chan string {
 	ch := make(chan string)
 
@@ -56,6 +58,7 @@ func SetupPodLogWatcher(
 	stream, err := cs.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
 		Follow:    true,
 		SinceTime: &now,
+		Container: container,
 	}).Stream(e.Context())
 	if err != nil {
 		e.Fatalf("streaming logs for pod %s: %v", podName, err)
@@ -110,7 +113,7 @@ func SetupPodsLogWatcher(
 
 	for i := range podList.Items {
 		podName := podList.Items[i].Name
-		ch := SetupPodLogWatcher(e, cs, opts.Namespace, podName)
+		ch := SetupPodLogWatcher(e, cs, opts.Namespace, podName, opts.Container)
 		fanWg.Go(func() {
 			for line := range ch {
 				out <- PodLogLine{PodName: podName, Line: line}
