@@ -397,6 +397,11 @@ Request-driven. Iterates `allReplicas`, for each:
 **Plan selection** returns `(planID, "")` on success, `("", blocked)` if blocked
 (written to slot via `NoDispatch`), `("", "")` to skip silently.
 
+A special case: when a member is in a liminal state heading toward its resolved
+type (LiminalDiskful with targetType=Diskful, or LiminalShadowDiskful with
+targetType=ShadowDiskful), `planChangeReplicaType` returns skip `("", "")` —
+the member is already mid-transition and no new dispatch is needed.
+
 Diskful plan selection (`planAddDiskful`) is the most complex — 8 variants based on:
 - Voter parity: even (no q↑) vs odd (q↑ needed)
 - ShadowDiskful feature: A vestibule vs sD pre-sync

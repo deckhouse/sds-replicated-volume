@@ -561,6 +561,12 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 - ⚡ **LiminalDiskful → TieBreaker: routes to d-to-tb plan.**
   D∅ member, ChangeRole(→TieBreaker). Odd voters → d-to-tb/v1.
 
+- ⚡ **LiminalDiskful → Diskful: skip (transition in progress).**
+  D + D + D∅ member, ChangeRole(→Diskful). Dispatch returns skip (already transitioning). No transition created. changed=false.
+
+- ⚡ **LiminalShadowDiskful → ShadowDiskful: skip (transition in progress).**
+  D + D + sD∅ member, ChangeRole(→ShadowDiskful). Dispatch returns skip. No transition created. changed=false.
+
 ### ChangeType + automatic ChangeQuorum
 
 - ⚡ **A→D + qmr raise: ChangeQuorum fires after ChangeType completes.**

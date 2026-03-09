@@ -1455,6 +1455,52 @@ var _ = Describe("ChangeReplicaType(sD↔D) additional", func() {
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
 		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("d-to-sd/v1"))
 	})
+
+	It("dispatch: LiminalDiskful → Diskful skips (transition in progress)", func() {
+		// D∅ member with target Diskful — already transitioning (e.g. mid tb-to-d or a-to-d plan).
+		// Dispatcher should skip: no new transition created.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeLiminalDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeDiskful),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5), mkRVR("rv-1-2", "node-3", 5),
+		}
+
+		_, _ = ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+	})
+
+	It("dispatch: LiminalShadowDiskful → ShadowDiskful skips (transition in progress)", func() {
+		// sD∅ member with target ShadowDiskful — already transitioning (e.g. mid a-to-sd plan).
+		// Dispatcher should skip: no new transition created.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeLiminalShadowDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeShadowDiskful),
+			},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5), mkRVR("rv-1-2", "node-3", 5),
+		}
+
+		_, _ = ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{ShadowDiskful: true})
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+	})
 })
 
 // ──────────────────────────────────────────────────────────────────────────────

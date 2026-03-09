@@ -257,6 +257,9 @@ source and target types, voter parity, and ShadowDiskful availability.
   via the `non-voting` flag change. No disk detach/reattach needed.
 - D→sD + q↓ (even→odd) uses the same detach-before-demote pattern as the
   sD + q↑ paths: D→D∅→sD∅+q↓→sD.
+- Liminal types heading toward their resolved type (D∅→D, sD∅→sD) are
+  skipped by the dispatcher — they indicate a transition is already in
+  progress. No new dispatch is created.
 
 ---
 
