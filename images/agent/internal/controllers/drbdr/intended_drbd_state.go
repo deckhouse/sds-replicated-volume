@@ -19,7 +19,6 @@ package drbdr
 import (
 	corev1 "k8s.io/api/core/v1"
 
-	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
@@ -266,13 +265,7 @@ func computeIntendedDRBDState(
 		})
 	}
 
-	// Compute isUpAndNotInCleanup
-	isUpAndNotInCleanup := true
-	if drbdr.DeletionTimestamp != nil && !obju.HasFinalizersOtherThan(drbdr, v1alpha1.AgentFinalizer) {
-		isUpAndNotInCleanup = false
-	} else if drbdr.Spec.State == v1alpha1.DRBDResourceStateDown {
-		isUpAndNotInCleanup = false
-	}
+	isUpAndNotInCleanup := !isBeingDeletedOrDown(drbdr)
 
 	// Compute size in bytes for diskful resources
 	var sizeBytes int64

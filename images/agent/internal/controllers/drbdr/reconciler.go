@@ -54,6 +54,18 @@ func NewReconciler(cl client.Client, nodeName string, portCache *PortCache) *Rec
 	}
 }
 
+// isBeingDeleted returns true when the DRBDResource is marked for deletion and
+// the agent holds the only remaining finalizer (ready for final cleanup).
+func isBeingDeleted(drbdr *v1alpha1.DRBDResource) bool {
+	return drbdr.DeletionTimestamp != nil && !obju.HasFinalizersOtherThan(drbdr, v1alpha1.AgentFinalizer)
+}
+
+// isBeingDeletedOrDown returns true when the DRBDResource is being torn down —
+// either because it's being deleted or because spec.state is Down.
+func isBeingDeletedOrDown(drbdr *v1alpha1.DRBDResource) bool {
+	return isBeingDeleted(drbdr) || drbdr.Spec.State == v1alpha1.DRBDResourceStateDown
+}
+
 // Reconcile reconciles a DRBDResource based on the request type.
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
@@ -379,9 +391,14 @@ func (r *Reconciler) reconcileLLVFinalizerRelease(
 		return nil
 	}
 
-	// Determine the intended LLV name. If spec is diskless or the resource is
-	// going down/being deleted, the intended LLV is empty (no disk).
+	// Determine the intended LLV name. When the resource is being deleted,
+	// the intended LLV is empty — the disk is no longer needed.
+	// Note: state=Down intentionally keeps the LLV finalizer (the resource
+	// may come back Up).
 	intendedLLVName := drbdr.Spec.LVMLogicalVolumeName
+	if isBeingDeleted(drbdr) {
+		intendedLLVName = ""
+	}
 
 	// Still attached to the same LLV — nothing to release.
 	if attachedLLVName == intendedLLVName {
@@ -446,15 +463,8 @@ func (r *Reconciler) reconcileFinalizer(
 	rf := flow.BeginReconcile(ctx, "reconcile-finalizer")
 	defer rf.OnEnd(&outcome)
 
-	isUpAndNotInCleanup := true
-	if drbdr.DeletionTimestamp != nil && !obju.HasFinalizersOtherThan(drbdr, v1alpha1.AgentFinalizer) {
-		isUpAndNotInCleanup = false
-	} else if drbdr.Spec.State == v1alpha1.DRBDResourceStateDown {
-		isUpAndNotInCleanup = false
-	}
-
 	base := drbdr.DeepCopy()
-	ensureOutcome := ensureFinalizer(rf.Ctx(), drbdr, adding, isUpAndNotInCleanup)
+	ensureOutcome := ensureFinalizer(rf.Ctx(), drbdr, adding, !isBeingDeletedOrDown(drbdr))
 	if ensureOutcome.Error() != nil {
 		return rf.Fail(ensureOutcome.Error())
 	}

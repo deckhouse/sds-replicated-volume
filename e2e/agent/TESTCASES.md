@@ -22,6 +22,14 @@ TestDRBDResource
 │       is intentionally kept (resource may come back Up). Cleanup reverts
 │       to state=Up; agent brings DRBD back up and re-adds its finalizer.
 │
+├── DeleteDiskful — delete diskful replica with attached LLV
+│       Creates a diskful DRBDResource with an LLV (same setup as R1).
+│       Deletes the DRBDResource directly without reverting to diskless.
+│       Waits for full deletion. Asserts the agent released its finalizer
+│       from the LLV. Catches the bug where the agent fails to release the
+│       LLV finalizer on the deletion path (intendedLLVName == attachedLLVName
+│       because spec doesn't change on delete).
+│
 ├── R2 — two peered, synced replicas (parallel with R3, R4)
 │   │   Creates 2 diskful replicas on separate nodes. Links them as
 │   │   full-mesh peers (protocol C, shared secret). Runs CreateNewUUID
@@ -80,3 +88,7 @@ Every subtest's cleanup exercises a teardown path:
 
 - **RemovePeer cleanup**: restores the peer list. Verifies the agent
   can re-add a previously forgotten peer.
+
+- **DeleteDiskful**: deletes the DRBDResource directly while still diskful
+  with an attached LLV. Verifies the agent releases the LLV finalizer on
+  the deletion path. Parent cleanup deletes the orphaned LLV.
