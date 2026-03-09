@@ -231,6 +231,7 @@ func systemNetworkToNodeAddressType(systemNetwork string) corev1.NodeAddressType
 func computeIntendedDRBDState(
 	drbdr *v1alpha1.DRBDResource,
 	backingDisk string,
+	isUpAndNotInCleanup bool,
 ) *intendedDRBDState {
 	// Build local addresses map from status.addresses
 	localAddresses := make(map[string]v1alpha1.DRBDAddress, len(drbdr.Status.Addresses))
@@ -264,8 +265,6 @@ func computeIntendedDRBDState(
 			paths:           paths,
 		})
 	}
-
-	isUpAndNotInCleanup := !isBeingDeletedOrDown(drbdr)
 
 	// Compute size in bytes for diskful resources
 	var sizeBytes int64
