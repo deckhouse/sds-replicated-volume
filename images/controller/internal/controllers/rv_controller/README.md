@@ -8,7 +8,7 @@ The controller reconciles `ReplicatedVolume` with:
 
 1. **Configuration initialization** — derives configuration from `ReplicatedStorageClass` (RSC) in Auto mode or from `ManualConfiguration` in Manual mode into RV status
 2. **Datamesh formation** — creates replicas, establishes DRBD connectivity, bootstraps data synchronization
-3. **Normal operation** — steady-state datamesh lifecycle: Access replica create/delete/join/leave, attach/detach transitions, multiattach management *(WIP: missing diskful join/leave, tiebreaker, role changes)*
+3. **Normal operation** — steady-state datamesh lifecycle managed by the datamesh transition engine (membership, attachment, quorum, network transitions); see [datamesh/README.md](datamesh/README.md)
 4. **Deletion** — cleans up child resources (RVRs, RVAs) and datamesh state
 
 ## Interactions
@@ -50,11 +50,10 @@ if configuration exists:
         reconcileRVAWaiting (datamesh forming)
     else:
         reconcileRVConfiguration (check for config updates + set ConfigurationReady condition)
-        reconcile normal operation (WIP):
+        reconcile normal operation:
             create Access RVRs for Active RVAs on nodes without any RVR
-            process Access replica datamesh membership (join/leave)
-            process attach/detach transitions (slot allocation, multiattach, guards)
-            update RVA conditions and attachment fields from attachmentsSummary
+            datamesh.ProcessTransitions (membership, quorum, attachment, network)
+            update RVA conditions from datamesh replica contexts
             delete unnecessary Access RVRs (redundant or unused)
 
 reconcileRVAFinalizers (add/remove RVA finalizers)
@@ -105,26 +104,13 @@ Reconcile (root) [Pure orchestration]
 │   │   └── advanceFormationStep / remove transition (formation complete)
 │   └── reconcileRVAWaiting ("Datamesh formation is in progress")
 ├── reconcileRVConfiguration [In-place reconciliation] (config updates + ConfigurationReady condition)
-├── reconcileNormalOperation [Pure orchestration] (WIP)
+├── reconcileNormalOperation [Pure orchestration]
 │   ├── reconcileCreateAccessReplicas [Pure orchestration] ← details
-│   ├── (MergeEnsures)
-│   │   ├── ensureDatameshAccessReplicas ← details
-│   │   │   ├── ensureDatameshAccessReplicaTransitionProgress (loop: active transitions)
-│   │   │   ├── ensureDatameshAddReplica (loop: pending joins)
-│   │   │   └── ensureDatameshRemoveReplica (loop: pending leaves)
-│   │   └── ensureDatameshAttachments ← details
-│   │       ├── buildAttachmentsSummary ← details
-│   │       ├── computeDatameshAttachBlocked (calls computeActualQuorum)
-│   │       ├── ensureDatameshAttachDetachTransitionProgress
-│   │       ├── computeDatameshPotentiallyAttached
-│   │       ├── ensureDatameshMultiattachTransitionProgress
-│   │       ├── computeDatameshAttachmentIntents ← details
-│   │       ├── ensureDatameshMultiattachToggle
-│   │       ├── ensureDatameshDetachTransitions ← details
-│   │       └── ensureDatameshAttachTransitions ← details
-│   ├── reconcileRVAConditionsFromAttachmentsSummary [In-place reconciliation] ← details
-│   │   ├── computeRVAAttachedConditionFromAttachmentsSummary
-│   │   ├── computeRVAReplicaReadyConditionFromAttachmentsSummary
+│   ├── datamesh.ProcessTransitions (membership, quorum, attachment, network)
+│   │   └── see datamesh/README.md
+│   ├── reconcileRVAConditionsFromDatameshReplicaContext [In-place reconciliation] ← details
+│   │   ├── computeRVAAttachedCondition
+│   │   ├── computeRVAReplicaReadyCondition
 │   │   ├── computeRVAReadyCondition
 │   │   ├── isRVAAttachmentFieldsInSync + applyRVAAttachmentFields
 │   │   └── patchRVAStatus
@@ -137,7 +123,7 @@ Reconcile (root) [Pure orchestration]
 └── patchRVStatus
 ```
 
-Links to detailed algorithms: [`reconcileDeletion`](#reconciledeletion-details), [`ensureDatameshReplicaRequests`](#ensuredatameshreplicarequests-details), [`reconcileRVConfiguration`](#reconcilervconfiguration-details), [`reconcileFormationStepPreconfigure`](#reconcileformationsteppreconfigure-details), [`reconcileFormationStepEstablishConnectivity`](#reconcileformationstepestablishconnectivity-details), [`reconcileFormationStepBootstrapData`](#reconcileformationstepbootstrapdata-details), [`reconcileCreateAccessReplicas`](#reconcilecreateaccessreplicas-details), [`reconcileDeleteAccessReplicas`](#reconciledeleteaccessreplicas-details), [`ensureDatameshAccessReplicas`](#ensuredatameshaccessreplicas-details), [`ensureDatameshAttachments`](#ensuredatameshattachments-details), [`buildAttachmentsSummary`](#buildattachmentssummary-details), [`computeDatameshAttachmentIntents`](#computedatameshattachmentintents-details), [`ensureDatameshDetachTransitions`](#ensuredatameshdetachtransitions-details), [`ensureDatameshAttachTransitions`](#ensuredatameshattachtransitions-details), [`reconcileRVAConditionsFromAttachmentsSummary`](#reconcilervaconditionsfromattachmentssummary-details)
+Links to detailed algorithms: [`reconcileDeletion`](#reconciledeletion-details), [`ensureDatameshReplicaRequests`](#ensuredatameshreplicarequests-details), [`reconcileRVConfiguration`](#reconcilervconfiguration-details), [`reconcileFormationStepPreconfigure`](#reconcileformationsteppreconfigure-details), [`reconcileFormationStepEstablishConnectivity`](#reconcileformationstepestablishconnectivity-details), [`reconcileFormationStepBootstrapData`](#reconcileformationstepbootstrapdata-details), [`reconcileCreateAccessReplicas`](#reconcilecreateaccessreplicas-details), [`reconcileDeleteAccessReplicas`](#reconciledeleteaccessreplicas-details), [`reconcileRVAConditionsFromDatameshReplicaContext`](#reconcilervaconditionsfromdatameshreplicacontext-details)
 
 ## Algorithm Flow
 
@@ -171,7 +157,7 @@ flowchart TD
     Formation --> FormingRVAWaiting["reconcileRVAWaiting<br/>(datamesh forming)"]
     FormingRVAWaiting --> Finalizers
     CheckForming -->|No| UpdateConfig["reconcileRVConfiguration<br/>(config updates + condition)"]
-    UpdateConfig --> NormalOp["reconcileNormalOperation<br/>(Access replicas + attachments)"]
+    UpdateConfig --> NormalOp["reconcileNormalOperation<br/>(datamesh engine + RVA conditions)"]
     NormalOp --> Finalizers
 
     Finalizers["reconcileRVAFinalizers +<br/>reconcileRVRFinalizers"]
@@ -195,7 +181,7 @@ Indicates whether the RV configuration is valid and derived from the appropriate
 
 ### Attached (on RVA)
 
-Set by `reconcileRVAConditionsFromAttachmentsSummary` during normal operation, or by `reconcileRVAWaiting` when the RV is unavailable.
+Set by `reconcileRVAConditionsFromDatameshReplicaContext` during normal operation, or by `reconcileRVAWaiting` when the RV is unavailable.
 
 | Status | Reason | When |
 |--------|--------|------|
@@ -212,7 +198,7 @@ Set by `reconcileRVAConditionsFromAttachmentsSummary` during normal operation, o
 
 ### ReplicaReady (on RVA)
 
-Mirrors the RVR Ready condition for the replica on this node. Set by `reconcileRVAConditionsFromAttachmentsSummary`. Removed by `reconcileRVAWaiting` when the RV is unavailable.
+Mirrors the RVR Ready condition for the replica on this node. Set by `reconcileRVAConditionsFromDatameshReplicaContext`. Removed by `reconcileRVAWaiting` when the RV is unavailable.
 
 | Status | Reason | When |
 |--------|--------|------|
@@ -293,34 +279,13 @@ When formation stalls (any safety check fails or progress timeout is exceeded), 
 
 ## Attachment Lifecycle
 
-Attachment is the process of making a datamesh volume accessible (Primary in DRBD terms) on a specific node. The attachment pipeline runs during normal operation and is orchestrated by `ensureDatameshAttachments`.
+Attachment (making a datamesh volume Primary on a node) is managed by the datamesh transition engine during normal operation. The engine handles slot allocation, multiattach toggling, attach/detach guards, quorum checks, and transition confirmation. See [datamesh/README.md](datamesh/README.md) for the engine's architecture and transition plans.
 
-### Concepts
+Key concepts:
 
-- **Slot**: an attachment slot controlled by `rv.Spec.MaxAttachments`. Nodes compete for slots to become attached.
-- **PotentiallyAttached**: a member that is attached (`member.Attached=true`) or has an active Detach transition (may still be Primary until confirmed). These always occupy a slot.
-- **Intent**: each node gets an attachment intent — `Attach` (has slot), `Detach` (should detach), `Pending` (waiting for slot or blocked), or no intent (not processed).
-- **Multiattach**: when more than one node needs to be attached simultaneously, DRBD must be configured for multiattach before any second Attach transition can proceed. Controlled by `rv.Status.Datamesh.Multiattach` and Enable/Disable Multiattach transitions.
-
-### Slot allocation
-
-1. PotentiallyAttached nodes with active RVA keep their slot (intent=Attach); without active RVA get intent=Detach
-2. Already-attached nodes NEVER lose their slot when `maxAttachments` decreases
-3. If attach is globally blocked (RV deleting, quorum not satisfied / agent not ready) — active-RVA nodes are Pending; nodes with only deleting RVAs are Detached
-4. Remaining candidates (eligible RSP node + has datamesh member) compete in FIFO order (by earliest RVA creation timestamp)
-5. Nodes without a datamesh member, on ineligible nodes, or with node/agent not ready are Pending with a specific message
-
-### Multiattach lifecycle
-
-- **EnableMultiattach**: triggered when `intendedAttachments > 1` and not already enabled. Bumps revision, creates EnableMultiattach transition. Must be confirmed by all members with backing volume + potentiallyAttached members before Attach transitions can proceed.
-- **DisableMultiattach**: triggered when `intendedAttachments <= 1` AND `potentiallyAttached <= 1`. Bumps revision, creates DisableMultiattach transition.
-- Enable and Disable are mutually exclusive — no concurrent multiattach transitions.
-
-### Transition confirmation
-
-All transitions are confirmed when the target replicas report `DatameshRevision >= step.DatameshRevision` (on the active step). The transition is then removed from `rv.Status.DatameshTransitions`.
-
-Special cases for Detach: also confirmed when the replica has no `attachmentState`, no RVR, or `DatameshRevision == 0` (replica left the datamesh or was deleted).
+- **Slot**: controlled by `rv.Spec.MaxAttachments`
+- **Multiattach**: managed automatically when multiple nodes need attachment
+- **Transition confirmation**: replicas confirm via `DatameshRevision`
 
 ## Managed Metadata
 
@@ -370,7 +335,7 @@ flowchart TD
 
     subgraph ensures [Ensure Helpers]
         EnsurePending[ensureDatameshReplicaRequests]
-        EnsureAttachments[ensureDatameshAttachments]
+        DMEngine["datamesh.ProcessTransitions"]
     end
 
     subgraph configReconciler [Configuration]
@@ -393,14 +358,14 @@ flowchart TD
     RSP --> ReconcileNormalOp
     RVAStatus --> ReconcileNormalOp
     RVAStatus --> ReconcileDeletion
-    RVRStatus --> EnsureAttachments
-    RVAStatus --> EnsureAttachments
-    RSP --> EnsureAttachments
+    RVRStatus --> DMEngine
+    RVAStatus --> DMEngine
+    RSP --> DMEngine
 
     ReconcileMeta --> RVMeta
     ReconcileConfig --> RVStatus
     EnsurePending --> RVStatus
-    EnsureAttachments --> RVStatus
+    DMEngine --> RVStatus
     ReconcileFormation --> RVStatus
     ReconcileFormation --> RVRManaged
     ReconcileFormation --> DRBDROp
@@ -655,9 +620,9 @@ flowchart TD
 
 ---
 
-### reconcileRVAConditionsFromAttachmentsSummary Details
+### reconcileRVAConditionsFromDatameshReplicaContext Details
 
-**Purpose:** Updates status conditions (Attached, ReplicaReady, Ready) and attachment fields (devicePath, ioSuspended, inUse) on each RVA based on the pre-computed `attachmentsSummary` returned by `ensureDatameshAttachments`. Called from `reconcileNormalOperation` after the attachment pipeline completes.
+**Purpose:** Updates status conditions (Attached, ReplicaReady, Ready) and attachment fields (devicePath, ioSuspended, inUse) on each RVA based on datamesh replica contexts returned by `datamesh.ProcessTransitions`. Called from `reconcileNormalOperation` after the datamesh engine runs.
 
 **File:** `reconciler_rva.go`
 
@@ -665,10 +630,10 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> IterStates["Iterate attachmentStates"]
-    IterStates --> CheckRVAs{"Node has RVAs?"}
+    Start([Start]) --> IterContexts["Iterate datamesh replica contexts"]
+    IterContexts --> CheckRVAs{"Context has RVAs?"}
     CheckRVAs -->|No| SkipNode[Skip]
-    CheckRVAs -->|Yes| ComputeConds["Compute conditions per node:<br/>1. computeRVAAttachedConditionFromAttachmentsSummary<br/>2. computeRVAReplicaReadyConditionFromAttachmentsSummary"]
+    CheckRVAs -->|Yes| ComputeConds["Compute conditions per node:<br/>1. computeRVAAttachedCondition<br/>2. computeRVAReplicaReadyCondition"]
     ComputeConds --> IterRVAs["For each RVA on node"]
     IterRVAs --> ComputeReady["computeRVAReadyCondition<br/>(per-RVA: deleting RVAs are never Ready)"]
     ComputeReady --> CheckSync{"Conditions + fields<br/>already in sync?"}
@@ -676,21 +641,21 @@ flowchart TD
     CheckSync -->|No| Patch["Set conditions + applyRVAAttachmentFields<br/>patchRVAStatus (NotFound ignored)"]
     SkipRVA --> IterRVAs
     Patch --> IterRVAs
-    IterRVAs -->|Done| IterStates
-    SkipNode --> IterStates
-    IterStates -->|Done| End([Continue])
+    IterRVAs -->|Done| IterContexts
+    SkipNode --> IterContexts
+    IterContexts -->|Done| End([Continue])
 ```
 
 **Key behaviors:**
 - Conditions are identical for all RVAs on the same node (Attached and ReplicaReady are per-node). Ready differs per RVA (deleting RVAs are always Ready=False/Deleting).
-- `conditionReason` and `conditionMessage` on each `attachmentState` are set by upstream attachment pipeline functions — this reconciler is a pure mapper from those fields to RVA conditions.
+- `AttachmentConditionReason()` and `AttachmentConditionMessage()` on each replica context are set by the datamesh engine (dispatchers, guards, slot status) — this reconciler is a pure mapper from those fields to RVA conditions.
 - Attachment fields (devicePath, ioSuspended, inUse) are copied from `rvr.Status.Attachment` if available, cleared otherwise.
 
 **Data Flow:**
 
 | Input | Description |
 |-------|-------------|
-| `atts.attachmentStates` | Per-node conditions, RVR pointers, RVA pointers |
+| `[]datamesh.ReplicaContext` | Per-node: attachment condition reason/message, RVR pointer, RVA pointers |
 
 | Output | Description |
 |--------|-------------|
@@ -769,7 +734,7 @@ flowchart TD
 
 ### reconcileCreateAccessReplicas Details
 
-**Purpose:** Creates Access RVRs for active (non-deleting) RVAs on nodes that do not yet have any RVR. Called from `reconcileNormalOperation` before `ensureDatameshAccessReplicas`.
+**Purpose:** Creates Access RVRs for active (non-deleting) RVAs on nodes that do not yet have any RVR. Called from `reconcileNormalOperation` before `datamesh.ProcessTransitions`.
 
 **File:** `reconciler_access_replicas.go`
 
@@ -805,7 +770,7 @@ All guards passed: create Access RVR via `createAccessRVR` (sets `spec.type=Acce
 
 ### reconcileDeleteAccessReplicas Details
 
-**Purpose:** Deletes Access RVRs that are redundant (another datamesh member on the same node) or unused (no active RVA on the node). Called from `reconcileNormalOperation` after `ensureDatameshAccessReplicas` and `ensureDatameshAttachments`.
+**Purpose:** Deletes Access RVRs that are redundant (another datamesh member on the same node) or unused (no active RVA on the node). Called from `reconcileNormalOperation` after `datamesh.ProcessTransitions`.
 
 **File:** `reconciler_access_replicas.go`
 
@@ -821,7 +786,7 @@ All guards passed: create Access RVR via `createAccessRVR` (sets `spec.type=Acce
 | 6 | No active (non-deleting) RVA on node | **Delete** (unused) |
 
 Deletion via `deleteRVR` (sets DeletionTimestamp). The existing pipeline handles the rest:
-- If datamesh member: rvr_controller forms leave pending, `ensureDatameshRemoveReplica` creates RemoveReplica transition, `reconcileRVRFinalizers` removes finalizer after completion.
+- If datamesh member: rvr_controller forms leave request, the datamesh engine's membership dispatcher creates RemoveReplica transition, `reconcileRVRFinalizers` removes finalizer after completion.
 - If not datamesh member: `reconcileRVRFinalizers` removes finalizer directly.
 
 **Data Flow:**
@@ -836,356 +801,3 @@ Deletion via `deleteRVR` (sets DeletionTimestamp). The existing pipeline handles
 | Output | Description |
 |--------|-------------|
 | RVR delete | Unneeded Access RVRs deleted (DeletionTimestamp set) |
-
----
-
-### ensureDatameshAccessReplicas Details
-
-**Purpose:** Coordinates Access replica datamesh membership: completes finished transitions, processes join requests, and processes leave requests. Called from `reconcileNormalOperation`.
-
-**File:** `reconciler_dm_access.go`
-
-**Algorithm:**
-
-```mermaid
-flowchart TD
-    Start([Start]) --> BuildSets["Build membersToConnect, accessMembers,<br/>index replicaRequests by ID"]
-
-    BuildSets --> Loop1["Loop 1: existing transitions<br/>(reverse iteration)"]
-    Loop1 --> CheckType{AddReplica or<br/>RemoveReplica?}
-    CheckType -->|No| SkipTransition[Skip]
-    CheckType -->|Yes| Progress[ensureDatameshAccessReplicaTransitionProgress]
-    Progress --> Completed{Completed?}
-    Completed -->|Yes| RemoveTransition[Remove transition from list]
-    Completed -->|No| KeepTransition[Keep transition]
-    RemoveTransition --> MarkProcessed["Mark pending as processed<br/>(nil in array)"]
-    KeepTransition --> MarkProcessed
-    SkipTransition --> Loop1
-    MarkProcessed --> Loop1
-
-    Loop1 -->|Done| Loop2["Loop 2: remaining pendings"]
-    Loop2 --> CheckJoinLeave{Join or leave?}
-    CheckJoinLeave -->|Join| JoinFn[ensureDatameshAddReplica]
-    CheckJoinLeave -->|Leave| LeaveFn[ensureDatameshRemoveReplica]
-    JoinFn --> Loop2
-    LeaveFn --> Loop2
-    Loop2 -->|Done| EndNode([Return EnsureOutcome])
-```
-
-#### ensureDatameshAddReplica (join guards)
-
-| # | Guard | Outcome |
-|---|-------|---------|
-| 1 | Already a datamesh member | Skip (transient state) |
-| 2 | RV deleting | Message: "Will not join datamesh: volume is being deleted" |
-| 3 | VolumeAccess=Local | Message: "Will not join datamesh: volumeAccess is Local" |
-| 4 | RVR not found | Skip silently |
-| 5 | Addresses empty | Message: "Waiting for replica addresses to be populated" |
-| 6 | Member already on same node | Message: member info |
-| 7 | RSP nil | Message: "Waiting for ReplicatedStoragePool to be available" |
-| 8 | Node not in eligible nodes | Message: node name |
-
-All guards passed: add member to datamesh, increment revision, create AddReplica transition.
-
-#### ensureDatameshRemoveReplica (leave guards)
-
-| # | Guard | Outcome |
-|---|-------|---------|
-| 1 | Not a datamesh member | Skip (transient state) |
-| 2 | Member type is not Access | Skip (defensive) |
-| 3 | Member is attached | Message: "Cannot leave datamesh: replica is attached, detach required first" |
-
-All guards passed: remove member from datamesh, increment revision, create RemoveReplica transition.
-
-#### ensureDatameshAccessReplicaTransitionProgress
-
-Checks confirmation progress for a single AddReplica or RemoveReplica transition:
-
-- **Confirmation**: a replica is confirmed when `DatameshRevision >= step.DatameshRevision` (on the active step).
-- **RemoveReplica special case**: the leaving replica also counts as confirmed when `DatameshRevision == 0` (it left the datamesh and reset its revision).
-- **Error reporting**: waiting replicas with `Configured=False` are reported as errors in the transition message. For AddReplica, the subject replica's `Configured=False` with reason `PendingJoin` is expected and skipped (it has not joined the datamesh yet).
-
-**Data Flow:**
-
-| Input | Description |
-|-------|-------------|
-| `rv.Status.DatameshReplicaRequests` | Pending join/leave requests from RVRs |
-| `rv.Status.DatameshTransitions` | Active transitions |
-| `rv.Status.Datamesh.Members` | Current datamesh members |
-| `rv.Status.Configuration.VolumeAccess` | Volume access mode (Local blocks join) |
-| `rvrs[].Status.DatameshRevision` | Replica confirmation progress |
-| `rvrs[].Status.Addresses` | Replica addresses (required for join) |
-| `rvrs[].Status.Conditions` | Configured condition (for error reporting) |
-| `rsp.EligibleNodes` | Eligible nodes with zones (for join) |
-
-| Output | Description |
-|--------|-------------|
-| `rv.Status.Datamesh.Members` | Members added/removed |
-| `rv.Status.DatameshRevision` | Incremented on join/leave |
-| `rv.Status.DatameshTransitions` | Transitions created/completed/removed |
-| `rv.Status.DatameshReplicaRequests[].Message` | Progress/error messages |
-
----
-
-### ensureDatameshAttachments Details
-
-**Purpose:** Coordinates datamesh attach/detach transitions: builds a pre-indexed attachment summary, determines which nodes should be attached/detached, manages multiattach state, and creates Attach/Detach transitions with guard rules. Returns an `attachmentsSummary` for downstream consumers (e.g., RVA condition reconciliation).
-
-**File:** `reconciler_dm_attachments.go`
-
-**Pipeline:**
-
-```mermaid
-flowchart TD
-    Start([ensureDatameshAttachments]) --> Build["buildAttachmentsSummary<br/>(pre-index members + rvrs + rvas by node)"]
-    Build --> AttachBlocked["computeDatameshAttachBlocked<br/>(RV deleting? quorum/agent not ready?)"]
-    AttachBlocked --> TransProgress["ensureDatameshAttachDetachTransitionProgress<br/>(complete finished Attach/Detach transitions,<br/>fill per-node flags)"]
-    TransProgress --> PotentiallyAttached["computeDatameshPotentiallyAttached<br/>(attached or detaching members)"]
-    PotentiallyAttached --> MultiProgress["ensureDatameshMultiattachTransitionProgress<br/>(complete finished Enable/Disable transitions)"]
-    MultiProgress --> Intents["computeDatameshAttachmentIntents<br/>(slot allocation: Attach/Detach/Pending)"]
-    Intents --> MultiToggle["ensureDatameshMultiattachToggle<br/>(enable/disable based on intent count)"]
-    MultiToggle --> Detach["ensureDatameshDetachTransitions<br/>(create Detach transitions with guards)"]
-    Detach --> Attach["ensureDatameshAttachTransitions<br/>(create Attach transitions with guards)"]
-    Attach --> End(["Return attachmentsSummary + EnsureOutcome"])
-```
-
-**Ordering constraints between sub-functions:**
-
-| Step | Depends on | Reason |
-|------|-----------|--------|
-| `computeDatameshAttachBlocked` | `buildAttachmentsSummary` | Needs members indexed |
-| `ensureDatameshAttachDetachTransitionProgress` | `buildAttachmentsSummary` | Needs `attachmentStateByReplicaID` index |
-| `computeDatameshPotentiallyAttached` | `ensureDatameshAttachDetachTransitionProgress` | Needs `hasActiveDetachTransition` flags |
-| `ensureDatameshMultiattachTransitionProgress` | `computeDatameshPotentiallyAttached` | Needs `potentiallyAttached` for mustConfirm set |
-| `computeDatameshAttachmentIntents` | `computeDatameshPotentiallyAttached` | Needs `potentiallyAttached` for slot allocation |
-| `ensureDatameshMultiattachToggle` | `computeDatameshAttachmentIntents` | Needs `intendedAttachments` count |
-| `ensureDatameshDetachTransitions` | `computeDatameshAttachmentIntents` | Needs intent=Detach |
-| `ensureDatameshAttachTransitions` | `ensureDatameshDetachTransitions` | Detach transitions may set flags read by Attach guards |
-
-**Key types:**
-
-- `attachmentsSummary`: pre-indexed summary of all attachment data. Contains `attachmentStates` sorted by NodeName (binary search via `findAttachmentStateByNodeName`), `attachmentStateByReplicaID` for O(1) lookup, global flags (`attachBlocked`, `hasActiveEnableMultiattachTransition`, etc.), and the `intendedAttachments` / `potentiallyAttached` ID sets.
-- `attachmentState`: per-node data. Contains `nodeName`, `intent` (Attach/Detach/Pending/""), pointers to `member`, `rvr`, `rvas`, per-node transition flags (`hasActiveAttachTransition`, `hasActiveDetachTransition`, `hasActiveAddAccessTransition`), and `conditionReason`/`conditionMessage` (set by the attachment pipeline for every node that has RVAs, consumed by `reconcileRVAConditionsFromAttachmentsSummary`).
-
-**Data Flow:**
-
-| Input | Description |
-|-------|-------------|
-| `rv.Status.Datamesh.Members` | Current datamesh members (Attached flag, NodeName, Type) |
-| `rv.Status.DatameshTransitions` | Active transitions |
-| `rv.Status.Datamesh.Multiattach` | Current multiattach state |
-| `rv.Status.Datamesh.QuorumMinimumRedundancy` | Quorum threshold for attach block |
-| `rv.Spec.MaxAttachments` | Maximum allowed simultaneous attachments |
-| `rvrs[].Status.DatameshRevision` | Transition confirmation progress |
-| `rvrs[].Status.Quorum` | Per-replica quorum flag (quorum check via `computeActualQuorum`) |
-| `rvrs[].Status.Attachment.InUse` | Device in-use flag (blocks detach) |
-| `rvrs[].Status.Conditions.Ready` | RVR Ready condition (attach guard + agent readiness for quorum check) |
-| `rvas` | Attachment intent: active RVAs determine which nodes should be attached |
-| `rsp.EligibleNodes` | Node eligibility for attach candidates |
-
-| Output | Description |
-|--------|-------------|
-| `rv.Status.Datamesh.Members[].Attached` | Updated attached flag on members |
-| `rv.Status.Datamesh.Multiattach` | Toggled on/off |
-| `rv.Status.DatameshRevision` | Incremented per transition |
-| `rv.Status.DatameshTransitions` | Transitions created/completed/removed |
-| `attachmentsSummary` | Returned for downstream use |
-
----
-
-### buildAttachmentsSummary Details
-
-**Purpose:** Builds the pre-indexed `attachmentsSummary` from rv, rvrs, and rvas. Populates `attachmentStates` (sorted by NodeName) with member/rvr/rvas pointers and the `attachmentStateByReplicaID` index. Does NOT fill intent, transition flags, or counts.
-
-**File:** `reconciler_dm_attachments.go`
-
-**Algorithm:**
-
-```mermaid
-flowchart TD
-    Start([Start]) --> SortMembers["Sort rv.Status.Datamesh.Members<br/>by NodeName (stack-allocated array,<br/>max 32 members)"]
-    SortMembers --> Merge["Sorted merge:<br/>members by NodeName × rvas by NodeName"]
-
-    Merge --> ProcessNode["For each unique NodeName:<br/>1. Create attachmentState<br/>2. Consume member if matches<br/>3. Look up rvr for member (by ID) or node (linear)<br/>4. Consume consecutive rvas for this node"]
-    ProcessNode --> IndexByID["Fill attachmentStateByReplicaID<br/>for O(1) lookup by member ID"]
-    IndexByID --> End(["Return attachmentsSummary"])
-```
-
-**Pre-conditions:**
-- `rvas` MUST be sorted by NodeName (primary), CreationTimestamp (secondary) — as returned by `getRVAsSorted`
-- `rv.Status.Datamesh.Members` are sorted in-place (stack-allocated `[32]*member` array avoids heap allocation)
-
-**What is NOT filled** (populated by subsequent pipeline steps):
-- `intent` on each `attachmentState`
-- `hasActiveAttachTransition`, `hasActiveDetachTransition`, `hasActiveAddAccessTransition` flags
-- `conditionReason`, `conditionMessage`
-- Global: `attachBlocked`, `intendedAttachments`, `potentiallyAttached`, multiattach flags
-
-**Data Flow:**
-
-| Input | Description |
-|-------|-------------|
-| `rv.Status.Datamesh.Members` | Datamesh members (pointer into rv, sorted by NodeName) |
-| `rvrs` | Replicas (sorted by ID, used for `findRVRByID` and NodeName fallback) |
-| `rvas` | Attachments (sorted by NodeName, sub-sliced per node — zero alloc) |
-
-| Output | Description |
-|--------|-------------|
-| `attachmentsSummary.attachmentStates` | Per-node states sorted by NodeName |
-| `attachmentsSummary.attachmentStateByReplicaID` | O(1) index by member ID |
-
----
-
-### computeDatameshAttachmentIntents Details
-
-**Purpose:** Computes the attachment intent (Attach/Detach/Pending) for each node in the attachments summary. Determines which nodes get attachment slots, respecting already-attached nodes, global blocks, slot limits, and node eligibility.
-
-**File:** `reconciler_dm_attachments.go`
-
-Must be called AFTER `computeDatameshPotentiallyAttached` (needs `atts.potentiallyAttached`).
-
-**Algorithm:**
-
-```mermaid
-flowchart TD
-    Start([Start]) --> Step1["Step 1: PotentiallyAttached nodes"]
-    Step1 --> PA_Loop{"For each potentiallyAttached<br/>member"}
-    PA_Loop -->|Has active RVA| SetAttach["intent = Attach<br/>(keep slot)"]
-    PA_Loop -->|No active RVA| SetDetach["intent = Detach"]
-    SetAttach --> PA_Loop
-    SetDetach --> PA_Loop
-
-    PA_Loop -->|Done| Step2{"attachBlocked?"}
-    Step2 -->|Yes| BlockedSplit["Active-RVA nodes → Pending;<br/>only-deleting-RVA nodes → Detached"]
-    BlockedSplit --> End
-
-    Step2 -->|No| Step3{"Available new slots > 0?"}
-    Step3 -->|No| PendingNoSlots["All remaining active-RVA nodes<br/>→ Pending with slot message"]
-    PendingNoSlots --> End
-
-    Step3 -->|Yes| Step4["Step 4: Filter candidates"]
-    Step4 --> FilterLoop{"For each unassigned<br/>active-RVA node"}
-    FilterLoop -->|"Not eligible (RSP)"| PendingIneligible["Pending: not eligible"]
-    FilterLoop -->|"!nodeReady"| PendingNodeReady["Pending: node not ready"]
-    FilterLoop -->|"!agentReady"| PendingAgentReady["Pending: agent not ready"]
-    FilterLoop -->|"No member + VolumeAccess=Local + no Diskful RVR"| PendingLocality["Pending: VolumeAccess locality not satisfied"]
-    FilterLoop -->|No member| PendingNoMember["Pending: waiting for replica"]
-    FilterLoop -->|Eligible + member| AddCandidate[Add to candidates]
-
-    PendingIneligible --> FilterLoop
-    PendingNodeReady --> FilterLoop
-    PendingAgentReady --> FilterLoop
-    PendingLocality --> FilterLoop
-    PendingNoMember --> FilterLoop
-    AddCandidate --> FilterLoop
-
-    FilterLoop -->|Done| Step5["Step 5: Sort candidates FIFO<br/>(earliest active RVA timestamp,<br/>NodeName tie-breaker)"]
-    Step5 --> AssignSlots{"For each candidate"}
-    AssignSlots -->|"index < availableNewSlots"| SlotAttach["intent = Attach"]
-    AssignSlots -->|"index >= availableNewSlots"| SlotPending["Pending: waiting for slot"]
-    SlotAttach --> AssignSlots
-    SlotPending --> AssignSlots
-    AssignSlots -->|Done| MarkDetached["Step 6: Nodes with only deleting RVAs<br/>→ intent = Detach"]
-    MarkDetached --> End([End])
-```
-
-**Key invariant:** Already-attached nodes (potentiallyAttached) NEVER lose their slot when `maxAttachments` decreases. `occupiedSlots` may exceed `maxAttachments` — this is a normal transient state (no forced detach).
-
-**Pending node message examples:**
-- `"Volume is being deleted"` (global block, not-yet-attached nodes — reason: ReplicatedVolumeDeleting)
-- `"Quorum not satisfied: no quorum on [#0]; agent not ready on [#1]"` (global block — reason: Pending; diagnostic detail from `computeActualQuorum`)
-- `"Waiting for attachment slot (slots occupied N/M)"` (no slot available — reason: Pending)
-- `"Node is not eligible for storage class X (pool Y)"` (Auto mode) or `"Node is not eligible for pool Y"` (Manual mode) (RSP check — reason: NodeNotEligible)
-- `"Node is not ready"` / `"Agent is not ready on node"` (node health — reason: Pending)
-- `"No Diskful replica on this node (volumeAccess is Local for storage class X)"` (VolumeAccess locality — reason: VolumeAccessLocalityNotSatisfied)
-- `"Waiting for replica on node"` (no RVR on node — reason: WaitingForReplica)
-- `"Waiting for replica [#N] to join datamesh: ..."` (RVR exists but not a member yet, with membership request message or Ready condition details — reason: WaitingForReplica)
-
-**Data Flow:**
-
-| Input | Description |
-|-------|-------------|
-| `atts.potentiallyAttached` | Pre-computed set of attached/detaching member IDs |
-| `atts.attachBlocked` / `atts.attachBlockedConditionReason` / `atts.attachBlockedConditionMessage` | Global block state |
-| `rv.Spec.MaxAttachments` | Slot limit |
-| `rsp.EligibleNodes` | Node eligibility (nodeReady, agentReady) |
-
-| Output | Description |
-|--------|-------------|
-| `atts.attachmentStates[].intent` | Attach / Detach / Pending per node |
-| `atts.attachmentStates[].conditionReason` | Machine-readable reason for RVA Attached condition |
-| `atts.attachmentStates[].conditionMessage` | Human-readable message for RVA Attached condition |
-| `atts.intendedAttachments` | Set of member IDs with intent=Attach |
-
----
-
-### ensureDatameshDetachTransitions Details
-
-**Purpose:** Creates Detach transitions for nodes with intent=Detach, respecting guard rules. Sets condition messages on blocked nodes. Returns true if rv was changed.
-
-**File:** `reconciler_dm_attachments.go`
-
-#### Detach guards
-
-| # | Guard | Outcome |
-|---|-------|---------|
-| 0 | No datamesh member (`as.member == nil`) | Skip (never attached); conditionReason=Detached |
-| 1 | Already fully detached (member.Attached=false, no active Detach transition) | Skip (settled); conditionReason=Detached |
-| 2 | Active Detach transition already exists | Skip |
-| 3 | Active Attach transition on same replica | Block: "Detach pending, waiting for attach to complete first" |
-| 4 | Device in use (`rvr.Status.Attachment.InUse`) | Block: "Device in use, detach blocked" |
-
-All guards passed: set `member.Attached=false`, increment `DatameshRevision`, create Detach transition. Set `hasActiveDetachTransition=true` on the node. Set `conditionReason=Detaching` and `conditionMessage` with transition progress.
-
-**Note:** RVR existence and Ready condition are NOT checked for detach — detach proceeds regardless. If the RVR is missing, no one will confirm the revision, but that is handled separately.
-
----
-
-### ensureDatameshAttachTransitions Details
-
-**Purpose:** Creates Attach transitions for nodes with intent=Attach, respecting guard rules and multiattach constraints. Sets condition messages on blocked nodes. Returns true if rv was changed.
-
-**File:** `reconciler_dm_attachments.go`
-
-#### Attach guards (per-node)
-
-| # | Guard | Outcome |
-|---|-------|---------|
-| 1 | Already fully attached (member.Attached=true, no active Attach transition) | Skip (settled); conditionReason=Attached. If RV is deleting, message includes pending-deletion note |
-| 2 | Active Attach transition already exists | Skip |
-| 3 | Active Detach transition on same replica | Block: "Attach pending, waiting for detach to complete first" |
-| 4 | Active AddReplica transition for same replica | Block: "Waiting for replica to join datamesh" |
-| 5 | No datamesh member (defensive) | Block: "Waiting for datamesh member" |
-| 6 | No RVR (defensive) | Block: "Waiting for replica" |
-| 7 | RVR Ready condition not True | Block: "Waiting for replica to become Ready" |
-| 8 | VolumeAccess=Local and member type does not have backing volume (`HasBackingVolume`) | Block: "No Diskful replica on this node (volumeAccess is Local for storage class X)" |
-| 9 | potentiallyAttached non-empty + multiattach not enabled or EnableMultiattach in progress | Block: "Waiting for multiattach to be enabled" (with transition progress) |
-| 10 | potentiallyAttached non-empty + DisableMultiattach in progress (defensive) | Block: "Waiting for multiattach to be enabled, but disable is in progress" |
-| 11 | `atts.attachBlocked` (defensive) | Block: global block message. Should not be reached — see note below |
-
-All guards passed: set `member.Attached=true`, increment `DatameshRevision`, create Attach transition. Add member to `potentiallyAttached`. Set `hasActiveAttachTransition=true` on the node. Set `conditionReason=Attaching` and `conditionMessage` with transition progress.
-
-**Note on multiattach guards (9-10):** When `potentiallyAttached` is empty, multiattach guards are skipped entirely — the first attach on an empty datamesh does not require multiattach. When `potentiallyAttached` is non-empty, multiattach must be fully enabled (confirmed by all required members) before a new Attach can proceed. Guards 9 and 10 use `break` (not `continue`) — they block ALL remaining Attach-intent nodes, not just the current one.
-
-**Note on guard 11 (`attachBlocked`):** This guard is defensive. When `attachBlocked=true`, `computeDatameshAttachmentIntents` Step 2 sets `intent=Pending` for all non-potentiallyAttached nodes. Only potentiallyAttached nodes retain `intent=Attach`, and they are all caught by guards 1-3 (settled, active attach transition, active detach transition). No node should reach guard 11 in practice.
-
-**Data Flow:**
-
-| Input | Description |
-|-------|-------------|
-| `atts.attachmentStates[].intent` | Must be `attachmentIntentAttach` |
-| `atts.attachBlocked` | Global block check |
-| `atts.potentiallyAttached` | Multiattach guard input |
-| `rv.Status.Datamesh.Multiattach` | Current multiattach state |
-| `atts.hasActiveEnableMultiattachTransition` | Multiattach guard |
-| `atts.hasActiveDisableMultiattachTransition` | Multiattach guard |
-| Per-node: `member`, `rvr`, transition flags | Guard inputs |
-
-| Output | Description |
-|--------|-------------|
-| `rv.Status.Datamesh.Members[].Attached` | Set to true |
-| `rv.Status.DatameshRevision` | Incremented |
-| `rv.Status.DatameshTransitions` | Attach transition appended |
-| `atts.potentiallyAttached` | Updated (member added) |
-| `atts.attachmentStates[].conditionReason` | Set for blocked/settled nodes |
-| `atts.attachmentStates[].conditionMessage` | Set for blocked/settled nodes |

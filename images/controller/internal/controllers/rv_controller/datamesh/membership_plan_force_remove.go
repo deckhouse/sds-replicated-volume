@@ -132,7 +132,7 @@ func registerForceRemovePlans(
 		Guards(guardVotersEven).
 		Steps(
 			mrStep("Force remove",
-				composeReplicaApply(
+				dmte.ComposeReplicaApply(
 					removeMember,
 					asReplicaApply(lowerQ),
 				),

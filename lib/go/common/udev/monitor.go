@@ -1,3 +1,5 @@
+//go:build linux
+
 /*
 Copyright 2026 Flant JSC
 
@@ -14,10 +16,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package udev provides block device event monitoring via Linux netlink sockets.
-//
-// TODO: Reuse this package in sds-node-configurator to replace its inline
-// go-udev/netlink usage in images/agent/internal/scanner/scanner.go.
 package udev
 
 import (
@@ -26,17 +24,6 @@ import (
 
 	"github.com/pilebones/go-udev/netlink"
 )
-
-// BlockEvent represents a udev event for a block device.
-type BlockEvent struct {
-	// Action is the event action: "add", "remove", "change", etc.
-	Action string
-	// KObj is the kernel object path, e.g. "/devices/virtual/block/dm-0".
-	KObj string
-	// Env contains all environment properties from the event
-	// (e.g. SUBSYSTEM, DEVNAME, DM_NAME, etc.).
-	Env map[string]string
-}
 
 // MonitorBlockEvents connects to the kernel's udev netlink socket and monitors
 // block subsystem events. Matched events are sent to eventCh.

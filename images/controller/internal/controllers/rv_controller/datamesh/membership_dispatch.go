@@ -280,6 +280,12 @@ func planChangeReplicaType(gctx *globalContext, rctx *ReplicaContext) (dmte.Plan
 		return planChangeDToTB(gctx, rctx)
 	case rctx.member.Type == v1alpha1.DatameshMemberType(targetType):
 		return "", "" // already target type
+	case rctx.member.Type == v1alpha1.DatameshMemberTypeLiminalDiskful &&
+		targetType == v1alpha1.ReplicaTypeDiskful:
+		return "", "" // transition to Diskful already in progress
+	case rctx.member.Type == v1alpha1.DatameshMemberTypeLiminalShadowDiskful &&
+		targetType == v1alpha1.ReplicaTypeShadowDiskful:
+		return "", "" // transition to ShadowDiskful already in progress
 	default:
 		return "", "Not implemented"
 	}

@@ -159,24 +159,6 @@ func confirmedReplicas(gctx *globalContext, stepRevision int64) idset.IDSet {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Adapters
-//
-
-// asReplicaConfirm adapts a global-scoped confirm callback for use in ReplicaStep.
-func asReplicaConfirm(fn func(*globalContext, int64) dmte.ConfirmResult) func(*globalContext, *ReplicaContext, int64) dmte.ConfirmResult {
-	return func(gctx *globalContext, _ *ReplicaContext, rev int64) dmte.ConfirmResult {
-		return fn(gctx, rev)
-	}
-}
-
-// asReplicaOnComplete adapts a global-scoped callback for use as ReplicaStep OnComplete.
-func asReplicaOnComplete(fn func(*globalContext)) func(*globalContext, *ReplicaContext) {
-	return func(gctx *globalContext, _ *ReplicaContext) {
-		fn(gctx)
-	}
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
 // Confirm helper functions
 //
 

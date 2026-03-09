@@ -370,8 +370,11 @@ penalty. D = FTT + GMDR + 1.
 3. ⚡ **RVR deleted concurrently — NotFound on patch is silently ignored.**
    RVR is deleted between Get and Patch. `patchRVR` / `patchRVRStatus` return NotFound → converted to nil. Reconcile continues without error.
 
-4. ⚡ **Conflict on patch (optimistic lock) — Reconcile returns error for retry.**
-   Another controller modifies the RVR between DeepCopy and Patch. Patch returns Conflict. Reconcile returns error → controller-runtime retries.
+4. ⚡ **Conflict on Diskful patch (Phase 2, optimistic lock) — Reconcile requeues.**
+   Another controller modifies the Diskful RVR between DeepCopy and Patch. Patch returns Conflict. `flow.ToCtrl()` converts the Conflict into a rate-limited requeue without error.
+
+5. ⚡ **Conflict on TieBreaker patch (Phase 3, optimistic lock) — Reconcile requeues.**
+   Diskful already scheduled (Phase 2 skipped). Another controller modifies the TieBreaker RVR between DeepCopy and Patch. Patch returns Conflict. The error propagates through Phase 3 outcome and `flow.ToCtrl()` converts it into a rate-limited requeue. TieBreaker `NodeName` remains empty.
 
 ---
 

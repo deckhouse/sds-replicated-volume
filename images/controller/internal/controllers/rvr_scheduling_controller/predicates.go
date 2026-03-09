@@ -29,13 +29,13 @@ import (
 // Reacts to:
 //   - Create: always (new RVR needs scheduling)
 //   - Update: spec changed (generation bump) or SatisfyEligibleNodes is False
-//   - Delete: never (scheduling controller doesn't handle deletion)
+//   - Delete: always (a deleted RVR frees a node, unblocking pending scheduling
+//     for other RVRs that previously failed with "node mismatch (assigned)")
 //   - Generic: never
 func RVRPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.Funcs{
 			UpdateFunc: rvrNeedsLVGScheduling,
-			DeleteFunc: func(_ event.TypedDeleteEvent[client.Object]) bool { return false },
 		},
 	}
 }

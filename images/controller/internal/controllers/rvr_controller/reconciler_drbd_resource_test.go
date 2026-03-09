@@ -259,6 +259,22 @@ var _ = Describe("computeIntendedType", func() {
 
 		Expect(result).To(Equal(v1alpha1.DatameshMemberTypeShadowDiskful))
 	})
+
+	It("returns Access for deleting Diskful non-member", func() {
+		now := metav1.Now()
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				DeletionTimestamp: &now,
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type: v1alpha1.ReplicaTypeDiskful,
+			},
+		}
+
+		result := computeIntendedType(rvr, nil)
+
+		Expect(result).To(Equal(v1alpha1.DatameshMemberTypeAccess))
+	})
 })
 
 var _ = Describe("computeTargetType", func() {

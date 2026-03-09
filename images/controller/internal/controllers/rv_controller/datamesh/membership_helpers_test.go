@@ -129,3 +129,9 @@ var _ = Describe("findZoneCount", func() {
 		Expect(findZoneCount(zones, "x")).To(Equal(byte(0)))
 	})
 })
+
+var _ = Describe("onLeaveComplete", func() {
+	It("nil rctx → does not panic", func() {
+		Expect(func() { onLeaveComplete(nil, nil) }).NotTo(Panic())
+	})
+})

@@ -465,7 +465,7 @@ var _ = Describe("ForceRemoveReplica additional", func() {
 		// Run until stable: ForceRemove should preempt and the system should stabilize.
 		// Unchecked: emergency preemption of in-flight AddReplica(D)+q↑ leaves
 		// transient q > expected until ChangeQuorum fires on the next iteration.
-		runUntilStableUnchecked(rv, rsp, filteredRVRs, FeatureFlags{})
+		runSettleLoop(rv, rsp, filteredRVRs, nil, FeatureFlags{}, nil, nil)
 
 		// rv-1-2 should be removed.
 		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-2")).To(BeNil())
@@ -532,7 +532,7 @@ var _ = Describe("ForceRemoveReplica additional", func() {
 			mkRVRUpToDate("rv-1-1", "node-2", 5),
 		}
 
-		runUntilStable(rv, nil, rvrs, FeatureFlags{})
+		runSettleLoop(rv, nil, rvrs, nil, FeatureFlags{}, nil, assertSafetyInvariants)
 
 		// rv-1-2 must be fully removed.
 		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-2")).To(BeNil())

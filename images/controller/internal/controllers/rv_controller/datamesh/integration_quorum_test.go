@@ -69,72 +69,13 @@ func featureLabel(ff FeatureFlags) string {
 // Helpers
 //
 
-// runUntilStable runs ProcessTransitions in a loop, confirming each step
-// by setting all RVR revisions to the current DatameshRevision.
-// After each iteration, assertSafetyInvariants verifies quorum correctness.
-// Fails the test if max iterations exceeded.
-//
-// Use runUntilStableUnchecked for tests that intentionally start with
-// corrupted state (e.g. q=18) or create transient intermediate violations
-// (e.g. emergency preemption of in-flight AddReplica).
-func runUntilStable(
-	rv *v1alpha1.ReplicatedVolume,
-	rsp RSP,
-	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-	features FeatureFlags,
-) {
-	const maxIter = 30
-	for i := range maxIter {
-		changed, _ := ProcessTransitions(context.Background(), rv, rsp, rvrs, nil, features)
-		assertSafetyInvariants(rv, i)
-		if !changed {
-			return
-		}
-		// Simulate all replicas confirming the latest revision.
-		for _, rvr := range rvrs {
-			rvr.Status.DatameshRevision = rv.Status.DatameshRevision
-		}
-		if len(rv.Status.DatameshTransitions) == 0 {
-			return
-		}
-	}
-	Fail(fmt.Sprintf("runUntilStable: did not stabilize after %d iterations", maxIter))
-}
-
-// runUntilStableUnchecked is like runUntilStable but without per-step safety
-// invariant checks. Use for tests that intentionally create or encounter
-// broken intermediate states:
-//   - corruption recovery tests (q=18, qmr=0)
-//   - emergency preemption tests (ForceRemove mid-AddReplica leaves transient q > expected)
-func runUntilStableUnchecked(
-	rv *v1alpha1.ReplicatedVolume,
-	rsp RSP,
-	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-	features FeatureFlags, //nolint:unparam // signature mirrors runUntilStable; callers currently pass FeatureFlags{} but may vary in future
-) {
-	const maxIter = 30
-	for range maxIter {
-		changed, _ := ProcessTransitions(context.Background(), rv, rsp, rvrs, nil, features)
-		if !changed {
-			return
-		}
-		for _, rvr := range rvrs {
-			rvr.Status.DatameshRevision = rv.Status.DatameshRevision
-		}
-		if len(rv.Status.DatameshTransitions) == 0 {
-			return
-		}
-	}
-	Fail(fmt.Sprintf("runUntilStableUnchecked: did not stabilize after %d iterations", maxIter))
-}
-
 // assertSafetyInvariants checks core safety invariants after each
 // ProcessTransitions call:
 //   - q == voters/2+1 (majority quorum: no split-brain, IO continuity)
 //   - qmr >= 1 (minimum valid quorum minimum redundancy)
 //
 // Always asserts unconditionally — no exceptions for "engine is still fixing".
-// Tests with intentionally broken state must use runUntilStableUnchecked.
+// Tests with intentionally broken state must use runSettleLoop (without check).
 func assertSafetyInvariants(rv *v1alpha1.ReplicatedVolume, iteration int) {
 	var voters int
 	for _, m := range rv.Status.Datamesh.Members {
@@ -297,7 +238,7 @@ func addD(
 		mkJoinRequestD(name),
 	}
 
-	runUntilStable(rv, rsp, *rvrs, features)
+	runSettleLoop(rv, rsp, *rvrs, nil, features, nil, assertSafetyInvariants)
 
 	// Clear requests after completion.
 	rv.Status.DatameshReplicaRequests = nil
@@ -331,7 +272,7 @@ func removeD(
 		mkLeaveRequest(memberName),
 	}
 
-	runUntilStable(rv, rsp, *rvrs, features)
+	runSettleLoop(rv, rsp, *rvrs, nil, features, nil, assertSafetyInvariants)
 
 	// Clear requests after completion.
 	rv.Status.DatameshReplicaRequests = nil

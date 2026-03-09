@@ -86,37 +86,6 @@ var _ = Describe("RepairNetworkAddresses guard", func() {
 //
 
 var _ = Describe("RepairNetworkAddresses settle", func() {
-	// runNetworkRepairUntilStable is like runUntilStable but also sets up peer
-	// connectivity so confirmAllConnected can pass.
-	runNetworkRepairUntilStable := func(
-		rv *v1alpha1.ReplicatedVolume,
-		rvrs []*v1alpha1.ReplicatedVolumeReplica,
-	) {
-		const maxIter = 10
-		for range maxIter {
-			changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
-			if !changed {
-				return
-			}
-			// Simulate all replicas confirming the latest revision
-			// and reporting all peers as Connected.
-			for _, rvr := range rvrs {
-				rvr.Status.DatameshRevision = rv.Status.DatameshRevision
-				rvr.Status.Peers = nil
-				for _, other := range rvrs {
-					if other.Name != rvr.Name {
-						rvr.Status.Peers = append(rvr.Status.Peers,
-							mkPeerConnected(other.Name))
-					}
-				}
-			}
-			if len(rv.Status.DatameshTransitions) == 0 {
-				return
-			}
-		}
-		Fail("runNetworkRepairUntilStable: did not stabilize")
-	}
-
 	It("apply syncs IP + confirm completes", func() {
 		m := mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1")
 		m.Addresses = []v1alpha1.DRBDResourceAddressStatus{mkAddr("net-A", "10.0.0.1", 7000)}
@@ -128,7 +97,7 @@ var _ = Describe("RepairNetworkAddresses settle", func() {
 		rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{mkAddr("net-A", "10.0.0.99", 9000)}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr}
 
-		runNetworkRepairUntilStable(rv, rvrs)
+		runSettleLoop(rv, nil, rvrs, nil, FeatureFlags{}, simulateWithPeers, nil)
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		// Member address synced from RVR.
@@ -153,7 +122,7 @@ var _ = Describe("RepairNetworkAddresses settle", func() {
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr}
 
-		runNetworkRepairUntilStable(rv, rvrs)
+		runSettleLoop(rv, nil, rvrs, nil, FeatureFlags{}, simulateWithPeers, nil)
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		repaired := rv.Status.Datamesh.FindMemberByName("rv-1-0")
@@ -177,7 +146,7 @@ var _ = Describe("RepairNetworkAddresses settle", func() {
 		rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{mkAddr("net-A", "10.0.0.1", 7000)}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr}
 
-		runNetworkRepairUntilStable(rv, rvrs)
+		runSettleLoop(rv, nil, rvrs, nil, FeatureFlags{}, simulateWithPeers, nil)
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		repaired := rv.Status.Datamesh.FindMemberByName("rv-1-0")
@@ -192,28 +161,6 @@ var _ = Describe("RepairNetworkAddresses settle", func() {
 //
 
 var _ = Describe("ChangeSystemNetworks settle", func() {
-	// runCSNUntilStable iterates ProcessTransitions with RSP, calling simulate
-	// between iterations to advance RVR state. Max 20 iterations for multi-step plans.
-	runCSNUntilStable := func(
-		rv *v1alpha1.ReplicatedVolume,
-		rsp RSP,
-		rvrs []*v1alpha1.ReplicatedVolumeReplica,
-		simulate func(*v1alpha1.ReplicatedVolume, []*v1alpha1.ReplicatedVolumeReplica),
-	) {
-		const maxIter = 20
-		for range maxIter {
-			changed, _ := ProcessTransitions(context.Background(), rv, rsp, rvrs, nil, FeatureFlags{})
-			if !changed {
-				return
-			}
-			simulate(rv, rvrs)
-			if len(rv.Status.DatameshTransitions) == 0 {
-				return
-			}
-		}
-		Fail("runCSNUntilStable: did not stabilize")
-	}
-
 	// simulateCSN creates a simulation function that bumps revision, adds
 	// addresses for newNets, and sets up peer connectivity on those networks.
 	simulateCSN := func(newNets []string, addrs map[string]v1alpha1.DRBDResourceAddressStatus) func(*v1alpha1.ReplicatedVolume, []*v1alpha1.ReplicatedVolumeReplica) {
@@ -256,10 +203,10 @@ var _ = Describe("ChangeSystemNetworks settle", func() {
 		rsp := mkRSP("node-1")
 		rsp.systemNetworkNames = []string{"net-A", "net-B"}
 
-		runCSNUntilStable(rv, rsp, rvrs, simulateCSN(
+		runSettleLoop(rv, rsp, rvrs, nil, FeatureFlags{}, simulateCSN(
 			[]string{"net-B"},
 			map[string]v1alpha1.DRBDResourceAddressStatus{"net-B": mkAddr("net-B", "10.0.0.2", 7000)},
-		))
+		), nil)
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.Datamesh.SystemNetworkNames).To(Equal([]string{"net-A", "net-B"}))
@@ -292,11 +239,11 @@ var _ = Describe("ChangeSystemNetworks settle", func() {
 		rsp.systemNetworkNames = []string{"net-A"}
 
 		// Guard: remaining network (net-A) — single member, no peers to check.
-		runCSNUntilStable(rv, rsp, rvrs, func(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) {
+		runSettleLoop(rv, rsp, rvrs, nil, FeatureFlags{}, func(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) {
 			for _, rvr := range rvrs {
 				rvr.Status.DatameshRevision = rv.Status.DatameshRevision
 			}
-		})
+		}, nil)
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.Datamesh.SystemNetworkNames).To(Equal([]string{"net-A"}))
@@ -326,10 +273,10 @@ var _ = Describe("ChangeSystemNetworks settle", func() {
 		rsp := mkRSP("node-1")
 		rsp.systemNetworkNames = []string{"net-A", "net-C"}
 
-		runCSNUntilStable(rv, rsp, rvrs, simulateCSN(
+		runSettleLoop(rv, rsp, rvrs, nil, FeatureFlags{}, simulateCSN(
 			[]string{"net-C"},
 			map[string]v1alpha1.DRBDResourceAddressStatus{"net-C": mkAddr("net-C", "10.0.0.3", 7000)},
-		))
+		), nil)
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.Datamesh.SystemNetworkNames).To(Equal([]string{"net-A", "net-C"}))
@@ -354,10 +301,10 @@ var _ = Describe("ChangeSystemNetworks settle", func() {
 		rsp := mkRSP("node-1")
 		rsp.systemNetworkNames = []string{"net-B"}
 
-		runCSNUntilStable(rv, rsp, rvrs, simulateCSN(
+		runSettleLoop(rv, rsp, rvrs, nil, FeatureFlags{}, simulateCSN(
 			[]string{"net-B"},
 			map[string]v1alpha1.DRBDResourceAddressStatus{"net-B": mkAddr("net-B", "10.0.0.2", 7000)},
-		))
+		), nil)
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.Datamesh.SystemNetworkNames).To(Equal([]string{"net-B"}))
@@ -414,7 +361,7 @@ var _ = Describe("ChangeSystemNetworks settle", func() {
 		rsp := mkRSP("node-1", "node-2")
 		rsp.systemNetworkNames = []string{"net-A", "net-B"}
 
-		runCSNUntilStable(rv, rsp, rvrs, func(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) {
+		runSettleLoop(rv, rsp, rvrs, nil, FeatureFlags{}, func(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) {
 			for _, rvr := range rvrs {
 				rvr.Status.DatameshRevision = rv.Status.DatameshRevision
 				if findAddressByNetwork(rvr.Status.Addresses, "net-B") == nil {
@@ -433,7 +380,7 @@ var _ = Describe("ChangeSystemNetworks settle", func() {
 					}
 				}
 			}
-		})
+		}, nil)
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.Datamesh.SystemNetworkNames).To(Equal([]string{"net-A", "net-B"}))
@@ -469,7 +416,7 @@ var _ = Describe("ChangeSystemNetworks settle", func() {
 		rsp := mkRSP("node-1", "node-2")
 		rsp.systemNetworkNames = []string{"net-B"}
 
-		runCSNUntilStable(rv, rsp, rvrs, func(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) {
+		runSettleLoop(rv, rsp, rvrs, nil, FeatureFlags{}, func(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) {
 			for _, rvr := range rvrs {
 				rvr.Status.DatameshRevision = rv.Status.DatameshRevision
 				if findAddressByNetwork(rvr.Status.Addresses, "net-B") == nil {
@@ -487,7 +434,7 @@ var _ = Describe("ChangeSystemNetworks settle", func() {
 					}
 				}
 			}
-		})
+		}, nil)
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.Datamesh.SystemNetworkNames).To(Equal([]string{"net-B"}))
@@ -614,11 +561,11 @@ var _ = Describe("ChangeSystemNetworks settle", func() {
 			mkPeerConnectedOnNetwork("rv-1-0", "net-A", "net-B"),
 		}
 
-		runCSNUntilStable(rv, rsp, rvrs, func(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) {
+		runSettleLoop(rv, rsp, rvrs, nil, FeatureFlags{}, func(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) {
 			for _, rvr := range rvrs {
 				rvr.Status.DatameshRevision = rv.Status.DatameshRevision
 			}
-		})
+		}, nil)
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.Datamesh.SystemNetworkNames).To(Equal([]string{"net-A"}))
@@ -640,13 +587,13 @@ var _ = Describe("ChangeSystemNetworks settle", func() {
 		rsp := mkRSP("node-1")
 		rsp.systemNetworkNames = []string{"net-A", "net-B", "net-C"}
 
-		runCSNUntilStable(rv, rsp, rvrs, simulateCSN(
+		runSettleLoop(rv, rsp, rvrs, nil, FeatureFlags{}, simulateCSN(
 			[]string{"net-B", "net-C"},
 			map[string]v1alpha1.DRBDResourceAddressStatus{
 				"net-B": mkAddr("net-B", "10.0.0.2", 7000),
 				"net-C": mkAddr("net-C", "10.0.0.3", 7000),
 			},
-		))
+		), nil)
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.Datamesh.SystemNetworkNames).To(Equal([]string{"net-A", "net-B", "net-C"}))
@@ -678,13 +625,13 @@ var _ = Describe("ChangeSystemNetworks settle", func() {
 		rsp := mkRSP("node-1")
 		rsp.systemNetworkNames = []string{"net-C", "net-D"}
 
-		runCSNUntilStable(rv, rsp, rvrs, simulateCSN(
+		runSettleLoop(rv, rsp, rvrs, nil, FeatureFlags{}, simulateCSN(
 			[]string{"net-C", "net-D"},
 			map[string]v1alpha1.DRBDResourceAddressStatus{
 				"net-C": mkAddr("net-C", "10.0.0.3", 7000),
 				"net-D": mkAddr("net-D", "10.0.0.4", 7000),
 			},
-		))
+		), nil)
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.Datamesh.SystemNetworkNames).To(Equal([]string{"net-C", "net-D"}))

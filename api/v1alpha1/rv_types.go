@@ -195,6 +195,7 @@ type ReplicatedVolumeStatus struct {
 
 	// EffectiveLayout describes the real-time protection level and health
 	// of the datamesh, based on observable cluster state.
+	// +kubebuilder:default={totalVoters: 0, reachableVoters: 0, upToDateVoters: 0, totalTieBreakers: 0, reachableTieBreakers: 0, staleAgents: 0}
 	EffectiveLayout ReplicatedVolumeEffectiveLayout `json:"effectiveLayout"`
 
 	// BaselineGuaranteedMinimumDataRedundancy is the GMDR level that the datamesh
@@ -749,26 +750,32 @@ type ReplicatedVolumeEffectiveLayout struct {
 	GuaranteedMinimumDataRedundancy *int8 `json:"guaranteedMinimumDataRedundancy,omitempty"`
 
 	// TotalVoters is the number of voter members (Diskful and liminal variants).
+	// +kubebuilder:default=0
 	TotalVoters int8 `json:"totalVoters"`
 
 	// ReachableVoters is the number of voters confirmed reachable
 	// (own Quorum=true or seen Connected by peers).
+	// +kubebuilder:default=0
 	ReachableVoters int8 `json:"reachableVoters"`
 
 	// UpToDateVoters is the number of voters with UpToDate backing volume
 	// (own BackingVolume=UpToDate or seen UpToDate by peers).
+	// +kubebuilder:default=0
 	UpToDateVoters int8 `json:"upToDateVoters"`
 
 	// TotalTieBreakers is the number of TieBreaker members.
+	// +kubebuilder:default=0
 	TotalTieBreakers int8 `json:"totalTieBreakers"`
 
 	// ReachableTieBreakers is the number of TieBreakers confirmed reachable
 	// (agent ready or seen Connected by peers).
+	// +kubebuilder:default=0
 	ReachableTieBreakers int8 `json:"reachableTieBreakers"`
 
 	// StaleAgents is the number of members whose agent data is stale
 	// (AgentNotReady or Quorum not yet reported). These members are
 	// reconstructed from peer observations when possible.
+	// +kubebuilder:default=0
 	StaleAgents int8 `json:"staleAgents"`
 
 	// Message is a human-readable summary of the effective layout state.

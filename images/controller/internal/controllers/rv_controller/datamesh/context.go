@@ -262,6 +262,15 @@ func (rc *ReplicaContext) Conditions() []metav1.Condition {
 // ReplicaContext — output accessors (for reconciler after engine processing)
 //
 
+// NodeName returns the node name this context represents.
+func (rc *ReplicaContext) NodeName() string { return rc.nodeName }
+
+// RVR returns the ReplicatedVolumeReplica on this node. Nil if no RVR exists.
+func (rc *ReplicaContext) RVR() *v1alpha1.ReplicatedVolumeReplica { return rc.rvr }
+
+// RVAs returns the RVAs for this node (sorted by CreationTimestamp, Name).
+func (rc *ReplicaContext) RVAs() []*v1alpha1.ReplicatedVolumeAttachment { return rc.rvas }
+
 // AttachmentConditionMessage returns the attachment condition message
 // set by the engine via the attachment slot accessor.
 func (rc *ReplicaContext) AttachmentConditionMessage() string { return rc.attachmentConditionMessage }

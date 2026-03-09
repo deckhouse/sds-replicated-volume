@@ -20,6 +20,7 @@ import (
 	"slices"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -53,23 +54,23 @@ func createMember(memberType v1alpha1.DatameshMemberType) func(*globalContext, *
 // Key no-op case: Remove(D) step `D→D∅` when member is already LiminalDiskful.
 func setType(memberType v1alpha1.DatameshMemberType) func(*globalContext, *ReplicaContext) bool {
 	return func(_ *globalContext, rctx *ReplicaContext) bool {
-		return assign(&rctx.member.Type, memberType)
+		return dmte.SetChanged(&rctx.member.Type, memberType)
 	}
 }
 
 // setBackingVolumeFromRequest sets LVMVolumeGroupName and ThinPoolName
 // on the member from the membership request. Returns false if both already set.
 func setBackingVolumeFromRequest(_ *globalContext, rctx *ReplicaContext) bool {
-	c1 := assign(&rctx.member.LVMVolumeGroupName, rctx.membershipRequest.Request.LVMVolumeGroupName)
-	c2 := assign(&rctx.member.LVMVolumeGroupThinPoolName, rctx.membershipRequest.Request.ThinPoolName)
+	c1 := dmte.SetChanged(&rctx.member.LVMVolumeGroupName, rctx.membershipRequest.Request.LVMVolumeGroupName)
+	c2 := dmte.SetChanged(&rctx.member.LVMVolumeGroupThinPoolName, rctx.membershipRequest.Request.ThinPoolName)
 	return c1 || c2
 }
 
 // clearBackingVolume clears LVMVolumeGroupName and ThinPoolName from the member.
 // Returns false if both already empty.
 func clearBackingVolume(_ *globalContext, rctx *ReplicaContext) bool {
-	c1 := assign(&rctx.member.LVMVolumeGroupName, "")
-	c2 := assign(&rctx.member.LVMVolumeGroupThinPoolName, "")
+	c1 := dmte.SetChanged(&rctx.member.LVMVolumeGroupName, "")
+	c2 := dmte.SetChanged(&rctx.member.LVMVolumeGroupThinPoolName, "")
 	return c1 || c2
 }
 
@@ -122,12 +123,12 @@ func lowerQMR(gctx *globalContext) bool {
 // Returns false if q is already correct (no-op in ChangeQuorum when only qmr differs).
 func setCorrectQ(gctx *globalContext) bool {
 	q, _ := computeCorrectQuorum(gctx)
-	return assign(&gctx.datamesh.quorum, q)
+	return dmte.SetChanged(&gctx.datamesh.quorum, q)
 }
 
 // setCorrectQMR sets qmr from computeCorrectQuorum.
 // Returns false if qmr is already correct (no-op in ChangeQuorum when only q differs).
 func setCorrectQMR(gctx *globalContext) bool {
 	_, qmr := computeCorrectQuorum(gctx)
-	return assign(&gctx.datamesh.quorumMinimumRedundancy, qmr)
+	return dmte.SetChanged(&gctx.datamesh.quorumMinimumRedundancy, qmr)
 }

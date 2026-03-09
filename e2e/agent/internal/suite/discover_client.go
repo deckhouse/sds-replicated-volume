@@ -17,16 +17,16 @@ limitations under the License.
 package suite
 
 import (
-	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
-
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
+
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
 )
 
 // DiscoverClient Discovers a K8s client from kubeconfig. Registers

@@ -388,8 +388,9 @@ spec:
                 x-kubernetes-list-type: map
               device:
                 description: |-
-                  Device path, e.g. /dev/drbd10012 or /dev/sds-replicated/<rvrName>
-                  Only present on primary
+                  Device is the stable symlink path to the DRBD block device,
+                  e.g. /dev/sdsrv/<resourceName>. The symlink target is /dev/drbd<minor>.
+                  Only present when the resource is Up and has an allocated minor.
                 maxLength: 256
                 type: string
               deviceIOSuspended:

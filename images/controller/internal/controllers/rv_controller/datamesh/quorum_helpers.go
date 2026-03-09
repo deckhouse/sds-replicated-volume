@@ -16,6 +16,10 @@ limitations under the License.
 
 package datamesh
 
+import (
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
+)
+
 // updateBaselineGMDR recomputes gctx.baselineGMDR from committed qmr.
 // Returns false if baseline is already correct (no-op).
 //
@@ -30,7 +34,7 @@ func updateBaselineGMDR(gctx *globalContext) bool {
 	if qmr > 0 {
 		gmdr = qmr - 1
 	}
-	return assign(&gctx.baselineGMDR, min(gmdr, gctx.configuration.GuaranteedMinimumDataRedundancy))
+	return dmte.SetChanged(&gctx.baselineGMDR, min(gmdr, gctx.configuration.GuaranteedMinimumDataRedundancy))
 }
 
 // computeCorrectQuorum returns the correct q and qmr for the current datamesh

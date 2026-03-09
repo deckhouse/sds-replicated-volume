@@ -300,3 +300,55 @@ var _ = Describe("RemoveReplica(sD)", func() {
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 	})
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// E2E settle
+//
+
+var _ = Describe("ShadowDiskful e2e settle", func() {
+	It("AddReplica(sD): dispatch → complete (2-step)", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestSD("rv-1-1")},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 0),
+		}
+
+		runSettleLoop(rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{ShadowDiskful: true}, nil, assertSafetyInvariants)
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.Datamesh.Members).To(HaveLen(2))
+		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
+		Expect(m).NotTo(BeNil())
+		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeShadowDiskful))
+		Expect(m.LVMVolumeGroupName).To(Equal("test-lvg"))
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Joined datamesh successfully"))
+	})
+
+	It("RemoveReplica(sD): dispatch → complete (1-step)", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeShadowDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-1")},
+			nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5),
+		}
+
+		runSettleLoop(rv, nil, rvrs, nil, FeatureFlags{}, nil, assertSafetyInvariants)
+
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.Datamesh.Members).To(HaveLen(1))
+		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-1")).To(BeNil())
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Left datamesh successfully"))
+	})
+})

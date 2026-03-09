@@ -24,6 +24,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 )
 
@@ -763,6 +764,38 @@ var _ = Describe("addedNetworks", func() {
 	})
 })
 
+var _ = Describe("removedNetworks", func() {
+	mkTransition := func(from, to []string) *v1alpha1.ReplicatedVolumeDatameshTransition {
+		return &v1alpha1.ReplicatedVolumeDatameshTransition{
+			FromSystemNetworkNames: from,
+			ToSystemNetworkNames:   to,
+		}
+	}
+
+	It("nil transition → nil", func() {
+		gctx := &globalContext{}
+		Expect(removedNetworks(gctx)).To(BeNil())
+	})
+
+	It("from=[A,B], to=[A] → [B]", func() {
+		gctx := &globalContext{}
+		gctx.changeSystemNetworksTransition = mkTransition([]string{"net-A", "net-B"}, []string{"net-A"})
+		Expect(removedNetworks(gctx)).To(Equal([]string{"net-B"}))
+	})
+
+	It("from=[A], to=[A,B] → nil (no removed)", func() {
+		gctx := &globalContext{}
+		gctx.changeSystemNetworksTransition = mkTransition([]string{"net-A"}, []string{"net-A", "net-B"})
+		Expect(removedNetworks(gctx)).To(BeNil())
+	})
+
+	It("from=[A,B], to=[C,D] → [A,B] (all removed)", func() {
+		gctx := &globalContext{}
+		gctx.changeSystemNetworksTransition = mkTransition([]string{"net-A", "net-B"}, []string{"net-C", "net-D"})
+		Expect(removedNetworks(gctx)).To(Equal([]string{"net-A", "net-B"}))
+	})
+})
+
 // ──────────────────────────────────────────────────────────────────────────────
 // confirmAddedAddressesAvailable
 //
@@ -1081,5 +1114,71 @@ var _ = Describe("repairAddresses", func() {
 		Expect(repairAddresses(gctx)).To(BeTrue())
 		Expect(gctx.allReplicas[0].member.Addresses).To(HaveLen(1))
 		Expect(gctx.allReplicas[0].member.Addresses[0].SystemNetworkName).To(Equal("net-A"))
+	})
+})
+
+var _ = Describe("addNewAddresses", func() {
+	mkGctx := func() *globalContext {
+		gctx := &globalContext{}
+		gctx.changeSystemNetworksTransition = &v1alpha1.ReplicatedVolumeDatameshTransition{
+			FromSystemNetworkNames: []string{"net-A"},
+			ToSystemNetworkNames:   []string{"net-A", "net-B"},
+		}
+		gctx.allReplicas = []ReplicaContext{{
+			id: 0,
+			member: &v1alpha1.DatameshMember{
+				Name:      "rv-1-0",
+				Addresses: []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "net-A", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}}},
+			},
+			rvr: &v1alpha1.ReplicatedVolumeReplica{Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				Addresses: []v1alpha1.DRBDResourceAddressStatus{
+					{SystemNetworkName: "net-A", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
+					{SystemNetworkName: "net-B", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.2", Port: 7000}},
+				},
+			}},
+		}}
+		gctx.allReplicas[0].gctx = gctx
+		gctx.replicas[0] = &gctx.allReplicas[0]
+		return gctx
+	}
+
+	It("already present with same IP → no change", func() {
+		gctx := mkGctx()
+		// Member already has net-B with the same address as RVR.
+		gctx.allReplicas[0].member.Addresses = append(gctx.allReplicas[0].member.Addresses,
+			v1alpha1.DRBDResourceAddressStatus{SystemNetworkName: "net-B", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.2", Port: 7000}})
+
+		Expect(addNewAddresses(gctx)).To(BeFalse())
+	})
+
+	It("already present with different IP → updated", func() {
+		gctx := mkGctx()
+		// Member has net-B with a stale IP.
+		gctx.allReplicas[0].member.Addresses = append(gctx.allReplicas[0].member.Addresses,
+			v1alpha1.DRBDResourceAddressStatus{SystemNetworkName: "net-B", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.99", Port: 7000}})
+
+		Expect(addNewAddresses(gctx)).To(BeTrue())
+		ma := findAddressByNetwork(gctx.allReplicas[0].member.Addresses, "net-B")
+		Expect(ma).NotTo(BeNil())
+		Expect(ma.Address.IPv4).To(Equal("10.0.0.2"))
+	})
+
+	It("RVR has no address for added network → skipped", func() {
+		gctx := mkGctx()
+		// RVR only has net-A, not net-B.
+		gctx.allReplicas[0].rvr.Status.Addresses = []v1alpha1.DRBDResourceAddressStatus{
+			{SystemNetworkName: "net-A", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
+		}
+
+		Expect(addNewAddresses(gctx)).To(BeFalse())
+		Expect(gctx.allReplicas[0].member.Addresses).To(HaveLen(1))
+	})
+})
+
+var _ = Describe("setSystemNetworks", func() {
+	It("panics when RSP is nil", func() {
+		gctx := &globalContext{} // rsp = nil
+		t := &dmte.Transition{}
+		Expect(func() { setSystemNetworks(gctx, t) }).To(Panic())
 	})
 })

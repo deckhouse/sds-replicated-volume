@@ -20,13 +20,13 @@ import (
 	"bufio"
 	"sync"
 
-	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
 )
 
 // PodLogMonitorOptions holds the config section for pod log monitoring.

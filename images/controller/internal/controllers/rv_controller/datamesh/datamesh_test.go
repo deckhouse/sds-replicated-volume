@@ -17,6 +17,8 @@ limitations under the License.
 package datamesh
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -154,6 +156,68 @@ func settleEffectiveLayout(
 ) {
 	p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{})
 	updateEffectiveLayout(p.Global(), &rv.Status.EffectiveLayout)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Settle loop runner
+//
+
+// runSettleLoop runs ProcessTransitions iteratively until stable.
+// simulate is called between iterations to advance RVR state; if nil,
+// simulateRevisionBump is used (sufficient for all membership confirms).
+// check is called after each ProcessTransitions call; if nil, no per-step
+// checks are performed.
+func runSettleLoop(
+	rv *v1alpha1.ReplicatedVolume,
+	rsp RSP,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rvas []*v1alpha1.ReplicatedVolumeAttachment,
+	ff FeatureFlags,
+	simulate func(*v1alpha1.ReplicatedVolume, []*v1alpha1.ReplicatedVolumeReplica),
+	check func(*v1alpha1.ReplicatedVolume, int),
+) {
+	if simulate == nil {
+		simulate = simulateRevisionBump
+	}
+	const maxIter = 50
+	for i := range maxIter {
+		changed, _ := ProcessTransitions(context.Background(), rv, rsp, rvrs, rvas, ff)
+		if check != nil {
+			check(rv, i)
+		}
+		if !changed {
+			return
+		}
+		simulate(rv, rvrs)
+		if len(rv.Status.DatameshTransitions) == 0 {
+			return
+		}
+	}
+	Fail(fmt.Sprintf("runSettleLoop: did not stabilize after %d iterations", 50))
+}
+
+// simulateRevisionBump bumps DatameshRevision on all RVRs to match the
+// current rv.Status.DatameshRevision. Sufficient for all membership confirms
+// (they only check revision).
+func simulateRevisionBump(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) {
+	for _, rvr := range rvrs {
+		rvr.Status.DatameshRevision = rv.Status.DatameshRevision
+	}
+}
+
+// simulateWithPeers bumps revision and sets all peers as Connected.
+// Needed for confirms that check peer connectivity (e.g., confirmAllConnected).
+func simulateWithPeers(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) {
+	for _, rvr := range rvrs {
+		rvr.Status.DatameshRevision = rv.Status.DatameshRevision
+		rvr.Status.Peers = nil
+		for _, other := range rvrs {
+			if other.Name != rvr.Name {
+				rvr.Status.Peers = append(rvr.Status.Peers,
+					mkPeerConnected(other.Name))
+			}
+		}
+	}
 }
 
 // mkMember creates a DatameshMember with name, type, and nodeName.

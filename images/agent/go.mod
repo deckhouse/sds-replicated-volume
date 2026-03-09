@@ -9,7 +9,6 @@ require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260218165228-44f333dae807
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-00010101000000-000000000000
 	github.com/go-logr/logr v1.4.3
-	github.com/google/go-cmp v0.7.0
 	golang.org/x/sync v0.19.0
 	k8s.io/api v0.35.1
 	k8s.io/apimachinery v0.35.1
@@ -43,6 +42,7 @@ require (
 	github.com/golangci/golines v0.15.0 // indirect
 	github.com/golangci/swaggoswag v0.0.0-20250504205917-77f2aca3143e // indirect
 	github.com/google/btree v1.1.3 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/ldez/structtags v0.6.1 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/manuelarte/embeddedstructfieldcheck v0.4.0 // indirect

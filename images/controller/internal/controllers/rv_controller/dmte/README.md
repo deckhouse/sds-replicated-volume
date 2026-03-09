@@ -52,7 +52,7 @@ A plan defines:
 - An ordered sequence of **Steps**
 - Optional **Guards** (preconditions)
 - Optional **OnComplete** callback
-- Replica type metadata (for replica-scoped plans)
+- Optional **Init** callback (populates transition metadata at creation time)
 
 Plans are keyed by `(TransitionType, PlanID)`. The `PlanID` is a versioned
 identifier (e.g., `"access/v1"`, `"diskful-odd/v1"`) that enables safe plan
@@ -431,6 +431,55 @@ Create step builders. Both support:
 | `.DiagnosticConditions(types...)` | Condition types to check on unconfirmed replicas for error reporting. |
 | `.DiagnosticSkipError(fn)` | Skip specific error conditions during diagnostic reporting. |
 | `.OnComplete(fn)` | Optional callback invoked after confirmation, before advancing to the next step. |
+
+### Callback Adapters & Combinators
+
+Functions in `adapt.go` for composing and adapting callbacks across scopes.
+
+#### Scope adapters (Global → Replica)
+
+Wrap global-scoped callbacks for use in replica-scoped plans. The replica
+context is ignored.
+
+```go
+dmte.AdaptGlobalApply[G, R](fn)      // GlobalApplyFunc → ReplicaApplyFunc
+dmte.AdaptGlobalConfirm[G, R](fn)    // GlobalConfirmFunc → ReplicaConfirmFunc
+dmte.AdaptGlobalOnComplete[G, R](fn) // GlobalOnCompleteFunc → ReplicaOnCompleteFunc
+```
+
+> **Note:** Go cannot infer `R` from the input argument (it only appears in
+> the return type). Call sites that use these adapters frequently should
+> define thin local wrappers that pin `G` and `R` to avoid verbose type
+> parameters at every call site.
+
+#### Cross-category adapter
+
+```go
+dmte.AdaptApplyToOnComplete[G](fn)   // GlobalApplyFunc (bool) → GlobalOnCompleteFunc (void)
+```
+
+Discards the bool return. Useful when an apply-style function (e.g.,
+`updateBaselineGMDR`) is used as an OnComplete callback.
+
+#### Combinators
+
+```go
+dmte.ComposeGlobalApply[G](fns...)   // combine multiple GlobalApplyFunc into one
+dmte.ComposeReplicaApply[G, R](fns...) // combine multiple ReplicaApplyFunc into one
+```
+
+Returns true if any sub-callback changed state (OR of all results).
+All sub-callbacks are always called regardless of earlier results.
+
+#### Utility
+
+```go
+dmte.SetChanged[T comparable](dst *T, val T) bool
+```
+
+Assigns `val` to `*dst` and returns true if the value changed. Generic
+helper for apply callbacks that need change detection — the bool return
+aligns with the apply callback contract.
 
 ### Dispatch Decision Constructors
 

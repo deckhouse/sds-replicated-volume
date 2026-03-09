@@ -44,11 +44,11 @@ import (
 //   - Feature: guardShadowDiskfulSupported (sD variants)
 var commonAddGuards = []any{
 	guardRVNotDeleting,
-	guardAddressesPopulated,
-	guardNoMemberOnSameNode,
 	guardRSPAvailable,
 	guardNodeEligible,
 	guardNodeHasAllSystemNetworks,
+	guardNoMemberOnSameNode,
+	guardAddressesPopulated,
 }
 
 // commonRemoveGuards are guards shared by all RemoveReplica plans.
