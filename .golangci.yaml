@@ -40,6 +40,9 @@ linters:
       - linters: [staticcheck]
         path: images/oldcontroller/
         text: "SA1019:"
+      # We want to keep our naming of packages
+      - path: (.+)\.go$
+        text: 'var-naming: .*'
     paths:
       - third_party$
       - builtin$
