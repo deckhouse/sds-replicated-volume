@@ -175,10 +175,12 @@ func (r *Reconciler) reconcileDRBDR(
 	}
 	addrErr := ensureAddresses(rf.Ctx(), drbdr, node, r.portCache.Allocate).Error()
 
-	// Phase 3: Add finalizer to intended LLV (before DRBD operations)
+	// Phase 3: Add finalizer to intended LLV (before DRBD operations).
+	// Skip when in cleanup — no point acquiring a finalizer on an LLV that
+	// is about to be released.
 	var intendedDisk string
 	var llvErr error
-	if drbdr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful {
+	if drbdr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful && upAndNotInCleanup {
 		intendedDisk, llvErr = r.reconcileLLVFinalizerAdd(rf.Ctx(), drbdr.Spec.LVMLogicalVolumeName)
 	}
 
@@ -382,40 +384,46 @@ func (r *Reconciler) reconcileLLVFinalizerAdd(ctx context.Context, llvName strin
 	return formatLVMDevicePath(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode), nil
 }
 
-// reconcileLLVFinalizerRelease removes the agent finalizer from the
-// previously-attached LLV when the resource is moving away from it (switching
-// to a different LLV, becoming diskless, or being deleted/downed). This runs
-// BEFORE DRBD convergence so the status still carries the attached LLV name.
+// reconcileLLVFinalizerRelease removes the agent finalizer from LLVs that the
+// agent no longer needs: the previously-attached LLV when switching disks, and
+// the spec LLV when the resource is being deleted. This runs BEFORE DRBD
+// convergence so the status still carries the attached LLV name.
 func (r *Reconciler) reconcileLLVFinalizerRelease(
 	ctx context.Context,
 	drbdr *v1alpha1.DRBDResource,
 	inCleanup bool,
 ) error {
-	if drbdr.Status.ActiveConfiguration == nil {
-		return nil
+	var attachedLLVName string
+	if drbdr.Status.ActiveConfiguration != nil {
+		attachedLLVName = drbdr.Status.ActiveConfiguration.LVMLogicalVolumeName
 	}
-	attachedLLVName := drbdr.Status.ActiveConfiguration.LVMLogicalVolumeName
-	if attachedLLVName == "" {
-		return nil
+	specLLVName := drbdr.Spec.LVMLogicalVolumeName
+
+	// Release finalizer from the attached LLV (from status) when the resource
+	// is switching to a different LLV or being deleted. state=Down
+	// intentionally keeps the LLV finalizer (the resource may come back Up).
+	if attachedLLVName != "" && (inCleanup || attachedLLVName != specLLVName) {
+		if err := r.releaseLLVFinalizer(ctx, attachedLLVName); err != nil {
+			return err
+		}
 	}
 
-	// Determine the intended LLV name. When the resource is being deleted,
-	// the intended LLV is empty — the disk is no longer needed.
-	// Note: state=Down intentionally keeps the LLV finalizer (the resource
-	// may come back Up).
-	intendedLLVName := drbdr.Spec.LVMLogicalVolumeName
-	if inCleanup {
-		intendedLLVName = ""
+	// On deletion, also release the finalizer from the spec LLV if the disk
+	// was never actually attached — Phase 3 adds the finalizer based on spec,
+	// but status only reflects what DRBD actually has attached.
+	if inCleanup && specLLVName != "" && specLLVName != attachedLLVName {
+		if err := r.releaseLLVFinalizer(ctx, specLLVName); err != nil {
+			return err
+		}
 	}
 
-	// Still attached to the same LLV — nothing to release.
-	if attachedLLVName == intendedLLVName {
-		return nil
-	}
+	return nil
+}
 
-	llv, err := r.getLVMLogicalVolume(ctx, attachedLLVName)
+func (r *Reconciler) releaseLLVFinalizer(ctx context.Context, llvName string) error {
+	llv, err := r.getLVMLogicalVolume(ctx, llvName)
 	if err != nil {
-		return flow.Wrapf(err, "getting attached LLV %q for finalizer release", attachedLLVName)
+		return flow.Wrapf(err, "getting LLV %q for finalizer release", llvName)
 	}
 	if llv == nil {
 		return nil
@@ -425,7 +433,7 @@ func (r *Reconciler) reconcileLLVFinalizerRelease(
 		llvBase := llv.DeepCopy()
 		obju.RemoveFinalizer(llv, v1alpha1.AgentFinalizer)
 		if err := r.patchLLV(ctx, llv, llvBase); err != nil {
-			return flow.Wrapf(err, "releasing finalizer on attached LLV %q", attachedLLVName)
+			return flow.Wrapf(err, "releasing finalizer on LLV %q", llvName)
 		}
 	}
 
