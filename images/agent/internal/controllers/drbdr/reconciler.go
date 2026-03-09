@@ -54,6 +54,18 @@ func NewReconciler(cl client.Client, nodeName string, portCache *PortCache) *Rec
 	}
 }
 
+// isInCleanup returns true when the DRBDResource is marked for deletion and
+// the agent holds the only remaining finalizer (ready for final cleanup).
+func isInCleanup(drbdr *v1alpha1.DRBDResource) bool {
+	return drbdr.DeletionTimestamp != nil && !obju.HasFinalizersOtherThan(drbdr, v1alpha1.AgentFinalizer)
+}
+
+// isUpAndNotInCleanup returns true when the DRBDResource is NOT being torn
+// down — it is neither being deleted nor in spec.state=Down.
+func isUpAndNotInCleanup(drbdr *v1alpha1.DRBDResource) bool {
+	return !isInCleanup(drbdr) && drbdr.Spec.State != v1alpha1.DRBDResourceStateDown
+}
+
 // Reconcile reconciles a DRBDResource based on the request type.
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
@@ -140,12 +152,19 @@ func (r *Reconciler) reconcileDRBDR(
 	}
 
 	// Phase 1: Ensure finalizer (adds if needed for up resources)
-	if finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, true); finalizerOutcome.ShouldReturn() {
+	if finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, true, isUpAndNotInCleanup(drbdr)); finalizerOutcome.ShouldReturn() {
 		if finalizerOutcome.Error() != nil {
 			return rf.Fail(finalizerOutcome.Error())
 		}
 		return rf.Done()
 	}
+
+	// Snapshot deletion state after Phase 1. Phase 1 may have patched the
+	// object, refreshing its metadata from the API server. This snapshot is
+	// used by all subsequent phases to ensure consistent behavior even if
+	// Phase 5's status patch further mutates drbdr metadata.
+	inCleanup := isInCleanup(drbdr)
+	upAndNotInCleanup := isUpAndNotInCleanup(drbdr)
 
 	// Phase 2: Ensure addresses in status (in-memory only, no patch yet)
 	// Error here is non-critical (e.g., port allocation failure) - continue reconciliation
@@ -167,12 +186,12 @@ func (r *Reconciler) reconcileDRBDR(
 	// The status still carries the attached LLV name at this point; after DRBD
 	// convergence (Phase 4) the disk may already be detached and the status will
 	// be cleared, making it impossible to identify which LLV to release.
-	if releaseErr := r.reconcileLLVFinalizerRelease(rf.Ctx(), drbdr); releaseErr != nil {
+	if releaseErr := r.reconcileLLVFinalizerRelease(rf.Ctx(), drbdr, inCleanup); releaseErr != nil {
 		llvErr = errors.Join(llvErr, releaseErr)
 	}
 
 	// Phase 4: DRBD convergence
-	iState := computeIntendedDRBDState(drbdr, intendedDisk)
+	iState := computeIntendedDRBDState(drbdr, intendedDisk, upAndNotInCleanup)
 
 	aState, aErr := observeActualDRBDState(rf.Ctx(), DRBDResourceNameOnTheNode(drbdr))
 	aErr = ConfiguredReasonError(aErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
@@ -208,7 +227,7 @@ func (r *Reconciler) reconcileDRBDR(
 	}
 
 	// Phase 6: Finalize (removes finalizer if needed for down/deleted resources)
-	if finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, false); finalizerOutcome.ShouldReturn() {
+	if finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, false, upAndNotInCleanup); finalizerOutcome.ShouldReturn() {
 		if finalizerOutcome.Error() != nil {
 			reconcileErr = errors.Join(reconcileErr, finalizerOutcome.Error())
 		}
@@ -370,6 +389,7 @@ func (r *Reconciler) reconcileLLVFinalizerAdd(ctx context.Context, llvName strin
 func (r *Reconciler) reconcileLLVFinalizerRelease(
 	ctx context.Context,
 	drbdr *v1alpha1.DRBDResource,
+	inCleanup bool,
 ) error {
 	if drbdr.Status.ActiveConfiguration == nil {
 		return nil
@@ -379,9 +399,14 @@ func (r *Reconciler) reconcileLLVFinalizerRelease(
 		return nil
 	}
 
-	// Determine the intended LLV name. If spec is diskless or the resource is
-	// going down/being deleted, the intended LLV is empty (no disk).
+	// Determine the intended LLV name. When the resource is being deleted,
+	// the intended LLV is empty — the disk is no longer needed.
+	// Note: state=Down intentionally keeps the LLV finalizer (the resource
+	// may come back Up).
 	intendedLLVName := drbdr.Spec.LVMLogicalVolumeName
+	if inCleanup {
+		intendedLLVName = ""
+	}
 
 	// Still attached to the same LLV — nothing to release.
 	if attachedLLVName == intendedLLVName {
@@ -442,16 +467,10 @@ func (r *Reconciler) reconcileFinalizer(
 	ctx context.Context,
 	drbdr *v1alpha1.DRBDResource,
 	adding bool,
+	isUpAndNotInCleanup bool,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "reconcile-finalizer")
 	defer rf.OnEnd(&outcome)
-
-	isUpAndNotInCleanup := true
-	if drbdr.DeletionTimestamp != nil && !obju.HasFinalizersOtherThan(drbdr, v1alpha1.AgentFinalizer) {
-		isUpAndNotInCleanup = false
-	} else if drbdr.Spec.State == v1alpha1.DRBDResourceStateDown {
-		isUpAndNotInCleanup = false
-	}
 
 	base := drbdr.DeepCopy()
 	ensureOutcome := ensureFinalizer(rf.Ctx(), drbdr, adding, isUpAndNotInCleanup)
