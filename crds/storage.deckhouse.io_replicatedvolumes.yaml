@@ -811,6 +811,13 @@ spec:
                 type: array
                 x-kubernetes-list-type: atomic
               effectiveLayout:
+                default:
+                  reachableTieBreakers: 0
+                  reachableVoters: 0
+                  staleAgents: 0
+                  totalTieBreakers: 0
+                  totalVoters: 0
+                  upToDateVoters: 0
                 description: |-
                   EffectiveLayout describes the real-time protection level and health
                   of the datamesh, based on observable cluster state.
@@ -836,29 +843,35 @@ spec:
                       layout state.
                     type: string
                   reachableTieBreakers:
+                    default: 0
                     description: |-
                       ReachableTieBreakers is the number of TieBreakers confirmed reachable
                       (agent ready or seen Connected by peers).
                     type: integer
                   reachableVoters:
+                    default: 0
                     description: |-
                       ReachableVoters is the number of voters confirmed reachable
                       (own Quorum=true or seen Connected by peers).
                     type: integer
                   staleAgents:
+                    default: 0
                     description: |-
                       StaleAgents is the number of members whose agent data is stale
                       (AgentNotReady or Quorum not yet reported). These members are
                       reconstructed from peer observations when possible.
                     type: integer
                   totalTieBreakers:
+                    default: 0
                     description: TotalTieBreakers is the number of TieBreaker members.
                     type: integer
                   totalVoters:
+                    default: 0
                     description: TotalVoters is the number of voter members (Diskful
                       and liminal variants).
                     type: integer
                   upToDateVoters:
+                    default: 0
                     description: |-
                       UpToDateVoters is the number of voters with UpToDate backing volume
                       (own BackingVolume=UpToDate or seen UpToDate by peers).

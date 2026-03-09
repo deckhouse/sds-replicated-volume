@@ -90,6 +90,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
+	// Reconcile migration from old configuration format (missing FTT/GMDR/storagePoolName fields).
+	if needsConfigurationFormatMigration(rsc) {
+		if outcome := r.reconcileMigrationConfigurationFormat(rf.Ctx(), rsc); outcome.ShouldReturn() {
+			return outcome.ToCtrl()
+		}
+	}
+
 	// Reconcile metadata (finalizer management).
 	if outcome := r.reconcileMetadata(rf.Ctx(), rsc); outcome.ShouldReturn() {
 		return outcome.ToCtrl()
@@ -234,6 +241,43 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 	}
 
 	return rf.Continue()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: migration-configuration-format
+//
+
+// reconcileMigrationConfigurationFormat migrates old-format status.configuration
+// that is missing fields added in the new CRD (failuresToTolerate, guaranteedMinimumDataRedundancy,
+// replicatedStoragePoolName). Old-format objects cannot be patched because CEL XValidation
+// rules on ReplicatedVolumeConfiguration fail with "no such key" for absent fields.
+// Nilling out configuration allows ensureConfiguration to rewrite it from scratch.
+//
+// Reconcile pattern: Conditional target evaluation
+func (r *Reconciler) reconcileMigrationConfigurationFormat(
+	ctx context.Context,
+	rsc *v1alpha1.ReplicatedStorageClass,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "migration-configuration-format")
+	defer rf.OnEnd(&outcome)
+
+	base := rsc.DeepCopy()
+	rsc.Status.Configuration = nil
+	rsc.Status.ConfigurationGeneration = 0
+
+	if err := r.patchRSCStatus(rf.Ctx(), rsc, base); err != nil {
+		return rf.Fail(err)
+	}
+
+	return rf.Continue()
+}
+
+// needsConfigurationFormatMigration detects old-format status.configuration
+// written by the previous controller version. Old format has only topology and
+// volumeAccess; new format always includes replicatedStoragePoolName (MinLength=1).
+func needsConfigurationFormatMigration(rsc *v1alpha1.ReplicatedStorageClass) bool {
+	return rsc.Status.Configuration != nil &&
+		rsc.Status.Configuration.ReplicatedStoragePoolName == ""
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
