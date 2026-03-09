@@ -48,6 +48,10 @@ func TestDRBDResource(t *testing.T) {
 		e.Run("StateDown", func(e envtesting.E) {
 			suite.SetupStateDown(e, cl, drbdr)
 		})
+
+		e.Run("DiskfulToDiskless", func(e envtesting.E) {
+			suite.SetupDiskfulToDiskless(e, cl, drbdr)
+		})
 	})
 
 	e.Run("DeleteDiskful", func(e envtesting.E) {
