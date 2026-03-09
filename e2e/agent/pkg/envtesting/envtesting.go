@@ -152,7 +152,7 @@ func newRunFn[T interface {
 	}
 }
 
-func newChild(parent TCommon, ctx context.Context, cancelCtx context.CancelFunc, sections map[string]json.RawMessage, runFn func(string, func(E)) bool) *scope {
+func newChild(parent TCommon, ctx context.Context, cancelCtx context.CancelFunc, sections map[string]json.RawMessage, runFn func(string, func(E)) bool) *scope { //nolint:revive // parent before ctx is intentional: parent owns the lifecycle
 	child := &scope{
 		TCommon:   parent,
 		ctx:       ctx,
@@ -177,18 +177,18 @@ func (e *scope) Options(targets ...any) {
 	for _, target := range targets {
 		typ := reflect.TypeOf(target)
 		if typ.Kind() != reflect.Pointer {
-			e.TCommon.Fatalf("Options: target must be a pointer, got %T", target)
+			e.Fatalf("Options: target must be a pointer, got %T", target)
 		}
 
 		elemType := typ.Elem()
 		typeName := elemType.Name()
 		if typeName == "" {
-			e.TCommon.Fatalf("Options: target must be a pointer to a named type, got %T", target)
+			e.Fatalf("Options: target must be a pointer to a named type, got %T", target)
 		}
 
 		raw, ok := e.sections[typeName]
 		if !ok {
-			e.TCommon.Fatalf("Options: section %q not found", typeName)
+			e.Fatalf("Options: section %q not found", typeName)
 		}
 
 		if err := json.Unmarshal(raw, target); err != nil {

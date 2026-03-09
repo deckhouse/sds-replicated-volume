@@ -55,6 +55,57 @@ func TestOf(t *testing.T) {
 	}
 }
 
+func TestOf_Variadic(t *testing.T) {
+	// Zero args → empty set.
+	s := idset.Of()
+	if !s.IsEmpty() {
+		t.Fatal("Of() should return empty set")
+	}
+
+	// Multiple args.
+	s = idset.Of(0, 3, 7, 31)
+	if s.Len() != 4 {
+		t.Fatalf("expected len=4, got %d", s.Len())
+	}
+	for _, id := range []uint8{0, 3, 7, 31} {
+		if !s.Contains(id) {
+			t.Fatalf("Of(0,3,7,31) does not contain %d", id)
+		}
+	}
+	// Not in set.
+	for _, id := range []uint8{1, 2, 4, 30} {
+		if s.Contains(id) {
+			t.Fatalf("Of(0,3,7,31) should not contain %d", id)
+		}
+	}
+
+	// Duplicates are harmless.
+	s = idset.Of(5, 5, 5)
+	if s.Len() != 1 {
+		t.Fatalf("expected len=1 for duplicates, got %d", s.Len())
+	}
+
+	// Equivalent to manual Add.
+	var manual idset.IDSet
+	manual.Add(1)
+	manual.Add(10)
+	manual.Add(20)
+	if idset.Of(1, 10, 20) != manual {
+		t.Fatal("Of(1,10,20) should equal manual {1,10,20}")
+	}
+}
+
+func TestAll_Constant(t *testing.T) {
+	if idset.All.Len() != 32 {
+		t.Fatalf("All.Len() = %d, want 32", idset.All.Len())
+	}
+	for id := uint8(0); id < 32; id++ {
+		if !idset.All.Contains(id) {
+			t.Fatalf("All should contain %d", id)
+		}
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Basic operations
 // ----------------------------------------------------------------------------
@@ -382,6 +433,43 @@ func TestIDSet_String(t *testing.T) {
 				t.Fatalf("expected %q, got %q", tt.want, got)
 			}
 		})
+	}
+}
+
+func TestIDSet_AppendString(t *testing.T) {
+	tests := []struct {
+		name   string
+		set    idset.IDSet
+		prefix string
+		want   string
+	}{
+		{"empty_no_prefix", 0, "", ""},
+		{"empty_with_prefix", 0, "stale: ", "stale: "},
+		{"single_no_prefix", 1 << 0, "", "#0"},
+		{"single_with_prefix", 1 << 5, "IDs: ", "IDs: #5"},
+		{"two_elements_with_prefix", (1 << 3) | (1 << 7), "[", "[#3, #7"},
+		{"consistent_with_String", (1 << 0) | (1 << 10) | (1 << 31), "", "#0, #10, #31"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := []byte(tt.prefix)
+			got := string(tt.set.AppendString(buf))
+			if got != tt.want {
+				t.Fatalf("expected %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestIDSet_AppendString_NoAlloc(t *testing.T) {
+	set := idset.Of(0, 5, 10)
+	var buf [64]byte
+	allocs := testing.AllocsPerRun(100, func() {
+		_ = set.AppendString(buf[:0])
+	})
+	if allocs > 0 {
+		t.Fatalf("AppendString allocated %.0f times, expected 0", allocs)
 	}
 }
 
