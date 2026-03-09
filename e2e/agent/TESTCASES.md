@@ -16,11 +16,16 @@ TestDRBDResource
 │   │   Configured=False with reason InMaintenance. Cleanup reverts;
 │   │   agent reconciles back to Configured=True.
 │   │
-│   └── StateDown
-│       Patches spec.state=Down. Waits for agent to tear down DRBD and
-│       remove its own finalizer from the DRBDResource. The LLV finalizer
-│       is intentionally kept (resource may come back Up). Cleanup reverts
-│       to state=Up; agent brings DRBD back up and re-adds its finalizer.
+│   ├── StateDown
+│   │   Patches spec.state=Down. Waits for agent to tear down DRBD and
+│   │   remove its own finalizer from the DRBDResource. The LLV finalizer
+│   │   is intentionally kept (resource may come back Up). Cleanup reverts
+│   │   to state=Up; agent brings DRBD back up and re-adds its finalizer.
+│   │
+│   └── DiskfulToDiskless
+│       Patches spec.type from Diskful to Diskless. Waits for
+│       Configured=True. Asserts activeConfiguration.type=Diskless.
+│       Cleanup reverts to Diskful; agent re-attaches the disk.
 │
 ├── DeleteDiskful — delete diskful replica with attached LLV
 │       Creates a diskful DRBDResource with an LLV (same setup as R1).
@@ -72,6 +77,9 @@ Every subtest's cleanup exercises a teardown path:
 - **DisklessToDiskfulReplica cleanup** (LIFO): reverts diskful→diskless
   patch, deletes the LLV, deletes the DRBDResource. Verifies the agent
   handles disk detach, DRBD teardown, and finalizer removal.
+
+- **DiskfulToDiskless cleanup**: reverts diskless→diskful patch. Verifies
+  the agent can re-attach a previously detached disk.
 
 - **Peering cleanup**: reverts peer patches (restores empty peers list).
   Verifies the agent handles peer disconnect gracefully.
