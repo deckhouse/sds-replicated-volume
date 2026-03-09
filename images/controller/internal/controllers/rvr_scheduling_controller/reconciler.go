@@ -129,7 +129,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// them from all subsequent scheduling logic.
 	var outcome flow.ReconcileOutcome
 	if sctx.Access.Len() > 0 {
-		outcome := r.reconcileRVRsConditionAbsent(rf.Ctx(), rvrs, sctx.Access)
+		outcome = r.reconcileRVRsConditionAbsent(rf.Ctx(), rvrs, sctx.Access)
 		if outcome.ShouldReturn() {
 			return outcome.ToCtrl()
 		}
@@ -183,7 +183,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			Enrichf("scheduling TieBreaker"))
 	}
 
-	return rf.Done().ToCtrl()
+	return outcome.ToCtrl()
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -2628,7 +2628,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("Conflict on patch — Reconcile requeues without error", func() {
+		It("Conflict on Diskful patch (Phase 2) — Reconcile requeues without error", func() {
 			rv := newRV(defaultConfig())
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -2667,6 +2667,54 @@ var _ = Describe("Reconciler", func() {
 			result, err := reconcileRV(ctx, rec)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.Requeue).To(BeTrue(), "Conflict should trigger requeue") //nolint:staticcheck // testing Requeue field set by flow.ToCtrl
+		})
+
+		It("Conflict on TieBreaker patch (Phase 3) — Reconcile requeues without error", func() {
+			rv := newRV(defaultConfig())
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
+					makeNode("node-b", "zone-b", makeLVG("vg-b", true)),
+				})
+
+			d := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			d.Spec.NodeName = "node-a"
+			d.Spec.LVMVolumeGroupName = "vg-a"
+
+			tb := newRVR(1, v1alpha1.ReplicaTypeTieBreaker)
+
+			conflictErr := &apierrors.StatusError{
+				ErrStatus: metav1.Status{
+					Status: metav1.StatusFailure,
+					Reason: metav1.StatusReasonConflict,
+				},
+			}
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, d, tb).
+				WithStatusSubresource(d, tb).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+						if rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok && rvr.Name == tb.Name {
+							return conflictErr
+						}
+						return cl.Patch(ctx, obj, patch, opts...)
+					},
+					SubResourcePatch: func(ctx context.Context, cl client.Client, _ string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+						if rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok && rvr.Name == tb.Name {
+							return conflictErr
+						}
+						return cl.Status().Patch(ctx, obj, patch, opts...)
+					},
+				}).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+
+			result, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue(), "Conflict on TieBreaker (Phase 3) should trigger requeue") //nolint:staticcheck // testing Requeue field set by flow.ToCtrl
+
+			tbUpdated := getUpdatedRVR(ctx, cl, tb)
+			Expect(tbUpdated.Spec.NodeName).To(BeEmpty(), "TieBreaker should not be placed when patch fails")
 		})
 	})
 
