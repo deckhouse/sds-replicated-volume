@@ -36,8 +36,8 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdr"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
-	fakedrbdsetup "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup/fake"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
+	fakedrbdutils "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils/fake"
 )
 
 const (
@@ -58,7 +58,7 @@ type reconcileTestCase struct {
 	objs []client.Object
 
 	// Expected drbdsetup commands (in order)
-	expectedCommands []*fakedrbdsetup.ExpectedCmd
+	expectedCommands []*fakedrbdutils.ExpectedCmd
 
 	// Expected reconcile error (nil means no error expected)
 	expectedReconcileErr string
@@ -68,23 +68,23 @@ type reconcileTestCase struct {
 }
 
 func TestReconciler_Reconcile(t *testing.T) {
-	configuredStatus := func(resName string) drbdsetup.StatusResult {
-		return drbdsetup.StatusResult{
+	configuredStatus := func(resName string) drbdutils.StatusResult {
+		return drbdutils.StatusResult{
 			{
 				Name:   resName,
 				NodeID: 0,
 				Role:   "Secondary",
-				Devices: []drbdsetup.Device{
+				Devices: []drbdutils.Device{
 					{Volume: 0, Minor: 1000, DiskState: "UpToDate", Quorum: true},
 				},
 			},
 		}
 	}
 
-	configuredShow := func(resName string) *drbdsetup.ShowResource {
-		return &drbdsetup.ShowResource{
+	configuredShow := func(resName string) *drbdutils.ShowResource {
+		return &drbdutils.ShowResource{
 			Resource: resName,
-			Options: drbdsetup.ShowOptions{
+			Options: drbdutils.ShowOptions{
 				AutoPromote:                false,
 				Quorum:                     "off",
 				QuorumMinimumRedundancy:    "off",
@@ -102,7 +102,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			drbdr: nil,
 			// When reconcile is triggered by K8S name but object doesn't exist,
 			// we just return Done (orphan cleanup requires ActualNameOnTheNode)
-			expectedCommands: []*fakedrbdsetup.ExpectedCmd{},
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{},
 		},
 		{
 			name:  "resource belongs to different node - returns done (filtered by predicates)",
@@ -110,15 +110,15 @@ func TestReconciler_Reconcile(t *testing.T) {
 			// When reconcile is triggered for a resource on different node,
 			// getDRBDRByName returns the object, but reconcileDRBDR checks
 			// node ownership and returns done (predicates should filter this normally)
-			expectedCommands: []*fakedrbdsetup.ExpectedCmd{},
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{},
 		},
 
 		// State=Up cases - verifies correct drbdsetup command sequence
 		{
 			name:  "state up, drbd not configured - creates resource and minor",
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp),
-			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
-				statusCmd(drbdsetup.StatusResult{}),
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
+				statusCmd(drbdutils.StatusResult{}),
 				// After status returns empty, actions are generated:
 				// NewResourceAction calls new-resource
 				newResourceCmd(testDRBDResName, 0),
@@ -146,7 +146,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 		{
 			name:  "state up, drbd configured - queries status and show only",
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp),
-			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
 				statusCmd(configuredStatus(testDRBDResName)),
 				showCmd(configuredShow(testDRBDResName)),
 				// Resource exists and options match - EnsureDeviceSymlinkAction runs (filesystem only)
@@ -154,7 +154,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 				statusCmd(configuredStatus(testDRBDResName)),
 				showCmd(configuredShow(testDRBDResName)),
 			},
-			postCheck: func(t *testing.T, cl client.Client) {
+			postCheck: func(t *testing.T, _ client.Client) {
 				expectDeviceSymlink(t, testDRBDRName, 1000)
 			},
 		},
@@ -163,11 +163,11 @@ func TestReconciler_Reconcile(t *testing.T) {
 		{
 			name:  "state down - queries status",
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateDown),
-			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
-				statusCmd(drbdsetup.StatusResult{}),
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
+				statusCmd(drbdutils.StatusResult{}),
 				// RemoveDeviceSymlinkAction runs (filesystem only)
 				// Refresh after symlink action
-				statusCmd(drbdsetup.StatusResult{}),
+				statusCmd(drbdutils.StatusResult{}),
 			},
 		},
 
@@ -175,11 +175,11 @@ func TestReconciler_Reconcile(t *testing.T) {
 		{
 			name:  "deleting resource - queries status",
 			drbdr: deletingDRBDR(testNodeName, v1alpha1.AgentFinalizer),
-			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
-				statusCmd(drbdsetup.StatusResult{}),
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
+				statusCmd(drbdutils.StatusResult{}),
 				// RemoveDeviceSymlinkAction runs (filesystem only)
 				// Refresh after symlink action
-				statusCmd(drbdsetup.StatusResult{}),
+				statusCmd(drbdutils.StatusResult{}),
 			},
 		},
 
@@ -187,7 +187,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 		{
 			name:  "custom drbd resource name - triggers rename to standard name",
 			drbdr: drbdrWithCustomName(testNodeName, testCustomDRBDName),
-			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
 				// When ActualNameOnTheNode is set, we rename from custom to standard name
 				renameCmd(testCustomDRBDName, testDRBDResName),
 			},
@@ -197,12 +197,12 @@ func TestReconciler_Reconcile(t *testing.T) {
 		{
 			name:  "status command error - returns error",
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateDown),
-			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
 				{
-					Name:         drbdsetup.Command,
-					Args:         drbdsetup.StatusArgs(testDRBDResName),
+					Name:         drbdutils.DRBDSetupCommand,
+					Args:         drbdutils.StatusArgs(testDRBDResName),
 					ResultOutput: []byte("error output"),
-					ResultErr:    fakedrbdsetup.ExitErr{Code: 1},
+					ResultErr:    fakedrbdutils.ExitErr{Code: 1},
 				},
 			},
 			expectedReconcileErr: "executing drbdsetup status",
@@ -210,15 +210,15 @@ func TestReconciler_Reconcile(t *testing.T) {
 		{
 			name:  "show command error - returns error",
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateDown),
-			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
-				statusCmd(drbdsetup.StatusResult{
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
+				statusCmd(drbdutils.StatusResult{
 					{Name: testDRBDResName, NodeID: 0, Role: "Secondary"},
 				}),
 				{
-					Name:         drbdsetup.Command,
-					Args:         drbdsetup.ShowArgs(testDRBDResName, true),
+					Name:         drbdutils.DRBDSetupCommand,
+					Args:         drbdutils.ShowArgs(testDRBDResName, true),
 					ResultOutput: []byte("show error"),
-					ResultErr:    fakedrbdsetup.ExitErr{Code: 1},
+					ResultErr:    fakedrbdutils.ExitErr{Code: 1},
 				},
 			},
 			expectedReconcileErr: "executing drbdsetup show",
@@ -226,12 +226,12 @@ func TestReconciler_Reconcile(t *testing.T) {
 		{
 			name:  "status exit code 10 - resource not found, creates resource",
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp),
-			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
 				{
-					Name:         drbdsetup.Command,
-					Args:         drbdsetup.StatusArgs(testDRBDResName),
-					ResultOutput: []byte(""),
-					ResultErr:    fakedrbdsetup.ExitErr{Code: 10}, // Exit 10 = resource not found
+					Name:         drbdutils.DRBDSetupCommand,
+					Args:         drbdutils.StatusArgs(testDRBDResName),
+					ResultOutput: []byte(testDRBDResName + ": No such resource\n"),
+					ResultErr:    fakedrbdutils.ExitErr{Code: 10},
 				},
 				// Resource not found triggers creation
 				newResourceCmd(testDRBDResName, 0),
@@ -250,7 +250,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 		{
 			name:  "maintenance mode - queries status and show",
 			drbdr: drbdrInMaintenance(testNodeName, v1alpha1.MaintenanceModeNoResourceReconciliation),
-			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
 				statusCmd(configuredStatus(testDRBDResName)),
 				showCmd(configuredShow(testDRBDResName)),
 				// Maintenance mode skips all actions (including EnsureDeviceSymlinkAction)
@@ -261,30 +261,30 @@ func TestReconciler_Reconcile(t *testing.T) {
 		{
 			name:  "resource with connections - removes stale peer",
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp),
-			expectedCommands: []*fakedrbdsetup.ExpectedCmd{
-				statusCmd(drbdsetup.StatusResult{
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
+				statusCmd(drbdutils.StatusResult{
 					{
 						Name:   testDRBDResName,
 						NodeID: 0,
 						Role:   "Primary",
-						Devices: []drbdsetup.Device{
+						Devices: []drbdutils.Device{
 							{Volume: 0, Minor: 1000, DiskState: "UpToDate", Quorum: true},
 						},
-						Connections: []drbdsetup.Connection{
+						Connections: []drbdutils.Connection{
 							{
 								PeerNodeID:      1,
 								Name:            "peer-1",
 								ConnectionState: "Connected",
-								PeerDevices: []drbdsetup.PeerDevice{
+								PeerDevices: []drbdutils.PeerDevice{
 									{Volume: 0, ReplicationState: "Established", PeerDiskState: "UpToDate"},
 								},
 							},
 						},
 					},
 				}),
-				showCmd(&drbdsetup.ShowResource{
+				showCmd(&drbdutils.ShowResource{
 					Resource: testDRBDResName,
-					Options: drbdsetup.ShowOptions{
+					Options: drbdutils.ShowOptions{
 						AutoPromote:                false,
 						Quorum:                     "off",
 						QuorumMinimumRedundancy:    "off",
@@ -292,8 +292,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 						OnNoDataAccessible:         "suspend-io",
 						OnSuspendedPrimaryOutdated: "force-secondary",
 					},
-					Connections: []drbdsetup.ShowConnection{
-						{PeerNodeID: 1, Net: drbdsetup.ShowNet{Protocol: "C"}},
+					Connections: []drbdutils.ShowConnection{
+						{PeerNodeID: 1, Net: drbdutils.ShowNet{Protocol: "C"}},
 					},
 				}),
 				// EnsureDeviceSymlinkAction runs (filesystem, not drbdsetup)
@@ -315,7 +315,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			drbdsetup.ResetNextDeviceMinor()
+			drbdutils.ResetNextDeviceMinor()
 
 			symlinkDir := t.TempDir() + "/"
 			drbdr.OverrideDeviceSymlinkDir(symlinkDir)
@@ -358,7 +358,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			cl := clientBuilder.Build()
 
 			// Setup fake drbdsetup
-			fakeExec := &fakedrbdsetup.Exec{}
+			fakeExec := &fakedrbdutils.Exec{}
 			fakeExec.ExpectCommands(tc.expectedCommands...)
 			fakeExec.Setup(t)
 
@@ -456,100 +456,100 @@ func drbdrInMaintenance(nodeName string, mode v1alpha1.MaintenanceMode) *v1alpha
 	return dr
 }
 
-func statusCmd(result drbdsetup.StatusResult) *fakedrbdsetup.ExpectedCmd {
+func statusCmd(result drbdutils.StatusResult) *fakedrbdutils.ExpectedCmd {
 	output, _ := json.Marshal(result)
-	return &fakedrbdsetup.ExpectedCmd{
-		Name:         drbdsetup.Command,
-		Args:         drbdsetup.StatusArgs(testDRBDResName),
+	return &fakedrbdutils.ExpectedCmd{
+		Name:         drbdutils.DRBDSetupCommand,
+		Args:         drbdutils.StatusArgs(testDRBDResName),
 		ResultOutput: output,
 		ResultErr:    nil,
 	}
 }
 
-func showCmd(result *drbdsetup.ShowResource) *fakedrbdsetup.ExpectedCmd {
-	var results []drbdsetup.ShowResource
+func showCmd(result *drbdutils.ShowResource) *fakedrbdutils.ExpectedCmd {
+	var results []drbdutils.ShowResource
 	if result != nil {
-		results = []drbdsetup.ShowResource{*result}
+		results = []drbdutils.ShowResource{*result}
 	}
 	output, _ := json.Marshal(results)
-	return &fakedrbdsetup.ExpectedCmd{
-		Name:         drbdsetup.Command,
-		Args:         drbdsetup.ShowArgs(testDRBDResName, true),
+	return &fakedrbdutils.ExpectedCmd{
+		Name:         drbdutils.DRBDSetupCommand,
+		Args:         drbdutils.ShowArgs(testDRBDResName, true),
 		ResultOutput: output,
 		ResultErr:    nil,
 	}
 }
 
-func newResourceCmd(resourceName string, nodeID uint8) *fakedrbdsetup.ExpectedCmd {
-	return &fakedrbdsetup.ExpectedCmd{
-		Name:         drbdsetup.Command,
-		Args:         drbdsetup.NewResourceArgs(resourceName, nodeID),
+func newResourceCmd(resourceName string, nodeID uint8) *fakedrbdutils.ExpectedCmd {
+	return &fakedrbdutils.ExpectedCmd{
+		Name:         drbdutils.DRBDSetupCommand,
+		Args:         drbdutils.NewResourceArgs(resourceName, nodeID),
 		ResultOutput: []byte{},
 		ResultErr:    nil,
 	}
 }
 
-func newMinorCmd(resourceName string, minor, volume uint, diskless bool) *fakedrbdsetup.ExpectedCmd {
-	return &fakedrbdsetup.ExpectedCmd{
-		Name:         drbdsetup.Command,
-		Args:         drbdsetup.NewMinorArgs(resourceName, minor, volume, diskless),
+func newMinorCmd(resourceName string, minor, volume uint, diskless bool) *fakedrbdutils.ExpectedCmd {
+	return &fakedrbdutils.ExpectedCmd{
+		Name:         drbdutils.DRBDSetupCommand,
+		Args:         drbdutils.NewMinorArgs(resourceName, minor, volume, diskless),
 		ResultOutput: []byte{},
 		ResultErr:    nil,
 	}
 }
 
-func disconnectCmd(resourceName string, peerNodeID uint8) *fakedrbdsetup.ExpectedCmd {
-	return &fakedrbdsetup.ExpectedCmd{
-		Name:         drbdsetup.Command,
-		Args:         drbdsetup.DisconnectArgs(resourceName, peerNodeID),
+func disconnectCmd(resourceName string, peerNodeID uint8) *fakedrbdutils.ExpectedCmd {
+	return &fakedrbdutils.ExpectedCmd{
+		Name:         drbdutils.DRBDSetupCommand,
+		Args:         drbdutils.DisconnectArgs(resourceName, peerNodeID),
 		ResultOutput: []byte{},
 		ResultErr:    nil,
 	}
 }
 
-func delPeerCmd(resourceName string, peerNodeID uint8) *fakedrbdsetup.ExpectedCmd {
-	return &fakedrbdsetup.ExpectedCmd{
-		Name:         drbdsetup.Command,
-		Args:         drbdsetup.DelPeerArgs(resourceName, peerNodeID),
+func delPeerCmd(resourceName string, peerNodeID uint8) *fakedrbdutils.ExpectedCmd {
+	return &fakedrbdutils.ExpectedCmd{
+		Name:         drbdutils.DRBDSetupCommand,
+		Args:         drbdutils.DelPeerArgs(resourceName, peerNodeID),
 		ResultOutput: []byte{},
 		ResultErr:    nil,
 	}
 }
 
-func forgetPeerCmd(resourceName string, peerNodeID uint8) *fakedrbdsetup.ExpectedCmd {
-	return &fakedrbdsetup.ExpectedCmd{
-		Name:         drbdsetup.Command,
-		Args:         drbdsetup.ForgetPeerArgs(resourceName, peerNodeID),
+func forgetPeerCmd(resourceName string, peerNodeID uint8) *fakedrbdutils.ExpectedCmd {
+	return &fakedrbdutils.ExpectedCmd{
+		Name:         drbdutils.DRBDSetupCommand,
+		Args:         drbdutils.ForgetPeerArgs(resourceName, peerNodeID),
 		ResultOutput: []byte{},
 		ResultErr:    nil,
 	}
 }
 
-func downCmd(resourceName string) *fakedrbdsetup.ExpectedCmd {
-	return &fakedrbdsetup.ExpectedCmd{
-		Name:         drbdsetup.Command,
-		Args:         drbdsetup.DownArgs(resourceName),
+func downCmd(resourceName string) *fakedrbdutils.ExpectedCmd {
+	return &fakedrbdutils.ExpectedCmd{
+		Name:         drbdutils.DRBDSetupCommand,
+		Args:         drbdutils.DownArgs(resourceName),
 		ResultOutput: []byte{},
 		ResultErr:    nil,
 	}
 }
 
-func renameCmd(oldName, newName string) *fakedrbdsetup.ExpectedCmd {
-	return &fakedrbdsetup.ExpectedCmd{
-		Name:         drbdsetup.Command,
-		Args:         drbdsetup.RenameArgs(oldName, newName),
+func renameCmd(oldName, newName string) *fakedrbdutils.ExpectedCmd {
+	return &fakedrbdutils.ExpectedCmd{
+		Name:         drbdutils.DRBDSetupCommand,
+		Args:         drbdutils.RenameArgs(oldName, newName),
 		ResultOutput: []byte{},
 		ResultErr:    nil,
 	}
 }
 
-func resourceOptionsCmd(resourceName string) *fakedrbdsetup.ExpectedCmd {
+func resourceOptionsCmd(resourceName string) *fakedrbdutils.ExpectedCmd {
 	autoPromote := false
 	quorum := uint(0)
 	quorumMinRedundancy := uint(0)
-	return &fakedrbdsetup.ExpectedCmd{
-		Name: drbdsetup.Command,
-		Args: drbdsetup.ResourceOptionsArgs(resourceName, drbdsetup.ResourceOptions{
+	return &fakedrbdutils.ExpectedCmd{
+		Name: drbdutils.DRBDSetupCommand,
+		Args: drbdutils.ResourceOptionsArgs(resourceName, drbdutils.ResourceOptions{
 			AutoPromote:                &autoPromote,
 			OnNoQuorum:                 "suspend-io",
 			OnNoDataAccessible:         "suspend-io",

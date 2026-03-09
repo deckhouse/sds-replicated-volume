@@ -23,10 +23,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 )
 
-// Scanner listens for DRBD events via drbdsetup events2 and triggers
+// Scanner listens for DRBD events via drbdutils events2 and triggers
 // reconciliation of DRBDResource objects by sending events to the controller.
 type Scanner struct {
 	requestCh chan<- event.TypedGenericEvent[DRBDReconcileRequest]
@@ -88,9 +88,9 @@ func (s *Scanner) runEventsLoop(ctx context.Context) error {
 
 	logger := log.FromContext(ctx)
 
-	for ev := range drbdsetup.ExecuteEvents2(ctx, &err) {
+	for ev := range drbdutils.ExecuteEvents2(ctx, &err) {
 		switch tev := ev.(type) {
-		case *drbdsetup.Event:
+		case *drbdutils.Event:
 			logger.V(1).Info("DRBD event received", "kind", tev.Kind, "object", tev.Object, "state", tev.State)
 
 			// Check for "exists -" which indicates initial state dump is complete
@@ -119,7 +119,7 @@ func (s *Scanner) runEventsLoop(ctx context.Context) error {
 				}
 			}
 
-		case *drbdsetup.UnparsedEvent:
+		case *drbdutils.UnparsedEvent:
 			logger.Info("Unparsed event", "error", tev.Err, "line", tev.RawEventLine)
 		}
 	}

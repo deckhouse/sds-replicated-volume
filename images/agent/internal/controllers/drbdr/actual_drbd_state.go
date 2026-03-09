@@ -28,7 +28,7 @@ import (
 
 	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 )
 
 // ActualDRBDState represents the actual DRBD state observed from the system.
@@ -149,8 +149,8 @@ type ActualPath interface {
 
 // actualState represents the observed DRBD resource state.
 type actualState struct {
-	status *drbdsetup.Resource
-	show   *drbdsetup.ShowResource
+	status *drbdutils.Resource
+	show   *drbdutils.ShowResource
 }
 
 func (aState *actualState) IsZero() bool {
@@ -236,7 +236,7 @@ func (aState *actualState) Volumes() []ActualVolume {
 	}
 
 	// Build a map of show volumes by volume number
-	showVolumes := make(map[int]*drbdsetup.ShowVolume)
+	showVolumes := make(map[int]*drbdutils.ShowVolume)
 	if aState.show != nil {
 		for i := range aState.show.ThisHost.Volumes {
 			vol := &aState.show.ThisHost.Volumes[i]
@@ -267,7 +267,7 @@ func (aState *actualState) Peers() []ActualPeer {
 	}
 
 	// Build a map of show connections by peer node ID
-	showConnections := make(map[int]*drbdsetup.ShowConnection)
+	showConnections := make(map[int]*drbdutils.ShowConnection)
 	if aState.show != nil {
 		for i := range aState.show.Connections {
 			conn := &aState.show.Connections[i]
@@ -312,7 +312,7 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 
 	// Invariant check: we expect exactly one volume
 	var err error
-	var volumes []drbdsetup.Device
+	var volumes []drbdutils.Device
 	if aState.status != nil {
 		volumes = aState.status.Devices
 	}
@@ -343,7 +343,7 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 	return err
 }
 
-func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResourceStatus, volumes []drbdsetup.Device) {
+func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResourceStatus, volumes []drbdutils.Device) {
 	if status.ActiveConfiguration == nil {
 		status.ActiveConfiguration = &v1alpha1.DRBDResourceActiveConfiguration{}
 	}
@@ -542,7 +542,7 @@ type actualVolume struct {
 	diskState  string
 	hasQuorum  bool
 	sizeBytes  int64
-	showVolume *drbdsetup.ShowVolume
+	showVolume *drbdutils.ShowVolume
 }
 
 func (v *actualVolume) Minor() int      { return v.minor }
@@ -573,8 +573,8 @@ var _ ActualVolume = &actualVolume{}
 
 // actualPeer implements ActualPeer.
 type actualPeer struct {
-	connection     *drbdsetup.Connection
-	showConnection *drbdsetup.ShowConnection
+	connection     *drbdutils.Connection
+	showConnection *drbdutils.ShowConnection
 }
 
 func (p *actualPeer) NodeID() uint8 {
@@ -644,7 +644,7 @@ var _ ActualPeer = &actualPeer{}
 
 // actualPath implements ActualPath.
 type actualPath struct {
-	path *drbdsetup.Path
+	path *drbdutils.Path
 }
 
 func (p *actualPath) LocalAddr() string {
@@ -663,7 +663,7 @@ var _ ActualPath = &actualPath{}
 
 // observeActualDRBDState retrieves the actual DRBD state by querying drbdsetup.
 func observeActualDRBDState(ctx context.Context, drbdResName string) (*actualState, error) {
-	statusResult, err := drbdsetup.ExecuteStatus(ctx, drbdResName)
+	statusResult, err := drbdutils.ExecuteStatus(ctx, drbdResName)
 	if err != nil {
 		return nil, fmt.Errorf("executing drbdsetup status: %w", err)
 	}
@@ -675,12 +675,12 @@ func observeActualDRBDState(ctx context.Context, drbdResName string) (*actualSta
 	}
 
 	// Get show output for configuration details
-	showResults, err := drbdsetup.ExecuteShow(ctx, drbdResName, true)
+	showResults, err := drbdutils.ExecuteShow(ctx, drbdResName, true)
 	if err != nil {
 		return nil, fmt.Errorf("executing drbdsetup show: %w", err)
 	}
 
-	var showResult *drbdsetup.ShowResource
+	var showResult *drbdutils.ShowResource
 	for i := range showResults {
 		if showResults[i].Resource == drbdResName {
 			showResult = &showResults[i]
