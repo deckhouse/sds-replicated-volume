@@ -419,6 +419,12 @@ func computeIntendedBackingVolume(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1a
 		bv.LVMVolumeGroupName = member.LVMVolumeGroupName
 		bv.ThinPoolName = member.LVMVolumeGroupThinPoolName
 	} else {
+		// Not a member and deleting: backing volume is not needed (RVR is leaving, not joining).
+		if rvr.DeletionTimestamp != nil {
+			return nil, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable,
+				"Backing volume is not applicable for deleting replica"
+		}
+
 		// Not a member: needs backing volume if type is Diskful.
 		if rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful {
 			return nil, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable,

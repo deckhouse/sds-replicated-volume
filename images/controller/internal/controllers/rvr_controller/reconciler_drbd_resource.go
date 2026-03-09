@@ -351,8 +351,13 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 // For datamesh members, the type is authoritative from the datamesh.
 // For non-members, it is derived from rvr.Spec.Type and represents the goal state;
 // DRBDR is configured only partially in this case (e.g. local disk mode without peer connections).
+// For deleting non-members, Access (Diskless) is returned — the replica is leaving
+// and should not attempt to acquire a backing volume.
 func computeIntendedType(rvr *v1alpha1.ReplicatedVolumeReplica, member *v1alpha1.DatameshMember) v1alpha1.DatameshMemberType {
 	if member == nil {
+		if rvr.DeletionTimestamp != nil {
+			return v1alpha1.DatameshMemberTypeAccess
+		}
 		return v1alpha1.DatameshMemberType(rvr.Spec.Type)
 	}
 

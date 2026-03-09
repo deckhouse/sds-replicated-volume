@@ -375,6 +375,25 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
 	})
 
+	It("returns nil for non-member with DeletionTimestamp (deleting Diskful)", func() {
+		now := metav1.Now()
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rvr-1",
+				DeletionTimestamp: &now,
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				NodeName:           "node-1",
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+
+		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
+		Expect(intended).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
+	})
+
 	It("returns nil for non-member with incomplete config (no nodeName)", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
