@@ -254,7 +254,7 @@ This controller does not manage finalizers, labels, or owner references. It only
 | Resource | Events | Handler |
 |----------|--------|---------|
 | ReplicatedVolume | Create, Delete, Generic (default); Update: `status.configurationGeneration` changes | For() (primary) |
-| ReplicatedVolumeReplica | Create (default); Update: spec changes (generation bump) or `SatisfyEligibleNodes=False`; Delete: never | mapRVRToRV (by `spec.replicatedVolumeName`) |
+| ReplicatedVolumeReplica | Create (default): new RVR needs scheduling; Update: spec changes (generation bump) or `SatisfyEligibleNodes=False`; Delete (default): freed node may unblock pending scheduling | mapRVRToRV (by `spec.replicatedVolumeName`) |
 | ReplicatedStoragePool | Create, Delete, Generic (default); Update: `status.eligibleNodesRevision` changes | mapRSPToRV (index lookup by storage pool name) |
 
 ### RV Predicates
@@ -266,7 +266,7 @@ This controller does not manage finalizers, labels, or owner references. It only
 
 - Create: default `true` (new RVR needs scheduling)
 - Update: generation changed (spec changes) OR `SatisfyEligibleNodes` condition is False (needs re-scheduling after node changes)
-- Delete: explicitly `false` (scheduling controller doesn't handle deletion)
+- Delete: default `true` (a deleted RVR frees a node, which may unblock pending scheduling for other RVRs that previously failed with "node mismatch (assigned)")
 - Generic: default `true`
 
 ### RSP Predicates
