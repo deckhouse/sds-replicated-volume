@@ -1,0 +1,45 @@
+/*
+Copyright 2026 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package drbdutils
+
+import (
+	"context"
+	"errors"
+	"fmt"
+)
+
+var (
+	ErrResizeBackingNotGrown = errors.New("backing device not grown")
+	ErrResizeNeedPrimary     = errors.New("need one primary node for resize")
+)
+
+// ResizeArgs returns the arguments for drbdsetup resize command.
+var ResizeArgs = func(minor uint) []string {
+	return []string{"resize", fmt.Sprintf("%d", minor)}
+}
+
+var ResizeKnownErrors = []KnownError{
+	{ExitCode: 10, OutputSubstring: "(111)", JoinErr: ErrResizeBackingNotGrown},
+	{ExitCode: 10, OutputSubstring: "(131)", JoinErr: ErrResizeNeedPrimary},
+}
+
+// ExecuteResize resizes a replicated device after growing backing devices.
+func ExecuteResize(ctx context.Context, minor uint) error {
+	cmd := ExecCommandContext(ctx, DRBDSetupCommand, ResizeArgs(minor)...)
+	_, err := executeCommand(cmd, ResizeKnownErrors)
+	return err
+}

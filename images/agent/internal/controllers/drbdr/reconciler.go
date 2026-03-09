@@ -32,7 +32,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -278,7 +278,7 @@ func (r *Reconciler) reconcileActualNameOnTheNode(
 
 	rf.Log().Info("Renaming DRBD resource", "from", oldName, "to", newName)
 
-	err := drbdsetup.ExecuteRename(rf.Ctx(), oldName, newName)
+	err := drbdutils.ExecuteRename(rf.Ctx(), oldName, newName)
 
 	switch {
 	case err == nil:
@@ -286,9 +286,9 @@ func (r *Reconciler) reconcileActualNameOnTheNode(
 		outcome = r.reconcileClearActualName(rf.Ctx(), drbdr)
 		return
 
-	case errors.Is(err, drbdsetup.ErrRenameUnknownResource):
+	case errors.Is(err, drbdutils.ErrRenameUnknownResource):
 		// Old name doesn't exist - check if new name exists (rename might have succeeded before)
-		status, statusErr := drbdsetup.ExecuteStatus(rf.Ctx(), newName)
+		status, statusErr := drbdutils.ExecuteStatus(rf.Ctx(), newName)
 		if statusErr != nil {
 			return rf.Fail(statusErr)
 		}
@@ -301,7 +301,7 @@ func (r *Reconciler) reconcileActualNameOnTheNode(
 		outcome = r.reconcileClearActualName(rf.Ctx(), drbdr)
 		return
 
-	case errors.Is(err, drbdsetup.ErrRenameAlreadyExists):
+	case errors.Is(err, drbdutils.ErrRenameAlreadyExists):
 		// Both names exist - configuration error
 		return rf.Failf(err, "both DRBD resource names exist: oldName=%s, newName=%s", oldName, newName)
 
