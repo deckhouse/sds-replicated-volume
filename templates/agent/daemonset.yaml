@@ -157,9 +157,6 @@ spec:
         {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 8 }}
       volumes:
       - hostPath:
-          path: /sys/
-          type: Directory
-      - hostPath:
           path: /dev/
           type: ""
         name: host-device-dir
