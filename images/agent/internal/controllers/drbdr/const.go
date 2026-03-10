@@ -34,6 +34,20 @@ const (
 	drbdNamePrefix = "sdsrv-"
 )
 
+// deviceSymlinkDir is the directory where stable device symlinks are created.
+// Each DRBDResource gets a symlink at /dev/sdsrv/{k8sName} -> /dev/drbd{minor}.
+var deviceSymlinkDir = "/dev/sdsrv/"
+
+// OverrideDeviceSymlinkDir replaces the symlink directory. For testing only.
+var OverrideDeviceSymlinkDir = func(dir string) {
+	deviceSymlinkDir = dir
+}
+
+// DeviceSymlinkPath returns the stable device symlink path for a DRBDResource.
+func DeviceSymlinkPath(k8sName string) string {
+	return deviceSymlinkDir + k8sName
+}
+
 // DRBDNameFromK8SName returns the standard DRBD resource name for a K8S name.
 func DRBDNameFromK8SName(k8sName string) string {
 	return drbdNamePrefix + k8sName

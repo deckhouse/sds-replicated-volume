@@ -33,190 +33,132 @@ import (
 // computeRVAAttachedCondition
 //
 
-var _ = Describe("computeRVAAttachedConditionFromAttachmentsSummary", func() {
+var _ = Describe("computeRVAAttachedCondition", func() {
 	It("returns Attached when fully attached", func() {
-		as := &attachmentState{
-			intent:           attachmentIntentAttach,
-			member:           &v1alpha1.ReplicatedVolumeDatameshMember{Attached: true, Type: v1alpha1.ReplicaTypeDiskful},
-			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached,
-			conditionMessage: "Volume is attached and ready to serve I/O on the node",
-		}
-		cond := computeRVAAttachedConditionFromAttachmentsSummary(as)
+		cond := computeRVAAttachedCondition(
+			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached,
+			"Volume is attached and ready to serve I/O on the node")
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
 	})
 
 	It("returns Attaching when attach transition is active", func() {
-		as := &attachmentState{
-			intent:                    attachmentIntentAttach,
-			member:                    &v1alpha1.ReplicatedVolumeDatameshMember{Attached: true},
-			hasActiveAttachTransition: true,
-			conditionMessage:          "Attaching, 0/1 confirmed",
-			conditionReason:           v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching,
-		}
-		cond := computeRVAAttachedConditionFromAttachmentsSummary(as)
+		cond := computeRVAAttachedCondition(
+			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching,
+			"Attaching, 0/1 confirmed")
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching))
 		Expect(cond.Message).To(ContainSubstring("Attaching"))
 	})
 
 	It("returns Detaching when detach transition is active", func() {
-		as := &attachmentState{
-			intent:                    attachmentIntentDetach,
-			member:                    &v1alpha1.ReplicatedVolumeDatameshMember{Attached: false},
-			hasActiveDetachTransition: true,
-			conditionMessage:          "Detaching, 0/1 confirmed",
-			conditionReason:           v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching,
-		}
-		cond := computeRVAAttachedConditionFromAttachmentsSummary(as)
+		cond := computeRVAAttachedCondition(
+			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching,
+			"Detaching, 0/1 confirmed")
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching))
 	})
 
 	It("returns Pending when slot is full", func() {
-		as := &attachmentState{
-			intent:           attachmentIntentPending,
-			conditionMessage: "Waiting for attachment slot (slots occupied 2/2)",
-			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending,
-		}
-		cond := computeRVAAttachedConditionFromAttachmentsSummary(as)
+		cond := computeRVAAttachedCondition(
+			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending,
+			"Waiting for attachment slot (slots occupied 2/2)")
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending))
 	})
 
 	It("returns Pending when attach blocked by quorum", func() {
-		as := &attachmentState{
-			intent:           attachmentIntentPending,
-			conditionMessage: "Quorum not satisfied (1/2 replicas with quorum)",
-			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending,
-		}
-		cond := computeRVAAttachedConditionFromAttachmentsSummary(as)
+		cond := computeRVAAttachedCondition(
+			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending,
+			"Quorum not satisfied (1/2 replicas with quorum)")
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending))
 	})
 
 	It("returns VolumeDeleting when attach blocked by deletion", func() {
-		as := &attachmentState{
-			intent:           attachmentIntentPending,
-			conditionMessage: "Volume is being deleted",
-			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonReplicatedVolumeDeleting,
-		}
-		cond := computeRVAAttachedConditionFromAttachmentsSummary(as)
+		cond := computeRVAAttachedCondition(
+			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonReplicatedVolumeDeleting,
+			"Volume is being deleted")
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonReplicatedVolumeDeleting))
 	})
 
 	It("returns NodeNotEligible when node not in RSP", func() {
-		as := &attachmentState{
-			intent:           attachmentIntentPending,
-			conditionMessage: "Node is not eligible for storage class sc-1 (pool pool-1)",
-			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonNodeNotEligible,
-		}
-		cond := computeRVAAttachedConditionFromAttachmentsSummary(as)
+		cond := computeRVAAttachedCondition(
+			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonNodeNotEligible,
+			"Node is not eligible for pool pool-1")
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonNodeNotEligible))
 	})
 
 	It("returns Pending when node not ready", func() {
-		as := &attachmentState{
-			intent:           attachmentIntentPending,
-			conditionMessage: "Node is not ready",
-			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending,
-		}
-		cond := computeRVAAttachedConditionFromAttachmentsSummary(as)
+		cond := computeRVAAttachedCondition(
+			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending,
+			"Node is not ready")
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending))
 	})
 
 	It("returns Pending when agent not ready", func() {
-		as := &attachmentState{
-			intent:           attachmentIntentPending,
-			conditionMessage: "Agent is not ready on node",
-			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending,
-		}
-		cond := computeRVAAttachedConditionFromAttachmentsSummary(as)
+		cond := computeRVAAttachedCondition(
+			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending,
+			"Agent is not ready on node")
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending))
 	})
 
 	It("returns WaitingForReplica when no replica on node", func() {
-		as := &attachmentState{
-			intent:           attachmentIntentPending,
-			conditionMessage: "Waiting for replica on node",
-			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica,
-		}
-		cond := computeRVAAttachedConditionFromAttachmentsSummary(as)
+		cond := computeRVAAttachedCondition(
+			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica,
+			"Waiting for replica on node")
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica))
 	})
 
 	It("returns WaitingForReplica when replica joining datamesh", func() {
-		as := &attachmentState{
-			intent:           attachmentIntentPending,
-			conditionMessage: "Waiting for replica [#3] to join datamesh",
-			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica,
-		}
-		cond := computeRVAAttachedConditionFromAttachmentsSummary(as)
+		cond := computeRVAAttachedCondition(
+			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica,
+			"Waiting for replica [#3] to join datamesh")
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica))
 	})
 
 	It("returns WaitingForReplica when RVR not ready", func() {
-		as := &attachmentState{
-			intent:           attachmentIntentAttach,
-			member:           &v1alpha1.ReplicatedVolumeDatameshMember{Attached: false},
-			conditionMessage: "Waiting for replica to become Ready",
-			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica,
-		}
-		cond := computeRVAAttachedConditionFromAttachmentsSummary(as)
+		cond := computeRVAAttachedCondition(
+			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica,
+			"Waiting for replica to become Ready")
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica))
 	})
 
 	It("returns Attaching when waiting for multiattach", func() {
-		as := &attachmentState{
-			intent:           attachmentIntentAttach,
-			member:           &v1alpha1.ReplicatedVolumeDatameshMember{Attached: false},
-			conditionMessage: "Waiting for multiattach to be enabled",
-			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching,
-		}
-		cond := computeRVAAttachedConditionFromAttachmentsSummary(as)
+		cond := computeRVAAttachedCondition(
+			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching,
+			"Waiting for multiattach to be enabled")
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching))
 	})
 
 	It("returns Pending when detach conflict blocks attach", func() {
-		as := &attachmentState{
-			intent:                    attachmentIntentAttach,
-			member:                    &v1alpha1.ReplicatedVolumeDatameshMember{Attached: false},
-			hasActiveDetachTransition: true,
-			conditionMessage:          "Attach pending, waiting for detach to complete first",
-			conditionReason:           v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending,
-		}
-		cond := computeRVAAttachedConditionFromAttachmentsSummary(as)
+		cond := computeRVAAttachedCondition(
+			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending,
+			"Attach pending, waiting for detach to complete first")
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending))
 	})
 
 	It("returns Detaching when device in use blocks detach", func() {
-		as := &attachmentState{
-			intent:           attachmentIntentDetach,
-			member:           &v1alpha1.ReplicatedVolumeDatameshMember{Attached: true},
-			conditionMessage: "Device in use, detach blocked",
-			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching,
-		}
-		cond := computeRVAAttachedConditionFromAttachmentsSummary(as)
+		cond := computeRVAAttachedCondition(
+			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching,
+			"Device in use, detach blocked")
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching))
 	})
 
 	It("returns LocalityNotSatisfied when conditionReason is set by upstream flow", func() {
-		as := &attachmentState{
-			intent:           attachmentIntentPending,
-			conditionMessage: "No Diskful replica on this node (volumeAccess is Local for storage class sc-1)",
-			conditionReason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonVolumeAccessLocalityNotSatisfied,
-		}
-		cond := computeRVAAttachedConditionFromAttachmentsSummary(as)
+		cond := computeRVAAttachedCondition(
+			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonVolumeAccessLocalityNotSatisfied,
+			"No Diskful replica on this node (volumeAccess is Local for storage class sc-1)")
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonVolumeAccessLocalityNotSatisfied))
 		Expect(cond.Message).To(ContainSubstring("No Diskful replica"))
@@ -224,8 +166,7 @@ var _ = Describe("computeRVAAttachedConditionFromAttachmentsSummary", func() {
 	})
 
 	It("panics when conditionReason is empty", func() {
-		as := &attachmentState{nodeName: "node-1"}
-		Expect(func() { computeRVAAttachedConditionFromAttachmentsSummary(as) }).To(Panic())
+		Expect(func() { computeRVAAttachedCondition("", "") }).To(Panic())
 	})
 })
 
@@ -233,26 +174,16 @@ var _ = Describe("computeRVAAttachedConditionFromAttachmentsSummary", func() {
 // computeRVAReplicaReadyCondition
 //
 
-var _ = Describe("computeRVAReplicaReadyConditionFromAttachmentsSummary", func() {
-	It("returns WaitingForReplica when attachmentState is nil", func() {
-		cond := computeRVAReplicaReadyConditionFromAttachmentsSummary(nil)
+var _ = Describe("computeRVAReplicaReadyCondition", func() {
+	It("returns WaitingForReplica when RVR is nil", func() {
+		cond := computeRVAReplicaReadyCondition(nil)
 		Expect(cond.Type).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReplicaReadyType))
 		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReplicaReadyReasonWaitingForReplica))
 	})
 
-	It("returns WaitingForReplica when RVR is nil", func() {
-		as := &attachmentState{}
-		cond := computeRVAReplicaReadyConditionFromAttachmentsSummary(as)
-		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReplicaReadyReasonWaitingForReplica))
-	})
-
 	It("returns WaitingForReplica when RVR has no Ready condition", func() {
-		as := &attachmentState{
-			rvr: &v1alpha1.ReplicatedVolumeReplica{},
-		}
-		cond := computeRVAReplicaReadyConditionFromAttachmentsSummary(as)
+		cond := computeRVAReplicaReadyCondition(&v1alpha1.ReplicatedVolumeReplica{})
 		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReplicaReadyReasonWaitingForReplica))
 	})
@@ -267,8 +198,7 @@ var _ = Describe("computeRVAReplicaReadyConditionFromAttachmentsSummary", func()
 				Message: "Ready for I/O",
 			},
 		}
-		as := &attachmentState{rvr: rvr}
-		cond := computeRVAReplicaReadyConditionFromAttachmentsSummary(as)
+		cond := computeRVAReplicaReadyCondition(rvr)
 		Expect(cond.Type).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReplicaReadyType))
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady))
@@ -285,8 +215,7 @@ var _ = Describe("computeRVAReplicaReadyConditionFromAttachmentsSummary", func()
 				Message: "Quorum is lost",
 			},
 		}
-		as := &attachmentState{rvr: rvr}
-		cond := computeRVAReplicaReadyConditionFromAttachmentsSummary(as)
+		cond := computeRVAReplicaReadyCondition(rvr)
 		Expect(cond.Type).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReplicaReadyType))
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumLost))
@@ -369,7 +298,7 @@ var _ = Describe("isNodeAttachedOrDetaching", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-1", Attached: true},
 					},
 				},
@@ -382,7 +311,7 @@ var _ = Describe("isNodeAttachedOrDetaching", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-1", Attached: false},
 					},
 				},
@@ -395,7 +324,7 @@ var _ = Describe("isNodeAttachedOrDetaching", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-2", Attached: true},
 					},
 				},
@@ -408,12 +337,12 @@ var _ = Describe("isNodeAttachedOrDetaching", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-1", Attached: false},
 					},
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: ptr.To(metav1.Now())}}},
 				},
 			},
 		}
@@ -424,12 +353,12 @@ var _ = Describe("isNodeAttachedOrDetaching", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-1", Attached: false},
 					},
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: ptr.To(metav1.Now())}}},
 				},
 			},
 		}
@@ -440,12 +369,12 @@ var _ = Describe("isNodeAttachedOrDetaching", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-2", Attached: false},
 					},
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: ptr.To(metav1.Now())}}},
 				},
 			},
 		}
@@ -564,7 +493,7 @@ var _ = Describe("reconcileRVAFinalizers", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-1", Attached: true},
 					},
 				},
@@ -589,7 +518,7 @@ var _ = Describe("reconcileRVAFinalizers", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-1", Attached: true},
 					},
 				},
@@ -618,12 +547,12 @@ var _ = Describe("reconcileRVAFinalizers", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-1", Attached: false},
 					},
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, ReplicaName: "rv-1-0", StartedAt: metav1.Now()},
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rv-1-0", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: ptr.To(metav1.Now())}}},
 				},
 			},
 		}
@@ -645,7 +574,7 @@ var _ = Describe("reconcileRVAFinalizers", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+					Members: []v1alpha1.DatameshMember{
 						{Name: "rv-1-0", NodeName: "node-1", Attached: false},
 					},
 				},

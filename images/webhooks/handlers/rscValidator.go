@@ -64,8 +64,8 @@ func RSCValidate(_ context.Context, _ *model.AdmissionReview, obj metav1.Object)
 			return &kwhvalidating.ValidatorResult{Valid: false, Message: "You must set at least one zone."},
 				nil
 		}
-		if (rsc.Spec.Replication == "Availability" || rsc.Spec.Replication == "ConsistencyAndAvailability") && len(rsc.Spec.Zones) != 3 {
-			klog.Infof("Incorrect combination of replication and zones (%s) (%s)", rsc.Spec.Replication, rsc.Spec.Zones)
+		if (rsc.Spec.Replication == "Availability" || rsc.Spec.Replication == "ConsistencyAndAvailability") && len(rsc.Spec.Zones) != 3 { //nolint:staticcheck // legacy Replication field still supported
+			klog.Infof("Incorrect combination of replication and zones (%s) (%s)", rsc.Spec.Replication, rsc.Spec.Zones) //nolint:staticcheck // legacy Replication field still supported
 			return &kwhvalidating.ValidatorResult{Valid: false,
 					Message: "With replication set to Availability or ConsistencyAndAvailability, three zones need to be specified."},
 				nil

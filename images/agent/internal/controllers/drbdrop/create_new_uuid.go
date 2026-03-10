@@ -22,7 +22,7 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdr"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 )
 
 // executeCreateNewUUID executes the CreateNewUUID operation.
@@ -33,7 +33,7 @@ func (r *OperationReconciler) executeCreateNewUUID(
 ) error {
 	// Get minor number from DRBD status
 	drbdResName := drbdr.DRBDResourceNameOnTheNode(dr)
-	statusResult, err := drbdsetup.ExecuteStatus(ctx, drbdResName)
+	statusResult, err := drbdutils.ExecuteStatus(ctx, drbdResName)
 	if err != nil {
 		return fmt.Errorf("querying DRBD status: %w", err)
 	}
@@ -57,7 +57,7 @@ func (r *OperationReconciler) executeCreateNewUUID(
 	}
 
 	// Execute command
-	if err := drbdsetup.ExecuteNewCurrentUUID(ctx, minor, clearBitmap, forceResync); err != nil {
+	if err := drbdutils.ExecuteNewCurrentUUID(ctx, minor, clearBitmap, forceResync); err != nil {
 		return fmt.Errorf("executing new-current-uuid: %w", err)
 	}
 

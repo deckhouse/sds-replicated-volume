@@ -56,3 +56,13 @@ bash hack/run-tests.sh
 The agent MUST request `"all"` permissions (disable sandbox) when running these commands, because sandbox restrictions cause SSL/TLS errors in `go mod` and related tooling.
 
 If any command fails, stop and report the error.
+
+## Sandbox policy for Go tooling
+
+The agent MUST request `"all"` permissions (disable sandbox) when running **any** command that involves Go tooling, including but not limited to:
+
+- Any `bash hack/*` script
+- `go build`, `go test`, `go run`, `go install`, `go mod ...`, `go work ...`
+- `make` targets that invoke Go tooling
+
+The Cursor sandbox uses a temporary `GOMODCACHE` that is not shared between invocations, causing full module re-downloads on every run. Disabling the sandbox ensures the system Go module cache is reused.

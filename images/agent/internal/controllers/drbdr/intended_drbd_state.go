@@ -19,8 +19,8 @@ package drbdr
 import (
 	corev1 "k8s.io/api/core/v1"
 
-	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 )
 
 // PortAllocator is a function that allocates a port for a given IP address.
@@ -76,11 +76,21 @@ type IntendedDRBDState interface {
 	// OnSuspendedPrimaryOutdated returns the intended action. Always "force-secondary".
 	OnSuspendedPrimaryOutdated() string
 
+	// QuorumDynamicVoters returns the intended quorum-dynamic-voters setting.
+	// Returns false (disable) when Flant extensions are available, true (DRBD default) otherwise.
+	QuorumDynamicVoters() bool
+
 	// DiscardZeroesIfAligned returns the intended setting. Always false.
 	DiscardZeroesIfAligned() bool
 
 	// RsDiscardGranularity returns the intended rs-discard-granularity. Always 8192.
 	RsDiscardGranularity() uint
+
+	// SymlinkName returns the K8S name used for the stable device symlink path.
+	SymlinkName() string
+
+	// NonVoting returns the intended non-voting setting. Read from spec.
+	NonVoting() bool
 }
 
 // IntendedPeer represents the intended state of a DRBD peer connection.
@@ -132,12 +142,14 @@ type IntendedPath interface {
 type intendedDRBDState struct {
 	isUpAndNotInCleanup     bool
 	resourceName            string
+	symlinkName             string
 	nodeID                  uint8
 	resourceType            v1alpha1.DRBDResourceType
 	backingDisk             string
 	quorum                  byte
 	quorumMinimumRedundancy byte
 	allowTwoPrimaries       bool
+	nonVoting               bool
 	role                    v1alpha1.DRBDRole
 	sizeBytes               int64
 	peers                   []IntendedPeer
@@ -146,6 +158,7 @@ type intendedDRBDState struct {
 func (s *intendedDRBDState) IsZero() bool              { return s == nil }
 func (s *intendedDRBDState) IsUpAndNotInCleanup() bool { return s.isUpAndNotInCleanup }
 func (s *intendedDRBDState) ResourceName() string      { return s.resourceName }
+func (s *intendedDRBDState) SymlinkName() string       { return s.symlinkName }
 func (s *intendedDRBDState) NodeID() uint8             { return s.nodeID }
 func (s *intendedDRBDState) Type() v1alpha1.DRBDResourceType {
 	return s.resourceType
@@ -163,10 +176,12 @@ func (s *intendedDRBDState) AutoPromote() bool                  { return false }
 func (s *intendedDRBDState) OnNoQuorum() string                 { return "suspend-io" }
 func (s *intendedDRBDState) OnNoDataAccessible() string         { return "suspend-io" }
 func (s *intendedDRBDState) OnSuspendedPrimaryOutdated() string { return "force-secondary" }
+func (s *intendedDRBDState) QuorumDynamicVoters() bool          { return !drbdutils.FlantExtensionsSupported }
 
 // Hardcoded disk options defaults
 func (s *intendedDRBDState) DiscardZeroesIfAligned() bool { return false }
 func (s *intendedDRBDState) RsDiscardGranularity() uint   { return 8192 } // TODO: DETECT AUTOMATICALLY FROM LVM
+func (s *intendedDRBDState) NonVoting() bool              { return s.nonVoting }
 
 var _ IntendedDRBDState = (*intendedDRBDState)(nil)
 
@@ -227,6 +242,7 @@ func systemNetworkToNodeAddressType(systemNetwork string) corev1.NodeAddressType
 func computeIntendedDRBDState(
 	drbdr *v1alpha1.DRBDResource,
 	backingDisk string,
+	isUpAndNotInCleanup bool,
 ) *intendedDRBDState {
 	// Build local addresses map from status.addresses
 	localAddresses := make(map[string]v1alpha1.DRBDAddress, len(drbdr.Status.Addresses))
@@ -261,14 +277,6 @@ func computeIntendedDRBDState(
 		})
 	}
 
-	// Compute isUpAndNotInCleanup
-	isUpAndNotInCleanup := true
-	if drbdr.DeletionTimestamp != nil && !obju.HasFinalizersOtherThan(drbdr, v1alpha1.AgentFinalizer) {
-		isUpAndNotInCleanup = false
-	} else if drbdr.Spec.State == v1alpha1.DRBDResourceStateDown {
-		isUpAndNotInCleanup = false
-	}
-
 	// Compute size in bytes for diskful resources
 	var sizeBytes int64
 	if drbdr.Spec.Size != nil {
@@ -278,12 +286,14 @@ func computeIntendedDRBDState(
 	return &intendedDRBDState{
 		isUpAndNotInCleanup:     isUpAndNotInCleanup,
 		resourceName:            DRBDResourceNameOnTheNode(drbdr),
+		symlinkName:             drbdr.Name,
 		nodeID:                  drbdr.Spec.NodeID,
 		resourceType:            drbdr.Spec.Type,
 		backingDisk:             backingDisk,
 		quorum:                  drbdr.Spec.Quorum,
 		quorumMinimumRedundancy: drbdr.Spec.QuorumMinimumRedundancy,
 		allowTwoPrimaries:       drbdr.Spec.AllowTwoPrimaries,
+		nonVoting:               drbdr.Spec.NonVoting,
 		role:                    drbdr.Spec.Role,
 		sizeBytes:               sizeBytes,
 		peers:                   peers,
