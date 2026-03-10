@@ -390,9 +390,10 @@ A backing volume is needed if **all** conditions are met:
 
 For replicas that are members of the datamesh, a disk is needed if:
 - `NeedsBackingVolume()` is true: Diskful, LiminalDiskful, ShadowDiskful, LiminalShadowDiskful
+- **Vestibule transition**: member is currently diskless (e.g., Access) but `spec.Type` targets a type that needs backing volume (e.g., Diskful). During vestibule transitions the LVG/ThinPool are taken from `rvr.Spec` (the member doesn't have LVG fields yet).
 
 A disk is NOT needed if:
-- `NeedsBackingVolume()` is false: Access, TieBreaker
+- `NeedsBackingVolume()` is false AND `spec.Type` also does not need backing volume: Access, TieBreaker
 
 For non-members, a disk is needed if spec.type is `Diskful`.
 

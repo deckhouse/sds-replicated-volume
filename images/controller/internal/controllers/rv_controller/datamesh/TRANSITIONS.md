@@ -379,8 +379,8 @@ Sets `datamesh.multiattach = true`. Enables simultaneous Primary on multiple
 nodes. Required before the second (and subsequent) Attach can proceed.
 
 **Trigger**: more than one datamesh member has an active RVA (intended
-attachments > 1) AND multiattach is currently disabled AND no
-EnableMultiattach is already in progress.
+attachments > 1) AND `maxAttachments > 1` AND multiattach is currently
+disabled AND no EnableMultiattach is already in progress.
 
 **Confirmation**: all members with a backing volume (D, sD) or with
 Attached = true must confirm. This ensures all data-bearing and
@@ -391,8 +391,10 @@ is allowed.
 
 Sets `datamesh.multiattach = false`. Returns to single-Primary mode.
 
-**Trigger**: intended attachments ≤ 1 AND multiattach is currently enabled
-AND no DisableMultiattach is already in progress.
+**Trigger**: multiattach is not needed (intended attachments ≤ 1 OR
+maxAttachments ≤ 1) AND multiattach is currently enabled AND at most one
+member is potentially attached (safe to toggle — no concurrent Primary
+risk) AND no DisableMultiattach is already in progress.
 
 **Confirmation**: same as EnableMultiattach (D + sD + Attached members).
 

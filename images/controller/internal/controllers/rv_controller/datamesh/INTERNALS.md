@@ -414,7 +414,7 @@ RemoveReplica(D) has 4 variants based on parity × qmr direction.
 Processes attachment intent per replica:
 
 1. **ForceDetach** — from requests, before normal decisions. Skips if member not attached.
-2. **Multiattach toggle** — counts intended attachments (member + active RVA). Dispatches `EnableMultiattach` or `DisableMultiattach` when toggle needed and not already in progress.
+2. **Multiattach toggle** — counts intended attachments (member + active RVA). Enable requires intended attachments > 1 and maxAttachments > 1. Disable is deferred while more than one member is potentially attached (concurrent Primary risk). Dispatches when toggle is needed and not already in progress.
 3. **Collect candidates** — replicas with RVAs or attached members. FIFO sort by earliest active RVA timestamp (detach-only candidates get zero timestamp → sort first).
 4. **Per-replica decision:**
 

@@ -963,7 +963,9 @@ var _ = Describe("Multiattach", func() {
 			mkRVRReady("rv-1-0", "node-1", 5),
 			mkRVRReady("rv-1-1", "node-2", 5),
 		}
-		// Only 1 active RVA (node-1) → intended=1, but node-2 still attached.
+		// Only 1 active RVA (node-1) → intended=1 → needMultiattach=false,
+		// but node-2 still attached → potentiallyAttached=2 > 1 → dispatcher skips Disable.
+		// Guard guardCanDisableMultiattach is defense-in-depth.
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-1")}
 
 		ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, rvas, FeatureFlags{})
@@ -1010,7 +1012,7 @@ var _ = Describe("Multiattach", func() {
 		Expect(enableCount).To(Equal(1))
 	})
 
-	It("guard: maxAttachments=1 blocks EnableMultiattach", func() {
+	It("maxAttachments=1: dispatcher skips EnableMultiattach", func() {
 		rv := mkRV(5,
 			[]v1alpha1.DatameshMember{
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
@@ -1018,8 +1020,9 @@ var _ = Describe("Multiattach", func() {
 			},
 			nil, nil,
 		)
-		// MaxAttachments=1 (default) — dispatcher dispatches EnableMultiattach,
-		// but guardMaxAttachmentsAllowsMultiattach blocks.
+		// MaxAttachments=1 (default) — dispatcher skips EnableMultiattach
+		// because needMultiattach requires maxAttachments > 1.
+		// Guard guardMaxAttachmentsAllowsMultiattach is defense-in-depth.
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRReady("rv-1-0", "node-1", 5),
 			mkRVRReady("rv-1-1", "node-2", 5),
@@ -1052,6 +1055,61 @@ var _ = Describe("Multiattach", func() {
 		// No RVAs → dispatcher wants DisableMultiattach, but guard blocks (2 potentiallyAttached).
 
 		ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{})
+
+		for _, t := range rv.Status.DatameshTransitions {
+			Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach))
+		}
+	})
+
+	It("disables multiattach when maxAttachments decreased to 1 and potentiallyAttached <= 1", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMemberAttached("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+			},
+			nil, nil,
+		)
+		rv.Spec.MaxAttachments = 1
+		rv.Status.Datamesh.Multiattach = true
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRReady("rv-1-0", "node-1", 5),
+		}
+		// maxAttachments decreased to 1, only 1 member attached → potentiallyAttached=1.
+		// needMultiattach=false (maxAttachments=1), potentiallyAttached <= 1 → Disable dispatched.
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-1")}
+
+		ProcessTransitions(context.Background(), rv, mkRSP("node-1"), rvrs, rvas, FeatureFlags{})
+
+		found := false
+		for _, t := range rv.Status.DatameshTransitions {
+			if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach {
+				found = true
+			}
+		}
+		Expect(found).To(BeTrue(), "expected DisableMultiattach transition")
+	})
+
+	It("does not disable when maxAttachments=1 but potentiallyAttached > 1", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMemberAttached("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMemberAttached("rv-1-1", v1alpha1.DatameshMemberTypeAccess, "node-2"),
+			},
+			nil, nil,
+		)
+		rv.Spec.MaxAttachments = 1
+		rv.Status.Datamesh.Multiattach = true
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRReady("rv-1-0", "node-1", 5),
+			mkRVRReady("rv-1-1", "node-2", 5),
+		}
+		// 2 RVAs, maxAttachments=1 → needMultiattach=false, but both members attached →
+		// potentiallyAttached=2 > 1 → dispatcher skips Disable (must Detach first).
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{
+			mkRVA("rva-1", "node-1"),
+			mkRVA("rva-2", "node-2"),
+		}
+
+		ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, rvas, FeatureFlags{})
 
 		for _, t := range rv.Status.DatameshTransitions {
 			Expect(t.Type).NotTo(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach))

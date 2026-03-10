@@ -262,6 +262,28 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
 	})
 
+	It("returns backing volume for Access member with Diskful spec (vestibule)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type:                       v1alpha1.ReplicaTypeDiskful,
+				NodeName:                   "node-1",
+				LVMVolumeGroupName:         "lvg-1",
+				LVMVolumeGroupThinPoolName: "thindata",
+			},
+		}
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
+			{Name: "rvr-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "node-1"},
+		}
+
+		bv, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
+
+		Expect(bv).NotTo(BeNil())
+		Expect(reason).To(BeEmpty())
+		Expect(bv.LVMVolumeGroupName).To(Equal("lvg-1"))
+		Expect(bv.ThinPoolName).To(Equal("thindata"))
+	})
+
 	It("returns backing volume for liminal Diskful datamesh member", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
