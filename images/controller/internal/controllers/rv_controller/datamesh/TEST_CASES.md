@@ -879,11 +879,17 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 - ⚡ **Does not create duplicate EnableMultiattach.**
   Active EnableMultiattach (not yet confirmed). 2 active RVAs. Dispatcher wants Enable again but tracker.CanAdmit blocks (hasMultiattachTransition=true). Still exactly 1 EnableMultiattach.
 
-- **Guard: maxAttachments=1 blocks EnableMultiattach.**
-  MaxAttachments=1 (default). 2 active RVAs. Dispatcher yields EnableMultiattach, but guardMaxAttachmentsAllowsMultiattach blocks. multiattach stays false.
+- **maxAttachments=1: dispatcher skips EnableMultiattach.**
+  MaxAttachments=1 (default). 2 active RVAs. needMultiattach=false (maxAttachments=1) — dispatcher skips Enable. guardMaxAttachmentsAllowsMultiattach is defense-in-depth. multiattach stays false.
 
 - **Guard: potentiallyAttached > 1 blocks DisableMultiattach.**
   2 members both Attached=true. No RVAs. Wants disable. But guardCanDisableMultiattach blocks.
+
+- **Disables multiattach when maxAttachments decreased to 1 and potentiallyAttached <= 1.**
+  1 member (D, Attached), maxAttachments=1, multiattach=true. 1 RVA. needMultiattach=false (maxAttachments=1). potentiallyAttached=1 ≤ 1 → DisableMultiattach dispatched.
+
+- **Does not disable when maxAttachments=1 but potentiallyAttached > 1.**
+  2 members both Attached, maxAttachments=1, multiattach=true. 2 RVAs. needMultiattach=false, but potentiallyAttached=2 > 1 → dispatcher skips Disable (must Detach first).
 
 - **Settle: EnableMultiattach completes when all relevant members confirm.**
   Active EnableMultiattach at rev 6. D(Attached) + A(Attached) both confirmed. Completed.
