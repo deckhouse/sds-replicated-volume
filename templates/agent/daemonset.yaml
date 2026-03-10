@@ -96,6 +96,8 @@ spec:
         volumeMounts:
         - mountPath: /dev/
           name: host-device-dir
+        - mountPath: /dev/sdsrv/
+          name: dev-sdsrv
         - mountPath: /sys/
           name: sys-dir
         - mountPath: /etc/config/
@@ -175,6 +177,8 @@ spec:
           items:
             - key: slogh.cfg
               path: slogh.cfg
+      - name: dev-sdsrv
+        emptyDir: {}
       - name: var-run-drbd-lock
         emptyDir: {}
 {{- end }}

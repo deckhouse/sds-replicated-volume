@@ -99,3 +99,14 @@ func assertDRBDRRole(e envtesting.E, drbdr *v1alpha1.DRBDResource, expected v1al
 			drbdr.Name, drbdr.Status.ActiveConfiguration.Role, expected)
 	}
 }
+
+func assertDRBDRType(e envtesting.E, drbdr *v1alpha1.DRBDResource, expected v1alpha1.DRBDResourceType) {
+	e.Helper()
+	if drbdr.Status.ActiveConfiguration == nil {
+		e.Fatalf("DRBDResource %q has no activeConfiguration", drbdr.Name)
+	}
+	if drbdr.Status.ActiveConfiguration.Type != expected {
+		e.Fatalf("DRBDResource %q activeConfiguration.type is %s, want %s",
+			drbdr.Name, drbdr.Status.ActiveConfiguration.Type, expected)
+	}
+}

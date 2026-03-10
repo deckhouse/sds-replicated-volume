@@ -33,7 +33,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/controlleroptions"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 )
 
 // BuildController creates and registers the DRBD controller and scanner with the manager.
@@ -57,10 +57,10 @@ func BuildController(mgr manager.Manager) error {
 	cl := mgr.GetClient()
 	nodeName := cfg.NodeName()
 
-	// Set up drbdsetup command logging
-	origExec := drbdsetup.ExecCommandContext
-	drbdsetup.ExecCommandContext = func(ctx context.Context, name string, arg ...string) drbdsetup.Cmd {
-		log.FromContext(ctx).Info("executing drbdsetup command", "command", name, "args", arg)
+	// Set up drbd command logging
+	origExec := drbdutils.ExecCommandContext
+	drbdutils.ExecCommandContext = func(ctx context.Context, name string, arg ...string) drbdutils.Cmd {
+		log.FromContext(ctx).Info("executing drbd command", "command", name, "args", arg)
 		return origExec(ctx, name, arg...)
 	}
 

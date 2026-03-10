@@ -199,13 +199,14 @@ type ReplicatedStoragePoolUsedBy struct {
 
 // TODO: Remove ReplicatedStoragePoolPhase once the old controller (sds-replicated-volume-controller) is retired.
 // ReplicatedStoragePoolPhase represents the phase of the ReplicatedStoragePool.
+//
 // Deprecated: Used only by the old controller.
 type ReplicatedStoragePoolPhase string
 
 // TODO: Remove phase constants once the old controller (sds-replicated-volume-controller) is retired.
-// Deprecated: Used only by the old controller.
-//
 // ReplicatedStoragePool phase values.
+//
+// Deprecated: Used only by the old controller.
 const (
 	RSPPhaseCompleted ReplicatedStoragePoolPhase = "Completed"
 	RSPPhaseFailed    ReplicatedStoragePoolPhase = "Failed"

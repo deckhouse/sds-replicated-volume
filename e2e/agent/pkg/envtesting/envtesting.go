@@ -138,7 +138,7 @@ func newRoot[T interface {
 }](t T, sections map[string]json.RawMessage) *scope {
 	ctx, cancel := context.WithCancel(t.Context())
 	runFn := newRunFn(t, sections)
-	return newChild(t, ctx, cancel, sections, runFn)
+	return newChild(ctx, t, cancel, sections, runFn)
 }
 
 func newRunFn[T interface {
@@ -152,7 +152,7 @@ func newRunFn[T interface {
 	}
 }
 
-func newChild(parent TCommon, ctx context.Context, cancelCtx context.CancelFunc, sections map[string]json.RawMessage, runFn func(string, func(E)) bool) *scope {
+func newChild(ctx context.Context, parent TCommon, cancelCtx context.CancelFunc, sections map[string]json.RawMessage, runFn func(string, func(E)) bool) *scope {
 	child := &scope{
 		TCommon:   parent,
 		ctx:       ctx,
@@ -177,22 +177,22 @@ func (e *scope) Options(targets ...any) {
 	for _, target := range targets {
 		typ := reflect.TypeOf(target)
 		if typ.Kind() != reflect.Pointer {
-			e.TCommon.Fatalf("Options: target must be a pointer, got %T", target)
+			e.Fatalf("Options: target must be a pointer, got %T", target)
 		}
 
 		elemType := typ.Elem()
 		typeName := elemType.Name()
 		if typeName == "" {
-			e.TCommon.Fatalf("Options: target must be a pointer to a named type, got %T", target)
+			e.Fatalf("Options: target must be a pointer to a named type, got %T", target)
 		}
 
 		raw, ok := e.sections[typeName]
 		if !ok {
-			e.TCommon.Fatalf("Options: section %q not found", typeName)
+			e.Fatalf("Options: section %q not found", typeName)
 		}
 
 		if err := json.Unmarshal(raw, target); err != nil {
-			e.TCommon.Fatalf("Options: unmarshalling section %q: %v", typeName, err)
+			e.Fatalf("Options: unmarshalling section %q: %v", typeName, err)
 		}
 	}
 }
@@ -243,14 +243,14 @@ func (e *scope) Context() context.Context {
 // child gets a derived context that is cancelled before its cleanups run.
 func (e *scope) Scope() E {
 	ctx, cancel := context.WithCancel(e.Context())
-	return newChild(e, ctx, cancel, e.sections, e.runFn)
+	return newChild(ctx, e, cancel, e.sections, e.runFn)
 }
 
 // ScopeWithTimeout creates a child E with its own error buffer, cleanup list,
 // and a timeout-bounded context.
 func (e *scope) ScopeWithTimeout(timeout time.Duration) E {
 	ctx, cancel := context.WithTimeout(e.Context(), timeout)
-	return newChild(e, ctx, cancel, e.sections, e.runFn)
+	return newChild(ctx, e, cancel, e.sections, e.runFn)
 }
 
 // DiscardErrors logs each accumulated error and clears the buffer. The scope
@@ -264,9 +264,9 @@ func (e *scope) DiscardErrors() {
 
 	for _, rec := range errors {
 		if rec.format != nil {
-			e.TCommon.Logf("discarded: "+*rec.format, rec.args...)
+			e.Logf("discarded: "+*rec.format, rec.args...)
 		} else {
-			e.TCommon.Log(append([]any{"discarded:"}, rec.args...)...)
+			e.Log(append([]any{"discarded:"}, rec.args...)...)
 		}
 	}
 }

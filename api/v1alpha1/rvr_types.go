@@ -21,7 +21,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 )
 
 // ReplicatedVolumeReplica is a Kubernetes Custom Resource that represents a replica of a ReplicatedVolume.
@@ -157,7 +156,7 @@ type ReplicatedVolumeReplicaSpec struct {
 	LVMVolumeGroupThinPoolName string `json:"lvmVolumeGroupThinPoolName,omitempty"`
 
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
+	// +kubebuilder:validation:Enum=Diskful;ShadowDiskful;Access;TieBreaker
 	Type ReplicaType `json:"type"`
 }
 
@@ -167,10 +166,10 @@ type ReplicaType string
 // Replica type values for [ReplicatedVolumeReplica] spec.type field.
 const (
 	// ReplicaTypeDiskful represents a diskful replica that stores data on disk.
-	// Diskful replicas are the primary quorum participants. They participate in quorum
-	// only when their backing volume is present and connected; otherwise they act as
-	// implicit tiebreakers. They contribute to quorumMinimumRedundancy only when their
-	// backing volume state is UpToDate.
+	// Diskful replicas are the primary quorum voters. They fully participate in
+	// quorum when their backing volume is attached and up-to-date; otherwise
+	// (disk detached or not yet up-to-date) they still count toward quorum
+	// reachability but do not contribute to the data redundancy guarantee.
 	ReplicaTypeDiskful ReplicaType = "Diskful"
 
 	// ReplicaTypeTieBreaker represents a diskless replica that can provide a tie-breaking
@@ -181,6 +180,15 @@ const (
 	// vote. TieBreakers can also be used for volume access if the StorageClass permits
 	// it via volumeAccess settings.
 	ReplicaTypeTieBreaker ReplicaType = "TieBreaker"
+
+	// ReplicaTypeShadowDiskful represents a diskful replica that stores and
+	// replicates data but is invisible to quorum. Typical uses include
+	// pre-synchronizing data on a new node before promoting it to a full
+	// Diskful voter (so the promotion requires only a fast configuration
+	// change rather than a lengthy data resync), providing a local data
+	// copy for read-heavy workloads, and maintaining a backup-ready
+	// replica without affecting quorum or availability guarantees.
+	ReplicaTypeShadowDiskful ReplicaType = "ShadowDiskful"
 
 	// ReplicaTypeAccess represents a diskless replica used solely for volume attachment.
 	// Access replicas do not store data and do not participate in quorum in any way.
@@ -223,18 +231,18 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	BackingVolume *ReplicatedVolumeReplicaStatusBackingVolume `json:"backingVolume,omitempty"`
 
-	// DatameshPending describes the pending datamesh membership state for this replica.
+	// DatameshRequest describes the pending datamesh membership request for this replica.
 	//
-	// This field contains changes that have been validated and are ready from the RVR's
-	// perspective, waiting to be applied to the datamesh. The controller sets this field
-	// only after all prerequisites are satisfied.
+	// This field contains a membership change request that has been validated and is ready
+	// from the RVR's perspective, waiting to be applied to the datamesh. The controller
+	// sets this field only after all prerequisites are satisfied.
 	//
-	// For example, member=true will not be set until scheduling completes: the spec.nodeName,
+	// For example, operation=Join will not be set until scheduling completes: the spec.nodeName,
 	// spec.lvmVolumeGroupName, and spec.lvmVolumeGroupThinPoolName fields must be populated
-	// and validated before the replica can be marked as a pending datamesh member.
+	// and validated before the replica can request datamesh membership.
 	//
 	// +optional
-	DatameshPendingTransition *ReplicatedVolumeReplicaStatusDatameshPendingTransition `json:"datameshPendingTransition,omitempty"`
+	DatameshRequest *DatameshMembershipRequest `json:"datameshRequest,omitempty"`
 
 	// DatameshRevision is the datamesh revision for which the replica was fully configured.
 	//
@@ -387,9 +395,17 @@ func (p ReplicatedVolumeReplicaStatusPeerStatus) ID() uint8 {
 }
 
 // ReplicatedVolumeReplicaStatusDRBDRReconciliationCache holds cached values used to optimize DRBDResource reconciliation.
-// These fields track the TARGET configuration that was last computed for DRBDR spec,
-// NOT the actual state that DRBDR has applied. They allow the controller to skip
-// redundant spec comparisons when the input parameters have not changed.
+// ReplicatedVolumeReplicaStatusDRBDRReconciliationCache is a composite cache key
+// used to skip redundant DRBDResource spec recomputations. The fields together
+// capture the inputs that determine the DRBDR spec:
+//   - DatameshRevision — peer topology (membership, connectivity);
+//   - DRBDRGeneration  — external modifications to DRBDR;
+//   - TargetType       — local resource configuration (disk mode, spec.type changes).
+//
+// When any field changes, the controller recomputes and potentially patches the
+// DRBDR spec. Note: the cache is populated even before the replica becomes a
+// datamesh member; in that case the DRBDR is only partially configured (no peer
+// connections), and DatameshRevision / TargetType reflect the partial inputs.
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeReplicaStatusDRBDRReconciliationCache struct {
 	// DatameshRevision is the datamesh revision for which DRBDResource spec was last computed.
@@ -398,99 +414,72 @@ type ReplicatedVolumeReplicaStatusDRBDRReconciliationCache struct {
 	// DRBDRGeneration is the DRBDResource generation at the time DRBDResource spec was last computed.
 	DRBDRGeneration int64 `json:"drbdrGeneration,omitempty"`
 
-	// RVRType is the effective replica type for which DRBDResource spec was last computed.
-	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
-	RVRType ReplicaType `json:"rvrType,omitempty"`
+	// TargetType is the target type for which DRBDResource spec was last computed.
+	// +kubebuilder:validation:Enum=Diskful;LiminalDiskful;ShadowDiskful;LiminalShadowDiskful;TieBreaker;Access
+	TargetType DatameshMemberType `json:"targetType,omitempty"`
 }
 
-// ReplicatedVolumeReplicaStatusDatameshPendingTransition describes pending datamesh changes for this replica.
+// DatameshMembershipRequest describes a pending datamesh membership change for a replica.
 //
-// This field contains changes that have been validated and are ready from the RVR's
-// perspective, waiting to be applied to the datamesh. The controller sets this field
-// only after all prerequisites are satisfied (e.g., scheduling completed, spec fields
-// populated and validated).
+// This struct contains a validated request that is ready from the replica's perspective,
+// waiting to be applied to the datamesh by the rv_controller.
 //
-// # Supported Operations
+// # Operations
 //
-// 1. Datamesh Join (member=true): Add this replica to the datamesh with specified type.
-//   - Type is required when joining.
-//   - For Diskful type: lvmVolumeGroupName is required, thinPoolName is optional.
-//   - For TieBreaker/Access types: no backing volume fields allowed.
+// Join: add this replica to the datamesh with specified type.
+//   - Type is required.
+//   - For Diskful: lvmVolumeGroupName is required, thinPoolName is optional.
+//   - For TieBreaker/Access: no backing volume fields allowed.
 //
-// 2. Datamesh Leave (member=false): Remove this replica from the datamesh.
-//   - No other fields allowed when leaving.
+// Leave: remove this replica from the datamesh.
+//   - No other fields allowed.
 //
-// 3. Type Change (member=nil, type set): Change the type of an existing datamesh member.
-//   - For change to Diskful: lvmVolumeGroupName required, thinPoolName optional.
-//   - For change to TieBreaker/Access: no backing volume fields allowed.
+// ChangeRole: change the type of an existing datamesh member.
+//   - Type is required.
+//   - For Diskful: lvmVolumeGroupName required, thinPoolName optional.
+//   - For TieBreaker/Access: no backing volume fields allowed.
 //
-// 4. Backing Volume Change (member=nil, type=nil): Replace backing volume for existing Diskful.
+// ChangeBackingVolume: replace backing volume for existing Diskful.
 //   - Used when migrating storage (e.g., between LVGs or between thick/thin).
 //   - Only lvmVolumeGroupName (and optionally thinPoolName) is set, no type.
-//   - Implies the replica is already Diskful and remains Diskful.
 //
-// # Field Combinations and Their Meanings
+// # Examples
 //
 // Join as Diskful on thin pool:
 //
-//	member: true, type: Diskful, lvmVolumeGroupName: "vg-1", thinPoolName: "tp-1"
+//	operation: Join, type: Diskful, lvmVolumeGroupName: "vg-1", thinPoolName: "tp-1"
 //
-// Join as Diskful on thick LVM:
+// Join as Access:
 //
-//	member: true, type: Diskful, lvmVolumeGroupName: "vg-1"
-//
-// Join as TieBreaker (diskless quorum voter):
-//
-//	member: true, type: TieBreaker
-//
-// Join as Access (diskless data accessor):
-//
-//	member: true, type: Access
+//	operation: Join, type: Access
 //
 // Leave datamesh:
 //
-//	member: false
+//	operation: Leave
 //
-// Change type to Diskful:
+// Change role to Diskful:
 //
-//	type: Diskful, lvmVolumeGroupName: "vg-2", thinPoolName: "tp-2"
+//	operation: ChangeRole, type: Diskful, lvmVolumeGroupName: "vg-2"
 //
-// Change type to TieBreaker:
+// Replace backing volume:
 //
-//	type: TieBreaker
-//
-// Change type to Access:
-//
-//	type: Access
-//
-// Replace backing volume for existing Diskful (migrate from thin to thick):
-//
-//	lvmVolumeGroupName: "vg-thick"
-//
-// Replace backing volume for existing Diskful (migrate from thick to thin):
-//
-//	lvmVolumeGroupName: "vg-thin", thinPoolName: "tp-1"
-//
-// Replace backing volume for existing Diskful (migrate between LVGs):
-//
-//	lvmVolumeGroupName: "vg-new", thinPoolName: "tp-1"
-//
-// No pending changes (field is nil or absent):
-//
-//	datameshPending: nil
+//	operation: ChangeBackingVolume, lvmVolumeGroupName: "vg-new", thinPoolName: "tp-1"
 //
 // +kubebuilder:object:generate=true
-// +kubebuilder:validation:XValidation:rule="!has(self.member) || self.member == true || (!has(self.type) && !has(self.lvmVolumeGroupName) && !has(self.thinPoolName))",message="when member is false, type/lvmVolumeGroupName/thinPoolName must not be set"
-// +kubebuilder:validation:XValidation:rule="!has(self.member) || self.member == false || has(self.type)",message="when member is true, type is required"
-// +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type != 'Diskful' || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupName is required when type is Diskful"
-// +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type == 'Diskful' || !has(self.lvmVolumeGroupName)",message="lvmVolumeGroupName must not be set when type is not Diskful"
-// +kubebuilder:validation:XValidation:rule="!has(self.thinPoolName) || has(self.lvmVolumeGroupName)",message="thinPoolName requires lvmVolumeGroupName to be set"
-type ReplicatedVolumeReplicaStatusDatameshPendingTransition struct {
-	// Member indicates whether this replica should be a datamesh member.
-	// +optional
-	Member *bool `json:"member,omitempty"`
+//
+//	+kubebuilder:validation:XValidation:rule="self.operation == 'Leave' || self.operation == 'ChangeBackingVolume' || has(self.type)",message="type is required for Join and ChangeRole operations"
+//	+kubebuilder:validation:XValidation:rule="self.operation != 'Leave' || (!has(self.type) && !has(self.lvmVolumeGroupName) && !has(self.thinPoolName))",message="type/lvmVolumeGroupName/thinPoolName must not be set for Leave"
+//	+kubebuilder:validation:XValidation:rule="self.operation != 'ChangeBackingVolume' || (!has(self.type) && has(self.lvmVolumeGroupName))",message="ChangeBackingVolume requires lvmVolumeGroupName and must not set type"
+//	+kubebuilder:validation:XValidation:rule="!has(self.type) || self.type != 'Diskful' || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupName is required when type is Diskful"
+//	+kubebuilder:validation:XValidation:rule="!has(self.type) || self.type == 'Diskful' || !has(self.lvmVolumeGroupName)",message="lvmVolumeGroupName must not be set when type is not Diskful"
+//	+kubebuilder:validation:XValidation:rule="!has(self.thinPoolName) || has(self.lvmVolumeGroupName)",message="thinPoolName requires lvmVolumeGroupName to be set"
+type DatameshMembershipRequest struct {
+	// Operation is the type of membership change requested.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=Join;Leave;ForceLeave;ForceDetach;ChangeRole;ChangeBackingVolume
+	Operation DatameshMembershipRequestOperation `json:"operation"`
 
-	// Type is the intended type when Member is true.
+	// Type is the intended replica type. Required for Join and ChangeRole operations.
 	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
 	// +optional
 	Type ReplicaType `json:"type,omitempty"`
@@ -506,12 +495,50 @@ type ReplicatedVolumeReplicaStatusDatameshPendingTransition struct {
 	ThinPoolName string `json:"thinPoolName,omitempty"`
 }
 
+// DatameshMembershipRequestOperation defines the type of membership change requested.
+type DatameshMembershipRequestOperation string
+
+const (
+	// DatameshMembershipRequestOperationJoin requests joining the datamesh as a new member.
+	DatameshMembershipRequestOperationJoin DatameshMembershipRequestOperation = "Join"
+
+	// DatameshMembershipRequestOperationLeave requests leaving the datamesh.
+	DatameshMembershipRequestOperationLeave DatameshMembershipRequestOperation = "Leave"
+
+	// DatameshMembershipRequestOperationForceLeave requests emergency removal from the
+	// datamesh. Used when the member's node has permanently failed. Removes the member
+	// directly without intermediate steps and without waiting for the dead replica to
+	// confirm. Bypasses normal safety preconditions (FTT/GMDR preservation, etc.) — the
+	// node is already lost; the operation restores configuration to match reality.
+	// Blocked only if the member is still attached (ForceDetach first) or reachable
+	// (the node must be fenced/shut down first to ensure it is truly unreachable).
+	DatameshMembershipRequestOperationForceLeave DatameshMembershipRequestOperation = "ForceLeave"
+
+	// DatameshMembershipRequestOperationForceDetach requests emergency detach of a dead
+	// member's IO. Used when the member's node has permanently failed while attached.
+	// Clears the attachment state so that ForceLeave can proceed. Does not wait for the
+	// dead replica to confirm — the node is already lost.
+	// Blocked if the member is still reachable (the node must be fenced/shut down first).
+	DatameshMembershipRequestOperationForceDetach DatameshMembershipRequestOperation = "ForceDetach"
+
+	// DatameshMembershipRequestOperationChangeRole requests changing the member role
+	// (e.g., Diskful to Access, Access to TieBreaker).
+	DatameshMembershipRequestOperationChangeRole DatameshMembershipRequestOperation = "ChangeRole"
+
+	// DatameshMembershipRequestOperationChangeBackingVolume requests migrating
+	// the backing volume to a different LVMVolumeGroup/ThinPool.
+	DatameshMembershipRequestOperationChangeBackingVolume DatameshMembershipRequestOperation = "ChangeBackingVolume"
+)
+
+// String returns the string representation of the operation.
+func (o DatameshMembershipRequestOperation) String() string { return string(o) }
+
 // Equals returns true if all fields match.
-func (t *ReplicatedVolumeReplicaStatusDatameshPendingTransition) Equals(other *ReplicatedVolumeReplicaStatusDatameshPendingTransition) bool {
+func (t *DatameshMembershipRequest) Equals(other *DatameshMembershipRequest) bool {
 	if t == nil || other == nil {
 		return t == other
 	}
-	return ptr.Equal(t.Member, other.Member) &&
+	return t.Operation == other.Operation &&
 		t.Type == other.Type &&
 		t.LVMVolumeGroupName == other.LVMVolumeGroupName &&
 		t.ThinPoolName == other.ThinPoolName

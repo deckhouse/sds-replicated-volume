@@ -20,19 +20,20 @@ import (
 	"bufio"
 	"sync"
 
-	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
 )
 
 // PodLogMonitorOptions holds the config section for pod log monitoring.
 type PodLogMonitorOptions struct {
 	Namespace     string `json:"namespace"`
 	LabelSelector string `json:"labelSelector"`
+	Container     string `json:"container,omitempty"`
 }
 
 // PodLogLine is a log line tagged with the pod name it came from.
@@ -49,6 +50,7 @@ func SetupPodLogWatcher(
 	cs *kubernetes.Clientset,
 	namespace string,
 	podName string,
+	container string,
 ) <-chan string {
 	ch := make(chan string)
 
@@ -56,6 +58,7 @@ func SetupPodLogWatcher(
 	stream, err := cs.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
 		Follow:    true,
 		SinceTime: &now,
+		Container: container,
 	}).Stream(e.Context())
 	if err != nil {
 		e.Fatalf("streaming logs for pod %s: %v", podName, err)
@@ -110,7 +113,7 @@ func SetupPodsLogWatcher(
 
 	for i := range podList.Items {
 		podName := podList.Items[i].Name
-		ch := SetupPodLogWatcher(e, cs, opts.Namespace, podName)
+		ch := SetupPodLogWatcher(e, cs, opts.Namespace, podName, opts.Container)
 		fanWg.Go(func() {
 			for line := range ch {
 				out <- PodLogLine{PodName: podName, Line: line}
