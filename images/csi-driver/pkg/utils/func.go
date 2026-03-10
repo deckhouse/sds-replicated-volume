@@ -34,7 +34,6 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	drbdsize "github.com/deckhouse/sds-replicated-volume/lib/go/common/drbd/size"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
@@ -368,34 +367,6 @@ func GetDRBDDevicePath(rvr *srv.ReplicatedVolumeReplica) (string, error) {
 		return "", fmt.Errorf("device path not available")
 	}
 	return rvr.Status.Attachment.DevicePath, nil
-}
-
-func GetActualUsableSize(ctx context.Context, kc client.Client, log *logger.Logger, volumeName string, fallback resource.Quantity) resource.Quantity {
-	rvrList := &srv.ReplicatedVolumeReplicaList{}
-	err := kc.List(ctx, rvrList, client.MatchingFields{
-		"spec.replicatedVolumeName": volumeName,
-	})
-	if err != nil {
-		log.Warning(fmt.Sprintf("[GetActualUsableSize][volumeID:%s] failed to list RVRs: %v, using fallback %s", volumeName, err, fallback.String()))
-		return fallback
-	}
-
-	for i := range rvrList.Items {
-		rvr := &rvrList.Items[i]
-		if rvr.Spec.Type != srv.ReplicaTypeDiskful {
-			continue
-		}
-		if rvr.Status.BackingVolume == nil || rvr.Status.BackingVolume.Size == nil {
-			continue
-		}
-		usable := drbdsize.UsableSize(*rvr.Status.BackingVolume.Size)
-		log.Info(fmt.Sprintf("[GetActualUsableSize][volumeID:%s] RVR %s backingVolume.size=%s, usable=%s",
-			volumeName, rvr.Name, rvr.Status.BackingVolume.Size.String(), usable.String()))
-		return usable
-	}
-
-	log.Warning(fmt.Sprintf("[GetActualUsableSize][volumeID:%s] no diskful RVR with backingVolume.size found, using fallback %s", volumeName, fallback.String()))
-	return fallback
 }
 
 // ExpandReplicatedVolume expands a ReplicatedVolume

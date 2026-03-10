@@ -14,8 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package size provides DRBD metadata size calculations.
-package size
+// Package drbd_size provides DRBD metadata size calculations.
+package drbd_size
 
 import "k8s.io/apimachinery/pkg/api/resource"
 
@@ -27,15 +27,18 @@ const (
 	alSizeSectors     = 64  // 1 stripe * 32KB / 512
 )
 
+// align rounds up x to the nearest multiple of a.
 func align(x, a uint64) uint64 {
 	return (x + a - 1) &^ (a - 1)
 }
 
+// bitmapSectors calculates on-disk bitmap size in sectors for given capacity.
 func bitmapSectors(capacitySectors uint64) uint64 {
 	bits := align(align(capacitySectors, bmSectPerBit)/bmSectPerBit, 64)
 	return align(bits/8*maxPeers, 4096) / sectorSize
 }
 
+// metadataSectors returns total DRBD metadata overhead in sectors.
 func metadataSectors(lowerSectors uint64) uint64 {
 	return bitmapSectors(lowerSectors) + superblockSectors + alSizeSectors
 }
@@ -76,5 +79,5 @@ func LowerVolumeSize(usableSize resource.Quantity) resource.Quantity {
 	}
 
 	// Unreachable due to guaranteed convergence (sublinear metadata growth).
-	panic("drbd size: LowerVolumeSize failed to converge")
+	panic("drbd_size: LowerVolumeSize failed to converge")
 }

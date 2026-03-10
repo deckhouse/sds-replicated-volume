@@ -134,9 +134,8 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	}
 	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] finish wait ReplicatedVolume, attempt counter = %d", traceID, volumeID, attemptCounter))
 
-	actualSize := utils.GetActualUsableSize(ctx, d.cl, d.log, volumeID, *rvSize)
-	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] actual usable size: %s (requested: %s)", traceID, volumeID, actualSize.String(), rvSize.String()))
-
+	// TODO: Replace rv.Spec.Size with rv.Status.UsableSize once available
+	// (will track actual usable capacity after DRBD metadata overhead).
 	volumeCtx := make(map[string]string, len(request.Parameters))
 	for k, v := range request.Parameters {
 		volumeCtx[k] = v
@@ -147,7 +146,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
-			CapacityBytes:      actualSize.Value(),
+			CapacityBytes:      rvSize.Value(),
 			VolumeId:           request.Name,
 			VolumeContext:      volumeCtx,
 			ContentSource:      request.VolumeContentSource,
@@ -353,13 +352,10 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.Contro
 
 	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] NodeExpansionRequired: %t", traceID, volumeID, nodeExpansionRequired))
 
-	actualUsableSize := utils.GetActualUsableSize(ctx, d.cl, d.log, volumeID, rv.Spec.Size)
-	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] actual usable size: %s, requested: %s", traceID, volumeID, actualUsableSize.String(), requestCapacity.String()))
-
-	if requestCapacity.Cmp(actualUsableSize) <= 0 {
-		d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] requested size %s <= actual usable size %s, no resize needed", traceID, volumeID, requestCapacity.String(), actualUsableSize.String()))
+	if requestCapacity.Cmp(rv.Spec.Size) <= 0 {
+		d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] requested size %s <= spec size %s, no resize needed", traceID, volumeID, requestCapacity.String(), rv.Spec.Size.String()))
 		return &csi.ControllerExpandVolumeResponse{
-			CapacityBytes:         actualUsableSize.Value(),
+			CapacityBytes:         rv.Spec.Size.Value(),
 			NodeExpansionRequired: nodeExpansionRequired,
 		}, nil
 	}
@@ -378,12 +374,8 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.Contro
 	}
 	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] finish resize ReplicatedVolume, attempt counter = %d", traceID, volumeID, attemptCounter))
 
-	newActualSize := utils.GetActualUsableSize(ctx, d.cl, d.log, volumeID, *requestCapacity)
-	capacityBytes := newActualSize.Value()
-	if requestCapacity.Value() > capacityBytes {
-		capacityBytes = requestCapacity.Value()
-	}
-	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] Volume expanded successfully, new actual usable size: %s, reporting: %d", traceID, volumeID, newActualSize.String(), capacityBytes))
+	capacityBytes := requestCapacity.Value()
+	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] Volume expanded successfully, reporting: %d", traceID, volumeID, capacityBytes))
 
 	return &csi.ControllerExpandVolumeResponse{
 		CapacityBytes:         capacityBytes,
