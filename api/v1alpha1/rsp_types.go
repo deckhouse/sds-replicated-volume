@@ -149,7 +149,7 @@ type ReplicatedStoragePoolLVMVolumeGroups struct {
 	Name string `json:"name"`
 	// Selected Thin-pool name.
 	// +kubebuilder:validation:MaxLength=128
-	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$`
+	// +kubebuilder:validation:Pattern=`^$|^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$`
 	// +optional
 	ThinPoolName string `json:"thinPoolName,omitempty"`
 }

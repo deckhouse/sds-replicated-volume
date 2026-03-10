@@ -318,7 +318,7 @@ spec:
                         thinPoolName:
                           description: Selected Thin-pool name.
                           maxLength: 128
-                          pattern: ^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$
+                          pattern: ^$|^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$
                           type: string
                       required:
                       - name
