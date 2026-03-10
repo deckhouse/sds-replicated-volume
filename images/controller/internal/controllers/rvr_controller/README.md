@@ -1275,7 +1275,7 @@ flowchart TD
 
 This function combines two logically related status updates to avoid duplicate `computeTargetDatameshRequest` calls.
 
-**RV Message Enrichment**: When a membership request exists (`target != nil`) and the parent `ReplicatedVolume` has a matching entry in `rv.Status.DatameshReplicaRequests` for this replica, the message from that entry is appended to the condition message with a `": "` separator. This allows the RV controller to provide additional context about the overall datamesh transition progress.
+**RV Message Enrichment**: When a membership request exists (`target != nil`) and the parent `ReplicatedVolume` has a matching entry in `rv.Status.DatameshReplicaRequests` for this replica, the datamesh message replaces the condition message entirely. The datamesh message is self-contained — the DMTE engine composes it with the plan display name (e.g., `"Adding diskful replica is blocked: would violate GMDR (ADR=1, need > 1)"` or `"Adding diskful replica: 2/4 replicas confirmed revision 7"`).
 
 **Algorithm (computeTargetDatameshRequest)**:
 

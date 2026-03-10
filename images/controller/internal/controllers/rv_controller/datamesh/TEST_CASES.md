@@ -128,7 +128,7 @@ across all canonical layouts, topologies, and feature variants.
   3D+1TB layout (FTT=1, GMDR=1). Voters=3 (odd) → TB_min=0. Leave request for TB. Transition created, member removed.
 
 - ⚡ **Guard: TB required — even D, FTT=D/2.**
-  2D+1TB layout (FTT=1, GMDR=0). Voters=2 (even), FTT=1=D/2 → TB_min=1. TB_count=1 ≤ TB_min=1 → blocked. Message contains "TB required: D_count=2 even, FTT=1 = D/2".
+  2D+1TB layout (FTT=1, GMDR=0). Voters=2 (even), FTT=1=D/2 → TB_min=1. TB_count=1 ≤ TB_min=1 → blocked. Message contains "TieBreaker required for quorum (Diskful=2 even, FTT=1)".
 
 - **Guard: TB not required — odd D.**
   3D+1TB layout (FTT=1, GMDR=1). Voters=3 (odd) → TB_min=0. Guard passes. Transition created.
@@ -406,7 +406,7 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
   VolumeAccess=Local. Blocked with "volumeAccess is Local" message.
 
 - ⚡ **TB→A guard: TB required (even D, FTT=D/2) blocks.**
-  2D+1TB (FTT=1). Even D, FTT=D/2 → TB required. Blocked with "TB required" message.
+  2D+1TB (FTT=1). Even D, FTT=D/2 → TB required. Blocked with "TieBreaker required" message.
 
 - **TB→A guard: TB not required (odd D) passes.**
   3D+1TB (FTT=1). Odd D → TB not required. Transition created.
@@ -534,7 +534,7 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 - **tb-to-d-via-sd-q-up/v1: 5 steps.**
 
 - ⚡ **TB→D guard: leavingTBGuards block when TB required.**
-  2D+1TB (FTT=1). TB required. Blocked with "TB" message.
+  2D+1TB (FTT=1). TB required. Blocked with "TieBreaker required" message.
 
 - **D→TB dispatch: 2 variants (odd → d-to-tb/v1, even → d-to-tb-q-down/v1).**
 
@@ -824,7 +824,7 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
   D member Attached=true. No RVAs. Detach transition created. member.Attached set to false.
 
 - **Guard: device in use → blocked.**
-  D member Attached=true. rvr.Status.Attachment.InUse=true. Blocked. Message = "Device in use, detach blocked". Reason = "Detaching".
+  D member Attached=true. rvr.Status.Attachment.InUse=true. Blocked. Message contains "device is in use". Reason = "Detaching".
 
 - **Works when RV deleting.**
   RV has DeletionTimestamp. D member Attached=true. No RVAs. Detach proceeds — Leave/Detach are not blocked by deletion.
@@ -1093,8 +1093,8 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 - **One remaining net fully connected → pass.**
 - **No remaining net fully connected → blocked.**
 - **Multiple remaining, one OK → pass.**
-- **Empty intersection → blocked with "intersection" message.**
-- **RSP unavailable → blocked with "RSP unavailable".**
+- **Empty intersection → blocked with "no common system networks" message.**
+- **RSP unavailable → blocked with "waiting for ReplicatedStoragePool".**
 - **Single member (no peers) → pass.**
 
 ### guardReplicasMatchTargetNetworks
@@ -1144,7 +1144,7 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 
 - **NonVoting allowed when no active transitions.**
 - ⚡ **Per-member membership blocked for same replica.**
-  Active AddReplica(NonVoting) for rv-1-3. New NonVoting proposal for rv-1-3 → blocked "Membership transition already in progress".
+  Active AddReplica(NonVoting) for rv-1-3. New NonVoting proposal for rv-1-3 → blocked "membership transition in progress for this replica".
 - **Attachment allowed alongside membership on same member.**
   Active AddReplica(NonVoting) for rv-1-3. Attachment proposal for rv-1-3 → allowed.
 - ⚡ **Voter blocked by another Voter.**
@@ -1203,7 +1203,7 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 - ⚡ **Quorum does NOT block Network.**
   Active ChangeQuorum. Network proposal → allowed.
 - **Network serialized (duplicate blocked).**
-  Active Network. Another Network → blocked "Network transition is already".
+  Active Network. Another Network → blocked "network transition in progress".
 - **Network does NOT block NonVoting or Attachment.**
 - ⚡ **Formation does NOT block Network.**
   Active Formation. Network proposal → allowed (Network is semi-emergency).
@@ -1299,7 +1299,7 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 
 - **7D members, adding 8th D → passes (7 < 8).**
 - ⚡ **8D members, adding 9th D → blocked (8/8).**
-  Message: "Cannot add replica with backing volume: 8/8 members".
+  Message contains "maximum disk members reached (8/8".
 - **7D + 1A, adding 8th D → passes (A doesn't count).**
 - **7D + 1TB, adding 8th D → passes (TB doesn't count).**
 - **8D, adding A → passes (non-disk not blocked).**
@@ -1377,7 +1377,7 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 - **guardTransZonalTBPlacement: TB in zone with 0D → passes.**
 - **guardTransZonalTBPlacement: TB in zone with 1D → passes.**
 - ⚡ **guardTransZonalTBPlacement: TB in zone with 2D → blocked.**
-  "TB zone has 2 D voters, must have ≤ 1".
+  "zone already has 2 Diskful voters (TB zone must have at most 1)".
 
 ### Other guards
 

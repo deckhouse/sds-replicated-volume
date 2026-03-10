@@ -185,7 +185,7 @@ var _ = Describe("RemoveReplica(TB)", func() {
 
 		Expect(changed).To(BeTrue()) // message changed
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
-		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("TB required"))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("TieBreaker required"))
 	})
 
 	It("guard: TB not required (odd D)", func() {

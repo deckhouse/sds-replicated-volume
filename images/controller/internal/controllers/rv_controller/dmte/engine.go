@@ -565,10 +565,11 @@ func (e *Engine[G, R, C]) dispatchOne(
 	// Guards.
 	guardResult := p.evaluateGuards(e.cp.Global(), rctx)
 	if guardResult.Blocked {
+		msg := composeBlocked(p.displayName, guardResult.Message)
 		if hasSlot {
-			slot.SetStatus(rctx, guardResult.Message, guardResult.Details)
+			slot.SetStatus(rctx, msg, guardResult.Details)
 		}
-		return nil, guardResult.Message
+		return nil, msg
 	}
 
 	// Tracker admission. tempT is a stack-allocated stub with only the fields
@@ -577,8 +578,9 @@ func (e *Engine[G, R, C]) dispatchOne(
 	if p.scope == ReplicaScope && rctx != zeroR {
 		tempT.ReplicaName = rctx.Name()
 	}
-	allowed, msg, det := e.tracker.CanAdmit(&tempT)
+	allowed, reason, det := e.tracker.CanAdmit(&tempT)
 	if !allowed {
+		msg := composeBlocked(p.displayName, reason)
 		if hasSlot {
 			slot.SetStatus(rctx, msg, det)
 		}

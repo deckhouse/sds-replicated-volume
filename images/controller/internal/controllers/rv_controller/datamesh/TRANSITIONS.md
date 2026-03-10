@@ -721,18 +721,23 @@ blocking guard stops the pipeline. For GMDR/FTT formulas referenced below,
 see [README.md](README.md) §4. For per-layout quorum verification, see
 [LAYOUTS_ANALYSIS.md](LAYOUTS_ANALYSIS.md).
 
+> **Message composition**: the "Blocked message" column below shows the guard
+> **reason** only. The full message seen by the operator is composed by the
+> engine: `"{plan name} is blocked: {reason}"` — e.g.,
+> `"Removing diskful replica is blocked: would violate GMDR (ADR=1, need > 1)"`.
+
 ### Preconditions for adding any member
 
 Any AddReplica transition is blocked until **all** of the following pass:
 
 | # | Guard | Condition | Blocked message |
 |---|-------|-----------|-----------------|
-| 1 | **RVNotDeleting** | RV does not have a DeletionTimestamp | "Will not join datamesh: volume is being deleted" |
-| 2 | **RSPAvailable** | ReplicatedStoragePool is available | "Waiting for ReplicatedStoragePool to be available" |
-| 3 | **NodeEligible** | Node is in the RSP eligible nodes | "Will not join datamesh: node is not in eligible nodes" |
+| 1 | **RVNotDeleting** | RV does not have a DeletionTimestamp | "volume is being deleted" |
+| 2 | **RSPAvailable** | ReplicatedStoragePool is available | "waiting for ReplicatedStoragePool to be available" |
+| 3 | **NodeEligible** | Node is in the RSP eligible nodes | "node is not in eligible nodes" |
 | 4 | **NodeHasAllSystemNetworks** | Node has all system networks from the datamesh configuration | *(not yet enforced — requires per-node network data in RSP)* |
-| 5 | **NoMemberOnSameNode** | No existing datamesh member on the same node | "Will not join datamesh: member already present on node" |
-| 6 | **AddressesPopulated** | Replica has at least one address reported | "Waiting for replica addresses to be populated" |
+| 5 | **NoMemberOnSameNode** | No existing datamesh member on the same node | "member already present on node" |
+| 6 | **AddressesPopulated** | Replica has at least one address reported | "waiting for replica addresses to be populated" |
 
 ### Preconditions for adding D (gaining voter)
 
@@ -740,8 +745,8 @@ Any transition that adds a voter is additionally blocked by topology guards:
 
 | # | Guard | Condition | Blocked message |
 |---|-------|-----------|-----------------|
-| 1 | **ZonalSameZone** | Topology is not Zonal, OR the replica's zone is the primary zone (zone with the most voters) | "Zonal topology: zone does not match primary zone" |
-| 2 | **TransZonalVoterPlacement** | Topology is not TransZonal, OR after adding the voter, losing any single zone still satisfies FTT and GMDR | "TransZonal: adding voter would violate zone FTT/GMDR" |
+| 1 | **ZonalSameZone** | Topology is not Zonal, OR the replica's zone is the primary zone (zone with the most voters) | "zone is not the primary zone for Zonal topology" |
+| 2 | **TransZonalVoterPlacement** | Topology is not TransZonal, OR after adding the voter, losing any single zone still satisfies FTT and GMDR | "adding to zone would violate zone FTT/GMDR" |
 
 Non-topology safety is inherent: more copies and more voters can only improve
 GMDR/FTT, never degrade them. Split-brain is prevented by the transitions
@@ -751,8 +756,8 @@ themselves (vestibule + atomic q↑ for odd→even voters).
 
 | # | Guard | Condition | Blocked message |
 |---|-------|-----------|-----------------|
-| 1 | **ZonalSameZone** | Topology is not Zonal, OR the replica's zone is the primary zone | "Zonal topology: zone does not match primary zone" |
-| 2 | **TransZonalTBPlacement** | Topology is not TransZonal, OR the target zone has at most 1 D voter | "TransZonal: TB zone has too many D voters" |
+| 1 | **ZonalSameZone** | Topology is not Zonal, OR the replica's zone is the primary zone | "zone is not the primary zone for Zonal topology" |
+| 2 | **TransZonalTBPlacement** | Topology is not TransZonal, OR the target zone has at most 1 D voter | "zone already has N Diskful voters (TB zone must have at most 1)" |
 
 ### Preconditions for removing any member
 
@@ -760,7 +765,7 @@ Any RemoveReplica transition is blocked until:
 
 | # | Guard | Condition | Blocked message |
 |---|-------|-----------|-----------------|
-| 1 | **NotAttached** | Member is not attached AND no Attach/Detach transition is in progress for it | "Cannot remove: replica is attached" / "Cannot remove: transition in progress" |
+| 1 | **NotAttached** | Member is not attached AND no Attach/Detach transition is in progress for it | "replica is attached, detach required first" / "attach/detach transition in progress" |
 
 ### Preconditions for leaving D (losing voter)
 
@@ -769,11 +774,11 @@ is additionally blocked until **all** of the following pass:
 
 | # | Guard | Condition | Blocked message |
 |---|-------|-----------|-----------------|
-| 1 | **VolumeAccessLocalForDemotion** | Member is not attached with volumeAccess=Local | "Cannot demote Diskful: volumeAccess=Local requires D on attached node" |
-| 2 | **GMDRPreserved** | ADR > target GMDR (ADR = UpToDate D count − 1) | "Would violate GMDR: ADR=N, need > M" |
-| 3 | **FTTPreserved** | D count > D_min (D_min = target FTT + target GMDR + 1) | "Would violate FTT: D_count=N, need > M" |
-| 4 | **ZoneGMDRPreserved** | Topology is not TransZonal, OR losing any zone after removal still leaves enough UpToDate D for GMDR | "Would violate zone GMDR" |
-| 5 | **ZoneFTTPreserved** | Topology is not TransZonal, OR losing any zone after removal still leaves enough D for quorum | "Would violate zone FTT" |
+| 1 | **VolumeAccessLocalForDemotion** | Member is not attached with volumeAccess=Local | "volumeAccess=Local requires Diskful on attached node" |
+| 2 | **GMDRPreserved** | ADR > target GMDR (ADR = UpToDate D count − 1) | "would violate GMDR (ADR=N, need > M)" |
+| 3 | **FTTPreserved** | D count > D_min (D_min = target FTT + target GMDR + 1) | "would violate FTT (Diskful=N, need > M)" |
+| 4 | **ZoneGMDRPreserved** | Topology is not TransZonal, OR losing any zone after removal still leaves enough UpToDate D for GMDR | "would violate zone GMDR" |
+| 5 | **ZoneFTTPreserved** | Topology is not TransZonal, OR losing any zone after removal still leaves enough D for quorum | "would violate zone FTT" |
 
 **ZoneGMDRPreserved pseudocode:**
 
@@ -808,15 +813,15 @@ for each zone z:
 
 | # | Guard | Condition | Blocked message |
 |---|-------|-----------|-----------------|
-| 1 | **TBSufficient** | TB count > TB_min (TB_min = 1 when D is even and target FTT = D/2, else 0) | "TB required: D_count=N even, FTT=M = D/2" |
-| 2 | **ZoneTBSufficient** | Topology is not TransZonal, OR after removal, each zone that needs TB coverage still has it | "Would violate zone TB coverage" |
+| 1 | **TBSufficient** | TB count > TB_min (TB_min = 1 when D is even and target FTT = D/2, else 0) | "TieBreaker required for quorum (Diskful=N even, FTT=M)" |
+| 2 | **ZoneTBSufficient** | Topology is not TransZonal, OR after removal, each zone that needs TB coverage still has it | "would violate zone TB coverage" |
 
 ### Preconditions for ForceRemoveReplica
 
 | # | Guard | Condition | Blocked message |
 |---|-------|-----------|-----------------|
-| 1 | **NotAttached** | Member is not attached and no Attach/Detach in progress | "Cannot force-remove attached member; ForceDetach first" |
-| 2 | **MemberUnreachable** | No replica with a ready agent reports a Connected DRBD connection to this member | "Force-removal blocked: member is reachable" |
+| 1 | **NotAttached** | Member is not attached and no Attach/Detach in progress | "replica is attached, detach required first" |
+| 2 | **MemberUnreachable** | No replica with a ready agent reports a Connected DRBD connection to this member | "member is reachable (connected from N replica(s): [...])" |
 
 **MemberUnreachable detail**: a replica has a ready agent if its DRBD status
 is current (not stale). The guard iterates all replicas with ready agents and
@@ -832,44 +837,44 @@ normal RemoveReplica instead.
 
 | # | Guard | Condition | Blocked message |
 |---|-------|-----------|-----------------|
-| 1 | **NotDeleting** | RV does not have a DeletionTimestamp | "Volume is being deleted" |
-| 2 | **NodeOperational** | RSP available, node in eligible nodes, NodeReady, AgentReady | "Node not eligible" / "Node is not ready" / "Agent is not ready" |
-| 3 | **RVRReady** | RVR exists and has Ready=True condition | "Waiting for replica to become Ready" |
-| 4 | **MemberExists** | Datamesh member exists on this node | "Waiting for replica to join datamesh" |
-| 5 | **NoActiveMembership** | No membership transition in progress for this replica | "Waiting for membership transition to complete" |
-| 6 | **QuorumSatisfied** | At least one voter member has quorum | "Quorum not satisfied: ..." |
-| 7 | **SlotAvailable** | potentiallyAttached count < maxAttachments | "Waiting for attachment slot (N/M occupied)" |
-| 8 | **VolumeAccessLocal** | volumeAccess is not Local, OR the member has a backing volume | "No Diskful replica on this node (volumeAccess is Local)" |
+| 1 | **NotDeleting** | RV does not have a DeletionTimestamp | "volume is being deleted" |
+| 2 | **NodeOperational** | RSP available, node in eligible nodes, NodeReady, AgentReady | "node not eligible" / "node is not ready" / "agent is not ready" |
+| 3 | **RVRReady** | RVR exists and has Ready=True condition | "waiting for replica to become Ready" |
+| 4 | **MemberExists** | Datamesh member exists on this node | "waiting for replica to join datamesh" |
+| 5 | **NoActiveMembership** | No membership transition in progress for this replica | "waiting for membership transition to complete" |
+| 6 | **QuorumSatisfied** | At least one voter member has quorum | "quorum not satisfied: ..." |
+| 7 | **SlotAvailable** | potentiallyAttached count < maxAttachments | "waiting for attachment slot (N/M occupied)" |
+| 8 | **VolumeAccessLocal** | volumeAccess is not Local, OR the member has a backing volume | "no Diskful replica on this node (volumeAccess is Local)" |
 
 ### Preconditions for Detach
 
 | # | Guard | Condition | Blocked message |
 |---|-------|-----------|-----------------|
-| 1 | **DeviceNotInUse** | Block device is not currently in use | "Device in use, detach blocked" |
+| 1 | **DeviceNotInUse** | Block device is not currently in use | "device is in use" |
 
 ### Preconditions for ForceDetach
 
 | # | Guard | Condition | Blocked message |
 |---|-------|-----------|-----------------|
-| 1 | **MemberUnreachable** | No replica with a ready agent reports a Connected connection to this member | "Force-removal blocked: member is reachable" |
+| 1 | **MemberUnreachable** | No replica with a ready agent reports a Connected connection to this member | "member is reachable (connected from N replica(s): [...])" |
 
 ### Preconditions for EnableMultiattach
 
 | # | Guard | Condition | Blocked message |
 |---|-------|-----------|-----------------|
-| 1 | **MaxAttachmentsAllows** | maxAttachments > 1 | "Multiattach not needed: maxAttachments is 1" |
+| 1 | **MaxAttachmentsAllows** | maxAttachments > 1 | "maxAttachments is 1" |
 
 ### Preconditions for DisableMultiattach
 
 | # | Guard | Condition | Blocked message |
 |---|-------|-----------|-----------------|
-| 1 | **CanDisable** | potentiallyAttached count ≤ 1 | "Cannot disable multiattach: N nodes potentially attached" |
+| 1 | **CanDisable** | potentiallyAttached count ≤ 1 | "N nodes potentially attached" |
 
 ### Preconditions for RepairNetworkAddresses
 
 | # | Guard | Condition | Blocked message |
 |---|-------|-----------|-----------------|
-| 1 | **ReplicasMatchTargetNetworks** | All replicas' actual addresses match the datamesh target network set (no missing, no extra) | "Replica N: missing/extra system networks [...]" |
+| 1 | **ReplicasMatchTargetNetworks** | All replicas' actual addresses match the datamesh target network set (no missing, no extra) | "replica name: system networks out of sync (missing/extra: [...])" |
 
 ### Preconditions for ChangeSystemNetworks
 
