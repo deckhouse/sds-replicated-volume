@@ -184,8 +184,8 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 
 		reconciledGoodReplicatedStoragePool, err := controller.GetReplicatedStoragePool(ctx, cl, testNameSpace, GoodReplicatedStoragePoolName)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(reconciledGoodReplicatedStoragePool.Status.Phase).To(Equal(srv.RSPPhaseFailed))
-		Expect(reconciledGoodReplicatedStoragePool.Status.Reason).To(Equal("lvmVG-1-on-FirstNode: Error getting LVMVolumeGroup: lvmvolumegroups.storage.deckhouse.io \"lvmVG-1-on-FirstNode\" not found\nlvmVG-1-on-SecondNode: Error getting LVMVolumeGroup: lvmvolumegroups.storage.deckhouse.io \"lvmVG-1-on-SecondNode\" not found\n"))
+		Expect(reconciledGoodReplicatedStoragePool.Status.Phase).To(Equal(srv.ReplicatedStoragePoolPhaseInvalidConfiguration))
+		Expect(reconciledGoodReplicatedStoragePool.Status.Message).To(Equal("lvmVG-1-on-FirstNode: Error getting LVMVolumeGroup: lvmvolumegroups.storage.deckhouse.io \"lvmVG-1-on-FirstNode\" not found\nlvmVG-1-on-SecondNode: Error getting LVMVolumeGroup: lvmvolumegroups.storage.deckhouse.io \"lvmVG-1-on-SecondNode\" not found\n"))
 
 		// Negative test with bad LVMVolumeGroups.
 		badLVMvgs := []map[string]string{{LVMVGOneOnFirstNodeName: ""}, {NotExistedlvmVGName: ""}, {LVMVGOneOnSecondNodeName: ""}, {LVMVGTwoOnFirstNodeName: ""}, {LVMVGOneOnSecondNodeNameDublicate: ""}, {SharedLVMVGName: ""}, {LVMVGWithSeveralNodes: ""}}
@@ -203,7 +203,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 
 		reconciledBadReplicatedStoragePool, err := controller.GetReplicatedStoragePool(ctx, cl, testNameSpace, BadReplicatedStoragePoolName)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(reconciledBadReplicatedStoragePool.Status.Phase).To(Equal(srv.RSPPhaseFailed))
+		Expect(reconciledBadReplicatedStoragePool.Status.Phase).To(Equal(srv.ReplicatedStoragePoolPhaseInvalidConfiguration))
 	})
 })
 
