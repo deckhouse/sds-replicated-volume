@@ -89,6 +89,8 @@ spec:
           privileged: true
           readOnlyRootFilesystem: true
         volumeMounts:
+        - mountPath: /dev/sdsrv/
+          name: dev-sdsrv
         - mountPath: /dev/
           name: host-device-dir
         - mountPath: /sys/
@@ -156,6 +158,10 @@ spec:
             {{- end }}
         {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 8 }}
       volumes:
+      - name: dev-sdsrv
+        hostPath:
+          path: /dev/sdsrv/
+          type: DirectoryOrCreate
       - hostPath:
           path: /dev/
           type: ""
