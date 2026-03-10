@@ -23,9 +23,21 @@ const (
 	// Reasons describe configuration readiness state.
 	ReplicatedVolumeCondConfigurationReadyType                                 = "ConfigurationReady"
 	ReplicatedVolumeCondConfigurationReadyReasonConfigurationRolloutInProgress = "ConfigurationRolloutInProgress" // Configuration rollout is in progress.
-	ReplicatedVolumeCondConfigurationReadyReasonReady                          = "Ready"                          // Configuration matches storage class.
+	ReplicatedVolumeCondConfigurationReadyReasonInvalidConfiguration           = "InvalidConfiguration"           // Configuration is invalid (e.g. TransZonal zone count mismatch).
+	ReplicatedVolumeCondConfigurationReadyReasonReady                          = "Ready"                          // Configuration is ready.
 	ReplicatedVolumeCondConfigurationReadyReasonStaleConfiguration             = "StaleConfiguration"             // Configuration does not match storage class (stale).
 	ReplicatedVolumeCondConfigurationReadyReasonWaitingForStorageClass         = "WaitingForStorageClass"         // Waiting for storage class to be ready.
+)
+
+const (
+	// ReplicatedVolumeCondConfiguredType indicates whether all replicas are configured.
+	//
+	// Reasons describe configuration progress / mismatch.
+	ReplicatedVolumeCondConfiguredType                          = "Configured"
+	ReplicatedVolumeCondConfiguredReasonConfigurationInProgress = "ConfigurationInProgress" // Configuration is still in progress.
+
+// ReplicatedVolumeCondConfiguredReasonAllReplicasConfigured = "AllReplicasConfigured" // All replicas are configured.
+// ReplicatedVolumeCondConfiguredReasonReplicasNotConfigured = "ReplicasNotConfigured" // Some replicas are not configured yet.
 )
 
 const (
@@ -51,5 +63,10 @@ const (
 
 const (
 	// ReplicatedVolumeCondScheduledType indicates whether all replicas have been scheduled.
-	ReplicatedVolumeCondScheduledType = "Scheduled"
+	//
+	// Reasons describe scheduling progress / deficit.
+	ReplicatedVolumeCondScheduledType                       = "Scheduled"
+	ReplicatedVolumeCondScheduledReasonAllReplicasScheduled = "AllReplicasScheduled" // All replicas are scheduled.
+	ReplicatedVolumeCondScheduledReasonReplicasNotScheduled = "ReplicasNotScheduled" // Some replicas are not scheduled yet.
+	ReplicatedVolumeCondScheduledReasonSchedulingInProgress = "SchedulingInProgress" // Scheduling is still in progress.
 )
