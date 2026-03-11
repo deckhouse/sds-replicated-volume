@@ -137,7 +137,7 @@ func computeRVAPhaseAndMessage(
 
 	switch {
 	case deleting:
-		phase = v1alpha1.ReplicatedVolumeAttachmentPhaseDeleting
+		phase = v1alpha1.ReplicatedVolumeAttachmentPhaseTerminating
 	case attached.Status == metav1.ConditionTrue:
 		phase = v1alpha1.ReplicatedVolumeAttachmentPhaseAttached
 	case attached.Reason == v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching:
@@ -195,8 +195,8 @@ func computeRVAReadyCondition(attached, replicaReady metav1.Condition, deleting 
 
 	if deleting {
 		cond.Status = metav1.ConditionFalse
-		cond.Reason = v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonDeleting
-		cond.Message = "Attachment is being deleted"
+		cond.Reason = v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonTerminating
+		cond.Message = "Attachment is terminating"
 		return cond
 	}
 

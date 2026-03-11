@@ -440,7 +440,7 @@ type ReplicatedStorageClassStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// Phase is the operational state summary of the storage class.
-	// +kubebuilder:validation:Enum=Ready;WaitingForStoragePool;InsufficientNodes;InvalidConfiguration;RollingOut;PartiallyAligned;Deleting
+	// +kubebuilder:validation:Enum=Ready;WaitingForStoragePool;InsufficientNodes;InvalidConfiguration;RollingOut;PartiallyAligned;Terminating
 	// +optional
 	Phase ReplicatedStorageClassPhase `json:"phase,omitempty"`
 	// Message is a human-readable description of the current phase.
@@ -486,8 +486,8 @@ const (
 	ReplicatedStorageClassPhaseRollingOut ReplicatedStorageClassPhase = "RollingOut"
 	// ReplicatedStorageClassPhasePartiallyAligned means divergence exists but all auto-fixes are disabled.
 	ReplicatedStorageClassPhasePartiallyAligned ReplicatedStorageClassPhase = "PartiallyAligned"
-	// ReplicatedStorageClassPhaseDeleting means the storage class is being deleted.
-	ReplicatedStorageClassPhaseDeleting ReplicatedStorageClassPhase = "Deleting"
+	// ReplicatedStorageClassPhaseTerminating means the storage class is terminating.
+	ReplicatedStorageClassPhaseTerminating ReplicatedStorageClassPhase = "Terminating"
 )
 
 func (p ReplicatedStorageClassPhase) String() string {

@@ -172,7 +172,7 @@ spec:
                 - Attaching
                 - Attached
                 - Detaching
-                - Deleting
+                - Terminating
                 type: string
             type: object
         required:

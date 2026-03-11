@@ -744,7 +744,7 @@ func applyVolumesSatisfyEligibleNodesCondFalse(rsc *v1alpha1.ReplicatedStorageCl
 func computePhaseAndMessage(rsc *v1alpha1.ReplicatedStorageClass) (v1alpha1.ReplicatedStorageClassPhase, string) {
 	// 1. Deleting.
 	if rsc.DeletionTimestamp != nil {
-		return v1alpha1.ReplicatedStorageClassPhaseDeleting, "Storage class is being deleted"
+		return v1alpha1.ReplicatedStorageClassPhaseTerminating, "Storage class is terminating"
 	}
 
 	// 2. WaitingForStoragePool.

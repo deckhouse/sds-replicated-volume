@@ -205,7 +205,7 @@ type ReplicatedVolumeReplicaStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// Phase is a quick operational state summary.
-	// +kubebuilder:validation:Enum=Pending;Provisioning;Configuring;WaitingForDatamesh;Synchronizing;Healthy;PartiallyDegraded;Degraded;Critical;Progressing;AgentNotReady;Deleting
+	// +kubebuilder:validation:Enum=Pending;Provisioning;Configuring;WaitingForDatamesh;Synchronizing;Healthy;PartiallyDegraded;Degraded;Critical;Progressing;AgentNotReady;Terminating
 	// +optional
 	Phase ReplicatedVolumeReplicaPhase `json:"phase,omitempty"`
 
@@ -319,8 +319,8 @@ const (
 	ReplicatedVolumeReplicaPhaseProgressing ReplicatedVolumeReplicaPhase = "Progressing"
 	// ReplicatedVolumeReplicaPhaseAgentNotReady indicates the agent is not responding on the node.
 	ReplicatedVolumeReplicaPhaseAgentNotReady ReplicatedVolumeReplicaPhase = "AgentNotReady"
-	// ReplicatedVolumeReplicaPhaseDeleting indicates the replica is being deleted and children are being cleaned up.
-	ReplicatedVolumeReplicaPhaseDeleting ReplicatedVolumeReplicaPhase = "Deleting"
+	// ReplicatedVolumeReplicaPhaseTerminating indicates the replica is terminating and children are being cleaned up.
+	ReplicatedVolumeReplicaPhaseTerminating ReplicatedVolumeReplicaPhase = "Terminating"
 )
 
 func (p ReplicatedVolumeReplicaPhase) String() string { return string(p) }

@@ -152,7 +152,7 @@ Phase derivation (evaluation order):
 
 | # | Phase | When | Operator action |
 |---|-------|------|-----------------|
-| 1 | **Deleting** | DeletionTimestamp set | Wait for cleanup |
+| 1 | **Terminating** | DeletionTimestamp set | Wait for cleanup |
 | 2 | **WaitingForStoragePool** | StoragePoolReady != True | Check RSP, LVGs, node health |
 | 3 | **InsufficientNodes** | Ready=False/InsufficientEligibleNodes | Add nodes or adjust FTT/GMDR |
 | 4 | **InvalidConfiguration** | Ready=False (other reasons) | Fix RSC spec |

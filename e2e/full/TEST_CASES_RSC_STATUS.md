@@ -156,16 +156,16 @@ The divergence is reported but the user is expected to act.
 
 ---
 
-## 9. Deleting — RSC deleted while volumes exist
+## 9. Terminating — RSC deleted while volumes exist
 
-⚡ **Phase=Deleting is transient while the finalizer holds.**
+⚡ **Phase=Terminating is transient while the finalizer holds.**
 
 Prerequisite: RSC with at least 1 volume (PVC still exists).
 
 Action: `kubectl delete rsc <name>`.
 
 Assert (immediately after delete, before finalizer releases):
-- `phase=Deleting`.
+- `phase=Terminating`.
 - RSC still exists (finalizer holds it).
 
 Assert (after cleanup completes):
@@ -261,16 +261,16 @@ If volumes were actually stale, expect transient `phase=RollingOut` before Ready
 
 ---
 
-## 14. Deleting — finalizer holds until RVs are deleted
+## 14. Terminating — finalizer holds until RVs are deleted
 
-⚡ **RSC stays in Deleting phase until all RVs referencing it are deleted.**
+⚡ **RSC stays in Terminating phase until all RVs referencing it are deleted.**
 
 Setup: RSC with 2 RVs, Ready.
 
 Action: `kubectl delete rsc <name> --wait=false`.
 
 Assert:
-- `phase=Deleting` persists while RVs exist.
+- `phase=Terminating` persists while RVs exist.
 - RSC has `deletionTimestamp` but is not removed.
 
 Action: Delete both RVs.

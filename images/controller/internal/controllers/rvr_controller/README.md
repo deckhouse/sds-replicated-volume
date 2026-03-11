@@ -50,7 +50,7 @@ reconcile DRBD resource:
     if DRBDR failed → DRBDConfigured=False ConfigurationFailed
     if not datamesh member:
         if was member (datameshRevision > 0) → reset datameshRevision to 0, DRBDConfigured=True
-        elif deleting → DRBDConfigured=True (replica is being deleted)
+        elif deleting → DRBDConfigured=True (replica is terminating)
         else → DRBDConfigured=False PendingDatameshJoin
     else → DRBDConfigured=True
 
@@ -266,7 +266,7 @@ Indicates overall replica readiness for I/O (based on quorum state).
 |--------|--------|------|
 | True | Ready | Ready for I/O (quorum message) |
 | True/False | QuorumViaPeers | Diskless replica; quorum provided by connected peers |
-| False | Deleting | Replica is being deleted (rvrShouldNotExist or deleting non-member) |
+| False | Terminating | Replica is being deleted (rvrShouldNotExist or deleting non-member) |
 | False | PendingDatameshJoin | Waiting to join datamesh (not deleting) |
 | False | PendingScheduling | Waiting for node assignment |
 | False | QuorumLost | Quorum is lost (quorum message) |
@@ -297,7 +297,7 @@ Phase evaluation splits into two paths based on datamesh membership (`datameshRe
 
 | Phase | When |
 |-------|------|
-| Deleting | DeletionTimestamp is set |
+| Terminating | DeletionTimestamp is set |
 | AgentNotReady | DRBDConfigured reason = AgentNotReady |
 
 **Pre-member lifecycle** (`datameshRevision == 0`):
@@ -649,7 +649,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     Start([Start]) --> CheckDelete{DeletionTimestamp?}
-    CheckDelete -->|Yes| Deleting([Deleting])
+    CheckDelete -->|Yes| Terminating([Terminating])
 
     CheckDelete -->|No| CheckAgent{DRBDConfigured<br/>reason=AgentNotReady?}
     CheckAgent -->|Yes| AgentNotReady([AgentNotReady])
@@ -891,7 +891,7 @@ flowchart TD
     CheckWasMember -->|Yes| ResetRevision["Reset DatameshRevision to 0<br/>DRBDConfigured=True Configured<br/>(removed from datamesh)"]
     ResetRevision --> End7a([Done])
     CheckWasMember -->|No| CheckDeleting{Deleting?}
-    CheckDeleting -->|Yes| SetDeletingConfigured["DRBDConfigured=True Configured<br/>(replica is being deleted)"]
+    CheckDeleting -->|Yes| SetDeletingConfigured["DRBDConfigured=True Configured<br/>(replica is terminating)"]
     SetDeletingConfigured --> End7b([Done])
     CheckDeleting -->|No| SetPendingJoin[DRBDConfigured=False PendingDatameshJoin]
     SetPendingJoin --> End7([Done])
@@ -1359,8 +1359,8 @@ flowchart TD
 ```mermaid
 flowchart TD
     Start([Start]) --> CheckDelete{RVR being deleted?}
-    CheckDelete -->|Yes| SetDeleting[False: Deleting]
-    SetDeleting --> End1([Done])
+    CheckDelete -->|Yes| SetTerminating[False: Terminating]
+    SetTerminating --> End1([Done])
 
     CheckDelete -->|No| CheckRV{RV ready with datamesh<br/>and system networks?}
     CheckRV -->|No| SetWaitRV[Unknown: WaitingForReplicatedVolume]

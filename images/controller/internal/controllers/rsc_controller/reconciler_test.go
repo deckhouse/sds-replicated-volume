@@ -1995,7 +1995,7 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	Describe("computePhaseAndMessage", func() {
-		It("returns Deleting when DeletionTimestamp is set", func() {
+		It("returns Terminating when DeletionTimestamp is set", func() {
 			now := metav1.Now()
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: &now},
@@ -2003,8 +2003,8 @@ var _ = Describe("Reconciler", func() {
 
 			phase, message := computePhaseAndMessage(rsc)
 
-			Expect(phase).To(Equal(v1alpha1.ReplicatedStorageClassPhaseDeleting))
-			Expect(message).To(Equal("Storage class is being deleted"))
+			Expect(phase).To(Equal(v1alpha1.ReplicatedStorageClassPhaseTerminating))
+			Expect(message).To(Equal("Storage class is terminating"))
 		})
 
 		It("returns WaitingForStoragePool when StoragePoolReady is False", func() {

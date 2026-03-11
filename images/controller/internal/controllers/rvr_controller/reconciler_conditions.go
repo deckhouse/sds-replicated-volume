@@ -425,8 +425,8 @@ func ensureConditionReady(
 	// Guard: RVR is being deleted.
 	if rvrShouldNotExist(rvr) {
 		changed = applyReadyCondFalse(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondReadyReasonDeleting,
-			"Replica is being deleted") || changed
+			v1alpha1.ReplicatedVolumeReplicaCondReadyReasonTerminating,
+			"Replica is terminating") || changed
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
@@ -509,8 +509,8 @@ func ensureConditionReady(
 		if rvr.DeletionTimestamp != nil {
 			// Replica is being deleted, not joining.
 			changed = applyReadyCondFalse(rvr,
-				v1alpha1.ReplicatedVolumeReplicaCondReadyReasonDeleting,
-				"Replica is being deleted") || changed
+				v1alpha1.ReplicatedVolumeReplicaCondReadyReasonTerminating,
+				"Replica is terminating") || changed
 		} else {
 			// Not a datamesh member yet — cannot participate in quorum.
 			changed = applyReadyCondFalse(rvr,
@@ -826,18 +826,18 @@ func computeRVRPhaseAndMessage(rvr *v1alpha1.ReplicatedVolumeReplica) (v1alpha1.
 			drbdConfigured.Status == metav1.ConditionFalse &&
 			drbdConfigured.Reason != v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonNotApplicable &&
 			drbdConfigured.Message != "" {
-			return v1alpha1.ReplicatedVolumeReplicaPhaseDeleting, drbdConfigured.Message
+			return v1alpha1.ReplicatedVolumeReplicaPhaseTerminating, drbdConfigured.Message
 		}
 		// Datamesh leave progress (Configured condition).
 		configured := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
 		if configured != nil && configured.Message != "" {
-			return v1alpha1.ReplicatedVolumeReplicaPhaseDeleting, configured.Message
+			return v1alpha1.ReplicatedVolumeReplicaPhaseTerminating, configured.Message
 		}
 		// DRBD cleanup progress.
 		if drbdConfigured != nil && drbdConfigured.Message != "" {
-			return v1alpha1.ReplicatedVolumeReplicaPhaseDeleting, drbdConfigured.Message
+			return v1alpha1.ReplicatedVolumeReplicaPhaseTerminating, drbdConfigured.Message
 		}
-		return v1alpha1.ReplicatedVolumeReplicaPhaseDeleting, "Replica is being deleted"
+		return v1alpha1.ReplicatedVolumeReplicaPhaseTerminating, "Replica is terminating"
 	}
 
 	// 2. AgentNotReady.

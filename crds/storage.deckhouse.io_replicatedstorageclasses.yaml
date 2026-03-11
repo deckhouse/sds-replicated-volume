@@ -633,7 +633,7 @@ spec:
                 - InvalidConfiguration
                 - RollingOut
                 - PartiallyAligned
-                - Deleting
+                - Terminating
                 type: string
               storagePoolBasedOnGeneration:
                 description: StoragePoolBasedOnGeneration is the RSC generation when

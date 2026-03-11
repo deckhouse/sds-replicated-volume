@@ -437,7 +437,7 @@ spec:
                 - Critical
                 - Progressing
                 - AgentNotReady
-                - Deleting
+                - Terminating
                 type: string
               quorum:
                 description: Quorum indicates whether this replica has quorum.

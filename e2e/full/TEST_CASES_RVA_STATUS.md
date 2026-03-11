@@ -128,7 +128,7 @@ Cleanup: delete the RVA.
 
 ---
 
-## 8. Pending — volume is being deleted
+## 8. Pending — volume is terminating
 
 **Phase=Pending when the referenced RV has a deletionTimestamp.**
 
@@ -138,15 +138,15 @@ Action: Delete the RV (`--wait=false`).
 
 Assert:
 - `phase=Pending`.
-- `message` = `Attaching volume is blocked: volume is being deleted`.
+- `message` = `Attaching volume is blocked: volume is terminating`.
 
 Cleanup: delete remaining RVAs, force-delete RV if stuck.
 
 ---
 
-## 9. Deleting — RVA deleted while attached
+## 9. Terminating — RVA deleted while attached
 
-⚡ **Phase=Deleting is transient while detach runs.**
+⚡ **Phase=Terminating is transient while detach runs.**
 
 Prerequisite: RVA is `Attached`. No other RVA occupies the slot (to ensure
 this RVA actually reaches Attached before deletion).
@@ -154,13 +154,13 @@ this RVA actually reaches Attached before deletion).
 Action: Delete the RVA.
 
 Assert (during detach):
-- `phase=Deleting`.
+- `phase=Terminating`.
 - `message` matches `Detaching volume: ...`.
 
 Assert (after detach):
 - RVA is fully deleted.
 
-To reliably observe Deleting, the RVA must be Attached before deletion.
+To reliably observe Terminating, the RVA must be Attached before deletion.
 If it was only Pending, deletion is instant (no detach needed).
 
 ---
