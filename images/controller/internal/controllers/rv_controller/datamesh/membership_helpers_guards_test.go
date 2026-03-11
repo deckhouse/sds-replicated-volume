@@ -96,7 +96,7 @@ var _ = Describe("guardMaxDiskMembers", func() {
 		Expect(changed).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(
-			ContainSubstring("backing volume"))
+			ContainSubstring("maximum disk members"))
 	})
 
 	// ──────────────────────────────────────────────────────────────────────
@@ -182,7 +182,7 @@ var _ = Describe("guardMaxDiskMembers", func() {
 		Expect(changed).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(
-			ContainSubstring("backing volume"))
+			ContainSubstring("maximum disk members"))
 	})
 
 	It("blocks: 7 D + 1 D∅ = 8 disk-bearing (liminal diskful)", func() {
@@ -202,7 +202,7 @@ var _ = Describe("guardMaxDiskMembers", func() {
 		Expect(changed).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(
-			ContainSubstring("backing volume"))
+			ContainSubstring("maximum disk members"))
 	})
 
 	It("blocks: 7 D + 1 sD∅ = 8 disk-bearing (liminal shadow-diskful)", func() {
@@ -222,7 +222,7 @@ var _ = Describe("guardMaxDiskMembers", func() {
 		Expect(changed).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(
-			ContainSubstring("backing volume"))
+			ContainSubstring("maximum disk members"))
 	})
 
 	// ──────────────────────────────────────────────────────────────────────
@@ -268,7 +268,7 @@ var _ = Describe("guardMaxDiskMembers", func() {
 		}
 		Expect(hasAdd).To(BeFalse())
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(
-			ContainSubstring("backing volume"))
+			ContainSubstring("maximum disk members"))
 	})
 
 	It("blocks: 7 D + A vestibule (AddReplica D) = 8 (pending AddReplica)", func() {
@@ -311,7 +311,7 @@ var _ = Describe("guardMaxDiskMembers", func() {
 		}
 		Expect(addCount).To(Equal(1)) // only the existing vestibule
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(
-			ContainSubstring("backing volume"))
+			ContainSubstring("maximum disk members"))
 	})
 
 	// ──────────────────────────────────────────────────────────────────────
@@ -336,7 +336,7 @@ var _ = Describe("guardMaxDiskMembers", func() {
 		Expect(changed).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(
-			ContainSubstring("backing volume"))
+			ContainSubstring("maximum disk members"))
 	})
 
 	It("blocks: 8 D + TB with ChangeType→sD request", func() {
@@ -357,7 +357,7 @@ var _ = Describe("guardMaxDiskMembers", func() {
 		Expect(changed).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(
-			ContainSubstring("backing volume"))
+			ContainSubstring("maximum disk members"))
 	})
 })
 
@@ -517,7 +517,7 @@ var _ = Describe("guardTBSufficient", func() {
 		)
 		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
 		Expect(r.Blocked).To(BeTrue())
-		Expect(r.Message).To(ContainSubstring("TB required"))
+		Expect(r.Message).To(ContainSubstring("TieBreaker required"))
 	})
 
 	It("pass: 2D+2TB, FTT=1 → still 1 TB left", func() {
@@ -1228,7 +1228,7 @@ var _ = Describe("guardTransZonalTBPlacement", func() {
 		rc := &ReplicaContext{gctx: gctx, id: 4, member: &v1alpha1.DatameshMember{Zone: "a"}}
 		r := guardTransZonalTBPlacement(gctx, rc)
 		Expect(r.Blocked).To(BeTrue())
-		Expect(r.Message).To(ContainSubstring("2 D voters"))
+		Expect(r.Message).To(ContainSubstring("2 Diskful voters"))
 	})
 
 	It("no member/no RSP → skip", func() {
@@ -1359,7 +1359,7 @@ var _ = Describe("guardNotAttached", func() {
 		}
 		r := guardNotAttached(nil, rc)
 		Expect(r.Blocked).To(BeTrue())
-		Expect(r.Message).To(ContainSubstring("Attach"))
+		Expect(r.Message).To(ContainSubstring("attach transition in progress"))
 	})
 
 	It("blocks: not attached but Detach transition in progress", func() {
@@ -1369,7 +1369,7 @@ var _ = Describe("guardNotAttached", func() {
 		}
 		r := guardNotAttached(nil, rc)
 		Expect(r.Blocked).To(BeTrue())
-		Expect(r.Message).To(ContainSubstring("Detach"))
+		Expect(r.Message).To(ContainSubstring("detach transition in progress"))
 	})
 })
 

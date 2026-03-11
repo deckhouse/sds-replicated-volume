@@ -3610,6 +3610,13 @@ var _ = Describe("Reconciler", func() {
 			Expect(readyCond).NotTo(BeNil())
 			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonDeleting))
+
+			// Verify SatisfyEligibleNodes is True/Satisfied (not Unknown/WaitingForReplicatedVolume).
+			// RSP is loaded even for deleting RVRs so the condition reflects real eligibility.
+			senCond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType)
+			Expect(senCond).NotTo(BeNil())
+			Expect(senCond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(senCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied))
 		})
 	})
 })

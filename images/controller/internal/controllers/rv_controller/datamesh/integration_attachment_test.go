@@ -344,7 +344,7 @@ var _ = Describe("integration: attachment", func() {
 		}
 		Expect(hasAttach).To(BeFalse(), "attach should be blocked by quorum")
 		rc := findReplicaContext(replicas, 0)
-		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("Quorum not satisfied"))
+		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("quorum not satisfied"))
 
 		// Phase 2: quorum restored.
 		rvr0.Status.Quorum = ptr.To(true)

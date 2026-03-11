@@ -946,10 +946,10 @@ var _ = Describe("ensureStatusDatameshRequestAndConfiguredCond", func() {
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
 
-		// Check Configured condition message includes RV message.
+		// Check Configured condition message is replaced by the datamesh message.
 		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
 		Expect(cond).NotTo(BeNil())
-		Expect(cond.Message).To(ContainSubstring(": Waiting for DRBD resource creation"))
+		Expect(cond.Message).To(Equal("Waiting for DRBD resource creation"))
 		Expect(cond.Message).NotTo(ContainSubstring("Other replica message"))
 	})
 

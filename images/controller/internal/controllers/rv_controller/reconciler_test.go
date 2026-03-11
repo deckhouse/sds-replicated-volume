@@ -1150,6 +1150,10 @@ var _ = Describe("Reconciler", func() {
 			Expect(readyCond).NotTo(BeNil())
 			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonNotAttached))
+
+			// Phase should be Pending (RVA is not deleting, RV is deleting → waiting conditions).
+			Expect(updated.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
+			Expect(updated.Status.Message).To(ContainSubstring("deleted"))
 		})
 
 		It("does not process deletion if RV has other finalizers", func(ctx SpecContext) {

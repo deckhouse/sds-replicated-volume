@@ -148,7 +148,7 @@ func (c *concurrencyTracker) CanAdmit(t *dmte.Transition) (bool, string, any) {
 	// Formation blocks everything except Network (semi-emergency) and Emergency.
 	if gctx.hasFormationTransition &&
 		proposedGroup != v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork {
-		return false, "Blocked by active Formation",
+		return false, "formation in progress",
 			attachmentDetails(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending)
 	}
 
@@ -167,10 +167,10 @@ func (c *concurrencyTracker) CanAdmit(t *dmte.Transition) (bool, string, any) {
 		if isMembership &&
 			(gctx.votingMembershipTransitions.Contains(replicaID) ||
 				gctx.nonVotingMembershipTransitions.Contains(replicaID)) {
-			return false, "Membership transition already in progress for this replica", nil
+			return false, "membership transition in progress for this replica", nil
 		}
 		if isAttachment && gctx.attachmentTransitions.Contains(replicaID) {
-			return false, "Attachment transition already in progress for this replica",
+			return false, "attachment transition in progress for this replica",
 				v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending
 		}
 	}
@@ -178,13 +178,13 @@ func (c *concurrencyTracker) CanAdmit(t *dmte.Transition) (bool, string, any) {
 	switch proposedGroup {
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership:
 		if gctx.votingMembershipTransitions.Len() > 0 {
-			return false, "Another voting membership transition is already in progress", nil
+			return false, "voting membership transition in progress", nil
 		}
 		if gctx.hasQuorumTransition {
-			return false, "Blocked by active ChangeQuorum transition", nil
+			return false, "quorum change in progress", nil
 		}
 		if gctx.hasNetworkTransition {
-			return false, "Blocked by active Network transition", nil
+			return false, "network transition in progress", nil
 		}
 
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership:
@@ -193,16 +193,16 @@ func (c *concurrencyTracker) CanAdmit(t *dmte.Transition) (bool, string, any) {
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupQuorum:
 		// Serialized: only one ChangeQuorum at a time.
 		if gctx.hasQuorumTransition {
-			return false, "Another ChangeQuorum transition is already in progress", nil
+			return false, "quorum change in progress", nil
 		}
 		// Quorum is blocked by active voting membership transitions (they change
 		// the voter set that quorum depends on). Non-voting membership, attachment,
 		// and multiattach transitions do not affect quorum and can run in parallel.
 		if gctx.votingMembershipTransitions.Len() > 0 {
-			return false, "Cannot start ChangeQuorum: voting membership transition is active", nil
+			return false, "voting membership transition in progress", nil
 		}
 		if gctx.hasNetworkTransition {
-			return false, "Blocked by active Network transition", nil
+			return false, "network transition in progress", nil
 		}
 
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment:
@@ -217,7 +217,7 @@ func (c *concurrencyTracker) CanAdmit(t *dmte.Transition) (bool, string, any) {
 		}
 		if !others.IsEmpty() {
 			if !gctx.datamesh.multiattach || gctx.hasMultiattachTransition {
-				return false, "Waiting for multiattach to be enabled",
+				return false, "waiting for multiattach to be enabled",
 					v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching
 			}
 		}
@@ -225,13 +225,13 @@ func (c *concurrencyTracker) CanAdmit(t *dmte.Transition) (bool, string, any) {
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupMultiattach:
 		// Serialized only — dispatcher decides when to toggle.
 		if gctx.hasMultiattachTransition {
-			return false, "Another Multiattach transition is already in progress", nil
+			return false, "multiattach transition in progress", nil
 		}
 
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork:
 		// Serialized: at most one Network transition at a time.
 		if gctx.hasNetworkTransition {
-			return false, "Another Network transition is already in progress", nil
+			return false, "network transition in progress", nil
 		}
 	}
 
