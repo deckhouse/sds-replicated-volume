@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -2057,6 +2058,747 @@ var _ = Describe("ensureConditionBackingVolumeUpToDate", func() {
 // ──────────────────────────────────────────────────────────────────────────────
 // Test helpers
 //
+
+var _ = Describe("computeRVRPhaseAndMessage", func() {
+	mkRVR := func(nodeName string) *v1alpha1.ReplicatedVolumeReplica {
+		return &v1alpha1.ReplicatedVolumeReplica{
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+				Type:                 v1alpha1.ReplicaTypeDiskful,
+				NodeName:             nodeName,
+			},
+		}
+	}
+
+	setCond := func(rvr *v1alpha1.ReplicatedVolumeReplica, condType string, status metav1.ConditionStatus, reason, message string) {
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:    condType,
+			Status:  status,
+			Reason:  reason,
+			Message: message,
+		})
+	}
+
+	It("returns Deleting with blocking DRBDConfigured message (agent down)", func() {
+		rvr := mkRVR("node-1")
+		rvr.DeletionTimestamp = ptr.To(metav1.Now())
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady,
+			"Agent is not ready on node node-1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+			metav1.ConditionFalse, "PendingLeave",
+			"Leaving datamesh: 0/4 replicas confirmed")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseDeleting))
+		Expect(msg).To(Equal("Agent is not ready on node node-1"))
+	})
+
+	It("returns Deleting with Configured message (datamesh leave progress)", func() {
+		rvr := mkRVR("node-1")
+		rvr.DeletionTimestamp = ptr.To(metav1.Now())
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured,
+			"DRBD fully configured")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+			metav1.ConditionFalse, "PendingLeave",
+			"Leaving datamesh: 0/4 replicas confirmed revision 7. Waiting: [#0, #1, #2, #3]")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseDeleting))
+		Expect(msg).To(Equal("Leaving datamesh: 0/4 replicas confirmed revision 7. Waiting: [#0, #1, #2, #3]"))
+	})
+
+	It("returns Deleting with DRBDConfigured cleanup message", func() {
+		rvr := mkRVR("node-1")
+		rvr.DeletionTimestamp = ptr.To(metav1.Now())
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonNotApplicable,
+			"Replica is being deleted; waiting for DRBD resource test-rv-0 to be deleted")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseDeleting))
+		Expect(msg).To(Equal("Replica is being deleted; waiting for DRBD resource test-rv-0 to be deleted"))
+	})
+
+	It("returns Deleting with fallback when no conditions", func() {
+		rvr := mkRVR("node-1")
+		rvr.DeletionTimestamp = ptr.To(metav1.Now())
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseDeleting))
+		Expect(msg).To(Equal("Replica is being deleted"))
+	})
+
+	It("returns AgentNotReady when DRBDConfigured reason is AgentNotReady", func() {
+		rvr := mkRVR("node-1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady,
+			"Agent is not ready on node node-1 (node status: Ready)")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseAgentNotReady))
+		Expect(msg).To(Equal("Agent is not ready on node node-1 (node status: Ready)"))
+	})
+
+	It("returns Pending when NodeName is empty", func() {
+		rvr := mkRVR("")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed,
+			"No suitable candidate found")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhasePending))
+		Expect(msg).To(Equal("No suitable candidate found"))
+	})
+
+	It("returns Pending when Scheduled is False", func() {
+		rvr := mkRVR("node-1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed,
+			"4 candidates; 4 excluded: node not ready")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhasePending))
+		Expect(msg).To(Equal("4 candidates; 4 excluded: node not ready"))
+	})
+
+	It("skips Pending for Access replica with NodeName set and no Scheduled condition", func() {
+		rvr := mkRVR("node-1")
+		rvr.Spec.Type = v1alpha1.ReplicaTypeAccess
+		// No Scheduled condition set (scheduling controller doesn't process Access replicas).
+		// Should NOT be Pending — falls through to later phases (Configuring fallback here).
+		phase, _ := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).NotTo(Equal(v1alpha1.ReplicatedVolumeReplicaPhasePending))
+	})
+
+	It("returns Provisioning when BVReady is False/Provisioning", func() {
+		rvr := mkRVR("node-1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled, "Scheduled")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioning,
+			"Creating backing volume test-rv-0-abc")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseProvisioning))
+		Expect(msg).To(Equal("Creating backing volume test-rv-0-abc"))
+	})
+
+	It("returns Provisioning when BVReady is False/ResizeFailed", func() {
+		rvr := mkRVR("node-1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled, "Scheduled")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizeFailed,
+			"Failed to resize backing volume")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseProvisioning))
+		Expect(msg).To(Equal("Failed to resize backing volume"))
+	})
+
+	It("returns Configuring when DRBDConfigured is Unknown/ApplyingConfiguration", func() {
+		rvr := mkRVR("node-1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled, "Scheduled")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionUnknown, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration,
+			"Waiting for agent to respond (generation: 5, observedGeneration: 4)")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring))
+		Expect(msg).To(Equal("Waiting for agent to respond (generation: 5, observedGeneration: 4)"))
+	})
+
+	It("returns Configuring when DRBDConfigured is False/ConfigurationFailed", func() {
+		rvr := mkRVR("node-1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled, "Scheduled")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigurationFailed,
+			"DRBD configuration failed (reason: ConnectFailed)")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring))
+		Expect(msg).To(Equal("DRBD configuration failed (reason: ConnectFailed)"))
+	})
+
+	It("returns WaitingForDatamesh with Configured message (datamesh join progress)", func() {
+		rvr := mkRVR("node-1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled, "Scheduled")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingDatameshJoin,
+			"DRBD preconfigured, waiting for datamesh membership")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+			metav1.ConditionFalse, "PendingJoin",
+			"Joining datamesh: 0/4 replicas confirmed revision 6. Waiting: [#0, #1, #2, #3]")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseWaitingForDatamesh))
+		Expect(msg).To(Equal("Joining datamesh: 0/4 replicas confirmed revision 6. Waiting: [#0, #1, #2, #3]"))
+	})
+
+	It("returns WaitingForDatamesh with DRBDConfigured fallback when no Configured", func() {
+		rvr := mkRVR("node-1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled, "Scheduled")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingDatameshJoin,
+			"DRBD preconfigured, waiting for datamesh membership")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseWaitingForDatamesh))
+		Expect(msg).To(Equal("DRBD preconfigured, waiting for datamesh membership"))
+	})
+
+	// ── Member health path tests (datameshRevision > 0) ──
+
+	It("returns Critical when Ready is False/QuorumLost", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumLost,
+			"Quorum: diskful 1/2, data quorum: 1/1")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseCritical))
+		Expect(msg).To(Equal("Quorum: diskful 1/2, data quorum: 1/1"))
+	})
+
+	It("returns Critical when Ready is False/QuorumViaPeers (diskless)", func() {
+		rvr := mkRVR("node-1")
+		rvr.Spec.Type = v1alpha1.ReplicaTypeAccess
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumViaPeers,
+			"Diskless replica; quorum via connected peers (data quorum: 0/2)")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseCritical))
+		Expect(msg).To(Equal("Diskless replica; quorum via connected peers (data quorum: 0/2)"))
+	})
+
+	It("returns Critical when Attached is False/IOSuspended", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonIOSuspended,
+			"I/O suspended on device /dev/drbd10012")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseCritical))
+		Expect(msg).To(Equal("I/O suspended on device /dev/drbd10012"))
+	})
+
+	It("returns Synchronizing when BVUpToDate is False/Synchronizing", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 3/2, data quorum: 2/2")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizing,
+			"Backing volume is synchronizing from peer test-rv-1")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseSynchronizing))
+		Expect(msg).To(Equal("Backing volume is synchronizing from peer test-rv-1"))
+	})
+
+	It("returns Synchronizing with problem suffix", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 3/2, data quorum: 2/2")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizing,
+			"Backing volume is synchronizing from peer test-rv-1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected,
+			"Connected to 1 of 2 peers")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseSynchronizing))
+		Expect(msg).To(Equal("Backing volume is synchronizing from peer test-rv-1. Partially connected to peers"))
+	})
+
+	It("returns Healthy when Ready is True/Ready and no problems", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured, "DRBD fully configured")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 3/2, data quorum: 3/2")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy))
+		Expect(msg).To(Equal("Quorum: diskful 3/2, data quorum: 3/2"))
+	})
+
+	It("returns Healthy when Ready is True/QuorumViaPeers (diskless)", func() {
+		rvr := mkRVR("node-1")
+		rvr.Spec.Type = v1alpha1.ReplicaTypeAccess
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured, "DRBD fully configured")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumViaPeers,
+			"Diskless replica; quorum via connected peers (data quorum: 2/2)")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy))
+		Expect(msg).To(Equal("Diskless replica; quorum via connected peers (data quorum: 2/2)"))
+	})
+
+	It("returns Degraded when Ready=True + disk Failed", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonFailed,
+			"Backing volume failed due to I/O errors")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseDegraded))
+		Expect(msg).To(ContainSubstring("Quorum: diskful 2/2"))
+		Expect(msg).To(ContainSubstring(". Disk failed"))
+	})
+
+	It("returns Degraded when Ready=True + NotConnected", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonNotConnected,
+			"Not connected to any peer")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseDegraded))
+		Expect(msg).To(ContainSubstring(". Not connected to any peer"))
+	})
+
+	It("returns Degraded when Ready=True + AttachmentFailed", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAttachmentFailed,
+			"Expected attached but not attached")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseDegraded))
+		Expect(msg).To(ContainSubstring(". Attachment failed"))
+	})
+
+	It("returns Degraded when member + ProvisioningFailed", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumViaPeers,
+			"Diskless replica; quorum via connected peers (data quorum: 2/1)")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioningFailed,
+			"Failed to create backing volume")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseDegraded))
+		Expect(msg).To(ContainSubstring(". Provisioning failed"))
+	})
+
+	It("returns Degraded when member + ConfigurationFailed", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigurationFailed,
+			"DRBD configuration failed")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseDegraded))
+		Expect(msg).To(ContainSubstring(". DRBD configuration failed"))
+	})
+
+	It("returns Degraded with max severity when Failed disk + PartiallyConnected", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonFailed,
+			"Backing volume failed")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected,
+			"Connected to 1 of 2 peers")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseDegraded))
+		Expect(msg).To(ContainSubstring(". Disk failed"))
+		Expect(msg).To(ContainSubstring(". Partially connected to peers"))
+	})
+
+	It("returns PartiallyDegraded when Ready=True + PartiallyConnected", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected,
+			"Connected to 1 of 2 peers")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded))
+		Expect(msg).To(ContainSubstring(". Partially connected to peers"))
+	})
+
+	It("returns PartiallyDegraded when Ready=True + SatisfyEligibleNodes=False", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonNodeMismatch,
+			"Node is not eligible")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded))
+		Expect(msg).To(ContainSubstring(". Node not eligible"))
+	})
+
+	It("returns PartiallyDegraded when Ready=True + DetachmentFailed", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonDetachmentFailed,
+			"Expected detached but still attached")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded))
+		Expect(msg).To(ContainSubstring(". Detachment failed"))
+	})
+
+	It("returns Progressing when member + Resizing + Ready=True + no problems", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizing,
+			"Resizing backing volume test-rv-0-abc from 100Mi to 200Mi")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing))
+		Expect(msg).To(ContainSubstring("Resizing backing volume"))
+	})
+
+	It("returns Progressing when member + ApplyingConfiguration + Ready=True", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionUnknown, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration,
+			"Waiting for agent to respond")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing))
+		Expect(msg).To(ContainSubstring("Applying DRBD configuration"))
+	})
+
+	It("returns Progressing when member + Provisioning BV (A→D conversion)", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumViaPeers,
+			"Diskless replica; quorum via connected peers (data quorum: 2/1)")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioning,
+			"Creating backing volume test-rv-0-abc")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing))
+		Expect(msg).To(ContainSubstring("Provisioning backing volume"))
+	})
+
+	It("health beats progress: PartiallyDegraded when Resizing + PartiallyConnected", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizing,
+			"Resizing backing volume")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected,
+			"Connected to 1 of 2 peers")
+
+		phase, _ := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded))
+	})
+
+	// ── Pre-member vs member split tests ──
+
+	It("pre-member: Provisioning when datameshRevision=0 + BVReady=False/Provisioning", func() {
+		rvr := mkRVR("node-1")
+		// datameshRevision = 0 (default)
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled, "Scheduled")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioning,
+			"Creating backing volume test-rv-0-abc")
+
+		phase, _ := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseProvisioning))
+	})
+
+	It("member: Progressing when datameshRevision>0 + BVReady=False/Provisioning + Ready=True", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumViaPeers,
+			"Diskless replica; quorum via connected peers (data quorum: 2/1)")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioning,
+			"Creating backing volume test-rv-0-abc")
+
+		phase, _ := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing))
+	})
+
+	It("pre-member: Configuring when datameshRevision=0 + ApplyingConfiguration", func() {
+		rvr := mkRVR("node-1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled, "Scheduled")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionUnknown, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration,
+			"Waiting for agent to respond")
+
+		phase, _ := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring))
+	})
+
+	It("member: Progressing when datameshRevision>0 + ApplyingConfiguration + Ready=True", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionUnknown, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration,
+			"Waiting for agent to respond")
+
+		phase, _ := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing))
+	})
+
+	It("pre-member: Configuring fallback with Ready message when DRBDConfigured is True", func() {
+		rvr := mkRVR("node-1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled, "Scheduled")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured, "DRBD fully configured")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonPendingDatameshJoin,
+			"Waiting to join datamesh")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring))
+		Expect(msg).To(Equal("Waiting to join datamesh"))
+	})
+
+	It("pre-member: Configuring fallback with generic message when no conditions", func() {
+		rvr := mkRVR("node-1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled, "Scheduled")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring))
+		Expect(msg).To(Equal("Configuring"))
+	})
+})
+
+var _ = Describe("computeMemberProblemsAndSeverity", func() {
+	mkMemberRVR := func() *v1alpha1.ReplicatedVolumeReplica {
+		return &v1alpha1.ReplicatedVolumeReplica{
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+				Type:                 v1alpha1.ReplicaTypeDiskful,
+				NodeName:             "node-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 5,
+			},
+		}
+	}
+	setCond := func(rvr *v1alpha1.ReplicatedVolumeReplica, condType string, status metav1.ConditionStatus, reason, message string) {
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type: condType, Status: status, Reason: reason, Message: message,
+		})
+	}
+
+	It("returns empty and severityNone when no problems", func() {
+		rvr := mkMemberRVR()
+		problems, sev := computeMemberProblemsAndSeverity(rvr, nil, nil)
+		Expect(problems).To(BeEmpty())
+		Expect(sev).To(Equal(severityNone))
+	})
+
+	It("returns Degraded severity for Failed disk", func() {
+		rvr := mkMemberRVR()
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonFailed, "IO error")
+		problems, sev := computeMemberProblemsAndSeverity(rvr, nil, nil)
+		Expect(problems).To(Equal(". Disk failed"))
+		Expect(sev).To(Equal(severityDegraded))
+	})
+
+	It("returns PartiallyDegraded severity for PartiallyConnected", func() {
+		rvr := mkMemberRVR()
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected, "1/2")
+		problems, sev := computeMemberProblemsAndSeverity(rvr, nil, nil)
+		Expect(problems).To(Equal(". Partially connected to peers"))
+		Expect(sev).To(Equal(severityPartiallyDegraded))
+	})
+
+	It("max severity wins when mixed (Failed + PartiallyConnected)", func() {
+		rvr := mkMemberRVR()
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonFailed, "IO error")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected, "1/2")
+		problems, sev := computeMemberProblemsAndSeverity(rvr, nil, nil)
+		Expect(problems).To(ContainSubstring(". Disk failed"))
+		Expect(problems).To(ContainSubstring(". Partially connected to peers"))
+		Expect(sev).To(Equal(severityDegraded))
+	})
+
+	It("returns Degraded severity for ProvisioningFailed (member-specific)", func() {
+		rvr := mkMemberRVR()
+		bvReady := &metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+			Status: metav1.ConditionFalse,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioningFailed,
+		}
+		problems, sev := computeMemberProblemsAndSeverity(rvr, bvReady, nil)
+		Expect(problems).To(Equal(". Provisioning failed"))
+		Expect(sev).To(Equal(severityDegraded))
+	})
+
+	It("returns Degraded severity for ConfigurationFailed (member-specific)", func() {
+		rvr := mkMemberRVR()
+		drbdConfigured := &metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			Status: metav1.ConditionFalse,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigurationFailed,
+		}
+		problems, sev := computeMemberProblemsAndSeverity(rvr, nil, drbdConfigured)
+		Expect(problems).To(Equal(". DRBD configuration failed"))
+		Expect(sev).To(Equal(severityDegraded))
+	})
+
+	It("skips SoleMember and NoPeers", func() {
+		rvr := mkMemberRVR()
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonSoleMember, "Sole member")
+		problems, sev := computeMemberProblemsAndSeverity(rvr, nil, nil)
+		Expect(problems).To(BeEmpty())
+		Expect(sev).To(Equal(severityNone))
+	})
+
+	It("skips absent conditions", func() {
+		rvr := mkMemberRVR()
+		problems, sev := computeMemberProblemsAndSeverity(rvr, nil, nil)
+		Expect(problems).To(BeEmpty())
+		Expect(sev).To(Equal(severityNone))
+	})
+})
+
+var _ = Describe("computeMemberProgress", func() {
+	It("returns empty when no progress", func() {
+		msg := computeMemberProgress(nil, nil)
+		Expect(msg).To(BeEmpty())
+	})
+
+	It("returns progress for Resizing", func() {
+		bvReady := &metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+			Status: metav1.ConditionFalse,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizing,
+		}
+		msg := computeMemberProgress(bvReady, nil)
+		Expect(msg).To(Equal("Resizing backing volume"))
+	})
+
+	It("returns progress for Provisioning", func() {
+		bvReady := &metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+			Status: metav1.ConditionFalse,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioning,
+		}
+		msg := computeMemberProgress(bvReady, nil)
+		Expect(msg).To(Equal("Provisioning backing volume"))
+	})
+
+	It("returns progress for ApplyingConfiguration", func() {
+		drbdConfigured := &metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			Status: metav1.ConditionUnknown,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration,
+		}
+		msg := computeMemberProgress(nil, drbdConfigured)
+		Expect(msg).To(Equal("Applying DRBD configuration"))
+	})
+
+	It("joins multiple progress triggers", func() {
+		bvReady := &metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+			Status: metav1.ConditionFalse,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizing,
+		}
+		drbdConfigured := &metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			Status: metav1.ConditionFalse,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForBackingVolume,
+		}
+		msg := computeMemberProgress(bvReady, drbdConfigured)
+		Expect(msg).To(ContainSubstring("Resizing backing volume"))
+		Expect(msg).To(ContainSubstring("Waiting for backing volume"))
+	})
+
+	It("does not report failure reasons as progress", func() {
+		bvReady := &metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+			Status: metav1.ConditionFalse,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioningFailed,
+		}
+		msg := computeMemberProgress(bvReady, nil)
+		Expect(msg).To(BeEmpty())
+	})
+})
 
 func boolPtr(b bool) *bool {
 	return &b

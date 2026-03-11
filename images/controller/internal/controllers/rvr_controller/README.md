@@ -115,10 +115,14 @@ Reconcile (root) [Pure orchestration]
 │       ├── rspEligibilityView.isStorageEligible (shared with computeIntendedBackingVolume)
 │       ├── applyDatameshRequest
 │       └── applyConfiguredCond*
+├── computeRVRPhaseAndMessage (phase + message from conditions; pre-member lifecycle vs member health path)
+│   └── computeMemberPhaseAndMessage (Critical/Synchronizing/Degraded/PartiallyDegraded/Progressing/Healthy)
+│       ├── computeMemberProblemsAndSeverity (problem detection + severity)
+│       └── computeMemberProgress (in-progress operational changes)
 └── patchRVRStatus
 ```
 
-Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureStatusAddressesAndType`](#ensurestatusaddressesandtype-details), [`ensureStatusAttachment`](#ensurestatusattachment-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionAttached`](#ensureconditionattached-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeUpToDate`](#ensureconditionbackingvolumeinsync-details), [`ensureStatusQuorum`](#ensurestatusquorum-details), [`ensureConditionReady`](#ensureconditionready-details), [`ensureConditionSatisfyEligibleNodes`](#ensureconditionsatisfyeligiblenodes-details), [`ensureStatusDatameshRequestAndConfiguredCond`](#ensurestatusdatameshrequesstandconfiguredcond-details)
+Links to detailed algorithms: [`computeRVRPhaseAndMessage`](#computervrrphaseandmessage-details), [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureStatusAddressesAndType`](#ensurestatusaddressesandtype-details), [`ensureStatusAttachment`](#ensurestatusattachment-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionAttached`](#ensureconditionattached-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeUpToDate`](#ensureconditionbackingvolumeinsync-details), [`ensureStatusQuorum`](#ensurestatusquorum-details), [`ensureConditionReady`](#ensureconditionready-details), [`ensureConditionSatisfyEligibleNodes`](#ensureconditionsatisfyeligiblenodes-details), [`ensureStatusDatameshRequestAndConfiguredCond`](#ensurestatusdatameshrequesstandconfiguredcond-details)
 
 ## Algorithm Flow
 
@@ -282,6 +286,41 @@ Indicates whether the replica satisfies the eligible nodes requirements from its
 | False | ThinPoolMismatch | Node and LVMVolumeGroup are eligible, but ThinPool is not allowed |
 | Unknown | WaitingForReplicatedVolume | Waiting for ReplicatedVolume or ReplicatedStoragePool to be ready |
 | (absent) | - | Node not yet assigned |
+
+### Phase
+
+Quick operational state summary computed from conditions by `computeRVRPhaseAndMessage`. Set after all conditions are ensured, before the status patch.
+
+Phase evaluation splits into two paths based on datamesh membership (`datameshRevision > 0`):
+
+**Universal (always first):**
+
+| Phase | When |
+|-------|------|
+| Deleting | DeletionTimestamp is set |
+| AgentNotReady | DRBDConfigured reason = AgentNotReady |
+
+**Pre-member lifecycle** (`datameshRevision == 0`):
+
+| Phase | When |
+|-------|------|
+| Pending | NodeName empty or Scheduled != True |
+| Provisioning | BackingVolumeReady=False with provisioning/resize reasons |
+| Configuring | DRBDConfigured=Unknown/ApplyingConfiguration or DRBDConfigured=False (non-excluded reasons) |
+| WaitingForDatamesh | DRBDConfigured=False/PendingDatameshJoin |
+
+**Member health** (`datameshRevision > 0`), priority order:
+
+| Phase | When |
+|-------|------|
+| Critical | Ready=False/QuorumLost or QuorumViaPeers, OR Attached=False/IOSuspended |
+| Synchronizing | BackingVolumeUpToDate=False/Synchronizing |
+| Degraded | Ready=True but serious problems: disk Failed, NotConnected, AttachmentFailed, ProvisioningFailed, ResizeFailed, ConfigurationFailed |
+| PartiallyDegraded | Ready=True but minor problems: PartiallyConnected, RequiresSynchronization, wrong node, DetachmentFailed |
+| Progressing | No health problems, but operational change in progress: resize, type conversion, DRBD reconfig |
+| Healthy | Ready=True, no problems, no in-progress changes |
+
+Message is sourced from the most relevant condition for the current phase, enriched with problem descriptions (`. Problem text`) for member health phases. For Progressing, the progress description is appended to the Ready message. For the pre-member default fallback (Configuring), the first non-True condition message is used in priority order: DRBDConfigured, BackingVolumeReady, Ready.
 
 ## Status Fields
 
@@ -598,6 +637,118 @@ flowchart TD
 ---
 
 ## Detailed Algorithms
+
+### computeRVRPhaseAndMessage Details
+
+**File:** `reconciler_conditions.go`
+
+**Purpose**: Computes the phase and human-readable message for an RVR from its current conditions. The function splits into two paths based on datamesh membership (`datameshRevision > 0`): pre-member replicas use lifecycle phases, member replicas use health phases. Called after all condition ensure helpers have run, before the status patch.
+
+**Algorithm (top-level)**:
+
+```mermaid
+flowchart TD
+    Start([Start]) --> CheckDelete{DeletionTimestamp?}
+    CheckDelete -->|Yes| Deleting([Deleting])
+
+    CheckDelete -->|No| CheckAgent{DRBDConfigured<br/>reason=AgentNotReady?}
+    CheckAgent -->|Yes| AgentNotReady([AgentNotReady])
+
+    CheckAgent -->|No| CheckMember{datameshRevision > 0?}
+
+    CheckMember -->|No| PreMember
+    CheckMember -->|Yes| MemberHealth["computeMemberPhaseAndMessage"]
+
+    subgraph PreMember [Pre-member lifecycle]
+        CheckPending{NodeName empty OR<br/>Scheduled != True?}
+        CheckPending -->|Yes| Pending([Pending])
+        CheckPending -->|No| CheckProv{BVReady=False<br/>provisioning reasons?}
+        CheckProv -->|Yes| Provisioning([Provisioning])
+        CheckProv -->|No| CheckConfig{DRBDConfigured<br/>issues?}
+        CheckConfig -->|Yes| Configuring([Configuring])
+        CheckConfig -->|No| CheckWait{DRBDConfigured=False<br/>PendingDatameshJoin?}
+        CheckWait -->|Yes| WaitDM([WaitingForDatamesh])
+        CheckWait -->|No| Fallback([Configuring fallback])
+    end
+```
+
+**Algorithm (computeMemberPhaseAndMessage)**:
+
+```mermaid
+flowchart TD
+    Start([Start]) --> CheckQuorum{Ready=False<br/>QuorumLost or QuorumViaPeers?}
+    CheckQuorum -->|Yes| Critical1([Critical + problems])
+
+    CheckQuorum -->|No| CheckIO{Attached=False<br/>IOSuspended?}
+    CheckIO -->|Yes| Critical2([Critical + problems])
+
+    CheckIO -->|No| CheckSync{BVUpToDate=False<br/>Synchronizing?}
+    CheckSync -->|Yes| Synchronizing([Synchronizing + problems])
+
+    CheckSync -->|No| Collect["Collect problems + severity<br/>Collect progress"]
+    Collect --> CheckReady{Ready=True?}
+
+    CheckReady -->|Yes| EvalHealth{Max severity?}
+    EvalHealth -->|Degraded| Degraded(["Degraded: Ready.Message + problems"])
+    EvalHealth -->|PartiallyDegraded| PartDeg(["PartiallyDegraded: Ready.Message + problems"])
+    EvalHealth -->|None + progress| Progressing(["Progressing: Ready.Message + progress"])
+    EvalHealth -->|None| Healthy(["Healthy: Ready.Message"])
+
+    CheckReady -->|No| CheckProgress{Progress detected?}
+    CheckProgress -->|Yes| ProgressFallback(["Progressing: progress message"])
+    CheckProgress -->|No| MemberFallback(["PartiallyDegraded: fallback message"])
+```
+
+**Degraded-severity problem triggers**:
+
+| Condition | State | Problem text |
+|-----------|-------|-------------|
+| BackingVolumeUpToDate | False/Failed | `Disk failed` |
+| FullyConnected | False/NotConnected | `Not connected to any peer` |
+| Attached | False/AttachmentFailed | `Attachment failed` |
+| BackingVolumeReady | False/ProvisioningFailed | `Provisioning failed` |
+| BackingVolumeReady | False/ResizeFailed | `Resize failed` |
+| DRBDConfigured | False/ConfigurationFailed | `DRBD configuration failed` |
+
+**PartiallyDegraded-severity problem triggers**:
+
+| Condition | State | Problem text |
+|-----------|-------|-------------|
+| FullyConnected | False/PartiallyConnected | `Partially connected to peers` |
+| BackingVolumeUpToDate | False/RequiresSynchronization | `Backing volume requires synchronization` |
+| BackingVolumeUpToDate | False/Unknown | `Backing volume state unknown` |
+| BackingVolumeUpToDate | False/Absent | `Backing volume absent` |
+| SatisfyEligibleNodes | False/NodeMismatch | `Node not eligible` |
+| SatisfyEligibleNodes | False/LVMVolumeGroupMismatch | `LVG not eligible` |
+| SatisfyEligibleNodes | False/ThinPoolMismatch | `ThinPool not eligible` |
+| Attached | True/DetachmentFailed | `Detachment failed` |
+
+**Progress triggers** (only when no health problems exist):
+
+| Condition | State | Text |
+|-----------|-------|------|
+| BackingVolumeReady | False/Provisioning | `Provisioning backing volume` |
+| BackingVolumeReady | False/Reprovisioning | `Reprovisioning backing volume` |
+| BackingVolumeReady | False/Resizing | `Resizing backing volume` |
+| BackingVolumeReady | False/NotReady | `Backing volume not ready` |
+| DRBDConfigured | Unknown/ApplyingConfiguration | `Applying DRBD configuration` |
+| DRBDConfigured | False/WaitingForBackingVolume | `Waiting for backing volume` |
+
+**Data Flow**:
+
+| Input | Description |
+|-------|-------------|
+| `rvr.DeletionTimestamp` | Deletion check |
+| `rvr.Spec.NodeName` | Scheduling check (pre-member) |
+| `rvr.Status.DatameshRevision` | Membership split (0 = pre-member, >0 = member) |
+| `rvr.Status.Conditions` | All 9 conditions (Ready, DRBDConfigured, BackingVolumeReady, BackingVolumeUpToDate, Scheduled, Attached, FullyConnected, SatisfyEligibleNodes, Configured) |
+
+| Output | Description |
+|--------|-------------|
+| `status.phase` | One of 12 phases (see Phase section above) |
+| `status.message` | Human-readable detail, enriched with problem/progress descriptions for member phases |
+
+---
 
 ### reconcileBackingVolume Details
 
