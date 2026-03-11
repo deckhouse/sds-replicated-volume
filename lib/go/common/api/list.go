@@ -32,7 +32,7 @@ func NewListForObject(obj client.Object, scheme *runtime.Scheme) (client.ObjectL
 	if err != nil {
 		return nil, err
 	}
-	gvk.Kind = gvk.Kind + "List"
+	gvk.Kind += "List"
 
 	o, err := scheme.New(gvk)
 	if err != nil {

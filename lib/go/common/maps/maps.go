@@ -14,15 +14,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package maps
+// TODO: rename package to avoid conflict with stdlib maps (revive: var-naming).
+package maps //nolint:revive
 
 import (
 	"fmt"
 	"iter"
 	"maps"
 
-	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	"golang.org/x/exp/constraints"
+
+	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 )
 
 func SetUnique[K comparable, V any](m map[K]V, key K, value V) (map[K]V, bool) {

@@ -25,6 +25,7 @@ import (
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/datamesh"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -32,40 +33,42 @@ import (
 // Reconcile: RVA conditions
 //
 
-// reconcileRVAConditionsFromAttachmentsSummary updates status conditions and attachment fields
-// for each RVA based on the attachmentsSummary.
+// reconcileRVAConditionsFromDatameshReplicaContext updates status conditions and attachment fields
+// for each RVA based on datamesh ReplicaContext output.
 //
-// Iterates over attachmentStates; each state contains all RVAs for that node,
+// Iterates over replica contexts; each context contains all RVAs for that node,
 // so conditions are computed once per node and applied to all RVAs.
 //
 // Reconcile pattern: In-place reconciliation
-func (r *Reconciler) reconcileRVAConditionsFromAttachmentsSummary(
+func (r *Reconciler) reconcileRVAConditionsFromDatameshReplicaContext(
 	ctx context.Context,
-	atts *attachmentsSummary,
+	dmrctxs []datamesh.ReplicaContext,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "rva-conditions")
 	defer rf.OnEnd(&outcome)
 
-	// Process RVAs grouped by node via attachmentStates.
-	for i := range atts.attachmentStates {
-		as := &atts.attachmentStates[i]
-		if len(as.rvas) == 0 {
+	// Process RVAs grouped by node via replica contexts.
+	for i := range dmrctxs {
+		dmrctx := &dmrctxs[i]
+		if len(dmrctx.RVAs()) == 0 {
 			continue
 		}
 
 		// Conditions are identical for all RVAs on the same node.
-		attached := computeRVAAttachedConditionFromAttachmentsSummary(as)
-		replicaReady := computeRVAReplicaReadyConditionFromAttachmentsSummary(as)
+		attached := computeRVAAttachedCondition(dmrctx.AttachmentConditionReason(), dmrctx.AttachmentConditionMessage())
+		replicaReady := computeRVAReplicaReadyCondition(dmrctx.RVR())
 
-		for _, rva := range as.rvas {
-			// Ready differs per RVA: Deleting RVAs are never Ready.
+		for _, rva := range dmrctx.RVAs() {
+			// Ready and Phase differ per RVA: Deleting RVAs are never Ready and get Phase=Deleting.
 			deleting := rva.DeletionTimestamp != nil
 			ready := computeRVAReadyCondition(attached, replicaReady, deleting)
+			phase, phaseMessage := computeRVAPhaseAndMessage(deleting, attached, replicaReady)
 
 			if obju.ConditionSemanticallyEqual(obju.GetStatusCondition(rva, attached.Type), &attached) &&
 				obju.ConditionSemanticallyEqual(obju.GetStatusCondition(rva, replicaReady.Type), &replicaReady) &&
 				obju.ConditionSemanticallyEqual(obju.GetStatusCondition(rva, ready.Type), &ready) &&
-				isRVAAttachmentFieldsInSync(rva, as.rvr) {
+				isRVAAttachmentFieldsInSync(rva, dmrctx.RVR()) &&
+				rva.Status.Phase == phase && rva.Status.Message == phaseMessage {
 				continue
 			}
 
@@ -74,9 +77,11 @@ func (r *Reconciler) reconcileRVAConditionsFromAttachmentsSummary(
 			obju.SetStatusCondition(rva, attached)
 			obju.SetStatusCondition(rva, replicaReady)
 			obju.SetStatusCondition(rva, ready)
+			rva.Status.Phase = phase
+			rva.Status.Message = phaseMessage
 
 			// Copy attachment fields from RVR if available, clear otherwise.
-			applyRVAAttachmentFields(rva, as.rvr)
+			applyRVAAttachmentFields(rva, dmrctx.RVR())
 
 			if err := r.patchRVAStatus(rf.Ctx(), rva, base); err != nil {
 				return rf.Failf(err, "patching RVA %s status", rva.Name)
@@ -92,23 +97,20 @@ func (r *Reconciler) reconcileRVAConditionsFromAttachmentsSummary(
 //
 
 // computeRVAAttachedCondition computes the Attached condition for an RVA
-// from the pre-indexed attachmentState.
-//
-// All reasons and messages are set by the upstream attachment flow
-// (computeDatameshAttachmentIntents / ensureDatameshAttach*Transitions).
-// This function is a pure mapper: conditionReason → condition Status/Reason/Message.
-func computeRVAAttachedConditionFromAttachmentsSummary(as *attachmentState) metav1.Condition {
-	if as.conditionReason == "" || as.conditionMessage == "" {
+// from reason/message provided by the upstream datamesh engine.
+// Pure mapper: reason → condition Status/Reason/Message.
+func computeRVAAttachedCondition(reason, message string) metav1.Condition {
+	if reason == "" || message == "" {
 		panic(fmt.Sprintf(
-			"computeRVAAttachedConditionFromAttachmentsSummary: conditionReason and conditionMessage must be set by upstream flow for node %s (intent=%s, reason=%q, message=%q)",
-			as.nodeName, as.intent, as.conditionReason, as.conditionMessage,
+			"computeRVAAttachedCondition: reason and message must be set by upstream flow (reason=%q, message=%q)",
+			reason, message,
 		))
 	}
 
 	cond := metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
-		Reason:  as.conditionReason,
-		Message: as.conditionMessage,
+		Reason:  reason,
+		Message: message,
 	}
 
 	if cond.Reason == v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached {
@@ -120,15 +122,49 @@ func computeRVAAttachedConditionFromAttachmentsSummary(as *attachmentState) meta
 	return cond
 }
 
+// computeRVAPhaseAndMessage computes the phase and human-readable message for an RVA.
+//
+// Phase is determined by DeletionTimestamp and Attached condition reason.
+// Message is passthrough from the Attached condition, except when Phase=Attached
+// and ReplicaReady != True — in that case the ReplicaReady message is used to
+// surface the degradation reason (e.g., "Quorum is lost").
+func computeRVAPhaseAndMessage(
+	deleting bool,
+	attached, replicaReady metav1.Condition,
+) (v1alpha1.ReplicatedVolumeAttachmentPhase, string) {
+	var phase v1alpha1.ReplicatedVolumeAttachmentPhase
+
+	switch {
+	case deleting:
+		phase = v1alpha1.ReplicatedVolumeAttachmentPhaseDeleting
+	case attached.Status == metav1.ConditionTrue:
+		phase = v1alpha1.ReplicatedVolumeAttachmentPhaseAttached
+	case attached.Reason == v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching:
+		phase = v1alpha1.ReplicatedVolumeAttachmentPhaseAttaching
+	case attached.Reason == v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching:
+		phase = v1alpha1.ReplicatedVolumeAttachmentPhaseDetaching
+	case attached.Reason == v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetached:
+		phase = v1alpha1.ReplicatedVolumeAttachmentPhaseDetached
+	default:
+		phase = v1alpha1.ReplicatedVolumeAttachmentPhasePending
+	}
+
+	msg := attached.Message
+	if phase == v1alpha1.ReplicatedVolumeAttachmentPhaseAttached && replicaReady.Status != metav1.ConditionTrue {
+		msg = replicaReady.Message
+	}
+
+	return phase, msg
+}
+
 // computeRVAReplicaReadyCondition computes the ReplicaReady condition for an RVA
-// by mirroring the RVR Ready condition for the replica on this node.
-func computeRVAReplicaReadyConditionFromAttachmentsSummary(as *attachmentState) metav1.Condition {
+// by mirroring the RVR Ready condition. Returns Unknown/WaitingForReplica if rvr is nil.
+func computeRVAReplicaReadyCondition(rvr *v1alpha1.ReplicatedVolumeReplica) metav1.Condition {
 	cond := metav1.Condition{
 		Type: v1alpha1.ReplicatedVolumeAttachmentCondReplicaReadyType,
 	}
 
-	// No attachment state or no RVR.
-	if as == nil || as.rvr == nil {
+	if rvr == nil {
 		cond.Status = metav1.ConditionUnknown
 		cond.Reason = v1alpha1.ReplicatedVolumeAttachmentCondReplicaReadyReasonWaitingForReplica
 		cond.Message = "Replica not found on node"
@@ -136,7 +172,7 @@ func computeRVAReplicaReadyConditionFromAttachmentsSummary(as *attachmentState) 
 	}
 
 	// Mirror the RVR Ready condition.
-	rvrReady := obju.GetStatusCondition(as.rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+	rvrReady := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
 	if rvrReady == nil {
 		cond.Status = metav1.ConditionUnknown
 		cond.Reason = v1alpha1.ReplicatedVolumeAttachmentCondReplicaReadyReasonWaitingForReplica
@@ -359,6 +395,14 @@ func (r *Reconciler) reconcileRVAWaiting(
 	defer rf.OnEnd(&outcome)
 
 	for _, rva := range rvas {
+		// Phase/message per RVA (DeletionTimestamp differs per RVA).
+		deleting := rva.DeletionTimestamp != nil
+		phase, phaseMessage := computeRVAPhaseAndMessage(deleting, metav1.Condition{
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolume,
+			Message: message,
+		}, metav1.Condition{})
+
 		// Check if conditions are already in sync.
 		attachedInSync := obju.StatusCondition(rva, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType).
 			IsFalse().
@@ -372,8 +416,9 @@ func (r *Reconciler) reconcileRVAWaiting(
 			Eval()
 		replicaReadyAbsent := obju.StatusCondition(rva, v1alpha1.ReplicatedVolumeAttachmentCondReplicaReadyType).Absent().Eval()
 		fieldsClear := isRVAAttachmentFieldsInSync(rva, nil)
+		phaseInSync := rva.Status.Phase == phase && rva.Status.Message == phaseMessage
 
-		if attachedInSync && readyInSync && replicaReadyAbsent && fieldsClear {
+		if attachedInSync && readyInSync && replicaReadyAbsent && fieldsClear && phaseInSync {
 			continue
 		}
 
@@ -393,6 +438,8 @@ func (r *Reconciler) reconcileRVAWaiting(
 		})
 		obju.RemoveStatusCondition(rva, v1alpha1.ReplicatedVolumeAttachmentCondReplicaReadyType)
 		clearRVAAttachmentFields(rva)
+		rva.Status.Phase = phase
+		rva.Status.Message = phaseMessage
 
 		if err := r.patchRVAStatus(rf.Ctx(), rva, base); err != nil {
 			return rf.Failf(err, "patching RVA %s status", rva.Name)

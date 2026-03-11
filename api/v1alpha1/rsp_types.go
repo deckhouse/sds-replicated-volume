@@ -32,8 +32,9 @@ import (
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:metadata:labels=backup.deckhouse.io/cluster-config=true
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
-// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,description="The age of this resource"
+// +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=`.status.message`
 type ReplicatedStoragePool struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -163,14 +164,14 @@ type ReplicatedStoragePoolStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// TODO: Remove Phase once the old controller (sds-replicated-volume-controller) is retired.
-	// Phase is used only by the old controller and will be removed in a future version.
+	// Phase is the operational state summary of the storage pool.
+	// +kubebuilder:validation:Enum=Ready;WaitingForLVMVolumeGroups;InvalidConfiguration
 	// +optional
 	Phase ReplicatedStoragePoolPhase `json:"phase,omitempty"`
-	// TODO: Remove Reason once the old controller (sds-replicated-volume-controller) is retired.
-	// Reason is used only by the old controller and will be removed in a future version.
+	// Message is a human-readable description of the current phase.
+	// Mirrors the Ready condition message.
 	// +optional
-	Reason string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
 
 	// EligibleNodesRevision is incremented when eligible nodes change.
 	// +optional
@@ -197,18 +198,17 @@ type ReplicatedStoragePoolUsedBy struct {
 	ReplicatedStorageClassNames []string `json:"replicatedStorageClassNames,omitempty"`
 }
 
-// TODO: Remove ReplicatedStoragePoolPhase once the old controller (sds-replicated-volume-controller) is retired.
-// ReplicatedStoragePoolPhase represents the phase of the ReplicatedStoragePool.
-// Deprecated: Used only by the old controller.
+// ReplicatedStoragePoolPhase represents the operational state of the ReplicatedStoragePool.
 type ReplicatedStoragePoolPhase string
 
-// TODO: Remove phase constants once the old controller (sds-replicated-volume-controller) is retired.
-// Deprecated: Used only by the old controller.
-//
 // ReplicatedStoragePool phase values.
 const (
-	RSPPhaseCompleted ReplicatedStoragePoolPhase = "Completed"
-	RSPPhaseFailed    ReplicatedStoragePoolPhase = "Failed"
+	// ReplicatedStoragePoolPhaseReady means eligible nodes are computed successfully.
+	ReplicatedStoragePoolPhaseReady ReplicatedStoragePoolPhase = "Ready"
+	// ReplicatedStoragePoolPhaseWaitingForLVMVolumeGroups means referenced LVGs are not found.
+	ReplicatedStoragePoolPhaseWaitingForLVMVolumeGroups ReplicatedStoragePoolPhase = "WaitingForLVMVolumeGroups"
+	// ReplicatedStoragePoolPhaseInvalidConfiguration means spec validation failed.
+	ReplicatedStoragePoolPhaseInvalidConfiguration ReplicatedStoragePoolPhase = "InvalidConfiguration"
 )
 
 func (p ReplicatedStoragePoolPhase) String() string {

@@ -78,6 +78,9 @@ type ActualDRBDState interface {
 	// OnSuspendedPrimaryOutdated returns the on-suspended-primary-outdated action.
 	OnSuspendedPrimaryOutdated() string
 
+	// QuorumDynamicVoters returns the quorum-dynamic-voters setting.
+	QuorumDynamicVoters() bool
+
 	// Volumes returns the list of volumes/devices for this resource.
 	Volumes() []ActualVolume
 
@@ -115,6 +118,9 @@ type ActualVolume interface {
 
 	// RsDiscardGranularity returns the rs-discard-granularity setting.
 	RsDiscardGranularity() string
+
+	// NonVoting returns the non-voting setting.
+	NonVoting() bool
 }
 
 type ActualPeer interface {
@@ -243,6 +249,13 @@ func (aState *actualState) OnSuspendedPrimaryOutdated() string {
 		return aState.show.Options.OnSuspendedPrimaryOutdated
 	}
 	return ""
+}
+
+func (aState *actualState) QuorumDynamicVoters() bool {
+	if aState.show != nil {
+		return aState.show.Options.QuorumDynamicVoters
+	}
+	return false
 }
 
 func (aState *actualState) Volumes() []ActualVolume {
@@ -409,8 +422,18 @@ func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResour
 		ac.AllowTwoPrimaries = &atp
 	}
 
+	// NonVoting - get from first volume disk options in show
+	ac.NonVoting = nil
+	if aState.show != nil && len(aState.show.ThisHost.Volumes) > 0 {
+		disk := &aState.show.ThisHost.Volumes[0].Disk
+		if !disk.IsNone {
+			nv := disk.NonVoting
+			ac.NonVoting = &nv
+		}
+	}
+
 	// Type and Size from first volume.
-	// Type is determined from drbdsetup show configuration ("disk" field), not from
+	// Type is determined from drbdsetup show configuration, not from
 	// the transient disk state in drbdsetup status.
 	//
 	// drbdsetup show JSON output per volume:
@@ -418,29 +441,29 @@ func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResour
 	//   - Diskless: has "disk": "none" only (no "backing-disk" field at all)
 	//   - Detached: has only "volume_nr" and "device_minor" (no "backing-disk", no "disk")
 	//
-	// Diskless is reported only when "disk" is explicitly the string "none"
-	// (Disk.IsNone == true). Everything else — including detached diskful
-	// resources where "backing-disk" is absent — is reported as Diskful,
-	// because the configured type does not change when the backing device
-	// is temporarily unavailable. The diskState field reports disk health.
+	// Diskful is reported only when "backing-disk" is present (non-empty).
+	// Both Diskless ("disk": "none") and Detached (no backing disk, no disk
+	// field) are reported as Diskless — the resource has no disk attached
+	// in either case.
 	//
 	// LVMLogicalVolumeName is set by the reconciler after reverse-lookup
 	// from the backing disk path. This Report() method does not set it.
 	if len(volumes) > 0 {
 		vol := &volumes[0]
 
-		// Look up the show volume to check disk configuration.
-		diskIsNone := false
+		// Look up the show volume to determine disk presence.
+		isDiskless := false
 		if aState.show != nil {
 			for i := range aState.show.ThisHost.Volumes {
 				if aState.show.ThisHost.Volumes[i].VolumeNr == vol.Volume {
-					diskIsNone = aState.show.ThisHost.Volumes[i].Disk.IsNone
+					sv := &aState.show.ThisHost.Volumes[i]
+					isDiskless = sv.Disk.IsNone || sv.BackingDisk == ""
 					break
 				}
 			}
 		}
 
-		if diskIsNone {
+		if isDiskless {
 			ac.Type = v1alpha1.DRBDResourceTypeDiskless
 			ac.Size = nil
 		} else {
@@ -586,6 +609,13 @@ func (v *actualVolume) RsDiscardGranularity() string {
 		return v.showVolume.Disk.RSDiscardGranularity
 	}
 	return ""
+}
+
+func (v *actualVolume) NonVoting() bool {
+	if v.showVolume != nil {
+		return v.showVolume.Disk.NonVoting
+	}
+	return false
 }
 
 var _ ActualVolume = &actualVolume{}

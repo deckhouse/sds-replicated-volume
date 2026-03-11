@@ -195,16 +195,14 @@ var _ = Describe("RVRPredicates", func() {
 	})
 
 	Describe("DeleteFunc", func() {
-		It("returns false always", func() {
+		It("returns true (default) to trigger re-scheduling when a node is freed", func() {
 			predicates := RVRPredicates()
 			rvr := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 			}
+			e := event.TypedDeleteEvent[client.Object]{Object: rvr}
 			for _, p := range predicates {
-				if fp, ok := p.(predicate.Funcs); ok && fp.DeleteFunc != nil {
-					e := event.TypedDeleteEvent[client.Object]{Object: rvr}
-					Expect(fp.DeleteFunc(e)).To(BeFalse())
-				}
+				Expect(p.Delete(e)).To(BeTrue())
 			}
 		})
 	})

@@ -316,6 +316,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			drbdutils.ResetNextDeviceMinor()
+			drbdutils.FlantExtensionsSupported = false
 
 			symlinkDir := t.TempDir() + "/"
 			drbdr.OverrideDeviceSymlinkDir(symlinkDir)

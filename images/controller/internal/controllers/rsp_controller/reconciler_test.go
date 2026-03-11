@@ -816,6 +816,8 @@ var _ = Describe("Reconciler", func() {
 			Expect(readyCond).NotTo(BeNil())
 			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedStoragePoolCondReadyReasonLVMVolumeGroupNotFound))
+			Expect(updatedRSP.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhaseWaitingForLVMVolumeGroups))
+			Expect(updatedRSP.Status.Message).To(ContainSubstring("LVMVolumeGroups not found"))
 		})
 
 		It("sets Ready=False when validation fails for LVMThin", func() {
@@ -857,6 +859,8 @@ var _ = Describe("Reconciler", func() {
 			Expect(readyCond).NotTo(BeNil())
 			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedStoragePoolCondReadyReasonInvalidLVMVolumeGroup))
+			Expect(updatedRSP.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhaseInvalidConfiguration))
+			Expect(updatedRSP.Status.Message).To(ContainSubstring("validation failed"))
 		})
 
 		It("sets Ready=False when NodeLabelSelector is invalid", func() {
@@ -913,6 +917,8 @@ var _ = Describe("Reconciler", func() {
 			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedStoragePoolCondReadyReasonInvalidNodeLabelSelector))
 			Expect(readyCond.Message).To(ContainSubstring("Invalid NodeLabelSelector"))
+			Expect(updatedRSP.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhaseInvalidConfiguration))
+			Expect(updatedRSP.Status.Message).To(ContainSubstring("Invalid NodeLabelSelector"))
 		})
 
 		It("sets Ready=True and updates EligibleNodes on success", func() {
@@ -973,6 +979,8 @@ var _ = Describe("Reconciler", func() {
 			Expect(updatedRSP.Status.EligibleNodes[0].NodeName).To(Equal("node-1"))
 			Expect(updatedRSP.Status.EligibleNodes[0].ZoneName).To(Equal("zone-a"))
 			Expect(updatedRSP.Status.EligibleNodesRevision).To(BeNumerically(">", 0))
+			Expect(updatedRSP.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhaseReady))
+			Expect(updatedRSP.Status.Message).To(ContainSubstring("1 nodes"))
 		})
 
 		It("increments EligibleNodesRevision when nodes change", func() {
@@ -1238,57 +1246,55 @@ var _ = Describe("getLVGsByRSP", func() {
 	})
 })
 
-var _ = Describe("applyLegacyFieldsCleared", func() {
-	It("clears phase and reason when both are set", func() {
+var _ = Describe("applyPhase", func() {
+	It("sets phase and message when both are empty", func() {
+		rsp := &v1alpha1.ReplicatedStoragePool{}
+
+		changed := applyPhase(rsp, v1alpha1.ReplicatedStoragePoolPhaseReady, "5 nodes")
+
+		Expect(changed).To(BeTrue())
+		Expect(rsp.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhaseReady))
+		Expect(rsp.Status.Message).To(Equal("5 nodes"))
+	})
+
+	It("returns true when phase changes", func() {
 		rsp := &v1alpha1.ReplicatedStoragePool{
 			Status: v1alpha1.ReplicatedStoragePoolStatus{
-				Phase:  v1alpha1.RSPPhaseCompleted,
-				Reason: "pool creation completed",
+				Phase:   v1alpha1.ReplicatedStoragePoolPhaseReady,
+				Message: "5 nodes",
 			},
 		}
 
-		changed := applyLegacyFieldsCleared(rsp)
+		changed := applyPhase(rsp, v1alpha1.ReplicatedStoragePoolPhaseWaitingForLVMVolumeGroups, "5 nodes")
 
 		Expect(changed).To(BeTrue())
-		Expect(rsp.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhase("")))
-		Expect(rsp.Status.Reason).To(BeEmpty())
+		Expect(rsp.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhaseWaitingForLVMVolumeGroups))
 	})
 
-	It("clears only phase when reason is already empty", func() {
+	It("returns true when message changes", func() {
 		rsp := &v1alpha1.ReplicatedStoragePool{
 			Status: v1alpha1.ReplicatedStoragePoolStatus{
-				Phase: v1alpha1.RSPPhaseFailed,
+				Phase:   v1alpha1.ReplicatedStoragePoolPhaseReady,
+				Message: "old message",
 			},
 		}
 
-		changed := applyLegacyFieldsCleared(rsp)
+		changed := applyPhase(rsp, v1alpha1.ReplicatedStoragePoolPhaseReady, "new message")
 
 		Expect(changed).To(BeTrue())
-		Expect(rsp.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhase("")))
+		Expect(rsp.Status.Message).To(Equal("new message"))
 	})
 
-	It("clears only reason when phase is already empty", func() {
+	It("returns false when nothing changes", func() {
 		rsp := &v1alpha1.ReplicatedStoragePool{
 			Status: v1alpha1.ReplicatedStoragePoolStatus{
-				Reason: "leftover reason",
+				Phase:   v1alpha1.ReplicatedStoragePoolPhaseInvalidConfiguration,
+				Message: "some error",
 			},
 		}
 
-		changed := applyLegacyFieldsCleared(rsp)
-
-		Expect(changed).To(BeTrue())
-		Expect(rsp.Status.Reason).To(BeEmpty())
-	})
-
-	It("reports no change when both are already empty", func() {
-		rsp := &v1alpha1.ReplicatedStoragePool{
-			Status: v1alpha1.ReplicatedStoragePoolStatus{},
-		}
-
-		changed := applyLegacyFieldsCleared(rsp)
+		changed := applyPhase(rsp, v1alpha1.ReplicatedStoragePoolPhaseInvalidConfiguration, "some error")
 
 		Expect(changed).To(BeFalse())
-		Expect(rsp.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhase("")))
-		Expect(rsp.Status.Reason).To(BeEmpty())
 	})
 })

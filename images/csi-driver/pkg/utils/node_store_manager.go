@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package utils
+package utils //nolint:revive // pre-existing package name; renaming is a separate refactor
 
 import (
 	"fmt"

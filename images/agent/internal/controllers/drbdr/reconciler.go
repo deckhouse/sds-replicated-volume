@@ -166,14 +166,20 @@ func (r *Reconciler) reconcileDRBDR(
 	inCleanup := isInCleanup(drbdr)
 	upAndNotInCleanup := isUpAndNotInCleanup(drbdr)
 
-	// Phase 2: Ensure addresses in status (in-memory only, no patch yet)
-	// Error here is non-critical (e.g., port allocation failure) - continue reconciliation
-	statusBase := drbdr.DeepCopy()
-	node, err := r.getRequiredCurrentNode(rf.Ctx())
-	if err != nil {
-		return rf.Fail(err)
+	// Phase 2: Ensure addresses are persisted (patch with optimistic lock).
+	// Must happen before DRBD convergence so that stale-cache races cause
+	// a conflict error here, before any destructive kernel actions execute.
+	if addrOutcome := r.reconcileAddresses(rf.Ctx(), drbdr); addrOutcome.ShouldReturn() {
+		if addrOutcome.Error() != nil {
+			return rf.Fail(addrOutcome.Error())
+		}
+		return rf.Done()
 	}
-	addrErr := ensureAddresses(rf.Ctx(), drbdr, node, r.portCache.Allocate).Error()
+
+	// Snapshot status after addresses are persisted. The addresses patch may
+	// have updated the object's resourceVersion; taking the snapshot here
+	// ensures the final Phase 5 patch uses the correct base.
+	statusBase := drbdr.DeepCopy()
 
 	// Phase 3: Add finalizer to intended LLV (before DRBD operations).
 	// Skip when in cleanup — no point acquiring a finalizer on an LLV that
@@ -214,14 +220,14 @@ func (r *Reconciler) reconcileDRBDR(
 	actualLLVName := computeActualLLVName(rf.Ctx(), r, aState)
 
 	// Phase 5: Report and status patch
-	reconcileErr := errors.Join(addrErr, llvErr, aErr, aErr2, drbdErr)
+	reconcileErr := errors.Join(llvErr, aErr, aErr2, drbdErr)
 	if ensureOutcome := ensureReportState(rf.Ctx(), aState, drbdr, actualLLVName, reconcileErr, maintenanceMode); ensureOutcome.Error() != nil {
 		reconcileErr = errors.Join(reconcileErr, ensureOutcome.Error())
 	}
 
 	// Patch status if changed
 	if !equality.Semantic.DeepEqual(statusBase.Status, drbdr.Status) {
-		statusPatchErr := r.patchDRBDRStatus(rf.Ctx(), drbdr, statusBase, false)
+		statusPatchErr := r.patchDRBDRStatus(rf.Ctx(), drbdr, statusBase, true)
 		// Ignore "not found" error if object was being deleted
 		if statusPatchErr != nil && (drbdr.DeletionTimestamp == nil || client.IgnoreNotFound(statusPatchErr) != nil) {
 			reconcileErr = errors.Join(reconcileErr, statusPatchErr)
@@ -492,6 +498,36 @@ func (r *Reconciler) reconcileFinalizer(
 			if apierrors.IsNotFound(err) {
 				return rf.Done()
 			}
+			return rf.Fail(err)
+		}
+	}
+
+	return rf.Continue()
+}
+
+// reconcileAddresses ensures addresses (IPs + ports) are persisted in status
+// before DRBD convergence. This prevents stale-cache races: if the informer
+// cache is behind, the optimistic-lock patch fails and the reconcile retries
+// before any destructive DRBD kernel actions execute.
+func (r *Reconciler) reconcileAddresses(
+	ctx context.Context,
+	drbdr *v1alpha1.DRBDResource,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "reconcile-addresses")
+	defer rf.OnEnd(&outcome)
+
+	node, err := r.getRequiredCurrentNode(rf.Ctx())
+	if err != nil {
+		return rf.Fail(err)
+	}
+
+	base := drbdr.DeepCopy()
+	if addrErr := ensureAddresses(rf.Ctx(), drbdr, node, r.portCache.Allocate).Error(); addrErr != nil {
+		return rf.Fail(addrErr)
+	}
+
+	if !equality.Semantic.DeepEqual(base.Status.Addresses, drbdr.Status.Addresses) {
+		if err := r.patchDRBDRStatus(rf.Ctx(), drbdr, base, true); err != nil {
 			return rf.Fail(err)
 		}
 	}
