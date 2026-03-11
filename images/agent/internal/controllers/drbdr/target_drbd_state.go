@@ -17,6 +17,8 @@ limitations under the License.
 package drbdr
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"slices"
 	"strings"
@@ -171,8 +173,56 @@ func computeMinorActions(resourceName string, allocatedMinor *uint, iState Inten
 	}}
 }
 
+func generateDeviceUUID() string {
+	var buf [8]byte
+	rand.Read(buf[:])
+	return fmt.Sprintf("%016X", binary.BigEndian.Uint64(buf[:]))
+}
+
+// computeAttachActions implements the device-uuid decision table and returns the
+// sequence of actions to prepare metadata and attach the disk.
+func computeAttachActions(aState ActualNonAttachedDiskMetadata, statusUUID string, minor *uint, backingDev string) DRBDActions {
+	var actions DRBDActions
+
+	if aState.HasMetadata() {
+		diskUUID := aState.DiskDeviceUUID()
+		switch {
+		case diskUUID != "" && statusUUID == diskUUID:
+			// Match — proceed to attach.
+		case diskUUID != "" && statusUUID != "" && statusUUID != diskUUID:
+			return DRBDActions{FailAction{Err: ConfiguredReasonError(
+				fmt.Errorf("backing device %s has device-uuid %s, DRBDResource expects %s", backingDev, diskUUID, statusUUID),
+				v1alpha1.DRBDResourceCondConfiguredReasonForeignDiskDetected,
+			)}}
+		case diskUUID != "" && statusUUID == "":
+			// Adopt from disk — proceed to attach.
+		case diskUUID == "" && statusUUID != "":
+			actions = append(actions, WriteDeviceUUIDAction{Minor: minor, BackingDev: backingDev, UUID: statusUUID})
+		default:
+			actions = append(actions, WriteDeviceUUIDAction{Minor: minor, BackingDev: backingDev, UUID: generateDeviceUUID()})
+		}
+		actions = append(actions, ApplyALAction{Minor: minor, BackingDev: backingDev})
+	} else {
+		uuid := statusUUID
+		if uuid == "" {
+			uuid = generateDeviceUUID()
+		}
+		actions = append(actions,
+			CreateMetadataAction{Minor: minor, BackingDev: backingDev},
+			WriteDeviceUUIDAction{Minor: minor, BackingDev: backingDev, UUID: uuid},
+		)
+	}
+
+	actions = append(actions, AttachAction{
+		Minor:    minor,
+		LowerDev: backingDev,
+		MetaDev:  backingDev,
+		MetaIdx:  "internal",
+	})
+	return actions
+}
+
 // computeDiskActions handles all disk-related actions: detach, attach, and options.
-// It ensures the disk state converges to the intended state.
 func computeDiskActions(minor *uint, iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
 	actualDisk := ""
 	if len(aState.Volumes()) > 0 {
@@ -180,29 +230,17 @@ func computeDiskActions(minor *uint, iState IntendedDRBDState, aState ActualDRBD
 	}
 	intendedDisk := iState.BackingDisk()
 
-	// Detach if disk is different (including going diskless)
 	if actualDisk != "" && actualDisk != intendedDisk {
 		res = append(res, DetachAction{Minor: minor})
-		return // Don't attach in same cycle as detach
+		return
 	}
 
-	// Attach if needed (diskful with backing disk, but no current disk)
 	if actualDisk == "" && intendedDisk != "" && iState.Type() == v1alpha1.DRBDResourceTypeDiskful {
-		res = append(res, CreateMetadataAction{
-			Minor:      minor,
-			BackingDev: intendedDisk,
-		})
-		res = append(res, AttachAction{
-			Minor:    minor,
-			LowerDev: intendedDisk,
-			MetaDev:  intendedDisk, // same device for internal metadata
-			MetaIdx:  "internal",
-		})
+		res = append(res, computeAttachActions(aState, iState.StatusDeviceUUID(), minor, intendedDisk)...)
 		res = append(res, computeDiskOptionsAction(minor, iState)...)
 		return
 	}
 
-	// Reconcile disk options for existing attached disk
 	if actualDisk != "" {
 		res = append(res, computeDiskOptionsActionReconcile(iState, aState)...)
 	}

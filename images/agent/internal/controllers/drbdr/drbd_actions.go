@@ -104,7 +104,42 @@ func (a NewMinorAction) String() string {
 	return fmt.Sprintf("NewMinor(resource=%s, volume=%d, diskless=%t)", a.ResourceName, a.Volume, a.Diskless)
 }
 
-// CreateMetadataAction creates DRBD metadata on a backing device.
+// FailAction returns an error when executed, used to represent decision-table errors
+// (e.g. ForeignDiskDetected) as part of the action sequence.
+type FailAction struct {
+	Err error
+}
+
+func (a FailAction) Execute(_ context.Context) error { return a.Err }
+func (a FailAction) String() string                  { return fmt.Sprintf("Fail(%v)", a.Err) }
+
+// WriteDeviceUUIDAction runs drbdmeta write-dev-uuid.
+type WriteDeviceUUIDAction struct {
+	Minor      *uint
+	BackingDev string
+	UUID       string
+}
+
+func (a WriteDeviceUUIDAction) Execute(ctx context.Context) error {
+	if a.Minor == nil {
+		return ConfiguredReasonError(
+			fmt.Errorf("WriteDeviceUUIDAction: minor not set"),
+			v1alpha1.DRBDResourceCondConfiguredReasonWriteDevUUIDFailed,
+		)
+	}
+	err := drbdutils.ExecuteWriteDevUUID(ctx, *a.Minor, a.BackingDev, a.UUID)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonWriteDevUUIDFailed)
+}
+
+func (a WriteDeviceUUIDAction) String() string {
+	minor := "<nil>"
+	if a.Minor != nil {
+		minor = fmt.Sprintf("%d", *a.Minor)
+	}
+	return fmt.Sprintf("WriteDeviceUUID(minor=%s, backingDev=%s, uuid=%s)", minor, a.BackingDev, a.UUID)
+}
+
+// CreateMetadataAction runs drbdmeta create-md (dumb).
 type CreateMetadataAction struct {
 	Minor      *uint
 	BackingDev string
@@ -127,6 +162,31 @@ func (a CreateMetadataAction) String() string {
 		minor = fmt.Sprintf("%d", *a.Minor)
 	}
 	return fmt.Sprintf("CreateMetadata(minor=%s, backingDev=%s)", minor, a.BackingDev)
+}
+
+// ApplyALAction runs drbdmeta apply-al (replay activity log).
+type ApplyALAction struct {
+	Minor      *uint
+	BackingDev string
+}
+
+func (a ApplyALAction) Execute(ctx context.Context) error {
+	if a.Minor == nil {
+		return ConfiguredReasonError(
+			fmt.Errorf("ApplyALAction: minor not set"),
+			v1alpha1.DRBDResourceCondConfiguredReasonApplyALFailed,
+		)
+	}
+	err := drbdutils.ExecuteApplyAL(ctx, *a.Minor, a.BackingDev)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonApplyALFailed)
+}
+
+func (a ApplyALAction) String() string {
+	minor := "<nil>"
+	if a.Minor != nil {
+		minor = fmt.Sprintf("%d", *a.Minor)
+	}
+	return fmt.Sprintf("ApplyAL(minor=%s, backingDev=%s)", minor, a.BackingDev)
 }
 
 // AttachAction attaches a backing device to a volume.

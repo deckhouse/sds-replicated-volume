@@ -83,6 +83,9 @@ type IntendedDRBDState interface {
 
 	// SymlinkName returns the K8S name used for the stable device symlink path.
 	SymlinkName() string
+
+	// StatusDeviceUUID returns the current device-uuid from DRBDResource.Status.
+	StatusDeviceUUID() string
 }
 
 // IntendedPeer represents the intended state of a DRBD peer connection.
@@ -144,6 +147,7 @@ type intendedDRBDState struct {
 	role                    v1alpha1.DRBDRole
 	sizeBytes               int64
 	peers                   []IntendedPeer
+	statusDeviceUUID        string
 }
 
 func (s *intendedDRBDState) IsZero() bool              { return s == nil }
@@ -161,6 +165,7 @@ func (s *intendedDRBDState) AllowTwoPrimaries() bool       { return s.allowTwoPr
 func (s *intendedDRBDState) Role() v1alpha1.DRBDRole       { return s.role }
 func (s *intendedDRBDState) Size() int64                   { return s.sizeBytes }
 func (s *intendedDRBDState) Peers() []IntendedPeer         { return s.peers }
+func (s *intendedDRBDState) StatusDeviceUUID() string      { return s.statusDeviceUUID }
 
 // Hardcoded resource options defaults
 func (s *intendedDRBDState) AutoPromote() bool                  { return false }
@@ -285,5 +290,6 @@ func computeIntendedDRBDState(
 		role:                    drbdr.Spec.Role,
 		sizeBytes:               sizeBytes,
 		peers:                   peers,
+		statusDeviceUUID:        drbdr.Status.DeviceUUID,
 	}
 }

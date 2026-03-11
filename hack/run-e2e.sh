@@ -14,4 +14,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-go test -v -count 1 -timeout 90s -run '^TestDRBDResource$' github.com/deckhouse/sds-replicated-volume/e2e/agent 2>&1 | tee test.log
+go test -v -count 1 -timeout 120s -run '^TestDRBDResource$' github.com/deckhouse/sds-replicated-volume/e2e/agent 2>&1 | tee test.log

@@ -9,7 +9,6 @@ require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20251112082451-591b11c7b2da
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-00010101000000-000000000000
 	github.com/go-logr/logr v1.4.3
-	github.com/google/go-cmp v0.7.0
 	golang.org/x/sync v0.19.0
 	k8s.io/api v0.35.1
 	k8s.io/apimachinery v0.35.1
@@ -18,6 +17,7 @@ require (
 
 require (
 	github.com/google/btree v1.1.3 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/pilebones/go-udev v0.9.0 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	k8s.io/apiextensions-apiserver v0.34.3 // indirect

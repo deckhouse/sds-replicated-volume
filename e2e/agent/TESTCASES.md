@@ -30,6 +30,19 @@ TestDRBDResource
 │       LLV finalizer on the deletion path (intendedLLVName == attachedLLVName
 │       because spec doesn't change on delete).
 │
+├── DeviceUUID — DRBD metadata protection (parallel)
+│   │   Covers device-uuid decision table: never overwrite existing metadata (G1),
+│   │   never attach a foreign disk (G2).
+│   │
+│   ├── InitialCreation — no metadata, empty status → create-md and set UUID
+│   ├── Peered — two replicas, synced
+│   │   ├── ReattachMatchingUUID — metadata and UUID match → reattach
+│   │   ├── ZeroDiskUUID — metadata present, zero on disk, status has UUID → write to disk and attach
+│   │   └── ForeignDisk — metadata present, UUID mismatch → error (foreign disk)
+│   ├── AdoptFromDisk — metadata present, status empty → adopt UUID from disk
+│   ├── GenerateNewUUID — metadata present, zero on disk, status empty → generate and set UUID
+│   └── RecreateMetadata — no metadata, status has UUID → create-md and write status UUID
+│
 ├── R2 — two peered, synced replicas (parallel with R3, R4)
 │   │   Creates 2 diskful replicas on separate nodes. Links them as
 │   │   full-mesh peers (protocol C, shared secret). Runs CreateNewUUID
@@ -92,3 +105,6 @@ Every subtest's cleanup exercises a teardown path:
 - **DeleteDiskful**: deletes the DRBDResource directly while still diskful
   with an attached LLV. Verifies the agent releases the LLV finalizer on
   the deletion path. Parent cleanup deletes the orphaned LLV.
+
+- **ForeignDisk cleanup**: restores the correct device-uuid on disk after
+  writing a fake UUID. Verifies the agent recovers from the error.

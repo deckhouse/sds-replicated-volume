@@ -195,7 +195,7 @@ func (r *Reconciler) reconcileDRBDR(
 	// Phase 4: DRBD convergence
 	iState := computeIntendedDRBDState(drbdr, intendedDisk, upAndNotInCleanup)
 
-	aState, aErr := observeActualDRBDState(rf.Ctx(), DRBDResourceNameOnTheNode(drbdr))
+	aState, aErr := observeActualDRBDState(rf.Ctx(), DRBDResourceNameOnTheNode(drbdr), intendedDisk, drbdr.Status.DeviceUUID)
 	aErr = ConfiguredReasonError(aErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 
 	// Compute and execute DRBD actions
@@ -206,7 +206,7 @@ func (r *Reconciler) reconcileDRBDR(
 	// Refresh actual state if DRBD state was changed
 	var aErr2 error
 	if refreshNeeded {
-		aState, aErr2 = observeActualDRBDState(rf.Ctx(), DRBDResourceNameOnTheNode(drbdr))
+		aState, aErr2 = observeActualDRBDState(rf.Ctx(), DRBDResourceNameOnTheNode(drbdr), intendedDisk, drbdr.Status.DeviceUUID)
 		aErr2 = ConfiguredReasonError(aErr2, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 	}
 
