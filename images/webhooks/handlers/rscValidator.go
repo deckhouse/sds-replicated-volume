@@ -46,6 +46,20 @@ func RSCValidate(_ context.Context, _ *model.AdmissionReview, obj metav1.Object)
 		klog.Fatal(err)
 	}
 
+	// Reject new-style fields that require the new control plane.
+	if rsc.Spec.FailuresToTolerate != nil || rsc.Spec.GuaranteedMinimumDataRedundancy != nil {
+		return &kwhvalidating.ValidatorResult{Valid: false,
+			Message: "failuresToTolerate/guaranteedMinimumDataRedundancy require the new control plane; use the replication field instead."}, nil
+	}
+	if len(rsc.Spec.Storage.LVMVolumeGroups) > 0 {
+		return &kwhvalidating.ValidatorResult{Valid: false,
+			Message: "spec.storage requires the new control plane; use the storagePool field instead."}, nil
+	}
+	if rsc.Spec.StoragePool == "" { //nolint:staticcheck // legacy StoragePool field required by old controller
+		return &kwhvalidating.ValidatorResult{Valid: false,
+			Message: "spec.storagePool is required."}, nil
+	}
+
 	var clusterZoneList []string
 
 	nodes, _ := staticClient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
