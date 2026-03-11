@@ -18,6 +18,7 @@ package datamesh
 
 import (
 	"fmt"
+	"strings"
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -141,7 +142,7 @@ func guardMaxDiskMembers(gctx *globalContext, _ *ReplicaContext) dmte.GuardResul
 	if total >= maxDiskMembers {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("Cannot add replica with backing volume: %d/%d members with backing volume (%d current + %d pending)",
+			Message: fmt.Sprintf("maximum disk members reached (%d/%d, %d current + %d pending)",
 				total, maxDiskMembers, current, pending),
 		}
 	}
@@ -157,7 +158,7 @@ func guardRVNotDeleting(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult
 	if gctx.deletionTimestamp != nil {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Will not join datamesh: volume is being deleted",
+			Message: "volume is being deleted",
 		}
 	}
 	return dmte.GuardResult{}
@@ -168,7 +169,7 @@ func guardAddressesPopulated(_ *globalContext, rctx *ReplicaContext) dmte.GuardR
 	if rctx.rvr == nil || len(rctx.rvr.Status.Addresses) == 0 {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Waiting for replica addresses to be populated",
+			Message: "waiting for replica addresses to be populated",
 		}
 	}
 	return dmte.GuardResult{}
@@ -182,7 +183,7 @@ func guardNoMemberOnSameNode(gctx *globalContext, rctx *ReplicaContext) dmte.Gua
 		if rc.member != nil && rc.nodeName == rctx.nodeName {
 			return dmte.GuardResult{
 				Blocked: true,
-				Message: fmt.Sprintf("Will not join datamesh: %s member %s already present on node %s",
+				Message: fmt.Sprintf("%s member %s already present on node %s",
 					rc.member.Type, rc.member.Name, rc.nodeName),
 			}
 		}
@@ -195,7 +196,7 @@ func guardRSPAvailable(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult 
 	if gctx.rsp == nil {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Waiting for ReplicatedStoragePool to be available",
+			Message: "waiting for ReplicatedStoragePool to be available",
 		}
 	}
 	return dmte.GuardResult{}
@@ -207,13 +208,13 @@ func guardNodeEligible(_ *globalContext, rctx *ReplicaContext) dmte.GuardResult 
 	if rctx.gctx.rsp == nil {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Waiting for ReplicatedStoragePool to be available",
+			Message: "waiting for ReplicatedStoragePool to be available",
 		}
 	}
 	if rctx.getEligibleNode() == nil {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("Will not join datamesh: node %s is not in eligible nodes", rctx.nodeName),
+			Message: fmt.Sprintf("node %s is not in eligible nodes", rctx.nodeName),
 		}
 	}
 	return dmte.GuardResult{}
@@ -231,14 +232,13 @@ func guardNotAttached(_ *globalContext, rctx *ReplicaContext) dmte.GuardResult {
 	if rctx.member != nil && rctx.member.Attached {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Cannot remove: replica is attached, detach required first",
+			Message: "replica is attached, detach required first",
 		}
 	}
 	if rctx.attachmentTransition != nil {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("Cannot remove: %s transition in progress, wait for completion",
-				rctx.attachmentTransition.Type),
+			Message: strings.ToLower(string(rctx.attachmentTransition.Type)) + " transition in progress",
 		}
 	}
 	return dmte.GuardResult{}
@@ -256,7 +256,7 @@ func guardVolumeAccessLocalForDemotion(gctx *globalContext, rctx *ReplicaContext
 		gctx.configuration.VolumeAccess == v1alpha1.VolumeAccessLocal {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Cannot demote Diskful: volumeAccess=Local requires D on attached node",
+			Message: "volumeAccess=Local requires Diskful on attached node",
 		}
 	}
 	return dmte.GuardResult{}
@@ -274,7 +274,7 @@ func guardGMDRPreserved(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult
 	if adr <= targetGMDR {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("Would violate GMDR: ADR=%d, need > %d", adr, targetGMDR),
+			Message: fmt.Sprintf("would violate GMDR (ADR=%d, need > %d)", adr, targetGMDR),
 		}
 	}
 	return dmte.GuardResult{}
@@ -290,7 +290,7 @@ func guardFTTPreserved(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult 
 	if voters <= dMin {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("Would violate FTT: D_count=%d, need > %d", voters, dMin),
+			Message: fmt.Sprintf("would violate FTT (Diskful=%d, need > %d)", voters, dMin),
 		}
 	}
 	return dmte.GuardResult{}
@@ -341,7 +341,7 @@ func guardZonalSameZone(gctx *globalContext, rctx *ReplicaContext) dmte.GuardRes
 
 	return dmte.GuardResult{
 		Blocked: true,
-		Message: fmt.Sprintf("Zonal topology: zone %q does not match primary zone(s)", replicaZone),
+		Message: fmt.Sprintf("zone %q is not the primary zone for Zonal topology", replicaZone),
 	}
 }
 
@@ -402,7 +402,7 @@ func guardTransZonalVoterPlacement(gctx *globalContext, rctx *ReplicaContext) dm
 				return dmte.GuardResult{
 					Blocked: true,
 					Message: fmt.Sprintf(
-						"TransZonal: adding voter to zone %q would violate zone FTT — losing zone %s would leave %d D voters, q=%d, TB=%d",
+						"adding to zone %q would violate zone FTT (losing zone %q would leave %d Diskful voters, q=%d, TB=%d)",
 						addedZone, zone, dSurviving, qAfter, tbSurviving),
 				}
 			}
@@ -413,7 +413,7 @@ func guardTransZonalVoterPlacement(gctx *globalContext, rctx *ReplicaContext) dm
 			return dmte.GuardResult{
 				Blocked: true,
 				Message: fmt.Sprintf(
-					"TransZonal: adding voter to zone %q would violate zone GMDR — losing zone %s would leave %d D voters, need >= %d (qmr)",
+					"adding to zone %q would violate zone GMDR (losing zone %q would leave %d Diskful voters, need >= %d)",
 					addedZone, zone, dSurviving, qmr),
 			}
 		}
@@ -431,7 +431,7 @@ func guardTransZonalVoterPlacement(gctx *globalContext, rctx *ReplicaContext) dm
 				return dmte.GuardResult{
 					Blocked: true,
 					Message: fmt.Sprintf(
-						"TransZonal: adding voter to new zone %q would violate zone FTT — losing it would leave %d D voters, q=%d",
+						"adding to new zone %q would violate zone FTT (losing it would leave %d Diskful voters, q=%d)",
 						addedZone, dSurviving, qAfter),
 				}
 			}
@@ -440,7 +440,7 @@ func guardTransZonalVoterPlacement(gctx *globalContext, rctx *ReplicaContext) dm
 			return dmte.GuardResult{
 				Blocked: true,
 				Message: fmt.Sprintf(
-					"TransZonal: adding voter to new zone %q would violate zone GMDR — losing it would leave %d D voters, need >= %d (qmr)",
+					"adding to new zone %q would violate zone GMDR (losing it would leave %d Diskful voters, need >= %d)",
 					addedZone, dSurviving, qmr),
 			}
 		}
@@ -473,7 +473,7 @@ func guardTransZonalTBPlacement(gctx *globalContext, rctx *ReplicaContext) dmte.
 		return dmte.GuardResult{
 			Blocked: true,
 			Message: fmt.Sprintf(
-				"TransZonal: TB zone %q has %d D voters, must have ≤ 1",
+				"zone %q already has %d Diskful voters (TB zone must have at most 1)",
 				tbZone, votersInTBZone),
 		}
 	}
@@ -523,7 +523,7 @@ func guardZoneGMDRPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.Guar
 			return dmte.GuardResult{
 				Blocked: true,
 				Message: fmt.Sprintf(
-					"Would violate zone GMDR: losing zone %s after removal would leave %d UpToDate D, need > %d",
+					"would violate zone GMDR (losing zone %q after removal would leave %d UpToDate Diskful, need > %d)",
 					zone, surviving, targetGMDR),
 			}
 		}
@@ -579,7 +579,7 @@ func guardZoneFTTPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.Guard
 		return dmte.GuardResult{
 			Blocked: true,
 			Message: fmt.Sprintf(
-				"Would violate zone FTT: losing zone %s would leave %d D voters, q=%d, TB=%d",
+				"would violate zone FTT (losing zone %q would leave %d Diskful voters, q=%d, TB=%d)",
 				zone, dSurviving, qAfter, tbSurviving),
 		}
 	}
@@ -606,7 +606,7 @@ func guardTBSufficient(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult 
 	if tbs <= tbMin {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("TB required: D_count=%d even, FTT=%d = D/2", voters, targetFTT),
+			Message: fmt.Sprintf("TieBreaker required for quorum (Diskful=%d even, FTT=%d)", voters, targetFTT),
 		}
 	}
 	return dmte.GuardResult{}
@@ -642,7 +642,7 @@ func guardZoneTBSufficient(gctx *globalContext, rctx *ReplicaContext) dmte.Guard
 	}
 	return dmte.GuardResult{
 		Blocked: true,
-		Message: fmt.Sprintf("Would violate zone TB coverage for zone %s", removedZone),
+		Message: fmt.Sprintf("would violate zone TB coverage (zone %q)", removedZone),
 	}
 }
 
@@ -686,7 +686,7 @@ func guardMemberUnreachable(gctx *globalContext, rctx *ReplicaContext) dmte.Guar
 	if !connectedFrom.IsEmpty() {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("Force-removal blocked: member is reachable (connected from %d replica(s): [%s])",
+			Message: fmt.Sprintf("member is reachable (connected from %d replica(s): [%s])",
 				connectedFrom.Len(), connectedFrom),
 		}
 	}
@@ -708,7 +708,7 @@ func guardVotersEven(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
 	if voters%2 != 0 {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("Defense: expected even voters, got %d", voters),
+			Message: fmt.Sprintf("internal check: expected even voter count, got %d", voters),
 		}
 	}
 	return dmte.GuardResult{}
@@ -721,7 +721,7 @@ func guardVotersOdd(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
 	if voters%2 == 0 {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("Defense: expected odd voters, got %d", voters),
+			Message: fmt.Sprintf("internal check: expected odd voter count, got %d", voters),
 		}
 	}
 	return dmte.GuardResult{}
@@ -734,7 +734,7 @@ func guardQMRRaiseNeeded(gctx *globalContext, _ *ReplicaContext) dmte.GuardResul
 	if gctx.datamesh.quorumMinimumRedundancy >= targetQMR {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("Defense: qmr↑ not needed, qmr=%d >= target qmr=%d",
+			Message: fmt.Sprintf("internal check: qmr raise not needed (qmr=%d >= target %d)",
 				gctx.datamesh.quorumMinimumRedundancy, targetQMR),
 		}
 	}
@@ -748,7 +748,7 @@ func guardQMRLowerNeeded(gctx *globalContext, _ *ReplicaContext) dmte.GuardResul
 	if gctx.datamesh.quorumMinimumRedundancy <= targetQMR {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("Defense: qmr↓ not needed, qmr=%d <= target qmr=%d",
+			Message: fmt.Sprintf("internal check: qmr lower not needed (qmr=%d <= target %d)",
 				gctx.datamesh.quorumMinimumRedundancy, targetQMR),
 		}
 	}
@@ -766,7 +766,7 @@ func guardShadowDiskfulSupported(gctx *globalContext, _ *ReplicaContext) dmte.Gu
 	if !gctx.features.ShadowDiskful {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "ShadowDiskful not supported (requires Flant DRBD extension)",
+			Message: "ShadowDiskful not supported (requires Flant DRBD extension, non-voting disk option)",
 		}
 	}
 	return dmte.GuardResult{}

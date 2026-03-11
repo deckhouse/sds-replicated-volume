@@ -70,7 +70,7 @@ var _ = Describe("concurrencyTracker", func() {
 
 		allowed, reason, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership, "rv-1-3"))
 		Expect(allowed).To(BeFalse())
-		Expect(reason).To(ContainSubstring("Membership transition already"))
+		Expect(reason).To(ContainSubstring("membership transition in progress for this replica"))
 	})
 
 	It("allows attachment alongside membership on same member", func() {
@@ -132,7 +132,7 @@ var _ = Describe("concurrencyTracker", func() {
 
 		allowed, reason, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupQuorum, ""))
 		Expect(allowed).To(BeFalse())
-		Expect(reason).To(ContainSubstring("Cannot start ChangeQuorum"))
+		Expect(reason).To(ContainSubstring("voting membership transition in progress"))
 	})
 
 	It("allows Quorum when only non-voting membership is active", func() {
@@ -169,7 +169,7 @@ var _ = Describe("concurrencyTracker", func() {
 
 		allowed, reason, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership, "rv-1-5"))
 		Expect(allowed).To(BeFalse())
-		Expect(reason).To(ContainSubstring("Formation"))
+		Expect(reason).To(ContainSubstring("formation in progress"))
 	})
 
 	It("blocks duplicate multiattach", func() {
@@ -182,7 +182,7 @@ var _ = Describe("concurrencyTracker", func() {
 
 		allowed, reason, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupMultiattach, ""))
 		Expect(allowed).To(BeFalse())
-		Expect(reason).To(ContainSubstring("Multiattach transition is already"))
+		Expect(reason).To(ContainSubstring("multiattach transition in progress"))
 	})
 
 	It("blocks duplicate quorum", func() {
@@ -195,7 +195,7 @@ var _ = Describe("concurrencyTracker", func() {
 
 		allowed, reason, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupQuorum, ""))
 		Expect(allowed).To(BeFalse())
-		Expect(reason).To(ContainSubstring("ChangeQuorum transition is already"))
+		Expect(reason).To(ContainSubstring("quorum change in progress"))
 	})
 
 	It("blocks duplicate formation", func() {
@@ -208,7 +208,7 @@ var _ = Describe("concurrencyTracker", func() {
 
 		allowed, reason, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupFormation, ""))
 		Expect(allowed).To(BeFalse())
-		Expect(reason).To(ContainSubstring("Formation"))
+		Expect(reason).To(ContainSubstring("formation in progress"))
 	})
 
 	It("blocks per-member attachment when same replica has active attachment", func() {
@@ -221,7 +221,7 @@ var _ = Describe("concurrencyTracker", func() {
 
 		allowed, reason, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, "rv-1-3"))
 		Expect(allowed).To(BeFalse())
-		Expect(reason).To(ContainSubstring("Attachment transition already"))
+		Expect(reason).To(ContainSubstring("attachment transition in progress for this replica"))
 	})
 
 	It("Remove unblocks subsequent CanAdmit", func() {
@@ -254,7 +254,7 @@ var _ = Describe("concurrencyTracker", func() {
 
 		allowed, reason, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupEmergency, "rv-1-5"))
 		Expect(allowed).To(BeFalse())
-		Expect(reason).To(ContainSubstring("Formation"))
+		Expect(reason).To(ContainSubstring("formation in progress"))
 	})
 
 	It("blocks VotingMembership when Quorum is active", func() {
@@ -267,7 +267,7 @@ var _ = Describe("concurrencyTracker", func() {
 
 		allowed, reason, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership, "rv-1-0"))
 		Expect(allowed).To(BeFalse())
-		Expect(reason).To(ContainSubstring("ChangeQuorum"))
+		Expect(reason).To(ContainSubstring("quorum change in progress"))
 	})
 
 	It("allows Attachment when Quorum is active", func() {
@@ -431,7 +431,7 @@ var _ = Describe("concurrencyTracker", func() {
 
 		allowed, reason, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership, "rv-1-0"))
 		Expect(allowed).To(BeFalse())
-		Expect(reason).To(ContainSubstring("Network"))
+		Expect(reason).To(ContainSubstring("network transition in progress"))
 	})
 
 	It("Network blocks Quorum", func() {
@@ -444,7 +444,7 @@ var _ = Describe("concurrencyTracker", func() {
 
 		allowed, reason, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupQuorum, ""))
 		Expect(allowed).To(BeFalse())
-		Expect(reason).To(ContainSubstring("Network"))
+		Expect(reason).To(ContainSubstring("network transition in progress"))
 	})
 
 	It("VotingMembership does NOT block Network", func() {
@@ -481,7 +481,7 @@ var _ = Describe("concurrencyTracker", func() {
 
 		allowed, reason, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork, ""))
 		Expect(allowed).To(BeFalse())
-		Expect(reason).To(ContainSubstring("Network transition is already"))
+		Expect(reason).To(ContainSubstring("network transition in progress"))
 	})
 
 	It("Network does NOT block NonVotingMembership", func() {

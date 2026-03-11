@@ -165,7 +165,7 @@ func guardAttachNotDeleting(gctx *globalContext, _ *ReplicaContext) dmte.GuardRe
 	if gctx.deletionTimestamp != nil {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Volume is being deleted",
+			Message: "volume is being deleted",
 			Details: v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonReplicatedVolumeDeleting,
 		}
 	}
@@ -180,7 +180,7 @@ func guardSlotAvailable(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult
 	if occupied >= int(gctx.maxAttachments) {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("Waiting for attachment slot (%d/%d occupied)", occupied, gctx.maxAttachments),
+			Message: fmt.Sprintf("waiting for attachment slot (%d/%d occupied)", occupied, gctx.maxAttachments),
 			Details: v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending,
 		}
 	}
@@ -193,7 +193,7 @@ func guardMaxAttachmentsAllowsMultiattach(gctx *globalContext) dmte.GuardResult 
 	if gctx.maxAttachments <= 1 {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Multiattach not needed: maxAttachments is 1",
+			Message: "maxAttachments is 1",
 		}
 	}
 	return dmte.GuardResult{}
@@ -205,7 +205,7 @@ func guardCanDisableMultiattach(gctx *globalContext) dmte.GuardResult {
 	if gctx.potentiallyAttached.Len() > 1 {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("Cannot disable multiattach: %d nodes potentially attached", gctx.potentiallyAttached.Len()),
+			Message: fmt.Sprintf("%d nodes potentially attached", gctx.potentiallyAttached.Len()),
 		}
 	}
 	return dmte.GuardResult{}
@@ -217,7 +217,7 @@ func guardQuorumSatisfied(gctx *globalContext, _ *ReplicaContext) dmte.GuardResu
 	if !gctx.isQuorumSatisfied() {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Quorum not satisfied: " + gctx.quorumDiagnostic,
+			Message: "quorum not satisfied: " + gctx.quorumDiagnostic,
 			Details: v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending,
 		}
 	}
@@ -231,7 +231,7 @@ func guardNodeOperational(_ *globalContext, rctx *ReplicaContext) dmte.GuardResu
 	if rctx.gctx.rsp == nil {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Waiting for ReplicatedStoragePool to be available",
+			Message: "waiting for ReplicatedStoragePool to be available",
 			Details: v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending,
 		}
 	}
@@ -240,14 +240,14 @@ func guardNodeOperational(_ *globalContext, rctx *ReplicaContext) dmte.GuardResu
 		if rctx.gctx.replicatedStorageClassName != "" {
 			return dmte.GuardResult{
 				Blocked: true,
-				Message: fmt.Sprintf("Node %s is not eligible for storage class %s (pool %s)",
+				Message: fmt.Sprintf("node %s is not eligible for storage class %s (pool %s)",
 					rctx.nodeName, rctx.gctx.replicatedStorageClassName, rctx.gctx.configuration.ReplicatedStoragePoolName),
 				Details: v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonNodeNotEligible,
 			}
 		}
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("Node %s is not eligible for pool %s",
+			Message: fmt.Sprintf("node %s is not eligible for pool %s",
 				rctx.nodeName, rctx.gctx.configuration.ReplicatedStoragePoolName),
 			Details: v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonNodeNotEligible,
 		}
@@ -255,14 +255,14 @@ func guardNodeOperational(_ *globalContext, rctx *ReplicaContext) dmte.GuardResu
 	if !en.NodeReady {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Node is not ready",
+			Message: "node is not ready",
 			Details: v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending,
 		}
 	}
 	if !en.AgentReady {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Agent is not ready on node",
+			Message: "agent is not ready on node",
 			Details: v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonPending,
 		}
 	}
@@ -274,13 +274,13 @@ func guardRVRReady(_ *globalContext, rctx *ReplicaContext) dmte.GuardResult {
 	if rctx.rvr == nil {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Waiting for replica",
+			Message: "waiting for replica",
 			Details: v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica,
 		}
 	}
 	if !obju.StatusCondition(rctx.rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType).IsTrue().Eval() {
 		cond := obju.GetStatusCondition(rctx.rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
-		msg := "Waiting for replica to become Ready"
+		msg := "waiting for replica to become Ready"
 		if cond != nil && cond.Message != "" {
 			msg += ": " + cond.Reason + " — " + cond.Message
 		}
@@ -314,14 +314,14 @@ func guardVolumeAccessLocalForAttach(gctx *globalContext, rctx *ReplicaContext) 
 	if gctx.replicatedStorageClassName != "" {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("No Diskful replica on this node (volumeAccess is Local for storage class %s)",
+			Message: fmt.Sprintf("no Diskful replica on this node (volumeAccess is Local for storage class %s)",
 				gctx.replicatedStorageClassName),
 			Details: v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonVolumeAccessLocalityNotSatisfied,
 		}
 	}
 	return dmte.GuardResult{
 		Blocked: true,
-		Message: "No Diskful replica on this node (volumeAccess is Local)",
+		Message: "no Diskful replica on this node (volumeAccess is Local)",
 		Details: v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonVolumeAccessLocalityNotSatisfied,
 	}
 }
@@ -335,14 +335,14 @@ func guardMemberExists(_ *globalContext, rctx *ReplicaContext) dmte.GuardResult 
 	reason := v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica
 
 	if rctx.rvr == nil {
-		return dmte.GuardResult{Blocked: true, Message: "Waiting for replica on node", Details: reason}
+		return dmte.GuardResult{Blocked: true, Message: "waiting for replica on node", Details: reason}
 	}
 
 	// RVR exists — check membership request progress.
 	if rctx.membershipRequest != nil &&
 		rctx.membershipRequest.Request.Operation == v1alpha1.DatameshMembershipRequestOperationJoin {
 		return dmte.GuardResult{Blocked: true, Message: fmt.Sprintf(
-			"Waiting for replica [#%d] to join datamesh: %s",
+			"waiting for replica [#%d] to join datamesh: %s",
 			rctx.id, rctx.membershipRequest.Message), Details: reason}
 	}
 
@@ -350,12 +350,12 @@ func guardMemberExists(_ *globalContext, rctx *ReplicaContext) dmte.GuardResult 
 	readyCond := obju.GetStatusCondition(rctx.rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
 	if readyCond != nil && readyCond.Message != "" {
 		return dmte.GuardResult{Blocked: true, Message: fmt.Sprintf(
-			"Waiting for replica [#%d] to join datamesh: %s — %s",
+			"waiting for replica [#%d] to join datamesh: %s — %s",
 			rctx.id, readyCond.Reason, readyCond.Message), Details: reason}
 	}
 
 	return dmte.GuardResult{Blocked: true, Message: fmt.Sprintf(
-		"Waiting for replica [#%d] to join datamesh", rctx.id), Details: reason}
+		"waiting for replica [#%d] to join datamesh", rctx.id), Details: reason}
 }
 
 // guardNoActiveMembershipTransition blocks if the replica has an active
@@ -364,7 +364,7 @@ func guardNoActiveMembershipTransition(_ *globalContext, rctx *ReplicaContext) d
 	if rctx.membershipTransition != nil {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Waiting for membership transition to complete",
+			Message: "waiting for membership transition to complete",
 			Details: v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica,
 		}
 	}
@@ -376,7 +376,7 @@ func guardDeviceNotInUse(_ *globalContext, rctx *ReplicaContext) dmte.GuardResul
 	if rctx.rvr != nil && rctx.rvr.Status.Attachment != nil && rctx.rvr.Status.Attachment.InUse {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Device in use, detach blocked",
+			Message: "device is in use",
 			Details: v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching,
 		}
 	}

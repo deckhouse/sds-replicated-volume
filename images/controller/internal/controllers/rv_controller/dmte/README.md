@@ -105,8 +105,9 @@ Slots serve two purposes:
 
 A **Guard** is a precondition check evaluated before creating a transition.
 Guards are registered on plans and evaluated in order — the first blocking
-guard stops the pipeline. The guard's message and details are written to the
-slot for user visibility.
+guard stops the pipeline. The engine composes the guard's reason with the
+plan display name via `composeBlocked` (`"{plan} is blocked: {reason}"`)
+and writes the composed message to the slot for user visibility.
 
 ### Tracker
 
@@ -225,11 +226,11 @@ flowchart TD
     BlockedMsg --> Blocked([return nil, reason])
 
     Conflict -->|no| Guards[Evaluate guards]
-    Guards -->|blocked| GuardMsg[Set guard message]
+    Guards -->|blocked| GuardMsg["composeBlocked + SetStatus"]
     GuardMsg --> Blocked
 
     Guards -->|pass| Tracker[Tracker.CanAdmit]
-    Tracker -->|denied| TrackerMsg[Set tracker message]
+    Tracker -->|denied| TrackerMsg["composeBlocked + SetStatus"]
     TrackerMsg --> Blocked
 
     Tracker -->|allowed| Create[Create transition]
@@ -241,8 +242,11 @@ flowchart TD
     Status --> Success(["return transition, ''"])
 ```
 
-At each gate (slot conflict, guards, tracker), a blocked result writes the
-reason to the slot and returns `(nil, reason)` — no transition is created.
+At each gate (slot conflict, guards, tracker), a blocked result writes a
+composed message to the slot and returns `(nil, composedMessage)` — no
+transition is created. Guard and tracker messages are composed via
+`composeBlocked("{plan} is blocked: {reason}"); slot conflicts use
+`composeBlockedByActive`.
 
 ### Process
 
@@ -533,9 +537,19 @@ The outer loop in `Process` re-runs `settleTransitions` as long as any
 transition was advanced or completed (`progressed == true`), because
 completing one transition may unblock another.
 
-### Progress Messages
+### Message Composition
 
-`confirmStep` generates messages in two layers:
+All messages written to `slot.SetStatus` are composed by the engine —
+guards, tracker, and step callbacks return raw content that the engine
+wraps with the plan display name. Three compose functions in `message.go`:
+
+| Function | When | Format |
+|----------|------|--------|
+| `composeProgressMessage` | Active transition settle | `"{plan}: {progress}"` or `"{plan} (step N/M: {step}): {progress}"` |
+| `composeBlockedByActive` | Slot conflict (different type active) | `"{newPlan}: waiting for {activePlan} to complete[. {stepMsg}]"` |
+| `composeBlocked` | Guard or tracker blocked | `"{plan} is blocked: {reason}"` |
+
+**Progress messages** are generated in two layers:
 
 1. **Raw progress** via `generateProgressMessage` — e.g.,
    `"3/4 replicas confirmed revision 7. Waiting: [#2]. Errors: #2 DRBDConfigured/SomeReason: msg"`

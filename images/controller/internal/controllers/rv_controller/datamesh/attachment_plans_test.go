@@ -87,7 +87,7 @@ var _ = Describe("Attach", func() {
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		rc := findReplicaContext(replicas, 0)
-		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("Quorum not satisfied"))
+		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("quorum not satisfied"))
 	})
 
 	It("guard: slot full", func() {
@@ -176,7 +176,7 @@ var _ = Describe("Attach", func() {
 		// Dispatcher dispatches Attach → guardMemberExists blocks.
 		for i := range replicas {
 			if replicas[i].nodeName == "node-1" {
-				Expect(replicas[i].AttachmentConditionMessage()).To(ContainSubstring("Waiting"))
+				Expect(replicas[i].AttachmentConditionMessage()).To(ContainSubstring("waiting"))
 				break
 			}
 		}
@@ -213,7 +213,7 @@ var _ = Describe("Attach", func() {
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		rc := findReplicaContext(replicas, 0)
-		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("Node is not ready"))
+		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("node is not ready"))
 	})
 
 	It("guard: agent not ready", func() {
@@ -231,7 +231,7 @@ var _ = Describe("Attach", func() {
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		rc := findReplicaContext(replicas, 0)
-		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("Agent is not ready"))
+		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("agent is not ready"))
 	})
 
 	It("guard: RVR not Ready", func() {
@@ -337,7 +337,7 @@ var _ = Describe("Attach", func() {
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		rc := findReplicaContext(replicas, 0)
-		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("Waiting for replica"))
+		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("waiting for replica"))
 	})
 
 	It("guard: RVR not Ready with condition message", func() {
@@ -617,7 +617,7 @@ var _ = Describe("Detach", func() {
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		rc := findReplicaContext(replicas, 0)
-		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("Device in use"))
+		Expect(rc.AttachmentConditionMessage()).To(ContainSubstring("device is in use"))
 	})
 
 	It("no transition for non-member node with deleting RVA", func() {

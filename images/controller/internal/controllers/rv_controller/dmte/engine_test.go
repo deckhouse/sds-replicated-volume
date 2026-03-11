@@ -219,7 +219,7 @@ var _ = Describe("Process", func() {
 
 		Expect(changed).To(BeFalse())
 		Expect(e.Finalize()).To(BeEmpty())
-		Expect(slot.statusMessages[5]).To(Equal("node not eligible"))
+		Expect(slot.statusMessages[5]).To(Equal("Joining is blocked: node not eligible"))
 	})
 
 	It("dispatch blocked by tracker writes message to slot", func() {
@@ -246,7 +246,7 @@ var _ = Describe("Process", func() {
 
 		Expect(changed).To(BeFalse())
 		Expect(e.Finalize()).To(BeEmpty())
-		Expect(slot.statusMessages[5]).To(Equal("blocked by quorum"))
+		Expect(slot.statusMessages[5]).To(Equal("Joining is blocked: blocked by quorum"))
 	})
 
 	It("dispatch slot conflict with unknown active plan uses empty display name", func() {
@@ -647,7 +647,7 @@ var _ = Describe("CreateReplicaTransition", func() {
 		t, reason := e.CreateReplicaTransition("AddReplica", "access/v1", 5)
 
 		Expect(t).To(BeNil())
-		Expect(reason).To(Equal("not ready"))
+		Expect(reason).To(Equal("Joining is blocked: not ready"))
 	})
 
 	It("blocks when tracker denies admission", func() {
@@ -669,7 +669,7 @@ var _ = Describe("CreateReplicaTransition", func() {
 		t, reason := e.CreateReplicaTransition("AddReplica", "access/v1", 5)
 
 		Expect(t).To(BeNil())
-		Expect(reason).To(Equal("blocked by quorum"))
+		Expect(reason).To(Equal("Joining is blocked: blocked by quorum"))
 	})
 
 	It("silently ignores when same type is already active on the slot", func() {
@@ -786,7 +786,7 @@ var _ = Describe("CreateGlobalTransition", func() {
 		t, reason := e.CreateGlobalTransition("ChangeQuorum", "qmr/v1")
 
 		Expect(t).To(BeNil())
-		Expect(reason).To(Equal("not safe"))
+		Expect(reason).To(Equal("Changing quorum is blocked: not safe"))
 	})
 
 	It("blocks when tracker denies admission", func() {
@@ -806,7 +806,7 @@ var _ = Describe("CreateGlobalTransition", func() {
 		t, reason := e.CreateGlobalTransition("ChangeQuorum", "qmr/v1")
 
 		Expect(t).To(BeNil())
-		Expect(reason).To(Equal("quorum change in progress"))
+		Expect(reason).To(Equal("Changing quorum is blocked: quorum change in progress"))
 	})
 
 	It("panics on unknown plan", func() {

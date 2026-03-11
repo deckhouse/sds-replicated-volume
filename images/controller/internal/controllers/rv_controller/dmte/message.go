@@ -88,7 +88,7 @@ func generateProgressMessage[G any, R ReplicaCtx, C ContextProvider[G, R]](
 			}
 			msg.WriteByte('#')
 			msg.WriteString(strconv.Itoa(int(id)))
-			msg.WriteString(" Replica not found")
+			msg.WriteString(" replica not found")
 			errorGroups++
 			continue
 		}
@@ -152,6 +152,20 @@ func composeProgressMessage(planName, stepName string, stepIdx, totalSteps int, 
 		return planName + ": " + rawProgress
 	}
 	return planName + " (step " + strconv.Itoa(stepIdx+1) + "/" + strconv.Itoa(totalSteps) + ": " + stepName + "): " + rawProgress
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// composeBlocked
+//
+
+// composeBlocked builds a blocked message by prepending the plan's display name.
+//
+// Format:
+//
+//	"{planName} is blocked: {reason}"
+//	→ "Removing diskful replica is blocked: would violate GMDR (ADR=1, need > 1)"
+func composeBlocked(planName, reason string) string {
+	return planName + " is blocked: " + reason
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

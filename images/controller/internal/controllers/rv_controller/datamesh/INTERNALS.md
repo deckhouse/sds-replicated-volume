@@ -301,7 +301,12 @@ Each accessor implements `dmte.ReplicaSlotAccessor[*ReplicaContext]`:
 The engine uses slots for:
 - **Init** — populates slot pointers from existing transitions during `NewEngine`.
 - **Conflict detection** — same transition type active on slot → silent ignore (preserves settle progress). Different type → "blocked by active" message via `SetStatus`.
-- **Status routing** — all status output (guards, tracker, progress, blocked) flows through `SetStatus`.
+- **Status routing** — all status output flows through `SetStatus`. The engine composes messages before calling `SetStatus`:
+  - **Progress**: `composeProgressMessage` — `"{plan}: {progress}"` or `"{plan} (step N/M: {step}): {progress}"`
+  - **Blocked by active**: `composeBlockedByActive` — `"{plan}: waiting for {active} to complete"`
+  - **Blocked by guard/tracker**: `composeBlocked` — `"{plan} is blocked: {reason}"`
+
+  Guard and tracker messages return only the reason (lowercase); the engine prepends the plan display name. The slot receives the fully composed message.
 
 ---
 
@@ -504,7 +509,10 @@ returns whether the value changed. Used in apply callbacks for the `bool` return
 
 ### 9.3 Guard Groups
 
-Guards are organized into predefined slices for reuse across plans:
+Guards are organized into predefined slices for reuse across plans. Each guard
+returns a lowercase reason string; the engine wraps it with the plan display
+name via `composeBlocked` (see §6). For the full list of guard messages, see
+[TRANSITIONS.md](TRANSITIONS.md) §8–§9.
 
 | Slice | Used by | Guards |
 |-------|---------|--------|

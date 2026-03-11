@@ -402,12 +402,13 @@ func ensureStatusDatameshRequestAndConfiguredCond(
 	// Compute target (single call for both status fields).
 	target, condReason, condMessage := computeTargetDatameshRequest(rvr, rv, rspView)
 
-	// Append RV datamesh pending transition message to condition message if there's a pending transition.
+	// Use datamesh message as the condition message if available (it is self-contained,
+	// composed by the datamesh transition engine with plan name and blocked/progress context).
 	if target != nil && rv != nil {
 		for i := range rv.Status.DatameshReplicaRequests {
 			if rv.Status.DatameshReplicaRequests[i].Name == rvr.Name {
 				if msg := rv.Status.DatameshReplicaRequests[i].Message; msg != "" {
-					condMessage += ": " + msg
+					condMessage = msg
 				}
 				break
 			}
