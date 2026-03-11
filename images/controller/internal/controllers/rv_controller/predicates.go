@@ -203,11 +203,13 @@ func rvrPredicates() []predicate.Predicate {
 				// - Scheduled: scheduling progress (preconfigure phase)
 				// - DRBDConfigured: DRBD configuration progress (preconfigure + establish-connectivity phases)
 				// - SatisfyEligibleNodes: misplaced replica detection (preconfigure phase)
+				// - Ready: attachment guards + RVA ReplicaReady/message updates
 				if !obju.AreConditionsSemanticallyEqual(
 					oldRVR, newRVR,
 					v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
 					v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
 					v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
+					v1alpha1.ReplicatedVolumeReplicaCondReadyType,
 				) {
 					return true
 				}

@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
@@ -770,6 +771,52 @@ var _ = Describe("rvrPredicates", func() {
 					Finalizers: []string{"test-finalizer"},
 				},
 			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRVR,
+				ObjectNew: newRVR,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when Ready condition status changes", func() {
+			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			}
+			obju.SetStatusCondition(oldRVR, metav1.Condition{
+				Type: v1alpha1.ReplicatedVolumeReplicaCondReadyType, Status: metav1.ConditionTrue, Reason: "Ready",
+			})
+			newRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			}
+			obju.SetStatusCondition(newRVR, metav1.Condition{
+				Type: v1alpha1.ReplicatedVolumeReplicaCondReadyType, Status: metav1.ConditionFalse, Reason: "QuorumLost",
+			})
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRVR,
+				ObjectNew: newRVR,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when Ready condition message changes", func() {
+			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			}
+			obju.SetStatusCondition(oldRVR, metav1.Condition{
+				Type: v1alpha1.ReplicatedVolumeReplicaCondReadyType, Status: metav1.ConditionTrue, Reason: "Ready", Message: "old",
+			})
+			newRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			}
+			obju.SetStatusCondition(newRVR, metav1.Condition{
+				Type: v1alpha1.ReplicatedVolumeReplicaCondReadyType, Status: metav1.ConditionTrue, Reason: "Ready", Message: "new",
+			})
 			e := event.TypedUpdateEvent[client.Object]{
 				ObjectOld: oldRVR,
 				ObjectNew: newRVR,

@@ -172,7 +172,6 @@ spec:
                 - Attaching
                 - Attached
                 - Detaching
-                - Detached
                 - Deleting
                 type: string
             type: object

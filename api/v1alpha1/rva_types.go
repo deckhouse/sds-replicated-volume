@@ -89,7 +89,7 @@ type ReplicatedVolumeAttachmentStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// Phase is a quick operational state summary.
-	// +kubebuilder:validation:Enum=Pending;Attaching;Attached;Detaching;Detached;Deleting
+	// +kubebuilder:validation:Enum=Pending;Attaching;Attached;Detaching;Deleting
 	// +optional
 	Phase ReplicatedVolumeAttachmentPhase `json:"phase,omitempty"`
 
@@ -127,8 +127,6 @@ const (
 	ReplicatedVolumeAttachmentPhaseAttached ReplicatedVolumeAttachmentPhase = "Attached"
 	// ReplicatedVolumeAttachmentPhaseDetaching indicates the volume is being detached from the node.
 	ReplicatedVolumeAttachmentPhaseDetaching ReplicatedVolumeAttachmentPhase = "Detaching"
-	// ReplicatedVolumeAttachmentPhaseDetached indicates the volume has been detached from the node.
-	ReplicatedVolumeAttachmentPhaseDetached ReplicatedVolumeAttachmentPhase = "Detached"
 	// ReplicatedVolumeAttachmentPhaseDeleting indicates the attachment is being deleted.
 	ReplicatedVolumeAttachmentPhaseDeleting ReplicatedVolumeAttachmentPhase = "Deleting"
 )
