@@ -34,9 +34,11 @@ func TestDRBDResource(t *testing.T) {
 	var podLogOpts kubetesting.PodLogMonitorOptions
 	e.Options(&podLogOpts)
 	podsLogs := kubetesting.SetupPodsLogWatcher(e, cl, cs, podLogOpts)
-	kubetesting.SetupErrorLogsWatcher(e, podsLogs)
+	logWatcher := kubetesting.SetupErrorLogsWatcher(e, podsLogs)
 
 	cluster := suite.DiscoverCluster(e, cl)
+
+	nodeExec := kubetesting.DiscoverNodeExec(e, cs, podLogOpts)
 
 	e.Run("R1", func(e envtesting.E) {
 		drbdr, _ := suite.SetupDisklessToDiskfulReplica(e, cl, cluster, "r1", 0)
@@ -57,6 +59,14 @@ func TestDRBDResource(t *testing.T) {
 	e.Run("DeleteDiskful", func(e envtesting.E) {
 		drbdr, llv := suite.SetupDisklessToDiskfulReplica(e, cl, cluster, "dd", 0)
 		suite.SetupDeleteDiskful(e, cl, drbdr, llv)
+	})
+
+	e.Run("DeviceUUID", func(e envtesting.E) {
+		e.Parallel()
+		if len(cluster.Nodes) < 2 {
+			e.Skipf("DeviceUUID requires at least 2 nodes, got %d", len(cluster.Nodes))
+		}
+		suite.SetupDT(e, cl, cluster, nodeExec, logWatcher)
 	})
 
 	for _, tc := range []struct {
