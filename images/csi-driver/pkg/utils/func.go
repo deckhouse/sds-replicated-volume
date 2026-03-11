@@ -219,6 +219,15 @@ func GetReplicatedVolume(ctx context.Context, kc client.Client, name string) (*s
 	return rv, err
 }
 
+func hasFormationTransition(transitions []srv.ReplicatedVolumeDatameshTransition) bool {
+	for i := range transitions {
+		if transitions[i].Type == srv.ReplicatedVolumeDatameshTransitionTypeFormation {
+			return true
+		}
+	}
+	return false
+}
+
 // WaitForReplicatedVolumeReady waits for ReplicatedVolume to become ready
 func WaitForReplicatedVolumeReady(
 	ctx context.Context,
@@ -226,41 +235,37 @@ func WaitForReplicatedVolumeReady(
 	log *logger.Logger,
 	traceID, name string,
 ) (int, error) {
-	// var attemptCounter int
+	var attemptCounter int
 	log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Waiting for ReplicatedVolume to become ready", traceID, name))
-	return 0, nil
-	// for {
-	// attemptCounter++
-	// select {
-	// case <-ctx.Done():
-	// 	log.Warning(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] context done. Failed to wait for ReplicatedVolume", traceID, name))
-	// 	return attemptCounter, ctx.Err()
-	// default:
-	// 	time.Sleep(500 * time.Millisecond)
-	// }
+	for {
+		attemptCounter++
+		select {
+		case <-ctx.Done():
+			log.Warning(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] context done. Failed to wait for ReplicatedVolume", traceID, name))
+			return attemptCounter, ctx.Err()
+		default:
+			time.Sleep(500 * time.Millisecond)
+		}
 
-	// rv, err := GetReplicatedVolume(ctx, kc, name)
-	// if err != nil {
-	// 	return attemptCounter, err
-	// }
+		rv, err := GetReplicatedVolume(ctx, kc, name)
+		if err != nil {
+			return attemptCounter, err
+		}
 
-	// if attemptCounter%10 == 0 {
-	// 	log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Attempt: %d, ReplicatedVolume: %+v", traceID, name, attemptCounter, rv))
-	// }
+		if attemptCounter%10 == 0 {
+			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Attempt: %d, ReplicatedVolume: %+v", traceID, name, attemptCounter, rv))
+		}
 
-	// if rv.DeletionTimestamp != nil {
-	// 	return attemptCounter, fmt.Errorf("failed to create ReplicatedVolume %s, reason: ReplicatedVolume is being deleted", name)
-	// }
+		if rv.DeletionTimestamp != nil {
+			return attemptCounter, fmt.Errorf("failed to create ReplicatedVolume %s, reason: ReplicatedVolume is being deleted", name)
+		}
 
-	// return attemptCounter, nil
-
-	// readyCond := meta.FindStatusCondition(rv.Status.Conditions, srv.ReplicatedVolumeCondIOReadyType)
-	// if readyCond != nil && readyCond.Status == metav1.ConditionTrue {
-	// 	log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] ReplicatedVolume is IOReady", traceID, name))
-	// 	return attemptCounter, nil
-	// }
-	// log.Trace(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Attempt %d, ReplicatedVolume not IOReady yet. Waiting...", traceID, name, attemptCounter))
-	// }
+		if rv.Status.DatameshRevision > 0 && !hasFormationTransition(rv.Status.DatameshTransitions) {
+			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] ReplicatedVolume is ready (datameshRevision=%d, no Formation transition)", traceID, name, rv.Status.DatameshRevision))
+			return attemptCounter, nil
+		}
+		log.Trace(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Attempt %d, ReplicatedVolume not ready yet (datameshRevision=%d, hasFormation=%v). Waiting...", traceID, name, attemptCounter, rv.Status.DatameshRevision, hasFormationTransition(rv.Status.DatameshTransitions)))
+	}
 }
 
 // DeleteReplicatedVolume deletes a ReplicatedVolume resource

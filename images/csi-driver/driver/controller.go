@@ -91,7 +91,10 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] WFFC binding: creating early RVA for preferred node", traceID, volumeID, preferredNode))
 		_, err := utils.EnsureRVA(ctx, d.cl, d.log, traceID, volumeID, preferredNode)
 		if err != nil {
-			d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] Failed to create early RVA (non-fatal)", traceID, volumeID, preferredNode))
+			d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] Failed to create ReplicatedVolumeAttachment for WFFC-selected node", traceID, volumeID, preferredNode))
+			return nil, status.Errorf(codes.Internal,
+				"failed to create ReplicatedVolumeAttachment for volume %q on WFFC-selected node %q: %v",
+				volumeID, preferredNode, err)
 		}
 	}
 
