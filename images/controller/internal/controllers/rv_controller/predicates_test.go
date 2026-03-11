@@ -20,6 +20,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -817,6 +818,131 @@ var _ = Describe("rvrPredicates", func() {
 			obju.SetStatusCondition(newRVR, metav1.Condition{
 				Type: v1alpha1.ReplicatedVolumeReplicaCondReadyType, Status: metav1.ConditionTrue, Reason: "Ready", Message: "new",
 			})
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRVR,
+				ObjectNew: newRVR,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when Quorum changes", func() {
+			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			}
+			newRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Quorum: ptr.To(true),
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRVR,
+				ObjectNew: newRVR,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when Attachment appears", func() {
+			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			}
+			newRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Attachment: &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+						DevicePath: "/dev/drbd1000",
+					},
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRVR,
+				ObjectNew: newRVR,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when Attachment.InUse changes", func() {
+			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Attachment: &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+						DevicePath: "/dev/drbd1000",
+						InUse:      false,
+					},
+				},
+			}
+			newRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Attachment: &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{
+						DevicePath: "/dev/drbd1000",
+						InUse:      true,
+					},
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRVR,
+				ObjectNew: newRVR,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when Peers ConnectionEstablishedOn changes", func() {
+			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Peers: []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+						{Name: "rvr-2", ConnectionState: v1alpha1.ConnectionStateConnected, ConnectionEstablishedOn: []string{"net-A"}},
+					},
+				},
+			}
+			newRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Peers: []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+						{Name: "rvr-2", ConnectionState: v1alpha1.ConnectionStateConnected, ConnectionEstablishedOn: []string{"net-A", "net-B"}},
+					},
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRVR,
+				ObjectNew: newRVR,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when Peers BackingVolumeState changes", func() {
+			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Peers: []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+						{Name: "rvr-2", ConnectionState: v1alpha1.ConnectionStateConnected, BackingVolumeState: v1alpha1.DiskStateInconsistent},
+					},
+				},
+			}
+			newRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Peers: []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+						{Name: "rvr-2", ConnectionState: v1alpha1.ConnectionStateConnected, BackingVolumeState: v1alpha1.DiskStateUpToDate},
+					},
+				},
+			}
 			e := event.TypedUpdateEvent[client.Object]{
 				ObjectOld: oldRVR,
 				ObjectNew: newRVR,
