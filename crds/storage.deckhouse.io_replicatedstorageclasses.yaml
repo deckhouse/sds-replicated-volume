@@ -21,42 +21,37 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.conditions[?(@.type=='Ready')].status
-      name: Ready
+    - jsonPath: .status.phase
+      name: Phase
       type: string
-    - jsonPath: .spec.replication
-      name: Replication
-      type: string
-    - jsonPath: .spec.topology
-      name: Topology
-      type: string
+    - jsonPath: .status.configuration.failuresToTolerate
+      name: FTT
+      type: integer
+    - jsonPath: .status.configuration.guaranteedMinimumDataRedundancy
+      name: GMDR
+      type: integer
+    - jsonPath: .status.volumes.total
+      name: Volumes
+      type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    - jsonPath: .status.storagePoolName
-      name: StoragePool
-      priority: 1
-      type: string
-    - jsonPath: .status.conditions[?(@.type=='StoragePoolReady')].status
-      name: StoragePoolReady
-      priority: 1
-      type: string
-    - jsonPath: .status.conditions[?(@.type=='ConfigurationRolledOut')].status
-      name: ConfigRolledOut
-      priority: 1
-      type: string
-    - jsonPath: .status.conditions[?(@.type=='VolumesSatisfyEligibleNodes')].status
-      name: VolsSatisfyEN
+    - jsonPath: .spec.topology
+      name: Topology
       priority: 1
       type: string
     - jsonPath: .spec.volumeAccess
       name: VolumeAccess
       priority: 1
       type: string
-    - jsonPath: .status.volumes.total
-      name: Volumes
+    - jsonPath: .status.storagePoolName
+      name: StoragePool
       priority: 1
-      type: integer
+      type: string
+    - jsonPath: .status.message
+      name: Message
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -625,18 +620,21 @@ spec:
                   was accepted.
                 format: int64
                 type: integer
-              phase:
-                description: |-
-                  The Storage class current state. Might be:
-                  - Failed (if the controller received incorrect resource configuration or some errors occurred during the operation)
-                  - Create (if everything went fine)
-                enum:
-                - Failed
-                - Created
+              message:
+                description: Message is a human-readable description of the current
+                  phase.
                 type: string
-              reason:
-                description: Additional information about the current state of the
-                  Storage Class.
+              phase:
+                description: Phase is the operational state summary of the storage
+                  class.
+                enum:
+                - Ready
+                - WaitingForStoragePool
+                - InsufficientNodes
+                - InvalidConfiguration
+                - RollingOut
+                - PartiallyAligned
+                - Deleting
                 type: string
               storagePoolBasedOnGeneration:
                 description: StoragePoolBasedOnGeneration is the RSC generation when

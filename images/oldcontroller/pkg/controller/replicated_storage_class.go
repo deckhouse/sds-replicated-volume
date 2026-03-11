@@ -109,8 +109,8 @@ const (
 	RSCStorageClassVolumeSnapshotClassAnnotationKey   = "storage.deckhouse.io/volumesnapshotclass"
 	RSCStorageClassVolumeSnapshotClassAnnotationValue = "sds-replicated-volume"
 
-	Created = "Created"
-	Failed  = "Failed"
+	Created = "Ready"
+	Failed  = "InvalidConfiguration"
 
 	DefaultStorageClassAnnotationKey = "storageclass.kubernetes.io/is-default-class"
 )
@@ -290,7 +290,7 @@ func ReconcileReplicatedStorageClass(
 	}
 
 	replicatedSC.Status.Phase = Created
-	replicatedSC.Status.Reason = "ReplicatedStorageClass and StorageClass are equal."
+	replicatedSC.Status.Message = "ReplicatedStorageClass and StorageClass are equal."
 	if !slices.Contains(replicatedSC.Finalizers, ReplicatedStorageClassFinalizerName) {
 		replicatedSC.Finalizers = append(replicatedSC.Finalizers,
 			ReplicatedStorageClassFinalizerName)
@@ -790,7 +790,7 @@ func updateReplicatedStorageClassStatus(
 	reason string,
 ) error {
 	replicatedSC.Status.Phase = srv.ReplicatedStorageClassPhase(phase)
-	replicatedSC.Status.Reason = reason
+	replicatedSC.Status.Message = reason
 	log.Trace(fmt.Sprintf("[updateReplicatedStorageClassStatus] update ReplicatedStorageClass %+v", replicatedSC))
 	return UpdateReplicatedStorageClass(ctx, cl, replicatedSC)
 }
