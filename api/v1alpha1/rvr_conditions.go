@@ -135,7 +135,7 @@ const (
 	ReplicatedVolumeReplicaCondReadyType                             = "Ready"
 	ReplicatedVolumeReplicaCondReadyReasonAgentNotReady              = "AgentNotReady"              // Agent is not ready.
 	ReplicatedVolumeReplicaCondReadyReasonApplyingConfiguration      = "ApplyingConfiguration"      // Configuration is being applied.
-	ReplicatedVolumeReplicaCondReadyReasonDeleting                   = "Deleting"                   // Replica is being deleted.
+	ReplicatedVolumeReplicaCondReadyReasonTerminating                = "Terminating"                // Replica is terminating.
 	ReplicatedVolumeReplicaCondReadyReasonPendingDatameshJoin        = "PendingDatameshJoin"        // Not a datamesh member; quorum not applicable.
 	ReplicatedVolumeReplicaCondReadyReasonPendingScheduling          = "PendingScheduling"          // Waiting for node assignment.
 	ReplicatedVolumeReplicaCondReadyReasonQuorumLost                 = "QuorumLost"                 // Quorum is lost.

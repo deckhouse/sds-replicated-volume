@@ -33,16 +33,12 @@ import (
 // +kubebuilder:selectablefield:JSONPath=.spec.replicatedVolumeName
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=".spec.type"
-// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
-// +kubebuilder:printcolumn:name="Configured",type=string,JSONPath=".status.conditions[?(@.type=='Configured')].status"
-// +kubebuilder:printcolumn:name="DRBDConfigured",type=string,JSONPath=".status.conditions[?(@.type=='DRBDConfigured')].status"
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="Attached",type=string,JSONPath=".status.conditions[?(@.type=='Attached')].status"
 // +kubebuilder:printcolumn:name="DataUpToDate",type=string,JSONPath=".status.conditions[?(@.type=='BackingVolumeUpToDate')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:printcolumn:name="Scheduled",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='Scheduled')].status"
-// +kubebuilder:printcolumn:name="Attached",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='Attached')].status"
-// +kubebuilder:printcolumn:name="FullyConnected",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='FullyConnected')].status"
-// +kubebuilder:printcolumn:name="BVReady",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='BackingVolumeReady')].status"
-// +kubebuilder:printcolumn:name="SatisfyEligibleNodes",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='SatisfyEligibleNodes')].status"
+// +kubebuilder:printcolumn:name="Configured",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='Configured')].status"
+// +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=".status.message"
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.startsWith(self.spec.replicatedVolumeName + '-')",message="metadata.name must start with spec.replicatedVolumeName + '-'"
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.substring(size(self.spec.replicatedVolumeName) + 1).matches('^[0-9][0-9]?$') && int(self.metadata.name.substring(size(self.spec.replicatedVolumeName) + 1)) <= 31",message="metadata.name must be exactly spec.replicatedVolumeName + '-' + id where id is 0..31"
 // +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 123",message="metadata.name must be at most 123 characters (to fit derived LLV name with prefix)"
@@ -208,6 +204,16 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
+	// Phase is a quick operational state summary.
+	// +kubebuilder:validation:Enum=Pending;Provisioning;Configuring;WaitingForDatamesh;Synchronizing;Healthy;PartiallyDegraded;Degraded;Critical;Progressing;AgentNotReady;Terminating
+	// +optional
+	Phase ReplicatedVolumeReplicaPhase `json:"phase,omitempty"`
+
+	// Message is a human-readable detail about the current state.
+	// +kubebuilder:validation:MaxLength=512
+	// +optional
+	Message string `json:"message,omitempty"`
+
 	// +kubebuilder:validation:MaxItems=10
 	// +listType=atomic
 	// +optional
@@ -283,6 +289,41 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	DRBDRReconciliationCache ReplicatedVolumeReplicaStatusDRBDRReconciliationCache `json:"drbdrReconciliationCache,omitempty"`
 }
+
+// ReplicatedVolumeReplicaPhase enumerates possible values for ReplicatedVolumeReplica status.phase field.
+type ReplicatedVolumeReplicaPhase string
+
+const (
+	// ReplicatedVolumeReplicaPhasePending indicates waiting for the scheduling controller to assign a node.
+	ReplicatedVolumeReplicaPhasePending ReplicatedVolumeReplicaPhase = "Pending"
+	// ReplicatedVolumeReplicaPhaseProvisioning indicates the backing volume is being created, replaced, or resized.
+	ReplicatedVolumeReplicaPhaseProvisioning ReplicatedVolumeReplicaPhase = "Provisioning"
+	// ReplicatedVolumeReplicaPhaseConfiguring indicates DRBD resource is being configured by the agent.
+	ReplicatedVolumeReplicaPhaseConfiguring ReplicatedVolumeReplicaPhase = "Configuring"
+	// ReplicatedVolumeReplicaPhaseWaitingForDatamesh indicates DRBD is preconfigured, waiting for datamesh membership.
+	ReplicatedVolumeReplicaPhaseWaitingForDatamesh ReplicatedVolumeReplicaPhase = "WaitingForDatamesh"
+	// ReplicatedVolumeReplicaPhaseSynchronizing indicates data synchronization is in progress.
+	ReplicatedVolumeReplicaPhaseSynchronizing ReplicatedVolumeReplicaPhase = "Synchronizing"
+	// ReplicatedVolumeReplicaPhaseHealthy indicates the replica is fully operational with quorum satisfied and no problems detected.
+	ReplicatedVolumeReplicaPhaseHealthy ReplicatedVolumeReplicaPhase = "Healthy"
+	// ReplicatedVolumeReplicaPhasePartiallyDegraded indicates the replica is serving IO but has minor problems
+	// (partial peer connectivity, outdated data, wrong node placement, detachment anomaly).
+	ReplicatedVolumeReplicaPhasePartiallyDegraded ReplicatedVolumeReplicaPhase = "PartiallyDegraded"
+	// ReplicatedVolumeReplicaPhaseDegraded indicates the replica is serving IO but has serious problems
+	// (disk failed, fully isolated, attachment failed, provisioning/config failed).
+	ReplicatedVolumeReplicaPhaseDegraded ReplicatedVolumeReplicaPhase = "Degraded"
+	// ReplicatedVolumeReplicaPhaseCritical indicates IO is frozen (quorum lost or IO suspended).
+	ReplicatedVolumeReplicaPhaseCritical ReplicatedVolumeReplicaPhase = "Critical"
+	// ReplicatedVolumeReplicaPhaseProgressing indicates an operational change is in progress
+	// (resize, type conversion, DRBD reconfiguration) with no health problems detected.
+	ReplicatedVolumeReplicaPhaseProgressing ReplicatedVolumeReplicaPhase = "Progressing"
+	// ReplicatedVolumeReplicaPhaseAgentNotReady indicates the agent is not responding on the node.
+	ReplicatedVolumeReplicaPhaseAgentNotReady ReplicatedVolumeReplicaPhase = "AgentNotReady"
+	// ReplicatedVolumeReplicaPhaseTerminating indicates the replica is terminating and children are being cleaned up.
+	ReplicatedVolumeReplicaPhaseTerminating ReplicatedVolumeReplicaPhase = "Terminating"
+)
+
+func (p ReplicatedVolumeReplicaPhase) String() string { return string(p) }
 
 // ReplicatedVolumeReplicaStatusAttachment contains information about the device attachment state.
 // +kubebuilder:object:generate=true

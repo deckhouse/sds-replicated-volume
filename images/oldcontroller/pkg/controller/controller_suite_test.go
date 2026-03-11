@@ -201,7 +201,7 @@ func getAndValidateNotReconciledRSC(ctx context.Context, cl client.Client, testN
 	Expect(replicatedSC.Name).To(Equal(testName))
 	Expect(replicatedSC.Finalizers).To(BeNil())
 	Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhase("")))
-	Expect(replicatedSC.Status.Reason).To(Equal(""))
+	Expect(replicatedSC.Status.Message).To(Equal(""))
 
 	return replicatedSC
 }

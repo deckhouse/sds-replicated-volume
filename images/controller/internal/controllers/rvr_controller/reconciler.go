@@ -162,6 +162,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 			// Ensure datamesh pending transition and configured condition.
 			ensureStatusDatameshRequestAndConfiguredCond(rf.Ctx(), rvr, rv, rspView),
+
+			// Ensure phase and message (computed from all conditions above).
+			ensureStatusPhaseAndMessage(rf.Ctx(), rvr),
 		)
 		if eo.Error() != nil {
 			return rf.Failf(eo.Error(), "ensuring status").ToCtrl()

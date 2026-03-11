@@ -166,7 +166,7 @@ func guardAttachNotDeleting(gctx *globalContext, _ *ReplicaContext) dmte.GuardRe
 		return dmte.GuardResult{
 			Blocked: true,
 			Message: "volume is being deleted",
-			Details: v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonReplicatedVolumeDeleting,
+			Details: v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonReplicatedVolumeTerminating,
 		}
 	}
 	return dmte.GuardResult{}
