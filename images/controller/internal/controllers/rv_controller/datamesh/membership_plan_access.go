@@ -87,7 +87,7 @@ func guardVolumeAccessNotLocal(gctx *globalContext, _ *ReplicaContext) dmte.Guar
 	if gctx.configuration.VolumeAccess == v1alpha1.VolumeAccessLocal {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Will not join datamesh: volumeAccess is Local",
+			Message: "volumeAccess is Local",
 		}
 	}
 	return dmte.GuardResult{}

@@ -89,11 +89,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Get RSP eligibility view for condition checks.
-	// Skip if node not assigned or RVR is being deleted.
+	// Skip if node not assigned.
 	var rspView *rspEligibilityView
 	if rvr != nil &&
 		rvr.Spec.NodeName != "" &&
-		!rvrShouldNotExist(rvr) &&
 		rv != nil &&
 		rv.Status.Configuration != nil {
 		rspView, err = r.getRSPEligibilityView(rf.Ctx(), rv.Status.Configuration.ReplicatedStoragePoolName, rvr.Spec.NodeName)

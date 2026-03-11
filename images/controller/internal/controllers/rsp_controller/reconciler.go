@@ -84,14 +84,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Take patch base before mutations.
 	base := rsp.DeepCopy()
 
-	// Clear legacy phase/reason fields set by the old controller (one-time migration).
-	if applyLegacyFieldsCleared(rsp) {
-		if err := r.patchRSPStatus(rf.Ctx(), rsp, base); err != nil {
-			return rf.Fail(err).ToCtrl()
-		}
-		base = rsp.DeepCopy()
-	}
-
 	// Get LVGs referenced by RSP.
 	lvgs, lvgsNotFoundErr, err := r.getLVGsByRSP(rf.Ctx(), rsp)
 	if err != nil {
@@ -101,10 +93,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Cannot calculate eligible nodes if LVGs are missing.
 	// Set condition and keep old eligible nodes.
 	if lvgsNotFoundErr != nil {
-		if applyReadyCondFalse(rsp,
+		message := fmt.Sprintf("Some LVMVolumeGroups not found: %v", lvgsNotFoundErr)
+		changed := applyReadyCondFalse(rsp,
 			v1alpha1.ReplicatedStoragePoolCondReadyReasonLVMVolumeGroupNotFound,
-			fmt.Sprintf("Some LVMVolumeGroups not found: %v", lvgsNotFoundErr),
-		) {
+			message,
+		)
+		changed = applyPhase(rsp, v1alpha1.ReplicatedStoragePoolPhaseWaitingForLVMVolumeGroups, message) || changed
+		if changed {
 			return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base)).ToCtrl()
 		}
 
@@ -113,10 +108,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Validate RSP and LVGs are correctly configured.
 	if err := validateRSPAndLVGs(rsp, lvgs); err != nil {
-		if applyReadyCondFalse(rsp,
+		message := fmt.Sprintf("RSP/LVG validation failed: %v", err)
+		changed := applyReadyCondFalse(rsp,
 			v1alpha1.ReplicatedStoragePoolCondReadyReasonInvalidLVMVolumeGroup,
-			fmt.Sprintf("RSP/LVG validation failed: %v", err),
-		) {
+			message,
+		)
+		changed = applyPhase(rsp, v1alpha1.ReplicatedStoragePoolPhaseInvalidConfiguration, message) || changed
+		if changed {
 			return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base)).ToCtrl()
 		}
 
@@ -130,10 +128,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		selector, err := metav1.LabelSelectorAsSelector(rsp.Spec.NodeLabelSelector)
 
 		if err != nil {
-			if applyReadyCondFalse(rsp,
+			message := fmt.Sprintf("Invalid NodeLabelSelector: %v", err)
+			changed := applyReadyCondFalse(rsp,
 				v1alpha1.ReplicatedStoragePoolCondReadyReasonInvalidNodeLabelSelector,
-				fmt.Sprintf("Invalid NodeLabelSelector: %v", err),
-			) {
+				message,
+			)
+			changed = applyPhase(rsp, v1alpha1.ReplicatedStoragePoolPhaseInvalidConfiguration, message) || changed
+			if changed {
 				return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base)).ToCtrl()
 			}
 			return rf.Done().ToCtrl()
@@ -146,10 +147,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if len(rsp.Spec.Zones) > 0 {
 		req, err := labels.NewRequirement(corev1.LabelTopologyZone, selection.In, rsp.Spec.Zones)
 		if err != nil {
-			if applyReadyCondFalse(rsp,
+			message := fmt.Sprintf("Invalid Zones: %v", err)
+			changed := applyReadyCondFalse(rsp,
 				v1alpha1.ReplicatedStoragePoolCondReadyReasonInvalidNodeLabelSelector,
-				fmt.Sprintf("Invalid Zones: %v", err),
-			) {
+				message,
+			)
+			changed = applyPhase(rsp, v1alpha1.ReplicatedStoragePoolPhaseInvalidConfiguration, message) || changed
+			if changed {
 				return rf.DoneOrFail(r.patchRSPStatus(rf.Ctx(), rsp, base)).ToCtrl()
 			}
 			return rf.Done().ToCtrl()
@@ -174,11 +178,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Apply changes to status.
 	changed := applyEligibleNodesAndIncrementRevisionIfChanged(rsp, eligibleNodes)
 
-	// Set condition to success.
+	// Set condition and phase to success.
+	message := fmt.Sprintf("Eligible nodes calculated successfully: %d nodes", len(eligibleNodes))
 	changed = applyReadyCondTrue(rsp,
 		v1alpha1.ReplicatedStoragePoolCondReadyReasonReady,
-		fmt.Sprintf("Eligible nodes calculated successfully: %d nodes", len(eligibleNodes)),
+		message,
 	) || changed
+	changed = applyPhase(rsp, v1alpha1.ReplicatedStoragePoolPhaseReady, message) || changed
 
 	if changed {
 		if err := r.patchRSPStatus(rf.Ctx(), rsp, base); err != nil {
@@ -454,17 +460,17 @@ func applyReadyCondFalse(rsp *v1alpha1.ReplicatedStoragePool, reason, message st
 	})
 }
 
-// applyLegacyFieldsCleared clears legacy status.phase and status.reason fields
-// that were written by the old controller (sds-replicated-volume-controller).
+// applyPhase sets status.phase and status.message.
+// Also clears the legacy status.reason field if present.
 // Returns true if any field was changed.
-func applyLegacyFieldsCleared(rsp *v1alpha1.ReplicatedStoragePool) bool {
+func applyPhase(rsp *v1alpha1.ReplicatedStoragePool, phase v1alpha1.ReplicatedStoragePoolPhase, message string) bool {
 	changed := false
-	if rsp.Status.Phase != "" {
-		rsp.Status.Phase = ""
+	if rsp.Status.Phase != phase {
+		rsp.Status.Phase = phase
 		changed = true
 	}
-	if rsp.Status.Reason != "" {
-		rsp.Status.Reason = ""
+	if rsp.Status.Message != message {
+		rsp.Status.Message = message
 		changed = true
 	}
 	return changed

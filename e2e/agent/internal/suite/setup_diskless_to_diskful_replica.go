@@ -62,12 +62,13 @@ func SetupDisklessToDiskfulReplica(
 		e.Fatalf("DRBDResource %q has no addresses after configured", name)
 	}
 
-	// Create LLV, wait for created.
+	// Reuse existing LLV if found (costly to create), otherwise create normally.
 	llv := kubetesting.SetupResource(
 		e.ScopeWithTimeout(llvCreatedTimeout.Duration),
 		cl,
 		newLLV(name, size, node.LVG.Name),
 		isLLVCreated,
+		kubetesting.ReuseIfFound(),
 	)
 
 	// Patch DRBDResource to Diskful, wait for configured.

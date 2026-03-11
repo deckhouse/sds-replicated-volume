@@ -606,7 +606,7 @@ var _ = Describe("guardRemainingNetworksConnected", func() {
 
 		r := guardRemainingNetworksConnected(gctx)
 		Expect(r.Blocked).To(BeTrue())
-		Expect(r.Message).To(ContainSubstring("intersection"))
+		Expect(r.Message).To(ContainSubstring("no common system networks"))
 	})
 
 	It("RSP unavailable → blocked", func() {
@@ -618,7 +618,7 @@ var _ = Describe("guardRemainingNetworksConnected", func() {
 
 		r := guardRemainingNetworksConnected(gctx)
 		Expect(r.Blocked).To(BeTrue())
-		Expect(r.Message).To(ContainSubstring("RSP unavailable"))
+		Expect(r.Message).To(ContainSubstring("waiting for ReplicatedStoragePool"))
 	})
 
 	It("single member → pass (no peers)", func() {

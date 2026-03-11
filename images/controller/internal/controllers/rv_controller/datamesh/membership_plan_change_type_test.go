@@ -237,7 +237,7 @@ var _ = Describe("ChangeReplicaType(TB→A)", func() {
 
 		Expect(changed).To(BeTrue()) // message changed
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
-		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("TB required"))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("TieBreaker required"))
 	})
 
 	It("guard: TB not required (odd D)", func() {
@@ -744,7 +744,7 @@ var _ = Describe("ChangeReplicaType(TB→sD)", func() {
 
 		Expect(changed).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
-		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("TB required"))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("TieBreaker required"))
 	})
 
 	It("completes full lifecycle", func() {
@@ -2246,7 +2246,7 @@ var _ = Describe("ChangeReplicaType(TB→D) plans", func() {
 		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
 		Expect(changed).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
-		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("TB"))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("TieBreaker required"))
 	})
 
 	It("tb-to-d/v1: baseline raised (OnComplete)", func() {

@@ -265,6 +265,16 @@ type DRBDResourceStatus struct {
 	// +optional
 	Quorum *bool `json:"quorum,omitempty"`
 
+	// DeviceUUID is a 16-digit uppercase hexadecimal identifier that binds this
+	// DRBDResource to specific physical DRBD metadata on the backing device.
+	// Format matches drbdmeta read-dev-uuid output. Set once after first
+	// metadata creation or adoption; immutable thereafter.
+	// +kubebuilder:validation:MaxLength=16
+	// +kubebuilder:validation:Pattern=`^([0-9A-F]{16})?$`
+	// +kubebuilder:validation:XValidation:rule="size(oldSelf) == 0 || oldSelf == self",message="deviceUUID is immutable once set"
+	// +optional
+	DeviceUUID string `json:"deviceUUID,omitempty"`
+
 	// +listType=map
 	// +listMapKey=type
 	// +optional

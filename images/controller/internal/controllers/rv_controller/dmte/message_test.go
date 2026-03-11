@@ -54,7 +54,7 @@ var _ = Describe("generateProgressMessage", func() {
 			MustConfirm: ids(0, 3),
 			Confirmed:   idset.Of(0),
 		}, []string{"DRBDConfigured"}, nil)
-		Expect(msg).To(ContainSubstring("#3 Replica not found"))
+		Expect(msg).To(ContainSubstring("#3 replica not found"))
 	})
 
 	It("diagnostic error on unconfirmed replica", func() {
@@ -179,7 +179,7 @@ var _ = Describe("generateProgressMessage", func() {
 			MustConfirm: idset.Of(7),
 			Confirmed:   idset.IDSet(0),
 		}, []string{"DRBDConfigured"}, nil)
-		Expect(msg).To(ContainSubstring("#7 Replica not found"))
+		Expect(msg).To(ContainSubstring("#7 replica not found"))
 	})
 
 	It("empty MustConfirm and Confirmed", func() {
@@ -203,6 +203,23 @@ var _ = Describe("composeProgressMessage", func() {
 	It("multi-step plan step 2 of 3", func() {
 		msg := composeProgressMessage("Adding diskful replica", "D∅ → D", 1, 3, "4/4 replicas confirmed revision 13")
 		Expect(msg).To(Equal("Adding diskful replica (step 2/3: D∅ → D): 4/4 replicas confirmed revision 13"))
+	})
+})
+
+var _ = Describe("composeBlocked", func() {
+	It("guard reason", func() {
+		msg := composeBlocked("Removing diskful replica", "would violate GMDR (ADR=1, need > 1)")
+		Expect(msg).To(Equal("Removing diskful replica is blocked: would violate GMDR (ADR=1, need > 1)"))
+	})
+
+	It("tracker reason", func() {
+		msg := composeBlocked("Adding diskful replica", "active Formation in progress")
+		Expect(msg).To(Equal("Adding diskful replica is blocked: active Formation in progress"))
+	})
+
+	It("attachment guard reason", func() {
+		msg := composeBlocked("Attaching volume", "volume is being deleted")
+		Expect(msg).To(Equal("Attaching volume is blocked: volume is being deleted"))
 	})
 })
 

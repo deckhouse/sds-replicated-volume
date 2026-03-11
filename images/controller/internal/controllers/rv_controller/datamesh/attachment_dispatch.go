@@ -90,6 +90,9 @@ func attachmentDispatcher() dmte.DispatchFunc[provider] {
 // should be dispatched. Returns (decision, true) if a toggle is needed.
 //
 // Counts intended attachments: replicas with active RVA + datamesh member.
+// Multiattach is needed only when both intendedCount > 1 AND maxAttachments > 1.
+// When maxAttachments=1, only one slot is available regardless of pending RVAs.
+//
 // The dispatcher decides "do we WANT to toggle?"; guards on the plans decide
 // "CAN we toggle?" (guardMaxAttachmentsAllowsMultiattach, guardCanDisableMultiattach).
 func decideMultiattachToggle(gctx *globalContext) (dmte.DispatchDecision, bool) {
@@ -102,7 +105,7 @@ func decideMultiattachToggle(gctx *globalContext) (dmte.DispatchDecision, bool) 
 		}
 	}
 
-	needMultiattach := intendedCount > 1
+	needMultiattach := intendedCount > 1 && gctx.maxAttachments > 1
 
 	if needMultiattach && !gctx.datamesh.multiattach && !gctx.hasMultiattachTransition {
 		return dmte.DispatchGlobal(
@@ -111,7 +114,8 @@ func decideMultiattachToggle(gctx *globalContext) (dmte.DispatchDecision, bool) 
 		), true
 	}
 
-	if !needMultiattach && gctx.datamesh.multiattach && !gctx.hasMultiattachTransition {
+	if !needMultiattach && gctx.datamesh.multiattach && !gctx.hasMultiattachTransition &&
+		gctx.potentiallyAttached.Len() <= 1 {
 		return dmte.DispatchGlobal(
 			v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach,
 			"disable-multiattach/v1",

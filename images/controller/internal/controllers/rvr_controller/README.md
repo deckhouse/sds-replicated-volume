@@ -390,9 +390,10 @@ A backing volume is needed if **all** conditions are met:
 
 For replicas that are members of the datamesh, a disk is needed if:
 - `NeedsBackingVolume()` is true: Diskful, LiminalDiskful, ShadowDiskful, LiminalShadowDiskful
+- **Vestibule transition**: member is currently diskless (e.g., Access) but `spec.Type` targets a type that needs backing volume (e.g., Diskful). During vestibule transitions the LVG/ThinPool are taken from `rvr.Spec` (the member doesn't have LVG fields yet).
 
 A disk is NOT needed if:
-- `NeedsBackingVolume()` is false: Access, TieBreaker
+- `NeedsBackingVolume()` is false AND `spec.Type` also does not need backing volume: Access, TieBreaker
 
 For non-members, a disk is needed if spec.type is `Diskful`.
 
@@ -1274,7 +1275,7 @@ flowchart TD
 
 This function combines two logically related status updates to avoid duplicate `computeTargetDatameshRequest` calls.
 
-**RV Message Enrichment**: When a membership request exists (`target != nil`) and the parent `ReplicatedVolume` has a matching entry in `rv.Status.DatameshReplicaRequests` for this replica, the message from that entry is appended to the condition message with a `": "` separator. This allows the RV controller to provide additional context about the overall datamesh transition progress.
+**RV Message Enrichment**: When a membership request exists (`target != nil`) and the parent `ReplicatedVolume` has a matching entry in `rv.Status.DatameshReplicaRequests` for this replica, the datamesh message replaces the condition message entirely. The datamesh message is self-contained — the DMTE engine composes it with the plan display name (e.g., `"Adding diskful replica is blocked: would violate GMDR (ADR=1, need > 1)"` or `"Adding diskful replica: 2/4 replicas confirmed revision 7"`).
 
 **Algorithm (computeTargetDatameshRequest)**:
 

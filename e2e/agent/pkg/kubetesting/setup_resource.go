@@ -33,6 +33,23 @@ type clientObjectAndPtr[T any] interface {
 	*T
 }
 
+// SetupResourceOption configures SetupResource behavior.
+type SetupResourceOption func(*setupResourceConfig)
+
+type setupResourceConfig struct {
+	reuseIfFound bool
+}
+
+// ReuseIfFound makes SetupResource try to discover an existing resource by
+// name first. If found, the predicate is checked immediately (no waiting) and
+// no cleanup is registered. If the resource does not exist, SetupResource
+// falls back to normal create-and-wait behavior.
+func ReuseIfFound() SetupResourceOption {
+	return func(c *setupResourceConfig) {
+		c.reuseIfFound = true
+	}
+}
+
 // SetupResource creates the given resource and optionally waits for it to
 // reach a desired state.
 //
@@ -44,13 +61,30 @@ type clientObjectAndPtr[T any] interface {
 // If predicate is nil, the resource is created and returned immediately.
 //
 // Resource cleanup (deletion + wait for disappearance) is registered on e.
+//
+// With the Reuse option, the resource is fetched by name instead of created,
+// the predicate is checked immediately without waiting, and no cleanup is
+// registered.
 func SetupResource[T any, PT clientObjectAndPtr[T]](
 	e envtesting.E,
 	wc client.WithWatch,
 	obj PT,
 	predicate func(PT) bool,
+	opts ...SetupResourceOption,
 ) PT {
 	e.Helper()
+
+	var cfg setupResourceConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+
+	if cfg.reuseIfFound {
+		reused, ok := tryReuseResource(e, wc, obj, predicate)
+		if ok {
+			return reused
+		}
+	}
 
 	if predicate == nil {
 		createResource(e, wc, obj)
@@ -64,6 +98,36 @@ func SetupResource[T any, PT clientObjectAndPtr[T]](
 	createResource(e, wc, obj)
 
 	return wait(e, obj, predicate)
+}
+
+// tryReuseResource attempts to fetch an existing resource by name. If found,
+// it checks the predicate immediately and returns (obj, true). If the resource
+// does not exist, it returns (zero, false) so the caller can fall back to
+// normal creation.
+func tryReuseResource[T any, PT clientObjectAndPtr[T]](
+	e envtesting.E,
+	cl client.Client,
+	obj PT,
+	predicate func(PT) bool,
+) (PT, bool) {
+	e.Helper()
+	key := client.ObjectKeyFromObject(obj)
+	kind := fmt.Sprintf("%T", obj)
+
+	if err := cl.Get(e.Context(), key, obj); err != nil {
+		if apierrors.IsNotFound(err) {
+			e.Logf("%s %q not found, creating normally", kind, key)
+			return obj, false
+		}
+		e.Fatalf("reusing %s %q: %v", kind, key, err)
+	}
+	e.Logf("reusing existing %s %q", kind, key)
+
+	if predicate != nil && !predicate(obj) {
+		e.Fatalf("reusing %s %q: predicate not satisfied", kind, key)
+	}
+
+	return obj, true
 }
 
 const deletionTimeout = 5 * time.Second

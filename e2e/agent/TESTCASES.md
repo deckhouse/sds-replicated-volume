@@ -16,11 +16,16 @@ TestDRBDResource
 │   │   Configured=False with reason InMaintenance. Cleanup reverts;
 │   │   agent reconciles back to Configured=True.
 │   │
-│   └── StateDown
-│       Patches spec.state=Down. Waits for agent to tear down DRBD and
-│       remove its own finalizer from the DRBDResource. The LLV finalizer
-│       is intentionally kept (resource may come back Up). Cleanup reverts
-│       to state=Up; agent brings DRBD back up and re-adds its finalizer.
+│   ├── StateDown
+│   │   Patches spec.state=Down. Waits for agent to tear down DRBD and
+│   │   remove its own finalizer from the DRBDResource. The LLV finalizer
+│   │   is intentionally kept (resource may come back Up). Cleanup reverts
+│   │   to state=Up; agent brings DRBD back up and re-adds its finalizer.
+│   │
+│   └── DiskfulToDiskless
+│       Patches spec.type from Diskful to Diskless. Waits for
+│       Configured=True. Asserts activeConfiguration.type=Diskless.
+│       Cleanup reverts to Diskful; agent re-attaches the disk.
 │
 ├── DeleteDiskful — delete diskful replica with attached LLV
 │       Creates a diskful DRBDResource with an LLV (same setup as R1).
@@ -29,6 +34,19 @@ TestDRBDResource
 │       from the LLV. Catches the bug where the agent fails to release the
 │       LLV finalizer on the deletion path (intendedLLVName == attachedLLVName
 │       because spec doesn't change on delete).
+│
+├── DeviceUUID — DRBD metadata protection (parallel)
+│   │   Covers device-uuid decision table: never overwrite existing metadata (G1),
+│   │   never attach a foreign disk (G2).
+│   │
+│   ├── InitialCreation — no metadata, empty status → create-md and set UUID
+│   ├── Peered — two replicas, synced
+│   │   ├── ReattachMatchingUUID — metadata and UUID match → reattach
+│   │   ├── ZeroDiskUUID — metadata present, zero on disk, status has UUID → write to disk and attach
+│   │   └── ForeignDisk — metadata present, UUID mismatch → error (foreign disk)
+│   ├── AdoptFromDisk — metadata present, status empty → adopt UUID from disk
+│   ├── GenerateNewUUID — metadata present, zero on disk, status empty → generate and set UUID
+│   └── RecreateMetadata — no metadata, status has UUID → create-md and write status UUID
 │
 ├── R2 — two peered, synced replicas (parallel with R3, R4)
 │   │   Creates 2 diskful replicas on separate nodes. Links them as
@@ -73,6 +91,9 @@ Every subtest's cleanup exercises a teardown path:
   patch, deletes the LLV, deletes the DRBDResource. Verifies the agent
   handles disk detach, DRBD teardown, and finalizer removal.
 
+- **DiskfulToDiskless cleanup**: reverts diskless→diskful patch. Verifies
+  the agent can re-attach a previously detached disk.
+
 - **Peering cleanup**: reverts peer patches (restores empty peers list).
   Verifies the agent handles peer disconnect gracefully.
 
@@ -92,3 +113,6 @@ Every subtest's cleanup exercises a teardown path:
 - **DeleteDiskful**: deletes the DRBDResource directly while still diskful
   with an attached LLV. Verifies the agent releases the LLV finalizer on
   the deletion path. Parent cleanup deletes the orphaned LLV.
+
+- **ForeignDisk cleanup**: restores the correct device-uuid on disk after
+  writing a fake UUID. Verifies the agent recovers from the error.

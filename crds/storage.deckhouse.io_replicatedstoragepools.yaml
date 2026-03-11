@@ -24,13 +24,17 @@ spec:
     - jsonPath: .spec.type
       name: Type
       type: string
-    - jsonPath: .status.conditions[?(@.type=="Ready")].status
-      name: Ready
+    - jsonPath: .status.phase
+      name: Phase
       type: string
     - description: The age of this resource
       jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.message
+      name: Message
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -355,13 +359,18 @@ spec:
                   change.
                 format: int64
                 type: integer
-              phase:
-                description: Phase is used only by the old controller and will be
-                  removed in a future version.
+              message:
+                description: |-
+                  Message is a human-readable description of the current phase.
+                  Mirrors the Ready condition message.
                 type: string
-              reason:
-                description: Reason is used only by the old controller and will be
-                  removed in a future version.
+              phase:
+                description: Phase is the operational state summary of the storage
+                  pool.
+                enum:
+                - Ready
+                - WaitingForLVMVolumeGroups
+                - InvalidConfiguration
                 type: string
               usedBy:
                 description: UsedBy tracks which resources are using this storage

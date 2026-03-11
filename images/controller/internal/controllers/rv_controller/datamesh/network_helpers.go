@@ -420,7 +420,7 @@ func guardRemainingNetworksConnected(gctx *globalContext) dmte.GuardResult {
 	if gctx.rsp == nil {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Cannot check remaining system networks: RSP unavailable",
+			Message: "waiting for ReplicatedStoragePool (needed to verify network connectivity)",
 		}
 	}
 
@@ -438,7 +438,7 @@ func guardRemainingNetworksConnected(gctx *globalContext) dmte.GuardResult {
 	if len(intersection) == 0 {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "Cannot adjust systemnetworks: intersection of datamesh and configuration is empty",
+			Message: "no common system networks between datamesh and configuration",
 		}
 	}
 
@@ -455,7 +455,7 @@ func guardRemainingNetworksConnected(gctx *globalContext) dmte.GuardResult {
 
 	return dmte.GuardResult{
 		Blocked: true,
-		Message: fmt.Sprintf("Cannot adjust networks: no remaining network with full connectivity (checked %d networks)", len(intersection)),
+		Message: fmt.Sprintf("no remaining network with full connectivity (checked %d networks)", len(intersection)),
 	}
 }
 
@@ -506,11 +506,11 @@ func guardReplicasMatchTargetNetworks(gctx *globalContext) dmte.GuardResult {
 		var msg string
 		switch {
 		case len(missing) > 0 && len(extra) > 0:
-			msg = fmt.Sprintf("Replica %d: missing system networks %v, extra system networks %v", rctx.id, missing, extra)
+			msg = fmt.Sprintf("replica %s: system networks out of sync (missing: %v, extra: %v)", rctx.Name(), missing, extra)
 		case len(missing) > 0:
-			msg = fmt.Sprintf("Replica %d: missing system networks %v", rctx.id, missing)
+			msg = fmt.Sprintf("replica %s: system networks out of sync (missing: %v)", rctx.Name(), missing)
 		default:
-			msg = fmt.Sprintf("Replica %d: extra system networks %v", rctx.id, extra)
+			msg = fmt.Sprintf("replica %s: system networks out of sync (extra: %v)", rctx.Name(), extra)
 		}
 		return dmte.GuardResult{Blocked: true, Message: msg}
 	}

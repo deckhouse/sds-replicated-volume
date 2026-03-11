@@ -43,6 +43,9 @@
   - [DRBDMETA OPERATIONS](#drbdmeta-operations)
     - [`drbdmeta create-md`](#drbdmeta-create-md)
     - [`drbdmeta dump-md`](#drbdmeta-dump-md)
+    - [`drbdmeta apply-al`](#drbdmeta-apply-al)
+    - [`drbdmeta read-dev-uuid`](#drbdmeta-read-dev-uuid)
+    - [`drbdmeta write-dev-uuid`](#drbdmeta-write-dev-uuid)
   - [TYPICAL COMMAND SEQUENCES](#typical-command-sequences)
 
 ## PREREQUISITES
@@ -1558,6 +1561,225 @@ drbdmeta [--force] <minor> v09 <meta_dev> <internal|flex-external|flex-internal|
 
 ---
 
+### `drbdmeta apply-al`
+**Purpose:** Replay the activity log into the bitmap and mark metadata clean
+
+**Synopsis:**
+```bash
+drbdmeta [--force] <minor_or_device> <format> [format_args...] apply-al
+```
+
+**Common v09 form:**
+```bash
+drbdmeta [--force] <minor> v09 <meta_dev> <internal|flex-external|flex-internal|index> apply-al
+```
+
+**Arguments:**
+- `minor_or_device` - DRBD minor number or DRBD device identifier
+- `format` - Metadata format such as `v09`
+- `format_args...` - Format-specific arguments; for `v09`, this is `<meta_dev>
+  <internal|flex-external|flex-internal|index>`
+
+**Options:**
+- `--force` (FLAG) - Skip interactive confirmation prompts (auto-confirms).
+  Does **not** bypass the `is_attached` guard (exit `20` if device is
+  configured).
+
+**Exit Codes and Errors:**
+- `0` - Activity log applied successfully, or metadata was already clean
+- `1` - Command-level failure after command dispatch. Match stderr such as:
+  - `No valid meta data found`
+  - `apply-al only implemented for DRBD >= 0.7`
+  - `update of super block flags failed`
+  - AL replay failures when the node was Primary at crash time (activity log
+    uninitialized or corrupt)
+- `20` - Usage / invocation / environment error. Match stderr such as:
+  - `Device '<dev>' is configured!`
+  - `Format identifier missing`
+  - `Unknown format '<fmt>'.`
+  - `Too few arguments for format`
+  - `command missing`
+  - `Cannot determine minor device number of drbd device '<dev>'`
+  - lock/setup failures such as missing `/var/run/drbd/lock/`
+
+**What it does (internally):**
+1. Opens and validates metadata on the backing device
+2. Reads the activity log ring buffer from disk
+3. Replays AL transactions to reconstruct the set of "hot" (recently written)
+   4 MiB extents that were active at the time of the crash
+4. Sets the corresponding bits in the bitmap, marking those extents as
+   out-of-sync so the next resync covers them
+5. Re-initializes the activity log on disk
+6. Sets the `MDF_AL_CLEAN` flag in the metadata superblock
+
+**Notes:**
+- **When to use:** After an unclean shutdown (crash, power loss, kill -9) of a
+  node that was Primary or could have been a write target. The kernel sets
+  `MDF_PRIMARY_IND` in metadata whenever the device could receive writes; if
+  that flag is set and `MDF_AL_CLEAN` is not, the activity log must be applied
+  before the kernel will accept an `attach`.
+- **Kernel refuses attach without it:** `drbdsetup attach` fails with
+  `Failure: (165) Unclean meta-data found.` and the kernel prints `Found
+  unclean meta data. Did you "drbdadm apply-al"?`
+- **Device must not be attached:** The command modifies metadata on disk and
+  will be refused with exit code `20` if the minor is currently configured
+  (attached) in the kernel.
+- **Safe to run multiple times:** If metadata is already clean, the command
+  returns `0` without modifying anything.
+- **Idempotent on clean metadata:** Running `apply-al` on metadata that does
+  not need it (e.g., `MDF_PRIMARY_IND` not set) is harmless; the AL is
+  re-initialized and `MDF_AL_CLEAN` is set.
+- **Data integrity implication:** Skipping `apply-al` when it is needed means
+  the bitmap may not cover all regions that were dirty at crash time. A
+  subsequent resync could miss those regions, leaving silent data
+  inconsistency.
+- **Also required before `dump-md`:** Without `--force`, `drbdmeta dump-md`
+  refuses unclean metadata with: `Found meta data is "unclean", please
+  apply-al first`
+
+---
+
+### `drbdmeta read-dev-uuid`
+**Purpose:** Read and print the device UUID from metadata
+
+**Synopsis:**
+```bash
+drbdmeta [--force] <minor_or_device> <format> [format_args...] read-dev-uuid
+```
+
+**Common v09 form:**
+```bash
+drbdmeta [--force] <minor> v09 <meta_dev> <internal|flex-external|flex-internal|index> read-dev-uuid
+```
+
+**Arguments:**
+- `minor_or_device` - DRBD minor number or DRBD device identifier
+- `format` - Metadata format such as `v09`
+- `format_args...` - Format-specific arguments; for `v09`, this is `<meta_dev>
+  <internal|flex-external|flex-internal|index>`
+
+**Options:**
+- `--force` (FLAG) - Auto-confirm the exclusive-open retry prompt (see
+  "Running while attached" below)
+
+**Exit Codes and Errors:**
+- `0` - Success. Prints the 64-bit device UUID as a 16-digit zero-padded
+  uppercase hexadecimal string to stdout, followed by a newline. Example:
+  `00A3F7E21BC04D59`. When the minor is attached, stderr also contains:
+  `# Output might be stale, since minor <n> is attached`
+- `1` - Metadata open or close failed. Match stderr such as:
+  - `open(<dev>) failed: ...`
+  - `No valid meta-data signature found`
+- `20` - Usage / invocation / environment error. Match stderr such as:
+  - `Operation canceled.` (EBUSY prompt declined or non-TTY without `--force`)
+  - `Format identifier missing`
+  - `Unknown format '<fmt>'.`
+  - `Too few arguments for format`
+  - `command missing`
+  - `Cannot determine minor device number of drbd device '<dev>'`
+  - lock/setup failures such as missing `/var/run/drbd/lock/`
+
+**Notes:**
+- **Read-only command** - does not modify metadata on disk
+- **Can be used while the device is attached.** Unlike `write-dev-uuid` and
+  `apply-al` (which are blocked by the `is_attached` guard), `read-dev-uuid`
+  has `modifies_md=0` and is allowed to proceed. However, for internal or
+  flexible metadata, `drbdmeta` opens the backing device with `O_EXCL`, which
+  fails with `EBUSY` when the kernel holds the device. The tool then asks
+  interactively: `Exclusive open failed. Do it anyways?` Use `--force` to
+  auto-confirm this prompt (required for automation / non-TTY stdin). After a
+  successful read on an attached device, stderr includes a stale-data warning.
+- **Not exposed via kernel netlink:** The device UUID is only accessible
+  through `drbdmeta read-dev-uuid` (or `drbdmeta dump-md`). `drbdsetup show`,
+  `drbdsetup status`, and `drbdsetup events2` do not report it. This makes
+  `read-dev-uuid --force` the only way to retrieve the device UUID from a
+  running (attached) system.
+- **What the device UUID is:** A random 64-bit identifier for the backing
+  device, generated by `drbdadm create-md` and stored in the metadata
+  superblock. It is not a replication UUID; it identifies the physical backing
+  device itself.
+- **Not shown in `--help`:** This command is intentionally hidden from the
+  usage output. It is used internally by `drbdadm create-md` to preserve the
+  device UUID across metadata re-initialization.
+- **How `drbdadm create-md` uses it:** Before reinitializing metadata,
+  `drbdadm` calls `read-dev-uuid` to save the existing UUID, then runs
+  `create-md`, then calls `write-dev-uuid` to restore it. This keeps the
+  device identity stable across metadata re-creation.
+- **Device UUID and metadata validation:** When opening metadata, `drbdmeta`
+  compares the on-disk device UUID against the last-known block device info
+  file. A mismatch produces a warning and requires `--force` to proceed. This
+  guards against accidentally operating on the wrong device.
+- **Output is always exactly 16 uppercase hex digits:** The format is
+  `%016lX\n` (uppercase). Parse it as an unsigned 64-bit hexadecimal value.
+- **Fails after offline resize:** If metadata is found only at a last-known
+  position (after an offline resize that has not been finalized with
+  `check-resize`), `open()` returns a non-zero status and the command fails
+  with exit code `1`.
+
+---
+
+### `drbdmeta write-dev-uuid`
+**Purpose:** Write a device UUID into metadata
+
+**Synopsis:**
+```bash
+drbdmeta [--force] <minor_or_device> <format> [format_args...] write-dev-uuid <uuid_hex>
+```
+
+**Common v09 form:**
+```bash
+drbdmeta [--force] <minor> v09 <meta_dev> <internal|flex-external|flex-internal|index> write-dev-uuid <uuid_hex>
+```
+
+**Arguments:**
+- `minor_or_device` - DRBD minor number or DRBD device identifier
+- `format` - Metadata format such as `v09`
+- `format_args...` - Format-specific arguments; for `v09`, this is `<meta_dev>
+  <internal|flex-external|flex-internal|index>`
+- `uuid_hex` - The device UUID as a hexadecimal string (parsed with base-16
+  `strtoull`; both uppercase and lowercase digits are accepted). Leading `0x`
+  prefix is not required.
+
+**Options:** None command-specific
+
+**Exit Codes and Errors:**
+- `0` - Device UUID written successfully
+- `1` - Metadata open, write, or close failed. Match stderr such as:
+  - `open(<dev>) failed: ...`
+  - `No valid meta-data signature found`
+  - `update failed`
+- `10` - Required argument missing. Match stderr:
+  - `Required Argument missing`
+- `20` - Usage / invocation / environment error. Match stderr such as:
+  - `Device '<dev>' is configured!`
+  - `Format identifier missing`
+  - `Unknown format '<fmt>'.`
+  - `Too few arguments for format`
+  - `command missing`
+  - `Cannot determine minor device number of drbd device '<dev>'`
+  - lock/setup failures such as missing `/var/run/drbd/lock/`
+
+**Notes:**
+- **Device must not be attached:** The command modifies metadata on disk and
+  will be refused with exit code `20` if the minor is currently configured
+  (attached) in the kernel.
+- **Not shown in `--help`:** This command is intentionally hidden from the
+  usage output. It is the write counterpart to `read-dev-uuid` and is
+  primarily used internally by `drbdadm create-md`.
+- **Typical workflow:** `drbdadm create-md` uses `read-dev-uuid` /
+  `write-dev-uuid` as a pair to preserve the device UUID across metadata
+  re-initialization. When calling `drbdmeta` directly, you normally do not
+  need to call `write-dev-uuid` unless you are reimplementing the `create-md`
+  workflow or restoring metadata from a backup.
+- **No validation of the UUID value:** The command accepts any 64-bit
+  hexadecimal value without checking whether it is meaningful or unique.
+  Writing `0` effectively clears the device UUID.
+- **Fails after offline resize:** Same as `read-dev-uuid` - if metadata is
+  found only at a last-known position, `open()` fails and the command exits
+  with code `1`.
+
+---
+
 ## TYPICAL COMMAND SEQUENCES
 
 **Full resource setup and promotion:**
@@ -1638,8 +1860,19 @@ drbdmeta 0 v09 /dev/vg0/lv0 internal create-md --force 31
 
 # Dump metadata in text form
 drbdmeta 0 v09 /dev/vg0/lv0 internal dump-md
+
+# Apply activity log after unclean shutdown (required before attach)
+drbdmeta 0 v09 /dev/vg0/lv0 internal apply-al
+
+# Read the device UUID (prints 16-digit hex to stdout)
+drbdmeta 0 v09 /dev/vg0/lv0 internal read-dev-uuid
+
+# Preserve device UUID across metadata re-creation (what drbdadm create-md does)
+OLD_UUID=$(drbdmeta 0 v09 /dev/vg0/lv0 internal read-dev-uuid)
+drbdmeta 0 v09 /dev/vg0/lv0 internal create-md --force 31
+drbdmeta 0 v09 /dev/vg0/lv0 internal write-dev-uuid "$OLD_UUID"
 ```
 
-This guide covers the most commonly used administrative and inspection commands,
-with arguments, options, exit codes, and behavior cross-checked against the
-source code.
+This guide covers the most commonly used administrative, inspection, and
+metadata commands, with arguments, options, exit codes, and behavior
+cross-checked against the source code.

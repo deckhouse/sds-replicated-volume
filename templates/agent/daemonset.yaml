@@ -173,7 +173,9 @@ spec:
             - key: slogh.cfg
               path: slogh.cfg
       - name: dev-sdsrv
-        emptyDir: {}
+        hostPath:
+          path: /dev/sdsrv/
+          type: DirectoryOrCreate
       - name: var-run-drbd-lock
         emptyDir: {}
 {{- end }}

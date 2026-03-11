@@ -18,6 +18,7 @@ The controller reconciles `ReplicatedStoragePool` status with:
 1. **Eligible nodes** — nodes that can host volumes of this storage pool
 2. **Eligible nodes revision** — for quick change detection
 3. **Ready condition** — describing the current state
+4. **Phase and message** — quick operational state summary (Ready / WaitingForLVMVolumeGroups / InvalidConfiguration) with human-readable detail
 
 ## Interactions
 
@@ -46,7 +47,6 @@ For each eligible node, the controller also records LVG readiness and agent read
 ```
 Reconcile (root) [In-place reconciliation]
 ├── getRSP                                    — fetch the RSP
-├── applyLegacyFieldsCleared + patchRSPStatus — clear old controller phase/reason (one-time migration)
 ├── getLVGsByRSP                              — fetch LVGs referenced by RSP
 ├── Validation step (details)
 │   ├── validateRSPAndLVGs                    — validate RSP/LVG configuration
@@ -59,6 +59,7 @@ Reconcile (root) [In-place reconciliation]
 │   └── Grace period logic (details)          — handle NotReady nodes
 ├── applyEligibleNodesAndIncrementRevisionIfChanged
 ├── applyReadyCondTrue/applyReadyCondFalse    — set Ready condition
+├── applyPhase                                — set phase + message (derived from Ready condition)
 └── patchRSPStatus                            — persist status changes
 ```
 
@@ -72,18 +73,15 @@ High-level overview of the reconciliation flow. See [Detailed Algorithms](#detai
 flowchart TD
     Start([Reconcile]) --> GetRSP[Get RSP]
     GetRSP -->|NotFound| Done1([Done])
-    GetRSP --> ClearLegacy{Legacy phase/reason set?}
-    ClearLegacy -->|Yes| PatchLegacy[Clear + Patch status]
-    PatchLegacy --> GetLVGs
-    ClearLegacy -->|No| GetLVGs[Get LVGs by RSP]
+    GetRSP --> GetLVGs[Get LVGs by RSP]
 
     GetLVGs --> Validate[Validate LVGs, Selector, Zones]
-    Validate -->|Invalid| SetFalse[Ready=False + Patch]
+    Validate -->|Invalid| SetFalse["Ready=False + phase + Patch"]
     SetFalse --> Done2([Done])
 
     Validate -->|Valid| GetInputs[Get Nodes + Agent Readiness]
     GetInputs --> Compute[computeActualEligibleNodes]
-    Compute --> Apply[Apply eligible nodes + Ready=True]
+    Compute --> Apply["Apply eligible nodes +<br/>Ready=True + phase"]
 
     Apply --> PatchDecision{Changed?}
     PatchDecision -->|Yes| Patch[Patch status]
@@ -106,6 +104,18 @@ Indicates whether the storage pool eligible nodes have been calculated successfu
 | False | LVMVolumeGroupNotFound | Some LVMVolumeGroups not found |
 | False | InvalidLVMVolumeGroup | RSP/LVG validation failed (e.g., thin pool not found) |
 | False | InvalidNodeLabelSelector | NodeLabelSelector or Zones parsing failed |
+
+### Phase
+
+Quick operational state summary. Set by `applyPhase` alongside the Ready condition.
+
+| Phase | When |
+|-------|------|
+| Ready | Eligible nodes calculated successfully |
+| WaitingForLVMVolumeGroups | Referenced LVGs not found |
+| InvalidConfiguration | Validation failed (LVG, selector, or zones) |
+
+Message is passthrough from the Ready condition message.
 
 ## Eligible Nodes Details
 
@@ -141,6 +151,8 @@ This controller manages `RSP.Status` fields only and does not create external la
 | Status field | `status.eligibleNodes` | RSP | List of eligible nodes |
 | Status field | `status.eligibleNodesRevision` | RSP | Change detection counter |
 | Status field | `status.conditions[Ready]` | RSP | Controller health condition |
+| Status field | `status.phase` | RSP | Operational state summary |
+| Status field | `status.message` | RSP | Human-readable detail (Ready condition message) |
 
 ## Watches
 
@@ -180,6 +192,7 @@ flowchart TD
         EN[status.eligibleNodes]
         ENRev[status.eligibleNodesRevision]
         Conds[status.conditions]
+        PhaseMsg["status.phase + status.message"]
     end
 
     RSP --> BuildSelector
@@ -196,6 +209,7 @@ flowchart TD
     ComputeEligible --> EN
     ComputeEligible --> ENRev
     ComputeEligible -->|Ready| Conds
+    Conds --> PhaseMsg
 ```
 
 ---

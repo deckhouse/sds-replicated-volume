@@ -404,20 +404,32 @@ func computeIntendedBackingVolume(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1a
 		//
 		// Backing volume is needed for all Diskful members, including liminal ones.
 		// Liminal members maintain their backing volume; it is just not referenced in the DRBDR spec.
+		//
+		// During vestibule transitions (e.g., diskful-q-up: ✦→A→D∅+q↑→D), the member is
+		// temporarily diskless (Access) while the spec already targets Diskful. In this case,
+		// keep the backing volume to avoid a pointless delete+recreate cycle — the LLV will be
+		// needed as soon as the member is promoted to LiminalDiskful.
+		specNeedsBV := v1alpha1.DatameshMemberType(rvr.Spec.Type).NeedsBackingVolume()
 		if !member.Type.NeedsBackingVolume() {
-			return nil, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable,
-				"Backing volume is not applicable for diskless replica type"
-		}
+			if !specNeedsBV {
+				return nil, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable,
+					"Backing volume is not applicable for diskless replica type"
+			}
+			// Vestibule: member is diskless but spec targets a type with backing volume.
+			// Compute BV from rvr.Spec (member doesn't have LVG fields yet).
+			bv.LVMVolumeGroupName = rvr.Spec.LVMVolumeGroupName
+			bv.ThinPoolName = rvr.Spec.LVMVolumeGroupThinPoolName
+		} else {
+			// Check if configuration is complete (lvgName are required, nodeName is always set for member).
+			if member.LVMVolumeGroupName == "" {
+				return nil, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling,
+					"Waiting for storage assignment"
+			}
 
-		// Check if configuration is complete (lvgName are required, nodeName is always set for member).
-		if member.LVMVolumeGroupName == "" {
-			return nil, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonPendingScheduling,
-				"Waiting for storage assignment"
+			// Use datamesh member configuration.
+			bv.LVMVolumeGroupName = member.LVMVolumeGroupName
+			bv.ThinPoolName = member.LVMVolumeGroupThinPoolName
 		}
-
-		// Use datamesh member configuration.
-		bv.LVMVolumeGroupName = member.LVMVolumeGroupName
-		bv.ThinPoolName = member.LVMVolumeGroupThinPoolName
 	} else {
 		// Not a member and deleting: backing volume is not needed (RVR is leaving, not joining).
 		if rvr.DeletionTimestamp != nil {

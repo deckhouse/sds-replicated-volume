@@ -70,14 +70,14 @@ func (m *mockT) Log(args ...any) { m.logs = append(m.logs, fmt.Sprint(args...)) 
 func (m *mockT) Logf(format string, args ...any) {
 	m.logs = append(m.logs, fmt.Sprintf(format, args...))
 }
-func (m *mockT) Name() string             { return m.name }
-func (m *mockT) Parallel()                {}
-func (m *mockT) Setenv(_, _ string)       {}
-func (m *mockT) Skip(_ ...any)            { m.skipped = true; runtime.Goexit() }
-func (m *mockT) Skipf(_ string, _ ...any) { m.skipped = true; runtime.Goexit() }
-func (m *mockT) SkipNow()                 { m.skipped = true; runtime.Goexit() }
-func (m *mockT) Skipped() bool            { return m.skipped }
-func (m *mockT) TempDir() string          { return "" }
+func (m *mockT) Name() string         { return m.name }
+func (m *mockT) Parallel()            {}
+func (m *mockT) Setenv(_, _ string)   {}
+func (m *mockT) Skip(...any)          { m.skipped = true; runtime.Goexit() }
+func (m *mockT) Skipf(string, ...any) { m.skipped = true; runtime.Goexit() }
+func (m *mockT) SkipNow()             { m.skipped = true; runtime.Goexit() }
+func (m *mockT) Skipped() bool        { return m.skipped }
+func (m *mockT) TempDir() string      { return "" }
 
 func (m *mockT) Run(name string, fn func(*mockT)) bool {
 	child := &mockT{ctx: m.ctx, name: m.name + "/" + name}
@@ -213,7 +213,7 @@ func TestScope_ContextDerivedFromParent(t *testing.T) {
 	}
 }
 
-func TestScope_ContextCancelledDuringCleanup(t *testing.T) {
+func TestScope_ContextReturnsBackgroundDuringCleanup(t *testing.T) {
 	e, _ := newTestE(t)
 
 	child := e.Scope()
@@ -224,8 +224,10 @@ func TestScope_ContextCancelledDuringCleanup(t *testing.T) {
 	})
 	child.Close()
 
-	if ctxDuringCleanup.Err() == nil {
-		t.Fatal("Scope context during cleanup should be cancelled (matching testing.T behavior)")
+	// During cleanup, Context() returns context.Background() so cleanup code (e.g. NodeExec)
+	// can run without cancellation; the test scope's context is already cancelled before cleanups run.
+	if ctxDuringCleanup != nil && ctxDuringCleanup.Err() != nil {
+		t.Fatal("Scope Context() during cleanup should return a non-cancelled context (Background)")
 	}
 }
 
@@ -306,7 +308,7 @@ func TestScopeWithTimeout_CloseCancelsContext(t *testing.T) {
 	}
 }
 
-func TestScopeWithTimeout_ContextCancelledDuringCleanup(t *testing.T) {
+func TestScopeWithTimeout_ContextReturnsBackgroundDuringCleanup(t *testing.T) {
 	e, _ := newTestE(t)
 
 	child := e.ScopeWithTimeout(10 * time.Second)
@@ -317,8 +319,8 @@ func TestScopeWithTimeout_ContextCancelledDuringCleanup(t *testing.T) {
 	})
 	child.Close()
 
-	if ctxDuringCleanup.Err() == nil {
-		t.Fatal("context during cleanup should be cancelled (matching testing.T behavior)")
+	if ctxDuringCleanup != nil && ctxDuringCleanup.Err() != nil {
+		t.Fatal("Context() during cleanup should return a non-cancelled context (Background)")
 	}
 }
 

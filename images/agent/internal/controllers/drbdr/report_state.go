@@ -45,7 +45,6 @@ func ensureReportState(
 	err = errors.Join(err, reportErr)
 	applyConfiguredCondition(drbdr, err, maintenanceMode)
 
-	// Set LVMLogicalVolumeName (reverse-computed from actual disk)
 	if drbdr.Status.ActiveConfiguration == nil {
 		drbdr.Status.ActiveConfiguration = &v1alpha1.DRBDResourceActiveConfiguration{}
 	}

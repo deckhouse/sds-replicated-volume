@@ -177,11 +177,11 @@ func TestSetupResource_CleanupLeavesControllerFinalizer(t *testing.T) {
 	if cm == nil {
 		t.Fatal("expected resource to still exist (controller finalizer blocks deletion)")
 	}
-	if len(cm.Finalizers) != 1 || cm.Finalizers[0] != "controller-finalizer" {
-		t.Errorf("expected only controller-finalizer, got %v", cm.Finalizers)
-	}
 	if cm.DeletionTimestamp == nil {
 		t.Error("expected deletionTimestamp to be set")
+	}
+	if len(cm.Finalizers) != 2 {
+		t.Errorf("expected both finalizers to remain (cleanup only issues Delete), got %v", cm.Finalizers)
 	}
 }
 
