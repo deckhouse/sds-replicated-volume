@@ -19,6 +19,7 @@ package utils //nolint:revive // pre-existing package name; renaming is a separa
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -106,7 +107,8 @@ func (s *Store) NodeStageVolumeFS(source, target string, fsType string, mountOpt
 
 	if isMountPoint {
 		mapperSourcePath := toMapperPath(source)
-		s.Log.Trace(fmt.Sprintf("Target %s is a mount point. Checking if it is already mounted to source %s or %s", target, source, mapperSourcePath))
+		resolvedSource := resolveDevicePath(source)
+		s.Log.Trace(fmt.Sprintf("Target %s is a mount point. Checking if it is already mounted to source %s, %s or %s", target, source, mapperSourcePath, resolvedSource))
 
 		mountedDevicePath, _, err := mountutils.GetDeviceNameFromMount(s.NodeStorage.Interface, target)
 		if err != nil {
@@ -114,8 +116,8 @@ func (s *Store) NodeStageVolumeFS(source, target string, fsType string, mountOpt
 		}
 		s.Log.Trace(fmt.Sprintf("Found device mounted at %s: %s", target, mountedDevicePath))
 
-		if mountedDevicePath != source && mountedDevicePath != mapperSourcePath {
-			return fmt.Errorf("target %s is a mount point and is not mounted to source %s or %s", target, source, mapperSourcePath)
+		if mountedDevicePath != source && mountedDevicePath != mapperSourcePath && mountedDevicePath != resolvedSource {
+			return fmt.Errorf("target %s is a mount point and is not mounted to source %s, %s or %s", target, source, mapperSourcePath, resolvedSource)
 		}
 
 		s.Log.Trace(fmt.Sprintf("Target %s is a mount point and already mounted to source %s. Skipping FormatAndMount without any checks", target, source))
@@ -288,6 +290,14 @@ func toMapperPath(devPath string) string {
 	return "/dev/mapper/" + mapperPath
 }
 
+func resolveDevicePath(devPath string) string {
+	resolved, err := filepath.EvalSymlinks(devPath)
+	if err != nil {
+		return devPath
+	}
+	return resolved
+}
+
 func checkMount(s *Store, devPath, target string, mountOpts []string) error {
 	mntInfo, err := s.NodeStorage.List()
 	if err != nil {
@@ -297,8 +307,9 @@ func checkMount(s *Store, devPath, target string, mountOpts []string) error {
 	for _, m := range mntInfo {
 		if m.Path == target {
 			mapperDevicePath := toMapperPath(devPath)
-			if m.Device != devPath && m.Device != mapperDevicePath {
-				return fmt.Errorf("[checkMount] device from mount point %q does not match expected source device path %s or mapper device path %s", m.Device, devPath, mapperDevicePath)
+			resolvedDevPath := resolveDevicePath(devPath)
+			if m.Device != devPath && m.Device != mapperDevicePath && m.Device != resolvedDevPath {
+				return fmt.Errorf("[checkMount] device from mount point %q does not match expected source device path %s, mapper device path %s or resolved device path %s", m.Device, devPath, mapperDevicePath, resolvedDevPath)
 			}
 			s.Log.Trace(fmt.Sprintf("[checkMount] mount point %s is mounted to device %s", target, m.Device))
 

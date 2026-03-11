@@ -348,9 +348,8 @@ func GetReplicatedVolumeReplicaForNode(ctx context.Context, kc client.Client, vo
 	err := kc.List(
 		ctx,
 		rvrList,
-		client.MatchingFields{
-			"spec.replicatedVolumeName": volumeName,
-			"spec.nodeName":             nodeName,
+		client.MatchingLabels{
+			srv.ReplicatedVolumeLabelKey: volumeName,
 		},
 	)
 	if err != nil {
@@ -358,7 +357,7 @@ func GetReplicatedVolumeReplicaForNode(ctx context.Context, kc client.Client, vo
 	}
 
 	for i := range rvrList.Items {
-		if rvrList.Items[i].Spec.ReplicatedVolumeName == volumeName && rvrList.Items[i].Spec.NodeName == nodeName {
+		if rvrList.Items[i].Spec.NodeName == nodeName {
 			return &rvrList.Items[i], nil
 		}
 	}
