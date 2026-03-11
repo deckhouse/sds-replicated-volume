@@ -387,7 +387,7 @@ func ValidateReplicatedStorageClass(replicatedSC *srv.ReplicatedStorageClass, zo
 			failedMsgBuilder.WriteString("Topology is set to 'TransZonal', but zones are not specified; ")
 		} else {
 			switch replicatedSC.Spec.Replication {
-			case ReplicationAvailability, ReplicationConsistencyAndAvailability:
+			case ReplicationAvailability, ReplicationConsistencyAndAvailability, "":
 				if len(replicatedSC.Spec.Zones) != 3 {
 					validationPassed = false
 					fmt.Fprintf(&failedMsgBuilder, "Selected unacceptable amount of zones for replication type: %s; correct number of zones should be 3; ", replicatedSC.Spec.Replication)
@@ -493,7 +493,7 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 		storageClassParameters[StorageClassPlacementCountKey] = "2"
 		storageClassParameters[StorageClassAutoEvictMinReplicaCountKey] = "2"
 		storageClassParameters[StorageClassParamAutoQuorumKey] = SuspendIo
-	case ReplicationConsistencyAndAvailability:
+	case ReplicationConsistencyAndAvailability, "":
 		storageClassParameters[StorageClassPlacementCountKey] = "3"
 		storageClassParameters[StorageClassAutoEvictMinReplicaCountKey] = "3"
 		storageClassParameters[StorageClassParamAutoQuorumKey] = SuspendIo

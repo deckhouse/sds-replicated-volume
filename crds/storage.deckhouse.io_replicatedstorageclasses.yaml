@@ -266,7 +266,6 @@ spec:
                 - Retain
                 type: string
               replication:
-                default: ConsistencyAndAvailability
                 description: |-
                   Deprecated: Use FailuresToTolerate and GuaranteedMinimumDataRedundancy instead.
                   Mutually exclusive with FailuresToTolerate/GuaranteedMinimumDataRedundancy.

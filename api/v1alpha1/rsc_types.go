@@ -126,7 +126,6 @@ type ReplicatedStorageClassSpec struct {
 	//   ConsistencyAndAvailability → failuresToTolerate=1, guaranteedMinimumDataRedundancy=1
 	//
 	// +kubebuilder:validation:Enum=None;Availability;Consistency;ConsistencyAndAvailability
-	// +kubebuilder:default:=ConsistencyAndAvailability
 	Replication ReplicatedStorageClassReplication `json:"replication,omitempty"`
 	// FailuresToTolerate (FTT) specifies how many arbitrary node failures the volume
 	// can tolerate while remaining available for IO.
