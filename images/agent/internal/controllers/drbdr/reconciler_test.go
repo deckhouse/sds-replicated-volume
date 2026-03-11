@@ -57,6 +57,9 @@ type reconcileTestCase struct {
 	// Additional objects in the cluster
 	objs []client.Object
 
+	// Override reconcile request (default: {Name: drbdr.Name or testDRBDRName})
+	request *drbdr.DRBDReconcileRequest
+
 	// Expected drbdsetup commands (in order)
 	expectedCommands []*fakedrbdutils.ExpectedCmd
 
@@ -98,10 +101,28 @@ func TestReconciler_Reconcile(t *testing.T) {
 	testCases := []reconcileTestCase{
 		// Basic cases - resource lookup
 		{
-			name:  "resource not found by name - returns done (no orphan cleanup)",
+			name:  "resource not found by name, no DRBD on node - done",
 			drbdr: nil,
-			// When reconcile is triggered by K8S name but object doesn't exist,
-			// we just return Done (orphan cleanup requires ActualNameOnTheNode)
+			// K8S object doesn't exist; orphan check queries DRBD status
+			// and finds nothing on the node.
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
+				statusCmd(drbdutils.StatusResult{}),
+			},
+		},
+		{
+			name:  "resource not found by name, DRBD exists on node - orphan cleanup",
+			drbdr: nil,
+			// K8S object doesn't exist but DRBD resource is running on the
+			// node. The reconciler tears it down.
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
+				statusCmd(configuredStatus(testDRBDResName)),
+				downCmd(testDRBDResName),
+			},
+		},
+		{
+			name: "non-prefixed DRBD with no owner - skipped",
+			// No K8S objects exist, non-prefixed DRBD name has no owner.
+			request:          &drbdr.DRBDReconcileRequest{ActualNameOnTheNode: "foreign-resource"},
 			expectedCommands: []*fakedrbdutils.ExpectedCmd{},
 		},
 		{
@@ -367,17 +388,20 @@ func TestReconciler_Reconcile(t *testing.T) {
 			portCache := drbdr.NewPortCache(context.Background(), drbdr.PortRangeMin, drbdr.PortRangeMax)
 			rec := drbdr.NewReconciler(cl, testNodeName, portCache)
 
-			// Determine request name
-			reqName := testDRBDRName
-			if tc.drbdr != nil {
-				reqName = tc.drbdr.Name
+			// Build reconcile request
+			var req drbdr.DRBDReconcileRequest
+			if tc.request != nil {
+				req = *tc.request
+			} else {
+				reqName := testDRBDRName
+				if tc.drbdr != nil {
+					reqName = tc.drbdr.Name
+				}
+				req = drbdr.DRBDReconcileRequest{Name: reqName}
 			}
 
 			// Run reconcile
-			_, err := rec.Reconcile(
-				t.Context(),
-				drbdr.DRBDReconcileRequest{Name: reqName},
-			)
+			_, err := rec.Reconcile(t.Context(), req)
 
 			// Check error
 			if tc.expectedReconcileErr != "" {
