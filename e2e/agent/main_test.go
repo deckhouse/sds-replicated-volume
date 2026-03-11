@@ -61,6 +61,20 @@ func TestDRBDResource(t *testing.T) {
 		suite.SetupDeleteDiskful(e, cl, drbdr, llv)
 	})
 
+	e.Run("OrphanCleanup", func(e envtesting.E) {
+		suite.SetupOrphanCleanup(e, cl, cluster, "oc", 0)
+	})
+
+	ne := kubetesting.DiscoverNodeExec(e, cs, podLogOpts)
+
+	e.Run("NonManagedResource", func(e envtesting.E) {
+		suite.SetupNonManagedResource(e, cl, cluster, ne, "nm", 0)
+	})
+
+	e.Run("Rename", func(e envtesting.E) {
+		suite.SetupRename(e, cl, cluster, ne, "rn", 0)
+	})
+
 	e.Run("DeviceUUID", func(e envtesting.E) {
 		e.Parallel()
 		if len(cluster.Nodes) < 2 {
