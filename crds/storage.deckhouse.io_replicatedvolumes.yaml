@@ -178,12 +178,13 @@ spec:
             x-kubernetes-validations:
             - message: Auto mode requires replicatedStorageClassName and must not
                 have manualConfiguration.
-              rule: self.configurationMode != 'Auto' || (size(self.replicatedStorageClassName)
-                > 0 && !has(self.manualConfiguration))
+              rule: self.configurationMode != 'Auto' || (has(self.replicatedStorageClassName)
+                && size(self.replicatedStorageClassName) > 0 && !has(self.manualConfiguration))
             - message: Manual mode requires manualConfiguration and must not have
                 replicatedStorageClassName.
               rule: self.configurationMode != 'Manual' || (has(self.manualConfiguration)
-                && size(self.replicatedStorageClassName) == 0)
+                && (!has(self.replicatedStorageClassName) || size(self.replicatedStorageClassName)
+                == 0))
           status:
             properties:
               actuallyAttachedTo:

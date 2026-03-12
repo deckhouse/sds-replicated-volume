@@ -64,9 +64,9 @@ func (rv *ReplicatedVolume) SetStatusConditions(conditions []metav1.Condition) {
 }
 
 // Auto mode requires RSC name, forbids manualConfiguration:
-// +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Auto' || (size(self.replicatedStorageClassName) > 0 && !has(self.manualConfiguration))",message="Auto mode requires replicatedStorageClassName and must not have manualConfiguration."
+// +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Auto' || (has(self.replicatedStorageClassName) && size(self.replicatedStorageClassName) > 0 && !has(self.manualConfiguration))",message="Auto mode requires replicatedStorageClassName and must not have manualConfiguration."
 // Manual mode requires manualConfiguration, forbids RSC name:
-// +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Manual' || (has(self.manualConfiguration) && size(self.replicatedStorageClassName) == 0)",message="Manual mode requires manualConfiguration and must not have replicatedStorageClassName."
+// +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Manual' || (has(self.manualConfiguration) && (!has(self.replicatedStorageClassName) || size(self.replicatedStorageClassName) == 0))",message="Manual mode requires manualConfiguration and must not have replicatedStorageClassName."
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeSpec struct {
 	// +kubebuilder:validation:Required
