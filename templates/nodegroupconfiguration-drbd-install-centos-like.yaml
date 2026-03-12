@@ -106,7 +106,7 @@ spec:
     if [ -e "/proc/drbd" ]; then
       # DRBD check version
 
-      current_version="$(cat /proc/drbd | grep 'version:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+      current_version="$(cat /proc/drbd | grep 'version:' | awk '{print $2}')"
       desired_version="{{ $.Values.sdsReplicatedVolume.internal.drbdVersion }}"
 
       # We expect the loaded DRBD module to be version 9.
@@ -200,7 +200,7 @@ spec:
     modprobe dm-thin-pool
 
     if [ -e "/proc/drbd" ]; then
-      current_version="$(cat /proc/drbd | grep 'version:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+      current_version="$(cat /proc/drbd | grep 'version:' | awk '{print $2}')"
       desired_version="{{ $.Values.sdsReplicatedVolume.internal.drbdVersion }}"
 
       {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
