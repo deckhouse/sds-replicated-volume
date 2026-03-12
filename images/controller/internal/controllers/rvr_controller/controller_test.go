@@ -63,7 +63,7 @@ var _ = Describe("rvEventHandler", func() {
 			}
 			newRV := oldRV.DeepCopy()
 			newRV.Status.DatameshRevision = 1
-			newRV.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+			newRV.Status.Datamesh.Members = []v1alpha1.DatameshMember{
 				{Name: "rv-1-0"},
 				{Name: "rv-1-1"},
 			}
@@ -101,7 +101,7 @@ var _ = Describe("rvEventHandler", func() {
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{Name: "rv-1-0"},
 							{Name: "rv-1-1"},
 						},
@@ -110,7 +110,7 @@ var _ = Describe("rvEventHandler", func() {
 			}
 			newRV := oldRV.DeepCopy()
 			newRV.Status.DatameshRevision = 2
-			newRV.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+			newRV.Status.Datamesh.Members = []v1alpha1.DatameshMember{
 				{Name: "rv-1-1"},
 				{Name: "rv-1-2"}, // Added.
 			}
@@ -160,20 +160,20 @@ var _ = Describe("rvEventHandler", func() {
 		})
 	})
 
-	Describe("Update with DatameshPendingReplicaTransitions message change", func() {
+	Describe("Update with DatameshReplicaRequests message change", func() {
 		It("enqueues only affected RVRs when message changes", func() {
 			oldRV := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					DatameshRevision: 1,
-					DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 						{Name: "rv-1-0", Message: "old message"},
 						{Name: "rv-1-1", Message: "unchanged"},
 					},
 				},
 			}
 			newRV := oldRV.DeepCopy()
-			newRV.Status.DatameshPendingReplicaTransitions[0].Message = "new message"
+			newRV.Status.DatameshReplicaRequests[0].Message = "new message"
 
 			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 
@@ -190,15 +190,15 @@ var _ = Describe("rvEventHandler", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					DatameshRevision: 1,
-					DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 						{Name: "rv-1-0", Message: "msg"},
 					},
 				},
 			}
 			newRV := oldRV.DeepCopy()
-			newRV.Status.DatameshPendingReplicaTransitions = append(
-				newRV.Status.DatameshPendingReplicaTransitions,
-				v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{Name: "rv-1-1", Message: "new"},
+			newRV.Status.DatameshReplicaRequests = append(
+				newRV.Status.DatameshReplicaRequests,
+				v1alpha1.ReplicatedVolumeDatameshReplicaRequest{Name: "rv-1-1", Message: "new"},
 			)
 
 			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
@@ -216,7 +216,7 @@ var _ = Describe("rvEventHandler", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					DatameshRevision: 1,
-					DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 						{Name: "rv-1-0", Message: "msg"},
 					},
 				},
@@ -238,24 +238,24 @@ var _ = Describe("rvEventHandler", func() {
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-						Members: []v1alpha1.ReplicatedVolumeDatameshMember{
+						Members: []v1alpha1.DatameshMember{
 							{Name: "rv-1-0"},
 							{Name: "rv-1-1"},
 						},
 					},
-					DatameshPendingReplicaTransitions: []v1alpha1.ReplicatedVolumeDatameshPendingReplicaTransition{
+					DatameshReplicaRequests: []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
 						{Name: "rv-1-3", Message: "old message"},
 					},
 				},
 			}
 			newRV := oldRV.DeepCopy()
 			newRV.Status.DatameshRevision = 2
-			newRV.Status.Datamesh.Members = []v1alpha1.ReplicatedVolumeDatameshMember{
+			newRV.Status.Datamesh.Members = []v1alpha1.DatameshMember{
 				{Name: "rv-1-1"},
 				{Name: "rv-1-2"}, // Added to datamesh.
 			}
 			// Message also changed for pending replica (not in datamesh).
-			newRV.Status.DatameshPendingReplicaTransitions[0].Message = "new message"
+			newRV.Status.DatameshReplicaRequests[0].Message = "new message"
 
 			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 
@@ -750,11 +750,11 @@ var _ = Describe("rspEventHandler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology:        v1alpha1.TopologyIgnored,
-						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "rsp-1",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyIgnored,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "rsp-1",
 					},
 				},
 			}
@@ -808,11 +808,11 @@ var _ = Describe("rspEventHandler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology:        v1alpha1.TopologyIgnored,
-						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "other-rsp",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyIgnored,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "other-rsp",
 					},
 				},
 			}
@@ -864,11 +864,11 @@ var _ = Describe("rspEventHandler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology:        v1alpha1.TopologyIgnored,
-						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "rsp-1",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyIgnored,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "rsp-1",
 					},
 				},
 			}
@@ -943,11 +943,11 @@ var _ = Describe("rspEventHandler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology:        v1alpha1.TopologyIgnored,
-						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "rsp-1",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyIgnored,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "rsp-1",
 					},
 				},
 			}
@@ -1000,11 +1000,11 @@ var _ = Describe("rspEventHandler", func() {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology:        v1alpha1.TopologyIgnored,
-						Replication:     v1alpha1.ReplicationConsistencyAndAvailability,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "rsp-1",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyIgnored,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "rsp-1",
 					},
 				},
 			}

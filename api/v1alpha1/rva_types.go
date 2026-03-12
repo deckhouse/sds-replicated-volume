@@ -29,10 +29,10 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 // +kubebuilder:selectablefield:JSONPath=.spec.replicatedVolumeName
 // +kubebuilder:printcolumn:name="Volume",type=string,JSONPath=".spec.replicatedVolumeName"
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
-// +kubebuilder:printcolumn:name="Attached",type=string,JSONPath=".status.conditions[?(@.type=='Attached')].status"
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="ReplicaReady",type=string,JSONPath=".status.conditions[?(@.type=='ReplicaReady')].status"
-// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=".status.message"
 type ReplicatedVolumeAttachment struct {
 	metav1.TypeMeta `json:",inline"`
 
@@ -88,6 +88,16 @@ type ReplicatedVolumeAttachmentStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
+	// Phase is a quick operational state summary.
+	// +kubebuilder:validation:Enum=Pending;Attaching;Attached;Detaching;Terminating
+	// +optional
+	Phase ReplicatedVolumeAttachmentPhase `json:"phase,omitempty"`
+
+	// Message is a human-readable detail about the current state.
+	// +kubebuilder:validation:MaxLength=512
+	// +optional
+	Message string `json:"message,omitempty"`
+
 	// DevicePath is the block device path on the node.
 	// Only set when the device is available on the node. Example: /dev/drbd10012.
 	// +kubebuilder:validation:MaxLength=256
@@ -104,3 +114,21 @@ type ReplicatedVolumeAttachmentStatus struct {
 	// +optional
 	InUse *bool `json:"inUse,omitempty"`
 }
+
+// ReplicatedVolumeAttachmentPhase enumerates possible values for ReplicatedVolumeAttachment status.phase field.
+type ReplicatedVolumeAttachmentPhase string
+
+const (
+	// ReplicatedVolumeAttachmentPhasePending indicates waiting for prerequisites (replica, quorum, slot, etc.).
+	ReplicatedVolumeAttachmentPhasePending ReplicatedVolumeAttachmentPhase = "Pending"
+	// ReplicatedVolumeAttachmentPhaseAttaching indicates the volume is being attached to the node.
+	ReplicatedVolumeAttachmentPhaseAttaching ReplicatedVolumeAttachmentPhase = "Attaching"
+	// ReplicatedVolumeAttachmentPhaseAttached indicates the volume is attached and serving IO on the node.
+	ReplicatedVolumeAttachmentPhaseAttached ReplicatedVolumeAttachmentPhase = "Attached"
+	// ReplicatedVolumeAttachmentPhaseDetaching indicates the volume is being detached from the node.
+	ReplicatedVolumeAttachmentPhaseDetaching ReplicatedVolumeAttachmentPhase = "Detaching"
+	// ReplicatedVolumeAttachmentPhaseTerminating indicates the attachment is terminating.
+	ReplicatedVolumeAttachmentPhaseTerminating ReplicatedVolumeAttachmentPhase = "Terminating"
+)
+
+func (p ReplicatedVolumeAttachmentPhase) String() string { return string(p) }

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package driver
+package driver //nolint:revive
 
 import (
 	"context"
@@ -343,7 +343,7 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.Contro
 	requestCapacity := resource.NewQuantity(request.CapacityRange.GetRequiredBytes(), resource.BinarySI)
 	d.log.Trace(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] requestCapacity: %s", traceID, volumeID, requestCapacity.String()))
 
-	nodeExpansionRequired := !(request.GetVolumeCapability().GetBlock() != nil)
+	nodeExpansionRequired := request.GetVolumeCapability().GetBlock() == nil
 
 	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] NodeExpansionRequired: %t", traceID, volumeID, nodeExpansionRequired))
 

@@ -15,7 +15,7 @@ The controller reconciles `ReplicatedVolumeReplica` with:
 
 | Direction | Resource/Controller | Relationship |
 |-----------|---------------------|--------------|
-| ← input | ReplicatedVolume | Reads datamesh configuration (size, membership, type transitions) |
+| ← input | ReplicatedVolume | Reads datamesh configuration (size, membership, member types) |
 | ← input | ReplicatedStoragePool | Reads eligible nodes for eligibility verification |
 | ← input | Pod (agent) | Checks agent readiness on target node before configuring DRBD |
 | → manages | LVMLogicalVolume | Creates/resizes/deletes backing volumes |
@@ -50,7 +50,7 @@ reconcile DRBD resource:
     if DRBDR failed → DRBDConfigured=False ConfigurationFailed
     if not datamesh member:
         if was member (datameshRevision > 0) → reset datameshRevision to 0, DRBDConfigured=True
-        elif deleting → DRBDConfigured=True (replica is being deleted)
+        elif deleting → DRBDConfigured=True (replica is terminating)
         else → DRBDConfigured=False PendingDatameshJoin
     else → DRBDConfigured=True
 
@@ -82,7 +82,7 @@ Reconcile (root) [Pure orchestration]
 │   ├── rvrShouldNotExist → deleteDRBDR + applyDRBDConfiguredCondFalse NotApplicable
 │   ├── RV/datamesh not ready → applyDRBDConfiguredCondFalse WaitingForReplicatedVolume
 │   ├── node not assigned → applyDRBDConfiguredCondFalse PendingScheduling
-│   ├── computeIntendedType / computeTargetType / computeTargetDRBDRReconciliationCache
+│   ├── computeIntendedType / computeTargetType / newDRBDRReconciliationCache
 │   ├── createDRBDR (computeTargetDRBDRSpec) / patchDRBDR
 │   ├── applyRVRDRBDRReconciliationCache
 │   ├── getAgentReady → applyDRBDConfiguredCondFalse AgentNotReady
@@ -110,15 +110,19 @@ Reconcile (root) [Pure orchestration]
 │   │   ├── computeEligibilityWarnings
 │   │   ├── findLVGInEligibleNode / findLVGInEligibleNodeByName
 │   │   └── applySatisfyEligibleNodesCond*
-│   └── ensureStatusDatameshPendingTransitionAndConfiguredCond [EnsureReconcileHelper] ← details
-│       ├── computeTargetDatameshPendingTransition
+│   └── ensureStatusDatameshRequestAndConfiguredCond [EnsureReconcileHelper] ← details
+│       ├── computeTargetDatameshRequest
 │       ├── rspEligibilityView.isStorageEligible (shared with computeIntendedBackingVolume)
-│       ├── applyDatameshPendingTransition
+│       ├── applyDatameshRequest
 │       └── applyConfiguredCond*
+├── computeRVRPhaseAndMessage (phase + message from conditions; pre-member lifecycle vs member health path)
+│   └── computeMemberPhaseAndMessage (Critical/Synchronizing/Degraded/PartiallyDegraded/Progressing/Healthy)
+│       ├── computeMemberProblemsAndSeverity (problem detection + severity)
+│       └── computeMemberProgress (in-progress operational changes)
 └── patchRVRStatus
 ```
 
-Links to detailed algorithms: [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureStatusAddressesAndType`](#ensurestatusaddressesandtype-details), [`ensureStatusAttachment`](#ensurestatusattachment-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionAttached`](#ensureconditionattached-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeUpToDate`](#ensureconditionbackingvolumeinsync-details), [`ensureStatusQuorum`](#ensurestatusquorum-details), [`ensureConditionReady`](#ensureconditionready-details), [`ensureConditionSatisfyEligibleNodes`](#ensureconditionsatisfyeligiblenodes-details), [`ensureStatusDatameshPendingTransitionAndConfiguredCond`](#ensurestatusdatameshpendingandconfiguredcond-details)
+Links to detailed algorithms: [`computeRVRPhaseAndMessage`](#computervrrphaseandmessage-details), [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureStatusAddressesAndType`](#ensurestatusaddressesandtype-details), [`ensureStatusAttachment`](#ensurestatusattachment-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionAttached`](#ensureconditionattached-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeUpToDate`](#ensureconditionbackingvolumeinsync-details), [`ensureStatusQuorum`](#ensurestatusquorum-details), [`ensureConditionReady`](#ensureconditionready-details), [`ensureConditionSatisfyEligibleNodes`](#ensureconditionsatisfyeligiblenodes-details), [`ensureStatusDatameshRequestAndConfiguredCond`](#ensurestatusdatameshrequesstandconfiguredcond-details)
 
 ## Algorithm Flow
 
@@ -150,7 +154,7 @@ flowchart TD
         PeersCond --> BVInSync[ensureConditionBackingVolumeUpToDate]
         BVInSync --> CondReady[ensureConditionReady]
         CondReady --> SEN[ensureConditionSatisfyEligibleNodes]
-        SEN --> DmPendingAndCond[ensureStatusDatameshPendingTransitionAndConfiguredCond]
+        SEN --> DmPendingAndCond[ensureStatusDatameshRequestAndConfiguredCond]
     end
 
     DmPendingAndCond --> Patch[Patch RVR status]
@@ -262,7 +266,7 @@ Indicates overall replica readiness for I/O (based on quorum state).
 |--------|--------|------|
 | True | Ready | Ready for I/O (quorum message) |
 | True/False | QuorumViaPeers | Diskless replica; quorum provided by connected peers |
-| False | Deleting | Replica is being deleted (rvrShouldNotExist or deleting non-member) |
+| False | Terminating | Replica is being deleted (rvrShouldNotExist or deleting non-member) |
 | False | PendingDatameshJoin | Waiting to join datamesh (not deleting) |
 | False | PendingScheduling | Waiting for node assignment |
 | False | QuorumLost | Quorum is lost (quorum message) |
@@ -283,6 +287,41 @@ Indicates whether the replica satisfies the eligible nodes requirements from its
 | Unknown | WaitingForReplicatedVolume | Waiting for ReplicatedVolume or ReplicatedStoragePool to be ready |
 | (absent) | - | Node not yet assigned |
 
+### Phase
+
+Quick operational state summary computed from conditions by `computeRVRPhaseAndMessage`. Set after all conditions are ensured, before the status patch.
+
+Phase evaluation splits into two paths based on datamesh membership (`datameshRevision > 0`):
+
+**Universal (always first):**
+
+| Phase | When |
+|-------|------|
+| Terminating | DeletionTimestamp is set |
+| AgentNotReady | DRBDConfigured reason = AgentNotReady |
+
+**Pre-member lifecycle** (`datameshRevision == 0`):
+
+| Phase | When |
+|-------|------|
+| Pending | NodeName empty or Scheduled != True |
+| Provisioning | BackingVolumeReady=False with provisioning/resize reasons |
+| Configuring | DRBDConfigured=Unknown/ApplyingConfiguration or DRBDConfigured=False (non-excluded reasons) |
+| WaitingForDatamesh | DRBDConfigured=False/PendingDatameshJoin |
+
+**Member health** (`datameshRevision > 0`), priority order:
+
+| Phase | When |
+|-------|------|
+| Critical | Ready=False/QuorumLost or QuorumViaPeers, OR Attached=False/IOSuspended |
+| Synchronizing | BackingVolumeUpToDate=False/Synchronizing |
+| Degraded | Ready=True but serious problems: disk Failed, NotConnected, AttachmentFailed, ProvisioningFailed, ResizeFailed, ConfigurationFailed |
+| PartiallyDegraded | Ready=True but minor problems: PartiallyConnected, RequiresSynchronization, wrong node, DetachmentFailed |
+| Progressing | No health problems, but operational change in progress: resize, type conversion, DRBD reconfig |
+| Healthy | Ready=True, no problems, no in-progress changes |
+
+Message is sourced from the most relevant condition for the current phase, enriched with problem descriptions (`. Problem text`) for member health phases. For Progressing, the progress description is appended to the Ready message. For the pre-member default fallback (Configuring), the first non-True condition message is used in priority order: DRBDConfigured, BackingVolumeReady, Ready.
+
 ## Status Fields
 
 The controller manages the following status fields on RVR:
@@ -293,7 +332,7 @@ The controller manages the following status fields on RVR:
 | `attachment` | Device attachment info (device path, I/O suspended) | From DRBDR status |
 | `type` | Observed DRBD type (Diskful/Diskless) | From DRBDR status.activeConfiguration.type |
 | `backingVolume` | Backing volume info (size, state, LVG name, thin pool) | From DRBDR + LLV status |
-| `datameshPendingTransition` | Pending datamesh transitions (join/leave/role change/BV change) | Computed from spec vs status |
+| `datameshRequest` | Datamesh membership requests (join/leave/role change/BV change) | Computed from spec vs status |
 | `datameshRevision` | Datamesh revision for which the replica was fully configured; reset to 0 when removed from datamesh | Set when DRBDConfigured=True; reset to 0 when removed |
 | `drbdrReconciliationCache` | Cache of target configuration that DRBDR spec was last applied for | Computed |
 | `peers` | Peer connectivity status | Merged from datamesh + DRBDR |
@@ -328,7 +367,7 @@ The `drbdrReconciliationCache` field caches the target configuration that DRBDR 
 |-------|-------------|
 | `datameshRevision` | Datamesh revision this replica was configured for |
 | `drbdrGeneration` | Generation of the DRBDResource that was last targeted |
-| `rvrType` | RVR type (Diskful/TieBreaker/Access) that was last targeted |
+| `targetType` | Target type (DatameshMemberType) for which DRBDR spec was last computed |
 
 ### PeerStatus
 
@@ -337,7 +376,7 @@ Each entry in `peers` contains:
 | Field | Description |
 |-------|-------------|
 | `name` | Peer RVR name |
-| `type` | Replica type (Diskful/TieBreaker/Access), empty if orphan |
+| `type` | Replica type (Diskful/ShadowDiskful/TieBreaker/Access), empty if orphan |
 | `attached` | Whether peer is attached (primary) |
 | `connectionEstablishedOn` | System networks with established connection |
 | `connectionState` | DRBD connection state |
@@ -354,14 +393,14 @@ Each entry in `peers` contains:
 | `connectedUpToDatePeers` | Count of connected UpToDate peers |
 | `quorumMinimumRedundancy` | Minimum UpToDate nodes required |
 
-### DatameshPendingTransition
+### DatameshRequest
 
-The `datameshPendingTransition` field describes pending datamesh transition. Only set when there's a pending change.
+The `datameshRequest` field describes datamesh membership request. Only set when there's a pending change.
 
 | Field | Description |
 |-------|-------------|
-| `member` | `true` = pending join, `false` = pending leave, absent = type/BV change |
-| `type` | Intended type (Diskful/Access/TieBreaker) when joining or changing type |
+| `operation` | `Join`, `Leave`, `ChangeRole`, or `ChangeBackingVolume` |
+| `type` | Intended type (Diskful/ShadowDiskful/Access/TieBreaker) when joining or changing type |
 | `lvmVolumeGroupName` | LVG name for Diskful type |
 | `thinPoolName` | Thin pool name (optional, for LVMThin) |
 
@@ -369,11 +408,11 @@ The `datameshPendingTransition` field describes pending datamesh transition. Onl
 
 | Operation | Fields |
 |-----------|--------|
-| Join as Diskful | `member: true, type: Diskful, lvmVolumeGroupName: "vg-1"` |
-| Join as TieBreaker | `member: true, type: TieBreaker` |
-| Leave datamesh | `member: false` |
-| Change to Diskful | `type: Diskful, lvmVolumeGroupName: "vg-2"` |
-| Change backing volume | `lvmVolumeGroupName: "vg-new"` |
+| Join as Diskful | `operation: Join, type: Diskful, lvmVolumeGroupName: "vg-1"` |
+| Join as TieBreaker | `operation: Join, type: TieBreaker` |
+| Leave datamesh | `operation: Leave` |
+| Change to Diskful | `operation: ChangeRole, type: Diskful, lvmVolumeGroupName: "vg-2"` |
+| Change backing volume | `operation: ChangeBackingVolume, lvmVolumeGroupName: "vg-new"` |
 | Configured (no pending) | `nil` |
 
 ## Backing Volume Management
@@ -389,12 +428,11 @@ A backing volume is needed if **all** conditions are met:
 3. **Configuration is complete** — nodeName and lvmVolumeGroupName are set
 
 For replicas that are members of the datamesh, a disk is needed if:
-- Type is `Diskful`, OR
-- TypeTransition is `ToDiskful` (disk is being prepared before becoming Diskful)
+- `NeedsBackingVolume()` is true: Diskful, LiminalDiskful, ShadowDiskful, LiminalShadowDiskful
+- **Vestibule transition**: member is currently diskless (e.g., Access) but `spec.Type` targets a type that needs backing volume (e.g., Diskful). During vestibule transitions the LVG/ThinPool are taken from `rvr.Spec` (the member doesn't have LVG fields yet).
 
 A disk is NOT needed if:
-- TypeTransition is `ToDiskless` (disk is being removed)
-- Type is diskless (Access/TieBreaker) and no transition to Diskful
+- `NeedsBackingVolume()` is false AND `spec.Type` also does not need backing volume: Access, TieBreaker
 
 For non-members, a disk is needed if spec.type is `Diskful`.
 
@@ -443,7 +481,7 @@ The controller watches six event sources:
 | ReplicatedVolumeReplica | Generation changes, Finalizers changes | For() (primary) |
 | LVMLogicalVolume | All fields (Status, Spec, Labels, Finalizers, OwnerRefs) | Owns() |
 | DRBDResource | All fields | Owns() |
-| ReplicatedVolume | DatameshRevision changes, ReplicatedStorageClassName changes, DatameshPendingReplicaTransitions message changes | rvEventHandler (custom) |
+| ReplicatedVolume | DatameshRevision changes, ReplicatedStorageClassName changes, DatameshReplicaRequests message changes | rvEventHandler (custom) |
 | ReplicatedStoragePool | EligibleNodes changes (per-node) | rspEventHandler |
 | Pod (agent) | Ready condition changes, Create/Delete | mapAgentPodToRVRs |
 
@@ -463,9 +501,9 @@ Intentionally empty: we need to react to all DRBDResource fields.
 
 ### RV Predicates
 
-- Reacts to DatameshRevision changes (covers Size, membership changes, type transitions)
+- Reacts to DatameshRevision changes (covers Size, membership changes, member type changes)
 - Reacts to Spec.ReplicatedStorageClassName changes (for labels)
-- Reacts to DatameshPendingReplicaTransitions message changes (for condition message enrichment)
+- Reacts to DatameshReplicaRequests message changes (for condition message enrichment)
 - Does not react to Create/Delete (RVRs handle their own lifecycle)
 
 ### RV EventHandler
@@ -475,7 +513,7 @@ Custom `rvEventHandler` with targeted enqueuing to minimize unnecessary reconcil
 - **ReplicatedStorageClassName changed**: enqueues ALL RVRs for the RV (labels update needed)
 - **Initial DatameshRevision change** (0 → N): enqueues ALL RVRs for the RV (initial setup)
 - **Non-initial DatameshRevision change**: enqueues only RVRs that are members in old OR new datamesh (targeted by ID)
-- **DatameshPendingReplicaTransitions message changed**: enqueues only affected RVRs where the message differs (targeted by ID via sorted merge diff)
+- **DatameshReplicaRequests message changed**: enqueues only affected RVRs where the message differs (targeted by ID via sorted merge diff)
 
 Multiple independent changes are collected into a single ID set and enqueued together.
 RVR names are constructed deterministically from RV name + ID without requiring index lookups.
@@ -510,7 +548,7 @@ Uses composite index to efficiently find RVRs by (replicatedVolumeName, nodeName
 | `IndexFieldRVRByReplicatedVolumeName` | `spec.replicatedVolumeName` | Map ReplicatedVolume events to RVRs |
 | `IndexFieldRVRByNodeName` | `spec.nodeName` | Map agent Pod events to RVRs on the same node |
 | `IndexFieldRVRByRVAndNode` | `spec.replicatedVolumeName+nodeName` | Find RVR by RV and node (composite) |
-| `IndexFieldRVByStoragePoolName` | `status.configuration.storagePoolName` | Find RVs using a specific RSP |
+| `IndexFieldRVByStoragePoolName` | `status.configuration.replicatedStoragePoolName` | Find RVs using a specific RSP |
 | `IndexFieldPodByNodeName` | `spec.nodeName` | Find agent Pod on a specific node |
 
 ## Data Flow
@@ -538,7 +576,7 @@ flowchart TD
         EnsureStatusPeers[ensureStatusPeers]
         EnsureBVStatus[ensureStatusBackingVolume]
         EnsureStatusQuorum[ensureStatusQuorum]
-        EnsureDmPendingAndCond[ensureStatusDatameshPendingTransitionAndConfiguredCond]
+        EnsureDmPendingAndCond[ensureStatusDatameshRequestAndConfiguredCond]
         EnsureCondAttach[ensureConditionAttached]
         EnsureCondFC[ensureConditionFullyConnected]
         EnsureBVInSync[ensureConditionBackingVolumeUpToDate]
@@ -591,7 +629,7 @@ flowchart TD
     EnsureBVInSync -->|BackingVolumeUpToDate| RVRStatusConds
     EnsureCondReady -->|Ready| RVRStatusConds
     EnsureCondSEN -->|SatisfyEligibleNodes| RVRStatusConds
-    EnsureDmPendingAndCond -->|datameshPendingTransition| RVRStatusFields
+    EnsureDmPendingAndCond -->|datameshRequest| RVRStatusFields
     EnsureDmPendingAndCond -->|Configured| RVRStatusConds
     RSP --> EnsureDmPendingAndCond
 ```
@@ -600,9 +638,125 @@ flowchart TD
 
 ## Detailed Algorithms
 
+### computeRVRPhaseAndMessage Details
+
+**File:** `reconciler_conditions.go`
+
+**Purpose**: Computes the phase and human-readable message for an RVR from its current conditions. The function splits into two paths based on datamesh membership (`datameshRevision > 0`): pre-member replicas use lifecycle phases, member replicas use health phases. Called after all condition ensure helpers have run, before the status patch.
+
+**Algorithm (top-level)**:
+
+```mermaid
+flowchart TD
+    Start([Start]) --> CheckDelete{DeletionTimestamp?}
+    CheckDelete -->|Yes| Terminating([Terminating])
+
+    CheckDelete -->|No| CheckAgent{DRBDConfigured<br/>reason=AgentNotReady?}
+    CheckAgent -->|Yes| AgentNotReady([AgentNotReady])
+
+    CheckAgent -->|No| CheckMember{datameshRevision > 0?}
+
+    CheckMember -->|No| PreMember
+    CheckMember -->|Yes| MemberHealth["computeMemberPhaseAndMessage"]
+
+    subgraph PreMember [Pre-member lifecycle]
+        CheckPending{NodeName empty OR<br/>Scheduled != True?}
+        CheckPending -->|Yes| Pending([Pending])
+        CheckPending -->|No| CheckProv{BVReady=False<br/>provisioning reasons?}
+        CheckProv -->|Yes| Provisioning([Provisioning])
+        CheckProv -->|No| CheckConfig{DRBDConfigured<br/>issues?}
+        CheckConfig -->|Yes| Configuring([Configuring])
+        CheckConfig -->|No| CheckWait{DRBDConfigured=False<br/>PendingDatameshJoin?}
+        CheckWait -->|Yes| WaitDM([WaitingForDatamesh])
+        CheckWait -->|No| Fallback([Configuring fallback])
+    end
+```
+
+**Algorithm (computeMemberPhaseAndMessage)**:
+
+```mermaid
+flowchart TD
+    Start([Start]) --> CheckQuorum{Ready=False<br/>QuorumLost or QuorumViaPeers?}
+    CheckQuorum -->|Yes| Critical1([Critical + problems])
+
+    CheckQuorum -->|No| CheckIO{Attached=False<br/>IOSuspended?}
+    CheckIO -->|Yes| Critical2([Critical + problems])
+
+    CheckIO -->|No| CheckSync{BVUpToDate=False<br/>Synchronizing?}
+    CheckSync -->|Yes| Synchronizing([Synchronizing + problems])
+
+    CheckSync -->|No| Collect["Collect problems + severity<br/>Collect progress"]
+    Collect --> CheckReady{Ready=True?}
+
+    CheckReady -->|Yes| EvalHealth{Max severity?}
+    EvalHealth -->|Degraded| Degraded(["Degraded: Ready.Message + problems"])
+    EvalHealth -->|PartiallyDegraded| PartDeg(["PartiallyDegraded: Ready.Message + problems"])
+    EvalHealth -->|None + progress| Progressing(["Progressing: Ready.Message + progress"])
+    EvalHealth -->|None| Healthy(["Healthy: Ready.Message"])
+
+    CheckReady -->|No| CheckProgress{Progress detected?}
+    CheckProgress -->|Yes| ProgressFallback(["Progressing: progress message"])
+    CheckProgress -->|No| MemberFallback(["PartiallyDegraded: fallback message"])
+```
+
+**Degraded-severity problem triggers**:
+
+| Condition | State | Problem text |
+|-----------|-------|-------------|
+| BackingVolumeUpToDate | False/Failed | `Disk failed` |
+| FullyConnected | False/NotConnected | `Not connected to any peer` |
+| Attached | False/AttachmentFailed | `Attachment failed` |
+| BackingVolumeReady | False/ProvisioningFailed | `Provisioning failed` |
+| BackingVolumeReady | False/ResizeFailed | `Resize failed` |
+| DRBDConfigured | False/ConfigurationFailed | `DRBD configuration failed` |
+
+**PartiallyDegraded-severity problem triggers**:
+
+| Condition | State | Problem text |
+|-----------|-------|-------------|
+| FullyConnected | False/PartiallyConnected | `Partially connected to peers` |
+| BackingVolumeUpToDate | False/RequiresSynchronization | `Backing volume requires synchronization` |
+| BackingVolumeUpToDate | False/Unknown | `Backing volume state unknown` |
+| BackingVolumeUpToDate | False/Absent | `Backing volume absent` |
+| SatisfyEligibleNodes | False/NodeMismatch | `Node not eligible` |
+| SatisfyEligibleNodes | False/LVMVolumeGroupMismatch | `LVG not eligible` |
+| SatisfyEligibleNodes | False/ThinPoolMismatch | `ThinPool not eligible` |
+| Attached | True/DetachmentFailed | `Detachment failed` |
+
+**Progress triggers** (only when no health problems exist):
+
+| Condition | State | Text |
+|-----------|-------|------|
+| BackingVolumeReady | False/Provisioning | `Provisioning backing volume` |
+| BackingVolumeReady | False/Reprovisioning | `Reprovisioning backing volume` |
+| BackingVolumeReady | False/Resizing | `Resizing backing volume` |
+| BackingVolumeReady | False/NotReady | `Backing volume not ready` |
+| DRBDConfigured | Unknown/ApplyingConfiguration | `Applying DRBD configuration` |
+| DRBDConfigured | False/WaitingForBackingVolume | `Waiting for backing volume` |
+
+**Data Flow**:
+
+| Input | Description |
+|-------|-------------|
+| `rvr.DeletionTimestamp` | Deletion check |
+| `rvr.Spec.NodeName` | Scheduling check (pre-member) |
+| `rvr.Status.DatameshRevision` | Membership split (0 = pre-member, >0 = member) |
+| `rvr.Status.Conditions` | All 9 conditions (Ready, DRBDConfigured, BackingVolumeReady, BackingVolumeUpToDate, Scheduled, Attached, FullyConnected, SatisfyEligibleNodes, Configured) |
+
+| Output | Description |
+|--------|-------------|
+| `status.phase` | One of 12 phases (see Phase section above) |
+| `status.message` | Human-readable detail, enriched with problem/progress descriptions for member phases |
+
+---
+
 ### reconcileBackingVolume Details
 
+**File:** `reconciler_backing_volume.go`
+
 **Purpose**: Manages LVMLogicalVolume (LLV) lifecycle for diskful replicas — creation, resize, and deletion.
+
+**File:** `reconciler_backing_volume.go`
 
 **Algorithm**:
 
@@ -675,6 +829,8 @@ flowchart TD
 
 ### reconcileDRBDResource Details
 
+**File:** `reconciler_drbd_resource.go`
+
 **Purpose**: Manages DRBDResource lifecycle — creation, configuration, resize, and deletion. Coordinates with agent for DRBD configuration.
 
 **Algorithm**:
@@ -735,7 +891,7 @@ flowchart TD
     CheckWasMember -->|Yes| ResetRevision["Reset DatameshRevision to 0<br/>DRBDConfigured=True Configured<br/>(removed from datamesh)"]
     ResetRevision --> End7a([Done])
     CheckWasMember -->|No| CheckDeleting{Deleting?}
-    CheckDeleting -->|Yes| SetDeletingConfigured["DRBDConfigured=True Configured<br/>(replica is being deleted)"]
+    CheckDeleting -->|Yes| SetDeletingConfigured["DRBDConfigured=True Configured<br/>(replica is terminating)"]
     SetDeletingConfigured --> End7b([Done])
     CheckDeleting -->|No| SetPendingJoin[DRBDConfigured=False PendingDatameshJoin]
     SetPendingJoin --> End7([Done])
@@ -749,7 +905,7 @@ flowchart TD
 | Input | Description |
 |-------|-------------|
 | `rvr.Spec` | Node name, replica type, LVG/thin pool for diskful |
-| `rv.Status.Datamesh` | System networks, members, size, type transitions |
+| `rv.Status.Datamesh` | System networks, members, size, member types |
 | `targetBV`, `intendedBV` | Backing volume pointers from reconcileBackingVolume |
 | `agent Pod` | Agent readiness on target node |
 
@@ -758,11 +914,13 @@ flowchart TD
 | `DRBDResource` | Created/patched/deleted DRBD resource |
 | `DRBDConfigured` condition | Reports DRBD configuration state |
 | `status.datameshRevision` | Datamesh revision for which replica was fully configured; reset to 0 when removed from datamesh |
-| `status.drbdrReconciliationCache` | Cache of target configuration (datameshRevision, drbdrGeneration, rvrType) |
+| `status.drbdrReconciliationCache` | Cache of target configuration (datameshRevision, drbdrGeneration, targetType) |
 
 ---
 
 ### ensureConditionSatisfyEligibleNodes Details
+
+**File:** `reconciler_conditions.go`
 
 **Purpose**: Verifies that the replica's node, LVMVolumeGroup, and ThinPool satisfy the eligible nodes requirements from the ReplicatedStoragePool. This is a non-I/O EnsureReconcileHelper that receives pre-fetched RSP eligibility data.
 
@@ -825,6 +983,8 @@ flowchart TD
 
 ### ensureStatusAddressesAndType Details
 
+**File:** `reconciler_status.go`
+
 **Purpose**: Updates the `status.addresses` and `status.type` fields from DRBDR status.
 
 **Algorithm**:
@@ -855,6 +1015,8 @@ flowchart TD
 ---
 
 ### ensureStatusAttachment Details
+
+**File:** `reconciler_status.go`
 
 **Purpose**: Updates the `status.attachment` field with device path, I/O suspension status, and device open (in-use) status.
 
@@ -892,6 +1054,8 @@ flowchart TD
 ---
 
 ### ensureConditionAttached Details
+
+**File:** `reconciler_conditions.go`
 
 **Purpose**: Reports whether the replica is attached (primary) and ready for I/O.
 
@@ -940,6 +1104,8 @@ flowchart TD
 
 ### ensureStatusPeers Details
 
+**File:** `reconciler_status.go`
+
 **Purpose**: Mirrors DRBDR peer status to RVR status. Populates `rvr.Status.Peers` directly from `drbdr.Status.Peers`.
 
 **Algorithm**:
@@ -974,6 +1140,8 @@ flowchart TD
 ---
 
 ### ensureConditionFullyConnected Details
+
+**File:** `reconciler_conditions.go`
 
 **Purpose**: Reports peer connectivity status via the `FullyConnected` condition. Uses `rvr.Status.Addresses` to determine expected system networks.
 
@@ -1023,6 +1191,8 @@ flowchart TD
 
 ### ensureStatusBackingVolume Details
 
+**File:** `reconciler_status.go`
+
 **Purpose**: Populates the `rvr.Status.BackingVolume` struct fields (size, state, LVM volume group info) from DRBDR and LLV status.
 
 **Algorithm**:
@@ -1069,6 +1239,8 @@ flowchart TD
 ---
 
 ### ensureConditionBackingVolumeUpToDate Details
+
+**File:** `reconciler_conditions.go`
 
 **Purpose**: Reports local backing volume synchronization state for diskful replicas via the `BackingVolumeUpToDate` condition.
 
@@ -1146,6 +1318,8 @@ flowchart TD
 
 ### ensureStatusQuorum Details
 
+**File:** `reconciler_status.go`
+
 **Purpose**: Populates the `rvr.Status.Quorum` and `rvr.Status.QuorumSummary` fields from DRBDR state.
 
 **Algorithm**:
@@ -1176,6 +1350,8 @@ flowchart TD
 
 ### ensureConditionReady Details
 
+**File:** `reconciler_conditions.go`
+
 **Purpose**: Reports overall replica readiness via the `Ready` condition. Quorum handling depends on replica role: not-yet-member, diskless member, or diskful member.
 
 **Algorithm**:
@@ -1183,8 +1359,8 @@ flowchart TD
 ```mermaid
 flowchart TD
     Start([Start]) --> CheckDelete{RVR being deleted?}
-    CheckDelete -->|Yes| SetDeleting[False: Deleting]
-    SetDeleting --> End1([Done])
+    CheckDelete -->|Yes| SetTerminating[False: Terminating]
+    SetTerminating --> End1([Done])
 
     CheckDelete -->|No| CheckRV{RV ready with datamesh<br/>and system networks?}
     CheckRV -->|No| SetWaitRV[Unknown: WaitingForReplicatedVolume]
@@ -1242,76 +1418,78 @@ flowchart TD
 
 ---
 
-### ensureStatusDatameshPendingTransitionAndConfiguredCond Details
+### ensureStatusDatameshRequestAndConfiguredCond Details
 
-**Purpose**: Populates both `rvr.Status.DatameshPendingTransition` field and the `Configured` condition based on comparison of `rvr.Spec` (intended) vs `rvr.Status` (actual) and eligibility checks.
+**File:** `reconciler_status.go`
 
-This function combines two logically related status updates to avoid duplicate `computeTargetDatameshPendingTransition` calls.
+**Purpose**: Populates both `rvr.Status.DatameshRequest` field and the `Configured` condition based on comparison of `rvr.Spec` (intended) vs `rvr.Status` (actual) and eligibility checks.
 
-**RV Message Enrichment**: When a pending transition exists (`target != nil`) and the parent `ReplicatedVolume` has a matching entry in `rv.Status.DatameshPendingReplicaTransitions` for this replica, the message from that entry is appended to the condition message with a `": "` separator. This allows the RV controller to provide additional context about the overall datamesh transition progress.
+This function combines two logically related status updates to avoid duplicate `computeTargetDatameshRequest` calls.
 
-**Algorithm (computeTargetDatameshPendingTransition)**:
+**RV Message Enrichment**: When a membership request exists (`target != nil`) and the parent `ReplicatedVolume` has a matching entry in `rv.Status.DatameshReplicaRequests` for this replica, the datamesh message replaces the condition message entirely. The datamesh message is self-contained — the DMTE engine composes it with the plan display name (e.g., `"Adding diskful replica is blocked: would violate GMDR (ADR=1, need > 1)"` or `"Adding diskful replica: 2/4 replicas confirmed revision 7"`).
+
+**Algorithm (computeTargetDatameshRequest)**:
 
 ```mermaid
 flowchart TD
     Start([Start]) --> CheckDeletion{DeletionTimestamp set?}
 
     CheckDeletion -->|Yes| CheckMemberDel{DatameshRevision != 0?}
-    CheckMemberDel -->|Yes| LeaveOp["pending = {member: false}"]
+    CheckMemberDel -->|Yes| LeaveOp["request = {operation: Leave}"]
     LeaveOp --> End1([Done: PendingLeave])
-    CheckMemberDel -->|No| NilDel[pending = nil, remove condition]
+    CheckMemberDel -->|No| NilDel[request = nil, remove condition]
     NilDel --> End2([Done])
 
     CheckDeletion -->|No| CheckRV{RV exists and datamesh ready<br/>and configuration set?}
-    CheckRV -->|No| NilRV[pending = nil, WaitingForReplicatedVolume]
+    CheckRV -->|No| NilRV[request = nil, WaitingForReplicatedVolume]
     NilRV --> End3([Done])
 
     CheckRV -->|Yes| CheckScheduled{spec.NodeName == empty?}
-    CheckScheduled -->|Yes| NilSched[pending = nil, PendingScheduling]
+    CheckScheduled -->|Yes| NilSched[request = nil, PendingScheduling]
     NilSched --> End4([Done])
 
     CheckScheduled -->|No| CheckDiskfulLVG{Diskful AND LVG empty?}
-    CheckDiskfulLVG -->|Yes| NilLVG[pending = nil, PendingScheduling]
+    CheckDiskfulLVG -->|Yes| NilLVG[request = nil, PendingScheduling]
     NilLVG --> End5([Done])
 
     CheckDiskfulLVG -->|No| CheckRSP{rspView available?}
-    CheckRSP -->|No| NilRSP[pending = nil, WaitingForReplicatedVolume]
+    CheckRSP -->|No| NilRSP[request = nil, WaitingForReplicatedVolume]
     NilRSP --> End6([Done])
 
     CheckRSP -->|Yes| CheckNodeElig{Node in eligible nodes?}
-    CheckNodeElig -->|No| NilNodeNotElig[pending = nil, NodeNotEligible]
+    CheckNodeElig -->|No| NilNodeNotElig[request = nil, NodeNotEligible]
     NilNodeNotElig --> End7([Done])
 
     CheckNodeElig -->|Yes| CheckDiskfulStorage{Diskful?}
     CheckDiskfulStorage -->|Yes| ValidateStorage{isStorageEligible?}
-    ValidateStorage -->|No| NilStorageNotElig[pending = nil, StorageNotEligible]
+    ValidateStorage -->|No| NilStorageNotElig[request = nil, StorageNotEligible]
     NilStorageNotElig --> End8([Done])
 
     ValidateStorage -->|Yes| CheckMember
     CheckDiskfulStorage -->|No| CheckMember{DatameshRevision != 0?}
 
-    CheckMember -->|No| JoinOp["pending = {member: true, role, lvg?, tp?}"]
+    CheckMember -->|No| JoinOp["request = {operation: Join, type, lvg?, tp?}"]
     JoinOp --> End9([Done: PendingJoin])
 
     CheckMember -->|Yes| CheckTypeSync{type in sync?}
-    CheckTypeSync -->|No| RoleChange["pending = {role, lvg?, tp?}"]
+    CheckTypeSync -->|No| RoleChange["request = {operation: ChangeRole, type, lvg?, tp?}"]
     RoleChange --> End10([Done: PendingRoleChange])
 
     CheckTypeSync -->|Yes| CheckDiskfulBV{Diskful?}
-    CheckDiskfulBV -->|No| ConfiguredNonDiskful[pending = nil, Configured]
+    CheckDiskfulBV -->|No| ConfiguredNonDiskful[request = nil, Configured]
     ConfiguredNonDiskful --> End11([Done])
 
     CheckDiskfulBV -->|Yes| CheckBVSync{backing volume in sync?}
-    CheckBVSync -->|No| BVChange["pending = {lvg, tp?}"]
+    CheckBVSync -->|No| BVChange["request = {operation: ChangeBackingVolume, lvg, tp?}"]
     BVChange --> End12([Done: PendingBackingVolumeChange])
 
-    CheckBVSync -->|Yes| Configured[pending = nil, Configured]
+    CheckBVSync -->|Yes| Configured[request = nil, Configured]
     Configured --> End13([Done])
 ```
 
 **Algorithm (Configured condition application)**:
 
-The `Configured` condition is set based on the `condReason` returned from `computeTargetDatameshPendingTransition`:
+The `Configured` condition is set based on the `condReason` returned from `computeTargetDatameshRequest`:
 
 - If `condReason` is empty → remove condition (non-member being deleted)
 - If `condReason` is `Configured` → set `True`
@@ -1327,10 +1505,10 @@ The `Configured` condition is set based on the `condReason` returned from `compu
 | `rvr.Status.Type` | Actual DRBD type (Diskful/Diskless) |
 | `rvr.Status.BackingVolume` | Actual backing volume info |
 | `rv` | Parent ReplicatedVolume (prerequisite checks + message enrichment) |
-| `rv.Status.DatameshPendingReplicaTransitions` | RV-level pending transitions with messages |
+| `rv.Status.DatameshReplicaRequests` | RV-level membership requests with messages |
 | `rspView` | RSP eligibility view (node eligibility, LVG list) |
 
 | Output | Description |
 |--------|-------------|
-| `status.datameshPendingTransition` | Pending operation (nil if none) |
+| `status.datameshRequest` | Pending operation (nil if none) |
 | `Configured` condition | Reports whether config matches intent (message may include RV context) |

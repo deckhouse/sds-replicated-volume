@@ -22,8 +22,11 @@ spec:
     - jsonPath: .spec.nodeName
       name: Node
       type: string
-    - jsonPath: .spec.state
+    - jsonPath: .status.activeConfiguration.state
       name: State
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Configured')].status
+      name: Configured
       type: string
     - jsonPath: .status.activeConfiguration.role
       name: Role
@@ -40,6 +43,10 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.conditions[?(@.type=='Configured')].message
+      name: Message
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -97,6 +104,12 @@ spec:
                 x-kubernetes-validations:
                 - message: nodeName is immutable
                   rule: self == oldSelf
+              nonVoting:
+                default: false
+                description: |-
+                  When enabled, the disk does not participate in quorum voting while
+                  still replicating data normally. Only valid for Diskful resources.
+                type: boolean
               peers:
                 items:
                   properties:
@@ -256,6 +269,8 @@ spec:
                       reverse-computed from that path to the LVMLogicalVolume name.
                     maxLength: 128
                     type: string
+                  nonVoting:
+                    type: boolean
                   quorum:
                     type: integer
                   quorumMinimumRedundancy:
@@ -380,8 +395,9 @@ spec:
                 x-kubernetes-list-type: map
               device:
                 description: |-
-                  Device path, e.g. /dev/drbd10012 or /dev/sds-replicated/<rvrName>
-                  Only present on primary
+                  Device is the stable symlink path to the DRBD block device,
+                  e.g. /dev/sdsrv/<resourceName>. The symlink target is /dev/drbd<minor>.
+                  Only present when the resource is Up and has an allocated minor.
                 maxLength: 256
                 type: string
               deviceIOSuspended:
@@ -396,6 +412,18 @@ spec:
                   When true, demotion to Secondary will fail.
                   Only present on primary
                 type: boolean
+              deviceUUID:
+                description: |-
+                  DeviceUUID is a 16-digit uppercase hexadecimal identifier that binds this
+                  DRBDResource to specific physical DRBD metadata on the backing device.
+                  Format matches drbdmeta read-dev-uuid output. Set once after first
+                  metadata creation or adoption; immutable thereafter.
+                maxLength: 16
+                pattern: ^([0-9A-F]{16})?$
+                type: string
+                x-kubernetes-validations:
+                - message: deviceUUID is immutable once set
+                  rule: size(oldSelf) == 0 || oldSelf == self
               diskState:
                 description: |-
                   DiskState represents the state of a DRBD backing disk.
@@ -506,6 +534,9 @@ spec:
         - message: spec.size cannot be decreased
           rule: '!has(oldSelf.spec.size) || !has(self.spec.size) || self.spec.size
             >= oldSelf.spec.size'
+        - message: nonVoting must be false (or unset) when type is Diskless
+          rule: 'self.spec.type == ''Diskless'' ? !has(self.spec.nonVoting) || self.spec.nonVoting
+            == false : true'
     served: true
     storage: true
     subresources:

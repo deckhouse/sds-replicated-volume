@@ -226,7 +226,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
-		replicatedSC.Status.Phase = srv.RSCPhaseCreated
+		replicatedSC.Status.Phase = srv.ReplicatedStorageClassPhaseReady
 
 		err := cl.Create(ctx, &replicatedSC)
 		if err == nil {
@@ -244,11 +244,11 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		oldResource := resources[testName]
 		Expect(oldResource.Name).To(Equal(testName))
 		Expect(oldResource.Namespace).To(Equal(testNamespaceConst))
-		Expect(oldResource.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(oldResource.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
-		oldResource.Status.Phase = srv.RSCPhaseFailed
+		oldResource.Status.Phase = srv.ReplicatedStorageClassPhaseInvalidConfiguration
 		updatedMessage := "new message"
-		oldResource.Status.Reason = updatedMessage
+		oldResource.Status.Message = updatedMessage
 
 		err = controller.UpdateReplicatedStorageClass(ctx, cl, &oldResource)
 		Expect(err).NotTo(HaveOccurred())
@@ -259,8 +259,8 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		updatedResource := resources[testName]
 		Expect(updatedResource.Name).To(Equal(testName))
 		Expect(updatedResource.Namespace).To(Equal(testNamespaceConst))
-		Expect(updatedResource.Status.Phase).To(Equal(srv.RSCPhaseFailed))
-		Expect(updatedResource.Status.Reason).To(Equal(updatedMessage))
+		Expect(updatedResource.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseInvalidConfiguration))
+		Expect(updatedResource.Status.Message).To(Equal(updatedMessage))
 	})
 
 	It("RemoveString_removes_correct_one", func() {
@@ -291,7 +291,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
 		replicatedSC.Finalizers = []string{controller.ReplicatedStorageClassFinalizerName}
-		replicatedSC.Status.Phase = srv.RSCPhaseCreated
+		replicatedSC.Status.Phase = srv.ReplicatedStorageClassPhaseReady
 
 		request := reconcile.Request{
 			NamespacedName: types.NamespacedName{
@@ -337,7 +337,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
 		replicatedSC.Finalizers = []string{controller.ReplicatedStorageClassFinalizerName}
-		replicatedSC.Status.Phase = srv.RSCPhaseCreated
+		replicatedSC.Status.Phase = srv.ReplicatedStorageClassPhaseReady
 
 		request := reconcile.Request{
 			NamespacedName: types.NamespacedName{
@@ -400,7 +400,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
 		replicatedSC.Finalizers = []string{controller.ReplicatedStorageClassFinalizerName}
-		replicatedSC.Status.Phase = srv.RSCPhaseFailed
+		replicatedSC.Status.Phase = srv.ReplicatedStorageClassPhaseInvalidConfiguration
 
 		request := reconcile.Request{
 			NamespacedName: types.NamespacedName{
@@ -456,7 +456,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
-		replicatedSC.Status.Phase = srv.RSCPhaseCreated
+		replicatedSC.Status.Phase = srv.ReplicatedStorageClassPhaseReady
 
 		request := reconcile.Request{
 			NamespacedName: types.NamespacedName{
@@ -659,15 +659,15 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 			Namespace: testNamespaceConst,
 		}, &replicatedSC)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseFailed))
-		Expect(replicatedSC.Status.Reason).To(Equal(failedMessage))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseInvalidConfiguration))
+		Expect(replicatedSC.Status.Message).To(Equal(failedMessage))
 
 		resources, err := getTestAPIStorageClasses(ctx, cl)
 		Expect(err).NotTo(HaveOccurred())
 
 		resource := resources[testName]
-		Expect(resource.Status.Phase).To(Equal(srv.RSCPhaseFailed))
-		Expect(resource.Status.Reason).To(Equal(failedMessage))
+		Expect(resource.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseInvalidConfiguration))
+		Expect(resource.Status.Message).To(Equal(failedMessage))
 	})
 
 	It("ReconcileReplicatedStorageClass_Validation_passed_StorageClass_not_found_Creates_one_Adds_finalizers_and_Returns_no_error", func() {
@@ -702,8 +702,8 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 		resource := resources[testName]
 
-		Expect(resource.Status.Phase).To(Equal(srv.RSCPhaseCreated))
-		Expect(resource.Status.Reason).To(Equal("ReplicatedStorageClass and StorageClass are equal."))
+		Expect(resource.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
+		Expect(resource.Status.Message).To(Equal("ReplicatedStorageClass and StorageClass are equal."))
 
 		Expect(slices.Contains(resource.Finalizers, controller.ReplicatedStorageClassFinalizerName)).To(BeTrue())
 
@@ -766,8 +766,8 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		resource := resources[testName]
-		Expect(resource.Status.Phase).To(Equal(srv.RSCPhaseCreated))
-		Expect(resource.Status.Reason).To(Equal("ReplicatedStorageClass and StorageClass are equal."))
+		Expect(resource.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
+		Expect(resource.Status.Message).To(Equal("ReplicatedStorageClass and StorageClass are equal."))
 
 		resFinalizers := strings.Join(resource.Finalizers, "")
 		Expect(strings.Contains(resFinalizers, controller.ReplicatedStorageClassFinalizerName))
@@ -783,7 +783,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
-		replicatedSC.Status.Phase = srv.RSCPhaseCreated
+		replicatedSC.Status.Phase = srv.ReplicatedStorageClassPhaseReady
 
 		anotherReplicatedSC := validSpecReplicatedSCTemplate
 		anotherReplicatedSC.Spec.ReclaimPolicy = "not-equal"
@@ -828,7 +828,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}, &replicatedSCafterReconcile)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(replicatedSCafterReconcile.Name).To(Equal(testName))
-		Expect(replicatedSCafterReconcile.Status.Phase).To(Equal(srv.RSCPhaseFailed))
+		Expect(replicatedSCafterReconcile.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseInvalidConfiguration))
 
 		storageClass, err := controller.GetStorageClass(ctx, cl, testName)
 		Expect(err).NotTo(HaveOccurred())
@@ -841,7 +841,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
-		replicatedSC.Status.Phase = srv.RSCPhaseCreated
+		replicatedSC.Status.Phase = srv.ReplicatedStorageClassPhaseReady
 		storageClass := controller.GenerateStorageClassFromReplicatedStorageClass(&replicatedSC)
 
 		equal, _ := controller.CompareStorageClasses(storageClass, storageClass)
@@ -948,7 +948,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(shouldRequeue).To(BeFalse())
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		storageClass := getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).To(Equal(map[string]string{controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}))
@@ -1000,7 +1000,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(shouldRequeue).To(BeFalse())
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		storageClass := getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).To(Equal(map[string]string{controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}))
@@ -1058,7 +1058,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(shouldRequeue).To(BeFalse())
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		storageClass := getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).To(Equal(map[string]string{controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}))
@@ -1123,7 +1123,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(shouldRequeue).To(BeFalse())
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		storageClass := getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).To(Equal(map[string]string{controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}))
@@ -1189,7 +1189,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(shouldRequeue).To(BeFalse())
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		storageClass := getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).To(Equal(map[string]string{controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}))
@@ -1238,7 +1238,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
 		Expect(replicatedSC.Spec.VolumeAccess).To(Equal(srv.VolumeAccessPreferablyLocal))
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		var shouldRequeue bool
 		shouldRequeue, err = controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
@@ -1246,7 +1246,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(shouldRequeue).To(BeFalse())
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		storageClass := getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).To(Equal(map[string]string{controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}))
@@ -1312,7 +1312,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(shouldRequeue).To(BeFalse())
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		storageClass := getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).To(Equal(map[string]string{controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}))
@@ -1362,7 +1362,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
 		Expect(replicatedSC.Spec.VolumeAccess).To(Equal(srv.VolumeAccessLocal))
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		var shouldRequeue bool
 		shouldRequeue, err = controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
@@ -1370,7 +1370,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(shouldRequeue).To(BeFalse())
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		storageClass := getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).NotTo(BeNil())
@@ -1438,7 +1438,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(shouldRequeue).To(BeFalse())
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		storageClass := getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).To(Equal(map[string]string{controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}))
@@ -1487,7 +1487,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
 		Expect(replicatedSC.Spec.VolumeAccess).To(Equal(srv.VolumeAccessPreferablyLocal))
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		var shouldRequeue bool
 		shouldRequeue, err = controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
@@ -1495,7 +1495,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(shouldRequeue).To(BeFalse())
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		storageClass := getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).To(Equal(map[string]string{controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}))
@@ -1570,7 +1570,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(shouldRequeue).To(BeFalse())
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		storageClass := getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).NotTo(BeNil())
@@ -1621,7 +1621,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
 		Expect(replicatedSC.Spec.VolumeAccess).To(Equal(srv.VolumeAccessLocal))
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		virtualizationEnabled, err := controller.GetVirtualizationModuleEnabled(ctx, cl, log, types.NamespacedName{Name: controller.ControllerConfigMapName, Namespace: validCFG.ControllerNamespace})
 		Expect(err).NotTo(HaveOccurred())
@@ -1643,7 +1643,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(shouldRequeue).To(BeFalse())
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		storageClass = getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).To(Equal(map[string]string{controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}))
@@ -1742,7 +1742,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(shouldRequeue).To(BeFalse())
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		storageClass = getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).NotTo(BeNil())
@@ -1799,7 +1799,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
 		Expect(replicatedSC.Spec.VolumeAccess).To(Equal(srv.VolumeAccessLocal))
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		storageClass := getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).NotTo(BeNil())
@@ -1825,7 +1825,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(shouldRequeue).To(BeFalse())
 
 		replicatedSC = getAndValidateReconciledRSC(ctx, cl, testName)
-		Expect(replicatedSC.Status.Phase).To(Equal(srv.RSCPhaseCreated))
+		Expect(replicatedSC.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
 		storageClass = getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).NotTo(BeNil())

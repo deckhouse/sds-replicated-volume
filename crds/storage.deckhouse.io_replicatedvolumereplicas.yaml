@@ -25,14 +25,11 @@ spec:
     - jsonPath: .spec.type
       name: Type
       type: string
-    - jsonPath: .status.conditions[?(@.type=='Ready')].status
-      name: Ready
+    - jsonPath: .status.phase
+      name: Phase
       type: string
-    - jsonPath: .status.conditions[?(@.type=='Configured')].status
-      name: Configured
-      type: string
-    - jsonPath: .status.conditions[?(@.type=='DRBDConfigured')].status
-      name: DRBDConfigured
+    - jsonPath: .status.conditions[?(@.type=='Attached')].status
+      name: Attached
       type: string
     - jsonPath: .status.conditions[?(@.type=='BackingVolumeUpToDate')].status
       name: DataUpToDate
@@ -40,24 +37,12 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    - jsonPath: .status.conditions[?(@.type=='Scheduled')].status
-      name: Scheduled
+    - jsonPath: .status.conditions[?(@.type=='Configured')].status
+      name: Configured
       priority: 1
       type: string
-    - jsonPath: .status.conditions[?(@.type=='Attached')].status
-      name: Attached
-      priority: 1
-      type: string
-    - jsonPath: .status.conditions[?(@.type=='FullyConnected')].status
-      name: FullyConnected
-      priority: 1
-      type: string
-    - jsonPath: .status.conditions[?(@.type=='BackingVolumeReady')].status
-      name: BVReady
-      priority: 1
-      type: string
-    - jsonPath: .status.conditions[?(@.type=='SatisfyEligibleNodes')].status
-      name: SatisfyEligibleNodes
+    - jsonPath: .status.message
+      name: Message
       priority: 1
       type: string
     name: v1alpha1
@@ -115,6 +100,7 @@ spec:
                   spec.type and status.effectiveType fields.
                 enum:
                 - Diskful
+                - ShadowDiskful
                 - Access
                 - TieBreaker
                 type: string
@@ -272,17 +258,17 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              datameshPendingTransition:
+              datameshRequest:
                 description: |-
-                  DatameshPending describes the pending datamesh membership state for this replica.
+                  DatameshRequest describes the pending datamesh membership request for this replica.
 
-                  This field contains changes that have been validated and are ready from the RVR's
-                  perspective, waiting to be applied to the datamesh. The controller sets this field
-                  only after all prerequisites are satisfied.
+                  This field contains a membership change request that has been validated and is ready
+                  from the RVR's perspective, waiting to be applied to the datamesh. The controller
+                  sets this field only after all prerequisites are satisfied.
 
-                  For example, member=true will not be set until scheduling completes: the spec.nodeName,
+                  For example, operation=Join will not be set until scheduling completes: the spec.nodeName,
                   spec.lvmVolumeGroupName, and spec.lvmVolumeGroupThinPoolName fields must be populated
-                  and validated before the replica can be marked as a pending datamesh member.
+                  and validated before the replica can request datamesh membership.
                 properties:
                   lvmVolumeGroupName:
                     description: LVMVolumeGroupName is the LVMVolumeGroup resource
@@ -290,29 +276,43 @@ spec:
                     minLength: 1
                     pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
                     type: string
-                  member:
-                    description: Member indicates whether this replica should be a
-                      datamesh member.
-                    type: boolean
+                  operation:
+                    description: Operation is the type of membership change requested.
+                    enum:
+                    - Join
+                    - Leave
+                    - ForceLeave
+                    - ForceDetach
+                    - ChangeRole
+                    - ChangeBackingVolume
+                    type: string
                   thinPoolName:
                     description: ThinPoolName is the thin pool name (optional, for
                       LVMThin storage pools).
                     type: string
                   type:
-                    description: Type is the intended type when Member is true.
+                    description: Type is the intended replica type. Required for Join
+                      and ChangeRole operations.
                     enum:
                     - Diskful
                     - Access
                     - TieBreaker
                     type: string
+                required:
+                - operation
                 type: object
                 x-kubernetes-validations:
-                - message: when member is false, type/lvmVolumeGroupName/thinPoolName
-                    must not be set
-                  rule: '!has(self.member) || self.member == true || (!has(self.type)
-                    && !has(self.lvmVolumeGroupName) && !has(self.thinPoolName))'
-                - message: when member is true, type is required
-                  rule: '!has(self.member) || self.member == false || has(self.type)'
+                - message: type is required for Join and ChangeRole operations
+                  rule: self.operation == 'Leave' || self.operation == 'ChangeBackingVolume'
+                    || has(self.type)
+                - message: type/lvmVolumeGroupName/thinPoolName must not be set for
+                    Leave
+                  rule: self.operation != 'Leave' || (!has(self.type) && !has(self.lvmVolumeGroupName)
+                    && !has(self.thinPoolName))
+                - message: ChangeBackingVolume requires lvmVolumeGroupName and must
+                    not set type
+                  rule: self.operation != 'ChangeBackingVolume' || (!has(self.type)
+                    && has(self.lvmVolumeGroupName))
                 - message: lvmVolumeGroupName is required when type is Diskful
                   rule: '!has(self.type) || self.type != ''Diskful'' || has(self.lvmVolumeGroupName)'
                 - message: lvmVolumeGroupName must not be set when type is not Diskful
@@ -348,15 +348,23 @@ spec:
                       the time DRBDResource spec was last computed.
                     format: int64
                     type: integer
-                  rvrType:
-                    description: RVRType is the effective replica type for which DRBDResource
+                  targetType:
+                    description: TargetType is the target type for which DRBDResource
                       spec was last computed.
                     enum:
                     - Diskful
-                    - Access
+                    - LiminalDiskful
+                    - ShadowDiskful
+                    - LiminalShadowDiskful
                     - TieBreaker
+                    - Access
                     type: string
                 type: object
+              message:
+                description: Message is a human-readable detail about the current
+                  state.
+                maxLength: 512
+                type: string
               peers:
                 description: Peers contains the status of connections to peer replicas.
                 items:
@@ -415,6 +423,22 @@ spec:
                 x-kubernetes-validations:
                 - message: peers[].name must be unique
                   rule: self.all(x, self.exists_one(y, x.name == y.name))
+              phase:
+                description: Phase is a quick operational state summary.
+                enum:
+                - Pending
+                - Provisioning
+                - Configuring
+                - WaitingForDatamesh
+                - Synchronizing
+                - Healthy
+                - PartiallyDegraded
+                - Degraded
+                - Critical
+                - Progressing
+                - AgentNotReady
+                - Terminating
+                type: string
               quorum:
                 description: Quorum indicates whether this replica has quorum.
                 type: boolean

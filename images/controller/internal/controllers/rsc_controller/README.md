@@ -10,10 +10,11 @@ The controller reconciles `ReplicatedStorageClass` status with:
 2. **Configuration snapshot** — resolved configuration from spec, stored in `status.configuration`
 3. **Generations/Revisions** — for quick change detection between RSC and RSP
 4. **Conditions** — 4 conditions describing the current state
-5. **Volume statistics** — counts of total, aligned, stale, and conflict volumes
-6. **Deletion cleanup** — releases RSP `usedBy` entries and removes finalizer on RSC deletion
+5. **Phase and message** — operational state summary derived from conditions, deletion state, and rollout strategy state
+6. **Volume statistics** — counts of total, aligned, stale, and conflict volumes
+7. **Deletion cleanup** — releases RSP `usedBy` entries and removes finalizer on RSC deletion
 
-> **Note:** RSC does not calculate eligible nodes directly. It uses `RSP.Status.EligibleNodes` from the associated storage pool and validates them against topology/replication requirements.
+> **Note:** RSC does not calculate eligible nodes directly. It uses `RSP.Status.EligibleNodes` from the associated storage pool and validates them against topology and FTT/GMDR requirements.
 
 ## Interactions
 
@@ -25,7 +26,7 @@ The controller reconciles `ReplicatedStorageClass` status with:
 
 ## Algorithm
 
-The controller creates/updates an RSP from `spec.storage`, validates eligible nodes against topology/replication requirements, and aggregates volume statistics:
+The controller creates/updates an RSP from `spec.storage`, validates eligible nodes against topology and FTT/GMDR requirements, and aggregates volume statistics:
 
 ```
 readiness = storagePoolReady AND eligibleNodesValid
@@ -56,6 +57,8 @@ Reconcile (root) [Pure orchestration]
 │   └── status.configuration + Ready condition
 ├── ensureVolumeSummaryAndConditions
 │   └── status.volumes + ConfigurationRolledOut/VolumesSatisfyEligibleNodes conditions
+├── ensurePhaseAndMessage
+│   └── status.phase + status.message (derived from conditions + deletion + rollout strategy)
 ├── patchRSCStatus (if changed)
 └── reconcileUnusedRSPs [Pure orchestration]
     └── reconcileRSPRelease [Conditional target evaluation]
@@ -88,7 +91,8 @@ flowchart TD
     ReconcileRSP --> EnsureStoragePool[ensureStoragePool]
     EnsureStoragePool --> EnsureConfig[ensureConfiguration]
     EnsureConfig --> EnsureVolumes[ensureVolumeSummaryAndConditions]
-    EnsureVolumes --> PatchDecision{Changed?}
+    EnsureVolumes --> EnsurePhase[ensurePhaseAndMessage]
+    EnsurePhase --> PatchDecision{Changed?}
     PatchDecision -->|Yes| PatchStatus[Patch RSC status]
     PatchDecision -->|No| ReleaseRSPs
     PatchStatus --> ReleaseRSPs
@@ -105,7 +109,7 @@ Indicates overall readiness of the storage class configuration.
 | Status | Reason | When |
 |--------|--------|------|
 | True | Ready | Configuration accepted and validated |
-| False | InsufficientEligibleNodes | RSP eligible nodes do not meet topology/replication requirements |
+| False | InsufficientEligibleNodes | RSP eligible nodes do not meet topology and FTT/GMDR requirements |
 | False | WaitingForStoragePool | Waiting for RSP to become ready |
 
 ### StoragePoolReady
@@ -140,24 +144,56 @@ Indicates whether all volumes' replicas are placed on eligible nodes.
 | False | ConflictResolutionInProgress | Resolution in progress |
 | False | ManualConflictResolution | `EligibleNodesConflictResolutionStrategy.type=Manual` AND `inConflictWithEligibleNodes > 0` |
 
+## Phase
+
+The `status.phase` field is an operational state summary derived from conditions, deletion state, and rollout strategy state. The `status.message` field provides a human-readable description.
+
+Phase derivation (evaluation order):
+
+| # | Phase | When | Operator action |
+|---|-------|------|-----------------|
+| 1 | **Terminating** | DeletionTimestamp set | Wait for cleanup |
+| 2 | **WaitingForStoragePool** | StoragePoolReady != True | Check RSP, LVGs, node health |
+| 3 | **InsufficientNodes** | Ready=False/InsufficientEligibleNodes | Add nodes or adjust FTT/GMDR |
+| 4 | **InvalidConfiguration** | Ready=False (other reasons) | Fix RSC spec |
+| 5 | **RollingOut** | Ready=True, divergence exists, at least one auto-fix active | Wait, system is working |
+| 6 | **PartiallyAligned** | Ready=True, divergence exists, all auto-fixes disabled | Enable rollout or fix manually |
+| 7 | **Ready** | Ready=True, all aligned (or no volumes) | Nothing |
+
+**RollingOut vs PartiallyAligned:** The two rollout strategies (ConfigurationRolloutStrategy, EligibleNodesConflictResolutionStrategy) are independently enabled/disabled. If at least one auto-fix is active for a divergent concern, the phase is RollingOut. If all divergent concerns have their auto-fix disabled, the phase is PartiallyAligned. The message explains which concerns are active and which are disabled.
+
 ## Eligible Nodes Validation
 
 RSC does not calculate eligible nodes. The `rsp_controller` calculates them and stores in `RSP.Status.EligibleNodes`.
 
-RSC validates that the eligible nodes from RSP meet replication and topology requirements:
+RSC validates that the eligible nodes from RSP meet the FTT/GMDR and topology requirements.
 
-| Replication | Topology | Requirement |
-|-------------|----------|-------------|
-| None | any | ≥1 node |
-| Availability | Ignored/default | ≥3 nodes, ≥2 with disks |
-| Availability | TransZonal | ≥3 zones, ≥2 with disks |
-| Availability | Zonal | per zone: ≥3 nodes, ≥2 with disks |
-| Consistency | Ignored/default | ≥2 nodes with disks |
-| Consistency | TransZonal | ≥2 zones with disks |
-| Consistency | Zonal | per zone: ≥2 nodes with disks |
-| ConsistencyAndAvailability | Ignored/default | ≥3 nodes with disks |
-| ConsistencyAndAvailability | TransZonal | ≥3 zones with disks |
-| ConsistencyAndAvailability | Zonal | per zone: ≥3 nodes with disks |
+Layout formulas: `D = FTT + GMDR + 1` (diskful replicas), `TB = 1` if D is even and `FTT = D/2` (else 0), `totalReplicas = D + TB`.
+
+**Ignored/default topology** — global node counts:
+
+| FTT | GMDR | D | TB | Min nodes | Min nodes with disks |
+|-----|------|---|----|-----------|---------------------|
+| 0 | 0 | 1 | 0 | 1 | 1 |
+| 0 | 1 | 2 | 0 | 2 | 2 |
+| 1 | 0 | 2 | 1 | 3 | 2 |
+| 1 | 1 | 3 | 0 | 3 | 3 |
+| 1 | 2 | 4 | 1 | 5 | 4 |
+| 2 | 1 | 4 | 0 | 4 | 4 |
+| 2 | 2 | 5 | 0 | 5 | 5 |
+
+**TransZonal topology** — zone counts (composite mode allows fewer zones for some layouts):
+
+| FTT | GMDR | Min zones | Min zones with disks |
+|-----|------|-----------|---------------------|
+| 0 | 1 | 2 | 2 |
+| 1 | 0 | 3 | 2 |
+| 1 | 1 | 3 | 3 |
+| 1 | 2 | 3 | 3 |
+| 2 | 1 | 4 | 4 |
+| 2 | 2 | 3 | 3 |
+
+**Zonal topology** — per-zone requirements (each zone must independently meet the Ignored/default requirements).
 
 If validation fails, RSC sets `Ready=False` with reason `InsufficientEligibleNodes`.
 
@@ -180,6 +216,8 @@ The controller aggregates statistics from all `ReplicatedVolume` resources refer
 |------|-----|------------|---------|
 | Finalizer | `sds-replicated-volume.deckhouse.io/rsc-controller` | RSC | Prevent deletion while RVs exist or RSPs reference this RSC in usedBy |
 | Finalizer | `sds-replicated-volume.deckhouse.io/rsc-controller` | RSP | Prevent RSP deletion while any RSC references it |
+| Status field | `status.phase` | RSC | Operational state summary |
+| Status field | `status.message` | RSC | Human-readable description of the current phase |
 
 ## Watches
 
@@ -213,6 +251,7 @@ flowchart TD
         EnsureStoragePool[ensureStoragePool]
         EnsureConfig[ensureConfiguration]
         EnsureVols[ensureVolumeSummaryAndConditions]
+        EnsurePhaseMsg[ensurePhaseAndMessage]
     end
 
     subgraph status [Status Output]
@@ -223,6 +262,8 @@ flowchart TD
         ConfigGen[status.configurationGeneration]
         Conds[status.conditions]
         Vol[status.volumes]
+        PhaseField[status.phase]
+        MessageField[status.message]
     end
 
     RSCSpec --> ReconcileRSP
@@ -246,6 +287,11 @@ flowchart TD
     EnsureVols --> Vol
     EnsureVols -->|ConfigurationRolledOut| Conds
     EnsureVols -->|VolumesSatisfyEligibleNodes| Conds
+
+    Conds --> EnsurePhaseMsg
+    Vol --> EnsurePhaseMsg
+    EnsurePhaseMsg --> PhaseField
+    EnsurePhaseMsg --> MessageField
 ```
 
 ---
@@ -278,7 +324,7 @@ flowchart TD
 
 ### ensureConfiguration Details
 
-**Purpose:** Validates eligible nodes against topology/replication requirements, updates `status.configuration`, `status.configurationGeneration`, `status.storagePoolEligibleNodesRevision`, and the `Ready` condition.
+**Purpose:** Validates eligible nodes against topology and FTT/GMDR requirements, updates `status.configuration`, `status.configurationGeneration`, `status.storagePoolEligibleNodesRevision`, and the `Ready` condition.
 
 **Algorithm:**
 
@@ -307,9 +353,9 @@ flowchart TD
 
 | Input | Output |
 |-------|--------|
-| `rsp.Status.EligibleNodes` | Validated against topology/replication |
+| `rsp.Status.EligibleNodes` | Validated against topology and FTT/GMDR |
 | `rsp.Status.EligibleNodesRevision` | `status.storagePoolEligibleNodesRevision` |
-| `rsc.Spec` (topology, replication, etc.) | `status.configuration` |
+| `rsc.Spec` (topology, FTT/GMDR, etc.) | `status.configuration` |
 | `rsc.Generation` | `status.configurationGeneration` |
 | Validation result | `Ready` condition |
 

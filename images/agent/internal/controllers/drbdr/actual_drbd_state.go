@@ -28,11 +28,24 @@ import (
 
 	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 )
+
+// ActualNonAttachedDiskMetadata holds metadata state observed on a backing device
+// that is not currently attached to DRBD.
+type ActualNonAttachedDiskMetadata interface {
+	// HasMetadata reports whether DRBD metadata exists on the backing device.
+	HasMetadata() bool
+
+	// DiskDeviceUUID returns the device-uuid from on-disk metadata (16 hex digits).
+	// Empty when metadata does not exist or device-uuid is zero.
+	DiskDeviceUUID() string
+}
 
 // ActualDRBDState represents the actual DRBD state observed from the system.
 type ActualDRBDState interface {
+	ActualNonAttachedDiskMetadata
+
 	IsZero() bool
 
 	// ResourceName returns the DRBD resource name.
@@ -64,6 +77,9 @@ type ActualDRBDState interface {
 
 	// OnSuspendedPrimaryOutdated returns the on-suspended-primary-outdated action.
 	OnSuspendedPrimaryOutdated() string
+
+	// QuorumDynamicVoters returns the quorum-dynamic-voters setting.
+	QuorumDynamicVoters() bool
 
 	// Volumes returns the list of volumes/devices for this resource.
 	Volumes() []ActualVolume
@@ -102,6 +118,9 @@ type ActualVolume interface {
 
 	// RsDiscardGranularity returns the rs-discard-granularity setting.
 	RsDiscardGranularity() string
+
+	// NonVoting returns the non-voting setting.
+	NonVoting() bool
 }
 
 type ActualPeer interface {
@@ -149,13 +168,15 @@ type ActualPath interface {
 
 // actualState represents the observed DRBD resource state.
 type actualState struct {
-	status *drbdsetup.Resource
-	show   *drbdsetup.ShowResource
+	status         *drbdutils.Resource
+	show           *drbdutils.ShowResource
+	hasMetadata    bool
+	diskDeviceUUID string
 }
 
-func (aState *actualState) IsZero() bool {
-	return aState == nil
-}
+func (aState *actualState) IsZero() bool           { return aState == nil }
+func (aState *actualState) HasMetadata() bool      { return aState.hasMetadata }
+func (aState *actualState) DiskDeviceUUID() string { return aState.diskDeviceUUID }
 
 func (aState *actualState) ResourceName() string {
 	if aState.status != nil {
@@ -230,13 +251,20 @@ func (aState *actualState) OnSuspendedPrimaryOutdated() string {
 	return ""
 }
 
+func (aState *actualState) QuorumDynamicVoters() bool {
+	if aState.show != nil {
+		return aState.show.Options.QuorumDynamicVoters
+	}
+	return false
+}
+
 func (aState *actualState) Volumes() []ActualVolume {
 	if aState.status == nil {
 		return nil
 	}
 
 	// Build a map of show volumes by volume number
-	showVolumes := make(map[int]*drbdsetup.ShowVolume)
+	showVolumes := make(map[int]*drbdutils.ShowVolume)
 	if aState.show != nil {
 		for i := range aState.show.ThisHost.Volumes {
 			vol := &aState.show.ThisHost.Volumes[i]
@@ -267,7 +295,7 @@ func (aState *actualState) Peers() []ActualPeer {
 	}
 
 	// Build a map of show connections by peer node ID
-	showConnections := make(map[int]*drbdsetup.ShowConnection)
+	showConnections := make(map[int]*drbdutils.ShowConnection)
 	if aState.show != nil {
 		for i := range aState.show.Connections {
 			conn := &aState.show.Connections[i]
@@ -312,7 +340,7 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 
 	// Invariant check: we expect exactly one volume
 	var err error
-	var volumes []drbdsetup.Device
+	var volumes []drbdutils.Device
 	if aState.status != nil {
 		volumes = aState.status.Devices
 	}
@@ -329,7 +357,7 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 		}
 
 		vol := &volumes[0]
-		status.Device = fmt.Sprintf("/dev/drbd%d", vol.Minor)
+		status.Device = DeviceSymlinkPath(drbdr.Name)
 		status.DiskState = v1alpha1.DiskState(vol.DiskState)
 		status.Quorum = &vol.Quorum
 	}
@@ -340,10 +368,14 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 	// Report Peers (including per-peer ReplicationState)
 	aState.reportPeers(drbdr)
 
+	if aState.diskDeviceUUID != "" && status.DeviceUUID == "" {
+		status.DeviceUUID = aState.diskDeviceUUID
+	}
+
 	return err
 }
 
-func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResourceStatus, volumes []drbdsetup.Device) {
+func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResourceStatus, volumes []drbdutils.Device) {
 	if status.ActiveConfiguration == nil {
 		status.ActiveConfiguration = &v1alpha1.DRBDResourceActiveConfiguration{}
 	}
@@ -390,8 +422,18 @@ func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResour
 		ac.AllowTwoPrimaries = &atp
 	}
 
+	// NonVoting - get from first volume disk options in show
+	ac.NonVoting = nil
+	if aState.show != nil && len(aState.show.ThisHost.Volumes) > 0 {
+		disk := &aState.show.ThisHost.Volumes[0].Disk
+		if !disk.IsNone {
+			nv := disk.NonVoting
+			ac.NonVoting = &nv
+		}
+	}
+
 	// Type and Size from first volume.
-	// Type is determined from drbdsetup show configuration ("disk" field), not from
+	// Type is determined from drbdsetup show configuration, not from
 	// the transient disk state in drbdsetup status.
 	//
 	// drbdsetup show JSON output per volume:
@@ -399,29 +441,29 @@ func (aState *actualState) reportActiveConfiguration(status *v1alpha1.DRBDResour
 	//   - Diskless: has "disk": "none" only (no "backing-disk" field at all)
 	//   - Detached: has only "volume_nr" and "device_minor" (no "backing-disk", no "disk")
 	//
-	// Diskless is reported only when "disk" is explicitly the string "none"
-	// (Disk.IsNone == true). Everything else — including detached diskful
-	// resources where "backing-disk" is absent — is reported as Diskful,
-	// because the configured type does not change when the backing device
-	// is temporarily unavailable. The diskState field reports disk health.
+	// Diskful is reported only when "backing-disk" is present (non-empty).
+	// Both Diskless ("disk": "none") and Detached (no backing disk, no disk
+	// field) are reported as Diskless — the resource has no disk attached
+	// in either case.
 	//
 	// LVMLogicalVolumeName is set by the reconciler after reverse-lookup
 	// from the backing disk path. This Report() method does not set it.
 	if len(volumes) > 0 {
 		vol := &volumes[0]
 
-		// Look up the show volume to check disk configuration.
-		diskIsNone := false
+		// Look up the show volume to determine disk presence.
+		isDiskless := false
 		if aState.show != nil {
 			for i := range aState.show.ThisHost.Volumes {
 				if aState.show.ThisHost.Volumes[i].VolumeNr == vol.Volume {
-					diskIsNone = aState.show.ThisHost.Volumes[i].Disk.IsNone
+					sv := &aState.show.ThisHost.Volumes[i]
+					isDiskless = sv.Disk.IsNone || sv.BackingDisk == ""
 					break
 				}
 			}
 		}
 
-		if diskIsNone {
+		if isDiskless {
 			ac.Type = v1alpha1.DRBDResourceTypeDiskless
 			ac.Size = nil
 		} else {
@@ -542,7 +584,7 @@ type actualVolume struct {
 	diskState  string
 	hasQuorum  bool
 	sizeBytes  int64
-	showVolume *drbdsetup.ShowVolume
+	showVolume *drbdutils.ShowVolume
 }
 
 func (v *actualVolume) Minor() int      { return v.minor }
@@ -569,12 +611,19 @@ func (v *actualVolume) RsDiscardGranularity() string {
 	return ""
 }
 
+func (v *actualVolume) NonVoting() bool {
+	if v.showVolume != nil {
+		return v.showVolume.Disk.NonVoting
+	}
+	return false
+}
+
 var _ ActualVolume = &actualVolume{}
 
 // actualPeer implements ActualPeer.
 type actualPeer struct {
-	connection     *drbdsetup.Connection
-	showConnection *drbdsetup.ShowConnection
+	connection     *drbdutils.Connection
+	showConnection *drbdutils.ShowConnection
 }
 
 func (p *actualPeer) NodeID() uint8 {
@@ -644,7 +693,7 @@ var _ ActualPeer = &actualPeer{}
 
 // actualPath implements ActualPath.
 type actualPath struct {
-	path *drbdsetup.Path
+	path *drbdutils.Path
 }
 
 func (p *actualPath) LocalAddr() string {
@@ -662,34 +711,74 @@ func (p *actualPath) Established() bool {
 var _ ActualPath = &actualPath{}
 
 // observeActualDRBDState retrieves the actual DRBD state by querying drbdsetup.
-func observeActualDRBDState(ctx context.Context, drbdResName string) (*actualState, error) {
-	statusResult, err := drbdsetup.ExecuteStatus(ctx, drbdResName)
+//
+// When intendedBackingDev is non-empty, the function probes the backing device:
+//   - If the disk is attached and statusDeviceUUID is empty, reads the device UUID
+//     via drbdmeta read-dev-uuid (uses "-" minor, always safe).
+//   - If the disk is not attached, probes metadata existence via drbdmeta dump-md
+//     (needs the real minor) and reads device UUID via read-dev-uuid ("-" minor).
+func observeActualDRBDState(ctx context.Context, drbdResName string, intendedBackingDev string, statusDeviceUUID string) (*actualState, error) {
+	state := &actualState{}
+
+	statusResult, err := drbdutils.ExecuteStatus(ctx, drbdResName)
 	if err != nil {
 		return nil, fmt.Errorf("executing drbdsetup status: %w", err)
 	}
 
-	if len(statusResult) != 1 {
-		// Resource not found in DRBD status - it's not configured yet.
-		// Return a valid (non-nil) state with ResourceExists() == false.
-		return &actualState{}, nil
-	}
+	if len(statusResult) == 1 {
+		state.status = &statusResult[0]
 
-	// Get show output for configuration details
-	showResults, err := drbdsetup.ExecuteShow(ctx, drbdResName, true)
-	if err != nil {
-		return nil, fmt.Errorf("executing drbdsetup show: %w", err)
-	}
-
-	var showResult *drbdsetup.ShowResource
-	for i := range showResults {
-		if showResults[i].Resource == drbdResName {
-			showResult = &showResults[i]
-			break
+		showResults, err := drbdutils.ExecuteShow(ctx, drbdResName, true)
+		if err != nil {
+			return nil, fmt.Errorf("executing drbdsetup show: %w", err)
+		}
+		for i := range showResults {
+			if showResults[i].Resource == drbdResName {
+				state.show = &showResults[i]
+				break
+			}
 		}
 	}
 
-	return &actualState{
-		status: &statusResult[0],
-		show:   showResult,
-	}, nil
+	if intendedBackingDev == "" {
+		return state, nil
+	}
+
+	hasVolumes := len(state.Volumes()) > 0
+	diskAttached := hasVolumes && state.Volumes()[0].BackingDisk() != ""
+
+	if diskAttached {
+		state.hasMetadata = true
+		if statusDeviceUUID == "" {
+			diskUUID, err := drbdutils.ExecuteReadDevUUID(ctx, intendedBackingDev)
+			if err != nil {
+				return nil, fmt.Errorf("reading device-uuid from attached disk: %w", err)
+			}
+			state.diskDeviceUUID = diskUUID
+		}
+		return state, nil
+	}
+
+	// Determine minor for drbdmeta dump-md (has is_attached guard, unlike
+	// read-dev-uuid which bypasses it). Prefer the actual allocated minor;
+	// fall back to 0 when no volumes exist yet.
+	var checkMDMinor uint
+	if hasVolumes {
+		checkMDMinor = uint(state.Volumes()[0].Minor())
+	}
+
+	hasMD, err := drbdutils.ExecuteCheckMD(ctx, checkMDMinor, intendedBackingDev)
+	if err != nil {
+		return nil, fmt.Errorf("probing backing device metadata: %w", err)
+	}
+	state.hasMetadata = hasMD
+	if hasMD {
+		diskUUID, err := drbdutils.ExecuteReadDevUUID(ctx, intendedBackingDev)
+		if err != nil {
+			return nil, fmt.Errorf("reading device-uuid: %w", err)
+		}
+		state.diskDeviceUUID = diskUUID
+	}
+
+	return state, nil
 }

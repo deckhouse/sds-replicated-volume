@@ -23,6 +23,7 @@ const (
 	// Status=False means configuration failed; see Reason for the failing step.
 	DRBDResourceCondConfiguredType = "Configured"
 
+	DRBDResourceCondConfiguredReasonApplyALFailed         = "ApplyALFailed"
 	DRBDResourceCondConfiguredReasonAttachFailed          = "AttachFailed"
 	DRBDResourceCondConfiguredReasonConfigured            = "Configured"
 	DRBDResourceCondConfiguredReasonConnectFailed         = "ConnectFailed"
@@ -34,6 +35,7 @@ const (
 	DRBDResourceCondConfiguredReasonDiskOptionsFailed     = "DiskOptionsFailed"
 	DRBDResourceCondConfiguredReasonDownFailed            = "DownFailed"
 	DRBDResourceCondConfiguredReasonFailed                = "Failed"
+	DRBDResourceCondConfiguredReasonForeignDiskDetected   = "ForeignDiskDetected"
 	DRBDResourceCondConfiguredReasonForgetPeerFailed      = "ForgetPeerFailed"
 	DRBDResourceCondConfiguredReasonNetOptionsFailed      = "NetOptionsFailed"
 	DRBDResourceCondConfiguredReasonNewMinorFailed        = "NewMinorFailed"
@@ -41,10 +43,13 @@ const (
 	DRBDResourceCondConfiguredReasonNewPeerFailed         = "NewPeerFailed"
 	DRBDResourceCondConfiguredReasonNewResourceFailed     = "NewResourceFailed"
 	DRBDResourceCondConfiguredReasonPrimaryFailed         = "PrimaryFailed"
+	DRBDResourceCondConfiguredReasonReadDevUUIDFailed     = "ReadDevUUIDFailed"
 	DRBDResourceCondConfiguredReasonRenameFailed          = "RenameFailed"
 	DRBDResourceCondConfiguredReasonResizeFailed          = "ResizeFailed"
 	DRBDResourceCondConfiguredReasonResourceOptionsFailed = "ResourceOptionsFailed"
 	DRBDResourceCondConfiguredReasonSecondaryFailed       = "SecondaryFailed"
 	DRBDResourceCondConfiguredReasonStateQueryFailed      = "StateQueryFailed"
+	DRBDResourceCondConfiguredReasonSymlinkFailed         = "SymlinkFailed"
+	DRBDResourceCondConfiguredReasonWriteDevUUIDFailed    = "WriteDevUUIDFailed"
 	DRBDResourceCondConfiguredReasonInMaintenance         = "InMaintenance"
 )

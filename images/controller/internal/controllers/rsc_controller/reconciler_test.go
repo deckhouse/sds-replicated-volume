@@ -196,16 +196,16 @@ var _ = Describe("computeActualVolumesSummary", func() {
 	It("collects used storage pool names from RVs", func() {
 		rvs := []rvView{
 			{
-				name:                         "rv-1",
-				configurationStoragePoolName: "pool-b",
+				name:                      "rv-1",
+				replicatedStoragePoolName: "pool-b",
 			},
 			{
-				name:                         "rv-2",
-				configurationStoragePoolName: "pool-a",
+				name:                      "rv-2",
+				replicatedStoragePoolName: "pool-a",
 			},
 			{
-				name:                         "rv-3",
-				configurationStoragePoolName: "pool-b", // Duplicate.
+				name:                      "rv-3",
+				replicatedStoragePoolName: "pool-b", // Duplicate.
 			},
 		}
 
@@ -230,7 +230,7 @@ var _ = Describe("computeActualVolumesSummary", func() {
 		rvs := []rvView{
 			{
 				name:                            "rv-1",
-				configurationStoragePoolName:    "pool-a",
+				replicatedStoragePoolName:       "pool-a",
 				configurationObservedGeneration: 99, // Not acknowledged (non-zero mismatch with RSC's 1).
 			},
 		}
@@ -263,17 +263,17 @@ var _ = Describe("validateEligibleNodes", func() {
 	}
 
 	Describe("Replication None", func() {
-		It("passes with 1 node", func() {
+		It("passes with 1 node with disk", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: v1alpha1.ReplicationNone,
 				},
 			}
 			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
-				makeNode("node-1", "", false),
+				makeNode("node-1", "", true),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -285,7 +285,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				},
 			}
 
-			err := validateEligibleNodes(nil, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nil, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("no nodes available in the storage pool"))
@@ -306,7 +306,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-3", "", false),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -323,7 +323,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-2", "", true),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("at least 3 nodes"))
@@ -342,7 +342,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-3", "", false),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("at least 2 nodes with disks"))
@@ -363,7 +363,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-3", "zone-c", false),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -380,7 +380,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-2", "zone-b", true),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("at least 3 zones"))
@@ -399,7 +399,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-3", "zone-c", false),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("at least 2 zones with disks"))
@@ -420,7 +420,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-3a", "zone-a", false),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -437,7 +437,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-2a", "zone-a", true),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("at least 3 nodes in each zone"))
@@ -456,7 +456,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-3a", "zone-a", false),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("at least 2 nodes with disks in each zone"))
@@ -476,7 +476,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-2", "", true),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -492,7 +492,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-1", "", true),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("at least 2 nodes"))
@@ -510,7 +510,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-2", "", false),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("at least 2 nodes with disks"))
@@ -530,7 +530,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-2", "zone-b", true),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -547,7 +547,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-2", "zone-b", false),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("at least 2 zones with disks"))
@@ -567,7 +567,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-2a", "zone-a", true),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -584,7 +584,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-2a", "zone-a", false),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("at least 2 nodes with disks in each zone"))
@@ -605,7 +605,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-3", "", true),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -622,10 +622,10 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-2", "", true),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("at least 3 nodes with disks"))
+			Expect(err.Error()).To(ContainSubstring("at least 3 nodes"))
 		})
 	})
 
@@ -643,7 +643,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-3", "zone-c", true),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -660,10 +660,10 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-2", "zone-b", true),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("at least 3 zones with disks"))
+			Expect(err.Error()).To(ContainSubstring("at least 3 zones"))
 		})
 	})
 
@@ -681,7 +681,7 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-3a", "zone-a", true),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -698,10 +698,10 @@ var _ = Describe("validateEligibleNodes", func() {
 				makeNode("node-2a", "zone-a", true),
 			}
 
-			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.Replication)
+			err := validateEligibleNodes(nodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR())
 
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("at least 3 nodes with disks in each zone"))
+			Expect(err.Error()).To(ContainSubstring("at least 3 nodes in each zone"))
 		})
 	})
 })
@@ -722,9 +722,9 @@ var _ = Describe("isConfigurationInSync", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			ObjectMeta: metav1.ObjectMeta{Generation: 2},
 			Status: v1alpha1.ReplicatedStorageClassStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationConsistencyAndAvailability,
-					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "pool-1",
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, ReplicatedStoragePoolName: "pool-1",
 				},
 				ConfigurationGeneration: 1,
 			},
@@ -739,9 +739,9 @@ var _ = Describe("isConfigurationInSync", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			ObjectMeta: metav1.ObjectMeta{Generation: 5},
 			Status: v1alpha1.ReplicatedStorageClassStatus{
-				Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-					Topology: v1alpha1.TopologyIgnored, Replication: v1alpha1.ReplicationConsistencyAndAvailability,
-					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, StoragePoolName: "pool-1",
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal, ReplicatedStoragePoolName: "pool-1",
 				},
 				ConfigurationGeneration: 5,
 			},
@@ -1096,9 +1096,10 @@ var _ = Describe("makeConfiguration", func() {
 		config := makeConfiguration(rsc, "my-storage-pool")
 
 		Expect(config.Topology).To(Equal(v1alpha1.TopologyTransZonal))
-		Expect(config.Replication).To(Equal(v1alpha1.ReplicationAvailability))
+		Expect(config.FailuresToTolerate).To(Equal(byte(1)))
+		Expect(config.GuaranteedMinimumDataRedundancy).To(Equal(byte(0)))
 		Expect(config.VolumeAccess).To(Equal(v1alpha1.VolumeAccessLocal))
-		Expect(config.StoragePoolName).To(Equal("my-storage-pool"))
+		Expect(config.ReplicatedStoragePoolName).To(Equal("my-storage-pool"))
 	})
 })
 
@@ -1216,7 +1217,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)).To(Succeed())
 
 			// StoragePool should be cleared.
-			Expect(updatedRSC.Spec.StoragePool).To(BeEmpty())
+			Expect(updatedRSC.Spec.StoragePool).To(BeEmpty()) //nolint:staticcheck // SA1019: testing migration from deprecated StoragePool
 
 			// spec.Storage should contain data from RSP.
 			Expect(updatedRSC.Spec.Storage.Type).To(Equal(v1alpha1.ReplicatedStoragePoolTypeLVMThin))
@@ -1253,7 +1254,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)).To(Succeed())
 
 			// StoragePool should remain unchanged (waiting for RSP to exist).
-			Expect(updatedRSC.Spec.StoragePool).To(Equal("rsp-not-found"))
+			Expect(updatedRSC.Spec.StoragePool).To(Equal("rsp-not-found")) //nolint:staticcheck // SA1019: testing migration from deprecated StoragePool
 
 			// Finalizer should NOT be added (reconcileMigrationFromRSP returns Done before reconcileMetadata).
 			Expect(updatedRSC.Finalizers).To(BeEmpty())
@@ -1304,7 +1305,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)).To(Succeed())
 
 			// Nothing should change.
-			Expect(updatedRSC.Spec.StoragePool).To(BeEmpty())
+			Expect(updatedRSC.Spec.StoragePool).To(BeEmpty()) //nolint:staticcheck // SA1019: testing migration from deprecated StoragePool
 			Expect(updatedRSC.Spec.Storage.Type).To(Equal(v1alpha1.ReplicatedStoragePoolTypeLVM))
 			Expect(updatedRSC.Spec.Storage.LVMVolumeGroups).To(HaveLen(1))
 			Expect(updatedRSC.Spec.Storage.LVMVolumeGroups[0].Name).To(Equal("lvg-existing"))
@@ -2007,58 +2008,262 @@ var _ = Describe("Reconciler", func() {
 		})
 	})
 
-	Describe("ensureLegacyFieldsCleared", func() {
-		It("clears phase and reason when both are set", func() {
+	Describe("computePhaseAndMessage", func() {
+		It("returns Terminating when DeletionTimestamp is set", func() {
+			now := metav1.Now()
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: &now},
+			}
+
+			phase, message := computePhaseAndMessage(rsc)
+
+			Expect(phase).To(Equal(v1alpha1.ReplicatedStorageClassPhaseTerminating))
+			Expect(message).To(Equal("Storage class is terminating"))
+		})
+
+		It("returns WaitingForStoragePool when StoragePoolReady is False", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Status: v1alpha1.ReplicatedStorageClassStatus{
-					Phase:  v1alpha1.RSCPhaseCreated,
-					Reason: "some old reason",
+					Conditions: []metav1.Condition{
+						{Type: v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType, Status: metav1.ConditionFalse, Message: "RSP not found"},
+					},
 				},
 			}
 
-			outcome := ensureLegacyFieldsCleared(context.Background(), rsc)
+			phase, message := computePhaseAndMessage(rsc)
 
-			Expect(outcome.DidChange()).To(BeTrue())
-			Expect(rsc.Status.Phase).To(Equal(v1alpha1.ReplicatedStorageClassPhase("")))
-			Expect(rsc.Status.Reason).To(BeEmpty())
+			Expect(phase).To(Equal(v1alpha1.ReplicatedStorageClassPhaseWaitingForStoragePool))
+			Expect(message).To(Equal("RSP not found"))
 		})
 
-		It("clears only phase when reason is already empty", func() {
+		It("returns InsufficientNodes when Ready=False/InsufficientEligibleNodes", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Status: v1alpha1.ReplicatedStorageClassStatus{
-					Phase: v1alpha1.RSCPhaseFailed,
+					Conditions: []metav1.Condition{
+						{Type: v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType, Status: metav1.ConditionTrue},
+						{Type: v1alpha1.ReplicatedStorageClassCondReadyType, Status: metav1.ConditionFalse,
+							Reason: v1alpha1.ReplicatedStorageClassCondReadyReasonInsufficientEligibleNodes, Message: "need 3 zones"},
+					},
 				},
 			}
 
-			outcome := ensureLegacyFieldsCleared(context.Background(), rsc)
+			phase, message := computePhaseAndMessage(rsc)
 
-			Expect(outcome.DidChange()).To(BeTrue())
-			Expect(rsc.Status.Phase).To(Equal(v1alpha1.ReplicatedStorageClassPhase("")))
+			Expect(phase).To(Equal(v1alpha1.ReplicatedStorageClassPhaseInsufficientNodes))
+			Expect(message).To(Equal("need 3 zones"))
 		})
 
-		It("clears only reason when phase is already empty", func() {
+		It("returns InvalidConfiguration when Ready=False with other reason", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Status: v1alpha1.ReplicatedStorageClassStatus{
-					Reason: "leftover reason",
+					Conditions: []metav1.Condition{
+						{Type: v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType, Status: metav1.ConditionTrue},
+						{Type: v1alpha1.ReplicatedStorageClassCondReadyType, Status: metav1.ConditionFalse,
+							Reason: v1alpha1.ReplicatedStorageClassCondReadyReasonInvalidConfiguration, Message: "bad config"},
+					},
 				},
 			}
 
-			outcome := ensureLegacyFieldsCleared(context.Background(), rsc)
+			phase, message := computePhaseAndMessage(rsc)
 
-			Expect(outcome.DidChange()).To(BeTrue())
-			Expect(rsc.Status.Reason).To(BeEmpty())
+			Expect(phase).To(Equal(v1alpha1.ReplicatedStorageClassPhaseInvalidConfiguration))
+			Expect(message).To(Equal("bad config"))
 		})
 
-		It("reports no change when both are already empty", func() {
+		It("returns Ready when all conditions True and no divergence", func() {
+			total := int32(5)
+			aligned := int32(5)
+			zero := int32(0)
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				Status: v1alpha1.ReplicatedStorageClassStatus{},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Conditions: []metav1.Condition{
+						{Type: v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType, Status: metav1.ConditionTrue},
+						{Type: v1alpha1.ReplicatedStorageClassCondReadyType, Status: metav1.ConditionTrue},
+						{Type: v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType, Status: metav1.ConditionTrue},
+						{Type: v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType, Status: metav1.ConditionTrue},
+					},
+					Volumes: v1alpha1.ReplicatedStorageClassVolumesSummary{
+						Total: &total, Aligned: &aligned, StaleConfiguration: &zero, InConflictWithEligibleNodes: &zero, PendingObservation: &zero,
+					},
+				},
 			}
 
-			outcome := ensureLegacyFieldsCleared(context.Background(), rsc)
+			phase, message := computePhaseAndMessage(rsc)
 
-			Expect(outcome.DidChange()).To(BeFalse())
-			Expect(rsc.Status.Phase).To(Equal(v1alpha1.ReplicatedStorageClassPhase("")))
-			Expect(rsc.Status.Reason).To(BeEmpty())
+			Expect(phase).To(Equal(v1alpha1.ReplicatedStorageClassPhaseReady))
+			Expect(message).To(ContainSubstring("5 volumes, all aligned"))
+		})
+
+		It("returns Ready with no volumes", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Conditions: []metav1.Condition{
+						{Type: v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType, Status: metav1.ConditionTrue},
+						{Type: v1alpha1.ReplicatedStorageClassCondReadyType, Status: metav1.ConditionTrue},
+						{Type: v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType, Status: metav1.ConditionTrue},
+						{Type: v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType, Status: metav1.ConditionTrue},
+					},
+				},
+			}
+
+			phase, message := computePhaseAndMessage(rsc)
+
+			Expect(phase).To(Equal(v1alpha1.ReplicatedStorageClassPhaseReady))
+			Expect(message).To(Equal("Storage class is ready"))
+		})
+
+		It("returns RollingOut when config rollout is active", func() {
+			total := int32(5)
+			aligned := int32(3)
+			stale := int32(2)
+			zero := int32(0)
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+						Type: v1alpha1.ConfigurationRolloutRollingUpdate,
+					},
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Conditions: []metav1.Condition{
+						{Type: v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType, Status: metav1.ConditionTrue},
+						{Type: v1alpha1.ReplicatedStorageClassCondReadyType, Status: metav1.ConditionTrue},
+						{Type: v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType, Status: metav1.ConditionFalse},
+						{Type: v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType, Status: metav1.ConditionTrue},
+					},
+					Volumes: v1alpha1.ReplicatedStorageClassVolumesSummary{
+						Total: &total, Aligned: &aligned, StaleConfiguration: &stale, InConflictWithEligibleNodes: &zero, PendingObservation: &zero,
+					},
+				},
+			}
+
+			phase, message := computePhaseAndMessage(rsc)
+
+			Expect(phase).To(Equal(v1alpha1.ReplicatedStorageClassPhaseRollingOut))
+			Expect(message).To(ContainSubstring("Configuration rollout in progress"))
+			Expect(message).To(ContainSubstring("3/5"))
+		})
+
+		It("returns PartiallyAligned when config rollout is disabled", func() {
+			total := int32(5)
+			stale := int32(2)
+			zero := int32(0)
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+						Type: v1alpha1.ConfigurationRolloutNewVolumesOnly,
+					},
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Conditions: []metav1.Condition{
+						{Type: v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType, Status: metav1.ConditionTrue},
+						{Type: v1alpha1.ReplicatedStorageClassCondReadyType, Status: metav1.ConditionTrue},
+						{Type: v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType, Status: metav1.ConditionFalse},
+						{Type: v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType, Status: metav1.ConditionTrue},
+					},
+					Volumes: v1alpha1.ReplicatedStorageClassVolumesSummary{
+						Total: &total, StaleConfiguration: &stale, InConflictWithEligibleNodes: &zero, PendingObservation: &zero,
+					},
+				},
+			}
+
+			phase, message := computePhaseAndMessage(rsc)
+
+			Expect(phase).To(Equal(v1alpha1.ReplicatedStorageClassPhasePartiallyAligned))
+			Expect(message).To(ContainSubstring("stale configuration"))
+			Expect(message).To(ContainSubstring("NewVolumesOnly"))
+		})
+
+		It("returns RollingOut when nodes repair is active even if config is disabled", func() {
+			total := int32(5)
+			stale := int32(1)
+			conflict := int32(1)
+			zero := int32(0)
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+						Type: v1alpha1.ConfigurationRolloutNewVolumesOnly,
+					},
+					EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+						Type: v1alpha1.EligibleNodesConflictResolutionRollingRepair,
+					},
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Conditions: []metav1.Condition{
+						{Type: v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType, Status: metav1.ConditionTrue},
+						{Type: v1alpha1.ReplicatedStorageClassCondReadyType, Status: metav1.ConditionTrue},
+						{Type: v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType, Status: metav1.ConditionFalse},
+						{Type: v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType, Status: metav1.ConditionFalse},
+					},
+					Volumes: v1alpha1.ReplicatedStorageClassVolumesSummary{
+						Total: &total, StaleConfiguration: &stale, InConflictWithEligibleNodes: &conflict, PendingObservation: &zero,
+					},
+				},
+			}
+
+			phase, message := computePhaseAndMessage(rsc)
+
+			Expect(phase).To(Equal(v1alpha1.ReplicatedStorageClassPhaseRollingOut))
+			Expect(message).To(ContainSubstring("conflict resolution in progress"))
+			Expect(message).To(ContainSubstring("NewVolumesOnly"))
+		})
+
+		It("returns PartiallyAligned when both rollouts are disabled", func() {
+			total := int32(5)
+			stale := int32(1)
+			conflict := int32(1)
+			zero := int32(0)
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+						Type: v1alpha1.ConfigurationRolloutNewVolumesOnly,
+					},
+					EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+						Type: v1alpha1.EligibleNodesConflictResolutionManual,
+					},
+				},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Conditions: []metav1.Condition{
+						{Type: v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType, Status: metav1.ConditionTrue},
+						{Type: v1alpha1.ReplicatedStorageClassCondReadyType, Status: metav1.ConditionTrue},
+						{Type: v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType, Status: metav1.ConditionFalse},
+						{Type: v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType, Status: metav1.ConditionFalse},
+					},
+					Volumes: v1alpha1.ReplicatedStorageClassVolumesSummary{
+						Total: &total, StaleConfiguration: &stale, InConflictWithEligibleNodes: &conflict, PendingObservation: &zero,
+					},
+				},
+			}
+
+			phase, message := computePhaseAndMessage(rsc)
+
+			Expect(phase).To(Equal(v1alpha1.ReplicatedStorageClassPhasePartiallyAligned))
+			Expect(message).To(ContainSubstring("NewVolumesOnly"))
+			Expect(message).To(ContainSubstring("Manual"))
+		})
+	})
+
+	Describe("applyPhase", func() {
+		It("sets phase and message when both are empty", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{}
+
+			changed := applyPhase(rsc, v1alpha1.ReplicatedStorageClassPhaseReady, "ready")
+
+			Expect(changed).To(BeTrue())
+			Expect(rsc.Status.Phase).To(Equal(v1alpha1.ReplicatedStorageClassPhaseReady))
+			Expect(rsc.Status.Message).To(Equal("ready"))
+		})
+
+		It("returns false when nothing changes", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					Phase:   v1alpha1.ReplicatedStorageClassPhaseReady,
+					Message: "ready",
+				},
+			}
+
+			changed := applyPhase(rsc, v1alpha1.ReplicatedStorageClassPhaseReady, "ready")
+
+			Expect(changed).To(BeFalse())
 		})
 	})
 
@@ -2281,11 +2486,11 @@ var _ = Describe("Reconciler", func() {
 				Status: v1alpha1.ReplicatedStorageClassStatus{
 					StoragePoolBasedOnGeneration: 6,
 					StoragePoolName:              "pool-1",
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Replication:     v1alpha1.ReplicationNone,
-						Topology:        v1alpha1.TopologyIgnored,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "pool-1",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+						Topology:                  v1alpha1.TopologyIgnored,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "pool-1",
 					},
 					// No StoragePoolReady condition.
 				},
@@ -2299,7 +2504,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(cond).NotTo(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondReadyReasonWaitingForStoragePool))
-			Expect(cond.Message).To(Equal("Pending: replication None -> ConsistencyAndAvailability. Waiting for ReplicatedStoragePool to become ready"))
+			Expect(cond.Message).To(Equal("Pending: failuresToTolerate 0 -> 1, guaranteedMinimumDataRedundancy 0 -> 1. Waiting for ReplicatedStoragePool to become ready"))
 		})
 
 		It("sets Ready=False when eligible nodes validation fails (initial config)", func() {
@@ -2369,11 +2574,11 @@ var _ = Describe("Reconciler", func() {
 					StoragePoolBasedOnGeneration:     6,
 					StoragePoolName:                  "pool-1",
 					StoragePoolEligibleNodesRevision: 1,
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Replication:     v1alpha1.ReplicationNone,
-						Topology:        v1alpha1.TopologyIgnored,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "pool-1",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+						Topology:                  v1alpha1.TopologyIgnored,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "pool-1",
 					},
 					Conditions: []metav1.Condition{
 						{
@@ -2401,7 +2606,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(cond).NotTo(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondReadyReasonInsufficientEligibleNodes))
-			Expect(cond.Message).To(HavePrefix("Pending: replication None -> ConsistencyAndAvailability. "))
+			Expect(cond.Message).To(HavePrefix("Pending: failuresToTolerate 0 -> 1, guaranteedMinimumDataRedundancy 0 -> 1. "))
 		})
 
 		It("updates StoragePoolEligibleNodesRevision when RSP revision changes and validation passes", func() {
@@ -2439,10 +2644,11 @@ var _ = Describe("Reconciler", func() {
 					EligibleNodesRevision: 2, // Changed.
 					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
 						{
-							NodeName:   "node-1",
-							NodeReady:  true,
-							AgentReady: true,
-						}, // Enough for ReplicationNone.
+							NodeName:        "node-1",
+							NodeReady:       true,
+							AgentReady:      true,
+							LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{{Name: "vg-1", Ready: true}},
+						},
 					},
 				},
 			}
@@ -2467,11 +2673,11 @@ var _ = Describe("Reconciler", func() {
 					StoragePoolName:                  "my-pool",
 					StoragePoolEligibleNodesRevision: 2, // Already in sync.
 					ConfigurationGeneration:          5, // Already in sync.
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology:        v1alpha1.TopologyIgnored,
-						Replication:     v1alpha1.ReplicationNone,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "my-pool",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyIgnored,
+						FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "my-pool",
 					},
 					Conditions: []metav1.Condition{
 						{
@@ -2522,11 +2728,11 @@ var _ = Describe("Reconciler", func() {
 					StoragePoolName:                  "my-pool",
 					StoragePoolEligibleNodesRevision: 2,
 					ConfigurationGeneration:          5,
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Topology:        v1alpha1.TopologyIgnored,
-						Replication:     v1alpha1.ReplicationNone,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "my-pool",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyIgnored,
+						FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "my-pool",
 					},
 					Conditions: []metav1.Condition{
 						{
@@ -2594,9 +2800,10 @@ var _ = Describe("Reconciler", func() {
 					EligibleNodesRevision: 2,
 					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
 						{
-							NodeName:   "node-1",
-							NodeReady:  true,
-							AgentReady: true,
+							NodeName:        "node-1",
+							NodeReady:       true,
+							AgentReady:      true,
+							LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{{Name: "vg-1", Ready: true}},
 						},
 					},
 				},
@@ -2607,7 +2814,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(outcome.DidChange()).To(BeTrue())
 			Expect(rsc.Status.ConfigurationGeneration).To(Equal(int64(6)))
 			Expect(rsc.Status.Configuration).NotTo(BeNil())
-			Expect(rsc.Status.Configuration.StoragePoolName).To(Equal("my-pool"))
+			Expect(rsc.Status.Configuration.ReplicatedStoragePoolName).To(Equal("my-pool"))
 
 			// Ready should be True.
 			cond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondReadyType)
@@ -2636,11 +2843,11 @@ var _ = Describe("Reconciler", func() {
 					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal,
 				},
 				Status: v1alpha1.ReplicatedStorageClassStatus{
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Replication:     v1alpha1.ReplicationNone,
-						Topology:        v1alpha1.TopologyIgnored,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "pool-1",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+						Topology:                  v1alpha1.TopologyIgnored,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "pool-1",
 					},
 				},
 			}
@@ -2656,16 +2863,16 @@ var _ = Describe("Reconciler", func() {
 					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal,
 				},
 				Status: v1alpha1.ReplicatedStorageClassStatus{
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Replication:     v1alpha1.ReplicationNone,
-						Topology:        v1alpha1.TopologyIgnored,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "pool-1",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+						Topology:                  v1alpha1.TopologyIgnored,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "pool-1",
 					},
 				},
 			}
 			msg := computePendingConfigurationDiffMessage(rsc, "pool-1")
-			Expect(msg).To(Equal("Pending: replication None -> ConsistencyAndAvailability"))
+			Expect(msg).To(Equal("Pending: failuresToTolerate 0 -> 1, guaranteedMinimumDataRedundancy 0 -> 1"))
 		})
 
 		It("shows topology diff", func() {
@@ -2676,11 +2883,11 @@ var _ = Describe("Reconciler", func() {
 					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal,
 				},
 				Status: v1alpha1.ReplicatedStorageClassStatus{
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Replication:     v1alpha1.ReplicationNone,
-						Topology:        v1alpha1.TopologyIgnored,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "pool-1",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+						Topology:                  v1alpha1.TopologyIgnored,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "pool-1",
 					},
 				},
 			}
@@ -2696,11 +2903,11 @@ var _ = Describe("Reconciler", func() {
 					VolumeAccess: v1alpha1.VolumeAccessLocal,
 				},
 				Status: v1alpha1.ReplicatedStorageClassStatus{
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Replication:     v1alpha1.ReplicationNone,
-						Topology:        v1alpha1.TopologyIgnored,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "pool-1",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+						Topology:                  v1alpha1.TopologyIgnored,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "pool-1",
 					},
 				},
 			}
@@ -2716,11 +2923,11 @@ var _ = Describe("Reconciler", func() {
 					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal,
 				},
 				Status: v1alpha1.ReplicatedStorageClassStatus{
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Replication:     v1alpha1.ReplicationNone,
-						Topology:        v1alpha1.TopologyIgnored,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "auto-rsp-old",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+						Topology:                  v1alpha1.TopologyIgnored,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "auto-rsp-old",
 					},
 				},
 			}
@@ -2736,16 +2943,16 @@ var _ = Describe("Reconciler", func() {
 					VolumeAccess: v1alpha1.VolumeAccessLocal,
 				},
 				Status: v1alpha1.ReplicatedStorageClassStatus{
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						Replication:     v1alpha1.ReplicationNone,
-						Topology:        v1alpha1.TopologyIgnored,
-						VolumeAccess:    v1alpha1.VolumeAccessPreferablyLocal,
-						StoragePoolName: "pool-old",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+						Topology:                  v1alpha1.TopologyIgnored,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "pool-old",
 					},
 				},
 			}
 			msg := computePendingConfigurationDiffMessage(rsc, "pool-new")
-			Expect(msg).To(Equal("Pending: replication None -> ConsistencyAndAvailability, topology Ignored -> TransZonal, volumeAccess PreferablyLocal -> Local, storage: not yet accepted (current pool: pool-old, pending pool: pool-new)"))
+			Expect(msg).To(Equal("Pending: failuresToTolerate 0 -> 1, guaranteedMinimumDataRedundancy 0 -> 1, topology Ignored -> TransZonal, volumeAccess PreferablyLocal -> Local, storage: not yet accepted (current pool: pool-old, pending pool: pool-new)"))
 		})
 	})
 
@@ -3570,10 +3777,11 @@ var _ = Describe("Reconciler", func() {
 					EligibleNodesRevision: 2, // Changed.
 					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
 						{
-							NodeName:   "node-1",
-							NodeReady:  true,
-							AgentReady: true,
-						}, // Enough for ReplicationNone.
+							NodeName:        "node-1",
+							NodeReady:       true,
+							AgentReady:      true,
+							LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{{Name: "vg-1", Ready: true}},
+						},
 					},
 				},
 			}
@@ -3598,8 +3806,12 @@ var _ = Describe("Reconciler", func() {
 					StoragePoolName:                  "my-pool",
 					StoragePoolEligibleNodesRevision: 2, // Already in sync.
 					ConfigurationGeneration:          5, // Already in sync.
-					Configuration: &v1alpha1.ReplicatedStorageClassConfiguration{
-						StoragePoolName: "my-pool",
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:                        v1alpha1.TopologyIgnored,
+						FailuresToTolerate:              0,
+						GuaranteedMinimumDataRedundancy: 0,
+						VolumeAccess:                    v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName:       "my-pool",
 					},
 					Conditions: []metav1.Condition{
 						{
@@ -3667,9 +3879,10 @@ var _ = Describe("Reconciler", func() {
 					EligibleNodesRevision: 2,
 					EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
 						{
-							NodeName:   "node-1",
-							NodeReady:  true,
-							AgentReady: true,
+							NodeName:        "node-1",
+							NodeReady:       true,
+							AgentReady:      true,
+							LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{{Name: "vg-1", Ready: true}},
 						},
 					},
 				},
@@ -3680,7 +3893,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(outcome.DidChange()).To(BeTrue())
 			Expect(rsc.Status.ConfigurationGeneration).To(Equal(int64(6)))
 			Expect(rsc.Status.Configuration).NotTo(BeNil())
-			Expect(rsc.Status.Configuration.StoragePoolName).To(Equal("my-pool"))
+			Expect(rsc.Status.Configuration.ReplicatedStoragePoolName).To(Equal("my-pool"))
 
 			// Ready should be True.
 			cond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondReadyType)

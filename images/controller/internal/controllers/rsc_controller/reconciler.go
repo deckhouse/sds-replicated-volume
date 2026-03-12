@@ -126,8 +126,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Reconcile migration from RSP (deprecated storagePool field).
-	if rsc.Spec.StoragePool != "" {
+	if rsc.Spec.StoragePool != "" { //nolint:staticcheck // SA1019: migration from deprecated StoragePool
 		if outcome := r.reconcileMigrationFromRSP(rf.Ctx(), rsc); outcome.ShouldReturn() {
+			return outcome.ToCtrl()
+		}
+	}
+
+	// Reconcile migration from old configuration format (missing FTT/GMDR/storagePoolName fields).
+	if needsConfigurationFormatMigration(rsc) {
+		if outcome := r.reconcileMigrationConfigurationFormat(rf.Ctx(), rsc); outcome.ShouldReturn() {
 			return outcome.ToCtrl()
 		}
 	}
@@ -150,9 +157,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	base := rsc.DeepCopy()
 
 	eo := flow.MergeEnsures(
-		// Clear legacy phase/reason fields set by the old controller.
-		ensureLegacyFieldsCleared(rf.Ctx(), rsc),
-
 		// Ensure storagePool name and condition are up to date.
 		ensureStoragePool(rf.Ctx(), rsc, targetStoragePoolName, rsp),
 
@@ -161,6 +165,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 		// Ensure volume summary and conditions.
 		ensureVolumeSummaryAndConditions(rf.Ctx(), rsc, rvs),
+
+		// Derive phase and message from conditions (must be last — reads conditions set above).
+		ensurePhaseAndMessage(rf.Ctx(), rsc),
 	)
 
 	// Patch if changed.
@@ -490,23 +497,25 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 ) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "migration-from-rsp", "rsp", rsc.Spec.StoragePool)
+	rf := flow.BeginReconcile(ctx, "migration-from-rsp", "rsp", rsc.Spec.StoragePool) //nolint:staticcheck // SA1019: migration from deprecated StoragePool
 	defer rf.OnEnd(&outcome)
 
-	rsp, err := r.getRSP(rf.Ctx(), rsc.Spec.StoragePool)
+	rsp, err := r.getRSP(rf.Ctx(), rsc.Spec.StoragePool) //nolint:staticcheck // SA1019: migration from deprecated StoragePool
 	if err != nil {
 		return rf.Fail(err)
 	}
 
-	// RSP not found - set conditions and wait.
+	// RSP not found - set conditions, phase, and wait.
 	if rsp == nil {
 		base := rsc.DeepCopy()
 		changed := applyReadyCondFalse(rsc,
 			v1alpha1.ReplicatedStorageClassCondReadyReasonWaitingForStoragePool,
-			fmt.Sprintf("Cannot migrate from storagePool field: ReplicatedStoragePool %q not found", rsc.Spec.StoragePool))
+			fmt.Sprintf("Cannot migrate from storagePool field: ReplicatedStoragePool %q not found", rsc.Spec.StoragePool)) //nolint:staticcheck // SA1019: migration from deprecated StoragePool
 		changed = applyStoragePoolReadyCondFalse(rsc,
 			v1alpha1.ReplicatedStorageClassCondStoragePoolReadyReasonStoragePoolNotFound,
-			fmt.Sprintf("ReplicatedStoragePool %q not found", rsc.Spec.StoragePool)) || changed
+			fmt.Sprintf("ReplicatedStoragePool %q not found", rsc.Spec.StoragePool)) || changed //nolint:staticcheck // SA1019: migration from deprecated StoragePool
+		phase, message := computePhaseAndMessage(rsc)
+		changed = applyPhase(rsc, phase, message) || changed
 		if changed {
 			if err := r.patchRSCStatus(rf.Ctx(), rsc, base); err != nil {
 				return rf.Fail(err)
@@ -526,13 +535,50 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 		Type:            rsp.Spec.Type,
 		LVMVolumeGroups: lvmVolumeGroups,
 	}
-	rsc.Spec.StoragePool = ""
+	rsc.Spec.StoragePool = "" //nolint:staticcheck // SA1019: migration from deprecated StoragePool
 
 	if err := r.patchRSC(rf.Ctx(), rsc, base); err != nil {
 		return rf.Fail(err)
 	}
 
 	return rf.Continue()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: migration-configuration-format
+//
+
+// reconcileMigrationConfigurationFormat migrates old-format status.configuration
+// that is missing fields added in the new CRD (failuresToTolerate, guaranteedMinimumDataRedundancy,
+// replicatedStoragePoolName). Old-format objects cannot be patched because CEL XValidation
+// rules on ReplicatedVolumeConfiguration fail with "no such key" for absent fields.
+// Nilling out configuration allows ensureConfiguration to rewrite it from scratch.
+//
+// Reconcile pattern: Conditional target evaluation
+func (r *Reconciler) reconcileMigrationConfigurationFormat(
+	ctx context.Context,
+	rsc *v1alpha1.ReplicatedStorageClass,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "migration-configuration-format")
+	defer rf.OnEnd(&outcome)
+
+	base := rsc.DeepCopy()
+	rsc.Status.Configuration = nil
+	rsc.Status.ConfigurationGeneration = 0
+
+	if err := r.patchRSCStatus(rf.Ctx(), rsc, base); err != nil {
+		return rf.Fail(err)
+	}
+
+	return rf.Continue()
+}
+
+// needsConfigurationFormatMigration detects old-format status.configuration
+// written by the previous controller version. Old format has only topology and
+// volumeAccess; new format always includes replicatedStoragePoolName (MinLength=1).
+func needsConfigurationFormatMigration(rsc *v1alpha1.ReplicatedStorageClass) bool {
+	return rsc.Status.Configuration != nil &&
+		rsc.Status.Configuration.ReplicatedStoragePoolName == ""
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -567,25 +613,17 @@ func (r *Reconciler) reconcileMetadata(
 
 // --- Ensure helpers ---
 
-// ensureLegacyFieldsCleared clears legacy status.phase and status.reason fields
-// that were written by the old controller (sds-replicated-volume-controller).
-func ensureLegacyFieldsCleared(
+// ensurePhaseAndMessage derives phase and message from conditions, deletion state,
+// and rollout strategy state, then applies them to status.
+func ensurePhaseAndMessage(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 ) (outcome flow.EnsureOutcome) {
-	ef := flow.BeginEnsure(ctx, "legacy-fields-cleared")
+	ef := flow.BeginEnsure(ctx, "phase-and-message")
 	defer ef.OnEnd(&outcome)
 
-	changed := false
-	if rsc.Status.Phase != "" {
-		rsc.Status.Phase = ""
-		changed = true
-	}
-	if rsc.Status.Reason != "" {
-		rsc.Status.Reason = ""
-		changed = true
-	}
-
+	phase, message := computePhaseAndMessage(rsc)
+	changed := applyPhase(rsc, phase, message)
 	return ef.Ok().ReportChangedIf(changed)
 }
 
@@ -666,7 +704,7 @@ func ensureConfiguration(
 	needsValidation := rsp.Status.EligibleNodesRevision != rsc.Status.StoragePoolEligibleNodesRevision ||
 		!isConfigurationInSync(rsc)
 	if needsValidation {
-		if err := validateEligibleNodes(rsp.Status.EligibleNodes, rsc.Spec.Topology, rsc.Spec.Replication); err != nil {
+		if err := validateEligibleNodes(rsp.Status.EligibleNodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR()); err != nil {
 			msg := err.Error()
 			if pendingDiffMsg != "" {
 				msg = pendingDiffMsg + ". " + msg
@@ -787,7 +825,7 @@ func ensureVolumeSummaryAndConditions(
 // rvView is a lightweight projection of ReplicatedVolume fields used by this controller.
 type rvView struct {
 	name                            string
-	configurationStoragePoolName    string
+	replicatedStoragePoolName       string
 	configurationObservedGeneration int64
 	conditions                      rvViewConditions
 }
@@ -814,7 +852,7 @@ func newRVView(unsafeRV *v1alpha1.ReplicatedVolume) rvView {
 	}
 
 	if unsafeRV.Status.Configuration != nil {
-		view.configurationStoragePoolName = unsafeRV.Status.Configuration.StoragePoolName
+		view.replicatedStoragePoolName = unsafeRV.Status.Configuration.ReplicatedStoragePoolName
 	}
 
 	return view
@@ -841,12 +879,14 @@ func computeRollingStrategiesConfiguration(rsc *v1alpha1.ReplicatedStorageClass)
 }
 
 // makeConfiguration computes the intended configuration from RSC spec.
-func makeConfiguration(rsc *v1alpha1.ReplicatedStorageClass, storagePoolName string) v1alpha1.ReplicatedStorageClassConfiguration {
-	return v1alpha1.ReplicatedStorageClassConfiguration{
-		Topology:        rsc.Spec.Topology,
-		Replication:     rsc.Spec.Replication,
-		VolumeAccess:    rsc.Spec.VolumeAccess,
-		StoragePoolName: storagePoolName,
+// Resolves the legacy replication field to FTT/GMDR when new fields are not set.
+func makeConfiguration(rsc *v1alpha1.ReplicatedStorageClass, storagePoolName string) v1alpha1.ReplicatedVolumeConfiguration {
+	return v1alpha1.ReplicatedVolumeConfiguration{
+		ReplicatedStoragePoolName:       storagePoolName,
+		Topology:                        rsc.Spec.Topology,
+		FailuresToTolerate:              rsc.Spec.GetFTT(),
+		GuaranteedMinimumDataRedundancy: rsc.Spec.GetGMDR(),
+		VolumeAccess:                    rsc.Spec.VolumeAccess,
 	}
 }
 
@@ -862,8 +902,11 @@ func computePendingConfigurationDiffMessage(rsc *v1alpha1.ReplicatedStorageClass
 	cur := rsc.Status.Configuration
 	var diffs []string
 
-	if cur.Replication != rsc.Spec.Replication {
-		diffs = append(diffs, fmt.Sprintf("replication %s -> %s", cur.Replication, rsc.Spec.Replication))
+	if cur.FailuresToTolerate != rsc.Spec.GetFTT() {
+		diffs = append(diffs, fmt.Sprintf("failuresToTolerate %d -> %d", cur.FailuresToTolerate, rsc.Spec.GetFTT()))
+	}
+	if cur.GuaranteedMinimumDataRedundancy != rsc.Spec.GetGMDR() {
+		diffs = append(diffs, fmt.Sprintf("guaranteedMinimumDataRedundancy %d -> %d", cur.GuaranteedMinimumDataRedundancy, rsc.Spec.GetGMDR()))
 	}
 	if cur.Topology != rsc.Spec.Topology {
 		diffs = append(diffs, fmt.Sprintf("topology %s -> %s", cur.Topology, rsc.Spec.Topology))
@@ -871,8 +914,8 @@ func computePendingConfigurationDiffMessage(rsc *v1alpha1.ReplicatedStorageClass
 	if cur.VolumeAccess != rsc.Spec.VolumeAccess {
 		diffs = append(diffs, fmt.Sprintf("volumeAccess %s -> %s", cur.VolumeAccess, rsc.Spec.VolumeAccess))
 	}
-	if cur.StoragePoolName != targetStoragePoolName {
-		diffs = append(diffs, fmt.Sprintf("storage: not yet accepted (current pool: %s, pending pool: %s)", cur.StoragePoolName, targetStoragePoolName))
+	if cur.ReplicatedStoragePoolName != targetStoragePoolName {
+		diffs = append(diffs, fmt.Sprintf("storage: not yet accepted (current pool: %s, pending pool: %s)", cur.ReplicatedStoragePoolName, targetStoragePoolName))
 	}
 
 	if len(diffs) == 0 {
@@ -993,26 +1036,181 @@ func applyVolumesSatisfyEligibleNodesCondFalse(rsc *v1alpha1.ReplicatedStorageCl
 	})
 }
 
+// --- Phase helpers ---
+
+// computePhaseAndMessage derives the RSC phase and human-readable message
+// from conditions, deletion state, volume summary, and rollout strategy state.
+func computePhaseAndMessage(rsc *v1alpha1.ReplicatedStorageClass) (v1alpha1.ReplicatedStorageClassPhase, string) {
+	// 1. Deleting.
+	if rsc.DeletionTimestamp != nil {
+		return v1alpha1.ReplicatedStorageClassPhaseTerminating, "Storage class is terminating"
+	}
+
+	// 2. WaitingForStoragePool.
+	spCond := objutilv1.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType)
+	if spCond == nil || spCond.Status != metav1.ConditionTrue {
+		msg := "Waiting for storage pool"
+		if spCond != nil {
+			msg = spCond.Message
+		}
+		return v1alpha1.ReplicatedStorageClassPhaseWaitingForStoragePool, msg
+	}
+
+	// 3-4. Ready=False → InsufficientNodes or InvalidConfiguration.
+	readyCond := objutilv1.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondReadyType)
+	if readyCond == nil || readyCond.Status != metav1.ConditionTrue {
+		msg := ""
+		if readyCond != nil {
+			msg = readyCond.Message
+		}
+		if readyCond != nil && readyCond.Reason == v1alpha1.ReplicatedStorageClassCondReadyReasonInsufficientEligibleNodes {
+			return v1alpha1.ReplicatedStorageClassPhaseInsufficientNodes, msg
+		}
+		return v1alpha1.ReplicatedStorageClassPhaseInvalidConfiguration, msg
+	}
+
+	// 5-7. Ready=True → check divergence.
+	configRolledOut := objutilv1.IsStatusConditionPresentAndTrue(rsc, v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType)
+	volsSatisfy := objutilv1.IsStatusConditionPresentAndTrue(rsc, v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType)
+
+	if configRolledOut && volsSatisfy {
+		// 7. Ready.
+		if rsc.Status.Volumes.Total != nil && *rsc.Status.Volumes.Total > 0 {
+			return v1alpha1.ReplicatedStorageClassPhaseReady,
+				fmt.Sprintf("Storage class is ready; %d volumes, all aligned", *rsc.Status.Volumes.Total)
+		}
+		return v1alpha1.ReplicatedStorageClassPhaseReady, "Storage class is ready"
+	}
+
+	// Divergence exists. Determine if any auto-fix is active.
+	hasActiveAutoFix := false
+
+	hasStaleConfig := rsc.Status.Volumes.StaleConfiguration != nil && *rsc.Status.Volumes.StaleConfiguration > 0
+	hasPendingObservation := rsc.Status.Volumes.PendingObservation != nil && *rsc.Status.Volumes.PendingObservation > 0
+	hasNodeConflicts := rsc.Status.Volumes.InConflictWithEligibleNodes != nil && *rsc.Status.Volumes.InConflictWithEligibleNodes > 0
+
+	configRolloutEnabled := rsc.Spec.ConfigurationRolloutStrategy.Type == v1alpha1.ConfigurationRolloutRollingUpdate
+	nodesRepairEnabled := rsc.Spec.EligibleNodesConflictResolutionStrategy.Type == v1alpha1.EligibleNodesConflictResolutionRollingRepair
+
+	if (hasStaleConfig || hasPendingObservation) && configRolloutEnabled {
+		hasActiveAutoFix = true
+	}
+	if hasNodeConflicts && nodesRepairEnabled {
+		hasActiveAutoFix = true
+	}
+	// PendingObservation is always "active" — the system is waiting for volumes to ack.
+	if hasPendingObservation {
+		hasActiveAutoFix = true
+	}
+
+	message := composeRolloutMessage(rsc, hasStaleConfig, hasPendingObservation, hasNodeConflicts, configRolloutEnabled, nodesRepairEnabled)
+
+	if hasActiveAutoFix {
+		return v1alpha1.ReplicatedStorageClassPhaseRollingOut, message
+	}
+	return v1alpha1.ReplicatedStorageClassPhasePartiallyAligned, message
+}
+
+// composeRolloutMessage builds a human-readable message from independent divergence parts.
+// Each part is included only when the corresponding divergence exists.
+func composeRolloutMessage(
+	rsc *v1alpha1.ReplicatedStorageClass,
+	hasStaleConfig, hasPendingObservation, hasNodeConflicts bool,
+	configRolloutEnabled, nodesRepairEnabled bool,
+) string {
+	var buf strings.Builder
+
+	if hasPendingObservation {
+		fmt.Fprintf(&buf, "Waiting for %d volume(s) to observe new configuration",
+			*rsc.Status.Volumes.PendingObservation)
+	}
+
+	if hasStaleConfig {
+		if buf.Len() > 0 {
+			buf.WriteString(". ")
+		}
+		if configRolloutEnabled {
+			aligned := int32(0)
+			if rsc.Status.Volumes.Aligned != nil {
+				aligned = *rsc.Status.Volumes.Aligned
+			}
+			fmt.Fprintf(&buf, "Configuration rollout in progress: %d/%d volumes aligned, %d stale",
+				aligned, *rsc.Status.Volumes.Total, *rsc.Status.Volumes.StaleConfiguration)
+		} else {
+			fmt.Fprintf(&buf, "%d volume(s) have stale configuration (rollout strategy: NewVolumesOnly)",
+				*rsc.Status.Volumes.StaleConfiguration)
+		}
+	}
+
+	if hasNodeConflicts {
+		if buf.Len() > 0 {
+			buf.WriteString(". ")
+		}
+		if nodesRepairEnabled {
+			fmt.Fprintf(&buf, "Eligible nodes conflict resolution in progress: %d volume(s) on non-eligible nodes",
+				*rsc.Status.Volumes.InConflictWithEligibleNodes)
+		} else {
+			fmt.Fprintf(&buf, "%d volume(s) on non-eligible nodes (resolution strategy: Manual)",
+				*rsc.Status.Volumes.InConflictWithEligibleNodes)
+		}
+	}
+
+	if buf.Len() == 0 {
+		return "Volumes are not fully aligned"
+	}
+
+	return buf.String()
+}
+
+// applyPhase sets status.phase and status.message.
+// Returns true if any field was changed.
+func applyPhase(rsc *v1alpha1.ReplicatedStorageClass, phase v1alpha1.ReplicatedStorageClassPhase, message string) bool {
+	changed := false
+	if rsc.Status.Phase != phase {
+		rsc.Status.Phase = phase
+		changed = true
+	}
+	if rsc.Status.Message != message {
+		rsc.Status.Message = message
+		changed = true
+	}
+	return changed
+}
+
 // validateEligibleNodes validates that eligible nodes from RSP meet the requirements
-// for the RSC's replication mode and topology.
+// for the given FTT/GMDR layout and topology.
 //
-// Requirements by replication mode:
-//   - None: at least 1 node
-//   - Availability: at least 3 nodes, at least 2 with disks
-//   - Consistency: 2 nodes, both with disks
-//   - ConsistencyAndAvailability: at least 3 nodes with disks
+// Layout formulas:
+//
+//	D  = FTT + GMDR + 1   (diskful replicas)
+//	TB = 1 if D is even AND FTT == D/2, else 0
+//	Total = D + TB
+//
+// Requirements:
+//   - At least D nodes with disks (for diskful replicas)
+//   - At least D + TB total nodes (tiebreaker needs a node but no disk)
 //
 // Additional topology requirements:
-//   - TransZonal: nodes must be distributed across required number of zones
-//   - Zonal: each zone must independently meet the requirements
+//   - TransZonal: zones with disks >= D, total zones >= D + TB
+//   - Zonal: each zone must independently meet the node requirements
 func validateEligibleNodes(
 	eligibleNodes []v1alpha1.ReplicatedStoragePoolEligibleNode,
 	topology v1alpha1.ReplicatedStorageClassTopology,
-	replication v1alpha1.ReplicatedStorageClassReplication,
+	ftt, gmdr byte,
 ) error {
 	if len(eligibleNodes) == 0 {
 		return fmt.Errorf("no nodes available in the storage pool")
 	}
+
+	// Compute layout parameters from FTT/GMDR.
+	//   D  = FTT + GMDR + 1   (diskful replicas)
+	//   TB = 1 if D is even AND FTT == D/2, else 0
+	d := int(ftt + gmdr + 1)
+	tb := 0
+	if d%2 == 0 && int(ftt) == d/2 {
+		tb = 1
+	}
+	totalReplicas := d + tb
 
 	// Count nodes and nodes with disks.
 	totalNodes := len(eligibleNodes)
@@ -1026,14 +1224,10 @@ func validateEligibleNodes(
 	// Group nodes by zone.
 	nodesByZone := make(map[string][]v1alpha1.ReplicatedStoragePoolEligibleNode)
 	for _, n := range eligibleNodes {
-		zone := n.ZoneName
-		if zone == "" {
-			zone = "" // empty zone key for nodes without zone
-		}
-		nodesByZone[zone] = append(nodesByZone[zone], n)
+		nodesByZone[n.ZoneName] = append(nodesByZone[n.ZoneName], n)
 	}
 
-	// Count zones and zones with disks.
+	// Count zones with disks.
 	zonesWithDisks := 0
 	for _, nodes := range nodesByZone {
 		for _, n := range nodes {
@@ -1044,54 +1238,21 @@ func validateEligibleNodes(
 		}
 	}
 
-	switch replication {
-	case v1alpha1.ReplicationNone:
-		// At least 1 node required.
-		if totalNodes < 1 {
-			return fmt.Errorf("Replication None requires at least 1 node, have %d", totalNodes)
-		}
-
-	case v1alpha1.ReplicationAvailability:
-		// At least 3 nodes, at least 2 with disks.
-		if err := validateAvailabilityReplication(topology, totalNodes, nodesWithDisks, nodesByZone, zonesWithDisks); err != nil {
-			return err
-		}
-
-	case v1alpha1.ReplicationConsistency:
-		// 2 nodes, both with disks.
-		if err := validateConsistencyReplication(topology, totalNodes, nodesWithDisks, nodesByZone, zonesWithDisks); err != nil {
-			return err
-		}
-
-	case v1alpha1.ReplicationConsistencyAndAvailability:
-		// At least 3 nodes with disks.
-		if err := validateConsistencyAndAvailabilityReplication(topology, nodesWithDisks, nodesByZone, zonesWithDisks); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// validateAvailabilityReplication validates requirements for Availability replication mode.
-func validateAvailabilityReplication(
-	topology v1alpha1.ReplicatedStorageClassTopology,
-	totalNodes, nodesWithDisks int,
-	nodesByZone map[string][]v1alpha1.ReplicatedStoragePoolEligibleNode,
-	zonesWithDisks int,
-) error {
 	switch topology {
 	case v1alpha1.TopologyTransZonal:
-		// 3 different zones, at least 2 with disks.
-		if len(nodesByZone) < 3 {
-			return fmt.Errorf("Replication Availability with TransZonal topology requires nodes in at least 3 zones, have %d", len(nodesByZone))
+		minZones, minZonesWithDisks := computeTransZonalMinZones(ftt, gmdr)
+
+		if len(nodesByZone) < minZones {
+			return fmt.Errorf("FTT=%d, GMDR=%d with TransZonal topology requires at least %d zones, have %d",
+				ftt, gmdr, minZones, len(nodesByZone))
 		}
-		if zonesWithDisks < 2 {
-			return fmt.Errorf("Replication Availability with TransZonal topology requires at least 2 zones with disks, have %d", zonesWithDisks)
+		if zonesWithDisks < minZonesWithDisks {
+			return fmt.Errorf("FTT=%d, GMDR=%d with TransZonal topology requires at least %d zones with disks, have %d",
+				ftt, gmdr, minZonesWithDisks, zonesWithDisks)
 		}
 
 	case v1alpha1.TopologyZonal:
-		// Per zone: at least 3 nodes, at least 2 with disks.
+		// Per zone: each zone must independently have enough nodes.
 		for zone, nodes := range nodesByZone {
 			zoneNodesWithDisks := 0
 			for _, n := range nodes {
@@ -1099,66 +1260,62 @@ func validateAvailabilityReplication(
 					zoneNodesWithDisks++
 				}
 			}
-			if len(nodes) < 3 {
-				return fmt.Errorf("Replication Availability with Zonal topology requires at least 3 nodes in each zone, zone %q has %d", zone, len(nodes))
+			if len(nodes) < totalReplicas {
+				return fmt.Errorf("FTT=%d, GMDR=%d with Zonal topology requires at least %d nodes in each zone, zone %q has %d",
+					ftt, gmdr, totalReplicas, zone, len(nodes))
 			}
-			if zoneNodesWithDisks < 2 {
-				return fmt.Errorf("Replication Availability with Zonal topology requires at least 2 nodes with disks in each zone, zone %q has %d", zone, zoneNodesWithDisks)
+			if zoneNodesWithDisks < d {
+				return fmt.Errorf("FTT=%d, GMDR=%d with Zonal topology requires at least %d nodes with disks in each zone, zone %q has %d",
+					ftt, gmdr, d, zone, zoneNodesWithDisks)
 			}
 		}
 
 	default:
 		// Ignored topology or unspecified: global check.
-		if totalNodes < 3 {
-			return fmt.Errorf("Replication Availability requires at least 3 nodes, have %d", totalNodes)
+		if totalNodes < totalReplicas {
+			return fmt.Errorf("FTT=%d, GMDR=%d requires at least %d nodes, have %d",
+				ftt, gmdr, totalReplicas, totalNodes)
 		}
-		if nodesWithDisks < 2 {
-			return fmt.Errorf("Replication Availability requires at least 2 nodes with disks, have %d", nodesWithDisks)
+		if nodesWithDisks < d {
+			return fmt.Errorf("FTT=%d, GMDR=%d requires at least %d nodes with disks, have %d",
+				ftt, gmdr, d, nodesWithDisks)
 		}
 	}
 
 	return nil
 }
 
-// validateConsistencyReplication validates requirements for Consistency replication mode.
-func validateConsistencyReplication(
-	topology v1alpha1.ReplicatedStorageClassTopology,
-	totalNodes, nodesWithDisks int,
-	nodesByZone map[string][]v1alpha1.ReplicatedStoragePoolEligibleNode,
-	zonesWithDisks int,
-) error {
-	switch topology {
-	case v1alpha1.TopologyTransZonal:
-		// 2 different zones with disks.
-		if zonesWithDisks < 2 {
-			return fmt.Errorf("Replication Consistency with TransZonal topology requires at least 2 zones with disks, have %d", zonesWithDisks)
-		}
-
-	case v1alpha1.TopologyZonal:
-		// Per zone: at least 2 nodes with disks.
-		for zone, nodes := range nodesByZone {
-			zoneNodesWithDisks := 0
-			for _, n := range nodes {
-				if isNodeSchedulable(n) {
-					zoneNodesWithDisks++
-				}
-			}
-			if zoneNodesWithDisks < 2 {
-				return fmt.Errorf("Replication Consistency with Zonal topology requires at least 2 nodes with disks in each zone, zone %q has %d", zone, zoneNodesWithDisks)
-			}
-		}
-
+// computeTransZonalMinZones returns the minimum total zones and minimum zones with disks
+// for a TransZonal layout with the given FTT/GMDR combination.
+// Only called for TransZonal topology (FTT=0,GMDR=0 is not TransZonal — CEL prevents it).
+//
+// Composite mode (multiple replicas per zone) allows fewer zones than pure zone
+// mode (1 replica per zone). The minimum values come from the zone distribution
+// constraints: max D per zone ≤ D − qmr, TB zone must have ≤ 1D.
+//
+//	FTT=0, GMDR=1: 2D        → 2 zones, 2 with disks
+//	FTT=1, GMDR=0: 2D+1TB    → 3 zones, 2 with disks
+//	FTT=1, GMDR=1: 3D        → 3 zones, 3 with disks
+//	FTT=1, GMDR=2: 4D+1TB    → 3 zones, 3 with disks (composite 2D|1D+TB|1D)
+//	FTT=2, GMDR=1: 4D        → 4 zones, 4 with disks
+//	FTT=2, GMDR=2: 5D        → 3 zones, 3 with disks (composite 2D|2D|1D)
+func computeTransZonalMinZones(ftt, gmdr byte) (minZones, minZonesWithDisks int) {
+	switch {
+	case ftt == 0 && gmdr == 1:
+		return 2, 2
+	case ftt == 1 && gmdr == 0:
+		return 3, 2
+	case ftt == 1 && gmdr == 1:
+		return 3, 3
+	case ftt == 1 && gmdr == 2:
+		return 3, 3
+	case ftt == 2 && gmdr == 1:
+		return 4, 4
+	case ftt == 2 && gmdr == 2:
+		return 3, 3
 	default:
-		// Ignored topology or unspecified: global check.
-		if totalNodes < 2 {
-			return fmt.Errorf("Replication Consistency requires at least 2 nodes, have %d", totalNodes)
-		}
-		if nodesWithDisks < 2 {
-			return fmt.Errorf("Replication Consistency requires at least 2 nodes with disks, have %d", nodesWithDisks)
-		}
+		panic(fmt.Sprintf("transZonalMinZones: unsupported FTT=%d, GMDR=%d combination", ftt, gmdr))
 	}
-
-	return nil
 }
 
 // validateConsistencyAndAvailabilityReplication validates requirements for ConsistencyAndAvailability replication mode.
@@ -1241,8 +1398,8 @@ func computeActualVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, rvs []rvV
 		rv := &rvs[i]
 
 		// Collect used storage pool names.
-		if rv.configurationStoragePoolName != "" {
-			usedStoragePoolNames[rv.configurationStoragePoolName] = struct{}{}
+		if rv.replicatedStoragePoolName != "" {
+			usedStoragePoolNames[rv.replicatedStoragePoolName] = struct{}{}
 		}
 
 		// Check nodes condition regardless of acknowledgment.

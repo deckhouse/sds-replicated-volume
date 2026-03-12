@@ -109,8 +109,8 @@ func NewReplicatedStoragePool(
 			if e.ObjectOld.Spec.Type != e.ObjectNew.Spec.Type {
 				errMessage := fmt.Sprintf("StoragePool spec changed. Type change is forbidden. Old type: %s, new type: %s", e.ObjectOld.Spec.Type, e.ObjectNew.Spec.Type)
 				log.Error(nil, errMessage)
-				e.ObjectNew.Status.Phase = srv.RSPPhaseFailed
-				e.ObjectNew.Status.Reason = errMessage
+				e.ObjectNew.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
+				e.ObjectNew.Status.Message = errMessage
 				err := UpdateReplicatedStoragePool(ctx, cl, e.ObjectNew)
 				if err != nil {
 					log.Error(err, "error UpdateReplicatedStoragePool")
@@ -152,8 +152,8 @@ func NewReplicatedStoragePool(
 						if slices.Contains(ephemeralNodesList, lvgNode.Name) {
 							errMessage := fmt.Sprintf("Cannot create storage pool on ephemeral node (%s)", lvgNode.Name)
 							log.Error(nil, errMessage)
-							e.ObjectNew.Status.Phase = srv.RSPPhaseFailed
-							e.ObjectNew.Status.Reason = errMessage
+							e.ObjectNew.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
+							e.ObjectNew.Status.Message = errMessage
 							err = UpdateReplicatedStoragePool(ctx, cl, e.ObjectNew)
 							if err != nil {
 								log.Error(err, "error UpdateReplicatedStoragePool")
@@ -198,8 +198,8 @@ func ReconcileReplicatedStoragePoolEvent(ctx context.Context, cl client.Client, 
 func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *lapi.Client, log logger.Logger, replicatedSP *srv.ReplicatedStoragePool) error { // TODO: add shouldRequeue as returned value
 	ok, msg, lvmVolumeGroups := GetAndValidateVolumeGroups(ctx, cl, string(replicatedSP.Spec.Type), replicatedSP.Spec.LVMVolumeGroups)
 	if !ok {
-		replicatedSP.Status.Phase = srv.RSPPhaseFailed
-		replicatedSP.Status.Reason = msg
+		replicatedSP.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
+		replicatedSP.Status.Message = msg
 		err := UpdateReplicatedStoragePool(ctx, cl, replicatedSP)
 		if err != nil {
 			return fmt.Errorf("error UpdateReplicatedStoragePool: %s", err.Error())
@@ -221,7 +221,7 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 
 		if !ok {
 			log.Error(nil, fmt.Sprintf("Error getting LVMVolumeGroup %s from LVMVolumeGroups map: %+v", replicatedSPLVMVolumeGroup.Name, lvmVolumeGroups))
-			failedMsgBuilder.WriteString(fmt.Sprintf("Error getting LVMVolumeGroup %s from LVMVolumeGroups map. See logs of %s for details; ", replicatedSPLVMVolumeGroup.Name, ReplicatedStoragePoolControllerName))
+			fmt.Fprintf(&failedMsgBuilder, "Error getting LVMVolumeGroup %s from LVMVolumeGroups map. See logs of %s for details; ", replicatedSPLVMVolumeGroup.Name, ReplicatedStoragePoolControllerName)
 			isSuccessful = false
 			continue
 		}
@@ -258,8 +258,8 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 						log.Error(delErr, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to delete LINSTOR Storage Pool %s on node %s in the VG %s", replicatedSP.Name, nodeName, lvmVgForLinstor))
 					}
 
-					replicatedSP.Status.Phase = srv.RSPPhaseFailed
-					replicatedSP.Status.Reason = createErr.Error()
+					replicatedSP.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
+					replicatedSP.Status.Message = createErr.Error()
 					updErr := UpdateReplicatedStoragePool(ctx, cl, replicatedSP)
 					if updErr != nil {
 						log.Error(updErr, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to update the Replicated Storage Pool %s", replicatedSP.Name))
@@ -295,8 +295,8 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 	}
 
 	if !isSuccessful {
-		replicatedSP.Status.Phase = srv.RSPPhaseFailed
-		replicatedSP.Status.Reason = failedMsgBuilder.String()
+		replicatedSP.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
+		replicatedSP.Status.Message = failedMsgBuilder.String()
 		err := UpdateReplicatedStoragePool(ctx, cl, replicatedSP)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to update the Replicated Storage Pool %s", replicatedSP.Name))
@@ -305,8 +305,8 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 		return fmt.Errorf("some errors have been occurred while creating Storage Pool %s, err: %s", replicatedSP.Name, failedMsgBuilder.String())
 	}
 
-	replicatedSP.Status.Phase = srv.RSPPhaseCompleted
-	replicatedSP.Status.Reason = "pool creation completed"
+	replicatedSP.Status.Phase = srv.ReplicatedStoragePoolPhaseReady
+	replicatedSP.Status.Message = "pool creation completed"
 	err := UpdateReplicatedStoragePool(ctx, cl, replicatedSP)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to update the Replicated Storage Pool %s", replicatedSP.Name))

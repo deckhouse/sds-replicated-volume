@@ -17,11 +17,14 @@ limitations under the License.
 package drbdr
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/maps"
 )
 
@@ -42,7 +45,8 @@ func computeTargetDRBDActions(iState IntendedDRBDState, aState ActualDRBDState) 
 	}
 
 	if !iState.IsUpAndNotInCleanup() {
-		// Teardown: generate Down action if resource exists
+		// Teardown: remove symlink before down to prevent dangling references
+		res = append(res, RemoveDeviceSymlinkAction{Name: iState.SymlinkName()})
 		if aState.ResourceExists() {
 			res = append(res, DownAction{ResourceName: iState.ResourceName()})
 		}
@@ -79,6 +83,9 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 	// 3. Compute minor actions (create if missing)
 	minor, minorActions := computeMinorActions(resourceName, &allocatedMinor, iState, aState)
 	res = append(res, minorActions...)
+
+	// 3b. Ensure stable device symlink points to the correct minor
+	res = append(res, EnsureDeviceSymlinkAction{Name: iState.SymlinkName(), Minor: minor})
 
 	// 4. Handle disk (detach if changing, attach if missing, reconcile options)
 	res = append(res, computeDiskActions(minor, iState, aState)...)
@@ -167,8 +174,56 @@ func computeMinorActions(resourceName string, allocatedMinor *uint, iState Inten
 	}}
 }
 
+func generateDeviceUUID() string {
+	var buf [8]byte
+	rand.Read(buf[:])
+	return fmt.Sprintf("%016X", binary.BigEndian.Uint64(buf[:]))
+}
+
+// computeAttachActions implements the device-uuid decision table and returns the
+// sequence of actions to prepare metadata and attach the disk.
+func computeAttachActions(aState ActualNonAttachedDiskMetadata, statusUUID string, minor *uint, backingDev string) DRBDActions {
+	var actions DRBDActions
+
+	if aState.HasMetadata() {
+		diskUUID := aState.DiskDeviceUUID()
+		switch {
+		case diskUUID != "" && statusUUID == diskUUID:
+			// Match — proceed to attach.
+		case diskUUID != "" && statusUUID != "" && statusUUID != diskUUID:
+			return DRBDActions{FailAction{Err: ConfiguredReasonError(
+				fmt.Errorf("backing device %s has device-uuid %s, DRBDResource expects %s", backingDev, diskUUID, statusUUID),
+				v1alpha1.DRBDResourceCondConfiguredReasonForeignDiskDetected,
+			)}}
+		case diskUUID != "" && statusUUID == "":
+			// Adopt from disk — proceed to attach.
+		case diskUUID == "" && statusUUID != "":
+			actions = append(actions, WriteDeviceUUIDAction{Minor: minor, BackingDev: backingDev, UUID: statusUUID})
+		default:
+			actions = append(actions, WriteDeviceUUIDAction{Minor: minor, BackingDev: backingDev, UUID: generateDeviceUUID()})
+		}
+		actions = append(actions, ApplyALAction{Minor: minor, BackingDev: backingDev})
+	} else {
+		uuid := statusUUID
+		if uuid == "" {
+			uuid = generateDeviceUUID()
+		}
+		actions = append(actions,
+			CreateMetadataAction{Minor: minor, BackingDev: backingDev},
+			WriteDeviceUUIDAction{Minor: minor, BackingDev: backingDev, UUID: uuid},
+		)
+	}
+
+	actions = append(actions, AttachAction{
+		Minor:    minor,
+		LowerDev: backingDev,
+		MetaDev:  backingDev,
+		MetaIdx:  "internal",
+	})
+	return actions
+}
+
 // computeDiskActions handles all disk-related actions: detach, attach, and options.
-// It ensures the disk state converges to the intended state.
 func computeDiskActions(minor *uint, iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
 	actualDisk := ""
 	if len(aState.Volumes()) > 0 {
@@ -176,29 +231,17 @@ func computeDiskActions(minor *uint, iState IntendedDRBDState, aState ActualDRBD
 	}
 	intendedDisk := iState.BackingDisk()
 
-	// Detach if disk is different (including going diskless)
 	if actualDisk != "" && actualDisk != intendedDisk {
 		res = append(res, DetachAction{Minor: minor})
-		return // Don't attach in same cycle as detach
+		return
 	}
 
-	// Attach if needed (diskful with backing disk, but no current disk)
 	if actualDisk == "" && intendedDisk != "" && iState.Type() == v1alpha1.DRBDResourceTypeDiskful {
-		res = append(res, CreateMetadataAction{
-			Minor:      minor,
-			BackingDev: intendedDisk,
-		})
-		res = append(res, AttachAction{
-			Minor:    minor,
-			LowerDev: intendedDisk,
-			MetaDev:  intendedDisk, // same device for internal metadata
-			MetaIdx:  "internal",
-		})
+		res = append(res, computeAttachActions(aState, iState.StatusDeviceUUID(), minor, intendedDisk)...)
 		res = append(res, computeDiskOptionsAction(minor, iState)...)
 		return
 	}
 
-	// Reconcile disk options for existing attached disk
 	if actualDisk != "" {
 		res = append(res, computeDiskOptionsActionReconcile(iState, aState)...)
 	}
@@ -219,7 +262,7 @@ func computeResourceOptionsAction(resourceName string, iState IntendedDRBDState)
 	quorum := uint(iState.Quorum())
 	quorumMinRedundancy := uint(iState.QuorumMinimumRedundancy())
 
-	res = append(res, ResourceOptionsAction{
+	action := ResourceOptionsAction{
 		ResourceName:               resourceName,
 		AutoPromote:                &autoPromote,
 		OnNoQuorum:                 iState.OnNoQuorum(),
@@ -227,7 +270,18 @@ func computeResourceOptionsAction(resourceName string, iState IntendedDRBDState)
 		OnSuspendedPrimaryOutdated: iState.OnSuspendedPrimaryOutdated(),
 		Quorum:                     &quorum,
 		QuorumMinimumRedundancy:    &quorumMinRedundancy,
-	})
+	}
+
+	// Include quorum-dynamic-voters when flant extensions are available,
+	// or when the intended value differs from the DRBD built-in default (true).
+	// In the latter case drbdsetup will fail on a non-flant kernel, surfacing
+	// the error instead of silently ignoring the requested setting.
+	if drbdutils.FlantExtensionsSupported || !iState.QuorumDynamicVoters() {
+		qdv := iState.QuorumDynamicVoters()
+		action.QuorumDynamicVoters = &qdv
+	}
+
+	res = append(res, action)
 	return res
 }
 
@@ -276,6 +330,17 @@ func computeResourceOptionsActionReconcile(resourceName string, iState IntendedD
 		changed = true
 	}
 
+	// Check quorum-dynamic-voters (flant extension).
+	// On non-flant kernels, only include if intended differs from DRBD default (true)
+	// so that drbdsetup surfaces the error instead of silently ignoring the setting.
+	if drbdutils.FlantExtensionsSupported || !iState.QuorumDynamicVoters() {
+		if iState.QuorumDynamicVoters() != aState.QuorumDynamicVoters() {
+			qdv := iState.QuorumDynamicVoters()
+			action.QuorumDynamicVoters = &qdv
+			changed = true
+		}
+	}
+
 	if changed {
 		res = append(res, action)
 	}
@@ -285,11 +350,20 @@ func computeResourceOptionsActionReconcile(resourceName string, iState IntendedD
 func computeDiskOptionsAction(minor *uint, iState IntendedDRBDState) (res DRBDActions) {
 	discardZeroes := iState.DiscardZeroesIfAligned()
 	rsDiscardGran := iState.RsDiscardGranularity()
-	res = append(res, DiskOptionsAction{
+	action := DiskOptionsAction{
 		Minor:                  minor,
 		DiscardZeroesIfAligned: &discardZeroes,
 		RsDiscardGranularity:   &rsDiscardGran,
-	})
+	}
+
+	// Include non-voting when flant extensions are available,
+	// or when the intended value differs from the DRBD built-in default (false).
+	if drbdutils.FlantExtensionsSupported || iState.NonVoting() {
+		nv := iState.NonVoting()
+		action.NonVoting = &nv
+	}
+
+	res = append(res, action)
 	return res
 }
 
@@ -316,6 +390,17 @@ func computeDiskOptionsActionReconcile(iState IntendedDRBDState, aState ActualDR
 			rsDiscardGran := iState.RsDiscardGranularity()
 			action.RsDiscardGranularity = &rsDiscardGran
 			changed = true
+		}
+
+		// Check non-voting (flant extension).
+		// On non-flant kernels, only include if intended differs from DRBD default (false)
+		// so that drbdsetup surfaces the error instead of silently ignoring the setting.
+		if drbdutils.FlantExtensionsSupported || iState.NonVoting() {
+			if iState.NonVoting() != vol.NonVoting() {
+				nv := iState.NonVoting()
+				action.NonVoting = &nv
+				changed = true
+			}
 		}
 
 		if changed {
@@ -439,38 +524,64 @@ func formatAddr(ip string, port uint) string {
 	return fmt.Sprintf("%s:%d", ip, port)
 }
 
-// computeResizeAction computes resize action if the intended size is larger than actual.
+// computeResizeAction computes resize action if the intended usable size is
+// larger than actual. The intended size is the lower volume (backing device)
+// size; it is converted to usable size by subtracting DRBD metadata overhead
+// before comparison.
+//
+// The resize command re-examines the backing device and uses whatever space is
+// available. If the backing device hasn't actually grown, drbdsetup returns
+// ErrResizeBackingNotGrown which ResizeAction treats as a no-op.
 func computeResizeAction(iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
-	// Skip if diskless or no intended size
 	if iState.Type() != v1alpha1.DRBDResourceTypeDiskful || iState.Size() == 0 {
 		return
 	}
 
-	// Need an existing volume to resize
 	if len(aState.Volumes()) == 0 {
 		return
 	}
 
 	actualVol := aState.Volumes()[0]
 
-	// Skip resize if volume has no backing disk or is diskless (not yet attached)
 	if actualVol.BackingDisk() == "" || actualVol.DiskState() == "Diskless" {
 		return
 	}
 
-	actualSize := actualVol.Size()
-	intendedSize := iState.Size()
-
-	// Only resize if intended size is larger (CEL validation prevents decrease)
-	if intendedSize > actualSize {
+	intendedUsable := drbdUsableSizeBytes(iState.Size())
+	if intendedUsable > actualVol.Size() {
 		minor := uint(actualVol.Minor())
-		res = append(res, ResizeAction{
-			Minor:     &minor,
-			SizeBytes: intendedSize,
-		})
+		res = append(res, ResizeAction{Minor: &minor})
 	}
 
 	return
+}
+
+// DRBD internal metadata size calculation.
+// Must stay in sync with images/controller/internal/drbd_size/drbd_size.go.
+const (
+	drbdMaxPeers          = 7
+	drbdSectorSize        = 512
+	drbdBmSectPerBit      = 8  // sectors per bitmap bit (1 << (12 - 9))
+	drbdSuperblockSectors = 8  // 4096 bytes / 512
+	drbdALSizeSectors     = 64 // 1 stripe * 32KB / 512
+)
+
+func drbdAlign(x, a uint64) uint64 {
+	return (x + a - 1) &^ (a - 1)
+}
+
+func drbdMetadataSectors(lowerSectors uint64) uint64 {
+	bits := drbdAlign(drbdAlign(lowerSectors, drbdBmSectPerBit)/drbdBmSectPerBit, 64)
+	bitmapSectors := drbdAlign(bits/8*drbdMaxPeers, 4096) / drbdSectorSize
+	return bitmapSectors + drbdSuperblockSectors + drbdALSizeSectors
+}
+
+// drbdUsableSizeBytes converts a lower volume (backing device) size in bytes
+// to the DRBD usable capacity in bytes, subtracting internal metadata overhead.
+func drbdUsableSizeBytes(lowerBytes int64) int64 {
+	lowerSectors := uint64(lowerBytes) / drbdSectorSize
+	usableSectors := lowerSectors - drbdMetadataSectors(lowerSectors)
+	return int64(usableSectors * drbdSectorSize)
 }
 
 // computeRoleAction computes role change action if actual role differs from intended.

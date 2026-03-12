@@ -27,15 +27,18 @@ import (
 // +kubebuilder:resource:scope=Cluster,shortName=drbdr
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
-// +kubebuilder:printcolumn:name="State",type=string,JSONPath=".spec.state"
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=".status.activeConfiguration.state"
+// +kubebuilder:printcolumn:name="Configured",type=string,JSONPath=".status.conditions[?(@.type=='Configured')].status"
 // +kubebuilder:printcolumn:name="Role",type=string,JSONPath=".status.activeConfiguration.role"
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=".status.activeConfiguration.type"
 // +kubebuilder:printcolumn:name="DiskState",type=string,JSONPath=".status.diskState"
 // +kubebuilder:printcolumn:name="Quorum",type=boolean,JSONPath=".status.quorum"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='Configured')].message"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName) > 0 : !has(self.spec.lvmLogicalVolumeName) || size(self.spec.lvmLogicalVolumeName) == 0",message="lvmLogicalVolumeName is required when type is Diskful and must be empty when type is Diskless"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.size) : !has(self.spec.size)",message="size is required when type is Diskful and must be empty when type is Diskless"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.spec.size) || !has(self.spec.size) || self.spec.size >= oldSelf.spec.size",message="spec.size cannot be decreased"
+// +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskless' ? !has(self.spec.nonVoting) || self.spec.nonVoting == false : true",message="nonVoting must be false (or unset) when type is Diskless"
 type DRBDResource struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`
@@ -106,6 +109,12 @@ type DRBDResourceSpec struct {
 	// +kubebuilder:default=false
 	// +optional
 	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
+
+	// When enabled, the disk does not participate in quorum voting while
+	// still replicating data normally. Only valid for Diskful resources.
+	// +kubebuilder:default=false
+	// +optional
+	NonVoting bool `json:"nonVoting,omitempty"`
 
 	// +kubebuilder:validation:Enum=Diskful;Diskless
 	// +kubebuilder:default=Diskful
@@ -218,8 +227,9 @@ type DRBDAddress struct {
 
 // +kubebuilder:object:generate=true
 type DRBDResourceStatus struct {
-	// Device path, e.g. /dev/drbd10012 or /dev/sds-replicated/<rvrName>
-	// Only present on primary
+	// Device is the stable symlink path to the DRBD block device,
+	// e.g. /dev/sdsrv/<resourceName>. The symlink target is /dev/drbd<minor>.
+	// Only present when the resource is Up and has an allocated minor.
 	// +kubebuilder:validation:MaxLength=256
 	// +optional
 	Device string `json:"device,omitempty"`
@@ -256,6 +266,16 @@ type DRBDResourceStatus struct {
 
 	// +optional
 	Quorum *bool `json:"quorum,omitempty"`
+
+	// DeviceUUID is a 16-digit uppercase hexadecimal identifier that binds this
+	// DRBDResource to specific physical DRBD metadata on the backing device.
+	// Format matches drbdmeta read-dev-uuid output. Set once after first
+	// metadata creation or adoption; immutable thereafter.
+	// +kubebuilder:validation:MaxLength=16
+	// +kubebuilder:validation:Pattern=`^([0-9A-F]{16})?$`
+	// +kubebuilder:validation:XValidation:rule="size(oldSelf) == 0 || oldSelf == self",message="deviceUUID is immutable once set"
+	// +optional
+	DeviceUUID string `json:"deviceUUID,omitempty"`
 
 	// +listType=map
 	// +listMapKey=type
@@ -294,6 +314,9 @@ type DRBDResourceActiveConfiguration struct {
 
 	// +optional
 	AllowTwoPrimaries *bool `json:"allowTwoPrimaries,omitempty"`
+
+	// +optional
+	NonVoting *bool `json:"nonVoting,omitempty"`
 
 	// Type is the current effective DRBD configuration (diskful or diskless).
 	// This reflects how DRBD is configured, not the transient disk state

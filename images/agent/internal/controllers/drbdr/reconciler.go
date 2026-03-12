@@ -20,9 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -30,7 +32,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -52,6 +54,18 @@ func NewReconciler(cl client.Client, nodeName string, portCache *PortCache) *Rec
 	}
 }
 
+// isInCleanup returns true when the DRBDResource is marked for deletion and
+// the agent holds the only remaining finalizer (ready for final cleanup).
+func isInCleanup(drbdr *v1alpha1.DRBDResource) bool {
+	return drbdr.DeletionTimestamp != nil && !obju.HasFinalizersOtherThan(drbdr, v1alpha1.AgentFinalizer)
+}
+
+// isUpAndNotInCleanup returns true when the DRBDResource is NOT being torn
+// down — it is neither being deleted nor in spec.state=Down.
+func isUpAndNotInCleanup(drbdr *v1alpha1.DRBDResource) bool {
+	return !isInCleanup(drbdr) && drbdr.Spec.State != v1alpha1.DRBDResourceStateDown
+}
+
 // Reconcile reconciles a DRBDResource based on the request type.
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
@@ -71,7 +85,7 @@ func (r *Reconciler) Reconcile(
 		return rf.Fail(err).ToCtrl()
 	}
 	if !ok {
-		return rf.Done().ToCtrl() // Deleted
+		return r.reconcileOrphanDRBD(rf.Ctx(), req.Name).ToCtrl()
 	}
 
 	// Skip if resource belongs to different node (predicates should filter this normally)
@@ -84,7 +98,7 @@ func (r *Reconciler) Reconcile(
 }
 
 // reconcileByActualName handles requests with ActualNameOnTheNode (non-prefixed DRBD resources).
-// Either finds the owning DRBDResource and reconciles it, or tears down orphan.
+// Either finds the owning DRBDResource and reconciles it, or skips (not ours).
 //
 // Reconcile pattern: Pure orchestration
 func (r *Reconciler) reconcileByActualName(
@@ -109,9 +123,8 @@ func (r *Reconciler) reconcileByActualName(
 
 	switch len(matches) {
 	case 0:
-		// Orphan - no K8S object owns this DRBD resource, tear it down
-		outcome = r.reconcileOrphanDRBD(rf.Ctx(), actualName)
-		return
+		rf.Log().V(1).Info("Non-managed DRBD resource, skipping")
+		return rf.Done()
 	case 1:
 		outcome = r.reconcileDRBDR(rf.Ctx(), &matches[0])
 		return
@@ -138,33 +151,56 @@ func (r *Reconciler) reconcileDRBDR(
 	}
 
 	// Phase 1: Ensure finalizer (adds if needed for up resources)
-	if finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, true); finalizerOutcome.ShouldReturn() {
+	if finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, true, isUpAndNotInCleanup(drbdr)); finalizerOutcome.ShouldReturn() {
 		if finalizerOutcome.Error() != nil {
 			return rf.Fail(finalizerOutcome.Error())
 		}
 		return rf.Done()
 	}
 
-	// Phase 2: Ensure addresses in status (in-memory only, no patch yet)
-	// Error here is non-critical (e.g., port allocation failure) - continue reconciliation
-	statusBase := drbdr.DeepCopy()
-	node, err := r.getRequiredCurrentNode(rf.Ctx())
-	if err != nil {
-		return rf.Fail(err)
-	}
-	addrErr := ensureAddresses(rf.Ctx(), drbdr, node, r.portCache.Allocate).Error()
+	// Snapshot deletion state after Phase 1. Phase 1 may have patched the
+	// object, refreshing its metadata from the API server. This snapshot is
+	// used by all subsequent phases to ensure consistent behavior even if
+	// Phase 5's status patch further mutates drbdr metadata.
+	inCleanup := isInCleanup(drbdr)
+	upAndNotInCleanup := isUpAndNotInCleanup(drbdr)
 
-	// Phase 3: Add finalizer to intended LLV (before DRBD operations)
+	// Phase 2: Ensure addresses are persisted (patch with optimistic lock).
+	// Must happen before DRBD convergence so that stale-cache races cause
+	// a conflict error here, before any destructive kernel actions execute.
+	if addrOutcome := r.reconcileAddresses(rf.Ctx(), drbdr); addrOutcome.ShouldReturn() {
+		if addrOutcome.Error() != nil {
+			return rf.Fail(addrOutcome.Error())
+		}
+		return rf.Done()
+	}
+
+	// Snapshot status after addresses are persisted. The addresses patch may
+	// have updated the object's resourceVersion; taking the snapshot here
+	// ensures the final Phase 5 patch uses the correct base.
+	statusBase := drbdr.DeepCopy()
+
+	// Phase 3: Add finalizer to intended LLV (before DRBD operations).
+	// Skip when in cleanup — no point acquiring a finalizer on an LLV that
+	// is about to be released.
 	var intendedDisk string
 	var llvErr error
-	if drbdr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful {
+	if drbdr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful && upAndNotInCleanup {
 		intendedDisk, llvErr = r.reconcileLLVFinalizerAdd(rf.Ctx(), drbdr.Spec.LVMLogicalVolumeName)
 	}
 
-	// Phase 4: DRBD convergence
-	iState := computeIntendedDRBDState(drbdr, intendedDisk)
+	// Phase 3b: Release finalizer from previously-attached LLV before detaching.
+	// The status still carries the attached LLV name at this point; after DRBD
+	// convergence (Phase 4) the disk may already be detached and the status will
+	// be cleared, making it impossible to identify which LLV to release.
+	if releaseErr := r.reconcileLLVFinalizerRelease(rf.Ctx(), drbdr, inCleanup); releaseErr != nil {
+		llvErr = errors.Join(llvErr, releaseErr)
+	}
 
-	aState, aErr := observeActualDRBDState(rf.Ctx(), DRBDResourceNameOnTheNode(drbdr))
+	// Phase 4: DRBD convergence
+	iState := computeIntendedDRBDState(drbdr, intendedDisk, upAndNotInCleanup)
+
+	aState, aErr := observeActualDRBDState(rf.Ctx(), DRBDResourceNameOnTheNode(drbdr), intendedDisk, drbdr.Status.DeviceUUID)
 	aErr = ConfiguredReasonError(aErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 
 	// Compute and execute DRBD actions
@@ -175,26 +211,22 @@ func (r *Reconciler) reconcileDRBDR(
 	// Refresh actual state if DRBD state was changed
 	var aErr2 error
 	if refreshNeeded {
-		aState, aErr2 = observeActualDRBDState(rf.Ctx(), DRBDResourceNameOnTheNode(drbdr))
+		aState, aErr2 = observeActualDRBDState(rf.Ctx(), DRBDResourceNameOnTheNode(drbdr), intendedDisk, drbdr.Status.DeviceUUID)
 		aErr2 = ConfiguredReasonError(aErr2, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 	}
 
-	// Remove finalizer from previous LLV (only if DRBD has actually detached from it)
-	// Also computes actualLLVName for report state
-	actualLLVName, actualLLVErr := r.reconcileLLVFinalizerRemove(rf.Ctx(), aState, drbdr.Status.ActiveConfiguration)
-	if actualLLVErr != nil {
-		llvErr = errors.Join(llvErr, actualLLVErr)
-	}
+	// Compute actualLLVName from DRBD actual state for status reporting.
+	actualLLVName := computeActualLLVName(rf.Ctx(), r, aState)
 
 	// Phase 5: Report and status patch
-	reconcileErr := errors.Join(addrErr, llvErr, aErr, aErr2, drbdErr)
+	reconcileErr := errors.Join(llvErr, aErr, aErr2, drbdErr)
 	if ensureOutcome := ensureReportState(rf.Ctx(), aState, drbdr, actualLLVName, reconcileErr, maintenanceMode); ensureOutcome.Error() != nil {
 		reconcileErr = errors.Join(reconcileErr, ensureOutcome.Error())
 	}
 
 	// Patch status if changed
 	if !equality.Semantic.DeepEqual(statusBase.Status, drbdr.Status) {
-		statusPatchErr := r.patchDRBDRStatus(rf.Ctx(), drbdr, statusBase, false)
+		statusPatchErr := r.patchDRBDRStatus(rf.Ctx(), drbdr, statusBase, true)
 		// Ignore "not found" error if object was being deleted
 		if statusPatchErr != nil && (drbdr.DeletionTimestamp == nil || client.IgnoreNotFound(statusPatchErr) != nil) {
 			reconcileErr = errors.Join(reconcileErr, statusPatchErr)
@@ -202,7 +234,7 @@ func (r *Reconciler) reconcileDRBDR(
 	}
 
 	// Phase 6: Finalize (removes finalizer if needed for down/deleted resources)
-	if finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, false); finalizerOutcome.ShouldReturn() {
+	if finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, false, upAndNotInCleanup); finalizerOutcome.ShouldReturn() {
 		if finalizerOutcome.Error() != nil {
 			reconcileErr = errors.Join(reconcileErr, finalizerOutcome.Error())
 		}
@@ -214,20 +246,32 @@ func (r *Reconciler) reconcileDRBDR(
 	return rf.Done()
 }
 
-// reconcileOrphanDRBD handles DRBD resources with no matching K8S object.
-// actualName is the actual DRBD name on the node to tear down.
+// reconcileOrphanDRBD handles owned DRBD resources with no matching K8S object.
+// k8sName is the K8S resource name; the actual DRBD name is derived from it.
+// If the DRBD resource does not exist on the node, this is a no-op.
 //
 // Reconcile pattern: In-place reconciliation
 func (r *Reconciler) reconcileOrphanDRBD(
 	ctx context.Context,
-	actualName string,
+	k8sName string,
 ) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "orphan-drbd", "actualNameOnTheNode", actualName)
+	drbdName := DRBDNameFromK8SName(k8sName)
+	rf := flow.BeginReconcile(ctx, "orphan-drbd", "drbdResourceName", drbdName)
 	defer rf.OnEnd(&outcome)
+
+	status, err := drbdutils.ExecuteStatus(rf.Ctx(), drbdName)
+	if err != nil {
+		return rf.Fail(err)
+	}
+	if len(status) == 0 {
+		return rf.Done()
+	}
 
 	rf.Log().Info("Cleaning up orphan DRBD resource")
 
-	downAction := DownAction{ResourceName: actualName}
+	_ = os.Remove(DeviceSymlinkPath(k8sName))
+
+	downAction := DownAction{ResourceName: drbdName}
 	if err := downAction.Execute(rf.Ctx()); err != nil {
 		return rf.Fail(err)
 	}
@@ -249,7 +293,7 @@ func (r *Reconciler) reconcileActualNameOnTheNode(
 
 	rf.Log().Info("Renaming DRBD resource", "from", oldName, "to", newName)
 
-	err := drbdsetup.ExecuteRename(rf.Ctx(), oldName, newName)
+	err := drbdutils.ExecuteRename(rf.Ctx(), oldName, newName)
 
 	switch {
 	case err == nil:
@@ -257,9 +301,9 @@ func (r *Reconciler) reconcileActualNameOnTheNode(
 		outcome = r.reconcileClearActualName(rf.Ctx(), drbdr)
 		return
 
-	case errors.Is(err, drbdsetup.ErrRenameUnknownResource):
+	case errors.Is(err, drbdutils.ErrRenameUnknownResource):
 		// Old name doesn't exist - check if new name exists (rename might have succeeded before)
-		status, statusErr := drbdsetup.ExecuteStatus(rf.Ctx(), newName)
+		status, statusErr := drbdutils.ExecuteStatus(rf.Ctx(), newName)
 		if statusErr != nil {
 			return rf.Fail(statusErr)
 		}
@@ -272,7 +316,7 @@ func (r *Reconciler) reconcileActualNameOnTheNode(
 		outcome = r.reconcileClearActualName(rf.Ctx(), drbdr)
 		return
 
-	case errors.Is(err, drbdsetup.ErrRenameAlreadyExists):
+	case errors.Is(err, drbdutils.ErrRenameAlreadyExists):
 		// Both names exist - configuration error
 		return rf.Failf(err, "both DRBD resource names exist: oldName=%s, newName=%s", oldName, newName)
 
@@ -353,60 +397,88 @@ func (r *Reconciler) reconcileLLVFinalizerAdd(ctx context.Context, llvName strin
 	return formatLVMDevicePath(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode), nil
 }
 
-// reconcileLLVFinalizerRemove removes AgentFinalizer from an LLV if it's no longer in use.
-// It computes actualLLVName from the DRBD actual state and only removes the finalizer if
-// previousLLVName != actualLLVName (meaning DRBD has detached from it).
-// Returns actualLLVName for use in report state.
-func (r *Reconciler) reconcileLLVFinalizerRemove(
+// reconcileLLVFinalizerRelease removes the agent finalizer from LLVs that the
+// agent no longer needs: the previously-attached LLV when switching disks, and
+// the spec LLV when the resource is being deleted. This runs BEFORE DRBD
+// convergence so the status still carries the attached LLV name.
+func (r *Reconciler) reconcileLLVFinalizerRelease(
 	ctx context.Context,
-	aState ActualDRBDState,
-	statusActiveConfig *v1alpha1.DRBDResourceActiveConfiguration,
-) (actualLLVName string, err error) {
-	// Compute actualLLVName from actualDisk
-	if !aState.IsZero() && len(aState.Volumes()) > 0 {
-		if actualDisk := aState.Volumes()[0].BackingDisk(); actualDisk != "" {
-			lvgsOnNode, err := r.getLVGsOnNode(ctx)
-			if err != nil {
-				return "", ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
-			}
+	drbdr *v1alpha1.DRBDResource,
+	inCleanup bool,
+) error {
+	var attachedLLVName string
+	if drbdr.Status.ActiveConfiguration != nil {
+		attachedLLVName = drbdr.Status.ActiveConfiguration.LVMLogicalVolumeName
+	}
+	specLLVName := drbdr.Spec.LVMLogicalVolumeName
 
-			var allLLVs []snc.LVMLogicalVolume
-			for i := range lvgsOnNode {
-				llvs, err := r.getLLVsForLVG(ctx, lvgsOnNode[i].Name)
-				if err != nil {
-					return "", ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
-				}
-				allLLVs = append(allLLVs, llvs...)
-			}
-
-			actualLLVName = computeLLVNameFromDiskPath(actualDisk, lvgsOnNode, allLLVs)
+	// Release finalizer from the attached LLV (from status) when the resource
+	// is switching to a different LLV or being deleted. state=Down
+	// intentionally keeps the LLV finalizer (the resource may come back Up).
+	if attachedLLVName != "" && (inCleanup || attachedLLVName != specLLVName) {
+		if err := r.releaseLLVFinalizer(ctx, attachedLLVName); err != nil {
+			return err
 		}
 	}
 
-	// Only remove finalizer if previous LLV differs from actual
-	if statusActiveConfig == nil ||
-		statusActiveConfig.LVMLogicalVolumeName == "" ||
-		statusActiveConfig.LVMLogicalVolumeName == actualLLVName {
-		return actualLLVName, nil
+	// On deletion, also release the finalizer from the spec LLV if the disk
+	// was never actually attached — Phase 3 adds the finalizer based on spec,
+	// but status only reflects what DRBD actually has attached.
+	if inCleanup && specLLVName != "" && specLLVName != attachedLLVName {
+		if err := r.releaseLLVFinalizer(ctx, specLLVName); err != nil {
+			return err
+		}
 	}
 
-	llv, err := r.getLVMLogicalVolume(ctx, statusActiveConfig.LVMLogicalVolumeName)
+	return nil
+}
+
+func (r *Reconciler) releaseLLVFinalizer(ctx context.Context, llvName string) error {
+	llv, err := r.getLVMLogicalVolume(ctx, llvName)
 	if err != nil {
-		return actualLLVName, flow.Wrapf(err, "getting previous LLV %q", statusActiveConfig.LVMLogicalVolumeName)
+		return flow.Wrapf(err, "getting LLV %q for finalizer release", llvName)
 	}
 	if llv == nil {
-		return actualLLVName, nil
+		return nil
 	}
 
 	if obju.HasFinalizer(llv, v1alpha1.AgentFinalizer) {
 		llvBase := llv.DeepCopy()
 		obju.RemoveFinalizer(llv, v1alpha1.AgentFinalizer)
 		if err := r.patchLLV(ctx, llv, llvBase); err != nil {
-			return actualLLVName, flow.Wrapf(err, "removing finalizer on LLV %q", llv.Name)
+			return flow.Wrapf(err, "releasing finalizer on LLV %q", llvName)
 		}
 	}
 
-	return actualLLVName, nil
+	return nil
+}
+
+// computeActualLLVName reverse-computes the LLV name from the DRBD actual
+// backing disk path. Returns empty if DRBD has no disk attached.
+func computeActualLLVName(ctx context.Context, r *Reconciler, aState ActualDRBDState) string {
+	if aState.IsZero() || len(aState.Volumes()) == 0 {
+		return ""
+	}
+	actualDisk := aState.Volumes()[0].BackingDisk()
+	if actualDisk == "" {
+		return ""
+	}
+
+	lvgsOnNode, err := r.getLVGsOnNode(ctx)
+	if err != nil {
+		return ""
+	}
+
+	var allLLVs []snc.LVMLogicalVolume
+	for i := range lvgsOnNode {
+		llvs, err := r.getLLVsForLVG(ctx, lvgsOnNode[i].Name)
+		if err != nil {
+			return ""
+		}
+		allLLVs = append(allLLVs, llvs...)
+	}
+
+	return computeLLVNameFromDiskPath(actualDisk, lvgsOnNode, allLLVs)
 }
 
 // reconcileFinalizer adds or removes the agent finalizer based on resource state.
@@ -416,16 +488,10 @@ func (r *Reconciler) reconcileFinalizer(
 	ctx context.Context,
 	drbdr *v1alpha1.DRBDResource,
 	adding bool,
+	isUpAndNotInCleanup bool,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "reconcile-finalizer")
 	defer rf.OnEnd(&outcome)
-
-	isUpAndNotInCleanup := true
-	if drbdr.DeletionTimestamp != nil && !obju.HasFinalizersOtherThan(drbdr, v1alpha1.AgentFinalizer) {
-		isUpAndNotInCleanup = false
-	} else if drbdr.Spec.State == v1alpha1.DRBDResourceStateDown {
-		isUpAndNotInCleanup = false
-	}
 
 	base := drbdr.DeepCopy()
 	ensureOutcome := ensureFinalizer(rf.Ctx(), drbdr, adding, isUpAndNotInCleanup)
@@ -436,6 +502,39 @@ func (r *Reconciler) reconcileFinalizer(
 	// Patch main object if finalizers changed
 	if ensureOutcome.DidChange() {
 		if err := r.patchDRBDR(rf.Ctx(), drbdr, base, true); err != nil {
+			if apierrors.IsNotFound(err) {
+				return rf.Done()
+			}
+			return rf.Fail(err)
+		}
+	}
+
+	return rf.Continue()
+}
+
+// reconcileAddresses ensures addresses (IPs + ports) are persisted in status
+// before DRBD convergence. This prevents stale-cache races: if the informer
+// cache is behind, the optimistic-lock patch fails and the reconcile retries
+// before any destructive DRBD kernel actions execute.
+func (r *Reconciler) reconcileAddresses(
+	ctx context.Context,
+	drbdr *v1alpha1.DRBDResource,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "reconcile-addresses")
+	defer rf.OnEnd(&outcome)
+
+	node, err := r.getRequiredCurrentNode(rf.Ctx())
+	if err != nil {
+		return rf.Fail(err)
+	}
+
+	base := drbdr.DeepCopy()
+	if addrErr := ensureAddresses(rf.Ctx(), drbdr, node, r.portCache.Allocate).Error(); addrErr != nil {
+		return rf.Fail(addrErr)
+	}
+
+	if !equality.Semantic.DeepEqual(base.Status.Addresses, drbdr.Status.Addresses) {
+		if err := r.patchDRBDRStatus(rf.Ctx(), drbdr, base, true); err != nil {
 			return rf.Fail(err)
 		}
 	}

@@ -1,0 +1,4 @@
+Changes:
+  - Added a hook for clearing resources when the module is turned off
+  - Removed the enableThinProvisioning setting, we assume that thin provisioning is always enabled
+  - Module-sdk update for CVE fix, golang update

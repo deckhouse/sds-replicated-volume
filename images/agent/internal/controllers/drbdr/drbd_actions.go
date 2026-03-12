@@ -18,11 +18,12 @@ package drbdr
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdmeta"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 )
 
 // DRBDAction represents a DRBD command to execute.
@@ -45,7 +46,7 @@ type NewResourceAction struct {
 }
 
 func (a NewResourceAction) Execute(ctx context.Context) error {
-	err := drbdsetup.ExecuteNewResource(ctx, a.ResourceName, a.NodeID)
+	err := drbdutils.ExecuteNewResource(ctx, a.ResourceName, a.NodeID)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNewResourceFailed)
 }
 
@@ -62,16 +63,18 @@ type ResourceOptionsAction struct {
 	OnSuspendedPrimaryOutdated string
 	Quorum                     *uint
 	QuorumMinimumRedundancy    *uint
+	QuorumDynamicVoters        *bool
 }
 
 func (a ResourceOptionsAction) Execute(ctx context.Context) error {
-	err := drbdsetup.ExecuteResourceOptions(ctx, a.ResourceName, drbdsetup.ResourceOptions{
+	err := drbdutils.ExecuteResourceOptions(ctx, a.ResourceName, drbdutils.ResourceOptions{
 		AutoPromote:                a.AutoPromote,
 		OnNoQuorum:                 a.OnNoQuorum,
 		OnNoDataAccessible:         a.OnNoDataAccessible,
 		OnSuspendedPrimaryOutdated: a.OnSuspendedPrimaryOutdated,
 		Quorum:                     a.Quorum,
 		QuorumMinimumRedundancy:    a.QuorumMinimumRedundancy,
+		QuorumDynamicVoters:        a.QuorumDynamicVoters,
 	})
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonResourceOptionsFailed)
 }
@@ -89,7 +92,7 @@ type NewMinorAction struct {
 }
 
 func (a NewMinorAction) Execute(ctx context.Context) error {
-	minor, err := drbdsetup.ExecuteNewAutoMinor(ctx, a.ResourceName, a.Volume, a.Diskless)
+	minor, err := drbdutils.ExecuteNewAutoMinor(ctx, a.ResourceName, a.Volume, a.Diskless)
 	if err != nil {
 		return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNewMinorFailed)
 	}
@@ -103,7 +106,42 @@ func (a NewMinorAction) String() string {
 	return fmt.Sprintf("NewMinor(resource=%s, volume=%d, diskless=%t)", a.ResourceName, a.Volume, a.Diskless)
 }
 
-// CreateMetadataAction creates DRBD metadata on a backing device.
+// FailAction returns an error when executed, used to represent decision-table errors
+// (e.g. ForeignDiskDetected) as part of the action sequence.
+type FailAction struct {
+	Err error
+}
+
+func (a FailAction) Execute(_ context.Context) error { return a.Err }
+func (a FailAction) String() string                  { return fmt.Sprintf("Fail(%v)", a.Err) }
+
+// WriteDeviceUUIDAction runs drbdmeta write-dev-uuid.
+type WriteDeviceUUIDAction struct {
+	Minor      *uint
+	BackingDev string
+	UUID       string
+}
+
+func (a WriteDeviceUUIDAction) Execute(ctx context.Context) error {
+	if a.Minor == nil {
+		return ConfiguredReasonError(
+			fmt.Errorf("WriteDeviceUUIDAction: minor not set"),
+			v1alpha1.DRBDResourceCondConfiguredReasonWriteDevUUIDFailed,
+		)
+	}
+	err := drbdutils.ExecuteWriteDevUUID(ctx, *a.Minor, a.BackingDev, a.UUID)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonWriteDevUUIDFailed)
+}
+
+func (a WriteDeviceUUIDAction) String() string {
+	minor := "<nil>"
+	if a.Minor != nil {
+		minor = fmt.Sprintf("%d", *a.Minor)
+	}
+	return fmt.Sprintf("WriteDeviceUUID(minor=%s, backingDev=%s, uuid=%s)", minor, a.BackingDev, a.UUID)
+}
+
+// CreateMetadataAction runs drbdmeta create-md (dumb).
 type CreateMetadataAction struct {
 	Minor      *uint
 	BackingDev string
@@ -116,7 +154,7 @@ func (a CreateMetadataAction) Execute(ctx context.Context) error {
 			v1alpha1.DRBDResourceCondConfiguredReasonCreateMetadataFailed,
 		)
 	}
-	err := drbdmeta.ExecuteCreateMD(ctx, *a.Minor, a.BackingDev)
+	err := drbdutils.ExecuteCreateMD(ctx, *a.Minor, a.BackingDev)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonCreateMetadataFailed)
 }
 
@@ -126,6 +164,31 @@ func (a CreateMetadataAction) String() string {
 		minor = fmt.Sprintf("%d", *a.Minor)
 	}
 	return fmt.Sprintf("CreateMetadata(minor=%s, backingDev=%s)", minor, a.BackingDev)
+}
+
+// ApplyALAction runs drbdmeta apply-al (replay activity log).
+type ApplyALAction struct {
+	Minor      *uint
+	BackingDev string
+}
+
+func (a ApplyALAction) Execute(ctx context.Context) error {
+	if a.Minor == nil {
+		return ConfiguredReasonError(
+			fmt.Errorf("ApplyALAction: minor not set"),
+			v1alpha1.DRBDResourceCondConfiguredReasonApplyALFailed,
+		)
+	}
+	err := drbdutils.ExecuteApplyAL(ctx, *a.Minor, a.BackingDev)
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonApplyALFailed)
+}
+
+func (a ApplyALAction) String() string {
+	minor := "<nil>"
+	if a.Minor != nil {
+		minor = fmt.Sprintf("%d", *a.Minor)
+	}
+	return fmt.Sprintf("ApplyAL(minor=%s, backingDev=%s)", minor, a.BackingDev)
 }
 
 // AttachAction attaches a backing device to a volume.
@@ -143,7 +206,7 @@ func (a AttachAction) Execute(ctx context.Context) error {
 			v1alpha1.DRBDResourceCondConfiguredReasonAttachFailed,
 		)
 	}
-	err := drbdsetup.ExecuteAttach(ctx, *a.Minor, a.LowerDev, a.MetaDev, a.MetaIdx)
+	err := drbdutils.ExecuteAttach(ctx, *a.Minor, a.LowerDev, a.MetaDev, a.MetaIdx)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonAttachFailed)
 }
 
@@ -160,6 +223,7 @@ type DiskOptionsAction struct {
 	Minor                  *uint
 	DiscardZeroesIfAligned *bool
 	RsDiscardGranularity   *uint
+	NonVoting              *bool
 }
 
 func (a DiskOptionsAction) Execute(ctx context.Context) error {
@@ -169,9 +233,10 @@ func (a DiskOptionsAction) Execute(ctx context.Context) error {
 			v1alpha1.DRBDResourceCondConfiguredReasonDiskOptionsFailed,
 		)
 	}
-	err := drbdsetup.ExecuteDiskOptions(ctx, *a.Minor, drbdsetup.DiskOptions{
+	err := drbdutils.ExecuteDiskOptions(ctx, *a.Minor, drbdutils.DiskOptions{
 		DiscardZeroesIfAligned: a.DiscardZeroesIfAligned,
 		RsDiscardGranularity:   a.RsDiscardGranularity,
+		NonVoting:              a.NonVoting,
 	})
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDiskOptionsFailed)
 }
@@ -196,14 +261,14 @@ type NewPeerAction struct {
 }
 
 func (a NewPeerAction) Execute(ctx context.Context) error {
-	opts := &drbdsetup.NewPeerOptions{
+	opts := &drbdutils.NewPeerOptions{
 		Name:         a.PeerName,
 		Protocol:     a.Protocol,
 		SharedSecret: a.SharedSecret,
 		CRAMHMACAlg:  a.CRAMHMACAlg,
 		RRConflict:   a.RRConflict,
 	}
-	err := drbdsetup.ExecuteNewPeer(ctx, a.ResourceName, a.PeerNodeID, opts)
+	err := drbdutils.ExecuteNewPeer(ctx, a.ResourceName, a.PeerNodeID, opts)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNewPeerFailed)
 }
 
@@ -223,7 +288,7 @@ type NetOptionsAction struct {
 }
 
 func (a NetOptionsAction) Execute(ctx context.Context) error {
-	err := drbdsetup.ExecuteNetOptions(ctx, a.ResourceName, a.PeerNodeID, drbdsetup.NetOptions{
+	err := drbdutils.ExecuteNetOptions(ctx, a.ResourceName, a.PeerNodeID, drbdutils.NetOptions{
 		Protocol:          a.Protocol,
 		SharedSecret:      a.SharedSecret,
 		CRAMHMACAlg:       a.CRAMHMACAlg,
@@ -246,7 +311,7 @@ type NewPathAction struct {
 }
 
 func (a NewPathAction) Execute(ctx context.Context) error {
-	err := drbdsetup.ExecuteNewPath(ctx, a.ResourceName, a.PeerNodeID, a.LocalAddr, a.RemoteAddr)
+	err := drbdutils.ExecuteNewPath(ctx, a.ResourceName, a.PeerNodeID, a.LocalAddr, a.RemoteAddr)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNewPathFailed)
 }
 
@@ -261,7 +326,7 @@ type ConnectAction struct {
 }
 
 func (a ConnectAction) Execute(ctx context.Context) error {
-	err := drbdsetup.ExecuteConnect(ctx, a.ResourceName, a.PeerNodeID)
+	err := drbdutils.ExecuteConnect(ctx, a.ResourceName, a.PeerNodeID)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonConnectFailed)
 }
 
@@ -276,7 +341,7 @@ type DisconnectAction struct {
 }
 
 func (a DisconnectAction) Execute(ctx context.Context) error {
-	err := drbdsetup.ExecuteDisconnect(ctx, a.ResourceName, a.PeerNodeID)
+	err := drbdutils.ExecuteDisconnect(ctx, a.ResourceName, a.PeerNodeID)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDisconnectFailed)
 }
 
@@ -293,7 +358,7 @@ type DelPathAction struct {
 }
 
 func (a DelPathAction) Execute(ctx context.Context) error {
-	err := drbdsetup.ExecuteDelPath(ctx, a.ResourceName, a.PeerNodeID, a.LocalAddr, a.RemoteAddr)
+	err := drbdutils.ExecuteDelPath(ctx, a.ResourceName, a.PeerNodeID, a.LocalAddr, a.RemoteAddr)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDelPathFailed)
 }
 
@@ -308,7 +373,7 @@ type DelPeerAction struct {
 }
 
 func (a DelPeerAction) Execute(ctx context.Context) error {
-	err := drbdsetup.ExecuteDelPeer(ctx, a.ResourceName, a.PeerNodeID)
+	err := drbdutils.ExecuteDelPeer(ctx, a.ResourceName, a.PeerNodeID)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDelPeerFailed)
 }
 
@@ -323,7 +388,7 @@ type ForgetPeerAction struct {
 }
 
 func (a ForgetPeerAction) Execute(ctx context.Context) error {
-	err := drbdsetup.ExecuteForgetPeer(ctx, a.ResourceName, a.PeerNodeID)
+	err := drbdutils.ExecuteForgetPeer(ctx, a.ResourceName, a.PeerNodeID)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonForgetPeerFailed)
 }
 
@@ -337,7 +402,7 @@ type DownAction struct {
 }
 
 func (a DownAction) Execute(ctx context.Context) error {
-	err := drbdsetup.ExecuteDown(ctx, a.ResourceName)
+	err := drbdutils.ExecuteDown(ctx, a.ResourceName)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDownFailed)
 }
 
@@ -357,7 +422,7 @@ func (a DetachAction) Execute(ctx context.Context) error {
 			v1alpha1.DRBDResourceCondConfiguredReasonDetachFailed,
 		)
 	}
-	err := drbdsetup.ExecuteDetach(ctx, *a.Minor)
+	err := drbdutils.ExecuteDetach(ctx, *a.Minor)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDetachFailed)
 }
 
@@ -376,7 +441,7 @@ type RenameAction struct {
 }
 
 func (a RenameAction) Execute(ctx context.Context) error {
-	err := drbdsetup.ExecuteRename(ctx, a.OldName, a.NewName)
+	err := drbdutils.ExecuteRename(ctx, a.OldName, a.NewName)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonRenameFailed)
 }
 
@@ -391,7 +456,7 @@ type PrimaryAction struct {
 }
 
 func (a PrimaryAction) Execute(ctx context.Context) error {
-	err := drbdsetup.ExecutePrimary(ctx, a.ResourceName, a.Force)
+	err := drbdutils.ExecutePrimary(ctx, a.ResourceName, a.Force)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonPrimaryFailed)
 }
 
@@ -406,7 +471,7 @@ type SecondaryAction struct {
 }
 
 func (a SecondaryAction) Execute(ctx context.Context) error {
-	err := drbdsetup.ExecuteSecondary(ctx, a.ResourceName, a.Force)
+	err := drbdutils.ExecuteSecondary(ctx, a.ResourceName, a.Force)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonSecondaryFailed)
 }
 
@@ -414,10 +479,9 @@ func (a SecondaryAction) String() string {
 	return fmt.Sprintf("Secondary(resource=%s, force=%t)", a.ResourceName, a.Force)
 }
 
-// ResizeAction resizes a DRBD device.
+// ResizeAction resizes a DRBD device by re-examining the backing device.
 type ResizeAction struct {
-	Minor     *uint
-	SizeBytes int64
+	Minor *uint
 }
 
 func (a ResizeAction) Execute(ctx context.Context) error {
@@ -427,7 +491,10 @@ func (a ResizeAction) Execute(ctx context.Context) error {
 			v1alpha1.DRBDResourceCondConfiguredReasonResizeFailed,
 		)
 	}
-	err := drbdsetup.ExecuteResize(ctx, *a.Minor, a.SizeBytes)
+	err := drbdutils.ExecuteResize(ctx, *a.Minor)
+	if errors.Is(err, drbdutils.ErrResizeBackingNotGrown) {
+		return nil
+	}
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonResizeFailed)
 }
 
@@ -436,5 +503,68 @@ func (a ResizeAction) String() string {
 	if a.Minor != nil {
 		minor = fmt.Sprintf("%d", *a.Minor)
 	}
-	return fmt.Sprintf("Resize(minor=%s, sizeBytes=%d)", minor, a.SizeBytes)
+	return fmt.Sprintf("Resize(minor=%s)", minor)
+}
+
+// EnsureDeviceSymlinkAction creates or updates the stable device symlink
+// /dev/sdsrv/{name} -> /dev/drbd{minor}.
+type EnsureDeviceSymlinkAction struct {
+	Name  string
+	Minor *uint
+}
+
+func (a EnsureDeviceSymlinkAction) Execute(_ context.Context) error {
+	if a.Minor == nil {
+		return ConfiguredReasonError(
+			fmt.Errorf("EnsureDeviceSymlinkAction: minor not set"),
+			v1alpha1.DRBDResourceCondConfiguredReasonSymlinkFailed,
+		)
+	}
+
+	symlinkPath := DeviceSymlinkPath(a.Name)
+	target := fmt.Sprintf("/dev/drbd%d", *a.Minor)
+
+	current, err := os.Readlink(symlinkPath)
+	if err == nil && current == target {
+		return nil
+	}
+
+	// Remove stale symlink (or anything at that path) before creating.
+	_ = os.Remove(symlinkPath)
+
+	if err := os.Symlink(target, symlinkPath); err != nil {
+		return ConfiguredReasonError(
+			fmt.Errorf("creating device symlink %s -> %s: %w", symlinkPath, target, err),
+			v1alpha1.DRBDResourceCondConfiguredReasonSymlinkFailed,
+		)
+	}
+	return nil
+}
+
+func (a EnsureDeviceSymlinkAction) String() string {
+	minor := "<nil>"
+	if a.Minor != nil {
+		minor = fmt.Sprintf("%d", *a.Minor)
+	}
+	return fmt.Sprintf("EnsureDeviceSymlink(name=%s, minor=%s)", a.Name, minor)
+}
+
+// RemoveDeviceSymlinkAction removes the stable device symlink before teardown.
+type RemoveDeviceSymlinkAction struct {
+	Name string
+}
+
+func (a RemoveDeviceSymlinkAction) Execute(_ context.Context) error {
+	err := os.Remove(DeviceSymlinkPath(a.Name))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return ConfiguredReasonError(
+			fmt.Errorf("removing device symlink: %w", err),
+			v1alpha1.DRBDResourceCondConfiguredReasonSymlinkFailed,
+		)
+	}
+	return nil
+}
+
+func (a RemoveDeviceSymlinkAction) String() string {
+	return fmt.Sprintf("RemoveDeviceSymlink(name=%s)", a.Name)
 }
