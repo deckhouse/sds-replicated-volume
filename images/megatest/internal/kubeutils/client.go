@@ -418,13 +418,21 @@ func (c *Client) GetRV(ctx context.Context, name string) (*v1alpha1.ReplicatedVo
 	return rv, nil
 }
 
-// IsRVReady checks if a ReplicatedVolume is in IOReady and Quorum conditions
+// IsRVReady checks if a ReplicatedVolume has completed initial datamesh formation.
+// Ready means: DatameshRevision > 0 and no active Formation transition.
 func (c *Client) IsRVReady(rv *v1alpha1.ReplicatedVolume) bool {
 	if rv == nil {
 		return false
 	}
-	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondIOReadyType) &&
-		meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondQuorumType)
+	if rv.Status.DatameshRevision <= 0 {
+		return false
+	}
+	for _, t := range rv.Status.DatameshTransitions {
+		if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation {
+			return false
+		}
+	}
+	return true
 }
 
 // PatchRV patches a ReplicatedVolume using merge patch strategy

@@ -209,6 +209,11 @@ func (v *VolumeAttacher) migrationCycle(ctx context.Context, otherNodeName, node
 		return fmt.Errorf("other node name equals selected node name: %s", nodeName)
 	}
 
+	// Step 0: Patch MaxAttachments to 2 to allow dual-attach during migration.
+	if err := v.patchMaxAttachments(ctx, 2); err != nil {
+		return fmt.Errorf("failed to patch MaxAttachments to 2 before migration: %w", err)
+	}
+
 	// Step 1: Attach the selected node and wait for it
 	if err := v.attachCycle(ctx, nodeName); err != nil {
 		return err
@@ -244,15 +249,34 @@ func (v *VolumeAttacher) migrationCycle(ctx context.Context, otherNodeName, node
 		return err
 	}
 
-	// Step 4: Random delay
+	// Step 4: Patch MaxAttachments back to 1 after migration is complete.
+	if err := v.patchMaxAttachments(ctx, 1); err != nil {
+		return fmt.Errorf("failed to patch MaxAttachments to 1 after migration: %w", err)
+	}
+
+	// Step 5: Random delay
 	randomDelay2 := randomDuration(v.cfg.Period)
 	log.Debug("waiting random delay before detaching selected node", "duration", randomDelay2.String())
 	if err := waitWithContext(ctx, randomDelay2); err != nil {
 		return err
 	}
 
-	// Step 5: Get fresh RV and detach the selected node
+	// Step 6: Get fresh RV and detach the selected node
 	return v.detachCycle(ctx, nodeName)
+}
+
+// patchMaxAttachments patches RV spec.maxAttachments to the given value.
+func (v *VolumeAttacher) patchMaxAttachments(ctx context.Context, maxAttachments byte) error {
+	rv, err := v.client.GetRV(ctx, v.rvName)
+	if err != nil {
+		return err
+	}
+	if rv.Spec.MaxAttachments == maxAttachments {
+		return nil
+	}
+	original := rv.DeepCopy()
+	rv.Spec.MaxAttachments = maxAttachments
+	return v.client.PatchRV(ctx, original, rv)
 }
 
 func (v *VolumeAttacher) doAttach(ctx context.Context, nodeName string) error {
