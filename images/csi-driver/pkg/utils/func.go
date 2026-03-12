@@ -154,6 +154,40 @@ func DeleteReplicatedVolume(ctx context.Context, kc client.Client, log *logger.L
 	return err
 }
 
+// WaitForReplicatedVolumeDeleted waits for ReplicatedVolume to be fully deleted (NotFound).
+func WaitForReplicatedVolumeDeleted(
+	ctx context.Context,
+	kc client.Client,
+	log *logger.Logger,
+	traceID, name string,
+) (int, error) {
+	var attemptCounter int
+	log.Info(fmt.Sprintf("[WaitForReplicatedVolumeDeleted][traceID:%s][volumeID:%s] Waiting for ReplicatedVolume to be deleted", traceID, name))
+	for {
+		attemptCounter++
+		select {
+		case <-ctx.Done():
+			log.Warning(fmt.Sprintf("[WaitForReplicatedVolumeDeleted][traceID:%s][volumeID:%s] context done", traceID, name))
+			return attemptCounter, ctx.Err()
+		default:
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		_, err := GetReplicatedVolume(ctx, kc, name)
+		if err != nil {
+			if kerrors.IsNotFound(err) {
+				log.Info(fmt.Sprintf("[WaitForReplicatedVolumeDeleted][traceID:%s][volumeID:%s] ReplicatedVolume is fully deleted", traceID, name))
+				return attemptCounter, nil
+			}
+			return attemptCounter, err
+		}
+
+		if attemptCounter%10 == 0 {
+			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeDeleted][traceID:%s][volumeID:%s] Attempt: %d, still waiting...", traceID, name, attemptCounter))
+		}
+	}
+}
+
 func removervdeletepropagationIfExist(ctx context.Context, kc client.Client, log *logger.Logger, rv *srv.ReplicatedVolume, finalizer string) (bool, error) {
 	for attempt := 0; attempt < KubernetesAPIRequestLimit; attempt++ {
 		removed := false
