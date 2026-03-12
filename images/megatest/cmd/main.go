@@ -166,25 +166,25 @@ func printCheckerStats(stats []*runners.CheckerStats) {
 	}
 
 	fmt.Fprintf(os.Stdout, "\nChecker Statistics:\n")
-	fmt.Fprintf(os.Stdout, "%-40s %20s %20s\n", "RV Name", "IOReady Transitions", "Quorum Transitions")
+	fmt.Fprintf(os.Stdout, "%-40s %20s %20s\n", "RV Name", "FTT Transitions", "GMDR Transitions")
 	fmt.Fprintf(os.Stdout, "%s\n", "────────────────────────────────────────────────────────────────────────────────")
 
 	var stableCount, recoveredCount, brokenCount int
 
 	for _, s := range stats {
-		ioReady := s.IOReadyTransitions.Load()
-		quorum := s.QuorumTransitions.Load()
+		ftt := s.FTTTransitions.Load()
+		gmdr := s.GMDRTransitions.Load()
 
-		fmt.Fprintf(os.Stdout, "%-40s %20d %20d\n", s.RVName, ioReady, quorum)
+		fmt.Fprintf(os.Stdout, "%-40s %20d %20d\n", s.RVName, ftt, gmdr)
 
-		// Categorize RV state
+		// Categorize RV state: odd transition count = ended unhealthy
 		switch {
-		case ioReady == 0 && quorum == 0:
-			stableCount++ // No issues at all
-		case ioReady%2 == 1 || quorum%2 == 1:
-			brokenCount++ // Odd = still in bad state
+		case ftt == 0 && gmdr == 0:
+			stableCount++
+		case ftt%2 == 1 || gmdr%2 == 1:
+			brokenCount++
 		default:
-			recoveredCount++ // Even >0 = had issues but recovered
+			recoveredCount++
 		}
 	}
 
