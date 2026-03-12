@@ -25,14 +25,12 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v2"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
@@ -42,148 +40,6 @@ const (
 	KubernetesAPIRequestTimeout     = 1
 	SDSReplicatedVolumeCSIFinalizer = "storage.deckhouse.io/sds-replicated-volume-csi"
 )
-
-func GetStorageClassLVGsAndParameters(
-	ctx context.Context,
-	kc client.Client,
-	log *logger.Logger,
-	storageClassLVGParametersString string,
-) (storageClassLVGs []snc.LVMVolumeGroup, storageClassLVGParametersMap map[string]string, err error) {
-	var storageClassLVGParametersList LVMVolumeGroups
-	err = yaml.Unmarshal([]byte(storageClassLVGParametersString), &storageClassLVGParametersList)
-	if err != nil {
-		log.Error(err, "unmarshal yaml lvmVolumeGroup")
-		return nil, nil, err
-	}
-
-	storageClassLVGParametersMap = make(map[string]string, len(storageClassLVGParametersList))
-	for _, v := range storageClassLVGParametersList {
-		storageClassLVGParametersMap[v.Name] = v.Thin.PoolName
-	}
-	log.Info(fmt.Sprintf("[GetStorageClassLVGs] StorageClass LVM volume groups parameters map: %+v", storageClassLVGParametersMap))
-
-	lvgs, err := GetLVGList(ctx, kc)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	for _, lvg := range lvgs.Items {
-		log.Trace(fmt.Sprintf("[GetStorageClassLVGs] process lvg: %+v", lvg))
-
-		_, ok := storageClassLVGParametersMap[lvg.Name]
-		if ok {
-			log.Info(fmt.Sprintf("[GetStorageClassLVGs] found lvg from storage class: %s", lvg.Name))
-			log.Info(fmt.Sprintf("[GetStorageClassLVGs] lvg.Status.Nodes[0].Name: %s", lvg.Status.Nodes[0].Name))
-			storageClassLVGs = append(storageClassLVGs, lvg)
-		} else {
-			log.Trace(fmt.Sprintf("[GetStorageClassLVGs] skip lvg: %s", lvg.Name))
-		}
-	}
-
-	return storageClassLVGs, storageClassLVGParametersMap, nil
-}
-
-func GetLVGList(ctx context.Context, kc client.Client) (*snc.LVMVolumeGroupList, error) {
-	listLvgs := &snc.LVMVolumeGroupList{}
-	return listLvgs, kc.List(ctx, listLvgs)
-}
-
-// StoragePoolInfo contains information extracted from ReplicatedStoragePool
-type StoragePoolInfo struct {
-	LVMVolumeGroups []snc.LVMVolumeGroup
-	LVGToThinPool   map[string]string // maps LVMVolumeGroup name to ThinPool name
-	LVMType         string            // "Thick" or "Thin"
-}
-
-// GetReplicatedStoragePool retrieves ReplicatedStoragePool by name
-func GetReplicatedStoragePool(
-	ctx context.Context,
-	kc client.Client,
-	storagePoolName string,
-) (*srv.ReplicatedStoragePool, error) {
-	rsp := &srv.ReplicatedStoragePool{}
-	err := kc.Get(ctx, client.ObjectKey{Name: storagePoolName}, rsp)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get ReplicatedStoragePool %s: %w", storagePoolName, err)
-	}
-	return rsp, nil
-}
-
-// GetLVMTypeFromStoragePool extracts LVM type from ReplicatedStoragePool
-// Returns "Thick" for "LVM" and "Thin" for "LVMThin"
-func GetLVMTypeFromStoragePool(rsp *srv.ReplicatedStoragePool) string {
-	switch rsp.Spec.Type {
-	case "LVMThin":
-		return "Thin"
-	case "LVM":
-		return "Thick"
-	default:
-		return "Thick" // default fallback
-	}
-}
-
-// GetLVGToThinPoolMap creates a map from LVMVolumeGroup name to ThinPool name
-// from ReplicatedStoragePool spec
-func GetLVGToThinPoolMap(rsp *srv.ReplicatedStoragePool) map[string]string {
-	lvgToThinPool := make(map[string]string, len(rsp.Spec.LVMVolumeGroups))
-	for _, rspLVG := range rsp.Spec.LVMVolumeGroups {
-		lvgToThinPool[rspLVG.Name] = rspLVG.ThinPoolName
-	}
-	return lvgToThinPool
-}
-
-// GetStoragePoolInfo gets all information needed from ReplicatedStoragePool
-func GetStoragePoolInfo(
-	ctx context.Context,
-	kc client.Client,
-	log *logger.Logger,
-	storagePoolName string,
-) (*StoragePoolInfo, error) {
-	// Get ReplicatedStoragePool
-	rsp, err := GetReplicatedStoragePool(ctx, kc, storagePoolName)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("failed to get ReplicatedStoragePool: %s", storagePoolName))
-		return nil, err
-	}
-
-	// Extract LVM type
-	lvmType := GetLVMTypeFromStoragePool(rsp)
-	log.Info(fmt.Sprintf("[GetStoragePoolInfo] StoragePool %s LVM type: %s", storagePoolName, lvmType))
-
-	// Extract LVG to ThinPool mapping
-	lvgToThinPool := GetLVGToThinPoolMap(rsp)
-	log.Info(fmt.Sprintf("[GetStoragePoolInfo] StoragePool %s LVG to ThinPool map: %+v", storagePoolName, lvgToThinPool))
-
-	// Build set of LVG names from StoragePool
-	lvgNamesSet := make(map[string]struct{}, len(rsp.Spec.LVMVolumeGroups))
-	for _, rspLVG := range rsp.Spec.LVMVolumeGroups {
-		lvgNamesSet[rspLVG.Name] = struct{}{}
-	}
-
-	// Get all LVMVolumeGroups from cluster and filter by names from StoragePool
-	allLVGs, err := GetLVGList(ctx, kc)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get LVMVolumeGroups list: %w", err)
-	}
-
-	lvmVolumeGroups := make([]snc.LVMVolumeGroup, 0)
-	for _, lvg := range allLVGs.Items {
-		log.Trace(fmt.Sprintf("[GetStoragePoolInfo] process lvg: %+v", lvg))
-
-		if _, ok := lvgNamesSet[lvg.Name]; ok {
-			log.Info(fmt.Sprintf("[GetStoragePoolInfo] found lvg from StoragePool: %s", lvg.Name))
-			lvmVolumeGroups = append(lvmVolumeGroups, lvg)
-		} else {
-			log.Trace(fmt.Sprintf("[GetStoragePoolInfo] skip lvg: %s (not in StoragePool)", lvg.Name))
-		}
-	}
-
-	return &StoragePoolInfo{
-		LVMVolumeGroups: lvmVolumeGroups,
-		LVGToThinPool:   lvgToThinPool,
-		LVMType:         lvmType,
-	}, nil
-}
 
 // CreateReplicatedVolume creates a ReplicatedVolume resource
 func CreateReplicatedVolume(

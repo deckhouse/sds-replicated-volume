@@ -51,28 +51,6 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		return nil, status.Error(codes.InvalidArgument, "Volume Capability cannot de empty")
 	}
 
-	// Get LVMVolumeGroups from StoragePool
-	storagePoolName := request.Parameters[internal.StoragePoolKey]
-	if len(storagePoolName) == 0 {
-		err := errors.New("no StoragePool specified in a storage class's parameters")
-		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] no StoragePool was found for the request: %+v", traceID, volumeID, request))
-		return nil, status.Errorf(codes.InvalidArgument, "no StoragePool specified in a storage class's parameters")
-	}
-
-	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] using StoragePool: %s", traceID, volumeID, storagePoolName))
-	storagePoolInfo, err := utils.GetStoragePoolInfo(ctx, d.cl, d.log, storagePoolName)
-	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error GetStoragePoolInfo", traceID, volumeID))
-		return nil, status.Errorf(codes.Internal, "error during GetStoragePoolInfo: %v", err)
-	}
-
-	LvmType := storagePoolInfo.LVMType
-	if LvmType != internal.LVMTypeThin && LvmType != internal.LVMTypeThick {
-		d.log.Warning(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Unknown LVM type from StoragePool: %s, defaulting to Thick", traceID, volumeID, LvmType))
-		LvmType = internal.LVMTypeThick
-	}
-	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] LVM type from StoragePool: %s", traceID, volumeID, LvmType))
-
 	rvSize := resource.NewQuantity(request.CapacityRange.GetRequiredBytes(), resource.BinarySI)
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume size: %s", traceID, volumeID, rvSize.String()))
 
@@ -110,7 +88,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ------------ CreateReplicatedVolume start ------------", traceID, volumeID))
 	pvcName := request.Parameters[internal.PVCAnnotationNameKey]
 	pvcNamespace := request.Parameters[internal.PVCAnnotationNamespaceKey]
-	_, err = utils.CreateReplicatedVolume(ctx, d.cl, d.log, traceID, volumeID, pvcName, pvcNamespace, rvSpec)
+	_, err := utils.CreateReplicatedVolume(ctx, d.cl, d.log, traceID, volumeID, pvcName, pvcNamespace, rvSpec)
 	if err != nil {
 		if kerrors.IsAlreadyExists(err) {
 			d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume %s already exists. Skip creating", traceID, volumeID, volumeID))

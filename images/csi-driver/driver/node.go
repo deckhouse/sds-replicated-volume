@@ -145,7 +145,7 @@ func (d *Driver) NodeStageVolume(ctx context.Context, request *csi.NodeStageVolu
 	d.log.Trace(fmt.Sprintf("mountOptions = %s", mountOptions))
 	d.log.Trace(fmt.Sprintf("fsType = %s", fsType))
 
-	err = d.storeManager.NodeStageVolumeFS(devPath, target, fsType, mountOptions, formatOptions, "", "")
+	err = d.storeManager.NodeStageVolumeFS(devPath, target, fsType, mountOptions, formatOptions)
 	if err != nil {
 		d.log.Error(err, "[NodeStageVolume] Error mounting volume")
 		return nil, status.Errorf(codes.Internal, "[NodeStageVolume] Error format device %q and mounting volume at %q: %v", devPath, target, err)

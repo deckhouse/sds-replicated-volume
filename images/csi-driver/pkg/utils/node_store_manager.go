@@ -26,12 +26,11 @@ import (
 	mountutils "k8s.io/mount-utils"
 	utilexec "k8s.io/utils/exec"
 
-	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 type NodeStoreManager interface {
-	NodeStageVolumeFS(source, target string, fsType string, mountOpts []string, formatOpts []string, lvmType, lvmThinPoolName string) error
+	NodeStageVolumeFS(source, target string, fsType string, mountOpts []string, formatOpts []string) error
 	NodePublishVolumeBlock(source, target string, mountOpts []string) error
 	NodePublishVolumeFS(source, devPath, target, fsType string, mountOpts []string) error
 	Unstage(target string) error
@@ -57,7 +56,7 @@ func NewStore(logger *logger.Logger) *Store {
 	}
 }
 
-func (s *Store) NodeStageVolumeFS(source, target string, fsType string, mountOpts []string, formatOpts []string, lvmType, lvmThinPoolName string) error {
+func (s *Store) NodeStageVolumeFS(source, target string, fsType string, mountOpts []string, formatOpts []string) error {
 	s.Log.Trace(" ----== Start NodeStageVolumeFS ==---- ")
 
 	s.Log.Trace("≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈ Format options ≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈")
@@ -126,9 +125,6 @@ func (s *Store) NodeStageVolumeFS(source, target string, fsType string, mountOpt
 
 	s.Log.Trace("-----------------== start FormatAndMount ==---------------")
 
-	if lvmType == internal.LVMTypeThin {
-		s.Log.Trace(fmt.Sprintf("LVM type is Thin. Thin pool name: %s", lvmThinPoolName))
-	}
 	err = s.NodeStorage.FormatAndMountSensitiveWithFormatOptions(source, target, fsType, mountOpts, nil, formatOpts)
 	if err != nil {
 		return fmt.Errorf("failed to FormatAndMount : %w", err)

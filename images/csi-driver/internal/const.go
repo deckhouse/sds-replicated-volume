@@ -17,23 +17,16 @@ limitations under the License.
 package internal
 
 const (
-	LvmTypeKey                  = "replicated.csi.storage.deckhouse.io/lvm-type"
-	BindingModeKey              = "replicated.csi.storage.deckhouse.io/volume-binding-mode"
-	StoragePoolKey              = "replicated.csi.storage.deckhouse.io/storagePool"
-	LVMVThickContiguousParamKey = "replicated.csi.storage.deckhouse.io/lvm-thick-contiguous"
-	ActualNameOnTheNodeKey      = "replicated.csi.storage.deckhouse.io/actualNameOnTheNode"
-	TopologyKey                 = "topology.sds-replicated-volume-csi/node"
-	SubPath                     = "subPath"
-	VGNameKey                   = "vgname"
-	ThinPoolNameKey             = "thinPoolName"
-	LVMTypeThin                 = "Thin"
-	LVMTypeThick                = "Thick"
-	BindingModeWFFC             = "WaitForFirstConsumer"
-	BindingModeI                = "Immediate"
-	ReplicatedVolumeNameKey     = "replicatedVolumeName"
-	DRBDDeviceMinorKey          = "drbdDeviceMinor"
-	PVCAnnotationNameKey        = "csi.storage.k8s.io/pvc/name"
-	PVCAnnotationNamespaceKey   = "csi.storage.k8s.io/pvc/namespace"
+	BindingModeKey            = "replicated.csi.storage.deckhouse.io/volume-binding-mode"
+	ActualNameOnTheNodeKey    = "replicated.csi.storage.deckhouse.io/actualNameOnTheNode"
+	TopologyKey               = "topology.sds-replicated-volume-csi/node"
+	SubPath                   = "subPath"
+	BindingModeWFFC           = "WaitForFirstConsumer"
+	BindingModeI              = "Immediate"
+	ReplicatedVolumeNameKey   = "replicatedVolumeName"
+	DRBDDeviceMinorKey        = "drbdDeviceMinor"
+	PVCAnnotationNameKey      = "csi.storage.k8s.io/pvc/name"
+	PVCAnnotationNamespaceKey = "csi.storage.k8s.io/pvc/namespace"
 
 	FSTypeKey = "csi.storage.k8s.io/fstype"
 
