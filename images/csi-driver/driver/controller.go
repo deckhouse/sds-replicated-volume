@@ -94,6 +94,11 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 			d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume %s already exists. Skip creating", traceID, volumeID, volumeID))
 		} else {
 			d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error CreateReplicatedVolume", traceID, volumeID))
+			if preferredNode != "" {
+				if rvaErr := utils.DeleteRVA(ctx, d.cl, d.log, traceID, volumeID, preferredNode); rvaErr != nil {
+					d.log.Error(rvaErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] error cleaning up WFFC RVA", traceID, volumeID, preferredNode))
+				}
+			}
 			return nil, err
 		}
 	}
@@ -108,6 +113,11 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		deleteErr := utils.DeleteReplicatedVolume(ctx, d.cl, d.log, traceID, volumeID)
 		if deleteErr != nil {
 			d.log.Error(deleteErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error DeleteReplicatedVolume", traceID, volumeID))
+		}
+		if preferredNode != "" {
+			if rvaErr := utils.DeleteRVA(ctx, d.cl, d.log, traceID, volumeID, preferredNode); rvaErr != nil {
+				d.log.Error(rvaErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] error cleaning up WFFC RVA", traceID, volumeID, preferredNode))
+			}
 		}
 
 		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error creating ReplicatedVolume", traceID, volumeID))
@@ -141,6 +151,12 @@ func (d *Driver) DeleteVolume(ctx context.Context, request *csi.DeleteVolumeRequ
 	d.log.Info(fmt.Sprintf("[DeleteVolume][traceID:%s] ========== Start DeleteVolume ============", traceID))
 	if len(request.VolumeId) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID cannot be empty")
+	}
+
+	// Delete RVAs first to avoid orphaned attachments (e.g. WFFC where ControllerUnpublishVolume was never called).
+	if err := utils.DeleteRVAsForVolume(ctx, d.cl, d.log, traceID, request.VolumeId); err != nil {
+		d.log.Error(err, "error DeleteRVAsForVolume")
+		return nil, err
 	}
 
 	err := utils.DeleteReplicatedVolume(ctx, d.cl, d.log, traceID, request.VolumeId)

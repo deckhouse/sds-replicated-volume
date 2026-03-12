@@ -379,6 +379,32 @@ func DeleteRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 	return nil
 }
 
+// DeleteRVAsForVolume lists all RVAs for the given volume and deletes them.
+// This cleans up orphaned RVAs when DeleteVolume is called (e.g. WFFC case where
+// ControllerUnpublishVolume was never invoked).
+func DeleteRVAsForVolume(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName string) error {
+	list := &srv.ReplicatedVolumeAttachmentList{}
+	if err := kc.List(ctx, list); err != nil {
+		return fmt.Errorf("list ReplicatedVolumeAttachments: %w", err)
+	}
+	var toDelete []srv.ReplicatedVolumeAttachment
+	for _, rva := range list.Items {
+		if rva.Spec.ReplicatedVolumeName == volumeName {
+			toDelete = append(toDelete, rva)
+		}
+	}
+	for _, rva := range toDelete {
+		log.Info(fmt.Sprintf("[DeleteRVAsForVolume][traceID:%s][volumeID:%s] Deleting ReplicatedVolumeAttachment %s (node=%s)", traceID, volumeName, rva.Name, rva.Spec.NodeName))
+		if err := kc.Delete(ctx, &rva); err != nil && !kerrors.IsNotFound(err) {
+			return fmt.Errorf("delete ReplicatedVolumeAttachment %s: %w", rva.Name, err)
+		}
+	}
+	if len(toDelete) > 0 {
+		log.Info(fmt.Sprintf("[DeleteRVAsForVolume][traceID:%s][volumeID:%s] Deleted %d ReplicatedVolumeAttachment(s)", traceID, volumeName, len(toDelete)))
+	}
+	return nil
+}
+
 // RVAWaitError represents a failure to observe RVA Ready=True.
 // It may wrap a context cancellation/deadline error, while still preserving the last seen RVA Ready condition.
 type RVAWaitError struct {
