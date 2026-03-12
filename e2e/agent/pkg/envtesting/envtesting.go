@@ -123,9 +123,10 @@ type scope struct {
 	ctx       context.Context
 	cancelCtx context.CancelFunc
 
-	errors   []errorRecord
-	failed   bool
-	cleanups []func()
+	errors    []errorRecord
+	failed    bool
+	cleanups  []func()
+	inCleanup bool // true while a cleanup is running; Context() returns Background() then
 
 	closed bool
 }
@@ -236,6 +237,12 @@ func (e *scope) Cleanup(f func()) {
 
 // Context returns the scope's context.
 func (e *scope) Context() context.Context {
+	e.mu.RLock()
+	inCleanup := e.inCleanup
+	e.mu.RUnlock()
+	if inCleanup {
+		return context.Background()
+	}
 	return e.ctx
 }
 
@@ -343,8 +350,13 @@ func (e *scope) runCleanups() (panicVal any) {
 		last := len(e.cleanups) - 1
 		cleanup := e.cleanups[last]
 		e.cleanups = e.cleanups[:last]
+		e.inCleanup = true
 		e.mu.Unlock()
 
 		cleanup()
+
+		e.mu.Lock()
+		e.inCleanup = false
+		e.mu.Unlock()
 	}
 }

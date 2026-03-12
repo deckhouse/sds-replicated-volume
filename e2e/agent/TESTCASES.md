@@ -35,6 +35,42 @@ TestDRBDResource
 │       LLV finalizer on the deletion path (intendedLLVName == attachedLLVName
 │       because spec doesn't change on delete).
 │
+├── OrphanCleanup — orphan DRBD resource cleanup after force-delete
+│       Creates a diskless DRBDResource, waits for Configured=True.
+│       Force-deletes the K8S object (removes agent finalizer, then
+│       deletes). The DRBD resource may still exist on the node.
+│       Re-creates the same DRBDResource, waits for Configured=True.
+│       Verifies the agent handles orphan DRBD resources left behind
+│       when the K8S object disappears without the normal finalizer flow.
+│
+├── NonManagedResource — non-managed DRBD resource left untouched
+│       Creates a DRBD resource directly on the node (via drbdsetup
+│       new-resource) without the sdsrv- prefix. Waits for the scanner
+│       to process events, then asserts the resource still exists.
+│       Verifies the agent does not tear down DRBD resources it does
+│       not own. Cleanup tears down the resource via drbdsetup down.
+│
+├── Rename — actualNameOnTheNode rename flow
+│       Creates a diskless DRBDResource, waits for Configured=True.
+│       Renames the DRBD resource on the node from sdsrv-{name} to
+│       custom-{name} via drbdsetup rename-resource. Patches the K8S
+│       object to set actualNameOnTheNode=custom-{name}. Waits for
+│       the agent to rename it back to sdsrv-{name}, clear
+│       actualNameOnTheNode, and reach Configured=True. Cleanup
+│       reverts the actualNameOnTheNode patch.
+├── DeviceUUID — DRBD metadata protection (parallel)
+│   │   Covers device-uuid decision table: never overwrite existing metadata (G1),
+│   │   never attach a foreign disk (G2).
+│   │
+│   ├── InitialCreation — no metadata, empty status → create-md and set UUID
+│   ├── Peered — two replicas, synced
+│   │   ├── ReattachMatchingUUID — metadata and UUID match → reattach
+│   │   ├── ZeroDiskUUID — metadata present, zero on disk, status has UUID → write to disk and attach
+│   │   └── ForeignDisk — metadata present, UUID mismatch → error (foreign disk)
+│   ├── AdoptFromDisk — metadata present, status empty → adopt UUID from disk
+│   ├── GenerateNewUUID — metadata present, zero on disk, status empty → generate and set UUID
+│   └── RecreateMetadata — no metadata, status has UUID → create-md and write status UUID
+│
 ├── R2 — two peered, synced replicas (parallel with R3, R4)
 │   │   Creates 2 diskful replicas on separate nodes. Links them as
 │   │   full-mesh peers (protocol C, shared secret). Runs CreateNewUUID
@@ -100,3 +136,18 @@ Every subtest's cleanup exercises a teardown path:
 - **DeleteDiskful**: deletes the DRBDResource directly while still diskful
   with an attached LLV. Verifies the agent releases the LLV finalizer on
   the deletion path. Parent cleanup deletes the orphaned LLV.
+
+- **OrphanCleanup**: force-deletes a DRBDResource (bypassing agent
+  finalizer flow), then re-creates it. Verifies the agent tears down the
+  orphan DRBD resource on the node and brings the re-created object up
+  cleanly. Cleanup deletes the re-created DRBDResource normally.
+
+- **NonManagedResource**: creates a non-prefixed DRBD resource directly
+  on the node and verifies it survives after the scanner processes events.
+  Cleanup tears down the resource via drbdsetup down.
+
+- **Rename cleanup**: reverts the actualNameOnTheNode patch. Since the
+  agent already cleared it and renamed the DRBD resource back to
+  standard name, the revert is a no-op.
+- **ForeignDisk cleanup**: restores the correct device-uuid on disk after
+  writing a fake UUID. Verifies the agent recovers from the error.

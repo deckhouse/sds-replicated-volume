@@ -46,6 +46,20 @@ func RSCValidate(_ context.Context, _ *model.AdmissionReview, obj metav1.Object)
 		klog.Fatal(err)
 	}
 
+	// Reject new-style fields that require the new control plane.
+	if rsc.Spec.FailuresToTolerate != nil || rsc.Spec.GuaranteedMinimumDataRedundancy != nil {
+		return &kwhvalidating.ValidatorResult{Valid: false,
+			Message: "failuresToTolerate/guaranteedMinimumDataRedundancy require the new control plane; use the replication field instead."}, nil
+	}
+	if len(rsc.Spec.Storage.LVMVolumeGroups) > 0 {
+		return &kwhvalidating.ValidatorResult{Valid: false,
+			Message: "spec.storage requires the new control plane; use the storagePool field instead."}, nil
+	}
+	if rsc.Spec.StoragePool == "" { //nolint:staticcheck // legacy StoragePool field required by old controller
+		return &kwhvalidating.ValidatorResult{Valid: false,
+			Message: "spec.storagePool is required."}, nil
+	}
+
 	var clusterZoneList []string
 
 	nodes, _ := staticClient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
@@ -64,7 +78,7 @@ func RSCValidate(_ context.Context, _ *model.AdmissionReview, obj metav1.Object)
 			return &kwhvalidating.ValidatorResult{Valid: false, Message: "You must set at least one zone."},
 				nil
 		}
-		if (rsc.Spec.Replication == "Availability" || rsc.Spec.Replication == "ConsistencyAndAvailability") && len(rsc.Spec.Zones) != 3 { //nolint:staticcheck // legacy Replication field still supported
+		if (rsc.Spec.Replication == "Availability" || rsc.Spec.Replication == "ConsistencyAndAvailability" || rsc.Spec.Replication == "") && len(rsc.Spec.Zones) != 3 { //nolint:staticcheck // legacy Replication field still supported
 			klog.Infof("Incorrect combination of replication and zones (%s) (%s)", rsc.Spec.Replication, rsc.Spec.Zones) //nolint:staticcheck // legacy Replication field still supported
 			return &kwhvalidating.ValidatorResult{Valid: false,
 					Message: "With replication set to Availability or ConsistencyAndAvailability, three zones need to be specified."},

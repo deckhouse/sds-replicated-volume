@@ -85,7 +85,7 @@ func (r *Reconciler) Reconcile(
 		return rf.Fail(err).ToCtrl()
 	}
 	if !ok {
-		return rf.Done().ToCtrl() // Deleted
+		return r.reconcileOrphanDRBD(rf.Ctx(), req.Name).ToCtrl()
 	}
 
 	// Skip if resource belongs to different node (predicates should filter this normally)
@@ -98,7 +98,7 @@ func (r *Reconciler) Reconcile(
 }
 
 // reconcileByActualName handles requests with ActualNameOnTheNode (non-prefixed DRBD resources).
-// Either finds the owning DRBDResource and reconciles it, or tears down orphan.
+// Either finds the owning DRBDResource and reconciles it, or skips (not ours).
 //
 // Reconcile pattern: Pure orchestration
 func (r *Reconciler) reconcileByActualName(
@@ -123,9 +123,8 @@ func (r *Reconciler) reconcileByActualName(
 
 	switch len(matches) {
 	case 0:
-		// Orphan - no K8S object owns this DRBD resource, tear it down
-		outcome = r.reconcileOrphanDRBD(rf.Ctx(), actualName)
-		return
+		rf.Log().V(1).Info("Non-managed DRBD resource, skipping")
+		return rf.Done()
 	case 1:
 		outcome = r.reconcileDRBDR(rf.Ctx(), &matches[0])
 		return
@@ -201,7 +200,7 @@ func (r *Reconciler) reconcileDRBDR(
 	// Phase 4: DRBD convergence
 	iState := computeIntendedDRBDState(drbdr, intendedDisk, upAndNotInCleanup)
 
-	aState, aErr := observeActualDRBDState(rf.Ctx(), DRBDResourceNameOnTheNode(drbdr))
+	aState, aErr := observeActualDRBDState(rf.Ctx(), DRBDResourceNameOnTheNode(drbdr), intendedDisk, drbdr.Status.DeviceUUID)
 	aErr = ConfiguredReasonError(aErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 
 	// Compute and execute DRBD actions
@@ -212,7 +211,7 @@ func (r *Reconciler) reconcileDRBDR(
 	// Refresh actual state if DRBD state was changed
 	var aErr2 error
 	if refreshNeeded {
-		aState, aErr2 = observeActualDRBDState(rf.Ctx(), DRBDResourceNameOnTheNode(drbdr))
+		aState, aErr2 = observeActualDRBDState(rf.Ctx(), DRBDResourceNameOnTheNode(drbdr), intendedDisk, drbdr.Status.DeviceUUID)
 		aErr2 = ConfiguredReasonError(aErr2, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 	}
 
@@ -247,24 +246,32 @@ func (r *Reconciler) reconcileDRBDR(
 	return rf.Done()
 }
 
-// reconcileOrphanDRBD handles DRBD resources with no matching K8S object.
-// actualName is the actual DRBD name on the node to tear down.
+// reconcileOrphanDRBD handles owned DRBD resources with no matching K8S object.
+// k8sName is the K8S resource name; the actual DRBD name is derived from it.
+// If the DRBD resource does not exist on the node, this is a no-op.
 //
 // Reconcile pattern: In-place reconciliation
 func (r *Reconciler) reconcileOrphanDRBD(
 	ctx context.Context,
-	actualName string,
+	k8sName string,
 ) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "orphan-drbd", "actualNameOnTheNode", actualName)
+	drbdName := DRBDNameFromK8SName(k8sName)
+	rf := flow.BeginReconcile(ctx, "orphan-drbd", "drbdResourceName", drbdName)
 	defer rf.OnEnd(&outcome)
+
+	status, err := drbdutils.ExecuteStatus(rf.Ctx(), drbdName)
+	if err != nil {
+		return rf.Fail(err)
+	}
+	if len(status) == 0 {
+		return rf.Done()
+	}
 
 	rf.Log().Info("Cleaning up orphan DRBD resource")
 
-	if k8sName, hasPrefix := ParseDRBDResourceNameOnTheNode(actualName); hasPrefix {
-		_ = os.Remove(DeviceSymlinkPath(k8sName))
-	}
+	_ = os.Remove(DeviceSymlinkPath(k8sName))
 
-	downAction := DownAction{ResourceName: actualName}
+	downAction := DownAction{ResourceName: drbdName}
 	if err := downAction.Execute(rf.Ctx()); err != nil {
 		return rf.Fail(err)
 	}

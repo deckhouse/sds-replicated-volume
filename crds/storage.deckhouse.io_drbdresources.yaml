@@ -22,8 +22,11 @@ spec:
     - jsonPath: .spec.nodeName
       name: Node
       type: string
-    - jsonPath: .spec.state
+    - jsonPath: .status.activeConfiguration.state
       name: State
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Configured')].status
+      name: Configured
       type: string
     - jsonPath: .status.activeConfiguration.role
       name: Role
@@ -40,6 +43,10 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.conditions[?(@.type=='Configured')].message
+      name: Message
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -405,6 +412,18 @@ spec:
                   When true, demotion to Secondary will fail.
                   Only present on primary
                 type: boolean
+              deviceUUID:
+                description: |-
+                  DeviceUUID is a 16-digit uppercase hexadecimal identifier that binds this
+                  DRBDResource to specific physical DRBD metadata on the backing device.
+                  Format matches drbdmeta read-dev-uuid output. Set once after first
+                  metadata creation or adoption; immutable thereafter.
+                maxLength: 16
+                pattern: ^([0-9A-F]{16})?$
+                type: string
+                x-kubernetes-validations:
+                - message: deviceUUID is immutable once set
+                  rule: size(oldSelf) == 0 || oldSelf == self
               diskState:
                 description: |-
                   DiskState represents the state of a DRBD backing disk.

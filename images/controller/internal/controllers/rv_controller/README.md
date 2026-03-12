@@ -70,7 +70,7 @@ Reconcile (root) [Pure orchestration]
 ├── getRSC, getRVAs, getRVRsSorted
 ├── rvShouldNotExist (DeletionTimestamp + no other finalizers + no attached + no Detach transitions) →
 │   ├── reconcileDeletion [In-place reconciliation] ← details
-│   │   ├── reconcileRVAWaiting ("ReplicatedVolume is being deleted")
+│   │   ├── reconcileRVAWaiting ("ReplicatedVolume is terminating")
 │   │   ├── deleteRVRWithForcedFinalizerRemoval (loop)
 │   │   └── clear datamesh members + patchRVStatus
 │   ├── reconcileRVAFinalizers [Target-state driven]
@@ -194,7 +194,7 @@ Set by `reconcileRVAConditionsFromDatameshReplicaContext` during normal operatio
 | False | WaitingForReplica | Replica not yet joined datamesh or not Ready |
 | False | WaitingForReplicatedVolume | RV deleted, not found, or datamesh forming |
 | False | NodeNotEligible | Node not in RSP eligible nodes |
-| False | ReplicatedVolumeDeleting | RV is being deleted; node is not yet attached (new attachments blocked) |
+| False | ReplicatedVolumeTerminating | RV is being deleted; node is not yet attached (new attachments blocked) |
 | False | VolumeAccessLocalityNotSatisfied | No Diskful replica on node (VolumeAccess=Local) |
 
 ### ReplicaReady (on RVA)
@@ -215,7 +215,7 @@ Aggregate condition: Ready=True iff Attached=True AND ReplicaReady=True AND not 
 | True | Ready | Attached and replica is ready |
 | False | NotAttached | Attached condition is not True |
 | False | ReplicaNotReady | ReplicaReady is False |
-| False | Deleting | RVA has DeletionTimestamp |
+| False | Terminating | RVA has DeletionTimestamp |
 | Unknown | ReplicaNotReady | ReplicaReady is Unknown |
 
 ### Phase (on RVA)
@@ -224,11 +224,10 @@ Quick operational state summary. Derived from DeletionTimestamp and Attached con
 
 | Phase | When |
 |-------|------|
-| Deleting | DeletionTimestamp is set |
+| Terminating | DeletionTimestamp is set |
 | Attached | Attached=True |
 | Attaching | Attached=False, Reason=Attaching |
 | Detaching | Attached=False, Reason=Detaching |
-| Detached | Attached=False, Reason=Detached |
 | Pending | Everything else (waiting for prerequisites) |
 
 Message is passthrough from the Attached condition, except when Phase=Attached and ReplicaReady != True — the ReplicaReady message is shown to surface degradation.
@@ -320,7 +319,7 @@ Key concepts:
 | ReplicatedVolume | Generation, DeletionTimestamp, ReplicatedStorageClass label, Finalizers changes | For() (primary) |
 | ReplicatedStorageClass | ConfigurationGeneration changes | mapRSCToRVs (index lookup) |
 | ReplicatedVolumeAttachment | DeletionTimestamp, Finalizers, Attached condition status changes | mapRVAToRV |
-| ReplicatedVolumeReplica | Conditions (Scheduled, DRBDConfigured, SatisfyEligibleNodes), DatameshRequest, DatameshRevision, Addresses, BackingVolume, Peers, DeletionTimestamp, Finalizers changes | mapRVRToRV |
+| ReplicatedVolumeReplica | Conditions (Scheduled, DRBDConfigured, SatisfyEligibleNodes, Ready), DatameshRequest, DatameshRevision, Addresses, Quorum, Attachment, BackingVolume, Peers (incl. BackingVolumeState, ConnectionEstablishedOn), DeletionTimestamp, Finalizers changes | mapRVRToRV |
 | DRBDResourceOperation | Create/Delete of *-formation ops, Phase changes, Generation changes | Owns() |
 
 ## Indexes
@@ -405,7 +404,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Start([reconcileDeletion]) --> UpdateRVAs["reconcileRVAWaiting<br/>(RV is being deleted)"]
+    Start([reconcileDeletion]) --> UpdateRVAs["reconcileRVAWaiting<br/>(RV is terminating)"]
 
     UpdateRVAs --> DeleteRVRs["Delete all RVRs<br/>(with forced finalizer removal)"]
     DeleteRVRs --> CheckMembers{Datamesh members exist?}
@@ -652,7 +651,7 @@ flowchart TD
     CheckRVAs -->|Yes| ComputeConds["Compute conditions per node:<br/>1. computeRVAAttachedCondition<br/>2. computeRVAReplicaReadyCondition"]
     ComputeConds --> IterRVAs["For each RVA on node"]
     IterRVAs --> ComputeReady["computeRVAReadyCondition<br/>(per-RVA: deleting RVAs are never Ready)"]
-    ComputeReady --> ComputePhase["computeRVAPhaseAndMessage<br/>(per-RVA: deleting RVAs get Phase=Deleting)"]
+    ComputeReady --> ComputePhase["computeRVAPhaseAndMessage<br/>(per-RVA: deleting RVAs get Phase=Terminating)"]
     ComputePhase --> CheckSync{"Conditions + fields +<br/>phase/message in sync?"}
     CheckSync -->|Yes| SkipRVA[Skip]
     CheckSync -->|No| Patch["Set conditions + phase/message +<br/>applyRVAAttachmentFields<br/>patchRVAStatus (NotFound ignored)"]
@@ -664,7 +663,7 @@ flowchart TD
 ```
 
 **Key behaviors:**
-- Conditions are identical for all RVAs on the same node (Attached and ReplicaReady are per-node). Ready and Phase differ per RVA (deleting RVAs are always Ready=False/Deleting and Phase=Deleting).
+- Conditions are identical for all RVAs on the same node (Attached and ReplicaReady are per-node). Ready and Phase differ per RVA (deleting RVAs are always Ready=False/Terminating and Phase=Terminating).
 - `AttachmentConditionReason()` and `AttachmentConditionMessage()` on each replica context are set by the datamesh engine (dispatchers, guards, slot status) — this reconciler is a pure mapper from those fields to RVA conditions.
 - Phase is derived from DeletionTimestamp + Attached condition reason. Message is passthrough from the Attached condition, except when Phase=Attached and ReplicaReady != True — the ReplicaReady message is used to surface degradation (e.g., quorum loss).
 - Attachment fields (devicePath, ioSuspended, inUse) are copied from `rvr.Status.Attachment` if available, cleared otherwise.

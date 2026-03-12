@@ -181,12 +181,14 @@ func drbdrOpPredicates() []predicate.Predicate {
 
 // rvrPredicates returns predicates for ReplicatedVolumeReplica events.
 // Reacts to:
-// - Condition changes: Scheduled, DRBDConfigured, SatisfyEligibleNodes (formation progress, misplaced detection)
+// - Condition changes: Scheduled, DRBDConfigured, SatisfyEligibleNodes, Ready
 // - DatameshRequest changes (preconfiguration readiness)
 // - DatameshRevision changes (rollout progress)
 // - Addresses changes (network readiness during formation)
+// - Quorum changes (attachment guards)
+// - Attachment changes (RVA attachment fields, detach guard InUse)
 // - BackingVolume changes (backing volume state during formation and data bootstrap)
-// - Peers changes (connectivity and replication state during formation)
+// - Peers changes (connectivity, replication, backing volume state, network establishment)
 // - DeletionTimestamp changes (deletion started)
 // - Finalizers changes (cleanup)
 func rvrPredicates() []predicate.Predicate {
@@ -203,11 +205,13 @@ func rvrPredicates() []predicate.Predicate {
 				// - Scheduled: scheduling progress (preconfigure phase)
 				// - DRBDConfigured: DRBD configuration progress (preconfigure + establish-connectivity phases)
 				// - SatisfyEligibleNodes: misplaced replica detection (preconfigure phase)
+				// - Ready: attachment guards + RVA ReplicaReady/message updates
 				if !obju.AreConditionsSemanticallyEqual(
 					oldRVR, newRVR,
 					v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
 					v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
 					v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
+					v1alpha1.ReplicatedVolumeReplicaCondReadyType,
 				) {
 					return true
 				}
@@ -230,6 +234,21 @@ func rvrPredicates() []predicate.Predicate {
 					return true
 				}
 
+				// React to Quorum change (attachment guards use quorum state).
+				if !ptr.Equal(oldRVR.Status.Quorum, newRVR.Status.Quorum) {
+					return true
+				}
+
+				// React to Attachment change (RVA attachment fields + detach guard InUse check).
+				oldAtt, newAtt := oldRVR.Status.Attachment, newRVR.Status.Attachment
+				if (oldAtt == nil) != (newAtt == nil) ||
+					(oldAtt != nil && newAtt != nil &&
+						(oldAtt.DevicePath != newAtt.DevicePath ||
+							oldAtt.IOSuspended != newAtt.IOSuspended ||
+							oldAtt.InUse != newAtt.InUse)) {
+					return true
+				}
+
 				// React to BackingVolume changes (state and size during formation).
 				oldBV, newBV := oldRVR.Status.BackingVolume, newRVR.Status.BackingVolume
 				if (oldBV == nil) != (newBV == nil) ||
@@ -241,7 +260,9 @@ func rvrPredicates() []predicate.Predicate {
 				if !slices.EqualFunc(oldRVR.Status.Peers, newRVR.Status.Peers,
 					func(a, b v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
 						return a.Name == b.Name && a.Type == b.Type &&
-							a.ConnectionState == b.ConnectionState && a.ReplicationState == b.ReplicationState
+							a.ConnectionState == b.ConnectionState && a.ReplicationState == b.ReplicationState &&
+							a.BackingVolumeState == b.BackingVolumeState &&
+							slices.Equal(a.ConnectionEstablishedOn, b.ConnectionEstablishedOn)
 					}) {
 					return true
 				}
