@@ -44,11 +44,11 @@ import (
 )
 
 const (
-	// rvInformerResyncPeriod is the resync period for the RV informer.
+	// informerResyncPeriod is the resync period for shared informers (RV, RVA).
 	// Normally events arrive instantly via Watch. Resync is a safety net
 	// for rare cases (~1%) when Watch connection drops and events are missed.
-	// Every resync period, informer re-lists all RVs to ensure cache is accurate.
-	rvInformerResyncPeriod = 30 * time.Second
+	// Every resync period, informer re-lists all objects to ensure cache is accurate.
+	informerResyncPeriod = 30 * time.Second
 
 	// nodesCacheTTL is the time-to-live for the nodes cache.
 	nodesCacheTTL = 30 * time.Second
@@ -70,8 +70,14 @@ type Client struct {
 	// - One handler processes all events (not N handlers for N checkers)
 	// - Map lookup O(1) instead of N filter calls per event
 	// - Better for 100+ concurrent RV watchers
-	rvInformer    cache.SharedIndexInformer
-	rvInformerMu  sync.RWMutex
+	rvInformer cache.SharedIndexInformer
+
+	// RVA informer for ReplicatedVolumeAttachment cache.
+	// Used by WaitForRVAReady and other attachment-related waits
+	// instead of direct GET polling (eliminates millions of API calls).
+	rvaInformer cache.SharedIndexInformer
+
+	informerMu    sync.RWMutex
 	informerStop  chan struct{}
 	informerReady bool
 
@@ -133,18 +139,17 @@ func NewClientWithKubeconfig(kubeconfigPath string) (*Client, error) {
 		rvCheckers:   make(map[string]chan *v1alpha1.ReplicatedVolume),
 	}
 
-	// Initialize RV informer
-	if err := c.initRVInformer(); err != nil {
-		return nil, fmt.Errorf("initializing RV informer: %w", err)
+	// Initialize shared informers (RV, RVA)
+	if err := c.initInformers(); err != nil {
+		return nil, fmt.Errorf("initializing informers: %w", err)
 	}
 
 	return c, nil
 }
 
-// initRVInformer creates and starts the shared informer for ReplicatedVolumes.
-// Called once during NewClient(). VolumeCheckers register handlers via AddRVEventHandler().
-func (c *Client) initRVInformer() error {
-	// Create REST client for RV
+// initInformers creates and starts shared informers for RV and RVA.
+// Called once during NewClient(). RV informer also dispatches to VolumeCheckers.
+func (c *Client) initInformers() error {
 	restCfg := rest.CopyConfig(c.cfg)
 	restCfg.GroupVersion = &v1alpha1.SchemeGroupVersion
 	restCfg.APIPath = "/apis"
@@ -158,36 +163,15 @@ func (c *Client) initRVInformer() error {
 		return fmt.Errorf("creating REST client: %w", err)
 	}
 
-	// Create ListWatch for ReplicatedVolumes using REST client methods directly
-	lw := &cache.ListWatch{
-		ListWithContextFunc: func(_ context.Context, options metav1.ListOptions) (runtime.Object, error) {
-			result := &v1alpha1.ReplicatedVolumeList{}
-			err := restClient.Get().
-				Resource("replicatedvolumes").
-				VersionedParams(&options, metav1.ParameterCodec).
-				Do(context.Background()).
-				Into(result)
-			return result, err
-		},
-		WatchFuncWithContext: func(_ context.Context, options metav1.ListOptions) (watch.Interface, error) {
-			options.Watch = true
-			return restClient.Get().
-				Resource("replicatedvolumes").
-				VersionedParams(&options, metav1.ParameterCodec).
-				Watch(context.Background())
-		},
-	}
-
-	// Create shared informer
+	// --- RV informer ---
 	c.rvInformer = cache.NewSharedIndexInformer(
-		lw,
+		crdListWatch(restClient, "replicatedvolumes", &v1alpha1.ReplicatedVolumeList{}),
 		&v1alpha1.ReplicatedVolume{},
-		rvInformerResyncPeriod,
+		informerResyncPeriod,
 		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 	)
 
-	// Register single dispatcher handler.
-	// This handler routes events to registered checkers by RV name.
+	// Register single dispatcher handler for VolumeCheckers.
 	// More efficient than N handlers for N checkers (O(1) map lookup vs O(N) filter calls).
 	_, _ = c.rvInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -201,19 +185,27 @@ func (c *Client) initRVInformer() error {
 		},
 	})
 
-	// Start informer in background
-	go c.rvInformer.Run(c.informerStop)
+	// --- RVA informer ---
+	c.rvaInformer = cache.NewSharedIndexInformer(
+		crdListWatch(restClient, "replicatedvolumeattachments", &v1alpha1.ReplicatedVolumeAttachmentList{}),
+		&v1alpha1.ReplicatedVolumeAttachment{},
+		informerResyncPeriod,
+		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+	)
 
-	// Wait for cache sync with timeout to detect connectivity issues early
-	syncCtx, syncCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Start both informers in background
+	go c.rvInformer.Run(c.informerStop)
+	go c.rvaInformer.Run(c.informerStop)
+
+	// Wait for both caches to sync
+	syncCtx, syncCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer syncCancel()
 
 	syncDone := make(chan struct{})
 	var syncErr error
 	go func() {
-		// This is a blocking call that waits for the cache to be synced or the context is cancelled
-		if !cache.WaitForCacheSync(c.informerStop, c.rvInformer.HasSynced) {
-			syncErr = fmt.Errorf("cache sync failed")
+		if !cache.WaitForCacheSync(c.informerStop, c.rvInformer.HasSynced, c.rvaInformer.HasSynced) {
+			syncErr = fmt.Errorf("informer cache sync failed")
 		}
 		close(syncDone)
 	}()
@@ -223,20 +215,40 @@ func (c *Client) initRVInformer() error {
 		if syncErr != nil {
 			return syncErr
 		}
-		// Cache synced successfully
 	case <-syncCtx.Done():
-		// Timeout - cluster might be unreachable or API server is slow
-		return fmt.Errorf("timeout waiting for RV informer cache sync: cluster may be unreachable")
+		return fmt.Errorf("timeout waiting for informer cache sync: cluster may be unreachable")
 	case <-c.informerStop:
-		// Informer was stopped (shouldn't happen during init)
 		return fmt.Errorf("informer stopped unexpectedly during initialization")
 	}
 
-	c.rvInformerMu.Lock()
+	c.informerMu.Lock()
 	c.informerReady = true
-	c.rvInformerMu.Unlock()
+	c.informerMu.Unlock()
 
 	return nil
+}
+
+// crdListWatch creates a ListWatch for a cluster-scoped CRD resource.
+// listObj is used as the target for list decoding (e.g., &v1alpha1.ReplicatedVolumeList{}).
+func crdListWatch(restClient rest.Interface, resource string, listObj runtime.Object) *cache.ListWatch {
+	return &cache.ListWatch{
+		ListWithContextFunc: func(_ context.Context, options metav1.ListOptions) (runtime.Object, error) {
+			result := listObj.DeepCopyObject()
+			err := restClient.Get().
+				Resource(resource).
+				VersionedParams(&options, metav1.ParameterCodec).
+				Do(context.Background()).
+				Into(result)
+			return result, err
+		},
+		WatchFuncWithContext: func(_ context.Context, options metav1.ListOptions) (watch.Interface, error) {
+			options.Watch = true
+			return restClient.Get().
+				Resource(resource).
+				VersionedParams(&options, metav1.ParameterCodec).
+				Watch(context.Background())
+		},
+	}
 }
 
 // dispatchRVEvent routes an RV event to the registered checker (if any).
@@ -260,11 +272,11 @@ func (c *Client) dispatchRVEvent(obj interface{}) {
 	}
 }
 
-// StopInformers stops all running informers.
+// StopInformers stops all running informers (RV, RVA).
 // Called on application shutdown from main.go via defer.
 func (c *Client) StopInformers() {
-	c.rvInformerMu.Lock()
-	defer c.rvInformerMu.Unlock()
+	c.informerMu.Lock()
+	defer c.informerMu.Unlock()
 
 	if c.informerReady {
 		close(c.informerStop)
@@ -276,9 +288,9 @@ func (c *Client) StopInformers() {
 // Returns channel where RV updates will be sent. Caller must call UnregisterRVChecker on shutdown.
 // Uses dispatcher pattern: one informer handler routes to many checkers via map lookup.
 func (c *Client) RegisterRVChecker(rvName string, ch chan *v1alpha1.ReplicatedVolume) error {
-	c.rvInformerMu.RLock()
+	c.informerMu.RLock()
 	ready := c.informerReady
-	c.rvInformerMu.RUnlock()
+	c.informerMu.RUnlock()
 
 	if !ready {
 		return fmt.Errorf("RV informer is not ready")
@@ -300,10 +312,10 @@ func (c *Client) UnregisterRVChecker(rvName string) {
 }
 
 // GetRVFromCache gets a ReplicatedVolume from the informer cache by name.
-// Used by VolumeChecker.checkInitialState() to get RV without API call.
+// Returns (nil, nil) if not found — caller must handle this as "not yet created" or "already deleted".
 func (c *Client) GetRVFromCache(name string) (*v1alpha1.ReplicatedVolume, error) {
-	c.rvInformerMu.RLock()
-	defer c.rvInformerMu.RUnlock()
+	c.informerMu.RLock()
+	defer c.informerMu.RUnlock()
 
 	if !c.informerReady {
 		return nil, fmt.Errorf("RV informer is not ready")
@@ -314,7 +326,7 @@ func (c *Client) GetRVFromCache(name string) (*v1alpha1.ReplicatedVolume, error)
 		return nil, err
 	}
 	if !exists {
-		return nil, fmt.Errorf("RV %s not found in cache", name)
+		return nil, nil
 	}
 
 	rv, ok := obj.(*v1alpha1.ReplicatedVolume)
@@ -323,6 +335,32 @@ func (c *Client) GetRVFromCache(name string) (*v1alpha1.ReplicatedVolume, error)
 	}
 
 	return rv, nil
+}
+
+// GetRVAFromCache gets a ReplicatedVolumeAttachment from the informer cache by name.
+// Returns (nil, nil) if not found.
+func (c *Client) GetRVAFromCache(name string) (*v1alpha1.ReplicatedVolumeAttachment, error) {
+	c.informerMu.RLock()
+	defer c.informerMu.RUnlock()
+
+	if !c.informerReady {
+		return nil, fmt.Errorf("RVA informer is not ready")
+	}
+
+	obj, exists, err := c.rvaInformer.GetStore().GetByKey(name)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, nil
+	}
+
+	rva, ok := obj.(*v1alpha1.ReplicatedVolumeAttachment)
+	if !ok {
+		return nil, fmt.Errorf("unexpected object type in cache: %T", obj)
+	}
+
+	return rva, nil
 }
 
 // Client returns the underlying controller-runtime client
@@ -523,14 +561,15 @@ func (c *Client) ListRVAsByRVName(ctx context.Context, rvName string) ([]v1alpha
 }
 
 // WaitForRVAReady waits until RVA Ready condition becomes True.
+// Uses the RVA informer cache instead of direct API calls.
 func (c *Client) WaitForRVAReady(ctx context.Context, rvName, nodeName string) error {
 	rvaName := buildRVAName(rvName, nodeName)
 	for {
-		rva := &v1alpha1.ReplicatedVolumeAttachment{}
-		if err := c.cl.Get(ctx, client.ObjectKey{Name: rvaName}, rva); err != nil {
-			if client.IgnoreNotFound(err) != nil {
-				return err
-			}
+		rva, err := c.GetRVAFromCache(rvaName)
+		if err != nil {
+			return err
+		}
+		if rva == nil {
 			if err := waitWithContext(ctx, 500*time.Millisecond); err != nil {
 				return err
 			}
