@@ -23,7 +23,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -337,18 +336,12 @@ func (v *VolumeMain) waitForRVReady(ctx context.Context) error {
 	for {
 		v.log.Debug("waiting for RV to become ready")
 
-		rv, err := v.client.GetRV(ctx, v.rvName)
+		rv, err := v.client.GetRVFromCache(v.rvName)
 		if err != nil {
-			if apierrors.IsNotFound(err) {
-				if err := waitWithContext(ctx, 500*time.Millisecond); err != nil {
-					return err
-				}
-				continue
-			}
 			return err
 		}
 
-		if v.client.IsRVReady(rv) {
+		if rv != nil && v.client.IsRVReady(rv) {
 			return nil
 		}
 
@@ -362,12 +355,12 @@ func (v *VolumeMain) WaitForRVDeleted(ctx context.Context, log *slog.Logger) err
 	for {
 		log.Debug("waiting for RV to be deleted")
 
-		_, err := v.client.GetRV(ctx, v.rvName)
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
+		rv, err := v.client.GetRVFromCache(v.rvName)
 		if err != nil {
 			return err
+		}
+		if rv == nil {
+			return nil
 		}
 
 		if err := waitWithContext(ctx, 1*time.Second); err != nil {
