@@ -162,10 +162,6 @@ spec:
           path: /dev/
           type: ""
         name: host-device-dir
-      - name: dev-sdsrv
-        hostPath:
-          path: /dev/sdsrv/
-          type: DirectoryOrCreate
       - hostPath:
           path: /sys/
           type: Directory
@@ -176,6 +172,10 @@ spec:
           items:
             - key: slogh.cfg
               path: slogh.cfg
+      - name: dev-sdsrv
+        hostPath:
+          path: /dev/sdsrv/
+          type: DirectoryOrCreate
       - name: var-run-drbd-lock
         emptyDir: {}
 {{- end }}
