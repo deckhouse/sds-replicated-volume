@@ -71,6 +71,7 @@ func BuildController(mgr manager.Manager, schedulerExtenderURL string) error {
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 10,
 			RateLimiter:             controlleroptions.DefaultRateLimiter(),
+			NewQueue:                controlleroptions.NewQueueWithHeartbeat,
 		}).
 		Complete(r)
 }
