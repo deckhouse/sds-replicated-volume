@@ -65,7 +65,19 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		}
 	}
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Preferred node from AccessibilityRequirements: %q", traceID, volumeID, preferredNode))
-	if preferredNode != "" {
+
+	bindingMode := request.Parameters[internal.BindingModeKey]
+	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] volume-binding-mode: %q", traceID, volumeID, bindingMode))
+
+	if bindingMode != internal.BindingModeWFFC && bindingMode != internal.BindingModeI {
+		errMsg := fmt.Sprintf("StorageClass must set %q to %q or %q", internal.BindingModeKey, internal.BindingModeWFFC, internal.BindingModeI)
+		err := status.Error(codes.InvalidArgument, errMsg)
+		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] %s", traceID, volumeID, errMsg))
+		return nil, err
+	}
+
+	createdEarlyRVA := false
+	if bindingMode == internal.BindingModeWFFC && preferredNode != "" {
 		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] WFFC binding: creating early RVA for preferred node", traceID, volumeID, preferredNode))
 		_, err := utils.EnsureRVA(ctx, d.cl, d.log, traceID, volumeID, preferredNode)
 		if err != nil {
@@ -74,6 +86,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 				"failed to create ReplicatedVolumeAttachment for volume %q on WFFC-selected node %q: %v",
 				volumeID, preferredNode, err)
 		}
+		createdEarlyRVA = true
 	}
 
 	// Build ReplicatedVolumeSpec
@@ -94,7 +107,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 			d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume %s already exists. Skip creating", traceID, volumeID, volumeID))
 		} else {
 			d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error CreateReplicatedVolume", traceID, volumeID))
-			if preferredNode != "" {
+			if createdEarlyRVA {
 				if rvaErr := utils.DeleteRVA(ctx, d.cl, d.log, traceID, volumeID, preferredNode); rvaErr != nil {
 					d.log.Error(rvaErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] error cleaning up WFFC RVA", traceID, volumeID, preferredNode))
 				}
@@ -114,7 +127,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		if deleteErr != nil {
 			d.log.Error(deleteErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error DeleteReplicatedVolume", traceID, volumeID))
 		}
-		if preferredNode != "" {
+		if createdEarlyRVA {
 			if rvaErr := utils.DeleteRVA(ctx, d.cl, d.log, traceID, volumeID, preferredNode); rvaErr != nil {
 				d.log.Error(rvaErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] error cleaning up WFFC RVA", traceID, volumeID, preferredNode))
 			}
