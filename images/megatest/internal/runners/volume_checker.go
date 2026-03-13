@@ -138,6 +138,10 @@ func (v *VolumeChecker) checkInitialState(ctx context.Context) {
 	// Try to get from cache first, fall back to API with timeout
 	rv, err := v.client.GetRVFromCache(v.rvName)
 	if err != nil {
+		v.log.Error("failed to get from cache", "error", err)
+		return
+	}
+	if rv == nil {
 		v.log.Debug("not in cache, fetching from API")
 
 		callCtx, cancel := context.WithTimeout(ctx, apiCallTimeout)
