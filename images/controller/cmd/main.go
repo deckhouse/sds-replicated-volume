@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"time"
 
@@ -68,6 +70,16 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 	if err != nil {
 		return fmt.Errorf("getting env config: %w", err)
 	}
+
+	// DEBUG: pprof server for live goroutine/heap inspection without restarting.
+	// Usage: kubectl port-forward -n d8-sds-replicated-volume deploy/controller 6060
+	//   curl http://localhost:6060/debug/pprof/goroutine?debug=2
+	go func() {
+		log.Info("starting pprof debug server", "addr", ":6060")
+		if err := http.ListenAndServe(":6060", nil); err != nil {
+			log.Error("pprof server failed", "err", err)
+		}
+	}()
 
 	// MANAGER
 	mgr, err := newManager(ctx, log, envConfig)

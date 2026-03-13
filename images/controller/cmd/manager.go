@@ -24,11 +24,9 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
-	ctrlcfg "sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -83,12 +81,6 @@ func newManager(
 		LeaderElectionNamespace: envConfig.PodNamespace(),
 		LeaderElectionID:        "sds-replicated-volume-controller",
 		Cache:                   cacheOpt,
-		// TODO: temporary workaround for controller-runtime priority queue stuck bug
-		// where internal queue goroutines stall indefinitely under high conflict rate,
-		// causing all reconciliation to stop. Remove once the upstream fix is available.
-		Controller: ctrlcfg.Controller{
-			UsePriorityQueue: ptr.To(false),
-		},
 		Metrics: server.Options{
 			BindAddress: envConfig.MetricsBindAddress(),
 		},
