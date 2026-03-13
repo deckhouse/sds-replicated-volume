@@ -223,12 +223,12 @@ func (v *VolumeAttacher) migrationCycle(ctx context.Context, otherNodeName, node
 	for {
 		log.Debug("waiting for both nodes to be attached", "selected_node", nodeName, "other_node", otherNodeName)
 
-		rv, err := v.client.GetRV(ctx, v.rvName)
+		rv, err := v.client.GetRVFromCache(v.rvName)
 		if err != nil {
 			return err
 		}
 
-		if len(rv.Status.ActuallyAttachedTo) == 2 {
+		if rv != nil && len(rv.Status.ActuallyAttachedTo) == 2 {
 			break
 		}
 
@@ -307,20 +307,20 @@ func (v *VolumeAttacher) detachCycle(ctx context.Context, nodeName string) error
 			log.Debug("waiting for node to be detached")
 		}
 
-		rv, err := v.client.GetRV(ctx, v.rvName)
+		rv, err := v.client.GetRVFromCache(v.rvName)
 		if err != nil {
 			return err
 		}
 
-		if nodeName == "" {
-			// Check if all nodes are detached
-			if len(rv.Status.ActuallyAttachedTo) == 0 {
-				return nil
-			}
-		} else {
-			// Check if specific node is detached
-			if !slices.Contains(rv.Status.ActuallyAttachedTo, nodeName) {
-				return nil
+		if rv != nil {
+			if nodeName == "" {
+				if len(rv.Status.ActuallyAttachedTo) == 0 {
+					return nil
+				}
+			} else {
+				if !slices.Contains(rv.Status.ActuallyAttachedTo, nodeName) {
+					return nil
+				}
 			}
 		}
 
