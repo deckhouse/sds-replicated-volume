@@ -269,6 +269,7 @@ func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) error {
 		Spec: v1alpha1.ReplicatedVolumeSpec{
 			Size:                       v.initialSize,
 			ReplicatedStorageClassName: v.storageClass,
+			MaxAttachments:             1,
 		},
 	}
 

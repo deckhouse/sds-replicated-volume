@@ -67,7 +67,6 @@ func BuildController(mgr manager.Manager) error {
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 10,
 			RateLimiter:             controlleroptions.DefaultRateLimiter(),
-			NewQueue:                controlleroptions.NewQueueWithHeartbeat,
 		}).
 		Complete(rec)
 }
