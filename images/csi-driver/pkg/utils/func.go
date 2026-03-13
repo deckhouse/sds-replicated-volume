@@ -21,19 +21,16 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"slices"
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v2"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
@@ -44,161 +41,12 @@ const (
 	SDSReplicatedVolumeCSIFinalizer = "storage.deckhouse.io/sds-replicated-volume-csi"
 )
 
-func AreSizesEqualWithinDelta(leftSize, rightSize, allowedDelta resource.Quantity) bool {
-	leftSizeFloat := float64(leftSize.Value())
-	rightSizeFloat := float64(rightSize.Value())
-
-	return math.Abs(leftSizeFloat-rightSizeFloat) < float64(allowedDelta.Value())
-}
-
-func GetStorageClassLVGsAndParameters(
-	ctx context.Context,
-	kc client.Client,
-	log *logger.Logger,
-	storageClassLVGParametersString string,
-) (storageClassLVGs []snc.LVMVolumeGroup, storageClassLVGParametersMap map[string]string, err error) {
-	var storageClassLVGParametersList LVMVolumeGroups
-	err = yaml.Unmarshal([]byte(storageClassLVGParametersString), &storageClassLVGParametersList)
-	if err != nil {
-		log.Error(err, "unmarshal yaml lvmVolumeGroup")
-		return nil, nil, err
-	}
-
-	storageClassLVGParametersMap = make(map[string]string, len(storageClassLVGParametersList))
-	for _, v := range storageClassLVGParametersList {
-		storageClassLVGParametersMap[v.Name] = v.Thin.PoolName
-	}
-	log.Info(fmt.Sprintf("[GetStorageClassLVGs] StorageClass LVM volume groups parameters map: %+v", storageClassLVGParametersMap))
-
-	lvgs, err := GetLVGList(ctx, kc)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	for _, lvg := range lvgs.Items {
-		log.Trace(fmt.Sprintf("[GetStorageClassLVGs] process lvg: %+v", lvg))
-
-		_, ok := storageClassLVGParametersMap[lvg.Name]
-		if ok {
-			log.Info(fmt.Sprintf("[GetStorageClassLVGs] found lvg from storage class: %s", lvg.Name))
-			log.Info(fmt.Sprintf("[GetStorageClassLVGs] lvg.Status.Nodes[0].Name: %s", lvg.Status.Nodes[0].Name))
-			storageClassLVGs = append(storageClassLVGs, lvg)
-		} else {
-			log.Trace(fmt.Sprintf("[GetStorageClassLVGs] skip lvg: %s", lvg.Name))
-		}
-	}
-
-	return storageClassLVGs, storageClassLVGParametersMap, nil
-}
-
-func GetLVGList(ctx context.Context, kc client.Client) (*snc.LVMVolumeGroupList, error) {
-	listLvgs := &snc.LVMVolumeGroupList{}
-	return listLvgs, kc.List(ctx, listLvgs)
-}
-
-// StoragePoolInfo contains information extracted from ReplicatedStoragePool
-type StoragePoolInfo struct {
-	LVMVolumeGroups []snc.LVMVolumeGroup
-	LVGToThinPool   map[string]string // maps LVMVolumeGroup name to ThinPool name
-	LVMType         string            // "Thick" or "Thin"
-}
-
-// GetReplicatedStoragePool retrieves ReplicatedStoragePool by name
-func GetReplicatedStoragePool(
-	ctx context.Context,
-	kc client.Client,
-	storagePoolName string,
-) (*srv.ReplicatedStoragePool, error) {
-	rsp := &srv.ReplicatedStoragePool{}
-	err := kc.Get(ctx, client.ObjectKey{Name: storagePoolName}, rsp)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get ReplicatedStoragePool %s: %w", storagePoolName, err)
-	}
-	return rsp, nil
-}
-
-// GetLVMTypeFromStoragePool extracts LVM type from ReplicatedStoragePool
-// Returns "Thick" for "LVM" and "Thin" for "LVMThin"
-func GetLVMTypeFromStoragePool(rsp *srv.ReplicatedStoragePool) string {
-	switch rsp.Spec.Type {
-	case "LVMThin":
-		return "Thin"
-	case "LVM":
-		return "Thick"
-	default:
-		return "Thick" // default fallback
-	}
-}
-
-// GetLVGToThinPoolMap creates a map from LVMVolumeGroup name to ThinPool name
-// from ReplicatedStoragePool spec
-func GetLVGToThinPoolMap(rsp *srv.ReplicatedStoragePool) map[string]string {
-	lvgToThinPool := make(map[string]string, len(rsp.Spec.LVMVolumeGroups))
-	for _, rspLVG := range rsp.Spec.LVMVolumeGroups {
-		lvgToThinPool[rspLVG.Name] = rspLVG.ThinPoolName
-	}
-	return lvgToThinPool
-}
-
-// GetStoragePoolInfo gets all information needed from ReplicatedStoragePool
-func GetStoragePoolInfo(
-	ctx context.Context,
-	kc client.Client,
-	log *logger.Logger,
-	storagePoolName string,
-) (*StoragePoolInfo, error) {
-	// Get ReplicatedStoragePool
-	rsp, err := GetReplicatedStoragePool(ctx, kc, storagePoolName)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("failed to get ReplicatedStoragePool: %s", storagePoolName))
-		return nil, err
-	}
-
-	// Extract LVM type
-	lvmType := GetLVMTypeFromStoragePool(rsp)
-	log.Info(fmt.Sprintf("[GetStoragePoolInfo] StoragePool %s LVM type: %s", storagePoolName, lvmType))
-
-	// Extract LVG to ThinPool mapping
-	lvgToThinPool := GetLVGToThinPoolMap(rsp)
-	log.Info(fmt.Sprintf("[GetStoragePoolInfo] StoragePool %s LVG to ThinPool map: %+v", storagePoolName, lvgToThinPool))
-
-	// Build set of LVG names from StoragePool
-	lvgNamesSet := make(map[string]struct{}, len(rsp.Spec.LVMVolumeGroups))
-	for _, rspLVG := range rsp.Spec.LVMVolumeGroups {
-		lvgNamesSet[rspLVG.Name] = struct{}{}
-	}
-
-	// Get all LVMVolumeGroups from cluster and filter by names from StoragePool
-	allLVGs, err := GetLVGList(ctx, kc)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get LVMVolumeGroups list: %w", err)
-	}
-
-	lvmVolumeGroups := make([]snc.LVMVolumeGroup, 0)
-	for _, lvg := range allLVGs.Items {
-		log.Trace(fmt.Sprintf("[GetStoragePoolInfo] process lvg: %+v", lvg))
-
-		if _, ok := lvgNamesSet[lvg.Name]; ok {
-			log.Info(fmt.Sprintf("[GetStoragePoolInfo] found lvg from StoragePool: %s", lvg.Name))
-			lvmVolumeGroups = append(lvmVolumeGroups, lvg)
-		} else {
-			log.Trace(fmt.Sprintf("[GetStoragePoolInfo] skip lvg: %s (not in StoragePool)", lvg.Name))
-		}
-	}
-
-	return &StoragePoolInfo{
-		LVMVolumeGroups: lvmVolumeGroups,
-		LVGToThinPool:   lvgToThinPool,
-		LVMType:         lvmType,
-	}, nil
-}
-
 // CreateReplicatedVolume creates a ReplicatedVolume resource
 func CreateReplicatedVolume(
 	ctx context.Context,
 	kc client.Client,
 	log *logger.Logger,
-	traceID, name string,
+	traceID, name, pvcName, pvcNamespace string,
 	rvSpec srv.ReplicatedVolumeSpec,
 ) (*srv.ReplicatedVolume, error) {
 	rv := &srv.ReplicatedVolume{
@@ -206,6 +54,10 @@ func CreateReplicatedVolume(
 			Name:            name,
 			OwnerReferences: []metav1.OwnerReference{},
 			Finalizers:      []string{SDSReplicatedVolumeCSIFinalizer},
+			Annotations: map[string]string{
+				srv.SchedulingReservationIDAnnotationKey:      pvcName,
+				srv.ReplicatedVolumePVCNamespaceAnnotationKey: pvcNamespace,
+			},
 		},
 		Spec: rvSpec,
 	}
@@ -221,6 +73,15 @@ func GetReplicatedVolume(ctx context.Context, kc client.Client, name string) (*s
 	rv := &srv.ReplicatedVolume{}
 	err := kc.Get(ctx, client.ObjectKey{Name: name}, rv)
 	return rv, err
+}
+
+func hasFormationTransition(transitions []srv.ReplicatedVolumeDatameshTransition) bool {
+	for i := range transitions {
+		if transitions[i].Type == srv.ReplicatedVolumeDatameshTransitionTypeFormation {
+			return true
+		}
+	}
+	return false
 }
 
 // WaitForReplicatedVolumeReady waits for ReplicatedVolume to become ready
@@ -255,12 +116,11 @@ func WaitForReplicatedVolumeReady(
 			return attemptCounter, fmt.Errorf("failed to create ReplicatedVolume %s, reason: ReplicatedVolume is being deleted", name)
 		}
 
-		readyCond := meta.FindStatusCondition(rv.Status.Conditions, srv.ReplicatedVolumeCondIOReadyType)
-		if readyCond != nil && readyCond.Status == metav1.ConditionTrue {
-			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] ReplicatedVolume is IOReady", traceID, name))
+		if rv.Status.DatameshRevision > 0 && !hasFormationTransition(rv.Status.DatameshTransitions) {
+			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] ReplicatedVolume is ready (datameshRevision=%d, no Formation transition)", traceID, name, rv.Status.DatameshRevision))
 			return attemptCounter, nil
 		}
-		log.Trace(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Attempt %d, ReplicatedVolume not IOReady yet. Waiting...", traceID, name, attemptCounter))
+		log.Trace(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Attempt %d, ReplicatedVolume not ready yet (datameshRevision=%d, hasFormation=%v). Waiting...", traceID, name, attemptCounter, rv.Status.DatameshRevision, hasFormationTransition(rv.Status.DatameshTransitions)))
 	}
 }
 
@@ -292,6 +152,40 @@ func DeleteReplicatedVolume(ctx context.Context, kc client.Client, log *logger.L
 	log.Trace(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] Trying to delete ReplicatedVolume", traceID, name))
 	err = kc.Delete(ctx, rv)
 	return err
+}
+
+// WaitForReplicatedVolumeDeleted waits for ReplicatedVolume to be fully deleted (NotFound).
+func WaitForReplicatedVolumeDeleted(
+	ctx context.Context,
+	kc client.Client,
+	log *logger.Logger,
+	traceID, name string,
+) (int, error) {
+	var attemptCounter int
+	log.Info(fmt.Sprintf("[WaitForReplicatedVolumeDeleted][traceID:%s][volumeID:%s] Waiting for ReplicatedVolume to be deleted", traceID, name))
+	for {
+		attemptCounter++
+		select {
+		case <-ctx.Done():
+			log.Warning(fmt.Sprintf("[WaitForReplicatedVolumeDeleted][traceID:%s][volumeID:%s] context done", traceID, name))
+			return attemptCounter, ctx.Err()
+		default:
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		_, err := GetReplicatedVolume(ctx, kc, name)
+		if err != nil {
+			if kerrors.IsNotFound(err) {
+				log.Info(fmt.Sprintf("[WaitForReplicatedVolumeDeleted][traceID:%s][volumeID:%s] ReplicatedVolume is fully deleted", traceID, name))
+				return attemptCounter, nil
+			}
+			return attemptCounter, err
+		}
+
+		if attemptCounter%10 == 0 {
+			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeDeleted][traceID:%s][volumeID:%s] Attempt: %d, still waiting...", traceID, name, attemptCounter))
+		}
+	}
 }
 
 func removervdeletepropagationIfExist(ctx context.Context, kc client.Client, log *logger.Logger, rv *srv.ReplicatedVolume, finalizer string) (bool, error) {
@@ -344,8 +238,9 @@ func GetReplicatedVolumeReplicaForNode(ctx context.Context, kc client.Client, vo
 	err := kc.List(
 		ctx,
 		rvrList,
-		client.MatchingFields{"spec.replicatedVolumeName": volumeName},
-		client.MatchingFields{"spec.nodeName": nodeName},
+		client.MatchingLabels{
+			srv.ReplicatedVolumeLabelKey: volumeName,
+		},
 	)
 	if err != nil {
 		return nil, err
@@ -385,6 +280,7 @@ func BuildReplicatedVolumeSpec(
 	return srv.ReplicatedVolumeSpec{
 		Size:                       size,
 		ReplicatedStorageClassName: rscName,
+		MaxAttachments:             2,
 	}
 }
 
@@ -479,6 +375,32 @@ func DeleteRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 	log.Info(fmt.Sprintf("[DeleteRVA][traceID:%s][volumeID:%s][node:%s] Deleting ReplicatedVolumeAttachment %s", traceID, volumeName, nodeName, rvaName))
 	if err := kc.Delete(ctx, rva); err != nil {
 		return client.IgnoreNotFound(err)
+	}
+	return nil
+}
+
+// DeleteRVAsForVolume lists all RVAs for the given volume and deletes them.
+// This cleans up orphaned RVAs when DeleteVolume is called (e.g. WFFC case where
+// ControllerUnpublishVolume was never invoked).
+func DeleteRVAsForVolume(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName string) error {
+	list := &srv.ReplicatedVolumeAttachmentList{}
+	if err := kc.List(ctx, list); err != nil {
+		return fmt.Errorf("list ReplicatedVolumeAttachments: %w", err)
+	}
+	var toDelete []srv.ReplicatedVolumeAttachment
+	for _, rva := range list.Items {
+		if rva.Spec.ReplicatedVolumeName == volumeName {
+			toDelete = append(toDelete, rva)
+		}
+	}
+	for _, rva := range toDelete {
+		log.Info(fmt.Sprintf("[DeleteRVAsForVolume][traceID:%s][volumeID:%s] Deleting ReplicatedVolumeAttachment %s (node=%s)", traceID, volumeName, rva.Name, rva.Spec.NodeName))
+		if err := kc.Delete(ctx, &rva); err != nil && !kerrors.IsNotFound(err) {
+			return fmt.Errorf("delete ReplicatedVolumeAttachment %s: %w", rva.Name, err)
+		}
+	}
+	if len(toDelete) > 0 {
+		log.Info(fmt.Sprintf("[DeleteRVAsForVolume][traceID:%s][volumeID:%s] Deleted %d ReplicatedVolumeAttachment(s)", traceID, volumeName, len(toDelete)))
 	}
 	return nil
 }

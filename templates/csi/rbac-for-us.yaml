@@ -98,4 +98,31 @@ roleRef:
   kind: ClusterRole
   name: d8:{{ .Chart.Name }}:replicatedvolumereplica-reader
   apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: d8:{{ .Chart.Name }}:replicatedvolumeattachment-manager
+  {{- include "helm_lib_module_labels" (list . ) | nindent 2 }}
+rules:
+  - apiGroups: ["storage.deckhouse.io"]
+    resources: ["replicatedvolumeattachments"]
+    verbs: ["create", "get", "update", "delete", "list", "watch"]
+  - apiGroups: ["storage.deckhouse.io"]
+    resources: ["replicatedvolumeattachments/status"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: d8:{{ .Chart.Name }}:replicatedvolumeattachment-manager-binding
+  {{- include "helm_lib_module_labels" (list . ) | nindent 2 }}
+subjects:
+  - kind: ServiceAccount
+    name: csi
+    namespace: d8-{{ .Chart.Name }}
+roleRef:
+  kind: ClusterRole
+  name: d8:{{ .Chart.Name }}:replicatedvolumeattachment-manager
+  apiGroup: rbac.authorization.k8s.io
 {{- end }}

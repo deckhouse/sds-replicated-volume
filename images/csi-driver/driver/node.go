@@ -145,7 +145,7 @@ func (d *Driver) NodeStageVolume(ctx context.Context, request *csi.NodeStageVolu
 	d.log.Trace(fmt.Sprintf("mountOptions = %s", mountOptions))
 	d.log.Trace(fmt.Sprintf("fsType = %s", fsType))
 
-	err = d.storeManager.NodeStageVolumeFS(devPath, target, fsType, mountOptions, formatOptions, "", "")
+	err = d.storeManager.NodeStageVolumeFS(devPath, target, fsType, mountOptions, formatOptions)
 	if err != nil {
 		d.log.Error(err, "[NodeStageVolume] Error mounting volume")
 		return nil, status.Errorf(codes.Internal, "[NodeStageVolume] Error format device %q and mounting volume at %q: %v", devPath, target, err)
@@ -467,14 +467,15 @@ func (d *Driver) NodeGetCapabilities(_ context.Context, request *csi.NodeGetCapa
 }
 
 func (d *Driver) NodeGetInfo(_ context.Context, _ *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
-	d.log.Info("method NodeGetInfo")
-	d.log.Info(fmt.Sprintf("hostID = %s", d.hostID))
+	d.log.Info(fmt.Sprintf("[NodeGetInfo] hostID = %s", d.hostID))
 
 	return &csi.NodeGetInfoResponse{
 		NodeId: d.hostID,
-		//MaxVolumesPerNode: 10,
-		// Don't set AccessibleTopology - scheduling handled by scheduler-extender
-		AccessibleTopology: nil,
+		AccessibleTopology: &csi.Topology{
+			Segments: map[string]string{
+				internal.TopologyKey: d.hostID,
+			},
+		},
 	}, nil
 }
 

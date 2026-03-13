@@ -84,7 +84,7 @@ func TestNodeStoreManager(t *testing.T) {
 			}
 
 			err := checkMount(store, devPath, target, []string{})
-			assert.ErrorContains(t, err, "[checkMount] device from mount point \"other-name\" does not match expected source device path weird-path or mapper device path ")
+			assert.ErrorContains(t, err, "[checkMount] device from mount point \"other-name\" does not match expected source device path weird-path")
 		})
 
 		t.Run("path_is_not_target_returns_error", func(t *testing.T) {

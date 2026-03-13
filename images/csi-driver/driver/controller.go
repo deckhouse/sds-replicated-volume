@@ -51,39 +51,47 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		return nil, status.Error(codes.InvalidArgument, "Volume Capability cannot de empty")
 	}
 
-	BindingMode := request.Parameters[internal.BindingModeKey]
-	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] storage class BindingMode: %s", traceID, volumeID, BindingMode))
-
-	// Get LVMVolumeGroups from StoragePool
-	storagePoolName := request.Parameters[internal.StoragePoolKey]
-	if len(storagePoolName) == 0 {
-		err := errors.New("no StoragePool specified in a storage class's parameters")
-		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] no StoragePool was found for the request: %+v", traceID, volumeID, request))
-		return nil, status.Errorf(codes.InvalidArgument, "no StoragePool specified in a storage class's parameters")
+	if request.VolumeContentSource != nil {
+		return nil, status.Error(codes.InvalidArgument, "Creating volumes from snapshots or clones is not supported")
 	}
-
-	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] using StoragePool: %s", traceID, volumeID, storagePoolName))
-	storagePoolInfo, err := utils.GetStoragePoolInfo(ctx, d.cl, d.log, storagePoolName)
-	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error GetStoragePoolInfo", traceID, volumeID))
-		return nil, status.Errorf(codes.Internal, "error during GetStoragePoolInfo: %v", err)
-	}
-
-	LvmType := storagePoolInfo.LVMType
-	if LvmType != internal.LVMTypeThin && LvmType != internal.LVMTypeThick {
-		d.log.Warning(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Unknown LVM type from StoragePool: %s, defaulting to Thick", traceID, volumeID, LvmType))
-		LvmType = internal.LVMTypeThick
-	}
-	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] LVM type from StoragePool: %s", traceID, volumeID, LvmType))
 
 	rvSize := resource.NewQuantity(request.CapacityRange.GetRequiredBytes(), resource.BinarySI)
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume size: %s", traceID, volumeID, rvSize.String()))
 
-	// Extract preferred node from AccessibilityRequirements for WaitForFirstConsumer
-	// Kubernetes provides the selected node in AccessibilityRequirements.Preferred[].Segments
-	// with key "kubernetes.io/hostname"
-	// NOTE: We no longer use rv.spec.attachTo. Attachment intent is expressed via ReplicatedVolumeAttachment (RVA)
-	// created in ControllerPublishVolume.
+	preferredNode := ""
+	if ar := request.AccessibilityRequirements; ar != nil {
+		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] AccessibilityRequirements: Requisite=%v, Preferred=%v", traceID, volumeID, ar.Requisite, ar.Preferred))
+		for _, topo := range ar.Preferred {
+			if node, ok := topo.Segments[internal.TopologyKey]; ok {
+				preferredNode = node
+				break
+			}
+		}
+	}
+	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Preferred node from AccessibilityRequirements: %q", traceID, volumeID, preferredNode))
+
+	bindingMode := request.Parameters[internal.BindingModeKey]
+	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] volume-binding-mode: %q", traceID, volumeID, bindingMode))
+
+	if bindingMode != internal.BindingModeWFFC && bindingMode != internal.BindingModeI {
+		errMsg := fmt.Sprintf("StorageClass must set %q to %q or %q", internal.BindingModeKey, internal.BindingModeWFFC, internal.BindingModeI)
+		err := status.Error(codes.InvalidArgument, errMsg)
+		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] %s", traceID, volumeID, errMsg))
+		return nil, err
+	}
+
+	createdEarlyRVA := false
+	if bindingMode == internal.BindingModeWFFC && preferredNode != "" {
+		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] WFFC binding: creating early RVA for preferred node", traceID, volumeID, preferredNode))
+		_, err := utils.EnsureRVA(ctx, d.cl, d.log, traceID, volumeID, preferredNode)
+		if err != nil {
+			d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] Failed to create ReplicatedVolumeAttachment for WFFC-selected node", traceID, volumeID, preferredNode))
+			return nil, status.Errorf(codes.Internal,
+				"failed to create ReplicatedVolumeAttachment for volume %q on WFFC-selected node %q: %v",
+				volumeID, preferredNode, err)
+		}
+		createdEarlyRVA = true
+	}
 
 	// Build ReplicatedVolumeSpec
 	rvSpec := utils.BuildReplicatedVolumeSpec(
@@ -95,12 +103,19 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 	// Create ReplicatedVolume
 	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ------------ CreateReplicatedVolume start ------------", traceID, volumeID))
-	_, err = utils.CreateReplicatedVolume(ctx, d.cl, d.log, traceID, volumeID, rvSpec)
+	pvcName := request.Parameters[internal.PVCAnnotationNameKey]
+	pvcNamespace := request.Parameters[internal.PVCAnnotationNamespaceKey]
+	_, err := utils.CreateReplicatedVolume(ctx, d.cl, d.log, traceID, volumeID, pvcName, pvcNamespace, rvSpec)
 	if err != nil {
 		if kerrors.IsAlreadyExists(err) {
 			d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume %s already exists. Skip creating", traceID, volumeID, volumeID))
 		} else {
 			d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error CreateReplicatedVolume", traceID, volumeID))
+			if createdEarlyRVA {
+				if rvaErr := utils.DeleteRVA(ctx, d.cl, d.log, traceID, volumeID, preferredNode); rvaErr != nil {
+					d.log.Error(rvaErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] error cleaning up WFFC RVA", traceID, volumeID, preferredNode))
+				}
+			}
 			return nil, err
 		}
 	}
@@ -116,13 +131,19 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		if deleteErr != nil {
 			d.log.Error(deleteErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error DeleteReplicatedVolume", traceID, volumeID))
 		}
+		if createdEarlyRVA {
+			if rvaErr := utils.DeleteRVA(ctx, d.cl, d.log, traceID, volumeID, preferredNode); rvaErr != nil {
+				d.log.Error(rvaErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] error cleaning up WFFC RVA", traceID, volumeID, preferredNode))
+			}
+		}
 
 		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error creating ReplicatedVolume", traceID, volumeID))
 		return nil, err
 	}
 	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] finish wait ReplicatedVolume, attempt counter = %d", traceID, volumeID, attemptCounter))
 
-	// Build volume context
+	// TODO: Replace rv.Spec.Size with rv.Status.UsableSize once available
+	// (will track actual usable capacity after DRBD metadata overhead).
 	volumeCtx := make(map[string]string, len(request.Parameters))
 	for k, v := range request.Parameters {
 		volumeCtx[k] = v
@@ -131,15 +152,13 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Volume created successfully. volumeCtx: %+v", traceID, volumeID, volumeCtx))
 
-	// Don't set AccessibleTopology - let scheduler-extender handle pod scheduling
-
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
-			CapacityBytes:      request.CapacityRange.GetRequiredBytes(),
+			CapacityBytes:      rvSize.Value(),
 			VolumeId:           request.Name,
 			VolumeContext:      volumeCtx,
-			ContentSource:      request.VolumeContentSource,
-			AccessibleTopology: nil, // No nodeAffinity - scheduling handled by scheduler-extender
+			ContentSource:      nil,
+			AccessibleTopology: nil,
 		},
 	}, nil
 }
@@ -151,12 +170,24 @@ func (d *Driver) DeleteVolume(ctx context.Context, request *csi.DeleteVolumeRequ
 		return nil, status.Error(codes.InvalidArgument, "Volume ID cannot be empty")
 	}
 
+	// Delete RVAs first to avoid orphaned attachments (e.g. WFFC where ControllerUnpublishVolume was never called).
+	if err := utils.DeleteRVAsForVolume(ctx, d.cl, d.log, traceID, request.VolumeId); err != nil {
+		d.log.Error(err, "error DeleteRVAsForVolume")
+		return nil, err
+	}
+
 	err := utils.DeleteReplicatedVolume(ctx, d.cl, d.log, traceID, request.VolumeId)
 	if err != nil {
 		d.log.Error(err, "error DeleteReplicatedVolume")
 		return nil, err
 	}
-	d.log.Info(fmt.Sprintf("[DeleteVolume][traceID:%s][volumeID:%s] Volume deleted successfully", traceID, request.VolumeId))
+
+	attemptCounter, err := utils.WaitForReplicatedVolumeDeleted(ctx, d.cl, d.log, traceID, request.VolumeId)
+	if err != nil {
+		d.log.Error(err, fmt.Sprintf("[DeleteVolume][traceID:%s][volumeID:%s] error waiting for ReplicatedVolume deletion", traceID, request.VolumeId))
+		return nil, err
+	}
+	d.log.Info(fmt.Sprintf("[DeleteVolume][traceID:%s][volumeID:%s] Volume deleted successfully, attempts: %d", traceID, request.VolumeId, attemptCounter))
 	d.log.Info(fmt.Sprintf("[DeleteVolume][traceID:%s] ========== END DeleteVolume ============", traceID))
 	return &csi.DeleteVolumeResponse{}, nil
 }
@@ -290,12 +321,12 @@ func (d *Driver) ControllerGetCapabilities(_ context.Context, _ *csi.ControllerG
 
 	var capabilities = []csi.ControllerServiceCapability_RPC_Type{
 		csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
-		csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
 		csi.ControllerServiceCapability_RPC_GET_CAPACITY,
 		csi.ControllerServiceCapability_RPC_EXPAND_VOLUME,
 		csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME,
-		// TODO: Add snapshot support if needed
+		// TODO: Add snapshot/clone support if needed
 		// csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
+		// csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
 	}
 
 	csiCaps := make([]*csi.ControllerServiceCapability, len(capabilities))
@@ -334,12 +365,6 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.Contro
 		return nil, status.Errorf(codes.Internal, "error getting ReplicatedVolume: %s", err.Error())
 	}
 
-	resizeDelta, err := resource.ParseQuantity(internal.ResizeDelta)
-	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] error ParseQuantity for ResizeDelta", traceID, volumeID))
-		return nil, err
-	}
-	d.log.Trace(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] resizeDelta: %s", traceID, volumeID, resizeDelta.String()))
 	requestCapacity := resource.NewQuantity(request.CapacityRange.GetRequiredBytes(), resource.BinarySI)
 	d.log.Trace(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] requestCapacity: %s", traceID, volumeID, requestCapacity.String()))
 
@@ -347,25 +372,21 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.Contro
 
 	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] NodeExpansionRequired: %t", traceID, volumeID, nodeExpansionRequired))
 
-	// Check if resize is needed
-	currentSize := rv.Spec.Size
-	if currentSize.Value() > requestCapacity.Value()+resizeDelta.Value() || utils.AreSizesEqualWithinDelta(*requestCapacity, currentSize, resizeDelta) {
-		d.log.Warning(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] requested size is less than or equal to the actual size of the volume include delta %s, no need to resize ReplicatedVolume %s, requested size: %s, actual size: %s, return NodeExpansionRequired: %t and CapacityBytes: %d", traceID, volumeID, resizeDelta.String(), volumeID, requestCapacity.String(), currentSize.String(), nodeExpansionRequired, currentSize.Value()))
+	if requestCapacity.Cmp(rv.Spec.Size) <= 0 {
+		d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] requested size %s <= spec size %s, no resize needed", traceID, volumeID, requestCapacity.String(), rv.Spec.Size.String()))
 		return &csi.ControllerExpandVolumeResponse{
-			CapacityBytes:         currentSize.Value(),
+			CapacityBytes:         rv.Spec.Size.Value(),
 			NodeExpansionRequired: nodeExpansionRequired,
 		}, nil
 	}
 
-	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] start resize ReplicatedVolume", traceID, volumeID))
-	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] requested size: %s, actual size: %s", traceID, volumeID, requestCapacity.String(), currentSize.String()))
+	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] start resize ReplicatedVolume, requested: %s, current spec: %s", traceID, volumeID, requestCapacity.String(), rv.Spec.Size.String()))
 	err = utils.ExpandReplicatedVolume(ctx, d.cl, rv, *requestCapacity)
 	if err != nil {
 		d.log.Error(err, fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] error updating ReplicatedVolume", traceID, volumeID))
 		return nil, status.Errorf(codes.Internal, "error updating ReplicatedVolume: %v", err)
 	}
 
-	// Wait for ReplicatedVolume to become ready after resize
 	attemptCounter, err := utils.WaitForReplicatedVolumeReady(ctx, d.cl, d.log, traceID, volumeID)
 	if err != nil {
 		d.log.Error(err, fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] error WaitForReplicatedVolumeReady", traceID, volumeID))
@@ -373,10 +394,11 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.Contro
 	}
 	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] finish resize ReplicatedVolume, attempt counter = %d", traceID, volumeID, attemptCounter))
 
-	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] Volume expanded successfully", traceID, volumeID))
+	capacityBytes := requestCapacity.Value()
+	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] Volume expanded successfully, reporting: %d", traceID, volumeID, capacityBytes))
 
 	return &csi.ControllerExpandVolumeResponse{
-		CapacityBytes:         request.CapacityRange.RequiredBytes,
+		CapacityBytes:         capacityBytes,
 		NodeExpansionRequired: nodeExpansionRequired,
 	}, nil
 }
