@@ -51,6 +51,10 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		return nil, status.Error(codes.InvalidArgument, "Volume Capability cannot de empty")
 	}
 
+	if request.VolumeContentSource != nil {
+		return nil, status.Error(codes.InvalidArgument, "Creating volumes from snapshots or clones is not supported")
+	}
+
 	rvSize := resource.NewQuantity(request.CapacityRange.GetRequiredBytes(), resource.BinarySI)
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume size: %s", traceID, volumeID, rvSize.String()))
 
@@ -153,7 +157,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 			CapacityBytes:      rvSize.Value(),
 			VolumeId:           request.Name,
 			VolumeContext:      volumeCtx,
-			ContentSource:      request.VolumeContentSource,
+			ContentSource:      nil,
 			AccessibleTopology: nil,
 		},
 	}, nil
@@ -317,12 +321,12 @@ func (d *Driver) ControllerGetCapabilities(_ context.Context, _ *csi.ControllerG
 
 	var capabilities = []csi.ControllerServiceCapability_RPC_Type{
 		csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
-		csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
 		csi.ControllerServiceCapability_RPC_GET_CAPACITY,
 		csi.ControllerServiceCapability_RPC_EXPAND_VOLUME,
 		csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME,
-		// TODO: Add snapshot support if needed
+		// TODO: Add snapshot/clone support if needed
 		// csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
+		// csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
 	}
 
 	csiCaps := make([]*csi.ControllerServiceCapability, len(capabilities))
