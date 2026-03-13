@@ -22,7 +22,7 @@ limitations under the License.
 //
 // Usage:
 //
-//	go run hack/debug.go [--log=<path>] [--snapshots=<dir>] <target> [<target> ...]
+//	go run hack/debug.go [--log=<path>] [--snapshots=<dir>] [--csi] <target> [<target> ...]
 //
 // Where <target> is:
 //
@@ -35,6 +35,7 @@ limitations under the License.
 //	--snapshots=<dir>   Save full object snapshots to the given directory (optional).
 //	                    Files are named <kind>-<name>-<HH-MM-SS.mmm>.yaml and
 //	                    object names in the terminal become clickable OSC 8 links.
+//	--csi               Include CSI controller and CSI node pod logs (optional).
 //
 // Examples:
 //
@@ -1457,6 +1458,10 @@ func badgeColor(component string) string {
 		return colorMagenta
 	case "agent":
 		return colorYellow
+	case "csi-controller":
+		return colorCyan
+	case "csi-node":
+		return colorGreen
 	default:
 		return colorCyan
 	}
@@ -2523,13 +2528,14 @@ func diffOpcodes(a, b []string) []opcode {
 // ---------------------------------------------------------------------------
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: go run hack/debug.go [--log=<path>] [--snapshots=<dir>] <target> [<target> ...]\n")
+	fmt.Fprintf(os.Stderr, "usage: go run hack/debug.go [--log=<path>] [--snapshots=<dir>] [--csi] <target> [<target> ...]\n")
 	fmt.Fprintf(os.Stderr, "\ntargets:\n")
 	fmt.Fprintf(os.Stderr, "  <kind>            watch all objects of that kind\n")
 	fmt.Fprintf(os.Stderr, "  <kind>/<name>     watch a specific named object\n")
 	fmt.Fprintf(os.Stderr, "\nflags:\n")
 	fmt.Fprintf(os.Stderr, "  --log=<path>        write plain-text copy of output to file\n")
 	fmt.Fprintf(os.Stderr, "  --snapshots=<dir>   save full object JSON snapshots; names become clickable links\n")
+	fmt.Fprintf(os.Stderr, "  --csi              include CSI controller and CSI node pod logs\n")
 	fmt.Fprintf(os.Stderr, "\nexamples:\n")
 	fmt.Fprintf(os.Stderr, "  go run hack/debug.go rsc rsp\n")
 	fmt.Fprintf(os.Stderr, "  go run hack/debug.go rsc/my-storage-class rv\n")
@@ -2541,12 +2547,15 @@ func usage() {
 func main() {
 	var logPath string
 	var rawTargets []string
+	var withCSI bool
 
 	for _, arg := range os.Args[1:] {
 		if strings.HasPrefix(arg, "--log=") {
 			logPath = strings.TrimPrefix(arg, "--log=")
 		} else if strings.HasPrefix(arg, "--snapshots=") {
 			snapshotsDir = strings.TrimPrefix(arg, "--snapshots=")
+		} else if arg == "--csi" {
+			withCSI = true
 		} else if arg == "--help" || arg == "-h" {
 			usage()
 		} else {
@@ -2609,10 +2618,15 @@ func main() {
 		go watchResource(ctx, kind, names, &ws, &wg)
 	}
 
-	// Start log streamers for controller and agent.
+	// Start log streamers for controller and agent. CSI logs are optional.
 	wg.Add(2)
 	go followPodLogs(ctx, "controller", "app=controller", &ws, &wg)
 	go followPodLogs(ctx, "agent", "app=agent", &ws, &wg)
+	if withCSI {
+		wg.Add(2)
+		go followPodLogs(ctx, "csi-controller", "app=csi-controller", &ws, &wg)
+		go followPodLogs(ctx, "csi-node", "app=csi-node", &ws, &wg)
+	}
 
 	wg.Wait()
 }
