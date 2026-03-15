@@ -751,10 +751,10 @@ var _ = Describe("computeRollingStrategiesConfiguration", func() {
 	It("returns (0, 0) when both policies are not RollingUpdate/RollingRepair", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+				ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
 					Type: v1alpha1.ConfigurationRolloutNewVolumesOnly,
 				},
-				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+				EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
 					Type: v1alpha1.EligibleNodesConflictResolutionManual,
 				},
 			},
@@ -769,13 +769,13 @@ var _ = Describe("computeRollingStrategiesConfiguration", func() {
 	It("returns maxParallel for rollouts when ConfigurationRolloutStrategy is RollingUpdate", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+				ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
 					Type: v1alpha1.ConfigurationRolloutRollingUpdate,
 					RollingUpdate: &v1alpha1.ReplicatedStorageClassConfigurationRollingUpdateStrategy{
 						MaxParallel: 5,
 					},
 				},
-				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+				EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
 					Type: v1alpha1.EligibleNodesConflictResolutionManual,
 				},
 			},
@@ -790,10 +790,10 @@ var _ = Describe("computeRollingStrategiesConfiguration", func() {
 	It("returns maxParallel for conflicts when EligibleNodesConflictResolutionStrategy is RollingRepair", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+				ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
 					Type: v1alpha1.ConfigurationRolloutNewVolumesOnly,
 				},
-				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+				EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
 					Type: v1alpha1.EligibleNodesConflictResolutionRollingRepair,
 					RollingRepair: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair{
 						MaxParallel: 10,
@@ -811,13 +811,13 @@ var _ = Describe("computeRollingStrategiesConfiguration", func() {
 	It("returns both maxParallel values when both policies are rolling", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+				ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
 					Type: v1alpha1.ConfigurationRolloutRollingUpdate,
 					RollingUpdate: &v1alpha1.ReplicatedStorageClassConfigurationRollingUpdateStrategy{
 						MaxParallel: 3,
 					},
 				},
-				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+				EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
 					Type: v1alpha1.EligibleNodesConflictResolutionRollingRepair,
 					RollingRepair: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair{
 						MaxParallel: 7,
@@ -835,11 +835,11 @@ var _ = Describe("computeRollingStrategiesConfiguration", func() {
 	It("panics when ConfigurationRolloutStrategy is RollingUpdate but RollingUpdate config is nil", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+				ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
 					Type:          v1alpha1.ConfigurationRolloutRollingUpdate,
 					RollingUpdate: nil,
 				},
-				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+				EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
 					Type: v1alpha1.EligibleNodesConflictResolutionManual,
 				},
 			},
@@ -853,10 +853,10 @@ var _ = Describe("computeRollingStrategiesConfiguration", func() {
 	It("panics when EligibleNodesConflictResolutionStrategy is RollingRepair but RollingRepair config is nil", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+				ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
 					Type: v1alpha1.ConfigurationRolloutNewVolumesOnly,
 				},
-				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+				EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
 					Type:          v1alpha1.EligibleNodesConflictResolutionRollingRepair,
 					RollingRepair: nil,
 				},
@@ -905,10 +905,10 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 				Name: "test-rsc",
 			},
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+				ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
 					Type: v1alpha1.ConfigurationRolloutNewVolumesOnly,
 				},
-				EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+				EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
 					Type: v1alpha1.EligibleNodesConflictResolutionManual,
 				},
 			},
@@ -1268,7 +1268,7 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					StoragePool: "", // Already empty - no migration needed.
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
 							{Name: "lvg-existing"},
@@ -1342,7 +1342,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					// No storagePool - using direct storage configuration.
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
 							{Name: "lvg-1"},
@@ -1379,7 +1379,7 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					// No storagePool - using direct storage configuration.
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
 							{Name: "lvg-1"},
@@ -1422,7 +1422,7 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					// No storagePool - using direct storage configuration.
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
 							{Name: "lvg-1"},
@@ -1617,7 +1617,7 @@ var _ = Describe("Reconciler", func() {
 					Generation: 1,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
 							{Name: "lvg-1"},
@@ -1626,7 +1626,7 @@ var _ = Describe("Reconciler", func() {
 					},
 					Zones:              []string{"zone-a", "zone-b"},
 					SystemNetworkNames: []string{"Internal"},
-					EligibleNodesPolicy: v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
+					EligibleNodesPolicy: &v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
 						NotReadyGracePeriod: metav1.Duration{Duration: 5 * time.Minute},
 					},
 				},
@@ -1670,7 +1670,7 @@ var _ = Describe("Reconciler", func() {
 					Generation: 1,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
 					},
@@ -1711,7 +1711,7 @@ var _ = Describe("Reconciler", func() {
 					Generation: 1,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
 					},
@@ -1760,7 +1760,7 @@ var _ = Describe("Reconciler", func() {
 					Generation: 1,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
 					},
@@ -1911,7 +1911,7 @@ var _ = Describe("Reconciler", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type: v1alpha1.ReplicatedStoragePoolTypeLVMThin,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
 							{Name: "lvg-1", ThinPoolName: "thin-1"},
@@ -1923,7 +1923,7 @@ var _ = Describe("Reconciler", func() {
 						MatchLabels: map[string]string{"node-type": "storage"},
 					},
 					SystemNetworkNames: []string{"Internal"},
-					EligibleNodesPolicy: v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
+					EligibleNodesPolicy: &v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
 						NotReadyGracePeriod: metav1.Duration{Duration: 15 * time.Minute},
 					},
 				},
@@ -1952,11 +1952,12 @@ var _ = Describe("Reconciler", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
 					},
-					SystemNetworkNames: []string{"Internal"},
+					SystemNetworkNames:  []string{"Internal"},
+					EligibleNodesPolicy: &v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{},
 				},
 			}
 
@@ -1969,14 +1970,15 @@ var _ = Describe("Reconciler", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
 							{Name: "lvg-1"},
 						},
 					},
-					Zones:              []string{"zone-a"},
-					SystemNetworkNames: []string{"Internal"},
+					Zones:               []string{"zone-a"},
+					SystemNetworkNames:  []string{"Internal"},
+					EligibleNodesPolicy: &v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{},
 				},
 			}
 
@@ -2105,8 +2107,11 @@ var _ = Describe("Reconciler", func() {
 			zero := int32(0)
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+					ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
 						Type: v1alpha1.ConfigurationRolloutRollingUpdate,
+					},
+					EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+						Type: v1alpha1.EligibleNodesConflictResolutionManual,
 					},
 				},
 				Status: v1alpha1.ReplicatedStorageClassStatus{
@@ -2135,8 +2140,11 @@ var _ = Describe("Reconciler", func() {
 			zero := int32(0)
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+					ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
 						Type: v1alpha1.ConfigurationRolloutNewVolumesOnly,
+					},
+					EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+						Type: v1alpha1.EligibleNodesConflictResolutionManual,
 					},
 				},
 				Status: v1alpha1.ReplicatedStorageClassStatus{
@@ -2166,10 +2174,10 @@ var _ = Describe("Reconciler", func() {
 			zero := int32(0)
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+					ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
 						Type: v1alpha1.ConfigurationRolloutNewVolumesOnly,
 					},
-					EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+					EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
 						Type: v1alpha1.EligibleNodesConflictResolutionRollingRepair,
 					},
 				},
@@ -2200,10 +2208,10 @@ var _ = Describe("Reconciler", func() {
 			zero := int32(0)
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					ConfigurationRolloutStrategy: v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+					ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
 						Type: v1alpha1.ConfigurationRolloutNewVolumesOnly,
 					},
-					EligibleNodesConflictResolutionStrategy: v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+					EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
 						Type: v1alpha1.EligibleNodesConflictResolutionManual,
 					},
 				},
@@ -3033,7 +3041,7 @@ var _ = Describe("Reconciler", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
 							{Name: "lvg-1"},
@@ -3055,7 +3063,7 @@ var _ = Describe("Reconciler", func() {
 			rsc1 := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
 							{Name: "lvg-a"},
@@ -3067,7 +3075,7 @@ var _ = Describe("Reconciler", func() {
 			rsc2 := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-2"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
 							{Name: "lvg-b"},
@@ -3087,7 +3095,7 @@ var _ = Describe("Reconciler", func() {
 			rsc1 := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
 							{Name: "lvg-1"},
@@ -3099,7 +3107,7 @@ var _ = Describe("Reconciler", func() {
 			rsc2 := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-2"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
 							{Name: "lvg-1"},
@@ -3119,7 +3127,7 @@ var _ = Describe("Reconciler", func() {
 			rsc1 := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
 					},
@@ -3128,7 +3136,7 @@ var _ = Describe("Reconciler", func() {
 			rsc2 := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-2"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVMThin,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
 					},
@@ -3145,7 +3153,7 @@ var _ = Describe("Reconciler", func() {
 			rsc1 := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
 					},
@@ -3154,7 +3162,7 @@ var _ = Describe("Reconciler", func() {
 			rsc2 := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-2"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-2"}},
 					},
@@ -3171,7 +3179,7 @@ var _ = Describe("Reconciler", func() {
 			rsc1 := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
 					},
@@ -3181,7 +3189,7 @@ var _ = Describe("Reconciler", func() {
 			rsc2 := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-2"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
 					},
@@ -3199,7 +3207,7 @@ var _ = Describe("Reconciler", func() {
 			rsc1 := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
 					},
@@ -3211,7 +3219,7 @@ var _ = Describe("Reconciler", func() {
 			rsc2 := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-2"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
 					},
@@ -3231,7 +3239,7 @@ var _ = Describe("Reconciler", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
 					},
@@ -3249,7 +3257,7 @@ var _ = Describe("Reconciler", func() {
 			rsc1 := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVMThin,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1", ThinPoolName: "thin-1"}},
 					},
@@ -3258,7 +3266,7 @@ var _ = Describe("Reconciler", func() {
 			rsc2 := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-2"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVMThin,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1", ThinPoolName: "thin-2"}},
 					},
@@ -3280,7 +3288,7 @@ var _ = Describe("Reconciler", func() {
 					Generation: 1,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
 					},
@@ -3300,7 +3308,7 @@ var _ = Describe("Reconciler", func() {
 					Generation: 5,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
 					},
@@ -3323,7 +3331,7 @@ var _ = Describe("Reconciler", func() {
 					Generation: 6, // Changed from 5.
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
 					},
@@ -3347,7 +3355,7 @@ var _ = Describe("Reconciler", func() {
 					Generation: 5,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
 					},
@@ -3371,7 +3379,7 @@ var _ = Describe("Reconciler", func() {
 					Generation: 1,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Storage: v1alpha1.ReplicatedStorageClassStorage{
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
 						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
 						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
 							{Name: "lvg-1"},

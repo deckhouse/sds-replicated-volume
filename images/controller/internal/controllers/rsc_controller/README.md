@@ -6,13 +6,14 @@ This controller manages `ReplicatedStorageClass` (RSC) resources by aggregating 
 
 The controller reconciles `ReplicatedStorageClass` status with:
 
-1. **Storage pool management** — auto-generates and manages an RSP based on `spec.storage` configuration
-2. **Configuration snapshot** — resolved configuration from spec, stored in `status.configuration`
-3. **Generations/Revisions** — for quick change detection between RSC and RSP
-4. **Conditions** — 4 conditions describing the current state
-5. **Phase and message** — operational state summary derived from conditions, deletion state, and rollout strategy state
-6. **Volume statistics** — counts of total, aligned, stale, and conflict volumes
-7. **Deletion cleanup** — releases RSP `usedBy` entries and removes finalizer on RSC deletion
+1. **Spec defaulting** — fills controller-managed optional spec fields (`systemNetworkNames`, `configurationRolloutStrategy`, `eligibleNodesConflictResolutionStrategy`, `eligibleNodesPolicy`) with defaults when not set by the user
+2. **Storage pool management** — auto-generates and manages an RSP based on `spec.storage` configuration
+3. **Configuration snapshot** — resolved configuration from spec, stored in `status.configuration`
+4. **Generations/Revisions** — for quick change detection between RSC and RSP
+5. **Conditions** — 4 conditions describing the current state
+6. **Phase and message** — operational state summary derived from conditions, deletion state, and rollout strategy state
+7. **Volume statistics** — counts of total, aligned, stale, and conflict volumes
+8. **Deletion cleanup** — releases RSP `usedBy` entries and removes finalizer on RSC deletion
 
 > **Note:** RSC does not calculate eligible nodes directly. It uses `RSP.Status.EligibleNodes` from the associated storage pool and validates them against topology and FTT/GMDR requirements.
 
@@ -26,7 +27,7 @@ The controller reconciles `ReplicatedStorageClass` status with:
 
 ## Algorithm
 
-The controller creates/updates an RSP from `spec.storage`, validates eligible nodes against topology and FTT/GMDR requirements, and aggregates volume statistics:
+The controller fills optional spec fields with defaults (if not set by the user), creates/updates an RSP from `spec.storage`, validates eligible nodes against topology and FTT/GMDR requirements, and aggregates volume statistics:
 
 ```
 readiness = storagePoolReady AND eligibleNodesValid
@@ -47,6 +48,11 @@ Reconcile (root) [Pure orchestration]
 │       └── remove finalizer from RSC (if RSC still exists)
 ├── reconcileMigrationFromRSP [Target-state driven]
 │   └── migrate spec.storagePool → spec.storage (deprecated field)
+├── Storage nil check → Ready=False InvalidConfiguration, Done
+├── reconcileDefaults [Conditional target evaluation]
+│   └── fill nil optional spec fields (systemNetworkNames, strategies, policy) and patch
+├── reconcileMigrationConfigurationFormat [Conditional target evaluation]
+│   └── nil out old-format status.configuration
 ├── reconcileMetadata [Conditional target evaluation]
 │   └── add finalizer (if not present)
 ├── reconcileRSP [Conditional target evaluation]
@@ -65,7 +71,7 @@ Reconcile (root) [Pure orchestration]
         └── release RSPs no longer referenced by this RSC
 ```
 
-Links to detailed algorithms: [`reconcileRSP`](#reconcilersp-details), [`ensureStoragePool`](#ensurestoragepool-details), [`ensureConfiguration`](#ensureconfiguration-details), [`ensureVolumeSummaryAndConditions`](#ensurevolumesummaryandconditions-details), [`reconcileRSPRelease`](#reconcilersp-release-details)
+Links to detailed algorithms: [`reconcileDefaults`](#reconciledefaults-details), [`reconcileRSP`](#reconcilersp-details), [`ensureStoragePool`](#ensurestoragepool-details), [`ensureConfiguration`](#ensureconfiguration-details), [`ensureVolumeSummaryAndConditions`](#ensurevolumesummaryandconditions-details), [`reconcileRSPRelease`](#reconcilersp-release-details)
 
 ## Algorithm Flow
 
@@ -83,9 +89,18 @@ flowchart TD
 
     ShouldDelete -->|No| Migration{storagePool not empty?}
     Migration -->|Yes| MigrationStep[reconcileMigrationFromRSP]
-    Migration -->|No| Metadata
+    Migration -->|No| CheckStorage
     MigrationStep -->|Done: RSP not found| MigrationDone([Done])
-    MigrationStep -->|Continue| Metadata[reconcileMetadata]
+    MigrationStep -->|Continue| CheckStorage
+
+    CheckStorage{Storage nil?}
+    CheckStorage -->|Yes| StorageInvalid["Ready=False InvalidConfiguration"]
+    StorageInvalid --> StorageInvalidDone([Done])
+    CheckStorage -->|No| NeedsDefaults{needsDefaults?}
+
+    NeedsDefaults -->|Yes| Defaults[reconcileDefaults]
+    NeedsDefaults -->|No| Metadata
+    Defaults --> Metadata[reconcileMetadata]
 
     Metadata --> ReconcileRSP[reconcileRSP]
     ReconcileRSP --> EnsureStoragePool[ensureStoragePool]
@@ -109,6 +124,7 @@ Indicates overall readiness of the storage class configuration.
 | Status | Reason | When |
 |--------|--------|------|
 | True | Ready | Configuration accepted and validated |
+| False | InvalidConfiguration | `spec.storage` is missing (not yet set or webhook not deployed) |
 | False | InsufficientEligibleNodes | RSP eligible nodes do not meet topology and FTT/GMDR requirements |
 | False | WaitingForStoragePool | Waiting for RSP to become ready |
 
@@ -247,6 +263,7 @@ flowchart TD
     end
 
     subgraph reconcilers [Reconcilers]
+        ReconcileDefaults[reconcileDefaults]
         ReconcileRSP[reconcileRSP]
         EnsureStoragePool[ensureStoragePool]
         EnsureConfig[ensureConfiguration]
@@ -265,6 +282,9 @@ flowchart TD
         PhaseField[status.phase]
         MessageField[status.message]
     end
+
+    RSCSpec --> ReconcileDefaults
+    ReconcileDefaults -->|"Fills nil fields, patches spec"| RSCSpec
 
     RSCSpec --> ReconcileRSP
     ReconcileRSP -->|Creates/updates| RSP
@@ -297,6 +317,31 @@ flowchart TD
 ---
 
 ## Detailed Algorithms
+
+### reconcileDefaults Details
+
+**Purpose:** Fills controller-managed optional spec fields with default values when they are nil. This handles both old RSCs created before these fields existed and new RSCs that omit them. After this step, `systemNetworkNames`, `configurationRolloutStrategy`, `eligibleNodesConflictResolutionStrategy`, and `eligibleNodesPolicy` are guaranteed non-nil.
+
+**Algorithm:**
+
+```mermaid
+flowchart TD
+    Start([reconcileDefaults]) --> Check{Any nil?}
+    Check -->|No| Skip([Continue])
+    Check -->|Yes| FillDefaults[applySpecDefaults]
+    FillDefaults --> PatchSpec[Patch RSC main resource]
+    PatchSpec -->|Error| Fail([Fail])
+    PatchSpec --> End([Continue])
+```
+
+**Default values:**
+
+| Field | Default |
+|-------|---------|
+| `systemNetworkNames` | `["Internal"]` |
+| `configurationRolloutStrategy` | `{type: RollingUpdate, rollingUpdate: {maxParallel: 5}}` |
+| `eligibleNodesConflictResolutionStrategy` | `{type: RollingRepair, rollingRepair: {maxParallel: 5}}` |
+| `eligibleNodesPolicy` | `{notReadyGracePeriod: 10m}` |
 
 ### ensureStoragePool Details
 

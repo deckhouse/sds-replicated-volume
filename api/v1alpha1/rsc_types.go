@@ -104,7 +104,8 @@ type ReplicatedStorageClassSpec struct {
 	// Storage defines the storage backend configuration for this storage class.
 	// Specifies the type of volumes (LVM or LVMThin) and which LVMVolumeGroups
 	// will be used to allocate space for volumes.
-	Storage ReplicatedStorageClassStorage `json:"storage"`
+	// +optional
+	Storage *ReplicatedStorageClassStorage `json:"storage,omitempty"`
 	// The storage class's reclaim policy. Might be:
 	// - Delete (If the Persistent Volume Claim is deleted, deletes the Persistent Volume and its associated storage as well)
 	// - Retain (If the Persistent Volume Claim is deleted, remains the Persistent Volume and its associated storage)
@@ -201,21 +202,21 @@ type ReplicatedStorageClassSpec struct {
 	// +kubebuilder:validation:MaxItems=1
 	// +kubebuilder:validation:Items={type=string,maxLength=64}
 	// +kubebuilder:validation:XValidation:rule="self.all(n, n == 'Internal')",message="Only 'Internal' network is currently supported"
-	// +kubebuilder:default:={"Internal"}
 	// +listType=set
-	SystemNetworkNames []string `json:"systemNetworkNames"`
+	// +optional
+	SystemNetworkNames []string `json:"systemNetworkNames,omitempty"`
 	// ConfigurationRolloutStrategy defines how configuration changes are applied to existing volumes.
-	// Always present with defaults.
-	// +kubebuilder:default={type: "RollingUpdate", rollingUpdate: {maxParallel: 5}}
-	ConfigurationRolloutStrategy ReplicatedStorageClassConfigurationRolloutStrategy `json:"configurationRolloutStrategy"`
+	// When not specified, the controller fills the default (RollingUpdate, maxParallel=5).
+	// +optional
+	ConfigurationRolloutStrategy *ReplicatedStorageClassConfigurationRolloutStrategy `json:"configurationRolloutStrategy,omitempty"`
 	// EligibleNodesConflictResolutionStrategy defines how the controller handles volumes with eligible nodes conflicts.
-	// Always present with defaults.
-	// +kubebuilder:default={type: "RollingRepair", rollingRepair: {maxParallel: 5}}
-	EligibleNodesConflictResolutionStrategy ReplicatedStorageClassEligibleNodesConflictResolutionStrategy `json:"eligibleNodesConflictResolutionStrategy"`
+	// When not specified, the controller fills the default (RollingRepair, maxParallel=5).
+	// +optional
+	EligibleNodesConflictResolutionStrategy *ReplicatedStorageClassEligibleNodesConflictResolutionStrategy `json:"eligibleNodesConflictResolutionStrategy,omitempty"`
 	// EligibleNodesPolicy defines policies for managing eligible nodes.
-	// Always present with defaults.
-	// +kubebuilder:default={notReadyGracePeriod: "10m"}
-	EligibleNodesPolicy ReplicatedStoragePoolEligibleNodesPolicy `json:"eligibleNodesPolicy"`
+	// When not specified, the controller fills the default (notReadyGracePeriod=10m).
+	// +optional
+	EligibleNodesPolicy *ReplicatedStoragePoolEligibleNodesPolicy `json:"eligibleNodesPolicy,omitempty"`
 }
 
 // ReplicatedStorageClassStorage defines the storage backend configuration for RSC.
@@ -362,8 +363,7 @@ func (t ReplicatedStorageClassTopology) String() string {
 type ReplicatedStorageClassConfigurationRolloutStrategy struct {
 	// Type specifies the rollout strategy type.
 	// +kubebuilder:validation:Enum=RollingUpdate;NewVolumesOnly
-	// +kubebuilder:default:=RollingUpdate
-	Type ReplicatedStorageClassConfigurationRolloutStrategyType `json:"type,omitempty"`
+	Type ReplicatedStorageClassConfigurationRolloutStrategyType `json:"type"`
 	// RollingUpdate configures parameters for RollingUpdate strategy.
 	// Required when type is RollingUpdate.
 	// +optional
@@ -399,8 +399,7 @@ type ReplicatedStorageClassConfigurationRollingUpdateStrategy struct {
 type ReplicatedStorageClassEligibleNodesConflictResolutionStrategy struct {
 	// Type specifies the conflict resolution strategy type.
 	// +kubebuilder:validation:Enum=Manual;RollingRepair
-	// +kubebuilder:default:=RollingRepair
-	Type ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType `json:"type,omitempty"`
+	Type ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType `json:"type"`
 	// RollingRepair configures parameters for RollingRepair conflict resolution strategy.
 	// Required when type is RollingRepair.
 	// +optional
