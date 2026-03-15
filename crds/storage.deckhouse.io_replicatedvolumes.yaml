@@ -172,7 +172,6 @@ spec:
                 - message: size must be greater than 0
                   rule: quantity(string(self)).isGreaterThan(quantity('0'))
             required:
-            - maxAttachments
             - size
             type: object
             x-kubernetes-validations:

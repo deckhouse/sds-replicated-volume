@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -280,7 +281,7 @@ func BuildReplicatedVolumeSpec(
 	return srv.ReplicatedVolumeSpec{
 		Size:                       size,
 		ReplicatedStorageClassName: rscName,
-		MaxAttachments:             2,
+		MaxAttachments:             ptr.To(byte(2)),
 	}
 }
 

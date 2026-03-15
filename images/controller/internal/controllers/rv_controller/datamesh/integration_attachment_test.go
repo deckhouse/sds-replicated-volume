@@ -224,7 +224,7 @@ var _ = Describe("integration: attachment", func() {
 			},
 			nil, nil,
 		)
-		rv.Spec.MaxAttachments = 2
+		rv.Spec.MaxAttachments = ptr.To(byte(2))
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRReady("rv-1-0", "node-1", 5),
 			mkRVRReady("rv-1-1", "node-2", 5),
@@ -261,7 +261,7 @@ var _ = Describe("integration: attachment", func() {
 			},
 			nil, nil,
 		)
-		rv.Spec.MaxAttachments = 3
+		rv.Spec.MaxAttachments = ptr.To(byte(3))
 		rv.Status.Configuration.VolumeAccess = v1alpha1.VolumeAccessLocal
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRReady("rv-1-0", "node-1", 5),
