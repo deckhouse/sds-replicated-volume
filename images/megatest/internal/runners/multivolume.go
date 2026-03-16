@@ -192,10 +192,42 @@ func (m *MultiVolume) cleanup(reason error) {
 	}
 }
 
+const (
+	attacherPeriodMinFloor = 60 * time.Second
+	attacherPeriodMaxFloor = 120 * time.Second
+)
+
+// resolveAttacherPeriod computes the effective attacher period.
+// If CLI flags are zero (default), derives from VolumePeriod with floor clamps.
+func (m *MultiVolume) resolveAttacherPeriod() config.DurationMinMax {
+	minP := m.cfg.AttacherPeriod.Min
+	maxP := m.cfg.AttacherPeriod.Max
+
+	if minP == 0 {
+		minP = m.cfg.VolumePeriod.Min
+	}
+	if maxP == 0 {
+		maxP = m.cfg.VolumePeriod.Max / 2
+	}
+
+	if minP < attacherPeriodMinFloor {
+		minP = attacherPeriodMinFloor
+	}
+	if maxP < attacherPeriodMaxFloor {
+		maxP = attacherPeriodMaxFloor
+	}
+	if maxP < minP {
+		maxP = minP
+	}
+
+	return config.DurationMinMax{Min: minP, Max: maxP}
+}
+
 func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName string, storageClass string, volumeLifetime time.Duration) {
 	cfg := config.VolumeMainConfig{
 		StorageClassName:             storageClass,
 		VolumeLifetime:               volumeLifetime,
+		AttacherPeriod:               m.resolveAttacherPeriod(),
 		InitialSize:                  resource.MustParse("100Mi"),
 		EnableVolumeResizer:          m.cfg.EnableVolumeResizer,
 		EnableVolumeReplicaDestroyer: m.cfg.EnableVolumeReplicaDestroyer,
