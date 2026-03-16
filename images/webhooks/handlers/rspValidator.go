@@ -45,22 +45,25 @@ func RSPValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		klog.Fatal(err.Error())
+		return nil, fmt.Errorf("failed to create in-cluster config: %w", err)
 	}
 
 	staticClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		klog.Fatal(err)
+		return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
 	}
 
 	cl, err := NewKubeClient("")
 	if err != nil {
-		klog.Fatal(err)
+		return nil, fmt.Errorf("failed to create kube client: %w", err)
 	}
 
 	var ephemeralNodesList []string
 
-	nodes, _ := staticClient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: "node.deckhouse.io/type=CloudEphemeral"})
+	nodes, err := staticClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: "node.deckhouse.io/type=CloudEphemeral"})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list nodes: %w", err)
+	}
 	for _, node := range nodes.Items {
 		ephemeralNodesList = append(ephemeralNodesList, node.Name)
 	}
@@ -69,7 +72,7 @@ func RSPValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 
 	err = cl.List(ctx, listDevice)
 	if err != nil {
-		klog.Fatal(err)
+		return nil, fmt.Errorf("failed to list LVMVolumeGroups: %w", err)
 	}
 
 	errMsg := ""
