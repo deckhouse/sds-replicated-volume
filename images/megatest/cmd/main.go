@@ -115,6 +115,7 @@ func main() {
 		VolumeStep:                   config.StepMinMax{Min: opt.VolumeStepMin, Max: opt.VolumeStepMax},
 		StepPeriod:                   config.DurationMinMax{Min: opt.StepPeriodMin, Max: opt.StepPeriodMax},
 		VolumePeriod:                 config.DurationMinMax{Min: opt.VolumePeriodMin, Max: opt.VolumePeriodMax},
+		AttacherPeriod:               config.DurationMinMax{Min: opt.AttacherPeriodMin, Max: opt.AttacherPeriodMax},
 		EnablePodDestroyer:           opt.EnablePodDestroyer,
 		EnableVolumeResizer:          opt.EnableVolumeResizer,
 		EnableVolumeReplicaDestroyer: opt.EnableVolumeReplicaDestroyer,

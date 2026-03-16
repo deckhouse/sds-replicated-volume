@@ -44,14 +44,18 @@ import (
 )
 
 const (
-	// informerResyncPeriod is the resync period for shared informers (RV, RVA).
+	// informerResyncPeriod is the resync period for shared informers.
 	// Normally events arrive instantly via Watch. Resync is a safety net
 	// for rare cases (~1%) when Watch connection drops and events are missed.
 	// Every resync period, informer re-lists all objects to ensure cache is accurate.
 	informerResyncPeriod = 30 * time.Second
 
-	// nodesCacheTTL is the time-to-live for the nodes cache.
-	nodesCacheTTL = 30 * time.Second
+	// Informer index keys for efficient lookup by parent resource name.
+	indexRVAByRVName = "spec.replicatedVolumeName"
+	indexRVRByRVName = "spec.replicatedVolumeName"
+
+	// storageNodeLabel is the label used to identify storage nodes.
+	storageNodeLabel = "storage.deckhouse.io/sds-replicated-volume-node"
 )
 
 // Client wraps a controller-runtime client with helper methods
@@ -59,11 +63,6 @@ type Client struct {
 	cl     client.Client
 	cfg    *rest.Config
 	scheme *runtime.Scheme
-
-	// Cached nodes with TTL
-	cachedNodes    []corev1.Node
-	nodesCacheTime time.Time
-	nodesMutex     sync.RWMutex
 
 	// RV informer with dispatcher for VolumeCheckers.
 	// Uses dispatcher pattern instead of per-checker handlers for efficiency:
@@ -75,7 +74,15 @@ type Client struct {
 	// RVA informer for ReplicatedVolumeAttachment cache.
 	// Used by WaitForRVAReady and other attachment-related waits
 	// instead of direct GET polling (eliminates millions of API calls).
+	// Indexed by spec.replicatedVolumeName for efficient per-RV lookups.
 	rvaInformer cache.SharedIndexInformer
+
+	// RVR informer for ReplicatedVolumeReplica cache.
+	// Indexed by spec.replicatedVolumeName.
+	rvrInformer cache.SharedIndexInformer
+
+	// Node informer for cluster nodes.
+	nodeInformer cache.SharedIndexInformer
 
 	informerMu    sync.RWMutex
 	informerStop  chan struct{}
@@ -185,26 +192,79 @@ func (c *Client) initInformers() error {
 		},
 	})
 
-	// --- RVA informer ---
+	// --- RVA informer (indexed by RV name) ---
 	c.rvaInformer = cache.NewSharedIndexInformer(
 		crdListWatch(restClient, "replicatedvolumeattachments", &v1alpha1.ReplicatedVolumeAttachmentList{}),
 		&v1alpha1.ReplicatedVolumeAttachment{},
 		informerResyncPeriod,
-		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+		cache.Indexers{
+			cache.NamespaceIndex: cache.MetaNamespaceIndexFunc,
+			indexRVAByRVName: func(obj interface{}) ([]string, error) {
+				rva, ok := obj.(*v1alpha1.ReplicatedVolumeAttachment)
+				if !ok {
+					return nil, nil
+				}
+				return []string{rva.Spec.ReplicatedVolumeName}, nil
+			},
+		},
 	)
 
-	// Start both informers in background
+	// --- RVR informer (indexed by RV name) ---
+	c.rvrInformer = cache.NewSharedIndexInformer(
+		crdListWatch(restClient, "replicatedvolumereplicas", &v1alpha1.ReplicatedVolumeReplicaList{}),
+		&v1alpha1.ReplicatedVolumeReplica{},
+		informerResyncPeriod,
+		cache.Indexers{
+			cache.NamespaceIndex: cache.MetaNamespaceIndexFunc,
+			indexRVRByRVName: func(obj interface{}) ([]string, error) {
+				rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+				if !ok {
+					return nil, nil
+				}
+				return []string{rvr.Spec.ReplicatedVolumeName}, nil
+			},
+		},
+	)
+
+	// --- Node informer (filtered by storage label) ---
+	coreCfg := rest.CopyConfig(c.cfg)
+	coreCfg.GroupVersion = &corev1.SchemeGroupVersion
+	coreCfg.APIPath = "/api"
+	coreCfg.NegotiatedSerializer = serializer.NewCodecFactory(c.scheme).WithoutConversion()
+
+	coreRestClient, err := rest.RESTClientFor(coreCfg)
+	if err != nil {
+		return fmt.Errorf("creating core REST client for Node informer: %w", err)
+	}
+
+	c.nodeInformer = cache.NewSharedIndexInformer(
+		cache.NewFilteredListWatchFromClient(coreRestClient, "nodes", "", func(options *metav1.ListOptions) {
+			options.LabelSelector = storageNodeLabel
+		}),
+		&corev1.Node{},
+		informerResyncPeriod,
+		cache.Indexers{},
+	)
+
+	// Start all informers in background
 	go c.rvInformer.Run(c.informerStop)
 	go c.rvaInformer.Run(c.informerStop)
+	go c.rvrInformer.Run(c.informerStop)
+	go c.nodeInformer.Run(c.informerStop)
 
-	// Wait for both caches to sync
+	// Wait for all caches to sync
 	syncCtx, syncCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer syncCancel()
 
 	syncDone := make(chan struct{})
 	var syncErr error
 	go func() {
-		if !cache.WaitForCacheSync(c.informerStop, c.rvInformer.HasSynced, c.rvaInformer.HasSynced) {
+		if !cache.WaitForCacheSync(c.informerStop,
+			c.rvInformer.HasSynced,
+			c.rvaInformer.HasSynced,
+			c.rvrInformer.HasSynced,
+			c.nodeInformer.HasSynced,
+		) {
 			syncErr = fmt.Errorf("informer cache sync failed")
 		}
 		close(syncDone)
@@ -368,9 +428,9 @@ func (c *Client) Client() client.Client {
 	return c.cl
 }
 
-// GetRandomNodes selects n random unique nodes from the cluster
-func (c *Client) GetRandomNodes(ctx context.Context, n int) ([]corev1.Node, error) {
-	nodes, err := c.ListNodes(ctx)
+// GetRandomNodes selects n random unique nodes from the informer cache.
+func (c *Client) GetRandomNodes(n int) ([]corev1.Node, error) {
+	nodes, err := c.ListNodesFromCache()
 	if err != nil {
 		return nil, err
 	}
@@ -387,51 +447,23 @@ func (c *Client) GetRandomNodes(ctx context.Context, n int) ([]corev1.Node, erro
 	return nodes[:n], nil
 }
 
-// ListNodes returns all nodes in the cluster with label storage.deckhouse.io/sds-replicated-volume-node=""
-// The result is cached with TTL of nodesCacheTTL
-func (c *Client) ListNodes(ctx context.Context) ([]corev1.Node, error) {
-	c.nodesMutex.RLock()
-	if c.cachedNodes != nil && time.Since(c.nodesCacheTime) < nodesCacheTTL {
-		nodes := make([]corev1.Node, len(c.cachedNodes))
-		for i := range c.cachedNodes {
-			nodes[i] = *c.cachedNodes[i].DeepCopy()
+// ListNodesFromCache returns all storage nodes from the Node informer cache.
+func (c *Client) ListNodesFromCache() ([]corev1.Node, error) {
+	c.informerMu.RLock()
+	defer c.informerMu.RUnlock()
+
+	if !c.informerReady {
+		return nil, fmt.Errorf("Node informer is not ready")
+	}
+
+	objs := c.nodeInformer.GetStore().List()
+	nodes := make([]corev1.Node, 0, len(objs))
+	for _, obj := range objs {
+		node, ok := obj.(*corev1.Node)
+		if !ok {
+			continue
 		}
-		c.nodesMutex.RUnlock()
-		return nodes, nil
-	}
-	c.nodesMutex.RUnlock()
-
-	c.nodesMutex.Lock()
-	defer c.nodesMutex.Unlock()
-
-	// Double-check after acquiring write lock
-	if c.cachedNodes != nil && time.Since(c.nodesCacheTime) < nodesCacheTTL {
-		nodes := make([]corev1.Node, len(c.cachedNodes))
-		for i := range c.cachedNodes {
-			nodes[i] = *c.cachedNodes[i].DeepCopy()
-		}
-		return nodes, nil
-	}
-
-	nodeList := &corev1.NodeList{}
-	err := c.cl.List(ctx, nodeList, client.MatchingLabels{
-		"storage.deckhouse.io/sds-replicated-volume-node": "",
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Cache the result with timestamp
-	c.cachedNodes = make([]corev1.Node, len(nodeList.Items))
-	for i := range nodeList.Items {
-		c.cachedNodes[i] = *nodeList.Items[i].DeepCopy()
-	}
-	c.nodesCacheTime = time.Now()
-
-	// Return a deep copy to prevent external modifications
-	nodes := make([]corev1.Node, len(c.cachedNodes))
-	for i := range c.cachedNodes {
-		nodes[i] = *c.cachedNodes[i].DeepCopy()
+		nodes = append(nodes, *node)
 	}
 	return nodes, nil
 }
@@ -446,7 +478,8 @@ func (c *Client) DeleteRV(ctx context.Context, rv *v1alpha1.ReplicatedVolume) er
 	return c.cl.Delete(ctx, rv)
 }
 
-// GetRV gets a ReplicatedVolume by name (from API server, not cache)
+// GetRV gets a ReplicatedVolume by name directly from the API server (not cache).
+// Prefer GetRVFromCache for non-critical reads.
 func (c *Client) GetRV(ctx context.Context, name string) (*v1alpha1.ReplicatedVolume, error) {
 	rv := &v1alpha1.ReplicatedVolume{}
 	err := c.cl.Get(ctx, client.ObjectKey{Name: name}, rv)
@@ -507,13 +540,16 @@ func buildRVAName(rvName, nodeName string) string {
 }
 
 // EnsureRVA creates a ReplicatedVolumeAttachment for (rvName, nodeName) if it does not exist.
+// Checks informer cache first, falls back to Create.
 func (c *Client) EnsureRVA(ctx context.Context, rvName, nodeName string) (*v1alpha1.ReplicatedVolumeAttachment, error) {
 	rvaName := buildRVAName(rvName, nodeName)
-	existing := &v1alpha1.ReplicatedVolumeAttachment{}
-	if err := c.cl.Get(ctx, client.ObjectKey{Name: rvaName}, existing); err == nil {
+
+	existing, err := c.GetRVAFromCache(rvaName)
+	if err != nil {
+		return nil, fmt.Errorf("get RVA %s from cache: %w", rvaName, err)
+	}
+	if existing != nil {
 		return existing, nil
-	} else if client.IgnoreNotFound(err) != nil {
-		return nil, fmt.Errorf("get RVA %s: %w", rvaName, err)
 	}
 
 	rva := &v1alpha1.ReplicatedVolumeAttachment{
@@ -532,17 +568,52 @@ func (c *Client) EnsureRVA(ctx context.Context, rvName, nodeName string) (*v1alp
 }
 
 // DeleteRVA deletes a ReplicatedVolumeAttachment for (rvName, nodeName). It is idempotent.
+// Uses informer cache for the existence check.
 func (c *Client) DeleteRVA(ctx context.Context, rvName, nodeName string) error {
 	rvaName := buildRVAName(rvName, nodeName)
-	rva := &v1alpha1.ReplicatedVolumeAttachment{}
-	if err := c.cl.Get(ctx, client.ObjectKey{Name: rvaName}, rva); err != nil {
-		return client.IgnoreNotFound(err)
+
+	existing, err := c.GetRVAFromCache(rvaName)
+	if err != nil {
+		return fmt.Errorf("get RVA %s from cache: %w", rvaName, err)
 	}
-	return client.IgnoreNotFound(c.cl.Delete(ctx, rva))
+	if existing == nil {
+		return nil
+	}
+
+	return client.IgnoreNotFound(c.cl.Delete(ctx, existing))
 }
 
-// ListRVAsByRVName lists non-deleting RVAs for a given RV (cluster-scoped).
-func (c *Client) ListRVAsByRVName(ctx context.Context, rvName string) ([]v1alpha1.ReplicatedVolumeAttachment, error) {
+// ListRVAsByRVName lists non-deleting RVAs for a given RV from the informer cache.
+func (c *Client) ListRVAsByRVName(rvName string) ([]v1alpha1.ReplicatedVolumeAttachment, error) {
+	c.informerMu.RLock()
+	defer c.informerMu.RUnlock()
+
+	if !c.informerReady {
+		return nil, fmt.Errorf("RVA informer is not ready")
+	}
+
+	objs, err := c.rvaInformer.GetIndexer().ByIndex(indexRVAByRVName, rvName)
+	if err != nil {
+		return nil, fmt.Errorf("index lookup for RVA by RV name %q: %w", rvName, err)
+	}
+
+	var out []v1alpha1.ReplicatedVolumeAttachment
+	for _, obj := range objs {
+		rva, ok := obj.(*v1alpha1.ReplicatedVolumeAttachment)
+		if !ok {
+			continue
+		}
+		if !rva.DeletionTimestamp.IsZero() {
+			continue
+		}
+		out = append(out, *rva)
+	}
+	return out, nil
+}
+
+// ListRVAsByRVNameDirect lists non-deleting RVAs for a given RV directly from the API server.
+// Use only when fresh data is required (e.g., before deletion for accurate timing).
+func (c *Client) ListRVAsByRVNameDirect(ctx context.Context, rvName string) ([]v1alpha1.ReplicatedVolumeAttachment, error) {
 	list := &v1alpha1.ReplicatedVolumeAttachmentList{}
 	if err := c.cl.List(ctx, list); err != nil {
 		return nil, err
@@ -593,16 +664,40 @@ func (c *Client) WaitForRVAReady(ctx context.Context, rvName, nodeName string) e
 	}
 }
 
-// ListRVRsByRVName lists all ReplicatedVolumeReplicas for a given RV
-// Filters by spec.replicatedVolumeName field
-func (c *Client) ListRVRsByRVName(ctx context.Context, rvName string) ([]v1alpha1.ReplicatedVolumeReplica, error) {
+// ListRVRsByRVName lists all ReplicatedVolumeReplicas for a given RV from the informer cache.
+func (c *Client) ListRVRsByRVName(rvName string) ([]v1alpha1.ReplicatedVolumeReplica, error) {
+	c.informerMu.RLock()
+	defer c.informerMu.RUnlock()
+
+	if !c.informerReady {
+		return nil, fmt.Errorf("RVR informer is not ready")
+	}
+
+	objs, err := c.rvrInformer.GetIndexer().ByIndex(indexRVRByRVName, rvName)
+	if err != nil {
+		return nil, fmt.Errorf("index lookup for RVR by RV name %q: %w", rvName, err)
+	}
+
+	result := make([]v1alpha1.ReplicatedVolumeReplica, 0, len(objs))
+	for _, obj := range objs {
+		rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+		if !ok {
+			continue
+		}
+		result = append(result, *rvr)
+	}
+	return result, nil
+}
+
+// ListRVRsByRVNameDirect lists all ReplicatedVolumeReplicas for a given RV directly from the API server.
+// Use only when fresh data is required (e.g., for final health diagnostics).
+func (c *Client) ListRVRsByRVNameDirect(ctx context.Context, rvName string) ([]v1alpha1.ReplicatedVolumeReplica, error) {
 	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	err := c.cl.List(ctx, rvrList)
 	if err != nil {
 		return nil, err
 	}
 
-	// Filter by replicatedVolumeName
 	var result []v1alpha1.ReplicatedVolumeReplica
 	for _, rvr := range rvrList.Items {
 		if rvr.Spec.ReplicatedVolumeName == rvName {

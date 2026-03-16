@@ -69,8 +69,8 @@ func (v *VolumeReplicaDestroyer) Run(ctx context.Context) error {
 func (v *VolumeReplicaDestroyer) doDestroy(ctx context.Context) {
 	startTime := time.Now()
 
-	// Get list of RVRs for this RV
-	rvrs, err := v.client.ListRVRsByRVName(ctx, v.rvName)
+	// Get list of RVRs for this RV from cache
+	rvrs, err := v.client.ListRVRsByRVName(v.rvName)
 	if err != nil {
 		v.log.Error("failed to list RVRs", "error", err)
 		return
