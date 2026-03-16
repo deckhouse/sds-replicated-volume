@@ -111,7 +111,7 @@ func (v *VolumeChecker) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case rv := <-v.updateCh:
-			v.processRVUpdate(ctx, rv)
+			v.processRVUpdate(rv)
 		}
 	}
 }
@@ -158,11 +158,11 @@ func (v *VolumeChecker) checkInitialState(ctx context.Context) {
 	}
 
 	// Reuse processRVUpdate - it will detect and log changes from initial healthy state
-	v.processRVUpdate(ctx, rv)
+	v.processRVUpdate(rv)
 }
 
 // processRVUpdate checks EffectiveLayout (FTT and GMDR) and logs transitions.
-func (v *VolumeChecker) processRVUpdate(ctx context.Context, rv *v1alpha1.ReplicatedVolume) {
+func (v *VolumeChecker) processRVUpdate(rv *v1alpha1.ReplicatedVolume) {
 	if rv == nil {
 		v.log.Debug("RV is nil, skipping health check")
 		return
@@ -189,7 +189,7 @@ func (v *VolumeChecker) processRVUpdate(ctx context.Context, rv *v1alpha1.Replic
 			"message", el.Message)
 
 		if !newFTTHealthy {
-			v.logHealthDetails(ctx, "FTT", el)
+			v.logHealthDetails("FTT", el)
 		}
 	}
 
@@ -209,7 +209,7 @@ func (v *VolumeChecker) processRVUpdate(ctx context.Context, rv *v1alpha1.Replic
 			"message", el.Message)
 
 		if !newGMDRHealthy {
-			v.logHealthDetails(ctx, "GMDR", el)
+			v.logHealthDetails("GMDR", el)
 		}
 	}
 }
@@ -222,18 +222,8 @@ func fmtBool(b bool) string {
 }
 
 // logHealthDetails logs EffectiveLayout summary and failed RVRs when health is unhealthy.
-func (v *VolumeChecker) logHealthDetails(ctx context.Context, metric string, el v1alpha1.ReplicatedVolumeEffectiveLayout) {
-	if ctx.Err() != nil {
-		v.log.Warn("health details (context cancelled, skipped RVR listing)",
-			"metric", metric,
-			"message", el.Message)
-		return
-	}
-
-	callCtx, cancel := context.WithTimeout(ctx, apiCallTimeout)
-	defer cancel()
-
-	rvrs, err := v.client.ListRVRsByRVName(callCtx, v.rvName)
+func (v *VolumeChecker) logHealthDetails(metric string, el v1alpha1.ReplicatedVolumeEffectiveLayout) {
+	rvrs, err := v.client.ListRVRsByRVName(v.rvName)
 	if err != nil {
 		v.log.Warn("health details",
 			"metric", metric,
