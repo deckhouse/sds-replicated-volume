@@ -94,13 +94,9 @@ spec:
               > Note that this field is in read-only mode.
             properties:
               configurationRolloutStrategy:
-                default:
-                  rollingUpdate:
-                    maxParallel: 5
-                  type: RollingUpdate
                 description: |-
                   ConfigurationRolloutStrategy defines how configuration changes are applied to existing volumes.
-                  Always present with defaults.
+                  When not specified, the controller fills the default (RollingUpdate, maxParallel=5).
                 properties:
                   rollingUpdate:
                     description: |-
@@ -119,12 +115,13 @@ spec:
                     - maxParallel
                     type: object
                   type:
-                    default: RollingUpdate
                     description: Type specifies the rollout strategy type.
                     enum:
                     - RollingUpdate
                     - NewVolumesOnly
                     type: string
+                required:
+                - type
                 type: object
                 x-kubernetes-validations:
                 - message: rollingUpdate is required when type is RollingUpdate
@@ -132,13 +129,9 @@ spec:
                 - message: rollingUpdate must not be set when type is not RollingUpdate
                   rule: self.type == 'RollingUpdate' || !has(self.rollingUpdate)
               eligibleNodesConflictResolutionStrategy:
-                default:
-                  rollingRepair:
-                    maxParallel: 5
-                  type: RollingRepair
                 description: |-
                   EligibleNodesConflictResolutionStrategy defines how the controller handles volumes with eligible nodes conflicts.
-                  Always present with defaults.
+                  When not specified, the controller fills the default (RollingRepair, maxParallel=5).
                 properties:
                   rollingRepair:
                     description: |-
@@ -157,12 +150,13 @@ spec:
                     - maxParallel
                     type: object
                   type:
-                    default: RollingRepair
                     description: Type specifies the conflict resolution strategy type.
                     enum:
                     - Manual
                     - RollingRepair
                     type: string
+                required:
+                - type
                 type: object
                 x-kubernetes-validations:
                 - message: rollingRepair is required when type is RollingRepair
@@ -170,11 +164,9 @@ spec:
                 - message: rollingRepair must not be set when type is not RollingRepair
                   rule: self.type == 'RollingRepair' || !has(self.rollingRepair)
               eligibleNodesPolicy:
-                default:
-                  notReadyGracePeriod: 10m
                 description: |-
                   EligibleNodesPolicy defines policies for managing eligible nodes.
-                  Always present with defaults.
+                  When not specified, the controller fills the default (notReadyGracePeriod=10m).
                 properties:
                   notReadyGracePeriod:
                     default: 10m
@@ -355,8 +347,6 @@ spec:
                 - message: StoragePool cannot be added or changed, only removed
                   rule: size(self) == 0 || self == oldSelf
               systemNetworkNames:
-                default:
-                - Internal
                 description: |-
                   SystemNetworkNames specifies network names used for DRBD replication traffic.
                   At least one network name must be specified. Each name is limited to 64 characters.
@@ -426,12 +416,7 @@ spec:
                 type: array
                 x-kubernetes-list-type: set
             required:
-            - configurationRolloutStrategy
-            - eligibleNodesConflictResolutionStrategy
-            - eligibleNodesPolicy
             - reclaimPolicy
-            - storage
-            - systemNetworkNames
             - topology
             type: object
             x-kubernetes-validations:

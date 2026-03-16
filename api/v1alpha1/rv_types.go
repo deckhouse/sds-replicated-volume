@@ -104,11 +104,11 @@ type ReplicatedVolumeSpec struct {
 	//     different Diskful replicas may apply writes in different order, leading to divergent data.
 	//   - Use at your own risk and with full understanding of the implications.
 	//
-	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=32
 	// +kubebuilder:default=1
-	MaxAttachments byte `json:"maxAttachments"`
+	// +optional
+	MaxAttachments *byte `json:"maxAttachments,omitempty"`
 }
 
 // ReplicatedVolumeConfigurationMode enumerates possible values for ReplicatedVolume spec.configurationMode field.

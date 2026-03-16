@@ -25,6 +25,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -86,6 +87,27 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Reconcile migration from RSP (deprecated storagePool field).
 	if rsc.Spec.StoragePool != "" { //nolint:staticcheck // SA1019: migration from deprecated StoragePool
 		if outcome := r.reconcileMigrationFromRSP(rf.Ctx(), rsc); outcome.ShouldReturn() {
+			return outcome.ToCtrl()
+		}
+	}
+
+	// Validate that Storage is present (after migration had a chance to fill it).
+	if rsc.Spec.Storage == nil {
+		base := rsc.DeepCopy()
+		applyReadyCondFalse(rsc,
+			v1alpha1.ReplicatedStorageClassCondReadyReasonInvalidConfiguration,
+			"spec.storage is required")
+		phase, message := computePhaseAndMessage(rsc)
+		applyPhase(rsc, phase, message)
+		if err := r.patchRSCStatus(rf.Ctx(), rsc, base); err != nil {
+			return rf.Fail(err).ToCtrl()
+		}
+		return rf.Done().ToCtrl()
+	}
+
+	// Fill controller-managed defaults for optional spec fields.
+	if needsDefaults(rsc) {
+		if outcome := r.reconcileDefaults(rf.Ctx(), rsc); outcome.ShouldReturn() {
 			return outcome.ToCtrl()
 		}
 	}
@@ -232,7 +254,7 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 	lvmVolumeGroups := make([]v1alpha1.ReplicatedStoragePoolLVMVolumeGroups, len(rsp.Spec.LVMVolumeGroups))
 	copy(lvmVolumeGroups, rsp.Spec.LVMVolumeGroups)
 
-	rsc.Spec.Storage = v1alpha1.ReplicatedStorageClassStorage{
+	rsc.Spec.Storage = &v1alpha1.ReplicatedStorageClassStorage{
 		Type:            rsp.Spec.Type,
 		LVMVolumeGroups: lvmVolumeGroups,
 	}
@@ -243,6 +265,68 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 	}
 
 	return rf.Continue()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: defaults
+//
+
+// needsDefaults returns true if any controller-managed optional spec fields are nil.
+func needsDefaults(rsc *v1alpha1.ReplicatedStorageClass) bool {
+	return rsc.Spec.SystemNetworkNames == nil ||
+		rsc.Spec.ConfigurationRolloutStrategy == nil ||
+		rsc.Spec.EligibleNodesConflictResolutionStrategy == nil ||
+		rsc.Spec.EligibleNodesPolicy == nil
+}
+
+// reconcileDefaults fills controller-managed defaults for optional spec fields and persists them.
+// After this step, SystemNetworkNames, ConfigurationRolloutStrategy,
+// EligibleNodesConflictResolutionStrategy, and EligibleNodesPolicy are guaranteed non-nil.
+//
+// Reconcile pattern: Conditional target evaluation
+func (r *Reconciler) reconcileDefaults(
+	ctx context.Context,
+	rsc *v1alpha1.ReplicatedStorageClass,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "defaults")
+	defer rf.OnEnd(&outcome)
+
+	base := rsc.DeepCopy()
+	applySpecDefaults(rsc)
+
+	if err := r.patchRSC(rf.Ctx(), rsc, base); err != nil {
+		return rf.Fail(err)
+	}
+
+	return rf.Continue()
+}
+
+// applySpecDefaults fills nil optional spec fields with default values.
+func applySpecDefaults(rsc *v1alpha1.ReplicatedStorageClass) {
+	if rsc.Spec.SystemNetworkNames == nil {
+		rsc.Spec.SystemNetworkNames = []string{"Internal"}
+	}
+	if rsc.Spec.ConfigurationRolloutStrategy == nil {
+		rsc.Spec.ConfigurationRolloutStrategy = &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+			Type: v1alpha1.ConfigurationRolloutRollingUpdate,
+			RollingUpdate: &v1alpha1.ReplicatedStorageClassConfigurationRollingUpdateStrategy{
+				MaxParallel: 5,
+			},
+		}
+	}
+	if rsc.Spec.EligibleNodesConflictResolutionStrategy == nil {
+		rsc.Spec.EligibleNodesConflictResolutionStrategy = &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+			Type: v1alpha1.EligibleNodesConflictResolutionRollingRepair,
+			RollingRepair: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair{
+				MaxParallel: 5,
+			},
+		}
+	}
+	if rsc.Spec.EligibleNodesPolicy == nil {
+		rsc.Spec.EligibleNodesPolicy = &v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
+			NotReadyGracePeriod: metav1.Duration{Duration: 10 * time.Minute},
+		}
+	}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
