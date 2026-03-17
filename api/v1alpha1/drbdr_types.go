@@ -246,6 +246,12 @@ type DRBDResourceStatus struct {
 	// +optional
 	DeviceOpen *bool `json:"deviceOpen,omitempty"`
 
+	// Size is the usable capacity of the DRBD upper device in bytes.
+	// Smaller than spec.size because DRBD internal metadata is stored on
+	// the backing device. Nil when the resource is diskless or down.
+	// +optional
+	Size *resource.Quantity `json:"size,omitempty"`
+
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))",message="addresses[].systemNetworkName must be unique"
 	// +kubebuilder:validation:MaxItems=10
 	// +listType=atomic
@@ -304,9 +310,6 @@ type DRBDResourceActiveConfiguration struct {
 	// +kubebuilder:validation:Enum=Up;Down
 	// +optional
 	State DRBDResourceState `json:"state,omitempty"`
-
-	// +optional
-	Size *resource.Quantity `json:"size,omitempty"`
 
 	// +kubebuilder:validation:Enum=Primary;Secondary
 	// +optional
