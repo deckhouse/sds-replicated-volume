@@ -85,6 +85,10 @@ spec:
                 fieldPath: spec.nodeName
           - name: SLOGH_CONFIG_PATH
             value: "/etc/config/slogh.cfg"
+          - name: LVM_SYSTEM_DIR
+            value: "/tmp/lvm"
+          - name: HOME
+            value: "/tmp"
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
