@@ -78,6 +78,9 @@ spec:
           - name: webhook-certs
             mountPath: /etc/webhook/certs
             readOnly: true
+        env:
+          - name: NEW_CONTROL_PLANE
+            value: "true"
         readinessProbe:
           httpGet:
             path: /healthz
