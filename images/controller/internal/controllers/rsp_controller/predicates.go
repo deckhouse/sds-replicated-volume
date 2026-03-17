@@ -32,9 +32,22 @@ import (
 )
 
 // rspPredicates returns predicates for ReplicatedStoragePool events.
-// Filters to only react to generation changes (spec updates).
+// Filters to only react to generation changes (spec updates) and resync events
+// (same resourceVersion — recovers lost queue items).
 func rspPredicates() []predicate.Predicate {
-	return []predicate.Predicate{predicate.GenerationChangedPredicate{}}
+	return []predicate.Predicate{
+		predicate.TypedFuncs[client.Object]{
+			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				if e.ObjectNew == nil || e.ObjectOld == nil {
+					return false
+				}
+				if e.ObjectOld.GetResourceVersion() == e.ObjectNew.GetResourceVersion() {
+					return true
+				}
+				return e.ObjectNew.GetGeneration() != e.ObjectOld.GetGeneration()
+			},
+		},
+	}
 }
 
 // nodePredicates returns predicates for Node events.

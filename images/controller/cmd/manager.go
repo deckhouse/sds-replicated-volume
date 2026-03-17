@@ -35,6 +35,7 @@ import (
 
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/controlleroptions"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/scheme"
 )
 
@@ -63,7 +64,14 @@ func newManager(
 
 	// Configure cache to only watch agent pods in the controller's namespace.
 	// This reduces memory usage and API server load.
+	//
+	// SyncPeriod enables periodic informer resync (synthetic Update events from
+	// in-memory cache, 0 API calls). Combined with the resync passthrough in
+	// controller predicates, this recovers items lost by the workqueue under
+	// high 409-conflict load. Tied to MaxBackoffDelay so the resync interval
+	// matches the maximum retry window.
 	cacheOpt := cache.Options{
+		SyncPeriod: ptr.To(controlleroptions.MaxBackoffDelay),
 		ByObject: map[client.Object]cache.ByObject{
 			&corev1.Pod{}: {
 				Namespaces: map[string]cache.Config{

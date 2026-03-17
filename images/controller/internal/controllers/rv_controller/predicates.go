@@ -43,6 +43,12 @@ func rvPredicates() []predicate.Predicate {
 					return true
 				}
 
+				// Pass resync events through (same object delivered as both old and new).
+				// This recovers items lost by the workqueue under high contention.
+				if e.ObjectOld.GetResourceVersion() == e.ObjectNew.GetResourceVersion() {
+					return true
+				}
+
 				// React to Generation change (Spec changes).
 				if e.ObjectNew.GetGeneration() != e.ObjectOld.GetGeneration() {
 					return true
