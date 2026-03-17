@@ -51,13 +51,22 @@ TestDRBDResource
 │       not own. Cleanup tears down the resource via drbdsetup down.
 │
 ├── Rename — actualNameOnTheNode rename flow
-│       Creates a diskless DRBDResource, waits for Configured=True.
-│       Renames the DRBD resource on the node from sdsrv-{name} to
-│       custom-{name} via drbdsetup rename-resource. Patches the K8S
-│       object to set actualNameOnTheNode=custom-{name}. Waits for
-│       the agent to rename it back to sdsrv-{name}, clear
-│       actualNameOnTheNode, and reach Configured=True. Cleanup
-│       reverts the actualNameOnTheNode patch.
+│   │   Creates a diskless DRBDResource, waits for Configured=True.
+│   │   Sets maintenance mode to guard against the agent re-creating
+│   │   the DRBD resource during the rename window. Renames the DRBD
+│   │   resource on the node from sdsrv-{name} to custom-{name} via
+│   │   drbdsetup rename-resource. Patches actualNameOnTheNode and
+│   │   clears maintenance in a single patch. Waits for the agent to
+│   │   rename it back to sdsrv-{name}, clear actualNameOnTheNode,
+│   │   and reach Configured=True.
+│   │
+│   └── MaintenanceModeSkipsRename
+│       Sets maintenance mode, renames the DRBD resource on the node
+│       to custom-mm-{name}, patches actualNameOnTheNode. Asserts the
+│       agent skips the rename (Configured=False/InMaintenance) and
+│       the DRBD resource on the node still has the custom name.
+│       Cleanup reverts actualNameOnTheNode, renames DRBD back on the
+│       node, then clears maintenance mode.
 ├── DeviceUUID — DRBD metadata protection (parallel)
 │   │   Covers device-uuid decision table: never overwrite existing metadata (G1),
 │   │   never attach a foreign disk (G2).
@@ -146,8 +155,14 @@ Every subtest's cleanup exercises a teardown path:
   on the node and verifies it survives after the scanner processes events.
   Cleanup tears down the resource via drbdsetup down.
 
-- **Rename cleanup**: reverts the actualNameOnTheNode patch. Since the
-  agent already cleared it and renamed the DRBD resource back to
-  standard name, the revert is a no-op.
+- **Rename cleanup**: reverts the combined actualNameOnTheNode +
+  maintenance patch, then reverts the maintenance-mode-only patch.
+  Since the agent already cleared actualNameOnTheNode and renamed
+  the DRBD resource back, the reverts are effectively no-ops.
+
+- **MaintenanceModeSkipsRename cleanup**: reverts actualNameOnTheNode,
+  renames the DRBD resource back to the standard name on the node,
+  then clears maintenance mode. The agent reconciles normally and
+  reaches Configured=True.
 - **ForeignDisk cleanup**: restores the correct device-uuid on disk after
   writing a fake UUID. Verifies the agent recovers from the error.
