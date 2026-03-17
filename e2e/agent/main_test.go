@@ -72,7 +72,11 @@ func TestDRBDResource(t *testing.T) {
 	})
 
 	e.Run("Rename", func(e envtesting.E) {
-		suite.SetupRename(e, cl, cluster, ne, "rn", 0)
+		drbdr := suite.SetupRename(e, cl, cluster, ne, "rn", 0)
+
+		e.Run("MaintenanceModeSkipsRename", func(e envtesting.E) {
+			suite.SetupMaintenanceModeWithRename(e, cl, ne, drbdr, cluster)
+		})
 	})
 
 	e.Run("DeviceUUID", func(e envtesting.E) {

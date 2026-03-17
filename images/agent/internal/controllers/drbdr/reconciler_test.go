@@ -214,6 +214,27 @@ func TestReconciler_Reconcile(t *testing.T) {
 			},
 		},
 
+		// Custom DRBD resource name + maintenance mode - rename is skipped
+		{
+			name:  "custom drbd resource name in maintenance mode - skips rename",
+			drbdr: drbdrWithCustomNameInMaintenance(testNodeName, testCustomDRBDName),
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
+				// Phase 0 rename is skipped due to MM; falls through to Phase 4.
+				// Status and show use the custom (old) name via DRBDResourceNameOnTheNode.
+				{
+					Name:         drbdutils.DRBDSetupCommand,
+					Args:         drbdutils.StatusArgs(testCustomDRBDName),
+					ResultOutput: mustJSON(configuredStatus(testCustomDRBDName)),
+				},
+				{
+					Name:         drbdutils.DRBDSetupCommand,
+					Args:         drbdutils.ShowArgs(testCustomDRBDName, true),
+					ResultOutput: mustJSON([]drbdutils.ShowResource{*configuredShow(testCustomDRBDName)}),
+				},
+				// Maintenance mode skips all actions
+			},
+		},
+
 		// Error cases - use State=Down to avoid action generation
 		{
 			name:  "status command error - returns error",
@@ -481,6 +502,14 @@ func drbdrInMaintenance(nodeName string, mode v1alpha1.MaintenanceMode) *v1alpha
 	return dr
 }
 
+func drbdrWithCustomNameInMaintenance(nodeName, customName string) *v1alpha1.DRBDResource {
+	dr := baseDRBDR()
+	dr.Spec.NodeName = nodeName
+	dr.Spec.ActualNameOnTheNode = customName
+	dr.Spec.Maintenance = v1alpha1.MaintenanceModeNoResourceReconciliation
+	return dr
+}
+
 func statusCmd(result drbdutils.StatusResult) *fakedrbdutils.ExpectedCmd {
 	output, _ := json.Marshal(result)
 	return &fakedrbdutils.ExpectedCmd{
@@ -609,6 +638,11 @@ func expectFinalizers(t *testing.T, got []string, expected ...string) {
 func mustParseQuantity(s string) *resource.Quantity {
 	q, _ := resource.ParseQuantity(s)
 	return &q
+}
+
+func mustJSON(v any) []byte {
+	b, _ := json.Marshal(v)
+	return b
 }
 
 func testNode(name string) *corev1.Node {

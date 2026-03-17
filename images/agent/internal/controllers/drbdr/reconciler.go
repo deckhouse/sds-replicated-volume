@@ -144,10 +144,16 @@ func (r *Reconciler) reconcileDRBDR(
 	rf := flow.BeginReconcile(ctx, "drbdr", "name", drbdr.Name)
 	defer rf.OnEnd(&outcome)
 
-	// Phase 0: Handle ActualNameOnTheNode rename if set
+	// Phase 0: Handle ActualNameOnTheNode rename if set.
+	// Maintenance mode skips the rename but falls through to Phase 4+
+	// where DRBDResourceNameOnTheNode returns the old name correctly.
 	if drbdr.Spec.ActualNameOnTheNode != "" {
-		outcome = r.reconcileActualNameOnTheNode(rf.Ctx(), drbdr)
-		return
+		if drbdr.Spec.Maintenance != v1alpha1.MaintenanceModeNoResourceReconciliation {
+			outcome = r.reconcileActualNameOnTheNode(rf.Ctx(), drbdr)
+			return
+		}
+		rf.Log().Info("Skipping ActualNameOnTheNode rename due to maintenance mode",
+			"actualName", drbdr.Spec.ActualNameOnTheNode)
 	}
 
 	// Phase 1: Ensure finalizer (adds if needed for up resources)
