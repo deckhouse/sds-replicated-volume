@@ -312,11 +312,11 @@ func (v *VolumeAttacher) patchMaxAttachments(ctx context.Context, maxAttachments
 	if err != nil {
 		return err
 	}
-	if rv.Spec.MaxAttachments == maxAttachments {
+	if rv.Spec.MaxAttachments != nil && *rv.Spec.MaxAttachments == maxAttachments {
 		return nil
 	}
 	original := rv.DeepCopy()
-	rv.Spec.MaxAttachments = maxAttachments
+	rv.Spec.MaxAttachments = &maxAttachments
 	return v.client.PatchRV(ctx, original, rv)
 }
 
