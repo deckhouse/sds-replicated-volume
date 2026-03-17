@@ -65,8 +65,8 @@ type Connection struct {
 	Congested       bool   `json:"congested"`
 	Peerrole        string `json:"peer-role"`
 	TLS             bool   `json:"tls"`
-	APInFlight      int    `json:"ap-in-flight"`
-	RSInFlight      int    `json:"rs-in-flight"`
+	APInFlight      uint64 `json:"ap-in-flight"`
+	RSInFlight      uint64 `json:"rs-in-flight"`
 
 	Paths       []Path       `json:"paths"`
 	PeerDevices []PeerDevice `json:"peer_devices"`

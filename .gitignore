@@ -47,5 +47,5 @@ images/**/Makefile
 
 # test data
 images/agent/pkg/drbdconf/testdata/out/
-test.log
+test*.log
 .env.json

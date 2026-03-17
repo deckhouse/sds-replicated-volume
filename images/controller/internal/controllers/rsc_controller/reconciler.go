@@ -25,6 +25,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -90,6 +91,27 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
+	// Validate that Storage is present (after migration had a chance to fill it).
+	if rsc.Spec.Storage == nil {
+		base := rsc.DeepCopy()
+		applyReadyCondFalse(rsc,
+			v1alpha1.ReplicatedStorageClassCondReadyReasonInvalidConfiguration,
+			"spec.storage is required")
+		phase, message := computePhaseAndMessage(rsc)
+		applyPhase(rsc, phase, message)
+		if err := r.patchRSCStatus(rf.Ctx(), rsc, base); err != nil {
+			return rf.Fail(err).ToCtrl()
+		}
+		return rf.Done().ToCtrl()
+	}
+
+	// Fill controller-managed defaults for optional spec fields.
+	if needsDefaults(rsc) {
+		if outcome := r.reconcileDefaults(rf.Ctx(), rsc); outcome.ShouldReturn() {
+			return outcome.ToCtrl()
+		}
+	}
+
 	// Reconcile migration from old configuration format (missing FTT/GMDR/storagePoolName fields).
 	if needsConfigurationFormatMigration(rsc) {
 		if outcome := r.reconcileMigrationConfigurationFormat(rf.Ctx(), rsc); outcome.ShouldReturn() {
@@ -115,9 +137,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	base := rsc.DeepCopy()
 
 	eo := flow.MergeEnsures(
-		// Clear legacy phase/reason fields set by the old controller.
-		ensureLegacyFieldsCleared(rf.Ctx(), rsc),
-
 		// Ensure storagePool name and condition are up to date.
 		ensureStoragePool(rf.Ctx(), rsc, targetStoragePoolName, rsp),
 
@@ -126,6 +145,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 		// Ensure volume summary and conditions.
 		ensureVolumeSummaryAndConditions(rf.Ctx(), rsc, rvs),
+
+		// Derive phase and message from conditions (must be last — reads conditions set above).
+		ensurePhaseAndMessage(rf.Ctx(), rsc),
 	)
 
 	// Patch if changed.
@@ -206,7 +228,7 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 		return rf.Fail(err)
 	}
 
-	// RSP not found - set conditions and wait.
+	// RSP not found - set conditions, phase, and wait.
 	if rsp == nil {
 		base := rsc.DeepCopy()
 		changed := applyReadyCondFalse(rsc,
@@ -215,6 +237,8 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 		changed = applyStoragePoolReadyCondFalse(rsc,
 			v1alpha1.ReplicatedStorageClassCondStoragePoolReadyReasonStoragePoolNotFound,
 			fmt.Sprintf("ReplicatedStoragePool %q not found", rsc.Spec.StoragePool)) || changed //nolint:staticcheck // SA1019: migration from deprecated StoragePool
+		phase, message := computePhaseAndMessage(rsc)
+		changed = applyPhase(rsc, phase, message) || changed
 		if changed {
 			if err := r.patchRSCStatus(rf.Ctx(), rsc, base); err != nil {
 				return rf.Fail(err)
@@ -230,7 +254,7 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 	lvmVolumeGroups := make([]v1alpha1.ReplicatedStoragePoolLVMVolumeGroups, len(rsp.Spec.LVMVolumeGroups))
 	copy(lvmVolumeGroups, rsp.Spec.LVMVolumeGroups)
 
-	rsc.Spec.Storage = v1alpha1.ReplicatedStorageClassStorage{
+	rsc.Spec.Storage = &v1alpha1.ReplicatedStorageClassStorage{
 		Type:            rsp.Spec.Type,
 		LVMVolumeGroups: lvmVolumeGroups,
 	}
@@ -241,6 +265,68 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 	}
 
 	return rf.Continue()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: defaults
+//
+
+// needsDefaults returns true if any controller-managed optional spec fields are nil.
+func needsDefaults(rsc *v1alpha1.ReplicatedStorageClass) bool {
+	return rsc.Spec.SystemNetworkNames == nil ||
+		rsc.Spec.ConfigurationRolloutStrategy == nil ||
+		rsc.Spec.EligibleNodesConflictResolutionStrategy == nil ||
+		rsc.Spec.EligibleNodesPolicy == nil
+}
+
+// reconcileDefaults fills controller-managed defaults for optional spec fields and persists them.
+// After this step, SystemNetworkNames, ConfigurationRolloutStrategy,
+// EligibleNodesConflictResolutionStrategy, and EligibleNodesPolicy are guaranteed non-nil.
+//
+// Reconcile pattern: Conditional target evaluation
+func (r *Reconciler) reconcileDefaults(
+	ctx context.Context,
+	rsc *v1alpha1.ReplicatedStorageClass,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "defaults")
+	defer rf.OnEnd(&outcome)
+
+	base := rsc.DeepCopy()
+	applySpecDefaults(rsc)
+
+	if err := r.patchRSC(rf.Ctx(), rsc, base); err != nil {
+		return rf.Fail(err)
+	}
+
+	return rf.Continue()
+}
+
+// applySpecDefaults fills nil optional spec fields with default values.
+func applySpecDefaults(rsc *v1alpha1.ReplicatedStorageClass) {
+	if rsc.Spec.SystemNetworkNames == nil {
+		rsc.Spec.SystemNetworkNames = []string{"Internal"}
+	}
+	if rsc.Spec.ConfigurationRolloutStrategy == nil {
+		rsc.Spec.ConfigurationRolloutStrategy = &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+			Type: v1alpha1.ConfigurationRolloutRollingUpdate,
+			RollingUpdate: &v1alpha1.ReplicatedStorageClassConfigurationRollingUpdateStrategy{
+				MaxParallel: 5,
+			},
+		}
+	}
+	if rsc.Spec.EligibleNodesConflictResolutionStrategy == nil {
+		rsc.Spec.EligibleNodesConflictResolutionStrategy = &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+			Type: v1alpha1.EligibleNodesConflictResolutionRollingRepair,
+			RollingRepair: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair{
+				MaxParallel: 5,
+			},
+		}
+	}
+	if rsc.Spec.EligibleNodesPolicy == nil {
+		rsc.Spec.EligibleNodesPolicy = &v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
+			NotReadyGracePeriod: metav1.Duration{Duration: 10 * time.Minute},
+		}
+	}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -312,25 +398,17 @@ func (r *Reconciler) reconcileMetadata(
 
 // --- Ensure helpers ---
 
-// ensureLegacyFieldsCleared clears legacy status.phase and status.reason fields
-// that were written by the old controller (sds-replicated-volume-controller).
-func ensureLegacyFieldsCleared(
+// ensurePhaseAndMessage derives phase and message from conditions, deletion state,
+// and rollout strategy state, then applies them to status.
+func ensurePhaseAndMessage(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 ) (outcome flow.EnsureOutcome) {
-	ef := flow.BeginEnsure(ctx, "legacy-fields-cleared")
+	ef := flow.BeginEnsure(ctx, "phase-and-message")
 	defer ef.OnEnd(&outcome)
 
-	changed := false
-	if rsc.Status.Phase != "" {
-		rsc.Status.Phase = ""
-		changed = true
-	}
-	if rsc.Status.Reason != "" {
-		rsc.Status.Reason = ""
-		changed = true
-	}
-
+	phase, message := computePhaseAndMessage(rsc)
+	changed := applyPhase(rsc, phase, message)
 	return ef.Ok().ReportChangedIf(changed)
 }
 
@@ -741,6 +819,147 @@ func applyVolumesSatisfyEligibleNodesCondFalse(rsc *v1alpha1.ReplicatedStorageCl
 		Reason:  reason,
 		Message: message,
 	})
+}
+
+// --- Phase helpers ---
+
+// computePhaseAndMessage derives the RSC phase and human-readable message
+// from conditions, deletion state, volume summary, and rollout strategy state.
+func computePhaseAndMessage(rsc *v1alpha1.ReplicatedStorageClass) (v1alpha1.ReplicatedStorageClassPhase, string) {
+	// 1. Deleting.
+	if rsc.DeletionTimestamp != nil {
+		return v1alpha1.ReplicatedStorageClassPhaseTerminating, "Storage class is terminating"
+	}
+
+	// 2. WaitingForStoragePool.
+	spCond := objutilv1.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType)
+	if spCond == nil || spCond.Status != metav1.ConditionTrue {
+		msg := "Waiting for storage pool"
+		if spCond != nil {
+			msg = spCond.Message
+		}
+		return v1alpha1.ReplicatedStorageClassPhaseWaitingForStoragePool, msg
+	}
+
+	// 3-4. Ready=False → InsufficientNodes or InvalidConfiguration.
+	readyCond := objutilv1.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondReadyType)
+	if readyCond == nil || readyCond.Status != metav1.ConditionTrue {
+		msg := ""
+		if readyCond != nil {
+			msg = readyCond.Message
+		}
+		if readyCond != nil && readyCond.Reason == v1alpha1.ReplicatedStorageClassCondReadyReasonInsufficientEligibleNodes {
+			return v1alpha1.ReplicatedStorageClassPhaseInsufficientNodes, msg
+		}
+		return v1alpha1.ReplicatedStorageClassPhaseInvalidConfiguration, msg
+	}
+
+	// 5-7. Ready=True → check divergence.
+	configRolledOut := objutilv1.IsStatusConditionPresentAndTrue(rsc, v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType)
+	volsSatisfy := objutilv1.IsStatusConditionPresentAndTrue(rsc, v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType)
+
+	if configRolledOut && volsSatisfy {
+		// 7. Ready.
+		if rsc.Status.Volumes.Total != nil && *rsc.Status.Volumes.Total > 0 {
+			return v1alpha1.ReplicatedStorageClassPhaseReady,
+				fmt.Sprintf("Storage class is ready; %d volumes, all aligned", *rsc.Status.Volumes.Total)
+		}
+		return v1alpha1.ReplicatedStorageClassPhaseReady, "Storage class is ready"
+	}
+
+	// Divergence exists. Determine if any auto-fix is active.
+	hasActiveAutoFix := false
+
+	hasStaleConfig := rsc.Status.Volumes.StaleConfiguration != nil && *rsc.Status.Volumes.StaleConfiguration > 0
+	hasPendingObservation := rsc.Status.Volumes.PendingObservation != nil && *rsc.Status.Volumes.PendingObservation > 0
+	hasNodeConflicts := rsc.Status.Volumes.InConflictWithEligibleNodes != nil && *rsc.Status.Volumes.InConflictWithEligibleNodes > 0
+
+	configRolloutEnabled := rsc.Spec.ConfigurationRolloutStrategy.Type == v1alpha1.ConfigurationRolloutRollingUpdate
+	nodesRepairEnabled := rsc.Spec.EligibleNodesConflictResolutionStrategy.Type == v1alpha1.EligibleNodesConflictResolutionRollingRepair
+
+	if (hasStaleConfig || hasPendingObservation) && configRolloutEnabled {
+		hasActiveAutoFix = true
+	}
+	if hasNodeConflicts && nodesRepairEnabled {
+		hasActiveAutoFix = true
+	}
+	// PendingObservation is always "active" — the system is waiting for volumes to ack.
+	if hasPendingObservation {
+		hasActiveAutoFix = true
+	}
+
+	message := composeRolloutMessage(rsc, hasStaleConfig, hasPendingObservation, hasNodeConflicts, configRolloutEnabled, nodesRepairEnabled)
+
+	if hasActiveAutoFix {
+		return v1alpha1.ReplicatedStorageClassPhaseRollingOut, message
+	}
+	return v1alpha1.ReplicatedStorageClassPhasePartiallyAligned, message
+}
+
+// composeRolloutMessage builds a human-readable message from independent divergence parts.
+// Each part is included only when the corresponding divergence exists.
+func composeRolloutMessage(
+	rsc *v1alpha1.ReplicatedStorageClass,
+	hasStaleConfig, hasPendingObservation, hasNodeConflicts bool,
+	configRolloutEnabled, nodesRepairEnabled bool,
+) string {
+	var buf strings.Builder
+
+	if hasPendingObservation {
+		fmt.Fprintf(&buf, "Waiting for %d volume(s) to observe new configuration",
+			*rsc.Status.Volumes.PendingObservation)
+	}
+
+	if hasStaleConfig {
+		if buf.Len() > 0 {
+			buf.WriteString(". ")
+		}
+		if configRolloutEnabled {
+			aligned := int32(0)
+			if rsc.Status.Volumes.Aligned != nil {
+				aligned = *rsc.Status.Volumes.Aligned
+			}
+			fmt.Fprintf(&buf, "Configuration rollout in progress: %d/%d volumes aligned, %d stale",
+				aligned, *rsc.Status.Volumes.Total, *rsc.Status.Volumes.StaleConfiguration)
+		} else {
+			fmt.Fprintf(&buf, "%d volume(s) have stale configuration (rollout strategy: NewVolumesOnly)",
+				*rsc.Status.Volumes.StaleConfiguration)
+		}
+	}
+
+	if hasNodeConflicts {
+		if buf.Len() > 0 {
+			buf.WriteString(". ")
+		}
+		if nodesRepairEnabled {
+			fmt.Fprintf(&buf, "Eligible nodes conflict resolution in progress: %d volume(s) on non-eligible nodes",
+				*rsc.Status.Volumes.InConflictWithEligibleNodes)
+		} else {
+			fmt.Fprintf(&buf, "%d volume(s) on non-eligible nodes (resolution strategy: Manual)",
+				*rsc.Status.Volumes.InConflictWithEligibleNodes)
+		}
+	}
+
+	if buf.Len() == 0 {
+		return "Volumes are not fully aligned"
+	}
+
+	return buf.String()
+}
+
+// applyPhase sets status.phase and status.message.
+// Returns true if any field was changed.
+func applyPhase(rsc *v1alpha1.ReplicatedStorageClass, phase v1alpha1.ReplicatedStorageClassPhase, message string) bool {
+	changed := false
+	if rsc.Status.Phase != phase {
+		rsc.Status.Phase = phase
+		changed = true
+	}
+	if rsc.Status.Message != message {
+		rsc.Status.Message = message
+		changed = true
+	}
+	return changed
 }
 
 // validateEligibleNodes validates that eligible nodes from RSP meet the requirements

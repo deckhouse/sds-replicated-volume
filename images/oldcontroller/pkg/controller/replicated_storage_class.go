@@ -109,8 +109,8 @@ const (
 	RSCStorageClassVolumeSnapshotClassAnnotationKey   = "storage.deckhouse.io/volumesnapshotclass"
 	RSCStorageClassVolumeSnapshotClassAnnotationValue = "sds-replicated-volume"
 
-	Created = "Created"
-	Failed  = "Failed"
+	Created = "Ready"
+	Failed  = "InvalidConfiguration"
 
 	DefaultStorageClassAnnotationKey = "storageclass.kubernetes.io/is-default-class"
 )
@@ -290,7 +290,7 @@ func ReconcileReplicatedStorageClass(
 	}
 
 	replicatedSC.Status.Phase = Created
-	replicatedSC.Status.Reason = "ReplicatedStorageClass and StorageClass are equal."
+	replicatedSC.Status.Message = "ReplicatedStorageClass and StorageClass are equal."
 	if !slices.Contains(replicatedSC.Finalizers, ReplicatedStorageClassFinalizerName) {
 		replicatedSC.Finalizers = append(replicatedSC.Finalizers,
 			ReplicatedStorageClassFinalizerName)
@@ -387,7 +387,7 @@ func ValidateReplicatedStorageClass(replicatedSC *srv.ReplicatedStorageClass, zo
 			failedMsgBuilder.WriteString("Topology is set to 'TransZonal', but zones are not specified; ")
 		} else {
 			switch replicatedSC.Spec.Replication {
-			case ReplicationAvailability, ReplicationConsistencyAndAvailability:
+			case ReplicationAvailability, ReplicationConsistencyAndAvailability, "":
 				if len(replicatedSC.Spec.Zones) != 3 {
 					validationPassed = false
 					fmt.Fprintf(&failedMsgBuilder, "Selected unacceptable amount of zones for replication type: %s; correct number of zones should be 3; ", replicatedSC.Spec.Replication)
@@ -493,7 +493,7 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 		storageClassParameters[StorageClassPlacementCountKey] = "2"
 		storageClassParameters[StorageClassAutoEvictMinReplicaCountKey] = "2"
 		storageClassParameters[StorageClassParamAutoQuorumKey] = SuspendIo
-	case ReplicationConsistencyAndAvailability:
+	case ReplicationConsistencyAndAvailability, "":
 		storageClassParameters[StorageClassPlacementCountKey] = "3"
 		storageClassParameters[StorageClassAutoEvictMinReplicaCountKey] = "3"
 		storageClassParameters[StorageClassParamAutoQuorumKey] = SuspendIo
@@ -790,7 +790,7 @@ func updateReplicatedStorageClassStatus(
 	reason string,
 ) error {
 	replicatedSC.Status.Phase = srv.ReplicatedStorageClassPhase(phase)
-	replicatedSC.Status.Reason = reason
+	replicatedSC.Status.Message = reason
 	log.Trace(fmt.Sprintf("[updateReplicatedStorageClassStatus] update ReplicatedStorageClass %+v", replicatedSC))
 	return UpdateReplicatedStorageClass(ctx, cl, replicatedSC)
 }

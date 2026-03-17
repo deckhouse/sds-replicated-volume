@@ -6,4 +6,30 @@ metadata:
   name: webhooks
   namespace: d8-{{ .Chart.Name }}
   {{- include "helm_lib_module_labels" (list . (dict "app" "webhooks")) | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: webhooks
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "webhooks")) | nindent 2 }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: webhooks
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "webhooks")) | nindent 2 }}
+subjects:
+  - kind: ServiceAccount
+    name: webhooks
+    namespace: d8-{{ .Chart.Name }}
+roleRef:
+  kind: Role
+  name: webhooks
+  apiGroup: rbac.authorization.k8s.io
 {{- end }}

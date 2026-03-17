@@ -28,7 +28,7 @@ const (
 	ReplicatedVolumeAttachmentCondAttachedReasonVolumeAccessLocalityNotSatisfied = "VolumeAccessLocalityNotSatisfied" // Node has no local data replica; storage class requires local access.
 	ReplicatedVolumeAttachmentCondAttachedReasonNodeNotEligible                  = "NodeNotEligible"                  // Node is not allowed by the storage pool configuration.
 	ReplicatedVolumeAttachmentCondAttachedReasonPending                          = "Pending"                          // Waiting for conditions to be met; see message for details.
-	ReplicatedVolumeAttachmentCondAttachedReasonReplicatedVolumeDeleting         = "ReplicatedVolumeDeleting"         // Volume is being deleted; new attachments are not allowed.
+	ReplicatedVolumeAttachmentCondAttachedReasonReplicatedVolumeTerminating      = "ReplicatedVolumeTerminating"      // Volume is terminating; new attachments are not allowed.
 	ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica                = "WaitingForReplica"                // Replica on this node is not yet available.
 	ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolume       = "WaitingForReplicatedVolume"       // ReplicatedVolume does not exist.
 )
@@ -39,7 +39,7 @@ const (
 	//
 	// Reasons describe which prerequisite is missing.
 	ReplicatedVolumeAttachmentCondReadyType                  = "Ready"
-	ReplicatedVolumeAttachmentCondReadyReasonDeleting        = "Deleting"        // Attachment is being deleted.
+	ReplicatedVolumeAttachmentCondReadyReasonTerminating     = "Terminating"     // Attachment is terminating.
 	ReplicatedVolumeAttachmentCondReadyReasonNotAttached     = "NotAttached"     // Attached=False.
 	ReplicatedVolumeAttachmentCondReadyReasonReady           = "Ready"           // Attached=True and ReplicaReady=True.
 	ReplicatedVolumeAttachmentCondReadyReasonReplicaNotReady = "ReplicaNotReady" // ReplicaReady=False.

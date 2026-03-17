@@ -125,9 +125,10 @@ func computeRVAAttachedCondition(reason, message string) metav1.Condition {
 // computeRVAPhaseAndMessage computes the phase and human-readable message for an RVA.
 //
 // Phase is determined by DeletionTimestamp and Attached condition reason.
-// Message is passthrough from the Attached condition, except when Phase=Attached
-// and ReplicaReady != True — in that case the ReplicaReady message is used to
-// surface the degradation reason (e.g., "Quorum is lost").
+// Message is passthrough from the Attached condition, except when
+// Attached=True and ReplicaReady != True — in that case the ReplicaReady
+// message is used to surface the degradation reason (e.g., "Quorum is lost").
+// Falls back to attached.Message if replicaReady.Message is empty.
 func computeRVAPhaseAndMessage(
 	deleting bool,
 	attached, replicaReady metav1.Condition,
@@ -136,21 +137,19 @@ func computeRVAPhaseAndMessage(
 
 	switch {
 	case deleting:
-		phase = v1alpha1.ReplicatedVolumeAttachmentPhaseDeleting
+		phase = v1alpha1.ReplicatedVolumeAttachmentPhaseTerminating
 	case attached.Status == metav1.ConditionTrue:
 		phase = v1alpha1.ReplicatedVolumeAttachmentPhaseAttached
 	case attached.Reason == v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching:
 		phase = v1alpha1.ReplicatedVolumeAttachmentPhaseAttaching
 	case attached.Reason == v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching:
 		phase = v1alpha1.ReplicatedVolumeAttachmentPhaseDetaching
-	case attached.Reason == v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetached:
-		phase = v1alpha1.ReplicatedVolumeAttachmentPhaseDetached
 	default:
 		phase = v1alpha1.ReplicatedVolumeAttachmentPhasePending
 	}
 
 	msg := attached.Message
-	if phase == v1alpha1.ReplicatedVolumeAttachmentPhaseAttached && replicaReady.Status != metav1.ConditionTrue {
+	if attached.Status == metav1.ConditionTrue && replicaReady.Status != metav1.ConditionTrue && replicaReady.Message != "" {
 		msg = replicaReady.Message
 	}
 
@@ -196,8 +195,8 @@ func computeRVAReadyCondition(attached, replicaReady metav1.Condition, deleting 
 
 	if deleting {
 		cond.Status = metav1.ConditionFalse
-		cond.Reason = v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonDeleting
-		cond.Message = "Attachment is being deleted"
+		cond.Reason = v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonTerminating
+		cond.Message = "Attachment is terminating"
 		return cond
 	}
 

@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -379,7 +380,7 @@ func buildContexts(
 			systemNetworkNames:      rv.Status.Datamesh.SystemNetworkNames,
 		},
 		baselineGMDR:               rv.Status.BaselineGuaranteedMinimumDataRedundancy,
-		maxAttachments:             rv.Spec.MaxAttachments,
+		maxAttachments:             ptr.Deref(rv.Spec.MaxAttachments, 1),
 		replicatedStorageClassName: rv.Spec.ReplicatedStorageClassName,
 		rsp:                        rsp,
 		features:                   features,

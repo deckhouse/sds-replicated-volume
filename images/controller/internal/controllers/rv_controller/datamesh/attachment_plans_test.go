@@ -553,7 +553,7 @@ var _ = Describe("Attach", func() {
 			},
 			nil, nil,
 		)
-		rv.Spec.MaxAttachments = 2
+		rv.Spec.MaxAttachments = ptr.To(byte(2))
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRReady("rv-1-0", "node-1", 5),
 			mkRVRReady("rv-1-1", "node-2", 5),
@@ -815,7 +815,7 @@ var _ = Describe("Attachment settle", func() {
 			},
 			nil, []v1alpha1.ReplicatedVolumeDatameshTransition{enableT},
 		)
-		rv.Spec.MaxAttachments = 2
+		rv.Spec.MaxAttachments = ptr.To(byte(2))
 		rv.Status.Datamesh.Multiattach = true
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRReady("rv-1-0", "node-1", 6),
@@ -849,7 +849,7 @@ var _ = Describe("Attachment settle", func() {
 			},
 			nil, []v1alpha1.ReplicatedVolumeDatameshTransition{enableT},
 		)
-		rv.Spec.MaxAttachments = 2
+		rv.Spec.MaxAttachments = ptr.To(byte(2))
 		rv.Status.Datamesh.Multiattach = true
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRReady("rv-1-0", "node-1", 6),
@@ -908,7 +908,7 @@ var _ = Describe("Multiattach", func() {
 			},
 			nil, nil,
 		)
-		rv.Spec.MaxAttachments = 2
+		rv.Spec.MaxAttachments = ptr.To(byte(2))
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRReady("rv-1-0", "node-1", 5),
 			mkRVRReady("rv-1-1", "node-2", 5),
@@ -957,7 +957,7 @@ var _ = Describe("Multiattach", func() {
 			},
 			nil, nil,
 		)
-		rv.Spec.MaxAttachments = 2
+		rv.Spec.MaxAttachments = ptr.To(byte(2))
 		rv.Status.Datamesh.Multiattach = true
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRReady("rv-1-0", "node-1", 5),
@@ -993,7 +993,7 @@ var _ = Describe("Multiattach", func() {
 			},
 			nil, []v1alpha1.ReplicatedVolumeDatameshTransition{enableT},
 		)
-		rv.Spec.MaxAttachments = 2
+		rv.Spec.MaxAttachments = ptr.To(byte(2))
 		rv.Status.Datamesh.Multiattach = true
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRReady("rv-1-0", "node-1", 4),
@@ -1046,7 +1046,7 @@ var _ = Describe("Multiattach", func() {
 			},
 			nil, nil,
 		)
-		rv.Spec.MaxAttachments = 2
+		rv.Spec.MaxAttachments = ptr.To(byte(2))
 		rv.Status.Datamesh.Multiattach = true
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRReady("rv-1-0", "node-1", 5),
@@ -1068,7 +1068,7 @@ var _ = Describe("Multiattach", func() {
 			},
 			nil, nil,
 		)
-		rv.Spec.MaxAttachments = 1
+		rv.Spec.MaxAttachments = ptr.To(byte(1))
 		rv.Status.Datamesh.Multiattach = true
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRReady("rv-1-0", "node-1", 5),
@@ -1096,7 +1096,7 @@ var _ = Describe("Multiattach", func() {
 			},
 			nil, nil,
 		)
-		rv.Spec.MaxAttachments = 1
+		rv.Spec.MaxAttachments = ptr.To(byte(1))
 		rv.Status.Datamesh.Multiattach = true
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRReady("rv-1-0", "node-1", 5),
@@ -1126,7 +1126,7 @@ var _ = Describe("Multiattach", func() {
 			},
 			nil, nil,
 		)
-		rv.Spec.MaxAttachments = 2
+		rv.Spec.MaxAttachments = ptr.To(byte(2))
 		rsp := mkRSP("node-1", "node-2")
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRReady("rv-1-0", "node-1", 5),
@@ -1320,7 +1320,7 @@ var _ = Describe("Attachment combined", func() {
 			},
 			nil, nil,
 		)
-		rv.Spec.MaxAttachments = 1 // decreased from 2
+		rv.Spec.MaxAttachments = ptr.To(byte(1)) // decreased from 2
 		rv.Status.Datamesh.Multiattach = true
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRReady("rv-1-0", "node-1", 5),
@@ -1544,7 +1544,7 @@ var _ = Describe("Attachment e2e settle", func() {
 			},
 			nil, nil,
 		)
-		rv.Spec.MaxAttachments = 2
+		rv.Spec.MaxAttachments = ptr.To(byte(2))
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVRReady("rv-1-0", "node-1", 5),
 			mkRVRReady("rv-1-1", "node-2", 5),

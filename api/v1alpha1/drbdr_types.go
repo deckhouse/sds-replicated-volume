@@ -27,12 +27,14 @@ import (
 // +kubebuilder:resource:scope=Cluster,shortName=drbdr
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
-// +kubebuilder:printcolumn:name="State",type=string,JSONPath=".spec.state"
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=".status.activeConfiguration.state"
+// +kubebuilder:printcolumn:name="Configured",type=string,JSONPath=".status.conditions[?(@.type=='Configured')].status"
 // +kubebuilder:printcolumn:name="Role",type=string,JSONPath=".status.activeConfiguration.role"
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=".status.activeConfiguration.type"
 // +kubebuilder:printcolumn:name="DiskState",type=string,JSONPath=".status.diskState"
 // +kubebuilder:printcolumn:name="Quorum",type=boolean,JSONPath=".status.quorum"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='Configured')].message"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName) > 0 : !has(self.spec.lvmLogicalVolumeName) || size(self.spec.lvmLogicalVolumeName) == 0",message="lvmLogicalVolumeName is required when type is Diskful and must be empty when type is Diskless"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.size) : !has(self.spec.size)",message="size is required when type is Diskful and must be empty when type is Diskless"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.spec.size) || !has(self.spec.size) || self.spec.size >= oldSelf.spec.size",message="spec.size cannot be decreased"

@@ -425,8 +425,8 @@ func ensureConditionReady(
 	// Guard: RVR is being deleted.
 	if rvrShouldNotExist(rvr) {
 		changed = applyReadyCondFalse(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondReadyReasonDeleting,
-			"Replica is being deleted") || changed
+			v1alpha1.ReplicatedVolumeReplicaCondReadyReasonTerminating,
+			"Replica is terminating") || changed
 		return ef.Ok().ReportChangedIf(changed)
 	}
 
@@ -509,8 +509,8 @@ func ensureConditionReady(
 		if rvr.DeletionTimestamp != nil {
 			// Replica is being deleted, not joining.
 			changed = applyReadyCondFalse(rvr,
-				v1alpha1.ReplicatedVolumeReplicaCondReadyReasonDeleting,
-				"Replica is being deleted") || changed
+				v1alpha1.ReplicatedVolumeReplicaCondReadyReasonTerminating,
+				"Replica is terminating") || changed
 		} else {
 			// Not a datamesh member yet — cannot participate in quorum.
 			changed = applyReadyCondFalse(rvr,
@@ -777,6 +777,361 @@ func applySatisfyEligibleNodesCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, re
 		Message: message,
 	})
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Ensure: phase and message
+//
+
+// ensureStatusPhaseAndMessage computes and applies the phase and message to RVR status.
+// Must be called after all condition ensure helpers have run.
+func ensureStatusPhaseAndMessage(
+	ctx context.Context,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "status-phase-and-message")
+	defer ef.OnEnd(&outcome)
+
+	phase, message := computeRVRPhaseAndMessage(rvr)
+	changed := false
+	if rvr.Status.Phase != phase {
+		rvr.Status.Phase = phase
+		changed = true
+	}
+	if rvr.Status.Message != message {
+		rvr.Status.Message = message
+		changed = true
+	}
+	return ef.Ok().ReportChangedIf(changed)
+}
+
+// computeRVRPhaseAndMessage computes the phase and human-readable message for an RVR
+// from its current conditions. Pure function, no I/O, no mutation.
+//
+// The function splits into two paths based on datamesh membership:
+//   - Pre-member (datameshRevision == 0): lifecycle phases (Pending → Provisioning → Configuring → WaitingForDatamesh).
+//   - Member (datameshRevision > 0): health phases (Critical / Synchronizing / Degraded / PartiallyDegraded / Progressing / Healthy).
+func computeRVRPhaseAndMessage(rvr *v1alpha1.ReplicatedVolumeReplica) (v1alpha1.ReplicatedVolumeReplicaPhase, string) {
+	drbdConfigured := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
+	bvReady := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
+	scheduled := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+	ready := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+	bvUpToDate := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType)
+
+	// ── Universal (always first) ──
+
+	// 1. Deleting.
+	if rvr.DeletionTimestamp != nil {
+		// Blocking issues first (agent down, config failed — NOT normal cleanup).
+		if drbdConfigured != nil &&
+			drbdConfigured.Status == metav1.ConditionFalse &&
+			drbdConfigured.Reason != v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonNotApplicable &&
+			drbdConfigured.Message != "" {
+			return v1alpha1.ReplicatedVolumeReplicaPhaseTerminating, drbdConfigured.Message
+		}
+		// Datamesh leave progress (Configured condition).
+		configured := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		if configured != nil && configured.Message != "" {
+			return v1alpha1.ReplicatedVolumeReplicaPhaseTerminating, configured.Message
+		}
+		// DRBD cleanup progress.
+		if drbdConfigured != nil && drbdConfigured.Message != "" {
+			return v1alpha1.ReplicatedVolumeReplicaPhaseTerminating, drbdConfigured.Message
+		}
+		return v1alpha1.ReplicatedVolumeReplicaPhaseTerminating, "Replica is terminating"
+	}
+
+	// 2. AgentNotReady.
+	if drbdConfigured != nil && drbdConfigured.Reason == v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady {
+		return v1alpha1.ReplicatedVolumeReplicaPhaseAgentNotReady, drbdConfigured.Message
+	}
+
+	// ── Membership split ──
+
+	if rvr.Status.DatameshRevision > 0 {
+		return computeMemberPhaseAndMessage(rvr, ready, bvUpToDate, bvReady, drbdConfigured)
+	}
+
+	// ── Pre-member lifecycle path ──
+
+	// 3. Pending.
+	// NodeName empty → always Pending.
+	// NodeName set + Scheduled absent → not Pending (Access replicas have no Scheduled condition;
+	//   for Diskful the scheduling controller will set it shortly).
+	// NodeName set + Scheduled != True → Pending (scheduler says not fully scheduled).
+	if rvr.Spec.NodeName == "" || (scheduled != nil && scheduled.Status != metav1.ConditionTrue) {
+		msg := "Waiting for scheduling"
+		if scheduled != nil && scheduled.Message != "" {
+			msg = scheduled.Message
+		} else if bvReady != nil && bvReady.Message != "" {
+			msg = bvReady.Message
+		}
+		return v1alpha1.ReplicatedVolumeReplicaPhasePending, msg
+	}
+
+	// 4. Provisioning.
+	if bvReady != nil && bvReady.Status == metav1.ConditionFalse {
+		switch bvReady.Reason {
+		case v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioning,
+			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonReprovisioning,
+			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizing,
+			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioningFailed,
+			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizeFailed,
+			v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotReady:
+			return v1alpha1.ReplicatedVolumeReplicaPhaseProvisioning, bvReady.Message
+		}
+	}
+
+	// 5. Configuring (explicit).
+	if drbdConfigured != nil {
+		if drbdConfigured.Status == metav1.ConditionUnknown &&
+			drbdConfigured.Reason == v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration {
+			return v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring, drbdConfigured.Message
+		}
+		if drbdConfigured.Status == metav1.ConditionFalse &&
+			drbdConfigured.Reason != v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingDatameshJoin &&
+			drbdConfigured.Reason != v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady &&
+			drbdConfigured.Reason != v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonNotApplicable {
+			return v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring, drbdConfigured.Message
+		}
+	}
+
+	// 6. WaitingForDatamesh.
+	if drbdConfigured != nil && drbdConfigured.Status == metav1.ConditionFalse &&
+		drbdConfigured.Reason == v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingDatameshJoin {
+		// Configured condition has the datamesh engine message (join progress/blocked).
+		configured := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType)
+		if configured != nil && configured.Message != "" {
+			return v1alpha1.ReplicatedVolumeReplicaPhaseWaitingForDatamesh, configured.Message
+		}
+		return v1alpha1.ReplicatedVolumeReplicaPhaseWaitingForDatamesh, drbdConfigured.Message
+	}
+
+	// 7. Default fallback (pre-member): Configuring with the most relevant non-True condition message.
+	switch {
+	case drbdConfigured != nil && drbdConfigured.Status != metav1.ConditionTrue && drbdConfigured.Message != "":
+		return v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring, drbdConfigured.Message
+	case bvReady != nil && bvReady.Status != metav1.ConditionTrue && bvReady.Message != "":
+		return v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring, bvReady.Message
+	case ready != nil && ready.Status != metav1.ConditionTrue && ready.Message != "":
+		return v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring, ready.Message
+	default:
+		return v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring, "Configuring"
+	}
+}
+
+// computeMemberPhaseAndMessage computes the phase and message for a datamesh member replica.
+// Called when datameshRevision > 0 (replica is or was a datamesh member).
+//
+// Priority: Critical > Synchronizing > Degraded > PartiallyDegraded > Progressing > Healthy.
+func computeMemberPhaseAndMessage(
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	ready, bvUpToDate, bvReady, drbdConfigured *metav1.Condition,
+) (v1alpha1.ReplicatedVolumeReplicaPhase, string) {
+	// 7. Critical — IO frozen.
+	// 7a. Quorum lost (from Ready condition).
+	if ready != nil && ready.Status == metav1.ConditionFalse &&
+		(ready.Reason == v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumLost ||
+			ready.Reason == v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumViaPeers) {
+		return v1alpha1.ReplicatedVolumeReplicaPhaseCritical, ready.Message + computeMemberProblems(rvr, bvReady, drbdConfigured)
+	}
+	// 7b. IO suspended (from Attached condition, independent of Ready).
+	if att := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType); att != nil &&
+		att.Status == metav1.ConditionFalse &&
+		att.Reason == v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonIOSuspended {
+		return v1alpha1.ReplicatedVolumeReplicaPhaseCritical, att.Message + computeMemberProblems(rvr, bvReady, drbdConfigured)
+	}
+
+	// 8. Synchronizing.
+	if bvUpToDate != nil && bvUpToDate.Status == metav1.ConditionFalse &&
+		bvUpToDate.Reason == v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonSynchronizing {
+		return v1alpha1.ReplicatedVolumeReplicaPhaseSynchronizing, bvUpToDate.Message + computeMemberProblems(rvr, bvReady, drbdConfigured)
+	}
+
+	// 9-12. Health / Progress assessment.
+	problems, severity := computeMemberProblemsAndSeverity(rvr, bvReady, drbdConfigured)
+	progressMsg := computeMemberProgress(bvReady, drbdConfigured)
+
+	// When Ready=True, we have full health information.
+	if ready != nil && ready.Status == metav1.ConditionTrue {
+		switch {
+		case severity >= severityDegraded:
+			return v1alpha1.ReplicatedVolumeReplicaPhaseDegraded, ready.Message + problems
+		case severity >= severityPartiallyDegraded:
+			return v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded, ready.Message + problems
+		case progressMsg != "":
+			return v1alpha1.ReplicatedVolumeReplicaPhaseProgressing, ready.Message + ". " + progressMsg
+		default:
+			return v1alpha1.ReplicatedVolumeReplicaPhaseHealthy, ready.Message
+		}
+	}
+
+	// Ready != True but not Critical — transient state during reconfig.
+	if progressMsg != "" {
+		return v1alpha1.ReplicatedVolumeReplicaPhaseProgressing, progressMsg
+	}
+
+	// Member fallback (unusual: Ready is neither True nor caught by Critical).
+	switch {
+	case drbdConfigured != nil && drbdConfigured.Status != metav1.ConditionTrue && drbdConfigured.Message != "":
+		return v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded, drbdConfigured.Message
+	case bvReady != nil && bvReady.Status != metav1.ConditionTrue && bvReady.Message != "":
+		return v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded, bvReady.Message
+	case ready != nil && ready.Message != "":
+		return v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded, ready.Message
+	default:
+		return v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded, "Unable to determine health status"
+	}
+}
+
+// computeMemberProblems is a convenience wrapper that returns only the problem string
+// (discarding severity). Used by Critical and Synchronizing phases where the phase
+// is already determined and we only need the problem suffixes for the message.
+func computeMemberProblems(rvr *v1alpha1.ReplicatedVolumeReplica, bvReady, drbdConfigured *metav1.Condition) string {
+	problems, _ := computeMemberProblemsAndSeverity(rvr, bvReady, drbdConfigured)
+	return problems
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Member health helpers (used by computeRVRPhaseAndMessage for member path)
+//
+
+// memberProblemSeverity represents the severity of a problem detected on a member replica.
+type memberProblemSeverity int
+
+const (
+	severityNone              memberProblemSeverity = 0
+	severityPartiallyDegraded memberProblemSeverity = 1
+	severityDegraded          memberProblemSeverity = 2
+)
+
+// computeMemberProblemsAndSeverity scans member-relevant conditions for problems and returns
+// a concatenated problem description string and the maximum severity found.
+//
+// Degraded-severity: disk failed, fully isolated, attachment failed, provisioning/resize/config failed.
+// PartiallyDegraded-severity: partial connectivity, outdated data, wrong node, detachment anomaly.
+func computeMemberProblemsAndSeverity(
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	bvReady, drbdConfigured *metav1.Condition,
+) (string, memberProblemSeverity) {
+	var problems string
+	maxSeverity := severityNone
+
+	add := func(sev memberProblemSeverity, text string) {
+		problems += ". " + text
+		if sev > maxSeverity {
+			maxSeverity = sev
+		}
+	}
+
+	// Attached condition.
+	if att := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType); att != nil {
+		switch {
+		case att.Status == metav1.ConditionFalse && att.Reason == v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAttachmentFailed:
+			add(severityDegraded, "Attachment failed")
+		case att.Status == metav1.ConditionTrue && att.Reason == v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonDetachmentFailed:
+			add(severityPartiallyDegraded, "Detachment failed")
+		}
+	}
+
+	// FullyConnected condition.
+	if fc := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType); fc != nil && fc.Status == metav1.ConditionFalse {
+		switch fc.Reason {
+		case v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonNotConnected:
+			add(severityDegraded, "Not connected to any peer")
+		case v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected:
+			add(severityPartiallyDegraded, "Partially connected to peers")
+		}
+	}
+
+	// BackingVolumeUpToDate condition.
+	if bvu := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType); bvu != nil && bvu.Status == metav1.ConditionFalse {
+		switch bvu.Reason {
+		case v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonFailed:
+			add(severityDegraded, "Disk failed")
+		case v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonRequiresSynchronization:
+			add(severityPartiallyDegraded, "Backing volume requires synchronization")
+		case v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonUnknown:
+			add(severityPartiallyDegraded, "Backing volume state unknown")
+		case v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonAbsent:
+			add(severityPartiallyDegraded, "Backing volume absent")
+		}
+	}
+
+	// SatisfyEligibleNodes condition.
+	if sen := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType); sen != nil && sen.Status == metav1.ConditionFalse {
+		switch sen.Reason {
+		case v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonNodeMismatch:
+			add(severityPartiallyDegraded, "Node not eligible")
+		case v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonLVMVolumeGroupMismatch:
+			add(severityPartiallyDegraded, "LVG not eligible")
+		case v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonThinPoolMismatch:
+			add(severityPartiallyDegraded, "ThinPool not eligible")
+		}
+	}
+
+	// BackingVolumeReady failures (member-specific: provisioning/resize failed on a member).
+	if bvReady != nil && bvReady.Status == metav1.ConditionFalse {
+		switch bvReady.Reason {
+		case v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioningFailed:
+			add(severityDegraded, "Provisioning failed")
+		case v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizeFailed:
+			add(severityDegraded, "Resize failed")
+		}
+	}
+
+	// DRBDConfigured failures (member-specific: config failed on a member).
+	if drbdConfigured != nil && drbdConfigured.Status == metav1.ConditionFalse &&
+		drbdConfigured.Reason == v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigurationFailed {
+		add(severityDegraded, "DRBD configuration failed")
+	}
+
+	return problems, maxSeverity
+}
+
+// computeMemberProgress detects in-progress operational changes on a member replica
+// (resize, type conversion, DRBD reconfiguration). Returns a human-readable description
+// or empty string if nothing is in progress. Failure reasons are NOT reported here
+// (they are reported as problems by computeMemberProblemsAndSeverity).
+func computeMemberProgress(bvReady, drbdConfigured *metav1.Condition) string {
+	var parts string
+
+	addPart := func(text string) {
+		if parts != "" {
+			parts += ". "
+		}
+		parts += text
+	}
+
+	if bvReady != nil && bvReady.Status == metav1.ConditionFalse {
+		switch bvReady.Reason {
+		case v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioning:
+			addPart("Provisioning backing volume")
+		case v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonReprovisioning:
+			addPart("Reprovisioning backing volume")
+		case v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizing:
+			addPart("Resizing backing volume")
+		case v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotReady:
+			addPart("Backing volume not ready")
+		}
+	}
+
+	if drbdConfigured != nil {
+		if drbdConfigured.Status == metav1.ConditionUnknown &&
+			drbdConfigured.Reason == v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration {
+			addPart("Applying DRBD configuration")
+		}
+		if drbdConfigured.Status == metav1.ConditionFalse &&
+			drbdConfigured.Reason == v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForBackingVolume {
+			addPart("Waiting for backing volume")
+		}
+	}
+
+	return parts
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Apply helpers
+//
 
 // applyAttachedCondFalse sets the Attached condition to False on RVR.
 func applyAttachedCondFalse(rvr *v1alpha1.ReplicatedVolumeReplica, reason, message string) bool {

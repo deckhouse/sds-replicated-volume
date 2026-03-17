@@ -21,42 +21,37 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.conditions[?(@.type=='Ready')].status
-      name: Ready
+    - jsonPath: .status.phase
+      name: Phase
       type: string
-    - jsonPath: .spec.replication
-      name: Replication
-      type: string
-    - jsonPath: .spec.topology
-      name: Topology
-      type: string
+    - jsonPath: .status.configuration.failuresToTolerate
+      name: FTT
+      type: integer
+    - jsonPath: .status.configuration.guaranteedMinimumDataRedundancy
+      name: GMDR
+      type: integer
+    - jsonPath: .status.volumes.total
+      name: Volumes
+      type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    - jsonPath: .status.storagePoolName
-      name: StoragePool
-      priority: 1
-      type: string
-    - jsonPath: .status.conditions[?(@.type=='StoragePoolReady')].status
-      name: StoragePoolReady
-      priority: 1
-      type: string
-    - jsonPath: .status.conditions[?(@.type=='ConfigurationRolledOut')].status
-      name: ConfigRolledOut
-      priority: 1
-      type: string
-    - jsonPath: .status.conditions[?(@.type=='VolumesSatisfyEligibleNodes')].status
-      name: VolsSatisfyEN
+    - jsonPath: .spec.topology
+      name: Topology
       priority: 1
       type: string
     - jsonPath: .spec.volumeAccess
       name: VolumeAccess
       priority: 1
       type: string
-    - jsonPath: .status.volumes.total
-      name: Volumes
+    - jsonPath: .status.storagePoolName
+      name: StoragePool
       priority: 1
-      type: integer
+      type: string
+    - jsonPath: .status.message
+      name: Message
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -99,13 +94,9 @@ spec:
               > Note that this field is in read-only mode.
             properties:
               configurationRolloutStrategy:
-                default:
-                  rollingUpdate:
-                    maxParallel: 5
-                  type: RollingUpdate
                 description: |-
                   ConfigurationRolloutStrategy defines how configuration changes are applied to existing volumes.
-                  Always present with defaults.
+                  When not specified, the controller fills the default (RollingUpdate, maxParallel=5).
                 properties:
                   rollingUpdate:
                     description: |-
@@ -124,12 +115,13 @@ spec:
                     - maxParallel
                     type: object
                   type:
-                    default: RollingUpdate
                     description: Type specifies the rollout strategy type.
                     enum:
                     - RollingUpdate
                     - NewVolumesOnly
                     type: string
+                required:
+                - type
                 type: object
                 x-kubernetes-validations:
                 - message: rollingUpdate is required when type is RollingUpdate
@@ -137,13 +129,9 @@ spec:
                 - message: rollingUpdate must not be set when type is not RollingUpdate
                   rule: self.type == 'RollingUpdate' || !has(self.rollingUpdate)
               eligibleNodesConflictResolutionStrategy:
-                default:
-                  rollingRepair:
-                    maxParallel: 5
-                  type: RollingRepair
                 description: |-
                   EligibleNodesConflictResolutionStrategy defines how the controller handles volumes with eligible nodes conflicts.
-                  Always present with defaults.
+                  When not specified, the controller fills the default (RollingRepair, maxParallel=5).
                 properties:
                   rollingRepair:
                     description: |-
@@ -162,12 +150,13 @@ spec:
                     - maxParallel
                     type: object
                   type:
-                    default: RollingRepair
                     description: Type specifies the conflict resolution strategy type.
                     enum:
                     - Manual
                     - RollingRepair
                     type: string
+                required:
+                - type
                 type: object
                 x-kubernetes-validations:
                 - message: rollingRepair is required when type is RollingRepair
@@ -175,11 +164,9 @@ spec:
                 - message: rollingRepair must not be set when type is not RollingRepair
                   rule: self.type == 'RollingRepair' || !has(self.rollingRepair)
               eligibleNodesPolicy:
-                default:
-                  notReadyGracePeriod: 10m
                 description: |-
                   EligibleNodesPolicy defines policies for managing eligible nodes.
-                  Always present with defaults.
+                  When not specified, the controller fills the default (notReadyGracePeriod=10m).
                 properties:
                   notReadyGracePeriod:
                     default: 10m
@@ -271,7 +258,6 @@ spec:
                 - Retain
                 type: string
               replication:
-                default: ConsistencyAndAvailability
                 description: |-
                   Deprecated: Use FailuresToTolerate and GuaranteedMinimumDataRedundancy instead.
                   Mutually exclusive with FailuresToTolerate/GuaranteedMinimumDataRedundancy.
@@ -361,8 +347,6 @@ spec:
                 - message: StoragePool cannot be added or changed, only removed
                   rule: size(self) == 0 || self == oldSelf
               systemNetworkNames:
-                default:
-                - Internal
                 description: |-
                   SystemNetworkNames specifies network names used for DRBD replication traffic.
                   At least one network name must be specified. Each name is limited to 64 characters.
@@ -432,12 +416,7 @@ spec:
                 type: array
                 x-kubernetes-list-type: set
             required:
-            - configurationRolloutStrategy
-            - eligibleNodesConflictResolutionStrategy
-            - eligibleNodesPolicy
             - reclaimPolicy
-            - storage
-            - systemNetworkNames
             - topology
             type: object
             x-kubernetes-validations:
@@ -625,18 +604,21 @@ spec:
                   was accepted.
                 format: int64
                 type: integer
-              phase:
-                description: |-
-                  The Storage class current state. Might be:
-                  - Failed (if the controller received incorrect resource configuration or some errors occurred during the operation)
-                  - Create (if everything went fine)
-                enum:
-                - Failed
-                - Created
+              message:
+                description: Message is a human-readable description of the current
+                  phase.
                 type: string
-              reason:
-                description: Additional information about the current state of the
-                  Storage Class.
+              phase:
+                description: Phase is the operational state summary of the storage
+                  class.
+                enum:
+                - Ready
+                - WaitingForStoragePool
+                - InsufficientNodes
+                - InvalidConfiguration
+                - RollingOut
+                - PartiallyAligned
+                - Terminating
                 type: string
               storagePoolBasedOnGeneration:
                 description: StoragePoolBasedOnGeneration is the RSC generation when

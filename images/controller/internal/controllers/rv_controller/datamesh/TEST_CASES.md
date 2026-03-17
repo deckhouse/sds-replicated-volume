@@ -20,7 +20,7 @@ across all canonical layouts, topologies, and feature variants.
   RSP has node-2 in zone-b. New Access member gets Zone=zone-b.
 
 - **Guard: RV deleting → blocked.**
-  RV has DeletionTimestamp. Join(A) request present. No transition created. Request message contains "being deleted".
+  RV has DeletionTimestamp. Join(A) request present. No transition created. Request message contains "is terminating".
 
 - **Guard: VolumeAccess=Local → blocked.**
   Configuration has VolumeAccess=Local. No transition created. Request message contains "volumeAccess is Local".
@@ -742,7 +742,7 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
   1D member, active RVA on same node. Attach transition created. member.Attached set to true. Revision incremented. AttachmentConditionReason = "Attaching".
 
 - **Guard: RV deleting → blocked.**
-  RV has DeletionTimestamp. Blocked. AttachmentConditionMessage contains "being deleted". Reason = "ReplicatedVolumeDeleting".
+  RV has DeletionTimestamp. Blocked. AttachmentConditionMessage contains "is terminating". Reason = "ReplicatedVolumeTerminating".
 
 - **Guard: quorum not satisfied → blocked.**
   1D member, RVR Ready but Quorum=false. guardQuorumSatisfied blocks. Message contains "Quorum not satisfied".

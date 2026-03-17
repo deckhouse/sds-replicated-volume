@@ -26,16 +26,15 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 // +kubebuilder:metadata:labels=heritage=deckhouse
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:metadata:labels=backup.deckhouse.io/cluster-config=true
-// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
-// +kubebuilder:printcolumn:name="Replication",type=string,JSONPath=`.spec.replication`
-// +kubebuilder:printcolumn:name="Topology",type=string,JSONPath=`.spec.topology`
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="FTT",type=integer,JSONPath=`.status.configuration.failuresToTolerate`
+// +kubebuilder:printcolumn:name="GMDR",type=integer,JSONPath=`.status.configuration.guaranteedMinimumDataRedundancy`
+// +kubebuilder:printcolumn:name="Volumes",type=integer,JSONPath=`.status.volumes.total`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
-// +kubebuilder:printcolumn:name="StoragePool",type=string,priority=1,JSONPath=`.status.storagePoolName`
-// +kubebuilder:printcolumn:name="StoragePoolReady",type=string,priority=1,JSONPath=`.status.conditions[?(@.type=='StoragePoolReady')].status`
-// +kubebuilder:printcolumn:name="ConfigRolledOut",type=string,priority=1,JSONPath=`.status.conditions[?(@.type=='ConfigurationRolledOut')].status`
-// +kubebuilder:printcolumn:name="VolsSatisfyEN",type=string,priority=1,JSONPath=`.status.conditions[?(@.type=='VolumesSatisfyEligibleNodes')].status`
+// +kubebuilder:printcolumn:name="Topology",type=string,priority=1,JSONPath=`.spec.topology`
 // +kubebuilder:printcolumn:name="VolumeAccess",type=string,priority=1,JSONPath=`.spec.volumeAccess`
-// +kubebuilder:printcolumn:name="Volumes",type=integer,priority=1,JSONPath=`.status.volumes.total`
+// +kubebuilder:printcolumn:name="StoragePool",type=string,priority=1,JSONPath=`.status.storagePoolName`
+// +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=`.status.message`
 type ReplicatedStorageClass struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -105,7 +104,8 @@ type ReplicatedStorageClassSpec struct {
 	// Storage defines the storage backend configuration for this storage class.
 	// Specifies the type of volumes (LVM or LVMThin) and which LVMVolumeGroups
 	// will be used to allocate space for volumes.
-	Storage ReplicatedStorageClassStorage `json:"storage"`
+	// +optional
+	Storage *ReplicatedStorageClassStorage `json:"storage,omitempty"`
 	// The storage class's reclaim policy. Might be:
 	// - Delete (If the Persistent Volume Claim is deleted, deletes the Persistent Volume and its associated storage as well)
 	// - Retain (If the Persistent Volume Claim is deleted, remains the Persistent Volume and its associated storage)
@@ -127,7 +127,6 @@ type ReplicatedStorageClassSpec struct {
 	//   ConsistencyAndAvailability → failuresToTolerate=1, guaranteedMinimumDataRedundancy=1
 	//
 	// +kubebuilder:validation:Enum=None;Availability;Consistency;ConsistencyAndAvailability
-	// +kubebuilder:default:=ConsistencyAndAvailability
 	Replication ReplicatedStorageClassReplication `json:"replication,omitempty"`
 	// FailuresToTolerate (FTT) specifies how many arbitrary node failures the volume
 	// can tolerate while remaining available for IO.
@@ -203,21 +202,21 @@ type ReplicatedStorageClassSpec struct {
 	// +kubebuilder:validation:MaxItems=1
 	// +kubebuilder:validation:Items={type=string,maxLength=64}
 	// +kubebuilder:validation:XValidation:rule="self.all(n, n == 'Internal')",message="Only 'Internal' network is currently supported"
-	// +kubebuilder:default:={"Internal"}
 	// +listType=set
-	SystemNetworkNames []string `json:"systemNetworkNames"`
+	// +optional
+	SystemNetworkNames []string `json:"systemNetworkNames,omitempty"`
 	// ConfigurationRolloutStrategy defines how configuration changes are applied to existing volumes.
-	// Always present with defaults.
-	// +kubebuilder:default={type: "RollingUpdate", rollingUpdate: {maxParallel: 5}}
-	ConfigurationRolloutStrategy ReplicatedStorageClassConfigurationRolloutStrategy `json:"configurationRolloutStrategy"`
+	// When not specified, the controller fills the default (RollingUpdate, maxParallel=5).
+	// +optional
+	ConfigurationRolloutStrategy *ReplicatedStorageClassConfigurationRolloutStrategy `json:"configurationRolloutStrategy,omitempty"`
 	// EligibleNodesConflictResolutionStrategy defines how the controller handles volumes with eligible nodes conflicts.
-	// Always present with defaults.
-	// +kubebuilder:default={type: "RollingRepair", rollingRepair: {maxParallel: 5}}
-	EligibleNodesConflictResolutionStrategy ReplicatedStorageClassEligibleNodesConflictResolutionStrategy `json:"eligibleNodesConflictResolutionStrategy"`
+	// When not specified, the controller fills the default (RollingRepair, maxParallel=5).
+	// +optional
+	EligibleNodesConflictResolutionStrategy *ReplicatedStorageClassEligibleNodesConflictResolutionStrategy `json:"eligibleNodesConflictResolutionStrategy,omitempty"`
 	// EligibleNodesPolicy defines policies for managing eligible nodes.
-	// Always present with defaults.
-	// +kubebuilder:default={notReadyGracePeriod: "10m"}
-	EligibleNodesPolicy ReplicatedStoragePoolEligibleNodesPolicy `json:"eligibleNodesPolicy"`
+	// When not specified, the controller fills the default (notReadyGracePeriod=10m).
+	// +optional
+	EligibleNodesPolicy *ReplicatedStoragePoolEligibleNodesPolicy `json:"eligibleNodesPolicy,omitempty"`
 }
 
 // ReplicatedStorageClassStorage defines the storage backend configuration for RSC.
@@ -364,8 +363,7 @@ func (t ReplicatedStorageClassTopology) String() string {
 type ReplicatedStorageClassConfigurationRolloutStrategy struct {
 	// Type specifies the rollout strategy type.
 	// +kubebuilder:validation:Enum=RollingUpdate;NewVolumesOnly
-	// +kubebuilder:default:=RollingUpdate
-	Type ReplicatedStorageClassConfigurationRolloutStrategyType `json:"type,omitempty"`
+	Type ReplicatedStorageClassConfigurationRolloutStrategyType `json:"type"`
 	// RollingUpdate configures parameters for RollingUpdate strategy.
 	// Required when type is RollingUpdate.
 	// +optional
@@ -401,8 +399,7 @@ type ReplicatedStorageClassConfigurationRollingUpdateStrategy struct {
 type ReplicatedStorageClassEligibleNodesConflictResolutionStrategy struct {
 	// Type specifies the conflict resolution strategy type.
 	// +kubebuilder:validation:Enum=Manual;RollingRepair
-	// +kubebuilder:default:=RollingRepair
-	Type ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType `json:"type,omitempty"`
+	Type ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType `json:"type"`
 	// RollingRepair configures parameters for RollingRepair conflict resolution strategy.
 	// Required when type is RollingRepair.
 	// +optional
@@ -441,13 +438,13 @@ type ReplicatedStorageClassStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// The Storage class current state. Might be:
-	// - Failed (if the controller received incorrect resource configuration or some errors occurred during the operation)
-	// - Create (if everything went fine)
-	// +kubebuilder:validation:Enum=Failed;Created
+	// Phase is the operational state summary of the storage class.
+	// +kubebuilder:validation:Enum=Ready;WaitingForStoragePool;InsufficientNodes;InvalidConfiguration;RollingOut;PartiallyAligned;Terminating
+	// +optional
 	Phase ReplicatedStorageClassPhase `json:"phase,omitempty"`
-	// Additional information about the current state of the Storage Class.
-	Reason string `json:"reason,omitempty"`
+	// Message is a human-readable description of the current phase.
+	// +optional
+	Message string `json:"message,omitempty"`
 	// ConfigurationGeneration is the RSC generation when configuration was accepted.
 	// +optional
 	ConfigurationGeneration int64 `json:"configurationGeneration,omitempty"`
@@ -471,15 +468,25 @@ type ReplicatedStorageClassStatus struct {
 	Volumes ReplicatedStorageClassVolumesSummary `json:"volumes"`
 }
 
-// ReplicatedStorageClassPhase enumerates possible values for ReplicatedStorageClass status.phase field.
+// ReplicatedStorageClassPhase represents the operational state of the ReplicatedStorageClass.
 type ReplicatedStorageClassPhase string
 
-// Phase values for [ReplicatedStorageClass] status.phase field.
+// ReplicatedStorageClass phase values.
 const (
-	// RSCPhaseFailed means the controller detected an invalid configuration or an operation error.
-	RSCPhaseFailed ReplicatedStorageClassPhase = "Failed"
-	// RSCPhaseCreated means the replicated storage class has been reconciled successfully.
-	RSCPhaseCreated ReplicatedStorageClassPhase = "Created"
+	// ReplicatedStorageClassPhaseReady means configuration is accepted and all volumes are aligned.
+	ReplicatedStorageClassPhaseReady ReplicatedStorageClassPhase = "Ready"
+	// ReplicatedStorageClassPhaseWaitingForStoragePool means the referenced storage pool is not ready.
+	ReplicatedStorageClassPhaseWaitingForStoragePool ReplicatedStorageClassPhase = "WaitingForStoragePool"
+	// ReplicatedStorageClassPhaseInsufficientNodes means eligible nodes do not meet FTT/GMDR/topology requirements.
+	ReplicatedStorageClassPhaseInsufficientNodes ReplicatedStorageClassPhase = "InsufficientNodes"
+	// ReplicatedStorageClassPhaseInvalidConfiguration means spec validation failed.
+	ReplicatedStorageClassPhaseInvalidConfiguration ReplicatedStorageClassPhase = "InvalidConfiguration"
+	// ReplicatedStorageClassPhaseRollingOut means configuration is accepted and active rollout/repair is in progress.
+	ReplicatedStorageClassPhaseRollingOut ReplicatedStorageClassPhase = "RollingOut"
+	// ReplicatedStorageClassPhasePartiallyAligned means divergence exists but all auto-fixes are disabled.
+	ReplicatedStorageClassPhasePartiallyAligned ReplicatedStorageClassPhase = "PartiallyAligned"
+	// ReplicatedStorageClassPhaseTerminating means the storage class is terminating.
+	ReplicatedStorageClassPhaseTerminating ReplicatedStorageClassPhase = "Terminating"
 )
 
 func (p ReplicatedStorageClassPhase) String() string {

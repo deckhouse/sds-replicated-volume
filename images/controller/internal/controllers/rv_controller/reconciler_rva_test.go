@@ -77,10 +77,10 @@ var _ = Describe("computeRVAAttachedCondition", func() {
 
 	It("returns VolumeDeleting when attach blocked by deletion", func() {
 		cond := computeRVAAttachedCondition(
-			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonReplicatedVolumeDeleting,
+			v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonReplicatedVolumeTerminating,
 			"Volume is being deleted")
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonReplicatedVolumeDeleting))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonReplicatedVolumeTerminating))
 	})
 
 	It("returns NodeNotEligible when node not in RSP", func() {
@@ -192,7 +192,7 @@ var _ = Describe("computeRVAPhaseAndMessage", func() {
 		phase, msg := computeRVAPhaseAndMessage(true,
 			attached(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached, "Volume is attached"),
 			replicaReadyCond(metav1.ConditionTrue, "Ready"))
-		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseDeleting))
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseTerminating))
 		Expect(msg).To(Equal("Volume is attached"))
 	})
 
@@ -200,8 +200,16 @@ var _ = Describe("computeRVAPhaseAndMessage", func() {
 		phase, msg := computeRVAPhaseAndMessage(true,
 			attached(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolume, "RV not found"),
 			metav1.Condition{})
-		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseDeleting))
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseTerminating))
 		Expect(msg).To(Equal("RV not found"))
+	})
+
+	It("returns Deleting with replicaReady.Message when deleting + Attached=True + degraded", func() {
+		phase, msg := computeRVAPhaseAndMessage(true,
+			attached(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached, "Volume is attached and ready to serve I/O on the node"),
+			replicaReadyCond(metav1.ConditionFalse, "Quorum is lost"))
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseTerminating))
+		Expect(msg).To(Equal("Quorum is lost"))
 	})
 
 	It("returns Attached with attached.Message when healthy (ReplicaReady=True)", func() {
@@ -228,6 +236,14 @@ var _ = Describe("computeRVAPhaseAndMessage", func() {
 		Expect(msg).To(Equal("Replica Ready condition not yet available"))
 	})
 
+	It("falls back to attached.Message when ReplicaReady=False but message is empty", func() {
+		phase, msg := computeRVAPhaseAndMessage(false,
+			attached(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached, "Volume is attached"),
+			replicaReadyCond(metav1.ConditionFalse, ""))
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseAttached))
+		Expect(msg).To(Equal("Volume is attached"))
+	})
+
 	It("returns Attaching with attached.Message (replicaReady ignored)", func() {
 		phase, msg := computeRVAPhaseAndMessage(false,
 			attached(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttaching, "Attaching volume: 0/1 replicas confirmed"),
@@ -244,11 +260,11 @@ var _ = Describe("computeRVAPhaseAndMessage", func() {
 		Expect(msg).To(Equal("Detaching volume is blocked: device is in use"))
 	})
 
-	It("returns Detached with attached.Message", func() {
+	It("returns Pending for Detached reason (Detached maps to Pending)", func() {
 		phase, msg := computeRVAPhaseAndMessage(false,
 			attached(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetached, "Volume has been detached from the node"),
 			metav1.Condition{})
-		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseDetached))
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
 		Expect(msg).To(Equal("Volume has been detached from the node"))
 	})
 
@@ -292,9 +308,9 @@ var _ = Describe("computeRVAPhaseAndMessage", func() {
 		Expect(msg).To(Equal("RV not found"))
 	})
 
-	It("returns Pending for ReplicatedVolumeDeleting reason", func() {
+	It("returns Pending for ReplicatedVolumeTerminating reason", func() {
 		phase, msg := computeRVAPhaseAndMessage(false,
-			attached(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonReplicatedVolumeDeleting, "volume is being deleted"),
+			attached(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonReplicatedVolumeTerminating, "volume is being deleted"),
 			metav1.Condition{})
 		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
 		Expect(msg).To(Equal("volume is being deleted"))
@@ -373,7 +389,7 @@ var _ = Describe("computeRVAReadyCondition", func() {
 		replicaReady := metav1.Condition{Status: metav1.ConditionTrue}
 		cond := computeRVAReadyCondition(attached, replicaReady, true)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonDeleting))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonTerminating))
 	})
 
 	It("returns NotAttached when Attached is False", func() {
@@ -927,7 +943,7 @@ var _ = Describe("reconcileRVAWaiting", func() {
 
 		var updated v1alpha1.ReplicatedVolumeAttachment
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva), &updated)).To(Succeed())
-		Expect(updated.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseDeleting))
+		Expect(updated.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseTerminating))
 		Expect(updated.Status.Message).To(Equal(msg))
 	})
 })

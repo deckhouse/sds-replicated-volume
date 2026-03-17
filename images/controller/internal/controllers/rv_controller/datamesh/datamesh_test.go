@@ -131,7 +131,7 @@ func mkRV(
 	}
 
 	return &v1alpha1.ReplicatedVolume{
-		Spec: v1alpha1.ReplicatedVolumeSpec{MaxAttachments: 1},
+		Spec: v1alpha1.ReplicatedVolumeSpec{MaxAttachments: ptr.To(byte(1))},
 		Status: v1alpha1.ReplicatedVolumeStatus{
 			Configuration:    &cfg,
 			DatameshRevision: revision,

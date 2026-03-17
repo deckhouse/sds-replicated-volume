@@ -35,6 +35,38 @@ TestDRBDResource
 │       LLV finalizer on the deletion path (intendedLLVName == attachedLLVName
 │       because spec doesn't change on delete).
 │
+├── OrphanCleanup — orphan DRBD resource cleanup after force-delete
+│       Creates a diskless DRBDResource, waits for Configured=True.
+│       Force-deletes the K8S object (removes agent finalizer, then
+│       deletes). The DRBD resource may still exist on the node.
+│       Re-creates the same DRBDResource, waits for Configured=True.
+│       Verifies the agent handles orphan DRBD resources left behind
+│       when the K8S object disappears without the normal finalizer flow.
+│
+├── NonManagedResource — non-managed DRBD resource left untouched
+│       Creates a DRBD resource directly on the node (via drbdsetup
+│       new-resource) without the sdsrv- prefix. Waits for the scanner
+│       to process events, then asserts the resource still exists.
+│       Verifies the agent does not tear down DRBD resources it does
+│       not own. Cleanup tears down the resource via drbdsetup down.
+│
+├── Rename — actualNameOnTheNode rename flow
+│   │   Creates a diskless DRBDResource, waits for Configured=True.
+│   │   Sets maintenance mode to guard against the agent re-creating
+│   │   the DRBD resource during the rename window. Renames the DRBD
+│   │   resource on the node from sdsrv-{name} to custom-{name} via
+│   │   drbdsetup rename-resource. Patches actualNameOnTheNode and
+│   │   clears maintenance in a single patch. Waits for the agent to
+│   │   rename it back to sdsrv-{name}, clear actualNameOnTheNode,
+│   │   and reach Configured=True.
+│   │
+│   └── MaintenanceModeSkipsRename
+│       Sets maintenance mode, renames the DRBD resource on the node
+│       to custom-mm-{name}, patches actualNameOnTheNode. Asserts the
+│       agent skips the rename (Configured=False/InMaintenance) and
+│       the DRBD resource on the node still has the custom name.
+│       Cleanup reverts actualNameOnTheNode, renames DRBD back on the
+│       node, then clears maintenance mode.
 ├── DeviceUUID — DRBD metadata protection (parallel)
 │   │   Covers device-uuid decision table: never overwrite existing metadata (G1),
 │   │   never attach a foreign disk (G2).
@@ -114,5 +146,23 @@ Every subtest's cleanup exercises a teardown path:
   with an attached LLV. Verifies the agent releases the LLV finalizer on
   the deletion path. Parent cleanup deletes the orphaned LLV.
 
+- **OrphanCleanup**: force-deletes a DRBDResource (bypassing agent
+  finalizer flow), then re-creates it. Verifies the agent tears down the
+  orphan DRBD resource on the node and brings the re-created object up
+  cleanly. Cleanup deletes the re-created DRBDResource normally.
+
+- **NonManagedResource**: creates a non-prefixed DRBD resource directly
+  on the node and verifies it survives after the scanner processes events.
+  Cleanup tears down the resource via drbdsetup down.
+
+- **Rename cleanup**: reverts the combined actualNameOnTheNode +
+  maintenance patch, then reverts the maintenance-mode-only patch.
+  Since the agent already cleared actualNameOnTheNode and renamed
+  the DRBD resource back, the reverts are effectively no-ops.
+
+- **MaintenanceModeSkipsRename cleanup**: reverts actualNameOnTheNode,
+  renames the DRBD resource back to the standard name on the node,
+  then clears maintenance mode. The agent reconciles normally and
+  reaches Configured=True.
 - **ForeignDisk cleanup**: restores the correct device-uuid on disk after
   writing a fake UUID. Verifies the agent recovers from the error.
