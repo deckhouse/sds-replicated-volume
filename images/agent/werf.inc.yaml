@@ -49,7 +49,7 @@ shell:
   beforeInstall:
     - apt-get update
     - apt-get install -y make automake pkg-config gcc libtool git curl rsync
-    - apt-get install -y flex libkeyutils-devel udev
+    - apt-get install -y flex libkeyutils-devel udev libaio-devel
     - {{ $.Root.ALT_CLEANUP_CMD }}
   install:
     - cd /src/drbd-utils
