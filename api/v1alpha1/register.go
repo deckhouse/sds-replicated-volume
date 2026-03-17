@@ -60,6 +60,10 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&DRBDNodeOperationList{},
 		&DRBDMapper{},
 		&DRBDMapperList{},
+		&ReplicatedVolumeSnapshot{},
+		&ReplicatedVolumeSnapshotList{},
+		&ReplicatedVolumeReplicaSnapshot{},
+		&ReplicatedVolumeReplicaSnapshotList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil

@@ -47,7 +47,7 @@ type DRBDResourceOperationSpec struct {
 	DRBDResourceName string `json:"drbdResourceName"`
 
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=CreateNewUUID;ForcePrimary;Invalidate;Outdate;Verify;CreateSnapshot
+	// +kubebuilder:validation:Enum=CreateNewUUID;ForcePrimary;Invalidate;Outdate;Verify;CreateSnapshot;DeleteSnapshot
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="type is immutable"
 	Type DRBDResourceOperationType `json:"type"`
 
@@ -55,6 +55,16 @@ type DRBDResourceOperationSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="createNewUUID is immutable"
 	// +optional
 	CreateNewUUID *CreateNewUUIDParams `json:"createNewUUID,omitempty"`
+
+	// Parameters for CreateSnapshot operation. Immutable once set.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="createSnapshot is immutable"
+	// +optional
+	CreateSnapshot *CreateSnapshotParams `json:"createSnapshot,omitempty"`
+
+	// Parameters for DeleteSnapshot operation. Immutable once set.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="deleteSnapshot is immutable"
+	// +optional
+	DeleteSnapshot *DeleteSnapshotParams `json:"deleteSnapshot,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -67,6 +77,24 @@ type CreateNewUUIDParams struct {
 	// +kubebuilder:default=false
 	// +optional
 	ForceResync bool `json:"forceResync,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+type CreateSnapshotParams struct {
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[0-9A-Za-z.+_-]*$`
+	SnapshotName string `json:"snapshotName"`
+}
+
+// +kubebuilder:object:generate=true
+type DeleteSnapshotParams struct {
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[0-9A-Za-z.+_-]*$`
+	SnapshotName string `json:"snapshotName"`
 }
 
 // +kubebuilder:object:generate=true
@@ -124,4 +152,6 @@ const (
 	DRBDResourceOperationVerify DRBDResourceOperationType = "Verify"
 	// DRBDResourceOperationCreateSnapshot creates a snapshot of the resource.
 	DRBDResourceOperationCreateSnapshot DRBDResourceOperationType = "CreateSnapshot"
+	// DRBDResourceOperationDeleteSnapshot deletes a snapshot of the resource.
+	DRBDResourceOperationDeleteSnapshot DRBDResourceOperationType = "DeleteSnapshot"
 )

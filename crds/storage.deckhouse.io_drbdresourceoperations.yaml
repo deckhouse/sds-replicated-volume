@@ -70,6 +70,36 @@ spec:
                   rule: self == oldSelf
                 - message: clearBitmap and forceResync are mutually exclusive
                   rule: '!(self.clearBitmap && self.forceResync)'
+              createSnapshot:
+                description: Parameters for CreateSnapshot operation. Immutable once
+                  set.
+                properties:
+                  snapshotName:
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[0-9A-Za-z.+_-]*$
+                    type: string
+                required:
+                - snapshotName
+                type: object
+                x-kubernetes-validations:
+                - message: createSnapshot is immutable
+                  rule: self == oldSelf
+              deleteSnapshot:
+                description: Parameters for DeleteSnapshot operation. Immutable once
+                  set.
+                properties:
+                  snapshotName:
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[0-9A-Za-z.+_-]*$
+                    type: string
+                required:
+                - snapshotName
+                type: object
+                x-kubernetes-validations:
+                - message: deleteSnapshot is immutable
+                  rule: self == oldSelf
               drbdResourceName:
                 maxLength: 253
                 minLength: 1
@@ -88,6 +118,7 @@ spec:
                 - Outdate
                 - Verify
                 - CreateSnapshot
+                - DeleteSnapshot
                 type: string
                 x-kubernetes-validations:
                 - message: type is immutable

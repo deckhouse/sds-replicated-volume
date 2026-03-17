@@ -69,6 +69,10 @@ func (r *OperationReconciler) Reconcile(
 	switch op.Spec.Type {
 	case v1alpha1.DRBDResourceOperationCreateNewUUID:
 		return r.reconcileCreateNewUUID(rf.Ctx(), op).ToCtrl()
+	case v1alpha1.DRBDResourceOperationCreateSnapshot:
+		return r.reconcileCreateSnapshot(rf.Ctx(), op).ToCtrl()
+	case v1alpha1.DRBDResourceOperationDeleteSnapshot:
+		return r.reconcileDeleteSnapshot(rf.Ctx(), op).ToCtrl()
 	default:
 		return r.reconcileUnsupported(rf.Ctx(), op, op.Spec.Type).ToCtrl()
 	}
@@ -109,6 +113,82 @@ func (r *OperationReconciler) reconcileCreateNewUUID(ctx context.Context, op *v1
 	}
 
 	opErr := r.executeCreateNewUUID(ctx, op, drbdr)
+	if opErr != nil {
+		if err := r.failOperationAndPatch(ctx, op, opErr.Error()); err != nil {
+			return rf.Fail(err)
+		}
+		return rf.Done()
+	}
+
+	if err := r.succeedOperationAndPatch(ctx, op); err != nil {
+		return rf.Fail(err)
+	}
+	return rf.Done()
+}
+
+// reconcileCreateSnapshot runs the CreateSnapshot operation for the DRBDResource on this node.
+func (r *OperationReconciler) reconcileCreateSnapshot(ctx context.Context, op *v1alpha1.DRBDResourceOperation) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "CreateSnapshot")
+	defer rf.OnEnd(&outcome)
+
+	drbdr, err := r.getDRBDResourceForOperation(ctx, op)
+	if err != nil {
+		return rf.Fail(err)
+	}
+	if drbdr == nil {
+		return rf.Done()
+	}
+
+	base := op.DeepCopy()
+	runOutcome := ensureOperationStatusRunning(ctx, op, metav1.NewTime(time.Now()))
+	if runOutcome.Error() != nil {
+		return rf.Fail(runOutcome.Error())
+	}
+	if runOutcome.DidChange() {
+		if err := r.patchOperationStatus(ctx, op, base); err != nil {
+			return rf.Fail(err)
+		}
+	}
+
+	opErr := r.executeCreateSnapshot(ctx, op, drbdr)
+	if opErr != nil {
+		if err := r.failOperationAndPatch(ctx, op, opErr.Error()); err != nil {
+			return rf.Fail(err)
+		}
+		return rf.Done()
+	}
+
+	if err := r.succeedOperationAndPatch(ctx, op); err != nil {
+		return rf.Fail(err)
+	}
+	return rf.Done()
+}
+
+// reconcileDeleteSnapshot runs the DeleteSnapshot operation for the DRBDResource on this node.
+func (r *OperationReconciler) reconcileDeleteSnapshot(ctx context.Context, op *v1alpha1.DRBDResourceOperation) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "DeleteSnapshot")
+	defer rf.OnEnd(&outcome)
+
+	drbdr, err := r.getDRBDResourceForOperation(ctx, op)
+	if err != nil {
+		return rf.Fail(err)
+	}
+	if drbdr == nil {
+		return rf.Done()
+	}
+
+	base := op.DeepCopy()
+	runOutcome := ensureOperationStatusRunning(ctx, op, metav1.NewTime(time.Now()))
+	if runOutcome.Error() != nil {
+		return rf.Fail(runOutcome.Error())
+	}
+	if runOutcome.DidChange() {
+		if err := r.patchOperationStatus(ctx, op, base); err != nil {
+			return rf.Fail(err)
+		}
+	}
+
+	opErr := r.executeDeleteSnapshot(ctx, op, drbdr)
 	if opErr != nil {
 		if err := r.failOperationAndPatch(ctx, op, opErr.Error()); err != nil {
 			return rf.Fail(err)
