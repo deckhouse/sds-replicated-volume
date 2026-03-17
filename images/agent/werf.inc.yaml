@@ -27,7 +27,7 @@ shell:
 
 
 ---
-{{- $drbdBinaries := "/drbd-utils/sbin/* /drbd-utils/etc/drbd.conf /drbd-utils/etc/drbd.d/global_common.conf /drbd-utils/etc/multipath/conf.d/drbd.conf /usr/sbin/dmsetup /usr/sbin/dmstats" }}
+{{- $drbdBinaries := "/drbd-utils/sbin/* /drbd-utils/etc/drbd.conf /drbd-utils/etc/drbd.d/global_common.conf /drbd-utils/etc/multipath/conf.d/drbd.conf /usr/sbin/dmsetup /usr/sbin/dmstats /lvm2/sbin/lvcreate /lvm2/sbin/lvremove /lvm2/lib64/*" }}
 image: {{ .ImageName }}-binaries-artifact
 fromImage: builder/alt
 final: false
@@ -62,17 +62,22 @@ shell:
     - make
     - make install DESTDIR=/drbd-utils
     - sed -i 's/usage-count\s*yes;/usage-count no;/' /drbd-utils/etc/drbd.d/global_common.conf
-    # LVM2 - Let's take only dmsetup
+    # LVM2 - dmsetup + lvcreate/lvremove for snapshots
     - cd /src/lvm2
     - ./configure --prefix=/ --libdir=/lib64 --build=x86_64-linux-gnu --disable-readline --without-systemd
     - make libdm.device-mapper
     - make -C libdm install_device-mapper
+    - make
+    - make install DESTDIR=/lvm2
   beforeSetup:
     - chmod +x /binary_replace.sh
     - /binary_replace.sh -i "{{ $drbdBinaries }}" -o /relocate
   setup:
     - rsync -avz /relocate/drbd-utils/ /relocate/
     - rm -rf /relocate/drbd-utils/
+    - test -d /relocate/lvm2/sbin && rsync -avz /relocate/lvm2/sbin/ /relocate/sbin/
+    - test -d /relocate/lvm2/lib64 && rsync -avz /relocate/lvm2/lib64/ /relocate/lib64/
+    - rm -rf /relocate/lvm2
 
 ---
 image: {{ .ImageName }}-golang-artifact
