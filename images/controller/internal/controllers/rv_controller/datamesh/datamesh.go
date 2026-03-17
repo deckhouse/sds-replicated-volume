@@ -49,6 +49,24 @@ func BuildRegistry() {
 	registerNetworkPlans(registry)
 }
 
+// PlanStepCount returns the number of steps for the given transition type
+// and plan ID. Returns 0 if the plan is not found.
+func PlanStepCount(tt string, planID string) int {
+	if registry == nil {
+		panic("datamesh.PlanStepCount: registry not initialized, call BuildRegistry first")
+	}
+	return registry.PlanStepCount(dmte.TransitionType(tt), dmte.PlanID(planID))
+}
+
+// MaxPlanStepCount returns the maximum step count across all plans for
+// the given transition type. Returns 0 if no plans exist.
+func MaxPlanStepCount(tt string) int {
+	if registry == nil {
+		panic("datamesh.MaxPlanStepCount: registry not initialized, call BuildRegistry first")
+	}
+	return registry.MaxPlanStepCount(dmte.TransitionType(tt))
+}
+
 // ProcessTransitions runs the datamesh transition engine for one reconciliation cycle.
 //
 // Synchronizes member zone info from RSP, settles in-flight transitions,

@@ -119,3 +119,24 @@ Assert:
 
 With `maxAttachments=1` only one slot is available, so enabling dual-Primary
 mode serves no purpose. The dispatcher must skip Enable entirely.
+
+---
+
+## 6. Orphaned RVR deletion when parent RV does not exist
+
+**RVR with RVControllerFinalizer is deleted when RV is absent.**
+
+Setup: Create a standalone RVR with `spec.replicatedVolumeName` pointing to a
+non-existent RV.
+
+Assert after creation:
+- `RVControllerFinalizer` is present on the RVR (added by `reconcileOrphanedRVRs`).
+
+Action: Delete the RVR.
+
+Assert after deletion:
+- RVR is fully deleted (not stuck with orphaned finalizer).
+
+When the parent RV does not exist, the RV controller must still remove its
+finalizer from deleting RVRs via the orphaned-RVR handler. Without this,
+the RVR would hang in deletion forever.

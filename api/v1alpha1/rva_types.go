@@ -65,6 +65,9 @@ func (rva *ReplicatedVolumeAttachment) SetStatusConditions(conditions []metav1.C
 	rva.Status.Conditions = conditions
 }
 
+// GetStatusPhase returns .status.phase as a string.
+func (rva *ReplicatedVolumeAttachment) GetStatusPhase() string { return string(rva.Status.Phase) }
+
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeAttachmentSpec struct {
 	// +kubebuilder:validation:Required
