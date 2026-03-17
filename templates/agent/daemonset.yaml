@@ -8,7 +8,8 @@ cpu: 50m
 memory: 25Mi
 {{- end }}
 
-{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
+{{- if not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started")) }}
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
 apiVersion: autoscaling.k8s.io/v1
@@ -46,7 +47,11 @@ spec:
         cpu: 20m
         memory: 25Mi
 {{- end }}
+{{- end }}
+{{- end }}
 
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
+{{- if not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started")) }}
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -281,4 +286,5 @@ spec:
         configMap:
           defaultMode: 420
           name: agent-monitoring
+{{- end }}
 {{- end }}
