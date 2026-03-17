@@ -212,8 +212,9 @@ var _ = Describe("rvPredicates", func() {
 		It("returns false when only status changes", func() {
 			oldRV := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:       "rv-1",
-					Generation: 1,
+					Name:            "rv-1",
+					Generation:      1,
+					ResourceVersion: "1",
 					Labels: map[string]string{
 						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
 					},
@@ -225,8 +226,9 @@ var _ = Describe("rvPredicates", func() {
 			}
 			newRV := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:       "rv-1",
-					Generation: 1,
+					Name:            "rv-1",
+					Generation:      1,
+					ResourceVersion: "2",
 					Labels: map[string]string{
 						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
 					},

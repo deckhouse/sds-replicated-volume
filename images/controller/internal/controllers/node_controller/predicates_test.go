@@ -97,7 +97,8 @@ var _ = Describe("nodePredicates", func() {
 		It("returns false when AgentNodeLabelKey is unchanged (both have)", func() {
 			oldNode := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "node-1",
+					Name:            "node-1",
+					ResourceVersion: "1",
 					Labels: map[string]string{
 						v1alpha1.AgentNodeLabelKey: "",
 					},
@@ -105,7 +106,8 @@ var _ = Describe("nodePredicates", func() {
 			}
 			newNode := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "node-1",
+					Name:            "node-1",
+					ResourceVersion: "2",
 					Labels: map[string]string{
 						v1alpha1.AgentNodeLabelKey: "",
 					},
@@ -124,14 +126,16 @@ var _ = Describe("nodePredicates", func() {
 		It("returns false when AgentNodeLabelKey is unchanged (both lack)", func() {
 			oldNode := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:   "node-1",
-					Labels: map[string]string{},
+					Name:            "node-1",
+					ResourceVersion: "1",
+					Labels:          map[string]string{},
 				},
 			}
 			newNode := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:   "node-1",
-					Labels: map[string]string{},
+					Name:            "node-1",
+					ResourceVersion: "2",
+					Labels:          map[string]string{},
 				},
 			}
 			e := event.TypedUpdateEvent[client.Object]{
@@ -201,7 +205,8 @@ var _ = Describe("nodePredicates", func() {
 		It("returns false when other labels change but AgentNodeLabelKey unchanged", func() {
 			oldNode := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "node-1",
+					Name:            "node-1",
+					ResourceVersion: "1",
 					Labels: map[string]string{
 						"env": "prod",
 					},
@@ -209,7 +214,8 @@ var _ = Describe("nodePredicates", func() {
 			}
 			newNode := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "node-1",
+					Name:            "node-1",
+					ResourceVersion: "2",
 					Labels: map[string]string{
 						"env": "staging",
 					},

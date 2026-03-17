@@ -82,10 +82,10 @@ var _ = Describe("rvrPredicates", func() {
 
 		It("returns false when no relevant changes", func() {
 			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
-				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", Generation: 1},
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", Generation: 1, ResourceVersion: "1"},
 			}
 			newRVR := &v1alpha1.ReplicatedVolumeReplica{
-				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", Generation: 1},
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", Generation: 1, ResourceVersion: "2"},
 			}
 			e := event.TypedUpdateEvent[client.Object]{
 				ObjectOld: oldRVR,
@@ -99,13 +99,14 @@ var _ = Describe("rvrPredicates", func() {
 
 		It("returns false when only Labels change", func() {
 			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
-				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", Generation: 1},
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", Generation: 1, ResourceVersion: "1"},
 			}
 			newRVR := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:       "rvr-1",
-					Generation: 1,
-					Labels:     map[string]string{"new": "label"},
+					Name:            "rvr-1",
+					Generation:      1,
+					ResourceVersion: "2",
+					Labels:          map[string]string{"new": "label"},
 				},
 			}
 			e := event.TypedUpdateEvent[client.Object]{
@@ -120,13 +121,14 @@ var _ = Describe("rvrPredicates", func() {
 
 		It("returns false when only Annotations change", func() {
 			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
-				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", Generation: 1},
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", Generation: 1, ResourceVersion: "1"},
 			}
 			newRVR := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:        "rvr-1",
-					Generation:  1,
-					Annotations: map[string]string{"new": "annotation"},
+					Name:            "rvr-1",
+					Generation:      1,
+					ResourceVersion: "2",
+					Annotations:     map[string]string{"new": "annotation"},
 				},
 			}
 			e := event.TypedUpdateEvent[client.Object]{
