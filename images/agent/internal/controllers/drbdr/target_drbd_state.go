@@ -502,7 +502,27 @@ func computePathActions(resourceName string, iPeer IntendedPeer, aPeer ActualPee
 		})
 	}
 
+	// Guard: do not delete the last established path on an active connection.
+	// DRBD kernel rejects del-path in that case. The scanner will trigger a
+	// new reconcile once the replacement path becomes established.
+	connectionActive := aPeer != nil &&
+		aPeer.ConnectionState() != v1alpha1.ConnectionStateStandAlone.String()
+
+	removedKeys := make(map[string]struct{}, len(toRemove))
+	for _, rp := range toRemove {
+		removedKeys[pathKey(rp.LocalAddr(), rp.RemoteAddr())] = struct{}{}
+	}
+	establishedRetained := 0
+	for _, ap := range actualPaths {
+		if _, removed := removedKeys[pathKey(ap.LocalAddr(), ap.RemoteAddr())]; !removed && ap.Established() {
+			establishedRetained++
+		}
+	}
+
 	for _, aPath := range toRemove {
+		if connectionActive && aPath.Established() && establishedRetained == 0 {
+			continue
+		}
 		res = append(res, DelPathAction{
 			ResourceName: resourceName,
 			PeerNodeID:   peerNodeID,

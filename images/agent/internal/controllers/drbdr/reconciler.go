@@ -171,10 +171,17 @@ func (r *Reconciler) reconcileDRBDR(
 	inCleanup := isInCleanup(drbdr)
 	upAndNotInCleanup := isUpAndNotInCleanup(drbdr)
 
+	// Observe DRBD state early — the result is used both by Phase 2
+	// (existing port adoption) and Phase 4 (convergence).
+	drbdResName := DRBDResourceNameOnTheNode(drbdr)
+	aState, aErr := observeActualDRBDState(rf.Ctx(), drbdResName)
+	aErr = ConfiguredReasonError(aErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
+
 	// Phase 2: Ensure addresses are persisted (patch with optimistic lock).
 	// Must happen before DRBD convergence so that stale-cache races cause
 	// a conflict error here, before any destructive kernel actions execute.
-	if addrOutcome := r.reconcileAddresses(rf.Ctx(), drbdr); addrOutcome.ShouldReturn() {
+	existingPorts := existingPortsFromState(aState)
+	if addrOutcome := r.reconcileAddresses(rf.Ctx(), drbdr, existingPorts); addrOutcome.ShouldReturn() {
 		if addrOutcome.Error() != nil {
 			return rf.Fail(addrOutcome.Error())
 		}
@@ -204,10 +211,14 @@ func (r *Reconciler) reconcileDRBDR(
 	}
 
 	// Phase 4: DRBD convergence
-	iState := computeIntendedDRBDState(drbdr, intendedDisk, upAndNotInCleanup)
+	// Probe disk metadata now that intendedDisk is known.
+	if aErr == nil {
+		if diskErr := observeActualDiskState(rf.Ctx(), aState, intendedDisk, drbdr.Status.DeviceUUID); diskErr != nil {
+			aErr = ConfiguredReasonError(diskErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
+		}
+	}
 
-	aState, aErr := observeActualDRBDState(rf.Ctx(), DRBDResourceNameOnTheNode(drbdr), intendedDisk, drbdr.Status.DeviceUUID)
-	aErr = ConfiguredReasonError(aErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
+	iState := computeIntendedDRBDState(drbdr, intendedDisk, upAndNotInCleanup)
 
 	// Compute and execute DRBD actions
 	targetActions := computeTargetDRBDActions(iState, aState)
@@ -217,7 +228,10 @@ func (r *Reconciler) reconcileDRBDR(
 	// Refresh actual state if DRBD state was changed
 	var aErr2 error
 	if refreshNeeded {
-		aState, aErr2 = observeActualDRBDState(rf.Ctx(), DRBDResourceNameOnTheNode(drbdr), intendedDisk, drbdr.Status.DeviceUUID)
+		aState, aErr2 = observeActualDRBDState(rf.Ctx(), drbdResName)
+		if aErr2 == nil {
+			aErr2 = observeActualDiskState(rf.Ctx(), aState, intendedDisk, drbdr.Status.DeviceUUID)
+		}
 		aErr2 = ConfiguredReasonError(aErr2, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 	}
 
@@ -522,9 +536,14 @@ func (r *Reconciler) reconcileFinalizer(
 // before DRBD convergence. This prevents stale-cache races: if the informer
 // cache is behind, the optimistic-lock patch fails and the reconcile retries
 // before any destructive DRBD kernel actions execute.
+//
+// existingPorts provides ports from a pre-existing DRBD resource on the node.
+// When status.addresses has no port for an IP, the existing port is adopted
+// before falling back to portAllocator.
 func (r *Reconciler) reconcileAddresses(
 	ctx context.Context,
 	drbdr *v1alpha1.DRBDResource,
+	existingPorts ExistingPorts,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "reconcile-addresses")
 	defer rf.OnEnd(&outcome)
@@ -535,7 +554,7 @@ func (r *Reconciler) reconcileAddresses(
 	}
 
 	base := drbdr.DeepCopy()
-	if addrErr := ensureAddresses(rf.Ctx(), drbdr, node, r.portCache.Allocate).Error(); addrErr != nil {
+	if addrErr := ensureAddresses(rf.Ctx(), drbdr, node, existingPorts, r.portCache.Allocate).Error(); addrErr != nil {
 		return rf.Fail(addrErr)
 	}
 

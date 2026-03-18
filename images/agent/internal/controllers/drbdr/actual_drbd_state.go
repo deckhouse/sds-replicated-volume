@@ -537,20 +537,34 @@ func (aState *actualState) reportPeers(drbdr *v1alpha1.DRBDResource) {
 			peerStatus.Type = v1alpha1.DRBDResourceTypeDiskful
 		}
 
-		// Build paths
+		// Build paths, deduplicating by SystemNetworkName (prefer established).
+		// DRBD kernel can temporarily have multiple paths on the same network
+		// (e.g. during port migration); the CRD requires uniqueness.
 		if len(conn.Paths) > 0 {
 			peerStatus.Paths = make([]v1alpha1.DRBDResourcePathStatus, 0, len(conn.Paths))
+			seenSNN := make(map[string]int, len(conn.Paths))
 			for j := range conn.Paths {
 				path := &conn.Paths[j]
-				// Look up SystemNetworkName from status.Addresses by IP
 				addr, found := uiter.Find(slices.Values(status.Addresses), func(a v1alpha1.DRBDResourceAddressStatus) bool {
 					return a.Address.IPv4 == path.ThisHost.Address
 				})
 				if !found {
-					// Path IP not found in addresses - skip this path.
-					// This can happen with stale data or manual DRBD configuration.
 					continue
 				}
+				if idx, dup := seenSNN[addr.SystemNetworkName]; dup {
+					if path.Established && !peerStatus.Paths[idx].Established {
+						peerStatus.Paths[idx] = v1alpha1.DRBDResourcePathStatus{
+							SystemNetworkName: addr.SystemNetworkName,
+							Address: v1alpha1.DRBDAddress{
+								IPv4: path.ThisHost.Address,
+								Port: uint(path.ThisHost.Port),
+							},
+							Established: path.Established,
+						}
+					}
+					continue
+				}
+				seenSNN[addr.SystemNetworkName] = len(peerStatus.Paths)
 				peerStatus.Paths = append(peerStatus.Paths, v1alpha1.DRBDResourcePathStatus{
 					SystemNetworkName: addr.SystemNetworkName,
 					Address: v1alpha1.DRBDAddress{
@@ -710,14 +724,10 @@ func (p *actualPath) Established() bool {
 
 var _ ActualPath = &actualPath{}
 
-// observeActualDRBDState retrieves the actual DRBD state by querying drbdsetup.
-//
-// When intendedBackingDev is non-empty, the function probes the backing device:
-//   - If the disk is attached and statusDeviceUUID is empty, reads the device UUID
-//     via drbdmeta read-dev-uuid (uses "-" minor, always safe).
-//   - If the disk is not attached, probes metadata existence via drbdmeta dump-md
-//     (needs the real minor) and reads device UUID via read-dev-uuid ("-" minor).
-func observeActualDRBDState(ctx context.Context, drbdResName string, intendedBackingDev string, statusDeviceUUID string) (*actualState, error) {
+// observeActualDRBDState retrieves the DRBD resource state by querying
+// drbdsetup status and drbdsetup show. It does NOT probe disk metadata;
+// call observeActualDiskState separately when disk information is needed.
+func observeActualDRBDState(ctx context.Context, drbdResName string) (*actualState, error) {
 	state := &actualState{}
 
 	statusResult, err := drbdutils.ExecuteStatus(ctx, drbdResName)
@@ -740,8 +750,20 @@ func observeActualDRBDState(ctx context.Context, drbdResName string, intendedBac
 		}
 	}
 
+	return state, nil
+}
+
+// observeActualDiskState probes the backing device for DRBD metadata and
+// device UUID, filling the disk-related fields of the actual state.
+//
+// When intendedBackingDev is non-empty, the function probes the backing device:
+//   - If the disk is attached and statusDeviceUUID is empty, reads the device UUID
+//     via drbdmeta read-dev-uuid (uses "-" minor, always safe).
+//   - If the disk is not attached, probes metadata existence via drbdmeta dump-md
+//     (needs the real minor) and reads device UUID via read-dev-uuid ("-" minor).
+func observeActualDiskState(ctx context.Context, state *actualState, intendedBackingDev string, statusDeviceUUID string) error {
 	if intendedBackingDev == "" {
-		return state, nil
+		return nil
 	}
 
 	hasVolumes := len(state.Volumes()) > 0
@@ -752,11 +774,11 @@ func observeActualDRBDState(ctx context.Context, drbdResName string, intendedBac
 		if statusDeviceUUID == "" {
 			diskUUID, err := drbdutils.ExecuteReadDevUUID(ctx, intendedBackingDev)
 			if err != nil {
-				return nil, fmt.Errorf("reading device-uuid from attached disk: %w", err)
+				return fmt.Errorf("reading device-uuid from attached disk: %w", err)
 			}
 			state.diskDeviceUUID = diskUUID
 		}
-		return state, nil
+		return nil
 	}
 
 	// Determine minor for drbdmeta dump-md (has is_attached guard, unlike
@@ -769,16 +791,16 @@ func observeActualDRBDState(ctx context.Context, drbdResName string, intendedBac
 
 	hasMD, err := drbdutils.ExecuteCheckMD(ctx, checkMDMinor, intendedBackingDev)
 	if err != nil {
-		return nil, fmt.Errorf("probing backing device metadata: %w", err)
+		return fmt.Errorf("probing backing device metadata: %w", err)
 	}
 	state.hasMetadata = hasMD
 	if hasMD {
 		diskUUID, err := drbdutils.ExecuteReadDevUUID(ctx, intendedBackingDev)
 		if err != nil {
-			return nil, fmt.Errorf("reading device-uuid: %w", err)
+			return fmt.Errorf("reading device-uuid: %w", err)
 		}
 		state.diskDeviceUUID = diskUUID
 	}
 
-	return state, nil
+	return nil
 }

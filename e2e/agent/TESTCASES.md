@@ -80,6 +80,23 @@ TestDRBDResource
 │   ├── GenerateNewUUID — metadata present, zero on disk, status empty → generate and set UUID
 │   └── RecreateMetadata — no metadata, status has UUID → create-md and write status UUID
 │
+├── PortConvergence — port adoption and path mismatch convergence (parallel)
+│   │   Requires 2 nodes. Creates 2 peered, synced diskful replicas.
+│   │
+│   ├── AdoptExistingPort
+│   │   Force-deletes both DRBDRs (DRBD keeps running on nodes with
+│   │   established connections). Recreates fresh DRBDRs (empty status).
+│   │   Asserts the agent adopts existing DRBD ports into status.addresses
+│   │   instead of allocating new ones. Re-peers and verifies Connected.
+│   │
+│   └── PathMismatchConvergence
+│       Injects a wrong port into DRBD on node 0 via drbdsetup
+│       (disconnect, del-path, new-path with wrong port, connect).
+│       status.addresses still has the original correct port. Waits for
+│       the agent to converge: adds correct path, waits for established,
+│       del-paths the stale one. Asserts status shows the correct port
+│       and DRBD has exactly one path per connection.
+│
 ├── R2 — two peered, synced replicas (parallel with R3, R4)
 │   │   Creates 2 diskful replicas on separate nodes. Links them as
 │   │   full-mesh peers (protocol C, shared secret). Runs CreateNewUUID
@@ -166,3 +183,11 @@ Every subtest's cleanup exercises a teardown path:
   reaches Configured=True.
 - **ForeignDisk cleanup**: restores the correct device-uuid on disk after
   writing a fake UUID. Verifies the agent recovers from the error.
+
+- **AdoptExistingPort**: force-deletes DRBDRs leaving DRBD running,
+  recreates them, asserts port adoption. Cleanup deletes the recreated
+  DRBDRs normally (via SetupDisklessToDiskfulReplica cleanup).
+
+- **PathMismatchConvergence**: injects a wrong DRBD path, waits for
+  the agent to converge. No extra cleanup needed — the parent
+  PortConvergence scope handles DRBDR deletion.

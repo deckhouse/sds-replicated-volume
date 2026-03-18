@@ -219,7 +219,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			name:  "custom drbd resource name in maintenance mode - skips rename",
 			drbdr: drbdrWithCustomNameInMaintenance(testNodeName, testCustomDRBDName),
 			expectedCommands: []*fakedrbdutils.ExpectedCmd{
-				// Phase 0 rename is skipped due to MM; falls through to Phase 4.
+				// Phase 0 rename is skipped due to MM; falls through to Phase 2+4.
 				// Status and show use the custom (old) name via DRBDResourceNameOnTheNode.
 				{
 					Name:         drbdutils.DRBDSetupCommand,
