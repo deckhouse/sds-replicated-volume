@@ -67,7 +67,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Failf(err, "getting ReplicatedVolume").ToCtrl()
 	}
 	if rv == nil {
-		return r.reconcileOrphanedRVAs(rf.Ctx(), req.Name).ToCtrl()
+		return flow.MergeReconciles(
+			r.reconcileOrphanedRVAs(rf.Ctx(), req.Name),
+			r.reconcileOrphanedRVRs(rf.Ctx(), req.Name),
+		).ToCtrl()
 	}
 
 	// Load RSC (Auto mode only; Manual mode has no RSC reference).
@@ -165,6 +168,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
+	// If datamesh just made the RV eligible for deletion (e.g., last member detached),
+	// requeue immediately so the next reconcile enters reconcileDeletion.
+	if rv.DeletionTimestamp != nil && rvShouldNotExist(rv) {
+		outcome = outcome.Merge(rf.ContinueAndRequeue())
+	}
+
 	// Reconcile RVA and RVR finalizers.
 	outcome = flow.MergeReconciles(
 		outcome,
@@ -182,6 +191,34 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	return outcome.ToCtrl()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: orphaned RVRs
+//
+
+// reconcileOrphanedRVRs handles RVRs that reference a deleted/absent RV.
+// Loads RVRs by rvName and delegates to reconcileRVRFinalizers with rv=nil,
+// which adds the finalizer to non-deleting RVRs and removes it from deleting ones
+// (isRVRMemberOrLeavingDatamesh returns false when rv is nil).
+//
+// Reconcile pattern: Pure orchestration
+func (r *Reconciler) reconcileOrphanedRVRs(
+	ctx context.Context,
+	rvName string,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "orphaned-rvrs")
+	defer rf.OnEnd(&outcome)
+
+	rvrs, err := r.getRVRsSorted(rf.Ctx(), rvName)
+	if err != nil {
+		return rf.Failf(err, "listing RVRs for deleted RV")
+	}
+	if len(rvrs) == 0 {
+		return rf.Done()
+	}
+
+	return r.reconcileRVRFinalizers(rf.Ctx(), nil, rvrs)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
