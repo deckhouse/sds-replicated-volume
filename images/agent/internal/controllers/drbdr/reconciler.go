@@ -223,6 +223,7 @@ func (r *Reconciler) reconcileDRBDR(
 	// Compute and execute DRBD actions
 	targetActions := computeTargetDRBDActions(iState, aState)
 	maintenanceMode := drbdr.Spec.Maintenance == v1alpha1.MaintenanceModeNoResourceReconciliation
+
 	refreshNeeded, drbdErr := convergeDRBDState(rf.Ctx(), targetActions, maintenanceMode)
 
 	// Refresh actual state if DRBD state was changed
@@ -380,7 +381,7 @@ func (r *Reconciler) reconcileLLVFinalizerAdd(ctx context.Context, llvName strin
 	}
 	if llv == nil {
 		return "", ConfiguredReasonError(
-			flow.Wrapf(nil, "LVMLogicalVolume %q not found", llvName),
+			fmt.Errorf("LVMLogicalVolume %q not found", llvName),
 			v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed,
 		)
 	}
@@ -388,7 +389,7 @@ func (r *Reconciler) reconcileLLVFinalizerAdd(ctx context.Context, llvName strin
 	// Do not add finalizer to a deleting LLV — treat it as unavailable.
 	if llv.DeletionTimestamp != nil {
 		return "", ConfiguredReasonError(
-			flow.Wrapf(nil, "LVMLogicalVolume %q is being deleted", llvName),
+			fmt.Errorf("LVMLogicalVolume %q is being deleted", llvName),
 			v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed,
 		)
 	}
@@ -409,7 +410,7 @@ func (r *Reconciler) reconcileLLVFinalizerAdd(ctx context.Context, llvName strin
 	}
 	if lvg == nil {
 		return "", ConfiguredReasonError(
-			flow.Wrapf(nil, "LVMVolumeGroup %q not found", llv.Spec.LVMVolumeGroupName),
+			fmt.Errorf("LVMVolumeGroup %q not found", llv.Spec.LVMVolumeGroupName),
 			v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed,
 		)
 	}
