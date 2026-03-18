@@ -105,4 +105,98 @@ var _ = Describe("Registry", func() {
 		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
 		Expect(reg.get("Unknown", "x/v1")).To(BeNil())
 	})
+
+	Describe("PlanStepCount", func() {
+		It("returns step count for registered plan", func() {
+			reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+			rt := reg.ReplicaTransition("AddReplica", 0)
+			rt.Plan("diskful/v1").
+				Group("VotingMembership").
+				DisplayName("Adding diskful").
+				Steps(
+					ReplicaStep("✦ → D∅", stubReplicaApply, stubReplicaConfirm),
+					ReplicaStep("D∅ → D", stubReplicaApply, stubReplicaConfirm),
+				).
+				Build()
+
+			Expect(reg.PlanStepCount("AddReplica", "diskful/v1")).To(Equal(2))
+		})
+
+		It("returns 0 for unknown plan", func() {
+			reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+			Expect(reg.PlanStepCount("Unknown", "x/v1")).To(Equal(0))
+		})
+
+		It("returns 0 for unknown transition type with existing plan ID", func() {
+			reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+			rt := reg.ReplicaTransition("AddReplica", 0)
+			rt.Plan("access/v1").
+				Group("NonVotingMembership").
+				DisplayName("Test").
+				Steps(ReplicaStep("✦ → A", stubReplicaApply, stubReplicaConfirm)).
+				Build()
+
+			Expect(reg.PlanStepCount("RemoveReplica", "access/v1")).To(Equal(0))
+		})
+	})
+
+	Describe("MaxPlanStepCount", func() {
+		It("returns max step count across plans for a transition type", func() {
+			reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+			rt := reg.ReplicaTransition("AddReplica", 0)
+
+			rt.Plan("access/v1").
+				Group("NonVotingMembership").
+				DisplayName("Add A").
+				Steps(ReplicaStep("✦ → A", stubReplicaApply, stubReplicaConfirm)).
+				Build()
+
+			rt.Plan("diskful/v1").
+				Group("VotingMembership").
+				DisplayName("Add D").
+				Steps(
+					ReplicaStep("✦ → D∅", stubReplicaApply, stubReplicaConfirm),
+					ReplicaStep("D∅ → D", stubReplicaApply, stubReplicaConfirm),
+				).
+				Build()
+
+			rt.Plan("diskful-q-up/v1").
+				Group("VotingMembership").
+				DisplayName("Add D+q").
+				Steps(
+					ReplicaStep("✦ → A", stubReplicaApply, stubReplicaConfirm),
+					ReplicaStep("A → D∅", stubReplicaApply, stubReplicaConfirm),
+					ReplicaStep("D∅ → D", stubReplicaApply, stubReplicaConfirm),
+				).
+				Build()
+
+			Expect(reg.MaxPlanStepCount("AddReplica")).To(Equal(3))
+		})
+
+		It("returns 0 for unknown transition type", func() {
+			reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+			Expect(reg.MaxPlanStepCount("Unknown")).To(Equal(0))
+		})
+
+		It("ignores plans of other transition types", func() {
+			reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+
+			addRT := reg.ReplicaTransition("AddReplica", 0)
+			addRT.Plan("access/v1").
+				Group("NonVotingMembership").
+				DisplayName("Add A").
+				Steps(ReplicaStep("✦ → A", stubReplicaApply, stubReplicaConfirm)).
+				Build()
+
+			removeRT := reg.ReplicaTransition("RemoveReplica", 0)
+			removeRT.Plan("access/v1").
+				Group("NonVotingMembership").
+				DisplayName("Remove A").
+				Steps(ReplicaStep("A → ✕", stubReplicaApply, stubReplicaConfirm)).
+				Build()
+
+			Expect(reg.MaxPlanStepCount("AddReplica")).To(Equal(1))
+			Expect(reg.MaxPlanStepCount("RemoveReplica")).To(Equal(1))
+		})
+	})
 })

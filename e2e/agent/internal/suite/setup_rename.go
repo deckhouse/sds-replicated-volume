@@ -64,7 +64,7 @@ func SetupRename(
 	// the rename. Without this, the agent may re-create the standard-named
 	// DRBD resource between the on-node rename and the actualNameOnTheNode
 	// patch, leaving both names alive on the node.
-	drbdr = SetupMaintenanceMode(e, cl, drbdr)
+	_ = SetupMaintenanceMode(e, cl, drbdr)
 
 	// Rename DRBD resource on the node from standard to custom name.
 	ne.Exec(e, node.Name, "drbdsetup", "rename-resource", standardDRBDName, customDRBDName)

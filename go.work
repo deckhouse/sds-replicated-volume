@@ -3,6 +3,9 @@ go 1.25.7
 use (
 	./api
 	./e2e/agent
+	./e2e/full
+	./e2e/pkg/debug
+	./e2e/pkg/framework
 	./hooks/go
 	./images/agent
 	./images/controller
@@ -12,4 +15,5 @@ use (
 	./images/oldcontroller
 	./images/webhooks
 	./lib/go/common
+	./lib/go/testkit
 )

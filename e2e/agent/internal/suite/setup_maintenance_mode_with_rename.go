@@ -41,7 +41,7 @@ func SetupMaintenanceModeWithRename(
 	cl client.WithWatch,
 	ne *kubetesting.NodeExec,
 	drbdr *v1alpha1.DRBDResource,
-	cluster *Cluster,
+	_ *Cluster,
 ) {
 	var drbdrConfiguredTimeout DRBDRConfiguredTimeout
 	e.Options(&drbdrConfiguredTimeout)
@@ -52,7 +52,7 @@ func SetupMaintenanceModeWithRename(
 	customDRBDName := "custom-mm-" + name
 
 	// Step 1: Set maintenance mode (registers cleanup #A — LIFO last).
-	drbdr = SetupMaintenanceMode(e, cl, drbdr)
+	_ = SetupMaintenanceMode(e, cl, drbdr)
 
 	// Step 2: Rename DRBD resource on the node from standard to custom name.
 	ne.Exec(e, nodeName, "drbdsetup", "rename-resource", standardDRBDName, customDRBDName)

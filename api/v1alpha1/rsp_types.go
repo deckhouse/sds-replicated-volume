@@ -63,6 +63,9 @@ func (rsp *ReplicatedStoragePool) SetStatusConditions(conditions []metav1.Condit
 	rsp.Status.Conditions = conditions
 }
 
+// GetStatusPhase returns .status.phase as a string.
+func (rsp *ReplicatedStoragePool) GetStatusPhase() string { return string(rsp.Status.Phase) }
+
 // Defines desired rules for Linstor's Storage-pools.
 // +kubebuilder:object:generate=true
 // +structType=atomic

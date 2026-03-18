@@ -73,6 +73,9 @@ func (rvr *ReplicatedVolumeReplica) SetStatusConditions(conditions []metav1.Cond
 	rvr.Status.Conditions = conditions
 }
 
+// GetStatusPhase returns .status.phase as a string.
+func (rvr *ReplicatedVolumeReplica) GetStatusPhase() string { return string(rvr.Status.Phase) }
+
 // ID extracts ID from the RVR name (e.g., "pvc-xxx-5" → 5).
 // Result is cached after first successful call
 func (rvr *ReplicatedVolumeReplica) ID() uint8 {

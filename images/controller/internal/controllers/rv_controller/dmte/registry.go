@@ -70,6 +70,28 @@ func (reg *Registry[G, R]) replicaSlotAccessor(id ReplicaSlotID) ReplicaSlotAcce
 	return reg.replicaSlotAccessors[id] // nil if not registered
 }
 
+// PlanStepCount returns the number of steps in the plan identified by
+// (transitionType, planID). Returns 0 if the plan is not found.
+func (reg *Registry[G, R]) PlanStepCount(tt TransitionType, planID PlanID) int {
+	p := reg.get(tt, planID)
+	if p == nil {
+		return 0
+	}
+	return len(p.steps)
+}
+
+// MaxPlanStepCount returns the maximum step count across all plans
+// registered for the given transition type. Returns 0 if no plans exist.
+func (reg *Registry[G, R]) MaxPlanStepCount(tt TransitionType) int {
+	m := 0
+	for key, p := range reg.plans {
+		if key.transitionType == tt && len(p.steps) > m {
+			m = len(p.steps)
+		}
+	}
+	return m
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // RegisteredTransition
 //

@@ -3178,6 +3178,103 @@ var _ = Describe("reconcileRVRFinalizers", func() {
 	})
 })
 
+// ──────────────────────────────────────────────────────────────────────────────
+// reconcileOrphanedRVRs
+//
+
+var _ = Describe("reconcileOrphanedRVRs", func() {
+	var scheme *runtime.Scheme
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+	})
+
+	It("removes finalizer from deleting orphaned RVR", func(ctx SpecContext) {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rvr-1",
+				DeletionTimestamp: ptr.To(metav1.Now()),
+				Finalizers:        []string{v1alpha1.RVControllerFinalizer},
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+			},
+		}
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		outcome := rec.reconcileOrphanedRVRs(ctx, "rv-1")
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+
+		// RVR should be finalized (finalizer removed → object deleted by fake client).
+		var updated v1alpha1.ReplicatedVolumeReplica
+		err := cl.Get(ctx, client.ObjectKeyFromObject(rvr), &updated)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("adds finalizer to non-deleting orphaned RVR", func(ctx SpecContext) {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "rvr-1",
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+			},
+		}
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		outcome := rec.reconcileOrphanedRVRs(ctx, "rv-1")
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolumeReplica
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), &updated)).To(Succeed())
+		Expect(obju.HasFinalizer(&updated, v1alpha1.RVControllerFinalizer)).To(BeTrue())
+	})
+
+	It("returns Done when no RVRs exist for the RV", func(ctx SpecContext) {
+		cl := newClientBuilder(scheme).Build()
+		rec := NewReconciler(cl, scheme)
+
+		outcome := rec.reconcileOrphanedRVRs(ctx, "rv-1")
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.ShouldReturn()).To(BeTrue()) // Done is terminal.
+	})
+
+	It("skips deleting RVR without finalizer", func(ctx SpecContext) {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rvr-1",
+				DeletionTimestamp: ptr.To(metav1.Now()),
+				Finalizers:        []string{"some-other-finalizer"},
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+			},
+		}
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		outcome := rec.reconcileOrphanedRVRs(ctx, "rv-1")
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+
+		// RVR should still exist (only our finalizer is managed).
+		var updated v1alpha1.ReplicatedVolumeReplica
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), &updated)).To(Succeed())
+		Expect(obju.HasFinalizer(&updated, v1alpha1.RVControllerFinalizer)).To(BeFalse())
+	})
+})
+
 var _ = Describe("applyDatameshTransitionStepMessage", func() {
 	It("sets message and returns true when different", func() {
 		step := &v1alpha1.ReplicatedVolumeDatameshTransitionStep{Message: "old"}

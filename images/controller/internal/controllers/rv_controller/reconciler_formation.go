@@ -34,7 +34,13 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
-// Formation step indices. Each step function accesses t.Steps[idx] directly.
+// Formation plan IDs stored in transition.PlanID.
+const (
+	formationPlanCreate = "create/v1"
+	formationPlanAdopt  = "adopt/v1"
+)
+
+// Formation create/v1 step indices. Each step function accesses t.Steps[idx] directly.
 const (
 	formationStepIdxPreconfigure          = 0
 	formationStepIdxEstablishConnectivity = 1
@@ -42,11 +48,26 @@ const (
 	formationStepCount                    = 3
 )
 
-// formationStepNames maps step index to human-readable name (displayed in status).
+// formationStepNames maps step index to human-readable name (displayed in status) for create/v1.
 var formationStepNames = [formationStepCount]string{
 	formationStepIdxPreconfigure:          "Preconfigure",
 	formationStepIdxEstablishConnectivity: "Establish connectivity",
 	formationStepIdxBootstrapData:         "Bootstrap data",
+}
+
+// Formation adopt/v1 step indices.
+const (
+	adoptStepIdxWaitPreconfigured   = 0
+	adoptStepIdxEstablishMembership = 1
+	adoptStepIdxWaitUpToDate        = 2
+	adoptStepCount                  = 3
+)
+
+// adoptStepNames maps step index to human-readable name (displayed in status) for adopt/v1.
+var adoptStepNames = [adoptStepCount]string{
+	adoptStepIdxWaitPreconfigured:   "Wait preconfigured",
+	adoptStepIdxEstablishMembership: "Establish membership",
+	adoptStepIdxWaitUpToDate:        "Wait up-to-date",
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -66,18 +87,43 @@ func (r *Reconciler) reconcileFormation(
 	rf := flow.BeginReconcile(ctx, "formation")
 	defer rf.OnEnd(&outcome)
 
-	// Find or create the Formation transition. Created on first entry (stepIdx=0).
-	t, created := ensureFormationTransition(rv)
+	// Determine plan: adopt when annotation is present, create otherwise.
+	planID := formationPlanCreate
+	if _, ok := rv.Annotations[v1alpha1.AdoptRVRAnnotationKey]; ok {
+		planID = formationPlanAdopt
+	}
 
-	switch stepIdx {
-	case formationStepIdxPreconfigure:
-		outcome = r.reconcileFormationStepPreconfigure(rf.Ctx(), rv, rvrs, rsp, rsc, t, created)
-	case formationStepIdxEstablishConnectivity:
-		outcome = r.reconcileFormationStepEstablishConnectivity(rf.Ctx(), rv, rvrs, rsp, rsc, t)
-	case formationStepIdxBootstrapData:
-		outcome = r.reconcileFormationStepBootstrapData(rf.Ctx(), rv, rvrs, rsp, rsc, t)
+	// Find or create the Formation transition. Created on first entry (stepIdx=0).
+	t, created := ensureFormationTransition(rv, planID)
+
+	// Dispatch by plan stored in the transition (persisted on first creation).
+	switch t.PlanID {
+	case formationPlanAdopt:
+		switch stepIdx {
+		case adoptStepIdxWaitPreconfigured:
+			outcome = r.reconcileAdoptStepWaitPreconfigured(rf.Ctx(), rv, rvrs, rsp, rsc, t, created)
+		case adoptStepIdxEstablishMembership:
+			outcome = r.reconcileAdoptStepEstablishMembership(rf.Ctx(), rv, rvrs, rsp, rsc, t)
+		case adoptStepIdxWaitUpToDate:
+			outcome = r.reconcileAdoptStepWaitUpToDate(rf.Ctx(), rv, rvrs, rsp, t)
+		default:
+			return rf.Fail(fmt.Errorf("invalid adopt formation step index: %d", stepIdx))
+		}
+
+	case formationPlanCreate, "":
+		switch stepIdx {
+		case formationStepIdxPreconfigure:
+			outcome = r.reconcileFormationStepPreconfigure(rf.Ctx(), rv, rvrs, rsp, rsc, t, created)
+		case formationStepIdxEstablishConnectivity:
+			outcome = r.reconcileFormationStepEstablishConnectivity(rf.Ctx(), rv, rvrs, rsp, rsc, t)
+		case formationStepIdxBootstrapData:
+			outcome = r.reconcileFormationStepBootstrapData(rf.Ctx(), rv, rvrs, rsp, rsc, t)
+		default:
+			return rf.Fail(fmt.Errorf("invalid formation step index: %d", stepIdx))
+		}
+
 	default:
-		return rf.Fail(fmt.Errorf("invalid formation step index: %d", stepIdx))
+		return rf.Fail(fmt.Errorf("unknown formation plan: %s", t.PlanID))
 	}
 
 	// Set "waiting" conditions on all RVAs — datamesh is not ready yet.
@@ -837,6 +883,353 @@ func (r *Reconciler) reconcileFormationRestartIfTimeoutPassed(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: adopt/v1 — WaitPreconfigured
+//
+
+// reconcileAdoptStepWaitPreconfigured waits for pre-existing RVRs to become preconfigured.
+// Unlike create/v1, this step never creates or deletes RVRs.
+//
+// Reconcile pattern: Pure orchestration
+func (r *Reconciler) reconcileAdoptStepWaitPreconfigured(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
+	rsp *rspView,
+	rsc *v1alpha1.ReplicatedStorageClass,
+	t *v1alpha1.ReplicatedVolumeDatameshTransition,
+	created bool,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "adopt-wait-preconfigured")
+	defer rf.OnEnd(&outcome)
+
+	step := &t.Steps[adoptStepIdxWaitPreconfigured]
+	changed := created
+	if created {
+		rv.Status.DatameshRevision = 1
+		rv.Status.Datamesh.SystemNetworkNames = rsp.SystemNetworkNames
+		rv.Status.Datamesh.Size = rv.Spec.Size
+
+		step.DatameshRevision = rv.Status.DatameshRevision
+		applyDatameshTransitionStepMessage(step, "Starting adopt: waiting for pre-existing replicas")
+	}
+
+	// Collect non-deleting diskful replicas.
+	diskful := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.DeletionTimestamp == nil
+	})
+
+	if diskful.IsEmpty() {
+		changed = applyDatameshTransitionStepMessage(step, "No diskful replicas found, waiting for pre-existing RVRs to appear") || changed
+		return rf.ContinueAndRequeue().ReportChangedIf(changed)
+	}
+
+	// Wait for deleting RVRs to be fully removed before proceeding.
+	deleting := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return rvr.DeletionTimestamp != nil
+	})
+	if !deleting.IsEmpty() {
+		msg := fmt.Sprintf("Waiting for %d deleting replicas [%s] to be fully removed", deleting.Len(), deleting.String())
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
+		return rf.ContinueAndRequeue().ReportChangedIf(changed)
+	}
+
+	// Replicas that have been assigned to a node by the scheduler.
+	scheduled := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType).
+			IsTrue().
+			ObservedGenerationCurrent().
+			Eval()
+	})
+
+	// Replicas ready to join the datamesh (adopt: must be in maintenance mode).
+	preconfigured := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		req := rvr.Status.DatameshRequest
+		return req != nil && req.Operation == v1alpha1.DatameshMembershipRequestOperationJoin &&
+			obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType).
+				ReasonEqual(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonInMaintenance).
+				ObservedGenerationCurrent().
+				Eval()
+	})
+
+	// Wait for scheduling and preconfiguration.
+	waitingScheduling := diskful.Difference(scheduled)
+	waitingPreconfiguration := scheduled.Intersect(diskful).Difference(preconfigured)
+
+	if !waitingScheduling.IsEmpty() || !waitingPreconfiguration.IsEmpty() {
+		targetDiskfulCount := byte(diskful.Len())
+
+		schedulingFailed := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+			return waitingScheduling.Contains(rvr.ID()) &&
+				obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType).
+					IsFalse().
+					Eval()
+		})
+		pendingScheduling := waitingScheduling.Difference(schedulingFailed)
+
+		msg := computeFormationPreconfigureWaitMessage(*rvrs, targetDiskfulCount,
+			pendingScheduling, schedulingFailed, waitingPreconfiguration)
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
+		changed = applyDatameshReplicaRequestMessages(
+			rv, preconfigured,
+			"Datamesh is forming (adopt), waiting for other replicas to enter maintenance mode",
+		) || changed
+		return rf.ContinueAndRequeue().ReportChangedIf(changed)
+	}
+
+	// Safety: verify all diskful replicas have addresses for required networks.
+	requiredNetworks := rv.Status.Datamesh.SystemNetworkNames
+	missingAddresses := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		if !diskful.Contains(rvr.ID()) {
+			return false
+		}
+		matchCount := 0
+		for _, addr := range rvr.Status.Addresses {
+			if slices.Contains(requiredNetworks, addr.SystemNetworkName) {
+				matchCount++
+			}
+		}
+		return matchCount != len(requiredNetworks)
+	})
+	if !missingAddresses.IsEmpty() {
+		msg := fmt.Sprintf(
+			"Address configuration mismatch: replicas [%s] do not have addresses for all required networks %v",
+			missingAddresses.String(), requiredNetworks,
+		)
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
+		return rf.ContinueAndRequeue().ReportChangedIf(changed)
+	}
+
+	// Safety: verify all diskful replicas are on eligible nodes.
+	notEligible := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return diskful.Contains(rvr.ID()) && rsp.FindEligibleNode(rvr.Spec.NodeName) == nil
+	})
+	if !notEligible.IsEmpty() {
+		msg := fmt.Sprintf("Replicas [%s] are placed on nodes not in eligible nodes list", notEligible.String())
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
+		return rf.ContinueAndRequeue().ReportChangedIf(changed)
+	}
+
+	// Safety: verify spec matches pending transition.
+	specMismatch := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		if !diskful.Contains(rvr.ID()) {
+			return false
+		}
+		req := rvr.Status.DatameshRequest
+		if req == nil {
+			return false
+		}
+		return rvr.Spec.Type != req.Type ||
+			rvr.Spec.LVMVolumeGroupName != req.LVMVolumeGroupName ||
+			rvr.Spec.LVMVolumeGroupThinPoolName != req.ThinPoolName
+	})
+	if !specMismatch.IsEmpty() {
+		msg := fmt.Sprintf("Replicas [%s] have spec changes that don't match pending transition", specMismatch.String())
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
+		return rf.ContinueAndRequeue().ReportChangedIf(changed)
+	}
+
+	// Safety: verify backing volume size is sufficient.
+	insufficientSize := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		if !diskful.Contains(rvr.ID()) {
+			return false
+		}
+		if rvr.Status.BackingVolume == nil || rvr.Status.BackingVolume.Size == nil {
+			return false
+		}
+		usable := drbd_size.UsableSize(*rvr.Status.BackingVolume.Size)
+		return usable.Cmp(rv.Status.Datamesh.Size) < 0
+	})
+	if !insufficientSize.IsEmpty() {
+		msg := fmt.Sprintf(
+			"Replicas [%s] have insufficient backing volume size for datamesh (required: %s)",
+			insufficientSize.String(), rv.Status.Datamesh.Size.String(),
+		)
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
+		return rf.ContinueAndRequeue().ReportChangedIf(changed)
+	}
+
+	// All preconfigured — advance to EstablishMembership.
+	advanceFormationStep(t, adoptStepIdxWaitPreconfigured)
+	return r.reconcileAdoptStepEstablishMembership(rf.Ctx(), rv, rvrs, rsp, rsc, t)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: adopt/v1 — EstablishMembership
+//
+
+// reconcileAdoptStepEstablishMembership adds adopted replicas to the datamesh,
+// generates shared secret and quorum settings, then waits for replicas to be
+// configured and connected.
+//
+// Reconcile pattern: Pure orchestration
+func (r *Reconciler) reconcileAdoptStepEstablishMembership(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
+	rsp *rspView,
+	_ *v1alpha1.ReplicatedStorageClass,
+	t *v1alpha1.ReplicatedVolumeDatameshTransition,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "adopt-establish-membership")
+	defer rf.OnEnd(&outcome)
+
+	step := &t.Steps[adoptStepIdxEstablishMembership]
+	changed := false
+
+	diskful := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.DeletionTimestamp == nil
+	})
+
+	if len(rv.Status.Datamesh.Members) == 0 {
+		secret, err := generateSharedSecret()
+		if err != nil {
+			return rf.Fail(err)
+		}
+		rv.Status.Datamesh.SharedSecretAlg = v1alpha1.SharedSecretAlgSHA256
+		rv.Status.Datamesh.SharedSecret = secret
+
+		for _, rvr := range *rvrs {
+			if !diskful.Contains(rvr.ID()) {
+				continue
+			}
+			var zone string
+			if en := rsp.FindEligibleNode(rvr.Spec.NodeName); en != nil {
+				zone = en.ZoneName
+			}
+			req := rvr.Status.DatameshRequest
+			applyDatameshMember(rv, v1alpha1.DatameshMember{
+				Name:                       rvr.Name,
+				Type:                       v1alpha1.DatameshMemberType(req.Type),
+				NodeName:                   rvr.Spec.NodeName,
+				Zone:                       zone,
+				Addresses:                  slices.Clone(rvr.Status.Addresses),
+				LVMVolumeGroupName:         req.LVMVolumeGroupName,
+				LVMVolumeGroupThinPoolName: req.ThinPoolName,
+				Attached:                   rvr.Status.Attachment != nil,
+			})
+		}
+
+		rv.Status.BaselineGuaranteedMinimumDataRedundancy = rv.Status.Configuration.GuaranteedMinimumDataRedundancy
+
+		quorum, quorumMinimumRedundancy := computeTargetQuorum(rv)
+		rv.Status.Datamesh.Quorum = quorum
+		rv.Status.Datamesh.QuorumMinimumRedundancy = quorumMinimumRedundancy
+
+		rv.Status.DatameshRevision++
+		step.DatameshRevision = rv.Status.DatameshRevision
+		applyDatameshReplicaRequestMessages(rv, diskful, "Datamesh is forming (adopt), waiting for replica to apply new configuration")
+		applyDatameshTransitionStepMessage(step, fmt.Sprintf(
+			"Replicas [%s] added to datamesh. Waiting for them to establish connections",
+			diskful.String(),
+		))
+
+		return rf.Continue().ReportChanged()
+	}
+
+	// Verify datamesh members match active replicas.
+	dmDiskful := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
+		return m.Type == v1alpha1.DatameshMemberTypeDiskful
+	})
+	if dmDiskful != diskful {
+		msg := fmt.Sprintf(
+			"Datamesh members mismatch: datamesh has [%s], but active RVRs are [%s]",
+			dmDiskful.String(), diskful.String(),
+		)
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
+		return rf.ContinueAndRequeue().ReportChangedIf(changed)
+	}
+
+	// Verify all diskful replicas are fully configured for the current datamesh revision.
+	configured := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return diskful.Contains(rvr.ID()) &&
+			rvr.Status.DatameshRevision == rv.Status.DatameshRevision &&
+			obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType).
+				IsTrue().
+				ObservedGenerationCurrent().
+				Eval()
+	})
+	if configured != diskful {
+		notConfigured := diskful.Difference(configured)
+		changed = applyDatameshTransitionStepMessage(step, fmt.Sprintf(
+			"Waiting for replicas [%s] to be fully configured for datamesh revision %d",
+			notConfigured.String(), rv.Status.DatameshRevision,
+		)) || changed
+		return rf.ContinueAndRequeue().ReportChangedIf(changed)
+	}
+
+	// Verify all diskful replicas are connected to each other.
+	connected := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		if !diskful.Contains(rvr.ID()) {
+			return false
+		}
+		expectedPeers := diskful.Difference(idset.Of(rvr.ID()))
+		actualPeers := idset.FromWhere(rvr.Status.Peers, func(p v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
+			return p.Type == v1alpha1.ReplicaTypeDiskful &&
+				p.ConnectionState == v1alpha1.ConnectionStateConnected
+		})
+		return actualPeers == expectedPeers
+	})
+	if connected != diskful {
+		notConnected := diskful.Difference(connected)
+		changed = applyDatameshTransitionStepMessage(step, fmt.Sprintf(
+			"Waiting for replicas [%s] to establish connections with all peers",
+			notConnected.String(),
+		)) || changed
+		return rf.ContinueAndRequeue().ReportChangedIf(changed)
+	}
+
+	// All connected — advance to WaitUpToDate.
+	advanceFormationStep(t, adoptStepIdxEstablishMembership)
+	return r.reconcileAdoptStepWaitUpToDate(rf.Ctx(), rv, rvrs, rsp, t)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: adopt/v1 — WaitUpToDate
+//
+
+// reconcileAdoptStepWaitUpToDate waits for all adopted replicas to have UpToDate
+// backing volumes, then completes formation.
+//
+// Reconcile pattern: Pure orchestration
+func (r *Reconciler) reconcileAdoptStepWaitUpToDate(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
+	_ *rspView,
+	t *v1alpha1.ReplicatedVolumeDatameshTransition,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "adopt-wait-uptodate")
+	defer rf.OnEnd(&outcome)
+
+	step := &t.Steps[adoptStepIdxWaitUpToDate]
+	changed := false
+
+	dmDiskful := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
+		return m.Type == v1alpha1.DatameshMemberTypeDiskful
+	})
+
+	upToDate := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return dmDiskful.Contains(rvr.ID()) &&
+			rvr.Status.BackingVolume != nil &&
+			rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate
+	})
+	if upToDate != dmDiskful {
+		notUpToDate := dmDiskful.Difference(upToDate)
+		changed = applyDatameshTransitionStepMessage(step, fmt.Sprintf(
+			"Waiting for replicas [%s] to reach UpToDate state",
+			notUpToDate.String(),
+		)) || changed
+		changed = applyDatameshReplicaRequestMessages(rv, notUpToDate, "Datamesh is forming (adopt), waiting for backing volume to become UpToDate") || changed
+		changed = applyDatameshReplicaRequestMessages(rv, upToDate, "Datamesh is forming (adopt), replica is UpToDate, waiting for remaining replicas") || changed
+		return rf.ContinueAndRequeue().ReportChangedIf(changed)
+	}
+
+	// All replicas UpToDate — formation complete.
+	changed = applyFormationTransitionAbsent(rv) || changed
+	return rf.ContinueAndRequeue().ReportChangedIf(changed)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Formation helpers
 //
 
@@ -878,32 +1271,47 @@ func isFormationInProgress(rv *v1alpha1.ReplicatedVolume) (bool, int) {
 }
 
 // ensureFormationTransition finds the existing Formation transition or creates a new one.
+// planID selects the step layout (create/v1 or adopt/v1); it is stored in the transition
+// on creation and ignored on subsequent calls (the persisted PlanID is authoritative).
 // Returns a pointer to the transition and whether it was just created.
 //
 // Exception: uses metav1.Now() for StartedAt when creating a new transition.
 // This is controller-owned state (persisted decision timestamp), acceptable here
 // because the value is set once and stabilized across subsequent reconciliations.
-func ensureFormationTransition(rv *v1alpha1.ReplicatedVolume) (*v1alpha1.ReplicatedVolumeDatameshTransition, bool) {
+func ensureFormationTransition(rv *v1alpha1.ReplicatedVolume, planID string) (*v1alpha1.ReplicatedVolumeDatameshTransition, bool) {
 	for i := range rv.Status.DatameshTransitions {
 		if rv.Status.DatameshTransitions[i].Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation {
 			return &rv.Status.DatameshTransitions[i], false
 		}
 	}
 
+	// Select step names and count based on planID.
+	var stepCount int
+	var stepNames []string
+	switch planID {
+	case formationPlanAdopt:
+		stepCount = adoptStepCount
+		stepNames = adoptStepNames[:]
+	default:
+		stepCount = formationStepCount
+		stepNames = formationStepNames[:]
+	}
+
 	// Create with all steps pre-declared. First step is Active, rest are Pending.
 	now := metav1.Now()
-	steps := make([]v1alpha1.ReplicatedVolumeDatameshTransitionStep, formationStepCount)
+	steps := make([]v1alpha1.ReplicatedVolumeDatameshTransitionStep, stepCount)
 	for i := range steps {
-		steps[i].Name = formationStepNames[i]
+		steps[i].Name = stepNames[i]
 		steps[i].Status = v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending
 	}
 	steps[0].Status = v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive
 	steps[0].StartedAt = &now
 
 	rv.Status.DatameshTransitions = append(rv.Status.DatameshTransitions, v1alpha1.ReplicatedVolumeDatameshTransition{
-		Type:  v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
-		Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupFormation,
-		Steps: steps,
+		Type:   v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
+		Group:  v1alpha1.ReplicatedVolumeDatameshTransitionGroupFormation,
+		PlanID: planID,
+		Steps:  steps,
 	})
 	return &rv.Status.DatameshTransitions[len(rv.Status.DatameshTransitions)-1], true
 }

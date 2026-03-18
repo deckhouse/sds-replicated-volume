@@ -44,6 +44,11 @@ failed_modules=0
 passed_modules=0
 
 for mod in $modules; do
+    # Skip e2e tests — they require a live cluster
+    if [[ "$mod" == ./e2e/* ]]; then
+        print_status "$YELLOW" "Skipping $mod (e2e)"
+        continue
+    fi
     print_status "$YELLOW" "Testing $mod"
     total_modules=$((total_modules + 1))
 

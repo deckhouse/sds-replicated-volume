@@ -220,7 +220,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 	// 9c. DRBDR is in maintenance mode.
 	if drbdrConfiguredCond.Reason == v1alpha1.DRBDResourceCondConfiguredReasonInMaintenance {
 		changed = applyDRBDConfiguredCondUnknown(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration,
+			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonInMaintenance,
 			"DRBD is in maintenance mode") || changed
 		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}

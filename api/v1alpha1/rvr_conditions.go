@@ -69,6 +69,7 @@ const (
 	ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration      = "ApplyingConfiguration"      // Agent is applying DRBD configuration.
 	ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigurationFailed        = "ConfigurationFailed"        // Agent failed to apply DRBD configuration.
 	ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured                 = "Configured"                 // Replica is fully configured for the current datamesh revision.
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonInMaintenance              = "InMaintenance"              // DRBD resource is in maintenance mode.
 	ReplicatedVolumeReplicaCondDRBDConfiguredReasonNotApplicable              = "NotApplicable"              // Not applicable (replica is being deleted).
 	ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingDatameshJoin        = "PendingDatameshJoin"        // DRBD preconfigured; waiting for datamesh membership.
 	ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingScheduling          = "PendingScheduling"          // Waiting for node assignment.
