@@ -87,6 +87,8 @@ spec:
             value: "/etc/config/slogh.cfg"
           - name: LVM_SYSTEM_DIR
             value: ""
+          - name: LVM_LOCK_DIR
+            value: "/var/run/drbd/lock"
           - name: HOME
             value: "/tmp"
         securityContext:
