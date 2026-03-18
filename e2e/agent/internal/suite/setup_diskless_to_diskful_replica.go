@@ -80,6 +80,7 @@ func SetupDisklessToDiskfulReplica(
 		isDRBDRTerminal,
 	)
 	assertDRBDRConfigured(e, drbdr)
+	assertDRBDRSizePopulated(e, drbdr)
 	assertLLVHasAgentFinalizer(e, cl, name)
 
 	return drbdr, llv

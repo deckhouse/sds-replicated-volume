@@ -9,7 +9,8 @@ TestDRBDResource
 │   │   Creates a diskless DRBDResource, waits for Configured=True and
 │   │   addresses populated. Creates an LLV, waits for Created. Patches
 │   │   the DRBDResource to Diskful, waits for Configured=True. Asserts
-│   │   the agent added its finalizer to the LLV.
+│   │   status.size is populated and less than spec.size (DRBD metadata
+│   │   overhead). Asserts the agent added its finalizer to the LLV.
 │   │
 │   ├── MaintenanceMode
 │   │   Patches spec.maintenance=NoResourceReconciliation. Asserts
@@ -26,6 +27,13 @@ TestDRBDResource
 │       Patches spec.type from Diskful to Diskless. Waits for
 │       Configured=True. Asserts activeConfiguration.type=Diskless.
 │       Cleanup reverts to Diskful; agent re-attaches the disk.
+│
+├── Resize — online resize of a single-node diskful replica
+│       Creates a diskful DRBDResource with an LLV, promotes to Primary
+│       (required by drbdsetup resize). Records initial status.size.
+│       Grows the LLV to 2x AllocateSize, waits for sds-node-configurator
+│       to resize. Patches DRBDR spec.size to the new size, waits for
+│       Configured=True. Asserts status.size has grown.
 │
 ├── DeleteDiskful — delete diskful replica with attached LLV
 │       Creates a diskful DRBDResource with an LLV (same setup as R1).
@@ -158,6 +166,12 @@ Every subtest's cleanup exercises a teardown path:
 
 - **RemovePeer cleanup**: restores the peer list. Verifies the agent
   can re-add a previously forgotten peer.
+
+- **Resize cleanup**: SetupPromotePrimary cleanup reverts role to Secondary.
+  SetupResourcePatch cleanup reverts LLV spec.size (LV is not actually
+  shrunk). SetupDisklessToDiskfulReplica cleanup deletes the DRBDResource
+  and LLV entirely. The DRBDR spec.size patch has no revert because the
+  API forbids decreasing spec.size.
 
 - **DeleteDiskful**: deletes the DRBDResource directly while still diskful
   with an attached LLV. Verifies the agent releases the LLV finalizer on

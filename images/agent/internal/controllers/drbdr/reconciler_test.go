@@ -78,7 +78,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 				NodeID: 0,
 				Role:   "Secondary",
 				Devices: []drbdutils.Device{
-					{Volume: 0, Minor: 1000, DiskState: "UpToDate", Quorum: true},
+					{Volume: 0, Minor: 1000, DiskState: "UpToDate", Quorum: true, Size: 1048316},
 				},
 			},
 		}
@@ -161,6 +161,14 @@ func TestReconciler_Reconcile(t *testing.T) {
 				expectDeviceSymlink(t, testDRBDRName, 0)
 				if dr.Status.Device != drbdr.DeviceSymlinkPath(testDRBDRName) {
 					t.Errorf("status.device = %q, want %q", dr.Status.Device, drbdr.DeviceSymlinkPath(testDRBDRName))
+				}
+
+				// status.size = DRBD usable size (Device.Size KiB * 1024)
+				wantUsableSize := resource.NewQuantity(1048316*1024, resource.BinarySI)
+				if dr.Status.Size == nil {
+					t.Error("status.size is nil, want non-nil")
+				} else if !dr.Status.Size.Equal(*wantUsableSize) {
+					t.Errorf("status.size = %s, want %s", dr.Status.Size.String(), wantUsableSize.String())
 				}
 			},
 		},

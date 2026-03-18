@@ -56,6 +56,10 @@ func TestDRBDResource(t *testing.T) {
 		})
 	})
 
+	e.Run("Resize", func(e envtesting.E) {
+		suite.SetupResize(e, cl, cluster, "rs", 0)
+	})
+
 	e.Run("DeleteDiskful", func(e envtesting.E) {
 		drbdr, llv := suite.SetupDisklessToDiskfulReplica(e, cl, cluster, "dd", 0)
 		suite.SetupDeleteDiskful(e, cl, drbdr, llv)
