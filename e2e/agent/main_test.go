@@ -87,6 +87,29 @@ func TestDRBDResource(t *testing.T) {
 		suite.SetupDT(e, cl, cluster, nodeExec, logWatcher)
 	})
 
+	e.Run("PortConvergence", func(e envtesting.E) {
+		e.Parallel()
+
+		if len(cluster.Nodes) < 2 {
+			e.Skipf("PortConvergence requires at least 2 nodes, got %d", len(cluster.Nodes))
+		}
+
+		drbdrs := make([]*v1alpha1.DRBDResource, 2)
+		for i := range drbdrs {
+			drbdrs[i], _ = suite.SetupDisklessToDiskfulReplica(e, cl, cluster, "pc", i)
+		}
+		drbdrs = suite.SetupPeering(e, cl, drbdrs)
+		suite.SetupInitialSync(e, cl, drbdrs)
+
+		e.Run("AdoptExistingPort", func(e envtesting.E) {
+			suite.SetupAdoptExistingPort(e, cl, cluster, "pa")
+		})
+
+		e.Run("PathMismatchConvergence", func(e envtesting.E) {
+			suite.SetupPathMismatchConvergence(e, cl, drbdrs, nodeExec, cluster)
+		})
+	})
+
 	for _, tc := range []struct {
 		name   string
 		prefix string
