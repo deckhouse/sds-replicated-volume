@@ -54,19 +54,6 @@ var _ = Describe("RSC configuration", func() {
 			Expect(rsc.Spec.EligibleNodesPolicy.NotReadyGracePeriod.Duration).To(Equal(10 * time.Minute))
 		})
 
-		It("sets Ready=False when spec.storage is missing", func(ctx SpecContext) {
-			trsc := f.TestRSC().
-				ReclaimPolicy(v1alpha1.RSCReclaimPolicyDelete).
-				Topology(v1alpha1.TopologyIgnored)
-			trsc.Create(ctx)
-
-			trsc.Await(ctx, ConditionStatus(
-				v1alpha1.ReplicatedStorageClassCondReadyType, "False"))
-
-			rsc := trsc.Object()
-			Expect(rsc).To(ConditionReason(v1alpha1.ReplicatedStorageClassCondReadyType, v1alpha1.ReplicatedStorageClassCondReadyReasonInvalidConfiguration))
-		})
-
 		It("preserves explicitly set strategies", func(ctx SpecContext) {
 			trsc := f.TestRSC().
 				StorageType(v1alpha1.ReplicatedStoragePoolTypeLVMThin).
@@ -90,6 +77,13 @@ var _ = Describe("RSC configuration", func() {
 	})
 
 	Context("API validation", func() {
+		It("rejects creation when spec.storage is missing", func(ctx SpecContext) {
+			trsc := f.TestRSC().
+				ReclaimPolicy(v1alpha1.RSCReclaimPolicyDelete).
+				Topology(v1alpha1.TopologyIgnored)
+			trsc.CreateExpect(ctx, MatchError(ContainSubstring("spec.storage is required")))
+		})
+
 		It("rejects strategy with type RollingUpdate but no rollingUpdate", func(ctx SpecContext) {
 			trsc := f.TestRSC().
 				StorageType(v1alpha1.ReplicatedStoragePoolTypeLVMThin).

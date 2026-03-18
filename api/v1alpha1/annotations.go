@@ -29,4 +29,10 @@ const (
 
 	// ReplicatedVolumePVCNamespaceAnnotationKey is a rv-related pvc namespace
 	ReplicatedVolumePVCNamespaceAnnotationKey = annotationPrefix + "pvc-namespace"
+
+	// AdoptRVRAnnotationKey triggers the adopt/v1 formation plan when set on a
+	// ReplicatedVolume. Formation will adopt pre-existing RVRs instead of creating
+	// new ones: no RVR creation/deletion, no DRBDResourceOperation.
+	// Presence-based (value is ignored).
+	AdoptRVRAnnotationKey = annotationPrefix + "adopt-rvr"
 )

@@ -18,6 +18,8 @@ package match
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/onsi/gomega/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -81,4 +83,85 @@ func (drbdr) IOSuspended() types.GomegaMatcher {
 		}
 		return false, "device I/O is not suspended"
 	})
+}
+
+// PeersMatchSpec matches when peer names from spec.Peers match peer names from status.Peers.
+func (drbdr) PeersMatchSpec() types.GomegaMatcher {
+	return tkmatch.NewMatcher(func(obj client.Object) (bool, string) {
+		d := asDRBDR(obj)
+		specNames := peerNames(d.Spec.Peers)
+		statusNames := statusPeerNames(d.Status.Peers)
+		if specNames == statusNames {
+			if specNames == "" {
+				return true, "peers match spec (no peers)"
+			}
+			return true, fmt.Sprintf("peers match spec: [%s]", specNames)
+		}
+		return false, fmt.Sprintf("peers mismatch: spec=[%s], status=[%s]", specNames, statusNames)
+	})
+}
+
+// RoleMatchesSpec matches when spec.Role equals status.ActiveConfiguration.Role.
+func (drbdr) RoleMatchesSpec() types.GomegaMatcher {
+	return tkmatch.NewMatcher(func(obj client.Object) (bool, string) {
+		d := asDRBDR(obj)
+		if d.Status.ActiveConfiguration == nil {
+			return false, "activeConfiguration is nil"
+		}
+		if d.Spec.Role == d.Status.ActiveConfiguration.Role {
+			return true, fmt.Sprintf("role matches spec: %s", d.Spec.Role)
+		}
+		return false, fmt.Sprintf("role mismatch: spec=%s, status=%s", d.Spec.Role, d.Status.ActiveConfiguration.Role)
+	})
+}
+
+// LVMMatchesSpec matches when spec.LVMLogicalVolumeName equals status.ActiveConfiguration.LVMLogicalVolumeName.
+func (drbdr) LVMMatchesSpec() types.GomegaMatcher {
+	return tkmatch.NewMatcher(func(obj client.Object) (bool, string) {
+		d := asDRBDR(obj)
+		if d.Status.ActiveConfiguration == nil {
+			return false, "activeConfiguration is nil"
+		}
+		if d.Spec.LVMLogicalVolumeName == d.Status.ActiveConfiguration.LVMLogicalVolumeName {
+			return true, fmt.Sprintf("LVM matches spec: %q", d.Spec.LVMLogicalVolumeName)
+		}
+		return false, fmt.Sprintf("LVM mismatch: spec=%q, status=%q",
+			d.Spec.LVMLogicalVolumeName, d.Status.ActiveConfiguration.LVMLogicalVolumeName)
+	})
+}
+
+// QuorumMatchesSpec matches when spec.Quorum equals status.ActiveConfiguration.Quorum.
+func (drbdr) QuorumMatchesSpec() types.GomegaMatcher {
+	return tkmatch.NewMatcher(func(obj client.Object) (bool, string) {
+		d := asDRBDR(obj)
+		if d.Status.ActiveConfiguration == nil {
+			return false, "activeConfiguration is nil"
+		}
+		if d.Status.ActiveConfiguration.Quorum == nil {
+			return false, "activeConfiguration.quorum is nil"
+		}
+		if d.Spec.Quorum == *d.Status.ActiveConfiguration.Quorum {
+			return true, fmt.Sprintf("quorum matches spec: %d", d.Spec.Quorum)
+		}
+		return false, fmt.Sprintf("quorum mismatch: spec=%d, status=%d",
+			d.Spec.Quorum, *d.Status.ActiveConfiguration.Quorum)
+	})
+}
+
+func peerNames(peers []v1alpha1.DRBDResourcePeer) string {
+	names := make([]string, len(peers))
+	for i := range peers {
+		names[i] = peers[i].Name
+	}
+	sort.Strings(names)
+	return strings.Join(names, ",")
+}
+
+func statusPeerNames(peers []v1alpha1.DRBDResourcePeerStatus) string {
+	names := make([]string, len(peers))
+	for i := range peers {
+		names[i] = peers[i].Name
+	}
+	sort.Strings(names)
+	return strings.Join(names, ",")
 }

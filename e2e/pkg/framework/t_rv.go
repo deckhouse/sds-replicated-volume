@@ -103,6 +103,7 @@ type TestRV struct {
 	buildPoolType  *v1alpha1.ReplicatedStoragePoolType
 	buildRSCName   string
 	buildManualCfg *v1alpha1.ReplicatedVolumeConfiguration
+	buildAdopt     bool
 
 	// Safety switches (populated by ActivateSafetyInvariants).
 	swQuorumCorrect    *tkmatch.Switch
@@ -161,6 +162,11 @@ func (t *TestRV) ManualConfig(cfg v1alpha1.ReplicatedVolumeConfiguration) *TestR
 	return t
 }
 
+func (t *TestRV) Adopt() *TestRV {
+	t.buildAdopt = true
+	return t
+}
+
 // ---------------------------------------------------------------------------
 // buildObject
 // ---------------------------------------------------------------------------
@@ -194,6 +200,14 @@ func (t *TestRV) buildObject(ctx context.Context) *v1alpha1.ReplicatedVolume {
 	}
 	if t.f != nil {
 		t.f.stampMetadata(rv)
+	}
+	if t.buildAdopt {
+		ann := rv.GetAnnotations()
+		if ann == nil {
+			ann = make(map[string]string)
+		}
+		ann[v1alpha1.AdoptRVRAnnotationKey] = ""
+		rv.SetAnnotations(ann)
 	}
 	return rv
 }

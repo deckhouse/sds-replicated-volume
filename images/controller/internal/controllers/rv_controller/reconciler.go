@@ -168,6 +168,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
+	// If datamesh just made the RV eligible for deletion (e.g., last member detached),
+	// requeue immediately so the next reconcile enters reconcileDeletion.
+	if rv.DeletionTimestamp != nil && rvShouldNotExist(rv) {
+		outcome = outcome.Merge(rf.ContinueAndRequeue())
+	}
+
 	// Reconcile RVA and RVR finalizers.
 	outcome = flow.MergeReconciles(
 		outcome,

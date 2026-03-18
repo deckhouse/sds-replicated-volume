@@ -13,12 +13,14 @@ replace github.com/deckhouse/sds-replicated-volume/e2e/pkg/debug => ../pkg/debug
 replace github.com/deckhouse/sds-replicated-volume/lib/go/testkit => ../../lib/go/testkit
 
 require (
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260218165228-44f333dae807
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-00010101000000-000000000000
 	github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework v0.0.0-00010101000000-000000000000
 	github.com/deckhouse/sds-replicated-volume/lib/go/testkit v0.0.0-00010101000000-000000000000
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2
+	sigs.k8s.io/controller-runtime v0.23.3
 )
 
 require (
@@ -26,7 +28,6 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260218165228-44f333dae807 // indirect
 	github.com/deckhouse/sds-replicated-volume/e2e/pkg/debug v0.0.0-00010101000000-000000000000 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
@@ -91,7 +92,6 @@ require (
 	k8s.io/client-go v0.35.1 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250910181357-589584f1c912 // indirect
-	sigs.k8s.io/controller-runtime v0.23.3 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2-0.20260122202528-d9cc6641c482 // indirect
