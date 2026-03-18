@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -28,21 +30,39 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/kubetesting"
 )
 
-// SetupAdoptExistingPort tests port adoption: force-deletes two peered DRBDRs
-// (leaving DRBD running on the nodes), then recreates them and asserts the
-// agent adopts the original DRBD ports instead of allocating new ones.
+func newDRBDResourceDiskful(name, nodeName string, nodeID uint8, size resource.Quantity) *v1alpha1.DRBDResource {
+	return &v1alpha1.DRBDResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+		Spec: v1alpha1.DRBDResourceSpec{
+			NodeName:             nodeName,
+			State:                v1alpha1.DRBDResourceStateUp,
+			SystemNetworks:       []string{"Internal"},
+			NodeID:               nodeID,
+			Role:                 v1alpha1.DRBDRoleSecondary,
+			Type:                 v1alpha1.DRBDResourceTypeDiskful,
+			LVMLogicalVolumeName: name,
+			Size:                 &size,
+		},
+	}
+}
+
+// SetupAdoptExistingPort tests port adoption during migration: renames DRBD
+// resources on the nodes (simulating old control plane), deletes the DRBDRs,
+// then creates new DRBDRs with ActualNameOnTheNode. The agent renames the DRBD
+// resources back and adopts their existing ports instead of allocating new ones.
 func SetupAdoptExistingPort(
 	e envtesting.E,
 	cl client.WithWatch,
 	cluster *Cluster,
+	ne *kubetesting.NodeExec,
 	prefix string,
 ) {
 	var testID TestID
 	var drbdrConfiguredTimeout DRBDRConfiguredTimeout
-	var peerConnectedTimeout PeerConnectedTimeout
-	e.Options(&testID, &drbdrConfiguredTimeout, &peerConnectedTimeout)
+	e.Options(&testID, &drbdrConfiguredTimeout)
 
-	// Create 2 diskful replicas, peer and sync them.
 	drbdrs := make([]*v1alpha1.DRBDResource, 2)
 	for i := range drbdrs {
 		drbdrs[i], _ = SetupDisklessToDiskfulReplica(e, cl, cluster, prefix, i)
@@ -50,7 +70,6 @@ func SetupAdoptExistingPort(
 	drbdrs = SetupPeering(e, cl, drbdrs)
 	SetupInitialSync(e, cl, drbdrs)
 
-	// Record original ports.
 	originalPorts := make([]uint, 2)
 	for i, drbdr := range drbdrs {
 		if len(drbdr.Status.Addresses) == 0 {
@@ -59,26 +78,37 @@ func SetupAdoptExistingPort(
 		originalPorts[i] = drbdr.Status.Addresses[0].Address.Port
 	}
 
-	// Force-delete both DRBDRs (DRBD keeps running on nodes).
+	for i := range drbdrs {
+		drbdrs[i] = SetupMaintenanceMode(e, cl, drbdrs[i])
+	}
+
+	migratedNames := make([]string, 2)
+	for i, drbdr := range drbdrs {
+		standardName := "sdsrv-" + drbdr.Name
+		migratedNames[i] = "migrated-" + drbdr.Name
+		ne.Exec(e, cluster.Nodes[i].Name, "drbdsetup", "rename-resource",
+			standardName, migratedNames[i])
+	}
+
 	for _, drbdr := range drbdrs {
 		forceDeleteDRBDResource(e, cl, drbdr, drbdrConfiguredTimeout)
 	}
 
-	// Recreate fresh DRBDRs (empty status).
 	newDRBDRs := make([]*v1alpha1.DRBDResource, 2)
 	for i := range newDRBDRs {
 		node := cluster.Nodes[i]
 		name := testID.ResourceName(prefix, fmt.Sprintf("%d", i))
+		obj := newDRBDResourceDiskful(name, node.Name, uint8(i), cluster.AllocateSize)
+		obj.Spec.ActualNameOnTheNode = migratedNames[i]
 		newDRBDRs[i] = kubetesting.SetupResource(
 			e.ScopeWithTimeout(drbdrConfiguredTimeout.Duration),
 			cl,
-			newDRBDResourceDiskless(name, node.Name, uint8(i)),
+			obj,
 			isDRBDRTerminal,
 		)
 		assertDRBDRConfigured(e, newDRBDRs[i])
 	}
 
-	// Assert: adopted ports match original DRBD ports.
 	for i, drbdr := range newDRBDRs {
 		if len(drbdr.Status.Addresses) == 0 {
 			e.Fatalf("assert: recreated DRBDResource %q has no addresses", drbdr.Name)
@@ -90,7 +120,6 @@ func SetupAdoptExistingPort(
 		}
 	}
 
-	// Re-peer and verify connection.
 	SetupPeering(e, cl, newDRBDRs)
 }
 
@@ -106,15 +135,19 @@ func SetupPathMismatchConvergence(
 	cluster *Cluster,
 ) {
 	var peerConnectedTimeout PeerConnectedTimeout
-	e.Options(&peerConnectedTimeout)
+	var drbdrConfiguredTimeout DRBDRConfiguredTimeout
+	e.Options(&peerConnectedTimeout, &drbdrConfiguredTimeout)
 
-	drbdr0 := drbdrs[0]
+	drbdr0 := &v1alpha1.DRBDResource{}
+	if err := cl.Get(e.Context(), client.ObjectKeyFromObject(drbdrs[0]), drbdr0); err != nil {
+		e.Fatalf("require: getting DRBDResource %q: %v", drbdrs[0].Name, err)
+	}
+
 	node0 := cluster.Nodes[0]
 	drbdResName := "sdsrv-" + drbdr0.Name
 
 	intendedPort := drbdr0.Status.Addresses[0].Address.Port
 
-	// Get current peer info for node 0's connection.
 	if len(drbdr0.Status.Peers) == 0 {
 		e.Fatalf("require: DRBDResource %q has no peers", drbdr0.Name)
 	}
@@ -124,7 +157,6 @@ func SetupPathMismatchConvergence(
 	}
 	currentLocalAddr := fmt.Sprintf("%s:%d", peer.Paths[0].Address.IPv4, peer.Paths[0].Address.Port)
 
-	// Build remote addr from peer's spec.
 	var remoteAddr string
 	for _, specPeer := range drbdr0.Spec.Peers {
 		if specPeer.Name == peer.Name && len(specPeer.Paths) > 0 {
@@ -136,20 +168,23 @@ func SetupPathMismatchConvergence(
 		e.Fatalf("require: could not find remote address for peer %q", peer.Name)
 	}
 
+	drbdr0 = SetupMaintenanceMode(e, cl, drbdr0)
+
 	wrongPort := uint(7999)
 	wrongLocalAddr := fmt.Sprintf("%s:%d", drbdr0.Status.Addresses[0].Address.IPv4, wrongPort)
 
-	// Inject wrong path: disconnect, del-path, new-path with wrong port, connect.
 	ne.Exec(e, node0.Name, "drbdsetup", "disconnect", drbdResName,
 		fmt.Sprintf("%d", peer.NodeID))
 	ne.Exec(e, node0.Name, "drbdsetup", "del-path", drbdResName,
 		fmt.Sprintf("%d", peer.NodeID), currentLocalAddr, remoteAddr)
 	ne.Exec(e, node0.Name, "drbdsetup", "new-path", drbdResName,
 		fmt.Sprintf("%d", peer.NodeID), wrongLocalAddr, remoteAddr)
-	ne.Exec(e, node0.Name, "drbdsetup", "connect", drbdResName,
-		fmt.Sprintf("%d", peer.NodeID))
 
-	// Wait for the agent to converge: correct path established.
+	kubetesting.SetupResourcePatch(e, cl, client.ObjectKeyFromObject(drbdr0),
+		func(d *v1alpha1.DRBDResource) {
+			d.Spec.Maintenance = ""
+		}, nil)
+
 	watcherScope := e.Scope()
 	defer watcherScope.Close()
 	waitFn := kubetesting.SetupResourceWatcher(watcherScope, cl, drbdr0)
@@ -173,7 +208,6 @@ func SetupPathMismatchConvergence(
 		return false
 	})
 
-	// Assert: peer path uses the intended port.
 	for _, p := range drbdr0.Status.Peers {
 		if p.Name != peer.Name {
 			continue
@@ -187,7 +221,6 @@ func SetupPathMismatchConvergence(
 		}
 	}
 
-	// Assert: DRBD on node 0 has exactly one path (stale path removed).
 	statusJSON := ne.Exec(e, node0.Name, "drbdsetup", "status", drbdResName, "--json")
 	assertSinglePathPerConnection(e, statusJSON, drbdResName)
 }

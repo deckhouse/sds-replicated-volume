@@ -106,7 +106,7 @@ func TestDRBDResource(t *testing.T) {
 		suite.SetupInitialSync(e, cl, drbdrs)
 
 		e.Run("AdoptExistingPort", func(e envtesting.E) {
-			suite.SetupAdoptExistingPort(e, cl, cluster, "pa")
+			suite.SetupAdoptExistingPort(e, cl, cluster, nodeExec, "pa")
 		})
 
 		e.Run("PathMismatchConvergence", func(e envtesting.E) {
