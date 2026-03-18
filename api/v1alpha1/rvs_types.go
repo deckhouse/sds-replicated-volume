@@ -83,6 +83,49 @@ type ReplicatedVolumeSnapshotStatus struct {
 
 	// +optional
 	CreationTime *metav1.Time `json:"creationTime,omitempty"`
+
+	Datamesh ReplicatedVolumeSnapshotDatamesh `json:"datamesh"`
+}
+
+// +kubebuilder:object:generate=true
+type ReplicatedVolumeSnapshotDatamesh struct {
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=120
+	ReplicatedVolumeName string `json:"replicatedVolumeName"`
+
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="members[].name must be unique"
+	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:default={}
+	// +listType=atomic
+	Members []SnapshotDatameshMember `json:"members"`
+
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=0
+	ReadyCount int `json:"readyCount"`
+
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=0
+	TotalCount int `json:"totalCount"`
+}
+
+// +kubebuilder:object:generate=true
+type SnapshotDatameshMember struct {
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Name string `json:"name"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	NodeName string `json:"nodeName"`
+
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	SnapshotHandle string `json:"snapshotHandle,omitempty"`
+
+	// +kubebuilder:default=false
+	Ready bool `json:"ready"`
 }
 
 type ReplicatedVolumeSnapshotPhase string

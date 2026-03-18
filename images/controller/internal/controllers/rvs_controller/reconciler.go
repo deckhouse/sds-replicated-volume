@@ -19,6 +19,7 @@ package rvscontroller
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -92,7 +93,7 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, rvs *v1alpha1.Replicat
 		return rf.Fail(err)
 	}
 	if rv == nil {
-		return r.reconcileStatus(rf.Ctx(), rvs,
+		return r.reconcileStatus(rf.Ctx(), rvs, rvs.Status.Datamesh,
 			v1alpha1.ReplicatedVolumeSnapshotPhaseFailed,
 			"ReplicatedVolume not found",
 			false)
@@ -175,54 +176,69 @@ func (r *Reconciler) reconcileAggregateStatus(
 	rf := flow.BeginReconcile(ctx, "aggregate-status")
 	defer rf.OnEnd(&outcome)
 
+	datamesh := r.buildDatamesh(rvs, childRVRSs)
+
 	if len(childRVRSs) == 0 {
-		return r.reconcileStatus(rf.Ctx(), rvs,
+		return r.reconcileStatus(rf.Ctx(), rvs, datamesh,
 			v1alpha1.ReplicatedVolumeSnapshotPhasePending,
 			"Waiting for replica snapshots to be created",
 			false)
 	}
 
-	allReady := true
 	anyFailed := false
-	anyInProgress := false
-
 	for _, child := range childRVRSs {
-		switch child.Status.Phase {
-		case v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseFailed:
+		if child.Status.Phase == v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseFailed {
 			anyFailed = true
-		case v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseReady:
-			// ok
-		case v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseInProgress:
-			anyInProgress = true
-			allReady = false
-		default:
-			allReady = false
+			break
 		}
 	}
 
 	if anyFailed {
-		return r.reconcileStatus(rf.Ctx(), rvs,
+		return r.reconcileStatus(rf.Ctx(), rvs, datamesh,
 			v1alpha1.ReplicatedVolumeSnapshotPhaseFailed,
 			"One or more replica snapshots failed",
 			false)
 	}
-	if allReady {
-		return r.reconcileStatus(rf.Ctx(), rvs,
+	if datamesh.ReadyCount == datamesh.TotalCount {
+		return r.reconcileStatus(rf.Ctx(), rvs, datamesh,
 			v1alpha1.ReplicatedVolumeSnapshotPhaseReady,
 			"All replica snapshots are ready",
 			true)
 	}
-	if anyInProgress {
-		return r.reconcileStatus(rf.Ctx(), rvs,
-			v1alpha1.ReplicatedVolumeSnapshotPhaseInProgress,
-			"Replica snapshots are being created",
-			false)
+
+	return r.reconcileStatus(rf.Ctx(), rvs, datamesh,
+		v1alpha1.ReplicatedVolumeSnapshotPhaseInProgress,
+		"Replica snapshots are being created",
+		false)
+}
+
+func (r *Reconciler) buildDatamesh(
+	rvs *v1alpha1.ReplicatedVolumeSnapshot,
+	childRVRSs []*v1alpha1.ReplicatedVolumeReplicaSnapshot,
+) v1alpha1.ReplicatedVolumeSnapshotDatamesh {
+	rvrCount := len(childRVRSs)
+	members := make([]v1alpha1.SnapshotDatameshMember, rvrCount)
+	var readyCount int
+
+	for i, child := range childRVRSs {
+		ready := child.Status.Phase == v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseReady
+		if ready {
+			readyCount++
+		}
+		members[i] = v1alpha1.SnapshotDatameshMember{
+			Name:           child.Name,
+			NodeName:       child.Spec.NodeName,
+			SnapshotHandle: child.Status.SnapshotHandle,
+			Ready:          ready,
+		}
 	}
 
-	return r.reconcileStatus(rf.Ctx(), rvs,
-		v1alpha1.ReplicatedVolumeSnapshotPhasePending,
-		"Waiting for replica snapshots",
-		false)
+	return v1alpha1.ReplicatedVolumeSnapshotDatamesh{
+		ReplicatedVolumeName: rvs.Spec.ReplicatedVolumeName,
+		Members:              members,
+		ReadyCount:           readyCount,
+		TotalCount:           rvrCount,
+	}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -233,6 +249,7 @@ func (r *Reconciler) reconcileAggregateStatus(
 func (r *Reconciler) reconcileStatus(
 	ctx context.Context,
 	rvs *v1alpha1.ReplicatedVolumeSnapshot,
+	datamesh v1alpha1.ReplicatedVolumeSnapshotDatamesh,
 	phase v1alpha1.ReplicatedVolumeSnapshotPhase,
 	message string,
 	readyToUse bool,
@@ -240,7 +257,10 @@ func (r *Reconciler) reconcileStatus(
 	rf := flow.BeginReconcile(ctx, "status")
 	defer rf.OnEnd(&outcome)
 
-	if rvs.Status.Phase == phase && rvs.Status.Message == message && rvs.Status.ReadyToUse == readyToUse {
+	if rvs.Status.Phase == phase &&
+		rvs.Status.Message == message &&
+		rvs.Status.ReadyToUse == readyToUse &&
+		reflect.DeepEqual(rvs.Status.Datamesh, datamesh) {
 		return rf.Continue()
 	}
 
@@ -249,6 +269,7 @@ func (r *Reconciler) reconcileStatus(
 	rvs.Status.Phase = phase
 	rvs.Status.Message = message
 	rvs.Status.ReadyToUse = readyToUse
+	rvs.Status.Datamesh = datamesh
 	if readyToUse && rvs.Status.CreationTime == nil {
 		now := metav1.Now()
 		rvs.Status.CreationTime = &now
@@ -297,7 +318,7 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, rvs *v1alpha1.Replicat
 			}
 		}
 		if !allDeleted {
-			return r.reconcileStatus(rf.Ctx(), rvs,
+			return r.reconcileStatus(rf.Ctx(), rvs, rvs.Status.Datamesh,
 				v1alpha1.ReplicatedVolumeSnapshotPhaseDeleting,
 				"Waiting for replica snapshots to be deleted",
 				false).Enrichf("waiting for children deletion")

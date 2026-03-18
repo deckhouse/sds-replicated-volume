@@ -129,6 +129,57 @@ spec:
               creationTime:
                 format: date-time
                 type: string
+              datamesh:
+                properties:
+                  members:
+                    default: []
+                    items:
+                      properties:
+                        name:
+                          maxLength: 253
+                          minLength: 1
+                          type: string
+                        nodeName:
+                          maxLength: 253
+                          minLength: 1
+                          type: string
+                        ready:
+                          default: false
+                          type: boolean
+                        snapshotHandle:
+                          maxLength: 253
+                          type: string
+                      required:
+                      - name
+                      - nodeName
+                      - ready
+                      type: object
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-list-type: atomic
+                    x-kubernetes-validations:
+                    - message: members[].name must be unique
+                      rule: self.all(x, self.exists_one(y, x.name == y.name))
+                  readyCount:
+                    default: 0
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  replicatedVolumeName:
+                    maxLength: 120
+                    minLength: 1
+                    type: string
+                  totalCount:
+                    default: 0
+                    format: int32
+                    minimum: 0
+                    type: integer
+                required:
+                - members
+                - readyCount
+                - replicatedVolumeName
+                - totalCount
+                type: object
               message:
                 maxLength: 512
                 type: string
@@ -142,6 +193,8 @@ spec:
                 type: string
               readyToUse:
                 type: boolean
+            required:
+            - datamesh
             type: object
         required:
         - metadata
