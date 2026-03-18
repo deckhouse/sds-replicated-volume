@@ -150,7 +150,7 @@ func (r *OperationReconciler) reconcileCreateSnapshot(ctx context.Context, op *v
 		}
 	}
 
-	opErr := r.executeCreateSnapshot(ctx, op, drbdr)
+	snapshotPath, opErr := r.executeCreateSnapshot(ctx, op, drbdr)
 	if opErr != nil {
 		if err := r.failOperationAndPatch(ctx, op, opErr.Error()); err != nil {
 			return rf.Fail(err)
@@ -158,6 +158,7 @@ func (r *OperationReconciler) reconcileCreateSnapshot(ctx context.Context, op *v
 		return rf.Done()
 	}
 
+	op.Status.Result = snapshotPath
 	if err := r.succeedOperationAndPatch(ctx, op); err != nil {
 		return rf.Fail(err)
 	}

@@ -31,19 +31,19 @@ func (r *OperationReconciler) executeCreateSnapshot(
 	ctx context.Context,
 	op *v1alpha1.DRBDResourceOperation,
 	drbdr *v1alpha1.DRBDResource,
-) error {
+) (snapshotPath string, err error) {
 	if op.Spec.CreateSnapshot == nil {
-		return fmt.Errorf("createSnapshot parameters are required")
+		return "", fmt.Errorf("createSnapshot parameters are required")
 	}
 
 	snapshotName := op.Spec.CreateSnapshot.SnapshotName
 	if snapshotName == "" {
-		return fmt.Errorf("snapshotName must not be empty")
+		return "", fmt.Errorf("snapshotName must not be empty")
 	}
 
 	vgName, lvName, err := r.resolveBackingLV(ctx, drbdr)
 	if err != nil {
-		return fmt.Errorf("resolving backing LV: %w", err)
+		return "", fmt.Errorf("resolving backing LV: %w", err)
 	}
 
 	lvPath := fmt.Sprintf("/dev/%s/%s", vgName, lvName)
@@ -51,10 +51,10 @@ func (r *OperationReconciler) executeCreateSnapshot(
 	cmd := exec.CommandContext(ctx, "lvcreate", "--snapshot", "--name", snapshotName, lvPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("lvcreate --snapshot failed: %w, output: %s", err, string(output))
+		return "", fmt.Errorf("lvcreate --snapshot failed: %w, output: %s", err, string(output))
 	}
 
-	return nil
+	return fmt.Sprintf("/dev/%s/%s", vgName, snapshotName), nil
 }
 
 func (r *OperationReconciler) resolveBackingLV(

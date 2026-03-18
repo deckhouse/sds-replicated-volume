@@ -114,10 +114,14 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, rvrs *v1alpha1.Replica
 
 	switch dro.Status.Phase {
 	case v1alpha1.DRBDOperationPhaseSucceeded:
+		snapshotHandle := dro.Status.Result
+		if snapshotHandle == "" {
+			snapshotHandle = rvrs.Name
+		}
 		return r.reconcileRVRSStatus(rf.Ctx(), rvrs,
 			v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseReady,
 			"Snapshot created successfully",
-			true, rvrs.Name)
+			true, snapshotHandle)
 	case v1alpha1.DRBDOperationPhaseFailed:
 		msg := "Snapshot creation failed"
 		if dro.Status.Message != "" {

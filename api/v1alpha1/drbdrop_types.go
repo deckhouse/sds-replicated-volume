@@ -106,6 +106,10 @@ type DRBDResourceOperationStatus struct {
 	// +optional
 	Message string `json:"message,omitempty"`
 
+	// +kubebuilder:validation:MaxLength=1024
+	// +optional
+	Result string `json:"result,omitempty"`
+
 	// +optional
 	StartedAt *metav1.Time `json:"startedAt,omitempty"`
 
