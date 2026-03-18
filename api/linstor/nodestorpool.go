@@ -20,22 +20,27 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-type LayerDrbdVolumeDefinitions struct {
+type NodeStorPool struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              struct {
-		ResourceName       string `json:"resource_name"`
-		ResourceNameSuffix string `json:"resource_name_suffix"`
-		SnapshotName       string `json:"snapshot_name"`
-		VlmMinorNr         int    `json:"vlm_minor_nr"`
-		VlmNr              int    `json:"vlm_nr"`
-	} `json:"spec"`
+	Spec              NodeStorPoolSpec `json:"spec"`
+}
+
+// +k8s:deepcopy-gen=true
+type NodeStorPoolSpec struct {
+	DriverName          string `json:"driver_name"`
+	ExternalLocking     bool   `json:"external_locking"`
+	FreeSpaceMgrDspName string `json:"free_space_mgr_dsp_name"`
+	FreeSpaceMgrName    string `json:"free_space_mgr_name"`
+	NodeName            string `json:"node_name"`
+	PoolName            string `json:"pool_name"`
+	UUID                string `json:"uuid"`
 }
 
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-type LayerDrbdVolumeDefinitionsList struct {
+type NodeStorPoolList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
-	Items           []LayerDrbdVolumeDefinitions `json:"items"`
+	Items           []NodeStorPool `json:"items"`
 }

@@ -20,22 +20,25 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-type LayerDrbdVolumeDefinitions struct {
+type LayerResourceIds struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	Spec              struct {
-		ResourceName       string `json:"resource_name"`
-		ResourceNameSuffix string `json:"resource_name_suffix"`
-		SnapshotName       string `json:"snapshot_name"`
-		VlmMinorNr         int    `json:"vlm_minor_nr"`
-		VlmNr              int    `json:"vlm_nr"`
+		LayerResourceID        int    `json:"layer_resource_id"`
+		LayerResourceKind      string `json:"layer_resource_kind"`
+		LayerResourceParentID  int    `json:"layer_resource_parent_id"`
+		LayerResourceSuffix    string `json:"layer_resource_suffix"`
+		LayerResourceSuspended bool   `json:"layer_resource_suspended"`
+		NodeName               string `json:"node_name"`
+		ResourceName           string `json:"resource_name"`
+		SnapshotName           string `json:"snapshot_name"`
 	} `json:"spec"`
 }
 
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-type LayerDrbdVolumeDefinitionsList struct {
+type LayerResourceIdsList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
-	Items           []LayerDrbdVolumeDefinitions `json:"items"`
+	Items           []LayerResourceIds `json:"items"`
 }

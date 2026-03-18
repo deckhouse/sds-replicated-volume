@@ -20,22 +20,24 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-type LayerDrbdVolumeDefinitions struct {
+type NodeNetInterfaces struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	Spec              struct {
-		ResourceName       string `json:"resource_name"`
-		ResourceNameSuffix string `json:"resource_name_suffix"`
-		SnapshotName       string `json:"snapshot_name"`
-		VlmMinorNr         int    `json:"vlm_minor_nr"`
-		VlmNr              int    `json:"vlm_nr"`
+		InetAddress      string `json:"inet_address"`
+		NodeName         string `json:"node_name"`
+		NodeNetDspName   string `json:"node_net_dsp_name"`
+		NodeNetName      string `json:"node_net_name"`
+		StltConnEncrType string `json:"stlt_conn_encr_type"`
+		StltConnPort     int    `json:"stlt_conn_port"`
+		Uuid             string `json:"uuid"`
 	} `json:"spec"`
 }
 
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-type LayerDrbdVolumeDefinitionsList struct {
+type NodeNetInterfacesList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
-	Items           []LayerDrbdVolumeDefinitions `json:"items"`
+	Items           []NodeNetInterfaces `json:"items"`
 }
