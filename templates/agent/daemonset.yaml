@@ -87,8 +87,6 @@ spec:
             value: "/etc/config/slogh.cfg"
           - name: LVM_SYSTEM_DIR
             value: ""
-          - name: LVM_LOCK_DIR
-            value: "/var/run/drbd/lock"
           - name: HOME
             value: "/tmp"
         securityContext:
@@ -105,6 +103,8 @@ spec:
           name: config
         - mountPath: /var/run/drbd/lock/
           name: var-run-drbd-lock
+        - mountPath: /run/lock/lvm
+          name: run-lock-lvm
         ports:
           - containerPort: 4215
             hostPort: 4215
@@ -183,5 +183,7 @@ spec:
           path: /dev/sdsrv/
           type: DirectoryOrCreate
       - name: var-run-drbd-lock
+        emptyDir: {}
+      - name: run-lock-lvm
         emptyDir: {}
 {{- end }}
