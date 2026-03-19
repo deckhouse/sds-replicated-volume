@@ -15,7 +15,7 @@ properties:
     properties:
       drbdVersion:
         type: string
-        default: "9.2.17-flant.3"
+        default: "9.2.17-flant.3-diag"
       dataNodesChecksum:
         type: string
         default: "default_data_nodes_checksum"
