@@ -1619,7 +1619,7 @@ var _ = Describe("Formation: Restart", func() {
 		Expect(err).NotTo(HaveOccurred())
 		// Should requeue with delay (timeout not yet passed).
 		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
-		Expect(result.RequeueAfter).To(BeNumerically("<=", 30*time.Second))
+		Expect(result.RequeueAfter).To(BeNumerically("<=", defaultFormationRestartTimeout))
 	})
 
 	It("resets formation when timeout has passed", func(ctx SpecContext) {
