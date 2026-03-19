@@ -73,13 +73,8 @@ func RVPredicates() []predicate.Predicate {
 	}
 }
 
-// rvConfigurationGenerationChanged returns true if status.configurationGeneration changed,
-// or if the event is a resync (same resourceVersion — recovers lost queue items).
+// rvConfigurationGenerationChanged returns true if status.configurationGeneration changed.
 func rvConfigurationGenerationChanged(e event.TypedUpdateEvent[client.Object]) bool {
-	if e.ObjectOld.GetResourceVersion() == e.ObjectNew.GetResourceVersion() {
-		return true
-	}
-
 	oldRV, okOld := e.ObjectOld.(*v1alpha1.ReplicatedVolume)
 	newRV, okNew := e.ObjectNew.(*v1alpha1.ReplicatedVolume)
 	if !okOld || !okNew || oldRV == nil || newRV == nil {

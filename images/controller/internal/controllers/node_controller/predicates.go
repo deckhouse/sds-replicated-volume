@@ -33,12 +33,6 @@ func nodePredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.TypedFuncs[client.Object]{
 			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
-				// Pass resync events through (same object delivered as both old and new).
-				// This recovers items lost by the workqueue under high contention.
-				if e.ObjectOld.GetResourceVersion() == e.ObjectNew.GetResourceVersion() {
-					return true
-				}
-
 				// React if AgentNodeLabelKey presence, absence, or value changed.
 				oldVal, oldHas := e.ObjectOld.GetLabels()[v1alpha1.AgentNodeLabelKey]
 				newVal, newHas := e.ObjectNew.GetLabels()[v1alpha1.AgentNodeLabelKey]
