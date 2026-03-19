@@ -176,7 +176,7 @@ func createPreexistingDRBD(ctx SpecContext, ftt, gmdr byte) []PreexistingDRBDRep
 	return result
 }
 
-var _ = Describe("Preexisting DRBD emulation", Label(fw.LabelUpgrade), func() {
+var _ = Describe("Preexisting DRBD emulation", Label(fw.LabelUpgrade, fw.LabelSlow), func() {
 	It("standalone DRBDR: DRBD resource persists after rename + maintenance + delete", func(ctx SpecContext) {
 		node := f.Discovery.AnyNode()
 

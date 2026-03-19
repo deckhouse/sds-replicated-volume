@@ -169,7 +169,6 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 		Entry("FTT=0 GMDR=0 secondary (1 replica)",
 			byte(0), byte(0), 1, false),
 		Entry("FTT=0 GMDR=0 primary (1 replica)",
-			SpecTimeout(2*time.Minute),
 			byte(0), byte(0), 1, true),
 
 		Entry("FTT=0 GMDR=1 secondary (2 replicas)",
@@ -180,9 +179,11 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 			byte(0), byte(1), 2, true),
 
 		Entry("FTT=1 GMDR=0 secondary (2 replicas)",
+			Label(fw.LabelSmoke),
 			SpecTimeout(2*time.Minute), require.MinNodes(2),
 			byte(1), byte(0), 2, false),
 		Entry("FTT=1 GMDR=0 primary (2 replicas)",
+			Label(fw.LabelSmoke),
 			SpecTimeout(2*time.Minute), require.MinNodes(2),
 			byte(1), byte(0), 2, true),
 
@@ -384,7 +385,6 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 		Entry("FTT=0 GMDR=0 secondary (1 replica)",
 			byte(0), byte(0), 1, false),
 		Entry("FTT=0 GMDR=0 primary (1 replica)",
-			SpecTimeout(2*time.Minute),
 			byte(0), byte(0), 1, true),
 
 		Entry("FTT=0 GMDR=1 secondary (2 replicas)",
