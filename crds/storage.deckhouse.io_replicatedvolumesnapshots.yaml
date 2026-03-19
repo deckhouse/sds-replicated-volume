@@ -162,7 +162,6 @@ spec:
                       rule: self.all(x, self.exists_one(y, x.name == y.name))
                   readyCount:
                     default: 0
-                    format: int32
                     minimum: 0
                     type: integer
                   replicatedVolumeName:
@@ -171,7 +170,6 @@ spec:
                     type: string
                   totalCount:
                     default: 0
-                    format: int32
                     minimum: 0
                     type: integer
                 required:

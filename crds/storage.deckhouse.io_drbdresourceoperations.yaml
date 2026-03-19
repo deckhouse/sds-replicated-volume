@@ -138,6 +138,9 @@ spec:
               phase:
                 description: DRBDOperationPhase represents the phase of a DRBD operation.
                 type: string
+              result:
+                maxLength: 1024
+                type: string
               startedAt:
                 format: date-time
                 type: string
