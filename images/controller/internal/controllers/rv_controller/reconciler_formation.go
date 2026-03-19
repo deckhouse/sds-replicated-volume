@@ -22,6 +22,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -941,23 +942,9 @@ func (r *Reconciler) reconcileAdoptStepWaitPreconfigured(
 			Eval()
 	})
 
-	// Replicas ready to join the datamesh (adopt: must be in maintenance mode).
-	preconfigured := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		req := rvr.Status.DatameshRequest
-		return req != nil && req.Operation == v1alpha1.DatameshMembershipRequestOperationJoin &&
-			obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType).
-				ReasonEqual(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonInMaintenance).
-				ObservedGenerationCurrent().
-				Eval()
-	})
-
-	// Wait for scheduling and preconfiguration.
+	// Gate 1: Wait for scheduling.
 	waitingScheduling := diskful.Difference(scheduled)
-	waitingPreconfiguration := scheduled.Intersect(diskful).Difference(preconfigured)
-
-	if !waitingScheduling.IsEmpty() || !waitingPreconfiguration.IsEmpty() {
-		targetDiskfulCount := byte(diskful.Len())
-
+	if !waitingScheduling.IsEmpty() {
 		schedulingFailed := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 			return waitingScheduling.Contains(rvr.ID()) &&
 				obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType).
@@ -966,12 +953,83 @@ func (r *Reconciler) reconcileAdoptStepWaitPreconfigured(
 		})
 		pendingScheduling := waitingScheduling.Difference(schedulingFailed)
 
-		msg := computeFormationPreconfigureWaitMessage(*rvrs, targetDiskfulCount,
-			pendingScheduling, schedulingFailed, waitingPreconfiguration)
+		var parts []string
+		if !pendingScheduling.IsEmpty() {
+			parts = append(parts, fmt.Sprintf("pending scheduling [%s]", pendingScheduling))
+		}
+		if !schedulingFailed.IsEmpty() {
+			part := fmt.Sprintf("scheduling failed [%s]", schedulingFailed)
+			if msgs := computeActualSchedulingFailureMessages(*rvrs, schedulingFailed); len(msgs) > 0 {
+				part += " (" + strings.Join(msgs, " | ") + ")"
+			}
+			parts = append(parts, part)
+		}
+		msg := fmt.Sprintf("Waiting for %d/%d replicas to be scheduled: %s",
+			waitingScheduling.Len(), diskful.Len(), strings.Join(parts, ", "))
 		changed = applyDatameshTransitionStepMessage(step, msg) || changed
 		changed = applyDatameshReplicaRequestMessages(
-			rv, preconfigured,
+			rv, scheduled.Intersect(diskful),
+			"Datamesh is forming (adopt), waiting for other replicas to be scheduled",
+		) || changed
+		return rf.ContinueAndRequeue().ReportChangedIf(changed)
+	}
+
+	// Gate 2: Wait for maintenance mode with DatameshRequest Join.
+	inMaintenance := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		req := rvr.Status.DatameshRequest
+		return req != nil && req.Operation == v1alpha1.DatameshMembershipRequestOperationJoin &&
+			obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType).
+				ReasonEqual(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonInMaintenance).
+				ObservedGenerationCurrent().
+				Eval()
+	})
+	waitingMaintenance := diskful.Difference(inMaintenance)
+	if !waitingMaintenance.IsEmpty() {
+		msg := fmt.Sprintf("Waiting for %d/%d replicas to enter maintenance mode with DatameshRequest Join: [%s]",
+			waitingMaintenance.Len(), diskful.Len(), waitingMaintenance)
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
+		changed = applyDatameshReplicaRequestMessages(
+			rv, inMaintenance,
 			"Datamesh is forming (adopt), waiting for other replicas to enter maintenance mode",
+		) || changed
+		return rf.ContinueAndRequeue().ReportChangedIf(changed)
+	}
+
+	// Gate 3: Wait for UpToDate backing volume.
+	bvReady := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return diskful.Contains(rvr.ID()) &&
+			rvr.Status.BackingVolume != nil &&
+			rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate
+	})
+	waitingBV := diskful.Difference(bvReady)
+	if !waitingBV.IsEmpty() {
+		msg := fmt.Sprintf("Waiting for %d/%d replicas to have UpToDate backing volume: [%s]",
+			waitingBV.Len(), diskful.Len(), waitingBV)
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
+		changed = applyDatameshReplicaRequestMessages(
+			rv, bvReady,
+			"Datamesh is forming (adopt), waiting for other replicas to have UpToDate backing volume",
+		) || changed
+		return rf.ContinueAndRequeue().ReportChangedIf(changed)
+	}
+
+	// Safety: verify diskful replica count matches intended configuration.
+	targetDiskfulCount := computeIntendedDiskfulReplicaCount(rv)
+	if diskful.Len() != int(targetDiskfulCount) {
+		msg := fmt.Sprintf(
+			"Diskful replica count mismatch: found %d, expected %d (FTT=%d + GMDR=%d + 1). "+
+				"Pre-existing replicas do not match the intended configuration",
+			diskful.Len(), targetDiskfulCount,
+			rv.Status.Configuration.FailuresToTolerate,
+			rv.Status.Configuration.GuaranteedMinimumDataRedundancy,
+		)
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
+		changed = applyDatameshReplicaRequestMessages(
+			rv, diskful,
+			fmt.Sprintf("Datamesh formation blocked: found %d diskful replicas, expected %d (FTT=%d + GMDR=%d + 1)",
+				diskful.Len(), targetDiskfulCount,
+				rv.Status.Configuration.FailuresToTolerate,
+				rv.Status.Configuration.GuaranteedMinimumDataRedundancy),
 		) || changed
 		return rf.ContinueAndRequeue().ReportChangedIf(changed)
 	}
@@ -991,11 +1049,20 @@ func (r *Reconciler) reconcileAdoptStepWaitPreconfigured(
 		return matchCount != len(requiredNetworks)
 	})
 	if !missingAddresses.IsEmpty() {
+		okReplicas := diskful.Difference(missingAddresses)
 		msg := fmt.Sprintf(
 			"Address configuration mismatch: replicas [%s] do not have addresses for all required networks %v",
 			missingAddresses.String(), requiredNetworks,
 		)
 		changed = applyDatameshTransitionStepMessage(step, msg) || changed
+		changed = applyDatameshReplicaRequestMessages(
+			rv, okReplicas,
+			"Datamesh is forming (adopt), waiting for other replicas to report required addresses",
+		) || changed
+		changed = applyDatameshReplicaRequestMessages(
+			rv, missingAddresses,
+			"Replica addresses do not match required network configuration, blocking datamesh formation",
+		) || changed
 		return rf.ContinueAndRequeue().ReportChangedIf(changed)
 	}
 
@@ -1004,8 +1071,17 @@ func (r *Reconciler) reconcileAdoptStepWaitPreconfigured(
 		return diskful.Contains(rvr.ID()) && rsp.FindEligibleNode(rvr.Spec.NodeName) == nil
 	})
 	if !notEligible.IsEmpty() {
+		okReplicas := diskful.Difference(notEligible)
 		msg := fmt.Sprintf("Replicas [%s] are placed on nodes not in eligible nodes list", notEligible.String())
 		changed = applyDatameshTransitionStepMessage(step, msg) || changed
+		changed = applyDatameshReplicaRequestMessages(
+			rv, okReplicas,
+			"Datamesh is forming (adopt), waiting for other replicas to be on eligible nodes",
+		) || changed
+		changed = applyDatameshReplicaRequestMessages(
+			rv, notEligible,
+			"Replica is placed on a node not in the eligible nodes list, blocking datamesh formation",
+		) || changed
 		return rf.ContinueAndRequeue().ReportChangedIf(changed)
 	}
 
@@ -1023,8 +1099,17 @@ func (r *Reconciler) reconcileAdoptStepWaitPreconfigured(
 			rvr.Spec.LVMVolumeGroupThinPoolName != req.ThinPoolName
 	})
 	if !specMismatch.IsEmpty() {
+		okReplicas := diskful.Difference(specMismatch)
 		msg := fmt.Sprintf("Replicas [%s] have spec changes that don't match pending transition", specMismatch.String())
 		changed = applyDatameshTransitionStepMessage(step, msg) || changed
+		changed = applyDatameshReplicaRequestMessages(
+			rv, okReplicas,
+			"Datamesh is forming (adopt), waiting for other replicas to resolve spec mismatch",
+		) || changed
+		changed = applyDatameshReplicaRequestMessages(
+			rv, specMismatch,
+			"Replica spec does not match pending transition, blocking datamesh formation",
+		) || changed
 		return rf.ContinueAndRequeue().ReportChangedIf(changed)
 	}
 
@@ -1040,11 +1125,20 @@ func (r *Reconciler) reconcileAdoptStepWaitPreconfigured(
 		return usable.Cmp(rv.Status.Datamesh.Size) < 0
 	})
 	if !insufficientSize.IsEmpty() {
+		okReplicas := diskful.Difference(insufficientSize)
 		msg := fmt.Sprintf(
 			"Replicas [%s] have insufficient backing volume size for datamesh (required: %s)",
 			insufficientSize.String(), rv.Status.Datamesh.Size.String(),
 		)
 		changed = applyDatameshTransitionStepMessage(step, msg) || changed
+		changed = applyDatameshReplicaRequestMessages(
+			rv, okReplicas,
+			"Datamesh is forming (adopt), waiting for other replicas to resolve backing volume size issue",
+		) || changed
+		changed = applyDatameshReplicaRequestMessages(
+			rv, insufficientSize,
+			"Replica backing volume size is insufficient for datamesh, blocking formation",
+		) || changed
 		return rf.ContinueAndRequeue().ReportChangedIf(changed)
 	}
 
@@ -1081,12 +1175,14 @@ func (r *Reconciler) reconcileAdoptStepEstablishMembership(
 	})
 
 	if len(rv.Status.Datamesh.Members) == 0 {
-		secret, err := generateSharedSecret()
-		if err != nil {
-			return rf.Fail(err)
+		if rv.Status.Datamesh.SharedSecret == "" {
+			secret, err := generateSharedSecret()
+			if err != nil {
+				return rf.Fail(err)
+			}
+			rv.Status.Datamesh.SharedSecretAlg = v1alpha1.SharedSecretAlgSHA256
+			rv.Status.Datamesh.SharedSecret = secret
 		}
-		rv.Status.Datamesh.SharedSecretAlg = v1alpha1.SharedSecretAlgSHA256
-		rv.Status.Datamesh.SharedSecret = secret
 
 		for _, rvr := range *rvrs {
 			if !diskful.Contains(rvr.ID()) {

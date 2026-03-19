@@ -145,6 +145,11 @@ func createPreexistingDRBD(ctx SpecContext, ftt, gmdr byte) []PreexistingDRBDRep
 
 	trv.Delete(ctx)
 
+	// Remove all finalizers from LLVs so they can be deleted from Kubernetes
+	// even though the underlying LV is still held open by the renamed DRBD
+	// resource. sds-node-configurator cannot lvremove a busy LV, so its
+	// finalizer would block deletion indefinitely. This recreates the
+	// "LVM device exists, but no LLV object" state expected by the adopt test.
 	for _, m := range members {
 		if m.llv.IsPresent() {
 			m.llv.Update(ctx, func(llv *snc.LVMLogicalVolume) {
@@ -171,7 +176,7 @@ func createPreexistingDRBD(ctx SpecContext, ftt, gmdr byte) []PreexistingDRBDRep
 	return result
 }
 
-var _ = Describe("Preexisting DRBD emulation", Label(fw.LabelUpgrade), func() {
+var _ = Describe("Preexisting DRBD emulation", Label(fw.LabelUpgrade, fw.LabelSlow), func() {
 	It("standalone DRBDR: DRBD resource persists after rename + maintenance + delete", func(ctx SpecContext) {
 		node := f.Discovery.AnyNode()
 
