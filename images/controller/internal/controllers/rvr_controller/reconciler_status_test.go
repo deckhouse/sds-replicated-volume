@@ -1931,6 +1931,161 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 		Expect(outcome.DidChange()).To(BeTrue())
 		Expect(rvr.Status.Peers).To(BeEmpty())
 	})
+
+	It("rewrites peer-N to rvNamePrefix when rvNamePrefix differs", func() {
+		rvr.Spec.ReplicatedVolumeName = "my-rv"
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "peer-0", Type: v1alpha1.DRBDResourceTypeDiskful},
+					{Name: "peer-5", Type: v1alpha1.DRBDResourceTypeDiskful},
+					{Name: "peer-31", Type: v1alpha1.DRBDResourceTypeDiskless, AllowRemoteRead: true},
+				},
+			},
+		}
+
+		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Peers).To(HaveLen(3))
+		Expect(rvr.Status.Peers[0].Name).To(Equal("my-rv-0"))
+		Expect(rvr.Status.Peers[0].Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(rvr.Status.Peers[1].Name).To(Equal("my-rv-5"))
+		Expect(rvr.Status.Peers[2].Name).To(Equal("my-rv-31"))
+		Expect(rvr.Status.Peers[2].Type).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
+	})
+
+	It("skips peer- with invalid suffix", func() {
+		rvr.Spec.ReplicatedVolumeName = "my-rv"
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "peer-abc", Type: v1alpha1.DRBDResourceTypeDiskful},
+					{Name: "peer-32", Type: v1alpha1.DRBDResourceTypeDiskful},
+					{Name: "peer--1", Type: v1alpha1.DRBDResourceTypeDiskful},
+				},
+			},
+		}
+
+		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(rvr.Status.Peers).To(BeEmpty())
+	})
+
+	It("skips truly foreign peer names", func() {
+		rvr.Spec.ReplicatedVolumeName = "my-rv"
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "unknown-peer", Type: v1alpha1.DRBDResourceTypeDiskful},
+					{Name: "other-rv-0", Type: v1alpha1.DRBDResourceTypeDiskful},
+				},
+			},
+		}
+
+		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(rvr.Status.Peers).To(BeEmpty())
+	})
+
+	It("skips rvNamePrefix with invalid suffix", func() {
+		rvr.Spec.ReplicatedVolumeName = "my-rv"
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "my-rv-abc", Type: v1alpha1.DRBDResourceTypeDiskful},
+					{Name: "my-rv-99", Type: v1alpha1.DRBDResourceTypeDiskful},
+					{Name: "my-rv-", Type: v1alpha1.DRBDResourceTypeDiskful},
+					{Name: "my-rv-5", Type: v1alpha1.DRBDResourceTypeDiskful},
+				},
+			},
+		}
+
+		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(rvr.Status.Peers).To(HaveLen(1))
+		Expect(rvr.Status.Peers[0].Name).To(Equal("my-rv-5"))
+	})
+
+	It("handles mix of valid rvNamePrefix, valid peer-N, and foreign peers", func() {
+		rvr.Spec.ReplicatedVolumeName = "my-rv"
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "my-rv-1", Type: v1alpha1.DRBDResourceTypeDiskful},
+					{Name: "unknown", Type: v1alpha1.DRBDResourceTypeDiskful},
+					{Name: "peer-2", Type: v1alpha1.DRBDResourceTypeDiskless, AllowRemoteRead: true},
+					{Name: "peer-99", Type: v1alpha1.DRBDResourceTypeDiskful},
+				},
+			},
+		}
+
+		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Peers).To(HaveLen(2))
+		Expect(rvr.Status.Peers[0].Name).To(Equal("my-rv-1"))
+		Expect(rvr.Status.Peers[0].Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(rvr.Status.Peers[1].Name).To(Equal("my-rv-2"))
+		Expect(rvr.Status.Peers[1].Type).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
+	})
+
+	It("is idempotent after peer-N rewriting", func() {
+		rvr.Spec.ReplicatedVolumeName = "my-rv"
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "peer-0", Type: v1alpha1.DRBDResourceTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnected},
+				},
+			},
+		}
+
+		outcome1 := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome1.Error()).NotTo(HaveOccurred())
+		Expect(outcome1.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Peers).To(HaveLen(1))
+		Expect(rvr.Status.Peers[0].Name).To(Equal("my-rv-0"))
+
+		outcome2 := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// parseIDSuffix tests
+//
+
+var _ = Describe("parseIDSuffix", func() {
+	DescribeTable("valid suffixes",
+		func(s string, expectedID uint8) {
+			id, ok := parseIDSuffix(s)
+			Expect(ok).To(BeTrue())
+			Expect(id).To(Equal(expectedID))
+		},
+		Entry("0", "0", uint8(0)),
+		Entry("3", "3", uint8(3)),
+		Entry("9", "9", uint8(9)),
+		Entry("10", "10", uint8(10)),
+		Entry("15", "15", uint8(15)),
+		Entry("31", "31", uint8(31)),
+	)
+
+	DescribeTable("invalid suffixes",
+		func(s string) {
+			_, ok := parseIDSuffix(s)
+			Expect(ok).To(BeFalse())
+		},
+		Entry("empty", ""),
+		Entry("leading zero 00", "00"),
+		Entry("leading zero 01", "01"),
+		Entry("leading zero 09", "09"),
+		Entry("out of range 32", "32"),
+		Entry("out of range 99", "99"),
+		Entry("alphabetic", "abc"),
+		Entry("negative", "-1"),
+		Entry("three digits", "123"),
+	)
 })
 
 // ──────────────────────────────────────────────────────────────────────────────

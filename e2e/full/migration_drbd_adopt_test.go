@@ -141,11 +141,11 @@ var _ = Describe("Migration: agent adopts preexisting DRBD", Label(fw.LabelUpgra
 
 		Entry("FTT=0 GMDR=0 secondary (1 replica)", byte(0), byte(0), 1, false),
 		Entry("FTT=0 GMDR=0 primary (1 replica)", byte(0), byte(0), 1, true),
-		// Entry("FTT=0 GMDR=1 secondary (1 replica)", byte(0), byte(1), 1, false),
-		// Entry("FTT=0 GMDR=1 primary (1 replica)", byte(0), byte(1), 1, true),
-		// Entry("FTT=1 GMDR=0 secondary (1 replica)", byte(1), byte(0), 1, false),
-		// Entry("FTT=1 GMDR=0 primary (1 replica)", byte(1), byte(0), 1, true),
-		// Entry("FTT=1 GMDR=1 secondary (1 replica)", byte(1), byte(1), 1, false),
-		// Entry("FTT=1 GMDR=1 primary (1 replica)", byte(1), byte(1), 1, true),
+		Entry("FTT=0 GMDR=1 secondary (1 replica)", byte(0), byte(1), 2, false),
+		Entry("FTT=0 GMDR=1 primary (1 replica)", byte(0), byte(1), 2, true),
+		Entry("FTT=1 GMDR=0 secondary (1 replica)", byte(1), byte(0), 2, false),
+		Entry("FTT=1 GMDR=0 primary (1 replica)", byte(1), byte(0), 2, true),
+		Entry("FTT=1 GMDR=1 secondary (1 replica)", byte(1), byte(1), 3, false),
+		Entry("FTT=1 GMDR=1 primary (1 replica)", byte(1), byte(1), 3, true),
 	)
 })
