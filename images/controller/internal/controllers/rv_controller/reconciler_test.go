@@ -37,7 +37,6 @@ import (
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/controlleroptions"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/datamesh"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
@@ -1421,81 +1420,6 @@ var _ = Describe("Reconciler", func() {
 		})
 	})
 
-	Context("formation concurrency gate", func() {
-		It("defers formation when all slots are occupied", func(ctx SpecContext) {
-			rsc := newRSCWithConfiguration("rsc-1")
-			rsp := newTestRSP("test-pool")
-
-			rv := &v1alpha1.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:       "rv-gate",
-					Finalizers: []string{v1alpha1.RVControllerFinalizer},
-					Labels: map[string]string{
-						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
-					},
-				},
-				Spec: v1alpha1.ReplicatedVolumeSpec{
-					Size:                       resource.MustParse("1Gi"),
-					ReplicatedStorageClassName: "rsc-1",
-				},
-				// DatameshRevision defaults to 0 → formation in progress.
-			}
-
-			cl := newClientBuilder(scheme).
-				WithObjects(rv, rsc, rsp).
-				WithStatusSubresource(rv, rsc).
-				Build()
-			rec := NewReconciler(cl, scheme)
-
-			// Fill all formation slots.
-			rec.activeFormations.Store(int32(controlleroptions.MaxConcurrentFormations))
-
-			result, err := rec.Reconcile(ctx, RequestFor(rv))
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(BeNumerically(">=", 5*time.Second))
-			Expect(result.RequeueAfter).To(BeNumerically("<=", 15*time.Second))
-
-			// Semaphore was not changed (no acquire/release happened).
-			Expect(rec.activeFormations.Load()).To(Equal(int32(controlleroptions.MaxConcurrentFormations)))
-		})
-
-		It("enters formation when slots are available", func(ctx SpecContext) {
-			rsc := newRSCWithConfiguration("rsc-1")
-			rsp := newTestRSP("test-pool")
-
-			rv := &v1alpha1.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:       "rv-gate-ok",
-					Finalizers: []string{v1alpha1.RVControllerFinalizer},
-					Labels: map[string]string{
-						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
-					},
-				},
-				Spec: v1alpha1.ReplicatedVolumeSpec{
-					Size:                       resource.MustParse("1Gi"),
-					ReplicatedStorageClassName: "rsc-1",
-				},
-			}
-
-			cl := newClientBuilder(scheme).
-				WithObjects(rv, rsc, rsp).
-				WithStatusSubresource(rv, rsc).
-				Build()
-			rec := NewReconciler(cl, scheme)
-
-			// Leave slots available (default 0).
-			result, err := rec.Reconcile(ctx, RequestFor(rv))
-			Expect(err).NotTo(HaveOccurred())
-			// Formation entered — it creates a transition and requeues for timeout.
-			// The exact RequeueAfter depends on formation logic, but it should not
-			// be the 5-15s gate delay.
-			Expect(result.RequeueAfter).To(BeNumerically(">", 15*time.Second),
-				"should enter formation (requeue for timeout), not gate delay")
-
-			// Semaphore was released (acquire + defer release completed).
-			Expect(rec.activeFormations.Load()).To(Equal(int32(0)))
-		})
-	})
 })
 
 var _ = Describe("ensureDatameshReplicaRequests", func() {

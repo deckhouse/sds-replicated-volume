@@ -20,11 +20,8 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"math/rand/v2"
 	"slices"
 	"strings"
-	"sync/atomic"
-	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,7 +32,6 @@ import (
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/controlleroptions"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/datamesh"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
@@ -49,11 +45,6 @@ import (
 type Reconciler struct {
 	cl     client.Client
 	scheme *runtime.Scheme
-
-	// activeFormations tracks how many formation reconciles are currently running.
-	// Used as a semaphore together with controlleroptions.MaxConcurrentFormations
-	// to prevent bulk RV creation from overwhelming the API server and disk I/O.
-	activeFormations atomic.Int32
 }
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
@@ -165,14 +156,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			return rf.Failf(err, "getting RSP").ToCtrl()
 		}
 		if forming, formationStepIdx := isFormationInProgress(rv); forming {
-			if !r.tryAcquireFormationSlot() {
-				// All formation slots are occupied — requeue with jitter to avoid thundering herd.
-				delay := 5*time.Second + time.Duration(rand.Int64N(int64(10*time.Second)))
-				outcome = outcome.Merge(rf.ContinueAndRequeueAfter(delay))
-			} else {
-				defer r.releaseFormationSlot()
-				outcome = outcome.Merge(r.reconcileFormation(rf.Ctx(), rv, &rvrs, rvas, rsp, rsc, formationStepIdx))
-			}
+			outcome = outcome.Merge(r.reconcileFormation(rf.Ctx(), rv, &rvrs, rvas, rsp, rsc, formationStepIdx))
 		} else {
 			outcome = flow.MergeReconciles(outcome,
 				r.reconcileRVConfiguration(rf.Ctx(), rv, rsc),
@@ -954,29 +938,6 @@ func (r *Reconciler) reconcileDeletion(
 
 	// We're done. Don't continue further reconciliation.
 	return rf.Done()
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Formation concurrency
-//
-
-// tryAcquireFormationSlot attempts to reserve a formation slot. Returns true
-// if a slot was acquired, false if all slots are occupied. Thread-safe via CAS.
-func (r *Reconciler) tryAcquireFormationSlot() bool {
-	for {
-		cur := r.activeFormations.Load()
-		if cur >= int32(controlleroptions.MaxConcurrentFormations) {
-			return false
-		}
-		if r.activeFormations.CompareAndSwap(cur, cur+1) {
-			return true
-		}
-	}
-}
-
-// releaseFormationSlot releases a previously acquired formation slot.
-func (r *Reconciler) releaseFormationSlot() {
-	r.activeFormations.Add(-1)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
