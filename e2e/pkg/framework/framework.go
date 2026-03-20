@@ -27,6 +27,7 @@ import (
 	"hash/fnv"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -39,6 +40,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -77,6 +79,8 @@ type Framework struct {
 	controlPlane ControlPlane
 
 	rscCache     map[rscCacheKey]*TestRSC
+	podCacheMu   sync.Mutex
+	podNameCache map[podCacheKey]string
 	specCounters map[any]int
 }
 
@@ -87,6 +91,8 @@ type Framework struct {
 // cluster is discovered. The run ID is generated on worker 1 and broadcast
 // to all parallel workers.
 func Setup() *Framework {
+	ctrl.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+
 	f := &Framework{}
 
 	mult := parseTimeoutMultiplier(os.Getenv("E2E_TIMEOUT_MULTIPLIER"))
@@ -118,7 +124,7 @@ func Setup() *Framework {
 		if f.cacheCancel != nil {
 			f.cacheCancel()
 		}
-	}, NodeTimeout(30*time.Second))
+	}, NodeTimeout(60*time.Second))
 
 	BeforeEach(func() {
 		f.specCounters = make(map[any]int)
@@ -155,6 +161,7 @@ func (f *Framework) init(ctx context.Context) {
 	f.WorkerID = GinkgoParallelProcess()
 	f.prefix = fmt.Sprintf("e2e-%s", f.runID)
 	f.rscCache = make(map[rscCacheKey]*TestRSC)
+	f.podNameCache = make(map[podCacheKey]string)
 
 	cacheCtx, cacheCancel := context.WithCancel(context.Background())
 	f.cacheCancel = cacheCancel

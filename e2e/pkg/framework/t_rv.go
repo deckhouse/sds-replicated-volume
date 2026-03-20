@@ -261,9 +261,24 @@ func (t *TestRV) TestRVR(id int) *TestRVR {
 	return t.rvrs.Resolve(name)
 }
 
+// TestRVRs returns all currently tracked TestRVRs.
+func (t *TestRV) TestRVRs() []*TestRVR {
+	return t.rvrs.All()
+}
+
 // RVRCount returns the number of tracked RVRs.
 func (t *TestRV) RVRCount() int {
 	return t.rvrs.Count()
+}
+
+// OccupiedNodes returns the node names of all current datamesh members.
+func (t *TestRV) OccupiedNodes() []string {
+	rv := t.Object()
+	nodes := make([]string, len(rv.Status.Datamesh.Members))
+	for i, m := range rv.Status.Datamesh.Members {
+		nodes[i] = m.NodeName
+	}
+	return nodes
 }
 
 // OnEachRVR returns a GroupHandle for bulk operations on all current

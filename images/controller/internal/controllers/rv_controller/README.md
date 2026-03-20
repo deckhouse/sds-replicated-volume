@@ -87,21 +87,38 @@ Reconcile (root) [Pure orchestration]
 ├── ensureDatameshReplicaRequests ← details
 ├── reconcileFormation [Pure orchestration]
 │   │   ensureFormationTransition (find or create Formation transition with all steps)
-│   ├── reconcileFormationStepPreconfigure [Pure orchestration] ← details
-│   │   ├── create/delete RVRs (guards for deleting/misplaced, replica count management)
-│   │   ├── wait for deleting replicas cleanup
-│   │   ├── safety checks (addresses, eligible nodes, spec mismatch, backing volume size)
-│   │   └── reconcileFormationRestartIfTimeoutPassed
-│   ├── reconcileFormationStepEstablishConnectivity [Pure orchestration] ← details
-│   │   ├── generateSharedSecret + applyDatameshMember
-│   │   ├── computeTargetQuorum
-│   │   ├── verify configured, connected, ready for data bootstrap
-│   │   └── reconcileFormationRestartIfTimeoutPassed
-│   ├── reconcileFormationStepBootstrapData [Pure orchestration] ← details
-│   │   ├── createDRBDROp (new-current-uuid)
-│   │   ├── verify operation status + UpToDate replicas
-│   │   ├── reconcileFormationRestartIfTimeoutPassed
-│   │   └── advanceFormationStep / remove transition (formation complete)
+│   ├── (create/v1)
+│   │   ├── reconcileFormationStepPreconfigure [Pure orchestration] ← details
+│   │   │   ├── create/delete RVRs (guards for deleting/misplaced, replica count management)
+│   │   │   ├── wait for deleting replicas cleanup
+│   │   │   ├── safety checks (addresses, eligible nodes, spec mismatch, backing volume size)
+│   │   │   └── reconcileFormationRestartIfTimeoutPassed
+│   │   ├── reconcileFormationStepEstablishConnectivity [Pure orchestration] ← details
+│   │   │   ├── generateSharedSecret + applyDatameshMember
+│   │   │   ├── computeTargetQuorum
+│   │   │   ├── verify configured, connected, ready for data bootstrap
+│   │   │   └── reconcileFormationRestartIfTimeoutPassed
+│   │   └── reconcileFormationStepBootstrapData [Pure orchestration] ← details
+│   │       ├── createDRBDROp (new-current-uuid)
+│   │       ├── verify operation status + UpToDate replicas
+│   │       ├── reconcileFormationRestartIfTimeoutPassed
+│   │       └── advanceFormationStep / remove transition (formation complete)
+│   ├── (adopt/v1)
+│   │   ├── reconcileAdoptStepVerifyPrerequisites [Pure orchestration] ← details
+│   │   │   ├── collect non-deleting replicas by type (diskful, tiebreaker, access)
+│   │   │   ├── gates: diskful exist, no deleting RVRs, all scheduled, all in maintenance+Join
+│   │   │   ├── gates: backing volumes UpToDate, diskful count matches, tiebreaker count matches
+│   │   │   ├── safety: addresses, eligible nodes, spec consistency, backing volume size
+│   │   │   └── advance → PopulateAndVerifyDatamesh
+│   │   ├── reconcileAdoptStepPopulateAndVerifyDatamesh [Pure orchestration] ← details
+│   │   │   ├── generateSharedSecret + applyDatameshMember (all replica types, multiattach)
+│   │   │   ├── computeTargetQuorum
+│   │   │   ├── gate: DatameshRevisionObservedByAgent >= DatameshRevision
+│   │   │   ├── verify: members match, star-topology connections, diskful UpToDate, QMR check
+│   │   │   └── advance → ExitMaintenance
+│   │   └── reconcileAdoptStepExitMaintenance [Pure orchestration] ← details
+│   │       ├── wait for DRBDConfigured=True (reason != InMaintenance)
+│   │       └── wait for Ready=True → formation complete
 │   └── reconcileRVAWaiting ("Datamesh formation is in progress")
 ├── reconcileRVConfiguration [In-place reconciliation] (config updates + ConfigurationReady condition)
 ├── reconcileNormalOperation [Pure orchestration]
@@ -124,7 +141,7 @@ Reconcile (root) [Pure orchestration]
 └── patchRVStatus
 ```
 
-Links to detailed algorithms: [`reconcileDeletion`](#reconciledeletion-details), [`ensureDatameshReplicaRequests`](#ensuredatameshreplicarequests-details), [`reconcileRVConfiguration`](#reconcilervconfiguration-details), [`reconcileFormationStepPreconfigure`](#reconcileformationsteppreconfigure-details), [`reconcileFormationStepEstablishConnectivity`](#reconcileformationstepestablishconnectivity-details), [`reconcileFormationStepBootstrapData`](#reconcileformationstepbootstrapdata-details), [`reconcileCreateAccessReplicas`](#reconcilecreateaccessreplicas-details), [`reconcileDeleteAccessReplicas`](#reconciledeleteaccessreplicas-details), [`reconcileRVAConditionsFromDatameshReplicaContext`](#reconcilervaconditionsfromdatameshreplicacontext-details)
+Links to detailed algorithms: [`reconcileDeletion`](#reconciledeletion-details), [`ensureDatameshReplicaRequests`](#ensuredatameshreplicarequests-details), [`reconcileRVConfiguration`](#reconcilervconfiguration-details), [`reconcileFormationStepPreconfigure`](#reconcileformationsteppreconfigure-details), [`reconcileFormationStepEstablishConnectivity`](#reconcileformationstepestablishconnectivity-details), [`reconcileFormationStepBootstrapData`](#reconcileformationstepbootstrapdata-details), [`reconcileAdoptStepVerifyPrerequisites`](#reconcileadoptstepverifyprerequisites-details), [`reconcileAdoptStepPopulateAndVerifyDatamesh`](#reconcileadoptsteppopulateandverifydatamesh-details), [`reconcileAdoptStepExitMaintenance`](#reconcileadoptstepexitmaintenance-details), [`reconcileCreateAccessReplicas`](#reconcilecreateaccessreplicas-details), [`reconcileDeleteAccessReplicas`](#reconciledeleteaccessreplicas-details), [`reconcileRVAConditionsFromDatameshReplicaContext`](#reconcilervaconditionsfromdatameshreplicacontext-details)
 
 ## Algorithm Flow
 
@@ -234,9 +251,16 @@ Message is passthrough from the Attached condition, except when Phase=Attached a
 
 ## Formation Steps
 
-Datamesh formation is a 3-step process that creates and configures DRBD replicas. Each step has a timeout; if progress stalls, formation restarts from scratch. All steps are pre-declared in the Formation transition at creation time and tracked in `rv.Status.DatameshTransitions[].Steps`.
+Datamesh formation uses one of two plans depending on whether pre-existing replicas need to be adopted. Each plan is a 3-step process tracked in `rv.Status.DatameshTransitions[].Steps`.
 
-### Step 1: Preconfigure
+- **create/v1** — creates fresh DRBD replicas, bootstraps connectivity and data.
+- **adopt/v1** — adopts pre-existing DRBD replicas (in maintenance mode) into the datamesh.
+
+### create/v1 Formation
+
+Each step has a timeout; if progress stalls, formation restarts from scratch.
+
+#### Step 1: Preconfigure
 
 Creates diskful replicas and waits for them to become preconfigured (DRBD setup complete, ready for datamesh membership).
 
@@ -250,7 +274,7 @@ Creates diskful replicas and waits for them to become preconfigured (DRBD setup 
 7. Wait for scheduling and preconfiguration (replicas split into pending scheduling / scheduling failed / preconfiguring; scheduling failure messages from RVR Scheduled=False conditions are shown inline)
 8. Safety checks: addresses, eligible nodes, spec consistency, backing volume size
 
-### Step 2: Establish Connectivity
+#### Step 2: Establish Connectivity
 
 Adds preconfigured replicas to the datamesh and waits for DRBD peer connections.
 
@@ -262,7 +286,7 @@ Adds preconfigured replicas to the datamesh and waits for DRBD peer connections.
 5. Wait for all replicas to connect to each other (ConnectionState=Connected)
 6. Wait for data bootstrap readiness (BackingVolume=Inconsistent + Replication=Established)
 
-### Step 3: Bootstrap Data
+#### Step 3: Bootstrap Data
 
 Triggers initial data synchronization via DRBDResourceOperation and waits for completion.
 
@@ -280,7 +304,7 @@ Triggers initial data synchronization via DRBDResourceOperation and waits for co
 - Force-resync (multi-replica thick provisioning): + volume size / 100 Mbit/s (worst-case bandwidth estimate)
 - Clear-bitmap (single replica or thin provisioning): base only
 
-### Formation Restart
+#### Formation Restart
 
 When formation stalls (any safety check fails or progress timeout is exceeded), formation restarts:
 
@@ -291,6 +315,54 @@ When formation stalls (any safety check fails or progress timeout is exceeded), 
 5. Reset all status fields (Configuration, DatameshRevision, Datamesh, EffectiveLayout, transitions)
 6. Re-derive configuration via `reconcileRVConfiguration` (to avoid ConfigurationReady condition flicker)
 7. Requeue for fresh start
+
+### adopt/v1 Formation
+
+Unlike create/v1, the adopt plan never creates or deletes RVRs. It expects pre-existing RVRs (created externally) to be in maintenance mode with a DatameshRequest Join. The adopt plan handles all replica types: Diskful, TieBreaker, and Access.
+
+#### Step 1: Verify Prerequisites
+
+Waits for pre-existing RVRs to satisfy all prerequisites before populating the datamesh.
+
+**Gates (in order):**
+1. At least one diskful replica exists
+2. No deleting RVRs remain
+3. All replicas (D+TB+A) are scheduled
+4. All replicas are in maintenance mode with DatameshRequest Join
+5. All diskful replicas have UpToDate backing volumes
+6. Diskful replica count matches `D = FTT + GMDR + 1`
+7. TieBreaker count matches: 1 if D is even and FTT = D/2, else 0
+8. All replicas have addresses for required system networks
+9. All replicas are on eligible nodes
+10. Replica spec matches pending transition (LVG, ThinPool)
+11. Backing volume size is sufficient (diskful only)
+
+#### Step 2: Populate and Verify Datamesh
+
+Populates the datamesh from pre-existing replicas and verifies configuration consistency. All checks run while DRBDRs remain in maintenance mode — DRBD does NOT react to configuration changes. Consistency is checked indirectly via RVR status.
+
+**Actions (populate):**
+1. Generate shared secret for DRBD peer authentication
+2. Add all replicas as datamesh members (with zone, addresses, LVG; tracks multiattach from attachment status)
+3. Set effective layout (FTT/GMDR) and quorum parameters
+4. Increment DatameshRevision
+
+**Gates (verify, in order):**
+1. All replicas have observed the datamesh revision (`DatameshRevisionObservedByAgent >= DatameshRevision`)
+2. Datamesh members match active RVRs
+3. Star-topology connections: diskful replicas connect to all others; TB/A replicas connect to diskful only
+4. All diskful replicas report UpToDate backing volume
+5. Quorum minimum redundancy does not exceed diskful count
+
+#### Step 3: Exit Maintenance
+
+Waits for all datamesh member replicas to exit maintenance mode and become healthy.
+
+**Gates (in order):**
+1. All replicas have exited maintenance (`DRBDConfigured=True`, reason != `InMaintenance`)
+2. All replicas are Ready (`Ready=True`)
+
+On success: removes the Formation transition (formation complete).
 
 ## Attachment Lifecycle
 
@@ -631,6 +703,169 @@ flowchart TD
 | Output | Description |
 |--------|-------------|
 | `DRBDResourceOperation` | Created/verified data bootstrap operation |
+| `rv.Status.DatameshTransitions` | Formation transition removed on success |
+
+---
+
+### reconcileAdoptStepVerifyPrerequisites Details
+
+**Purpose:** Waits for pre-existing RVRs (diskful, tiebreaker, access) to satisfy all prerequisites before populating the datamesh. Unlike create/v1, this step never creates or deletes RVRs.
+
+**File:** `reconciler_formation.go`
+
+**Algorithm:**
+
+```mermaid
+flowchart TD
+    Start([Start]) --> Init{"First entry?"}
+    Init -->|Yes| SetRev["DatameshRevision=1,<br/>SystemNetworkNames, Size"]
+    Init -->|No| CollectReplicas
+    SetRev --> CollectReplicas
+
+    CollectReplicas["Collect by type:<br/>diskful, tiebreaker, access<br/>all = D ∪ TB ∪ A"]
+
+    CollectReplicas --> CheckDiskful{Diskful exist?}
+    CheckDiskful -->|No| Wait1["Wait: no diskful replicas"]
+
+    CheckDiskful -->|Yes| CheckDeleting{Deleting RVRs?}
+    CheckDeleting -->|Yes| Wait2["Wait: deleting RVRs remain"]
+
+    CheckDeleting -->|No| CheckScheduled{All scheduled?}
+    CheckScheduled -->|No| Wait3["Wait: replicas not scheduled"]
+
+    CheckScheduled -->|Yes| CheckMaintenance{All in maintenance<br/>with Join request?}
+    CheckMaintenance -->|No| Wait4["Wait: not in maintenance"]
+
+    CheckMaintenance -->|Yes| CheckBV{Diskful BV UpToDate?}
+    CheckBV -->|No| Wait5["Wait: BV not UpToDate"]
+
+    CheckBV -->|Yes| CheckDCount{"D count = FTT+GMDR+1?"}
+    CheckDCount -->|No| Wait6["Blocked: count mismatch"]
+
+    CheckDCount -->|Yes| CheckTBCount{TB count correct?}
+    CheckTBCount -->|No| Wait7["Blocked: TB count mismatch"]
+
+    CheckTBCount -->|Yes| CheckAddresses{All have addresses?}
+    CheckAddresses -->|No| Wait8["Wait: missing addresses"]
+
+    CheckAddresses -->|Yes| CheckEligible{All on eligible nodes?}
+    CheckEligible -->|No| Wait9["Blocked: node not eligible"]
+
+    CheckEligible -->|Yes| CheckSpec{Spec matches request?}
+    CheckSpec -->|No| Wait10["Blocked: spec mismatch"]
+
+    CheckSpec -->|Yes| CheckSize{BV size sufficient?}
+    CheckSize -->|No| Wait11["Blocked: size insufficient"]
+
+    CheckSize -->|Yes| Advance(["Advance → PopulateAndVerifyDatamesh"])
+```
+
+**Data Flow:**
+
+| Input | Description |
+|-------|-------------|
+| `rvrs` | Replica statuses (scheduling, maintenance, backing volume, addresses) |
+| `rv.Status.Configuration` (FTT, GMDR) | Determines expected diskful and tiebreaker counts |
+| `rsp` | Eligible nodes, system network names |
+
+| Output | Description |
+|--------|-------------|
+| `rv.Status.DatameshRevision` | Set to 1 on first entry |
+| `rv.Status.Datamesh.SystemNetworkNames` | Copied from RSP |
+| `rv.Status.Datamesh.Size` | Copied from RV spec |
+| Formation transition step messages | Progress/error reporting |
+
+---
+
+### reconcileAdoptStepPopulateAndVerifyDatamesh Details
+
+**Purpose:** Populates the datamesh (shared secret, members, quorum) from pre-existing replicas and verifies that the auto-generated configuration is consistent with actual DRBD state. All checks run while DRBDRs are in maintenance mode.
+
+**File:** `reconciler_formation.go`
+
+**Algorithm:**
+
+```mermaid
+flowchart TD
+    Start([Start]) --> CollectAll["Collect all = D ∪ TB ∪ A"]
+
+    CollectAll --> CheckMembers{Members already set?}
+    CheckMembers -->|No| GenSecret[generateSharedSecret]
+    GenSecret --> AddMembers["Add all replicas as datamesh members<br/>(zone, addresses, LVG, multiattach)"]
+    AddMembers --> SetQuorum[computeTargetQuorum]
+    SetQuorum --> IncrRevision["DatameshRevision++"]
+    IncrRevision --> ReturnChanged([Return changed])
+
+    CheckMembers -->|Yes| CheckObserved{"All observed revision?<br/>DatameshRevisionObservedByAgent<br/>>= DatameshRevision"}
+    CheckObserved -->|No| WaitObserved["Wait: replicas not observed"]
+
+    CheckObserved -->|Yes| CheckMembersMatch{Members match<br/>active RVRs?}
+    CheckMembersMatch -->|No| WaitMismatch["Wait: members mismatch"]
+
+    CheckMembersMatch -->|Yes| CheckConnected{"Star-topology<br/>connections ok?"}
+    CheckConnected -->|No| WaitConn["Wait: not connected"]
+
+    CheckConnected -->|Yes| CheckUpToDate{Diskful UpToDate?}
+    CheckUpToDate -->|No| WaitUTD["Wait: not UpToDate"]
+
+    CheckUpToDate -->|Yes| CheckQMR{"QMR <= diskful count?"}
+    CheckQMR -->|No| WaitQMR["Blocked: QMR exceeds<br/>diskful count"]
+
+    CheckQMR -->|Yes| Advance(["Advance → ExitMaintenance"])
+```
+
+**Star-topology connection check:** Diskful replicas expect connections to all other members (D+TB+A). TieBreaker and Access replicas expect connections to diskful replicas only.
+
+**Data Flow:**
+
+| Input | Description |
+|-------|-------------|
+| `rvrs` | Replica statuses (DatameshRevisionObservedByAgent, peers, backing volume) |
+| `rsp.EligibleNodes` | Zone information for datamesh members |
+
+| Output | Description |
+|--------|-------------|
+| `rv.Status.Datamesh.SharedSecret` | Generated DRBD shared secret |
+| `rv.Status.Datamesh.Members` | Datamesh member list (all types) |
+| `rv.Status.Datamesh.Multiattach` | Set if multiple members are attached |
+| `rv.Status.EffectiveLayout` | Set from Configuration (FTT/GMDR) |
+| `rv.Status.BaselineGuaranteedMinimumDataRedundancy` | From configuration |
+| `rv.Status.Datamesh.Quorum`, `QuorumMinimumRedundancy` | Computed quorum thresholds |
+| `rv.Status.DatameshRevision` | Incremented revision |
+
+---
+
+### reconcileAdoptStepExitMaintenance Details
+
+**Purpose:** Waits for all datamesh member replicas to exit maintenance mode and become Ready (healthy), then completes formation.
+
+**File:** `reconciler_formation.go`
+
+**Algorithm:**
+
+```mermaid
+flowchart TD
+    Start([Start]) --> CollectAll["Collect all datamesh members<br/>(D ∪ TB ∪ A)"]
+
+    CollectAll --> CheckMaintenance{"All exited maintenance?<br/>DRBDConfigured=True,<br/>reason != InMaintenance"}
+    CheckMaintenance -->|No| WaitMaint["Wait: replicas still<br/>in maintenance"]
+
+    CheckMaintenance -->|Yes| CheckReady{"All Ready?<br/>Ready=True"}
+    CheckReady -->|No| WaitReady["Wait: replicas not Ready"]
+
+    CheckReady -->|Yes| Complete["Remove Formation transition<br/>(formation complete)"]
+    Complete --> End([ContinueAndRequeue])
+```
+
+**Data Flow:**
+
+| Input | Description |
+|-------|-------------|
+| `rvrs` | Replica conditions (DRBDConfigured, Ready) |
+| `rv.Status.Datamesh.Members` | Datamesh member list (determines which replicas to check) |
+
+| Output | Description |
+|--------|-------------|
 | `rv.Status.DatameshTransitions` | Formation transition removed on success |
 
 ---

@@ -17,11 +17,15 @@ limitations under the License.
 package full
 
 import (
+	"fmt"
 	"math/rand"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -34,110 +38,159 @@ import (
 
 var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label(fw.LabelUpgrade, fw.LabelSlow), func() {
 	DescribeTable("adopts preexisting replicas and completes formation",
-		func(ctx SpecContext, ftt, gmdr byte, expectedReplicas int, wantPrimary bool) {
-			replicas := createPreexistingDRBD(ctx, ftt, gmdr)
+		func(ctx SpecContext, l fw.TestLayout) {
+			replicas := f.SetupLayout(ctx, l).EmulatePreexisting(ctx)
+			expectedReplicas := l.ExpectedReplicas()
 			Expect(replicas).To(HaveLen(expectedReplicas))
-
-			primaryIdx := -1
-			if wantPrimary && len(replicas) > 0 {
-				primaryIdx = rand.Intn(len(replicas))
-				res := f.Drbdsetup(ctx, replicas[primaryIdx].NodeName, "primary", replicas[primaryIdx].DRBDName)
-				Expect(res.ExitCode).To(Equal(0))
-			}
 
 			rvName := f.UniqueName()
 
-			llvs := make([]*fw.TestLLV, len(replicas))
-			for i, r := range replicas {
-				tllv := f.TestLLV()
-				b := tllv.ActualLVName(r.ActualLVName).
-					LVMVolumeGroupName(r.LVGName).
-					Type("Thin").
-					Size(r.Size)
-				if r.ThinPoolName != "" {
-					b = b.ThinPoolName(r.ThinPoolName)
-				}
-				b.Create(ctx)
-				llvs[i] = tllv
-			}
+			var llvs []*fw.TestLLV
+			var drbdrs []*fw.TestDRBDR
+			var primaryDRBDR *fw.TestDRBDR
 
-			drbdrs := make([]*fw.TestDRBDR, len(replicas))
+			// llvByReplicaIdx maps the original replica index to the LLV
+			// (nil for non-diskful replicas).
+			llvByReplicaIdx := make(map[int]*fw.TestLLV)
+
 			for i, r := range replicas {
 				rvrName := v1alpha1.FormatReplicatedVolumeReplicaName(rvName, r.NodeID)
-				b := f.TestDRBDRExact(rvrName).
+
+				var drbdType v1alpha1.DRBDResourceType
+				var tllv *fw.TestLLV
+
+				switch r.Type {
+				case v1alpha1.ReplicaTypeDiskful:
+					drbdType = v1alpha1.DRBDResourceTypeDiskful
+					tllv = f.TestLLV()
+					llvB := tllv.ActualLVName(r.ActualLVName).
+						LVMVolumeGroupName(r.LVGName).
+						Type("Thin").
+						Size(r.Size)
+					if r.ThinPoolName != "" {
+						llvB = llvB.ThinPoolName(r.ThinPoolName)
+					}
+					llvB.Create(ctx)
+					llvs = append(llvs, tllv)
+					llvByReplicaIdx[i] = tllv
+				case v1alpha1.ReplicaTypeTieBreaker, v1alpha1.ReplicaTypeAccess:
+					drbdType = v1alpha1.DRBDResourceTypeDiskless
+				}
+
+				db := f.TestDRBDRExact(rvrName).
 					Node(r.NodeName).
-					Type(v1alpha1.DRBDResourceTypeDiskful).
-					Size(r.Size).
-					LVMLogicalVolumeName(llvs[i].Name()).
+					Type(drbdType).
 					SystemNetworks("Internal").
 					NodeID(r.NodeID).
 					ActualNameOnTheNode(r.DRBDName).
 					Maintenance(v1alpha1.MaintenanceModeNoResourceReconciliation)
-				if wantPrimary && i == primaryIdx {
-					b = b.Role(v1alpha1.DRBDRolePrimary)
+				if drbdType == v1alpha1.DRBDResourceTypeDiskful {
+					db = db.Size(r.Size).LVMLogicalVolumeName(tllv.Name())
 				}
-				b.Create(ctx)
-				drbdrs[i] = b
+				if r.Role == v1alpha1.DRBDRolePrimary {
+					db = db.Role(v1alpha1.DRBDRolePrimary)
+				}
+				db.Create(ctx)
+
+				drbdrs = append(drbdrs, db)
+
+				if r.Role == v1alpha1.DRBDRolePrimary {
+					primaryDRBDR = db
+				}
 			}
 
+			// Clear maintenance on all DRBDRs during cleanup so that the
+			// controller can reconcile them and complete deletion. Without
+			// this, a failed test leaves DRBDRs in maintenance mode which
+			// blocks detach transitions and causes a deletion deadlock.
+			DeferCleanup(func(cleanupCtx SpecContext) {
+				patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"maintenance":""}}`))
+				for _, td := range drbdrs {
+					obj := &v1alpha1.DRBDResource{ObjectMeta: metav1.ObjectMeta{Name: td.Name()}}
+					_ = client.IgnoreNotFound(f.Client.Patch(cleanupCtx, obj, patch))
+				}
+			})
+
 			for _, td := range drbdrs {
-				td.Await(ctx, And(
-					DRBDR.HasAddresses(),
-					DRBDR.DiskState(v1alpha1.DiskStateUpToDate)))
+				td.Await(ctx, DRBDR.HasAddresses())
+			}
+			for _, td := range drbdrs {
+				obj := td.Object()
+				if obj.Spec.Type == v1alpha1.DRBDResourceTypeDiskful {
+					td.Await(ctx, DRBDR.DiskState(v1alpha1.DiskStateUpToDate))
+				}
 			}
 
 			swUpToDate := NewSwitch(DRBDR.DiskState(v1alpha1.DiskStateUpToDate))
 			for _, td := range drbdrs {
-				td.Always(swUpToDate)
+				obj := td.Object()
+				if obj.Spec.Type == v1alpha1.DRBDResourceTypeDiskful {
+					td.Always(swUpToDate)
+				}
 			}
 			var swPrimaryDevice *Switch
-			if wantPrimary {
+			if primaryDRBDR != nil {
 				swPrimaryDevice = NewSwitch(And(DRBDR.HasDevice(), Not(DRBDR.IOSuspended())))
-				drbdrs[primaryIdx].Always(swPrimaryDevice)
+				primaryDRBDR.Always(swPrimaryDevice)
 			}
 
 			swRVRQuorum := NewSwitch(RVR.NeverLoseQuorum())
 			for i, r := range replicas {
 				trvr := f.TestRVRExact(rvName, r.NodeID).
 					Node(r.NodeName).
-					Type(v1alpha1.ReplicaTypeDiskful).
-					LVG(r.LVGName)
-				if r.ThinPoolName != "" {
-					trvr = trvr.ThinPool(r.ThinPoolName)
+					Type(r.Type)
+				if r.Type == v1alpha1.ReplicaTypeDiskful {
+					trvr = trvr.LVG(r.LVGName)
+					if r.ThinPoolName != "" {
+						trvr = trvr.ThinPool(r.ThinPoolName)
+					}
 				}
 				trvr.Create(ctx)
 				trvr.Always(swRVRQuorum)
 
-				// Randomly set ownerRefs to exercise the controller's ability to
-				// adopt pre-existing DRBDRs and LLVs that may or may not already
-				// have the correct ownerRef. The controller must set ownerRef
-				// on any child that is missing it.
 				rvrObj := trvr.Object()
 				if rand.Intn(2) == 0 {
 					drbdrs[i].Update(ctx, func(d *v1alpha1.DRBDResource) {
 						Expect(controllerutil.SetControllerReference(rvrObj, d, f.Scheme)).To(Succeed())
 					})
 				}
-				if rand.Intn(2) == 0 {
-					llvs[i].Update(ctx, func(llv *snc.LVMLogicalVolume) {
+				if tllv := llvByReplicaIdx[i]; tllv != nil && rand.Intn(2) == 0 {
+					tllv.Update(ctx, func(llv *snc.LVMLogicalVolume) {
 						Expect(controllerutil.SetControllerReference(rvrObj, llv, f.Scheme)).To(Succeed())
 					})
 				}
 			}
 
-			trv := f.TestRVExact(rvName).Adopt().FTT(ftt).GMDR(gmdr)
+			fmt.Fprintf(GinkgoWriter, "[adopt] creating RV %s with %d replicas (%d attached)\n",
+				rvName, len(replicas), l.Attached)
+
+			trv := f.TestRVExact(rvName).Adopt().FTT(l.FTT).GMDR(l.GMDR)
+			if l.Attached > 0 {
+				trv = trv.MaxAttachments(byte(l.Attached))
+			}
 			trv.Create(ctx)
+
+			for _, r := range replicas {
+				if r.Role == v1alpha1.DRBDRolePrimary {
+					trv.Attach(ctx, r.NodeName)
+				}
+			}
 
 			trv.Await(ctx, RV.Members(expectedReplicas))
 
 			for _, td := range drbdrs {
-				td.Await(ctx, And(
-					DRBDR.PeersMatchSpec(),
-					DRBDR.RoleMatchesSpec(),
-					DRBDR.LVMMatchesSpec(),
-					DRBDR.QuorumMatchesSpec(),
-				))
+				obj := td.Object()
+				if obj.Spec.Type == v1alpha1.DRBDResourceTypeDiskful {
+					td.Await(ctx, And(
+						DRBDR.PeersMatchSpec(),
+						DRBDR.RoleMatchesSpec(),
+						DRBDR.LVMMatchesSpec(),
+						DRBDR.QuorumMatchesSpec(),
+					))
+				}
 			}
+
+			trv.Await(ctx, RV.TransitionStepActive(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation, "Exit maintenance"))
 
 			for _, td := range drbdrs {
 				td.Update(ctx, func(d *v1alpha1.DRBDResource) {
@@ -166,163 +219,225 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 			Expect(rv.Status.Datamesh.Members).To(HaveLen(expectedReplicas))
 		},
 
-		Entry("FTT=0 GMDR=0 secondary (1 replica)",
-			byte(0), byte(0), 1, false),
-		Entry("FTT=0 GMDR=0 primary (1 replica)",
-			byte(0), byte(0), 1, true),
-
-		Entry("FTT=0 GMDR=1 secondary (2 replicas)",
+		// --- 1D ---
+		Entry("1D",
+			fw.TestLayout{FTT: 0, GMDR: 0}),
+		Entry("1D (1att)",
+			fw.TestLayout{FTT: 0, GMDR: 0, Attached: 1}),
+		Entry("1D+1A (1att)",
 			SpecTimeout(2*time.Minute), require.MinNodes(2),
-			byte(0), byte(1), 2, false),
-		Entry("FTT=0 GMDR=1 primary (2 replicas)",
+			fw.TestLayout{FTT: 0, GMDR: 0, Access: 1, Attached: 1}),
+		Entry("1D+1A (2att)",
 			SpecTimeout(2*time.Minute), require.MinNodes(2),
-			byte(0), byte(1), 2, true),
+			fw.TestLayout{FTT: 0, GMDR: 0, Access: 1, Attached: 2}),
+		Entry("1D+2A (2att)",
+			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			fw.TestLayout{FTT: 0, GMDR: 0, Access: 2, Attached: 2}),
 
-		Entry("FTT=1 GMDR=0 secondary (2 replicas)",
+		// --- 2D ---
+		Entry("2D",
+			SpecTimeout(2*time.Minute), require.MinNodes(2),
+			fw.TestLayout{FTT: 0, GMDR: 1}),
+		Entry("2D (1att)",
+			SpecTimeout(2*time.Minute), require.MinNodes(2),
+			fw.TestLayout{FTT: 0, GMDR: 1, Attached: 1}),
+		Entry("2D (2att)",
+			SpecTimeout(2*time.Minute), require.MinNodes(2),
+			fw.TestLayout{FTT: 0, GMDR: 1, Attached: 2}),
+		Entry("2D+1A (1att)",
+			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			fw.TestLayout{FTT: 0, GMDR: 1, Access: 1, Attached: 1}),
+		Entry("2D+1A (2att)",
+			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			fw.TestLayout{FTT: 0, GMDR: 1, Access: 1, Attached: 2}),
+		Entry("2D+2A (2att)",
+			SpecTimeout(2*time.Minute), require.MinNodes(4),
+			fw.TestLayout{FTT: 0, GMDR: 1, Access: 2, Attached: 2}),
+
+		// --- 2D+1TB ---
+		Entry("2D+1TB",
 			Label(fw.LabelSmoke),
-			SpecTimeout(2*time.Minute), require.MinNodes(2),
-			byte(1), byte(0), 2, false),
-		Entry("FTT=1 GMDR=0 primary (2 replicas)",
-			Label(fw.LabelSmoke),
-			SpecTimeout(2*time.Minute), require.MinNodes(2),
-			byte(1), byte(0), 2, true),
+			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			fw.TestLayout{FTT: 1, GMDR: 0}),
+		Entry("2D+1TB (1att)",
+			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			fw.TestLayout{FTT: 1, GMDR: 0, Attached: 1}),
+		Entry("2D+1TB (2att)",
+			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			fw.TestLayout{FTT: 1, GMDR: 0, Attached: 2}),
+		Entry("2D+1TB+1A (1att)",
+			SpecTimeout(2*time.Minute), require.MinNodes(4),
+			fw.TestLayout{FTT: 1, GMDR: 0, Access: 1, Attached: 1}),
+		Entry("2D+1TB+1A (2att)",
+			SpecTimeout(2*time.Minute), require.MinNodes(4),
+			fw.TestLayout{FTT: 1, GMDR: 0, Access: 1, Attached: 2}),
+		Entry("2D+1TB+2A (2att)",
+			SpecTimeout(2*time.Minute), require.MinNodes(5),
+			fw.TestLayout{FTT: 1, GMDR: 0, Access: 2, Attached: 2}),
 
-		Entry("FTT=1 GMDR=1 secondary (3 replicas)",
+		// --- 3D ---
+		Entry("3D",
 			SpecTimeout(3*time.Minute), require.MinNodes(3),
-			byte(1), byte(1), 3, false),
-		Entry("FTT=1 GMDR=1 primary (3 replicas)",
+			fw.TestLayout{FTT: 1, GMDR: 1}),
+		Entry("3D (1att)",
 			SpecTimeout(3*time.Minute), require.MinNodes(3),
-			byte(1), byte(1), 3, true),
+			fw.TestLayout{FTT: 1, GMDR: 1, Attached: 1}),
+		Entry("3D (2att)",
+			SpecTimeout(3*time.Minute), require.MinNodes(3),
+			fw.TestLayout{FTT: 1, GMDR: 1, Attached: 2}),
+		Entry("3D+1A (1att)",
+			SpecTimeout(3*time.Minute), require.MinNodes(4),
+			fw.TestLayout{FTT: 1, GMDR: 1, Access: 1, Attached: 1}),
+		Entry("3D+1A (2att)",
+			SpecTimeout(3*time.Minute), require.MinNodes(4),
+			fw.TestLayout{FTT: 1, GMDR: 1, Access: 1, Attached: 2}),
+		Entry("3D+2A (2att)",
+			SpecTimeout(3*time.Minute), require.MinNodes(5),
+			fw.TestLayout{FTT: 1, GMDR: 1, Access: 2, Attached: 2}),
 	)
 
 	DescribeTable("adopts preexisting replicas in random order and completes formation",
-		func(ctx SpecContext, ftt, gmdr byte, expectedReplicas int, wantPrimary bool) {
-			replicas := createPreexistingDRBD(ctx, ftt, gmdr)
+		func(ctx SpecContext, l fw.TestLayout) {
+			replicas := f.SetupLayout(ctx, l).EmulatePreexisting(ctx)
+			expectedReplicas := l.ExpectedReplicas()
 			Expect(replicas).To(HaveLen(expectedReplicas))
-
-			primaryIdx := -1
-			if wantPrimary && len(replicas) > 0 {
-				primaryIdx = rand.Intn(len(replicas))
-				res := f.Drbdsetup(ctx, replicas[primaryIdx].NodeName, "primary", replicas[primaryIdx].DRBDName)
-				Expect(res.ExitCode).To(Equal(0))
-			}
 
 			rvName := f.UniqueName()
 
 			// Pre-build all objects for all replicas (no Create yet).
-			llvs := make([]*fw.TestLLV, len(replicas))
-			drbdrs := make([]*fw.TestDRBDR, len(replicas))
-			trvrs := make([]*fw.TestRVR, len(replicas))
+			// Only Diskful and TieBreaker replicas participate in this test.
+			type replicaBundle struct {
+				r     fw.PreexistingDRBDReplica
+				llv   *fw.TestLLV
+				drbdr *fw.TestDRBDR
+				rvr   *fw.TestRVR
+			}
+			var bundles []replicaBundle
 
-			for i, r := range replicas {
-				tllv := f.TestLLV()
-				llvB := tllv.ActualLVName(r.ActualLVName).
-					LVMVolumeGroupName(r.LVGName).
-					Type("Thin").
-					Size(r.Size)
-				if r.ThinPoolName != "" {
-					llvB = llvB.ThinPoolName(r.ThinPoolName)
+			for _, r := range replicas {
+				if r.Type != v1alpha1.ReplicaTypeDiskful && r.Type != v1alpha1.ReplicaTypeTieBreaker {
+					continue
 				}
-				_ = llvB // spec configured, Create deferred
-				llvs[i] = tllv
 
-				rvrName := v1alpha1.FormatReplicatedVolumeReplicaName(rvName, r.NodeID)
-				drbdrB := f.TestDRBDRExact(rvrName).
+				rvrNameFull := v1alpha1.FormatReplicatedVolumeReplicaName(rvName, r.NodeID)
+				var drbdType v1alpha1.DRBDResourceType
+				var tllv *fw.TestLLV
+
+				switch r.Type {
+				case v1alpha1.ReplicaTypeDiskful:
+					drbdType = v1alpha1.DRBDResourceTypeDiskful
+					tllv = f.TestLLV()
+					llvB := tllv.ActualLVName(r.ActualLVName).
+						LVMVolumeGroupName(r.LVGName).
+						Type("Thin").
+						Size(r.Size)
+					if r.ThinPoolName != "" {
+						llvB = llvB.ThinPoolName(r.ThinPoolName)
+					}
+					_ = llvB
+				case v1alpha1.ReplicaTypeTieBreaker:
+					drbdType = v1alpha1.DRBDResourceTypeDiskless
+				}
+
+				drbdrB := f.TestDRBDRExact(rvrNameFull).
 					Node(r.NodeName).
-					Type(v1alpha1.DRBDResourceTypeDiskful).
-					Size(r.Size).
-					LVMLogicalVolumeName(tllv.Name()).
+					Type(drbdType).
 					SystemNetworks("Internal").
 					NodeID(r.NodeID).
 					ActualNameOnTheNode(r.DRBDName).
 					Maintenance(v1alpha1.MaintenanceModeNoResourceReconciliation)
-				if wantPrimary && i == primaryIdx {
+				if drbdType == v1alpha1.DRBDResourceTypeDiskful {
+					drbdrB = drbdrB.Size(r.Size).LVMLogicalVolumeName(tllv.Name())
+				}
+				if r.Role == v1alpha1.DRBDRolePrimary {
 					drbdrB = drbdrB.Role(v1alpha1.DRBDRolePrimary)
 				}
-				_ = drbdrB // spec configured, Create deferred
-				drbdrs[i] = drbdrB
+				_ = drbdrB
 
 				trvr := f.TestRVRExact(rvName, r.NodeID).
 					Node(r.NodeName).
-					Type(v1alpha1.ReplicaTypeDiskful).
-					LVG(r.LVGName)
-				if r.ThinPoolName != "" {
-					trvr = trvr.ThinPool(r.ThinPoolName)
+					Type(r.Type)
+				if r.Type == v1alpha1.ReplicaTypeDiskful {
+					trvr = trvr.LVG(r.LVGName)
+					if r.ThinPoolName != "" {
+						trvr = trvr.ThinPool(r.ThinPoolName)
+					}
 				}
-				trvrs[i] = trvr
+
+				bundles = append(bundles, replicaBundle{r: r, llv: tllv, drbdr: drbdrB, rvr: trvr})
 			}
 
-			// Create switches before shuffle (captured by closures).
 			swUpToDate := NewSwitch(DRBDR.DiskState(v1alpha1.DiskStateUpToDate))
 			var swPrimaryDevice *Switch
-			if wantPrimary {
+			if l.Attached > 0 {
 				swPrimaryDevice = NewSwitch(And(DRBDR.HasDevice(), Not(DRBDR.IOSuspended())))
 			}
 			swRVRQuorum := NewSwitch(RVR.NeverLoseQuorum())
 
-			// Track creation state per replica for contextual ownerRef and Await logic.
 			type replicaState struct{ llv, drbdr, rvr, upToDateDone bool }
-			st := make([]replicaState, len(replicas))
+			st := make([]replicaState, len(bundles))
 
-			// Helper: await DiskState UpToDate and register Always switches for replica i.
 			awaitUpToDate := func(i int) {
-				drbdrs[i].Await(ctx, DRBDR.DiskState(v1alpha1.DiskStateUpToDate))
-				drbdrs[i].Always(swUpToDate)
-				if wantPrimary && i == primaryIdx {
-					drbdrs[i].Always(swPrimaryDevice)
+				if bundles[i].r.Type != v1alpha1.ReplicaTypeDiskful {
+					st[i].upToDateDone = true
+					return
+				}
+				bundles[i].drbdr.Await(ctx, DRBDR.DiskState(v1alpha1.DiskStateUpToDate))
+				bundles[i].drbdr.Always(swUpToDate)
+				if bundles[i].r.Role == v1alpha1.DRBDRolePrimary {
+					bundles[i].drbdr.Always(swPrimaryDevice)
 				}
 				st[i].upToDateDone = true
 			}
 
-			// Build a flat action list: 3 actions per replica, shuffled globally.
-			actions := make([]func(), 0, 3*len(replicas))
-			for i := range replicas {
-				// LLV action.
-				actions = append(actions, func() {
-					llvs[i].Create(ctx)
-					st[i].llv = true
-					if st[i].rvr && rand.Intn(2) == 0 {
-						rvrObj := trvrs[i].Object()
-						llvs[i].Update(ctx, func(llv *snc.LVMLogicalVolume) {
-							Expect(controllerutil.SetControllerReference(rvrObj, llv, f.Scheme)).To(Succeed())
-						})
-					}
-					// LLV created after DRBDR: now DRBDR can reach UpToDate.
-					if st[i].drbdr && !st[i].upToDateDone {
-						awaitUpToDate(i)
-					}
-				})
+			actions := make([]func(), 0, 3*len(bundles))
+			for i := range bundles {
+				if bundles[i].llv != nil {
+					actions = append(actions, func() {
+						bundles[i].llv.Create(ctx)
+						st[i].llv = true
+						if st[i].rvr && rand.Intn(2) == 0 {
+							rvrObj := bundles[i].rvr.Object()
+							bundles[i].llv.Update(ctx, func(llv *snc.LVMLogicalVolume) {
+								Expect(controllerutil.SetControllerReference(rvrObj, llv, f.Scheme)).To(Succeed())
+							})
+						}
+						if st[i].drbdr && !st[i].upToDateDone {
+							awaitUpToDate(i)
+						}
+					})
+				}
 
-				// DRBDR action.
 				actions = append(actions, func() {
-					drbdrs[i].Create(ctx)
-					drbdrs[i].Await(ctx, DRBDR.HasAddresses())
+					bundles[i].drbdr.Create(ctx)
+					bundles[i].drbdr.Await(ctx, DRBDR.HasAddresses())
 					st[i].drbdr = true
 					if st[i].rvr && rand.Intn(2) == 0 {
-						rvrObj := trvrs[i].Object()
-						drbdrs[i].Update(ctx, func(d *v1alpha1.DRBDResource) {
+						rvrObj := bundles[i].rvr.Object()
+						bundles[i].drbdr.Update(ctx, func(d *v1alpha1.DRBDResource) {
 							Expect(controllerutil.SetControllerReference(rvrObj, d, f.Scheme)).To(Succeed())
 						})
 					}
-					// DRBDR created after LLV: can reach UpToDate immediately.
-					if st[i].llv && !st[i].upToDateDone {
+					if bundles[i].llv != nil && st[i].llv && !st[i].upToDateDone {
 						awaitUpToDate(i)
+					}
+					if bundles[i].llv == nil && !st[i].upToDateDone {
+						st[i].upToDateDone = true
 					}
 				})
 
-				// RVR action.
 				actions = append(actions, func() {
-					trvrs[i].Create(ctx)
-					trvrs[i].Always(swRVRQuorum)
+					bundles[i].rvr.Create(ctx)
+					bundles[i].rvr.Always(swRVRQuorum)
 					st[i].rvr = true
-					rvrObj := trvrs[i].Object()
+					rvrObj := bundles[i].rvr.Object()
 					if st[i].drbdr && rand.Intn(2) == 0 {
-						drbdrs[i].Update(ctx, func(d *v1alpha1.DRBDResource) {
+						bundles[i].drbdr.Update(ctx, func(d *v1alpha1.DRBDResource) {
 							Expect(controllerutil.SetControllerReference(rvrObj, d, f.Scheme)).To(Succeed())
 						})
 					}
-					if st[i].llv && rand.Intn(2) == 0 {
-						llvs[i].Update(ctx, func(llv *snc.LVMLogicalVolume) {
+					if bundles[i].llv != nil && st[i].llv && rand.Intn(2) == 0 {
+						bundles[i].llv.Update(ctx, func(llv *snc.LVMLogicalVolume) {
 							Expect(controllerutil.SetControllerReference(rvrObj, llv, f.Scheme)).To(Succeed())
 						})
 					}
@@ -334,29 +449,44 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 				action()
 			}
 
-			// Finish any replicas where both DRBDR and LLV exist but UpToDate was not yet awaited.
-			for i := range replicas {
+			// Clear maintenance on all DRBDRs during cleanup (see first table comment).
+			DeferCleanup(func(cleanupCtx SpecContext) {
+				patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"maintenance":""}}`))
+				for i, b := range bundles {
+					if !st[i].drbdr {
+						continue
+					}
+					obj := &v1alpha1.DRBDResource{ObjectMeta: metav1.ObjectMeta{Name: b.drbdr.Name()}}
+					_ = client.IgnoreNotFound(f.Client.Patch(cleanupCtx, obj, patch))
+				}
+			})
+
+			for i := range bundles {
 				if !st[i].upToDateDone {
 					awaitUpToDate(i)
 				}
 			}
 
-			trv := f.TestRVExact(rvName).Adopt().FTT(ftt).GMDR(gmdr)
+			trv := f.TestRVExact(rvName).Adopt().FTT(l.FTT).GMDR(l.GMDR)
 			trv.Create(ctx)
 
 			trv.Await(ctx, RV.Members(expectedReplicas))
 
-			for _, td := range drbdrs {
-				td.Await(ctx, And(
-					DRBDR.PeersMatchSpec(),
-					DRBDR.RoleMatchesSpec(),
-					DRBDR.LVMMatchesSpec(),
-					DRBDR.QuorumMatchesSpec(),
-				))
+			for _, b := range bundles {
+				if b.r.Type == v1alpha1.ReplicaTypeDiskful {
+					b.drbdr.Await(ctx, And(
+						DRBDR.PeersMatchSpec(),
+						DRBDR.RoleMatchesSpec(),
+						DRBDR.LVMMatchesSpec(),
+						DRBDR.QuorumMatchesSpec(),
+					))
+				}
 			}
 
-			for _, td := range drbdrs {
-				td.Update(ctx, func(d *v1alpha1.DRBDResource) {
+			trv.Await(ctx, RV.TransitionStepActive(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation, "Exit maintenance"))
+
+			for _, b := range bundles {
+				b.drbdr.Update(ctx, func(d *v1alpha1.DRBDResource) {
 					d.Spec.Maintenance = ""
 				})
 			}
@@ -382,30 +512,30 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 			Expect(rv.Status.Datamesh.Members).To(HaveLen(expectedReplicas))
 		},
 
-		Entry("FTT=0 GMDR=0 secondary (1 replica)",
-			byte(0), byte(0), 1, false),
-		Entry("FTT=0 GMDR=0 primary (1 replica)",
-			byte(0), byte(0), 1, true),
+		Entry("FTT=0 GMDR=0 (1D)",
+			fw.TestLayout{FTT: 0, GMDR: 0}),
+		Entry("FTT=0 GMDR=0 (1D, 1att)",
+			fw.TestLayout{FTT: 0, GMDR: 0, Attached: 1}),
 
-		Entry("FTT=0 GMDR=1 secondary (2 replicas)",
+		Entry("FTT=0 GMDR=1 (2D)",
 			SpecTimeout(2*time.Minute), require.MinNodes(2),
-			byte(0), byte(1), 2, false),
-		Entry("FTT=0 GMDR=1 primary (2 replicas)",
+			fw.TestLayout{FTT: 0, GMDR: 1}),
+		Entry("FTT=0 GMDR=1 (2D, 1att)",
 			SpecTimeout(2*time.Minute), require.MinNodes(2),
-			byte(0), byte(1), 2, true),
+			fw.TestLayout{FTT: 0, GMDR: 1, Attached: 1}),
 
-		Entry("FTT=1 GMDR=0 secondary (2 replicas)",
-			SpecTimeout(2*time.Minute), require.MinNodes(2),
-			byte(1), byte(0), 2, false),
-		Entry("FTT=1 GMDR=0 primary (2 replicas)",
-			SpecTimeout(2*time.Minute), require.MinNodes(2),
-			byte(1), byte(0), 2, true),
+		Entry("FTT=1 GMDR=0 (2D+1TB)",
+			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			fw.TestLayout{FTT: 1, GMDR: 0}),
+		Entry("FTT=1 GMDR=0 (2D+1TB, 1att)",
+			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			fw.TestLayout{FTT: 1, GMDR: 0, Attached: 1}),
 
-		Entry("FTT=1 GMDR=1 secondary (3 replicas)",
+		Entry("FTT=1 GMDR=1 (3D)",
 			SpecTimeout(3*time.Minute), require.MinNodes(3),
-			byte(1), byte(1), 3, false),
-		Entry("FTT=1 GMDR=1 primary (3 replicas)",
+			fw.TestLayout{FTT: 1, GMDR: 1}),
+		Entry("FTT=1 GMDR=1 (3D, 1att)",
 			SpecTimeout(3*time.Minute), require.MinNodes(3),
-			byte(1), byte(1), 3, true),
+			fw.TestLayout{FTT: 1, GMDR: 1, Attached: 1}),
 	)
 })
