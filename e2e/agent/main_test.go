@@ -65,6 +65,26 @@ func TestDRBDResource(t *testing.T) {
 		suite.SetupDeleteDiskful(e, cl, drbdr, llv)
 	})
 
+	e.Run("LLVFinalizer", func(e envtesting.E) {
+		drbdr, llv := suite.SetupDisklessToDiskfulReplica(e, cl, cluster, "lf", 0)
+
+		e.Run("DownUp", func(e envtesting.E) {
+			suite.SetupLLVFinalizerDownUp(e, cl, drbdr, llv.Name)
+		})
+
+		e.Run("DownUpDiskless", func(e envtesting.E) {
+			suite.SetupLLVFinalizerDownUpDiskless(e, cl, drbdr, llv.Name)
+		})
+
+		e.Run("DownUpDownUpDiskless", func(e envtesting.E) {
+			suite.SetupLLVFinalizerDownUpDownUpDiskless(e, cl, drbdr, llv.Name)
+		})
+
+		e.Run("DownDisklessThenUp", func(e envtesting.E) {
+			suite.SetupLLVFinalizerDownDisklessThenUp(e, cl, drbdr, llv.Name)
+		})
+	})
+
 	e.Run("OrphanCleanup", func(e envtesting.E) {
 		suite.SetupOrphanCleanup(e, cl, cluster, "oc", 0)
 	})
