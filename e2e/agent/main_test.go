@@ -138,6 +138,12 @@ func TestDRBDResource(t *testing.T) {
 			drbdrs = suite.SetupPeering(e, cl, drbdrs)
 			suite.SetupInitialSync(e, cl, drbdrs)
 
+			if tc.n == 4 {
+				e.Run("DRBDSetupSchema", func(e envtesting.E) {
+					suite.DiscoverDRBDSetupSchema(e, nodeExec, cluster.Nodes[0].Name, "sdsrv-"+drbdrs[0].Name, tc.n-1)
+				})
+			}
+
 			e.Run("PromotePrimary", func(e envtesting.E) {
 				suite.SetupPromotePrimary(e, cl, drbdrs[0])
 

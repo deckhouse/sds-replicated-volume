@@ -135,6 +135,14 @@ TestDRBDResource
 └── R4 — four peered, synced replicas (parallel with R2, R3)
     │   Same as R2 but with 4 nodes. Maximum replica count test.
     │
+    ├── DRBDSetupSchema — strict schema validation of drbdsetup JSON output
+    │   Runs drbdsetup status --json and drbdsetup show --json on node 0.
+    │   Unmarshals both outputs into the production drbdutils Go structs
+    │   with DisallowUnknownFields (rejects unknown JSON fields). Validates
+    │   key fields are populated: resource name, connections (3 for 4-node
+    │   full mesh), paths with non-empty host addresses. Read-only; does
+    │   not modify state.
+    │
     └── PromotePrimary
         │
         └── DemoteToSecondary
