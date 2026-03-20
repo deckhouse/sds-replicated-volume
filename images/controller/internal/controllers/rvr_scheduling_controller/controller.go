@@ -69,7 +69,7 @@ func BuildController(mgr manager.Manager, schedulerExtenderURL string) error {
 			builder.WithPredicates(RSPPredicates()...),
 		).
 		WithOptions(controller.Options{
-			MaxConcurrentReconciles: 10,
+			MaxConcurrentReconciles: controlleroptions.MaxConcurrentReconciles,
 			RateLimiter:             controlleroptions.DefaultRateLimiter(),
 		}).
 		Complete(r)

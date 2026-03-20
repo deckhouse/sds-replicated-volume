@@ -24,6 +24,24 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+const (
+	// MaxConcurrentReconciles is the number of parallel reconcile goroutines
+	// per controller. Applies to both rv-controller and rvr-scheduling-controller.
+	// Higher values increase throughput for normal operations (attach, detach,
+	// replica moves) but also increase API server load.
+	MaxConcurrentReconciles = 20
+
+	// MaxConcurrentFormations limits how many RV formations may run in parallel
+	// inside rv-controller. Formations are I/O-heavy (create RVRs, DRBD sync)
+	// and compete for disk bandwidth on each node. Without a limit, bulk RV
+	// creation (e.g., 500+ RVs) causes a conflict storm: every formation times
+	// out and restarts, amplifying API server and disk load.
+	//
+	// The value is intentionally low relative to MaxConcurrentReconciles so that
+	// normal operations (attach, detach, replica moves) are not starved.
+	MaxConcurrentFormations = 4
+)
+
 // DefaultRateLimiter returns the shared rate limiter used by all controllers in this binary.
 //
 // It combines two limiters (max of both delays is used):
