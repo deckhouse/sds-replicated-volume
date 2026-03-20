@@ -335,6 +335,14 @@ type DRBDResourceActiveConfiguration struct {
 	// +kubebuilder:validation:MaxLength=128
 	// +optional
 	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName,omitempty"`
+
+	// LLVFinalizersToRelease lists LVMLogicalVolume names whose agent finalizer
+	// must be released. Populated before adding a finalizer to an LLV, cleared
+	// after the finalizer is successfully released. This ensures the agent never
+	// loses track of which LLVs it needs to clean up.
+	// +listType=set
+	// +optional
+	LLVFinalizersToRelease []string `json:"llvFinalizersToRelease,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

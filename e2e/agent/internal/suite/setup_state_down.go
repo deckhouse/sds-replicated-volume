@@ -27,7 +27,7 @@ import (
 
 // SetupStateDown patches the DRBDResource to state=Down, waits for the agent
 // to tear down DRBD and remove its finalizer from the DRBDResource.
-// The LLV finalizer is intentionally kept — the resource may come back Up.
+// The LLV finalizer is also released; it is re-acquired when state=Up.
 func SetupStateDown(
 	e envtesting.E,
 	cl client.WithWatch,

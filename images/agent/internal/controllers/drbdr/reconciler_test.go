@@ -46,6 +46,7 @@ const (
 	testDRBDRName      = "test-drbdr"
 	testDRBDResName    = "sdsrv-" + testDRBDRName
 	testCustomDRBDName = "custom-drbd-name"
+	testLLVName        = "test-llv"
 )
 
 type reconcileTestCase struct {
@@ -197,6 +198,32 @@ func TestReconciler_Reconcile(t *testing.T) {
 				// RemoveDeviceSymlinkAction runs (filesystem only)
 				// Refresh after symlink action
 				statusCmd(drbdutils.StatusResult{}),
+			},
+		},
+		{
+			name:  "state down diskful - releases LLV finalizer",
+			drbdr: drbdrDiskfulDown(testNodeName, testLLVName, testLLVName),
+			objs:  []client.Object{testLLVWithFinalizer(testLLVName)},
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
+				statusCmd(drbdutils.StatusResult{}),
+				statusCmd(drbdutils.StatusResult{}),
+			},
+			postCheck: func(t *testing.T, cl client.Client) {
+				expectLLVHasNoAgentFinalizer(t, cl, testLLVName)
+			},
+		},
+		{
+			name:  "state down diskful - empty pending list means nothing to release",
+			drbdr: drbdrDiskfulDown(testNodeName, testLLVName, ""),
+			objs:  []client.Object{testLLVWithFinalizer(testLLVName)},
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
+				statusCmd(drbdutils.StatusResult{}),
+				statusCmd(drbdutils.StatusResult{}),
+			},
+			postCheck: func(t *testing.T, cl client.Client) {
+				// No LLV in the pending-release list → nothing to release.
+				// Recovery would catch this if DRBD had the disk attached.
+				expectLLVHasAgentFinalizer(t, cl, testLLVName)
 			},
 		},
 
@@ -676,5 +703,63 @@ func expectDeviceSymlink(t *testing.T, k8sName string, expectedMinor uint) {
 	wantTarget := fmt.Sprintf("/dev/drbd%d", expectedMinor)
 	if target != wantTarget {
 		t.Errorf("symlink %s -> %s, want -> %s", symlinkPath, target, wantTarget)
+	}
+}
+
+func drbdrDiskfulDown(nodeName, specLLV, statusLLV string) *v1alpha1.DRBDResource {
+	dr := baseDRBDR()
+	dr.Spec.NodeName = nodeName
+	dr.Spec.State = v1alpha1.DRBDResourceStateDown
+	dr.Spec.Type = v1alpha1.DRBDResourceTypeDiskful
+	dr.Spec.LVMLogicalVolumeName = specLLV
+	if statusLLV != "" {
+		dr.Status.ActiveConfiguration = &v1alpha1.DRBDResourceActiveConfiguration{
+			LVMLogicalVolumeName:   statusLLV,
+			LLVFinalizersToRelease: []string{statusLLV},
+		}
+	}
+	return dr
+}
+
+func testLLVWithFinalizer(name string) *snc.LVMLogicalVolume {
+	return &snc.LVMLogicalVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       name,
+			Finalizers: []string{v1alpha1.AgentFinalizer},
+		},
+		Spec: snc.LVMLogicalVolumeSpec{
+			ActualLVNameOnTheNode: name,
+			Type:                  "Thick",
+			Size:                  "100Mi",
+			LVMVolumeGroupName:    "test-lvg",
+		},
+	}
+}
+
+func expectLLVHasAgentFinalizer(t *testing.T, cl client.Client, llvName string) {
+	t.Helper()
+	llv := &snc.LVMLogicalVolume{}
+	if err := cl.Get(t.Context(), client.ObjectKey{Name: llvName}, llv); err != nil {
+		t.Fatalf("getting LLV %q: %v", llvName, err)
+	}
+	for _, f := range llv.Finalizers {
+		if f == v1alpha1.AgentFinalizer {
+			return
+		}
+	}
+	t.Errorf("LLV %q does not have agent finalizer %q", llvName, v1alpha1.AgentFinalizer)
+}
+
+func expectLLVHasNoAgentFinalizer(t *testing.T, cl client.Client, llvName string) {
+	t.Helper()
+	llv := &snc.LVMLogicalVolume{}
+	if err := cl.Get(t.Context(), client.ObjectKey{Name: llvName}, llv); err != nil {
+		t.Fatalf("getting LLV %q: %v", llvName, err)
+	}
+	for _, f := range llv.Finalizers {
+		if f == v1alpha1.AgentFinalizer {
+			t.Errorf("LLV %q still has agent finalizer %q", llvName, v1alpha1.AgentFinalizer)
+			return
+		}
 	}
 }

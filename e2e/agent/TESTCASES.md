@@ -20,8 +20,8 @@ TestDRBDResource
 │   ├── StateDown
 │   │   Patches spec.state=Down. Waits for agent to tear down DRBD and
 │   │   remove its own finalizer from the DRBDResource. The LLV finalizer
-│   │   is intentionally kept (resource may come back Up). Cleanup reverts
-│   │   to state=Up; agent brings DRBD back up and re-adds its finalizer.
+│   │   is also released. Cleanup reverts to state=Up; agent brings DRBD
+│   │   back up and re-adds both finalizers.
 │   │
 │   └── DiskfulToDiskless
 │       Patches spec.type from Diskful to Diskless. Waits for
@@ -42,6 +42,26 @@ TestDRBDResource
 │       from the LLV. Catches the bug where the agent fails to release the
 │       LLV finalizer on the deletion path (intendedLLVName == attachedLLVName
 │       because spec doesn't change on delete).
+│
+├── LLVFinalizer — LLV finalizer behavior across state/spec transitions
+│   │   Creates a diskful DRBDResource with an LLV (same setup as R1).
+│   │   Exercises sequences of state and spec changes, asserting the
+│   │   agent releases the LLV finalizer on Down and re-acquires it on Up.
+│   │
+│   ├── DownUp
+│   │   Down → Up. Asserts finalizer absent after Down, present after Up.
+│   │
+│   ├── DownUpDiskless
+│   │   Down → Up+Diskless (single combined patch). Asserts finalizer
+│   │   absent after Down, stays absent after Up+Diskless.
+│   │
+│   ├── DownUpDownUpDiskless
+│   │   Down → Up → Down → Up+Diskless. Multiple cycles, asserts
+│   │   correct finalizer state at each step.
+│   │
+│   └── DownDisklessThenUp
+│       Down → DiskfulToDiskless (while Down) → Up. Asserts finalizer
+│       stays absent throughout when spec is cleared while Down.
 │
 ├── OrphanCleanup — orphan DRBD resource cleanup after force-delete
 │       Creates a diskless DRBDResource, waits for Configured=True.
@@ -169,8 +189,8 @@ Every subtest's cleanup exercises a teardown path:
   agent resumes reconciliation.
 
 - **StateDown cleanup**: reverts state back to Up. Verifies the agent
-  can bring a downed resource fully back up (re-add finalizer, re-create
-  DRBD resource, re-attach disk).
+  can bring a downed resource fully back up (re-add both DRBDR and LLV
+  finalizers, re-create DRBD resource, re-attach disk).
 
 - **RemovePeer cleanup**: restores the peer list. Verifies the agent
   can re-add a previously forgotten peer.
