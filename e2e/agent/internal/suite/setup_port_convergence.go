@@ -30,7 +30,8 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/kubetesting"
 )
 
-func newDRBDResourceDiskful(name, nodeName string, nodeID uint8, size resource.Quantity) *v1alpha1.DRBDResource {
+func newDRBDResourceDiskful(name, nodeName string, nodeID uint8, llvSize resource.Quantity) *v1alpha1.DRBDResource {
+	usable := drbdUsableSize(llvSize)
 	return &v1alpha1.DRBDResource{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -43,7 +44,7 @@ func newDRBDResourceDiskful(name, nodeName string, nodeID uint8, size resource.Q
 			Role:                 v1alpha1.DRBDRoleSecondary,
 			Type:                 v1alpha1.DRBDResourceTypeDiskful,
 			LVMLogicalVolumeName: name,
-			Size:                 &size,
+			Size:                 &usable,
 		},
 	}
 }
