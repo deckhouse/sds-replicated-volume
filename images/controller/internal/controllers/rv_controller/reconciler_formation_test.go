@@ -1091,7 +1091,7 @@ var _ = Describe("Formation: BootstrapData", func() {
 	})
 
 	// formationStartedAt is a fixed time used as the formation StartedAt in bootstrap-data tests.
-	// Must be recent enough that the formation timeout (1 min base) has NOT passed.
+	// Must be recent enough that the formation timeout (defaultFormationRestartTimeout base) has NOT passed.
 	// DRBDResourceOperation objects in these tests must have CreationTimestamp after this time
 	// to not be considered stale by the reconciler.
 	formationStartedAt := metav1.NewTime(time.Now().Add(-5 * time.Second))

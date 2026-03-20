@@ -736,16 +736,21 @@ func (r *Reconciler) reconcileFormationStepBootstrapData(
 		}
 	}
 
-	// Timeout: 1 min base. For multi-replica thick provisioning (force-resync) add volume
-	// size / 100 Mbit/s (≈12.5 MB/s) to account for full data synchronization. Single
-	// replica and thin provisioning (clear-bitmap) skip full resync, so no size-based
-	// addition is needed.
+	// Data bootstrap timeout uses defaultFormationRestartTimeout as the base so that
+	// the total allowed time since formation start is at least as long as for earlier
+	// steps. Without this, a formation that spent most of its time in preconfigure
+	// would hit the bootstrap timeout immediately (it is checked against formation
+	// start, not step start).
+	//
+	// For multi-replica thick provisioning (force-resync) we add volume size / 100 Mbit/s
+	// (≈12.5 MB/s) to account for full data synchronization. Single replica and thin
+	// provisioning (clear-bitmap) skip full resync, so no size-based addition is needed.
 	//
 	// We expect sds-replicated-volume to run on 10 Gbit/s networks (or at least 1 Gbit/s).
 	// In the worst case, when many volumes are being created simultaneously, each volume
 	// should still get at least 100 Mbit/s of bandwidth. If even that is not enough,
 	// something has gone completely wrong and there is no point in waiting further.
-	dataBootstrapTimeout := 1 * time.Minute
+	dataBootstrapTimeout := defaultFormationRestartTimeout
 	if !singleReplica && rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM {
 		const worstCaseBytesPerSec = 100 * 1000 * 1000 / 8 // 100 Mbit/s in bytes
 		sizeBytes := rv.Status.Datamesh.Size.Value()
@@ -763,7 +768,7 @@ func (r *Reconciler) reconcileFormationStepBootstrapData(
 	}
 
 	// Verify the DRBDResourceOperation has not failed.
-	// If it failed — restart formation with a 30-second timeout.
+	// If it failed — restart formation after defaultFormationRestartTimeout.
 	if drbdrOp.Status.Phase == v1alpha1.DRBDOperationPhaseFailed {
 		rf.Log().Error(fmt.Errorf("DRBDResourceOperation %s failed: %s", drbdrOpName, drbdrOp.Status.Message), "data bootstrap operation failed, restarting formation")
 
