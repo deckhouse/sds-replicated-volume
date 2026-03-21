@@ -1,0 +1,20 @@
+{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if (.Values.global.enabledModules | has "operator-prometheus-crd") }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: controller-metrics
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list $ (dict "app" "controller")) | nindent 2 }}
+spec:
+  clusterIP: None
+  selector:
+    app: controller
+  ports:
+  - name: metrics
+    port: 4272
+    targetPort: 4272
+    protocol: TCP
+{{- end }}
+{{- end }}
