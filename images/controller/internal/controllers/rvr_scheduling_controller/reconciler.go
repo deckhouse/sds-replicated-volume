@@ -161,11 +161,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	unscheduled := sctx.All.Difference(sctx.Scheduled).Difference(sctx.Deleting)
 
 	// Phase 2: Schedule unscheduled Diskful RVRs (per-RVR pipeline).
-	//
-	// Each iteration checks ShouldReturn to avoid scheduling more replicas
-	// while the informer cache is stale. This reduces (but does not eliminate)
-	// the chance of placing two replicas on the same node; the ultimate
-	// uniqueness guarantee is enforced by datamesh.
 	unscheduledDiskful := unscheduled.Intersect(sctx.Diskful)
 	for _, rvr := range rvrs {
 		if !unscheduledDiskful.Contains(rvr.ID()) {
@@ -173,13 +168,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 		outcome = outcome.Merge(r.reconcileOneRVRScheduling(rf.Ctx(), rvr, sctx).
 			Enrichf("scheduling Diskful"))
-		if outcome.ShouldReturn() {
-			return outcome.ToCtrl()
-		}
+	}
+	if outcome.ShouldReturn() {
+		return outcome.ToCtrl()
 	}
 
 	// Phase 3: Schedule unscheduled TieBreaker RVRs (per-RVR pipeline, no scoring).
-	// Same per-iteration ShouldReturn guard as Phase 2 (see comment above).
 	unscheduledTieBreaker := unscheduled.Intersect(sctx.TieBreaker)
 	for _, rvr := range rvrs {
 		if !unscheduledTieBreaker.Contains(rvr.ID()) {
@@ -187,9 +181,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 		outcome = outcome.Merge(r.reconcileOneRVRScheduling(rf.Ctx(), rvr, sctx).
 			Enrichf("scheduling TieBreaker"))
-		if outcome.ShouldReturn() {
-			return outcome.ToCtrl()
-		}
 	}
 
 	return outcome.ToCtrl()
