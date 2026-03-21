@@ -897,7 +897,7 @@ func (r *Reconciler) reconcileAdoptStepVerifyPrerequisites(
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
 	rsp *rspView,
-	rsc *v1alpha1.ReplicatedStorageClass,
+	_ *v1alpha1.ReplicatedStorageClass,
 	t *v1alpha1.ReplicatedVolumeDatameshTransition,
 	created bool,
 ) (outcome flow.ReconcileOutcome) {
@@ -1221,10 +1221,10 @@ func (r *Reconciler) reconcileAdoptStepPopulateAndVerifyDatamesh(
 	})
 	all := diskful.Union(tiebreakers).Union(access)
 
-	// Populate datamesh: generate shared secret and add all replicas as members.
+	// Populate datamesh: resolve shared secret and add all replicas as members.
 	if len(rv.Status.Datamesh.Members) == 0 {
 		if rv.Status.Datamesh.SharedSecret == "" {
-			secret, err := generateSharedSecret()
+			secret, err := resolveAdoptSharedSecret(rv)
 			if err != nil {
 				return rf.Fail(err)
 			}
@@ -1472,6 +1472,25 @@ func generateSharedSecret() (string, error) {
 	}
 	// Use RawStdEncoding to avoid padding; ensure <=64 chars.
 	return base64.RawStdEncoding.EncodeToString(buf), nil
+}
+
+const maxSharedSecretLen = 64
+
+// resolveAdoptSharedSecret returns the shared secret for adopt/v1 formation.
+// If the AdoptSharedSecretAnnotationKey annotation is set, its value is used
+// (with validation); otherwise a random secret is generated.
+func resolveAdoptSharedSecret(rv *v1alpha1.ReplicatedVolume) (string, error) {
+	secret, ok := rv.Annotations[v1alpha1.AdoptSharedSecretAnnotationKey]
+	if !ok {
+		return generateSharedSecret()
+	}
+	if secret == "" {
+		return "", fmt.Errorf("annotation %s is set but empty", v1alpha1.AdoptSharedSecretAnnotationKey)
+	}
+	if len(secret) > maxSharedSecretLen {
+		return "", fmt.Errorf("annotation %s value exceeds %d characters", v1alpha1.AdoptSharedSecretAnnotationKey, maxSharedSecretLen)
+	}
+	return secret, nil
 }
 
 // isFormationInProgress returns true if the datamesh is still forming:

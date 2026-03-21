@@ -342,7 +342,7 @@ Waits for pre-existing RVRs to satisfy all prerequisites before populating the d
 Populates the datamesh from pre-existing replicas and verifies configuration consistency. All checks run while DRBDRs remain in maintenance mode — DRBD does NOT react to configuration changes. Consistency is checked indirectly via RVR status.
 
 **Actions (populate):**
-1. Generate shared secret for DRBD peer authentication
+1. Resolve shared secret for DRBD peer authentication: if the `adopt-shared-secret` annotation is set, its value is used (must be non-empty, max 64 chars); otherwise a random secret is generated
 2. Add all replicas as datamesh members (with zone, addresses, LVG; tracks multiattach from attachment status)
 3. Set effective layout (FTT/GMDR) and quorum parameters
 4. Increment DatameshRevision
@@ -790,8 +790,11 @@ flowchart TD
     Start([Start]) --> CollectAll["Collect all = D ∪ TB ∪ A"]
 
     CollectAll --> CheckMembers{Members already set?}
-    CheckMembers -->|No| GenSecret[generateSharedSecret]
-    GenSecret --> AddMembers["Add all replicas as datamesh members<br/>(zone, addresses, LVG, multiattach)"]
+    CheckMembers -->|No| CheckAnnotation{"adopt-shared-secret<br/>annotation set?"}
+    CheckAnnotation -->|Yes| UseAnnotation["Use annotation value<br/>(validate: non-empty, max 64 chars)"]
+    CheckAnnotation -->|No| GenSecret[generateSharedSecret]
+    UseAnnotation --> AddMembers["Add all replicas as datamesh members<br/>(zone, addresses, LVG, multiattach)"]
+    GenSecret --> AddMembers
     AddMembers --> SetQuorum[computeTargetQuorum]
     SetQuorum --> IncrRevision["DatameshRevision++"]
     IncrRevision --> ReturnChanged([Return changed])
@@ -825,7 +828,7 @@ flowchart TD
 
 | Output | Description |
 |--------|-------------|
-| `rv.Status.Datamesh.SharedSecret` | Generated DRBD shared secret |
+| `rv.Status.Datamesh.SharedSecret` | DRBD shared secret (from `adopt-shared-secret` annotation or generated) |
 | `rv.Status.Datamesh.Members` | Datamesh member list (all types) |
 | `rv.Status.Datamesh.Multiattach` | Set if multiple members are attached |
 | `rv.Status.EffectiveLayout` | Set from Configuration (FTT/GMDR) |

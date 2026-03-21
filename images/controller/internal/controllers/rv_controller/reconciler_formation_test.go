@@ -19,6 +19,7 @@ package rvcontroller
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -2054,6 +2055,93 @@ var _ = Describe("Formation: Adopt", func() {
 		Expect(updated.Status.Datamesh.SharedSecret).NotTo(BeEmpty())
 		Expect(updated.Status.Datamesh.Members).To(HaveLen(1))
 		Expect(updated.Status.DatameshRevision).To(Equal(int64(2)))
+	})
+
+	It("uses shared secret from adopt-shared-secret annotation", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+		rv := newAdoptRV()
+		rv.Annotations[v1alpha1.AdoptSharedSecretAnnotationKey] = "my-preexisting-secret"
+
+		rvr := newPreconfiguredRVR("rv-1", 0, "node-1")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+		Expect(updated.Status.Datamesh.SharedSecret).To(Equal("my-preexisting-secret"))
+		Expect(updated.Status.Datamesh.SharedSecretAlg).To(Equal(v1alpha1.SharedSecretAlgSHA256))
+		Expect(updated.Status.Datamesh.Members).To(HaveLen(1))
+	})
+
+	It("fails when adopt-shared-secret annotation is present but empty", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+		rv := newAdoptRV()
+		rv.Annotations[v1alpha1.AdoptSharedSecretAnnotationKey] = ""
+
+		rvr := newPreconfiguredRVR("rv-1", 0, "node-1")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("empty"))
+	})
+
+	It("fails when adopt-shared-secret annotation exceeds 64 characters", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+		rv := newAdoptRV()
+		rv.Annotations[v1alpha1.AdoptSharedSecretAnnotationKey] = strings.Repeat("x", 65)
+
+		rvr := newPreconfiguredRVR("rv-1", 0, "node-1")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("exceeds"))
+	})
+
+	It("generates random secret when adopt-shared-secret annotation is absent", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+		rv := newAdoptRV()
+
+		rvr := newPreconfiguredRVR("rv-1", 0, "node-1")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+		Expect(updated.Status.Datamesh.SharedSecret).NotTo(BeEmpty())
+		Expect(updated.Status.Datamesh.SharedSecret).NotTo(Equal("my-preexisting-secret"))
+		Expect(updated.Status.Datamesh.SharedSecretAlg).To(Equal(v1alpha1.SharedSecretAlgSHA256))
 	})
 
 	It("completes formation when all replicas are healthy (ExitMaintenance)", func(ctx SpecContext) {

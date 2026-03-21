@@ -94,16 +94,17 @@ type TestRV struct {
 	extraInformerRegs []tk.InformerReg
 
 	// Builder fields — nil means "not set, let API server default".
-	buildFTT       *byte
-	buildGMDR      *byte
-	buildSize      *resource.Quantity
-	buildMaxAttach *byte
-	buildTopology  *v1alpha1.ReplicatedStorageClassTopology
-	buildAccess    *v1alpha1.ReplicatedStorageClassVolumeAccess
-	buildPoolType  *v1alpha1.ReplicatedStoragePoolType
-	buildRSCName   string
-	buildManualCfg *v1alpha1.ReplicatedVolumeConfiguration
-	buildAdopt     bool
+	buildFTT               *byte
+	buildGMDR              *byte
+	buildSize              *resource.Quantity
+	buildMaxAttach         *byte
+	buildTopology          *v1alpha1.ReplicatedStorageClassTopology
+	buildAccess            *v1alpha1.ReplicatedStorageClassVolumeAccess
+	buildPoolType          *v1alpha1.ReplicatedStoragePoolType
+	buildRSCName           string
+	buildManualCfg         *v1alpha1.ReplicatedVolumeConfiguration
+	buildAdopt             bool
+	buildAdoptSharedSecret string
 
 	// Safety switches (populated by ActivateSafetyInvariants).
 	swQuorumCorrect    *tkmatch.Switch
@@ -167,6 +168,11 @@ func (t *TestRV) Adopt() *TestRV {
 	return t
 }
 
+func (t *TestRV) AdoptSharedSecret(s string) *TestRV {
+	t.buildAdoptSharedSecret = s
+	return t
+}
+
 // ---------------------------------------------------------------------------
 // buildObject
 // ---------------------------------------------------------------------------
@@ -207,6 +213,9 @@ func (t *TestRV) buildObject(ctx context.Context) *v1alpha1.ReplicatedVolume {
 			ann = make(map[string]string)
 		}
 		ann[v1alpha1.AdoptRVRAnnotationKey] = ""
+		if t.buildAdoptSharedSecret != "" {
+			ann[v1alpha1.AdoptSharedSecretAnnotationKey] = t.buildAdoptSharedSecret
+		}
 		rv.SetAnnotations(ann)
 	}
 	return rv

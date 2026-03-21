@@ -39,13 +39,14 @@ import (
 var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label(fw.LabelUpgrade, fw.LabelSlow), func() {
 	DescribeTable("adopts preexisting replicas and completes formation",
 		func(ctx SpecContext, l fw.TestLayout) {
-			replicas := f.SetupLayout(ctx, l).EmulatePreexisting(ctx)
+			sourceRV := f.SetupLayout(ctx, l)
+			adoptSecret := sourceRV.Object().Status.Datamesh.SharedSecret
+			replicas := sourceRV.EmulatePreexisting(ctx)
 			expectedReplicas := l.ExpectedReplicas()
 			Expect(replicas).To(HaveLen(expectedReplicas))
 
 			rvName := f.UniqueName()
 
-			var llvs []*fw.TestLLV
 			var drbdrs []*fw.TestDRBDR
 			var primaryDRBDR *fw.TestDRBDR
 
@@ -71,7 +72,6 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 						llvB = llvB.ThinPoolName(r.ThinPoolName)
 					}
 					llvB.Create(ctx)
-					llvs = append(llvs, tllv)
 					llvByReplicaIdx[i] = tllv
 				case v1alpha1.ReplicaTypeTieBreaker, v1alpha1.ReplicaTypeAccess:
 					drbdType = v1alpha1.DRBDResourceTypeDiskless
@@ -164,7 +164,7 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 			fmt.Fprintf(GinkgoWriter, "[adopt] creating RV %s with %d replicas (%d attached)\n",
 				rvName, len(replicas), l.Attached)
 
-			trv := f.TestRVExact(rvName).Adopt().FTT(l.FTT).GMDR(l.GMDR)
+			trv := f.TestRVExact(rvName).Adopt().AdoptSharedSecret(adoptSecret).FTT(l.FTT).GMDR(l.GMDR)
 			if l.Attached > 0 {
 				trv = trv.MaxAttachments(byte(l.Attached))
 			}
@@ -199,6 +199,8 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 			}
 
 			trv.Await(ctx, RV.FormationComplete())
+
+			Expect(trv.Object().Status.Datamesh.SharedSecret).To(Equal(adoptSecret))
 
 			swUpToDate.Disable()
 			if swPrimaryDevice != nil {
@@ -298,7 +300,9 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 
 	DescribeTable("adopts preexisting replicas in random order and completes formation",
 		func(ctx SpecContext, l fw.TestLayout) {
-			replicas := f.SetupLayout(ctx, l).EmulatePreexisting(ctx)
+			sourceRV := f.SetupLayout(ctx, l)
+			adoptSecret := sourceRV.Object().Status.Datamesh.SharedSecret
+			replicas := sourceRV.EmulatePreexisting(ctx)
 			expectedReplicas := l.ExpectedReplicas()
 			Expect(replicas).To(HaveLen(expectedReplicas))
 
@@ -467,7 +471,7 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 				}
 			}
 
-			trv := f.TestRVExact(rvName).Adopt().FTT(l.FTT).GMDR(l.GMDR)
+			trv := f.TestRVExact(rvName).Adopt().AdoptSharedSecret(adoptSecret).FTT(l.FTT).GMDR(l.GMDR)
 			trv.Create(ctx)
 
 			trv.Await(ctx, RV.Members(expectedReplicas))
@@ -492,6 +496,8 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 			}
 
 			trv.Await(ctx, RV.FormationComplete())
+
+			Expect(trv.Object().Status.Datamesh.SharedSecret).To(Equal(adoptSecret))
 
 			swUpToDate.Disable()
 			if swPrimaryDevice != nil {
