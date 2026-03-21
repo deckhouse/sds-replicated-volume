@@ -137,6 +137,7 @@ type DiskfulPlacement struct {
 // AnyNode returns a random eligible node name from the scoped RSP,
 // excluding names listed in except. Fails the test if no node is available.
 func (ps *PoolScope) AnyNode(except ...string) string {
+	GinkgoHelper()
 	return ps.pickNode(false, except)
 }
 
@@ -144,6 +145,7 @@ func (ps *PoolScope) AnyNode(except ...string) string {
 // LVMVolumeGroup in the scoped RSP, excluding names listed in except.
 // Fails the test if no suitable node is available.
 func (ps *PoolScope) AnyDiskfulNode(except ...string) string {
+	GinkgoHelper()
 	return ps.pickNode(true, except)
 }
 
@@ -152,6 +154,7 @@ func (ps *PoolScope) AnyDiskfulNode(except ...string) string {
 // that has LVMVolumeGroups, then a random LVG on that node.
 // Fails the test if no suitable placement is available.
 func (ps *PoolScope) AnyDiskfulPlacement(except ...string) DiskfulPlacement {
+	GinkgoHelper()
 	excSet := makeExcludeSet(except)
 	type candidate struct {
 		nodeName string
@@ -178,6 +181,7 @@ func (ps *PoolScope) AnyDiskfulPlacement(except ...string) DiskfulPlacement {
 }
 
 func (ps *PoolScope) pickNode(needLVG bool, except []string) string {
+	GinkgoHelper()
 	excSet := makeExcludeSet(except)
 	var candidates []string
 	for _, n := range ps.rsp.Status.EligibleNodes {

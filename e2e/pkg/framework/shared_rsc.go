@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"strings"
 
+	. "github.com/onsi/ginkgo/v2"
+
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	tkmatch "github.com/deckhouse/sds-replicated-volume/lib/go/testkit/match"
 )
@@ -68,6 +70,7 @@ func poolAbbrev(pt v1alpha1.ReplicatedStoragePoolType) string {
 // RSC on the cluster (and waiting for Ready) if it doesn't exist yet.
 // The RSC is shared across workers (run-level metadata, IgnoreAlreadyExists).
 func (f *Framework) getOrCreateRSC(ctx context.Context, key rscCacheKey) string {
+	GinkgoHelper()
 	if trsc, ok := f.rscCache[key]; ok {
 		return trsc.Name()
 	}

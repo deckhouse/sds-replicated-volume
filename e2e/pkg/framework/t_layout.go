@@ -57,6 +57,7 @@ func (l TestLayout) ExpectedReplicas() int {
 //	Phase 3: Create TB RVR + Access/extra RVAs (fire-and-forget)
 //	Phase 4: Await FormationComplete, TB Healthy, RVAs Attached
 func (f *Framework) SetupLayout(ctx SpecContext, l TestLayout) *TestRV {
+	GinkgoHelper()
 	Expect(l.Attached).To(BeNumerically(">=", l.Access),
 		"Attached must be >= Access (Access replicas are always attached)")
 
@@ -117,6 +118,7 @@ func (f *Framework) SetupLayout(ctx SpecContext, l TestLayout) *TestRV {
 		if extra == 0 {
 			break
 		}
+		trvr.Await(ctx, tkmatch.Present())
 		obj := trvr.Object()
 		if obj.Spec.Type != v1alpha1.ReplicaTypeAccess {
 			allRVAs = append(allRVAs, trv.Attach(ctx, obj.Spec.NodeName))

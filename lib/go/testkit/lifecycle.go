@@ -18,6 +18,7 @@ package testkit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -123,6 +124,7 @@ func (t *TrackedObject[T]) unwatchDebugger(obj client.Object) {
 //
 // No-op when Client is nil (unit-test mode).
 func (t *TrackedObject[T]) CreateExpect(ctx context.Context, m types.GomegaMatcher) {
+	GinkgoHelper()
 	if t.Client == nil {
 		return
 	}
@@ -162,6 +164,7 @@ func (t *TrackedObject[T]) CreateExpect(ctx context.Context, m types.GomegaMatch
 
 // Create builds the object and creates it on the cluster, expecting success.
 func (t *TrackedObject[T]) Create(ctx context.Context) {
+	GinkgoHelper()
 	t.CreateExpect(ctx, Succeed())
 }
 
@@ -172,6 +175,7 @@ func (t *TrackedObject[T]) Create(ctx context.Context) {
 //
 // No-op when Client is nil (unit-test mode).
 func (t *TrackedObject[T]) CreateOrGetExpect(ctx context.Context, m types.GomegaMatcher) {
+	GinkgoHelper()
 	if t.Client == nil {
 		return
 	}
@@ -209,6 +213,7 @@ func (t *TrackedObject[T]) CreateOrGetExpect(ctx context.Context, m types.Gomega
 
 // CreateOrGet ensures the object exists, expecting success.
 func (t *TrackedObject[T]) CreateOrGet(ctx context.Context) {
+	GinkgoHelper()
 	t.CreateOrGetExpect(ctx, Succeed())
 }
 
@@ -220,6 +225,7 @@ func (t *TrackedObject[T]) CreateOrGet(ctx context.Context) {
 //
 // No-op when Client is nil (unit-test mode).
 func (t *TrackedObject[T]) GetExpect(ctx context.Context, m types.GomegaMatcher) {
+	GinkgoHelper()
 	if t.Client == nil {
 		return
 	}
@@ -255,6 +261,7 @@ func (t *TrackedObject[T]) GetExpect(ctx context.Context, m types.GomegaMatcher)
 
 // Get wraps an already-existing object, expecting it to exist.
 func (t *TrackedObject[T]) Get(ctx context.Context) {
+	GinkgoHelper()
 	t.GetExpect(ctx, Succeed())
 }
 
@@ -267,6 +274,7 @@ func (t *TrackedObject[T]) Get(ctx context.Context) {
 // Fails (via Object) if the object has not been observed yet or is deleted.
 // No-op when Client is nil (unit-test mode).
 func (t *TrackedObject[T]) UpdateExpect(ctx context.Context, mutate func(T), m types.GomegaMatcher) {
+	GinkgoHelper()
 	if t.Client == nil {
 		return
 	}
@@ -289,11 +297,13 @@ func (t *TrackedObject[T]) UpdateExpect(ctx context.Context, mutate func(T), m t
 // Update fetches the latest object, applies mutate, and sends a
 // merge-patch, expecting success.
 func (t *TrackedObject[T]) Update(ctx context.Context, mutate func(T)) {
+	GinkgoHelper()
 	t.UpdateExpect(ctx, mutate, Succeed())
 }
 
 // AddLabel adds or overwrites a single label on the tracked object.
 func (t *TrackedObject[T]) AddLabel(ctx context.Context, key, value string) {
+	GinkgoHelper()
 	t.Update(ctx, func(obj T) {
 		labels := obj.GetLabels()
 		if labels == nil {
@@ -307,6 +317,7 @@ func (t *TrackedObject[T]) AddLabel(ctx context.Context, key, value string) {
 // RemoveLabel removes a label by key from the tracked object.
 // No-op if the label does not exist.
 func (t *TrackedObject[T]) RemoveLabel(ctx context.Context, key string) {
+	GinkgoHelper()
 	t.Update(ctx, func(obj T) {
 		labels := obj.GetLabels()
 		if labels == nil {
@@ -319,6 +330,7 @@ func (t *TrackedObject[T]) RemoveLabel(ctx context.Context, key string) {
 
 // AddAnnotation adds or overwrites a single annotation on the tracked object.
 func (t *TrackedObject[T]) AddAnnotation(ctx context.Context, key, value string) {
+	GinkgoHelper()
 	t.Update(ctx, func(obj T) {
 		annotations := obj.GetAnnotations()
 		if annotations == nil {
@@ -332,6 +344,7 @@ func (t *TrackedObject[T]) AddAnnotation(ctx context.Context, key, value string)
 // RemoveAnnotation removes an annotation by key from the tracked object.
 // No-op if the annotation does not exist.
 func (t *TrackedObject[T]) RemoveAnnotation(ctx context.Context, key string) {
+	GinkgoHelper()
 	t.Update(ctx, func(obj T) {
 		annotations := obj.GetAnnotations()
 		if annotations == nil {
@@ -350,6 +363,7 @@ func (t *TrackedObject[T]) RemoveAnnotation(ctx context.Context, key string) {
 //
 // No-op when Client is nil (unit-test mode).
 func (t *TrackedObject[T]) DeleteExpect(ctx context.Context, m types.GomegaMatcher) {
+	GinkgoHelper()
 	if t.Client == nil {
 		return
 	}
@@ -366,6 +380,7 @@ func (t *TrackedObject[T]) DeleteExpect(ctx context.Context, m types.GomegaMatch
 
 // Delete sends a delete request for the tracked object, expecting success.
 func (t *TrackedObject[T]) Delete(ctx context.Context) {
+	GinkgoHelper()
 	t.DeleteExpect(ctx, Succeed())
 }
 
@@ -387,6 +402,7 @@ func (t *TrackedObject[T]) deleteByName(ctx context.Context) {
 // deletionTimestamp) or the object is deleted (DELETED event). Unlike
 // Await, this tolerates deletion (no fail-fast).
 func (t *TrackedObject[T]) awaitDeleteSync(ctx context.Context, beforeRV int64) {
+	GinkgoHelper()
 	t.checkFailed()
 	for {
 		t.mu.RLock()
@@ -411,6 +427,10 @@ func (t *TrackedObject[T]) awaitDeleteSync(ctx context.Context, beforeRV int64) 
 			t.checkFailed()
 			return
 		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				Fail(fmt.Sprintf("%s %s: timed out waiting for informer to acknowledge delete",
+					t.GVK.Kind, t.objName))
+			}
 			return
 		}
 	}

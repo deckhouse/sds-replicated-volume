@@ -55,6 +55,7 @@ type PreexistingDRBDReplica struct {
 // deletes the RV (stripping LLV finalizers), and re-promotes replicas that were
 // attached before the dismantle. A DeferCleanup is registered for teardown.
 func (t *TestRV) EmulatePreexisting(ctx SpecContext) []PreexistingDRBDReplica {
+	GinkgoHelper()
 	type memberInfo struct {
 		replicaType  v1alpha1.ReplicaType
 		attached     bool
@@ -109,7 +110,8 @@ func (t *TestRV) EmulatePreexisting(ctx SpecContext) []PreexistingDRBDReplica {
 			llvObj := tllv.Object()
 
 			var lvg snc.LVMVolumeGroup
-			Expect(t.f.Client.Get(ctx, client.ObjectKey{Name: llvObj.Spec.LVMVolumeGroupName}, &lvg)).To(Succeed())
+			Expect(t.f.Client.Get(ctx, client.ObjectKey{Name: llvObj.Spec.LVMVolumeGroupName}, &lvg)).To(Succeed(),
+				"getting LVMVolumeGroup %s", llvObj.Spec.LVMVolumeGroupName)
 
 			mi.llv = tllv
 			mi.lvDevPath = "/dev/" + lvg.Spec.ActualVGNameOnTheNode + "/" + llvObj.Spec.ActualLVNameOnTheNode
@@ -160,7 +162,7 @@ func (t *TestRV) EmulatePreexisting(ctx SpecContext) []PreexistingDRBDReplica {
 				return nil
 			})
 		}
-		Expect(g.Wait()).To(Succeed())
+		Expect(g.Wait()).To(Succeed(), "cleanup: force-secondary DRBD resources")
 
 		// Group 2: down + poll until gone (parallel per alive)
 		g, gCtx = errgroup.WithContext(cleanupCtx)
@@ -185,7 +187,7 @@ func (t *TestRV) EmulatePreexisting(ctx SpecContext) []PreexistingDRBDReplica {
 				}
 			})
 		}
-		Expect(g.Wait()).To(Succeed())
+		Expect(g.Wait()).To(Succeed(), "cleanup: down DRBD resources")
 
 		// Group 3: lvremove (parallel per member with lvDevPath)
 		g, gCtx = errgroup.WithContext(cleanupCtx)
@@ -205,7 +207,7 @@ func (t *TestRV) EmulatePreexisting(ctx SpecContext) []PreexistingDRBDReplica {
 				return nil
 			})
 		}
-		Expect(g.Wait()).To(Succeed())
+		Expect(g.Wait()).To(Succeed(), "cleanup: lvremove backing volumes")
 
 		fmt.Fprintln(GinkgoWriter, "[cleanup] preexisting DRBD: done")
 	})
@@ -234,7 +236,7 @@ func (t *TestRV) EmulatePreexisting(ctx SpecContext) []PreexistingDRBDReplica {
 			return err
 		})
 	}
-	Expect(g.Wait()).To(Succeed())
+	Expect(g.Wait()).To(Succeed(), "demoting DRBD primaries")
 
 	fmt.Fprintln(GinkgoWriter, "[emulate] waiting for attached replicas to detach after demotion")
 	for _, m := range members {
@@ -259,7 +261,7 @@ func (t *TestRV) EmulatePreexisting(ctx SpecContext) []PreexistingDRBDReplica {
 			return nil
 		})
 	}
-	Expect(g.Wait()).To(Succeed())
+	Expect(g.Wait()).To(Succeed(), "renaming DRBD resources")
 
 	// --- Force-delete attached DRBDRs ---
 	// Attached DRBDRs (primary) block RV deletion because the datamesh engine
@@ -294,7 +296,7 @@ func (t *TestRV) EmulatePreexisting(ctx SpecContext) []PreexistingDRBDReplica {
 		client.RawPatch(types.MergePatchType, []byte(
 			`{"status":{"datamesh":{"members":[]},"datameshTransitions":null,"datameshReplicaRequests":null}}`,
 		)),
-	)).To(Succeed())
+	)).To(Succeed(), "clearing datamesh status on RV %s", t.Name())
 
 	// Remove all finalizers from LLVs so they can be deleted from Kubernetes
 	// even though the underlying LV is still held open by the renamed DRBD
@@ -335,7 +337,7 @@ func (t *TestRV) EmulatePreexisting(ctx SpecContext) []PreexistingDRBDReplica {
 			return nil
 		})
 	}
-	Expect(g.Wait()).To(Succeed())
+	Expect(g.Wait()).To(Succeed(), "re-promoting attached replicas")
 
 	// --- Build result ---
 

@@ -52,6 +52,7 @@ func RegisterInformer[T client.Object](
 	filter func(T) bool,
 	handler func(watch.EventType, T),
 ) InformerReg {
+	GinkgoHelper()
 	inf, err := c.GetInformerForKind(ctx, gvk)
 	if err != nil {
 		Fail(fmt.Sprintf("%s: failed to get informer: %v", desc, err))
