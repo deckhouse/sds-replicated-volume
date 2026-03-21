@@ -76,14 +76,11 @@ func ExecuteNewMinor(ctx context.Context, resource string, minor uint, volume ui
 // When diskless is true, --diskless is passed to mark the device as an intentionally diskless client.
 // Returns the allocated minor number on success.
 func ExecuteNewAutoMinor(ctx context.Context, resource string, volume uint, diskless bool) (uint, error) {
-	nextDeviceMinorMu.Lock()
-	defer nextDeviceMinorMu.Unlock()
-
 	for {
-		minor := nextDeviceMinor
+		minor := grabNextMinor()
+
 		err := ExecuteNewMinor(ctx, resource, nextDeviceMinor, volume, diskless)
 		if err == nil {
-			_ = incrementDeviceMinor(nil)
 			return minor, nil
 		}
 
@@ -96,26 +93,42 @@ func ExecuteNewAutoMinor(ctx context.Context, resource string, volume uint, disk
 			return 0, fmt.Errorf("querying show to find used minors: %w", err)
 		}
 
-		if err := incrementDeviceMinor(resources); err != nil {
+		if err := advanceMinorPastUsed(resources); err != nil {
 			return 0, err
 		}
 	}
 }
 
-func incrementDeviceMinor(resources []ShowResource) error {
+// grabNextMinor atomically claims the next candidate minor number.
+// Each concurrent caller gets a unique minor, preventing contention on exec.
+func grabNextMinor() uint {
+	nextDeviceMinorMu.Lock()
+	defer nextDeviceMinorMu.Unlock()
+	minor := nextDeviceMinor
+	nextDeviceMinor++
+	if nextDeviceMinor > MaxDeviceMinor {
+		nextDeviceMinor = 0
+	}
+	return minor
+}
+
+// advanceMinorPastUsed scans used minors from drbdsetup show output and
+// advances nextDeviceMinor past all of them. Called on minor collision.
+func advanceMinorPastUsed(resources []ShowResource) error {
+	nextDeviceMinorMu.Lock()
+	defer nextDeviceMinorMu.Unlock()
+
 	var totalUsedMinors int
 	for _, res := range resources {
 		for _, vol := range res.ThisHost.Volumes {
 			totalUsedMinors++
-			nextDeviceMinor = max(nextDeviceMinor, uint(vol.DeviceMinor))
+			nextDeviceMinor = max(nextDeviceMinor, uint(vol.DeviceMinor)+1)
 		}
 	}
 
 	if totalUsedMinors > MaxDeviceMinor {
 		return ErrNewMinorNoFreeMinor
 	}
-
-	nextDeviceMinor++
 
 	if nextDeviceMinor > MaxDeviceMinor {
 		nextDeviceMinor = 0
