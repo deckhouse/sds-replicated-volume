@@ -855,8 +855,9 @@ func ensureDatameshReplicaRequests(
 }
 
 // rvShouldNotExist returns true if RV should be deleted:
-// DeletionTimestamp is set, no finalizers except ours, no attached members,
-// and no Detach transitions in progress.
+// DeletionTimestamp is set, no finalizers except ours, and either formation
+// is still in progress (incomplete datamesh — skip attach/detach checks) or
+// no attached members and no Detach transitions in progress.
 func rvShouldNotExist(rv *v1alpha1.ReplicatedVolume) bool {
 	if rv == nil {
 		return true
@@ -869,6 +870,14 @@ func rvShouldNotExist(rv *v1alpha1.ReplicatedVolume) bool {
 	// Check no other finalizers except ours.
 	if obju.HasFinalizersOtherThan(rv, v1alpha1.RVControllerFinalizer) {
 		return false
+	}
+
+	// During formation the datamesh is not yet fully established, so attached
+	// members and detach transitions are not meaningful blockers — skip them
+	// to avoid a deadlock where formation is stuck on deleting RVRs while
+	// deletion is stuck waiting for detach that will never come.
+	if forming, _ := isFormationInProgress(rv); forming {
+		return true
 	}
 
 	// Check no attached members.

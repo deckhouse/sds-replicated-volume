@@ -9,7 +9,8 @@ TestDRBDResource
 │   │   Creates a diskless DRBDResource, waits for Configured=True and
 │   │   addresses populated. Creates an LLV, waits for Created. Patches
 │   │   the DRBDResource to Diskful, waits for Configured=True. Asserts
-│   │   the agent added its finalizer to the LLV.
+│   │   status.size is populated and less than spec.size (DRBD metadata
+│   │   overhead). Asserts the agent added its finalizer to the LLV.
 │   │
 │   ├── MaintenanceMode
 │   │   Patches spec.maintenance=NoResourceReconciliation. Asserts
@@ -19,13 +20,20 @@ TestDRBDResource
 │   ├── StateDown
 │   │   Patches spec.state=Down. Waits for agent to tear down DRBD and
 │   │   remove its own finalizer from the DRBDResource. The LLV finalizer
-│   │   is intentionally kept (resource may come back Up). Cleanup reverts
-│   │   to state=Up; agent brings DRBD back up and re-adds its finalizer.
+│   │   is also released. Cleanup reverts to state=Up; agent brings DRBD
+│   │   back up and re-adds both finalizers.
 │   │
 │   └── DiskfulToDiskless
 │       Patches spec.type from Diskful to Diskless. Waits for
 │       Configured=True. Asserts activeConfiguration.type=Diskless.
 │       Cleanup reverts to Diskful; agent re-attaches the disk.
+│
+├── Resize — online resize of a single-node diskful replica
+│       Creates a diskful DRBDResource with an LLV, promotes to Primary
+│       (required by drbdsetup resize). Records initial status.size.
+│       Grows the LLV to 2x AllocateSize, waits for sds-node-configurator
+│       to resize. Patches DRBDR spec.size to the new size, waits for
+│       Configured=True. Asserts status.size has grown.
 │
 ├── DeleteDiskful — delete diskful replica with attached LLV
 │       Creates a diskful DRBDResource with an LLV (same setup as R1).
@@ -34,6 +42,26 @@ TestDRBDResource
 │       from the LLV. Catches the bug where the agent fails to release the
 │       LLV finalizer on the deletion path (intendedLLVName == attachedLLVName
 │       because spec doesn't change on delete).
+│
+├── LLVFinalizer — LLV finalizer behavior across state/spec transitions
+│   │   Creates a diskful DRBDResource with an LLV (same setup as R1).
+│   │   Exercises sequences of state and spec changes, asserting the
+│   │   agent releases the LLV finalizer on Down and re-acquires it on Up.
+│   │
+│   ├── DownUp
+│   │   Down → Up. Asserts finalizer absent after Down, present after Up.
+│   │
+│   ├── DownUpDiskless
+│   │   Down → Up+Diskless (single combined patch). Asserts finalizer
+│   │   absent after Down, stays absent after Up+Diskless.
+│   │
+│   ├── DownUpDownUpDiskless
+│   │   Down → Up → Down → Up+Diskless. Multiple cycles, asserts
+│   │   correct finalizer state at each step.
+│   │
+│   └── DownDisklessThenUp
+│       Down → DiskfulToDiskless (while Down) → Up. Asserts finalizer
+│       stays absent throughout when spec is cleared while Down.
 │
 ├── OrphanCleanup — orphan DRBD resource cleanup after force-delete
 │       Creates a diskless DRBDResource, waits for Configured=True.
@@ -80,6 +108,23 @@ TestDRBDResource
 │   ├── GenerateNewUUID — metadata present, zero on disk, status empty → generate and set UUID
 │   └── RecreateMetadata — no metadata, status has UUID → create-md and write status UUID
 │
+├── PortConvergence — port adoption and path mismatch convergence (parallel)
+│   │   Requires 2 nodes. Creates 2 peered, synced diskful replicas.
+│   │
+│   ├── AdoptExistingPort
+│   │   Force-deletes both DRBDRs (DRBD keeps running on nodes with
+│   │   established connections). Recreates fresh DRBDRs (empty status).
+│   │   Asserts the agent adopts existing DRBD ports into status.addresses
+│   │   instead of allocating new ones. Re-peers and verifies Connected.
+│   │
+│   └── PathMismatchConvergence
+│       Injects a wrong port into DRBD on node 0 via drbdsetup
+│       (disconnect, del-path, new-path with wrong port, connect).
+│       status.addresses still has the original correct port. Waits for
+│       the agent to converge: adds correct path, waits for established,
+│       del-paths the stale one. Asserts status shows the correct port
+│       and DRBD has exactly one path per connection.
+│
 ├── R2 — two peered, synced replicas (parallel with R3, R4)
 │   │   Creates 2 diskful replicas on separate nodes. Links them as
 │   │   full-mesh peers (protocol C, shared secret). Runs CreateNewUUID
@@ -110,6 +155,14 @@ TestDRBDResource
 └── R4 — four peered, synced replicas (parallel with R2, R3)
     │   Same as R2 but with 4 nodes. Maximum replica count test.
     │
+    ├── DRBDSetupSchema — strict schema validation of drbdsetup JSON output
+    │   Runs drbdsetup status --json and drbdsetup show --json on node 0.
+    │   Unmarshals both outputs into the production drbdutils Go structs
+    │   with DisallowUnknownFields (rejects unknown JSON fields). Validates
+    │   key fields are populated: resource name, connections (3 for 4-node
+    │   full mesh), paths with non-empty host addresses. Read-only; does
+    │   not modify state.
+    │
     └── PromotePrimary
         │
         └── DemoteToSecondary
@@ -136,11 +189,17 @@ Every subtest's cleanup exercises a teardown path:
   agent resumes reconciliation.
 
 - **StateDown cleanup**: reverts state back to Up. Verifies the agent
-  can bring a downed resource fully back up (re-add finalizer, re-create
-  DRBD resource, re-attach disk).
+  can bring a downed resource fully back up (re-add both DRBDR and LLV
+  finalizers, re-create DRBD resource, re-attach disk).
 
 - **RemovePeer cleanup**: restores the peer list. Verifies the agent
   can re-add a previously forgotten peer.
+
+- **Resize cleanup**: SetupPromotePrimary cleanup reverts role to Secondary.
+  SetupResourcePatch cleanup reverts LLV spec.size (LV is not actually
+  shrunk). SetupDisklessToDiskfulReplica cleanup deletes the DRBDResource
+  and LLV entirely. The DRBDR spec.size patch has no revert because the
+  API forbids decreasing spec.size.
 
 - **DeleteDiskful**: deletes the DRBDResource directly while still diskful
   with an attached LLV. Verifies the agent releases the LLV finalizer on
@@ -166,3 +225,11 @@ Every subtest's cleanup exercises a teardown path:
   reaches Configured=True.
 - **ForeignDisk cleanup**: restores the correct device-uuid on disk after
   writing a fake UUID. Verifies the agent recovers from the error.
+
+- **AdoptExistingPort**: force-deletes DRBDRs leaving DRBD running,
+  recreates them, asserts port adoption. Cleanup deletes the recreated
+  DRBDRs normally (via SetupDisklessToDiskfulReplica cleanup).
+
+- **PathMismatchConvergence**: injects a wrong DRBD path, waits for
+  the agent to converge. No extra cleanup needed — the parent
+  PortConvergence scope handles DRBDR deletion.

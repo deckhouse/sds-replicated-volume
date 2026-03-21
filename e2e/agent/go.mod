@@ -4,11 +4,14 @@ go 1.25.7
 
 replace github.com/deckhouse/sds-replicated-volume/api => ../../api
 
+replace github.com/deckhouse/sds-replicated-volume/images/agent => ../../images/agent
+
 replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go/common
 
 require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260218165228-44f333dae807
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-00010101000000-000000000000
+	github.com/deckhouse/sds-replicated-volume/images/agent v0.0.0-00010101000000-000000000000
 	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-00010101000000-000000000000
 	github.com/google/go-cmp v0.7.0
 	k8s.io/api v0.35.1

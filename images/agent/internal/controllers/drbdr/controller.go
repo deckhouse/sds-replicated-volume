@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -82,8 +83,21 @@ func BuildController(mgr manager.Manager) error {
 	// Build DRBD resource controller with TypedReconciler
 	if err := builder.TypedControllerManagedBy[DRBDReconcileRequest](mgr).
 		Named(ControllerName).
-		// Watch DRBDResource and map to DRBDReconcileRequest{Name: ...}
-		// Predicates already filter by nodeName, so map func just converts
+		WithLogConstructor(func(req *DRBDReconcileRequest) logr.Logger {
+			l := mgr.GetLogger().WithValues(
+				"controller", ControllerName,
+				"controllerGroup", v1alpha1.APIGroup,
+				"controllerKind", "DRBDResource",
+			)
+			if req != nil {
+				name := req.Name
+				if name == "" {
+					name = req.ActualNameOnTheNode
+				}
+				l = l.WithValues("name", name)
+			}
+			return l
+		}).
 		Watches(
 			&v1alpha1.DRBDResource{},
 			handler.TypedEnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []DRBDReconcileRequest {

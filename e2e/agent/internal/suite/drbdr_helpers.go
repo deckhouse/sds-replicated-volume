@@ -89,6 +89,23 @@ func assertDRBDRCondition(e envtesting.E, drbdr *v1alpha1.DRBDResource, condType
 	e.Fatalf("DRBDResource %q has no %s condition", drbdr.Name, condType)
 }
 
+func assertDRBDRSizePopulated(e envtesting.E, drbdr *v1alpha1.DRBDResource) {
+	e.Helper()
+	if drbdr.Status.Size == nil {
+		e.Fatalf("DRBDResource %q status.size is nil, want non-nil for diskful resource", drbdr.Name)
+	}
+	if drbdr.Status.Size.Value() <= 0 {
+		e.Fatalf("DRBDResource %q status.size is %s, want positive", drbdr.Name, drbdr.Status.Size.String())
+	}
+	if drbdr.Spec.Size == nil {
+		return
+	}
+	if drbdr.Status.Size.Cmp(*drbdr.Spec.Size) > 0 {
+		e.Fatalf("DRBDResource %q status.size %s must not exceed spec.size %s",
+			drbdr.Name, drbdr.Status.Size.String(), drbdr.Spec.Size.String())
+	}
+}
+
 func assertDRBDRRole(e envtesting.E, drbdr *v1alpha1.DRBDResource, expected v1alpha1.DRBDRole) {
 	e.Helper()
 	if drbdr.Status.ActiveConfiguration == nil {

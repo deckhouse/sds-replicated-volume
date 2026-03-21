@@ -114,15 +114,16 @@ type ShowVolumeDisk struct {
 }
 
 type ShowConnection struct {
-	Path       ShowPath               `json:"path"`
-	Net        ShowNet                `json:"net"`
-	Volumes    []ShowConnectionVolume `json:"volumes"`
-	PeerNodeID int                    `json:"_peer_node_id"`
+	Paths        []ShowPath             `json:"paths"`
+	IsStandalone bool                   `json:"_is_standalone"`
+	Net          ShowNet                `json:"net"`
+	Volumes      []ShowConnectionVolume `json:"volumes"`
+	PeerNodeID   int                    `json:"_peer_node_id"`
 }
 
 type ShowPath struct {
-	ThisHost   string `json:"_this_host"`
-	RemoteHost string `json:"_remote_host"`
+	ThisHost   Host `json:"this_host"`
+	RemoteHost Host `json:"remote_host"`
 }
 
 type ShowNet struct {

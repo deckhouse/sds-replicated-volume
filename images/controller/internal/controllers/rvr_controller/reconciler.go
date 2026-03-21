@@ -179,6 +179,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
+	// If RVR should not exist but our finalizer is still present (children were
+	// just deleted in this cycle), requeue so reconcileMetadata can remove it.
+	// Without requeue, no event source remains to trigger the next reconcile.
+	if rvr != nil && rvrShouldNotExist(rvr) && obju.HasFinalizer(rvr, v1alpha1.RVRControllerFinalizer) {
+		outcome = outcome.Merge(rf.ContinueAndRequeue())
+	}
+
 	return outcome.ToCtrl()
 }
 
@@ -305,11 +312,12 @@ func applyRVRMetadata(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.Replic
 	return changed
 }
 
-// rvrShouldNotExist returns true if RV is absent or RV is being deleted
+// rvrShouldNotExist returns true if the RVR is being deleted
 // with only our finalizer remaining.
+// Callers must handle rvr==nil explicitly before calling this function.
 func rvrShouldNotExist(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 	if rvr == nil {
-		return true
+		return false
 	}
 	if rvr.DeletionTimestamp == nil {
 		return false

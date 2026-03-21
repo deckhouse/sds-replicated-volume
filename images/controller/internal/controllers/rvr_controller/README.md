@@ -48,8 +48,9 @@ reconcile DRBD resource:
     if agent not ready → DRBDConfigured=False AgentNotReady
     if DRBDR pending → DRBDConfigured=False ApplyingConfiguration
     if DRBDR failed → DRBDConfigured=False ConfigurationFailed
+    if agent processed current generation → record datameshRevisionObservedByAgent
     if not datamesh member:
-        if was member (datameshRevision > 0) → reset datameshRevision to 0, DRBDConfigured=True
+        if was member (datameshRevision > 0) → reset datameshRevision to 0, datameshRevisionObservedByAgent to 0, DRBDConfigured=True
         elif deleting → DRBDConfigured=True (replica is terminating)
         else → DRBDConfigured=False PendingDatameshJoin
     else → DRBDConfigured=True
@@ -334,6 +335,7 @@ The controller manages the following status fields on RVR:
 | `backingVolume` | Backing volume info (size, state, LVG name, thin pool) | From DRBDR + LLV status |
 | `datameshRequest` | Datamesh membership requests (join/leave/role change/BV change) | Computed from spec vs status |
 | `datameshRevision` | Datamesh revision for which the replica was fully configured; reset to 0 when removed from datamesh | Set when DRBDConfigured=True; reset to 0 when removed |
+| `datameshRevisionObservedByAgent` | Datamesh revision for which the agent has processed the DRBDResource spec (observedGeneration == generation); set regardless of success/failure/maintenance; reset to 0 when removed from datamesh | Set when agent processes current DRBDR generation; reset to 0 when removed |
 | `drbdrReconciliationCache` | Cache of target configuration that DRBDR spec was last applied for | Computed |
 | `peers` | Peer connectivity status | Merged from datamesh + DRBDR |
 | `quorum` | Whether this replica has quorum | From DRBDR status |
@@ -869,10 +871,18 @@ flowchart TD
     CheckAgent -->|Yes| CheckState{DRBDR state?}
     CheckState -->|Pending| SetApplying[DRBDConfigured=False ApplyingConfiguration]
     CheckState -->|Failed| SetFailed[DRBDConfigured=False ConfigurationFailed]
-    CheckState -->|True| CheckTargetType
+    CheckState -->|Configured| RecordObserved["Record DatameshRevisionObservedByAgent"]
 
     SetApplying --> End5([Done])
     SetFailed --> End6([Done])
+
+    RecordObserved --> CheckMaintenance{In maintenance?}
+    CheckMaintenance -->|Yes| SetMaintenance[DRBDConfigured=Unknown InMaintenance]
+    SetMaintenance --> EndMaint([Done])
+    CheckMaintenance -->|No| CheckConfigFailed{Config failed?}
+    CheckConfigFailed -->|Yes| SetConfigFailed[DRBDConfigured=False ConfigurationFailed]
+    SetConfigFailed --> EndCF([Done])
+    CheckConfigFailed -->|No| CheckTargetType
 
     CheckTargetType{targetType != intendedType?}
     CheckTargetType -->|Yes| SetWaitBV1[DRBDConfigured=False WaitingForBackingVolume]
@@ -888,7 +898,7 @@ flowchart TD
 
     CheckResize -->|No| CheckMember{Datamesh member?}
     CheckMember -->|No| CheckWasMember{Was member?<br/>DatameshRevision > 0}
-    CheckWasMember -->|Yes| ResetRevision["Reset DatameshRevision to 0<br/>DRBDConfigured=True Configured<br/>(removed from datamesh)"]
+    CheckWasMember -->|Yes| ResetRevision["Reset DatameshRevision to 0,<br/>DatameshRevisionObservedByAgent to 0<br/>DRBDConfigured=True Configured<br/>(removed from datamesh)"]
     ResetRevision --> End7a([Done])
     CheckWasMember -->|No| CheckDeleting{Deleting?}
     CheckDeleting -->|Yes| SetDeletingConfigured["DRBDConfigured=True Configured<br/>(replica is terminating)"]
@@ -914,6 +924,7 @@ flowchart TD
 | `DRBDResource` | Created/patched/deleted DRBD resource |
 | `DRBDConfigured` condition | Reports DRBD configuration state |
 | `status.datameshRevision` | Datamesh revision for which replica was fully configured; reset to 0 when removed from datamesh |
+| `status.datameshRevisionObservedByAgent` | Datamesh revision observed by agent (advances even in maintenance/failure); reset to 0 when removed from datamesh |
 | `status.drbdrReconciliationCache` | Cache of target configuration (datameshRevision, drbdrGeneration, targetType) |
 
 ---

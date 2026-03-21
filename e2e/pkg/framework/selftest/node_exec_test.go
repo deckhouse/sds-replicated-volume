@@ -25,18 +25,21 @@ import (
 
 var _ = Describe("Node Exec", Label(fw.LabelSmoke), func() {
 	It("Drbdsetup returns zero exit code for a valid command", func(ctx SpecContext) {
-		result := f.Drbdsetup(ctx, f.Discovery.AnyNode(), "show")
+		result, err := f.Drbdsetup(ctx, f.Discovery.AnyNode(), "show")
+		Expect(err).NotTo(HaveOccurred())
 		Expect(result.ExitCode).To(Equal(0))
 	})
 
 	It("LVM returns zero exit code and non-empty output", func(ctx SpecContext) {
-		result := f.LVM(ctx, f.Discovery.AnyNode(), "vgs")
+		result, err := f.LVM(ctx, f.Discovery.AnyDiskfulNode(), "vgs")
+		Expect(err).NotTo(HaveOccurred())
 		Expect(result.ExitCode).To(Equal(0))
 		Expect(result.Stdout).NotTo(BeEmpty())
 	})
 
 	It("returns non-zero exit code without failing the test", func(ctx SpecContext) {
-		result := f.Drbdsetup(ctx, f.Discovery.AnyNode(), "status", "nonexistent-resource-name-e2e-selftest")
+		result, err := f.Drbdsetup(ctx, f.Discovery.AnyNode(), "status", "nonexistent-resource-name-e2e-selftest")
+		Expect(err).NotTo(HaveOccurred())
 		Expect(result.ExitCode).NotTo(Equal(0))
 	})
 })

@@ -246,6 +246,12 @@ type DRBDResourceStatus struct {
 	// +optional
 	DeviceOpen *bool `json:"deviceOpen,omitempty"`
 
+	// Size is the usable capacity of the DRBD upper device in bytes.
+	// Smaller than spec.size because DRBD internal metadata is stored on
+	// the backing device. Nil when the resource is diskless or down.
+	// +optional
+	Size *resource.Quantity `json:"size,omitempty"`
+
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))",message="addresses[].systemNetworkName must be unique"
 	// +kubebuilder:validation:MaxItems=10
 	// +listType=atomic
@@ -305,9 +311,6 @@ type DRBDResourceActiveConfiguration struct {
 	// +optional
 	State DRBDResourceState `json:"state,omitempty"`
 
-	// +optional
-	Size *resource.Quantity `json:"size,omitempty"`
-
 	// +kubebuilder:validation:Enum=Primary;Secondary
 	// +optional
 	Role DRBDRole `json:"role,omitempty"`
@@ -332,6 +335,14 @@ type DRBDResourceActiveConfiguration struct {
 	// +kubebuilder:validation:MaxLength=128
 	// +optional
 	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName,omitempty"`
+
+	// LLVFinalizersToRelease lists LVMLogicalVolume names whose agent finalizer
+	// must be released. Populated before adding a finalizer to an LLV, cleared
+	// after the finalizer is successfully released. This ensures the agent never
+	// loses track of which LLVs it needs to clean up.
+	// +listType=set
+	// +optional
+	LLVFinalizersToRelease []string `json:"llvFinalizersToRelease,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

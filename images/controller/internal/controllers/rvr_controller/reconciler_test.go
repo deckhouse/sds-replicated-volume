@@ -47,8 +47,8 @@ import (
 //
 
 var _ = Describe("rvrShouldNotExist", func() {
-	It("returns true for nil RVR", func() {
-		Expect(rvrShouldNotExist(nil)).To(BeTrue())
+	It("returns false for nil RVR (callers handle nil explicitly)", func() {
+		Expect(rvrShouldNotExist(nil)).To(BeFalse())
 	})
 
 	It("returns false for active RVR (no deletion timestamp)", func() {
@@ -1338,21 +1338,117 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	Describe("Reconcile", func() {
-		It("returns done result when RVR not found (nil RVR)", func() {
+		It("returns done result when RVR not found and no children exist", func() {
 			cl := testhelpers.WithLLVByRVROwnerIndex(
 				fake.NewClientBuilder().
 					WithScheme(scheme),
 			).Build()
 			rec := NewReconciler(cl, scheme, logr.Discard(), "")
 
-			// When RVR is not found, reconcileMetadata returns early with Continue()
-			// since rvrShouldNotExist(nil) returns true.
-			// The overall reconcile should still complete without error.
 			result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "nonexistent"}})
 
 			Expect(err).NotTo(HaveOccurred())
-			// When RVR is nil and no DRBDResource exists, reconcile completes as Done
 			Expect(result).To(Equal(reconcile.Result{}))
+		})
+
+		It("does not delete DRBDR when RVR not found (cache lag)", func() {
+			drbdr := &v1alpha1.DRBDResource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rvr-1",
+				},
+				Spec: v1alpha1.DRBDResourceSpec{
+					NodeName: "node-1",
+					Type:     v1alpha1.DRBDResourceTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithLLVByRVROwnerIndex(
+				fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(drbdr),
+			).Build()
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+			result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			// DRBDR must NOT be deleted — RVR may appear on the next reconciliation.
+			var got v1alpha1.DRBDResource
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, &got)).To(Succeed())
+			Expect(got.DeletionTimestamp).To(BeNil())
+		})
+
+		It("removes finalizer from deleting DRBDR when RVR not found", func() {
+			drbdr := &v1alpha1.DRBDResource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rvr-1",
+					Finalizers: []string{v1alpha1.RVRControllerFinalizer},
+				},
+				Spec: v1alpha1.DRBDResourceSpec{
+					NodeName: "node-1",
+					Type:     v1alpha1.DRBDResourceTypeDiskful,
+				},
+			}
+
+			cl := testhelpers.WithLLVByRVROwnerIndex(
+				fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(drbdr),
+			).Build()
+
+			// Delete the DRBDR so it gets DeletionTimestamp (finalizer keeps it alive).
+			Expect(cl.Delete(ctx, drbdr)).To(Succeed())
+
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+			result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			// Finalizer should be removed to unblock GC cascade deletion.
+			// After removal, the fake client deletes the object entirely.
+			var got v1alpha1.DRBDResource
+			err = cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, &got)
+			Expect(apierrors.IsNotFound(err)).To(BeTrue(), "DRBDR should be fully deleted after finalizer removal")
+		})
+
+		It("does not delete LLV when RVR not found (cache lag)", func() {
+			llv := &snc.LVMLogicalVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "llv-1",
+					Finalizers: []string{v1alpha1.RVRControllerFinalizer},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         v1alpha1.SchemeGroupVersion.String(),
+							Kind:               "ReplicatedVolumeReplica",
+							Name:               "rvr-1",
+							UID:                "uid-1",
+							Controller:         boolPtr(true),
+							BlockOwnerDeletion: boolPtr(true),
+						},
+					},
+				},
+			}
+
+			cl := testhelpers.WithLLVByRVROwnerIndex(
+				fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(llv),
+			).Build()
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+			result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			// LLV must NOT be deleted.
+			var got snc.LVMLogicalVolume
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "llv-1"}, &got)).To(Succeed())
+			Expect(got.DeletionTimestamp).To(BeNil())
 		})
 
 		It("adds finalizer and labels to new RVR", func() {
@@ -1473,6 +1569,61 @@ var _ = Describe("Reconciler", func() {
 			var llvList snc.LVMLogicalVolumeList
 			Expect(cl.List(ctx, &llvList)).To(Succeed())
 			Expect(llvList.Items).To(BeEmpty())
+		})
+
+		It("requeues when RVR is deleting and children were deleted in same cycle", func() {
+			now := metav1.Now()
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rvr-1",
+					UID:               "uid-1",
+					DeletionTimestamp: &now,
+					Finalizers:        []string{v1alpha1.RVRControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					Type: v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+			llv := &snc.LVMLogicalVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "llv-1",
+					Finalizers: []string{v1alpha1.RVRControllerFinalizer},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         v1alpha1.SchemeGroupVersion.String(),
+							Kind:               "ReplicatedVolumeReplica",
+							Name:               "rvr-1",
+							UID:                "uid-1",
+							Controller:         boolPtr(true),
+							BlockOwnerDeletion: boolPtr(true),
+						},
+					},
+				},
+			}
+
+			cl := testhelpers.WithLLVByRVROwnerIndex(
+				fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(rvr, llv).
+					WithStatusSubresource(rvr),
+			).Build()
+			rec := NewReconciler(cl, scheme, logr.Discard(), "")
+
+			// First reconcile: reconcileMetadata keeps finalizer (LLV exists),
+			// then reconcileBackingVolume deletes LLV. Requeue is needed so
+			// the next cycle can remove the finalizer.
+			result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).NotTo(Equal(reconcile.Result{}), "should requeue when children deleted in same cycle")
+
+			// Second reconcile: reconcileMetadata sees no children, removes finalizer.
+			_, err = rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "rvr-1"}})
+			Expect(err).NotTo(HaveOccurred())
+
+			// RVR should now be fully deleted.
+			var updated v1alpha1.ReplicatedVolumeReplica
+			err = cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, &updated)
+			Expect(apierrors.IsNotFound(err)).To(BeTrue(), "RVR should be deleted after second reconcile")
 		})
 
 		// Note: This test verifies that applyBackingVolumeReadyCondAbsent is called

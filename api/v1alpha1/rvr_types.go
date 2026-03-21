@@ -268,6 +268,16 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	DatameshRevision int64 `json:"datameshRevision,omitempty"`
 
+	// DatameshRevisionObservedByAgent is the datamesh revision for which the agent
+	// has processed the DRBDResource spec (observedGeneration == generation).
+	//
+	// Unlike DatameshRevision, this field is set regardless of whether the agent
+	// reported success, failure, or maintenance mode — it only requires that the
+	// agent has acknowledged the current DRBDResource generation.
+	//
+	// +optional
+	DatameshRevisionObservedByAgent int64 `json:"datameshRevisionObservedByAgent,omitempty"`
+
 	// Attachment contains information about the device attachment state.
 	// Only set when the replica is attached on the node.
 	// +optional

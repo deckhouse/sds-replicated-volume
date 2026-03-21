@@ -91,6 +91,30 @@ func (rv) HasActiveTransition(tt string) types.GomegaMatcher {
 
 // FormationComplete matches when the Formation transition is completed
 // or no Formation transition exists and members are present.
+// TransitionStepActive matches when the transition of the given type has its current
+// (first non-completed) step with the given name and status Active.
+func (rv) TransitionStepActive(transitionType v1alpha1.ReplicatedVolumeDatameshTransitionType, stepName string) types.GomegaMatcher {
+	return tkmatch.NewMatcher(func(obj client.Object) (bool, string) {
+		r := asRV(obj)
+		for i := range r.Status.DatameshTransitions {
+			t := &r.Status.DatameshTransitions[i]
+			if t.Type != transitionType {
+				continue
+			}
+			cur := t.CurrentStep()
+			if cur == nil {
+				return false, fmt.Sprintf("%s transition has no active step (all completed)", transitionType)
+			}
+			if cur.Name == stepName && cur.Status == v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive {
+				return true, fmt.Sprintf("%s step %q is active", transitionType, stepName)
+			}
+			return false, fmt.Sprintf("current %s step is %q (%s), expected %q active",
+				transitionType, cur.Name, cur.Status, stepName)
+		}
+		return false, fmt.Sprintf("no %s transition found", transitionType)
+	})
+}
+
 func (rv) FormationComplete() types.GomegaMatcher {
 	return tkmatch.NewMatcher(func(obj client.Object) (bool, string) {
 		r := asRV(obj)

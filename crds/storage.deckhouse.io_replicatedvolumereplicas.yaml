@@ -334,6 +334,16 @@ spec:
                     - Backing volume is synchronized (resync happens asynchronously if the volume was newly added).
                 format: int64
                 type: integer
+              datameshRevisionObservedByAgent:
+                description: |-
+                  DatameshRevisionObservedByAgent is the datamesh revision for which the agent
+                  has processed the DRBDResource spec (observedGeneration == generation).
+
+                  Unlike DatameshRevision, this field is set regardless of whether the agent
+                  reported success, failure, or maintenance mode — it only requires that the
+                  agent has acknowledged the current DRBDResource generation.
+                format: int64
+                type: integer
               drbdrReconciliationCache:
                 description: DRBDRReconciliationCache holds cached values for DRBDResource
                   reconciliation optimization.

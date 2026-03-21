@@ -52,16 +52,31 @@ func (r *Reconciler) reconcileBackingVolume(
 	rf := flow.BeginReconcile(ctx, "backing-volume")
 	defer rf.OnEnd(&outcome)
 
+	// 0. RVR not found in cache — don't assume it's deleted.
+	// The RVR may appear on the next reconciliation (informer cache lag).
+	// If any LLV is being deleted (e.g., by GC cascade), remove our
+	// finalizer to unblock. Otherwise skip — don't delete children speculatively.
+	if rvr == nil {
+		for i := range *llvs {
+			llv := &(*llvs)[i]
+			if llv.DeletionTimestamp != nil && obju.HasFinalizer(llv, v1alpha1.RVRControllerFinalizer) {
+				base := llv.DeepCopy()
+				obju.RemoveFinalizer(llv, v1alpha1.RVRControllerFinalizer)
+				if err := r.patchLLV(rf.Ctx(), llv, base); err != nil {
+					return nil, nil, rf.Failf(err, "removing finalizer from deleting LLV %s", llv.Name)
+				}
+			}
+		}
+		return nil, nil, rf.Continue()
+	}
+
 	// 1. Deletion branch: if RVR should not exist, delete all LLVs.
+	// rvr is guaranteed non-nil here (rvr==nil is handled in step 0 above).
 	if rvrShouldNotExist(rvr) {
 		if len(*llvs) > 0 {
 			deletingNames, ro := r.reconcileLLVsDeletion(rf.Ctx(), llvs, nil)
 			if ro.ShouldReturn() {
 				return nil, nil, ro
-			}
-			// rvr can be nil here if it was already deleted; nothing to update in that case.
-			if rvr == nil {
-				return nil, nil, rf.Continue()
 			}
 			// Still deleting — set condition False.
 			changed := applyBackingVolumeReadyCondFalse(rvr,
@@ -70,12 +85,7 @@ func (r *Reconciler) reconcileBackingVolume(
 			return nil, nil, rf.Continue().ReportChangedIf(changed)
 		}
 
-		// All LLVs deleted.
-		// If rvr is nil (already deleted), just return.
-		if rvr == nil {
-			return nil, nil, rf.Continue()
-		}
-		// Remove condition entirely.
+		// All LLVs deleted — remove condition entirely.
 		changed := applyBackingVolumeReadyCondAbsent(rvr)
 		return nil, nil, rf.Continue().ReportChangedIf(changed)
 	}

@@ -479,9 +479,12 @@ func (a SecondaryAction) String() string {
 	return fmt.Sprintf("Secondary(resource=%s, force=%t)", a.ResourceName, a.Force)
 }
 
-// ResizeAction resizes a DRBD device by re-examining the backing device.
+// ResizeAction resizes a DRBD device.
+// When SizeBytes > 0, the target usable size is passed explicitly via --size;
+// otherwise DRBD auto-detects from the backing device.
 type ResizeAction struct {
-	Minor *uint
+	Minor     *uint
+	SizeBytes int64
 }
 
 func (a ResizeAction) Execute(ctx context.Context) error {
@@ -491,7 +494,7 @@ func (a ResizeAction) Execute(ctx context.Context) error {
 			v1alpha1.DRBDResourceCondConfiguredReasonResizeFailed,
 		)
 	}
-	err := drbdutils.ExecuteResize(ctx, *a.Minor)
+	err := drbdutils.ExecuteResize(ctx, *a.Minor, a.SizeBytes)
 	if errors.Is(err, drbdutils.ErrResizeBackingNotGrown) {
 		return nil
 	}
@@ -503,7 +506,7 @@ func (a ResizeAction) String() string {
 	if a.Minor != nil {
 		minor = fmt.Sprintf("%d", *a.Minor)
 	}
-	return fmt.Sprintf("Resize(minor=%s)", minor)
+	return fmt.Sprintf("Resize(minor=%s, sizeBytes=%d)", minor, a.SizeBytes)
 }
 
 // EnsureDeviceSymlinkAction creates or updates the stable device symlink

@@ -183,13 +183,13 @@ func TestExecuteResizeKnownErrors(t *testing.T) {
 		fakeExec := &fakedrbdutils.Exec{}
 		fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
 			Name:         drbdutils.DRBDSetupCommand,
-			Args:         drbdutils.ResizeArgs(3),
+			Args:         drbdutils.ResizeArgs(3, 0),
 			ResultOutput: []byte("Failure: (111) Low.dev. smaller than requested DRBD-dev. size.\n"),
 			ResultErr:    fakedrbdutils.ExitErr{Code: 10},
 		})
 		fakeExec.Setup(t)
 
-		err := drbdutils.ExecuteResize(t.Context(), 3)
+		err := drbdutils.ExecuteResize(t.Context(), 3, 0)
 		if !errors.Is(err, drbdutils.ErrResizeBackingNotGrown) {
 			t.Fatalf("ExecuteResize() error = %v, want ErrResizeBackingNotGrown", err)
 		}
@@ -199,13 +199,13 @@ func TestExecuteResizeKnownErrors(t *testing.T) {
 		fakeExec := &fakedrbdutils.Exec{}
 		fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
 			Name:         drbdutils.DRBDSetupCommand,
-			Args:         drbdutils.ResizeArgs(3),
+			Args:         drbdutils.ResizeArgs(3, 0),
 			ResultOutput: []byte("Failure: (131) Need one Primary node to resize.\n"),
 			ResultErr:    fakedrbdutils.ExitErr{Code: 10},
 		})
 		fakeExec.Setup(t)
 
-		err := drbdutils.ExecuteResize(t.Context(), 3)
+		err := drbdutils.ExecuteResize(t.Context(), 3, 0)
 		if !errors.Is(err, drbdutils.ErrResizeNeedPrimary) {
 			t.Fatalf("ExecuteResize() error = %v, want ErrResizeNeedPrimary", err)
 		}
@@ -215,13 +215,13 @@ func TestExecuteResizeKnownErrors(t *testing.T) {
 		fakeExec := &fakedrbdutils.Exec{}
 		fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
 			Name:         drbdutils.DRBDSetupCommand,
-			Args:         drbdutils.ResizeArgs(3),
+			Args:         drbdutils.ResizeArgs(3, 0),
 			ResultOutput: []byte("Failure: (127) Device minor not allocated\n"),
 			ResultErr:    fakedrbdutils.ExitErr{Code: 10},
 		})
 		fakeExec.Setup(t)
 
-		err := drbdutils.ExecuteResize(t.Context(), 3)
+		err := drbdutils.ExecuteResize(t.Context(), 3, 0)
 		if err == nil {
 			t.Fatal("ExecuteResize() error = nil, want non-nil")
 		}

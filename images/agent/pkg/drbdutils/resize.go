@@ -28,8 +28,15 @@ var (
 )
 
 // ResizeArgs returns the arguments for drbdsetup resize command.
-var ResizeArgs = func(minor uint) []string {
-	return []string{"resize", fmt.Sprintf("%d", minor)}
+// When sizeBytes > 0, an explicit --size (in 512-byte sectors) is passed
+// instead of letting DRBD auto-detect from the backing device.
+var ResizeArgs = func(minor uint, sizeBytes int64) []string {
+	args := []string{"resize", fmt.Sprintf("%d", minor)}
+	if sizeBytes > 0 {
+		sectors := sizeBytes / 512
+		args = append(args, fmt.Sprintf("--size=%d", sectors))
+	}
+	return args
 }
 
 var ResizeKnownErrors = []KnownError{
@@ -38,8 +45,9 @@ var ResizeKnownErrors = []KnownError{
 }
 
 // ExecuteResize resizes a replicated device after growing backing devices.
-func ExecuteResize(ctx context.Context, minor uint) error {
-	cmd := ExecCommandContext(ctx, DRBDSetupCommand, ResizeArgs(minor)...)
+// When sizeBytes > 0, the target usable size is passed explicitly via --size.
+func ExecuteResize(ctx context.Context, minor uint, sizeBytes int64) error {
+	cmd := ExecCommandContext(ctx, DRBDSetupCommand, ResizeArgs(minor, sizeBytes)...)
 	_, err := executeCommand(cmd, ResizeKnownErrors)
 	return err
 }
