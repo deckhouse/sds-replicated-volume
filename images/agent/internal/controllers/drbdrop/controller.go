@@ -52,7 +52,7 @@ func BuildController(mgr manager.Manager) error {
 			builder.WithPredicates(operationPredicates()...),
 		).
 		WithOptions(controller.Options{
-			MaxConcurrentReconciles: 5,
+			MaxConcurrentReconciles: 10,
 			RateLimiter:             controlleroptions.DefaultRateLimiter[reconcile.Request](),
 		}).
 		Complete(rec); err != nil {
