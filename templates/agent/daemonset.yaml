@@ -3,6 +3,11 @@ cpu: 50m
 memory: 50Mi
 {{- end }}
 
+{{- define "drbd_prometheus_exporter_agent_resources" }}
+cpu: 50m
+memory: 25Mi
+{{- end }}
+
 {{- if .Values.sdsReplicatedVolume.newControlPlane }}
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
@@ -27,6 +32,19 @@ spec:
       maxAllowed:
         cpu: 200m
         memory: 100Mi
+    {{- include "helm_lib_vpa_kube_rbac_proxy_resources" . | nindent 4 }}
+    - containerName: drbd-prometheus-exporter
+      minAllowed:
+        {{- include "drbd_prometheus_exporter_agent_resources" . | nindent 8 }}
+      maxAllowed:
+        cpu: 100m
+        memory: 50Mi
+    - containerName: kube-rbac-proxy-drbd
+      minAllowed:
+        {{- include "helm_lib_container_kube_rbac_proxy_resources" . | nindent 8 }}
+      maxAllowed:
+        cpu: 20m
+        memory: 25Mi
 {{- end }}
 
 ---
@@ -130,7 +148,7 @@ spec:
           - name: KUBE_RBAC_PROXY_CONFIG
             value: |
               upstreams:
-              - upstream: http://127.0.0.1:4215
+              - upstream: http://127.0.0.1:4270
                 path: /
                 authorization:
                   resourceAttributes:
@@ -149,6 +167,87 @@ spec:
           httpGet:
             path: /livez
             port: 4215
+            scheme: HTTPS
+        resources:
+          requests:
+            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
+            {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+              {{- include "helm_lib_container_kube_rbac_proxy_resources" . | nindent 12 }}
+            {{- end }}
+        {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 8 }}
+      - name: drbd-prometheus-exporter
+        image: {{ include "helm_lib_module_image" (list . "drbdReactor") }}
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            host: 127.0.0.1
+            path: /
+            port: 4274
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          requests:
+            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
+            {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+              {{- include "drbd_prometheus_exporter_agent_resources" . | nindent 12 }}
+            {{- end }}
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          seccompProfile:
+            type: RuntimeDefault
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+          - mountPath: /etc/drbd-reactor.d/
+            name: drbd-reactor-config
+      - name: kube-rbac-proxy-drbd
+        image: {{ include "helm_lib_module_common_image" (list . "kubeRbacProxy") }}
+        imagePullPolicy: IfNotPresent
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        args:
+          - --secure-listen-address=$(KUBE_RBAC_PROXY_LISTEN_ADDRESS):4273
+          - --v=2
+          - --logtostderr=true
+          - --stale-cache-interval=1h30m
+          - "--livez-path=/livez"
+        env:
+          - name: KUBE_RBAC_PROXY_LISTEN_ADDRESS
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: status.podIP
+          - name: KUBE_RBAC_PROXY_CONFIG
+            value: |
+              upstreams:
+              - upstream: http://127.0.0.1:4274
+                path: /
+                authorization:
+                  resourceAttributes:
+                    namespace: d8-{{ .Chart.Name }}
+                    apiGroup: apps
+                    apiVersion: v1
+                    resource: daemonsets
+                    subresource: prometheus-metrics
+                    name: agent
+        ports:
+          - containerPort: 4273
+            hostPort: 4273
+            name: drbd-metrics
+            protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: 4273
+            scheme: HTTPS
+        readinessProbe:
+          httpGet:
+            path: /livez
+            port: 4273
             scheme: HTTPS
         resources:
           requests:
@@ -178,4 +277,8 @@ spec:
           type: DirectoryOrCreate
       - name: var-run-drbd-lock
         emptyDir: {}
+      - name: drbd-reactor-config
+        configMap:
+          defaultMode: 420
+          name: agent-monitoring
 {{- end }}
