@@ -192,8 +192,6 @@ func (f *Framework) init(ctx context.Context) {
 	Expect(err).NotTo(HaveOccurred())
 	f.clientset = clientset
 
-	f.Discovery = newDiscovery(ctx, cl)
-
 	var deploys appsv1.DeploymentList
 	Expect(c.List(ctx, &deploys, client.InNamespace("d8-sds-replicated-volume"))).To(Succeed())
 	for i := range deploys.Items {
@@ -218,6 +216,8 @@ func (f *Framework) init(ctx context.Context) {
 		dbg.Component{Name: "controller", LabelSelector: "app=controller"},
 		dbg.Component{Name: "agent", LabelSelector: "app=agent"},
 	)
+
+	f.Discovery = newDiscovery(ctx, f)
 
 	fmt.Fprintf(GinkgoWriter, "[%s] init: runID=%s worker=%d rspThick=%s rspThin=%s controlPlane=%d\n",
 		time.Now().Format("15:04:05.000"), f.runID, f.WorkerID, f.Discovery.ThickRSPName(), f.Discovery.ThinRSPName(), f.controlPlane)
