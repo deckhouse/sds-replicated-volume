@@ -94,16 +94,17 @@ type TestRV struct {
 	extraInformerRegs []tk.InformerReg
 
 	// Builder fields — nil means "not set, let API server default".
-	buildFTT       *byte
-	buildGMDR      *byte
-	buildSize      *resource.Quantity
-	buildMaxAttach *byte
-	buildTopology  *v1alpha1.ReplicatedStorageClassTopology
-	buildAccess    *v1alpha1.ReplicatedStorageClassVolumeAccess
-	buildPoolType  *v1alpha1.ReplicatedStoragePoolType
-	buildRSCName   string
-	buildManualCfg *v1alpha1.ReplicatedVolumeConfiguration
-	buildAdopt     bool
+	buildFTT               *byte
+	buildGMDR              *byte
+	buildSize              *resource.Quantity
+	buildMaxAttach         *byte
+	buildTopology          *v1alpha1.ReplicatedStorageClassTopology
+	buildAccess            *v1alpha1.ReplicatedStorageClassVolumeAccess
+	buildPoolType          *v1alpha1.ReplicatedStoragePoolType
+	buildRSCName           string
+	buildManualCfg         *v1alpha1.ReplicatedVolumeConfiguration
+	buildAdopt             bool
+	buildAdoptSharedSecret string
 
 	// Safety switches (populated by ActivateSafetyInvariants).
 	swQuorumCorrect    *tkmatch.Switch
@@ -167,6 +168,11 @@ func (t *TestRV) Adopt() *TestRV {
 	return t
 }
 
+func (t *TestRV) AdoptSharedSecret(s string) *TestRV {
+	t.buildAdoptSharedSecret = s
+	return t
+}
+
 // ---------------------------------------------------------------------------
 // buildObject
 // ---------------------------------------------------------------------------
@@ -207,6 +213,9 @@ func (t *TestRV) buildObject(ctx context.Context) *v1alpha1.ReplicatedVolume {
 			ann = make(map[string]string)
 		}
 		ann[v1alpha1.AdoptRVRAnnotationKey] = ""
+		if t.buildAdoptSharedSecret != "" {
+			ann[v1alpha1.AdoptSharedSecretAnnotationKey] = t.buildAdoptSharedSecret
+		}
 		rv.SetAnnotations(ann)
 	}
 	return rv
@@ -261,9 +270,24 @@ func (t *TestRV) TestRVR(id int) *TestRVR {
 	return t.rvrs.Resolve(name)
 }
 
+// TestRVRs returns all currently tracked TestRVRs.
+func (t *TestRV) TestRVRs() []*TestRVR {
+	return t.rvrs.All()
+}
+
 // RVRCount returns the number of tracked RVRs.
 func (t *TestRV) RVRCount() int {
 	return t.rvrs.Count()
+}
+
+// OccupiedNodes returns the node names of all current datamesh members.
+func (t *TestRV) OccupiedNodes() []string {
+	rv := t.Object()
+	nodes := make([]string, len(rv.Status.Datamesh.Members))
+	for i, m := range rv.Status.Datamesh.Members {
+		nodes[i] = m.NodeName
+	}
+	return nodes
 }
 
 // OnEachRVR returns a GroupHandle for bulk operations on all current

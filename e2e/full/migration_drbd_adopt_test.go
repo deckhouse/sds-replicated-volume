@@ -17,7 +17,6 @@ limitations under the License.
 package full
 
 import (
-	"math/rand"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -32,63 +31,79 @@ import (
 
 var _ = Describe("Migration: agent adopts preexisting DRBD", Label(fw.LabelUpgrade, fw.LabelSlow), func() {
 	DescribeTable("adopts and cleans up",
-		func(ctx SpecContext, ftt, gmdr byte, expectedReplicas int, wantPrimary bool) {
-			replicas := createPreexistingDRBD(ctx, ftt, gmdr)
-			Expect(replicas).To(HaveLen(expectedReplicas))
+		func(ctx SpecContext, l fw.TestLayout) {
+			replicas := f.SetupLayout(ctx, l).EmulatePreexisting(ctx)
+			Expect(replicas).To(HaveLen(l.ExpectedReplicas()))
 
-			primaryIdx := -1
-			if wantPrimary && len(replicas) > 0 {
-				primaryIdx = rand.Intn(len(replicas))
-				res := f.Drbdsetup(ctx, replicas[primaryIdx].NodeName, "primary", replicas[primaryIdx].DRBDName)
-				Expect(res.ExitCode).To(Equal(0))
-			}
+			var llvs []*fw.TestLLV
+			var drbdrs []*fw.TestDRBDR
+			var primaryDRBDR *fw.TestDRBDR
 
-			llvs := make([]*fw.TestLLV, len(replicas))
-			for i, r := range replicas {
-				tllv := f.TestLLV()
-				b := tllv.ActualLVName(r.ActualLVName).
-					LVMVolumeGroupName(r.LVGName).
-					Type("Thin").
-					Size(r.Size)
-				if r.ThinPoolName != "" {
-					b = b.ThinPoolName(r.ThinPoolName)
+			for _, r := range replicas {
+				var drbdType v1alpha1.DRBDResourceType
+				var tllv *fw.TestLLV
+
+				switch r.Type {
+				case v1alpha1.ReplicaTypeDiskful:
+					drbdType = v1alpha1.DRBDResourceTypeDiskful
+					tllv = f.TestLLV()
+					b := tllv.ActualLVName(r.ActualLVName).
+						LVMVolumeGroupName(r.LVGName).
+						Type("Thin").
+						Size(r.Size)
+					if r.ThinPoolName != "" {
+						b = b.ThinPoolName(r.ThinPoolName)
+					}
+					b.Create(ctx)
+					llvs = append(llvs, tllv)
+				case v1alpha1.ReplicaTypeTieBreaker:
+					drbdType = v1alpha1.DRBDResourceTypeDiskless
+				default:
+					continue
 				}
-				b.Create(ctx)
-				llvs[i] = tllv
-			}
 
-			drbdrs := make([]*fw.TestDRBDR, len(replicas))
-			for i, r := range replicas {
-				b := f.TestDRBDR().
+				db := f.TestDRBDR().
 					Node(r.NodeName).
-					Type(v1alpha1.DRBDResourceTypeDiskful).
-					Size(r.Size).
-					LVMLogicalVolumeName(llvs[i].Name()).
+					Type(drbdType).
 					SystemNetworks("Internal").
 					NodeID(r.NodeID).
 					ActualNameOnTheNode(r.DRBDName).
 					Maintenance(v1alpha1.MaintenanceModeNoResourceReconciliation)
-				if wantPrimary && i == primaryIdx {
-					b = b.Role(v1alpha1.DRBDRolePrimary)
+				if drbdType == v1alpha1.DRBDResourceTypeDiskful {
+					db = db.Size(r.Size).LVMLogicalVolumeName(tllv.Name())
 				}
-				b.Create(ctx)
-				drbdrs[i] = b
+				if r.Role == v1alpha1.DRBDRolePrimary {
+					db = db.Role(v1alpha1.DRBDRolePrimary)
+				}
+				db.Create(ctx)
+				drbdrs = append(drbdrs, db)
+
+				if r.Role == v1alpha1.DRBDRolePrimary {
+					primaryDRBDR = db
+				}
 			}
 
 			for _, td := range drbdrs {
-				td.Await(ctx, And(
-					DRBDR.HasAddresses(),
-					DRBDR.DiskState(v1alpha1.DiskStateUpToDate)))
+				td.Await(ctx, DRBDR.HasAddresses())
+			}
+			for _, td := range drbdrs {
+				obj := td.Object()
+				if obj.Spec.Type == v1alpha1.DRBDResourceTypeDiskful {
+					td.Await(ctx, DRBDR.DiskState(v1alpha1.DiskStateUpToDate))
+				}
 			}
 
 			swUpToDate := NewSwitch(DRBDR.DiskState(v1alpha1.DiskStateUpToDate))
 			for _, td := range drbdrs {
-				td.Always(swUpToDate)
+				obj := td.Object()
+				if obj.Spec.Type == v1alpha1.DRBDResourceTypeDiskful {
+					td.Always(swUpToDate)
+				}
 			}
 			var swPrimaryDevice *Switch
-			if wantPrimary {
+			if primaryDRBDR != nil {
 				swPrimaryDevice = NewSwitch(And(DRBDR.HasDevice(), Not(DRBDR.IOSuspended())))
-				drbdrs[primaryIdx].Always(swPrimaryDevice)
+				primaryDRBDR.Always(swPrimaryDevice)
 			}
 
 			for i, td := range drbdrs {
@@ -127,7 +142,7 @@ var _ = Describe("Migration: agent adopts preexisting DRBD", Label(fw.LabelUpgra
 			}
 
 			swUpToDate.Disable()
-			if wantPrimary {
+			if swPrimaryDevice != nil {
 				swPrimaryDevice.Disable()
 			}
 
@@ -141,30 +156,30 @@ var _ = Describe("Migration: agent adopts preexisting DRBD", Label(fw.LabelUpgra
 			}
 		},
 
-		Entry("FTT=0 GMDR=0 secondary (1 replica)",
-			byte(0), byte(0), 1, false),
-		Entry("FTT=0 GMDR=0 primary (1 replica)",
-			byte(0), byte(0), 1, true),
+		Entry("FTT=0 GMDR=0 (1D)",
+			fw.TestLayout{FTT: 0, GMDR: 0}),
+		Entry("FTT=0 GMDR=0 (1D, 1att)",
+			fw.TestLayout{FTT: 0, GMDR: 0, Attached: 1}),
 
-		Entry("FTT=0 GMDR=1 secondary (2 replicas)",
+		Entry("FTT=0 GMDR=1 (2D)",
 			SpecTimeout(2*time.Minute), require.MinNodes(2),
-			byte(0), byte(1), 2, false),
-		Entry("FTT=0 GMDR=1 primary (2 replicas)",
+			fw.TestLayout{FTT: 0, GMDR: 1}),
+		Entry("FTT=0 GMDR=1 (2D, 1att)",
 			SpecTimeout(2*time.Minute), require.MinNodes(2),
-			byte(0), byte(1), 2, true),
+			fw.TestLayout{FTT: 0, GMDR: 1, Attached: 1}),
 
-		Entry("FTT=1 GMDR=0 secondary (2 replicas)",
-			SpecTimeout(2*time.Minute), require.MinNodes(2),
-			byte(1), byte(0), 2, false),
-		Entry("FTT=1 GMDR=0 primary (2 replicas)",
-			SpecTimeout(2*time.Minute), require.MinNodes(2),
-			byte(1), byte(0), 2, true),
+		Entry("FTT=1 GMDR=0 (2D+1TB)",
+			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			fw.TestLayout{FTT: 1, GMDR: 0}),
+		Entry("FTT=1 GMDR=0 (2D+1TB, 1att)",
+			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			fw.TestLayout{FTT: 1, GMDR: 0, Attached: 1}),
 
-		Entry("FTT=1 GMDR=1 secondary (3 replicas)",
+		Entry("FTT=1 GMDR=1 (3D)",
 			SpecTimeout(3*time.Minute), require.MinNodes(3),
-			byte(1), byte(1), 3, false),
-		Entry("FTT=1 GMDR=1 primary (3 replicas)",
+			fw.TestLayout{FTT: 1, GMDR: 1}),
+		Entry("FTT=1 GMDR=1 (3D, 1att)",
 			SpecTimeout(3*time.Minute), require.MinNodes(3),
-			byte(1), byte(1), 3, true),
+			fw.TestLayout{FTT: 1, GMDR: 1, Attached: 1}),
 	)
 })

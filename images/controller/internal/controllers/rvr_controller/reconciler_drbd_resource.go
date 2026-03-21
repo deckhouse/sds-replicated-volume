@@ -245,7 +245,15 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
-	// 10c. DRBDR is in maintenance mode.
+	// 10c. Agent processed the current generation — record the datamesh revision
+	// the agent observed. This advances even when the agent reports maintenance
+	// or configuration failure (unlike DatameshRevision which requires full success).
+	if rvr.Status.DatameshRevisionObservedByAgent != targetDRBDRReconciliationCache.DatameshRevision {
+		rvr.Status.DatameshRevisionObservedByAgent = targetDRBDRReconciliationCache.DatameshRevision
+		changed = true
+	}
+
+	// 10d. DRBDR is in maintenance mode.
 	if drbdrConfiguredCond.Reason == v1alpha1.DRBDResourceCondConfiguredReasonInMaintenance {
 		changed = applyDRBDConfiguredCondUnknown(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonInMaintenance,
@@ -253,7 +261,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
-	// 10d. DRBDR configuration failed.
+	// 10e. DRBDR configuration failed.
 	if drbdrConfiguredCond.Status != metav1.ConditionTrue {
 		msg := fmt.Sprintf("DRBD configuration failed (reason: %s)", drbdrConfiguredCond.Reason)
 		changed = applyDRBDConfiguredCondFalse(rvr,
@@ -322,6 +330,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		// that the replica has acknowledged its removal from the datamesh.
 		if rvr.Status.DatameshRevision != 0 {
 			rvr.Status.DatameshRevision = 0
+			rvr.Status.DatameshRevisionObservedByAgent = 0
 			changed = true
 			changed = applyDRBDConfiguredCondTrue(rvr,
 				v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured,
