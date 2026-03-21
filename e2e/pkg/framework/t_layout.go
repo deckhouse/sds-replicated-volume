@@ -81,20 +81,8 @@ func (f *Framework) SetupLayout(ctx SpecContext, l TestLayout) *TestRV {
 	var tbRVR *TestRVR
 	var tbNodeName string
 	if needTB {
-		taken := make(map[uint8]bool)
-		for _, m := range trv.Object().Status.Datamesh.Members {
-			taken[m.ID()] = true
-		}
-		var tbNodeID uint8
-		for id := uint8(0); id <= 31; id++ {
-			if !taken[id] {
-				tbNodeID = id
-				break
-			}
-		}
-
 		tbNodeName = f.Discovery.AnyNode(trv.OccupiedNodes()...)
-		tbRVR = f.TestRVRExact(trv.Name(), tbNodeID).
+		tbRVR = f.TestRVRExact(trv.Name(), trv.FreeReplicaID()).
 			Node(tbNodeName).
 			Type(v1alpha1.ReplicaTypeTieBreaker)
 		tbRVR.Create(ctx)

@@ -97,6 +97,29 @@ func (r *Reconciler) reconcileFormation(
 	// Find or create the Formation transition. Created on first entry (stepIdx=0).
 	t, created := ensureFormationTransition(rv, planID)
 
+	// Adopt formation, steps 0-1: re-derive configuration so the user can fix
+	// mismatches (wrong FTT/GMDR, switched config mode, etc.) without adopt
+	// being stuck forever. If configuration changed, restart the adopt transition
+	// from the beginning to re-verify all prerequisites.
+	// Step 2 (ExitMaintenance) does not use configuration; any pending config
+	// change will be picked up by normal operation after formation completes.
+	if t.PlanID == formationPlanAdopt && !created &&
+		stepIdx <= adoptStepIdxPopulateAndVerifyDatamesh {
+		configOutcome := r.reconcileRVConfiguration(rf.Ctx(), rv, rsc)
+		if configOutcome.ShouldReturn() {
+			return configOutcome
+		}
+		if configOutcome.DidChange() {
+			rf.Log().Info("Configuration changed during adopt formation, restarting adopt")
+			rv.Status.DatameshRevision = 0
+			rv.Status.Datamesh = v1alpha1.ReplicatedVolumeDatamesh{}
+			rv.Status.BaselineGuaranteedMinimumDataRedundancy = 0
+			rv.Status.DatameshTransitions = nil
+			rv.Status.DatameshReplicaRequests = nil
+			return rf.ContinueAndRequeue().ReportChanged()
+		}
+	}
+
 	// Dispatch by plan stored in the transition (persisted on first creation).
 	switch t.PlanID {
 	case formationPlanAdopt:
@@ -1027,9 +1050,11 @@ func (r *Reconciler) reconcileAdoptStepVerifyPrerequisites(
 		return rf.ContinueAndRequeue().ReportChangedIf(changed)
 	}
 
-	// Gate: diskful replica count matches intended configuration.
+	// Gate: diskful replica count is at least the intended count.
+	// Having more diskful replicas than needed is acceptable during adopt
+	// (extras will be managed after formation completes).
 	targetDiskfulCount := computeIntendedDiskfulReplicaCount(rv)
-	if diskful.Len() != int(targetDiskfulCount) {
+	if diskful.Len() < int(targetDiskfulCount) {
 		msg := fmt.Sprintf(
 			"Diskful replica count mismatch: found %d, expected %d (FTT=%d + GMDR=%d + 1). "+
 				"Pre-existing replicas do not match the intended configuration",
@@ -1048,14 +1073,15 @@ func (r *Reconciler) reconcileAdoptStepVerifyPrerequisites(
 		return rf.ContinueAndRequeue().ReportChangedIf(changed)
 	}
 
-	// Gate: tiebreaker replica count matches intended configuration.
+	// Gate: tiebreaker replica count is at least the intended count.
+	// Having more tiebreakers than needed is acceptable during adopt.
 	// TB = 1 if D is even AND FTT == D/2, else 0.
 	var targetTBCount int
 	if targetDiskfulCount%2 == 0 && targetDiskfulCount > 0 &&
 		rv.Status.Configuration.FailuresToTolerate == targetDiskfulCount/2 {
 		targetTBCount = 1
 	}
-	if tiebreakers.Len() != targetTBCount {
+	if tiebreakers.Len() < targetTBCount {
 		msg := fmt.Sprintf(
 			"TieBreaker replica count mismatch: found %d, expected %d (D=%d, FTT=%d). "+
 				"Pre-existing replicas do not match the intended configuration",

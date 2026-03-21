@@ -326,14 +326,25 @@ func (t *TestRV) EmulatePreexisting(ctx SpecContext) []PreexistingDRBDReplica {
 			continue
 		}
 		g.Go(func() error {
-			res, err := t.f.Drbdsetup(gCtx, m.nodeName, "primary", m.newDRBDName)
-			if err != nil {
-				return err
+			const maxAttempts = 3
+			for attempt := 1; attempt <= maxAttempts; attempt++ {
+				res, err := t.f.Drbdsetup(gCtx, m.nodeName, "primary", m.newDRBDName)
+				if err != nil {
+					return err
+				}
+				if res.ExitCode == 0 {
+					members[i].attached = true
+					return nil
+				}
+				if attempt == maxAttempts {
+					return fmt.Errorf("primary %s on %s: exit %d (after %d attempts)", m.newDRBDName, m.nodeName, res.ExitCode, maxAttempts)
+				}
+				select {
+				case <-gCtx.Done():
+					return gCtx.Err()
+				case <-time.After(time.Duration(attempt) * time.Second):
+				}
 			}
-			if res.ExitCode != 0 {
-				return fmt.Errorf("primary %s on %s: exit %d", m.newDRBDName, m.nodeName, res.ExitCode)
-			}
-			members[i].attached = true
 			return nil
 		})
 	}
