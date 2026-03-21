@@ -26,25 +26,26 @@ import (
 
 const (
 	// MaxConcurrentReconciles is the number of parallel reconcile goroutines
-	// per controller. Applies to both rv-controller and rvr-scheduling-controller.
-	// Higher values increase throughput for normal operations (attach, detach,
-	// replica moves) but also increase API server load.
-	MaxConcurrentReconciles = 20
+	// per controller. Applies to rv-controller and rvr-controller.
+	// Idle goroutines cost ~2-8KB each; even 100 goroutines ≈ 800KB RAM.
+	// Higher values increase throughput for bulk operations but also increase
+	// API server load (more concurrent patches → more 409 Conflicts → retries).
+	MaxConcurrentReconciles = 50
 )
 
 // DefaultRateLimiter returns the shared rate limiter used by all controllers in this binary.
 //
 // It combines two limiters (max of both delays is used):
-//   - Per-item exponential backoff: 5ms base, 1 minute max.
-//   - Global token bucket: 100 QPS, burst 500.
+//   - Per-item exponential backoff: 5ms base, 30 seconds max.
+//   - Global token bucket: 300 QPS, burst 1500.
 func DefaultRateLimiter() workqueue.TypedRateLimiter[reconcile.Request] {
 	return workqueue.NewTypedMaxOfRateLimiter(
 		workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](
 			5*time.Millisecond, // baseDelay
-			1*time.Minute,      // maxDelay
+			30*time.Second,     // maxDelay
 		),
 		&workqueue.TypedBucketRateLimiter[reconcile.Request]{
-			Limiter: rate.NewLimiter(rate.Limit(100), 500),
+			Limiter: rate.NewLimiter(rate.Limit(300), 1500),
 		},
 	)
 }

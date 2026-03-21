@@ -26,16 +26,16 @@ import (
 // DefaultRateLimiter returns the shared rate limiter used by all controllers in this binary.
 //
 // It combines two limiters (max of both delays is used):
-//   - Per-item exponential backoff: 5ms base, 1 minute max.
-//   - Global token bucket: 100 QPS, burst 500.
+//   - Per-item exponential backoff: 5ms base, 30 seconds max.
+//   - Global token bucket: 300 QPS, burst 1500.
 func DefaultRateLimiter[T comparable]() workqueue.TypedRateLimiter[T] {
 	return workqueue.NewTypedMaxOfRateLimiter(
 		workqueue.NewTypedItemExponentialFailureRateLimiter[T](
 			5*time.Millisecond, // baseDelay
-			1*time.Minute,      // maxDelay
+			30*time.Second,     // maxDelay
 		),
 		&workqueue.TypedBucketRateLimiter[T]{
-			Limiter: rate.NewLimiter(rate.Limit(100), 500),
+			Limiter: rate.NewLimiter(rate.Limit(300), 1500),
 		},
 	)
 }
