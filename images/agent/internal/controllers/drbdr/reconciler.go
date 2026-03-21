@@ -685,10 +685,10 @@ func (r *Reconciler) patchDRBDRStatus(
 func convergeDRBDState(ctx context.Context, actions DRBDActions, maintenanceMode bool) (refreshNeeded bool, err error) {
 	log := log.FromContext(ctx)
 	for _, action := range actions {
-		log.Info("DRBD action", "action", action.String(), "maintenanceMode", maintenanceMode)
 		if maintenanceMode {
 			continue
 		}
+		log.Info("DRBD action", "action", action.String(), "maintenanceMode", maintenanceMode)
 		if err := action.Execute(ctx); err != nil {
 			return refreshNeeded, err
 		}
