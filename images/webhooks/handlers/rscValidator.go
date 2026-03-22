@@ -19,11 +19,10 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"sync"
+	"os"
 
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -32,8 +31,7 @@ import (
 )
 
 const (
-	newControlPlaneConfigMapName = "controller-config"
-	webhookNamespace             = "d8-sds-replicated-volume"
+	webhookNamespace = "d8-sds-replicated-volume"
 
 	// Topology types for ReplicatedStorageClass.
 	topologyTransZonal = "TransZonal"
@@ -45,20 +43,15 @@ const (
 	replicationConsistencyAndAvailability = "ConsistencyAndAvailability"
 )
 
-// newControlPlane caches whether the new control plane is active.
-// nil = not determined yet, true = new control plane, false = legacy control plane (cached 404).
-// API errors are NOT cached and will trigger a retry on next call.
-var (
-	newControlPlane   *bool
-	newControlPlaneMu sync.RWMutex
-)
-
 func RSCValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {
 	rsc, ok := obj.(*srv.ReplicatedStorageClass)
 	if !ok {
 		// If not a storage class just continue the validation chain(if there is one) and do nothing.
 		return &kwhvalidating.ValidatorResult{}, nil
 	}
+
+	// Determine control plane type based on environment variable.
+	isNewControlPlane := os.Getenv("NEW_CONTROL_PLANE") != ""
 
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -68,12 +61,6 @@ func RSCValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 	staticClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
-	}
-
-	// Determine control plane type (cached on first successful call).
-	isNewControlPlane, err := getNewControlPlane(ctx, staticClient)
-	if err != nil {
-		return nil, err
 	}
 
 	if isNewControlPlane {
@@ -203,45 +190,4 @@ func validateLegacyControlPlaneTopology(rsc *srv.ReplicatedStorageClass, cluster
 		}
 	}
 	return &kwhvalidating.ValidatorResult{Valid: true}
-}
-
-// getNewControlPlane determines if the new control plane is active by checking ConfigMap existence.
-// Returns true if new control plane, false if legacy. Successful results (including 404) are cached.
-// API errors are NOT cached and will trigger a retry on next call.
-func getNewControlPlane(ctx context.Context, client *kubernetes.Clientset) (bool, error) {
-	// Fast path: check cache with read lock.
-	newControlPlaneMu.RLock()
-	if newControlPlane != nil {
-		result := *newControlPlane
-		newControlPlaneMu.RUnlock()
-		return result, nil
-	}
-	newControlPlaneMu.RUnlock()
-
-	// Slow path: fetch with write lock.
-	newControlPlaneMu.Lock()
-	defer newControlPlaneMu.Unlock()
-
-	// Double-check after acquiring write lock.
-	if newControlPlane != nil {
-		return *newControlPlane, nil
-	}
-
-	// Fetch ConfigMap from API.
-	_, err := client.CoreV1().ConfigMaps(webhookNamespace).Get(ctx, newControlPlaneConfigMapName, metav1.GetOptions{})
-	if err != nil {
-		if k8serrors.IsNotFound(err) {
-			// ConfigMap not found - legacy control plane. Cache this result.
-			result := false
-			newControlPlane = &result
-			return false, nil
-		}
-		// API error - do NOT cache, return error to allow retry.
-		return false, err
-	}
-
-	// ConfigMap found - new control plane. Cache this result.
-	result := true
-	newControlPlane = &result
-	return true, nil
 }

@@ -1,5 +1,5 @@
-{{/*
-{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
+{{- if not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started")) }}
 {{- if (.Values.global.enabledModules | has "operator-prometheus-crd") }}
 ---
 apiVersion: monitoring.coreos.com/v1
@@ -58,4 +58,4 @@ spec:
     - d8-{{ .Chart.Name }}
 {{- end }}
 {{- end }}
-*/}}
+{{- end }}
