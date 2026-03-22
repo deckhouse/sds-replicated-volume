@@ -30,9 +30,6 @@ const (
 	DRBDMinPortEnvVar = "DRBD_MIN_PORT"
 	DRBDMaxPortEnvVar = "DRBD_MAX_PORT"
 
-	DRBDMinPortDefault uint = 7000
-	DRBDMaxPortDefault uint = 7999
-
 	HealthProbeBindAddressEnvVar = "HEALTH_PROBE_BIND_ADDRESS"
 	MetricsPortEnvVar            = "METRICS_BIND_ADDRESS"
 	EnabledControllersEnvVar     = "ENABLED_CONTROLLERS"
@@ -108,27 +105,23 @@ func GetConfig() (Config, error) {
 		cfg.nodeName = hostName
 	}
 
-	//
 	minPortStr := os.Getenv(DRBDMinPortEnvVar)
 	if minPortStr == "" {
-		cfg.drbdMinPort = DRBDMinPortDefault
+		return cfg, fmt.Errorf("%w: %s is required", ErrInvalidConfig, DRBDMinPortEnvVar)
+	}
+	if minPort, err := strconv.ParseUint(minPortStr, 10, 32); err != nil {
+		return cfg, fmt.Errorf("parsing %s: %w", DRBDMinPortEnvVar, err)
 	} else {
-		minPort, err := strconv.ParseUint(minPortStr, 10, 32)
-		if err != nil {
-			return cfg, fmt.Errorf("parsing %s: %w", DRBDMinPortEnvVar, err)
-		}
 		cfg.drbdMinPort = uint(minPort)
 	}
 
-	//
 	maxPortStr := os.Getenv(DRBDMaxPortEnvVar)
 	if maxPortStr == "" {
-		cfg.drbdMaxPort = DRBDMaxPortDefault
+		return cfg, fmt.Errorf("%w: %s is required", ErrInvalidConfig, DRBDMaxPortEnvVar)
+	}
+	if maxPort, err := strconv.ParseUint(maxPortStr, 10, 32); err != nil {
+		return cfg, fmt.Errorf("parsing %s: %w", DRBDMaxPortEnvVar, err)
 	} else {
-		maxPort, err := strconv.ParseUint(maxPortStr, 10, 32)
-		if err != nil {
-			return cfg, fmt.Errorf("parsing %s: %w", DRBDMaxPortEnvVar, err)
-		}
 		cfg.drbdMaxPort = uint(maxPort)
 	}
 
