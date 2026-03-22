@@ -39,7 +39,7 @@ import (
 const (
 	KubernetesAPIRequestLimit       = 3
 	KubernetesAPIRequestTimeout     = 1
-	SDSReplicatedVolumeCSIFinalizer = "storage.deckhouse.io/sds-replicated-volume-csi"
+	SDSReplicatedVolumeCSIFinalizer = "sds-replicated-volume.deckhouse.io/csi-controller"
 )
 
 // CreateReplicatedVolume creates a ReplicatedVolume resource
@@ -337,6 +337,13 @@ func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 				rvaName, existing.Spec.ReplicatedVolumeName, existing.Spec.NodeName,
 			)
 		}
+		if !slices.Contains(existing.Finalizers, SDSReplicatedVolumeCSIFinalizer) {
+			existing.Finalizers = append(existing.Finalizers, SDSReplicatedVolumeCSIFinalizer)
+			if err := kc.Update(ctx, existing); err != nil {
+				return "", fmt.Errorf("add finalizer to ReplicatedVolumeAttachment %s: %w", rvaName, err)
+			}
+			log.Info(fmt.Sprintf("[EnsureRVA][traceID:%s][volumeID:%s][node:%s] Added finalizer to existing RVA %s", traceID, volumeName, nodeName, rvaName))
+		}
 		return rvaName, nil
 	} else if client.IgnoreNotFound(err) != nil {
 		return "", fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
@@ -344,7 +351,8 @@ func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 
 	rva := &srv.ReplicatedVolumeAttachment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: rvaName,
+			Name:       rvaName,
+			Finalizers: []string{SDSReplicatedVolumeCSIFinalizer},
 		},
 		Spec: srv.ReplicatedVolumeAttachmentSpec{
 			ReplicatedVolumeName: volumeName,
