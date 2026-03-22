@@ -46,6 +46,7 @@ type PreexistingDRBDReplica struct {
 	LVGName      string
 	ThinPoolName string
 	Size         string
+	Addresses    []v1alpha1.DRBDResourceAddressStatus
 }
 
 // EmulatePreexisting dismantles the RV, leaving orphaned DRBD resources on
@@ -72,6 +73,7 @@ func (t *TestRV) EmulatePreexisting(ctx SpecContext) []PreexistingDRBDReplica {
 		lvgName      string
 		thinPoolName string
 		size         string
+		addresses    []v1alpha1.DRBDResourceAddressStatus
 	}
 
 	// --- Build attached set from datamesh members ---
@@ -101,6 +103,7 @@ func (t *TestRV) EmulatePreexisting(ctx SpecContext) []PreexistingDRBDReplica {
 			nodeID:      drbdrObj.Spec.NodeID,
 			rvr:         trvr,
 			drbdr:       drbdr,
+			addresses:   drbdrObj.Status.Addresses,
 		}
 
 		if obj.Spec.Type == v1alpha1.ReplicaTypeDiskful {
@@ -369,6 +372,7 @@ func (t *TestRV) EmulatePreexisting(ctx SpecContext) []PreexistingDRBDReplica {
 			LVGName:      m.lvgName,
 			ThinPoolName: m.thinPoolName,
 			Size:         m.size,
+			Addresses:    m.addresses,
 		}
 	}
 	return result

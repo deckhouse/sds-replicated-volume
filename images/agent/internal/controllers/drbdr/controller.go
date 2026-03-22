@@ -70,17 +70,20 @@ func BuildController(mgr manager.Manager) error {
 	// Create internal request channel (scanner sends here)
 	requestCh := make(chan event.TypedGenericEvent[DRBDReconcileRequest], 100)
 
-	// Create scanner with new channel type
-	scanner := NewScanner(requestCh)
+	// Create DRBD port cache (scanner-maintained, will be used by PortRegistry later)
+	drbdPortCache := NewDRBDPortCache()
+
+	// Create scanner with port cache
+	scanner := NewScanner(requestCh, drbdPortCache)
 	if err := mgr.Add(scanner); err != nil {
 		return fmt.Errorf("adding scanner runnable: %w", err)
 	}
 
-	// Create port cache (reconciler-owned)
-	portCache := NewPortCache(context.Background(), cfg.DRBDMinPort(), cfg.DRBDMaxPort())
+	// Create port registry (reconciler-owned, uses DRBDPortCache for kernel state)
+	portRegistry := NewPortRegistry(cl, nodeName, drbdPortCache, cfg.DRBDMinPort(), cfg.DRBDMaxPort(), 10*time.Minute)
 
 	// Create reconciler (implements reconcile.TypedReconciler[DRBDReconcileRequest])
-	rec := NewReconciler(cl, nodeName, portCache)
+	rec := NewReconciler(cl, nodeName, portRegistry)
 
 	// Build DRBD resource controller with TypedReconciler
 	if err := builder.TypedControllerManagedBy[DRBDReconcileRequest](mgr).

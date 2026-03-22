@@ -28,16 +28,20 @@ import (
 
 // Scanner listens for DRBD events via drbdutils events2 and triggers
 // reconciliation of DRBDResource objects by sending events to the controller.
+// It also maintains a DRBDPortCache with port information from path events.
 type Scanner struct {
 	requestCh chan<- event.TypedGenericEvent[DRBDReconcileRequest]
+	portCache *DRBDPortCache
 }
 
 // NewScanner creates a new Scanner.
 func NewScanner(
 	requestCh chan<- event.TypedGenericEvent[DRBDReconcileRequest],
+	portCache *DRBDPortCache,
 ) *Scanner {
 	return &Scanner{
 		requestCh: requestCh,
+		portCache: portCache,
 	}
 }
 
@@ -71,6 +75,14 @@ func (s *Scanner) Start(ctx context.Context) error {
 // runEventsLoop runs a single iteration of the events2 listener.
 // Returns error if the loop terminates unexpectedly.
 func (s *Scanner) runEventsLoop(ctx context.Context) error {
+	s.portCache.BeginDump()
+	dumpCompleted := false
+	defer func() {
+		if !dumpCompleted {
+			s.portCache.AbortDump()
+		}
+	}()
+
 	var err error
 	var online bool
 
@@ -95,6 +107,8 @@ func (s *Scanner) runEventsLoop(ctx context.Context) error {
 
 			// Check for "exists -" which indicates initial state dump is complete
 			if !online && tev.Kind == "exists" && tev.Object == "-" {
+				s.portCache.EndDump()
+				dumpCompleted = true
 				online = true
 				logger.Info("DRBD events online", "pendingResources", len(pending))
 				// Trigger reconciliation for all accumulated resources
@@ -111,6 +125,8 @@ func (s *Scanner) runEventsLoop(ctx context.Context) error {
 				continue
 			}
 			processName(drbdName)
+
+			s.updatePortCache(tev, drbdName)
 
 			// For rename events, also process "new_name"
 			if tev.Kind == "rename" {
@@ -129,6 +145,31 @@ func (s *Scanner) runEventsLoop(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// updatePortCache updates the DRBDPortCache based on path and resource events.
+func (s *Scanner) updatePortCache(ev *drbdutils.Event, drbdName string) {
+	switch ev.Object {
+	case "path":
+		local, ok := ev.State["local"]
+		if !ok {
+			return
+		}
+		ip, port, ok := parseLocalAddr(local)
+		if !ok {
+			return
+		}
+		switch ev.Kind {
+		case "exists", "create":
+			s.portCache.Add(drbdName, ip, port)
+		case "destroy":
+			s.portCache.Remove(drbdName, ip, port)
+		}
+	case "resource":
+		if ev.Kind == "destroy" {
+			s.portCache.RemoveResource(drbdName)
+		}
+	}
 }
 
 // triggerReconciliation sends a request to trigger reconciliation for a specific DRBD resource.
