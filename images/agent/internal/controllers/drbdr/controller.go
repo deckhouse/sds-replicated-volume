@@ -210,6 +210,7 @@ type straceCmd struct {
 	pipeReader *os.File
 	pipeWriter *os.File
 	startTime  time.Time
+	bgReader   <-chan []byte
 }
 
 func newStraceCmd(ctx context.Context, logger logr.Logger, name string, arg ...string) *straceCmd {
@@ -218,7 +219,7 @@ func newStraceCmd(ctx context.Context, logger logr.Logger, name string, arg ...s
 	straceArgs := make([]string, 0, len(arg)+10)
 	straceArgs = append(straceArgs, "-o", "/dev/fd/3",
 		"-e", "trace=!brk,mmap,mprotect,munmap,read,write,pread64,pwrite64,lseek",
-		"-tt", "-T", "-f", name)
+		"-C", "-w", "-tt", "-T", "-f", name)
 	straceArgs = append(straceArgs, arg...)
 
 	cmd := exec.CommandContext(ctx, "strace", straceArgs...)
@@ -231,32 +232,44 @@ func newStraceCmd(ctx context.Context, logger logr.Logger, name string, arg ...s
 	}
 }
 
+func (c *straceCmd) startBgReader() <-chan []byte {
+	ch := make(chan []byte, 1)
+	go func() {
+		data, _ := io.ReadAll(c.pipeReader)
+		ch <- data
+	}()
+	return ch
+}
+
+func (c *straceCmd) collectTrace(ch <-chan []byte) []byte {
+	c.pipeWriter.Close()
+	data := <-ch
+	c.pipeReader.Close()
+	return data
+}
+
 func (c *straceCmd) CombinedOutput() ([]byte, error) {
 	c.log.Info("Executing DRBD command (strace)", "command", c.cmdName, "args", c.args)
 	start := time.Now()
+	ch := c.startBgReader()
 
 	out, err := c.cmd.CombinedOutput()
-	c.pipeWriter.Close()
-	straceOut, _ := io.ReadAll(c.pipeReader)
-	c.pipeReader.Close()
 
-	c.logDone(start, err, straceOut)
+	c.logDone(start, err, c.collectTrace(ch))
 	return out, err
 }
 
 func (c *straceCmd) Start() error {
 	c.log.Info("Executing DRBD command (strace)", "command", c.cmdName, "args", c.args)
 	c.startTime = time.Now()
+	c.bgReader = c.startBgReader()
 	return c.cmd.Start()
 }
 
 func (c *straceCmd) Wait() error {
 	err := c.cmd.Wait()
-	c.pipeWriter.Close()
-	straceOut, _ := io.ReadAll(c.pipeReader)
-	c.pipeReader.Close()
 
-	c.logDone(c.startTime, err, straceOut)
+	c.logDone(c.startTime, err, c.collectTrace(c.bgReader))
 	return err
 }
 
