@@ -20,6 +20,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -61,12 +64,17 @@ func BuildController(mgr manager.Manager) error {
 	cl := mgr.GetClient()
 	nodeName := cfg.NodeName()
 
-	// Set up drbd command logging at actual execution time
+	// Set up drbd command logging at actual execution time.
+	// drbdmeta calls are additionally wrapped with strace to diagnose O_EXCL delays.
 	origExec := drbdutils.ExecCommandContext
 	drbdutils.ExecCommandContext = func(ctx context.Context, name string, arg ...string) drbdutils.Cmd {
+		logger := log.FromContext(ctx)
+		if name == drbdutils.DRBDMetaCommand {
+			return newStraceCmd(ctx, logger, name, arg...)
+		}
 		return &loggingCmd{
 			Cmd: origExec(ctx, name, arg...),
-			log: log.FromContext(ctx),
+			log: logger,
 			cmd: name, args: arg,
 		}
 	}
@@ -191,3 +199,86 @@ func (c *loggingCmd) logDone(start time.Time, err error) {
 func (c *loggingCmd) String() string {
 	return c.Cmd.String()
 }
+
+// straceCmd wraps a drbdmeta call with strace, routing trace output through
+// an os.Pipe directly into the structured log (no temp files).
+type straceCmd struct {
+	cmd        *exec.Cmd
+	log        logr.Logger
+	cmdName    string
+	args       []string
+	pipeReader *os.File
+	pipeWriter *os.File
+	startTime  time.Time
+}
+
+func newStraceCmd(ctx context.Context, logger logr.Logger, name string, arg ...string) *straceCmd {
+	pr, pw, _ := os.Pipe()
+
+	straceArgs := make([]string, 0, len(arg)+7)
+	straceArgs = append(straceArgs, "-o", "/dev/fd/3", "-e", "trace=openat", "-T", "-f", name)
+	straceArgs = append(straceArgs, arg...)
+
+	cmd := exec.CommandContext(ctx, "strace", straceArgs...)
+	cmd.ExtraFiles = []*os.File{pw} // fd 3 in child
+
+	return &straceCmd{
+		cmd: cmd, log: logger,
+		cmdName: name, args: arg,
+		pipeReader: pr, pipeWriter: pw,
+	}
+}
+
+func (c *straceCmd) CombinedOutput() ([]byte, error) {
+	c.log.Info("Executing DRBD command (strace)", "command", c.cmdName, "args", c.args)
+	start := time.Now()
+
+	out, err := c.cmd.CombinedOutput()
+	c.pipeWriter.Close()
+	straceOut, _ := io.ReadAll(c.pipeReader)
+	c.pipeReader.Close()
+
+	duration := time.Since(start).String()
+	for _, line := range strings.Split(strings.TrimSpace(string(straceOut)), "\n") {
+		if line != "" {
+			c.log.Info("strace", "command", c.cmdName, "line", line)
+		}
+	}
+
+	if err != nil {
+		c.log.Error(err, "DRBD command failed", "command", c.cmdName, "args", c.args, "duration", duration)
+	} else {
+		c.log.Info("DRBD command complete", "command", c.cmdName, "args", c.args, "duration", duration)
+	}
+	return out, err
+}
+
+func (c *straceCmd) Start() error {
+	c.log.Info("Executing DRBD command (strace)", "command", c.cmdName, "args", c.args)
+	c.startTime = time.Now()
+	return c.cmd.Start()
+}
+
+func (c *straceCmd) Wait() error {
+	err := c.cmd.Wait()
+	c.pipeWriter.Close()
+	straceOut, _ := io.ReadAll(c.pipeReader)
+	c.pipeReader.Close()
+
+	duration := time.Since(c.startTime).String()
+	for _, line := range strings.Split(strings.TrimSpace(string(straceOut)), "\n") {
+		if line != "" {
+			c.log.Info("strace", "command", c.cmdName, "line", line)
+		}
+	}
+
+	if err != nil {
+		c.log.Error(err, "DRBD command failed", "command", c.cmdName, "args", c.args, "duration", duration)
+	} else {
+		c.log.Info("DRBD command complete", "command", c.cmdName, "args", c.args, "duration", duration)
+	}
+	return err
+}
+
+func (c *straceCmd) StdoutPipe() (io.ReadCloser, error) { return c.cmd.StdoutPipe() }
+func (c *straceCmd) String() string                     { return c.cmd.String() }
