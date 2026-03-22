@@ -66,7 +66,7 @@ func BuildController(mgr manager.Manager, agentPodNamespace string) error {
 			builder.WithPredicates(rspPredicates()...),
 		).
 		WithOptions(controller.Options{
-			MaxConcurrentReconciles: 10,
+			MaxConcurrentReconciles: controlleroptions.MaxConcurrentReconciles,
 			RateLimiter:             controlleroptions.DefaultRateLimiter(),
 		}).
 		Complete(rec)

@@ -91,8 +91,8 @@ The required Diskful count is D = FTT + GMDR + 1. TB = 1 if D is even and FTT = 
 1. ⚡ **Extender error, single Diskful → `Scheduled=False` / `ExtenderUnavailable`, Reconcile returns error.**
    1 Diskful, no TieBreaker. Mock extender returns an error. The Diskful receives `Scheduled=False` / `ExtenderUnavailable`. Reconcile returns an error (triggers retry).
 
-2. ⚡ **Extender error, multiple Diskful → all attempted, then error.**
-   3 Diskful, no TieBreaker. Extender fails on the first Diskful. The reconciler continues to attempt the remaining Diskful (each also fails with `ExtenderUnavailable`). All 3 receive `Scheduled=False` / `ExtenderUnavailable`. Reconcile returns an error after attempting all Diskful.
+2. ⚡ **Extender error, multiple Diskful → first gets error, rest not attempted.**
+   3 Diskful, no TieBreaker. Extender fails on the first Diskful. The loop breaks immediately (stale-cache safety) — only rvr-0 receives `Scheduled=False` / `ExtenderUnavailable`. The remaining Diskful have no condition set. Reconcile returns an error.
 
 3. ⚡ **Extender error, Diskful + TieBreaker → Diskful fails, TieBreaker NOT attempted.**
    1 Diskful + 1 TieBreaker. Extender fails on the Diskful. Diskful receives `Scheduled=False` / `ExtenderUnavailable`. Reconcile returns an error before reaching Phase 3 (TieBreaker scheduling). TieBreaker is not scheduled in this run.

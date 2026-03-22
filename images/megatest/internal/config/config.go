@@ -53,6 +53,7 @@ type MultiVolumeConfig struct {
 	VolumeStep                   StepMinMax
 	StepPeriod                   DurationMinMax
 	VolumePeriod                 DurationMinMax
+	AttacherPeriod               DurationMinMax
 	EnablePodDestroyer           bool
 	EnableVolumeResizer          bool
 	EnableVolumeReplicaDestroyer bool
@@ -60,10 +61,11 @@ type MultiVolumeConfig struct {
 	ChaosDebugMode               bool
 }
 
-// VolumeMainConfig configures the volume-main goroutine
+// VolumeMainConfig configures the volume-main  goroutine
 type VolumeMainConfig struct {
 	StorageClassName             string
 	VolumeLifetime               time.Duration
+	AttacherPeriod               DurationMinMax
 	InitialSize                  resource.Quantity
 	EnableVolumeResizer          bool
 	EnableVolumeReplicaDestroyer bool

@@ -1419,6 +1419,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("deleting replicas"))
 		})
 	})
+
 })
 
 var _ = Describe("ensureDatameshReplicaRequests", func() {

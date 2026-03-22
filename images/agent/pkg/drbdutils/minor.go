@@ -75,6 +75,11 @@ func ExecuteNewMinor(ctx context.Context, resource string, minor uint, volume ui
 // ExecuteNewAutoMinor creates a new DRBD device/volume with auto-allocated minor.
 // When diskless is true, --diskless is passed to mark the device as an intentionally diskless client.
 // Returns the allocated minor number on success.
+//
+// The mutex is held only for counter operations (microseconds), not during exec.
+// Kernel safety: DRBD parallel_ops=true and per-resource conf_update mutex
+// guarantee that concurrent drbdsetup new-minor for different resources is safe.
+// Minor number collisions are caught by the kernel (-EEXIST) and handled via retry.
 func ExecuteNewAutoMinor(ctx context.Context, resource string, volume uint, diskless bool) (uint, error) {
 	for {
 		minor := grabNextMinor()

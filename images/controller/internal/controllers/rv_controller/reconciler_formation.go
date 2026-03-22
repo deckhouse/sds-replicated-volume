@@ -71,6 +71,11 @@ var adoptStepNames = [adoptStepCount]string{
 	adoptStepIdxExitMaintenance:           "Exit maintenance",
 }
 
+// defaultFormationRestartTimeout is the minimum elapsed time since formation started before
+// reconcileFormationRestartIfTimeoutPassed may delete RVRs and restart formation (scheduling,
+// preconfigure, connectivity steps). Larger values reduce thrashing under API/scheduling load.
+const defaultFormationRestartTimeout = 300 * time.Second
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Reconcile: formation
 //
@@ -302,7 +307,7 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 			rv, diskful,
 			"Datamesh is forming, waiting for replica cleanup to complete",
 		) || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, defaultFormationRestartTimeout).
 			ReportChangedIf(changed)
 	}
 
@@ -330,7 +335,7 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 			rv, preconfigured,
 			"Datamesh is forming, waiting for other replicas to become preconfigured",
 		) || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, defaultFormationRestartTimeout).
 			ReportChangedIf(changed)
 	}
 
@@ -367,7 +372,7 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 			rv, missingAddresses,
 			"Replica addresses do not match required network configuration, blocking datamesh formation",
 		) || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, defaultFormationRestartTimeout).
 			ReportChangedIf(changed)
 	}
 
@@ -393,7 +398,7 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 			rv, notEligible,
 			"Replica is placed on a node not in the eligible nodes list, blocking datamesh formation",
 		) || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, defaultFormationRestartTimeout).
 			ReportChangedIf(changed)
 	}
 
@@ -428,7 +433,7 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 			rv, specMismatch,
 			"Replica spec does not match pending transition, blocking datamesh formation",
 		) || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, defaultFormationRestartTimeout).
 			ReportChangedIf(changed)
 	}
 
@@ -461,7 +466,7 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 			rv, insufficientSize,
 			"Replica backing volume size is insufficient for datamesh, blocking formation",
 		) || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, defaultFormationRestartTimeout).
 			ReportChangedIf(changed)
 	}
 
@@ -567,7 +572,7 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 		)
 		changed = applyDatameshTransitionStepMessage(step, msg) || changed
 		changed = applyDatameshReplicaRequestMessages(rv, diskful, msg) || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, defaultFormationRestartTimeout).
 			ReportChangedIf(changed)
 	}
 
@@ -588,7 +593,7 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 		)) || changed
 		changed = applyDatameshReplicaRequestMessages(rv, notConfigured, "Datamesh is forming, waiting for DRBD configuration to continue") || changed
 		changed = applyDatameshReplicaRequestMessages(rv, configured, "Datamesh is forming, DRBD configured, waiting for other replicas") || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, defaultFormationRestartTimeout).
 			ReportChangedIf(changed)
 	}
 
@@ -613,7 +618,7 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 			notConnected.String(),
 		)) || changed
 		changed = applyDatameshReplicaRequestMessages(rv, diskful, "Datamesh is forming, waiting for all replicas to connect to each other") || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, defaultFormationRestartTimeout).
 			ReportChangedIf(changed)
 	}
 
@@ -648,7 +653,7 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 		)) || changed
 		changed = applyDatameshReplicaRequestMessages(rv, notReady, "Datamesh is forming, waiting for data bootstrap readiness (requires backing volume Inconsistent and replication Established with all peers)") || changed
 		changed = applyDatameshReplicaRequestMessages(rv, readyForDataBootstrap, "Datamesh is forming, ready for data bootstrap, waiting for other replicas") || changed
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, defaultFormationRestartTimeout).
 			ReportChangedIf(changed)
 	}
 
@@ -749,21 +754,26 @@ func (r *Reconciler) reconcileFormationStepBootstrapData(
 			changed = applyDatameshTransitionStepMessage(step, "Existing DRBDResourceOperation has unexpected parameters, restarting formation") || changed
 			changed = applyDatameshReplicaRequestMessages(rv, dmDiskful, "Datamesh is forming, restarting due to data bootstrap operation parameter mismatch") || changed
 
-			return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
+			return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, defaultFormationRestartTimeout).
 				ReportChangedIf(changed)
 		}
 	}
 
-	// Timeout: 1 min base. For multi-replica thick provisioning (force-resync) add volume
-	// size / 100 Mbit/s (≈12.5 MB/s) to account for full data synchronization. Single
-	// replica and thin provisioning (clear-bitmap) skip full resync, so no size-based
-	// addition is needed.
+	// Data bootstrap timeout uses defaultFormationRestartTimeout as the base so that
+	// the total allowed time since formation start is at least as long as for earlier
+	// steps. Without this, a formation that spent most of its time in preconfigure
+	// would hit the bootstrap timeout immediately (it is checked against formation
+	// start, not step start).
+	//
+	// For multi-replica thick provisioning (force-resync) we add volume size / 100 Mbit/s
+	// (≈12.5 MB/s) to account for full data synchronization. Single replica and thin
+	// provisioning (clear-bitmap) skip full resync, so no size-based addition is needed.
 	//
 	// We expect sds-replicated-volume to run on 10 Gbit/s networks (or at least 1 Gbit/s).
 	// In the worst case, when many volumes are being created simultaneously, each volume
 	// should still get at least 100 Mbit/s of bandwidth. If even that is not enough,
 	// something has gone completely wrong and there is no point in waiting further.
-	dataBootstrapTimeout := 1 * time.Minute
+	dataBootstrapTimeout := defaultFormationRestartTimeout
 	if !singleReplica && rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM {
 		const worstCaseBytesPerSec = 100 * 1000 * 1000 / 8 // 100 Mbit/s in bytes
 		sizeBytes := rv.Status.Datamesh.Size.Value()
@@ -781,14 +791,14 @@ func (r *Reconciler) reconcileFormationStepBootstrapData(
 	}
 
 	// Verify the DRBDResourceOperation has not failed.
-	// If it failed — restart formation with a 30-second timeout.
+	// If it failed — restart formation after defaultFormationRestartTimeout.
 	if drbdrOp.Status.Phase == v1alpha1.DRBDOperationPhaseFailed {
 		rf.Log().Error(fmt.Errorf("DRBDResourceOperation %s failed: %s", drbdrOpName, drbdrOp.Status.Message), "data bootstrap operation failed, restarting formation")
 
 		changed = applyDatameshTransitionStepMessage(step, "Data bootstrap operation failed, restarting formation") || changed
 		changed = applyDatameshReplicaRequestMessages(rv, dmDiskful, "Datamesh is forming, restarting due to failed data bootstrap operation") || changed
 
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, defaultFormationRestartTimeout).
 			ReportChangedIf(changed)
 	}
 

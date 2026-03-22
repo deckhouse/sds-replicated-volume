@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"syscall"
 )
 
 const (
@@ -72,6 +73,24 @@ func (pc *PortCache) Allocate(ip string) uint {
 
 type portAllocator <-chan func() uint
 
+// noReuseAddrListener is a net.ListenConfig that clears SO_REUSEADDR before
+// bind(). Go sets SO_REUSEADDR=1 by default, which allows bind() to succeed on
+// ports that have only ESTABLISHED connections (no LISTEN socket). DRBD closes
+// the LISTEN socket after a connection is established, so a default net.Listen
+// falsely reports such ports as "free". Clearing SO_REUSEADDR makes bind() fail
+// for any port that has live kernel sockets, regardless of their state.
+var noReuseAddrListener = net.ListenConfig{
+	Control: func(_, _ string, c syscall.RawConn) error {
+		var setsockErr error
+		if controlErr := c.Control(func(fd uintptr) {
+			setsockErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 0)
+		}); controlErr != nil {
+			return controlErr
+		}
+		return setsockErr
+	},
+}
+
 func newPortAllocator(ctx context.Context, ip string, minPort, maxPort uint) portAllocator {
 	ch := make(chan func() uint)
 	go func() {
@@ -80,7 +99,7 @@ func newPortAllocator(ctx context.Context, ip string, minPort, maxPort uint) por
 			if p > maxPort {
 				p = minPort
 			}
-			l, err := net.Listen("tcp", fmt.Sprintf("%s:%d", ip, p))
+			l, err := noReuseAddrListener.Listen(ctx, "tcp", fmt.Sprintf("%s:%d", ip, p))
 			if err != nil {
 				continue
 			}
