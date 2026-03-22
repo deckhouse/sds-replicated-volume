@@ -1,4 +1,4 @@
-{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -34,7 +34,7 @@ subjects:
 {{- end }}
 
 
-{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

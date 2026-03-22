@@ -1,4 +1,4 @@
-{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 {{- if .Values.sdsReplicatedVolume.internal.masterPassphrase }}
 apiVersion: v1
 kind: Secret

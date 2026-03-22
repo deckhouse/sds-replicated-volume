@@ -1,5 +1,5 @@
-{{/*
-{{- if .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
+{{- if not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started")) }}
 {{- if (.Values.global.enabledModules | has "operator-prometheus-crd") }}
 ---
 apiVersion: monitoring.coreos.com/v1
@@ -30,6 +30,26 @@ spec:
     - sourceLabels: [__meta_kubernetes_pod_ready]
       regex: "true"
       action: keep
+  - port: drbd-metrics
+    scheme: https
+    path: /
+    bearerTokenSecret:
+      name: "prometheus-token"
+      key: "token"
+    tlsConfig:
+      insecureSkipVerify: true
+    relabelings:
+    - regex: endpoint|namespace|pod|container
+      action: labeldrop
+    - targetLabel: job
+      replacement: sds-replicated-volume-drbd
+    - sourceLabels: [__meta_kubernetes_pod_node_name]
+      targetLabel: node
+    - targetLabel: tier
+      replacement: cluster
+    - sourceLabels: [__meta_kubernetes_pod_ready]
+      regex: "true"
+      action: keep
   selector:
     matchLabels:
       app: agent
@@ -38,4 +58,4 @@ spec:
     - d8-{{ .Chart.Name }}
 {{- end }}
 {{- end }}
-*/}}
+{{- end }}

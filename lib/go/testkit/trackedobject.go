@@ -18,10 +18,12 @@ package testkit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -193,6 +195,7 @@ func (t *TrackedObject[T]) InjectEvent(eventType watch.EventType, obj T) {
 // object is deleted — call Await(ctx, Present()) first.
 // The returned object is safe to mutate without affecting the history.
 func (t *TrackedObject[T]) Object() T {
+	ginkgo.GinkgoHelper()
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	if len(t.snapshots) == 0 {
@@ -225,9 +228,13 @@ func (t *TrackedObject[T]) Name() string {
 // sequence fails. Calls Fail immediately if the object is deleted,
 // because a deleted object can never satisfy the awaited condition.
 func (t *TrackedObject[T]) Await(ctx context.Context, m types.GomegaMatcher) {
+	ginkgo.GinkgoHelper()
 	t.checkFailed()
 	t.awaitLoop(ctx, m)
 	t.checkFailed()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.failOnTimeout(m)
+	}
 }
 
 // awaitLoop is the blocking core of Await. It records failures in
@@ -280,6 +287,55 @@ func (t *TrackedObject[T]) awaitLoop(ctx context.Context, m types.GomegaMatcher)
 	}
 }
 
+// failOnTimeout is called when Await returns with a cancelled context.
+// It re-checks the condition against the latest snapshot (handling the
+// race where the condition was met concurrently with context cancellation)
+// and calls Fail with a descriptive message if the condition is not met.
+func (t *TrackedObject[T]) failOnTimeout(m types.GomegaMatcher) {
+	ginkgo.GinkgoHelper()
+	t.mu.RLock()
+	snapCount := len(t.snapshots)
+	deleted := t.deleted
+	var lastObj T
+	if snapCount > 0 {
+		lastObj = t.snapshots[len(t.snapshots)-1].Object
+	}
+	t.mu.RUnlock()
+
+	switch {
+	case match.IsDeletedMatcher(m):
+		if !deleted {
+			gomega.Default.(*gomega.WithT).Fail(
+				fmt.Sprintf("%s %s: timed out waiting for deletion", t.GVK.Kind, t.objName), 1)
+		}
+	case match.IsPresentMatcher(m):
+		if snapCount == 0 || deleted {
+			msg := "timed out waiting for object to appear"
+			if deleted {
+				msg = "timed out: object was deleted"
+			}
+			gomega.Default.(*gomega.WithT).Fail(
+				fmt.Sprintf("%s %s: %s", t.GVK.Kind, t.objName, msg), 1)
+		}
+	case match.IsPresentAgainMatcher(m):
+		if deleted || snapCount == 0 {
+			gomega.Default.(*gomega.WithT).Fail(
+				fmt.Sprintf("%s %s: timed out waiting for object to reappear", t.GVK.Kind, t.objName), 1)
+		}
+	default:
+		if snapCount == 0 {
+			gomega.Default.(*gomega.WithT).Fail(
+				fmt.Sprintf("%s %s: timed out awaiting condition (no events received)", t.GVK.Kind, t.objName), 1)
+			return
+		}
+		matched, detail := match.MatchObject(m, lastObj)
+		if !matched {
+			gomega.Default.(*gomega.WithT).Fail(
+				fmt.Sprintf("%s %s: timed out awaiting condition\n  %s", t.GVK.Kind, t.objName, detail), 1)
+		}
+	}
+}
+
 // IsDeleted reports whether the last observed event was a Delete.
 func (t *TrackedObject[T]) IsDeleted() bool {
 	t.mu.RLock()
@@ -313,6 +369,7 @@ func (t *TrackedObject[T]) recordFailure(msg string) {
 // Uses Gomega's fail handler (not ginkgo.Fail directly) so that
 // InterceptGomegaFailure can intercept it in unit tests.
 func (t *TrackedObject[T]) checkFailed() {
+	ginkgo.GinkgoHelper()
 	t.mu.RLock()
 	err := t.failedErr
 	t.mu.RUnlock()

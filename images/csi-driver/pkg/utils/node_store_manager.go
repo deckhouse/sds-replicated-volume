@@ -155,6 +155,28 @@ func (s *Store) NodePublishVolumeBlock(source, target string, mountOpts []string
 	s.Log.Trace(info.Mode().String())
 	s.Log.Trace("≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈ MODE SOURCE  ≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈")
 
+	exists, err := s.PathExists(target)
+	if err != nil {
+		return fmt.Errorf("[NodePublishVolumeBlock] could not check if target %s exists: %w", target, err)
+	}
+
+	if exists {
+		isMountPoint, mntErr := s.NodeStorage.IsMountPoint(target)
+		if mntErr != nil {
+			return fmt.Errorf("[NodePublishVolumeBlock] could not check if target %s is a mount point: %w", target, mntErr)
+		}
+
+		if isMountPoint {
+			// For block volume bind mounts, mount info reports the backing
+			// device of /dev (e.g. "udev"/"devtmpfs") rather than the actual
+			// block device path, so checkMount() cannot verify the source.
+			// The target path is unique per volume and pod, which makes a
+			// false-positive mount point practically impossible.
+			s.Log.Info(fmt.Sprintf("[NodePublishVolumeBlock] target %s is already a mount point. Skipping mount", target))
+			return nil
+		}
+	}
+
 	s.Log.Trace("-----------------== start Create File ==---------------")
 	f, err := os.OpenFile(target, os.O_CREATE, os.FileMode(0644))
 	if err != nil {

@@ -290,6 +290,24 @@ func (t *TestRV) OccupiedNodes() []string {
 	return nodes
 }
 
+// FreeReplicaID returns the lowest ID (0-31) not used by any current
+// datamesh member or tracked RVR. Panics if all 32 IDs are taken.
+func (t *TestRV) FreeReplicaID() uint8 {
+	taken := make(map[uint8]bool)
+	for _, m := range t.Object().Status.Datamesh.Members {
+		taken[m.ID()] = true
+	}
+	for _, rvr := range t.TestRVRs() {
+		taken[rvr.ID()] = true
+	}
+	for id := uint8(0); id <= 31; id++ {
+		if !taken[id] {
+			return id
+		}
+	}
+	panic("all 32 replica IDs are taken")
+}
+
 // OnEachRVR returns a GroupHandle for bulk operations on all current
 // and future RVR children.
 func (t *TestRV) OnEachRVR() *tk.TrackedGroupHandle[*v1alpha1.ReplicatedVolumeReplica, *TestRVR] {

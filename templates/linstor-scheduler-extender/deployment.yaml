@@ -9,7 +9,7 @@ cpu: 10m
 memory: 25Mi
 {{- end }}
 
-{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
 apiVersion: autoscaling.k8s.io/v1

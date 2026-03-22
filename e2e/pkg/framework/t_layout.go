@@ -57,6 +57,7 @@ func (l TestLayout) ExpectedReplicas() int {
 //	Phase 3: Create TB RVR + Access/extra RVAs (fire-and-forget)
 //	Phase 4: Await FormationComplete, TB Healthy, RVAs Attached
 func (f *Framework) SetupLayout(ctx SpecContext, l TestLayout) *TestRV {
+	GinkgoHelper()
 	Expect(l.Attached).To(BeNumerically(">=", l.Access),
 		"Attached must be >= Access (Access replicas are always attached)")
 
@@ -80,20 +81,8 @@ func (f *Framework) SetupLayout(ctx SpecContext, l TestLayout) *TestRV {
 	var tbRVR *TestRVR
 	var tbNodeName string
 	if needTB {
-		taken := make(map[uint8]bool)
-		for _, m := range trv.Object().Status.Datamesh.Members {
-			taken[m.ID()] = true
-		}
-		var tbNodeID uint8
-		for id := uint8(0); id <= 31; id++ {
-			if !taken[id] {
-				tbNodeID = id
-				break
-			}
-		}
-
 		tbNodeName = f.Discovery.AnyNode(trv.OccupiedNodes()...)
-		tbRVR = f.TestRVRExact(trv.Name(), tbNodeID).
+		tbRVR = f.TestRVRExact(trv.Name(), trv.FreeReplicaID()).
 			Node(tbNodeName).
 			Type(v1alpha1.ReplicaTypeTieBreaker)
 		tbRVR.Create(ctx)
@@ -117,6 +106,7 @@ func (f *Framework) SetupLayout(ctx SpecContext, l TestLayout) *TestRV {
 		if extra == 0 {
 			break
 		}
+		trvr.Await(ctx, tkmatch.Present())
 		obj := trvr.Object()
 		if obj.Spec.Type != v1alpha1.ReplicaTypeAccess {
 			allRVAs = append(allRVAs, trv.Attach(ctx, obj.Spec.NodeName))

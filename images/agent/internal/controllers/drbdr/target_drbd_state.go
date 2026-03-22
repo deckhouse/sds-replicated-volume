@@ -176,7 +176,7 @@ func computeMinorActions(resourceName string, allocatedMinor *uint, iState Inten
 
 func generateDeviceUUID() string {
 	var buf [8]byte
-	rand.Read(buf[:])
+	_, _ = rand.Read(buf[:])
 	return fmt.Sprintf("%016X", binary.BigEndian.Uint64(buf[:]))
 }
 

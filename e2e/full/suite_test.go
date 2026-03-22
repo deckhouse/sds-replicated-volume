@@ -29,5 +29,11 @@ var f = fw.Setup()
 
 func TestFull(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Full E2E Suite")
+
+	suiteConfig, reporterConfig := GinkgoConfiguration()
+	if suiteConfig.LabelFilter == "" {
+		suiteConfig.LabelFilter = "!/^Bug:/"
+	}
+
+	RunSpecs(t, "Full E2E Suite", suiteConfig, reporterConfig)
 }

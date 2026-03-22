@@ -105,6 +105,13 @@ linters-settings:
     exclude-rules:
       # TODO: fix and remove - disable placement (#rbac) check for CSI driver RBAC objects
       placement:
+        # oldcontroller uses helm_lib_module_controller_rbac which hardcodes name "controller"
+        - kind: ServiceAccount
+          name: controller
+        - kind: Role
+          name: controller
+        - kind: RoleBinding
+          name: controller
         # TODO: fix and remove
         - kind: RoleBinding
           name: csi:controller:external-attacher

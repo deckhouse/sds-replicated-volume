@@ -1,4 +1,4 @@
-{{- if not .Values.sdsReplicatedVolume.newControlPlane }}
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 {{- /* RBAC */ -}}
 {{- $rbacConfig := dict
   "roleRules" (list

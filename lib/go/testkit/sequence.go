@@ -18,9 +18,11 @@ package testkit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
 	"k8s.io/apimachinery/pkg/watch"
@@ -226,6 +228,7 @@ func (t *TrackedObject[T]) FollowsFromStart(matchers ...types.GomegaMatcher) {
 // awaitOneSequence blocks until a single sequence is done
 // (completed or failed) or the context is cancelled.
 func (t *TrackedObject[T]) awaitOneSequence(ctx context.Context, s *sequence) {
+	ginkgo.GinkgoHelper()
 	for {
 		t.mu.RLock()
 		if s.done {
@@ -247,6 +250,19 @@ func (t *TrackedObject[T]) awaitOneSequence(ctx context.Context, s *sequence) {
 		case <-failed:
 			t.checkFailed()
 		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				t.mu.RLock()
+				step := s.cursor
+				total := len(s.steps)
+				regAt := s.registeredAt
+				isDone := s.done
+				t.mu.RUnlock()
+				if !isDone {
+					gomega.Default.(*gomega.WithT).Fail(
+						fmt.Sprintf("%s: sequence timed out at step %d/%d\n  Registered at: %s",
+							t.objName, step+1, total, regAt), 1)
+				}
+			}
 			return
 		}
 	}
@@ -256,6 +272,7 @@ func (t *TrackedObject[T]) awaitOneSequence(ctx context.Context, s *sequence) {
 // (completed or failed) or the context is cancelled.
 // Calls Fail on the first error.
 func (t *TrackedObject[T]) AwaitFollowed(ctx context.Context) {
+	ginkgo.GinkgoHelper()
 	t.checkFailed()
 	for {
 		t.mu.RLock()
@@ -287,6 +304,28 @@ func (t *TrackedObject[T]) AwaitFollowed(ctx context.Context) {
 		case <-failed:
 			t.checkFailed()
 		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				t.mu.RLock()
+				var pendingCount int
+				var firstStep, firstTotal int
+				var firstReg string
+				for _, seq := range t.sequences {
+					if !seq.done {
+						pendingCount++
+						if pendingCount == 1 {
+							firstStep = seq.cursor
+							firstTotal = len(seq.steps)
+							firstReg = seq.registeredAt
+						}
+					}
+				}
+				t.mu.RUnlock()
+				if pendingCount > 0 {
+					gomega.Default.(*gomega.WithT).Fail(
+						fmt.Sprintf("%s: AwaitFollowed timed out, %d sequence(s) pending; first at step %d/%d\n  Registered at: %s",
+							t.objName, pendingCount, firstStep+1, firstTotal, firstReg), 1)
+				}
+			}
 			return
 		}
 	}
@@ -299,6 +338,7 @@ func (t *TrackedObject[T]) AwaitFollowed(ctx context.Context) {
 // immediately when the current state already satisfies the sequence.
 // Combines Follows + awaitOneSequence in a single call.
 func (t *TrackedObject[T]) AwaitSequence(ctx context.Context, matchers ...types.GomegaMatcher) {
+	ginkgo.GinkgoHelper()
 	t.checkFailed()
 	validateLifecyclePositions(matchers)
 	s := &sequence{
@@ -334,6 +374,7 @@ func (t *TrackedObject[T]) AwaitSequence(ctx context.Context, matchers ...types.
 // Combines FollowsFromStart + awaitOneSequence in a single call.
 // Not supported on lite TrackedObjects (created with NewLiteTrackedObject).
 func (t *TrackedObject[T]) AwaitSequenceFromStart(ctx context.Context, matchers ...types.GomegaMatcher) {
+	ginkgo.GinkgoHelper()
 	t.checkFailed()
 	validateLifecyclePositions(matchers)
 	if t.keepOnlyLast {

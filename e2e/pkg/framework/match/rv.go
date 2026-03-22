@@ -18,6 +18,7 @@ package match
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/onsi/gomega/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -110,6 +111,30 @@ func (rv) TransitionStepActive(transitionType v1alpha1.ReplicatedVolumeDatameshT
 			}
 			return false, fmt.Sprintf("current %s step is %q (%s), expected %q active",
 				transitionType, cur.Name, cur.Status, stepName)
+		}
+		return false, fmt.Sprintf("no %s transition found", transitionType)
+	})
+}
+
+// TransitionCurrentStepMessageContains matches when the current (first non-completed) step
+// of the given transition type has a Message containing substr.
+func (rv) TransitionCurrentStepMessageContains(transitionType v1alpha1.ReplicatedVolumeDatameshTransitionType, substr string) types.GomegaMatcher {
+	return tkmatch.NewMatcher(func(obj client.Object) (bool, string) {
+		r := asRV(obj)
+		for i := range r.Status.DatameshTransitions {
+			t := &r.Status.DatameshTransitions[i]
+			if t.Type != transitionType {
+				continue
+			}
+			cur := t.CurrentStep()
+			if cur == nil {
+				return false, fmt.Sprintf("%s transition has no active step (all completed)", transitionType)
+			}
+			if strings.Contains(cur.Message, substr) {
+				return true, fmt.Sprintf("%s current step %q message contains %q", transitionType, cur.Name, substr)
+			}
+			return false, fmt.Sprintf("%s current step %q message %q does not contain %q",
+				transitionType, cur.Name, cur.Message, substr)
 		}
 		return false, fmt.Sprintf("no %s transition found", transitionType)
 	})

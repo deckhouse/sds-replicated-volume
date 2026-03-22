@@ -30,4 +30,4 @@ properties:
       schedule:
         description: Расписание резервного копирования
   newControlPlane:
-    description: Использовать новый control-plane как бэкенд для модуля
+    description: Использовать новый control-plane как бэкенд для модуля. После переключения в true возврат в false запрещён.
