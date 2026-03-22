@@ -286,7 +286,7 @@ func BuildReplicatedVolumeSpec(
 }
 
 func BuildRVAName(volumeName, nodeName string) string {
-	base := "rva-" + volumeName + "-" + nodeName
+	base := "csi-" + volumeName + "-" + nodeName
 	if len(base) <= 253 {
 		return base
 	}
@@ -294,14 +294,14 @@ func BuildRVAName(volumeName, nodeName string) string {
 	sum := sha1.Sum([]byte(base))
 	hash := hex.EncodeToString(sum[:])[:8]
 
-	// "rva-" + vol + "-" + node + "-" + hash
-	const prefixLen = 4 // len("rva-")
+	// "csi-" + vol + "-" + node + "-" + hash
+	const prefixLen = 4 // len("csi-")
 	const sepCount = 2  // "-" between parts + "-" before hash
 	const hashLen = 8
 	maxPartsLen := 253 - prefixLen - sepCount - hashLen
 	if maxPartsLen < 2 {
 		// Should never happen, but keep a valid, bounded name.
-		return "rva-" + hash
+		return "csi-" + hash
 	}
 
 	volMax := maxPartsLen / 2
@@ -309,7 +309,7 @@ func BuildRVAName(volumeName, nodeName string) string {
 
 	volPart := truncateString(volumeName, volMax)
 	nodePart := truncateString(nodeName, nodeMax)
-	return "rva-" + volPart + "-" + nodePart + "-" + hash
+	return "csi-" + volPart + "-" + nodePart + "-" + hash
 }
 
 func truncateString(s string, maxLen int) string {
