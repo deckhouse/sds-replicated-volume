@@ -216,7 +216,7 @@ func newStraceCmd(ctx context.Context, logger logr.Logger, name string, arg ...s
 	pr, pw, _ := os.Pipe()
 
 	straceArgs := make([]string, 0, len(arg)+7)
-	straceArgs = append(straceArgs, "-o", "/dev/fd/3", "-e", "trace=openat", "-tt", "-T", "-f", name)
+	straceArgs = append(straceArgs, "-o", "/dev/fd/3", "-tt", "-T", "-f", name)
 	straceArgs = append(straceArgs, arg...)
 
 	cmd := exec.CommandContext(ctx, "strace", straceArgs...)
