@@ -19,6 +19,7 @@ package drbdr
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -60,11 +61,14 @@ func BuildController(mgr manager.Manager) error {
 	cl := mgr.GetClient()
 	nodeName := cfg.NodeName()
 
-	// Set up drbd command logging
+	// Set up drbd command logging at actual execution time
 	origExec := drbdutils.ExecCommandContext
 	drbdutils.ExecCommandContext = func(ctx context.Context, name string, arg ...string) drbdutils.Cmd {
-		log.FromContext(ctx).Info("executing drbd command", "command", name, "args", arg)
-		return origExec(ctx, name, arg...)
+		return &loggingCmd{
+			Cmd: origExec(ctx, name, arg...),
+			log: log.FromContext(ctx),
+			cmd: name, args: arg,
+		}
 	}
 
 	// Create internal request channel (scanner sends here)
@@ -134,4 +138,56 @@ func withDurationLogging(inner reconcile.TypedReconciler[DRBDReconcileRequest]) 
 		log.FromContext(ctx).Info("Reconcile complete", "duration", time.Since(start).String())
 		return res, err
 	})
+}
+
+type loggingCmd struct {
+	drbdutils.Cmd
+	log        logr.Logger
+	cmd        string
+	args       []string
+	loggedOnce bool
+	startTime  time.Time
+}
+
+func (c *loggingCmd) logExec() {
+	if !c.loggedOnce {
+		c.loggedOnce = true
+		c.log.Info("Executing DRBD command", "command", c.cmd, "args", c.args)
+	}
+}
+
+func (c *loggingCmd) CombinedOutput() ([]byte, error) {
+	c.logExec()
+	start := time.Now()
+	out, err := c.Cmd.CombinedOutput()
+	c.logDone(start, err)
+	return out, err
+}
+
+func (c *loggingCmd) Start() error {
+	c.logExec()
+	c.startTime = time.Now()
+	return c.Cmd.Start()
+}
+
+func (c *loggingCmd) StdoutPipe() (io.ReadCloser, error) {
+	return c.Cmd.StdoutPipe()
+}
+
+func (c *loggingCmd) Wait() error {
+	err := c.Cmd.Wait()
+	c.logDone(c.startTime, err)
+	return err
+}
+
+func (c *loggingCmd) logDone(start time.Time, err error) {
+	if err != nil {
+		c.log.Error(err, "DRBD command failed", "command", c.cmd, "args", c.args, "duration", time.Since(start).String())
+	} else {
+		c.log.Info("DRBD command complete", "command", c.cmd, "args", c.args, "duration", time.Since(start).String())
+	}
+}
+
+func (c *loggingCmd) String() string {
+	return c.Cmd.String()
 }
