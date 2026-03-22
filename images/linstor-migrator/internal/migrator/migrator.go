@@ -393,7 +393,12 @@ func (m *Migrator) migrateResource(
 
 	size, err := db.GetSize(pv, resName)
 	if err != nil {
-		return fmt.Errorf("failed to get size: %w", err)
+		log.Warn("skipping resource: cannot determine volume size", "err", err)
+		return nil
+	}
+	if size.IsZero() {
+		log.Warn("skipping resource: volume size is zero")
+		return nil
 	}
 
 	rscName, rscOK := m.findReplicatedStorageClassForResource(pv, poolName, repStorClasses)
