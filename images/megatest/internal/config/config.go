@@ -61,7 +61,7 @@ type MultiVolumeConfig struct {
 	ChaosDebugMode               bool
 }
 
-// VolumeMainConfig configures the volume-main goroutine
+// VolumeMainConfig configures the volume-main  goroutine
 type VolumeMainConfig struct {
 	StorageClassName             string
 	VolumeLifetime               time.Duration
