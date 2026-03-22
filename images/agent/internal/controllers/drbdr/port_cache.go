@@ -23,11 +23,6 @@ import (
 	"sync"
 )
 
-const (
-	PortRangeMin = uint(7000)
-	PortRangeMax = uint(7999)
-)
-
 // PortCache maintains port allocators for different IP addresses.
 // It is designed to be owned by the reconciler and passed to helpers as a delegate.
 //

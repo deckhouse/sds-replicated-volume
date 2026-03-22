@@ -441,7 +441,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			fakeExec.Setup(t)
 
 			// Create reconciler with port cache
-			portCache := drbdr.NewPortCache(context.Background(), drbdr.PortRangeMin, drbdr.PortRangeMax)
+			portCache := drbdr.NewPortCache(context.Background(), 7000, 7999)
 			rec := drbdr.NewReconciler(cl, testNodeName, portCache)
 
 			// Build reconcile request

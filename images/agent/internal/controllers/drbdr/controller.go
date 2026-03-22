@@ -75,7 +75,7 @@ func BuildController(mgr manager.Manager) error {
 	}
 
 	// Create port cache (reconciler-owned)
-	portCache := NewPortCache(context.Background(), PortRangeMin, PortRangeMax)
+	portCache := NewPortCache(context.Background(), cfg.DRBDMinPort(), cfg.DRBDMaxPort())
 
 	// Create reconciler (implements reconcile.TypedReconciler[DRBDReconcileRequest])
 	rec := NewReconciler(cl, nodeName, portCache)
