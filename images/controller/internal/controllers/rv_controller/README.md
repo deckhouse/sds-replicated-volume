@@ -46,7 +46,7 @@ ensure datamesh replica membership requests (sync from RVR statuses)
 
 if configuration exists:
     if formation in progress (DatameshRevision == 0 or Formation transition active):
-        reconcile formation (3-step process; config frozen)
+        reconcile formation (3-step process; create: config frozen; adopt: config re-derived in steps 0-1, restart on change)
         reconcileRVAWaiting (datamesh forming)
     else:
         reconcileRVConfiguration (check for config updates + set ConfigurationReady condition)
@@ -87,6 +87,7 @@ Reconcile (root) [Pure orchestration]
 ├── ensureDatameshReplicaRequests ← details
 ├── reconcileFormation [Pure orchestration]
 │   │   ensureFormationTransition (find or create Formation transition with all steps)
+│   │   adopt steps 0-1: reconcileRVConfiguration → if changed, reset datamesh state + restart
 │   ├── (create/v1)
 │   │   ├── reconcileFormationStepPreconfigure [Pure orchestration] ← details
 │   │   │   ├── create/delete RVRs (guards for deleting/misplaced, replica count management)
@@ -107,7 +108,7 @@ Reconcile (root) [Pure orchestration]
 │   │   ├── reconcileAdoptStepVerifyPrerequisites [Pure orchestration] ← details
 │   │   │   ├── collect non-deleting replicas by type (diskful, tiebreaker, access)
 │   │   │   ├── gates: diskful exist, no deleting RVRs, all scheduled, all in maintenance+Join
-│   │   │   ├── gates: backing volumes UpToDate, diskful count matches, tiebreaker count matches
+│   │   │   ├── gates: backing volumes UpToDate, diskful count >= expected, tiebreaker count >= expected
 │   │   │   ├── safety: addresses, eligible nodes, spec consistency, backing volume size
 │   │   │   └── advance → PopulateAndVerifyDatamesh
 │   │   ├── reconcileAdoptStepPopulateAndVerifyDatamesh [Pure orchestration] ← details
@@ -312,13 +313,15 @@ When formation stalls (any safety check fails or progress timeout is exceeded), 
 2. Log error (formation timed out)
 3. Delete formation DRBDResourceOperation if exists
 4. Delete all replicas (with finalizer removal)
-5. Reset all status fields (Configuration, DatameshRevision, Datamesh, EffectiveLayout, transitions)
+5. Reset all status fields (Configuration, ConfigurationGeneration, ConfigurationObservedGeneration, DatameshRevision, Datamesh, BaselineGuaranteedMinimumDataRedundancy, transitions, DatameshReplicaRequests)
 6. Re-derive configuration via `reconcileRVConfiguration` (to avoid ConfigurationReady condition flicker)
 7. Requeue for fresh start
 
 ### adopt/v1 Formation
 
 Unlike create/v1, the adopt plan never creates or deletes RVRs. It expects pre-existing RVRs (created externally) to be in maintenance mode with a DatameshRequest Join. The adopt plan handles all replica types: Diskful, TieBreaker, and Access.
+
+**Configuration re-derivation:** During adopt steps 0-1 (VerifyPrerequisites and PopulateAndVerifyDatamesh), the controller re-derives configuration from the current source (RSC or ManualConfiguration) on every re-entry. If the configuration changed (e.g., user fixed FTT/GMDR mismatch, switched config mode, or pointed to a different RSC), the adopt transition restarts from step 0: datamesh state is reset (DatameshRevision, Members, Quorum, transitions) but replicas are NOT deleted. Step 2 (ExitMaintenance) does not check configuration; any pending config change is picked up by normal operation after formation completes.
 
 #### Step 1: Verify Prerequisites
 
@@ -330,8 +333,8 @@ Waits for pre-existing RVRs to satisfy all prerequisites before populating the d
 3. All replicas (D+TB+A) are scheduled
 4. All replicas are in maintenance mode with DatameshRequest Join
 5. All diskful replicas have UpToDate backing volumes
-6. Diskful replica count matches `D = FTT + GMDR + 1`
-7. TieBreaker count matches: 1 if D is even and FTT = D/2, else 0
+6. Diskful replica count >= `D = FTT + GMDR + 1` (extras are acceptable)
+7. TieBreaker count >= expected: 1 if D is even and FTT = D/2, else 0 (extras are acceptable)
 8. All replicas have addresses for required system networks
 9. All replicas are on eligible nodes
 10. Replica spec matches pending transition (LVG, ThinPool)
@@ -621,8 +624,8 @@ flowchart TD
     CollectDiskful --> CheckMembers{Datamesh members<br/>already set?}
     CheckMembers -->|No| GenSecret[generateSharedSecret]
     GenSecret --> AddMembers["Add diskful replicas as datamesh members<br/>(zone, addresses, LVG from membership request)"]
-    AddMembers --> SetEL["Set EffectiveLayout<br/>(FTT/GMDR from configuration)"]
-    SetEL --> SetQuorum[computeTargetQuorum]
+    AddMembers --> SetBaseline["Set BaselineGMDR<br/>(from configuration)"]
+    SetBaseline --> SetQuorum[computeTargetQuorum]
     SetQuorum --> IncrRevision["DatameshRevision++"]
     IncrRevision --> ReturnChanged([Return changed])
 
@@ -652,8 +655,8 @@ flowchart TD
 |--------|-------------|
 | `rv.Status.Datamesh.SharedSecret` | Generated DRBD shared secret |
 | `rv.Status.Datamesh.Members` | Datamesh member list |
-| `rv.Status.EffectiveLayout` | Set from Configuration (FTT/GMDR) |
-| `rv.Status.Datamesh.Quorum` | Quorum threshold (derived from EffectiveLayout) |
+| `rv.Status.BaselineGuaranteedMinimumDataRedundancy` | Set from Configuration GMDR |
+| `rv.Status.Datamesh.Quorum` | Quorum threshold (derived from configuration) |
 | `rv.Status.DatameshRevision` | Incremented revision |
 
 ---
@@ -831,7 +834,7 @@ flowchart TD
 | `rv.Status.Datamesh.SharedSecret` | DRBD shared secret (from `adopt-shared-secret` annotation or generated) |
 | `rv.Status.Datamesh.Members` | Datamesh member list (all types) |
 | `rv.Status.Datamesh.Multiattach` | Set if multiple members are attached |
-| `rv.Status.EffectiveLayout` | Set from Configuration (FTT/GMDR) |
+| `rv.Status.BaselineGuaranteedMinimumDataRedundancy` | Set from Configuration GMDR |
 | `rv.Status.BaselineGuaranteedMinimumDataRedundancy` | From configuration |
 | `rv.Status.Datamesh.Quorum`, `QuorumMinimumRedundancy` | Computed quorum thresholds |
 | `rv.Status.DatameshRevision` | Incremented revision |
@@ -927,9 +930,10 @@ flowchart TD
 **Caller control:** This function does NOT have an internal formation freeze guard. Instead, callers decide when to call it:
 - **Root Reconcile:** when `Configuration` is nil (initial set)
 - **Normal operation:** always (check for config updates)
-- **Formation reset:** after clearing `Configuration` to nil (re-derive)
+- **Formation reset (create/v1):** after clearing `Configuration` to nil (re-derive)
+- **Adopt formation steps 0-1:** re-derive to detect user-initiated config changes
 
-During formation, callers do NOT call this function (config is frozen).
+During create formation, callers do NOT call this function (config is frozen). During adopt formation, `reconcileFormation` calls this in steps 0-1 to allow the user to fix configuration mismatches; if config changed, adopt restarts.
 
 **Algorithm:**
 

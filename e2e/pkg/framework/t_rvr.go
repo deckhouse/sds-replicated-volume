@@ -93,6 +93,18 @@ func (t *TestRVR) ThinPool(name string) *TestRVR {
 }
 
 // ---------------------------------------------------------------------------
+// ID
+// ---------------------------------------------------------------------------
+
+// ID extracts the replica ID (0-31) from the RVR name suffix.
+// Does not require the API object to be present.
+func (t *TestRVR) ID() uint8 {
+	return (&v1alpha1.ReplicatedVolumeReplica{
+		ObjectMeta: metav1.ObjectMeta{Name: t.Name()},
+	}).ID()
+}
+
+// ---------------------------------------------------------------------------
 // buildObject
 // ---------------------------------------------------------------------------
 

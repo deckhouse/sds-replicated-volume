@@ -19,31 +19,44 @@ package framework
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	tk "github.com/deckhouse/sds-replicated-volume/lib/go/testkit"
 )
+
+func testPoolScope(rsp *v1alpha1.ReplicatedStoragePool) PoolScope {
+	trsp := &TestRSP{}
+	trsp.TrackedObject = tk.NewTrackedObject[*v1alpha1.ReplicatedStoragePool](
+		nil, nil, gvkRSP, rsp.Name,
+		tk.Lifecycle[*v1alpha1.ReplicatedStoragePool]{})
+	trsp.InjectEvent(watch.Added, rsp)
+	return PoolScope{trsp: trsp}
+}
 
 func thinDiscovery(nodes ...v1alpha1.ReplicatedStoragePoolEligibleNode) *Discovery {
 	return &Discovery{
-		PoolScope: PoolScope{rsp: &v1alpha1.ReplicatedStoragePool{
+		PoolScope: testPoolScope(&v1alpha1.ReplicatedStoragePool{
 			Status: v1alpha1.ReplicatedStoragePoolStatus{EligibleNodes: nodes},
-		}},
-		thick: &v1alpha1.ReplicatedStoragePool{},
+		}),
+		thickPool: testPoolScope(&v1alpha1.ReplicatedStoragePool{}),
 	}
 }
 
 func thickDiscovery(nodes ...v1alpha1.ReplicatedStoragePoolEligibleNode) *Discovery {
 	return &Discovery{
-		PoolScope: PoolScope{rsp: &v1alpha1.ReplicatedStoragePool{}},
-		thick: &v1alpha1.ReplicatedStoragePool{
+		PoolScope: testPoolScope(&v1alpha1.ReplicatedStoragePool{}),
+		thickPool: testPoolScope(&v1alpha1.ReplicatedStoragePool{
 			Status: v1alpha1.ReplicatedStoragePoolStatus{EligibleNodes: nodes},
-		},
+		}),
 	}
 }
 
 func eligibleNode(name string, lvgs ...v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup) v1alpha1.ReplicatedStoragePoolEligibleNode {
 	return v1alpha1.ReplicatedStoragePoolEligibleNode{
 		NodeName:        name,
+		NodeReady:       true,
+		AgentReady:      true,
 		LVMVolumeGroups: lvgs,
 	}
 }
@@ -52,6 +65,7 @@ func lvg(name, thinPool string) v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVol
 	return v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
 		Name:         name,
 		ThinPoolName: thinPool,
+		Ready:        true,
 	}
 }
 
@@ -119,6 +133,30 @@ var _ = Describe("AnyNode", func() {
 		)
 		node := d.From(thick).AnyNode("k1")
 		Expect(node).To(Equal("k2"))
+	})
+
+	It("skips nodes with NodeReady=false", func() {
+		d := thinDiscovery(
+			v1alpha1.ReplicatedStoragePoolEligibleNode{NodeName: "not-ready", NodeReady: false, AgentReady: true},
+			eligibleNode("ready"),
+		)
+		Expect(d.AnyNode()).To(Equal("ready"))
+	})
+
+	It("skips nodes with AgentReady=false", func() {
+		d := thinDiscovery(
+			v1alpha1.ReplicatedStoragePoolEligibleNode{NodeName: "no-agent", NodeReady: true, AgentReady: false},
+			eligibleNode("good"),
+		)
+		Expect(d.AnyNode()).To(Equal("good"))
+	})
+
+	It("skips unschedulable nodes", func() {
+		d := thinDiscovery(
+			v1alpha1.ReplicatedStoragePoolEligibleNode{NodeName: "unsched", NodeReady: true, AgentReady: true, Unschedulable: true},
+			eligibleNode("sched"),
+		)
+		Expect(d.AnyNode()).To(Equal("sched"))
 	})
 })
 
@@ -212,5 +250,27 @@ var _ = Describe("AnyDiskfulPlacement", func() {
 		p := d.From(thick).AnyDiskfulPlacement()
 		Expect(p.NodeName).To(Equal("k1"))
 		Expect(p.LVGName).To(Equal("vg-thick"))
+	})
+
+	It("skips not-ready LVGs", func() {
+		d := thinDiscovery(
+			eligibleNode("n1",
+				v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{Name: "bad", Ready: false},
+				lvg("good", ""),
+			),
+		)
+		p := d.AnyDiskfulPlacement()
+		Expect(p.LVGName).To(Equal("good"))
+	})
+
+	It("skips unschedulable LVGs", func() {
+		d := thinDiscovery(
+			eligibleNode("n1",
+				v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{Name: "unsched", Ready: true, Unschedulable: true},
+				lvg("ok", ""),
+			),
+		)
+		p := d.AnyDiskfulPlacement()
+		Expect(p.LVGName).To(Equal("ok"))
 	})
 })

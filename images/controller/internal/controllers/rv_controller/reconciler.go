@@ -132,7 +132,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Derive rv.Status.Configuration from the appropriate source (RSC or ManualConfiguration).
 	// Called here only for initial set (config is nil). During normal operation,
 	// reconcileRVConfiguration is called inside reconcileNormalOperation.
-	// During formation, config is frozen (only formation reset calls reconcileRVConfiguration).
+	// During create formation, config is frozen (only formation restart calls
+	// reconcileRVConfiguration). During adopt formation, config is re-derived
+	// in steps 0-1 inside reconcileFormation to allow the user to fix mismatches.
 	if rv.Status.Configuration == nil {
 		outcome = outcome.Merge(r.reconcileRVConfiguration(rf.Ctx(), rv, rsc))
 		if outcome.ShouldReturn() {
@@ -631,9 +633,12 @@ func applyRVMetadata(rv *v1alpha1.ReplicatedVolume, targetFinalizerPresent bool)
 // Callers control when this function is called:
 //   - Root Reconcile: when Configuration is nil (initial set)
 //   - reconcileNormalOperation: always (check for config updates)
-//   - Formation reset: after clearing Configuration to nil (re-derive)
+//   - Formation reset (create/v1): after clearing Configuration to nil (re-derive)
+//   - Adopt formation steps 0-1: re-derive to detect user-initiated config changes
 //
-// During formation, callers do NOT call this function (config is frozen).
+// During create formation, callers do NOT call this function (config is frozen).
+// During adopt formation, reconcileFormation calls this in steps 0-1 to allow
+// the user to fix configuration mismatches; if config changed, adopt restarts.
 //
 // Generation semantics by mode:
 //   - Auto mode: ConfigurationGeneration = RSC's Status.ConfigurationGeneration
