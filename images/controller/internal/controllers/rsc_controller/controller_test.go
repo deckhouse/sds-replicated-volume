@@ -24,119 +24,16 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 var _ = Describe("Mapper functions", func() {
-	var scheme *runtime.Scheme
-
-	BeforeEach(func() {
-		scheme = runtime.NewScheme()
-		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
-		Expect(corev1.AddToScheme(scheme)).To(Succeed())
-	})
-
 	Describe("mapRSPToRSC", func() {
-		It("returns requests for RSCs referencing the RSP via spec.storagePool", func() {
-			rsp := &v1alpha1.ReplicatedStoragePool{
-				ObjectMeta: metav1.ObjectMeta{Name: "pool-1"},
-			}
-			rsc1 := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
-				Spec:       v1alpha1.ReplicatedStorageClassSpec{StoragePool: "pool-1"},
-			}
-			rsc2 := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-2"},
-				Spec:       v1alpha1.ReplicatedStorageClassSpec{StoragePool: "pool-1"},
-			}
-			rscOther := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-other"},
-				Spec:       v1alpha1.ReplicatedStorageClassSpec{StoragePool: "other-pool"},
-			}
-
-			cl := testhelpers.WithRSCByStatusStoragePoolNameIndex(
-				testhelpers.WithRSCByStoragePoolIndex(
-					fake.NewClientBuilder().
-						WithScheme(scheme).
-						WithObjects(rsp, rsc1, rsc2, rscOther),
-				),
-			).Build()
-
-			mapFunc := mapRSPToRSC(cl)
-			requests := mapFunc(context.Background(), rsp)
-
-			Expect(requests).To(HaveLen(2))
-			names := []string{requests[0].Name, requests[1].Name}
-			Expect(names).To(ContainElements("rsc-1", "rsc-2"))
-		})
-
-		It("returns requests for RSCs referencing the RSP via status.storagePoolName", func() {
-			rsp := &v1alpha1.ReplicatedStoragePool{
-				ObjectMeta: metav1.ObjectMeta{Name: "auto-rsp-abc123"},
-			}
-			rsc1 := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
-				Status:     v1alpha1.ReplicatedStorageClassStatus{StoragePoolName: "auto-rsp-abc123"},
-			}
-			rsc2 := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-2"},
-				Status:     v1alpha1.ReplicatedStorageClassStatus{StoragePoolName: "auto-rsp-abc123"},
-			}
-			rscOther := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-other"},
-				Status:     v1alpha1.ReplicatedStorageClassStatus{StoragePoolName: "other-pool"},
-			}
-
-			cl := testhelpers.WithRSCByStatusStoragePoolNameIndex(
-				testhelpers.WithRSCByStoragePoolIndex(
-					fake.NewClientBuilder().
-						WithScheme(scheme).
-						WithObjects(rsp, rsc1, rsc2, rscOther),
-				),
-			).Build()
-
-			mapFunc := mapRSPToRSC(cl)
-			requests := mapFunc(context.Background(), rsp)
-
-			Expect(requests).To(HaveLen(2))
-			names := []string{requests[0].Name, requests[1].Name}
-			Expect(names).To(ContainElements("rsc-1", "rsc-2"))
-		})
-
-		It("returns deduplicated requests when RSC matches both indexes", func() {
-			rsp := &v1alpha1.ReplicatedStoragePool{
-				ObjectMeta: metav1.ObjectMeta{Name: "pool-1"},
-			}
-			// RSC matches both spec.storagePool and status.storagePoolName.
-			rsc := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
-				Spec:       v1alpha1.ReplicatedStorageClassSpec{StoragePool: "pool-1"},
-				Status:     v1alpha1.ReplicatedStorageClassStatus{StoragePoolName: "pool-1"},
-			}
-
-			cl := testhelpers.WithRSCByStatusStoragePoolNameIndex(
-				testhelpers.WithRSCByStoragePoolIndex(
-					fake.NewClientBuilder().
-						WithScheme(scheme).
-						WithObjects(rsp, rsc),
-				),
-			).Build()
-
-			mapFunc := mapRSPToRSC(cl)
-			requests := mapFunc(context.Background(), rsp)
-
-			Expect(requests).To(HaveLen(1))
-			Expect(requests[0].Name).To(Equal("rsc-1"))
-		})
-
-		It("returns requests for RSCs from usedBy (orphaned entries for deleted RSCs)", func() {
+		It("returns requests for RSCs from usedBy", func() {
 			rsp := &v1alpha1.ReplicatedStoragePool{
 				ObjectMeta: metav1.ObjectMeta{Name: "pool-1"},
 				Status: v1alpha1.ReplicatedStoragePoolStatus{
@@ -146,15 +43,7 @@ var _ = Describe("Mapper functions", func() {
 				},
 			}
 
-			cl := testhelpers.WithRSCByStatusStoragePoolNameIndex(
-				testhelpers.WithRSCByStoragePoolIndex(
-					fake.NewClientBuilder().
-						WithScheme(scheme).
-						WithObjects(rsp),
-				),
-			).Build()
-
-			mapFunc := mapRSPToRSC(cl)
+			mapFunc := mapRSPToRSC()
 			requests := mapFunc(context.Background(), rsp)
 
 			Expect(requests).To(HaveLen(2))
@@ -162,29 +51,17 @@ var _ = Describe("Mapper functions", func() {
 			Expect(names).To(ContainElements("rsc-deleted-1", "rsc-deleted-2"))
 		})
 
-		It("deduplicates usedBy entries with index results", func() {
+		It("deduplicates usedBy entries", func() {
 			rsp := &v1alpha1.ReplicatedStoragePool{
 				ObjectMeta: metav1.ObjectMeta{Name: "pool-1"},
 				Status: v1alpha1.ReplicatedStoragePoolStatus{
 					UsedBy: v1alpha1.ReplicatedStoragePoolUsedBy{
-						ReplicatedStorageClassNames: []string{"rsc-1", "rsc-orphan"},
+						ReplicatedStorageClassNames: []string{"rsc-1", "rsc-orphan", "rsc-1"},
 					},
 				},
 			}
-			rsc1 := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
-				Status:     v1alpha1.ReplicatedStorageClassStatus{StoragePoolName: "pool-1"},
-			}
 
-			cl := testhelpers.WithRSCByStatusStoragePoolNameIndex(
-				testhelpers.WithRSCByStoragePoolIndex(
-					fake.NewClientBuilder().
-						WithScheme(scheme).
-						WithObjects(rsp, rsc1),
-				),
-			).Build()
-
-			mapFunc := mapRSPToRSC(cl)
+			mapFunc := mapRSPToRSC()
 			requests := mapFunc(context.Background(), rsp)
 
 			Expect(requests).To(HaveLen(2))
@@ -196,29 +73,15 @@ var _ = Describe("Mapper functions", func() {
 			rsp := &v1alpha1.ReplicatedStoragePool{
 				ObjectMeta: metav1.ObjectMeta{Name: "pool-unused"},
 			}
-			rscOther := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-other"},
-				Spec:       v1alpha1.ReplicatedStorageClassSpec{StoragePool: "other-pool"},
-			}
 
-			cl := testhelpers.WithRSCByStatusStoragePoolNameIndex(
-				testhelpers.WithRSCByStoragePoolIndex(
-					fake.NewClientBuilder().
-						WithScheme(scheme).
-						WithObjects(rsp, rscOther),
-				),
-			).Build()
-
-			mapFunc := mapRSPToRSC(cl)
+			mapFunc := mapRSPToRSC()
 			requests := mapFunc(context.Background(), rsp)
 
 			Expect(requests).To(BeNil())
 		})
 
 		It("returns nil for non-RSP object", func() {
-			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
-
-			mapFunc := mapRSPToRSC(cl)
+			mapFunc := mapRSPToRSC()
 			requests := mapFunc(context.Background(), &corev1.Node{})
 
 			Expect(requests).To(BeNil())
