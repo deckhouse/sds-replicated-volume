@@ -120,7 +120,7 @@ func BuildController(mgr manager.Manager) error {
 			)),
 		).
 		WithOptions(controller.TypedOptions[DRBDReconcileRequest]{
-			MaxConcurrentReconciles: 10,
+			MaxConcurrentReconciles: 20,
 			RateLimiter:             controlleroptions.DefaultRateLimiter[DRBDReconcileRequest](),
 		}).
 		Complete(withDurationLogging(rec)); err != nil {
