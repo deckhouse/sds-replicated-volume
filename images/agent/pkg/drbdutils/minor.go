@@ -79,7 +79,7 @@ func ExecuteNewAutoMinor(ctx context.Context, resource string, volume uint, disk
 	for {
 		minor := grabNextMinor()
 
-		err := ExecuteNewMinor(ctx, resource, nextDeviceMinor, volume, diskless)
+		err := ExecuteNewMinor(ctx, resource, minor, volume, diskless)
 		if err == nil {
 			return minor, nil
 		}
