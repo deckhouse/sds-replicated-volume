@@ -704,7 +704,7 @@ func (m *Migrator) createRVAFromVolumeAttachments(
 			continue
 		}
 
-		rvaName := fmt.Sprintf("%s-%s", resName, strings.ToLower(va.Spec.NodeName))
+		rvaName := fmt.Sprintf("%s-%s-%s", "csi", resName, strings.ToLower(va.Spec.NodeName))
 		rva := &srvv1alpha1.ReplicatedVolumeAttachment{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: rvaName,
