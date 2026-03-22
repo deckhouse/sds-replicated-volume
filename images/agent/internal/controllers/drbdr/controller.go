@@ -216,7 +216,7 @@ func newStraceCmd(ctx context.Context, logger logr.Logger, name string, arg ...s
 	pr, pw, _ := os.Pipe()
 
 	straceArgs := make([]string, 0, len(arg)+7)
-	straceArgs = append(straceArgs, "-o", "/dev/fd/3", "-e", "trace=openat", "-T", "-f", name)
+	straceArgs = append(straceArgs, "-o", "/dev/fd/3", "-e", "trace=openat", "-tt", "-T", "-f", name)
 	straceArgs = append(straceArgs, arg...)
 
 	cmd := exec.CommandContext(ctx, "strace", straceArgs...)
@@ -238,18 +238,7 @@ func (c *straceCmd) CombinedOutput() ([]byte, error) {
 	straceOut, _ := io.ReadAll(c.pipeReader)
 	c.pipeReader.Close()
 
-	duration := time.Since(start).String()
-	for _, line := range strings.Split(strings.TrimSpace(string(straceOut)), "\n") {
-		if line != "" {
-			c.log.Info("strace", "command", c.cmdName, "line", line)
-		}
-	}
-
-	if err != nil {
-		c.log.Error(err, "DRBD command failed", "command", c.cmdName, "args", c.args, "duration", duration)
-	} else {
-		c.log.Info("DRBD command complete", "command", c.cmdName, "args", c.args, "duration", duration)
-	}
+	c.logDone(start, err, straceOut)
 	return out, err
 }
 
@@ -265,19 +254,18 @@ func (c *straceCmd) Wait() error {
 	straceOut, _ := io.ReadAll(c.pipeReader)
 	c.pipeReader.Close()
 
-	duration := time.Since(c.startTime).String()
-	for _, line := range strings.Split(strings.TrimSpace(string(straceOut)), "\n") {
-		if line != "" {
-			c.log.Info("strace", "command", c.cmdName, "line", line)
-		}
-	}
-
-	if err != nil {
-		c.log.Error(err, "DRBD command failed", "command", c.cmdName, "args", c.args, "duration", duration)
-	} else {
-		c.log.Info("DRBD command complete", "command", c.cmdName, "args", c.args, "duration", duration)
-	}
+	c.logDone(c.startTime, err, straceOut)
 	return err
+}
+
+func (c *straceCmd) logDone(start time.Time, err error, straceOut []byte) {
+	duration := time.Since(start).String()
+	trace := strings.TrimSpace(string(straceOut))
+	if err != nil {
+		c.log.Error(err, "DRBD command failed", "command", c.cmdName, "args", c.args, "duration", duration, "strace", trace)
+	} else {
+		c.log.Info("DRBD command complete", "command", c.cmdName, "args", c.args, "duration", duration, "strace", trace)
+	}
 }
 
 func (c *straceCmd) StdoutPipe() (io.ReadCloser, error) { return c.cmd.StdoutPipe() }
