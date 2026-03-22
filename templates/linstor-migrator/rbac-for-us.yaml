@@ -71,6 +71,7 @@ rules:
       - layerdrbdresources
       - layerdrbdresourcedefinitions
       - propscontainers
+      - nodestorpool
       - nodestorpools
     verbs: ["list"]
   - apiGroups: ["storage.deckhouse.io"]

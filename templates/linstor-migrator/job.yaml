@@ -8,7 +8,6 @@ metadata:
   namespace: d8-{{ .Chart.Name }}
   {{- include "helm_lib_module_labels" (list . (dict "app" "control-plane-migrator")) | nindent 2 }}
 spec:
-  ttlSecondsAfterFinished: 3600
   backoffLimit: 2
   template:
     metadata:
