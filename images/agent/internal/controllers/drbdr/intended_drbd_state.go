@@ -149,6 +149,7 @@ type intendedDRBDState struct {
 	nodeID                  uint8
 	resourceType            v1alpha1.DRBDResourceType
 	backingDisk             string
+	rsDiscardGranularity    uint
 	quorum                  byte
 	quorumMinimumRedundancy byte
 	allowTwoPrimaries       bool
@@ -183,9 +184,11 @@ func (s *intendedDRBDState) OnNoDataAccessible() string         { return "suspen
 func (s *intendedDRBDState) OnSuspendedPrimaryOutdated() string { return "force-secondary" }
 func (s *intendedDRBDState) QuorumDynamicVoters() bool          { return !drbdutils.FlantExtensionsSupported }
 
-// Hardcoded disk options defaults
-func (s *intendedDRBDState) DiscardZeroesIfAligned() bool { return false }
-func (s *intendedDRBDState) RsDiscardGranularity() uint   { return 8192 } // TODO: DETECT AUTOMATICALLY FROM LVM
+// Disk options defaults.
+// DiscardZeroesIfAligned is always true: safe for thick (ignored by kernel when
+// bdev_max_discard_sectors == 0) and required for thin to use discard instead of zeroout.
+func (s *intendedDRBDState) DiscardZeroesIfAligned() bool { return true }
+func (s *intendedDRBDState) RsDiscardGranularity() uint   { return s.rsDiscardGranularity }
 func (s *intendedDRBDState) NonVoting() bool              { return s.nonVoting }
 
 var _ IntendedDRBDState = (*intendedDRBDState)(nil)
@@ -288,6 +291,11 @@ func computeIntendedDRBDState(
 		sizeBytes = drbdr.Spec.Size.Value()
 	}
 
+	var rsDiscardGran uint
+	if backingDisk != "" {
+		rsDiscardGran = drbdutils.ReadDiscardGranularity(backingDisk)
+	}
+
 	return &intendedDRBDState{
 		isUpAndNotInCleanup:     isUpAndNotInCleanup,
 		resourceName:            DRBDResourceNameOnTheNode(drbdr),
@@ -295,6 +303,7 @@ func computeIntendedDRBDState(
 		nodeID:                  drbdr.Spec.NodeID,
 		resourceType:            drbdr.Spec.Type,
 		backingDisk:             backingDisk,
+		rsDiscardGranularity:    rsDiscardGran,
 		quorum:                  drbdr.Spec.Quorum,
 		quorumMinimumRedundancy: drbdr.Spec.QuorumMinimumRedundancy,
 		allowTwoPrimaries:       drbdr.Spec.AllowTwoPrimaries,
