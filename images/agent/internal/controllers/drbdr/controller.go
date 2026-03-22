@@ -202,30 +202,42 @@ func (c *loggingCmd) String() string {
 
 // straceCmd wraps a drbdmeta call with strace, routing trace output through
 // an os.Pipe directly into the structured log (no temp files).
+// straceCmd wraps a drbdmeta call with two nested strace instances:
+//   - outer: full summary (-c -w) on fd 3
+//   - inner: filtered trace lines (-e trace=!..., -tt -T) on fd 4
 type straceCmd struct {
-	cmd        *exec.Cmd
-	log        logr.Logger
-	cmdName    string
-	args       []string
-	pipeReader *os.File
-	pipeWriter *os.File
-	startTime  time.Time
+	cmd           *exec.Cmd
+	log           logr.Logger
+	cmdName       string
+	args          []string
+	summaryReader *os.File
+	summaryWriter *os.File
+	traceReader   *os.File
+	traceWriter   *os.File
+	startTime     time.Time
 }
 
 func newStraceCmd(ctx context.Context, logger logr.Logger, name string, arg ...string) *straceCmd {
-	pr, pw, _ := os.Pipe()
+	summaryR, summaryW, _ := os.Pipe() // fd 3 — full summary
+	traceR, traceW, _ := os.Pipe()     // fd 4 — filtered lines
 
-	straceArgs := make([]string, 0, len(arg)+7)
-	straceArgs = append(straceArgs, "-o", "/dev/fd/3", "-tt", "-T", "-f", name)
-	straceArgs = append(straceArgs, arg...)
+	// outer strace: full summary → fd 3
+	// inner strace: filtered lines → fd 4, wrapping the actual command
+	outerArgs := []string{"-o", "/dev/fd/3", "-c", "-w", "-f",
+		"strace", "-o", "/dev/fd/4",
+		"-e", "trace=!brk,mmap,mprotect,munmap,read,write,pread64,pwrite64,lseek",
+		"-tt", "-T", "-f", name,
+	}
+	outerArgs = append(outerArgs, arg...)
 
-	cmd := exec.CommandContext(ctx, "strace", straceArgs...)
-	cmd.ExtraFiles = []*os.File{pw} // fd 3 in child
+	cmd := exec.CommandContext(ctx, "strace", outerArgs...)
+	cmd.ExtraFiles = []*os.File{summaryW, traceW} // fd 3, fd 4
 
 	return &straceCmd{
 		cmd: cmd, log: logger,
 		cmdName: name, args: arg,
-		pipeReader: pr, pipeWriter: pw,
+		summaryReader: summaryR, summaryWriter: summaryW,
+		traceReader: traceR, traceWriter: traceW,
 	}
 }
 
@@ -234,11 +246,7 @@ func (c *straceCmd) CombinedOutput() ([]byte, error) {
 	start := time.Now()
 
 	out, err := c.cmd.CombinedOutput()
-	c.pipeWriter.Close()
-	straceOut, _ := io.ReadAll(c.pipeReader)
-	c.pipeReader.Close()
-
-	c.logDone(start, err, straceOut)
+	c.closePipesAndLog(start, err)
 	return out, err
 }
 
@@ -250,21 +258,25 @@ func (c *straceCmd) Start() error {
 
 func (c *straceCmd) Wait() error {
 	err := c.cmd.Wait()
-	c.pipeWriter.Close()
-	straceOut, _ := io.ReadAll(c.pipeReader)
-	c.pipeReader.Close()
-
-	c.logDone(c.startTime, err, straceOut)
+	c.closePipesAndLog(c.startTime, err)
 	return err
 }
 
-func (c *straceCmd) logDone(start time.Time, err error, straceOut []byte) {
+func (c *straceCmd) closePipesAndLog(start time.Time, err error) {
+	c.summaryWriter.Close()
+	c.traceWriter.Close()
+	summaryOut, _ := io.ReadAll(c.summaryReader)
+	traceOut, _ := io.ReadAll(c.traceReader)
+	c.summaryReader.Close()
+	c.traceReader.Close()
+
 	duration := time.Since(start).String()
-	trace := strings.TrimSpace(string(straceOut))
+	summary := strings.TrimSpace(string(summaryOut))
+	trace := strings.TrimSpace(string(traceOut))
 	if err != nil {
-		c.log.Error(err, "DRBD command failed", "command", c.cmdName, "args", c.args, "duration", duration, "strace", trace)
+		c.log.Error(err, "DRBD command failed", "command", c.cmdName, "args", c.args, "duration", duration, "straceSummary", summary, "straceTrace", trace)
 	} else {
-		c.log.Info("DRBD command complete", "command", c.cmdName, "args", c.args, "duration", duration, "strace", trace)
+		c.log.Info("DRBD command complete", "command", c.cmdName, "args", c.args, "duration", duration, "straceSummary", summary, "straceTrace", trace)
 	}
 }
 
