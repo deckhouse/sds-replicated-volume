@@ -381,8 +381,8 @@ func DeleteRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 		return fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
 	}
 
-	if slices.Contains(rva.Finalizers, RVACSIControllerFinalizer) {
-		rva.Finalizers = slices.DeleteFunc(rva.Finalizers, func(s string) bool { return s == RVACSIControllerFinalizer })
+	if slices.Contains(rva.Finalizers, SDSReplicatedVolumeCSIFinalizer) {
+		rva.Finalizers = slices.DeleteFunc(rva.Finalizers, func(s string) bool { return s == SDSReplicatedVolumeCSIFinalizer })
 		if err := kc.Update(ctx, rva); err != nil {
 			return fmt.Errorf("remove finalizer from ReplicatedVolumeAttachment %s: %w", rvaName, err)
 		}
@@ -411,8 +411,8 @@ func DeleteRVAsForVolume(ctx context.Context, kc client.Client, log *logger.Logg
 		}
 	}
 	for _, rva := range toDelete {
-		if slices.Contains(rva.Finalizers, RVACSIControllerFinalizer) {
-			rva.Finalizers = slices.DeleteFunc(rva.Finalizers, func(s string) bool { return s == RVACSIControllerFinalizer })
+		if slices.Contains(rva.Finalizers, SDSReplicatedVolumeCSIFinalizer) {
+			rva.Finalizers = slices.DeleteFunc(rva.Finalizers, func(s string) bool { return s == SDSReplicatedVolumeCSIFinalizer })
 			if err := kc.Update(ctx, &rva); err != nil {
 				return fmt.Errorf("remove finalizer from ReplicatedVolumeAttachment %s: %w", rva.Name, err)
 			}
