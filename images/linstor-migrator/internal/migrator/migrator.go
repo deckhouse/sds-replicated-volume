@@ -349,9 +349,9 @@ func (m *Migrator) runStage3(ctx context.Context) error {
 		return ctx.Err()
 	}
 
-	if err := m.updateMigrationState(ctx, config.StateAllCompleted); err != nil {
-		return fmt.Errorf("failed to update migration state: %w", err)
-	}
+	// if err := m.updateMigrationState(ctx, config.StateAllCompleted); err != nil {
+	//	return fmt.Errorf("failed to update migration state: %w", err)
+	// }
 	m.log.Info("stage 3: completed (stub)")
 	return nil
 }
