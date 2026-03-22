@@ -381,6 +381,14 @@ func DeleteRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 		return fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
 	}
 
+	if slices.Contains(rva.Finalizers, RVACSIControllerFinalizer) {
+		rva.Finalizers = slices.DeleteFunc(rva.Finalizers, func(s string) bool { return s == RVACSIControllerFinalizer })
+		if err := kc.Update(ctx, rva); err != nil {
+			return fmt.Errorf("remove finalizer from ReplicatedVolumeAttachment %s: %w", rvaName, err)
+		}
+		log.Info(fmt.Sprintf("[DeleteRVA][traceID:%s][volumeID:%s][node:%s] Removed finalizer from RVA %s", traceID, volumeName, nodeName, rvaName))
+	}
+
 	log.Info(fmt.Sprintf("[DeleteRVA][traceID:%s][volumeID:%s][node:%s] Deleting ReplicatedVolumeAttachment %s", traceID, volumeName, nodeName, rvaName))
 	if err := kc.Delete(ctx, rva); err != nil {
 		return client.IgnoreNotFound(err)
@@ -403,6 +411,13 @@ func DeleteRVAsForVolume(ctx context.Context, kc client.Client, log *logger.Logg
 		}
 	}
 	for _, rva := range toDelete {
+		if slices.Contains(rva.Finalizers, RVACSIControllerFinalizer) {
+			rva.Finalizers = slices.DeleteFunc(rva.Finalizers, func(s string) bool { return s == RVACSIControllerFinalizer })
+			if err := kc.Update(ctx, &rva); err != nil {
+				return fmt.Errorf("remove finalizer from ReplicatedVolumeAttachment %s: %w", rva.Name, err)
+			}
+			log.Info(fmt.Sprintf("[DeleteRVAsForVolume][traceID:%s][volumeID:%s] Removed finalizer from RVA %s", traceID, volumeName, rva.Name))
+		}
 		log.Info(fmt.Sprintf("[DeleteRVAsForVolume][traceID:%s][volumeID:%s] Deleting ReplicatedVolumeAttachment %s (node=%s)", traceID, volumeName, rva.Name, rva.Spec.NodeName))
 		if err := kc.Delete(ctx, &rva); err != nil && !kerrors.IsNotFound(err) {
 			return fmt.Errorf("delete ReplicatedVolumeAttachment %s: %w", rva.Name, err)
