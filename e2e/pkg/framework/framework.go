@@ -167,6 +167,7 @@ func (f *Framework) init(ctx context.Context) {
 	f.cacheCancel = cacheCancel
 
 	cfg := ctrl.GetConfigOrDie()
+	cfg.WrapTransport = newRetryTransport(3)
 	f.restConfig = cfg
 
 	scheme := runtime.NewScheme()
