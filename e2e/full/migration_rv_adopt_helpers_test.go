@@ -126,6 +126,11 @@ func setupAdoptPreexisting(ctx SpecContext, sourceLayout fw.TestLayout) adoptSet
 	for _, td := range drbdrs {
 		td.Await(ctx, DRBDR.HasAddresses())
 	}
+	multiReplica := len(replicas) > 1
+	for i, td := range drbdrs {
+		assertAddressesAdopted(td.Object().Status.Addresses, replicas[i].Addresses,
+			multiReplica, td.Name())
+	}
 	for _, td := range drbdrs {
 		obj := td.Object()
 		if obj.Spec.Type == v1alpha1.DRBDResourceTypeDiskful {
@@ -235,4 +240,32 @@ func finishAdopt(ctx SpecContext, trv *fw.TestRV, res adoptSetupResult) {
 	}
 	rv := trv.Object()
 	Expect(rv.Status.Datamesh.Members).To(HaveLen(res.ExpectedCount))
+}
+
+// assertAddressesAdopted verifies that actual addresses match expected IPs and
+// system networks. For multi-replica resources (where DRBD kernel has
+// connections), it also asserts port equality. For standalone resources (0
+// connections in kernel), it only asserts that a valid port was allocated —
+// the port cannot be adopted because existingPortsFromState has no paths.
+func assertAddressesAdopted(
+	actual, expected []v1alpha1.DRBDResourceAddressStatus,
+	multiReplica bool,
+	name string,
+) {
+	GinkgoHelper()
+	Expect(actual).To(HaveLen(len(expected)),
+		"DRBDR %s address count mismatch", name)
+	for i, a := range actual {
+		e := expected[i]
+		Expect(a.SystemNetworkName).To(Equal(e.SystemNetworkName),
+			"DRBDR %s address[%d] system network must match", name, i)
+		Expect(a.Address.IPv4).To(Equal(e.Address.IPv4),
+			"DRBDR %s address[%d] IP must match", name, i)
+		Expect(a.Address.Port).NotTo(BeZero(),
+			"DRBDR %s address[%d] port must be allocated", name, i)
+		if multiReplica {
+			Expect(a.Address.Port).To(Equal(e.Address.Port),
+				"DRBDR %s address[%d] port must match preexisting (multi-replica)", name, i)
+		}
+	}
 }

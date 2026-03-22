@@ -17,7 +17,6 @@ limitations under the License.
 package drbdr_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -440,9 +439,12 @@ func TestReconciler_Reconcile(t *testing.T) {
 			fakeExec.ExpectCommands(tc.expectedCommands...)
 			fakeExec.Setup(t)
 
-			// Create reconciler with port cache
-			portCache := drbdr.NewPortCache(context.Background(), 7000, 7999)
-			rec := drbdr.NewReconciler(cl, testNodeName, portCache)
+			// Create reconciler with port registry
+			drbdPortCache := drbdr.NewDRBDPortCache()
+			drbdPortCache.BeginDump()
+			drbdPortCache.EndDump()
+			portRegistry := drbdr.NewPortRegistry(cl, testNodeName, drbdPortCache, 7000, 7999, 10*time.Minute)
+			rec := drbdr.NewReconciler(cl, testNodeName, portRegistry)
 
 			// Build reconcile request
 			var req drbdr.DRBDReconcileRequest

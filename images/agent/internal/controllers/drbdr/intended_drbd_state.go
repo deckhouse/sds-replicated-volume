@@ -17,6 +17,8 @@ limitations under the License.
 package drbdr
 
 import (
+	"context"
+
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -24,7 +26,7 @@ import (
 )
 
 // PortAllocator is a function that allocates a port for a given IP address.
-type PortAllocator func(ip string) uint
+type PortAllocator func(ctx context.Context, ip string) (uint, error)
 
 // IntendedDRBDState represents the intended DRBD state for a resource.
 // It focuses only on DRBD-specific state, not K8S object state.

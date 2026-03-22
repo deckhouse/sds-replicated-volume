@@ -39,19 +39,19 @@ import (
 
 // Reconciler reconciles DRBDResource objects for the current node.
 type Reconciler struct {
-	cl        client.Client
-	nodeName  string
-	portCache *PortCache
+	cl           client.Client
+	nodeName     string
+	portRegistry *PortRegistry
 }
 
 var _ reconcile.TypedReconciler[DRBDReconcileRequest] = (*Reconciler)(nil)
 
 // NewReconciler creates a new Reconciler.
-func NewReconciler(cl client.Client, nodeName string, portCache *PortCache) *Reconciler {
+func NewReconciler(cl client.Client, nodeName string, portRegistry *PortRegistry) *Reconciler {
 	return &Reconciler{
-		cl:        cl,
-		nodeName:  nodeName,
-		portCache: portCache,
+		cl:           cl,
+		nodeName:     nodeName,
+		portRegistry: portRegistry,
 	}
 }
 
@@ -617,7 +617,7 @@ func (r *Reconciler) reconcileAddresses(
 	}
 
 	base := drbdr.DeepCopy()
-	if addrErr := ensureAddresses(rf.Ctx(), drbdr, node, existingPorts, r.portCache.Allocate).Error(); addrErr != nil {
+	if addrErr := ensureAddresses(rf.Ctx(), drbdr, node, existingPorts, r.portRegistry.Allocate).Error(); addrErr != nil {
 		return rf.Fail(addrErr)
 	}
 
