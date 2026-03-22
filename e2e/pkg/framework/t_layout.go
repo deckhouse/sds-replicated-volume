@@ -32,6 +32,7 @@ type TestLayout struct {
 	GMDR     byte
 	Access   int
 	Attached int
+	Size     string // volume size (e.g. "100Mi"); empty means default (1Mi)
 }
 
 // ExpectedReplicas returns the total replica count (D + TB + Access)
@@ -67,6 +68,9 @@ func (f *Framework) SetupLayout(ctx SpecContext, l TestLayout) *TestRV {
 	// --- Phase 1: create RV ---
 
 	trv := f.TestRV().FTT(l.FTT).GMDR(l.GMDR)
+	if l.Size != "" {
+		trv = trv.Size(l.Size)
+	}
 	if l.Attached > 0 {
 		trv = trv.MaxAttachments(byte(l.Attached))
 	}
