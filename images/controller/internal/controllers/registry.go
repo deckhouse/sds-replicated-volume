@@ -27,6 +27,8 @@ import (
 	rvcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller"
 	rvrcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_controller"
 	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
+	rvrscontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvrs_controller"
+	rvscontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvs_controller"
 )
 
 // BuildAll builds all controllers.
@@ -62,6 +64,8 @@ func BuildAll(mgr manager.Manager, podNamespace string, schedulerExtenderURL str
 		{name: rvrcontroller.RVRControllerName, build: func(mgr manager.Manager) error {
 			return rvrcontroller.BuildController(mgr, podNamespace)
 		}},
+		{name: rvscontroller.RVSControllerName, build: rvscontroller.BuildController},
+		{name: rvrscontroller.RVRSControllerName, build: rvrscontroller.BuildController},
 	}
 
 	for _, b := range builders {

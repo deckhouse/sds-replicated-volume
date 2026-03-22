@@ -73,6 +73,11 @@ func RegisterIndexes(mgr manager.Manager) error {
 		return err
 	}
 
+	// ReplicatedVolumeReplicaSnapshot (RVRS)
+	if err := indexes.RegisterRVRSBySnapshotName(mgr); err != nil {
+		return err
+	}
+
 	// LVMLogicalVolume (LLV)
 	if err := indexes.RegisterLLVByRVROwner(mgr); err != nil {
 		return err

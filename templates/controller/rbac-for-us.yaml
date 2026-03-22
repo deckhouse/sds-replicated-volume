@@ -20,6 +20,7 @@ rules:
       - replicatedstorageclasses
       - replicatedvolumes
       - replicatedvolumeattachments
+      - replicatedvolumesnapshots
     verbs: ["get", "list", "watch", "patch"]
 
   # --- storage.deckhouse.io: full lifecycle (create, patch, delete) ---
@@ -27,6 +28,7 @@ rules:
     resources:
       - replicatedstoragepools
       - replicatedvolumereplicas
+      - replicatedvolumereplicasnapshots
       - drbdresources
       - lvmlogicalvolumes
     verbs: ["get", "list", "watch", "create", "patch", "delete"]
@@ -52,6 +54,8 @@ rules:
       - replicatedvolumes/status
       - replicatedvolumereplicas/status
       - replicatedvolumeattachments/status
+      - replicatedvolumesnapshots/status
+      - replicatedvolumereplicasnapshots/status
     verbs: ["patch"]
 
   # --- Nodes: read + patch labels ---

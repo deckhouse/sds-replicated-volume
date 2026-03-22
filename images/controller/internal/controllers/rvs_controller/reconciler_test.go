@@ -14,16 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package rvscontroller
 
-const AgentFinalizer = "sds-replicated-volume.deckhouse.io/agent"
+import "testing"
 
-const RSCControllerFinalizer = "sds-replicated-volume.deckhouse.io/rsc-controller"
-
-const RVControllerFinalizer = "sds-replicated-volume.deckhouse.io/rv-controller"
-
-const RVRControllerFinalizer = "sds-replicated-volume.deckhouse.io/rvr-controller"
-
-const RVSControllerFinalizer = "sds-replicated-volume.deckhouse.io/rvs-controller"
-
-const RVRSControllerFinalizer = "sds-replicated-volume.deckhouse.io/rvrs-controller"
+func TestReconciler(t *testing.T) {
+	t.Skip("TODO: implement tests")
+}
