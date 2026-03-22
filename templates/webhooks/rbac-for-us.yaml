@@ -1,0 +1,9 @@
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: webhooks
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "webhooks")) | nindent 2 }}
+{{- end }}
