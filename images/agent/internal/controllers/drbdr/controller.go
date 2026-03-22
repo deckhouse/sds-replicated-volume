@@ -218,7 +218,7 @@ func newStraceCmd(ctx context.Context, logger logr.Logger, name string, arg ...s
 
 	straceArgs := make([]string, 0, len(arg)+10)
 	straceArgs = append(straceArgs, "-o", "/dev/fd/3",
-		"-e", "trace=!brk,mmap,mprotect,munmap,read,write,pread64,pwrite64,lseek",
+		"-e", "trace=!brk,mmap,mprotect,munmap,read,write,lseek",
 		"-C", "-w", "-tt", "-T", "-f", name)
 	straceArgs = append(straceArgs, arg...)
 
