@@ -24,19 +24,17 @@ import (
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	sv1 "k8s.io/api/storage/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/registry"
 	"github.com/deckhouse/sds-common-lib/kubeclient"
+	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 )
 
 const hookName = "remove-finalizers-on-module-delete"
@@ -67,8 +65,8 @@ func handlerRemoveFinalizersOnModuleDelete(ctx context.Context, input *pkg.HookI
 		admissionregistrationv1.AddToScheme,
 		clientgoscheme.AddToScheme,
 		extv1.AddToScheme,
-		v1.AddToScheme,
-		sv1.AddToScheme,
+		corev1.AddToScheme,
+		storagev1.AddToScheme,
 		snapv1.AddToScheme)
 	if err != nil {
 		return fmt.Errorf("failed to initialize kube client: %w", err)

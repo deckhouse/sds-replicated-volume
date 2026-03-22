@@ -1,0 +1,184 @@
+---
+description: Rules for choosing listType/mapType/structType markers on API collection and struct fields (SSA merge semantics, uniqueness validation, CEL, marker hygiene). Apply when adding or reviewing []T / map[K]V / struct fields in api/v*/, and when deciding how lists should behave under SSA or kubectl apply. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+alwaysApply: false
+---
+
+Normative keywords used in this document are defined in `rfc-like-mdc.mdc`.
+
+# List, Map, and Struct Type Markers for API Fields
+
+## 1. Decision Priority for `[]T` Fields
+
+Every `[]T` field MUST have an explicit `+listType` marker. Do not rely on defaults.
+
+The decision follows this priority order:
+
+1. **Conditions** -- if the field is `status.conditions` (`[]metav1.Condition`), it MUST be `+listType=map` with `+listMapKey=type`. This is a Kubernetes convention.
+
+2. **Order / duplicates** -- if element order is semantically meaningful, or if duplicate elements are valid, use `+listType=atomic`.
+
+3. **Per-item SSA merge/ownership** -- if different field managers (users, controllers, kubectl) should be able to independently own or merge individual elements, use `+listType=set` (scalars) or `+listType=map` (structs by key).
+
+4. **Unique elements, single writer** -- if elements must be unique but per-item SSA merge is not needed (single controller writes the full list), use `+listType=atomic` and add a CEL `XValidation` rule for uniqueness.
+
+5. **Fallback** -- `+listType=atomic`.
+
+```mermaid
+flowchart TD
+    Start["[]T field"] --> P1{"status.conditions?"}
+    P1 -->|Yes| MapCond["map/type"]
+    P1 -->|No| P2{"Order matters OR duplicates valid?"}
+    P2 -->|Yes| AtomicOrd["atomic"]
+    P2 -->|No| P3{"Per-item SSA merge/ownership needed?"}
+    P3 -->|Yes| IsScalar{"Scalar?"}
+    IsScalar -->|Yes| SetType["set"]
+    IsScalar -->|No| MapKey["map/key"]
+    P3 -->|No| P4{"Unique elements?"}
+    P4 -->|Yes| AtomicCEL["atomic + CEL uniqueness"]
+    P4 -->|No| AtomicPlain["atomic"]
+```
+
+### 1.1. Spec vs Status Heuristic for Per-Item Merge (P3)
+
+"Per-item SSA merge/ownership needed?" is almost always **no** for status fields (a single controller writes the full list) and almost always **yes** for spec fields (users and tools apply partial changes via kubectl).
+
+However, the API designer MUST think carefully about spec lists -- not every spec list benefits from per-item merge. For example, an immutable spec is better modeled as `+structType=atomic` on the spec struct itself.
+
+## 2. SSA Merge Semantics vs API Validation
+
+`listType` controls **two things** simultaneously:
+
+- **Merge/ownership (SSA)**: `map`/`set` enable per-item field ownership -- different Apply operations can independently own different elements. `atomic` means the entire list is one opaque unit.
+- **Uniqueness invariant**: `map` validates key uniqueness; `set` validates value uniqueness. `atomic` does NOT validate uniqueness.
+
+These two concerns are coupled in Kubernetes -- you cannot get one without the other via `listType` alone.
+
+**If you need uniqueness but NOT per-item merge** (e.g., single-writer status field with a natural key), use `+listType=atomic` and add a `// +kubebuilder:validation:XValidation` CEL rule for uniqueness. This avoids SSA overhead (managedFields bloat, accidental element deletion on partial Apply) while still enforcing the invariant.
+
+**If you need per-item merge** (e.g., user-facing spec list, multi-controller status), use `map`/`set` -- uniqueness comes for free.
+
+### 2.1. CEL Uniqueness Patterns
+
+For unique scalar values in a `[]string`:
+
+```go
+// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="elements must be unique"
+// +listType=atomic
+```
+
+For unique struct key (single field, e.g., `name`):
+
+```go
+// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="name must be unique"
+// +listType=atomic
+```
+
+For unique composite key (e.g., `name` + `thinPoolName`):
+
+```go
+// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name && x.thinPoolName == y.thinPoolName))",message="name+thinPoolName must be unique"
+// +listType=atomic
+```
+
+## 3. `set` Rules
+
+- `set` MUST be used only for scalar types (`string`, `int`, `bool`, etc.). Structs MUST NOT use `set`.
+- `set` does not guarantee or normalize element order.
+- `set` MUST NOT have `+listMapKey`.
+
+## 4. `map` Rules
+
+MUST:
+
+- `+listType=map`
+- One or more `+listMapKey=<field>` markers identifying the key field(s).
+- Key fields MUST be Required and have stable identity (not mutated after creation).
+
+MUST NOT:
+
+- `+patchMergeKey`, `+patchStrategy=merge`, and `patchStrategy`/`patchMergeKey` struct tags. These markers control strategic merge patch (SMP), which does **not** work for CRDs -- the API server falls back to JSON Merge Patch for all CRD patch requests regardless of these annotations. They have no runtime effect and no tooling reads them from CRD schemas. Use `+listType`/`+listMapKey` for SSA merge semantics instead.
+
+Composite keys:
+
+- Use multiple `+listMapKey` lines.
+
+## 5. `atomic` Rules
+
+- `atomic` MUST NOT have `+listMapKey`.
+- If uniqueness is needed on an `atomic` list, add a `// +kubebuilder:validation:XValidation` CEL rule (see section 2.1).
+
+## 6. `mapType` for Go `map[K]V` Fields
+
+Go map types (`map[string]T`) have their own merge marker:
+
+- Default: `granular` -- each key is independently owned in SSA.
+- `+mapType=atomic` -- the entire map is one opaque unit; use when the map is always replaced by one owner.
+
+## 7. `structType` for Embedded Structs
+
+Struct types have a parallel marker:
+
+- Default: `granular` -- each field is independently owned in SSA.
+- `+structType=atomic` -- the struct is always replaced as a unit by one owner.
+- Prefer `granular` for spec structs where users may patch individual fields.
+- Prefer `atomic` for immutable spec structs (where `self == oldSelf` is enforced on all fields), and for computed status sub-objects that are always written together.
+
+When a struct is `+structType=atomic`, nested `+listType` markers on its fields become documentation-only for SSA (the parent struct owns everything as one unit), but they still affect OpenAPI schema generation.
+
+## 8. API Evolution Safety
+
+MUST NOT change `listType`, `listMapKey`, `mapType`, or `structType` on an already-published API field without:
+
+- An API version bump, OR
+- An explicit migration plan documenting SSA/managedFields consequences.
+
+Changing these markers reshapes the SSA field ownership tree, potentially causing ownership conflicts, data loss on Apply, or managedFields corruption for existing resources.
+
+## 9. Pitfalls
+
+- **Omission deletes in `map`/`set`**: when a field manager Applies a `map`/`set` list and omits an element it previously owned, that element is deleted (if no other owner). Controllers that apply "partial intent" must be aware.
+- **managedFields bloat**: `map`/`set` on large collections inflate `managedFields` metadata (one entry per element vs one entry for the entire list with `atomic`).
+- **When `atomic` is better despite uniqueness**: for single-writer status lists, deterministic ordering requirements, or cases where "conflict is better than silent merge", `atomic` + CEL uniqueness is preferable to `map`/`set`.
+
+## 10. Examples
+
+**(a) `status.conditions`** -- P1 (Kubernetes standard):
+
+```go
+// +listType=map
+// +listMapKey=type
+// +optional
+Conditions []metav1.Condition `json:"conditions,omitempty"`
+```
+
+**(b) Unique scalar set in spec** -- P3 (per-item merge useful for user):
+
+```go
+// +listType=set
+Zones []string `json:"zones,omitempty"`
+```
+
+**(c) Struct list with natural key in spec** -- P3 (per-item merge useful):
+
+```go
+// +listType=map
+// +listMapKey=name
+Peers []DRBDResourcePeer `json:"peers,omitempty"`
+```
+
+**(d) Single-writer status list with uniqueness** -- P4 (atomic + CEL):
+
+```go
+// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="name must be unique"
+// +listType=atomic
+// +optional
+Peers []ReplicatedVolumeReplicaStatusPeerStatus `json:"peers,omitempty"`
+```
+
+**(e) Ordered / no-uniqueness list** -- P2/P5 (atomic, no CEL):
+
+```go
+// +listType=atomic
+// +optional
+DatameshTransitions []ReplicatedVolumeDatameshTransition `json:"datameshTransitions,omitempty"`
+```
