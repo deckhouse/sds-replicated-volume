@@ -19,6 +19,7 @@ package drbdr
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -28,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -118,9 +120,18 @@ func BuildController(mgr manager.Manager) error {
 			MaxConcurrentReconciles: 10,
 			RateLimiter:             controlleroptions.DefaultRateLimiter[DRBDReconcileRequest](),
 		}).
-		Complete(rec); err != nil {
+		Complete(withDurationLogging(rec)); err != nil {
 		return fmt.Errorf("building DRBD resource controller: %w", err)
 	}
 
 	return nil
+}
+
+func withDurationLogging(inner reconcile.TypedReconciler[DRBDReconcileRequest]) reconcile.TypedReconciler[DRBDReconcileRequest] {
+	return reconcile.TypedFunc[DRBDReconcileRequest](func(ctx context.Context, req DRBDReconcileRequest) (reconcile.Result, error) {
+		start := time.Now()
+		res, err := inner.Reconcile(ctx, req)
+		log.FromContext(ctx).Info("Reconcile complete", "duration", time.Since(start).String())
+		return res, err
+	})
 }
