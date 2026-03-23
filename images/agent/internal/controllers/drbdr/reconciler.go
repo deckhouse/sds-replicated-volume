@@ -239,6 +239,8 @@ func (r *Reconciler) reconcileDRBDR(
 
 	refreshNeeded, drbdErr := convergeDRBDState(rf.Ctx(), targetActions, maintenanceMode)
 
+	drbdErr = ensureLocalPortConflictResolved(rf.Ctx(), drbdr, drbdErr, r.portRegistry.Allocate)
+
 	var aErr2 error
 	if refreshNeeded {
 		aState, aErr2 = observeActualDRBDState(rf.Ctx(), drbdResName)
@@ -695,6 +697,43 @@ func convergeDRBDState(ctx context.Context, actions DRBDActions, maintenanceMode
 		refreshNeeded = true
 	}
 	return refreshNeeded, nil
+}
+
+// ensureLocalPortConflictResolved checks if drbdErr contains a local port
+// conflict from new-path and immediately allocates a replacement port for the
+// conflicting IP in drbdr.Status.Addresses.
+//
+// Returns the original drbdErr annotated with re-allocation info on success,
+// or with allocation failure details on error. Returns drbdErr unchanged when
+// no local port conflict is detected.
+func ensureLocalPortConflictResolved(
+	ctx context.Context,
+	drbdr *v1alpha1.DRBDResource,
+	drbdErr error,
+	portAllocator PortAllocator,
+) error {
+	var conflict *localPortConflictError
+	if !errors.As(drbdErr, &conflict) {
+		return drbdErr
+	}
+
+	for i := range drbdr.Status.Addresses {
+		addr := &drbdr.Status.Addresses[i]
+		if addr.Address.IPv4 != conflict.ip {
+			continue
+		}
+		oldPort := addr.Address.Port
+		newPort, allocErr := portAllocator(ctx, conflict.ip)
+		if allocErr != nil {
+			return fmt.Errorf("%w (port re-allocation failed: %v)", drbdErr, allocErr)
+		}
+		log.FromContext(ctx).Info("Re-allocated conflicting local port",
+			"ip", conflict.ip, "oldPort", oldPort, "newPort", newPort)
+		addr.Address.Port = newPort
+		return fmt.Errorf("%w (port re-allocated: %d -> %d)", drbdErr, oldPort, newPort)
+	}
+
+	return drbdErr
 }
 
 // formatLVMDevicePath formats the path to an LVM logical volume device.

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -316,6 +317,10 @@ type NewPathAction struct {
 
 func (a NewPathAction) Execute(ctx context.Context) error {
 	err := drbdutils.ExecuteNewPath(ctx, a.ResourceName, a.PeerNodeID, a.LocalAddr, a.RemoteAddr)
+	if err != nil && errors.Is(err, drbdutils.ErrNewPathLocalAddrInUse) {
+		ip, _, _ := net.SplitHostPort(a.LocalAddr)
+		err = &localPortConflictError{ip: ip, err: err}
+	}
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNewPathFailed)
 }
 
