@@ -229,17 +229,29 @@ func finishAdopt(ctx SpecContext, trv *fw.TestRV, res adoptSetupResult) {
 	}
 	res.swRVRQuorum.Disable()
 
-	Expect(trv.RVRCount()).To(Equal(res.ExpectedCount))
+	// After formation, access replicas without a matching RVA are deleted
+	// by normal operation. Collect only replicas expected to survive.
+	rvaNodes := trv.RVANodes()
+	var surviving []*fw.TestRVR
 	for i := 0; i < res.ExpectedCount; i++ {
 		trvr := trv.TestRVR(i)
+		rvr := trvr.Object()
+		if rvr.Spec.Type == v1alpha1.ReplicaTypeAccess && !rvaNodes[rvr.Spec.NodeName] {
+			continue
+		}
+		surviving = append(surviving, trvr)
+	}
+
+	trv.Await(ctx, RV.Members(len(surviving)))
+	Expect(trv.RVRCount()).To(Equal(len(surviving)))
+	for _, trvr := range surviving {
 		trvr.AwaitSequence(ctx,
+			Phase(string(v1alpha1.ReplicatedVolumeReplicaPhasePending)),
 			Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring)),
 			Or(Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing)),
 				Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy))),
 		)
 	}
-	rv := trv.Object()
-	Expect(rv.Status.Datamesh.Members).To(HaveLen(res.ExpectedCount))
 }
 
 // assertAddressesAdopted verifies that actual addresses match expected IPs and

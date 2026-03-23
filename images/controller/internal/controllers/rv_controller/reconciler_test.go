@@ -2107,6 +2107,106 @@ var _ = Describe("applyDatameshMember", func() {
 	})
 })
 
+var _ = Describe("ensureDatameshMemberAddresses", func() {
+	addr := func(ip string, port uint) v1alpha1.DRBDResourceAddressStatus {
+		return v1alpha1.DRBDResourceAddressStatus{
+			SystemNetworkName: "Internal",
+			Address:           v1alpha1.DRBDAddress{IPv4: ip, Port: port},
+		}
+	}
+
+	It("returns false when addresses match", func() {
+		addrs := []v1alpha1.DRBDResourceAddressStatus{addr("10.0.0.1", 7000)}
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 5,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.DatameshMember{
+						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0), Addresses: addrs},
+					},
+				},
+			},
+		}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{{
+			ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0)},
+			Status:     v1alpha1.ReplicatedVolumeReplicaStatus{Addresses: addrs},
+		}}
+		Expect(ensureDatameshMemberAddresses(rv, rvrs)).To(BeFalse())
+		Expect(rv.Status.DatameshRevision).To(BeEquivalentTo(5))
+	})
+
+	It("updates addresses and bumps revision when port changed", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 5,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.DatameshMember{
+						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+							Addresses: []v1alpha1.DRBDResourceAddressStatus{addr("10.0.0.1", 7000)}},
+					},
+				},
+			},
+		}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{{
+			ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0)},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				Addresses: []v1alpha1.DRBDResourceAddressStatus{addr("10.0.0.1", 7078)},
+			},
+		}}
+		Expect(ensureDatameshMemberAddresses(rv, rvrs)).To(BeTrue())
+		Expect(rv.Status.DatameshRevision).To(BeEquivalentTo(6))
+		Expect(rv.Status.Datamesh.Members[0].Addresses[0].Address.Port).To(Equal(uint(7078)))
+	})
+
+	It("bumps revision only once for multiple address changes", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 3,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.DatameshMember{
+						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+							Addresses: []v1alpha1.DRBDResourceAddressStatus{addr("10.0.0.1", 7000)}},
+						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 1),
+							Addresses: []v1alpha1.DRBDResourceAddressStatus{addr("10.0.0.2", 7000)}},
+					},
+				},
+			},
+		}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0)},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Addresses: []v1alpha1.DRBDResourceAddressStatus{addr("10.0.0.1", 8000)},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 1)},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Addresses: []v1alpha1.DRBDResourceAddressStatus{addr("10.0.0.2", 9000)},
+				},
+			},
+		}
+		Expect(ensureDatameshMemberAddresses(rv, rvrs)).To(BeTrue())
+		Expect(rv.Status.DatameshRevision).To(BeEquivalentTo(4))
+	})
+
+	It("skips members without matching RVR", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 5,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.DatameshMember{
+						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+							Addresses: []v1alpha1.DRBDResourceAddressStatus{addr("10.0.0.1", 7000)}},
+					},
+				},
+			},
+		}
+		Expect(ensureDatameshMemberAddresses(rv, nil)).To(BeFalse())
+		Expect(rv.Status.DatameshRevision).To(BeEquivalentTo(5))
+	})
+})
+
 var _ = Describe("applyDatameshReplicaRequestMessages", func() {
 	It("updates message for matching node and returns true", func() {
 		rv := &v1alpha1.ReplicatedVolume{

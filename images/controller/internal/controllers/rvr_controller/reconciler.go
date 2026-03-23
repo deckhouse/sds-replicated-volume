@@ -267,9 +267,15 @@ func isRVRMetadataInSync(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.Rep
 	}
 
 	// Check replicated-storage-class label.
-	if rv != nil && rv.Spec.ReplicatedStorageClassName != "" {
-		if !obju.HasLabelValue(rvr, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName) {
-			return false
+	if rv != nil {
+		if rv.Spec.ReplicatedStorageClassName != "" {
+			if !obju.HasLabelValue(rvr, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName) {
+				return false
+			}
+		} else {
+			if obju.HasLabel(rvr, v1alpha1.ReplicatedStorageClassLabelKey) {
+				return false
+			}
 		}
 	}
 
@@ -300,8 +306,12 @@ func applyRVRMetadata(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.Replic
 
 	// Apply replicated-storage-class label.
 	// Note: node-name label is managed by rvr_scheduling_controller.
-	if rv != nil && rv.Spec.ReplicatedStorageClassName != "" {
-		changed = obju.SetLabel(rvr, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName) || changed
+	if rv != nil {
+		if rv.Spec.ReplicatedStorageClassName != "" {
+			changed = obju.SetLabel(rvr, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName) || changed
+		} else {
+			changed = obju.RemoveLabel(rvr, v1alpha1.ReplicatedStorageClassLabelKey) || changed
+		}
 	}
 
 	// Apply lvm-volume-group label.

@@ -995,7 +995,7 @@ func TestMustToCtrl_ConflictErrorBecomesRequeue(t *testing.T) {
 	}
 }
 
-func TestReconcileFlow_OnEnd_ConflictLoggedAtInfoNotError(t *testing.T) {
+func TestReconcileFlow_OnEnd_ConflictLoggedAtDebugNotError(t *testing.T) {
 	core, observed := observer.New(zapcore.DebugLevel)
 	zl := zap.New(core)
 	l := zapr.NewLogger(zl)
@@ -1013,18 +1013,18 @@ func TestReconcileFlow_OnEnd_ConflictLoggedAtInfoNotError(t *testing.T) {
 		}
 	}
 
-	// Should have exactly one Info-level "phase end" entry (V(0) = Info).
-	var infoMatches []observer.LoggedEntry
+	// Should have exactly one Debug-level "phase end" entry (V(1) = Debug).
+	var debugMatches []observer.LoggedEntry
 	for _, e := range observed.All() {
-		if e.Message == "phase end" && e.Level == zapcore.InfoLevel {
-			infoMatches = append(infoMatches, e)
+		if e.Message == "phase end" && e.Level == zapcore.DebugLevel {
+			debugMatches = append(debugMatches, e)
 		}
 	}
-	if len(infoMatches) != 1 {
-		t.Fatalf("expected exactly 1 info 'phase end' log entry, got %d; entries=%v", len(infoMatches), observed.All())
+	if len(debugMatches) != 1 {
+		t.Fatalf("expected exactly 1 debug 'phase end' log entry, got %d; entries=%v", len(debugMatches), observed.All())
 	}
 
-	m := infoMatches[0].ContextMap()
+	m := debugMatches[0].ContextMap()
 	if got := m["result"]; got != "Conflict" {
 		t.Fatalf("expected result=Conflict, got %v", got)
 	}
@@ -1033,7 +1033,7 @@ func TestReconcileFlow_OnEnd_ConflictLoggedAtInfoNotError(t *testing.T) {
 	}
 }
 
-func TestReconcileFlow_OnEnd_WrappedConflictLoggedAtInfoNotError(t *testing.T) {
+func TestReconcileFlow_OnEnd_WrappedConflictLoggedAtDebugNotError(t *testing.T) {
 	core, observed := observer.New(zapcore.DebugLevel)
 	zl := zap.New(core)
 	l := zapr.NewLogger(zl)
@@ -1051,17 +1051,17 @@ func TestReconcileFlow_OnEnd_WrappedConflictLoggedAtInfoNotError(t *testing.T) {
 		}
 	}
 
-	// Should have an Info-level log with result=Conflict.
-	var infoMatches []observer.LoggedEntry
+	// Should have a Debug-level log with result=Conflict.
+	var debugMatches []observer.LoggedEntry
 	for _, e := range observed.All() {
-		if e.Message == "phase end" && e.Level == zapcore.InfoLevel {
-			infoMatches = append(infoMatches, e)
+		if e.Message == "phase end" && e.Level == zapcore.DebugLevel {
+			debugMatches = append(debugMatches, e)
 		}
 	}
-	if len(infoMatches) != 1 {
-		t.Fatalf("expected exactly 1 info 'phase end' log entry, got %d; entries=%v", len(infoMatches), observed.All())
+	if len(debugMatches) != 1 {
+		t.Fatalf("expected exactly 1 debug 'phase end' log entry, got %d; entries=%v", len(debugMatches), observed.All())
 	}
-	if got := infoMatches[0].ContextMap()["result"]; got != "Conflict" {
+	if got := debugMatches[0].ContextMap()["result"]; got != "Conflict" {
 		t.Fatalf("expected result=Conflict, got %v", got)
 	}
 }
@@ -1086,24 +1086,20 @@ func TestReconcileFlow_OnEnd_NestedPhases_ConflictLoggedOnce(t *testing.T) {
 		}
 	}
 
-	// Exactly one Info-level "phase end" (from child), one Debug-level (from parent, already logged).
-	infoCount := 0
+	// Both child (conflict) and parent (already-logged fallthrough) emit at Debug level.
 	debugCount := 0
 	for _, e := range observed.All() {
 		if e.Message == "phase end" {
-			switch e.Level {
-			case zapcore.InfoLevel:
-				infoCount++
-			case zapcore.DebugLevel:
+			if e.Level == zapcore.InfoLevel {
+				t.Fatalf("unexpected Info-level 'phase end' log entry: %v", e)
+			}
+			if e.Level == zapcore.DebugLevel {
 				debugCount++
 			}
 		}
 	}
-	if infoCount != 1 {
-		t.Fatalf("expected exactly 1 info 'phase end' log entry, got %d", infoCount)
-	}
-	if debugCount != 1 {
-		t.Fatalf("expected exactly 1 debug 'phase end' log entry (parent after conflict already logged), got %d", debugCount)
+	if debugCount != 2 {
+		t.Fatalf("expected exactly 2 debug 'phase end' log entries (child conflict + parent fallthrough), got %d", debugCount)
 	}
 }
 

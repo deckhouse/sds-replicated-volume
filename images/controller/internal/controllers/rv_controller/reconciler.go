@@ -133,8 +133,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Called here only for initial set (config is nil). During normal operation,
 	// reconcileRVConfiguration is called inside reconcileNormalOperation.
 	// During create formation, config is frozen (only formation restart calls
-	// reconcileRVConfiguration). During adopt formation, config is re-derived
-	// in steps 0-1 inside reconcileFormation to allow the user to fix mismatches.
+	// reconcileRVConfiguration). During adopt formation, config is NOT re-derived;
+	// adopt accepts pre-existing replicas as-is regardless of RSC mismatch.
 	if rv.Status.Configuration == nil {
 		outcome = outcome.Merge(r.reconcileRVConfiguration(rf.Ctx(), rv, rsc))
 		if outcome.ShouldReturn() {
@@ -470,6 +470,33 @@ func applyDatameshMember(rv *v1alpha1.ReplicatedVolume, member v1alpha1.Datamesh
 	return true
 }
 
+// ensureDatameshMemberAddresses syncs datamesh member addresses from current
+// RVR statuses. If any address changed, updates the member and increments
+// DatameshRevision so that agents re-converge. Returns true if anything changed.
+func ensureDatameshMemberAddresses(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) bool {
+	addressChanged := false
+	for i := range rv.Status.Datamesh.Members {
+		m := &rv.Status.Datamesh.Members[i]
+		for _, rvr := range rvrs {
+			if rvr.Name != m.Name {
+				continue
+			}
+			if len(rvr.Status.Addresses) == 0 {
+				break
+			}
+			if !slices.Equal(m.Addresses, rvr.Status.Addresses) {
+				m.Addresses = slices.Clone(rvr.Status.Addresses)
+				addressChanged = true
+			}
+			break
+		}
+	}
+	if addressChanged {
+		rv.Status.DatameshRevision++
+	}
+	return addressChanged
+}
+
 // applyDatameshReplicaRequestMessages updates the Message field for pending replica transitions
 // whose ID is in the given set. Returns true if any message was changed.
 func applyDatameshReplicaRequestMessages(rv *v1alpha1.ReplicatedVolume, repIDs idset.IDSet, message string) bool {
@@ -634,11 +661,10 @@ func applyRVMetadata(rv *v1alpha1.ReplicatedVolume, targetFinalizerPresent bool)
 //   - Root Reconcile: when Configuration is nil (initial set)
 //   - reconcileNormalOperation: always (check for config updates)
 //   - Formation reset (create/v1): after clearing Configuration to nil (re-derive)
-//   - Adopt formation steps 0-1: re-derive to detect user-initiated config changes
 //
-// During create formation, callers do NOT call this function (config is frozen).
-// During adopt formation, reconcileFormation calls this in steps 0-1 to allow
-// the user to fix configuration mismatches; if config changed, adopt restarts.
+// During formation (both create and adopt), callers do NOT call this function
+// (config is frozen). Any pending config change is picked up by normal operation
+// after formation completes.
 //
 // Generation semantics by mode:
 //   - Auto mode: ConfigurationGeneration = RSC's Status.ConfigurationGeneration
