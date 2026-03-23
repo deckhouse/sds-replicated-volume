@@ -151,6 +151,9 @@ type ActualPeer interface {
 	// AllowRemoteRead returns the allow-remote-read setting.
 	AllowRemoteRead() bool
 
+	// VerifyAlg returns the online-verify hash algorithm.
+	VerifyAlg() string
+
 	// Paths returns the network paths to this peer.
 	Paths() []ActualPath
 }
@@ -696,6 +699,13 @@ func (p *actualPeer) AllowRemoteRead() bool {
 		return p.showConnection.Net.AllowRemoteRead
 	}
 	return false
+}
+
+func (p *actualPeer) VerifyAlg() string {
+	if p.showConnection != nil {
+		return p.showConnection.Net.VerifyAlg
+	}
+	return ""
 }
 
 func (p *actualPeer) Paths() []ActualPath {

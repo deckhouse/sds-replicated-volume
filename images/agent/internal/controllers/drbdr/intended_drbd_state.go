@@ -121,6 +121,9 @@ type IntendedPeer interface {
 	// RRConflict returns the intended rr-conflict policy. Always "retry-connect".
 	RRConflict() string
 
+	// VerifyAlg returns the intended online-verify hash algorithm. Always "crct10dif-pclmul".
+	VerifyAlg() string
+
 	// Paths returns the network paths to this peer.
 	Paths() []IntendedPath
 }
@@ -210,6 +213,7 @@ func (p *intendedPeer) SharedSecret() string                      { return p.sha
 func (p *intendedPeer) SharedSecretAlg() v1alpha1.SharedSecretAlg { return p.sharedSecretAlg }
 func (p *intendedPeer) AllowRemoteRead() bool                     { return p.allowRemoteRead }
 func (p *intendedPeer) RRConflict() string                        { return "retry-connect" }
+func (p *intendedPeer) VerifyAlg() string                         { return "crct10dif-pclmul" }
 func (p *intendedPeer) Paths() []IntendedPath                     { return p.paths }
 
 var _ IntendedPeer = (*intendedPeer)(nil)
