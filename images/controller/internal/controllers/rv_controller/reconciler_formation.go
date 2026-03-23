@@ -1445,19 +1445,33 @@ func (r *Reconciler) reconcileAdoptStepExitMaintenance(
 	})
 
 	// Gate: all replicas exited maintenance mode.
-	exitedMaintenance := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+	stillInMaintenance := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 		return dmAll.Contains(rvr.ID()) &&
 			obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType).
-				IsTrue().
-				ReasonNotEqual(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonInMaintenance).
-				ObservedGenerationCurrent().
+				ReasonEqual(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonInMaintenance).
 				Eval()
 	})
-	if exitedMaintenance != dmAll {
-		stillInMaintenance := dmAll.Difference(exitedMaintenance)
+	if !stillInMaintenance.IsEmpty() {
 		changed = applyDatameshTransitionStepMessage(step, fmt.Sprintf(
 			"Waiting for replicas [%s] to exit maintenance mode",
 			stillInMaintenance.String(),
+		)) || changed
+		return rf.ContinueAndRequeue().ReportChangedIf(changed)
+	}
+
+	// Gate: all replicas are DRBD configured.
+	drbdConfigured := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return dmAll.Contains(rvr.ID()) &&
+			obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType).
+				IsTrue().
+				ObservedGenerationCurrent().
+				Eval()
+	})
+	if drbdConfigured != dmAll {
+		notConfigured := dmAll.Difference(drbdConfigured)
+		changed = applyDatameshTransitionStepMessage(step, fmt.Sprintf(
+			"Waiting for replicas [%s] to become DRBD configured",
+			notConfigured.String(),
 		)) || changed
 		return rf.ContinueAndRequeue().ReportChangedIf(changed)
 	}

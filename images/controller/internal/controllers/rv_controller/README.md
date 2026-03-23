@@ -118,7 +118,8 @@ Reconcile (root) [Pure orchestration]
 │   │   │   ├── verify: members match, star-topology connections, diskful UpToDate, QMR check
 │   │   │   └── advance → ExitMaintenance
 │   │   └── reconcileAdoptStepExitMaintenance [Pure orchestration] ← details
-│   │       ├── wait for DRBDConfigured=True (reason != InMaintenance)
+│   │       ├── wait for maintenance exit (DRBDConfigured reason != InMaintenance)
+│   │       ├── wait for DRBDConfigured=True
 │   │       └── wait for Ready=True → formation complete
 │   └── reconcileRVAWaiting ("Datamesh formation is in progress")
 ├── reconcileRVConfiguration [In-place reconciliation] (config updates + ConfigurationReady condition)
@@ -362,8 +363,9 @@ Populates the datamesh from pre-existing replicas and verifies configuration con
 Waits for all datamesh member replicas to exit maintenance mode and become healthy.
 
 **Gates (in order):**
-1. All replicas have exited maintenance (`DRBDConfigured=True`, reason != `InMaintenance`)
-2. All replicas are Ready (`Ready=True`)
+1. No replicas are in maintenance (`DRBDConfigured` reason != `InMaintenance`)
+2. All replicas are DRBD configured (`DRBDConfigured=True`)
+3. All replicas are Ready (`Ready=True`)
 
 On success: removes the Formation transition (formation complete).
 
@@ -853,10 +855,13 @@ flowchart TD
 flowchart TD
     Start([Start]) --> CollectAll["Collect all datamesh members<br/>(D ∪ TB ∪ A)"]
 
-    CollectAll --> CheckMaintenance{"All exited maintenance?<br/>DRBDConfigured=True,<br/>reason != InMaintenance"}
-    CheckMaintenance -->|No| WaitMaint["Wait: replicas still<br/>in maintenance"]
+    CollectAll --> CheckMaintenance{"Any still in maintenance?<br/>DRBDConfigured reason<br/>= InMaintenance"}
+    CheckMaintenance -->|Yes| WaitMaint["Wait: replicas still<br/>in maintenance"]
 
-    CheckMaintenance -->|Yes| CheckReady{"All Ready?<br/>Ready=True"}
+    CheckMaintenance -->|No| CheckConfigured{"All DRBD configured?<br/>DRBDConfigured=True"}
+    CheckConfigured -->|No| WaitConfigured["Wait: replicas not<br/>DRBD configured"]
+
+    CheckConfigured -->|Yes| CheckReady{"All Ready?<br/>Ready=True"}
     CheckReady -->|No| WaitReady["Wait: replicas not Ready"]
 
     CheckReady -->|Yes| Complete["Remove Formation transition<br/>(formation complete)"]
