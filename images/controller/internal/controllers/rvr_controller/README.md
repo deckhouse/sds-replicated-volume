@@ -85,6 +85,7 @@ Reconcile (root) [Pure orchestration]
 │   ├── node not assigned → applyDRBDConfiguredCondFalse PendingScheduling
 │   ├── computeIntendedType / computeTargetType / newDRBDRReconciliationCache
 │   ├── createDRBDR (computeTargetDRBDRSpec) / patchDRBDR
+│   ├── isDRBDRMetadataInSync / applyDRBDRMetadata (ownerRef, finalizer, labels)
 │   ├── applyRVRDRBDRReconciliationCache
 │   ├── getAgentReady → applyDRBDConfiguredCondFalse AgentNotReady
 │   ├── check DRBDR DRBDConfigured condition → ApplyingConfiguration / ConfigurationFailed
@@ -471,6 +472,8 @@ The backing volume size is taken as `max(rv.Spec.Size, rv.Status.Datamesh.Size)`
 | Label | `sds-replicated-volume.deckhouse.io/lvm-volume-group` | RVR | Link to LVMVolumeGroup |
 | Label | `sds-replicated-volume.deckhouse.io/replicated-volume` | LLV | Link to parent ReplicatedVolume |
 | Label | `sds-replicated-volume.deckhouse.io/replicated-storage-class` | LLV | Link to ReplicatedStorageClass |
+| Label | `sds-replicated-volume.deckhouse.io/replicated-volume` | DRBDResource | Link to parent ReplicatedVolume |
+| Label | `sds-replicated-volume.deckhouse.io/replicated-storage-class` | DRBDResource | Link to ReplicatedStorageClass |
 | OwnerRef | controller reference | LLV | Owner reference to RVR |
 | OwnerRef | controller reference | DRBDResource | Owner reference to RVR |
 
@@ -861,8 +864,10 @@ flowchart TD
 
     CheckDRBDRExists -->|Yes| CheckNeedsUpdate{Spec needs update?}
     CheckNeedsUpdate -->|Yes| PatchDRBDR[Patch DRBDR]
-    PatchDRBDR --> UpdateStatus1
-    CheckNeedsUpdate -->|No| UpdateStatus1
+    PatchDRBDR --> EnsureMeta
+    CheckNeedsUpdate -->|No| EnsureMeta
+
+    EnsureMeta["Ensure DRBDR metadata\n(ownerRef, finalizer, labels)"] --> UpdateStatus1[Update reconciliation cache]
 
     UpdateStatus1 --> CheckAgent{Agent ready?}
     CheckAgent -->|No| SetAgentNA[DRBDConfigured=False AgentNotReady]
