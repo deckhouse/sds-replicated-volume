@@ -1302,6 +1302,12 @@ func (r *Reconciler) reconcileAdoptStepPopulateAndVerifyDatamesh(
 		return rf.Continue().ReportChanged()
 	}
 
+	// Sync addresses: if any RVR address changed since the datamesh was
+	// populated, update the member and bump revision so agents re-converge.
+	if ensureDatameshMemberAddresses(rv, *rvrs) {
+		return rf.Continue().ReportChanged()
+	}
+
 	// Gate: all replicas have observed the datamesh revision (agent processed the DRBDR spec).
 	// This uses DatameshRevisionObservedByAgent (not DatameshRevision) because the
 	// agent may be in maintenance mode and unable to fully apply the configuration.
@@ -1437,6 +1443,12 @@ func (r *Reconciler) reconcileAdoptStepExitMaintenance(
 
 	step := &t.Steps[adoptStepIdxExitMaintenance]
 	changed := false
+
+	// Sync addresses: if any RVR address changed since the datamesh was
+	// populated, update the member and bump revision so agents re-converge.
+	if ensureDatameshMemberAddresses(rv, *rvrs) {
+		return rf.Continue().ReportChanged()
+	}
 
 	dmAll := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
 		return m.Type == v1alpha1.DatameshMemberTypeDiskful ||

@@ -114,10 +114,12 @@ Reconcile (root) [Pure orchestration]
 │   │   ├── reconcileAdoptStepPopulateAndVerifyDatamesh [Pure orchestration] ← details
 │   │   │   ├── generateSharedSecret + applyDatameshMember (all replica types, multiattach)
 │   │   │   ├── computeTargetQuorum
+│   │   │   ├── ensureDatameshMemberAddresses (sync addresses from RVR, bump revision)
 │   │   │   ├── gate: DatameshRevisionObservedByAgent >= DatameshRevision
 │   │   │   ├── verify: members match, star-topology connections, diskful UpToDate, QMR check
 │   │   │   └── advance → ExitMaintenance
 │   │   └── reconcileAdoptStepExitMaintenance [Pure orchestration] ← details
+│   │       ├── ensureDatameshMemberAddresses (sync addresses from RVR, bump revision)
 │   │       ├── wait for maintenance exit (DRBDConfigured reason != InMaintenance)
 │   │       ├── wait for DRBDConfigured=True
 │   │       └── wait for Ready=True → formation complete
@@ -804,7 +806,9 @@ flowchart TD
     SetQuorum --> IncrRevision["DatameshRevision++"]
     IncrRevision --> ReturnChanged([Return changed])
 
-    CheckMembers -->|Yes| CheckObserved{"All observed revision?<br/>DatameshRevisionObservedByAgent<br/>>= DatameshRevision"}
+    CheckMembers -->|Yes| SyncAddr["ensureDatameshMemberAddresses<br/>(sync from RVR, bump revision)"]
+    SyncAddr -->|Changed| ReturnChanged2([Return changed])
+    SyncAddr -->|Unchanged| CheckObserved{"All observed revision?<br/>DatameshRevisionObservedByAgent<br/>>= DatameshRevision"}
     CheckObserved -->|No| WaitObserved["Wait: replicas not observed"]
 
     CheckObserved -->|Yes| CheckMembersMatch{Members match<br/>active RVRs?}
@@ -853,7 +857,9 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> CollectAll["Collect all datamesh members<br/>(D ∪ TB ∪ A)"]
+    Start([Start]) --> SyncAddr["ensureDatameshMemberAddresses<br/>(sync from RVR, bump revision)"]
+    SyncAddr -->|Changed| ReturnChanged([Return changed])
+    SyncAddr -->|Unchanged| CollectAll["Collect all datamesh members<br/>(D ∪ TB ∪ A)"]
 
     CollectAll --> CheckMaintenance{"Any still in maintenance?<br/>DRBDConfigured reason<br/>= InMaintenance"}
     CheckMaintenance -->|Yes| WaitMaint["Wait: replicas still<br/>in maintenance"]

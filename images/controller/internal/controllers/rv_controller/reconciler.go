@@ -470,6 +470,33 @@ func applyDatameshMember(rv *v1alpha1.ReplicatedVolume, member v1alpha1.Datamesh
 	return true
 }
 
+// ensureDatameshMemberAddresses syncs datamesh member addresses from current
+// RVR statuses. If any address changed, updates the member and increments
+// DatameshRevision so that agents re-converge. Returns true if anything changed.
+func ensureDatameshMemberAddresses(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) bool {
+	addressChanged := false
+	for i := range rv.Status.Datamesh.Members {
+		m := &rv.Status.Datamesh.Members[i]
+		for _, rvr := range rvrs {
+			if rvr.Name != m.Name {
+				continue
+			}
+			if len(rvr.Status.Addresses) == 0 {
+				break
+			}
+			if !slices.Equal(m.Addresses, rvr.Status.Addresses) {
+				m.Addresses = slices.Clone(rvr.Status.Addresses)
+				addressChanged = true
+			}
+			break
+		}
+	}
+	if addressChanged {
+		rv.Status.DatameshRevision++
+	}
+	return addressChanged
+}
+
 // applyDatameshReplicaRequestMessages updates the Message field for pending replica transitions
 // whose ID is in the given set. Returns true if any message was changed.
 func applyDatameshReplicaRequestMessages(rv *v1alpha1.ReplicatedVolume, repIDs idset.IDSet, message string) bool {
