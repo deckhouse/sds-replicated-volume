@@ -533,7 +533,7 @@ var _ = Describe("Reconciler", func() {
 			expectNodeName(ctx, cl, newDiskful, "node-b")
 		})
 
-		It("Deleting unscheduled RVR is skipped", func() {
+		It("Deleting unscheduled RVR is scheduled so agent can clean up", func() {
 			rv := newRV(defaultConfig())
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -554,9 +554,48 @@ var _ = Describe("Reconciler", func() {
 			_, err := reconcileRV(ctx, rec)
 			Expect(err).NotTo(HaveOccurred())
 
-			// NodeName remains empty — not scheduled
 			updated := getUpdatedRVR(ctx, cl, deleting)
-			Expect(updated.Spec.NodeName).To(BeEmpty())
+			Expect(updated.Spec.NodeName).To(Equal("node-a"),
+				"deleting unscheduled replica must be placed so the agent can clean up")
+			expectScheduledCondition(ctx, cl, deleting, metav1.ConditionTrue,
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled)
+		})
+
+		It("Deleting unscheduled RVR does not block node for other replicas", func() {
+			rv := newRV(defaultConfig())
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
+					makeNode("node-b", "zone-b", makeLVG("vg-b", true)),
+				})
+
+			now := metav1.Now()
+			deleting := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			deleting.DeletionTimestamp = &now
+			deleting.Finalizers = []string{"test-finalizer"}
+
+			normal := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, deleting, normal).
+				WithStatusSubresource(deleting, normal).
+				Build()
+
+			mock := &reconcilerMockExtender{}
+			rec := NewReconciler(cl, logr.Discard(), scheme, mock)
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Both should be scheduled (on different nodes).
+			updatedDeleting := getUpdatedRVR(ctx, cl, deleting)
+			updatedNormal := getUpdatedRVR(ctx, cl, normal)
+			Expect(updatedDeleting.Spec.NodeName).NotTo(BeEmpty(),
+				"deleting replica must be scheduled")
+			Expect(updatedNormal.Spec.NodeName).NotTo(BeEmpty(),
+				"normal replica must be scheduled")
+			Expect(updatedDeleting.Spec.NodeName).NotTo(Equal(updatedNormal.Spec.NodeName),
+				"replicas must land on different nodes")
 		})
 	})
 

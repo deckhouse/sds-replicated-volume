@@ -118,8 +118,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Build the scheduling context: eligible nodes, topology, zone layout,
 	// reservation parameters, and replica-type sets (All, Access, Diskful,
-	// TieBreaker, Deleting, Scheduled) with OccupiedNodes — all computed in
-	// a single pass over rvrs.
+	// TieBreaker, Scheduled) with OccupiedNodes — all computed in a single
+	// pass over rvrs.
 	sctx := computeSchedulingContext(rv, rsp, rvrs, attachToNodes)
 
 	// Access replicas (diskless) don't need scheduling — they are created
@@ -156,9 +156,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Done().ToCtrl()
 	}
 
-	// Replicas that still need scheduling. Deleting RVRs (DeletionTimestamp
-	// set) are excluded — they are being removed and should not be placed.
-	unscheduled := sctx.All.Difference(sctx.Scheduled).Difference(sctx.Deleting)
+	// Replicas that still need scheduling. Deleting RVRs are not excluded:
+	// the scheduler's job is to place replicas, not to decide whether they
+	// are needed. Unnecessary replicas will have their finalizers removed
+	// and disappear on their own.
+	unscheduled := sctx.All.Difference(sctx.Scheduled)
 
 	// Phase 2: Schedule unscheduled Diskful RVRs (per-RVR pipeline).
 	//
@@ -634,13 +636,12 @@ type schedulingContext struct {
 	Access     idset.IDSet
 	Diskful    idset.IDSet
 	TieBreaker idset.IDSet
-	Deleting   idset.IDSet
 	Scheduled  idset.IDSet
 }
 
 // computeSchedulingContext builds a schedulingContext from RV, RSP, RVRs, and
 // the desired attach-to node list (from RVA objects).
-// All replica-type sets (All, Access, Diskful, TieBreaker, Deleting, Scheduled)
+// All replica-type sets (All, Access, Diskful, TieBreaker, Scheduled)
 // and OccupiedNodes are computed in a single pass over rvrs.
 // EligibleNodes are sorted by NodeName.
 func computeSchedulingContext(
@@ -670,7 +671,7 @@ func computeSchedulingContext(
 
 	poolType := rsp.Spec.Type
 
-	// Single pass: classify each RVR by type, scheduling state, and deletion.
+	// Single pass: classify each RVR by type and scheduling state.
 	for _, rvr := range rvrs {
 		id := rvr.ID()
 		sctx.All.Add(id)
@@ -682,10 +683,6 @@ func computeSchedulingContext(
 			sctx.Diskful.Add(id)
 		case v1alpha1.ReplicaTypeTieBreaker:
 			sctx.TieBreaker.Add(id)
-		}
-
-		if rvr.DeletionTimestamp != nil {
-			sctx.Deleting.Add(id)
 		}
 
 		if rvr.Spec.NodeName != "" {
@@ -892,7 +889,24 @@ func (r *Reconciler) getRVRsByRVName(ctx context.Context, rvName string) ([]*v1a
 	}
 
 	slices.SortFunc(result, func(a, b *v1alpha1.ReplicatedVolumeReplica) int {
-		return cmp.Compare(a.ID(), b.ID())
+		// Non-deleting replicas first, deleting last.
+		aDeleting := a.DeletionTimestamp != nil
+		bDeleting := b.DeletionTimestamp != nil
+		if aDeleting != bDeleting {
+			if aDeleting {
+				return 1
+			}
+			return -1
+		}
+		// Within the same group: oldest first (by CreationTimestamp),
+		// tie-break by name for determinism.
+		if !a.CreationTimestamp.Equal(&b.CreationTimestamp) {
+			if a.CreationTimestamp.Before(&b.CreationTimestamp) {
+				return -1
+			}
+			return 1
+		}
+		return cmp.Compare(a.Name, b.Name)
 	})
 
 	return result, nil
