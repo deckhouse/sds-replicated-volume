@@ -2592,6 +2592,90 @@ var _ = Describe("Reconciler", func() {
 				"expected no status patch when condition is identical")
 		})
 
+		It("generation bump — observedGeneration is updated even when status/reason/message unchanged", func() {
+			rv := newRV(defaultConfig())
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
+					makeNode("node-b", "zone-b", makeLVG("vg-b", true)),
+				})
+
+			rvr := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			rvr.Generation = 1
+			rvr.Spec.NodeName = "node-a"
+			rvr.Spec.LVMVolumeGroupName = "vg-a"
+			obju.SetStatusCondition(rvr, metav1.Condition{
+				Type:    v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+				Status:  metav1.ConditionTrue,
+				Reason:  v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled,
+				Message: "Replica scheduled successfully",
+			})
+			// Condition was set at generation=1, so observedGeneration=1.
+			Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType).ObservedGeneration).
+				To(Equal(int64(1)))
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, rvr).
+				WithStatusSubresource(rvr).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+
+			// Simulate a spec change that bumps generation without altering
+			// the condition's status/reason/message.
+			fresh := getUpdatedRVR(ctx, cl, rvr)
+			fresh.Generation = 2
+			Expect(cl.Update(ctx, fresh)).To(Succeed())
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			after := getUpdatedRVR(ctx, cl, rvr)
+			cond := obju.GetStatusCondition(after, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.ObservedGeneration).To(Equal(int64(2)),
+				"observedGeneration must track the current generation")
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled))
+		})
+
+		It("condition already set with same generation — no patch", func() {
+			rv := newRV(defaultConfig())
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
+					makeNode("node-b", "zone-b", makeLVG("vg-b", true)),
+				})
+
+			rvr := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			rvr.Generation = 5
+			rvr.Spec.NodeName = "node-a"
+			rvr.Spec.LVMVolumeGroupName = "vg-a"
+			obju.SetStatusCondition(rvr, metav1.Condition{
+				Type:    v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+				Status:  metav1.ConditionTrue,
+				Reason:  v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled,
+				Message: "Replica scheduled successfully",
+			})
+			// observedGeneration=5 matches generation=5.
+			Expect(obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType).ObservedGeneration).
+				To(Equal(int64(5)))
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, rvr).
+				WithStatusSubresource(rvr).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+
+			initial := getUpdatedRVR(ctx, cl, rvr)
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			after := getUpdatedRVR(ctx, cl, rvr)
+			Expect(after.ResourceVersion).To(Equal(initial.ResourceVersion),
+				"expected no status patch when condition and observedGeneration are identical")
+		})
+
 		It("RVR deleted concurrently — NotFound on status patch is silently ignored", func() {
 			rv := newRV(defaultConfig())
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,

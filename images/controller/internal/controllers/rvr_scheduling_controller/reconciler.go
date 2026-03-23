@@ -840,18 +840,17 @@ func (r *Reconciler) reconcileRVRCondition(
 	defer rf.OnEnd(&outcome)
 
 	if obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType).
-		StatusEqual(status).ReasonEqual(reason).MessageEqual(message).Eval() {
+		StatusEqual(status).ReasonEqual(reason).MessageEqual(message).ObservedGenerationCurrent().Eval() {
 		return rf.Continue()
 	}
 
 	base := rvr.DeepCopy()
 
 	obju.SetStatusCondition(rvr, metav1.Condition{
-		Type:               v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
-		Status:             status,
-		Reason:             reason,
-		Message:            message,
-		ObservedGeneration: rvr.Generation,
+		Type:    v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+		Status:  status,
+		Reason:  reason,
+		Message: message,
 	})
 
 	if err := r.patchRVRStatus(rf.Ctx(), rvr, base); err != nil {
