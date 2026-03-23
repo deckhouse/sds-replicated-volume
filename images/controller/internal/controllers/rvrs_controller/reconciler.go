@@ -26,6 +26,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
@@ -51,7 +53,6 @@ func NewReconciler(cl client.Client, scheme *runtime.Scheme) *Reconciler {
 // Reconcile
 //
 
-// Reconcile pattern: Pure orchestration.
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	rf := flow.BeginRootReconcile(ctx)
 
@@ -74,7 +75,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 // Reconcile: normal
 //
 
-// Reconcile pattern: In-place reconciliation.
 func (r *Reconciler) reconcileNormal(ctx context.Context, rvrs *v1alpha1.ReplicatedVolumeReplicaSnapshot) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "normal")
 	defer rf.OnEnd(&outcome)
@@ -86,21 +86,22 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, rvrs *v1alpha1.Replica
 		}
 	}
 
-	droName := computeCreateSnapshotDROName(rvrs.Name)
-	dro, err := r.getDRO(rf.Ctx(), droName)
+	llvsName := rvrs.Name
+	llvs, err := r.getLLVS(rf.Ctx(), llvsName)
 	if err != nil {
 		return rf.Fail(err)
 	}
 
-	if dro == nil {
-		snapshotName := rvrs.Name
-		if err := r.createDRO(rf.Ctx(), rvrs, droName, v1alpha1.DRBDResourceOperationSpec{
-			DRBDResourceName: rvrs.Spec.ReplicatedVolumeReplicaName,
-			Type:             v1alpha1.DRBDResourceOperationCreateSnapshot,
-			CreateSnapshot: &v1alpha1.CreateSnapshotParams{
-				SnapshotName: snapshotName,
-			},
-		}); err != nil {
+	if llvs == nil {
+		llvName, err := r.resolveLLVNameForRVR(rf.Ctx(), rvrs.Spec.ReplicatedVolumeReplicaName)
+		if err != nil {
+			return r.reconcileRVRSStatus(rf.Ctx(), rvrs,
+				v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseFailed,
+				fmt.Sprintf("Failed to resolve LLV name: %v", err),
+				false, "")
+		}
+
+		if err := r.createLLVS(rf.Ctx(), rvrs, llvsName, llvName); err != nil {
 			if apierrors.IsAlreadyExists(err) {
 				return rf.DoneAndRequeue()
 			}
@@ -112,20 +113,23 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, rvrs *v1alpha1.Replica
 			false, "")
 	}
 
-	switch dro.Status.Phase {
-	case v1alpha1.DRBDOperationPhaseSucceeded:
-		snapshotHandle := dro.Status.Result
-		if snapshotHandle == "" {
-			snapshotHandle = rvrs.Name
-		}
+	if llvs.Status == nil {
+		return r.reconcileRVRSStatus(rf.Ctx(), rvrs,
+			v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseInProgress,
+			"Waiting for snapshot to be created",
+			false, "")
+	}
+
+	switch llvs.Status.Phase {
+	case "Created":
 		return r.reconcileRVRSStatus(rf.Ctx(), rvrs,
 			v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseReady,
 			"Snapshot created successfully",
-			true, snapshotHandle)
-	case v1alpha1.DRBDOperationPhaseFailed:
+			true, llvsName)
+	case "Failed":
 		msg := "Snapshot creation failed"
-		if dro.Status.Message != "" {
-			msg = dro.Status.Message
+		if llvs.Status.Reason != "" {
+			msg = llvs.Status.Reason
 		}
 		return r.reconcileRVRSStatus(rf.Ctx(), rvrs,
 			v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseFailed,
@@ -133,7 +137,7 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, rvrs *v1alpha1.Replica
 	default:
 		return r.reconcileRVRSStatus(rf.Ctx(), rvrs,
 			v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseInProgress,
-			"Waiting for snapshot operation to complete",
+			"Waiting for snapshot to be created",
 			false, "")
 	}
 }
@@ -142,7 +146,6 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, rvrs *v1alpha1.Replica
 // Reconcile: status
 //
 
-// Reconcile pattern: In-place reconciliation.
 func (r *Reconciler) reconcileRVRSStatus(
 	ctx context.Context,
 	rvrs *v1alpha1.ReplicatedVolumeReplicaSnapshot,
@@ -183,7 +186,6 @@ func (r *Reconciler) reconcileRVRSStatus(
 // Reconcile: delete
 //
 
-// Reconcile pattern: In-place reconciliation.
 func (r *Reconciler) reconcileDelete(ctx context.Context, rvrs *v1alpha1.ReplicatedVolumeReplicaSnapshot) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "delete")
 	defer rf.OnEnd(&outcome)
@@ -192,49 +194,21 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, rvrs *v1alpha1.Replica
 		return rf.Done()
 	}
 
-	snapshotHandle := rvrs.Status.SnapshotHandle
-	if snapshotHandle != "" {
-		droName := computeDeleteSnapshotDROName(rvrs.Name)
-		dro, err := r.getDRO(rf.Ctx(), droName)
+	if rvrs.Status.SnapshotHandle != "" {
+		llvsName := rvrs.Status.SnapshotHandle
+		llvs, err := r.getLLVS(rf.Ctx(), llvsName)
 		if err != nil {
 			return rf.Fail(err)
 		}
 
-		if dro == nil {
-			if err := r.createDRO(rf.Ctx(), rvrs, droName, v1alpha1.DRBDResourceOperationSpec{
-				DRBDResourceName: rvrs.Spec.ReplicatedVolumeReplicaName,
-				Type:             v1alpha1.DRBDResourceOperationDeleteSnapshot,
-				DeleteSnapshot: &v1alpha1.DeleteSnapshotParams{
-					SnapshotName: snapshotHandle,
-				},
-			}); err != nil {
-				if apierrors.IsAlreadyExists(err) {
-					return rf.DoneAndRequeue()
-				}
+		if llvs != nil {
+			if err := r.cl.Delete(rf.Ctx(), llvs); err != nil && !apierrors.IsNotFound(err) {
 				return rf.Fail(err)
 			}
 			return r.reconcileRVRSStatus(rf.Ctx(), rvrs,
 				v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseDeleting,
-				"Snapshot deletion started",
-				false, snapshotHandle)
-		}
-
-		switch dro.Status.Phase {
-		case v1alpha1.DRBDOperationPhaseSucceeded:
-			// ok, proceed to remove finalizer
-		case v1alpha1.DRBDOperationPhaseFailed:
-			msg := "Snapshot deletion failed"
-			if dro.Status.Message != "" {
-				msg = dro.Status.Message
-			}
-			return r.reconcileRVRSStatus(rf.Ctx(), rvrs,
-				v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseFailed,
-				msg, false, snapshotHandle)
-		default:
-			return r.reconcileRVRSStatus(rf.Ctx(), rvrs,
-				v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseDeleting,
-				"Waiting for snapshot deletion to complete",
-				false, snapshotHandle)
+				"Waiting for snapshot to be deleted",
+				false, rvrs.Status.SnapshotHandle)
 		}
 	}
 
@@ -245,18 +219,6 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, rvrs *v1alpha1.Replica
 	}
 
 	return rf.Done()
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Helpers: Reconcile (non-I/O)
-//
-
-func computeCreateSnapshotDROName(rvrsName string) string {
-	return fmt.Sprintf("%s-create-snap", rvrsName)
-}
-
-func computeDeleteSnapshotDROName(rvrsName string) string {
-	return fmt.Sprintf("%s-delete-snap", rvrsName)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -294,33 +256,49 @@ func (r *Reconciler) patchRVRSStatus(
 	return r.cl.Status().Patch(ctx, rvrs, patch)
 }
 
-// --- DRO ---
+// --- LLVS ---
 
-func (r *Reconciler) getDRO(ctx context.Context, name string) (*v1alpha1.DRBDResourceOperation, error) {
-	dro := &v1alpha1.DRBDResourceOperation{}
-	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, dro); err != nil {
+func (r *Reconciler) getLLVS(ctx context.Context, name string) (*snc.LVMLogicalVolumeSnapshot, error) {
+	llvs := &snc.LVMLogicalVolumeSnapshot{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, llvs); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	return dro, nil
+	return llvs, nil
 }
 
-func (r *Reconciler) createDRO(
+func (r *Reconciler) createLLVS(
 	ctx context.Context,
 	owner *v1alpha1.ReplicatedVolumeReplicaSnapshot,
-	name string,
-	spec v1alpha1.DRBDResourceOperationSpec,
+	llvsName string,
+	llvName string,
 ) error {
-	obj := &v1alpha1.DRBDResourceOperation{
+	obj := &snc.LVMLogicalVolumeSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
+			Name: llvsName,
 		},
-		Spec: spec,
+		Spec: snc.LVMLogicalVolumeSnapshotSpec{
+			ActualSnapshotNameOnTheNode: llvsName,
+			LVMLogicalVolumeName:        llvName,
+		},
 	}
 	if _, err := obju.SetControllerRef(obj, owner, r.scheme); err != nil {
 		return err
 	}
 	return r.cl.Create(ctx, obj)
+}
+
+// --- DRBDResource ---
+
+func (r *Reconciler) resolveLLVNameForRVR(ctx context.Context, rvrName string) (string, error) {
+	drbdr := &v1alpha1.DRBDResource{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: rvrName}, drbdr); err != nil {
+		return "", fmt.Errorf("getting DRBDResource %s: %w", rvrName, err)
+	}
+	if drbdr.Spec.LVMLogicalVolumeName == "" {
+		return "", fmt.Errorf("DRBDResource %s has no lvmLogicalVolumeName", rvrName)
+	}
+	return drbdr.Spec.LVMLogicalVolumeName, nil
 }

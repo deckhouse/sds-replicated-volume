@@ -662,3 +662,120 @@ func WaitForAttachedToRemoved(
 		log.Trace(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Attempt %d, node still in status.actuallyAttachedTo. Waiting...", traceID, volumeName, nodeName, attemptCounter))
 	}
 }
+
+func CreateReplicatedVolumeSnapshot(
+	ctx context.Context,
+	kc client.Client,
+	log *logger.Logger,
+	traceID, name, rvName string,
+) (*srv.ReplicatedVolumeSnapshot, error) {
+	rvs := &srv.ReplicatedVolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       name,
+			Finalizers: []string{SDSReplicatedVolumeCSIFinalizer},
+		},
+		Spec: srv.ReplicatedVolumeSnapshotSpec{
+			ReplicatedVolumeName: rvName,
+		},
+	}
+
+	log.Trace(fmt.Sprintf("[CreateReplicatedVolumeSnapshot][traceID:%s][snapshotID:%s] RVS: %+v", traceID, name, rvs))
+
+	err := kc.Create(ctx, rvs)
+	return rvs, err
+}
+
+func GetReplicatedVolumeSnapshot(ctx context.Context, kc client.Client, name string) (*srv.ReplicatedVolumeSnapshot, error) {
+	rvs := &srv.ReplicatedVolumeSnapshot{}
+	err := kc.Get(ctx, client.ObjectKey{Name: name}, rvs)
+	return rvs, err
+}
+
+func DeleteReplicatedVolumeSnapshot(
+	ctx context.Context,
+	kc client.Client,
+	log *logger.Logger,
+	traceID, name string,
+) error {
+	rvs := &srv.ReplicatedVolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+	}
+	log.Info(fmt.Sprintf("[DeleteReplicatedVolumeSnapshot][traceID:%s][snapshotID:%s] Deleting RVS", traceID, name))
+	err := kc.Delete(ctx, rvs)
+	if kerrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+func WaitForReplicatedVolumeSnapshotReady(
+	ctx context.Context,
+	kc client.Client,
+	log *logger.Logger,
+	traceID, name string,
+) (*srv.ReplicatedVolumeSnapshot, error) {
+	log.Info(fmt.Sprintf("[WaitForRVSReady][traceID:%s][snapshotID:%s] Waiting for RVS to become ready", traceID, name))
+	var attemptCounter int
+	for {
+		attemptCounter++
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		rvs, err := GetReplicatedVolumeSnapshot(ctx, kc, name)
+		if err != nil {
+			return nil, err
+		}
+
+		if attemptCounter%10 == 0 {
+			log.Info(fmt.Sprintf("[WaitForRVSReady][traceID:%s][snapshotID:%s] Attempt: %d, phase: %s", traceID, name, attemptCounter, rvs.Status.Phase))
+		}
+
+		if rvs.DeletionTimestamp != nil {
+			return nil, fmt.Errorf("RVS %s is being deleted", name)
+		}
+
+		switch rvs.Status.Phase {
+		case srv.ReplicatedVolumeSnapshotPhaseReady:
+			return rvs, nil
+		case srv.ReplicatedVolumeSnapshotPhaseFailed:
+			return nil, fmt.Errorf("snapshot creation failed: %s", rvs.Status.Message)
+		}
+	}
+}
+
+func WaitForReplicatedVolumeSnapshotDeleted(
+	ctx context.Context,
+	kc client.Client,
+	log *logger.Logger,
+	traceID, name string,
+) error {
+	log.Info(fmt.Sprintf("[WaitForRVSDeleted][traceID:%s][snapshotID:%s] Waiting for RVS deletion", traceID, name))
+	var attemptCounter int
+	for {
+		attemptCounter++
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		_, err := GetReplicatedVolumeSnapshot(ctx, kc, name)
+		if err != nil {
+			if kerrors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+
+		if attemptCounter%10 == 0 {
+			log.Info(fmt.Sprintf("[WaitForRVSDeleted][traceID:%s][snapshotID:%s] Attempt: %d, still exists", traceID, name, attemptCounter))
+		}
+	}
+}

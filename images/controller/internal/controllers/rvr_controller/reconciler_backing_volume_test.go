@@ -1248,7 +1248,7 @@ var _ = Describe("newLLV", func() {
 			Size:               resource.MustParse("10Gi"),
 		}
 
-		llv, err := newLLV(scheme, rvr, nil, bv)
+		llv, err := newLLV(scheme, rvr, nil, bv, nil)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(llv.Name).To(Equal("llv-1"))
@@ -1264,7 +1264,7 @@ var _ = Describe("newLLV", func() {
 			Size:               resource.MustParse("10Gi"),
 		}
 
-		llv, err := newLLV(scheme, rvr, nil, bv)
+		llv, err := newLLV(scheme, rvr, nil, bv, nil)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(obju.HasFinalizer(llv, v1alpha1.RVRControllerFinalizer)).To(BeTrue())
@@ -1280,7 +1280,7 @@ var _ = Describe("newLLV", func() {
 			Size:               resource.MustParse("10Gi"),
 		}
 
-		llv, err := newLLV(scheme, rvr, nil, bv)
+		llv, err := newLLV(scheme, rvr, nil, bv, nil)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(obju.HasControllerRef(llv, rvr)).To(BeTrue())
@@ -1297,7 +1297,7 @@ var _ = Describe("newLLV", func() {
 			Size:               resource.MustParse("10Gi"),
 		}
 
-		llv, err := newLLV(scheme, rvr, nil, bv)
+		llv, err := newLLV(scheme, rvr, nil, bv, nil)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(llv.Spec.Type).To(Equal("Thick"))
@@ -1315,7 +1315,7 @@ var _ = Describe("newLLV", func() {
 			Size:               resource.MustParse("10Gi"),
 		}
 
-		llv, err := newLLV(scheme, rvr, nil, bv)
+		llv, err := newLLV(scheme, rvr, nil, bv, nil)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(llv.Spec.Type).To(Equal("Thin"))
@@ -1333,7 +1333,7 @@ var _ = Describe("newLLV", func() {
 			Size:               resource.MustParse("10Gi"),
 		}
 
-		llv, err := newLLV(scheme, rvr, nil, bv)
+		llv, err := newLLV(scheme, rvr, nil, bv, nil)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(llv.Spec.Size).To(Equal("10Gi"))
@@ -1352,7 +1352,7 @@ var _ = Describe("newLLV", func() {
 			Size:               resource.MustParse("10Gi"),
 		}
 
-		llv, err := newLLV(scheme, rvr, nil, bv)
+		llv, err := newLLV(scheme, rvr, nil, bv, nil)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(obju.HasLabelValue(llv, v1alpha1.ReplicatedVolumeLabelKey, "rv-1")).To(BeTrue())
@@ -1374,7 +1374,7 @@ var _ = Describe("newLLV", func() {
 			Size:               resource.MustParse("10Gi"),
 		}
 
-		llv, err := newLLV(scheme, rvr, rv, bv)
+		llv, err := newLLV(scheme, rvr, rv, bv, nil)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(obju.HasLabelValue(llv, v1alpha1.ReplicatedStorageClassLabelKey, "rsc-1")).To(BeTrue())

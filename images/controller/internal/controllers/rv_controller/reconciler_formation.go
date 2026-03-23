@@ -156,11 +156,23 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 	// Create missing diskful replicas only when there are no replicas being deleted or misplaced.
 	// This prevents zombie accumulation: we wait for all cleanup to finish before creating new ones.
 	if deleting.IsEmpty() && misplaced.IsEmpty() {
+		snapshotNodeName := ""
+		if rv.Spec.DataSource != nil && diskful.IsEmpty() {
+			nodeName, err := r.resolveSnapshotNodeName(rf.Ctx(), rv.Spec.DataSource.SnapshotName)
+			if err != nil {
+				return rf.Failf(err, "resolving snapshot node for clone")
+			}
+			snapshotNodeName = nodeName
+		}
+
 		for diskful.Len() < int(targetDiskfulCount) {
-			rvr, err := r.createDiskfulRVR(rf.Ctx(), rv, rvrs)
+			nodeName := ""
+			if snapshotNodeName != "" && diskful.IsEmpty() {
+				nodeName = snapshotNodeName
+			}
+			rvr, err := r.createRVR(rf.Ctx(), rv, rvrs, v1alpha1.ReplicaTypeDiskful, nodeName)
 			if err != nil {
 				if apierrors.IsAlreadyExists(err) {
-					// Stale cache: RVR was already created by a previous reconciliation. Requeue to pick it up.
 					rf.Log().Info("RVR already exists, requeueing")
 					return rf.DoneAndRequeue()
 				}
@@ -637,10 +649,13 @@ func (r *Reconciler) reconcileFormationStepBootstrapData(
 	// Single replica: no peers to synchronize with, always use clear-bitmap.
 	// Multiple replicas with thin provisioning: clear-bitmap (thin volumes don't need full resync).
 	// Multiple replicas with thick provisioning: force-resync (thick volumes require full data synchronization).
+	// Clone (DataSource set) with multiple replicas: always force-resync — the primary replica
+	// has data from the snapshot source, while other replicas have empty backing volumes.
 	singleReplica := dmDiskful.Len() == 1
+	isClone := rv.Spec.DataSource != nil
 	drbdrOpFormationParams := &v1alpha1.CreateNewUUIDParams{
-		ClearBitmap: singleReplica || rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVMThin,
-		ForceResync: !singleReplica && rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM,
+		ClearBitmap: singleReplica || (!isClone && rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVMThin),
+		ForceResync: !singleReplica && (isClone || rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM),
 	}
 
 	// Create DRBDResourceOperation for data bootstrap if it doesn't exist yet.
@@ -797,7 +812,6 @@ func (r *Reconciler) reconcileFormationRestartIfTimeoutPassed(
 
 	rf.Log().Error(fmt.Errorf("formation timed out after %s, restarting", elapsed.Truncate(time.Second)), "restarting formation")
 
-	// Delete formation DRBDResourceOperation if it exists.
 	drbdrOpName := rv.Name + "-formation"
 	drbdrOp, err := r.getDRBDROp(rf.Ctx(), drbdrOpName)
 	if err != nil {
@@ -931,4 +945,39 @@ func applyFormationTransitionAbsent(rv *v1alpha1.ReplicatedVolume) bool {
 		}
 	}
 	return false
+}
+
+// resolveSnapshotNodeName finds a node that has a Ready RVRS for the given RVS.
+func (r *Reconciler) resolveSnapshotNodeName(ctx context.Context, rvsName string) (string, error) {
+	var rvrsList v1alpha1.ReplicatedVolumeReplicaSnapshotList
+	if err := r.cl.List(ctx, &rvrsList); err != nil {
+		return "", fmt.Errorf("listing RVRS: %w", err)
+	}
+	for i := range rvrsList.Items {
+		rvrs := &rvrsList.Items[i]
+		if rvrs.Spec.ReplicatedVolumeSnapshotName == rvsName &&
+			rvrs.Status.Phase == v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseReady &&
+			rvrs.Status.ReadyToUse {
+			return rvrs.Spec.NodeName, nil
+		}
+	}
+	return "", fmt.Errorf("no ready RVRS found for snapshot %q", rvsName)
+}
+
+// resolveSnapshotHandleForNode finds the SnapshotHandle from a Ready RVRS on the given node.
+func (r *Reconciler) resolveSnapshotHandleForNode(ctx context.Context, rvsName, nodeName string) (string, error) {
+	var rvrsList v1alpha1.ReplicatedVolumeReplicaSnapshotList
+	if err := r.cl.List(ctx, &rvrsList); err != nil {
+		return "", fmt.Errorf("listing RVRS: %w", err)
+	}
+	for i := range rvrsList.Items {
+		rvrs := &rvrsList.Items[i]
+		if rvrs.Spec.ReplicatedVolumeSnapshotName == rvsName &&
+			rvrs.Spec.NodeName == nodeName &&
+			rvrs.Status.Phase == v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseReady &&
+			rvrs.Status.SnapshotHandle != "" {
+			return rvrs.Status.SnapshotHandle, nil
+		}
+	}
+	return "", fmt.Errorf("no ready RVRS with snapshotHandle found for snapshot %q on node %q", rvsName, nodeName)
 }

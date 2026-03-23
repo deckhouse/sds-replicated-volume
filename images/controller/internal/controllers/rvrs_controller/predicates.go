@@ -19,11 +19,11 @@ package rvrscontroller
 import (
 	"slices"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
-
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func rvrsPredicates() []predicate.Predicate {
@@ -42,16 +42,24 @@ func rvrsPredicates() []predicate.Predicate {
 	}
 }
 
-func droPredicates() []predicate.Predicate {
+func llvsPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.Funcs{
 			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
-				oldDRO, okOld := e.ObjectOld.(*v1alpha1.DRBDResourceOperation)
-				newDRO, okNew := e.ObjectNew.(*v1alpha1.DRBDResourceOperation)
-				if !okOld || !okNew || oldDRO == nil || newDRO == nil {
+				oldLLVS, okOld := e.ObjectOld.(*snc.LVMLogicalVolumeSnapshot)
+				newLLVS, okNew := e.ObjectNew.(*snc.LVMLogicalVolumeSnapshot)
+				if !okOld || !okNew || oldLLVS == nil || newLLVS == nil {
 					return true
 				}
-				return oldDRO.Status.Phase != newDRO.Status.Phase
+				oldPhase := ""
+				if oldLLVS.Status != nil {
+					oldPhase = oldLLVS.Status.Phase
+				}
+				newPhase := ""
+				if newLLVS.Status != nil {
+					newPhase = newLLVS.Status.Phase
+				}
+				return oldPhase != newPhase
 			},
 		},
 	}

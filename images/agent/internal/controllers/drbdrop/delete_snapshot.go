@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
@@ -38,12 +39,16 @@ func (r *OperationReconciler) executeDeleteSnapshot(
 		return fmt.Errorf("snapshotName must not be empty")
 	}
 
-	vgName, _, err := r.resolveBackingLV(ctx, drbdr)
-	if err != nil {
-		return fmt.Errorf("resolving backing LV: %w", err)
+	var snapPath string
+	if strings.HasPrefix(snapshotName, "/dev/") {
+		snapPath = snapshotName
+	} else {
+		vgName, _, err := r.resolveBackingLV(ctx, drbdr)
+		if err != nil {
+			return fmt.Errorf("resolving backing LV: %w", err)
+		}
+		snapPath = fmt.Sprintf("/dev/%s/%s", vgName, snapshotName)
 	}
-
-	snapPath := fmt.Sprintf("/dev/%s/%s", vgName, snapshotName)
 
 	cmd := exec.CommandContext(ctx, "lvremove", "-f", snapPath)
 	output, err := cmd.CombinedOutput()

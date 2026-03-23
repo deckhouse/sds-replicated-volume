@@ -67,6 +67,8 @@ func (rv *ReplicatedVolume) SetStatusConditions(conditions []metav1.Condition) {
 // +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Auto' || (has(self.replicatedStorageClassName) && size(self.replicatedStorageClassName) > 0 && !has(self.manualConfiguration))",message="Auto mode requires replicatedStorageClassName and must not have manualConfiguration."
 // Manual mode requires manualConfiguration, forbids RSC name:
 // +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Manual' || (has(self.manualConfiguration) && (!has(self.replicatedStorageClassName) || size(self.replicatedStorageClassName) == 0))",message="Manual mode requires manualConfiguration and must not have replicatedStorageClassName."
+// dataSource is immutable once set:
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.dataSource) || has(self.dataSource)",message="dataSource cannot be removed once set"
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeSpec struct {
 	// +kubebuilder:validation:Required
@@ -109,6 +111,20 @@ type ReplicatedVolumeSpec struct {
 	// +kubebuilder:default=1
 	// +optional
 	MaxAttachments *byte `json:"maxAttachments,omitempty"`
+
+	// +optional
+	DataSource *VolumeDataSource `json:"dataSource,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+//
+//	+kubebuilder:validation:XValidation:rule="size(self.snapshotName) > 0",message="snapshotName must not be empty"
+type VolumeDataSource struct {
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="snapshotName is immutable"
+	SnapshotName string `json:"snapshotName"`
 }
 
 // ReplicatedVolumeConfigurationMode enumerates possible values for ReplicatedVolume spec.configurationMode field.

@@ -26,6 +26,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/controlleroptions"
 )
@@ -43,9 +45,9 @@ func BuildController(mgr manager.Manager) error {
 			rvrsPredicates()...,
 		)).
 		Watches(
-			&v1alpha1.DRBDResourceOperation{},
-			handler.EnqueueRequestsFromMapFunc(mapDROToRVRS(cl)),
-			builder.WithPredicates(droPredicates()...),
+			&snc.LVMLogicalVolumeSnapshot{},
+			handler.EnqueueRequestsFromMapFunc(mapLLVSToRVRS(cl)),
+			builder.WithPredicates(llvsPredicates()...),
 		).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 10,
@@ -54,13 +56,13 @@ func BuildController(mgr manager.Manager) error {
 		Complete(rec)
 }
 
-func mapDROToRVRS(cl client.Client) handler.MapFunc {
+func mapLLVSToRVRS(cl client.Client) handler.MapFunc {
 	return func(ctx context.Context, obj client.Object) []reconcile.Request {
-		dro, ok := obj.(*v1alpha1.DRBDResourceOperation)
-		if !ok || dro == nil {
+		llvs, ok := obj.(*snc.LVMLogicalVolumeSnapshot)
+		if !ok || llvs == nil {
 			return nil
 		}
-		for _, ref := range dro.GetOwnerReferences() {
+		for _, ref := range llvs.GetOwnerReferences() {
 			if ref.Kind == "ReplicatedVolumeReplicaSnapshot" {
 				return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: ref.Name}}}
 			}

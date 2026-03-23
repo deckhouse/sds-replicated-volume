@@ -93,7 +93,7 @@ type DeleteSnapshotParams struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	// +kubebuilder:validation:Pattern=`^[0-9A-Za-z.+_-]*$`
+	// +kubebuilder:validation:Pattern=`^[0-9A-Za-z.+_/\-]*$`
 	SnapshotName string `json:"snapshotName"`
 }
 

@@ -92,7 +92,7 @@ spec:
                   snapshotName:
                     maxLength: 253
                     minLength: 1
-                    pattern: ^[0-9A-Za-z.+_-]*$
+                    pattern: ^[0-9A-Za-z.+_/\-]*$
                     type: string
                 required:
                 - snapshotName
@@ -108,6 +108,21 @@ spec:
                 x-kubernetes-validations:
                 - message: drbdResourceName is immutable
                   rule: self == oldSelf
+              populateFromSnapshot:
+                description: Parameters for PopulateFromSnapshot operation. Immutable
+                  once set.
+                properties:
+                  sourceLVPath:
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^/dev/[0-9A-Za-z.+_/\-]*$
+                    type: string
+                required:
+                - sourceLVPath
+                type: object
+                x-kubernetes-validations:
+                - message: populateFromSnapshot is immutable
+                  rule: self == oldSelf
               type:
                 description: DRBDResourceOperationType represents the type of operation
                   to perform on a DRBD resource.
@@ -119,6 +134,7 @@ spec:
                 - Verify
                 - CreateSnapshot
                 - DeleteSnapshot
+                - PopulateFromSnapshot
                 type: string
                 x-kubernetes-validations:
                 - message: type is immutable
