@@ -2723,7 +2723,7 @@ var _ = Describe("Reconciler", func() {
 	//
 
 	Describe("Extender: Multi-Diskful and Mixed Errors", func() {
-		It("Extender error, multiple Diskful — all attempted, all get ExtenderUnavailable", func() {
+		It("Extender error, multiple Diskful — first gets ExtenderUnavailable, rest not attempted", func() {
 			rv := newRV(defaultConfig())
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -2750,11 +2750,14 @@ var _ = Describe("Reconciler", func() {
 			_, err := reconcileRV(ctx, rec)
 			Expect(err).To(HaveOccurred())
 
-			// All Diskful get ExtenderUnavailable
-			for _, rvr := range []*v1alpha1.ReplicatedVolumeReplica{rvr0, rvr1, rvr2} {
-				expectScheduledCondition(ctx, cl, rvr, metav1.ConditionFalse,
-					v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonExtenderUnavailable)
-			}
+			// Per-iteration ShouldReturn stops the loop after the first failure.
+			// Only rvr0 (lowest ID, processed first) gets ExtenderUnavailable.
+			expectScheduledCondition(ctx, cl, rvr0, metav1.ConditionFalse,
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonExtenderUnavailable)
+
+			// Remaining Diskful were not reached — no condition set.
+			expectNoScheduledCondition(ctx, cl, rvr1)
+			expectNoScheduledCondition(ctx, cl, rvr2)
 		})
 
 		It("Extender error, Diskful + TieBreaker — Diskful fails, TieBreaker NOT attempted", func() {

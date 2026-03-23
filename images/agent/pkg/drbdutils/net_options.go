@@ -36,6 +36,7 @@ type NetOptions struct {
 	CRAMHMACAlg       *string
 	AllowTwoPrimaries *bool
 	AllowRemoteRead   *bool
+	VerifyAlg         *string
 }
 
 // NetOptionsArgs returns arguments for drbdsetup net-options command.
@@ -71,6 +72,10 @@ var NetOptionsArgs = func(resource string, peerNodeID uint8, opts NetOptions) []
 		} else {
 			args = append(args, "--allow-remote-read=no")
 		}
+	}
+
+	if opts.VerifyAlg != nil {
+		args = append(args, "--verify-alg="+*opts.VerifyAlg)
 	}
 
 	return args

@@ -107,6 +107,7 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 			SharedSecret: iPeer.SharedSecret(),
 			CRAMHMACAlg:  string(iPeer.SharedSecretAlg()),
 			RRConflict:   iPeer.RRConflict(),
+			VerifyAlg:    iPeer.VerifyAlg(),
 		})
 		// Set net options
 		res = append(res, computeNetOptionsAction(resourceName, iPeer, iState.AllowTwoPrimaries())...)
@@ -176,7 +177,7 @@ func computeMinorActions(resourceName string, allocatedMinor *uint, iState Inten
 
 func generateDeviceUUID() string {
 	var buf [8]byte
-	rand.Read(buf[:])
+	_, _ = rand.Read(buf[:])
 	return fmt.Sprintf("%016X", binary.BigEndian.Uint64(buf[:]))
 }
 
@@ -412,12 +413,14 @@ func computeDiskOptionsActionReconcile(iState IntendedDRBDState, aState ActualDR
 
 func computeNetOptionsAction(resourceName string, iPeer IntendedPeer, allowTwoPrimaries bool) (res DRBDActions) {
 	allowRemoteRead := iPeer.AllowRemoteRead()
+	verifyAlg := iPeer.VerifyAlg()
 
 	res = append(res, NetOptionsAction{
 		ResourceName:      resourceName,
 		PeerNodeID:        iPeer.NodeID(),
 		AllowTwoPrimaries: &allowTwoPrimaries,
 		AllowRemoteRead:   &allowRemoteRead,
+		VerifyAlg:         &verifyAlg,
 	})
 	return res
 }
@@ -463,6 +466,13 @@ func computeNetOptionsActionReconcile(resourceName string, iPeer IntendedPeer, a
 		changed = true
 	}
 
+	// Check verify-alg
+	if iPeer.VerifyAlg() != aPeer.VerifyAlg() {
+		verifyAlg := iPeer.VerifyAlg()
+		action.VerifyAlg = &verifyAlg
+		changed = true
+	}
+
 	if changed {
 		res = append(res, action)
 	}
@@ -502,7 +512,27 @@ func computePathActions(resourceName string, iPeer IntendedPeer, aPeer ActualPee
 		})
 	}
 
+	// Guard: do not delete the last established path on an active connection.
+	// DRBD kernel rejects del-path in that case. The scanner will trigger a
+	// new reconcile once the replacement path becomes established.
+	connectionActive := aPeer != nil &&
+		aPeer.ConnectionState() != v1alpha1.ConnectionStateStandAlone.String()
+
+	removedKeys := make(map[string]struct{}, len(toRemove))
+	for _, rp := range toRemove {
+		removedKeys[pathKey(rp.LocalAddr(), rp.RemoteAddr())] = struct{}{}
+	}
+	establishedRetained := 0
+	for _, ap := range actualPaths {
+		if _, removed := removedKeys[pathKey(ap.LocalAddr(), ap.RemoteAddr())]; !removed && ap.Established() {
+			establishedRetained++
+		}
+	}
+
 	for _, aPath := range toRemove {
+		if connectionActive && aPath.Established() && establishedRetained == 0 {
+			continue
+		}
 		res = append(res, DelPathAction{
 			ResourceName: resourceName,
 			PeerNodeID:   peerNodeID,
@@ -524,13 +554,11 @@ func formatAddr(ip string, port uint) string {
 	return fmt.Sprintf("%s:%d", ip, port)
 }
 
-// computeResizeAction computes resize action if the intended usable size is
-// larger than actual. The intended size is the lower volume (backing device)
-// size; it is converted to usable size by subtracting DRBD metadata overhead
-// before comparison.
+// computeResizeAction computes resize action if the intended upper-device
+// size (spec.size) is larger than the actual DRBD device size. Both values
+// are upper-device sizes in bytes; the comparison is direct.
 //
-// The resize command re-examines the backing device and uses whatever space is
-// available. If the backing device hasn't actually grown, drbdsetup returns
+// If the backing device hasn't actually grown yet, drbdsetup returns
 // ErrResizeBackingNotGrown which ResizeAction treats as a no-op.
 func computeResizeAction(iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
 	if iState.Type() != v1alpha1.DRBDResourceTypeDiskful || iState.Size() == 0 {
@@ -547,41 +575,12 @@ func computeResizeAction(iState IntendedDRBDState, aState ActualDRBDState) (res 
 		return
 	}
 
-	intendedUsable := drbdUsableSizeBytes(iState.Size())
-	if intendedUsable > actualVol.Size() {
+	if iState.Size() > actualVol.Size() {
 		minor := uint(actualVol.Minor())
-		res = append(res, ResizeAction{Minor: &minor})
+		res = append(res, ResizeAction{Minor: &minor, SizeBytes: iState.Size()})
 	}
 
 	return
-}
-
-// DRBD internal metadata size calculation.
-// Must stay in sync with images/controller/internal/drbd_size/drbd_size.go.
-const (
-	drbdMaxPeers          = 7
-	drbdSectorSize        = 512
-	drbdBmSectPerBit      = 8  // sectors per bitmap bit (1 << (12 - 9))
-	drbdSuperblockSectors = 8  // 4096 bytes / 512
-	drbdALSizeSectors     = 64 // 1 stripe * 32KB / 512
-)
-
-func drbdAlign(x, a uint64) uint64 {
-	return (x + a - 1) &^ (a - 1)
-}
-
-func drbdMetadataSectors(lowerSectors uint64) uint64 {
-	bits := drbdAlign(drbdAlign(lowerSectors, drbdBmSectPerBit)/drbdBmSectPerBit, 64)
-	bitmapSectors := drbdAlign(bits/8*drbdMaxPeers, 4096) / drbdSectorSize
-	return bitmapSectors + drbdSuperblockSectors + drbdALSizeSectors
-}
-
-// drbdUsableSizeBytes converts a lower volume (backing device) size in bytes
-// to the DRBD usable capacity in bytes, subtracting internal metadata overhead.
-func drbdUsableSizeBytes(lowerBytes int64) int64 {
-	lowerSectors := uint64(lowerBytes) / drbdSectorSize
-	usableSectors := lowerSectors - drbdMetadataSectors(lowerSectors)
-	return int64(usableSectors * drbdSectorSize)
 }
 
 // computeRoleAction computes role change action if actual role differs from intended.

@@ -65,4 +65,4 @@ properties:
   newControlPlane:
     type: boolean
     default: false
-    description: When true, use the new control-plane as a backend for the module
+    description: When true, use the new control-plane as a backend for the module. Once switched to true, reverting back to false is prohibited.

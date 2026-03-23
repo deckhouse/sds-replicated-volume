@@ -18,13 +18,39 @@ package drbdr
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
+
+// ExistingPorts maps local IP addresses to ports currently configured in the
+// DRBD kernel. Used as a fallback source-of-truth when status.addresses has
+// no port yet (migration / adoption scenario).
+type ExistingPorts map[string]uint
+
+// existingPortsFromState extracts local IP → port mapping from an observed
+// DRBD state. Returns nil if the state has no connections with paths.
+func existingPortsFromState(aState *actualState) ExistingPorts {
+	if aState == nil || aState.status == nil {
+		return nil
+	}
+	ports := make(ExistingPorts)
+	for i := range aState.status.Connections {
+		for j := range aState.status.Connections[i].Paths {
+			h := &aState.status.Connections[i].Paths[j].ThisHost
+			if h.Address != "" && h.Port > 0 {
+				ports[h.Address] = uint(h.Port)
+			}
+		}
+	}
+	if len(ports) == 0 {
+		return nil
+	}
+	return ports
+}
 
 // IntendedIP represents an intended IP address for a system network.
 type IntendedIP struct {
@@ -106,23 +132,33 @@ func applyIPs(drbdr *v1alpha1.DRBDResource, intendedIPs []IntendedIP) {
 }
 
 // computeIntendedPorts computes ports for each IP in drbdr.status.addresses.
-// It prefers existing ports but allocates new ones if port is 0.
+//
+// Port source-of-truth priority:
+//  1. status.addresses port (primary SoT) — non-zero port already persisted.
+//  2. DRBD kernel port (existingPorts) — fallback for migration/adoption when
+//     the DRBD resource already exists on the node but the K8S object is new.
+//  3. portAllocator (last resort) — allocates a fresh port.
+//
 // If port allocation fails (returns 0), the address is skipped and an error is returned.
 //
 // Note: This helper mutates reconciler-owned deterministic state (PortCache).
 // The PortCache maintains port allocation across reconciliations to ensure
 // stable port assignments. This is acceptable because the cache is deterministic
 // relative to its state and produces stable outputs for the same inputs.
-func computeIntendedPorts(drbdr *v1alpha1.DRBDResource, portAllocator PortAllocator) ([]IntendedPort, error) {
+func computeIntendedPorts(ctx context.Context, drbdr *v1alpha1.DRBDResource, existingPorts ExistingPorts, portAllocator PortAllocator) ([]IntendedPort, error) {
 	result := make([]IntendedPort, 0, len(drbdr.Status.Addresses))
 	var allocErr error
 	for _, addr := range drbdr.Status.Addresses {
 		port := addr.Address.Port
 		if port == 0 {
-			port = portAllocator(addr.Address.IPv4)
-			if port == 0 {
-				allocErr = fmt.Errorf("failed to allocate port for IP %s (network %s)", addr.Address.IPv4, addr.SystemNetworkName)
-				continue // Skip this address
+			port = existingPorts[addr.Address.IPv4]
+		}
+		if port == 0 {
+			var err error
+			port, err = portAllocator(ctx, addr.Address.IPv4)
+			if err != nil {
+				allocErr = errors.Join(allocErr, err)
+				continue
 			}
 		}
 		result = append(result, IntendedPort{
@@ -169,6 +205,10 @@ func applyPorts(drbdr *v1alpha1.DRBDResource, intendedPorts []IntendedPort) {
 // This mutates drbdr.Status in-memory; patching is done by the caller based
 // on semantic equality comparison with the base object.
 //
+// existingPorts provides ports currently configured in the DRBD kernel. When
+// status.addresses has no port for an IP, the DRBD kernel port is adopted
+// before falling back to portAllocator. Pass nil when no DRBD resource exists.
+//
 // If port allocation fails for some addresses, those addresses are excluded
 // from status and an error is returned. The error is non-critical and should
 // not cause early exit from reconciliation.
@@ -176,6 +216,7 @@ func ensureAddresses(
 	ctx context.Context,
 	drbdr *v1alpha1.DRBDResource,
 	node *corev1.Node,
+	existingPorts ExistingPorts,
 	portAllocator PortAllocator,
 ) (outcome flow.EnsureOutcome) {
 	ef := flow.BeginEnsure(ctx, "ensure-addresses")
@@ -186,7 +227,7 @@ func ensureAddresses(
 	applyIPs(drbdr, intendedIPs)
 
 	// Compute and apply ports
-	intendedPorts, portErr := computeIntendedPorts(drbdr, portAllocator)
+	intendedPorts, portErr := computeIntendedPorts(ctx, drbdr, existingPorts, portAllocator)
 	applyPorts(drbdr, intendedPorts)
 
 	if portErr != nil {

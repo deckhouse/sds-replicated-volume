@@ -56,9 +56,33 @@ func TestDRBDResource(t *testing.T) {
 		})
 	})
 
+	e.Run("Resize", func(e envtesting.E) {
+		suite.SetupResize(e, cl, cluster, "rs", 0)
+	})
+
 	e.Run("DeleteDiskful", func(e envtesting.E) {
 		drbdr, llv := suite.SetupDisklessToDiskfulReplica(e, cl, cluster, "dd", 0)
 		suite.SetupDeleteDiskful(e, cl, drbdr, llv)
+	})
+
+	e.Run("LLVFinalizer", func(e envtesting.E) {
+		drbdr, llv := suite.SetupDisklessToDiskfulReplica(e, cl, cluster, "lf", 0)
+
+		e.Run("DownUp", func(e envtesting.E) {
+			suite.SetupLLVFinalizerDownUp(e, cl, drbdr, llv.Name)
+		})
+
+		e.Run("DownUpDiskless", func(e envtesting.E) {
+			suite.SetupLLVFinalizerDownUpDiskless(e, cl, drbdr, llv.Name)
+		})
+
+		e.Run("DownUpDownUpDiskless", func(e envtesting.E) {
+			suite.SetupLLVFinalizerDownUpDownUpDiskless(e, cl, drbdr, llv.Name)
+		})
+
+		e.Run("DownDisklessThenUp", func(e envtesting.E) {
+			suite.SetupLLVFinalizerDownDisklessThenUp(e, cl, drbdr, llv.Name)
+		})
 	})
 
 	e.Run("OrphanCleanup", func(e envtesting.E) {
@@ -72,7 +96,11 @@ func TestDRBDResource(t *testing.T) {
 	})
 
 	e.Run("Rename", func(e envtesting.E) {
-		suite.SetupRename(e, cl, cluster, ne, "rn", 0)
+		drbdr := suite.SetupRename(e, cl, cluster, ne, "rn", 0)
+
+		e.Run("MaintenanceModeSkipsRename", func(e envtesting.E) {
+			suite.SetupMaintenanceModeWithRename(e, cl, ne, drbdr, cluster)
+		})
 	})
 
 	e.Run("DeviceUUID", func(e envtesting.E) {
@@ -81,6 +109,29 @@ func TestDRBDResource(t *testing.T) {
 			e.Skipf("DeviceUUID requires at least 2 nodes, got %d", len(cluster.Nodes))
 		}
 		suite.SetupDT(e, cl, cluster, nodeExec, logWatcher)
+	})
+
+	e.Run("PortConvergence", func(e envtesting.E) {
+		e.Parallel()
+
+		if len(cluster.Nodes) < 2 {
+			e.Skipf("PortConvergence requires at least 2 nodes, got %d", len(cluster.Nodes))
+		}
+
+		drbdrs := make([]*v1alpha1.DRBDResource, 2)
+		for i := range drbdrs {
+			drbdrs[i], _ = suite.SetupDisklessToDiskfulReplica(e, cl, cluster, "pc", i)
+		}
+		drbdrs = suite.SetupPeering(e, cl, drbdrs)
+		suite.SetupInitialSync(e, cl, drbdrs)
+
+		e.Run("AdoptExistingPort", func(e envtesting.E) {
+			suite.SetupAdoptExistingPort(e, cl, cluster, nodeExec, "pa")
+		})
+
+		e.Run("PathMismatchConvergence", func(e envtesting.E) {
+			suite.SetupPathMismatchConvergence(e, cl, drbdrs, nodeExec, cluster)
+		})
 	})
 
 	for _, tc := range []struct {
@@ -106,6 +157,12 @@ func TestDRBDResource(t *testing.T) {
 
 			drbdrs = suite.SetupPeering(e, cl, drbdrs)
 			suite.SetupInitialSync(e, cl, drbdrs)
+
+			if tc.n == 4 {
+				e.Run("DRBDSetupSchema", func(e envtesting.E) {
+					suite.DiscoverDRBDSetupSchema(e, nodeExec, cluster.Nodes[0].Name, "sdsrv-"+drbdrs[0].Name, tc.n-1)
+				})
+			}
 
 			e.Run("PromotePrimary", func(e envtesting.E) {
 				suite.SetupPromotePrimary(e, cl, drbdrs[0])

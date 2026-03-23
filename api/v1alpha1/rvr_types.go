@@ -73,6 +73,9 @@ func (rvr *ReplicatedVolumeReplica) SetStatusConditions(conditions []metav1.Cond
 	rvr.Status.Conditions = conditions
 }
 
+// GetStatusPhase returns .status.phase as a string.
+func (rvr *ReplicatedVolumeReplica) GetStatusPhase() string { return string(rvr.Status.Phase) }
+
 // ID extracts ID from the RVR name (e.g., "pvc-xxx-5" → 5).
 // Result is cached after first successful call
 func (rvr *ReplicatedVolumeReplica) ID() uint8 {
@@ -264,6 +267,16 @@ type ReplicatedVolumeReplicaStatus struct {
 	//
 	// +optional
 	DatameshRevision int64 `json:"datameshRevision,omitempty"`
+
+	// DatameshRevisionObservedByAgent is the datamesh revision for which the agent
+	// has processed the DRBDResource spec (observedGeneration == generation).
+	//
+	// Unlike DatameshRevision, this field is set regardless of whether the agent
+	// reported success, failure, or maintenance mode — it only requires that the
+	// agent has acknowledged the current DRBDResource generation.
+	//
+	// +optional
+	DatameshRevisionObservedByAgent int64 `json:"datameshRevisionObservedByAgent,omitempty"`
 
 	// Attachment contains information about the device attachment state.
 	// Only set when the replica is attached on the node.

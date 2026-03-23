@@ -29,4 +29,17 @@ const (
 
 	// ReplicatedVolumePVCNamespaceAnnotationKey is a rv-related pvc namespace
 	ReplicatedVolumePVCNamespaceAnnotationKey = annotationPrefix + "pvc-namespace"
+
+	// AdoptRVRAnnotationKey triggers the adopt/v1 formation plan when set on a
+	// ReplicatedVolume. Formation will adopt pre-existing RVRs instead of creating
+	// new ones: no RVR creation/deletion, no DRBDResourceOperation.
+	// Presence-based (value is ignored).
+	AdoptRVRAnnotationKey = annotationPrefix + "adopt-rvr"
+
+	// AdoptSharedSecretAnnotationKey carries the DRBD shared secret from a
+	// pre-existing datamesh into the adopt/v1 formation plan. When set on a
+	// ReplicatedVolume, the controller uses its value instead of generating a
+	// random secret. The value must be non-empty and at most 64 characters.
+	// Only used during adopt/v1 formation.
+	AdoptSharedSecretAnnotationKey = annotationPrefix + "adopt-shared-secret"
 )

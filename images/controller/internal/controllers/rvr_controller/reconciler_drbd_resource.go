@@ -42,6 +42,23 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 	rf := flow.BeginReconcile(ctx, "drbd-resource")
 	defer rf.OnEnd(&outcome)
 
+	// 0. RVR not found in cache — don't assume it's deleted.
+	// The RVR may appear on the next reconciliation (informer cache lag).
+	// If DRBDR exists and is being deleted (e.g., by GC cascade), remove our
+	// finalizer to unblock. Otherwise skip — don't delete children speculatively.
+	if rvr == nil {
+		if drbdr != nil && drbdr.DeletionTimestamp != nil {
+			if obju.HasFinalizer(drbdr, v1alpha1.RVRControllerFinalizer) {
+				base := drbdr.DeepCopy()
+				obju.RemoveFinalizer(drbdr, v1alpha1.RVRControllerFinalizer)
+				if err := r.patchDRBDR(rf.Ctx(), drbdr, base); err != nil {
+					return drbdr, rf.Failf(err, "removing finalizer from deleting DRBDResource %s", drbdr.Name)
+				}
+			}
+		}
+		return drbdr, rf.Continue()
+	}
+
 	// 1. Deletion branch: if RVR should not exist, remove finalizer from DRBDR and delete it.
 	if rvrShouldNotExist(rvr) {
 		if drbdr != nil {
@@ -61,17 +78,15 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		}
 
 		// Set DRBDConfigured condition on RVR.
-		changed := false
-		if rvr != nil {
-			var message string
-			if drbdr == nil {
-				message = "Replica is being deleted; DRBD resource has been deleted"
-			} else {
-				message = fmt.Sprintf("Replica is being deleted; waiting for DRBD resource %s to be deleted", drbdr.Name)
-			}
-			changed = applyDRBDConfiguredCondFalse(rvr,
-				v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonNotApplicable, message)
+		// rvr is guaranteed non-nil here (rvr==nil is handled in step 0 above).
+		var message string
+		if drbdr == nil {
+			message = "Replica is being deleted; DRBD resource has been deleted"
+		} else {
+			message = fmt.Sprintf("Replica is being deleted; waiting for DRBD resource %s to be deleted", drbdr.Name)
 		}
+		changed := applyDRBDConfiguredCondFalse(rvr,
+			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonNotApplicable, message)
 
 		// DRBDR may still exist in the API (e.g., blocked by finalizers),
 		// but for reconciliation purposes we consider it deleted.
@@ -169,11 +184,24 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		}
 	}
 
-	// 7. Cache target configuration to skip redundant spec comparisons on next reconcile.
+	// 7. Ensure ownerRef on DRBDR (may be missing on pre-existing/externally-created DRBDRs).
+	// Once set, the Owns() watch triggers for DRBDR events, and Kubernetes GC
+	// cascade-deletes the DRBDR when the RVR is deleted.
+	if !metav1.IsControlledBy(drbdr, rvr) {
+		base := drbdr.DeepCopy()
+		if err := controllerutil.SetControllerReference(rvr, drbdr, r.scheme); err != nil {
+			return drbdr, rf.Failf(err, "setting controller reference on DRBDResource %s", drbdr.Name)
+		}
+		if err := r.patchDRBDR(rf.Ctx(), drbdr, base); err != nil {
+			return drbdr, rf.Failf(err, "patching DRBDResource %s ownerRef", drbdr.Name)
+		}
+	}
+
+	// 8. Cache target configuration to skip redundant spec comparisons on next reconcile.
 	//    Further we always require optimistic lock.
 	changed := applyRVRDRBDRReconciliationCache(rvr, targetDRBDRReconciliationCache)
 
-	// 8. Check if the agent is ready on the node.
+	// 9. Check if the agent is ready on the node.
 	nodeName := rvr.Spec.NodeName
 	agentReady, err := r.getAgentReady(rf.Ctx(), nodeName)
 	if err != nil {
@@ -197,10 +225,10 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
-	// 9. Check DRBDR configuration status.
+	// 10. Check DRBDR configuration status.
 	drbdrConfiguredCond := obju.GetStatusCondition(drbdr, v1alpha1.DRBDResourceCondConfiguredType)
 
-	// 9a. Configured condition not set yet — waiting for agent to respond.
+	// 10a. Configured condition not set yet — waiting for agent to respond.
 	if drbdrConfiguredCond == nil {
 		changed = applyDRBDConfiguredCondUnknown(rvr,
 			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration,
@@ -208,7 +236,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
-	// 9b. Agent hasn't processed the current generation yet.
+	// 10b. Agent hasn't processed the current generation yet.
 	if drbdrConfiguredCond.ObservedGeneration != drbdr.Generation {
 		msg := fmt.Sprintf("Waiting for agent to respond (generation: %d, observedGeneration: %d)",
 			drbdr.Generation, drbdrConfiguredCond.ObservedGeneration)
@@ -217,15 +245,23 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
-	// 9c. DRBDR is in maintenance mode.
+	// 10c. Agent processed the current generation — record the datamesh revision
+	// the agent observed. This advances even when the agent reports maintenance
+	// or configuration failure (unlike DatameshRevision which requires full success).
+	if rvr.Status.DatameshRevisionObservedByAgent != targetDRBDRReconciliationCache.DatameshRevision {
+		rvr.Status.DatameshRevisionObservedByAgent = targetDRBDRReconciliationCache.DatameshRevision
+		changed = true
+	}
+
+	// 10d. DRBDR is in maintenance mode.
 	if drbdrConfiguredCond.Reason == v1alpha1.DRBDResourceCondConfiguredReasonInMaintenance {
 		changed = applyDRBDConfiguredCondUnknown(rvr,
-			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration,
+			v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonInMaintenance,
 			"DRBD is in maintenance mode") || changed
 		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
-	// 9d. DRBDR configuration failed.
+	// 10e. DRBDR configuration failed.
 	if drbdrConfiguredCond.Status != metav1.ConditionTrue {
 		msg := fmt.Sprintf("DRBD configuration failed (reason: %s)", drbdrConfiguredCond.Reason)
 		changed = applyDRBDConfiguredCondFalse(rvr,
@@ -235,7 +271,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 
 	// At this point DRBDR is configured (Configured condition is True).
 
-	// 10. DRBDR is configured — check addresses are populated.
+	// 11. DRBDR is configured — check addresses are populated.
 	// Note: We check drbdr.Status.Addresses (the source of truth) rather than
 	// rvr.Status.Addresses (the mirror). ensureStatusAddressesAndType copies
 	// addresses from DRBDR to RVR later in the same reconcile cycle.
@@ -246,7 +282,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
-	// 11. If targetType != intendedType, DRBDR is not yet configured for the
+	// 12. If targetType != intendedType, DRBDR is not yet configured for the
 	// intended type (e.g. backing volume is not ready yet). Wait until the
 	// preconditions are met and targetType converges to intendedType.
 	if targetType != intendedType {
@@ -256,9 +292,9 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		return drbdr, rf.Continue().ReportChangedIf(changed)
 	}
 
-	// 12. Check if backing volume matches intended configuration.
+	// 13. Check if backing volume matches intended configuration.
 	if intendedBV != nil && targetBV != nil {
-		// 12a. Check if LVG or ThinPool changed — wait for backing volume replacement.
+		// 13a. Check if LVG or ThinPool changed — wait for backing volume replacement.
 		// This can happen when LVG or ThinPool was changed in RVR spec (before datamesh membership)
 		// or in datamesh (after membership).
 		if targetBV.LVMVolumeGroupName != intendedBV.LVMVolumeGroupName ||
@@ -276,7 +312,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 			return drbdr, rf.Continue().ReportChangedIf(changed)
 		}
 
-		// 12b. Check if backing volume needs resize.
+		// 13b. Check if backing volume needs resize.
 		if targetBV.Size.Cmp(intendedBV.Size) < 0 {
 			msg := fmt.Sprintf("Backing volume resize pending: current size %s, expected size %s",
 				targetBV.Size.String(), intendedBV.Size.String())
@@ -286,7 +322,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		}
 	}
 
-	// 13. If not a datamesh member.
+	// 14. If not a datamesh member.
 	if member == nil {
 		// If previously a datamesh member (DatameshRevision > 0) but now removed from the
 		// datamesh (e.g., during replica deletion), reset DatameshRevision to signal that
@@ -294,6 +330,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		// that the replica has acknowledged its removal from the datamesh.
 		if rvr.Status.DatameshRevision != 0 {
 			rvr.Status.DatameshRevision = 0
+			rvr.Status.DatameshRevisionObservedByAgent = 0
 			changed = true
 			changed = applyDRBDConfiguredCondTrue(rvr,
 				v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured,
@@ -327,7 +364,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		panic(fmt.Sprintf("BUG: targetBV and intendedBV must be equal for Diskful, got targetBV=%+v, intendedBV=%+v", targetBV, intendedBV))
 	}
 
-	// 14. Replica is fully configured to the current datamesh revision — record DatameshRevision.
+	// 15. Replica is fully configured to the current datamesh revision — record DatameshRevision.
 	//
 	// At this point, the replica is fully configured for the current datamesh revision:
 	//   - DRBD was configured to match the intended state derived from this datamesh revision.

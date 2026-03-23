@@ -62,6 +62,9 @@ func (rsc *ReplicatedStorageClass) SetStatusConditions(conditions []metav1.Condi
 	rsc.Status.Conditions = conditions
 }
 
+// GetStatusPhase returns .status.phase as a string.
+func (rsc *ReplicatedStorageClass) GetStatusPhase() string { return string(rsc.Status.Phase) }
+
 // Legacy replication validations (only fire when replication is set):
 // +kubebuilder:validation:XValidation:rule="!has(self.replication) || self.replication != 'None' || self.topology == 'Ignored'",message="Replication None requires topology Ignored (no replicas to distribute)."
 // +kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.replication) || self.replication != 'Availability' || !has(self.zones) || size(self.zones) == 0 || size(self.zones) >= 3",message="TransZonal topology with Availability replication requires at least 3 zones (if specified)."

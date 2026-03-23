@@ -963,6 +963,7 @@ var _ = Describe("Reconciler", func() {
 					ReplicatedStorageClassName: "rsc-1",
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
 					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 						Members: []v1alpha1.DatameshMember{
 							{Name: "rvr-1", Attached: true}, // Attached member.
@@ -1700,7 +1701,70 @@ var _ = Describe("rvShouldNotExist", func() {
 		Expect(rvShouldNotExist(rv)).To(BeFalse())
 	})
 
-	It("returns false when attached members exist", func() {
+	It("returns false when attached members exist (post-formation)", func() {
+		now := metav1.Now()
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rv-1",
+				DeletionTimestamp: &now,
+				Finalizers:        []string{v1alpha1.RVControllerFinalizer},
+			},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 1,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.DatameshMember{
+						{Name: "rvr-1", Attached: true},
+					},
+				},
+			},
+		}
+		Expect(rvShouldNotExist(rv)).To(BeFalse())
+	})
+
+	It("returns false when Detach transition in progress (post-formation)", func() {
+		now := metav1.Now()
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rv-1",
+				DeletionTimestamp: &now,
+				Finalizers:        []string{v1alpha1.RVControllerFinalizer},
+			},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 1,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.DatameshMember{
+						{Name: "rvr-1", Attached: false},
+					},
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rvr-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: ptr.To(now)}}},
+				},
+			},
+		}
+		Expect(rvShouldNotExist(rv)).To(BeFalse())
+	})
+
+	It("returns true when deleting with only our finalizer, no attached members, and no Detach transitions (post-formation)", func() {
+		now := metav1.Now()
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rv-1",
+				DeletionTimestamp: &now,
+				Finalizers:        []string{v1alpha1.RVControllerFinalizer},
+			},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 1,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.DatameshMember{
+						{Name: "rvr-1", Attached: false},
+					},
+				},
+			},
+		}
+		Expect(rvShouldNotExist(rv)).To(BeTrue())
+	})
+
+	It("returns true during formation even with attached members (DatameshRevision == 0)", func() {
 		now := metav1.Now()
 		rv := &v1alpha1.ReplicatedVolume{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1716,10 +1780,10 @@ var _ = Describe("rvShouldNotExist", func() {
 				},
 			},
 		}
-		Expect(rvShouldNotExist(rv)).To(BeFalse())
+		Expect(rvShouldNotExist(rv)).To(BeTrue())
 	})
 
-	It("returns false when Detach transition in progress", func() {
+	It("returns true during formation even with attached members (active Formation transition)", func() {
 		now := metav1.Now()
 		rv := &v1alpha1.ReplicatedVolume{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1728,31 +1792,19 @@ var _ = Describe("rvShouldNotExist", func() {
 				Finalizers:        []string{v1alpha1.RVControllerFinalizer},
 			},
 			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 1,
 				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
 					Members: []v1alpha1.DatameshMember{
-						{Name: "rvr-1", Attached: false},
+						{Name: "rvr-1", Attached: true},
 					},
 				},
 				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-					{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment, ReplicaName: "rvr-1", Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: ptr.To(now)}}},
-				},
-			},
-		}
-		Expect(rvShouldNotExist(rv)).To(BeFalse())
-	})
-
-	It("returns true when deleting with only our finalizer, no attached members, and no Detach transitions", func() {
-		now := metav1.Now()
-		rv := &v1alpha1.ReplicatedVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:              "rv-1",
-				DeletionTimestamp: &now,
-				Finalizers:        []string{v1alpha1.RVControllerFinalizer},
-			},
-			Status: v1alpha1.ReplicatedVolumeStatus{
-				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
-					Members: []v1alpha1.DatameshMember{
-						{Name: "rvr-1", Attached: false},
+					{
+						Type:  v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
+						Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupFormation,
+						Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+							{Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: ptr.To(now)},
+						},
 					},
 				},
 			},
@@ -2807,6 +2859,7 @@ var _ = Describe("Root Reconcile deletion with attach state", func() {
 
 	It("does NOT enter deletion path when member is still attached", func(ctx SpecContext) {
 		rv := makeDeletingRV()
+		rv.Status.DatameshRevision = 1
 		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
 			{Name: "rv-1-0", NodeName: "node-1", Attached: true},
 		}
@@ -2845,6 +2898,7 @@ var _ = Describe("Root Reconcile deletion with attach state", func() {
 
 	It("does NOT enter deletion path when Detach transition in progress", func(ctx SpecContext) {
 		rv := makeDeletingRV()
+		rv.Status.DatameshRevision = 1
 		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
 			{Name: "rv-1-0", NodeName: "node-1", Attached: false},
 		}
@@ -3175,6 +3229,103 @@ var _ = Describe("reconcileRVRFinalizers", func() {
 		var updated v1alpha1.ReplicatedVolumeReplica
 		err := cl.Get(ctx, client.ObjectKeyFromObject(rvr), &updated)
 		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// reconcileOrphanedRVRs
+//
+
+var _ = Describe("reconcileOrphanedRVRs", func() {
+	var scheme *runtime.Scheme
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+	})
+
+	It("removes finalizer from deleting orphaned RVR", func(ctx SpecContext) {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rvr-1",
+				DeletionTimestamp: ptr.To(metav1.Now()),
+				Finalizers:        []string{v1alpha1.RVControllerFinalizer},
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+			},
+		}
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		outcome := rec.reconcileOrphanedRVRs(ctx, "rv-1")
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+
+		// RVR should be finalized (finalizer removed → object deleted by fake client).
+		var updated v1alpha1.ReplicatedVolumeReplica
+		err := cl.Get(ctx, client.ObjectKeyFromObject(rvr), &updated)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("adds finalizer to non-deleting orphaned RVR", func(ctx SpecContext) {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "rvr-1",
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+			},
+		}
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		outcome := rec.reconcileOrphanedRVRs(ctx, "rv-1")
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolumeReplica
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), &updated)).To(Succeed())
+		Expect(obju.HasFinalizer(&updated, v1alpha1.RVControllerFinalizer)).To(BeTrue())
+	})
+
+	It("returns Done when no RVRs exist for the RV", func(ctx SpecContext) {
+		cl := newClientBuilder(scheme).Build()
+		rec := NewReconciler(cl, scheme)
+
+		outcome := rec.reconcileOrphanedRVRs(ctx, "rv-1")
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.ShouldReturn()).To(BeTrue()) // Done is terminal.
+	})
+
+	It("skips deleting RVR without finalizer", func(ctx SpecContext) {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rvr-1",
+				DeletionTimestamp: ptr.To(metav1.Now()),
+				Finalizers:        []string{"some-other-finalizer"},
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+			},
+		}
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		outcome := rec.reconcileOrphanedRVRs(ctx, "rv-1")
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+
+		// RVR should still exist (only our finalizer is managed).
+		var updated v1alpha1.ReplicatedVolumeReplica
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), &updated)).To(Succeed())
+		Expect(obju.HasFinalizer(&updated, v1alpha1.RVControllerFinalizer)).To(BeFalse())
 	})
 })
 

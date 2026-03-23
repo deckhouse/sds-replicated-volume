@@ -19,7 +19,9 @@ package drbdr
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -27,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -67,23 +70,39 @@ func BuildController(mgr manager.Manager) error {
 	// Create internal request channel (scanner sends here)
 	requestCh := make(chan event.TypedGenericEvent[DRBDReconcileRequest], 100)
 
-	// Create scanner with new channel type
-	scanner := NewScanner(requestCh)
+	// Create DRBD port cache (scanner-maintained, will be used by PortRegistry later)
+	drbdPortCache := NewDRBDPortCache()
+
+	// Create scanner with port cache
+	scanner := NewScanner(requestCh, drbdPortCache)
 	if err := mgr.Add(scanner); err != nil {
 		return fmt.Errorf("adding scanner runnable: %w", err)
 	}
 
-	// Create port cache (reconciler-owned)
-	portCache := NewPortCache(context.Background(), PortRangeMin, PortRangeMax)
+	// Create port registry (reconciler-owned, uses DRBDPortCache for kernel state)
+	portRegistry := NewPortRegistry(cl, nodeName, drbdPortCache, cfg.DRBDMinPort(), cfg.DRBDMaxPort(), 10*time.Minute)
 
 	// Create reconciler (implements reconcile.TypedReconciler[DRBDReconcileRequest])
-	rec := NewReconciler(cl, nodeName, portCache)
+	rec := NewReconciler(cl, nodeName, portRegistry)
 
 	// Build DRBD resource controller with TypedReconciler
 	if err := builder.TypedControllerManagedBy[DRBDReconcileRequest](mgr).
 		Named(ControllerName).
-		// Watch DRBDResource and map to DRBDReconcileRequest{Name: ...}
-		// Predicates already filter by nodeName, so map func just converts
+		WithLogConstructor(func(req *DRBDReconcileRequest) logr.Logger {
+			l := mgr.GetLogger().WithValues(
+				"controller", ControllerName,
+				"controllerGroup", v1alpha1.APIGroup,
+				"controllerKind", "DRBDResource",
+			)
+			if req != nil {
+				name := req.Name
+				if name == "" {
+					name = req.ActualNameOnTheNode
+				}
+				l = l.WithValues("name", name)
+			}
+			return l
+		}).
 		Watches(
 			&v1alpha1.DRBDResource{},
 			handler.TypedEnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []DRBDReconcileRequest {
@@ -101,12 +120,21 @@ func BuildController(mgr manager.Manager) error {
 			)),
 		).
 		WithOptions(controller.TypedOptions[DRBDReconcileRequest]{
-			MaxConcurrentReconciles: 10,
+			MaxConcurrentReconciles: 20,
 			RateLimiter:             controlleroptions.DefaultRateLimiter[DRBDReconcileRequest](),
 		}).
-		Complete(rec); err != nil {
+		Complete(withDurationLogging(rec)); err != nil {
 		return fmt.Errorf("building DRBD resource controller: %w", err)
 	}
 
 	return nil
+}
+
+func withDurationLogging(inner reconcile.TypedReconciler[DRBDReconcileRequest]) reconcile.TypedReconciler[DRBDReconcileRequest] {
+	return reconcile.TypedFunc[DRBDReconcileRequest](func(ctx context.Context, req DRBDReconcileRequest) (reconcile.Result, error) {
+		start := time.Now()
+		res, err := inner.Reconcile(ctx, req)
+		log.FromContext(ctx).Info("Reconcile complete", "duration", time.Since(start).String())
+		return res, err
+	})
 }

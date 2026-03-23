@@ -292,11 +292,6 @@ func (in *DRBDResourceActiveConfiguration) DeepCopyInto(out *DRBDResourceActiveC
 		*out = new(byte)
 		**out = **in
 	}
-	if in.Size != nil {
-		in, out := &in.Size, &out.Size
-		x := (*in).DeepCopy()
-		*out = &x
-	}
 	if in.AllowTwoPrimaries != nil {
 		in, out := &in.AllowTwoPrimaries, &out.AllowTwoPrimaries
 		*out = new(bool)
@@ -306,6 +301,11 @@ func (in *DRBDResourceActiveConfiguration) DeepCopyInto(out *DRBDResourceActiveC
 		in, out := &in.NonVoting, &out.NonVoting
 		*out = new(bool)
 		**out = **in
+	}
+	if in.LLVFinalizersToRelease != nil {
+		in, out := &in.LLVFinalizersToRelease, &out.LLVFinalizersToRelease
+		*out = make([]string, len(*in))
+		copy(*out, *in)
 	}
 }
 
@@ -585,6 +585,11 @@ func (in *DRBDResourceStatus) DeepCopyInto(out *DRBDResourceStatus) {
 		in, out := &in.DeviceOpen, &out.DeviceOpen
 		*out = new(bool)
 		**out = **in
+	}
+	if in.Size != nil {
+		in, out := &in.Size, &out.Size
+		x := (*in).DeepCopy()
+		*out = &x
 	}
 	if in.Addresses != nil {
 		in, out := &in.Addresses, &out.Addresses

@@ -12,6 +12,8 @@ properties:
     - sslNodeCert
     - drbdVersion
     - dataNodesChecksum
+    - controlPlaneMigration
+    - newControlPlane
     properties:
       drbdVersion:
         type: string
@@ -19,6 +21,14 @@ properties:
       dataNodesChecksum:
         type: string
         default: "default_data_nodes_checksum"
+      controlPlaneMigration:
+        type: string
+        default: "not_started"
+      newControlPlane:
+        type: boolean
+        default: false
+        description: |
+          Internal value determining whether to use the new control plane.
       masterPassphrase:
         type: string
       csiMigrationHook:

@@ -39,7 +39,7 @@ import (
 const (
 	KubernetesAPIRequestLimit       = 3
 	KubernetesAPIRequestTimeout     = 1
-	SDSReplicatedVolumeCSIFinalizer = "storage.deckhouse.io/sds-replicated-volume-csi"
+	SDSReplicatedVolumeCSIFinalizer = "sds-replicated-volume.deckhouse.io/csi-controller"
 )
 
 // CreateReplicatedVolume creates a ReplicatedVolume resource
@@ -56,7 +56,7 @@ func CreateReplicatedVolume(
 			OwnerReferences: []metav1.OwnerReference{},
 			Finalizers:      []string{SDSReplicatedVolumeCSIFinalizer},
 			Annotations: map[string]string{
-				srv.SchedulingReservationIDAnnotationKey:      pvcName,
+				srv.SchedulingReservationIDAnnotationKey:      pvcNamespace + "/" + pvcName,
 				srv.ReplicatedVolumePVCNamespaceAnnotationKey: pvcNamespace,
 			},
 		},
@@ -286,7 +286,7 @@ func BuildReplicatedVolumeSpec(
 }
 
 func BuildRVAName(volumeName, nodeName string) string {
-	base := "rva-" + volumeName + "-" + nodeName
+	base := "csi-" + volumeName + "-" + nodeName
 	if len(base) <= 253 {
 		return base
 	}
@@ -294,14 +294,14 @@ func BuildRVAName(volumeName, nodeName string) string {
 	sum := sha1.Sum([]byte(base))
 	hash := hex.EncodeToString(sum[:])[:8]
 
-	// "rva-" + vol + "-" + node + "-" + hash
-	const prefixLen = 4 // len("rva-")
+	// "csi-" + vol + "-" + node + "-" + hash
+	const prefixLen = 4 // len("csi-")
 	const sepCount = 2  // "-" between parts + "-" before hash
 	const hashLen = 8
 	maxPartsLen := 253 - prefixLen - sepCount - hashLen
 	if maxPartsLen < 2 {
 		// Should never happen, but keep a valid, bounded name.
-		return "rva-" + hash
+		return "csi-" + hash
 	}
 
 	volMax := maxPartsLen / 2
@@ -309,7 +309,7 @@ func BuildRVAName(volumeName, nodeName string) string {
 
 	volPart := truncateString(volumeName, volMax)
 	nodePart := truncateString(nodeName, nodeMax)
-	return "rva-" + volPart + "-" + nodePart + "-" + hash
+	return "csi-" + volPart + "-" + nodePart + "-" + hash
 }
 
 func truncateString(s string, maxLen int) string {
@@ -337,6 +337,13 @@ func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 				rvaName, existing.Spec.ReplicatedVolumeName, existing.Spec.NodeName,
 			)
 		}
+		if !slices.Contains(existing.Finalizers, SDSReplicatedVolumeCSIFinalizer) {
+			existing.Finalizers = append(existing.Finalizers, SDSReplicatedVolumeCSIFinalizer)
+			if err := kc.Update(ctx, existing); err != nil {
+				return "", fmt.Errorf("add finalizer to ReplicatedVolumeAttachment %s: %w", rvaName, err)
+			}
+			log.Info(fmt.Sprintf("[EnsureRVA][traceID:%s][volumeID:%s][node:%s] Added finalizer to existing RVA %s", traceID, volumeName, nodeName, rvaName))
+		}
 		return rvaName, nil
 	} else if client.IgnoreNotFound(err) != nil {
 		return "", fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
@@ -344,7 +351,8 @@ func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 
 	rva := &srv.ReplicatedVolumeAttachment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: rvaName,
+			Name:       rvaName,
+			Finalizers: []string{SDSReplicatedVolumeCSIFinalizer},
 		},
 		Spec: srv.ReplicatedVolumeAttachmentSpec{
 			ReplicatedVolumeName: volumeName,
@@ -373,6 +381,14 @@ func DeleteRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 		return fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
 	}
 
+	if slices.Contains(rva.Finalizers, SDSReplicatedVolumeCSIFinalizer) {
+		rva.Finalizers = slices.DeleteFunc(rva.Finalizers, func(s string) bool { return s == SDSReplicatedVolumeCSIFinalizer })
+		if err := kc.Update(ctx, rva); err != nil {
+			return fmt.Errorf("remove finalizer from ReplicatedVolumeAttachment %s: %w", rvaName, err)
+		}
+		log.Info(fmt.Sprintf("[DeleteRVA][traceID:%s][volumeID:%s][node:%s] Removed finalizer from RVA %s", traceID, volumeName, nodeName, rvaName))
+	}
+
 	log.Info(fmt.Sprintf("[DeleteRVA][traceID:%s][volumeID:%s][node:%s] Deleting ReplicatedVolumeAttachment %s", traceID, volumeName, nodeName, rvaName))
 	if err := kc.Delete(ctx, rva); err != nil {
 		return client.IgnoreNotFound(err)
@@ -395,6 +411,13 @@ func DeleteRVAsForVolume(ctx context.Context, kc client.Client, log *logger.Logg
 		}
 	}
 	for _, rva := range toDelete {
+		if slices.Contains(rva.Finalizers, SDSReplicatedVolumeCSIFinalizer) {
+			rva.Finalizers = slices.DeleteFunc(rva.Finalizers, func(s string) bool { return s == SDSReplicatedVolumeCSIFinalizer })
+			if err := kc.Update(ctx, &rva); err != nil {
+				return fmt.Errorf("remove finalizer from ReplicatedVolumeAttachment %s: %w", rva.Name, err)
+			}
+			log.Info(fmt.Sprintf("[DeleteRVAsForVolume][traceID:%s][volumeID:%s] Removed finalizer from RVA %s", traceID, volumeName, rva.Name))
+		}
 		log.Info(fmt.Sprintf("[DeleteRVAsForVolume][traceID:%s][volumeID:%s] Deleting ReplicatedVolumeAttachment %s (node=%s)", traceID, volumeName, rva.Name, rva.Spec.NodeName))
 		if err := kc.Delete(ctx, &rva); err != nil && !kerrors.IsNotFound(err) {
 			return fmt.Errorf("delete ReplicatedVolumeAttachment %s: %w", rva.Name, err)

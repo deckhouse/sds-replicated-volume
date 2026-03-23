@@ -143,32 +143,50 @@ func ensureStatusPeers(
 	rvNamePrefix := rvr.Spec.ReplicatedVolumeName + "-"
 	n := len(drbdrPeers)
 
-	// Ensure rvr.Status.Peers has the right length.
+	// Ensure rvr.Status.Peers has enough capacity (may shrink after skipping foreign peers).
 	if cap(rvr.Status.Peers) < n {
 		// Need to grow capacity.
 		newPeers := make([]v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus, n)
 		copy(newPeers, rvr.Status.Peers)
 		rvr.Status.Peers = newPeers
 	}
-	if len(rvr.Status.Peers) != n {
+	if len(rvr.Status.Peers) < n {
 		rvr.Status.Peers = rvr.Status.Peers[:n]
-		changed = true
 	}
 
-	// Update each position in-place (order mirrors drbdr.Status.Peers).
+	// Update each position in-place using a write index (foreign peers are skipped).
+	writeIdx := 0
 	for i := range drbdrPeers {
 		src := &drbdrPeers[i]
-		dst := &rvr.Status.Peers[i]
 
-		// Guard: foreign peer (peer not belonging to this ReplicatedVolume).
-		// DRBDR spec.peers is derived from RV datamesh members, so foreign peers should never
-		// appear. If they do, it indicates a serious misconfiguration. This check also ensures
-		// that ID() (which extracts the numeric suffix from peer name) works correctly.
-		if !strings.HasPrefix(src.Name, rvNamePrefix) {
-			return ef.Errf("foreign peer detected: %s", src.Name)
+		// Normalize peer name.
+		// Both canonical ("rv-name-0") and unmatched DRBD ("peer-0") prefixes are
+		// accepted; the suffix after the prefix must be a valid ID (0-31).
+		// The agent reports "peer-N" when a DRBD peer exists on the node but has
+		// no corresponding entry in spec.peers. These are rewritten to
+		// rvNamePrefix + suffix. Unrecognized prefixes or invalid suffixes are
+		// logged and skipped.
+		peerName := src.Name
+		var suffix string
+		switch {
+		case strings.HasPrefix(peerName, rvNamePrefix):
+			suffix = peerName[len(rvNamePrefix):]
+		case strings.HasPrefix(peerName, "peer-"):
+			suffix = peerName[len("peer-"):]
+		default:
+			ef.Log().Error(fmt.Errorf("unexpected peer name %q (expected prefix %q or %q)", peerName, rvNamePrefix, "peer-"), "skipping foreign peer")
+			continue
 		}
+		if _, ok := parseIDSuffix(suffix); !ok {
+			ef.Log().Error(fmt.Errorf("peer name %q has invalid ID suffix %q (must be 0-31)", peerName, suffix), "skipping foreign peer")
+			continue
+		}
+		peerName = rvNamePrefix + suffix
+
+		dst := &rvr.Status.Peers[writeIdx]
 
 		// Compute target Type from drbdr peer.
+		// TODO: ShadowDiskful
 		var targetType v1alpha1.ReplicaType
 		switch src.Type {
 		case v1alpha1.DRBDResourceTypeDiskful:
@@ -185,8 +203,8 @@ func ensureStatusPeers(
 		targetAttached := src.Role == v1alpha1.DRBDRolePrimary
 
 		// Update fields, tracking changes.
-		if dst.Name != src.Name {
-			dst.Name = src.Name
+		if dst.Name != peerName {
+			dst.Name = peerName
 			changed = true
 		}
 		if dst.Type != targetType {
@@ -214,14 +232,14 @@ func ensureStatusPeers(
 			dst.ConnectionEstablishedOn = dst.ConnectionEstablishedOn[:establishedCount]
 			changed = true
 		}
-		j := 0
+		connIdx := 0
 		for _, path := range src.Paths {
 			if path.Established {
-				if dst.ConnectionEstablishedOn[j] != path.SystemNetworkName {
-					dst.ConnectionEstablishedOn[j] = path.SystemNetworkName
+				if dst.ConnectionEstablishedOn[connIdx] != path.SystemNetworkName {
+					dst.ConnectionEstablishedOn[connIdx] = path.SystemNetworkName
 					changed = true
 				}
-				j++
+				connIdx++
 			}
 		}
 		if dst.ConnectionState != src.ConnectionState {
@@ -236,9 +254,37 @@ func ensureStatusPeers(
 			dst.ReplicationState = src.ReplicationState
 			changed = true
 		}
+
+		writeIdx++
+	}
+
+	// Trim to actual written count (foreign peers were skipped).
+	if len(rvr.Status.Peers) != writeIdx {
+		rvr.Status.Peers = rvr.Status.Peers[:writeIdx]
+		changed = true
 	}
 
 	return ef.Ok().ReportChangedIf(changed)
+}
+
+// parseIDSuffix validates that s is a decimal number 0-31 and returns the parsed value.
+func parseIDSuffix(s string) (uint8, bool) {
+	switch len(s) {
+	case 1:
+		d := s[0] - '0'
+		if d <= 9 {
+			return d, true
+		}
+	case 2:
+		hi, lo := s[0]-'0', s[1]-'0'
+		if hi >= 1 && hi <= 3 && lo <= 9 {
+			id := hi*10 + lo
+			if id <= 31 {
+				return id, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // ensureStatusBackingVolume ensures the RVR backing volume status fields reflect the current DRBDR state.

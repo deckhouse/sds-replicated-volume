@@ -17,6 +17,8 @@ limitations under the License.
 package drbdr
 
 import (
+	"context"
+
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -24,7 +26,7 @@ import (
 )
 
 // PortAllocator is a function that allocates a port for a given IP address.
-type PortAllocator func(ip string) uint
+type PortAllocator func(ctx context.Context, ip string) (uint, error)
 
 // IntendedDRBDState represents the intended DRBD state for a resource.
 // It focuses only on DRBD-specific state, not K8S object state.
@@ -119,6 +121,9 @@ type IntendedPeer interface {
 	// RRConflict returns the intended rr-conflict policy. Always "retry-connect".
 	RRConflict() string
 
+	// VerifyAlg returns the intended online-verify hash algorithm. Always "crct10dif-pclmul".
+	VerifyAlg() string
+
 	// Paths returns the network paths to this peer.
 	Paths() []IntendedPath
 }
@@ -149,6 +154,7 @@ type intendedDRBDState struct {
 	nodeID                  uint8
 	resourceType            v1alpha1.DRBDResourceType
 	backingDisk             string
+	rsDiscardGranularity    uint
 	quorum                  byte
 	quorumMinimumRedundancy byte
 	allowTwoPrimaries       bool
@@ -183,9 +189,11 @@ func (s *intendedDRBDState) OnNoDataAccessible() string         { return "suspen
 func (s *intendedDRBDState) OnSuspendedPrimaryOutdated() string { return "force-secondary" }
 func (s *intendedDRBDState) QuorumDynamicVoters() bool          { return !drbdutils.FlantExtensionsSupported }
 
-// Hardcoded disk options defaults
-func (s *intendedDRBDState) DiscardZeroesIfAligned() bool { return false }
-func (s *intendedDRBDState) RsDiscardGranularity() uint   { return 8192 } // TODO: DETECT AUTOMATICALLY FROM LVM
+// Disk options defaults.
+// DiscardZeroesIfAligned is always true: safe for thick (ignored by kernel when
+// bdev_max_discard_sectors == 0) and required for thin to use discard instead of zeroout.
+func (s *intendedDRBDState) DiscardZeroesIfAligned() bool { return true }
+func (s *intendedDRBDState) RsDiscardGranularity() uint   { return s.rsDiscardGranularity }
 func (s *intendedDRBDState) NonVoting() bool              { return s.nonVoting }
 
 var _ IntendedDRBDState = (*intendedDRBDState)(nil)
@@ -208,6 +216,7 @@ func (p *intendedPeer) SharedSecret() string                      { return p.sha
 func (p *intendedPeer) SharedSecretAlg() v1alpha1.SharedSecretAlg { return p.sharedSecretAlg }
 func (p *intendedPeer) AllowRemoteRead() bool                     { return p.allowRemoteRead }
 func (p *intendedPeer) RRConflict() string                        { return "retry-connect" }
+func (p *intendedPeer) VerifyAlg() string                         { return "crct10dif-pclmul" }
 func (p *intendedPeer) Paths() []IntendedPath                     { return p.paths }
 
 var _ IntendedPeer = (*intendedPeer)(nil)
@@ -288,6 +297,11 @@ func computeIntendedDRBDState(
 		sizeBytes = drbdr.Spec.Size.Value()
 	}
 
+	var rsDiscardGran uint
+	if backingDisk != "" {
+		rsDiscardGran = drbdutils.ReadDiscardGranularity(backingDisk)
+	}
+
 	return &intendedDRBDState{
 		isUpAndNotInCleanup:     isUpAndNotInCleanup,
 		resourceName:            DRBDResourceNameOnTheNode(drbdr),
@@ -295,6 +309,7 @@ func computeIntendedDRBDState(
 		nodeID:                  drbdr.Spec.NodeID,
 		resourceType:            drbdr.Spec.Type,
 		backingDisk:             backingDisk,
+		rsDiscardGranularity:    rsDiscardGran,
 		quorum:                  drbdr.Spec.Quorum,
 		quorumMinimumRedundancy: drbdr.Spec.QuorumMinimumRedundancy,
 		allowTwoPrimaries:       drbdr.Spec.AllowTwoPrimaries,

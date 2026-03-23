@@ -37,6 +37,14 @@ type DRBDNodeOperation struct {
 	Status *DRBDNodeOperationStatus `json:"status,omitempty"`
 }
 
+// GetStatusPhase returns .status.phase as a string.
+func (o *DRBDNodeOperation) GetStatusPhase() string {
+	if o.Status == nil {
+		return ""
+	}
+	return string(o.Status.Phase)
+}
+
 // +kubebuilder:object:generate=true
 type DRBDNodeOperationSpec struct {
 	// +kubebuilder:validation:Required

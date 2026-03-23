@@ -29,12 +29,12 @@ import (
 
 // ensureReportState updates the DRBDResource status based on the actual DRBD state
 // and any errors encountered during reconciliation.
-// actualLLVName is the LLV name reverse-computed from the DRBD backing disk path.
+// statusLLVName is the LLV name reverse-computed from the DRBD backing disk.
 func ensureReportState(
 	ctx context.Context,
 	aState ActualDRBDState,
 	drbdr *v1alpha1.DRBDResource,
-	actualLLVName string,
+	statusLLVName string,
 	err error,
 	maintenanceMode bool,
 ) (outcome flow.EnsureOutcome) {
@@ -48,7 +48,7 @@ func ensureReportState(
 	if drbdr.Status.ActiveConfiguration == nil {
 		drbdr.Status.ActiveConfiguration = &v1alpha1.DRBDResourceActiveConfiguration{}
 	}
-	drbdr.Status.ActiveConfiguration.LVMLogicalVolumeName = actualLLVName
+	drbdr.Status.ActiveConfiguration.LVMLogicalVolumeName = statusLLVName
 
 	return ef.Ok()
 }

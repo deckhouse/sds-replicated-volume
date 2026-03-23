@@ -45,10 +45,13 @@
         },
         "connections": [
             {
-                "path": {
-                    "_this_host": "ipv4 10.12.0.241:7001",
-                    "_remote_host": "ipv4 10.12.0.235:7001"
-                },
+                "paths": [
+                    {
+                        "this_host": { "address": "10.12.0.241", "port": 7001, "family": "ipv4" },
+                        "remote_host": { "address": "10.12.0.235", "port": 7001, "family": "ipv4" }
+                    }
+                ],
+                "_is_standalone": false,
                 "net": {
                     "transport": "",
                     "load-balance-paths": false,
@@ -107,10 +110,13 @@
                 "_peer_node_id": 1
             },
             {
-                "path": {
-                    "_this_host": "ipv4 10.12.0.241:7001",
-                    "_remote_host": "ipv4 10.12.0.236:7001"
-                },
+                "paths": [
+                    {
+                        "this_host": { "address": "10.12.0.241", "port": 7001, "family": "ipv4" },
+                        "remote_host": { "address": "10.12.0.236", "port": 7001, "family": "ipv4" }
+                    }
+                ],
+                "_is_standalone": false,
                 "net": {
                     "transport": "",
                     "load-balance-paths": false,
@@ -169,10 +175,13 @@
                 "_peer_node_id": 2
             },
             {
-                "path": {
-                    "_this_host": "ipv4 10.12.0.241:7001",
-                    "_remote_host": "ipv4 10.12.0.234:7001"
-                },
+                "paths": [
+                    {
+                        "this_host": { "address": "10.12.0.241", "port": 7001, "family": "ipv4" },
+                        "remote_host": { "address": "10.12.0.234", "port": 7001, "family": "ipv4" }
+                    }
+                ],
+                "_is_standalone": false,
                 "net": {
                     "transport": "",
                     "load-balance-paths": false,

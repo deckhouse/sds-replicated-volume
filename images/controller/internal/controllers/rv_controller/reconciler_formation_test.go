@@ -19,6 +19,7 @@ package rvcontroller
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -112,14 +113,30 @@ var _ = Describe("generateSharedSecret", func() {
 })
 
 var _ = Describe("ensureFormationTransition", func() {
-	It("creates new transition with all steps", func() {
+	It("creates new transition with all steps (create/v1)", func() {
 		rv := &v1alpha1.ReplicatedVolume{}
-		t, created := ensureFormationTransition(rv)
+		t, created := ensureFormationTransition(rv, formationPlanCreate)
 		Expect(created).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
 		Expect(t.Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation))
+		Expect(t.PlanID).To(Equal(formationPlanCreate))
 		Expect(t.Steps).To(HaveLen(formationStepCount))
 		Expect(t.Steps[0].Name).To(Equal(formationStepNames[0]))
+		Expect(t.Steps[0].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive))
+		Expect(t.Steps[0].StartedAt).NotTo(BeNil())
+		Expect(t.Steps[1].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending))
+		Expect(t.Steps[2].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending))
+	})
+
+	It("creates new transition with adopt steps (adopt/v1)", func() {
+		rv := &v1alpha1.ReplicatedVolume{}
+		t, created := ensureFormationTransition(rv, formationPlanAdopt)
+		Expect(created).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(t.Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation))
+		Expect(t.PlanID).To(Equal(formationPlanAdopt))
+		Expect(t.Steps).To(HaveLen(adoptStepCount))
+		Expect(t.Steps[0].Name).To(Equal(adoptStepNames[0]))
 		Expect(t.Steps[0].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive))
 		Expect(t.Steps[0].StartedAt).NotTo(BeNil())
 		Expect(t.Steps[1].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending))
@@ -134,7 +151,7 @@ var _ = Describe("ensureFormationTransition", func() {
 				},
 			},
 		}
-		t, created := ensureFormationTransition(rv)
+		t, created := ensureFormationTransition(rv, formationPlanCreate)
 		Expect(created).To(BeFalse())
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
 		Expect(t.Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation))
@@ -144,7 +161,7 @@ var _ = Describe("ensureFormationTransition", func() {
 var _ = Describe("advanceFormationStep", func() {
 	It("completes current step and activates next", func() {
 		rv := &v1alpha1.ReplicatedVolume{}
-		t, _ := ensureFormationTransition(rv)
+		t, _ := ensureFormationTransition(rv, formationPlanCreate)
 
 		advanceFormationStep(t, formationStepIdxPreconfigure)
 
@@ -158,7 +175,7 @@ var _ = Describe("advanceFormationStep", func() {
 
 	It("clears message on completed step", func() {
 		rv := &v1alpha1.ReplicatedVolume{}
-		t, _ := ensureFormationTransition(rv)
+		t, _ := ensureFormationTransition(rv, formationPlanCreate)
 		t.Steps[0].Message = "waiting for something..."
 
 		advanceFormationStep(t, formationStepIdxPreconfigure)
@@ -1746,6 +1763,1396 @@ var _ = Describe("Formation: Restart", func() {
 		var updatedOp v1alpha1.DRBDResourceOperation
 		err = cl.Get(ctx, client.ObjectKey{Name: "rv-1-formation"}, &updatedOp)
 		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "DRBDResourceOperation should be deleted after restart")
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Formation: Adopt
+//
+
+var _ = Describe("Formation: Adopt", func() {
+	var scheme *runtime.Scheme
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+	})
+
+	newAdoptRV := func() *v1alpha1.ReplicatedVolume {
+		return &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "rv-1",
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				Labels: map[string]string{
+					v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+				},
+				Annotations: map[string]string{
+					v1alpha1.AdoptRVRAnnotationKey: "",
+				},
+			},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				Size:                       resource.MustParse("10Gi"),
+				ReplicatedStorageClassName: "rsc-1",
+			},
+		}
+	}
+
+	// newPreconfiguredRVR creates an RVR that is preconfigured for adopt:
+	// scheduled, DRBDConfigured=Unknown/InMaintenance, datamesh request operation=Join.
+	//nolint:unparam // rvName is always "rv-1" in current tests, but kept as param for future extensibility.
+	newPreconfiguredRVR := func(rvName string, id uint8, nodeName string) *v1alpha1.ReplicatedVolumeReplica {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       v1alpha1.FormatReplicatedVolumeReplicaName(rvName, id),
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: rvName,
+				Type:                 v1alpha1.ReplicaTypeDiskful,
+				NodeName:             nodeName,
+				LVMVolumeGroupName:   "lvg-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				Addresses: []v1alpha1.DRBDResourceAddressStatus{
+					{SystemNetworkName: "Internal"},
+				},
+				BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+					Size:  ptr.To(resource.MustParse("11Gi")),
+					State: v1alpha1.DiskStateUpToDate,
+				},
+				DatameshRequest: &v1alpha1.DatameshMembershipRequest{
+					Operation:          v1alpha1.DatameshMembershipRequestOperationJoin,
+					Type:               v1alpha1.ReplicaTypeDiskful,
+					LVMVolumeGroupName: "lvg-1",
+				},
+			},
+		}
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+			Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled,
+		})
+		// Mark as in maintenance (adopt requires DRBDRs to be in maintenance mode).
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			Status: metav1.ConditionUnknown,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonInMaintenance,
+		})
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
+			Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied,
+		})
+		return rvr
+	}
+
+	//nolint:unparam // name is always "test-pool" in current tests, but kept as param for future extensibility.
+	newTestRSPWithNodes := func(name string, nodeNames ...string) *v1alpha1.ReplicatedStoragePool {
+		rsp := newTestRSP(name)
+		rsp.Status.EligibleNodes = make([]v1alpha1.ReplicatedStoragePoolEligibleNode, len(nodeNames))
+		for i, nn := range nodeNames {
+			rsp.Status.EligibleNodes[i] = v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: nn,
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{
+					{Name: "lvg-1"},
+				},
+			}
+		}
+		return rsp
+	}
+
+	//nolint:unparam // rvName is always "rv-1" in current tests, but kept as param for future extensibility.
+	newPreconfiguredAccessRVR := func(rvName string, id uint8, nodeName string) *v1alpha1.ReplicatedVolumeReplica {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       v1alpha1.FormatReplicatedVolumeReplicaName(rvName, id),
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: rvName,
+				Type:                 v1alpha1.ReplicaTypeAccess,
+				NodeName:             nodeName,
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				Addresses: []v1alpha1.DRBDResourceAddressStatus{
+					{SystemNetworkName: "Internal"},
+				},
+				DatameshRequest: &v1alpha1.DatameshMembershipRequest{
+					Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
+					Type:      v1alpha1.ReplicaTypeAccess,
+				},
+			},
+		}
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			Status: metav1.ConditionUnknown,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonInMaintenance,
+		})
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
+			Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied,
+		})
+		return rvr
+	}
+
+	//nolint:unparam // rvName is always "rv-1" in current tests, but kept as param for future extensibility.
+	newPreconfiguredTieBreakerRVR := func(rvName string, id uint8, nodeName string) *v1alpha1.ReplicatedVolumeReplica {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       v1alpha1.FormatReplicatedVolumeReplicaName(rvName, id),
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: rvName,
+				Type:                 v1alpha1.ReplicaTypeTieBreaker,
+				NodeName:             nodeName,
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				Addresses: []v1alpha1.DRBDResourceAddressStatus{
+					{SystemNetworkName: "Internal"},
+				},
+				DatameshRequest: &v1alpha1.DatameshMembershipRequest{
+					Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
+					Type:      v1alpha1.ReplicaTypeTieBreaker,
+				},
+			},
+		}
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+			Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled,
+		})
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			Status: metav1.ConditionUnknown,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonInMaintenance,
+		})
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
+			Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied,
+		})
+		return rvr
+	}
+
+	mkAdoptTransition := func(activeStepIdx int) v1alpha1.ReplicatedVolumeDatameshTransition {
+		now := metav1.Now()
+		steps := make([]v1alpha1.ReplicatedVolumeDatameshTransitionStep, adoptStepCount)
+		for i := range steps {
+			steps[i].Name = adoptStepNames[i]
+			switch {
+			case i < activeStepIdx:
+				steps[i].Status = v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted
+				steps[i].StartedAt = &now
+				steps[i].CompletedAt = &now
+			case i == activeStepIdx:
+				steps[i].Status = v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive
+				steps[i].StartedAt = &now
+			default:
+				steps[i].Status = v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending
+			}
+		}
+		return v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:   v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
+			Group:  v1alpha1.ReplicatedVolumeDatameshTransitionGroupFormation,
+			PlanID: formationPlanAdopt,
+			Steps:  steps,
+		}
+	}
+
+	It("creates adopt/v1 transition and waits for preconfigured RVRs (no creation)", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+		rv := newAdoptRV()
+
+		// Unscheduled RVR — adopt should wait, not create new ones.
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+				Type:                 v1alpha1.ReplicaTypeDiskful,
+			},
+		}
+
+		rvrCreateCalled := false
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+					if _, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok {
+						rvrCreateCalled = true
+					}
+					return cl.Create(ctx, obj, opts...)
+				},
+			}).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		result, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeTrue()) //nolint:staticcheck // ContinueAndRequeue
+		Expect(rvrCreateCalled).To(BeFalse(), "adopt must NOT create new RVRs")
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(updated.Status.DatameshTransitions[0].PlanID).To(Equal(formationPlanAdopt))
+		Expect(updated.Status.DatameshTransitions[0].Steps).To(HaveLen(adoptStepCount))
+	})
+
+	It("does NOT delete excess RVRs", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1") // FTT=0,GMDR=0 → 1 diskful in create, but adopt keeps all
+		rsp := newTestRSPWithNodes("test-pool", "node-1", "node-2")
+		rv := newAdoptRV()
+
+		rvr0 := newPreconfiguredRVR("rv-1", 0, "node-1")
+		rvr1 := newPreconfiguredRVR("rv-1", 1, "node-2")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr0, rvr1).
+			WithStatusSubresource(rv, rsc, rvr0, rvr1).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		// Both RVRs should still exist (not deleted).
+		var updatedRVR0 v1alpha1.ReplicatedVolumeReplica
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr0), &updatedRVR0)).To(Succeed())
+		Expect(updatedRVR0.DeletionTimestamp).To(BeNil())
+
+		var updatedRVR1 v1alpha1.ReplicatedVolumeReplica
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr1), &updatedRVR1)).To(Succeed())
+		Expect(updatedRVR1.DeletionTimestamp).To(BeNil())
+	})
+
+	It("transitions to PopulateAndVerifyDatamesh when prerequisites are verified", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+		rv := newAdoptRV()
+
+		rvr := newPreconfiguredRVR("rv-1", 0, "node-1")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+		// Should have shared secret set and members added.
+		Expect(updated.Status.Datamesh.SharedSecret).NotTo(BeEmpty())
+		Expect(updated.Status.Datamesh.Members).To(HaveLen(1))
+		Expect(updated.Status.DatameshRevision).To(Equal(int64(2)))
+	})
+
+	It("uses shared secret from adopt-shared-secret annotation", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+		rv := newAdoptRV()
+		rv.Annotations[v1alpha1.AdoptSharedSecretAnnotationKey] = "my-preexisting-secret"
+
+		rvr := newPreconfiguredRVR("rv-1", 0, "node-1")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+		Expect(updated.Status.Datamesh.SharedSecret).To(Equal("my-preexisting-secret"))
+		Expect(updated.Status.Datamesh.SharedSecretAlg).To(Equal(v1alpha1.SharedSecretAlgSHA256))
+		Expect(updated.Status.Datamesh.Members).To(HaveLen(1))
+	})
+
+	It("fails when adopt-shared-secret annotation is present but empty", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+		rv := newAdoptRV()
+		rv.Annotations[v1alpha1.AdoptSharedSecretAnnotationKey] = ""
+
+		rvr := newPreconfiguredRVR("rv-1", 0, "node-1")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("empty"))
+	})
+
+	It("fails when adopt-shared-secret annotation exceeds 64 characters", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+		rv := newAdoptRV()
+		rv.Annotations[v1alpha1.AdoptSharedSecretAnnotationKey] = strings.Repeat("x", 65)
+
+		rvr := newPreconfiguredRVR("rv-1", 0, "node-1")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("exceeds"))
+	})
+
+	It("generates random secret when adopt-shared-secret annotation is absent", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+		rv := newAdoptRV()
+
+		rvr := newPreconfiguredRVR("rv-1", 0, "node-1")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+		Expect(updated.Status.Datamesh.SharedSecret).NotTo(BeEmpty())
+		Expect(updated.Status.Datamesh.SharedSecret).NotTo(Equal("my-preexisting-secret"))
+		Expect(updated.Status.Datamesh.SharedSecretAlg).To(Equal(v1alpha1.SharedSecretAlgSHA256))
+	})
+
+	It("completes formation when all replicas are healthy (ExitMaintenance)", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "rv-1",
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				Labels:     map[string]string{v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1"},
+				Annotations: map[string]string{
+					v1alpha1.AdoptRVRAnnotationKey: "",
+				},
+			},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				Size:                       resource.MustParse("10Gi"),
+				ReplicatedStorageClassName: "rsc-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				ConfigurationGeneration:         1,
+				ConfigurationObservedGeneration: 1,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:           v1alpha1.TopologyIgnored,
+					FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:              v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName: "test-pool",
+				},
+				DatameshRevision: 1,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					SharedSecret:            "test-secret",
+					SharedSecretAlg:         v1alpha1.SharedSecretAlgSHA256,
+					SystemNetworkNames:      []string{"Internal"},
+					Size:                    resource.MustParse("10Gi"),
+					Quorum:                  1,
+					QuorumMinimumRedundancy: 1,
+					Members: []v1alpha1.DatameshMember{
+						{
+							Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+							Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1",
+							Addresses:          []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+							LVMVolumeGroupName: "lvg-1",
+						},
+					},
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					{
+						Type:   v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
+						Group:  v1alpha1.ReplicatedVolumeDatameshTransitionGroupFormation,
+						PlanID: formationPlanAdopt,
+						Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+							{Name: adoptStepNames[0], Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted},
+							{Name: adoptStepNames[1], Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted},
+							{Name: adoptStepNames[2], Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+								StartedAt: ptr.To(metav1.Now())},
+						},
+					},
+				},
+			},
+		}
+
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1", Type: v1alpha1.ReplicaTypeDiskful,
+				NodeName: "node-1", LVMVolumeGroupName: "lvg-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1,
+				BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+					Size:  ptr.To(resource.MustParse("11Gi")),
+					State: v1alpha1.DiskStateUpToDate,
+				},
+			},
+		}
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType, Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured,
+		})
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type: v1alpha1.ReplicatedVolumeReplicaCondReadyType, Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+		})
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.DatameshTransitions).To(BeEmpty(), "formation should be completed")
+	})
+
+	It("does not create DRBDResourceOperation", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+		rv := newAdoptRV()
+
+		rvr := newPreconfiguredRVR("rv-1", 0, "node-1")
+
+		drbdrOpCreateCalled := false
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+					if _, ok := obj.(*v1alpha1.DRBDResourceOperation); ok {
+						drbdrOpCreateCalled = true
+					}
+					return cl.Create(ctx, obj, opts...)
+				},
+			}).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(drbdrOpCreateCalled).To(BeFalse(), "adopt must NOT create DRBDResourceOperation")
+	})
+
+	// ── VerifyPrerequisites ──
+
+	It("Access RVR with nodeName passes scheduling gate", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1") // FTT=0, GMDR=0 → 1 D, no TB
+		rsp := newTestRSPWithNodes("test-pool", "node-1", "node-2")
+		rv := newAdoptRV()
+
+		rvr0 := newPreconfiguredRVR("rv-1", 0, "node-1")
+		rvr1 := newPreconfiguredAccessRVR("rv-1", 1, "node-2")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr0, rvr1).
+			WithStatusSubresource(rv, rsc, rvr0, rvr1).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.Datamesh.SharedSecret).NotTo(BeEmpty(), "should advance past VerifyPrerequisites")
+		Expect(updated.Status.Datamesh.Members).To(HaveLen(2))
+
+		memberTypes := map[v1alpha1.DatameshMemberType]bool{}
+		for _, m := range updated.Status.Datamesh.Members {
+			memberTypes[m.Type] = true
+		}
+		Expect(memberTypes).To(HaveKey(v1alpha1.DatameshMemberTypeDiskful))
+		Expect(memberTypes).To(HaveKey(v1alpha1.DatameshMemberTypeAccess))
+	})
+
+	It("Access RVR without nodeName blocks scheduling gate", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+		rv := newAdoptRV()
+
+		rvr0 := newPreconfiguredRVR("rv-1", 0, "node-1")
+		rvr1 := newPreconfiguredAccessRVR("rv-1", 1, "") // empty nodeName
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr0, rvr1).
+			WithStatusSubresource(rv, rsc, rvr0, rvr1).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		result, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeTrue()) //nolint:staticcheck // ContinueAndRequeue
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.Datamesh.SharedSecret).To(BeEmpty(), "should not advance past VerifyPrerequisites")
+		Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(updated.Status.DatameshTransitions[0].Steps[adoptStepIdxVerifyPrerequisites].Message).
+			To(ContainSubstring("scheduled"))
+	})
+
+	It("blocks when TB count does not match (expected 1 found 0)", func(ctx SpecContext) {
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			Status: v1alpha1.ReplicatedStorageClassStatus{
+				ConfigurationGeneration: 1,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:                        v1alpha1.TopologyIgnored,
+					FailuresToTolerate:              1, // FTT=1
+					GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:                    v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName:       "test-pool",
+				},
+			},
+		}
+		rsp := newTestRSPWithNodes("test-pool", "node-1", "node-2")
+		rv := newAdoptRV()
+
+		// FTT=1, GMDR=0 → D=2. D=2 even, FTT=D/2=1 → need 1 TB. But we provide 0.
+		rvr0 := newPreconfiguredRVR("rv-1", 0, "node-1")
+		rvr1 := newPreconfiguredRVR("rv-1", 1, "node-2")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr0, rvr1).
+			WithStatusSubresource(rv, rsc, rvr0, rvr1).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		result, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeTrue()) //nolint:staticcheck // ContinueAndRequeue
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(updated.Status.DatameshTransitions[0].Steps[adoptStepIdxVerifyPrerequisites].Message).
+			To(ContainSubstring("TieBreaker replica count mismatch"))
+	})
+
+	It("proceeds when TB count exceeds expected (found 1, need 0)", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1") // FTT=0, GMDR=0 → D=1, no TB needed
+		rsp := newTestRSPWithNodes("test-pool", "node-1", "node-2")
+		rv := newAdoptRV()
+
+		rvr0 := newPreconfiguredRVR("rv-1", 0, "node-1")
+		rvr1 := newPreconfiguredTieBreakerRVR("rv-1", 1, "node-2")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr0, rvr1).
+			WithStatusSubresource(rv, rsc, rvr0, rvr1).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.Datamesh.SharedSecret).NotTo(BeEmpty(), "should advance past VerifyPrerequisites")
+		Expect(updated.Status.Datamesh.Members).To(HaveLen(2))
+	})
+
+	// ── PopulateAndVerifyDatamesh ──
+
+	It("populates all member types including TieBreaker and Access", func(ctx SpecContext) {
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			Status: v1alpha1.ReplicatedStorageClassStatus{
+				ConfigurationGeneration: 1,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:                        v1alpha1.TopologyIgnored,
+					FailuresToTolerate:              1,
+					GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:                    v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName:       "test-pool",
+				},
+			},
+		}
+		rsp := newTestRSPWithNodes("test-pool", "node-1", "node-2", "node-3", "node-4")
+
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "rv-1",
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				Labels:     map[string]string{v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1"},
+				Annotations: map[string]string{
+					v1alpha1.AdoptRVRAnnotationKey: "",
+				},
+			},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				Size:                       resource.MustParse("10Gi"),
+				ReplicatedStorageClassName: "rsc-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				ConfigurationGeneration:         1,
+				ConfigurationObservedGeneration: 1,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:                        v1alpha1.TopologyIgnored,
+					FailuresToTolerate:              1,
+					GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:                    v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName:       "test-pool",
+				},
+				DatameshRevision: 1,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					SystemNetworkNames: []string{"Internal"},
+					Size:               resource.MustParse("10Gi"),
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					mkAdoptTransition(adoptStepIdxPopulateAndVerifyDatamesh),
+				},
+			},
+		}
+		obju.SetStatusCondition(rv, metav1.Condition{
+			Type: v1alpha1.ReplicatedVolumeCondConfigurationReadyType, Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonReady, Message: "Configuration is ready",
+		})
+
+		rvr0 := newPreconfiguredRVR("rv-1", 0, "node-1")
+		rvr1 := newPreconfiguredRVR("rv-1", 1, "node-2")
+		rvr2 := newPreconfiguredTieBreakerRVR("rv-1", 2, "node-3")
+		rvr3 := newPreconfiguredAccessRVR("rv-1", 3, "node-4")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr0, rvr1, rvr2, rvr3).
+			WithStatusSubresource(rv, rsc, rvr0, rvr1, rvr2, rvr3).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.Datamesh.SharedSecret).NotTo(BeEmpty())
+		Expect(updated.Status.Datamesh.Members).To(HaveLen(4))
+
+		memberTypes := map[v1alpha1.DatameshMemberType]int{}
+		for _, m := range updated.Status.Datamesh.Members {
+			memberTypes[m.Type]++
+		}
+		Expect(memberTypes[v1alpha1.DatameshMemberTypeDiskful]).To(Equal(2))
+		Expect(memberTypes[v1alpha1.DatameshMemberTypeTieBreaker]).To(Equal(1))
+		Expect(memberTypes[v1alpha1.DatameshMemberTypeAccess]).To(Equal(1))
+	})
+
+	It("sets Multiattach when multiple replicas are attached", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1", "node-2")
+
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "rv-1",
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				Labels:     map[string]string{v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1"},
+				Annotations: map[string]string{
+					v1alpha1.AdoptRVRAnnotationKey: "",
+				},
+			},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				Size:                       resource.MustParse("10Gi"),
+				ReplicatedStorageClassName: "rsc-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				ConfigurationGeneration:         1,
+				ConfigurationObservedGeneration: 1,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:           v1alpha1.TopologyIgnored,
+					FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:              v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName: "test-pool",
+				},
+				DatameshRevision: 1,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					SystemNetworkNames: []string{"Internal"},
+					Size:               resource.MustParse("10Gi"),
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					mkAdoptTransition(adoptStepIdxPopulateAndVerifyDatamesh),
+				},
+			},
+		}
+		obju.SetStatusCondition(rv, metav1.Condition{
+			Type: v1alpha1.ReplicatedVolumeCondConfigurationReadyType, Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonReady, Message: "Configuration is ready",
+		})
+
+		rvr0 := newPreconfiguredRVR("rv-1", 0, "node-1")
+		rvr0.Status.Attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{}
+
+		rvr1 := newPreconfiguredAccessRVR("rv-1", 1, "node-2")
+		rvr1.Status.Attachment = &v1alpha1.ReplicatedVolumeReplicaStatusAttachment{}
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr0, rvr1).
+			WithStatusSubresource(rv, rsc, rvr0, rvr1).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.Datamesh.Multiattach).To(BeTrue(), "Multiattach should be set when 2 replicas are attached")
+	})
+
+	It("blocks when TB is not connected to all D (star topology)", func(ctx SpecContext) {
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			Status: v1alpha1.ReplicatedStorageClassStatus{
+				ConfigurationGeneration: 1,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:                        v1alpha1.TopologyIgnored,
+					FailuresToTolerate:              1,
+					GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:                    v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName:       "test-pool",
+				},
+			},
+		}
+		rsp := newTestRSPWithNodes("test-pool", "node-1", "node-2", "node-3")
+
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "rv-1",
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				Labels:     map[string]string{v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1"},
+				Annotations: map[string]string{
+					v1alpha1.AdoptRVRAnnotationKey: "",
+				},
+			},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				Size:                       resource.MustParse("10Gi"),
+				ReplicatedStorageClassName: "rsc-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				ConfigurationGeneration:         1,
+				ConfigurationObservedGeneration: 1,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:                        v1alpha1.TopologyIgnored,
+					FailuresToTolerate:              1,
+					GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:                    v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName:       "test-pool",
+				},
+				DatameshRevision:                        2,
+				BaselineGuaranteedMinimumDataRedundancy: 0,
+				Conditions: []metav1.Condition{
+					{Type: v1alpha1.ReplicatedVolumeCondConfigurationReadyType, Status: metav1.ConditionTrue,
+						Reason: v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonReady, Message: "Configuration is ready"},
+				},
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					SharedSecret:            "test-secret",
+					SharedSecretAlg:         v1alpha1.SharedSecretAlgSHA256,
+					SystemNetworkNames:      []string{"Internal"},
+					Size:                    resource.MustParse("10Gi"),
+					Quorum:                  2,
+					QuorumMinimumRedundancy: 1,
+					Members: []v1alpha1.DatameshMember{
+						{
+							Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+							Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1",
+							Addresses:          []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+							LVMVolumeGroupName: "lvg-1",
+						},
+						{
+							Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 1),
+							Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-2",
+							Addresses:          []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+							LVMVolumeGroupName: "lvg-1",
+						},
+						{
+							Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2),
+							Type: v1alpha1.DatameshMemberTypeTieBreaker, NodeName: "node-3",
+							Addresses: []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+						},
+					},
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					mkAdoptTransition(adoptStepIdxPopulateAndVerifyDatamesh),
+				},
+			},
+		}
+
+		rvr0 := newPreconfiguredRVR("rv-1", 0, "node-1")
+		rvr0.Status.DatameshRevisionObservedByAgent = 2
+		rvr0.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+			{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 1), ConnectionState: v1alpha1.ConnectionStateConnected},
+			{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2), ConnectionState: v1alpha1.ConnectionStateConnected},
+		}
+		rvr1 := newPreconfiguredRVR("rv-1", 1, "node-2")
+		rvr1.Status.DatameshRevisionObservedByAgent = 2
+		rvr1.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+			{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0), ConnectionState: v1alpha1.ConnectionStateConnected},
+			{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2), ConnectionState: v1alpha1.ConnectionStateConnected},
+		}
+		rvr2 := newPreconfiguredTieBreakerRVR("rv-1", 2, "node-3")
+		rvr2.Status.DatameshRevisionObservedByAgent = 2
+		// TB only connected to D0, missing connection to D1.
+		rvr2.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+			{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0), ConnectionState: v1alpha1.ConnectionStateConnected},
+		}
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr0, rvr1, rvr2).
+			WithStatusSubresource(rv, rsc, rvr0, rvr1, rvr2).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		result, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeTrue()) //nolint:staticcheck // ContinueAndRequeue
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(updated.Status.DatameshTransitions[0].Steps[adoptStepIdxPopulateAndVerifyDatamesh].Message).
+			To(ContainSubstring("establish connections"))
+	})
+
+	It("blocks when quorum minimum redundancy exceeds diskful count", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "rv-1",
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				Labels:     map[string]string{v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1"},
+				Annotations: map[string]string{
+					v1alpha1.AdoptRVRAnnotationKey: "",
+				},
+			},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				Size:                       resource.MustParse("10Gi"),
+				ReplicatedStorageClassName: "rsc-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				ConfigurationGeneration:         1,
+				ConfigurationObservedGeneration: 1,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:           v1alpha1.TopologyIgnored,
+					FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:              v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName: "test-pool",
+				},
+				Conditions: []metav1.Condition{
+					{Type: v1alpha1.ReplicatedVolumeCondConfigurationReadyType, Status: metav1.ConditionTrue,
+						Reason: v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonReady, Message: "Configuration is ready"},
+				},
+				DatameshRevision: 2,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					SharedSecret:            "test-secret",
+					SharedSecretAlg:         v1alpha1.SharedSecretAlgSHA256,
+					SystemNetworkNames:      []string{"Internal"},
+					Size:                    resource.MustParse("10Gi"),
+					Quorum:                  1,
+					QuorumMinimumRedundancy: 3, // artificially high: 3 > 1 diskful
+					Members: []v1alpha1.DatameshMember{
+						{
+							Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+							Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1",
+							Addresses:          []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+							LVMVolumeGroupName: "lvg-1",
+						},
+					},
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					mkAdoptTransition(adoptStepIdxPopulateAndVerifyDatamesh),
+				},
+			},
+		}
+
+		rvr := newPreconfiguredRVR("rv-1", 0, "node-1")
+		rvr.Status.DatameshRevisionObservedByAgent = 2
+		rvr.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+			Size:  ptr.To(resource.MustParse("11Gi")),
+			State: v1alpha1.DiskStateUpToDate,
+		}
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		result, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeTrue()) //nolint:staticcheck // ContinueAndRequeue
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(updated.Status.DatameshTransitions[0].Steps[adoptStepIdxPopulateAndVerifyDatamesh].Message).
+			To(ContainSubstring("Quorum minimum redundancy"))
+	})
+
+	// ── ExitMaintenance ──
+
+	It("waits for replicas to exit maintenance mode", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "rv-1",
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				Labels:     map[string]string{v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1"},
+				Annotations: map[string]string{
+					v1alpha1.AdoptRVRAnnotationKey: "",
+				},
+			},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				Size:                       resource.MustParse("10Gi"),
+				ReplicatedStorageClassName: "rsc-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				ConfigurationGeneration:         1,
+				ConfigurationObservedGeneration: 1,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:           v1alpha1.TopologyIgnored,
+					FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:              v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName: "test-pool",
+				},
+				DatameshRevision: 2,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					SharedSecret:            "test-secret",
+					SharedSecretAlg:         v1alpha1.SharedSecretAlgSHA256,
+					SystemNetworkNames:      []string{"Internal"},
+					Size:                    resource.MustParse("10Gi"),
+					Quorum:                  1,
+					QuorumMinimumRedundancy: 1,
+					Members: []v1alpha1.DatameshMember{
+						{
+							Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+							Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1",
+							Addresses:          []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+							LVMVolumeGroupName: "lvg-1",
+						},
+					},
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					mkAdoptTransition(adoptStepIdxExitMaintenance),
+				},
+			},
+		}
+
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1", Type: v1alpha1.ReplicaTypeDiskful,
+				NodeName: "node-1", LVMVolumeGroupName: "lvg-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 2,
+			},
+		}
+		// Still in maintenance.
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType, Status: metav1.ConditionUnknown,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonInMaintenance,
+		})
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		result, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeTrue()) //nolint:staticcheck // ContinueAndRequeue
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(updated.Status.DatameshTransitions[0].Steps[adoptStepIdxExitMaintenance].Message).
+			To(ContainSubstring("exit maintenance"))
+	})
+
+	It("waits for replicas to become Ready", func(ctx SpecContext) {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "rv-1",
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				Labels:     map[string]string{v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1"},
+				Annotations: map[string]string{
+					v1alpha1.AdoptRVRAnnotationKey: "",
+				},
+			},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				Size:                       resource.MustParse("10Gi"),
+				ReplicatedStorageClassName: "rsc-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				ConfigurationGeneration:         1,
+				ConfigurationObservedGeneration: 1,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:           v1alpha1.TopologyIgnored,
+					FailuresToTolerate: 0, GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:              v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName: "test-pool",
+				},
+				DatameshRevision: 2,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					SharedSecret:            "test-secret",
+					SharedSecretAlg:         v1alpha1.SharedSecretAlgSHA256,
+					SystemNetworkNames:      []string{"Internal"},
+					Size:                    resource.MustParse("10Gi"),
+					Quorum:                  1,
+					QuorumMinimumRedundancy: 1,
+					Members: []v1alpha1.DatameshMember{
+						{
+							Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+							Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1",
+							Addresses:          []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+							LVMVolumeGroupName: "lvg-1",
+						},
+					},
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					mkAdoptTransition(adoptStepIdxExitMaintenance),
+				},
+			},
+		}
+
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1", Type: v1alpha1.ReplicaTypeDiskful,
+				NodeName: "node-1", LVMVolumeGroupName: "lvg-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 2,
+			},
+		}
+		// Exited maintenance (DRBDConfigured=True/Configured), but NOT Ready.
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType, Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured,
+		})
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		result, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeTrue()) //nolint:staticcheck // ContinueAndRequeue
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(updated.Status.DatameshTransitions[0].Steps[adoptStepIdxExitMaintenance].Message).
+			To(ContainSubstring("Ready"))
+	})
+
+	It("restarts adopt when configuration changes during step 0", func(ctx SpecContext) {
+		// RSC has new FTT=1 (2 diskful), but RV status still has old FTT=0 (1 diskful).
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			Status: v1alpha1.ReplicatedStorageClassStatus{
+				ConfigurationGeneration: 2,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:                        v1alpha1.TopologyIgnored,
+					FailuresToTolerate:              1,
+					GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:                    v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName:       "test-pool",
+				},
+			},
+		}
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "rv-1",
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				Labels:     map[string]string{v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1"},
+				Annotations: map[string]string{
+					v1alpha1.AdoptRVRAnnotationKey: "",
+				},
+			},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				Size:                       resource.MustParse("10Gi"),
+				ReplicatedStorageClassName: "rsc-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				ConfigurationGeneration:         1,
+				ConfigurationObservedGeneration: 1,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:                        v1alpha1.TopologyIgnored,
+					FailuresToTolerate:              0,
+					GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:                    v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName:       "test-pool",
+				},
+				DatameshRevision: 1,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					SystemNetworkNames: []string{"Internal"},
+					Size:               resource.MustParse("10Gi"),
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					mkAdoptTransition(adoptStepIdxVerifyPrerequisites),
+				},
+			},
+		}
+
+		rvr := newPreconfiguredRVR("rv-1", 0, "node-1")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		result, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeTrue()) //nolint:staticcheck // ContinueAndRequeue
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+		// Configuration updated to new FTT=1.
+		Expect(updated.Status.Configuration.FailuresToTolerate).To(Equal(byte(1)))
+		// Datamesh state reset.
+		Expect(updated.Status.DatameshRevision).To(Equal(int64(0)))
+		Expect(updated.Status.Datamesh.Members).To(BeEmpty())
+		Expect(updated.Status.DatameshTransitions).To(BeEmpty())
+		Expect(updated.Status.DatameshReplicaRequests).To(BeEmpty())
+	})
+
+	It("restarts adopt when configuration changes during step 1", func(ctx SpecContext) {
+		// RSC has new FTT=1 (2 diskful), but RV status still has old FTT=0 (1 diskful).
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			Status: v1alpha1.ReplicatedStorageClassStatus{
+				ConfigurationGeneration: 2,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:                        v1alpha1.TopologyIgnored,
+					FailuresToTolerate:              1,
+					GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:                    v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName:       "test-pool",
+				},
+			},
+		}
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "rv-1",
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				Labels:     map[string]string{v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1"},
+				Annotations: map[string]string{
+					v1alpha1.AdoptRVRAnnotationKey: "",
+				},
+			},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				Size:                       resource.MustParse("10Gi"),
+				ReplicatedStorageClassName: "rsc-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				ConfigurationGeneration:         1,
+				ConfigurationObservedGeneration: 1,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:                        v1alpha1.TopologyIgnored,
+					FailuresToTolerate:              0,
+					GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:                    v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName:       "test-pool",
+				},
+				DatameshRevision: 1,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					SystemNetworkNames: []string{"Internal"},
+					Size:               resource.MustParse("10Gi"),
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					mkAdoptTransition(adoptStepIdxPopulateAndVerifyDatamesh),
+				},
+			},
+		}
+
+		rvr := newPreconfiguredRVR("rv-1", 0, "node-1")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		result, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeTrue()) //nolint:staticcheck // ContinueAndRequeue
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+		// Configuration updated to new FTT=1.
+		Expect(updated.Status.Configuration.FailuresToTolerate).To(Equal(byte(1)))
+		// Datamesh state reset.
+		Expect(updated.Status.DatameshRevision).To(Equal(int64(0)))
+		Expect(updated.Status.Datamesh.Members).To(BeEmpty())
+		Expect(updated.Status.DatameshTransitions).To(BeEmpty())
+	})
+
+	It("does not restart adopt when configuration changes during step 2", func(ctx SpecContext) {
+		// RSC has new FTT=1 (2 diskful), but RV status still has old FTT=0 (1 diskful).
+		// Step 2 should NOT detect config changes — it should proceed normally.
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			Status: v1alpha1.ReplicatedStorageClassStatus{
+				ConfigurationGeneration: 2,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:                        v1alpha1.TopologyIgnored,
+					FailuresToTolerate:              1,
+					GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:                    v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName:       "test-pool",
+				},
+			},
+		}
+		rsp := newTestRSPWithNodes("test-pool", "node-1")
+
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "rv-1",
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				Labels:     map[string]string{v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1"},
+				Annotations: map[string]string{
+					v1alpha1.AdoptRVRAnnotationKey: "",
+				},
+			},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				Size:                       resource.MustParse("10Gi"),
+				ReplicatedStorageClassName: "rsc-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				ConfigurationGeneration:         1,
+				ConfigurationObservedGeneration: 1,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology:                        v1alpha1.TopologyIgnored,
+					FailuresToTolerate:              0,
+					GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess:                    v1alpha1.VolumeAccessLocal,
+					ReplicatedStoragePoolName:       "test-pool",
+				},
+				DatameshRevision: 2,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					SharedSecret:            "test-secret",
+					SharedSecretAlg:         v1alpha1.SharedSecretAlgSHA256,
+					SystemNetworkNames:      []string{"Internal"},
+					Size:                    resource.MustParse("10Gi"),
+					Quorum:                  1,
+					QuorumMinimumRedundancy: 1,
+					Members: []v1alpha1.DatameshMember{
+						{
+							Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+							Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1",
+							Addresses:          []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+							LVMVolumeGroupName: "lvg-1",
+						},
+					},
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					mkAdoptTransition(adoptStepIdxExitMaintenance),
+				},
+			},
+		}
+
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1", Type: v1alpha1.ReplicaTypeDiskful,
+				NodeName: "node-1", LVMVolumeGroupName: "lvg-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 2,
+				BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+					Size:  ptr.To(resource.MustParse("11Gi")),
+					State: v1alpha1.DiskStateUpToDate,
+				},
+			},
+		}
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType, Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured,
+		})
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type: v1alpha1.ReplicatedVolumeReplicaCondReadyType, Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+		})
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+		// Formation should complete normally (step 2 does not check config).
+		Expect(updated.Status.DatameshTransitions).To(BeEmpty(), "formation should complete")
+		// Datamesh state preserved (not reset).
+		Expect(updated.Status.DatameshRevision).To(Equal(int64(2)))
+		Expect(updated.Status.Datamesh.Members).To(HaveLen(1))
 	})
 })
 

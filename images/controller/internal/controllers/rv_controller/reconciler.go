@@ -67,7 +67,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Failf(err, "getting ReplicatedVolume").ToCtrl()
 	}
 	if rv == nil {
-		return r.reconcileOrphanedRVAs(rf.Ctx(), req.Name).ToCtrl()
+		return flow.MergeReconciles(
+			r.reconcileOrphanedRVAs(rf.Ctx(), req.Name),
+			r.reconcileOrphanedRVRs(rf.Ctx(), req.Name),
+		).ToCtrl()
 	}
 
 	// Load RSC (Auto mode only; Manual mode has no RSC reference).
@@ -129,7 +132,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Derive rv.Status.Configuration from the appropriate source (RSC or ManualConfiguration).
 	// Called here only for initial set (config is nil). During normal operation,
 	// reconcileRVConfiguration is called inside reconcileNormalOperation.
-	// During formation, config is frozen (only formation reset calls reconcileRVConfiguration).
+	// During create formation, config is frozen (only formation restart calls
+	// reconcileRVConfiguration). During adopt formation, config is re-derived
+	// in steps 0-1 inside reconcileFormation to allow the user to fix mismatches.
 	if rv.Status.Configuration == nil {
 		outcome = outcome.Merge(r.reconcileRVConfiguration(rf.Ctx(), rv, rsc))
 		if outcome.ShouldReturn() {
@@ -165,6 +170,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
+	// If datamesh just made the RV eligible for deletion (e.g., last member detached),
+	// requeue immediately so the next reconcile enters reconcileDeletion.
+	if rv.DeletionTimestamp != nil && rvShouldNotExist(rv) {
+		outcome = outcome.Merge(rf.ContinueAndRequeue())
+	}
+
 	// Reconcile RVA and RVR finalizers.
 	outcome = flow.MergeReconciles(
 		outcome,
@@ -182,6 +193,34 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	return outcome.ToCtrl()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: orphaned RVRs
+//
+
+// reconcileOrphanedRVRs handles RVRs that reference a deleted/absent RV.
+// Loads RVRs by rvName and delegates to reconcileRVRFinalizers with rv=nil,
+// which adds the finalizer to non-deleting RVRs and removes it from deleting ones
+// (isRVRMemberOrLeavingDatamesh returns false when rv is nil).
+//
+// Reconcile pattern: Pure orchestration
+func (r *Reconciler) reconcileOrphanedRVRs(
+	ctx context.Context,
+	rvName string,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "orphaned-rvrs")
+	defer rf.OnEnd(&outcome)
+
+	rvrs, err := r.getRVRsSorted(rf.Ctx(), rvName)
+	if err != nil {
+		return rf.Failf(err, "listing RVRs for deleted RV")
+	}
+	if len(rvrs) == 0 {
+		return rf.Done()
+	}
+
+	return r.reconcileRVRFinalizers(rf.Ctx(), nil, rvrs)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -594,9 +633,12 @@ func applyRVMetadata(rv *v1alpha1.ReplicatedVolume, targetFinalizerPresent bool)
 // Callers control when this function is called:
 //   - Root Reconcile: when Configuration is nil (initial set)
 //   - reconcileNormalOperation: always (check for config updates)
-//   - Formation reset: after clearing Configuration to nil (re-derive)
+//   - Formation reset (create/v1): after clearing Configuration to nil (re-derive)
+//   - Adopt formation steps 0-1: re-derive to detect user-initiated config changes
 //
-// During formation, callers do NOT call this function (config is frozen).
+// During create formation, callers do NOT call this function (config is frozen).
+// During adopt formation, reconcileFormation calls this in steps 0-1 to allow
+// the user to fix configuration mismatches; if config changed, adopt restarts.
 //
 // Generation semantics by mode:
 //   - Auto mode: ConfigurationGeneration = RSC's Status.ConfigurationGeneration
@@ -818,8 +860,9 @@ func ensureDatameshReplicaRequests(
 }
 
 // rvShouldNotExist returns true if RV should be deleted:
-// DeletionTimestamp is set, no finalizers except ours, no attached members,
-// and no Detach transitions in progress.
+// DeletionTimestamp is set, no finalizers except ours, and either formation
+// is still in progress (incomplete datamesh — skip attach/detach checks) or
+// no attached members and no Detach transitions in progress.
 func rvShouldNotExist(rv *v1alpha1.ReplicatedVolume) bool {
 	if rv == nil {
 		return true
@@ -832,6 +875,14 @@ func rvShouldNotExist(rv *v1alpha1.ReplicatedVolume) bool {
 	// Check no other finalizers except ours.
 	if obju.HasFinalizersOtherThan(rv, v1alpha1.RVControllerFinalizer) {
 		return false
+	}
+
+	// During formation the datamesh is not yet fully established, so attached
+	// members and detach transitions are not meaningful blockers — skip them
+	// to avoid a deadlock where formation is stuck on deleting RVRs while
+	// deletion is stuck waiting for detach that will never come.
+	if forming, _ := isFormationInProgress(rv); forming {
+		return true
 	}
 
 	// Check no attached members.

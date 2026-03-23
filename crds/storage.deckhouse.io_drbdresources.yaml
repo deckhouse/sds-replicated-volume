@@ -261,6 +261,16 @@ spec:
                 properties:
                   allowTwoPrimaries:
                     type: boolean
+                  llvFinalizersToRelease:
+                    description: |-
+                      LLVFinalizersToRelease lists LVMLogicalVolume names whose agent finalizer
+                      must be released. Populated before adding a finalizer to an LLV, cleared
+                      after the finalizer is successfully released. This ensures the agent never
+                      loses track of which LLVs it needs to clean up.
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
                   lvmLogicalVolumeName:
                     description: |-
                       LVMLogicalVolumeName is the LVM logical volume name currently configured in DRBD.
@@ -281,12 +291,6 @@ spec:
                     - Primary
                     - Secondary
                     type: string
-                  size:
-                    anyOf:
-                    - type: integer
-                    - type: string
-                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                    x-kubernetes-int-or-string: true
                   state:
                     description: DRBDResourceState represents the desired state of
                       a DRBD resource.
@@ -517,6 +521,16 @@ spec:
                   rule: self.all(x, self.exists_one(y, x.nodeID == y.nodeID))
               quorum:
                 type: boolean
+              size:
+                anyOf:
+                - type: integer
+                - type: string
+                description: |-
+                  Size is the usable capacity of the DRBD upper device in bytes.
+                  Smaller than spec.size because DRBD internal metadata is stored on
+                  the backing device. Nil when the resource is diskless or down.
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
             type: object
         required:
         - metadata

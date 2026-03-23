@@ -80,6 +80,7 @@ func SetupDisklessToDiskfulReplica(
 		isDRBDRTerminal,
 	)
 	assertDRBDRConfigured(e, drbdr)
+	assertDRBDRSizePopulated(e, drbdr)
 	assertLLVHasAgentFinalizer(e, cl, name)
 
 	return drbdr, llv
@@ -115,11 +116,12 @@ func newLLV(name string, size resource.Quantity, lvgName string) *snc.LVMLogical
 	}
 }
 
-func changeDRBDResourceToDiskful(llvName string, size resource.Quantity) func(*v1alpha1.DRBDResource) {
+func changeDRBDResourceToDiskful(llvName string, llvSize resource.Quantity) func(*v1alpha1.DRBDResource) {
+	usable := drbdUsableSize(llvSize)
 	return func(d *v1alpha1.DRBDResource) {
 		d.Spec.Type = v1alpha1.DRBDResourceTypeDiskful
 		d.Spec.LVMLogicalVolumeName = llvName
-		d.Spec.Size = &size
+		d.Spec.Size = &usable
 	}
 }
 
