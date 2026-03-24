@@ -86,12 +86,13 @@ func hasFormationTransition(transitions []srv.ReplicatedVolumeDatameshTransition
 }
 
 // WaitForReplicatedVolumeReady waits for ReplicatedVolume to become ready
+// and returns the last-fetched RV on success.
 func WaitForReplicatedVolumeReady(
 	ctx context.Context,
 	kc client.Client,
 	log *logger.Logger,
 	traceID, name string,
-) (int, error) {
+) (*srv.ReplicatedVolume, int, error) {
 	var attemptCounter int
 	log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Waiting for ReplicatedVolume to become ready", traceID, name))
 	for {
@@ -99,14 +100,14 @@ func WaitForReplicatedVolumeReady(
 		select {
 		case <-ctx.Done():
 			log.Warning(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] context done. Failed to wait for ReplicatedVolume", traceID, name))
-			return attemptCounter, ctx.Err()
+			return nil, attemptCounter, ctx.Err()
 		default:
 			time.Sleep(500 * time.Millisecond)
 		}
 
 		rv, err := GetReplicatedVolume(ctx, kc, name)
 		if err != nil {
-			return attemptCounter, err
+			return nil, attemptCounter, err
 		}
 
 		if attemptCounter%10 == 0 {
@@ -114,14 +115,66 @@ func WaitForReplicatedVolumeReady(
 		}
 
 		if rv.DeletionTimestamp != nil {
-			return attemptCounter, fmt.Errorf("failed to create ReplicatedVolume %s, reason: ReplicatedVolume is being deleted", name)
+			return nil, attemptCounter, fmt.Errorf("failed to create ReplicatedVolume %s, reason: ReplicatedVolume is being deleted", name)
 		}
 
 		if rv.Status.DatameshRevision > 0 && !hasFormationTransition(rv.Status.DatameshTransitions) {
 			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] ReplicatedVolume is ready (datameshRevision=%d, no Formation transition)", traceID, name, rv.Status.DatameshRevision))
-			return attemptCounter, nil
+			return rv, attemptCounter, nil
 		}
 		log.Trace(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Attempt %d, ReplicatedVolume not ready yet (datameshRevision=%d, hasFormation=%v). Waiting...", traceID, name, attemptCounter, rv.Status.DatameshRevision, hasFormationTransition(rv.Status.DatameshTransitions)))
+	}
+}
+
+// quantityWithBytes formats a resource.Quantity as "106436Ki (109054464 bytes)" for debugging.
+func quantityWithBytes(q resource.Quantity) string {
+	return fmt.Sprintf("%s (%d bytes)", q.String(), q.Value())
+}
+
+// WaitForReplicatedVolumeResized polls until rv.Status.Size >= targetSize
+// and returns the last-fetched RV on success.
+func WaitForReplicatedVolumeResized(
+	ctx context.Context,
+	kc client.Client,
+	log *logger.Logger,
+	traceID, name string,
+	targetSize resource.Quantity,
+) (*srv.ReplicatedVolume, int, error) {
+	var attemptCounter int
+	log.Info(fmt.Sprintf("[WaitForReplicatedVolumeResized][traceID:%s][volumeID:%s] Waiting for status.size >= %s", traceID, name, quantityWithBytes(targetSize)))
+	for {
+		attemptCounter++
+		select {
+		case <-ctx.Done():
+			log.Warning(fmt.Sprintf("[WaitForReplicatedVolumeResized][traceID:%s][volumeID:%s] context done after %d attempts", traceID, name, attemptCounter))
+			return nil, attemptCounter, ctx.Err()
+		default:
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		rv, err := GetReplicatedVolume(ctx, kc, name)
+		if err != nil {
+			return nil, attemptCounter, err
+		}
+
+		if attemptCounter%10 == 0 {
+			var currentSize string
+			if rv.Status.Size != nil {
+				currentSize = quantityWithBytes(*rv.Status.Size)
+			} else {
+				currentSize = "<nil>"
+			}
+			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeResized][traceID:%s][volumeID:%s] Attempt: %d, status.size=%s, target=%s", traceID, name, attemptCounter, currentSize, quantityWithBytes(targetSize)))
+		}
+
+		if rv.DeletionTimestamp != nil {
+			return nil, attemptCounter, fmt.Errorf("ReplicatedVolume %s is being deleted, cannot complete resize", name)
+		}
+
+		if rv.Status.Size != nil && rv.Status.Size.Cmp(targetSize) >= 0 {
+			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeResized][traceID:%s][volumeID:%s] Resize complete: status.size=%s >= target=%s", traceID, name, quantityWithBytes(*rv.Status.Size), quantityWithBytes(targetSize)))
+			return rv, attemptCounter, nil
+		}
 	}
 }
 
