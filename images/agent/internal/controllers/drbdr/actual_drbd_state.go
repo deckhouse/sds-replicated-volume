@@ -151,6 +151,9 @@ type ActualPeer interface {
 	// AllowRemoteRead returns the allow-remote-read setting.
 	AllowRemoteRead() bool
 
+	// VerifyAlg returns the online-verify hash algorithm.
+	VerifyAlg() string
+
 	// Paths returns the network paths to this peer.
 	Paths() []ActualPath
 }
@@ -329,6 +332,8 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 		status.DiskState = ""
 		status.Quorum = nil
 		status.Peers = nil
+		status.DeviceOpen = nil
+		status.DeviceIOSuspended = nil
 
 		// Keep activeConfiguration but set state to Down
 		if status.ActiveConfiguration == nil {
@@ -370,6 +375,17 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 		} else {
 			status.Size = nil
 		}
+	}
+
+	// DeviceOpen and DeviceIOSuspended are only meaningful on Primary.
+	if aState.status != nil && aState.status.Role == "Primary" && len(volumes) > 0 {
+		open := volumes[0].Open
+		status.DeviceOpen = &open
+		suspended := aState.status.Suspended
+		status.DeviceIOSuspended = &suspended
+	} else {
+		status.DeviceOpen = nil
+		status.DeviceIOSuspended = nil
 	}
 
 	// Report ActiveConfiguration
@@ -696,6 +712,13 @@ func (p *actualPeer) AllowRemoteRead() bool {
 		return p.showConnection.Net.AllowRemoteRead
 	}
 	return false
+}
+
+func (p *actualPeer) VerifyAlg() string {
+	if p.showConnection != nil {
+		return p.showConnection.Net.VerifyAlg
+	}
+	return ""
 }
 
 func (p *actualPeer) Paths() []ActualPath {

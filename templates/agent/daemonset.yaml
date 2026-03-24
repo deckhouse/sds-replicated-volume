@@ -106,6 +106,10 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: spec.nodeName
+          - name: DRBD_MIN_PORT
+            value: "{{ $.Values.sdsReplicatedVolume.drbdPortRange.minPort }}"
+          - name: DRBD_MAX_PORT
+            value: "{{ $.Values.sdsReplicatedVolume.drbdPortRange.maxPort }}"
           - name: SLOGH_CONFIG_PATH
             value: "/etc/config/slogh.cfg"
         securityContext:

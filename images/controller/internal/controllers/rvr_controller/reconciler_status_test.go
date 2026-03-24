@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
@@ -1263,6 +1264,76 @@ var _ = Describe("ensureStatusAddressesAndType", func() {
 		Expect(outcome1.DidChange()).To(BeTrue())
 
 		outcome2 := ensureStatusAddressesAndType(ctx, rvr, drbdr)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ensureStatusSize tests
+//
+
+var _ = Describe("ensureStatusSize", func() {
+	var (
+		ctx context.Context
+		rvr *v1alpha1.ReplicatedVolumeReplica
+	)
+
+	BeforeEach(func() {
+		ctx = logr.NewContext(context.Background(), logr.Discard())
+		rvr = &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+	})
+
+	It("sets size from drbdr.status.size", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Size: ptr.To(resource.MustParse("10Gi")),
+			},
+		}
+
+		outcome := ensureStatusSize(ctx, rvr, drbdr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Size).NotTo(BeNil())
+		Expect(rvr.Status.Size.String()).To(Equal("10Gi"))
+	})
+
+	It("clears size when drbdr is nil", func() {
+		rvr.Status.Size = ptr.To(resource.MustParse("10Gi"))
+
+		outcome := ensureStatusSize(ctx, rvr, nil)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Size).To(BeNil())
+	})
+
+	It("clears size when drbdr.status.size is nil", func() {
+		rvr.Status.Size = ptr.To(resource.MustParse("10Gi"))
+		drbdr := &v1alpha1.DRBDResource{}
+
+		outcome := ensureStatusSize(ctx, rvr, drbdr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Size).To(BeNil())
+	})
+
+	It("reports no change when already up to date", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Size: ptr.To(resource.MustParse("10Gi")),
+			},
+		}
+
+		outcome1 := ensureStatusSize(ctx, rvr, drbdr)
+		Expect(outcome1.Error()).NotTo(HaveOccurred())
+		Expect(outcome1.DidChange()).To(BeTrue())
+
+		outcome2 := ensureStatusSize(ctx, rvr, drbdr)
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
 		Expect(outcome2.DidChange()).To(BeFalse())
 	})

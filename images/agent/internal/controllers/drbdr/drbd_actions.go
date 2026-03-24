@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -258,6 +259,7 @@ type NewPeerAction struct {
 	SharedSecret string
 	CRAMHMACAlg  string // HMAC algorithm for authentication
 	RRConflict   string // e.g., "retry-connect"
+	VerifyAlg    string // Online verify hash algorithm
 }
 
 func (a NewPeerAction) Execute(ctx context.Context) error {
@@ -267,6 +269,7 @@ func (a NewPeerAction) Execute(ctx context.Context) error {
 		SharedSecret: a.SharedSecret,
 		CRAMHMACAlg:  a.CRAMHMACAlg,
 		RRConflict:   a.RRConflict,
+		VerifyAlg:    a.VerifyAlg,
 	}
 	err := drbdutils.ExecuteNewPeer(ctx, a.ResourceName, a.PeerNodeID, opts)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNewPeerFailed)
@@ -285,6 +288,7 @@ type NetOptionsAction struct {
 	CRAMHMACAlg       *string
 	AllowTwoPrimaries *bool
 	AllowRemoteRead   *bool
+	VerifyAlg         *string
 }
 
 func (a NetOptionsAction) Execute(ctx context.Context) error {
@@ -294,6 +298,7 @@ func (a NetOptionsAction) Execute(ctx context.Context) error {
 		CRAMHMACAlg:       a.CRAMHMACAlg,
 		AllowTwoPrimaries: a.AllowTwoPrimaries,
 		AllowRemoteRead:   a.AllowRemoteRead,
+		VerifyAlg:         a.VerifyAlg,
 	})
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNetOptionsFailed)
 }
@@ -312,6 +317,10 @@ type NewPathAction struct {
 
 func (a NewPathAction) Execute(ctx context.Context) error {
 	err := drbdutils.ExecuteNewPath(ctx, a.ResourceName, a.PeerNodeID, a.LocalAddr, a.RemoteAddr)
+	if err != nil && errors.Is(err, drbdutils.ErrNewPathLocalAddrInUse) {
+		ip, _, _ := net.SplitHostPort(a.LocalAddr)
+		err = &localPortConflictError{ip: ip, err: err}
+	}
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNewPathFailed)
 }
 

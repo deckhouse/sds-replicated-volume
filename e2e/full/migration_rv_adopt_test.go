@@ -258,6 +258,8 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 				actions = append(actions, func() {
 					bundles[i].drbdr.Create(ctx)
 					bundles[i].drbdr.Await(ctx, DRBDR.HasAddresses())
+					assertAddressesAdopted(bundles[i].drbdr.Object().Status.Addresses,
+						bundles[i].r.Addresses, len(bundles) > 1, bundles[i].drbdr.Name())
 					st[i].drbdr = true
 					if st[i].rvr && rand.Intn(2) == 0 {
 						rvrObj := bundles[i].rvr.Object()
@@ -352,6 +354,7 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 			for i := 0; i < expectedReplicas; i++ {
 				trvr := trv.TestRVR(i)
 				trvr.AwaitSequence(ctx,
+					Phase(string(v1alpha1.ReplicatedVolumeReplicaPhasePending)),
 					Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring)),
 					Or(Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing)),
 						Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy))),

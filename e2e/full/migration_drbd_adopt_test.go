@@ -86,6 +86,18 @@ var _ = Describe("Migration: agent adopts preexisting DRBD", Label(fw.LabelUpgra
 			for _, td := range drbdrs {
 				td.Await(ctx, DRBDR.HasAddresses())
 			}
+
+			originalAddrs := make(map[uint8][]v1alpha1.DRBDResourceAddressStatus, len(replicas))
+			for _, r := range replicas {
+				originalAddrs[r.NodeID] = r.Addresses
+			}
+			multiReplica := len(replicas) > 1
+			for _, td := range drbdrs {
+				obj := td.Object()
+				assertAddressesAdopted(obj.Status.Addresses, originalAddrs[obj.Spec.NodeID],
+					multiReplica, td.Name())
+			}
+
 			for _, td := range drbdrs {
 				obj := td.Object()
 				if obj.Spec.Type == v1alpha1.DRBDResourceTypeDiskful {

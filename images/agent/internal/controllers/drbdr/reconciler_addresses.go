@@ -18,7 +18,7 @@ package drbdr
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -145,7 +145,7 @@ func applyIPs(drbdr *v1alpha1.DRBDResource, intendedIPs []IntendedIP) {
 // The PortCache maintains port allocation across reconciliations to ensure
 // stable port assignments. This is acceptable because the cache is deterministic
 // relative to its state and produces stable outputs for the same inputs.
-func computeIntendedPorts(drbdr *v1alpha1.DRBDResource, existingPorts ExistingPorts, portAllocator PortAllocator) ([]IntendedPort, error) {
+func computeIntendedPorts(ctx context.Context, drbdr *v1alpha1.DRBDResource, existingPorts ExistingPorts, portAllocator PortAllocator) ([]IntendedPort, error) {
 	result := make([]IntendedPort, 0, len(drbdr.Status.Addresses))
 	var allocErr error
 	for _, addr := range drbdr.Status.Addresses {
@@ -154,9 +154,10 @@ func computeIntendedPorts(drbdr *v1alpha1.DRBDResource, existingPorts ExistingPo
 			port = existingPorts[addr.Address.IPv4]
 		}
 		if port == 0 {
-			port = portAllocator(addr.Address.IPv4)
-			if port == 0 {
-				allocErr = fmt.Errorf("failed to allocate port for IP %s (network %s)", addr.Address.IPv4, addr.SystemNetworkName)
+			var err error
+			port, err = portAllocator(ctx, addr.Address.IPv4)
+			if err != nil {
+				allocErr = errors.Join(allocErr, err)
 				continue
 			}
 		}
@@ -226,7 +227,7 @@ func ensureAddresses(
 	applyIPs(drbdr, intendedIPs)
 
 	// Compute and apply ports
-	intendedPorts, portErr := computeIntendedPorts(drbdr, existingPorts, portAllocator)
+	intendedPorts, portErr := computeIntendedPorts(ctx, drbdr, existingPorts, portAllocator)
 	applyPorts(drbdr, intendedPorts)
 
 	if portErr != nil {

@@ -19,10 +19,10 @@ package v1alpha1
 const labelPrefix = "sds-replicated-volume.deckhouse.io/"
 
 const (
-	// ReplicatedStorageClassLabelKey is the label key for ReplicatedStorageClass name on RV and RVR.
+	// ReplicatedStorageClassLabelKey is the label key for ReplicatedStorageClass name on RV, RVR, LLV, and DRBDR.
 	ReplicatedStorageClassLabelKey = labelPrefix + "replicated-storage-class"
 
-	// ReplicatedVolumeLabelKey is the label key for ReplicatedVolume name on RVR.
+	// ReplicatedVolumeLabelKey is the label key for ReplicatedVolume name on RVR, LLV, and DRBDR.
 	ReplicatedVolumeLabelKey = labelPrefix + "replicated-volume"
 
 	// LVMVolumeGroupLabelKey is the label key for LVMVolumeGroup name on RVR.

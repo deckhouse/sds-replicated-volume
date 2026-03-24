@@ -74,6 +74,7 @@ const (
 	ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingDatameshJoin        = "PendingDatameshJoin"        // DRBD preconfigured; waiting for datamesh membership.
 	ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingScheduling          = "PendingScheduling"          // Waiting for node assignment.
 	ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForBackingVolume    = "WaitingForBackingVolume"    // Waiting for backing volume (creating, resizing, or replacing).
+	ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForDRBDResize       = "WaitingForDRBDResize"       // Waiting for DRBD device to confirm target usable size after resize.
 	ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForReplicatedVolume = "WaitingForReplicatedVolume" // Waiting for ReplicatedVolume datamesh to be initialized.
 )
 

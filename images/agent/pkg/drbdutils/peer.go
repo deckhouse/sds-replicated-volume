@@ -37,6 +37,7 @@ type NewPeerOptions struct {
 	SharedSecret string
 	CRAMHMACAlg  string // Required for shared-secret to work (e.g., "sha256", "sha1")
 	RRConflict   string // "retry-connect", "disconnect", etc.
+	VerifyAlg    string // Online verify hash algorithm (from /proc/crypto)
 }
 
 // NewPeerArgs returns the arguments for drbdsetup new-peer command.
@@ -62,6 +63,9 @@ var NewPeerArgs = func(resource string, peerNodeID uint8, opts *NewPeerOptions) 
 		}
 		if opts.RRConflict != "" {
 			args = append(args, "--rr-conflict", opts.RRConflict)
+		}
+		if opts.VerifyAlg != "" {
+			args = append(args, "--verify-alg", opts.VerifyAlg)
 		}
 	}
 	return args

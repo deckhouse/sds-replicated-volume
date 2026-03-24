@@ -63,7 +63,8 @@ func drbdrPredicates() []predicate.Predicate {
 
 // rvPredicates returns predicates for ReplicatedVolume events.
 // Reacts to:
-// - DatameshRevision changes (Status.Datamesh.Size, membership, etc.)
+// - DatameshRevision changes (membership, datamesh size, etc.)
+// - Spec.Size changes (for eager LLV resize before datamesh transition)
 // - Spec.ReplicatedStorageClassName changes (for labels)
 // - DatameshReplicaRequests message changes (for condition message enrichment)
 func rvPredicates() []predicate.Predicate {
@@ -79,8 +80,13 @@ func rvPredicates() []predicate.Predicate {
 					return true
 				}
 
-				// React to DatameshRevision change (covers Size, membership changes, etc.).
+				// React to DatameshRevision change (covers membership, datamesh size, etc.).
 				if oldRV.Status.DatameshRevision != newRV.Status.DatameshRevision {
+					return true
+				}
+
+				// React to Spec.Size change (for eager LLV resize before datamesh transition).
+				if !oldRV.Spec.Size.Equal(newRV.Spec.Size) {
 					return true
 				}
 

@@ -89,7 +89,7 @@ var _ = Describe("newDRBDR", func() {
 			NodeID:   1,
 		}
 
-		drbdr, err := newDRBDR(scheme, rvr, spec)
+		drbdr, err := newDRBDR(scheme, rvr, nil, spec)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(drbdr.Name).To(Equal("rvr-1"))
@@ -104,7 +104,7 @@ var _ = Describe("newDRBDR", func() {
 			NodeID:   1,
 		}
 
-		drbdr, err := newDRBDR(scheme, rvr, spec)
+		drbdr, err := newDRBDR(scheme, rvr, nil, spec)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(obju.HasFinalizer(drbdr, v1alpha1.RVRControllerFinalizer)).To(BeTrue())
@@ -119,7 +119,7 @@ var _ = Describe("newDRBDR", func() {
 			NodeID:   1,
 		}
 
-		drbdr, err := newDRBDR(scheme, rvr, spec)
+		drbdr, err := newDRBDR(scheme, rvr, nil, spec)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(obju.HasControllerRef(drbdr, rvr)).To(BeTrue())
@@ -136,13 +136,70 @@ var _ = Describe("newDRBDR", func() {
 			State:    v1alpha1.DRBDResourceStateUp,
 		}
 
-		drbdr, err := newDRBDR(scheme, rvr, spec)
+		drbdr, err := newDRBDR(scheme, rvr, nil, spec)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(drbdr.Spec.NodeName).To(Equal("node-1"))
 		Expect(drbdr.Spec.NodeID).To(Equal(uint8(1)))
 		Expect(drbdr.Spec.Type).To(Equal(v1alpha1.DRBDResourceTypeDiskful))
 		Expect(drbdr.Spec.State).To(Equal(v1alpha1.DRBDResourceStateUp))
+	})
+
+	It("sets replicated-volume label when RVR has ReplicatedVolumeName", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+			},
+		}
+		spec := v1alpha1.DRBDResourceSpec{NodeName: "node-1", NodeID: 1}
+
+		drbdr, err := newDRBDR(scheme, rvr, nil, spec)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(obju.HasLabelValue(drbdr, v1alpha1.ReplicatedVolumeLabelKey, "rv-1")).To(BeTrue())
+	})
+
+	It("does not set replicated-volume label when ReplicatedVolumeName is empty", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+		}
+		spec := v1alpha1.DRBDResourceSpec{NodeName: "node-1", NodeID: 1}
+
+		drbdr, err := newDRBDR(scheme, rvr, nil, spec)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(obju.HasLabel(drbdr, v1alpha1.ReplicatedVolumeLabelKey)).To(BeFalse())
+	})
+
+	It("sets replicated-storage-class label when RV has ReplicatedStorageClassName", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				ReplicatedStorageClassName: "rsc-1",
+			},
+		}
+		spec := v1alpha1.DRBDResourceSpec{NodeName: "node-1", NodeID: 1}
+
+		drbdr, err := newDRBDR(scheme, rvr, rv, spec)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(obju.HasLabelValue(drbdr, v1alpha1.ReplicatedStorageClassLabelKey, "rsc-1")).To(BeTrue())
+	})
+
+	It("does not set replicated-storage-class label when rv is nil", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+		}
+		spec := v1alpha1.DRBDResourceSpec{NodeName: "node-1", NodeID: 1}
+
+		drbdr, err := newDRBDR(scheme, rvr, nil, spec)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(obju.HasLabel(drbdr, v1alpha1.ReplicatedStorageClassLabelKey)).To(BeFalse())
 	})
 })
 
@@ -1071,5 +1128,313 @@ var _ = Describe("applyRVRDRBDRReconciliationCache", func() {
 
 		Expect(changed).To(BeTrue())
 		Expect(rvr.Status.DRBDRReconciliationCache).To(Equal(target))
+	})
+})
+
+var _ = Describe("isDRBDRMetadataInSync", func() {
+	var (
+		rvr    *v1alpha1.ReplicatedVolumeReplica
+		scheme *runtime.Scheme
+	)
+
+	BeforeEach(func() {
+		rvr = &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+		}
+		scheme = runtime.NewScheme()
+		_ = v1alpha1.AddToScheme(scheme)
+	})
+
+	It("returns false when finalizer is missing", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1"},
+		}
+
+		Expect(isDRBDRMetadataInSync(rvr, nil, drbdr)).To(BeFalse())
+	})
+
+	It("returns false when ownerRef is missing", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "drbdr-1",
+				Finalizers: []string{v1alpha1.RVRControllerFinalizer},
+			},
+		}
+
+		Expect(isDRBDRMetadataInSync(rvr, nil, drbdr)).To(BeFalse())
+	})
+
+	It("returns false when replicated-volume label is missing", func() {
+		rvr.Spec.ReplicatedVolumeName = "rv-1"
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "drbdr-1",
+				Finalizers: []string{v1alpha1.RVRControllerFinalizer},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         v1alpha1.SchemeGroupVersion.String(),
+						Kind:               "ReplicatedVolumeReplica",
+						Name:               "rvr-1",
+						UID:                "uid-1",
+						Controller:         boolPtr(true),
+						BlockOwnerDeletion: boolPtr(true),
+					},
+				},
+			},
+		}
+
+		Expect(isDRBDRMetadataInSync(rvr, nil, drbdr)).To(BeFalse())
+	})
+
+	It("returns false when replicated-storage-class label is missing", func() {
+		rvr.Spec.ReplicatedVolumeName = "rv-1"
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				ReplicatedStorageClassName: "rsc-1",
+			},
+		}
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "drbdr-1",
+				Finalizers: []string{v1alpha1.RVRControllerFinalizer},
+				Labels: map[string]string{
+					v1alpha1.ReplicatedVolumeLabelKey: "rv-1",
+				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         v1alpha1.SchemeGroupVersion.String(),
+						Kind:               "ReplicatedVolumeReplica",
+						Name:               "rvr-1",
+						UID:                "uid-1",
+						Controller:         boolPtr(true),
+						BlockOwnerDeletion: boolPtr(true),
+					},
+				},
+			},
+		}
+
+		Expect(isDRBDRMetadataInSync(rvr, rv, drbdr)).To(BeFalse())
+	})
+
+	It("returns true when all metadata is in sync", func() {
+		rvr.Spec.ReplicatedVolumeName = "rv-1"
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				ReplicatedStorageClassName: "rsc-1",
+			},
+		}
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "drbdr-1",
+				Finalizers: []string{v1alpha1.RVRControllerFinalizer},
+				Labels: map[string]string{
+					v1alpha1.ReplicatedVolumeLabelKey:       "rv-1",
+					v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         v1alpha1.SchemeGroupVersion.String(),
+						Kind:               "ReplicatedVolumeReplica",
+						Name:               "rvr-1",
+						UID:                "uid-1",
+						Controller:         boolPtr(true),
+						BlockOwnerDeletion: boolPtr(true),
+					},
+				},
+			},
+		}
+
+		Expect(isDRBDRMetadataInSync(rvr, rv, drbdr)).To(BeTrue())
+	})
+
+	It("returns true when rv is nil and no RSC label expected", func() {
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "drbdr-1",
+				Finalizers: []string{v1alpha1.RVRControllerFinalizer},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         v1alpha1.SchemeGroupVersion.String(),
+						Kind:               "ReplicatedVolumeReplica",
+						Name:               "rvr-1",
+						UID:                "uid-1",
+						Controller:         boolPtr(true),
+						BlockOwnerDeletion: boolPtr(true),
+					},
+				},
+			},
+		}
+
+		Expect(isDRBDRMetadataInSync(rvr, nil, drbdr)).To(BeTrue())
+	})
+
+	It("returns false when RSC label is stale (RSC cleared on RV)", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+		}
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "drbdr-1",
+				Finalizers: []string{v1alpha1.RVRControllerFinalizer},
+				Labels: map[string]string{
+					v1alpha1.ReplicatedStorageClassLabelKey: "old-rsc",
+				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         v1alpha1.SchemeGroupVersion.String(),
+						Kind:               "ReplicatedVolumeReplica",
+						Name:               "rvr-1",
+						UID:                "uid-1",
+						Controller:         boolPtr(true),
+						BlockOwnerDeletion: boolPtr(true),
+					},
+				},
+			},
+		}
+
+		Expect(isDRBDRMetadataInSync(rvr, rv, drbdr)).To(BeFalse())
+	})
+})
+
+var _ = Describe("applyDRBDRMetadata", func() {
+	var scheme *runtime.Scheme
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		_ = v1alpha1.AddToScheme(scheme)
+	})
+
+	It("adds finalizer", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+		}
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1"},
+		}
+
+		changed, err := applyDRBDRMetadata(scheme, rvr, nil, drbdr)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeTrue())
+		Expect(obju.HasFinalizer(drbdr, v1alpha1.RVRControllerFinalizer)).To(BeTrue())
+	})
+
+	It("sets replicated-volume label", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+			},
+		}
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1"},
+		}
+
+		changed, err := applyDRBDRMetadata(scheme, rvr, nil, drbdr)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeTrue())
+		Expect(obju.HasLabelValue(drbdr, v1alpha1.ReplicatedVolumeLabelKey, "rv-1")).To(BeTrue())
+	})
+
+	It("sets replicated-storage-class label", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				ReplicatedStorageClassName: "rsc-1",
+			},
+		}
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1"},
+		}
+
+		changed, err := applyDRBDRMetadata(scheme, rvr, rv, drbdr)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeTrue())
+		Expect(obju.HasLabelValue(drbdr, v1alpha1.ReplicatedStorageClassLabelKey, "rsc-1")).To(BeTrue())
+	})
+
+	It("sets ownerRef", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+		}
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "drbdr-1"},
+		}
+
+		changed, err := applyDRBDRMetadata(scheme, rvr, nil, drbdr)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeTrue())
+		Expect(obju.HasControllerRef(drbdr, rvr)).To(BeTrue())
+	})
+
+	It("removes stale RSC label when RSC is cleared on RV", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+		}
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "drbdr-1",
+				Labels: map[string]string{
+					v1alpha1.ReplicatedStorageClassLabelKey: "old-rsc",
+				},
+			},
+		}
+
+		changed, err := applyDRBDRMetadata(scheme, rvr, rv, drbdr)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeTrue())
+		Expect(obju.HasLabel(drbdr, v1alpha1.ReplicatedStorageClassLabelKey)).To(BeFalse())
+	})
+
+	It("returns false when nothing changes (idempotent)", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				ReplicatedStorageClassName: "rsc-1",
+			},
+		}
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "drbdr-1",
+				Finalizers: []string{v1alpha1.RVRControllerFinalizer},
+				Labels: map[string]string{
+					v1alpha1.ReplicatedVolumeLabelKey:       "rv-1",
+					v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         v1alpha1.SchemeGroupVersion.String(),
+						Kind:               "ReplicatedVolumeReplica",
+						Name:               "rvr-1",
+						UID:                "uid-1",
+						Controller:         boolPtr(true),
+						BlockOwnerDeletion: boolPtr(true),
+					},
+				},
+			},
+		}
+
+		changed, err := applyDRBDRMetadata(scheme, rvr, rv, drbdr)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeFalse())
 	})
 })

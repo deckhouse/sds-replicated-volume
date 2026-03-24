@@ -38,7 +38,7 @@ the voter count (D) **before** adding the replacement:
 
 A replacement = **add** new D (VotingMembership), then **remove** old D
 (VotingMembership). These two transitions execute sequentially
-(VotingMembership is serialized — see [TRANSITIONS.md](TRANSITIONS.md) §14).
+(VotingMembership is serialized — see [TRANSITIONS.md](TRANSITIONS.md) §11).
 
 ### Vestibule
 
@@ -567,7 +567,7 @@ and quorum parameters.
 
 The §2 and §3 procedures are zone-agnostic — they describe DRBD-level steps.
 In TransZonal and Zonal topologies, placement and removal guards add
-zone-aware constraints (see [TRANSITIONS.md](TRANSITIONS.md) §8).
+zone-aware constraints (see [TRANSITIONS.md](TRANSITIONS.md) §9).
 
 **Zone placement rule**: the scheduler places the new replica in the zone
 with the fewest replicas of the target type (greedy round-robin). This
@@ -576,10 +576,10 @@ naturally places the replacement into the zone that lost the replica.
 **Safety enforcement**:
 
 - **Placement guards** block additions that would violate zone constraints
-  (see [TRANSITIONS.md](TRANSITIONS.md) §8, preconditions for adding D and
+  (see [TRANSITIONS.md](TRANSITIONS.md) §9, preconditions for adding D and
   adding TB).
 - **Removal guards** block removals that would violate zone-level GMDR, FTT,
-  or TB coverage (see [TRANSITIONS.md](TRANSITIONS.md) §8, preconditions
+  or TB coverage (see [TRANSITIONS.md](TRANSITIONS.md) §9, preconditions
   for leaving D and leaving TB).
 
 No new procedures are needed — §2 and §3 apply as-is with zone constraints

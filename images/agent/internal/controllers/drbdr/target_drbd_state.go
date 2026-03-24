@@ -107,6 +107,7 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 			SharedSecret: iPeer.SharedSecret(),
 			CRAMHMACAlg:  string(iPeer.SharedSecretAlg()),
 			RRConflict:   iPeer.RRConflict(),
+			VerifyAlg:    iPeer.VerifyAlg(),
 		})
 		// Set net options
 		res = append(res, computeNetOptionsAction(resourceName, iPeer, iState.AllowTwoPrimaries())...)
@@ -412,12 +413,14 @@ func computeDiskOptionsActionReconcile(iState IntendedDRBDState, aState ActualDR
 
 func computeNetOptionsAction(resourceName string, iPeer IntendedPeer, allowTwoPrimaries bool) (res DRBDActions) {
 	allowRemoteRead := iPeer.AllowRemoteRead()
+	verifyAlg := iPeer.VerifyAlg()
 
 	res = append(res, NetOptionsAction{
 		ResourceName:      resourceName,
 		PeerNodeID:        iPeer.NodeID(),
 		AllowTwoPrimaries: &allowTwoPrimaries,
 		AllowRemoteRead:   &allowRemoteRead,
+		VerifyAlg:         &verifyAlg,
 	})
 	return res
 }
@@ -460,6 +463,13 @@ func computeNetOptionsActionReconcile(resourceName string, iPeer IntendedPeer, a
 	if iPeer.AllowRemoteRead() != aPeer.AllowRemoteRead() {
 		allowRemoteRead := iPeer.AllowRemoteRead()
 		action.AllowRemoteRead = &allowRemoteRead
+		changed = true
+	}
+
+	// Check verify-alg
+	if iPeer.VerifyAlg() != aPeer.VerifyAlg() {
+		verifyAlg := iPeer.VerifyAlg()
+		action.VerifyAlg = &verifyAlg
 		changed = true
 	}
 

@@ -636,6 +636,7 @@ spec:
                       - Network
                       - NonVotingMembership
                       - Quorum
+                      - Resize
                       - VotingMembership
                       type: string
                     planID:
@@ -759,6 +760,7 @@ spec:
                       - Formation
                       - RemoveReplica
                       - RepairNetworkAddresses
+                      - ResizeVolume
                       type: string
                   required:
                   - group
@@ -772,14 +774,14 @@ spec:
                     rule: self.type == 'Formation' || self.type == 'EnableMultiattach'
                       || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum'
                       || self.type == 'RepairNetworkAddresses' || self.type == 'ChangeSystemNetworks'
-                      || has(self.replicaName)
+                      || self.type == 'ResizeVolume' || has(self.replicaName)
                   - message: replicaName must not be set for Formation, EnableMultiattach,
-                      DisableMultiattach, ChangeQuorum, RepairNetworkAddresses, ChangeSystemNetworks
-                      transitions
+                      DisableMultiattach, ChangeQuorum, RepairNetworkAddresses, ChangeSystemNetworks,
+                      ResizeVolume transitions
                     rule: '!has(self.replicaName) || !(self.type == ''Formation''
                       || self.type == ''EnableMultiattach'' || self.type == ''DisableMultiattach''
                       || self.type == ''ChangeQuorum'' || self.type == ''RepairNetworkAddresses''
-                      || self.type == ''ChangeSystemNetworks'')'
+                      || self.type == ''ChangeSystemNetworks'' || self.type == ''ResizeVolume'')'
                   - message: replicaType must only be set for AddReplica, RemoveReplica,
                       ForceRemoveReplica transitions
                     rule: self.type == 'AddReplica' || self.type == 'RemoveReplica'
@@ -914,6 +916,15 @@ spec:
                 x-kubernetes-validations:
                 - message: eligibleNodesViolations[].replicaName must be unique
                   rule: self.all(x, self.exists_one(y, x.replicaName == y.replicaName))
+              size:
+                anyOf:
+                - type: integer
+                - type: string
+                description: |-
+                  Size is the actual usable capacity of the volume in bytes.
+                  Nil when the volume has no ready replicas.
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
             required:
             - baselineGuaranteedMinimumDataRedundancy
             - datamesh

@@ -16,6 +16,8 @@ limitations under the License.
 
 package drbdr
 
+import "fmt"
+
 // ConfiguredReasonSource carries a condition reason for configuration failures.
 type ConfiguredReasonSource interface {
 	ConfiguredReason() string
@@ -27,6 +29,7 @@ type configuredReasonError struct {
 }
 
 func (e configuredReasonError) ConfiguredReason() string { return e.reason }
+func (e configuredReasonError) Unwrap() error            { return e.error }
 
 // ConfiguredReasonError wraps an error with a configured reason.
 // Returns nil if err is nil.
@@ -36,3 +39,17 @@ func ConfiguredReasonError(err error, reason string) error {
 	}
 	return configuredReasonError{error: err, reason: reason}
 }
+
+// localPortConflictError indicates that a DRBD new-path command failed because
+// the local port is already in use. Carries the conflicting IP so the
+// reconciler can reset the port in status.addresses for re-allocation.
+type localPortConflictError struct {
+	ip  string
+	err error
+}
+
+func (e *localPortConflictError) Error() string {
+	return fmt.Sprintf("local port conflict on %s: %v", e.ip, e.err)
+}
+
+func (e *localPortConflictError) Unwrap() error { return e.err }

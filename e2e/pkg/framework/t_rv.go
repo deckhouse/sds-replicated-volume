@@ -280,6 +280,28 @@ func (t *TestRV) RVRCount() int {
 	return t.rvrs.Count()
 }
 
+// TestRVAs returns all currently tracked TestRVAs.
+func (t *TestRV) TestRVAs() []*TestRVA {
+	return t.rvas.All()
+}
+
+// RVACount returns the number of tracked RVAs.
+func (t *TestRV) RVACount() int {
+	return t.rvas.Count()
+}
+
+// RVANodes returns the set of node names that have a tracked RVA.
+func (t *TestRV) RVANodes() map[string]bool {
+	nodes := make(map[string]bool)
+	for _, trva := range t.rvas.All() {
+		obj := trva.Object()
+		if obj != nil && obj.Spec.NodeName != "" {
+			nodes[obj.Spec.NodeName] = true
+		}
+	}
+	return nodes
+}
+
 // OccupiedNodes returns the node names of all current datamesh members.
 func (t *TestRV) OccupiedNodes() []string {
 	rv := t.Object()

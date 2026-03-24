@@ -49,6 +49,7 @@ reconcile DRBD resource:
     if DRBDR pending → DRBDConfigured=False ApplyingConfiguration
     if DRBDR failed → DRBDConfigured=False ConfigurationFailed
     if agent processed current generation → record datameshRevisionObservedByAgent
+    if DRBD diskful and status.size < spec.size → DRBDConfigured=False WaitingForDRBDResize
     if not datamesh member:
         if was member (datameshRevision > 0) → reset datameshRevision to 0, datameshRevisionObservedByAgent to 0, DRBDConfigured=True
         elif deleting → DRBDConfigured=True (replica is terminating)
@@ -85,6 +86,7 @@ Reconcile (root) [Pure orchestration]
 │   ├── node not assigned → applyDRBDConfiguredCondFalse PendingScheduling
 │   ├── computeIntendedType / computeTargetType / newDRBDRReconciliationCache
 │   ├── createDRBDR (computeTargetDRBDRSpec) / patchDRBDR
+│   ├── isDRBDRMetadataInSync / applyDRBDRMetadata (ownerRef, finalizer, labels)
 │   ├── applyRVRDRBDRReconciliationCache
 │   ├── getAgentReady → applyDRBDConfiguredCondFalse AgentNotReady
 │   ├── check DRBDR DRBDConfigured condition → ApplyingConfiguration / ConfigurationFailed
@@ -93,6 +95,8 @@ Reconcile (root) [Pure orchestration]
 ├── flow.MergeEnsures (all ensures are independent)
 │   ├── ensureStatusAddressesAndType ← details
 │   │   └── updates rvr.Status.Addresses and rvr.Status.Type from DRBDR
+│   ├── ensureStatusSize
+│   │   └── updates rvr.Status.Size from drbdr.Status.Size
 │   ├── ensureStatusAttachment ← details
 │   │   └── applyRVRAttachment
 │   ├── ensureStatusPeers ← details
@@ -146,7 +150,8 @@ flowchart TD
 
     subgraph StatusBlock ["Status Ensure (MergeEnsures)"]
         AddrType[ensureStatusAddressesAndType]
-        AddrType --> StatusAttach[ensureStatusAttachment]
+        AddrType --> StatusSize[ensureStatusSize]
+        StatusSize --> StatusAttach[ensureStatusAttachment]
         StatusAttach --> Peers[ensureStatusPeers]
         Peers --> BVStatus[ensureStatusBackingVolume]
         BVStatus --> StatusQuorum[ensureStatusQuorum]
@@ -211,6 +216,7 @@ Indicates whether the replica's DRBD resource is configured.
 | False | PendingDatameshJoin | DRBD preconfigured, waiting for datamesh membership (not deleting) |
 | False | PendingScheduling | Waiting for node assignment |
 | False | WaitingForBackingVolume | Waiting for backing volume (creating, resizing, or replacing) |
+| False | WaitingForDRBDResize | Waiting for DRBD device to confirm target usable size after resize |
 | Unknown | ApplyingConfiguration | Waiting for agent to apply DRBD configuration |
 | Unknown | WaitingForReplicatedVolume | Waiting for ReplicatedVolume or ReplicatedStoragePool to be ready |
 
@@ -318,7 +324,7 @@ Phase evaluation splits into two paths based on datamesh membership (`datameshRe
 | Synchronizing | BackingVolumeUpToDate=False/Synchronizing |
 | Degraded | Ready=True but serious problems: disk Failed, NotConnected, AttachmentFailed, ProvisioningFailed, ResizeFailed, ConfigurationFailed |
 | PartiallyDegraded | Ready=True but minor problems: PartiallyConnected, RequiresSynchronization, wrong node, DetachmentFailed |
-| Progressing | No health problems, but operational change in progress: resize, type conversion, DRBD reconfig |
+| Progressing | No health problems, but operational change in progress: resize, type conversion, DRBD reconfig, DRBD resize |
 | Healthy | Ready=True, no problems, no in-progress changes |
 
 Message is sourced from the most relevant condition for the current phase, enriched with problem descriptions (`. Problem text`) for member health phases. For Progressing, the progress description is appended to the Ready message. For the pre-member default fallback (Configuring), the first non-True condition message is used in priority order: DRBDConfigured, BackingVolumeReady, Ready.
@@ -331,6 +337,7 @@ The controller manages the following status fields on RVR:
 |-------|-------------|--------|
 | `addresses` | DRBD addresses assigned to this replica | From DRBDR status |
 | `attachment` | Device attachment info (device path, I/O suspended) | From DRBDR status |
+| `size` | Usable capacity of the DRBD device in bytes | From DRBDR status.size |
 | `type` | Observed DRBD type (Diskful/Diskless) | From DRBDR status.activeConfiguration.type |
 | `backingVolume` | Backing volume info (size, state, LVG name, thin pool) | From DRBDR + LLV status |
 | `datameshRequest` | Datamesh membership requests (join/leave/role change/BV change) | Computed from spec vs status |
@@ -471,6 +478,8 @@ The backing volume size is taken as `max(rv.Spec.Size, rv.Status.Datamesh.Size)`
 | Label | `sds-replicated-volume.deckhouse.io/lvm-volume-group` | RVR | Link to LVMVolumeGroup |
 | Label | `sds-replicated-volume.deckhouse.io/replicated-volume` | LLV | Link to parent ReplicatedVolume |
 | Label | `sds-replicated-volume.deckhouse.io/replicated-storage-class` | LLV | Link to ReplicatedStorageClass |
+| Label | `sds-replicated-volume.deckhouse.io/replicated-volume` | DRBDResource | Link to parent ReplicatedVolume |
+| Label | `sds-replicated-volume.deckhouse.io/replicated-storage-class` | DRBDResource | Link to ReplicatedStorageClass |
 | OwnerRef | controller reference | LLV | Owner reference to RVR |
 | OwnerRef | controller reference | DRBDResource | Owner reference to RVR |
 
@@ -503,7 +512,8 @@ Intentionally empty: we need to react to all DRBDResource fields.
 
 ### RV Predicates
 
-- Reacts to DatameshRevision changes (covers Size, membership changes, member type changes)
+- Reacts to DatameshRevision changes (covers membership, datamesh size, member type changes)
+- Reacts to Spec.Size changes (for eager LLV resize before datamesh transition)
 - Reacts to Spec.ReplicatedStorageClassName changes (for labels)
 - Reacts to DatameshReplicaRequests message changes (for condition message enrichment)
 - Does not react to Create/Delete (RVRs handle their own lifecycle)
@@ -574,6 +584,7 @@ flowchart TD
 
     subgraph statusEnsure [Status Ensure]
         EnsureStatusAddrType[ensureStatusAddressesAndType]
+        EnsureStatusSize[ensureStatusSize]
         EnsureStatusAttach[ensureStatusAttachment]
         EnsureStatusPeers[ensureStatusPeers]
         EnsureBVStatus[ensureStatusBackingVolume]
@@ -611,6 +622,7 @@ flowchart TD
     ReconcileDRBD -->|drbdrReconciliationCache| RVRStatusFields
 
     DRBDR --> EnsureStatusAddrType
+    DRBDR --> EnsureStatusSize
     DRBDR --> EnsureStatusAttach
     DRBDR --> EnsureStatusPeers
     DRBDR --> EnsureBVStatus
@@ -622,6 +634,7 @@ flowchart TD
     LLVs --> EnsureBVStatus
 
     EnsureStatusAddrType -->|addresses, type| RVRStatusFields
+    EnsureStatusSize -->|size| RVRStatusFields
     EnsureStatusAttach -->|attachment| RVRStatusFields
     EnsureStatusPeers -->|peers| RVRStatusFields
     EnsureBVStatus -->|backingVolume| RVRStatusFields
@@ -735,6 +748,7 @@ flowchart TD
 | BackingVolumeReady | False/NotReady | `Backing volume not ready` |
 | DRBDConfigured | Unknown/ApplyingConfiguration | `Applying DRBD configuration` |
 | DRBDConfigured | False/WaitingForBackingVolume | `Waiting for backing volume` |
+| DRBDConfigured | False/WaitingForDRBDResize | `Waiting for DRBD resize` |
 
 **Data Flow**:
 
@@ -861,8 +875,10 @@ flowchart TD
 
     CheckDRBDRExists -->|Yes| CheckNeedsUpdate{Spec needs update?}
     CheckNeedsUpdate -->|Yes| PatchDRBDR[Patch DRBDR]
-    PatchDRBDR --> UpdateStatus1
-    CheckNeedsUpdate -->|No| UpdateStatus1
+    PatchDRBDR --> EnsureMeta
+    CheckNeedsUpdate -->|No| EnsureMeta
+
+    EnsureMeta["Ensure DRBDR metadata\n(ownerRef, finalizer, labels)"] --> UpdateStatus1[Update reconciliation cache]
 
     UpdateStatus1 --> CheckAgent{Agent ready?}
     CheckAgent -->|No| SetAgentNA[DRBDConfigured=False AgentNotReady]
@@ -896,7 +912,11 @@ flowchart TD
     CheckResize -->|Yes| SetWaitBV3[DRBDConfigured=False WaitingForBackingVolume]
     SetWaitBV3 --> End11([Done])
 
-    CheckResize -->|No| CheckMember{Datamesh member?}
+    CheckResize -->|No| CheckDRBDSize{"DRBD diskful AND\nstatus.size < spec.size?"}
+    CheckDRBDSize -->|Yes| SetWaitResize[DRBDConfigured=False WaitingForDRBDResize]
+    SetWaitResize --> End11b([Done])
+
+    CheckDRBDSize -->|No| CheckMember{Datamesh member?}
     CheckMember -->|No| CheckWasMember{Was member?<br/>DatameshRevision > 0}
     CheckWasMember -->|Yes| ResetRevision["Reset DatameshRevision to 0,<br/>DatameshRevisionObservedByAgent to 0<br/>DRBDConfigured=True Configured<br/>(removed from datamesh)"]
     ResetRevision --> End7a([Done])

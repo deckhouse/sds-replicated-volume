@@ -2773,6 +2773,16 @@ var _ = Describe("computeMemberProgress", func() {
 		Expect(msg).To(Equal("Applying DRBD configuration"))
 	})
 
+	It("returns progress for WaitingForDRBDResize", func() {
+		drbdConfigured := &metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			Status: metav1.ConditionFalse,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForDRBDResize,
+		}
+		msg := computeMemberProgress(nil, drbdConfigured)
+		Expect(msg).To(Equal("Waiting for DRBD resize"))
+	})
+
 	It("joins multiple progress triggers", func() {
 		bvReady := &metav1.Condition{
 			Type:   v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,

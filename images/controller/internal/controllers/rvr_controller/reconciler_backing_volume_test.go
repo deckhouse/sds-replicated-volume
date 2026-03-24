@@ -993,6 +993,33 @@ var _ = Describe("isLLVMetadataInSync", func() {
 
 		Expect(isLLVMetadataInSync(rvr, rv, llv)).To(BeTrue())
 	})
+
+	It("returns false when RSC label is stale (RSC cleared on RV)", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+		}
+		llv := &snc.LVMLogicalVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "llv-1",
+				Finalizers: []string{v1alpha1.RVRControllerFinalizer},
+				Labels: map[string]string{
+					v1alpha1.ReplicatedStorageClassLabelKey: "old-rsc",
+				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         v1alpha1.SchemeGroupVersion.String(),
+						Kind:               "ReplicatedVolumeReplica",
+						Name:               "rvr-1",
+						UID:                "uid-1",
+						Controller:         boolPtr(true),
+						BlockOwnerDeletion: boolPtr(true),
+					},
+				},
+			},
+		}
+
+		Expect(isLLVMetadataInSync(rvr, rv, llv)).To(BeFalse())
+	})
 })
 
 var _ = Describe("isLLVReady", func() {
@@ -1108,6 +1135,29 @@ var _ = Describe("applyLLVMetadata", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(changed).To(BeTrue())
 		Expect(obju.HasControllerRef(llv, rvr)).To(BeTrue())
+	})
+
+	It("removes stale RSC label when RSC is cleared on RV", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+		}
+		llv := &snc.LVMLogicalVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "llv-1",
+				Labels: map[string]string{
+					v1alpha1.ReplicatedStorageClassLabelKey: "old-rsc",
+				},
+			},
+		}
+
+		changed, err := applyLLVMetadata(scheme, rvr, rv, llv)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeTrue())
+		Expect(obju.HasLabel(llv, v1alpha1.ReplicatedStorageClassLabelKey)).To(BeFalse())
 	})
 
 	It("returns false when nothing changes (idempotent)", func() {
