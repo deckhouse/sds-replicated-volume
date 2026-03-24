@@ -186,22 +186,18 @@ func generateDeviceUUID() string {
 func computeAttachActions(aState ActualNonAttachedDiskMetadata, statusUUID string, minor *uint, backingDev string) DRBDActions {
 	var actions DRBDActions
 
-	if aState.HasMetadata() {
+	if aState.HasMetadata() && statusUUID != "" {
 		diskUUID := aState.DiskDeviceUUID()
 		switch {
 		case diskUUID != "" && statusUUID == diskUUID:
 			// Match — proceed to attach.
-		case diskUUID != "" && statusUUID != "" && statusUUID != diskUUID:
+		case diskUUID != "" && statusUUID != diskUUID:
 			return DRBDActions{FailAction{Err: ConfiguredReasonError(
 				fmt.Errorf("backing device %s has device-uuid %s, DRBDResource expects %s", backingDev, diskUUID, statusUUID),
 				v1alpha1.DRBDResourceCondConfiguredReasonForeignDiskDetected,
 			)}}
-		case diskUUID != "" && statusUUID == "":
-			// Adopt from disk — proceed to attach.
-		case diskUUID == "" && statusUUID != "":
+		case diskUUID == "":
 			actions = append(actions, WriteDeviceUUIDAction{Minor: minor, BackingDev: backingDev, UUID: statusUUID})
-		default:
-			actions = append(actions, WriteDeviceUUIDAction{Minor: minor, BackingDev: backingDev, UUID: generateDeviceUUID()})
 		}
 		actions = append(actions, ApplyALAction{Minor: minor, BackingDev: backingDev})
 	} else {
