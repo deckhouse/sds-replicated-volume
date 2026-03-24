@@ -235,6 +235,11 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	Type DRBDResourceType `json:"type,omitempty"`
 
+	// Size is the usable capacity of the DRBD device in bytes.
+	// Nil when the replica is diskless or down.
+	// +optional
+	Size *resource.Quantity `json:"size,omitempty"`
+
 	// BackingVolume contains information about the backing LVM logical volume.
 	// Only set for Diskful replicas.
 	// +optional

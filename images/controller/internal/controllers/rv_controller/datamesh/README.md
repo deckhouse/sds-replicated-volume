@@ -21,6 +21,8 @@ The controller manages the full lifecycle of a datamesh:
   and detaching when no longer needed.
 - **Network** — repairing addresses when IPs change and migrating between
   system networks.
+- **Resize** — growing the volume when rv.Spec.Size increases, coordinating
+  backing volume growth and DRBD resize across all diskful members.
 - **Failure recovery** — when a node is permanently lost (removed from
   Kubernetes), the controller automatically force-detaches and force-removes
   the dead member, then restores the target layout by creating new replicas.
@@ -583,6 +585,7 @@ re-checks what needs to happen next.
 | **Attachment** | Primary/Secondary mode changes | Attach, Detach |
 | **Multiattach** | Dual-Primary mode toggle | EnableMultiattach, DisableMultiattach |
 | **Network** | IP address and network updates | RepairNetworkAddresses, ChangeSystemNetworks |
+| **Resize** | Volume size changes | ResizeVolume |
 | **Emergency** | Recovery from damaged states | ForceRemoveReplica, ForceDetach |
 
 ### Parallelism rules
@@ -604,6 +607,10 @@ Some transitions can run concurrently; others must be serialized:
 - **Network**: serialized. Blocks VotingMembership and Quorum (addresses
   must be stable before voter/quorum changes). Not blocked by
   VotingMembership or Quorum (semi-emergency: repair is urgent).
+- **Resize**: serialized — at most one active at a time. Mutually exclusive
+  with disk-gaining membership transitions (AddReplica D/sD,
+  ChangeReplicaType to D/sD). Independent from Quorum, Attachment,
+  Multiattach, and Network.
 - **Formation**: blocks everything except Network and Emergency.
 - **Emergency**: always admitted. Cancels conflicting transitions for the
   affected replica (CancelActiveOnCreate) rather than blocking them.

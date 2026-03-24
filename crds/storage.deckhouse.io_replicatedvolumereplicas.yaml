@@ -483,6 +483,15 @@ spec:
                 - connectedTieBreakerPeers
                 - connectedUpToDatePeers
                 type: object
+              size:
+                anyOf:
+                - type: integer
+                - type: string
+                description: |-
+                  Size is the usable capacity of the DRBD device in bytes.
+                  Nil when the replica is diskless or down.
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
               type:
                 description: |-
                   Type reflects the currently observed DRBD configuration type

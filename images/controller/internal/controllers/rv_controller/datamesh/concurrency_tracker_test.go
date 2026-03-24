@@ -539,4 +539,167 @@ var _ = Describe("concurrencyTracker", func() {
 		allowed, _, _ = tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership, "rv-1-0"))
 		Expect(allowed).To(BeTrue())
 	})
+
+	// ── Resize group ──
+
+	It("Resize serialized: duplicate blocked", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		tracker.Add(mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeResizeVolume,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupResize,
+			"",
+		))
+		allowed, msg, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupResize, ""))
+		Expect(allowed).To(BeFalse())
+		Expect(msg).To(ContainSubstring("resize in progress"))
+	})
+
+	It("Resize blocked by disk-gaining AddReplica(D)", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		addD := mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			"rv-1-0",
+		)
+		addD.ReplicaType = v1alpha1.ReplicaTypeDiskful
+		tracker.Add(addD)
+
+		allowed, msg, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupResize, ""))
+		Expect(allowed).To(BeFalse())
+		Expect(msg).To(ContainSubstring("disk-gaining"))
+	})
+
+	It("Resize NOT blocked by RemoveReplica(D)", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		removeD := mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			"rv-1-0",
+		)
+		removeD.ReplicaType = v1alpha1.ReplicaTypeDiskful
+		tracker.Add(removeD)
+
+		allowed, _, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupResize, ""))
+		// Not blocked by disk-gaining (RemoveReplica is not disk-gaining),
+		// but blocked by VotingMembership serialization rule? No — Resize
+		// has no mutual exclusion with VotingMembership in general.
+		// Only disk-gaining transitions block Resize.
+		Expect(allowed).To(BeTrue())
+	})
+
+	It("disk-gaining AddReplica(D) blocked by active Resize", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		tracker.Add(mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeResizeVolume,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupResize,
+			"",
+		))
+
+		addD := &dmte.Transition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			ReplicaName: "rv-1-5",
+			ReplicaType: v1alpha1.ReplicaTypeDiskful,
+		}
+		allowed, msg, _ := tracker.CanAdmit(addD)
+		Expect(allowed).To(BeFalse())
+		Expect(msg).To(ContainSubstring("resize in progress"))
+	})
+
+	It("disk-gaining AddReplica(sD) blocked by active Resize", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		tracker.Add(mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeResizeVolume,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupResize,
+			"",
+		))
+
+		addSD := &dmte.Transition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+			ReplicaName: "rv-1-5",
+			ReplicaType: v1alpha1.ReplicaTypeShadowDiskful,
+		}
+		allowed, msg, _ := tracker.CanAdmit(addSD)
+		Expect(allowed).To(BeFalse())
+		Expect(msg).To(ContainSubstring("resize in progress"))
+	})
+
+	It("non-disk-gaining AddReplica(A) NOT blocked by active Resize", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		tracker.Add(mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeResizeVolume,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupResize,
+			"",
+		))
+
+		addA := &dmte.Transition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership,
+			ReplicaName: "rv-1-5",
+			ReplicaType: v1alpha1.ReplicaTypeAccess,
+		}
+		allowed, _, _ := tracker.CanAdmit(addA)
+		Expect(allowed).To(BeTrue())
+	})
+
+	It("Remove disk-gaining unblocks Resize", func() {
+		tracker := newConcurrencyTracker(&globalContext{})
+		addD := mkTransition(
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
+			v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			"rv-1-0",
+		)
+		addD.ReplicaType = v1alpha1.ReplicaTypeDiskful
+		tracker.Add(addD)
+
+		allowed, _, _ := tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupResize, ""))
+		Expect(allowed).To(BeFalse())
+
+		tracker.Remove(addD)
+
+		allowed, _, _ = tracker.CanAdmit(mkProposal(v1alpha1.ReplicatedVolumeDatameshTransitionGroupResize, ""))
+		Expect(allowed).To(BeTrue())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// isDiskGainingTransition
+//
+
+var _ = Describe("isDiskGainingTransition", func() {
+	It("returns true for AddReplica Diskful", func() {
+		t := &dmte.Transition{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica, ReplicaType: v1alpha1.ReplicaTypeDiskful}
+		Expect(isDiskGainingTransition(t)).To(BeTrue())
+	})
+
+	It("returns true for AddReplica ShadowDiskful", func() {
+		t := &dmte.Transition{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica, ReplicaType: v1alpha1.ReplicaTypeShadowDiskful}
+		Expect(isDiskGainingTransition(t)).To(BeTrue())
+	})
+
+	It("returns true for ChangeReplicaType to Diskful", func() {
+		t := &dmte.Transition{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType, ToReplicaType: v1alpha1.ReplicaTypeDiskful}
+		Expect(isDiskGainingTransition(t)).To(BeTrue())
+	})
+
+	It("returns true for ChangeReplicaType to ShadowDiskful", func() {
+		t := &dmte.Transition{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType, ToReplicaType: v1alpha1.ReplicaTypeShadowDiskful}
+		Expect(isDiskGainingTransition(t)).To(BeTrue())
+	})
+
+	It("returns false for AddReplica Access", func() {
+		t := &dmte.Transition{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica, ReplicaType: v1alpha1.ReplicaTypeAccess}
+		Expect(isDiskGainingTransition(t)).To(BeFalse())
+	})
+
+	It("returns false for RemoveReplica Diskful", func() {
+		t := &dmte.Transition{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica, ReplicaType: v1alpha1.ReplicaTypeDiskful}
+		Expect(isDiskGainingTransition(t)).To(BeFalse())
+	})
+
+	It("returns false for ChangeReplicaType to Access", func() {
+		t := &dmte.Transition{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType, ToReplicaType: v1alpha1.ReplicaTypeAccess}
+		Expect(isDiskGainingTransition(t)).To(BeFalse())
+	})
 })

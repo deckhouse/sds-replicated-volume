@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
@@ -104,6 +105,32 @@ func ensureStatusAddressesAndType(
 	}
 	if rvr.Status.Type != typ {
 		rvr.Status.Type = typ
+		changed = true
+	}
+
+	return ef.Ok().ReportChangedIf(changed)
+}
+
+// ensureStatusSize ensures rvr.Status.Size reflects the DRBD usable capacity from drbdr.Status.Size.
+func ensureStatusSize(
+	ctx context.Context,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	drbdr *v1alpha1.DRBDResource,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "status-size")
+	defer ef.OnEnd(&outcome)
+
+	var target *resource.Quantity
+	if drbdr != nil && drbdr.Status.Size != nil {
+		q := drbdr.Status.Size.DeepCopy()
+		target = &q
+	}
+
+	changed := false
+	currentNil := rvr.Status.Size == nil
+	targetNil := target == nil
+	if currentNil != targetNil || (!currentNil && !rvr.Status.Size.Equal(*target)) {
+		rvr.Status.Size = target
 		changed = true
 	}
 

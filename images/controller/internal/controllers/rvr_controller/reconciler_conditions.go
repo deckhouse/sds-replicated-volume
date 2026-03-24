@@ -1124,6 +1124,10 @@ func computeMemberProgress(bvReady, drbdConfigured *metav1.Condition) string {
 			drbdConfigured.Reason == v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForBackingVolume {
 			addPart("Waiting for backing volume")
 		}
+		if drbdConfigured.Status == metav1.ConditionFalse &&
+			drbdConfigured.Reason == v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForDRBDResize {
+			addPart("Waiting for DRBD resize")
+		}
 	}
 
 	return parts

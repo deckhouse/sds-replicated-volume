@@ -16,7 +16,7 @@ controller restarts. Each transition has:
 
 - **Type** — what it does (e.g., AddReplica, Attach, ChangeQuorum).
 - **Group** — concurrency category (e.g., VotingMembership, Attachment).
-  Determines which transitions can run in parallel (see §14).
+  Determines which transitions can run in parallel (see §11).
 - **Plan** — a versioned sequence of steps, selected at creation time based
   on the current state (e.g., voter parity, feature flags).
 - **Steps** — ordered actions, each with an apply callback (mutates state)
@@ -162,7 +162,7 @@ boundary, see [LAYOUTS_PROCEDURES.md](LAYOUTS_PROCEDURES.md).
 that is currently attached (serving IO), it uses ChangeReplicaType instead of
 RemoveReplica: D → sD (Flant DRBD) or D → A (without Flant DRBD). The
 converted member stays in the datamesh and continues serving IO. See
-preconditions (§12) for the NotAttached guard that enforces this.
+preconditions (§9) for the NotAttached guard that enforces this.
 
 ### 2.3 ForceRemoveReplica
 
@@ -184,7 +184,7 @@ without waiting for the dead replica to confirm.
 **Key properties:**
 
 - **Emergency group**: ForceRemoveReplica is always admitted by the
-  parallelism tracker, regardless of other active transitions (see §14).
+  parallelism tracker, regardless of other active transitions (see §11).
 
 - **CancelActiveOnCreate**: any in-progress transition for the dead member
   is cancelled before the ForceRemoveReplica is created. This prevents
@@ -195,7 +195,7 @@ without waiting for the dead replica to confirm.
   configuration to match reality.
 
 - **ForceDetach required first**: if the dead member is still marked as
-  attached (serving IO), a ForceDetach (see §7) must be performed first to
+  attached (serving IO), a ForceDetach (see §4) must be performed first to
   clear the attachment flag before removal.
 
 - **Dead member excluded from confirmation**: after removal, the dead
@@ -616,7 +616,47 @@ members confirm the DatameshRevision.
 
 ---
 
-## 7. Step Confirmation Rules
+## 7. Resize Transitions
+
+The Resize transition group handles volume growth when `rv.Spec.Size`
+increases beyond the current `datamesh.Size`. Only growing is supported —
+shrinking is not.
+
+### ResizeVolume
+
+| Property | Value |
+|----------|-------|
+| Type | ResizeVolume |
+| Scope | Global |
+| Group | Resize |
+| Plan | `resize/v1` |
+| Steps | 1 |
+| DisplayName | "Resizing volume" |
+
+**Trigger**: `datamesh.Size < rv.Spec.Size`.
+
+**Step 1 (resize)**: sets `datamesh.Size = rv.Spec.Size`. Confirmation:
+all datamesh members must confirm the new DatameshRevision.
+
+**How it works end-to-end**: the rvr\_controller eagerly grows LVM logical
+volumes before the transition starts (via `max(rv.Spec.Size, datamesh.Size)`
+in `computeIntendedBackingVolume`). Once all backing volumes have grown, the
+transition dispatches and sets the new datamesh size. Each rvr\_controller
+then patches the corresponding DRBDResource `spec.size` to the new value.
+The agent runs `drbdsetup resize`, and the rvr\_controller gates
+`datameshRevision` on `drbdr.Status.Size >= drbdr.Spec.Size` (step 13c).
+The standard revision-based confirm thus implicitly waits for the DRBD
+resize to complete on every member.
+
+**Preconditions**: see §10.
+
+**Parallelism**: serialized (one at a time). Mutually exclusive with
+disk-gaining membership transitions (AddReplica D/sD, ChangeReplicaType
+to D/sD). See §11.
+
+---
+
+## 8. Step Confirmation Rules
 
 Each multi-step transition publishes a new DatameshRevision at each step and
 waits for confirmation from the affected replicas. The confirmation scope
@@ -714,7 +754,7 @@ confirmation sets; the step completes immediately.
 
 ---
 
-## 8. Preconditions: Membership
+## 9. Preconditions: Membership
 
 Guards are evaluated in order before a transition is created. The first
 blocking guard stops the pipeline. For GMDR/FTT formulas referenced below,
@@ -831,7 +871,7 @@ normal RemoveReplica instead.
 
 ---
 
-## 9. Preconditions: Attachment and Network
+## 10. Preconditions: Attachment, Network, and Resize
 
 ### Preconditions for Attach
 
@@ -887,9 +927,17 @@ Guards depend on the plan variant:
 | update/v1 | **RemainingNetworksConnected** + **NodesHaveAddedNetworks** | Both conditions |
 | migrate/v1 | **NodesHaveAddedNetworks** | Every added network available on every node *(not yet enforced)* |
 
+### Preconditions for ResizeVolume
+
+| # | Guard | Condition | Blocked message |
+|---|-------|-----------|-----------------|
+| 1 | **HasReadyDiskfulMember** | At least one diskful member has Ready=True | "no ready diskful member" |
+| 2 | **NoActiveResync** | No diskful member has a peer in a syncing replication state | "replica NAME has peer PEER in state STATE" |
+| 3 | **BackingVolumesGrown** | All diskful members' backing volume size >= target lower size | "backing volume on replica NAME not grown yet (SIZE, need >= TARGET)" |
+
 ---
 
-## 10. Transition Parallelism
+## 11. Transition Parallelism
 
 Transitions are grouped by what they affect. Parallelism rules determine which
 groups can run concurrently and which are mutually exclusive.
@@ -905,6 +953,7 @@ groups can run concurrently and which are mutually exclusive.
 | **Attachment** | Primary/Secondary | Attach, Detach |
 | **Multiattach** | Dual-Primary toggle | EnableMultiattach, DisableMultiattach |
 | **Network** | Address/network repair | RepairNetworkAddresses, ChangeSystemNetworks |
+| **Resize** | Volume size changes | ResizeVolume |
 | **Emergency** | Dead member recovery | ForceRemoveReplica, ForceDetach |
 
 ### Per-group rules
@@ -936,6 +985,13 @@ groups can run concurrently and which are mutually exclusive.
   may already be degraded. The repair is safe alongside in-progress
   voter/quorum transitions because it only mutates addresses, not topology or
   quorum values.
+
+- **Resize**: serialized — at most one Resize at a time. Mutually exclusive
+  with **disk-gaining** membership transitions: AddReplica(D/sD) and
+  ChangeReplicaType(→D/→sD). Both resize and disk-gaining transitions lead
+  to resync; running them concurrently would be unsafe. Non-disk-gaining
+  membership (AddReplica A/TB, RemoveReplica, ChangeType away from disk),
+  Quorum, Attachment, Multiattach, and Network are independent.
 
 - **Formation**: blocks everything except Network and Emergency. During
   initial volume creation, no membership, quorum, or attachment transitions

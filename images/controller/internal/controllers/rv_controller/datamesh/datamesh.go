@@ -47,6 +47,7 @@ func BuildRegistry() {
 	registerQuorumPlans(registry)
 	registerAttachmentPlans(registry)
 	registerNetworkPlans(registry)
+	registerResizePlans(registry)
 }
 
 // PlanStepCount returns the number of steps for the given transition type
@@ -97,6 +98,7 @@ func ProcessTransitions(
 		quorumDispatcher(),
 		membershipDispatcher(),
 		attachmentDispatcher(),
+		resizeDispatcher(),
 	}
 	tracker := newConcurrencyTracker(gctx)
 	engine := dmte.NewEngine(ctx, registry, tracker, dispatchers,
