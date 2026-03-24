@@ -230,6 +230,17 @@ func (s *Store) NodePublishVolumeFS(source, devPath, target, fsType string, moun
 		return nil
 	}
 
+	// Guard: if the staging mount was lost (e.g. DRBD quorum loss, LV
+	// deactivation), source is a plain directory on the root FS.  Bind-mounting
+	// it would silently expose the wrong data to the pod.
+	sourceMounted, err := s.NodeStorage.IsMountPoint(source)
+	if err != nil {
+		return fmt.Errorf("[NodePublishVolumeFS] failed to check if staging path %q is a mount point: %w", source, err)
+	}
+	if !sourceMounted {
+		return fmt.Errorf("[NodePublishVolumeFS] staging path %q is not a mount point; the staging mount may have been lost (e.g. DRBD quorum loss)", source)
+	}
+
 	err = s.NodeStorage.Mount(source, target, fsType, mountOpts)
 	if err != nil {
 		return fmt.Errorf("[NodePublishVolumeFS] failed to bind mount %q to %q with mount options %v: %w", source, target, mountOpts, err)

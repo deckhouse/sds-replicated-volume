@@ -233,40 +233,6 @@ func removervdeletepropagationIfExist(ctx context.Context, kc client.Client, log
 	return false, fmt.Errorf("after %d attempts of removing finalizer %s from ReplicatedVolume %s, last error: %w", KubernetesAPIRequestLimit, finalizer, rv.Name, nil)
 }
 
-// GetReplicatedVolumeReplicaForNode gets ReplicatedVolumeReplica for a specific node
-func GetReplicatedVolumeReplicaForNode(ctx context.Context, kc client.Client, volumeName, nodeName string) (*srv.ReplicatedVolumeReplica, error) {
-	rvrList := &srv.ReplicatedVolumeReplicaList{}
-	err := kc.List(
-		ctx,
-		rvrList,
-		client.MatchingLabels{
-			srv.ReplicatedVolumeLabelKey: volumeName,
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	for i := range rvrList.Items {
-		if rvrList.Items[i].Spec.NodeName == nodeName {
-			return &rvrList.Items[i], nil
-		}
-	}
-
-	return nil, fmt.Errorf("ReplicatedVolumeReplica not found for volume %s on node %s", volumeName, nodeName)
-}
-
-// GetDRBDDevicePath gets DRBD device path from ReplicatedVolumeReplica status
-func GetDRBDDevicePath(rvr *srv.ReplicatedVolumeReplica) (string, error) {
-	if rvr.Status.Attachment == nil {
-		return "", fmt.Errorf("replica is not attached")
-	}
-	if rvr.Status.Attachment.DevicePath == "" {
-		return "", fmt.Errorf("device path not available")
-	}
-	return rvr.Status.Attachment.DevicePath, nil
-}
-
 // ExpandReplicatedVolume expands a ReplicatedVolume
 func ExpandReplicatedVolume(ctx context.Context, kc client.Client, rv *srv.ReplicatedVolume, newSize resource.Quantity) error {
 	rv.Spec.Size = newSize
@@ -324,6 +290,18 @@ func truncateString(s string, maxLen int) string {
 	out = strings.TrimSuffix(out, "-")
 	out = strings.TrimSuffix(out, ".")
 	return out
+}
+
+func GetDevicePathFromRVA(ctx context.Context, kc client.Client, volumeName, nodeName string) (string, error) {
+	rvaName := BuildRVAName(volumeName, nodeName)
+	rva := &srv.ReplicatedVolumeAttachment{}
+	if err := kc.Get(ctx, client.ObjectKey{Name: rvaName}, rva); err != nil {
+		return "", fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
+	}
+	if rva.Status.DevicePath == "" {
+		return "", fmt.Errorf("device path not available in ReplicatedVolumeAttachment %s (phase=%s)", rvaName, rva.Status.Phase)
+	}
+	return rva.Status.DevicePath, nil
 }
 
 func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) (string, error) {
