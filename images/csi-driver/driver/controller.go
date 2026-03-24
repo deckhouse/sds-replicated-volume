@@ -170,10 +170,9 @@ func (d *Driver) DeleteVolume(ctx context.Context, request *csi.DeleteVolumeRequ
 		return nil, status.Error(codes.InvalidArgument, "Volume ID cannot be empty")
 	}
 
-	// Delete RVAs first to avoid orphaned attachments (e.g. WFFC where ControllerUnpublishVolume was never called).
-	if err := utils.DeleteRVAsForVolume(ctx, d.cl, d.log, traceID, request.VolumeId); err != nil {
-		d.log.Error(err, "error DeleteRVAsForVolume")
-		return nil, err
+	if err := utils.CheckNoRVAsExist(ctx, d.cl, d.log, traceID, request.VolumeId); err != nil {
+		d.log.Error(err, fmt.Sprintf("[DeleteVolume][traceID:%s][volumeID:%s] cannot delete volume while RVAs exist", traceID, request.VolumeId))
+		return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
 	}
 
 	err := utils.DeleteReplicatedVolume(ctx, d.cl, d.log, traceID, request.VolumeId)

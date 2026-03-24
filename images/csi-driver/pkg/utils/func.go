@@ -315,6 +315,10 @@ func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 				rvaName, existing.Spec.ReplicatedVolumeName, existing.Spec.NodeName,
 			)
 		}
+		if existing.DeletionTimestamp != nil {
+			return "", fmt.Errorf("ReplicatedVolumeAttachment %s is being deleted (phase=%s); cannot publish volume until deletion completes",
+				rvaName, existing.Status.Phase)
+		}
 		if !slices.Contains(existing.Finalizers, SDSReplicatedVolumeCSIFinalizer) {
 			existing.Finalizers = append(existing.Finalizers, SDSReplicatedVolumeCSIFinalizer)
 			if err := kc.Update(ctx, existing); err != nil {
@@ -359,6 +363,10 @@ func DeleteRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 		return fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
 	}
 
+	if rva.Status.InUse != nil && *rva.Status.InUse {
+		return fmt.Errorf("ReplicatedVolumeAttachment %s is still in use on node %s, cannot delete", rvaName, nodeName)
+	}
+
 	if slices.Contains(rva.Finalizers, SDSReplicatedVolumeCSIFinalizer) {
 		rva.Finalizers = slices.DeleteFunc(rva.Finalizers, func(s string) bool { return s == SDSReplicatedVolumeCSIFinalizer })
 		if err := kc.Update(ctx, rva); err != nil {
@@ -374,36 +382,24 @@ func DeleteRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 	return nil
 }
 
-// DeleteRVAsForVolume lists all RVAs for the given volume and deletes them.
-// This cleans up orphaned RVAs when DeleteVolume is called (e.g. WFFC case where
-// ControllerUnpublishVolume was never invoked).
-func DeleteRVAsForVolume(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName string) error {
+// CheckNoRVAsExist lists RVAs for the given volume and returns an error if any
+// still exist. This prevents deleting a ReplicatedVolume while it has active
+// attachments.
+func CheckNoRVAsExist(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName string) error {
 	list := &srv.ReplicatedVolumeAttachmentList{}
 	if err := kc.List(ctx, list); err != nil {
 		return fmt.Errorf("list ReplicatedVolumeAttachments: %w", err)
 	}
-	var toDelete []srv.ReplicatedVolumeAttachment
+	var remaining []string
 	for _, rva := range list.Items {
 		if rva.Spec.ReplicatedVolumeName == volumeName {
-			toDelete = append(toDelete, rva)
+			remaining = append(remaining, rva.Name)
 		}
 	}
-	for _, rva := range toDelete {
-		if slices.Contains(rva.Finalizers, SDSReplicatedVolumeCSIFinalizer) {
-			rva.Finalizers = slices.DeleteFunc(rva.Finalizers, func(s string) bool { return s == SDSReplicatedVolumeCSIFinalizer })
-			if err := kc.Update(ctx, &rva); err != nil {
-				return fmt.Errorf("remove finalizer from ReplicatedVolumeAttachment %s: %w", rva.Name, err)
-			}
-			log.Info(fmt.Sprintf("[DeleteRVAsForVolume][traceID:%s][volumeID:%s] Removed finalizer from RVA %s", traceID, volumeName, rva.Name))
-		}
-		log.Info(fmt.Sprintf("[DeleteRVAsForVolume][traceID:%s][volumeID:%s] Deleting ReplicatedVolumeAttachment %s (node=%s)", traceID, volumeName, rva.Name, rva.Spec.NodeName))
-		if err := kc.Delete(ctx, &rva); err != nil && !kerrors.IsNotFound(err) {
-			return fmt.Errorf("delete ReplicatedVolumeAttachment %s: %w", rva.Name, err)
-		}
+	if len(remaining) > 0 {
+		return fmt.Errorf("cannot delete volume %s: %d ReplicatedVolumeAttachment(s) still exist: %v", volumeName, len(remaining), remaining)
 	}
-	if len(toDelete) > 0 {
-		log.Info(fmt.Sprintf("[DeleteRVAsForVolume][traceID:%s][volumeID:%s] Deleted %d ReplicatedVolumeAttachment(s)", traceID, volumeName, len(toDelete)))
-	}
+	log.Info(fmt.Sprintf("[CheckNoRVAsExist][traceID:%s][volumeID:%s] No RVAs found, safe to proceed with deletion", traceID, volumeName))
 	return nil
 }
 
