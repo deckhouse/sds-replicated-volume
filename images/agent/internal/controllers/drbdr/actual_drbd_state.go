@@ -332,6 +332,8 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 		status.DiskState = ""
 		status.Quorum = nil
 		status.Peers = nil
+		status.DeviceOpen = nil
+		status.DeviceIOSuspended = nil
 
 		// Keep activeConfiguration but set state to Down
 		if status.ActiveConfiguration == nil {
@@ -373,6 +375,17 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 		} else {
 			status.Size = nil
 		}
+	}
+
+	// DeviceOpen and DeviceIOSuspended are only meaningful on Primary.
+	if aState.status != nil && aState.status.Role == "Primary" && len(volumes) > 0 {
+		open := volumes[0].Open
+		status.DeviceOpen = &open
+		suspended := aState.status.Suspended
+		status.DeviceIOSuspended = &suspended
+	} else {
+		status.DeviceOpen = nil
+		status.DeviceIOSuspended = nil
 	}
 
 	// Report ActiveConfiguration

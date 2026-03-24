@@ -84,6 +84,20 @@ func TestReconciler_Reconcile(t *testing.T) {
 		}
 	}
 
+	configuredPrimaryStatus := func(resName string) drbdutils.StatusResult {
+		return drbdutils.StatusResult{
+			{
+				Name:      resName,
+				NodeID:    0,
+				Role:      "Primary",
+				Suspended: true,
+				Devices: []drbdutils.Device{
+					{Volume: 0, Minor: 1000, DiskState: "UpToDate", Quorum: true, Size: 1048316, Open: true},
+				},
+			},
+		}
+	}
+
 	configuredShow := func(resName string) *drbdutils.ShowResource {
 		return &drbdutils.ShowResource{
 			Resource: resName,
@@ -170,6 +184,14 @@ func TestReconciler_Reconcile(t *testing.T) {
 				} else if !dr.Status.Size.Equal(*wantUsableSize) {
 					t.Errorf("status.size = %s, want %s", dr.Status.Size.String(), wantUsableSize.String())
 				}
+
+				// Secondary role: DeviceOpen and DeviceIOSuspended must be nil
+				if dr.Status.DeviceOpen != nil {
+					t.Errorf("status.deviceOpen = %v, want nil (Secondary)", *dr.Status.DeviceOpen)
+				}
+				if dr.Status.DeviceIOSuspended != nil {
+					t.Errorf("status.deviceIOSuspended = %v, want nil (Secondary)", *dr.Status.DeviceIOSuspended)
+				}
 			},
 		},
 		{
@@ -185,6 +207,45 @@ func TestReconciler_Reconcile(t *testing.T) {
 			},
 			postCheck: func(t *testing.T, _ client.Client) {
 				expectDeviceSymlink(t, testDRBDRName, 1000)
+			},
+		},
+
+		{
+			name:  "state up, drbd configured as primary - reports device open and io suspended",
+			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp),
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
+				{
+					Name:         drbdutils.DRBDSetupCommand,
+					Args:         drbdutils.StatusArgs(testDRBDResName),
+					ResultOutput: mustJSON(configuredPrimaryStatus(testDRBDResName)),
+				},
+				showCmd(configuredShow(testDRBDResName)),
+				// EnsureDeviceSymlinkAction runs (filesystem only)
+				// Refresh after symlink action
+				{
+					Name:         drbdutils.DRBDSetupCommand,
+					Args:         drbdutils.StatusArgs(testDRBDResName),
+					ResultOutput: mustJSON(configuredPrimaryStatus(testDRBDResName)),
+				},
+				showCmd(configuredShow(testDRBDResName)),
+			},
+			postCheck: func(t *testing.T, cl client.Client) {
+				dr := &v1alpha1.DRBDResource{}
+				if err := cl.Get(t.Context(), client.ObjectKey{Name: testDRBDRName}, dr); err != nil {
+					t.Fatalf("failed to get DRBDResource: %v", err)
+				}
+				if dr.Status.DeviceOpen == nil {
+					t.Fatal("status.deviceOpen is nil, want non-nil (Primary)")
+				}
+				if !*dr.Status.DeviceOpen {
+					t.Error("status.deviceOpen = false, want true")
+				}
+				if dr.Status.DeviceIOSuspended == nil {
+					t.Fatal("status.deviceIOSuspended is nil, want non-nil (Primary)")
+				}
+				if !*dr.Status.DeviceIOSuspended {
+					t.Error("status.deviceIOSuspended = false, want true")
+				}
 			},
 		},
 
