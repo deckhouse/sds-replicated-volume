@@ -323,6 +323,26 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		}
 	}
 
+	// 13c. Check if DRBD device has confirmed the target usable size.
+	// During resize, the agent runs `drbdsetup resize` asynchronously. Until
+	// drbdr.Status.Size >= drbdr.Spec.Size, the replica is not fully configured.
+	if drbdr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful && drbdr.Spec.Size != nil {
+		statusSize := drbdr.Status.Size
+		if statusSize == nil || statusSize.Cmp(*drbdr.Spec.Size) < 0 {
+			var msg string
+			if statusSize != nil {
+				msg = fmt.Sprintf("DRBD resize pending: usable size %s, expected %s",
+					statusSize.String(), drbdr.Spec.Size.String())
+			} else {
+				msg = fmt.Sprintf("DRBD resize pending: usable size not yet reported, expected %s",
+					drbdr.Spec.Size.String())
+			}
+			changed = applyDRBDConfiguredCondFalse(rvr,
+				v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForDRBDResize, msg) || changed
+			return drbdr, rf.Continue().ReportChangedIf(changed)
+		}
+	}
+
 	// 14. If not a datamesh member.
 	if member == nil {
 		// If previously a datamesh member (DatameshRevision > 0) but now removed from the

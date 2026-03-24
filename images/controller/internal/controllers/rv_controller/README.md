@@ -43,6 +43,7 @@ ensure metadata (finalizer + labels)
 
 if config nil: reconcileRVConfiguration (initial set from RSC or ManualConfiguration)
 ensure datamesh replica membership requests (sync from RVR statuses)
+ensure status size (min usable size from diskful member RVRs)
 
 if configuration exists:
     if formation in progress (DatameshRevision == 0 or Formation transition active):
@@ -85,6 +86,7 @@ Reconcile (root) [Pure orchestration]
 │   └── patchRV
 ├── if config nil: reconcileRVConfiguration [In-place reconciliation] ← details
 ├── ensureDatameshReplicaRequests ← details
+├── ensureStatusSize (min usable size from diskful member RVRs)
 ├── reconcileFormation [Pure orchestration]
 │   │   ensureFormationTransition (find or create Formation transition with all steps)
 │   ├── (create/v1)
@@ -166,7 +168,7 @@ flowchart TD
     CheckConfigNil -->|Yes| InitConfig["reconcileRVConfiguration<br/>(initial set)"]
     InitConfig --> EnsurePending
     CheckConfigNil -->|No| EnsurePending
-    EnsurePending["ensureDatameshReplicaRequests"]
+    EnsurePending["ensureDatameshReplicaRequests +<br/>ensureStatusSize"]
     EnsurePending --> CheckConfig{Configuration exists?}
     CheckConfig -->|No| Finalizers
 
@@ -414,6 +416,7 @@ flowchart TD
 
     subgraph ensures [Ensure Helpers]
         EnsurePending[ensureDatameshReplicaRequests]
+        EnsureSize[ensureStatusSize]
         DMEngine["datamesh.ProcessTransitions"]
     end
 
@@ -431,6 +434,7 @@ flowchart TD
 
     RSCStatus --> ReconcileConfig
     RVRStatus --> EnsurePending
+    RVRStatus --> EnsureSize
     RVRStatus --> ReconcileFormation
     RSP --> ReconcileFormation
     RVRStatus --> ReconcileNormalOp
@@ -444,6 +448,7 @@ flowchart TD
     ReconcileMeta --> RVMeta
     ReconcileConfig --> RVStatus
     EnsurePending --> RVStatus
+    EnsureSize --> RVStatus
     DMEngine --> RVStatus
     ReconcileFormation --> RVStatus
     ReconcileFormation --> RVRManaged

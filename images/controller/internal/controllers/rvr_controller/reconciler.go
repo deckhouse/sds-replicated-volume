@@ -148,6 +148,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		eo := flow.MergeEnsures(
 			// Ensure status fields.
 			ensureStatusAddressesAndType(rf.Ctx(), rvr, drbdr),
+			ensureStatusSize(rf.Ctx(), rvr, drbdr),
 			ensureStatusAttachment(rf.Ctx(), rvr, drbdr, agentReady, drbdrConfigurationPending),
 			ensureStatusPeers(rf.Ctx(), rvr, drbdr),
 			ensureStatusBackingVolume(rf.Ctx(), rvr, drbdr, llvs),

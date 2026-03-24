@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/onsi/gomega/types"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -187,6 +188,31 @@ func (rv) QuorumCorrect() types.GomegaMatcher {
 // SafetyChecks returns the standard set of RV-level check matchers.
 func (rv) SafetyChecks() []types.GomegaMatcher {
 	return []types.GomegaMatcher{RV.QuorumCorrect()}
+}
+
+// DatameshSizeGE matches when rv.Status.Datamesh.Size >= target.
+func (rv) DatameshSizeGE(target resource.Quantity) types.GomegaMatcher {
+	return tkmatch.NewMatcher(func(obj client.Object) (bool, string) {
+		r := asRV(obj)
+		actual := r.Status.Datamesh.Size
+		if actual.Cmp(target) >= 0 {
+			return true, fmt.Sprintf("datamesh.size %s >= %s", actual.String(), target.String())
+		}
+		return false, fmt.Sprintf("datamesh.size %s < %s", actual.String(), target.String())
+	})
+}
+
+// NoActiveTransitions matches when there are no active (non-completed) transitions.
+func (rv) NoActiveTransitions() types.GomegaMatcher {
+	return tkmatch.NewMatcher(func(obj client.Object) (bool, string) {
+		r := asRV(obj)
+		for i := range r.Status.DatameshTransitions {
+			if !r.Status.DatameshTransitions[i].IsCompleted() {
+				return false, fmt.Sprintf("active transition: %s", r.Status.DatameshTransitions[i].Type)
+			}
+		}
+		return true, "no active transitions"
+	})
 }
 
 // Custom creates a matcher with a typed function for ReplicatedVolume.

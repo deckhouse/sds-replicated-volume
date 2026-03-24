@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
@@ -145,6 +146,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Preparatory actions.
 	eo := flow.MergeEnsures(
 		ensureDatameshReplicaRequests(rf.Ctx(), rv, rvrs),
+		ensureStatusSize(rf.Ctx(), rv, rvrs),
 	)
 	if eo.Error() != nil {
 		return rf.Fail(eo.Error()).ToCtrl()
@@ -880,6 +882,49 @@ func ensureDatameshReplicaRequests(
 	// Assign result only if changed.
 	if changed {
 		rv.Status.DatameshReplicaRequests = result
+	}
+
+	return ef.Ok().ReportChangedIf(changed)
+}
+
+// ensureStatusSize ensures rv.Status.Size reflects the minimum usable DRBD
+// capacity across all diskful datamesh member replicas. Nil when no diskful
+// members have reported their size yet.
+func ensureStatusSize(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "status-size")
+	defer ef.OnEnd(&outcome)
+
+	// Build an IDSet of diskful datamesh members.
+	diskfulMembers := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
+		return m.Type.HasBackingVolume()
+	})
+
+	// Find the minimum non-nil size across diskful datamesh member RVRs.
+	var minSize *resource.Quantity
+	for _, rvr := range rvrs {
+		if !diskfulMembers.Contains(rvr.ID()) {
+			continue
+		}
+		if rvr.Status.Size == nil {
+			continue
+		}
+		if minSize == nil || rvr.Status.Size.Cmp(*minSize) < 0 {
+			q := rvr.Status.Size.DeepCopy()
+			minSize = &q
+		}
+	}
+
+	// Compare and apply.
+	changed := false
+	currentNil := rv.Status.Size == nil
+	targetNil := minSize == nil
+	if currentNil != targetNil || (!currentNil && !rv.Status.Size.Equal(*minSize)) {
+		rv.Status.Size = minSize
+		changed = true
 	}
 
 	return ef.Ok().ReportChangedIf(changed)

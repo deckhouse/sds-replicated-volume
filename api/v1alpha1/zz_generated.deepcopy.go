@@ -1569,6 +1569,11 @@ func (in *ReplicatedVolumeReplicaStatus) DeepCopyInto(out *ReplicatedVolumeRepli
 		*out = make([]DRBDResourceAddressStatus, len(*in))
 		copy(*out, *in)
 	}
+	if in.Size != nil {
+		in, out := &in.Size, &out.Size
+		x := (*in).DeepCopy()
+		*out = &x
+	}
 	if in.BackingVolume != nil {
 		in, out := &in.BackingVolume, &out.BackingVolume
 		*out = new(ReplicatedVolumeReplicaStatusBackingVolume)
@@ -1744,6 +1749,11 @@ func (in *ReplicatedVolumeStatus) DeepCopyInto(out *ReplicatedVolumeStatus) {
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
+	}
+	if in.Size != nil {
+		in, out := &in.Size, &out.Size
+		x := (*in).DeepCopy()
+		*out = &x
 	}
 	if in.ActuallyAttachedTo != nil {
 		in, out := &in.ActuallyAttachedTo, &out.ActuallyAttachedTo

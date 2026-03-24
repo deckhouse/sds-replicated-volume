@@ -19,6 +19,7 @@ package datamesh
 import (
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
@@ -51,6 +52,9 @@ type globalContext struct {
 	// Mutated by step callbacks after replicas confirm qmr changes;
 	// written back to rv.Status.BaselineGuaranteedMinimumDataRedundancy.
 	baselineGMDR byte
+
+	// size is the target usable size from rv.Spec.Size (read-only during engine processing).
+	size resource.Quantity
 
 	// maxAttachments is the maximum number of simultaneously attached nodes (from rv.Spec).
 	maxAttachments byte
@@ -87,6 +91,12 @@ type globalContext struct {
 	hasQuorumTransition      bool
 	hasMultiattachTransition bool
 	hasNetworkTransition     bool
+	hasResizeTransition      bool
+
+	// diskGainingMembershipTransitions tracks replicas with active membership
+	// transitions that add a disk-bearing member (AddReplica D/sD or ChangeReplicaType → D/sD).
+	// Used for mutual exclusion with Resize.
+	diskGainingMembershipTransitions idset.IDSet
 
 	// Replica scope groups (idset — which replicas have active transitions).
 	votingMembershipTransitions    idset.IDSet
@@ -172,6 +182,8 @@ type datameshContext struct {
 	multiattach bool
 	// systemNetworkNames is the current system network name list.
 	systemNetworkNames []string
+	// size is the current datamesh usable size (rv.Status.Datamesh.Size).
+	size resource.Quantity
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -378,7 +390,9 @@ func buildContexts(
 			quorumMinimumRedundancy: rv.Status.Datamesh.QuorumMinimumRedundancy,
 			multiattach:             rv.Status.Datamesh.Multiattach,
 			systemNetworkNames:      rv.Status.Datamesh.SystemNetworkNames,
+			size:                    rv.Status.Datamesh.Size,
 		},
+		size:                       rv.Spec.Size,
 		baselineGMDR:               rv.Status.BaselineGuaranteedMinimumDataRedundancy,
 		maxAttachments:             ptr.Deref(rv.Spec.MaxAttachments, 1),
 		replicatedStorageClassName: rv.Spec.ReplicatedStorageClassName,
@@ -569,6 +583,7 @@ func writebackDatameshFromContext(rv *v1alpha1.ReplicatedVolume, gctx *globalCon
 	rv.Status.Datamesh.QuorumMinimumRedundancy = gctx.datamesh.quorumMinimumRedundancy
 	rv.Status.Datamesh.Multiattach = gctx.datamesh.multiattach
 	rv.Status.Datamesh.SystemNetworkNames = gctx.datamesh.systemNetworkNames
+	rv.Status.Datamesh.Size = gctx.datamesh.size
 }
 
 // writebackBaselineGMDRFromContext writes the baseline GMDR from the
