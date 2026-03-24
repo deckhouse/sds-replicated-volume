@@ -178,7 +178,7 @@ func (r *Reconciler) reconcileBackingVolume(
 	// 9. Create if missing.
 	if intendedLLV == nil {
 		var source *snc.LVMLogicalVolumeSource
-		if rv.Spec.DataSource != nil {
+		if rv.Spec.DataSource != nil && rvr.ID() == 0 {
 			var sourceErr error
 			source, sourceErr = r.resolveSnapshotSourceForNode(rf.Ctx(), rv.Spec.DataSource.SnapshotName, rvr.Spec.NodeName)
 			if sourceErr != nil {
