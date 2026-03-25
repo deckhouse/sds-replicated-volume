@@ -282,6 +282,9 @@ func (r *Reconciler) reconcileDRBDR(
 	// initialize ActiveConfiguration via aState.Report).
 	ensureActiveConfiguration(drbdr).LLVFinalizersToRelease = pendingRelease
 
+	// Observe DRBDR metrics (condition transitions, health gauge).
+	observeDRBDRMetrics(drbdr, statusBase)
+
 	// Patch status if changed
 	if !equality.Semantic.DeepEqual(statusBase.Status, drbdr.Status) {
 		statusPatchErr := r.patchDRBDRStatus(rf.Ctx(), drbdr, statusBase, true)
@@ -295,6 +298,11 @@ func (r *Reconciler) reconcileDRBDR(
 	if finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, false, upAndNotInCleanup); finalizerOutcome.ShouldReturn() {
 		if finalizerOutcome.Error() != nil {
 			reconcileErr = errors.Join(reconcileErr, finalizerOutcome.Error())
+		}
+		// If finalizer was removed during cleanup, observe deletion metrics.
+		if isInCleanup(drbdr) && !obju.HasFinalizer(drbdr, v1alpha1.AgentFinalizer) {
+			observeDRBDRDeletion(drbdr)
+			cleanupDRBDRMetrics(drbdr)
 		}
 	}
 
