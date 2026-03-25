@@ -223,6 +223,7 @@ func (f *Framework) init(ctx context.Context) {
 	f.Debugger.RegisterKind("rsp", gvkRSP.Kind)
 	f.Debugger.RegisterKind("llv", gvkLLV.Kind)
 	f.Debugger.RegisterKind("ns", gvkNS.Kind)
+	f.Debugger.RegisterKind("sc", gvkSC.Kind)
 	f.Debugger.StartLogStreaming(context.Background(), clientset, "d8-sds-replicated-volume",
 		dbg.Component{Name: "controller", LabelSelector: "app=controller"},
 		dbg.Component{Name: "agent", LabelSelector: "app=agent"},

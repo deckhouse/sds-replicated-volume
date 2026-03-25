@@ -18,6 +18,7 @@ package framework
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -34,6 +35,7 @@ var (
 	gvkRSP   = v1alpha1.SchemeGroupVersion.WithKind("ReplicatedStoragePool")
 	gvkLLV   = snc.SchemeGroupVersion.WithKind("LVMLogicalVolume")
 	gvkNS    = corev1.SchemeGroupVersion.WithKind("Namespace")
+	gvkSC    = storagev1.SchemeGroupVersion.WithKind("StorageClass")
 )
 
 // e2eTypes returns cluster-scoped object types managed by e2e tests, plus

@@ -34,4 +34,9 @@ const (
 
 	// AgentNodeLabelKey is the label key for selecting nodes where the agent should run.
 	AgentNodeLabelKey = "storage.deckhouse.io/sds-replicated-volume-node"
+
+	// ManagedByLabelKey is the label key set on managed resources (StorageClass, etc.).
+	ManagedByLabelKey = "storage.deckhouse.io/managed-by"
+	// ManagedByLabelValue is the value for ManagedByLabelKey.
+	ManagedByLabelValue = "sds-replicated-volume"
 )

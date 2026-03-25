@@ -22,11 +22,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -133,6 +136,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return outcome.ToCtrl()
 	}
 
+	// Reconcile StorageClass (create/update SC alongside RSC lifecycle).
+	if outcome := r.reconcileStorageClass(rf.Ctx(), rsc); outcome.ShouldReturn() {
+		return outcome.ToCtrl()
+	}
+
 	// Take patch base before mutations.
 	base := rsc.DeepCopy()
 
@@ -181,6 +189,24 @@ func (r *Reconciler) reconcileDeletion(
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "deletion")
 	defer rf.OnEnd(&outcome)
+
+	// Clean up StorageClass (may be orphaned if RSC was already deleted from API).
+	oldSC, err := r.getStorageClass(rf.Ctx(), rscName)
+	if err != nil {
+		return rf.Fail(err)
+	}
+	if oldSC != nil && oldSC.Provisioner == v1alpha1.CSIProvisioner {
+		if objutilv1.HasFinalizer(oldSC, v1alpha1.StorageClassFinalizer) {
+			base := oldSC.DeepCopy()
+			objutilv1.RemoveFinalizer(oldSC, v1alpha1.StorageClassFinalizer)
+			if err := r.patchStorageClass(rf.Ctx(), oldSC, base); err != nil {
+				return rf.Fail(err)
+			}
+		}
+		if err := r.deleteStorageClass(rf.Ctx(), oldSC); err != nil {
+			return rf.Fail(err)
+		}
+	}
 
 	// Release all RSPs that reference this RSC.
 	outcomes := make([]flow.ReconcileOutcome, 0, len(usedStoragePoolNames))
@@ -1514,6 +1540,122 @@ func applyRSPRemoveUsedBy(rsp *v1alpha1.ReplicatedStoragePool, rscName string) b
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: storageclass
+//
+
+// reconcileStorageClass creates or updates the Kubernetes StorageClass
+// that corresponds to this RSC. SC name = RSC name. When specs differ,
+// the SC is deleted and recreated (SC spec fields are immutable).
+//
+// Reconcile pattern: Conditional target evaluation
+func (r *Reconciler) reconcileStorageClass(ctx context.Context, rsc *v1alpha1.ReplicatedStorageClass) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "storageclass")
+	defer rf.OnEnd(&outcome)
+
+	oldSC, err := r.getStorageClass(rf.Ctx(), rsc.Name)
+	if err != nil {
+		return rf.Fail(err)
+	}
+
+	targetSC := computeTargetStorageClass(rsc, oldSC)
+
+	if oldSC == nil {
+		if err := r.createStorageClass(rf.Ctx(), targetSC); err != nil {
+			return rf.Fail(err)
+		}
+		return rf.Continue()
+	}
+
+	if !isStorageClassSpecInSync(targetSC, oldSC) {
+		if objutilv1.HasFinalizer(oldSC, v1alpha1.StorageClassFinalizer) {
+			base := oldSC.DeepCopy()
+			objutilv1.RemoveFinalizer(oldSC, v1alpha1.StorageClassFinalizer)
+			if err := r.patchStorageClass(rf.Ctx(), oldSC, base); err != nil {
+				return rf.Fail(err)
+			}
+		}
+		if err := r.deleteStorageClass(rf.Ctx(), oldSC); err != nil {
+			return rf.Fail(err)
+		}
+		if err := r.createStorageClass(rf.Ctx(), targetSC); err != nil {
+			return rf.Fail(err)
+		}
+		return rf.Continue()
+	}
+
+	if !isStorageClassMetadataInSync(targetSC, oldSC) {
+		base := oldSC.DeepCopy()
+		oldSC.Labels = maps.Clone(targetSC.Labels)
+		oldSC.Annotations = maps.Clone(targetSC.Annotations)
+		oldSC.Finalizers = slices.Clone(targetSC.Finalizers)
+		if err := r.patchStorageClass(rf.Ctx(), oldSC, base); err != nil {
+			return rf.Fail(err)
+		}
+	}
+
+	return rf.Continue()
+}
+
+// computeTargetStorageClass builds the target StorageClass from RSC spec.
+// If oldSC is non-nil, existing labels/annotations/finalizers are preserved
+// (our values are added on top).
+func computeTargetStorageClass(rsc *v1alpha1.ReplicatedStorageClass, oldSC *storagev1.StorageClass) *storagev1.StorageClass {
+	allowVolumeExpansion := true
+	reclaimPolicy := corev1.PersistentVolumeReclaimPolicy(rsc.Spec.ReclaimPolicy)
+
+	var volumeBindingMode storagev1.VolumeBindingMode
+	switch rsc.Spec.VolumeAccess {
+	case v1alpha1.VolumeAccessLocal,
+		v1alpha1.VolumeAccessEventuallyLocal,
+		v1alpha1.VolumeAccessPreferablyLocal:
+		volumeBindingMode = storagev1.VolumeBindingWaitForFirstConsumer
+	case v1alpha1.VolumeAccessAny:
+		volumeBindingMode = storagev1.VolumeBindingImmediate
+	}
+
+	sc := &storagev1.StorageClass{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "StorageClass",
+			APIVersion: "storage.k8s.io/v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: rsc.Name,
+		},
+		AllowVolumeExpansion: &allowVolumeExpansion,
+		Parameters: map[string]string{
+			v1alpha1.CSIParamRSCNameKey: rsc.Name,
+		},
+		Provisioner:       v1alpha1.CSIProvisioner,
+		ReclaimPolicy:     &reclaimPolicy,
+		VolumeBindingMode: &volumeBindingMode,
+	}
+
+	if oldSC != nil {
+		sc.Labels = maps.Clone(oldSC.Labels)
+		sc.Annotations = maps.Clone(oldSC.Annotations)
+		sc.Finalizers = slices.Clone(oldSC.Finalizers)
+	}
+
+	objutilv1.AddFinalizer(sc, v1alpha1.StorageClassFinalizer)
+	objutilv1.SetLabel(sc, v1alpha1.ManagedByLabelKey, v1alpha1.ManagedByLabelValue)
+
+	return sc
+}
+
+func isStorageClassSpecInSync(targetSC, oldSC *storagev1.StorageClass) bool {
+	return maps.Equal(oldSC.Parameters, targetSC.Parameters) &&
+		oldSC.Provisioner == targetSC.Provisioner &&
+		ptr.Equal(oldSC.ReclaimPolicy, targetSC.ReclaimPolicy) &&
+		ptr.Equal(oldSC.VolumeBindingMode, targetSC.VolumeBindingMode)
+}
+
+func isStorageClassMetadataInSync(targetSC, oldSC *storagev1.StorageClass) bool {
+	return maps.Equal(oldSC.Labels, targetSC.Labels) &&
+		maps.Equal(oldSC.Annotations, targetSC.Annotations) &&
+		slices.Equal(oldSC.Finalizers, targetSC.Finalizers)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Single-call I/O helper categories
 //
 
@@ -1634,5 +1776,41 @@ func (r *Reconciler) deleteRSP(ctx context.Context, rsp *v1alpha1.ReplicatedStor
 		return err
 	}
 	rsp.DeletionTimestamp = ptr.To(metav1.Now())
+	return nil
+}
+
+// --- StorageClass ---
+
+// getStorageClass fetches a StorageClass by name. Returns (nil, nil) if not found.
+func (r *Reconciler) getStorageClass(ctx context.Context, name string) (*storagev1.StorageClass, error) {
+	var sc storagev1.StorageClass
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, &sc); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &sc, nil
+}
+
+// createStorageClass creates a StorageClass.
+func (r *Reconciler) createStorageClass(ctx context.Context, sc *storagev1.StorageClass) error {
+	return r.cl.Create(ctx, sc)
+}
+
+// patchStorageClass patches a StorageClass (main resource).
+func (r *Reconciler) patchStorageClass(ctx context.Context, sc *storagev1.StorageClass, base *storagev1.StorageClass) error {
+	return r.cl.Patch(ctx, sc, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
+}
+
+// deleteStorageClass deletes a StorageClass.
+func (r *Reconciler) deleteStorageClass(ctx context.Context, sc *storagev1.StorageClass) error {
+	if sc.DeletionTimestamp != nil {
+		return nil
+	}
+	if err := client.IgnoreNotFound(r.cl.Delete(ctx, sc)); err != nil {
+		return err
+	}
+	sc.DeletionTimestamp = ptr.To(metav1.Now())
 	return nil
 }

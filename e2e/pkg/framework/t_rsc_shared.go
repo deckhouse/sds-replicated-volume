@@ -160,5 +160,7 @@ func (t *TestRSC) initSharedTrackedObject(name string) {
 			Standalone: true,
 			OnBuild:    func(_ context.Context) *v1alpha1.ReplicatedStorageClass { return t.buildObject() },
 			OnNewEmpty: func() *v1alpha1.ReplicatedStorageClass { return &v1alpha1.ReplicatedStorageClass{} },
+			OnSetup:    func(ctx context.Context) { t.setupSC(ctx) },
+			OnTeardown: func() { t.teardownSC() },
 		})
 }
