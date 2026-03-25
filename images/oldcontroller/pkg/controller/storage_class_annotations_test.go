@@ -55,22 +55,8 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		volumeBindingMode      = storagev1.VolumeBindingWaitForFirstConsumer
 		reclaimPolicy          = corev1.PersistentVolumeReclaimPolicy(controller.ReclaimPolicyRetain)
 		storageClassParameters = map[string]string{
-			controller.StorageClassStoragePoolKey:                     "test-sp",
-			controller.StorageClassParamFSTypeKey:                     controller.FsTypeExt4,
-			controller.StorageClassParamPlacementPolicyKey:            controller.PlacementPolicyAutoPlaceTopology,
-			controller.StorageClassParamNetProtocolKey:                controller.NetProtocolC,
-			controller.StorageClassParamNetRRConflictKey:              controller.RrConflictRetryConnect,
-			controller.StorageClassParamAutoQuorumKey:                 controller.SuspendIo,
-			controller.StorageClassParamAutoAddQuorumTieBreakerKey:    "true",
-			controller.StorageClassParamOnNoQuorumKey:                 controller.SuspendIo,
-			controller.StorageClassParamOnNoDataAccessibleKey:         controller.SuspendIo,
-			controller.StorageClassParamOnSuspendedPrimaryOutdatedKey: controller.PrimaryOutdatedForceSecondary,
-			controller.StorageClassPlacementCountKey:                  "3",
-			controller.StorageClassAutoEvictMinReplicaCountKey:        "3",
-			controller.StorageClassParamReplicasOnSameKey:             fmt.Sprintf("class.storage.deckhouse.io/%s", testName),
-			controller.StorageClassParamReplicasOnDifferentKey:        controller.ZoneLabel,
-			controller.StorageClassParamAllowRemoteVolumeAccessKey:    "false",
-			controller.QuorumMinimumRedundancyWithPrefixSCKey:         "2",
+			controller.ReplicatedStorageClassParamNameKey: testName,
+			controller.StorageClassStoragePoolKey:         "test-sp",
 		}
 
 		validStorageClassResource = &storagev1.StorageClass{
@@ -215,42 +201,26 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 			}
 		}
 
-		whenAllowRemoteVolumeAccessKeyIs := func(value bool, foo func()) {
-			if value {
-				When("non local", func() {
-					BeforeEach(func() {
-						if storageClassResource.Parameters == nil {
-							storageClassResource.Parameters = make(map[string]string)
-						}
-						storageClassResource.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey] = "true"
-					})
-					foo()
-					JustAfterEach(func() {
-						storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
-						Expect(err).NotTo(HaveOccurred())
-						Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "true"))
-					})
-				})
-			} else {
+		whenVolumeAccessIsLocal := func(local bool, foo func()) {
+			if local {
 				When("local", func() {
 					BeforeEach(func() {
-						if storageClassResource == nil {
+						if replicatedStorageClassResource == nil {
 							return
 						}
-						storageClassResource.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey] = "false"
-					})
-					JustBeforeEach(func() {
-						if storageClassResource == nil {
-							return
-						}
-						Expect(storageClassResource.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
+						replicatedStorageClassResource.Spec.VolumeAccess = srv.VolumeAccessLocal
 					})
 					foo()
-					JustAfterEach(func() {
-						storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
-						Expect(err).NotTo(HaveOccurred())
-						Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
+				})
+			} else {
+				When("non local", func() {
+					BeforeEach(func() {
+						if replicatedStorageClassResource == nil {
+							return
+						}
+						replicatedStorageClassResource.Spec.VolumeAccess = srv.VolumeAccessAny
 					})
+					foo()
 				})
 			}
 		}
@@ -339,7 +309,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 
 		whenStorageClassExists(func() {
 			whenConfigMapExistsIs(false, func() {
-				whenAllowRemoteVolumeAccessKeyIs(false, func() {
+				whenVolumeAccessIsLocal(true, func() {
 					whenDefaultAnnotationExistsIs(false, func() {
 						itHasNoAnnotations()
 					})
@@ -351,25 +321,25 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 			whenConfigMapExistsIs(true, func() {
 				whenVirtualizationIs(false, func() {
 					whenDefaultAnnotationExistsIs(false, func() {
-						whenAllowRemoteVolumeAccessKeyIs(false, func() {
+						whenVolumeAccessIsLocal(true, func() {
 							itHasNoAnnotations()
 						})
-						whenAllowRemoteVolumeAccessKeyIs(true, func() {
+						whenVolumeAccessIsLocal(false, func() {
 							itHasNoAnnotations()
 						})
 					})
 					whenDefaultAnnotationExistsIs(true, func() {
-						whenAllowRemoteVolumeAccessKeyIs(false, func() {
+						whenVolumeAccessIsLocal(true, func() {
 							itHasOnlyDefaultStorageClassAnnotationKey()
 						})
-						whenAllowRemoteVolumeAccessKeyIs(true, func() {
+						whenVolumeAccessIsLocal(false, func() {
 							itHasOnlyDefaultStorageClassAnnotationKey()
 						})
 					})
 				})
 				whenVirtualizationIs(true, func() {
 					whenDefaultAnnotationExistsIs(false, func() {
-						whenAllowRemoteVolumeAccessKeyIs(false, func() {
+						whenVolumeAccessIsLocal(true, func() {
 							It("has only access mode annotation", func() {
 								shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
 								Expect(err).NotTo(HaveOccurred())
@@ -383,12 +353,12 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 								Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.StorageClassVirtualizationAnnotationKey, controller.StorageClassVirtualizationAnnotationValue))
 							})
 						})
-						whenAllowRemoteVolumeAccessKeyIs(true, func() {
+						whenVolumeAccessIsLocal(false, func() {
 							itHasNoAnnotations()
 						})
 					})
 					whenDefaultAnnotationExistsIs(true, func() {
-						whenAllowRemoteVolumeAccessKeyIs(false, func() {
+						whenVolumeAccessIsLocal(true, func() {
 							It("has default storage class and access mode annotations", func() {
 								shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
 								Expect(err).NotTo(HaveOccurred())
@@ -403,23 +373,23 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 								Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.StorageClassVirtualizationAnnotationKey, controller.StorageClassVirtualizationAnnotationValue))
 							})
 						})
-						whenAllowRemoteVolumeAccessKeyIs(true, func() {
+						whenVolumeAccessIsLocal(false, func() {
 							itHasOnlyDefaultStorageClassAnnotationKey()
 						})
 					})
 
-					When("not replicated but local with default provisioner", func() {
+					When("local VolumeAccess with another provisioner", func() {
 						var anotherProvisioner string
 						BeforeEach(func() {
 							anotherProvisioner = "another.provisioner"
 							storageClassResource.Annotations = map[string]string{controller.DefaultStorageClassAnnotationKey: "true"}
-							storageClassResource.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey] = "false"
+							replicatedStorageClassResource.Spec.VolumeAccess = srv.VolumeAccessLocal
 							storageClassResource.Provisioner = anotherProvisioner
 						})
 
 						itHasOnlyDefaultStorageClassAnnotationKey()
 
-						It("parameter StorageClassParamAllowRemoteVolumeAccessKey set to false and another provisioner", func() {
+						It("local VolumeAccess is ignored for non-matching provisioner", func() {
 							shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
 							Expect(err).NotTo(HaveOccurred())
 							Expect(shouldRequeue).To(BeFalse())
@@ -427,7 +397,6 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 							storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
 							Expect(err).NotTo(HaveOccurred())
 							Expect(storageClass).NotTo(BeNil())
-							Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
 							Expect(storageClass.Provisioner).To(Equal(anotherProvisioner))
 						})
 					})
