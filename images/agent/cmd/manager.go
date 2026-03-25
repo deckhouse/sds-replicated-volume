@@ -22,17 +22,23 @@ import (
 	"log/slog"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	u "github.com/deckhouse/sds-common-lib/utils"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 )
 
 type managerConfig interface {
+	NodeName() string
 	HealthProbeBindAddress() string
 	MetricsBindAddress() string
 	IsControllerEnabled(name string) bool
@@ -53,6 +59,9 @@ func newManager(
 		return nil, u.LogError(log, fmt.Errorf("building scheme: %w", err))
 	}
 
+	nodeName := cfg.NodeName()
+	nodeNameSelector := fields.SelectorFromSet(fields.Set{"spec.nodeName": nodeName})
+
 	mgrOpts := manager.Options{
 		Scheme:                 scheme,
 		BaseContext:            func() context.Context { return ctx },
@@ -60,6 +69,15 @@ func newManager(
 		HealthProbeBindAddress: cfg.HealthProbeBindAddress(),
 		Metrics: server.Options{
 			BindAddress: cfg.MetricsBindAddress(),
+		},
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				&v1alpha1.DRBDResource{}: {Field: nodeNameSelector},
+				&v1alpha1.DRBDMapper{}:   {Field: nodeNameSelector},
+				&corev1.Node{}: {
+					Field: fields.SelectorFromSet(fields.Set{"metadata.name": nodeName}),
+				},
+			},
 		},
 	}
 
