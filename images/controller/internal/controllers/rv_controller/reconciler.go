@@ -103,7 +103,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	//   - no Detach transitions in progress.
 	//
 	// While the RV is still attached or detaching, rvShouldNotExist returns false
-	// and reconciliation continues through the normal path (where reconcileRVAFinalizers
+	// and reconciliation continues through the normal path (where reconcileRVAMetadata
 	// and the future attach/detach logic handle the graceful detach lifecycle).
 	//
 	// Once all attachments are fully resolved, we enter this branch and force-delete
@@ -111,13 +111,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if rvShouldNotExist(rv) {
 		// Order matters (Go evaluates arguments left to right):
 		// 1. reconcileDeletion: set RVA conditions, force-delete RVRs, clear datamesh members.
-		// 2. reconcileRVAFinalizers: remove finalizer from deleting RVAs (may trigger
+		// 2. reconcileRVAMetadata: remove finalizer from deleting RVAs (may trigger
 		//    Kubernetes finalization = object deletion). Must run after reconcileDeletion,
 		//    otherwise reconcileDeletion would try to patch conditions on an already-deleted RVA.
 		// 3. reconcileMetadata: remove RV finalizer if no children remain.
 		return flow.MergeReconciles(
 			r.reconcileDeletion(rf.Ctx(), rv, rvas, &rvrs),
-			r.reconcileRVAFinalizers(rf.Ctx(), rv, rvas),
+			r.reconcileRVAMetadata(rf.Ctx(), rv, rvas),
 			r.reconcileMetadata(rf.Ctx(), rv, rvrs),
 		).ToCtrl()
 	}
@@ -181,7 +181,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Reconcile RVA and RVR finalizers.
 	outcome = flow.MergeReconciles(
 		outcome,
-		r.reconcileRVAFinalizers(rf.Ctx(), rv, rvas),
+		r.reconcileRVAMetadata(rf.Ctx(), rv, rvas),
 		r.reconcileRVRFinalizers(rf.Ctx(), rv, rvrs),
 	)
 	if outcome.ShouldReturn() {

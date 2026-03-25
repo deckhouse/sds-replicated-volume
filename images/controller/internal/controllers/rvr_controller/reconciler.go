@@ -306,7 +306,6 @@ func applyRVRMetadata(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.Replic
 	}
 
 	// Apply replicated-storage-class label.
-	// Note: node-name label is managed by rvr_scheduling_controller.
 	if rv != nil {
 		if rv.Spec.ReplicatedStorageClassName != "" {
 			changed = obju.SetLabel(rvr, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName) || changed
