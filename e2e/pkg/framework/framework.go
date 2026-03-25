@@ -78,6 +78,7 @@ type Framework struct {
 	prefix       string // "e2e-{runID}"
 	controlPlane ControlPlane
 
+	nsCache      map[string]*TestNS
 	rscCache     map[rscCacheKey]*TestRSC
 	podCacheMu   sync.Mutex
 	podNameCache map[podCacheKey]string
@@ -160,6 +161,7 @@ func (f *Framework) Name(suffix string) string {
 func (f *Framework) init(ctx context.Context) {
 	f.WorkerID = GinkgoParallelProcess()
 	f.prefix = fmt.Sprintf("e2e-%s", f.runID)
+	f.nsCache = make(map[string]*TestNS)
 	f.rscCache = make(map[rscCacheKey]*TestRSC)
 	f.podNameCache = make(map[podCacheKey]string)
 
@@ -213,6 +215,14 @@ func (f *Framework) init(ctx context.Context) {
 	f.Debugger = dbg.New(c, GinkgoWriter,
 		dbg.WithRelationGraph(relationGraph),
 	)
+	f.Debugger.RegisterKind("rv", gvkRV.Kind)
+	f.Debugger.RegisterKind("rvr", gvkRVR.Kind)
+	f.Debugger.RegisterKind("rva", gvkRVA.Kind)
+	f.Debugger.RegisterKind("drbdr", gvkDRBDR.Kind)
+	f.Debugger.RegisterKind("rsc", gvkRSC.Kind)
+	f.Debugger.RegisterKind("rsp", gvkRSP.Kind)
+	f.Debugger.RegisterKind("llv", gvkLLV.Kind)
+	f.Debugger.RegisterKind("ns", gvkNS.Kind)
 	f.Debugger.StartLogStreaming(context.Background(), clientset, "d8-sds-replicated-volume",
 		dbg.Component{Name: "controller", LabelSelector: "app=controller"},
 		dbg.Component{Name: "agent", LabelSelector: "app=agent"},

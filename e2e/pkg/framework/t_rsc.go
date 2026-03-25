@@ -146,17 +146,6 @@ func (t *TestRSC) EligibleNodesConflictResolutionStrategyMaxParallel(n int32) *T
 }
 
 // ---------------------------------------------------------------------------
-// CreateShared (custom lifecycle — different from standard Create)
-// ---------------------------------------------------------------------------
-
-// createShared creates the RSC as a shared (run-level) object:
-// IgnoreAlreadyExists, stampRunMetadata, no DeferCleanup.
-func (t *TestRSC) createShared(ctx context.Context) {
-	t.shared = true
-	t.CreateOrGet(ctx)
-}
-
-// ---------------------------------------------------------------------------
 // buildObject
 // ---------------------------------------------------------------------------
 

@@ -217,6 +217,54 @@ func (t *TrackedObject[T]) CreateOrGet(ctx context.Context) {
 	t.CreateOrGetExpect(ctx, Succeed())
 }
 
+// CreateSharedExpect ensures the object exists on the cluster with
+// IgnoreAlreadyExists semantics, identical to CreateOrGetExpect, but
+// registers NO DeferCleanup at all. The caller is responsible for
+// lifecycle management. Informers and debugger watches persist until
+// the cache context is cancelled or Debugger.Stop is called (typically
+// in AfterSuite).
+//
+// Use for run-scoped shared objects (e.g. shared RSC, shared namespace)
+// that live for the entire test run and are cleaned up at suite level.
+//
+// No-op when Client is nil (unit-test mode).
+func (t *TrackedObject[T]) CreateSharedExpect(ctx context.Context, m types.GomegaMatcher) {
+	GinkgoHelper()
+	if t.Client == nil {
+		return
+	}
+
+	obj := t.lifecycle.OnBuild(ctx)
+	obj.GetObjectKind().SetGroupVersionKind(t.GVK)
+
+	if t.lifecycle.Debugger != nil {
+		Expect(t.lifecycle.Debugger.WatchRelated(obj)).To(Succeed(),
+			"watch related for %s %s", t.GVK.Kind, obj.GetName())
+	}
+
+	t.setup(ctx)
+
+	fmt.Fprintf(GinkgoWriter, "[%s] ensuring (shared) %s %s\n",
+		time.Now().Format("15:04:05.000"), t.GVK.Kind, obj.GetName())
+
+	err := client.IgnoreAlreadyExists(t.Client.Create(ctx, obj))
+	Expect(err).To(m, "ensuring (shared) %s %s", t.GVK.Kind, obj.GetName())
+
+	if err != nil {
+		t.teardown()
+		t.unwatchDebugger(obj)
+	} else if obj.GetResourceVersion() != "" {
+		t.Await(ctx, match.ResourceVersionAtLeast(obj.GetResourceVersion()))
+	}
+}
+
+// CreateShared ensures the object exists as a shared run-scoped resource,
+// expecting success. See CreateSharedExpect for details.
+func (t *TrackedObject[T]) CreateShared(ctx context.Context) {
+	GinkgoHelper()
+	t.CreateSharedExpect(ctx, Succeed())
+}
+
 // GetExpect wraps an already-existing object on the cluster into this
 // TrackedObject, registering informers and debugger for full tracking.
 // The get result is asserted against m. On success DeferCleanup removes
