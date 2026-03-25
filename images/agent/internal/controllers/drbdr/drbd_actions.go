@@ -307,6 +307,25 @@ func (a NetOptionsAction) String() string {
 	return fmt.Sprintf("NetOptions(resource=%s, peerNodeID=%d)", a.ResourceName, a.PeerNodeID)
 }
 
+// PeerDeviceOptionsAction sets peer-device options on a connection volume.
+type PeerDeviceOptionsAction struct {
+	ResourceName string
+	PeerNodeID   uint8
+	VolumeNr     uint
+	Bitmap       *bool
+}
+
+func (a PeerDeviceOptionsAction) Execute(ctx context.Context) error {
+	err := drbdutils.ExecutePeerDeviceOptions(ctx, a.ResourceName, a.PeerNodeID, a.VolumeNr, drbdutils.PeerDeviceOptions{
+		Bitmap: a.Bitmap,
+	})
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonPeerDeviceOptionsFailed)
+}
+
+func (a PeerDeviceOptionsAction) String() string {
+	return fmt.Sprintf("PeerDeviceOptions(resource=%s, peerNodeID=%d, volumeNr=%d)", a.ResourceName, a.PeerNodeID, a.VolumeNr)
+}
+
 // NewPathAction adds a network path to a peer.
 type NewPathAction struct {
 	ResourceName string
