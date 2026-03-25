@@ -154,6 +154,10 @@ type ActualPeer interface {
 	// VerifyAlg returns the online-verify hash algorithm.
 	VerifyAlg() string
 
+	// Bitmap returns the peer-device bitmap setting for volume 0.
+	// Returns nil when show data is unavailable or the peer has no volumes.
+	Bitmap() *bool
+
 	// Paths returns the network paths to this peer.
 	Paths() []ActualPath
 }
@@ -719,6 +723,14 @@ func (p *actualPeer) VerifyAlg() string {
 		return p.showConnection.Net.VerifyAlg
 	}
 	return ""
+}
+
+func (p *actualPeer) Bitmap() *bool {
+	if p.showConnection != nil && len(p.showConnection.Volumes) > 0 {
+		b := p.showConnection.Volumes[0].Disk.Bitmap
+		return &b
+	}
+	return nil
 }
 
 func (p *actualPeer) Paths() []ActualPath {

@@ -106,6 +106,9 @@ type IntendedPeer interface {
 	// NodeID returns the peer's node ID.
 	NodeID() uint8
 
+	// Type returns the peer's resource type (Diskful or Diskless).
+	Type() v1alpha1.DRBDResourceType
+
 	// Protocol returns the replication protocol (A, B, or C).
 	Protocol() v1alpha1.DRBDProtocol
 
@@ -202,6 +205,7 @@ var _ IntendedDRBDState = (*intendedDRBDState)(nil)
 type intendedPeer struct {
 	name            string
 	nodeID          uint8
+	peerType        v1alpha1.DRBDResourceType
 	protocol        v1alpha1.DRBDProtocol
 	sharedSecret    string
 	sharedSecretAlg v1alpha1.SharedSecretAlg
@@ -211,6 +215,7 @@ type intendedPeer struct {
 
 func (p *intendedPeer) Name() string                              { return p.name }
 func (p *intendedPeer) NodeID() uint8                             { return p.nodeID }
+func (p *intendedPeer) Type() v1alpha1.DRBDResourceType           { return p.peerType }
 func (p *intendedPeer) Protocol() v1alpha1.DRBDProtocol           { return p.protocol }
 func (p *intendedPeer) SharedSecret() string                      { return p.sharedSecret }
 func (p *intendedPeer) SharedSecretAlg() v1alpha1.SharedSecretAlg { return p.sharedSecretAlg }
@@ -283,6 +288,7 @@ func computeIntendedDRBDState(
 		peers = append(peers, &intendedPeer{
 			name:            peer.Name,
 			nodeID:          peer.NodeID,
+			peerType:        peer.Type,
 			protocol:        peer.Protocol,
 			sharedSecret:    peer.SharedSecret,
 			sharedSecretAlg: peer.SharedSecretAlg,
