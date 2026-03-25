@@ -17,7 +17,10 @@ limitations under the License.
 package framework
 
 import (
+	"context"
+
 	storagev1 "k8s.io/api/storage/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	tk "github.com/deckhouse/sds-replicated-volume/lib/go/testkit"
 )
@@ -39,15 +42,45 @@ func newTestSC(f *Framework, name string, standalone bool) *TestSC {
 		tk.Lifecycle[*storagev1.StorageClass]{
 			Debugger:   f.Debugger,
 			Standalone: standalone,
+			OnBuild:    func(_ context.Context) *storagev1.StorageClass { return t.buildObject() },
 			OnNewEmpty: func() *storagev1.StorageClass { return &storagev1.StorageClass{} },
 		})
 	return t
 }
 
 // TestSC is the domain wrapper for StorageClass test objects.
-// StorageClasses are cluster-scoped and typically created by the
-// RSC controller, not by tests directly.
 type TestSC struct {
 	*tk.TrackedObject[*storagev1.StorageClass]
 	f *Framework
+
+	buildProvisioner *string
+}
+
+// ---------------------------------------------------------------------------
+// Builder chain
+// ---------------------------------------------------------------------------
+
+func (t *TestSC) Provisioner(p string) *TestSC {
+	t.buildProvisioner = &p
+	return t
+}
+
+// ---------------------------------------------------------------------------
+// buildObject
+// ---------------------------------------------------------------------------
+
+func (t *TestSC) buildObject() *storagev1.StorageClass {
+	sc := &storagev1.StorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: t.Name(),
+		},
+		Provisioner: "kubernetes.io/no-provisioner",
+	}
+	if t.buildProvisioner != nil {
+		sc.Provisioner = *t.buildProvisioner
+	}
+	if t.f != nil {
+		t.f.stampMetadata(sc)
+	}
+	return sc
 }

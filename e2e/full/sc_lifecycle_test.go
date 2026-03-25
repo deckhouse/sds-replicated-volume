@@ -106,4 +106,19 @@ var _ = Describe("SC lifecycle", func() {
 		Expect(sc.ReclaimPolicy).NotTo(BeNil())
 		Expect(*sc.ReclaimPolicy).To(Equal(corev1.PersistentVolumeReclaimRetain))
 	})
+
+	Context("webhook validation", func() {
+		It("rejects RSC when SC with same name and different provisioner exists", func(ctx SpecContext) {
+			tsc := f.TestSC("foreign").Provisioner("kubernetes.io/no-provisioner")
+			tsc.Create(ctx)
+
+			trsc := f.TestRSCExact(tsc.Name()).
+				StorageType(v1alpha1.ReplicatedStoragePoolTypeLVMThin).
+				StorageLVMVolumeGroups(f.Discovery.LVMVolumeGroups()...).
+				ReclaimPolicy(v1alpha1.RSCReclaimPolicyDelete).
+				Topology(v1alpha1.TopologyIgnored).
+				FTT(0).GMDR(0)
+			trsc.CreateExpect(ctx, MatchError(ContainSubstring("already exists with provisioner")))
+		})
+	})
 })
