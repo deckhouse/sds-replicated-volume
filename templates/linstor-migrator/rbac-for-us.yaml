@@ -46,10 +46,7 @@ metadata:
 rules:
   - apiGroups: ["apiextensions.k8s.io"]
     resources: ["customresourcedefinitions"]
-    verbs: ["get"]
-    resourceNames:
-      - nodes.internal.linstor.linbit.com
-      - replicatedvolumes.storage.deckhouse.io
+    verbs: ["get", "list", "delete"]
   - apiGroups: ["deckhouse.io"]
     resources: ["moduleconfigs"]
     verbs: ["get"]
@@ -62,17 +59,7 @@ rules:
     resources: ["volumeattachments"]
     verbs: ["list"]
   - apiGroups: ["internal.linstor.linbit.com"]
-    resources:
-      - volumedefinitions
-      - resourcedefinitions
-      - resourcegroups
-      - resources
-      - layerresourceids
-      - layerdrbdresources
-      - layerdrbdresourcedefinitions
-      - propscontainers
-      - nodestorpool
-      - nodestorpools
+    resources: ["*"]
     verbs: ["list"]
   - apiGroups: ["storage.deckhouse.io"]
     resources:
@@ -87,7 +74,10 @@ rules:
       - drbdresources
       - replicatedvolumeattachments
       - lvmlogicalvolumes
-    verbs: ["create", "get", "patch"]
+    verbs: ["create", "get", "patch", "delete"]
+  - apiGroups: ["storage.deckhouse.io"]
+    resources: ["replicatedstoragemetadatabackups"]
+    verbs: ["deletecollection"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
