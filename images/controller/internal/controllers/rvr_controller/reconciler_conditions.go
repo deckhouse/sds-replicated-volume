@@ -959,15 +959,15 @@ func computeMemberPhaseAndMessage(
 		case severity >= severityPartiallyDegraded:
 			return v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded, ready.Message + problems
 		case progressMsg != "":
-			return v1alpha1.ReplicatedVolumeReplicaPhaseProgressing, ready.Message + ". " + progressMsg
+			return v1alpha1.ReplicatedVolumeReplicaPhaseProgressing, ready.Message + ". " + progressMsg + problems
 		default:
-			return v1alpha1.ReplicatedVolumeReplicaPhaseHealthy, ready.Message
+			return v1alpha1.ReplicatedVolumeReplicaPhaseHealthy, ready.Message + problems
 		}
 	}
 
 	// Ready != True but not Critical — transient state during reconfig.
 	if progressMsg != "" {
-		return v1alpha1.ReplicatedVolumeReplicaPhaseProgressing, progressMsg
+		return v1alpha1.ReplicatedVolumeReplicaPhaseProgressing, progressMsg + problems
 	}
 
 	// Member fallback (unusual: Ready is neither True nor caught by Critical).
@@ -1057,15 +1057,15 @@ func computeMemberProblemsAndSeverity(
 		}
 	}
 
-	// SatisfyEligibleNodes condition.
+	// SatisfyEligibleNodes condition (informational only — does not affect phase).
 	if sen := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType); sen != nil && sen.Status == metav1.ConditionFalse {
 		switch sen.Reason {
 		case v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonNodeMismatch:
-			add(severityPartiallyDegraded, "Node not eligible")
+			add(severityNone, "Node not eligible")
 		case v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonLVMVolumeGroupMismatch:
-			add(severityPartiallyDegraded, "LVG not eligible")
+			add(severityNone, "LVG not eligible")
 		case v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonThinPoolMismatch:
-			add(severityPartiallyDegraded, "ThinPool not eligible")
+			add(severityNone, "ThinPool not eligible")
 		}
 	}
 

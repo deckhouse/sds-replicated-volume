@@ -323,11 +323,11 @@ Phase evaluation splits into two paths based on datamesh membership (`datameshRe
 | Critical | Ready=False/QuorumLost or QuorumViaPeers, OR Attached=False/IOSuspended |
 | Synchronizing | BackingVolumeUpToDate=False/Synchronizing |
 | Degraded | Ready=True but serious problems: disk Failed, NotConnected, AttachmentFailed, ProvisioningFailed, ResizeFailed, ConfigurationFailed |
-| PartiallyDegraded | Ready=True but minor problems: PartiallyConnected, RequiresSynchronization, wrong node, DetachmentFailed |
+| PartiallyDegraded | Ready=True but minor problems: PartiallyConnected, RequiresSynchronization, DetachmentFailed |
 | Progressing | No health problems, but operational change in progress: resize, type conversion, DRBD reconfig, DRBD resize |
 | Healthy | Ready=True, no problems, no in-progress changes |
 
-Message is sourced from the most relevant condition for the current phase, enriched with problem descriptions (`. Problem text`) for member health phases. For Progressing, the progress description is appended to the Ready message. For the pre-member default fallback (Configuring), the first non-True condition message is used in priority order: DRBDConfigured, BackingVolumeReady, Ready.
+Message is sourced from the most relevant condition for the current phase, enriched with problem descriptions (`. Problem text`) for all member health phases (including Healthy and Progressing). Informational notes (eligible-node mismatch) are appended to the message without affecting the phase. For Progressing, the progress description is appended to the Ready message. For the pre-member default fallback (Configuring), the first non-True condition message is used in priority order: DRBDConfigured, BackingVolumeReady, Ready.
 
 ## Status Fields
 
@@ -707,11 +707,11 @@ flowchart TD
     CheckReady -->|Yes| EvalHealth{Max severity?}
     EvalHealth -->|Degraded| Degraded(["Degraded: Ready.Message + problems"])
     EvalHealth -->|PartiallyDegraded| PartDeg(["PartiallyDegraded: Ready.Message + problems"])
-    EvalHealth -->|None + progress| Progressing(["Progressing: Ready.Message + progress"])
-    EvalHealth -->|None| Healthy(["Healthy: Ready.Message"])
+    EvalHealth -->|None + progress| Progressing(["Progressing: Ready.Message + progress + problems"])
+    EvalHealth -->|None| Healthy(["Healthy: Ready.Message + problems"])
 
     CheckReady -->|No| CheckProgress{Progress detected?}
-    CheckProgress -->|Yes| ProgressFallback(["Progressing: progress message"])
+    CheckProgress -->|Yes| ProgressFallback(["Progressing: progress message + problems"])
     CheckProgress -->|No| MemberFallback(["PartiallyDegraded: fallback message"])
 ```
 
@@ -734,10 +734,15 @@ flowchart TD
 | BackingVolumeUpToDate | False/RequiresSynchronization | `Backing volume requires synchronization` |
 | BackingVolumeUpToDate | False/Unknown | `Backing volume state unknown` |
 | BackingVolumeUpToDate | False/Absent | `Backing volume absent` |
+| Attached | True/DetachmentFailed | `Detachment failed` |
+
+**Informational notes** (appended to message without affecting phase):
+
+| Condition | State | Problem text |
+|-----------|-------|-------------|
 | SatisfyEligibleNodes | False/NodeMismatch | `Node not eligible` |
 | SatisfyEligibleNodes | False/LVMVolumeGroupMismatch | `LVG not eligible` |
 | SatisfyEligibleNodes | False/ThinPoolMismatch | `ThinPool not eligible` |
-| Attached | True/DetachmentFailed | `Detachment failed` |
 
 **Progress triggers** (only when no health problems exist):
 

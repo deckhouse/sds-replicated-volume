@@ -2467,7 +2467,7 @@ var _ = Describe("computeRVRPhaseAndMessage", func() {
 		Expect(msg).To(ContainSubstring(". Partially connected to peers"))
 	})
 
-	It("returns PartiallyDegraded when Ready=True + SatisfyEligibleNodes=False", func() {
+	It("returns Healthy when Ready=True + SatisfyEligibleNodes=False (informational only)", func() {
 		rvr := mkRVR("node-1")
 		rvr.Status.DatameshRevision = 5
 		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
@@ -2478,7 +2478,47 @@ var _ = Describe("computeRVRPhaseAndMessage", func() {
 			"Node is not eligible")
 
 		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy))
+		Expect(msg).To(ContainSubstring(". Node not eligible"))
+	})
+
+	It("returns Progressing with eligible note when Ready=True + Progressing + SatisfyEligibleNodes=False", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonNodeMismatch,
+			"Node is not eligible")
+		bvReady := metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+			Status: metav1.ConditionFalse,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizing,
+		}
+		obju.SetStatusCondition(rvr, bvReady)
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing))
+		Expect(msg).To(ContainSubstring(". Node not eligible"))
+	})
+
+	It("returns PartiallyDegraded when Ready=True + PartiallyConnected + SatisfyEligibleNodes=False", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected,
+			"1/2")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonNodeMismatch,
+			"Node is not eligible")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
 		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded))
+		Expect(msg).To(ContainSubstring(". Partially connected to peers"))
 		Expect(msg).To(ContainSubstring(". Node not eligible"))
 	})
 
