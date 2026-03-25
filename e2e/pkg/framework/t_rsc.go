@@ -19,7 +19,9 @@ package framework
 import (
 	"context"
 
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	tk "github.com/deckhouse/sds-replicated-volume/lib/go/testkit"
@@ -44,6 +46,8 @@ func newTestRSC(f *Framework, name string) *TestRSC {
 			Standalone: true,
 			OnBuild:    func(_ context.Context) *v1alpha1.ReplicatedStorageClass { return t.buildObject() },
 			OnNewEmpty: func() *v1alpha1.ReplicatedStorageClass { return &v1alpha1.ReplicatedStorageClass{} },
+			OnSetup:    func(ctx context.Context) { t.setupSC(ctx) },
+			OnTeardown: func() { t.teardownSC() },
 		})
 	return t
 }
@@ -53,7 +57,9 @@ type TestRSC struct {
 	*tk.TrackedObject[*v1alpha1.ReplicatedStorageClass]
 	f *Framework
 
-	shared bool // when true, buildObject stamps run-level metadata
+	sc            *TestSC
+	scInformerReg tk.InformerReg
+	shared        bool // when true, buildObject stamps run-level metadata
 
 	buildStoragePool      string // deprecated spec.storagePool
 	buildStorageType      *v1alpha1.ReplicatedStoragePoolType
@@ -146,14 +152,25 @@ func (t *TestRSC) EligibleNodesConflictResolutionStrategyMaxParallel(n int32) *T
 }
 
 // ---------------------------------------------------------------------------
-// CreateShared (custom lifecycle — different from standard Create)
+// StorageClass child
 // ---------------------------------------------------------------------------
 
-// createShared creates the RSC as a shared (run-level) object:
-// IgnoreAlreadyExists, stampRunMetadata, no DeferCleanup.
-func (t *TestRSC) createShared(ctx context.Context) {
-	t.shared = true
-	t.CreateOrGet(ctx)
+// TestSC returns the tracked StorageClass child (SC name = RSC name).
+func (t *TestRSC) TestSC() *TestSC { return t.sc }
+
+func (t *TestRSC) setupSC(ctx context.Context) {
+	name := t.Name()
+	t.sc = newTestSC(t.f, name, false)
+	t.scInformerReg = tk.RegisterInformer[*storagev1.StorageClass](
+		ctx, t.f.Cache, gvkSC, "SC for "+name,
+		func(sc *storagev1.StorageClass) bool { return sc.GetName() == name },
+		func(et watch.EventType, sc *storagev1.StorageClass) { t.sc.InjectEvent(et, sc) },
+	)
+}
+
+func (t *TestRSC) teardownSC() {
+	tk.RemoveInformerRegs([]tk.InformerReg{t.scInformerReg})
+	t.sc = nil
 }
 
 // ---------------------------------------------------------------------------

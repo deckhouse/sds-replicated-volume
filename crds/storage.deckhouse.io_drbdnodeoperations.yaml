@@ -93,6 +93,9 @@ spec:
         - metadata
         - spec
         type: object
+    selectableFields:
+    - jsonPath: .spec.nodeName
+    - jsonPath: .status.phase
     served: true
     storage: true
     subresources:

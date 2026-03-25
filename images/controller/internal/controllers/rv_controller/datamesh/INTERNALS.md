@@ -432,6 +432,7 @@ Processes attachment intent per replica:
    | Attached + active RVA + no transition | `NoDispatch` with "attached and ready" |
    | Has active RVA (not attached) | `DispatchReplica` Attach |
    | No active RVA + attached | `DispatchReplica` Detach |
+   | Active attachment transition in progress | skip (settle set the authoritative slot status) |
    | Only deleting RVAs | `NoDispatch` with "detached" |
    | No RVAs + not attached | skip |
 

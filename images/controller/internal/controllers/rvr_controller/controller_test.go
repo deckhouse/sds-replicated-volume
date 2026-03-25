@@ -25,6 +25,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -157,6 +158,67 @@ var _ = Describe("rvEventHandler", func() {
 
 			Expect(queue.items).To(HaveLen(1))
 			Expect(queue.items[0].Name).To(Equal("rv-1-0"))
+		})
+	})
+
+	Describe("Update with Spec.Size change", func() {
+		It("enqueues all RVRs when Spec.Size changes", func() {
+			oldRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size: resource.MustParse("100Mi"),
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
+				},
+			}
+			newRV := oldRV.DeepCopy()
+			newRV.Spec.Size = resource.MustParse("200Mi")
+
+			rvr0 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1-0"},
+				Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-1"},
+			}
+			rvr1 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1-1"},
+				Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-1"},
+			}
+			rvrOther := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-other-0"},
+				Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-other"},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(
+				fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(newRV, rvr0, rvr1, rvrOther),
+			).Build()
+
+			handler := newRVEventHandler(cl).(*rvEventHandler)
+			handler.Update(context.Background(), event.UpdateEvent{ObjectOld: oldRV, ObjectNew: newRV}, queue)
+
+			Expect(queue.items).To(HaveLen(2))
+			names := []string{queue.items[0].Name, queue.items[1].Name}
+			Expect(names).To(ContainElements("rv-1-0", "rv-1-1"))
+		})
+
+		It("does not enqueue RVRs when Spec.Size is unchanged", func() {
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size: resource.MustParse("100Mi"),
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
+				},
+			}
+
+			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+			handler := newRVEventHandler(cl).(*rvEventHandler)
+			handler.Update(context.Background(), event.UpdateEvent{ObjectOld: rv, ObjectNew: rv.DeepCopy()}, queue)
+
+			Expect(queue.items).To(BeEmpty())
 		})
 	})
 

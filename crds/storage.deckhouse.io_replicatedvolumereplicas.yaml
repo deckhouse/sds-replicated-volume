@@ -526,6 +526,7 @@ spec:
     selectableFields:
     - jsonPath: .spec.nodeName
     - jsonPath: .spec.replicatedVolumeName
+    - jsonPath: .status.phase
     served: true
     storage: true
     subresources:

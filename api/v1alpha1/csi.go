@@ -14,33 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package selftest
+package v1alpha1
 
-import (
-	"flag"
-	"testing"
+// CSI provisioner and StorageClass parameter constants.
+const (
+	// CSIProvisioner is the provisioner name for StorageClasses managed by this module.
+	CSIProvisioner = "replicated.csi.storage.deckhouse.io"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-
-	fw "github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework"
+	// CSIParamRSCNameKey is the StorageClass parameter key that identifies
+	// which ReplicatedStorageClass the volume belongs to.
+	CSIParamRSCNameKey = "replicated.csi.storage.deckhouse.io/replicatedStorageClassName"
 )
-
-var (
-	selfTests bool
-	f         *fw.Framework
-)
-
-func init() {
-	flag.BoolVar(&selfTests, "self-test", false, "run framework self-tests")
-}
-
-func TestSelfTest(t *testing.T) {
-	if !selfTests {
-		t.Skip("framework self-tests disabled (use -args --self-test)")
-		return
-	}
-	f = fw.Setup()
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "Framework Self-Test Suite")
-}

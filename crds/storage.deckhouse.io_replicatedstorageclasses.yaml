@@ -680,6 +680,8 @@ spec:
         required:
         - spec
         type: object
+    selectableFields:
+    - jsonPath: .status.phase
     served: true
     storage: true
     subresources:
