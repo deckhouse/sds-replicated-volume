@@ -31,7 +31,7 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Configured')].status
       name: Configured
       type: string
-    - jsonPath: .spec.size
+    - jsonPath: .status.size
       name: Size
       type: string
     - jsonPath: .metadata.creationTimestamp
