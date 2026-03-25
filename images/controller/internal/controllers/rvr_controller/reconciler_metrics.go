@@ -49,9 +49,12 @@ func observeRVRMetrics(
 
 	// Detect phase change.
 	if oldPhase != newPhase && newPhase != "" {
-		// Record phase duration in histogram.
 		if prev, duration, existed := metrics.RVRPhases.RecordPhaseChange(rvr.Name, newPhase); existed {
-			metrics.RVRPhaseDuration.WithLabelValues(node, sc, prev.Phase).Observe(duration.Seconds())
+			phaseLabel := prev.Phase
+			if phaseLabel == "" {
+				phaseLabel = "Initial"
+			}
+			metrics.RVRPhaseDuration.WithLabelValues(node, sc, phaseLabel).Observe(duration.Seconds())
 		}
 
 		// Delete old phase label from gauge, set new one below.
