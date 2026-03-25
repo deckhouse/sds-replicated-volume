@@ -105,6 +105,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		// Reconcile the RVR metadata (finalizers and labels).
 		outcome := r.reconcileMetadata(rf.Ctx(), rvr, rv, llvs, drbdr)
 		if outcome.ShouldReturn() {
+			// If finalizer was removed (deletion completed), observe deletion metrics and cleanup.
+			if rvr.DeletionTimestamp != nil && !obju.HasFinalizer(rvr, v1alpha1.RVRControllerFinalizer) {
+				observeRVRDeletion(rvr, rv)
+				cleanupRVRMetrics(rvr)
+			}
 			return outcome.ToCtrl()
 		}
 	}
@@ -172,6 +177,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 		outcome = outcome.WithChangeFrom(eo)
 	}
+
+	// Observe RVR metrics (phase changes, creation duration, health gauges).
+	observeRVRMetrics(rvr, base, rv)
 
 	// Patch the RVR status if changed.
 	if outcome.DidChange() && rvr != nil {
