@@ -551,6 +551,8 @@ spec:
         - message: nonVoting must be false (or unset) when type is Diskless
           rule: 'self.spec.type == ''Diskless'' ? !has(self.spec.nonVoting) || self.spec.nonVoting
             == false : true'
+    selectableFields:
+    - jsonPath: .spec.nodeName
     served: true
     storage: true
     subresources:

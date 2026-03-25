@@ -26,6 +26,7 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 // +kubebuilder:metadata:labels=heritage=deckhouse
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:metadata:labels=backup.deckhouse.io/cluster-config=true
+// +kubebuilder:selectablefield:JSONPath=.status.phase
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="FTT",type=integer,JSONPath=`.status.configuration.failuresToTolerate`
 // +kubebuilder:printcolumn:name="GMDR",type=integer,JSONPath=`.status.configuration.guaranteedMinimumDataRedundancy`
