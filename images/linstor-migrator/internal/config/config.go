@@ -23,6 +23,14 @@ const (
 	// ModuleName is the name of the Deckhouse module.
 	ModuleName = "sds-replicated-volume"
 
+	// MigratorHostDir is the directory on the node for linstor-migrator under /opt/deckhouse/tmp (the Job mounts
+	// /opt/deckhouse/tmp; the binary creates MigratorHostDir so it is owned by the migrator user).
+	// Logs and other host-local migrator data live here.
+	MigratorHostDir = "/opt/deckhouse/tmp/linstor-migrator"
+
+	// MigratorLogFileName is the log file name inside MigratorHostDir (opened with O_APPEND).
+	MigratorLogFileName = "linstor-migrator.log"
+
 	// MigrationConfigMapName is the name of the ConfigMap used to track migration state.
 	MigrationConfigMapName = "control-plane-migration"
 

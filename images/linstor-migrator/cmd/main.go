@@ -18,8 +18,10 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -33,6 +35,7 @@ import (
 	sncv1alpha1 "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srvlinstor "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srvv1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/kubeutils"
 	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/migrator"
 )
@@ -58,12 +61,13 @@ func main() {
 		logLevel = slog.LevelInfo
 	}
 
-	// Setup logger with stdout output.
-	logHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level:     logLevel,
-		AddSource: false,
-	})
-	log := slog.New(logHandler)
+	log, logCleanup, err := newLogger(logLevel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "linstor-migrator: %v\n", err)
+		os.Exit(1)
+	}
+	defer logCleanup()
+
 	slog.SetDefault(log)
 
 	log.Info("linstor-migrator started")
@@ -95,6 +99,29 @@ func main() {
 	}
 
 	log.Info("linstor-migrator gracefully shutdown")
+}
+
+// newLogger returns a slog.Logger that writes the same log lines to stdout and to
+// config.MigratorHostDir/config.MigratorLogFileName in append mode. logCleanup syncs and closes the file.
+func newLogger(level slog.Level) (*slog.Logger, func(), error) {
+	if err := os.MkdirAll(config.MigratorHostDir, 0o755); err != nil {
+		return nil, nil, fmt.Errorf("create migrator host directory %q: %w", config.MigratorHostDir, err)
+	}
+	logPath := filepath.Join(config.MigratorHostDir, config.MigratorLogFileName)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open log file %q: %w", logPath, err)
+	}
+	cleanup := func() {
+		_ = f.Sync()
+		_ = f.Close()
+	}
+	mw := io.MultiWriter(os.Stdout, f)
+	h := slog.NewTextHandler(mw, &slog.HandlerOptions{
+		Level:     level,
+		AddSource: false,
+	})
+	return slog.New(h), cleanup, nil
 }
 
 // newScheme creates a runtime.Scheme with all required types registered.
