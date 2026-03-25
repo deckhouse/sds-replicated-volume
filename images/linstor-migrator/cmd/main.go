@@ -28,6 +28,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/dynamic"
 	kubecl "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
@@ -92,7 +93,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	m := migrator.New(kClient, log)
+	dynClient, err := dynamic.NewForConfig(kConfig)
+	if err != nil {
+		log.Error("failed to create dynamic Kubernetes client", "err", err)
+		os.Exit(1)
+	}
+
+	m := migrator.New(kClient, dynClient, log)
 	if err := m.Run(ctx); err != nil {
 		log.Error("linstor-migrator exited with error", "err", err)
 		os.Exit(1)

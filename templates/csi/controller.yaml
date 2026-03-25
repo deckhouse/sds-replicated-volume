@@ -20,10 +20,8 @@
 - --log-level=info
 {{- end }}
 
-{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
-{{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
+{{- if and .Values.sdsReplicatedVolume.internal.newControlPlane (not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started" "stage1_completed"))) }}
 - --csi-endpoint=unix://$(ADDRESS)
-{{- end }}
 {{- end }}
 {{- end }}
 
@@ -56,8 +54,7 @@
       name: linstor-client-https-cert
 {{- end }}
 
-{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
-{{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
+{{- if and .Values.sdsReplicatedVolume.internal.newControlPlane (not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started" "stage1_completed"))) }}
 - name: ADDRESS
   value: /csi/csi.sock
 - name: KUBE_NODE_NAME
@@ -76,7 +73,6 @@
   value: "3"
 {{- else if eq .Values.sdsReplicatedVolume.logLevel "TRACE" }}
   value: "4"
-{{- end }}
 {{- end }}
 {{- end }}
 
@@ -157,8 +153,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- end }}
 
 
-{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
-{{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
+{{- if and .Values.sdsReplicatedVolume.internal.newControlPlane (not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started" "stage1_completed"))) }}
 {{- $csiControllerImage := include "helm_lib_module_image" (list . "csiDriver") }}
 
 {{- $csiControllerConfig := dict }}
@@ -182,7 +177,6 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 
 {{- include "helm_lib_csi_controller_manifests" (list . $csiControllerConfig) }}
 {{- end }}
-{{- end }}
 
 ###
 ### node
@@ -196,10 +190,8 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 - --log-level=info
 {{- end }}
 
-{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
-{{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
+{{- if and .Values.sdsReplicatedVolume.internal.newControlPlane (not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started" "stage1_completed"))) }}
 - --csi-endpoint=unix://$(CSI_ADDRESS)
-{{- end }}
 {{- end }}
 {{- end }}
 
@@ -234,8 +226,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
       name: linstor-client-https-cert
 {{- end }}
 
-{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
-{{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
+{{- if and .Values.sdsReplicatedVolume.internal.newControlPlane (not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started" "stage1_completed"))) }}
 - name: CSI_ADDRESS
   value: /csi/csi.sock
 - name: DRIVER_REG_SOCK_PATH
@@ -255,7 +246,6 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
   value: "3"
 {{- else if eq .Values.sdsReplicatedVolume.logLevel "TRACE" }}
   value: "4"
-{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -336,8 +326,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- end }}
 
 
-{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
-{{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
+{{- if and .Values.sdsReplicatedVolume.internal.newControlPlane (not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started" "stage1_completed"))) }}
 {{- $csiNodeImage := include "helm_lib_module_image" (list . "csiDriver") }}
 
 {{- $csiNodeConfig := dict }}
@@ -355,5 +344,4 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- $_ := set $csiNodeConfig "forceCsiNodeAndStaticNodesDepoloy" true }}
 
 {{- include "helm_lib_csi_node_manifests" (list . $csiNodeConfig) }}
-{{- end }}
 {{- end }}
