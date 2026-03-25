@@ -492,7 +492,7 @@ The controller watches six event sources:
 | ReplicatedVolumeReplica | Generation changes, Finalizers changes | For() (primary) |
 | LVMLogicalVolume | All fields (Status, Spec, Labels, Finalizers, OwnerRefs) | Owns() |
 | DRBDResource | All fields | Owns() |
-| ReplicatedVolume | DatameshRevision changes, ReplicatedStorageClassName changes, DatameshReplicaRequests message changes | rvEventHandler (custom) |
+| ReplicatedVolume | DatameshRevision changes, Spec.Size changes, ReplicatedStorageClassName changes, DatameshReplicaRequests message changes | rvEventHandler (custom) |
 | ReplicatedStoragePool | EligibleNodes changes (per-node) | rspEventHandler |
 | Pod (agent) | Ready condition changes, Create/Delete | mapAgentPodToRVRs |
 
@@ -523,6 +523,7 @@ Intentionally empty: we need to react to all DRBDResource fields.
 Custom `rvEventHandler` with targeted enqueuing to minimize unnecessary reconciliations:
 
 - **ReplicatedStorageClassName changed**: enqueues ALL RVRs for the RV (labels update needed)
+- **Spec.Size changed**: enqueues ALL RVRs for the RV (eager LLV resize before datamesh transition)
 - **Initial DatameshRevision change** (0 → N): enqueues ALL RVRs for the RV (initial setup)
 - **Non-initial DatameshRevision change**: enqueues only RVRs that are members in old OR new datamesh (targeted by ID)
 - **DatameshReplicaRequests message changed**: enqueues only affected RVRs where the message differs (targeted by ID via sorted merge diff)
