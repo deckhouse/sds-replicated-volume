@@ -510,14 +510,14 @@ func (r *Reconciler) reconcileLLVSFinalizerAdd(ctx context.Context, llvsName str
 		}
 	}
 
-	if llvs.Status == nil || llvs.Status.ActualVGNameOnTheNode == "" || llvs.Status.ActualLVNameOnTheNode == "" {
+	if llvs.Status == nil || llvs.Status.ActualVGNameOnTheNode == "" {
 		return "", ConfiguredReasonError(
-			fmt.Errorf("LVMLogicalVolumeSnapshot %q status not ready (VG/LV names missing)", llvsName),
+			fmt.Errorf("LVMLogicalVolumeSnapshot %q status not ready (VG name missing)", llvsName),
 			v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed,
 		)
 	}
 
-	return formatLVMDevicePath(llvs.Status.ActualVGNameOnTheNode, llvs.Status.ActualLVNameOnTheNode), nil
+	return formatLVMDevicePath(llvs.Status.ActualVGNameOnTheNode, llvsName), nil
 }
 
 func (r *Reconciler) releaseLLVSFinalizer(ctx context.Context, llvsName string) error {
