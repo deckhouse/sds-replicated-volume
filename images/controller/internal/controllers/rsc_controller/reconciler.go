@@ -1623,7 +1623,8 @@ func computeTargetStorageClass(rsc *v1alpha1.ReplicatedStorageClass, oldSC *stor
 		},
 		AllowVolumeExpansion: &allowVolumeExpansion,
 		Parameters: map[string]string{
-			v1alpha1.CSIParamRSCNameKey: rsc.Name,
+			v1alpha1.CSIParamRSCNameKey:           rsc.Name,
+			v1alpha1.CSIParamVolumeBindingModeKey: string(volumeBindingMode),
 		},
 		Provisioner:       v1alpha1.CSIProvisioner,
 		ReclaimPolicy:     &reclaimPolicy,

@@ -24,4 +24,8 @@ const (
 	// CSIParamRSCNameKey is the StorageClass parameter key that identifies
 	// which ReplicatedStorageClass the volume belongs to.
 	CSIParamRSCNameKey = "replicated.csi.storage.deckhouse.io/replicatedStorageClassName"
+
+	// CSIParamVolumeBindingModeKey is the StorageClass parameter key that
+	// tells the CSI driver which volume binding mode is in effect.
+	CSIParamVolumeBindingModeKey = "replicated.csi.storage.deckhouse.io/volume-binding-mode"
 )
