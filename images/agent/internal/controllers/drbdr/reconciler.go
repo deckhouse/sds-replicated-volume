@@ -517,7 +517,21 @@ func (r *Reconciler) reconcileLLVSFinalizerAdd(ctx context.Context, llvsName str
 		)
 	}
 
-	return formatLVMDevicePath(llvs.Status.ActualVGNameOnTheNode, llvsName), nil
+	devPath := formatLVMDevicePath(llvs.Status.ActualVGNameOnTheNode, llvsName)
+
+	// TODO discuss
+	if _, err := os.Stat(devPath); os.IsNotExist(err) {
+		lvPath := llvs.Status.ActualVGNameOnTheNode + "/" + llvsName
+		cmd := drbdutils.ExecCommandContext(ctx, "/sbin/lvchange", "-ay", "-K", lvPath)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return "", ConfiguredReasonError(
+				fmt.Errorf("activating snapshot LV %s: %w; output: %s", lvPath, err, string(out)),
+				v1alpha1.DRBDResourceCondConfiguredReasonAttachFailed,
+			)
+		}
+	}
+
+	return devPath, nil
 }
 
 func (r *Reconciler) releaseLLVSFinalizer(ctx context.Context, llvsName string) error {
