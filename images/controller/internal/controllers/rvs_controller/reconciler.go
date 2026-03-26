@@ -185,12 +185,7 @@ func (r *Reconciler) reconcileChildren(
 		}
 
 		if rvs.Status.SourceReplicaSnapshotName == "" {
-			rvrsName := fmt.Sprintf("%s-%s", rvs.Name, primaryRVRs[0].Spec.NodeName)
-			base := rvs.DeepCopy()
-			rvs.Status.SourceReplicaSnapshotName = rvrsName
-			if err := r.patchRVSStatus(rf.Ctx(), rvs, base); err != nil {
-				return rf.Fail(err)
-			}
+			rvs.Status.SourceReplicaSnapshotName = fmt.Sprintf("%s-%s", rvs.Name, primaryRVRs[0].Spec.NodeName)
 		}
 	}
 
@@ -297,13 +292,6 @@ func (r *Reconciler) reconcileStatus(
 	rf := flow.BeginReconcile(ctx, "status")
 	defer rf.OnEnd(&outcome)
 
-	if rvs.Status.Phase == phase &&
-		rvs.Status.Message == message &&
-		rvs.Status.ReadyToUse == readyToUse &&
-		reflect.DeepEqual(rvs.Status.Datamesh, datamesh) {
-		return rf.Continue()
-	}
-
 	base := rvs.DeepCopy()
 
 	rvs.Status.Phase = phase
@@ -313,6 +301,10 @@ func (r *Reconciler) reconcileStatus(
 	if readyToUse && rvs.Status.CreationTime == nil {
 		now := metav1.Now()
 		rvs.Status.CreationTime = &now
+	}
+
+	if reflect.DeepEqual(rvs.Status, base.Status) {
+		return rf.Continue()
 	}
 
 	if err := r.patchRVSStatus(rf.Ctx(), rvs, base); err != nil {
