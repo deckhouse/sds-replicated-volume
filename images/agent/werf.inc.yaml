@@ -27,7 +27,7 @@ shell:
 
 
 ---
-{{- $drbdBinaries := "/drbd-utils/sbin/* /drbd-utils/etc/drbd.conf /drbd-utils/etc/drbd.d/global_common.conf /drbd-utils/etc/multipath/conf.d/drbd.conf /usr/sbin/dmsetup /usr/sbin/dmstats /lvm2/sbin/lvcreate /lvm2/sbin/lvremove /lvm2/lib64/*" }}
+{{- $drbdBinaries := "/drbd-utils/sbin/* /drbd-utils/etc/drbd.conf /drbd-utils/etc/drbd.d/global_common.conf /drbd-utils/etc/multipath/conf.d/drbd.conf /usr/sbin/dmsetup /usr/sbin/dmstats /lvm2/sbin/lvcreate /lvm2/sbin/lvchange /lvm2/sbin/lvremove /lvm2/lib64/*" }}
 image: {{ .ImageName }}-binaries-artifact
 fromImage: builder/alt
 final: false
