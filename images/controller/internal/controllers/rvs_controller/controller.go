@@ -47,6 +47,7 @@ func BuildController(mgr manager.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(mapRVRSToRVS),
 			builder.WithPredicates(rvrsPredicates()...),
 		).
+		Owns(&v1alpha1.DRBDResource{}, builder.WithPredicates(syncDRBDRPredicates()...)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 10,
 			RateLimiter:             controlleroptions.DefaultRateLimiter(),

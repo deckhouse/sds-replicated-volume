@@ -245,7 +245,7 @@ type ReplicatedVolumeDatameshReplicaRequest struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=123
-	// +kubebuilder:validation:Pattern=`^.+-([0-9]|[12][0-9]|3[01])$`
+	// +kubebuilder:validation:Pattern=`^.+-([0-9]|[12][0-9]|3[01])$` 
 	Name string `json:"name"`
 
 	// Message is an optional human-readable message about the request state and progress.
@@ -264,7 +264,7 @@ type ReplicatedVolumeDatameshReplicaRequest struct {
 
 // ID extracts ID from the replica name (e.g., "pvc-xxx-5" → 5).
 func (t ReplicatedVolumeDatameshReplicaRequest) ID() uint8 {
-	return idFromName(t.Name)
+	return IDFromName(t.Name)
 }
 
 // ReplicatedVolumeDatameshTransition represents an active datamesh transition.
@@ -368,7 +368,7 @@ func (t ReplicatedVolumeDatameshTransition) ReplicaID() uint8 {
 	if t.ReplicaName == "" {
 		panic("ReplicaID called on transition without replicaName (type: " + string(t.Type) + ")")
 	}
-	return idFromName(t.ReplicaName)
+	return IDFromName(t.ReplicaName)
 }
 
 // CurrentStep returns a pointer to the first non-Completed step, or nil if all steps are completed.
@@ -640,7 +640,7 @@ type DatameshMember struct {
 
 // ID extracts ID from the member name (e.g., "pvc-xxx-5" → 5).
 func (m DatameshMember) ID() uint8 {
-	return idFromName(m.Name)
+	return IDFromName(m.Name)
 }
 
 // DatameshMemberType enumerates possible types for datamesh members.

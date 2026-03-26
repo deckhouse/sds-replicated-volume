@@ -27,6 +27,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -1630,36 +1631,37 @@ func applyFormationTransitionAbsent(rv *v1alpha1.ReplicatedVolume) bool {
 }
 
 // resolveSnapshotNodeName finds a node that has a Ready RVRS for the given RVS.
+// It prefers the source RVRS (snapshot of the Primary replica) when available.
 func (r *Reconciler) resolveSnapshotNodeName(ctx context.Context, rvsName string) (string, error) {
+	rvs := &v1alpha1.ReplicatedVolumeSnapshot{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: rvsName}, rvs); err != nil {
+		return "", fmt.Errorf("getting RVS %q: %w", rvsName, err)
+	}
+
 	var rvrsList v1alpha1.ReplicatedVolumeReplicaSnapshotList
 	if err := r.cl.List(ctx, &rvrsList); err != nil {
 		return "", fmt.Errorf("listing RVRS: %w", err)
 	}
+
+	var fallbackNodeName string
 	for i := range rvrsList.Items {
 		rvrs := &rvrsList.Items[i]
-		if rvrs.Spec.ReplicatedVolumeSnapshotName == rvsName &&
-			rvrs.Status.Phase == v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseReady &&
-			rvrs.Status.ReadyToUse {
+		if rvrs.Spec.ReplicatedVolumeSnapshotName != rvsName {
+			continue
+		}
+		if rvrs.Status.Phase != v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseReady || !rvrs.Status.ReadyToUse {
+			continue
+		}
+		if rvs.Status.SourceReplicaSnapshotName != "" && rvrs.Name == rvs.Status.SourceReplicaSnapshotName {
 			return rvrs.Spec.NodeName, nil
 		}
-	}
-	return "", fmt.Errorf("no ready RVRS found for snapshot %q", rvsName)
-}
-
-// resolveSnapshotHandleForNode finds the SnapshotHandle from a Ready RVRS on the given node.
-func (r *Reconciler) resolveSnapshotHandleForNode(ctx context.Context, rvsName, nodeName string) (string, error) {
-	var rvrsList v1alpha1.ReplicatedVolumeReplicaSnapshotList
-	if err := r.cl.List(ctx, &rvrsList); err != nil {
-		return "", fmt.Errorf("listing RVRS: %w", err)
-	}
-	for i := range rvrsList.Items {
-		rvrs := &rvrsList.Items[i]
-		if rvrs.Spec.ReplicatedVolumeSnapshotName == rvsName &&
-			rvrs.Spec.NodeName == nodeName &&
-			rvrs.Status.Phase == v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseReady &&
-			rvrs.Status.SnapshotHandle != "" {
-			return rvrs.Status.SnapshotHandle, nil
+		if fallbackNodeName == "" {
+			fallbackNodeName = rvrs.Spec.NodeName
 		}
 	}
-	return "", fmt.Errorf("no ready RVRS with snapshotHandle found for snapshot %q on node %q", rvsName, nodeName)
+
+	if fallbackNodeName != "" {
+		return fallbackNodeName, nil
+	}
+	return "", fmt.Errorf("no ready RVRS found for snapshot %q", rvsName)
 }

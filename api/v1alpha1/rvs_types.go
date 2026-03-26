@@ -70,7 +70,7 @@ type ReplicatedVolumeSnapshotStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// +kubebuilder:validation:Enum=Pending;InProgress;Ready;Failed;Deleting
+	// +kubebuilder:validation:Enum=Pending;InProgress;Synchronizing;Ready;Failed;Deleting
 	// +optional
 	Phase ReplicatedVolumeSnapshotPhase `json:"phase,omitempty"`
 
@@ -85,6 +85,20 @@ type ReplicatedVolumeSnapshotStatus struct {
 	CreationTime *metav1.Time `json:"creationTime,omitempty"`
 
 	Datamesh ReplicatedVolumeSnapshotDatamesh `json:"datamesh"`
+
+	// SourceReplicaSnapshotName is the RVRS created from the attached (Primary)
+	// replica. This snapshot has the most up-to-date data and is preferred
+	// as the sync source and clone source.
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	SourceReplicaSnapshotName string `json:"sourceReplicaSnapshotName,omitempty"`
+
+	// SyncDRBDResources lists temporary DRBDResource names created for
+	// snapshot synchronization. The RVS controller uses this to monitor
+	// sync progress and clean up resources after sync completes.
+	// +listType=set
+	// +optional
+	SyncDRBDResources []string `json:"syncDRBDResources,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -131,11 +145,12 @@ type SnapshotDatameshMember struct {
 type ReplicatedVolumeSnapshotPhase string
 
 const (
-	ReplicatedVolumeSnapshotPhasePending    ReplicatedVolumeSnapshotPhase = "Pending"
-	ReplicatedVolumeSnapshotPhaseInProgress ReplicatedVolumeSnapshotPhase = "InProgress"
-	ReplicatedVolumeSnapshotPhaseReady      ReplicatedVolumeSnapshotPhase = "Ready"
-	ReplicatedVolumeSnapshotPhaseFailed     ReplicatedVolumeSnapshotPhase = "Failed"
-	ReplicatedVolumeSnapshotPhaseDeleting   ReplicatedVolumeSnapshotPhase = "Deleting"
+	ReplicatedVolumeSnapshotPhasePending       ReplicatedVolumeSnapshotPhase = "Pending"
+	ReplicatedVolumeSnapshotPhaseInProgress    ReplicatedVolumeSnapshotPhase = "InProgress"
+	ReplicatedVolumeSnapshotPhaseSynchronizing ReplicatedVolumeSnapshotPhase = "Synchronizing"
+	ReplicatedVolumeSnapshotPhaseReady         ReplicatedVolumeSnapshotPhase = "Ready"
+	ReplicatedVolumeSnapshotPhaseFailed        ReplicatedVolumeSnapshotPhase = "Failed"
+	ReplicatedVolumeSnapshotPhaseDeleting      ReplicatedVolumeSnapshotPhase = "Deleting"
 )
 
 func (p ReplicatedVolumeSnapshotPhase) String() string { return string(p) }

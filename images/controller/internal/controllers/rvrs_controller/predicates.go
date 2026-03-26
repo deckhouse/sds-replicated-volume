@@ -19,11 +19,11 @@ package rvrscontroller
 import (
 	"slices"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
 
 func rvrsPredicates() []predicate.Predicate {

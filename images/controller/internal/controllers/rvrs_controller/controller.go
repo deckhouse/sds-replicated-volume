@@ -27,7 +27,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/controlleroptions"
 )
@@ -56,8 +55,8 @@ func BuildController(mgr manager.Manager) error {
 		Complete(rec)
 }
 
-func mapLLVSToRVRS(cl client.Client) handler.MapFunc {
-	return func(ctx context.Context, obj client.Object) []reconcile.Request {
+func mapLLVSToRVRS(_ client.Client) handler.MapFunc {
+	return func(_ context.Context, obj client.Object) []reconcile.Request {
 		llvs, ok := obj.(*snc.LVMLogicalVolumeSnapshot)
 		if !ok || llvs == nil {
 			return nil

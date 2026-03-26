@@ -42,6 +42,41 @@ func rvsPredicates() []predicate.Predicate {
 	}
 }
 
+func syncDRBDRPredicates() []predicate.Predicate {
+	return []predicate.Predicate{
+		predicate.Funcs{
+			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				oldObj, okOld := e.ObjectOld.(*v1alpha1.DRBDResource)
+				newObj, okNew := e.ObjectNew.(*v1alpha1.DRBDResource)
+				if !okOld || !okNew || oldObj == nil || newObj == nil {
+					return true
+				}
+				if oldObj.Status.DiskState != newObj.Status.DiskState {
+					return true
+				}
+				if len(oldObj.Status.Addresses) != len(newObj.Status.Addresses) {
+					return true
+				}
+				if len(oldObj.Status.Peers) != len(newObj.Status.Peers) {
+					return true
+				}
+				for i := range oldObj.Status.Peers {
+					if i >= len(newObj.Status.Peers) {
+						return true
+					}
+					if oldObj.Status.Peers[i].DiskState != newObj.Status.Peers[i].DiskState {
+						return true
+					}
+					if oldObj.Status.Peers[i].ConnectionState != newObj.Status.Peers[i].ConnectionState {
+						return true
+					}
+				}
+				return false
+			},
+		},
+	}
+}
+
 func rvrsPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.Funcs{

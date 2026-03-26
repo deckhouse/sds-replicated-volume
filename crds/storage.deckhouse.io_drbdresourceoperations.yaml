@@ -70,36 +70,6 @@ spec:
                   rule: self == oldSelf
                 - message: clearBitmap and forceResync are mutually exclusive
                   rule: '!(self.clearBitmap && self.forceResync)'
-              createSnapshot:
-                description: Parameters for CreateSnapshot operation. Immutable once
-                  set.
-                properties:
-                  snapshotName:
-                    maxLength: 253
-                    minLength: 1
-                    pattern: ^[0-9A-Za-z.+_-]*$
-                    type: string
-                required:
-                - snapshotName
-                type: object
-                x-kubernetes-validations:
-                - message: createSnapshot is immutable
-                  rule: self == oldSelf
-              deleteSnapshot:
-                description: Parameters for DeleteSnapshot operation. Immutable once
-                  set.
-                properties:
-                  snapshotName:
-                    maxLength: 253
-                    minLength: 1
-                    pattern: ^[0-9A-Za-z.+_/\-]*$
-                    type: string
-                required:
-                - snapshotName
-                type: object
-                x-kubernetes-validations:
-                - message: deleteSnapshot is immutable
-                  rule: self == oldSelf
               drbdResourceName:
                 maxLength: 253
                 minLength: 1
@@ -107,21 +77,6 @@ spec:
                 type: string
                 x-kubernetes-validations:
                 - message: drbdResourceName is immutable
-                  rule: self == oldSelf
-              populateFromSnapshot:
-                description: Parameters for PopulateFromSnapshot operation. Immutable
-                  once set.
-                properties:
-                  sourceLVPath:
-                    maxLength: 253
-                    minLength: 1
-                    pattern: ^/dev/[0-9A-Za-z.+_/\-]*$
-                    type: string
-                required:
-                - sourceLVPath
-                type: object
-                x-kubernetes-validations:
-                - message: populateFromSnapshot is immutable
                   rule: self == oldSelf
               type:
                 description: DRBDResourceOperationType represents the type of operation
@@ -132,9 +87,6 @@ spec:
                 - Invalidate
                 - Outdate
                 - Verify
-                - CreateSnapshot
-                - DeleteSnapshot
-                - PopulateFromSnapshot
                 type: string
                 x-kubernetes-validations:
                 - message: type is immutable

@@ -109,17 +109,21 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, rvs *v1alpha1.Replicat
 		return rf.Fail(err)
 	}
 
-	outcome = r.reconcileChildren(rf.Ctx(), rvs, rvrs, childRVRSs)
+	outcome = r.reconcileChildren(rf.Ctx(), rvs, rv, rvrs, childRVRSs)
 	if outcome.ShouldReturn() {
 		return outcome
 	}
 
-	childRVRSs, err = r.getChildRVRSs(rf.Ctx(), rvs.Name)
-	if err != nil {
-		return rf.Fail(err)
+	outcome = r.reconcileAggregateStatus(rf.Ctx(), rvs, childRVRSs)
+	if outcome.ShouldReturn() {
+		return outcome
 	}
 
-	return r.reconcileAggregateStatus(rf.Ctx(), rvs, childRVRSs)
+	if rvs.Status.Phase == v1alpha1.ReplicatedVolumeSnapshotPhaseSynchronizing {
+		return r.reconcileSyncMesh(rf.Ctx(), rvs, rv, childRVRSs)
+	}
+
+	return outcome
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -127,9 +131,17 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, rvs *v1alpha1.Replicat
 //
 
 // Reconcile pattern: In-place reconciliation.
+//
+// Snapshots are created in two phases:
+//  1. Secondary (non-attached) replicas first.
+//  2. Primary (attached) replica last, only after all secondary RVRS are Ready.
+//
+// This ensures the primary snapshot contains the most up-to-date data
+// (it is taken while secondaries are already frozen).
 func (r *Reconciler) reconcileChildren(
 	ctx context.Context,
 	rvs *v1alpha1.ReplicatedVolumeSnapshot,
+	rv *v1alpha1.ReplicatedVolume,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 	existingRVRSs []*v1alpha1.ReplicatedVolumeReplicaSnapshot,
 ) (outcome flow.ReconcileOutcome) {
@@ -141,22 +153,44 @@ func (r *Reconciler) reconcileChildren(
 		existingByRVR[child.Spec.ReplicatedVolumeReplicaName] = child
 	}
 
-	for _, rvr := range rvrs {
-		if rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful {
-			continue
-		}
-		if rvr.Spec.NodeName == "" {
-			continue
-		}
+	secondaryRVRs, primaryRVRs := splitRVRsByAttachment(rvrs, rv.Status.Datamesh.Members)
+
+	for _, rvr := range secondaryRVRs {
 		if _, exists := existingByRVR[rvr.Name]; exists {
 			continue
 		}
-
 		if err := r.createRVRS(rf.Ctx(), rvs, rvr); err != nil {
 			if apierrors.IsAlreadyExists(err) {
 				return rf.DoneAndRequeue()
 			}
 			return rf.Fail(err)
+		}
+	}
+
+	if len(primaryRVRs) > 0 {
+		if !allRVRSReady(secondaryRVRs, existingByRVR) {
+			return rf.DoneAndRequeue()
+		}
+
+		for _, rvr := range primaryRVRs {
+			if _, exists := existingByRVR[rvr.Name]; exists {
+				continue
+			}
+			if err := r.createRVRS(rf.Ctx(), rvs, rvr); err != nil {
+				if apierrors.IsAlreadyExists(err) {
+					return rf.DoneAndRequeue()
+				}
+				return rf.Fail(err)
+			}
+		}
+
+		if rvs.Status.SourceReplicaSnapshotName == "" {
+			rvrsName := fmt.Sprintf("%s-%s", rvs.Name, primaryRVRs[0].Spec.NodeName)
+			base := rvs.DeepCopy()
+			rvs.Status.SourceReplicaSnapshotName = rvrsName
+			if err := r.patchRVSStatus(rf.Ctx(), rvs, base); err != nil {
+				return rf.Fail(err)
+			}
 		}
 	}
 
@@ -200,6 +234,12 @@ func (r *Reconciler) reconcileAggregateStatus(
 			false)
 	}
 	if datamesh.ReadyCount == datamesh.TotalCount {
+		if datamesh.TotalCount > 1 && rvs.Status.Phase != v1alpha1.ReplicatedVolumeSnapshotPhaseReady {
+			return r.reconcileStatus(rf.Ctx(), rvs, datamesh,
+				v1alpha1.ReplicatedVolumeSnapshotPhaseSynchronizing,
+				"All replica snapshots created, starting synchronization",
+				false)
+		}
 		return r.reconcileStatus(rf.Ctx(), rvs, datamesh,
 			v1alpha1.ReplicatedVolumeSnapshotPhaseReady,
 			"All replica snapshots are ready",
@@ -293,6 +333,33 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, rvs *v1alpha1.Replicat
 
 	if !obju.HasFinalizer(rvs, v1alpha1.RVSControllerFinalizer) {
 		return rf.Done()
+	}
+
+	if len(rvs.Status.SyncDRBDResources) > 0 {
+		syncDRBDRs, _, err := r.getSyncDRBDResources(rf.Ctx(), rvs.Status.SyncDRBDResources)
+		if err != nil {
+			return rf.Fail(err)
+		}
+		for _, drbdr := range syncDRBDRs {
+			if drbdr.DeletionTimestamp != nil {
+				continue
+			}
+			if err := r.cl.Delete(rf.Ctx(), drbdr); err != nil && !apierrors.IsNotFound(err) {
+				return rf.Fail(err)
+			}
+		}
+		if len(syncDRBDRs) > 0 {
+			return r.reconcileStatus(rf.Ctx(), rvs, rvs.Status.Datamesh,
+				v1alpha1.ReplicatedVolumeSnapshotPhaseDeleting,
+				"Waiting for sync resources to be deleted",
+				false).Enrichf("waiting for sync DRBDResources deletion")
+		}
+
+		base := rvs.DeepCopy()
+		rvs.Status.SyncDRBDResources = nil
+		if err := r.patchRVSStatus(rf.Ctx(), rvs, base); err != nil {
+			return rf.Fail(err)
+		}
 	}
 
 	childRVRSs, err := r.getChildRVRSs(rf.Ctx(), rvs.Name)
@@ -439,4 +506,48 @@ func (r *Reconciler) getRVRsByRVName(ctx context.Context, rvName string) ([]*v1a
 		result[i] = &list.Items[i]
 	}
 	return result, nil
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Pure helpers
+//
+
+func splitRVRsByAttachment(
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	members []v1alpha1.DatameshMember,
+) (secondary, primary []*v1alpha1.ReplicatedVolumeReplica) {
+	attachedNames := make(map[string]struct{}, len(members))
+	for _, m := range members {
+		if m.Attached {
+			attachedNames[m.Name] = struct{}{}
+		}
+	}
+
+	for _, rvr := range rvrs {
+		if rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful {
+			continue
+		}
+		if rvr.Spec.NodeName == "" {
+			continue
+		}
+		if _, attached := attachedNames[rvr.Name]; attached {
+			primary = append(primary, rvr)
+		} else {
+			secondary = append(secondary, rvr)
+		}
+	}
+	return secondary, primary
+}
+
+func allRVRSReady(
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	existingByRVR map[string]*v1alpha1.ReplicatedVolumeReplicaSnapshot,
+) bool {
+	for _, rvr := range rvrs {
+		child, exists := existingByRVR[rvr.Name]
+		if !exists || child.Status.Phase != v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseReady {
+			return false
+		}
+	}
+	return true
 }

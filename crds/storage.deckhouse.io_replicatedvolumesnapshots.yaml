@@ -185,12 +185,29 @@ spec:
                 enum:
                 - Pending
                 - InProgress
+                - Synchronizing
                 - Ready
                 - Failed
                 - Deleting
                 type: string
               readyToUse:
                 type: boolean
+              sourceReplicaSnapshotName:
+                description: |-
+                  SourceReplicaSnapshotName is the RVRS created from the attached (Primary)
+                  replica. This snapshot has the most up-to-date data and is preferred
+                  as the sync source and clone source.
+                maxLength: 253
+                type: string
+              syncDRBDResources:
+                description: |-
+                  SyncDRBDResources lists temporary DRBDResource names created for
+                  snapshot synchronization. The RVS controller uses this to monitor
+                  sync progress and clean up resources after sync completes.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
             required:
             - datamesh
             type: object
