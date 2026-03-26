@@ -144,7 +144,7 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		targetSpec := computeTargetDRBDRSpec(rvr, drbdr, datamesh, member, targetBV.LLVNameOrEmpty(), targetType)
 
 		// Create new DRBDResource.
-		newObj, err := newDRBDR(r.scheme, rvr, targetSpec)
+		newObj, err := newDRBDR(r.scheme, rvr, rv, targetSpec)
 		if err != nil {
 			return drbdr, rf.Failf(err, "constructing DRBDResource")
 		}
@@ -184,16 +184,17 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		}
 	}
 
-	// 7. Ensure ownerRef on DRBDR (may be missing on pre-existing/externally-created DRBDRs).
+	// 7. Ensure metadata on DRBDR (ownerRef, finalizer, labels).
+	// OwnerRef may be missing on pre-existing/externally-created DRBDRs.
 	// Once set, the Owns() watch triggers for DRBDR events, and Kubernetes GC
 	// cascade-deletes the DRBDR when the RVR is deleted.
-	if !metav1.IsControlledBy(drbdr, rvr) {
+	if !isDRBDRMetadataInSync(rvr, rv, drbdr) {
 		base := drbdr.DeepCopy()
-		if err := controllerutil.SetControllerReference(rvr, drbdr, r.scheme); err != nil {
-			return drbdr, rf.Failf(err, "setting controller reference on DRBDResource %s", drbdr.Name)
+		if _, err := applyDRBDRMetadata(r.scheme, rvr, rv, drbdr); err != nil {
+			return drbdr, rf.Failf(err, "applying DRBDResource %s metadata", drbdr.Name)
 		}
 		if err := r.patchDRBDR(rf.Ctx(), drbdr, base); err != nil {
-			return drbdr, rf.Failf(err, "patching DRBDResource %s ownerRef", drbdr.Name)
+			return drbdr, rf.Failf(err, "patching DRBDResource %s metadata", drbdr.Name)
 		}
 	}
 
@@ -322,6 +323,26 @@ func (r *Reconciler) reconcileDRBDResource(ctx context.Context, rvr *v1alpha1.Re
 		}
 	}
 
+	// 13c. Check if DRBD device has confirmed the target usable size.
+	// During resize, the agent runs `drbdsetup resize` asynchronously. Until
+	// drbdr.Status.Size >= drbdr.Spec.Size, the replica is not fully configured.
+	if drbdr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful && drbdr.Spec.Size != nil {
+		statusSize := drbdr.Status.Size
+		if statusSize == nil || statusSize.Cmp(*drbdr.Spec.Size) < 0 {
+			var msg string
+			if statusSize != nil {
+				msg = fmt.Sprintf("DRBD resize pending: usable size %s, expected %s",
+					statusSize.String(), drbdr.Spec.Size.String())
+			} else {
+				msg = fmt.Sprintf("DRBD resize pending: usable size not yet reported, expected %s",
+					drbdr.Spec.Size.String())
+			}
+			changed = applyDRBDConfiguredCondFalse(rvr,
+				v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForDRBDResize, msg) || changed
+			return drbdr, rf.Continue().ReportChangedIf(changed)
+		}
+	}
+
 	// 14. If not a datamesh member.
 	if member == nil {
 		// If previously a datamesh member (DatameshRevision > 0) but now removed from the
@@ -443,24 +464,97 @@ func computeDRBDRType(memberType v1alpha1.DatameshMemberType) v1alpha1.DRBDResou
 	return v1alpha1.DRBDResourceTypeDiskless
 }
 
-// newDRBDR constructs a new DRBDResource with ownerRef and finalizer.
+// newDRBDR constructs a new DRBDResource with ownerRef, finalizer, and labels.
 // Spec must already have all fields set (including NodeName and NodeID for DRBDR).
 func newDRBDR(
 	scheme *runtime.Scheme,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
+	rv *v1alpha1.ReplicatedVolume,
 	spec v1alpha1.DRBDResourceSpec,
 ) (*v1alpha1.DRBDResource, error) {
 	drbdr := &v1alpha1.DRBDResource{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       rvr.Name,
+			Labels:     map[string]string{},
 			Finalizers: []string{v1alpha1.RVRControllerFinalizer},
 		},
 		Spec: spec,
 	}
+
+	if rvr.Spec.ReplicatedVolumeName != "" {
+		drbdr.Labels[v1alpha1.ReplicatedVolumeLabelKey] = rvr.Spec.ReplicatedVolumeName
+	}
+
+	if rv != nil && rv.Spec.ReplicatedStorageClassName != "" {
+		drbdr.Labels[v1alpha1.ReplicatedStorageClassLabelKey] = rv.Spec.ReplicatedStorageClassName
+	}
+
 	if err := controllerutil.SetControllerReference(rvr, drbdr, scheme); err != nil {
 		return nil, err
 	}
 	return drbdr, nil
+}
+
+// isDRBDRMetadataInSync checks if ownerRef, finalizer, and labels are set on DRBDR.
+func isDRBDRMetadataInSync(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.ReplicatedVolume, drbdr *v1alpha1.DRBDResource) bool {
+	if !obju.HasFinalizer(drbdr, v1alpha1.RVRControllerFinalizer) {
+		return false
+	}
+	if !obju.HasControllerRef(drbdr, rvr) {
+		return false
+	}
+
+	if rvr.Spec.ReplicatedVolumeName != "" {
+		if !obju.HasLabelValue(drbdr, v1alpha1.ReplicatedVolumeLabelKey, rvr.Spec.ReplicatedVolumeName) {
+			return false
+		}
+	}
+
+	if rv != nil {
+		if rv.Spec.ReplicatedStorageClassName != "" {
+			if !obju.HasLabelValue(drbdr, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName) {
+				return false
+			}
+		} else {
+			if obju.HasLabel(drbdr, v1alpha1.ReplicatedStorageClassLabelKey) {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+// applyDRBDRMetadata applies ownerRef, finalizer, and labels to DRBDR.
+// Returns true if any changes were made.
+func applyDRBDRMetadata(scheme *runtime.Scheme, rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.ReplicatedVolume, drbdr *v1alpha1.DRBDResource) (bool, error) {
+	changed := obju.AddFinalizer(drbdr, v1alpha1.RVRControllerFinalizer)
+
+	if rvr.Spec.ReplicatedVolumeName != "" {
+		if obju.SetLabel(drbdr, v1alpha1.ReplicatedVolumeLabelKey, rvr.Spec.ReplicatedVolumeName) {
+			changed = true
+		}
+	}
+
+	if rv != nil {
+		if rv.Spec.ReplicatedStorageClassName != "" {
+			if obju.SetLabel(drbdr, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName) {
+				changed = true
+			}
+		} else {
+			if obju.RemoveLabel(drbdr, v1alpha1.ReplicatedStorageClassLabelKey) {
+				changed = true
+			}
+		}
+	}
+
+	if ownerRefChanged, err := obju.SetControllerRef(drbdr, rvr, scheme); err != nil {
+		return changed, fmt.Errorf("setting controller reference: %w", err)
+	} else if ownerRefChanged {
+		changed = true
+	}
+
+	return changed, nil
 }
 
 // computeTargetDRBDRSpec computes the target DRBDR spec based on rvr, existing drbdr,

@@ -137,7 +137,9 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 	// Wait for ReplicatedVolume to become ready
 	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] start wait ReplicatedVolume", traceID, volumeID))
-	attemptCounter, err := utils.WaitForReplicatedVolumeReady(ctx, d.cl, d.log, traceID, volumeID)
+	waitCtx, waitCancel := context.WithTimeout(ctx, d.waitActionTimeout)
+	defer waitCancel()
+	rv, attemptCounter, err := utils.WaitForReplicatedVolumeReady(waitCtx, d.cl, d.log, traceID, volumeID)
 	if err != nil {
 		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error WaitForReplicatedVolumeReady. Delete ReplicatedVolume %s", traceID, volumeID, volumeID))
 
@@ -156,15 +158,18 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	}
 	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] finish wait ReplicatedVolume, attempt counter = %d", traceID, volumeID, attemptCounter))
 
-	// TODO: Replace rv.Spec.Size with rv.Status.UsableSize once available
-	// (will track actual usable capacity after DRBD metadata overhead).
+	capacityBytes := rvSize.Value()
+	if rv.Status.Size != nil {
+		capacityBytes = rv.Status.Size.Value()
+	}
+
 	volumeCtx := make(map[string]string, len(request.Parameters))
 	for k, v := range request.Parameters {
 		volumeCtx[k] = v
 	}
 	volumeCtx[internal.ReplicatedVolumeNameKey] = volumeID
 
-	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Volume created successfully. volumeCtx: %+v", traceID, volumeID, volumeCtx))
+	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Volume created successfully, capacity: %d. volumeCtx: %+v", traceID, volumeID, capacityBytes, volumeCtx))
 
 	var contentSource *csi.VolumeContentSource
 	if snapshotSource != nil {
@@ -179,7 +184,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
-			CapacityBytes:      rvSize.Value(),
+			CapacityBytes:      capacityBytes,
 			VolumeId:           request.Name,
 			VolumeContext:      volumeCtx,
 			ContentSource:      contentSource,
@@ -195,10 +200,9 @@ func (d *Driver) DeleteVolume(ctx context.Context, request *csi.DeleteVolumeRequ
 		return nil, status.Error(codes.InvalidArgument, "Volume ID cannot be empty")
 	}
 
-	// Delete RVAs first to avoid orphaned attachments (e.g. WFFC where ControllerUnpublishVolume was never called).
-	if err := utils.DeleteRVAsForVolume(ctx, d.cl, d.log, traceID, request.VolumeId); err != nil {
-		d.log.Error(err, "error DeleteRVAsForVolume")
-		return nil, err
+	if err := utils.CheckNoRVAsExist(ctx, d.cl, d.log, traceID, request.VolumeId); err != nil {
+		d.log.Error(err, fmt.Sprintf("[DeleteVolume][traceID:%s][volumeID:%s] cannot delete volume while RVAs exist", traceID, request.VolumeId))
+		return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
 	}
 
 	err := utils.DeleteReplicatedVolume(ctx, d.cl, d.log, traceID, request.VolumeId)
@@ -207,7 +211,9 @@ func (d *Driver) DeleteVolume(ctx context.Context, request *csi.DeleteVolumeRequ
 		return nil, err
 	}
 
-	attemptCounter, err := utils.WaitForReplicatedVolumeDeleted(ctx, d.cl, d.log, traceID, request.VolumeId)
+	deleteWaitCtx, deleteWaitCancel := context.WithTimeout(ctx, d.waitActionTimeout)
+	defer deleteWaitCancel()
+	attemptCounter, err := utils.WaitForReplicatedVolumeDeleted(deleteWaitCtx, d.cl, d.log, traceID, request.VolumeId)
 	if err != nil {
 		d.log.Error(err, fmt.Sprintf("[DeleteVolume][traceID:%s][volumeID:%s] error waiting for ReplicatedVolume deletion", traceID, request.VolumeId))
 		return nil, err
@@ -240,7 +246,9 @@ func (d *Driver) ControllerPublishVolume(ctx context.Context, request *csi.Contr
 		return nil, status.Errorf(codes.Internal, "Failed to create ReplicatedVolumeAttachment: %v", err)
 	}
 
-	err = utils.WaitForRVAReady(ctx, d.cl, d.log, traceID, volumeID, nodeID)
+	publishWaitCtx, publishWaitCancel := context.WithTimeout(ctx, d.waitActionTimeout)
+	defer publishWaitCancel()
+	err = utils.WaitForRVAReady(publishWaitCtx, d.cl, d.log, traceID, volumeID, nodeID)
 	if err != nil {
 		d.log.Error(err, fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed waiting for RVA Ready=true", traceID, volumeID, nodeID))
 		// Preserve RVA reason/message for better user diagnostics.
@@ -304,8 +312,9 @@ func (d *Driver) ControllerUnpublishVolume(ctx context.Context, request *csi.Con
 
 	d.log.Info(fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Waiting for node to disappear from status.actuallyAttachedTo", traceID, volumeID, nodeID))
 
-	// Wait for node to disappear from status.actuallyAttachedTo
-	err = utils.WaitForAttachedToRemoved(ctx, d.cl, d.log, traceID, volumeID, nodeID)
+	unpublishWaitCtx, unpublishWaitCancel := context.WithTimeout(ctx, d.waitActionTimeout)
+	defer unpublishWaitCancel()
+	err = utils.WaitForAttachedToRemoved(unpublishWaitCtx, d.cl, d.log, traceID, volumeID, nodeID)
 	if err != nil {
 		d.log.Error(err, fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to wait for status.actuallyAttachedTo removal", traceID, volumeID, nodeID))
 		return nil, status.Errorf(codes.Internal, "Failed to wait for status.actuallyAttachedTo removal: %v", err)
@@ -392,33 +401,38 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.Contro
 	d.log.Trace(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] requestCapacity: %s", traceID, volumeID, requestCapacity.String()))
 
 	nodeExpansionRequired := request.GetVolumeCapability().GetBlock() == nil
-
 	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] NodeExpansionRequired: %t", traceID, volumeID, nodeExpansionRequired))
 
-	if requestCapacity.Cmp(rv.Spec.Size) <= 0 {
-		d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] requested size %s <= spec size %s, no resize needed", traceID, volumeID, requestCapacity.String(), rv.Spec.Size.String()))
+	if requestCapacity.Cmp(rv.Spec.Size) > 0 {
+		d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] Updating spec.size from %s to %s", traceID, volumeID, rv.Spec.Size.String(), requestCapacity.String()))
+		err = utils.ExpandReplicatedVolume(ctx, d.cl, rv, *requestCapacity)
+		if err != nil {
+			d.log.Error(err, fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] error updating ReplicatedVolume", traceID, volumeID))
+			return nil, status.Errorf(codes.Internal, "error updating ReplicatedVolume: %v", err)
+		}
+	}
+
+	if rv.Status.Size != nil && rv.Status.Size.Cmp(*requestCapacity) >= 0 {
+		d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] status.size %s already >= requested %s, no resize needed", traceID, volumeID, rv.Status.Size.String(), requestCapacity.String()))
 		return &csi.ControllerExpandVolumeResponse{
-			CapacityBytes:         rv.Spec.Size.Value(),
+			CapacityBytes:         rv.Status.Size.Value(),
 			NodeExpansionRequired: nodeExpansionRequired,
 		}, nil
 	}
 
-	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] start resize ReplicatedVolume, requested: %s, current spec: %s", traceID, volumeID, requestCapacity.String(), rv.Spec.Size.String()))
-	err = utils.ExpandReplicatedVolume(ctx, d.cl, rv, *requestCapacity)
-	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] error updating ReplicatedVolume", traceID, volumeID))
-		return nil, status.Errorf(codes.Internal, "error updating ReplicatedVolume: %v", err)
-	}
+	waitCtx, waitCancel := context.WithTimeout(ctx, d.waitActionTimeout)
+	defer waitCancel()
 
-	attemptCounter, err := utils.WaitForReplicatedVolumeReady(ctx, d.cl, d.log, traceID, volumeID)
+	var attemptCounter int
+	rv, attemptCounter, err = utils.WaitForReplicatedVolumeResized(waitCtx, d.cl, d.log, traceID, volumeID, *requestCapacity)
 	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] error WaitForReplicatedVolumeReady", traceID, volumeID))
-		return nil, err
+		d.log.Error(err, fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] error WaitForReplicatedVolumeResized", traceID, volumeID))
+		return nil, status.Errorf(codes.Internal, "error waiting for resize: %v", err)
 	}
-	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] finish resize ReplicatedVolume, attempt counter = %d", traceID, volumeID, attemptCounter))
+	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] Resize complete after %d attempts", traceID, volumeID, attemptCounter))
 
-	capacityBytes := requestCapacity.Value()
-	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] Volume expanded successfully, reporting: %d", traceID, volumeID, capacityBytes))
+	capacityBytes := rv.Status.Size.Value()
+	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] Volume expanded successfully, reporting capacity: %d", traceID, volumeID, capacityBytes))
 
 	return &csi.ControllerExpandVolumeResponse{
 		CapacityBytes:         capacityBytes,

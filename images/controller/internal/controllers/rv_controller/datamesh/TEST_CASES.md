@@ -4,9 +4,9 @@ This document lists the key behavioral cases that must be reviewed and used as t
 Cases are grouped by transition group and test scope.
 Non-obvious / non-trivial cases are marked with ⚡.
 
-Plan behavior tests (sections 1–18) exercise transitions through `ProcessTransitions`.
-Unit tests (sections 19–24) test individual functions directly.
-Integration tests (sections 25–30) verify cross-group interactions and invariants
+Plan behavior tests (sections 1–19) exercise transitions through `ProcessTransitions`.
+Unit tests (sections 20–25) test individual functions directly.
+Integration tests (sections 26–31) verify cross-group interactions and invariants
 across all canonical layouts, topologies, and feature variants.
 
 ---
@@ -847,6 +847,9 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 - **No transition for non-member node with deleting RVA.**
   No members. Deleting RVA on node-1. No Detach transition (nothing to detach).
 
+- ⚡ **Reason stays Detaching while Detach transition is active.**
+  D member Attached=true, deleting RVA. First ProcessTransitions creates Detach (member.Attached→false). Second ProcessTransitions without subject confirmation: transition still active. AttachmentConditionReason must be "Detaching" (from settle), not "Detached" (regression: dispatch NoDispatch used to overwrite settle status).
+
 ---
 
 ## 16. ForceDetach
@@ -942,7 +945,54 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 
 ---
 
-## 19. Network: RepairNetworkAddresses
+## 19. ResizeVolume
+
+### Dispatch
+
+- **Skip: datamesh.Size == spec.Size.**
+  2D layout, spec.Size = datamesh.Size = 10Gi. ProcessTransitions returns changed=false. No transitions.
+
+- **Skip: spec.Size < datamesh.Size (shrink not supported).**
+  spec.Size = 5Gi, datamesh.Size = 10Gi. changed=false. No transitions.
+
+- **Dispatch: datamesh.Size < spec.Size.**
+  2D layout, spec.Size = 20Gi, datamesh.Size = 10Gi. All guards pass (Ready=True, Established, BV grown). ResizeVolume transition created with planID=resize/v1. datamesh.Size updated to spec.Size. Revision incremented.
+
+### Guards
+
+- **Guard: no ready diskful member.**
+  D members have Ready=False. No ResizeVolume transition created.
+
+- **Guard: active resync.**
+  D member has peer in SyncTarget state. No ResizeVolume transition created.
+
+- **Guard: backing volumes not grown.**
+  D member BackingVolume.Size < target lower size. No ResizeVolume transition created.
+
+### Settle
+
+- **Partial confirm: some members not confirmed.**
+  After dispatch, only 1 of 2 members bumps revision. Transition stays active.
+
+- **All confirmed: transition completed.**
+  All members bump revision. Transition completed. No transitions remain.
+
+### E2E
+
+- **Full lifecycle: dispatch → simulate → complete.**
+  2D layout. runSettleLoop settles. Final: datamesh.Size == spec.Size, no transitions.
+
+### Concurrency
+
+- ⚡ **Resize blocked by active AddReplica(D).**
+  Pre-existing AddReplica(D) transition + resize trigger. Tracker blocks ResizeVolume. Only AddReplica present.
+
+- ⚡ **AddReplica(D) blocked by active resize.**
+  Pre-existing ResizeVolume transition + Join(D) request. Tracker blocks AddReplica(D). Only ResizeVolume present.
+
+---
+
+## 20. Network: RepairNetworkAddresses
 
 ### Dispatch
 
@@ -976,7 +1026,7 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 
 ---
 
-## 20. Network: ChangeSystemNetworks
+## 21. Network: ChangeSystemNetworks
 
 ### Dispatch
 
@@ -1046,7 +1096,7 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 
 ---
 
-## 21. Network Helpers
+## 22. Network Helpers
 
 ### peerConnected / peerConnectedOnNetwork
 
@@ -1138,7 +1188,7 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 
 ---
 
-## 22. Concurrency Tracker
+## 23. Concurrency Tracker
 
 ### Basic admission
 
@@ -1212,7 +1262,7 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 
 ---
 
-## 23. Effective Layout
+## 24. Effective Layout
 
 ### Change detection
 
@@ -1293,7 +1343,7 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 
 ---
 
-## 24. Guards (Unit)
+## 25. Guards (Unit)
 
 ### guardMaxDiskMembers
 
@@ -1403,7 +1453,7 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 
 ---
 
-## 25. Integration: Quorum Invariants
+## 26. Integration: Quorum Invariants
 
 All 7 canonical layouts are tested across topologies and feature variants.
 Each layout runs a 4-step cycle checking q and qmr invariants at every intermediate state.
@@ -1427,7 +1477,7 @@ Each layout runs a 4-step cycle checking q and qmr invariants at every intermedi
 
 ---
 
-## 26. Integration: ForceRemove Cascade
+## 27. Integration: ForceRemove Cascade
 
 Tests cascading ForceRemove operations simulating sequential node failures.
 All layouts × topologies × feature variants.
@@ -1458,7 +1508,7 @@ All layouts × topologies × feature variants.
 
 ---
 
-## 27. Integration: Attachment Lifecycle
+## 28. Integration: Attachment Lifecycle
 
 - **Full D lifecycle: add+attach → detach+remove.**
   2D existing. Phase 1: Join(D) + RVA → AddReplica(D) completes, then Attach completes (member Attached=true). Phase 2: remove RVA + Leave request → Detach completes, then RemoveReplica(D) completes (member removed). Final: 2D, q correct.
@@ -1486,7 +1536,7 @@ All layouts × topologies × feature variants.
 
 ---
 
-## 28. Integration: Layout Transitions
+## 29. Integration: Layout Transitions
 
 All 7 canonical layouts form ordered pairs (42 transitions). Each pair is tested in two modes across topologies and feature variants.
 
@@ -1508,7 +1558,7 @@ All 7 canonical layouts form ordered pairs (42 transitions). Each pair is tested
 
 ---
 
-## 29. Integration: Topology Switch
+## 30. Integration: Topology Switch
 
 - ⚡ **Ignored → TransZonal: stable layout, no spurious transitions.**
   3D Ignored with zones already set on members. Switch to TransZonal. No membership transitions should be created by the topology switch alone.
@@ -1542,7 +1592,7 @@ All 7 canonical layouts form ordered pairs (42 transitions). Each pair is tested
 
 ---
 
-## 30. Integration: Network
+## 31. Integration: Network
 
 - **Sequential CSN: add then remove.**
   2D. Phase 1: RSP adds net-B → add/v1 completes (systemNetworkNames=[A,B], members have 2 addresses). Phase 2: RSP removes net-B → remove/v1 completes (systemNetworkNames=[A], members have 1 address).
@@ -1564,7 +1614,7 @@ All 7 canonical layouts form ordered pairs (42 transitions). Each pair is tested
 
 ---
 
-## 31. Context and Writeback
+## 32. Context and Writeback
 
 ### buildContexts
 
@@ -1682,7 +1732,7 @@ All 7 canonical layouts form ordered pairs (42 transitions). Each pair is tested
 
 ---
 
-## 32. Performance
+## 33. Performance
 
 ### Allocation bounds (Ginkgo tests)
 

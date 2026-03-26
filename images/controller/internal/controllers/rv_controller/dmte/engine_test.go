@@ -249,6 +249,35 @@ var _ = Describe("Process", func() {
 		Expect(slot.statusMessages[5]).To(Equal("Joining is blocked: blocked by quorum"))
 	})
 
+	It("dispatch passes Init metadata to tracker CanAdmit", func() {
+		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+		slot := newRecordingSlotAccessor()
+		reg.RegisterReplicaSlot(0, slot)
+
+		reg.ReplicaTransition("AddReplica", 0).
+			Plan("diskful/v1").Group("G").DisplayName("Adding").
+			Init(func(_ *testGCtx, _ *testReplicaCtx, t *Transition) {
+				t.ReplicaType = v1alpha1.ReplicaTypeDiskful
+			}).
+			Steps(ReplicaStep("s", stubReplicaApply, neverReplicaConfirm)).Build()
+
+		rctx5 := &testReplicaCtx{id: 5, name: "rv-1-5"}
+
+		var capturedType v1alpha1.ReplicaType
+		tracker := &mockTracker{canAdmitFn: func(t *Transition) (bool, string, any) {
+			capturedType = t.ReplicaType
+			return true, "", nil
+		}}
+
+		var rev int64
+		var transitions []Transition
+		e := NewEngine(context.Background(), reg, tracker, []DispatchFunc[testCtxProvider]{singleReplicaDispatcher(rctx5, "AddReplica", "diskful/v1")}, &rev, transitions, testCtx(rctx5))
+
+		e.Process(context.Background())
+
+		Expect(capturedType).To(Equal(v1alpha1.ReplicaTypeDiskful))
+	})
+
 	It("dispatch slot conflict with unknown active plan uses empty display name", func() {
 		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
 		slot := newRecordingSlotAccessor()
@@ -670,6 +699,32 @@ var _ = Describe("CreateReplicaTransition", func() {
 
 		Expect(t).To(BeNil())
 		Expect(reason).To(Equal("Joining is blocked: blocked by quorum"))
+	})
+
+	It("passes Init metadata to tracker CanAdmit", func() {
+		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+		reg.RegisterReplicaSlot(0, newRecordingSlotAccessor())
+
+		reg.ReplicaTransition("AddReplica", 0).
+			Plan("diskful/v1").Group("G").DisplayName("Adding").
+			Init(func(_ *testGCtx, _ *testReplicaCtx, t *Transition) {
+				t.ReplicaType = v1alpha1.ReplicaTypeDiskful
+			}).
+			Steps(ReplicaStep("s", stubReplicaApply, neverReplicaConfirm)).Build()
+
+		var capturedType v1alpha1.ReplicaType
+		tracker := &mockTracker{canAdmitFn: func(t *Transition) (bool, string, any) {
+			capturedType = t.ReplicaType
+			return true, "", nil
+		}}
+
+		var rev int64
+		rctx5 := &testReplicaCtx{id: 5, name: "rv-1-5"}
+		e := newTestEngine(reg, tracker, &rev, nil, testCtx(rctx5))
+
+		e.CreateReplicaTransition("AddReplica", "diskful/v1", 5)
+
+		Expect(capturedType).To(Equal(v1alpha1.ReplicaTypeDiskful))
 	})
 
 	It("silently ignores when same type is already active on the slot", func() {

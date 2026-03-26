@@ -19,11 +19,17 @@ package drbdr
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
+)
+
+const (
+	scannerRetryBaseDelay = 1 * time.Second
+	scannerRetryMaxDelay  = 30 * time.Second
 )
 
 // Scanner listens for DRBD events via drbdutils events2 and triggers
@@ -53,21 +59,31 @@ func (s *Scanner) Start(ctx context.Context) error {
 
 	logger.Info("Starting scanner")
 
+	retryDelay := scannerRetryBaseDelay
 	for {
 		if err := s.runEventsLoop(ctx); err != nil {
 			if ctx.Err() != nil {
 				logger.Info("Scanner stopping due to context cancellation")
 				return nil
 			}
-			logger.Error(err, "Events loop failed, restarting")
-			// Continue to retry
+			logger.Error(err, "Events loop failed, retrying", "retryDelay", retryDelay)
+
+			select {
+			case <-time.After(retryDelay):
+			case <-ctx.Done():
+				return nil
+			}
+
+			retryDelay = min(retryDelay*2, scannerRetryMaxDelay)
+			continue
 		}
+
+		retryDelay = scannerRetryBaseDelay
 
 		select {
 		case <-ctx.Done():
 			return nil
 		default:
-			// Continue to restart
 		}
 	}
 }

@@ -25,6 +25,8 @@ import (
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=drbdrop
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
+// +kubebuilder:selectablefield:JSONPath=.spec.drbdResourceName
+// +kubebuilder:selectablefield:JSONPath=.status.phase
 // +kubebuilder:printcolumn:name="Resource",type=string,JSONPath=".spec.drbdResourceName"
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=".spec.type"
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"

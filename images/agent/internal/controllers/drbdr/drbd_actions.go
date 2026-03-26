@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -306,6 +307,25 @@ func (a NetOptionsAction) String() string {
 	return fmt.Sprintf("NetOptions(resource=%s, peerNodeID=%d)", a.ResourceName, a.PeerNodeID)
 }
 
+// PeerDeviceOptionsAction sets peer-device options on a connection volume.
+type PeerDeviceOptionsAction struct {
+	ResourceName string
+	PeerNodeID   uint8
+	VolumeNr     uint
+	Bitmap       *bool
+}
+
+func (a PeerDeviceOptionsAction) Execute(ctx context.Context) error {
+	err := drbdutils.ExecutePeerDeviceOptions(ctx, a.ResourceName, a.PeerNodeID, a.VolumeNr, drbdutils.PeerDeviceOptions{
+		Bitmap: a.Bitmap,
+	})
+	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonPeerDeviceOptionsFailed)
+}
+
+func (a PeerDeviceOptionsAction) String() string {
+	return fmt.Sprintf("PeerDeviceOptions(resource=%s, peerNodeID=%d, volumeNr=%d)", a.ResourceName, a.PeerNodeID, a.VolumeNr)
+}
+
 // NewPathAction adds a network path to a peer.
 type NewPathAction struct {
 	ResourceName string
@@ -316,6 +336,10 @@ type NewPathAction struct {
 
 func (a NewPathAction) Execute(ctx context.Context) error {
 	err := drbdutils.ExecuteNewPath(ctx, a.ResourceName, a.PeerNodeID, a.LocalAddr, a.RemoteAddr)
+	if err != nil && errors.Is(err, drbdutils.ErrNewPathLocalAddrInUse) {
+		ip, _, _ := net.SplitHostPort(a.LocalAddr)
+		err = &localPortConflictError{ip: ip, err: err}
+	}
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonNewPathFailed)
 }
 

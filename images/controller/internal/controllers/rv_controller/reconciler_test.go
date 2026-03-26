@@ -1674,6 +1674,127 @@ var _ = Describe("ensureDatameshReplicaRequests", func() {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
+// ensureStatusSize tests
+//
+
+var _ = Describe("ensureStatusSize", func() {
+	var (
+		ctx context.Context
+		rv  *v1alpha1.ReplicatedVolume
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		rv = &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+		}
+	})
+
+	mkRVR := func(name string, size *resource.Quantity) *v1alpha1.ReplicatedVolumeReplica {
+		return &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Status:     v1alpha1.ReplicatedVolumeReplicaStatus{Size: size},
+		}
+	}
+
+	It("sets min size from two diskful members", func() {
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
+			{Name: "rvr-1", Type: v1alpha1.DatameshMemberTypeDiskful},
+			{Name: "rvr-2", Type: v1alpha1.DatameshMemberTypeDiskful},
+		}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rvr-1", ptr.To(resource.MustParse("10Gi"))),
+			mkRVR("rvr-2", ptr.To(resource.MustParse("20Gi"))),
+		}
+
+		outcome := ensureStatusSize(ctx, rv, rvrs)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rv.Status.Size).NotTo(BeNil())
+		Expect(rv.Status.Size.String()).To(Equal("10Gi"))
+	})
+
+	It("skips diskless members", func() {
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
+			{Name: "rvr-1", Type: v1alpha1.DatameshMemberTypeDiskful},
+			{Name: "rvr-2", Type: v1alpha1.DatameshMemberTypeAccess},
+		}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rvr-1", ptr.To(resource.MustParse("10Gi"))),
+			mkRVR("rvr-2", nil),
+		}
+
+		outcome := ensureStatusSize(ctx, rv, rvrs)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rv.Status.Size).NotTo(BeNil())
+		Expect(rv.Status.Size.String()).To(Equal("10Gi"))
+	})
+
+	It("sets nil when all members are diskless", func() {
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
+			{Name: "rvr-1", Type: v1alpha1.DatameshMemberTypeAccess},
+			{Name: "rvr-2", Type: v1alpha1.DatameshMemberTypeTieBreaker},
+		}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rvr-1", nil),
+			mkRVR("rvr-2", nil),
+		}
+
+		outcome := ensureStatusSize(ctx, rv, rvrs)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rv.Status.Size).To(BeNil())
+	})
+
+	It("sets nil when no members", func() {
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{}
+
+		outcome := ensureStatusSize(ctx, rv, rvrs)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rv.Status.Size).To(BeNil())
+	})
+
+	It("clears size when diskful member has nil size", func() {
+		rv.Status.Size = ptr.To(resource.MustParse("10Gi"))
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
+			{Name: "rvr-1", Type: v1alpha1.DatameshMemberTypeDiskful},
+		}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rvr-1", nil),
+		}
+
+		outcome := ensureStatusSize(ctx, rv, rvrs)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rv.Status.Size).To(BeNil())
+	})
+
+	It("reports no change when already up to date", func() {
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
+			{Name: "rvr-1", Type: v1alpha1.DatameshMemberTypeDiskful},
+		}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rvr-1", ptr.To(resource.MustParse("10Gi"))),
+		}
+
+		outcome1 := ensureStatusSize(ctx, rv, rvrs)
+		Expect(outcome1.Error()).NotTo(HaveOccurred())
+		Expect(outcome1.DidChange()).To(BeTrue())
+
+		outcome2 := ensureStatusSize(ctx, rv, rvrs)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Pure helper function tests
 //
 
@@ -2104,6 +2225,106 @@ var _ = Describe("applyDatameshMember", func() {
 		changed := applyDatameshMember(rv, updated)
 		Expect(changed).To(BeTrue())
 		Expect(rv.Status.Datamesh.Members[0].NodeName).To(Equal("node-2"))
+	})
+})
+
+var _ = Describe("ensureDatameshMemberAddresses", func() {
+	addr := func(ip string, port uint) v1alpha1.DRBDResourceAddressStatus {
+		return v1alpha1.DRBDResourceAddressStatus{
+			SystemNetworkName: "Internal",
+			Address:           v1alpha1.DRBDAddress{IPv4: ip, Port: port},
+		}
+	}
+
+	It("returns false when addresses match", func() {
+		addrs := []v1alpha1.DRBDResourceAddressStatus{addr("10.0.0.1", 7000)}
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 5,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.DatameshMember{
+						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0), Addresses: addrs},
+					},
+				},
+			},
+		}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{{
+			ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0)},
+			Status:     v1alpha1.ReplicatedVolumeReplicaStatus{Addresses: addrs},
+		}}
+		Expect(ensureDatameshMemberAddresses(rv, rvrs)).To(BeFalse())
+		Expect(rv.Status.DatameshRevision).To(BeEquivalentTo(5))
+	})
+
+	It("updates addresses and bumps revision when port changed", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 5,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.DatameshMember{
+						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+							Addresses: []v1alpha1.DRBDResourceAddressStatus{addr("10.0.0.1", 7000)}},
+					},
+				},
+			},
+		}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{{
+			ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0)},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				Addresses: []v1alpha1.DRBDResourceAddressStatus{addr("10.0.0.1", 7078)},
+			},
+		}}
+		Expect(ensureDatameshMemberAddresses(rv, rvrs)).To(BeTrue())
+		Expect(rv.Status.DatameshRevision).To(BeEquivalentTo(6))
+		Expect(rv.Status.Datamesh.Members[0].Addresses[0].Address.Port).To(Equal(uint(7078)))
+	})
+
+	It("bumps revision only once for multiple address changes", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 3,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.DatameshMember{
+						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+							Addresses: []v1alpha1.DRBDResourceAddressStatus{addr("10.0.0.1", 7000)}},
+						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 1),
+							Addresses: []v1alpha1.DRBDResourceAddressStatus{addr("10.0.0.2", 7000)}},
+					},
+				},
+			},
+		}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0)},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Addresses: []v1alpha1.DRBDResourceAddressStatus{addr("10.0.0.1", 8000)},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 1)},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Addresses: []v1alpha1.DRBDResourceAddressStatus{addr("10.0.0.2", 9000)},
+				},
+			},
+		}
+		Expect(ensureDatameshMemberAddresses(rv, rvrs)).To(BeTrue())
+		Expect(rv.Status.DatameshRevision).To(BeEquivalentTo(4))
+	})
+
+	It("skips members without matching RVR", func() {
+		rv := &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 5,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Members: []v1alpha1.DatameshMember{
+						{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+							Addresses: []v1alpha1.DRBDResourceAddressStatus{addr("10.0.0.1", 7000)}},
+					},
+				},
+			},
+		}
+		Expect(ensureDatameshMemberAddresses(rv, nil)).To(BeFalse())
+		Expect(rv.Status.DatameshRevision).To(BeEquivalentTo(5))
 	})
 })
 

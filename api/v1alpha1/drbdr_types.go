@@ -26,6 +26,7 @@ import (
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=drbdr
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
+// +kubebuilder:selectablefield:JSONPath=.spec.nodeName
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=".status.activeConfiguration.state"
 // +kubebuilder:printcolumn:name="Configured",type=string,JSONPath=".status.conditions[?(@.type=='Configured')].status"

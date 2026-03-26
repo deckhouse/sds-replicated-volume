@@ -230,6 +230,30 @@ func (s *Store) NodePublishVolumeFS(source, devPath, target, fsType string, moun
 		return nil
 	}
 
+	// Guard: if the staging mount was lost (e.g. DRBD quorum loss, LV
+	// deactivation), source is a plain directory on the root FS.  Bind-mounting
+	// it would silently expose the wrong data to the pod.
+	sourceMounted, err := s.NodeStorage.IsMountPoint(source)
+	if err != nil {
+		return fmt.Errorf("[NodePublishVolumeFS] failed to check if staging path %q is a mount point: %w", source, err)
+	}
+	if !sourceMounted {
+		return fmt.Errorf("[NodePublishVolumeFS] staging path %q is not a mount point; the staging mount may have been lost (e.g. DRBD quorum loss)", source)
+	}
+
+	// Verify the correct device is mounted at the staging path.
+	mountedDevice, _, err := mountutils.GetDeviceNameFromMount(s.NodeStorage.Interface, source)
+	if err != nil {
+		return fmt.Errorf("[NodePublishVolumeFS] failed to find device mounted at staging path %q: %w", source, err)
+	}
+	mapperDevPath := toMapperPath(devPath)
+	resolvedDevPath := resolveDevicePath(devPath)
+	if mountedDevice != devPath && mountedDevice != mapperDevPath && mountedDevice != resolvedDevPath {
+		return fmt.Errorf("[NodePublishVolumeFS] staging path %q is mounted from device %q, expected %s (mapper: %s, resolved: %s)",
+			source, mountedDevice, devPath, mapperDevPath, resolvedDevPath)
+	}
+	s.Log.Trace(fmt.Sprintf("[NodePublishVolumeFS] staging path %q is mounted from expected device %s", source, mountedDevice))
+
 	err = s.NodeStorage.Mount(source, target, fsType, mountOpts)
 	if err != nil {
 		return fmt.Errorf("[NodePublishVolumeFS] failed to bind mount %q to %q with mount options %v: %w", source, target, mountOpts, err)

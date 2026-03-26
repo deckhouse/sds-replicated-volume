@@ -86,12 +86,13 @@ func hasFormationTransition(transitions []srv.ReplicatedVolumeDatameshTransition
 }
 
 // WaitForReplicatedVolumeReady waits for ReplicatedVolume to become ready
+// and returns the last-fetched RV on success.
 func WaitForReplicatedVolumeReady(
 	ctx context.Context,
 	kc client.Client,
 	log *logger.Logger,
 	traceID, name string,
-) (int, error) {
+) (*srv.ReplicatedVolume, int, error) {
 	var attemptCounter int
 	log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Waiting for ReplicatedVolume to become ready", traceID, name))
 	for {
@@ -99,14 +100,14 @@ func WaitForReplicatedVolumeReady(
 		select {
 		case <-ctx.Done():
 			log.Warning(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] context done. Failed to wait for ReplicatedVolume", traceID, name))
-			return attemptCounter, ctx.Err()
+			return nil, attemptCounter, ctx.Err()
 		default:
 			time.Sleep(500 * time.Millisecond)
 		}
 
 		rv, err := GetReplicatedVolume(ctx, kc, name)
 		if err != nil {
-			return attemptCounter, err
+			return nil, attemptCounter, err
 		}
 
 		if attemptCounter%10 == 0 {
@@ -114,14 +115,66 @@ func WaitForReplicatedVolumeReady(
 		}
 
 		if rv.DeletionTimestamp != nil {
-			return attemptCounter, fmt.Errorf("failed to create ReplicatedVolume %s, reason: ReplicatedVolume is being deleted", name)
+			return nil, attemptCounter, fmt.Errorf("failed to create ReplicatedVolume %s, reason: ReplicatedVolume is being deleted", name)
 		}
 
 		if rv.Status.DatameshRevision > 0 && !hasFormationTransition(rv.Status.DatameshTransitions) {
 			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] ReplicatedVolume is ready (datameshRevision=%d, no Formation transition)", traceID, name, rv.Status.DatameshRevision))
-			return attemptCounter, nil
+			return rv, attemptCounter, nil
 		}
 		log.Trace(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Attempt %d, ReplicatedVolume not ready yet (datameshRevision=%d, hasFormation=%v). Waiting...", traceID, name, attemptCounter, rv.Status.DatameshRevision, hasFormationTransition(rv.Status.DatameshTransitions)))
+	}
+}
+
+// quantityWithBytes formats a resource.Quantity as "106436Ki (109054464 bytes)" for debugging.
+func quantityWithBytes(q resource.Quantity) string {
+	return fmt.Sprintf("%s (%d bytes)", q.String(), q.Value())
+}
+
+// WaitForReplicatedVolumeResized polls until rv.Status.Size >= targetSize
+// and returns the last-fetched RV on success.
+func WaitForReplicatedVolumeResized(
+	ctx context.Context,
+	kc client.Client,
+	log *logger.Logger,
+	traceID, name string,
+	targetSize resource.Quantity,
+) (*srv.ReplicatedVolume, int, error) {
+	var attemptCounter int
+	log.Info(fmt.Sprintf("[WaitForReplicatedVolumeResized][traceID:%s][volumeID:%s] Waiting for status.size >= %s", traceID, name, quantityWithBytes(targetSize)))
+	for {
+		attemptCounter++
+		select {
+		case <-ctx.Done():
+			log.Warning(fmt.Sprintf("[WaitForReplicatedVolumeResized][traceID:%s][volumeID:%s] context done after %d attempts", traceID, name, attemptCounter))
+			return nil, attemptCounter, ctx.Err()
+		default:
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		rv, err := GetReplicatedVolume(ctx, kc, name)
+		if err != nil {
+			return nil, attemptCounter, err
+		}
+
+		if attemptCounter%10 == 0 {
+			var currentSize string
+			if rv.Status.Size != nil {
+				currentSize = quantityWithBytes(*rv.Status.Size)
+			} else {
+				currentSize = "<nil>"
+			}
+			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeResized][traceID:%s][volumeID:%s] Attempt: %d, status.size=%s, target=%s", traceID, name, attemptCounter, currentSize, quantityWithBytes(targetSize)))
+		}
+
+		if rv.DeletionTimestamp != nil {
+			return nil, attemptCounter, fmt.Errorf("ReplicatedVolume %s is being deleted, cannot complete resize", name)
+		}
+
+		if rv.Status.Size != nil && rv.Status.Size.Cmp(targetSize) >= 0 {
+			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeResized][traceID:%s][volumeID:%s] Resize complete: status.size=%s >= target=%s", traceID, name, quantityWithBytes(*rv.Status.Size), quantityWithBytes(targetSize)))
+			return rv, attemptCounter, nil
+		}
 	}
 }
 
@@ -233,40 +286,6 @@ func removervdeletepropagationIfExist(ctx context.Context, kc client.Client, log
 	return false, fmt.Errorf("after %d attempts of removing finalizer %s from ReplicatedVolume %s, last error: %w", KubernetesAPIRequestLimit, finalizer, rv.Name, nil)
 }
 
-// GetReplicatedVolumeReplicaForNode gets ReplicatedVolumeReplica for a specific node
-func GetReplicatedVolumeReplicaForNode(ctx context.Context, kc client.Client, volumeName, nodeName string) (*srv.ReplicatedVolumeReplica, error) {
-	rvrList := &srv.ReplicatedVolumeReplicaList{}
-	err := kc.List(
-		ctx,
-		rvrList,
-		client.MatchingLabels{
-			srv.ReplicatedVolumeLabelKey: volumeName,
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	for i := range rvrList.Items {
-		if rvrList.Items[i].Spec.NodeName == nodeName {
-			return &rvrList.Items[i], nil
-		}
-	}
-
-	return nil, fmt.Errorf("ReplicatedVolumeReplica not found for volume %s on node %s", volumeName, nodeName)
-}
-
-// GetDRBDDevicePath gets DRBD device path from ReplicatedVolumeReplica status
-func GetDRBDDevicePath(rvr *srv.ReplicatedVolumeReplica) (string, error) {
-	if rvr.Status.Attachment == nil {
-		return "", fmt.Errorf("replica is not attached")
-	}
-	if rvr.Status.Attachment.DevicePath == "" {
-		return "", fmt.Errorf("device path not available")
-	}
-	return rvr.Status.Attachment.DevicePath, nil
-}
-
 // ExpandReplicatedVolume expands a ReplicatedVolume
 func ExpandReplicatedVolume(ctx context.Context, kc client.Client, rv *srv.ReplicatedVolume, newSize resource.Quantity) error {
 	rv.Spec.Size = newSize
@@ -326,6 +345,18 @@ func truncateString(s string, maxLen int) string {
 	return out
 }
 
+func GetDevicePathFromRVA(ctx context.Context, kc client.Client, volumeName, nodeName string) (string, error) {
+	rvaName := BuildRVAName(volumeName, nodeName)
+	rva := &srv.ReplicatedVolumeAttachment{}
+	if err := kc.Get(ctx, client.ObjectKey{Name: rvaName}, rva); err != nil {
+		return "", fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
+	}
+	if rva.Status.DevicePath == "" {
+		return "", fmt.Errorf("device path not available in ReplicatedVolumeAttachment %s (phase=%s)", rvaName, rva.Status.Phase)
+	}
+	return rva.Status.DevicePath, nil
+}
+
 func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) (string, error) {
 	rvaName := BuildRVAName(volumeName, nodeName)
 
@@ -336,6 +367,10 @@ func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 			return "", fmt.Errorf("ReplicatedVolumeAttachment %s already exists but has different spec (volume=%s,node=%s)",
 				rvaName, existing.Spec.ReplicatedVolumeName, existing.Spec.NodeName,
 			)
+		}
+		if existing.DeletionTimestamp != nil {
+			return "", fmt.Errorf("ReplicatedVolumeAttachment %s is being deleted (phase=%s); cannot publish volume until deletion completes",
+				rvaName, existing.Status.Phase)
 		}
 		if !slices.Contains(existing.Finalizers, SDSReplicatedVolumeCSIFinalizer) {
 			existing.Finalizers = append(existing.Finalizers, SDSReplicatedVolumeCSIFinalizer)
@@ -381,6 +416,10 @@ func DeleteRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 		return fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
 	}
 
+	if rva.Status.InUse != nil && *rva.Status.InUse {
+		return fmt.Errorf("ReplicatedVolumeAttachment %s is still in use on node %s, cannot delete", rvaName, nodeName)
+	}
+
 	if slices.Contains(rva.Finalizers, SDSReplicatedVolumeCSIFinalizer) {
 		rva.Finalizers = slices.DeleteFunc(rva.Finalizers, func(s string) bool { return s == SDSReplicatedVolumeCSIFinalizer })
 		if err := kc.Update(ctx, rva); err != nil {
@@ -396,36 +435,24 @@ func DeleteRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 	return nil
 }
 
-// DeleteRVAsForVolume lists all RVAs for the given volume and deletes them.
-// This cleans up orphaned RVAs when DeleteVolume is called (e.g. WFFC case where
-// ControllerUnpublishVolume was never invoked).
-func DeleteRVAsForVolume(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName string) error {
+// CheckNoRVAsExist lists RVAs for the given volume and returns an error if any
+// still exist. This prevents deleting a ReplicatedVolume while it has active
+// attachments.
+func CheckNoRVAsExist(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName string) error {
 	list := &srv.ReplicatedVolumeAttachmentList{}
 	if err := kc.List(ctx, list); err != nil {
 		return fmt.Errorf("list ReplicatedVolumeAttachments: %w", err)
 	}
-	var toDelete []srv.ReplicatedVolumeAttachment
+	var remaining []string
 	for _, rva := range list.Items {
 		if rva.Spec.ReplicatedVolumeName == volumeName {
-			toDelete = append(toDelete, rva)
+			remaining = append(remaining, rva.Name)
 		}
 	}
-	for _, rva := range toDelete {
-		if slices.Contains(rva.Finalizers, SDSReplicatedVolumeCSIFinalizer) {
-			rva.Finalizers = slices.DeleteFunc(rva.Finalizers, func(s string) bool { return s == SDSReplicatedVolumeCSIFinalizer })
-			if err := kc.Update(ctx, &rva); err != nil {
-				return fmt.Errorf("remove finalizer from ReplicatedVolumeAttachment %s: %w", rva.Name, err)
-			}
-			log.Info(fmt.Sprintf("[DeleteRVAsForVolume][traceID:%s][volumeID:%s] Removed finalizer from RVA %s", traceID, volumeName, rva.Name))
-		}
-		log.Info(fmt.Sprintf("[DeleteRVAsForVolume][traceID:%s][volumeID:%s] Deleting ReplicatedVolumeAttachment %s (node=%s)", traceID, volumeName, rva.Name, rva.Spec.NodeName))
-		if err := kc.Delete(ctx, &rva); err != nil && !kerrors.IsNotFound(err) {
-			return fmt.Errorf("delete ReplicatedVolumeAttachment %s: %w", rva.Name, err)
-		}
+	if len(remaining) > 0 {
+		return fmt.Errorf("cannot delete volume %s: %d ReplicatedVolumeAttachment(s) still exist: %v", volumeName, len(remaining), remaining)
 	}
-	if len(toDelete) > 0 {
-		log.Info(fmt.Sprintf("[DeleteRVAsForVolume][traceID:%s][volumeID:%s] Deleted %d ReplicatedVolumeAttachment(s)", traceID, volumeName, len(toDelete)))
-	}
+	log.Info(fmt.Sprintf("[CheckNoRVAsExist][traceID:%s][volumeID:%s] No RVAs found, safe to proceed with deletion", traceID, volumeName))
 	return nil
 }
 

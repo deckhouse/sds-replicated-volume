@@ -21,22 +21,19 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	fw "github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework"
-	. "github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework/match"
 	"github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework/require"
 )
 
-var _ = Describe("Migration: RV adopt/v1 config restart", Label(fw.LabelUpgrade, fw.LabelSlow), func() {
-	DescribeTable("restarts adopt when RSC configuration does not match and user fixes it",
+var _ = Describe("Migration: RV adopt/v1 with mismatched RSC", Label(fw.LabelUpgrade, fw.LabelSlow), func() {
+	DescribeTable("adopts when RSC configuration does not match actual replicas",
 		func(ctx SpecContext, sourceLayout, wrongLayout fw.TestLayout) {
 			res := setupAdoptPreexisting(ctx, sourceLayout)
 
-			// Create RV with WRONG RSC configuration.
-			fmt.Fprintf(GinkgoWriter, "[adopt-config-restart] creating RV %s with wrong RSC (FTT=%d, GMDR=%d), expecting stuck\n",
-				res.RVName, wrongLayout.FTT, wrongLayout.GMDR)
+			fmt.Fprintf(GinkgoWriter, "[adopt-mismatched-rsc] creating RV %s with RSC (FTT=%d, GMDR=%d) that does not match source (FTT=%d, GMDR=%d)\n",
+				res.RVName, wrongLayout.FTT, wrongLayout.GMDR, sourceLayout.FTT, sourceLayout.GMDR)
 
 			trv := f.TestRVExact(res.RVName).Adopt().AdoptSharedSecret(res.AdoptSecret).FTT(wrongLayout.FTT).GMDR(wrongLayout.GMDR)
 			if sourceLayout.Attached > 0 {
@@ -50,22 +47,6 @@ var _ = Describe("Migration: RV adopt/v1 config restart", Label(fw.LabelUpgrade,
 				}
 			}
 
-			// Await step 0 stuck on replica count mismatch (diskful or tiebreaker).
-			formationType := v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation
-			trv.Await(ctx, Or(
-				RV.TransitionCurrentStepMessageContains(formationType, "Diskful replica count mismatch"),
-				RV.TransitionCurrentStepMessageContains(formationType, "TieBreaker replica count mismatch"),
-			))
-
-			// Fix — switch RV to the correct RSC.
-			fmt.Fprintf(GinkgoWriter, "[adopt-config-restart] switching RV %s to correct RSC %s\n",
-				res.RVName, res.RSCName)
-
-			trv.Update(ctx, func(rv *v1alpha1.ReplicatedVolume) {
-				rv.Spec.ReplicatedStorageClassName = res.RSCName
-			})
-
-			// Await formation completion (same as normal adopt).
 			finishAdopt(ctx, trv, res)
 		},
 

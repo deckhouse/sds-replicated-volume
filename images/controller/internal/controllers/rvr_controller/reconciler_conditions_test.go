@@ -2079,39 +2079,77 @@ var _ = Describe("computeRVRPhaseAndMessage", func() {
 		})
 	}
 
-	It("returns Terminating with blocking DRBDConfigured message (agent down)", func() {
+	// ── Stage 1: DeletionTimestamp + still operational (rvrShouldNotExist=false) ──
+	// Other finalizers present → normal phase + deletion note.
+
+	It("returns Healthy + deletion note when member is deleting but still operational", func() {
 		rvr := mkRVR("node-1")
 		rvr.DeletionTimestamp = ptr.To(metav1.Now())
+		rvr.Finalizers = []string{v1alpha1.RVRControllerFinalizer, v1alpha1.RVControllerFinalizer}
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingLeave,
+			"Leaving datamesh: 0/4 replicas confirmed revision 7")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy))
+		Expect(msg).To(ContainSubstring("Quorum: diskful 2/2"))
+		Expect(msg).To(ContainSubstring(". Leaving datamesh: 0/4 replicas confirmed revision 7"))
+	})
+
+	It("returns AgentNotReady + deletion note when member is deleting and agent down", func() {
+		rvr := mkRVR("node-1")
+		rvr.DeletionTimestamp = ptr.To(metav1.Now())
+		rvr.Finalizers = []string{v1alpha1.RVRControllerFinalizer, v1alpha1.RVControllerFinalizer}
 		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
 			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady,
 			"Agent is not ready on node node-1")
 		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
-			metav1.ConditionFalse, "PendingLeave",
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonPendingLeave,
 			"Leaving datamesh: 0/4 replicas confirmed")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseAgentNotReady))
+		Expect(msg).To(ContainSubstring("Agent is not ready on node node-1"))
+		Expect(msg).To(ContainSubstring(". Leaving datamesh: 0/4 replicas confirmed"))
+	})
+
+	It("returns pre-member phase + generic deletion note when pre-member is deleting", func() {
+		rvr := mkRVR("node-1")
+		rvr.DeletionTimestamp = ptr.To(metav1.Now())
+		rvr.Finalizers = []string{v1alpha1.RVRControllerFinalizer, v1alpha1.RVControllerFinalizer}
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured,
+			"DRBD configured (replica is being deleted)")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring))
+		Expect(msg).To(ContainSubstring(". Deletion pending"))
+	})
+
+	// ── Stage 3: rvrShouldNotExist=true (final cleanup) ──
+	// Only RVRControllerFinalizer (or none) remaining.
+
+	It("returns Terminating with blocking DRBDConfigured message (agent down)", func() {
+		rvr := mkRVR("node-1")
+		rvr.DeletionTimestamp = ptr.To(metav1.Now())
+		rvr.Finalizers = []string{v1alpha1.RVRControllerFinalizer}
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady,
+			"Agent is not ready on node node-1")
 
 		phase, msg := computeRVRPhaseAndMessage(rvr)
 		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseTerminating))
 		Expect(msg).To(Equal("Agent is not ready on node node-1"))
 	})
 
-	It("returns Terminating with Configured message (datamesh leave progress)", func() {
-		rvr := mkRVR("node-1")
-		rvr.DeletionTimestamp = ptr.To(metav1.Now())
-		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
-			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured,
-			"DRBD fully configured")
-		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfiguredType,
-			metav1.ConditionFalse, "PendingLeave",
-			"Leaving datamesh: 0/4 replicas confirmed revision 7. Waiting: [#0, #1, #2, #3]")
-
-		phase, msg := computeRVRPhaseAndMessage(rvr)
-		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseTerminating))
-		Expect(msg).To(Equal("Leaving datamesh: 0/4 replicas confirmed revision 7. Waiting: [#0, #1, #2, #3]"))
-	})
-
 	It("returns Terminating with DRBDConfigured cleanup message", func() {
 		rvr := mkRVR("node-1")
 		rvr.DeletionTimestamp = ptr.To(metav1.Now())
+		rvr.Finalizers = []string{v1alpha1.RVRControllerFinalizer}
 		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
 			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonNotApplicable,
 			"Replica is being deleted; waiting for DRBD resource test-rv-0 to be deleted")
@@ -2121,9 +2159,40 @@ var _ = Describe("computeRVRPhaseAndMessage", func() {
 		Expect(msg).To(Equal("Replica is being deleted; waiting for DRBD resource test-rv-0 to be deleted"))
 	})
 
+	It("returns Terminating with BackingVolumeReady cleanup message", func() {
+		rvr := mkRVR("node-1")
+		rvr.DeletionTimestamp = ptr.To(metav1.Now())
+		rvr.Finalizers = []string{v1alpha1.RVRControllerFinalizer}
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable,
+			"Replica is being deleted; deleting backing volumes: llv-1")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseTerminating))
+		Expect(msg).To(ContainSubstring("deleting backing volumes: llv-1"))
+	})
+
+	It("returns Terminating with combined DRBDR + BV cleanup message", func() {
+		rvr := mkRVR("node-1")
+		rvr.DeletionTimestamp = ptr.To(metav1.Now())
+		rvr.Finalizers = []string{v1alpha1.RVRControllerFinalizer}
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonNotApplicable,
+			"Replica is being deleted; waiting for DRBD resource test-rv-0 to be deleted")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable,
+			"Replica is being deleted; deleting backing volumes: llv-1")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseTerminating))
+		Expect(msg).To(ContainSubstring("waiting for DRBD resource test-rv-0 to be deleted"))
+		Expect(msg).To(ContainSubstring("deleting backing volumes: llv-1"))
+	})
+
 	It("returns Terminating with fallback when no conditions", func() {
 		rvr := mkRVR("node-1")
 		rvr.DeletionTimestamp = ptr.To(metav1.Now())
+		rvr.Finalizers = []string{v1alpha1.RVRControllerFinalizer}
 
 		phase, msg := computeRVRPhaseAndMessage(rvr)
 		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseTerminating))
@@ -2467,7 +2536,7 @@ var _ = Describe("computeRVRPhaseAndMessage", func() {
 		Expect(msg).To(ContainSubstring(". Partially connected to peers"))
 	})
 
-	It("returns PartiallyDegraded when Ready=True + SatisfyEligibleNodes=False", func() {
+	It("returns Healthy when Ready=True + SatisfyEligibleNodes=False (informational only)", func() {
 		rvr := mkRVR("node-1")
 		rvr.Status.DatameshRevision = 5
 		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
@@ -2478,7 +2547,47 @@ var _ = Describe("computeRVRPhaseAndMessage", func() {
 			"Node is not eligible")
 
 		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy))
+		Expect(msg).To(ContainSubstring(". Node not eligible"))
+	})
+
+	It("returns Progressing with eligible note when Ready=True + Progressing + SatisfyEligibleNodes=False", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonNodeMismatch,
+			"Node is not eligible")
+		bvReady := metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+			Status: metav1.ConditionFalse,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizing,
+		}
+		obju.SetStatusCondition(rvr, bvReady)
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing))
+		Expect(msg).To(ContainSubstring(". Node not eligible"))
+	})
+
+	It("returns PartiallyDegraded when Ready=True + PartiallyConnected + SatisfyEligibleNodes=False", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected,
+			"1/2")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonNodeMismatch,
+			"Node is not eligible")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
 		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded))
+		Expect(msg).To(ContainSubstring(". Partially connected to peers"))
 		Expect(msg).To(ContainSubstring(". Node not eligible"))
 	})
 
@@ -2771,6 +2880,16 @@ var _ = Describe("computeMemberProgress", func() {
 		}
 		msg := computeMemberProgress(nil, drbdConfigured)
 		Expect(msg).To(Equal("Applying DRBD configuration"))
+	})
+
+	It("returns progress for WaitingForDRBDResize", func() {
+		drbdConfigured := &metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			Status: metav1.ConditionFalse,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonWaitingForDRBDResize,
+		}
+		msg := computeMemberProgress(nil, drbdConfigured)
+		Expect(msg).To(Equal("Waiting for DRBD resize"))
 	})
 
 	It("joins multiple progress triggers", func() {

@@ -344,8 +344,8 @@ func (rf ReconcileFlow) OnEnd(out *ReconcileOutcome) {
 	if out.err != nil && !out.errorLogged {
 		if isExpectedTransientError(out.err) {
 			// Conflict (optimistic lock) is an expected transient condition;
-			// log at Info (not Error) with a cleaned-up message.
-			rf.log.Info("phase end", append(fields, "err", cleanTransientErrorMessage(out.err))...)
+			// log at Debug (not Error) with a cleaned-up message.
+			rf.log.V(1).Info("phase end", append(fields, "err", cleanTransientErrorMessage(out.err))...)
 		} else {
 			rf.log.Error(out.err, "phase end", fields...)
 		}

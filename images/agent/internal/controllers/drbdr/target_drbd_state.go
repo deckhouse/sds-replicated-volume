@@ -123,6 +123,7 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 
 		// Reconcile net options (protocol, shared-secret, cram-hmac-alg, allow-two-primaries, allow-remote-read)
 		res = append(res, computeNetOptionsActionReconcile(resourceName, iPeer, aPeer, iState.AllowTwoPrimaries())...)
+		res = append(res, computePeerDeviceOptionsAction(resourceName, iPeer, aPeer)...)
 		res = append(res, computePathActions(resourceName, iPeer, aPeer)...)
 		// Connect is only valid when peer is in StandAlone state.
 		// Any other state means connection is either active, in progress, or in error recovery,
@@ -407,6 +408,29 @@ func computeDiskOptionsActionReconcile(iState IntendedDRBDState, aState ActualDR
 		}
 	}
 	return res
+}
+
+// computePeerDeviceOptionsAction emits a PeerDeviceOptionsAction when the intended
+// bitmap setting diverges from the actual one. For Diskless peers bitmap must be off;
+// for Diskful peers it stays at the DRBD default (on) and no action is emitted.
+func computePeerDeviceOptionsAction(resourceName string, iPeer IntendedPeer, aPeer ActualPeer) (res DRBDActions) {
+	if iPeer.Type() != v1alpha1.DRBDResourceTypeDiskless {
+		return
+	}
+
+	actualBitmap := aPeer.Bitmap()
+	if actualBitmap != nil && !*actualBitmap {
+		return
+	}
+
+	bitmapOff := false
+	res = append(res, PeerDeviceOptionsAction{
+		ResourceName: resourceName,
+		PeerNodeID:   iPeer.NodeID(),
+		VolumeNr:     0,
+		Bitmap:       &bitmapOff,
+	})
+	return
 }
 
 func computeNetOptionsAction(resourceName string, iPeer IntendedPeer, allowTwoPrimaries bool) (res DRBDActions) {

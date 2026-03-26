@@ -226,6 +226,11 @@ func rvrPredicates() []predicate.Predicate {
 					return true
 				}
 
+				// React to DatameshRevisionObservedByAgent change (adopt formation progress).
+				if oldRVR.Status.DatameshRevisionObservedByAgent != newRVR.Status.DatameshRevisionObservedByAgent {
+					return true
+				}
+
 				// React to Addresses change (network readiness for formation).
 				if !slices.EqualFunc(oldRVR.Status.Addresses, newRVR.Status.Addresses,
 					func(a, b v1alpha1.DRBDResourceAddressStatus) bool {

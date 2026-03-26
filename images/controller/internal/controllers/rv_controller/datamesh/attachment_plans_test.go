@@ -689,6 +689,31 @@ var _ = Describe("Detach", func() {
 			}
 		}
 	})
+
+	It("reason stays Detaching while Detach transition is active", func() {
+		// Step 1: attached member + deleting RVA → triggers Detach.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{mkMemberAttached("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1")},
+			nil, nil,
+		)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVRReady("rv-1-0", "node-1", 5)}
+		rva := mkRVA("rva-1", "node-1")
+		rva.DeletionTimestamp = ptr.To(metav1.Now())
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rva}
+
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, rvas, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].Type).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach))
+		Expect(rv.Status.Datamesh.Members[0].Attached).To(BeFalse())
+
+		// Step 2: re-run without subject confirmation (RVR revision not bumped).
+		// The Detach transition is still active — reason must stay Detaching.
+		_, replicas := ProcessTransitions(context.Background(), rv, nil, rvrs, rvas, FeatureFlags{})
+
+		rc := findReplicaContext(replicas, 0)
+		Expect(rc.AttachmentConditionReason()).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonDetaching))
+	})
 })
 
 // ──────────────────────────────────────────────────────────────────────────────

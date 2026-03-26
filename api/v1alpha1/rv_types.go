@@ -31,7 +31,7 @@ import (
 // +kubebuilder:printcolumn:name="Quorum",type=string,JSONPath=".status.conditions[?(@.type=='Quorum')].status"
 // +kubebuilder:printcolumn:name="Scheduled",type=string,JSONPath=".status.conditions[?(@.type=='Scheduled')].status"
 // +kubebuilder:printcolumn:name="Configured",type=string,JSONPath=".status.conditions[?(@.type=='Configured')].status"
-// +kubebuilder:printcolumn:name="Size",type=string,JSONPath=".spec.size"
+// +kubebuilder:printcolumn:name="Size",type=string,JSONPath=".status.size"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="ConfigurationReady",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='ConfigurationReady')].status"
 // +kubebuilder:printcolumn:name="SatisfyEligibleNodes",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='SatisfyEligibleNodes')].status"
@@ -176,6 +176,11 @@ type ReplicatedVolumeStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
+	// Size is the actual usable capacity of the volume in bytes.
+	// Nil when the volume has no ready replicas.
+	// +optional
+	Size *resource.Quantity `json:"size,omitempty"`
+
 	// TODO: Remove this field. It is no longer used (except for CSI driver, which will use RVA objects instead).
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="actuallyAttachedTo must be unique"
 	// +kubebuilder:validation:MaxItems=2
@@ -272,8 +277,8 @@ func (t ReplicatedVolumeDatameshReplicaRequest) ID() uint8 {
 // and executed sequentially. The transition's start time is steps[0].startedAt.
 // +kubebuilder:object:generate=true
 //
-//	+kubebuilder:validation:XValidation:rule="self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum' || self.type == 'RepairNetworkAddresses' || self.type == 'ChangeSystemNetworks' || has(self.replicaName)",message="replicaName is required for AddReplica, RemoveReplica, ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach transitions"
-//	+kubebuilder:validation:XValidation:rule="!has(self.replicaName) || !(self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum' || self.type == 'RepairNetworkAddresses' || self.type == 'ChangeSystemNetworks')",message="replicaName must not be set for Formation, EnableMultiattach, DisableMultiattach, ChangeQuorum, RepairNetworkAddresses, ChangeSystemNetworks transitions"
+//	+kubebuilder:validation:XValidation:rule="self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum' || self.type == 'RepairNetworkAddresses' || self.type == 'ChangeSystemNetworks' || self.type == 'ResizeVolume' || has(self.replicaName)",message="replicaName is required for AddReplica, RemoveReplica, ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach transitions"
+//	+kubebuilder:validation:XValidation:rule="!has(self.replicaName) || !(self.type == 'Formation' || self.type == 'EnableMultiattach' || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum' || self.type == 'RepairNetworkAddresses' || self.type == 'ChangeSystemNetworks' || self.type == 'ResizeVolume')",message="replicaName must not be set for Formation, EnableMultiattach, DisableMultiattach, ChangeQuorum, RepairNetworkAddresses, ChangeSystemNetworks, ResizeVolume transitions"
 //	+kubebuilder:validation:XValidation:rule="self.type == 'AddReplica' || self.type == 'RemoveReplica' || self.type == 'ForceRemoveReplica' || !has(self.replicaType)",message="replicaType must only be set for AddReplica, RemoveReplica, ForceRemoveReplica transitions"
 //	+kubebuilder:validation:XValidation:rule="!(self.type == 'AddReplica' || self.type == 'RemoveReplica' || self.type == 'ForceRemoveReplica') || has(self.replicaType)",message="replicaType is required for AddReplica, RemoveReplica, ForceRemoveReplica transitions"
 //	+kubebuilder:validation:XValidation:rule="self.type == 'ChangeReplicaType' || (!has(self.fromReplicaType) && !has(self.toReplicaType))",message="fromReplicaType and toReplicaType must only be set for ChangeReplicaType transitions"
@@ -285,7 +290,7 @@ func (t ReplicatedVolumeDatameshReplicaRequest) ID() uint8 {
 type ReplicatedVolumeDatameshTransition struct {
 	// Type is the transition type.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=AddReplica;Attach;ChangeQuorum;ChangeReplicaType;ChangeSystemNetworks;Detach;DisableMultiattach;EnableMultiattach;ForceDetach;ForceRemoveReplica;Formation;RemoveReplica;RepairNetworkAddresses
+	// +kubebuilder:validation:Enum=AddReplica;Attach;ChangeQuorum;ChangeReplicaType;ChangeSystemNetworks;Detach;DisableMultiattach;EnableMultiattach;ForceDetach;ForceRemoveReplica;Formation;RemoveReplica;RepairNetworkAddresses;ResizeVolume
 	Type ReplicatedVolumeDatameshTransitionType `json:"type"`
 
 	// ReplicaName is the name of the replica this transition applies to.
@@ -342,7 +347,7 @@ type ReplicatedVolumeDatameshTransition struct {
 	// Set by the controller at transition creation time. Read-only for users.
 	// Provides observability: explains why a transition may be waiting.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=Attachment;Emergency;Formation;Multiattach;Network;NonVotingMembership;Quorum;VotingMembership
+	// +kubebuilder:validation:Enum=Attachment;Emergency;Formation;Multiattach;Network;NonVotingMembership;Quorum;Resize;VotingMembership
 	Group ReplicatedVolumeDatameshTransitionGroup `json:"group"`
 
 	// PlanID identifies the transition plan used to create this transition.
@@ -480,6 +485,8 @@ const (
 	ReplicatedVolumeDatameshTransitionTypeRemoveReplica ReplicatedVolumeDatameshTransitionType = "RemoveReplica"
 	// ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses indicates address repair for existing system networks.
 	ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses ReplicatedVolumeDatameshTransitionType = "RepairNetworkAddresses"
+	// ReplicatedVolumeDatameshTransitionTypeResizeVolume resizes the datamesh volume.
+	ReplicatedVolumeDatameshTransitionTypeResizeVolume ReplicatedVolumeDatameshTransitionType = "ResizeVolume"
 )
 
 func (t ReplicatedVolumeDatameshTransitionType) String() string {
@@ -505,6 +512,8 @@ const (
 	ReplicatedVolumeDatameshTransitionGroupMultiattach ReplicatedVolumeDatameshTransitionGroup = "Multiattach"
 	// ReplicatedVolumeDatameshTransitionGroupNetwork is the network group (serialized, semi-emergency: blocks VotingMembership and Quorum).
 	ReplicatedVolumeDatameshTransitionGroupNetwork ReplicatedVolumeDatameshTransitionGroup = "Network"
+	// ReplicatedVolumeDatameshTransitionGroupResize is the resize group (serialized, mutually exclusive with disk-gaining membership).
+	ReplicatedVolumeDatameshTransitionGroupResize ReplicatedVolumeDatameshTransitionGroup = "Resize"
 	// ReplicatedVolumeDatameshTransitionGroupEmergency is the emergency group (preemptive).
 	ReplicatedVolumeDatameshTransitionGroupEmergency ReplicatedVolumeDatameshTransitionGroup = "Emergency"
 )

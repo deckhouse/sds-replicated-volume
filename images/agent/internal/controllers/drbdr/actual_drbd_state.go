@@ -154,6 +154,10 @@ type ActualPeer interface {
 	// VerifyAlg returns the online-verify hash algorithm.
 	VerifyAlg() string
 
+	// Bitmap returns the peer-device bitmap setting for volume 0.
+	// Returns nil when show data is unavailable or the peer has no volumes.
+	Bitmap() *bool
+
 	// Paths returns the network paths to this peer.
 	Paths() []ActualPath
 }
@@ -332,6 +336,8 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 		status.DiskState = ""
 		status.Quorum = nil
 		status.Peers = nil
+		status.DeviceOpen = nil
+		status.DeviceIOSuspended = nil
 
 		// Keep activeConfiguration but set state to Down
 		if status.ActiveConfiguration == nil {
@@ -373,6 +379,17 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 		} else {
 			status.Size = nil
 		}
+	}
+
+	// DeviceOpen and DeviceIOSuspended are only meaningful on Primary.
+	if aState.status != nil && aState.status.Role == "Primary" && len(volumes) > 0 {
+		open := volumes[0].Open
+		status.DeviceOpen = &open
+		suspended := aState.status.Suspended
+		status.DeviceIOSuspended = &suspended
+	} else {
+		status.DeviceOpen = nil
+		status.DeviceIOSuspended = nil
 	}
 
 	// Report ActiveConfiguration
@@ -706,6 +723,14 @@ func (p *actualPeer) VerifyAlg() string {
 		return p.showConnection.Net.VerifyAlg
 	}
 	return ""
+}
+
+func (p *actualPeer) Bitmap() *bool {
+	if p.showConnection != nil && len(p.showConnection.Volumes) > 0 {
+		b := p.showConnection.Volumes[0].Disk.Bitmap
+		return &b
+	}
+	return nil
 }
 
 func (p *actualPeer) Paths() []ActualPath {

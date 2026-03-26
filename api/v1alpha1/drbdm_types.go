@@ -25,6 +25,7 @@ import (
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=drbdm
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
+// +kubebuilder:selectablefield:JSONPath=.spec.nodeName
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
 // +kubebuilder:printcolumn:name="LowerDevice",type=string,JSONPath=".spec.lowerDevicePath"
 // +kubebuilder:printcolumn:name="UpperDevice",type=string,JSONPath=".status.upperDevicePath"

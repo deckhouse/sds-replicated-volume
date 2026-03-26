@@ -74,6 +74,9 @@ graph TD
 | `network_plans.go` | RepairNetworkAddresses and ChangeSystemNetworks plans |
 | `network_helpers.go` | Network apply/confirm/guard callbacks, connection verification |
 | `network_dispatch.go` | Network dispatcher (repair priority, CSN plan selection) |
+| `resize_plans.go` | ResizeVolume plan definition and apply callback |
+| `resize_helpers.go` | Resize guards (`guardHasReadyDiskfulMember`, `guardNoActiveResync`, `guardBackingVolumesGrown`) |
+| `resize_dispatch.go` | Resize dispatcher (triggers when `datamesh.size < spec.size`) |
 | `effective_layout.go` | `updateEffectiveLayout`, `isAgentReady` |
 
 ---
@@ -201,7 +204,8 @@ BuildRegistry
 │   └── registerForceRemovePlans
 ├── registerQuorumPlans
 ├── registerAttachmentPlans
-└── registerNetworkPlans
+├── registerNetworkPlans
+└── registerResizePlans
 ```
 
 Transition handles (`RegisteredTransition`) carry scope and slot:
@@ -344,7 +348,7 @@ minus the proposed replica for accurate counting.
 
 ## 8. Dispatchers
 
-Dispatchers are registered in order: **network → quorum → membership → attachment**.
+Dispatchers are registered in order: **network → quorum → membership → attachment → resize**.
 Order matters: network repair has priority over membership (stale addresses must be
 fixed before adding voters), and quorum check runs before membership to handle
 standalone q/qmr corrections.
@@ -428,11 +432,21 @@ Processes attachment intent per replica:
    | Attached + active RVA + no transition | `NoDispatch` with "attached and ready" |
    | Has active RVA (not attached) | `DispatchReplica` Attach |
    | No active RVA + attached | `DispatchReplica` Detach |
+   | Active attachment transition in progress | skip (settle set the authoritative slot status) |
    | Only deleting RVAs | `NoDispatch` with "detached" |
    | No RVAs + not attached | skip |
 
 All admission checks (member existence, eligibility, quorum, slots) are handled
 by guards on the plans and by the concurrency tracker — the dispatcher only decides intent.
+
+### 8.5 Resize Dispatcher
+
+Simplest dispatcher. Compares `datamesh.size` (current) with `gctx.size`
+(target from `rv.Spec.Size`). If `datamesh.size < gctx.size`, dispatches
+`ResizeVolume` with plan `resize/v1`. Otherwise no-op.
+
+Only supports growing — if `datamesh.size >= spec.size` (including shrink),
+the dispatcher silently skips.
 
 ---
 
@@ -512,7 +526,7 @@ returns whether the value changed. Used in apply callbacks for the `bool` return
 Guards are organized into predefined slices for reuse across plans. Each guard
 returns a lowercase reason string; the engine wraps it with the plan display
 name via `composeBlocked` (see §6). For the full list of guard messages, see
-[TRANSITIONS.md](TRANSITIONS.md) §8–§9.
+[TRANSITIONS.md](TRANSITIONS.md) §9–§10.
 
 | Slice | Used by | Guards |
 |-------|---------|--------|

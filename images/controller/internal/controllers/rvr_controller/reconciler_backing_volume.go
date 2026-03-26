@@ -665,9 +665,15 @@ func isLLVMetadataInSync(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.Rep
 	}
 
 	// Check replicated-storage-class label.
-	if rv != nil && rv.Spec.ReplicatedStorageClassName != "" {
-		if !obju.HasLabelValue(llv, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName) {
-			return false
+	if rv != nil {
+		if rv.Spec.ReplicatedStorageClassName != "" {
+			if !obju.HasLabelValue(llv, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName) {
+				return false
+			}
+		} else {
+			if obju.HasLabel(llv, v1alpha1.ReplicatedStorageClassLabelKey) {
+				return false
+			}
 		}
 	}
 
@@ -689,9 +695,15 @@ func applyLLVMetadata(scheme *runtime.Scheme, rvr *v1alpha1.ReplicatedVolumeRepl
 	}
 
 	// Ensure replicated-storage-class label.
-	if rv != nil && rv.Spec.ReplicatedStorageClassName != "" {
-		if obju.SetLabel(llv, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName) {
-			changed = true
+	if rv != nil {
+		if rv.Spec.ReplicatedStorageClassName != "" {
+			if obju.SetLabel(llv, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName) {
+				changed = true
+			}
+		} else {
+			if obju.RemoveLabel(llv, v1alpha1.ReplicatedStorageClassLabelKey) {
+				changed = true
+			}
 		}
 	}
 

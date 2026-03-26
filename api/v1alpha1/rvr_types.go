@@ -31,6 +31,7 @@ import (
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:selectablefield:JSONPath=.spec.nodeName
 // +kubebuilder:selectablefield:JSONPath=.spec.replicatedVolumeName
+// +kubebuilder:selectablefield:JSONPath=.status.phase
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=".spec.type"
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
@@ -234,6 +235,11 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +kubebuilder:validation:Enum=Diskful;Diskless
 	// +optional
 	Type DRBDResourceType `json:"type,omitempty"`
+
+	// Size is the usable capacity of the DRBD device in bytes.
+	// Nil when the replica is diskless or down.
+	// +optional
+	Size *resource.Quantity `json:"size,omitempty"`
 
 	// BackingVolume contains information about the backing LVM logical volume.
 	// Only set for Diskful replicas.

@@ -19,19 +19,20 @@ package v1alpha1
 const labelPrefix = "sds-replicated-volume.deckhouse.io/"
 
 const (
-	// ReplicatedStorageClassLabelKey is the label key for ReplicatedStorageClass name on RV and RVR.
+	// ReplicatedStorageClassLabelKey is the label key for ReplicatedStorageClass name on RV, RVR, RVA, LLV, and DRBDR.
 	ReplicatedStorageClassLabelKey = labelPrefix + "replicated-storage-class"
 
-	// ReplicatedVolumeLabelKey is the label key for ReplicatedVolume name on RVR.
+	// ReplicatedVolumeLabelKey is the label key for ReplicatedVolume name on RVR, RVA, LLV, and DRBDR.
 	ReplicatedVolumeLabelKey = labelPrefix + "replicated-volume"
 
 	// LVMVolumeGroupLabelKey is the label key for LVMVolumeGroup name on RVR.
 	LVMVolumeGroupLabelKey = labelPrefix + "lvm-volume-group"
 
-	// NodeNameLabelKey is the label key for the Kubernetes node name where the RVR is scheduled.
-	// Note: This stores node.metadata.name, not the OS hostname (kubernetes.io/hostname).
-	NodeNameLabelKey = labelPrefix + "node-name"
-
 	// AgentNodeLabelKey is the label key for selecting nodes where the agent should run.
 	AgentNodeLabelKey = "storage.deckhouse.io/sds-replicated-volume-node"
+
+	// ManagedByLabelKey is the label key set on managed resources (StorageClass, etc.).
+	ManagedByLabelKey = "storage.deckhouse.io/managed-by"
+	// ManagedByLabelValue is the value for ManagedByLabelKey.
+	ManagedByLabelValue = "sds-replicated-volume"
 )

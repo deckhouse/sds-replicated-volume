@@ -563,10 +563,123 @@ var _ = Describe("hasOtherNonDeletingRVAOnNode", func() {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// reconcileRVAFinalizers (moved from reconciler_test.go)
+// isRVAMetadataInSync / applyRVAMetadata
 //
 
-var _ = Describe("reconcileRVAFinalizers", func() {
+var _ = Describe("isRVAMetadataInSync", func() {
+	mkRVA := func() *v1alpha1.ReplicatedVolumeAttachment {
+		return &v1alpha1.ReplicatedVolumeAttachment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "rva-1",
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				Labels: map[string]string{
+					v1alpha1.ReplicatedVolumeLabelKey:       "rv-1",
+					v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+				},
+			},
+			Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+				ReplicatedVolumeName: "rv-1",
+				NodeName:             "node-1",
+			},
+		}
+	}
+	mkRV := func(rscName string) *v1alpha1.ReplicatedVolume {
+		return &v1alpha1.ReplicatedVolume{
+			Spec: v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: rscName},
+		}
+	}
+
+	It("returns true when all metadata matches", func() {
+		Expect(isRVAMetadataInSync(mkRVA(), mkRV("rsc-1"))).To(BeTrue())
+	})
+
+	It("returns false when finalizer is missing", func() {
+		rva := mkRVA()
+		rva.Finalizers = nil
+		Expect(isRVAMetadataInSync(rva, mkRV("rsc-1"))).To(BeFalse())
+	})
+
+	It("returns false when RV label is missing", func() {
+		rva := mkRVA()
+		delete(rva.Labels, v1alpha1.ReplicatedVolumeLabelKey)
+		Expect(isRVAMetadataInSync(rva, mkRV("rsc-1"))).To(BeFalse())
+	})
+
+	It("returns false when RSC label is missing", func() {
+		rva := mkRVA()
+		delete(rva.Labels, v1alpha1.ReplicatedStorageClassLabelKey)
+		Expect(isRVAMetadataInSync(rva, mkRV("rsc-1"))).To(BeFalse())
+	})
+
+	It("returns false when RSC label has wrong value", func() {
+		rva := mkRVA()
+		rva.Labels[v1alpha1.ReplicatedStorageClassLabelKey] = "wrong"
+		Expect(isRVAMetadataInSync(rva, mkRV("rsc-1"))).To(BeFalse())
+	})
+
+	It("returns false when RSC label is present but should be absent", func() {
+		rva := mkRVA()
+		Expect(isRVAMetadataInSync(rva, mkRV(""))).To(BeFalse())
+	})
+
+	It("returns true when RSC label absent and RSC name empty", func() {
+		rva := mkRVA()
+		delete(rva.Labels, v1alpha1.ReplicatedStorageClassLabelKey)
+		Expect(isRVAMetadataInSync(rva, mkRV(""))).To(BeTrue())
+	})
+
+	It("returns true when rv is nil (RSC label not checked)", func() {
+		rva := mkRVA()
+		delete(rva.Labels, v1alpha1.ReplicatedStorageClassLabelKey)
+		Expect(isRVAMetadataInSync(rva, nil)).To(BeTrue())
+	})
+})
+
+var _ = Describe("applyRVAMetadata", func() {
+	It("sets finalizer and labels", func() {
+		rva := &v1alpha1.ReplicatedVolumeAttachment{
+			ObjectMeta: metav1.ObjectMeta{Name: "rva-1"},
+			Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+				ReplicatedVolumeName: "rv-1",
+				NodeName:             "node-1",
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			Spec: v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "rsc-1"},
+		}
+
+		applyRVAMetadata(rva, rv)
+
+		Expect(rva.Finalizers).To(ContainElement(v1alpha1.RVControllerFinalizer))
+		Expect(rva.Labels).To(HaveKeyWithValue(v1alpha1.ReplicatedVolumeLabelKey, "rv-1"))
+		Expect(rva.Labels).To(HaveKeyWithValue(v1alpha1.ReplicatedStorageClassLabelKey, "rsc-1"))
+	})
+
+	It("removes RSC label when RSC name is empty", func() {
+		rva := &v1alpha1.ReplicatedVolumeAttachment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   "rva-1",
+				Labels: map[string]string{v1alpha1.ReplicatedStorageClassLabelKey: "old"},
+			},
+			Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+				ReplicatedVolumeName: "rv-1",
+				NodeName:             "node-1",
+			},
+		}
+		rv := &v1alpha1.ReplicatedVolume{}
+
+		applyRVAMetadata(rva, rv)
+
+		Expect(rva.Labels).NotTo(HaveKey(v1alpha1.ReplicatedStorageClassLabelKey))
+		Expect(rva.Labels).To(HaveKeyWithValue(v1alpha1.ReplicatedVolumeLabelKey, "rv-1"))
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// reconcileRVAMetadata
+//
+
+var _ = Describe("reconcileRVAMetadata", func() {
 	var scheme *runtime.Scheme
 
 	BeforeEach(func() {
@@ -591,28 +704,78 @@ var _ = Describe("reconcileRVAFinalizers", func() {
 		return rva
 	}
 
-	It("adds finalizer to non-deleting RVA", func(ctx SpecContext) {
+	It("adds finalizer and labels to non-deleting RVA", func(ctx SpecContext) {
 		rva := makeRVA("rva-1", "rv-1", "node-1")
+		rv := &v1alpha1.ReplicatedVolume{
+			Spec: v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "rsc-1"},
+		}
 		cl := newClientBuilder(scheme).WithObjects(rva).Build()
 		rec := NewReconciler(cl, scheme)
 
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rva}
-		outcome := rec.reconcileRVAFinalizers(ctx, &v1alpha1.ReplicatedVolume{}, rvas)
+		outcome := rec.reconcileRVAMetadata(ctx, rv, rvas)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 
 		var updated v1alpha1.ReplicatedVolumeAttachment
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva), &updated)).To(Succeed())
 		Expect(updated.Finalizers).To(ContainElement(v1alpha1.RVControllerFinalizer))
+		Expect(updated.Labels).To(HaveKeyWithValue(v1alpha1.ReplicatedVolumeLabelKey, "rv-1"))
+		Expect(updated.Labels).To(HaveKeyWithValue(v1alpha1.ReplicatedStorageClassLabelKey, "rsc-1"))
 	})
 
-	It("skips non-deleting RVA that already has finalizer", func(ctx SpecContext) {
+	It("adds labels without RSC when ReplicatedStorageClassName is empty", func(ctx SpecContext) {
 		rva := makeRVA("rva-1", "rv-1", "node-1")
-		rva.Finalizers = []string{v1alpha1.RVControllerFinalizer}
+		rv := &v1alpha1.ReplicatedVolume{}
 		cl := newClientBuilder(scheme).WithObjects(rva).Build()
 		rec := NewReconciler(cl, scheme)
 
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rva}
-		outcome := rec.reconcileRVAFinalizers(ctx, &v1alpha1.ReplicatedVolume{}, rvas)
+		outcome := rec.reconcileRVAMetadata(ctx, rv, rvas)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolumeAttachment
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva), &updated)).To(Succeed())
+		Expect(updated.Finalizers).To(ContainElement(v1alpha1.RVControllerFinalizer))
+		Expect(updated.Labels).To(HaveKeyWithValue(v1alpha1.ReplicatedVolumeLabelKey, "rv-1"))
+		Expect(updated.Labels).NotTo(HaveKey(v1alpha1.ReplicatedStorageClassLabelKey))
+	})
+
+	It("removes stale RSC label when ReplicatedStorageClassName becomes empty", func(ctx SpecContext) {
+		rva := makeRVA("rva-1", "rv-1", "node-1")
+		rva.Finalizers = []string{v1alpha1.RVControllerFinalizer}
+		rva.Labels = map[string]string{
+			v1alpha1.ReplicatedVolumeLabelKey:       "rv-1",
+			v1alpha1.ReplicatedStorageClassLabelKey: "old-rsc",
+		}
+		rv := &v1alpha1.ReplicatedVolume{}
+		cl := newClientBuilder(scheme).WithObjects(rva).Build()
+		rec := NewReconciler(cl, scheme)
+
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rva}
+		outcome := rec.reconcileRVAMetadata(ctx, rv, rvas)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolumeAttachment
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva), &updated)).To(Succeed())
+		Expect(updated.Labels).NotTo(HaveKey(v1alpha1.ReplicatedStorageClassLabelKey))
+		Expect(updated.Labels).To(HaveKeyWithValue(v1alpha1.ReplicatedVolumeLabelKey, "rv-1"))
+	})
+
+	It("skips non-deleting RVA when metadata is already in sync", func(ctx SpecContext) {
+		rva := makeRVA("rva-1", "rv-1", "node-1")
+		rva.Finalizers = []string{v1alpha1.RVControllerFinalizer}
+		rva.Labels = map[string]string{
+			v1alpha1.ReplicatedVolumeLabelKey:       "rv-1",
+			v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			Spec: v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "rsc-1"},
+		}
+		cl := newClientBuilder(scheme).WithObjects(rva).Build()
+		rec := NewReconciler(cl, scheme)
+
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rva}
+		outcome := rec.reconcileRVAMetadata(ctx, rv, rvas)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeFalse())
 	})
@@ -623,7 +786,7 @@ var _ = Describe("reconcileRVAFinalizers", func() {
 		rec := NewReconciler(cl, scheme)
 
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rva}
-		outcome := rec.reconcileRVAFinalizers(ctx, nil, rvas)
+		outcome := rec.reconcileRVAMetadata(ctx, nil, rvas)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 
 		// After removing the last finalizer, the fake client finalizes the object (deletes it).
@@ -648,7 +811,7 @@ var _ = Describe("reconcileRVAFinalizers", func() {
 		}
 
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rva}
-		outcome := rec.reconcileRVAFinalizers(ctx, rv, rvas)
+		outcome := rec.reconcileRVAMetadata(ctx, rv, rvas)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 
 		var updated v1alpha1.ReplicatedVolumeAttachment
@@ -673,7 +836,7 @@ var _ = Describe("reconcileRVAFinalizers", func() {
 		}
 
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rvaDeleting, rvaActive}
-		outcome := rec.reconcileRVAFinalizers(ctx, rv, rvas)
+		outcome := rec.reconcileRVAMetadata(ctx, rv, rvas)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 
 		// Deleting RVA finalized (last finalizer removed → object deleted by fake client).
@@ -705,7 +868,7 @@ var _ = Describe("reconcileRVAFinalizers", func() {
 		}
 
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rva}
-		outcome := rec.reconcileRVAFinalizers(ctx, rv, rvas)
+		outcome := rec.reconcileRVAMetadata(ctx, rv, rvas)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 
 		var updated v1alpha1.ReplicatedVolumeAttachment
@@ -729,7 +892,7 @@ var _ = Describe("reconcileRVAFinalizers", func() {
 		}
 
 		rvas := []*v1alpha1.ReplicatedVolumeAttachment{rva}
-		outcome := rec.reconcileRVAFinalizers(ctx, rv, rvas)
+		outcome := rec.reconcileRVAMetadata(ctx, rv, rvas)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 
 		// Deleting RVA finalized (last finalizer removed → object deleted by fake client).

@@ -69,10 +69,18 @@ func (c *concurrencyTracker) Add(t *dmte.Transition) {
 		if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeSystemNetworks {
 			c.gctx.changeSystemNetworksTransition = t
 		}
+	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupResize:
+		c.gctx.hasResizeTransition = true
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership:
 		c.gctx.votingMembershipTransitions.Add(t.ReplicaID())
+		if isDiskGainingTransition(t) {
+			c.gctx.diskGainingMembershipTransitions.Add(t.ReplicaID())
+		}
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership:
 		c.gctx.nonVotingMembershipTransitions.Add(t.ReplicaID())
+		if isDiskGainingTransition(t) {
+			c.gctx.diskGainingMembershipTransitions.Add(t.ReplicaID())
+		}
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment:
 		c.gctx.attachmentTransitions.Add(t.ReplicaID())
 		c.gctx.potentiallyAttached.Add(t.ReplicaID()) // attaching or detaching — still possibly Primary
@@ -94,10 +102,18 @@ func (c *concurrencyTracker) Remove(t *dmte.Transition) {
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork:
 		c.gctx.hasNetworkTransition = false
 		c.gctx.changeSystemNetworksTransition = nil
+	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupResize:
+		c.gctx.hasResizeTransition = false
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership:
 		c.gctx.votingMembershipTransitions.Remove(t.ReplicaID())
+		if isDiskGainingTransition(t) {
+			c.gctx.diskGainingMembershipTransitions.Remove(t.ReplicaID())
+		}
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership:
 		c.gctx.nonVotingMembershipTransitions.Remove(t.ReplicaID())
+		if isDiskGainingTransition(t) {
+			c.gctx.diskGainingMembershipTransitions.Remove(t.ReplicaID())
+		}
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupAttachment:
 		c.gctx.attachmentTransitions.Remove(t.ReplicaID())
 		if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach {
@@ -125,6 +141,8 @@ func (c *concurrencyTracker) Remove(t *dmte.Transition) {
 //     Blocked by active Network (addresses must be stable before quorum changes).
 //   - Network: serialized (at most one active). Blocks VotingMembership and Quorum
 //     (semi-emergency: not blocked by Formation, VotingMembership, or Quorum).
+//   - Resize: serialized (at most one active). Mutually exclusive with
+//     disk-gaining membership transitions (AddReplica D/sD, ChangeReplicaType → D/sD).
 //   - Attachment: multiattach readiness checked via potentiallyAttached state
 //     (second+ attach requires multiattach enabled and confirmed).
 //   - Multiattach: serialized (no double-toggle).
@@ -186,9 +204,15 @@ func (c *concurrencyTracker) CanAdmit(t *dmte.Transition) (bool, string, any) {
 		if gctx.hasNetworkTransition {
 			return false, "network transition in progress", nil
 		}
+		if isDiskGainingTransition(t) && gctx.hasResizeTransition {
+			return false, "resize in progress", nil
+		}
 
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership:
 		// Can overlap with everything (per-member check above handles same-replica).
+		if isDiskGainingTransition(t) && gctx.hasResizeTransition {
+			return false, "resize in progress", nil
+		}
 
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupQuorum:
 		// Serialized: only one ChangeQuorum at a time.
@@ -228,6 +252,16 @@ func (c *concurrencyTracker) CanAdmit(t *dmte.Transition) (bool, string, any) {
 			return false, "multiattach transition in progress", nil
 		}
 
+	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupResize:
+		// Serialized: only one Resize at a time.
+		if gctx.hasResizeTransition {
+			return false, "resize in progress", nil
+		}
+		// Mutually exclusive with disk-gaining membership transitions.
+		if gctx.diskGainingMembershipTransitions.Len() > 0 {
+			return false, "disk-gaining membership transition in progress", nil
+		}
+
 	case v1alpha1.ReplicatedVolumeDatameshTransitionGroupNetwork:
 		// Serialized: at most one Network transition at a time.
 		if gctx.hasNetworkTransition {
@@ -236,4 +270,19 @@ func (c *concurrencyTracker) CanAdmit(t *dmte.Transition) (bool, string, any) {
 	}
 
 	return true, "", nil
+}
+
+// isDiskGainingTransition returns true if the transition adds a disk-bearing
+// member (AddReplica with D/sD type, or ChangeReplicaType to D/sD type).
+func isDiskGainingTransition(t *dmte.Transition) bool {
+	switch t.Type {
+	case v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica:
+		return t.ReplicaType == v1alpha1.ReplicaTypeDiskful ||
+			t.ReplicaType == v1alpha1.ReplicaTypeShadowDiskful
+	case v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType:
+		return t.ToReplicaType == v1alpha1.ReplicaTypeDiskful ||
+			t.ToReplicaType == v1alpha1.ReplicaTypeShadowDiskful
+	default:
+		return false
+	}
 }
