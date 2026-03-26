@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/utils/ptr"
 	kubecl "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -41,24 +42,28 @@ import (
 	sncv1alpha1 "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srvv1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/config"
+	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/linstorbackup"
 	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/linstordb"
+	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/metadatabackupcleanup"
 )
 
 // Migrator performs the migration from LINSTOR CRs to the new control-plane CRs.
 type Migrator struct {
-	client kubecl.Client
-	log    *slog.Logger
+	client        kubecl.Client
+	dynamicClient dynamic.Interface
+	log           *slog.Logger
 }
 
 // New creates a new Migrator instance.
-func New(client kubecl.Client, log *slog.Logger) *Migrator {
+func New(client kubecl.Client, dynamicClient dynamic.Interface, log *slog.Logger) *Migrator {
 	return &Migrator{
-		client: client,
-		log:    log,
+		client:        client,
+		dynamicClient: dynamicClient,
+		log:           log,
 	}
 }
 
-// Run executes the full migration workflow: pre-flight checks, then stages 1-3.
+// Run executes the full migration workflow: pre-flight checks, stage 1 (resource migration), stage 2 (short stub).
 func (m *Migrator) Run(ctx context.Context) error {
 	// Pre-flight: check that new control-plane is enabled in ModuleConfig.
 	if err := m.checkNewControlPlaneEnabled(ctx); err != nil {
@@ -74,19 +79,6 @@ func (m *Migrator) Run(ctx context.Context) error {
 	}
 	m.log.Debug("new control-plane CRD found", "crd", config.NewControlPlaneCRDName)
 
-	// Pre-flight: check LINSTOR CRDs exist.
-	if err := m.crdExists(ctx, config.LinstorCRDName); err != nil {
-		if apierrors.IsNotFound(err) {
-			m.log.Info("LINSTOR not found in cluster, no migration needed")
-			if err := m.ensureConfigMapState(ctx, config.StateAllCompleted); err != nil {
-				return fmt.Errorf("failed to set migration state to %s: %w", config.StateAllCompleted, err)
-			}
-			return nil
-		}
-		return fmt.Errorf("failed to check LINSTOR CRD %q: %w", config.LinstorCRDName, err)
-	}
-	m.log.Debug("LINSTOR CRD found", "crd", config.LinstorCRDName)
-
 	// Pre-flight: ensure ConfigMap exists.
 	currentState, err := m.ensureConfigMap(ctx)
 	if err != nil {
@@ -98,34 +90,15 @@ func (m *Migrator) Run(ctx context.Context) error {
 	case config.StateAllCompleted:
 		m.log.Info("migration already completed, nothing to do")
 		return nil
-	case config.StateStage2Completed:
-		return m.runStage3(ctx)
+	case config.StateStage1Completed:
+		// Resource migration finished; only the post-migration stub remains.
+		return m.runStage2Stub(ctx)
 	default:
-		// For all other states (not_started, stage1_started, stage1_completed, stage2_started, stage3_started)
-		// quickly skip stage 1, then run stage 2, then stage 3.
-		if err := m.skipStage1(ctx); err != nil {
+		if err := m.runStage1(ctx); err != nil {
 			return err
 		}
-		if err := m.runStage2(ctx); err != nil {
-			return err
-		}
-		return m.runStage3(ctx)
+		return m.runStage2Stub(ctx)
 	}
-}
-
-// skipStage1 quickly skips stage 1 for compatibility with existing helm templates.
-// Stage 1 previously performed resource migration, but this logic has been moved
-// to stage 2. This stub is required to maintain compatibility with existing
-// helm templates that expect the stage1_completed state in the ConfigMap.
-func (m *Migrator) skipStage1(ctx context.Context) error {
-	m.log.Info("stage 1: skipping (compatibility stub)")
-
-	if err := m.updateMigrationState(ctx, config.StateStage1Completed); err != nil {
-		return fmt.Errorf("failed to set stage1_completed state: %w", err)
-	}
-
-	m.log.Info("stage 1: marked as completed (stub)")
-	return nil
 }
 
 // waitForLinstorControllerRemoval waits for the linstor-controller deployment
@@ -173,13 +146,13 @@ func (m *Migrator) waitForLinstorControllerRemoval(ctx context.Context) error {
 	}
 }
 
-// runStage2 performs the actual resource migration from LINSTOR to new control-plane.
+// runStage1 performs resource migration from LINSTOR to new control-plane CRs.
 // It waits for linstor-controller removal, loads LINSTOR data, classifies resources,
 // and migrates them in the correct order.
-func (m *Migrator) runStage2(ctx context.Context) error {
-	m.log.Info("stage 2: starting resource migration")
+func (m *Migrator) runStage1(ctx context.Context) error {
+	m.log.Info("stage 1: starting resource migration")
 
-	if err := m.updateMigrationState(ctx, config.StateStage2Started); err != nil {
+	if err := m.updateMigrationState(ctx, config.StateStage1Started); err != nil {
 		return fmt.Errorf("failed to update migration state: %w", err)
 	}
 
@@ -188,14 +161,32 @@ func (m *Migrator) runStage2(ctx context.Context) error {
 		return err
 	}
 
-	// 2. Load LINSTOR database
+	// 2. If LINSTOR CRDs are gone, skip the rest of stage 1.
+	if err := m.crdExists(ctx, config.LinstorCRDName); err != nil {
+		if apierrors.IsNotFound(err) {
+			m.log.Info("LINSTOR not found in cluster, no resource migration needed")
+			if err := m.updateMigrationState(ctx, config.StateStage1Completed); err != nil {
+				return fmt.Errorf("failed to set migration state to %s: %w", config.StateStage1Completed, err)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to check LINSTOR CRD %q: %w", config.LinstorCRDName, err)
+	}
+	m.log.Debug("LINSTOR CRD found", "crd", config.LinstorCRDName)
+
+	// 3. Backup all CRs for every CRD with spec.group internal.linstor.linbit.com
+	if err := linstorbackup.WriteGroupBackup(ctx, m.client, m.dynamicClient, m.log, linstorbackup.BackupDir()); err != nil {
+		return fmt.Errorf("LINSTOR CR backup: %w", err)
+	}
+
+	// 4. Load LINSTOR database
 	db, err := linstordb.Init(ctx, m.client)
 	if err != nil {
 		return fmt.Errorf("failed to initialize LINSTOR database: %w", err)
 	}
 	m.log.Info("LINSTOR database loaded", "resources", len(db.Resources), "resourceDefinitions", len(db.ResourceDefinitions), "resourceGroups", len(db.ResourceGroups))
 
-	// 3. Load PVs for analysis
+	// 5. Load PVs for analysis
 	pvs := &corev1.PersistentVolumeList{}
 	if err := m.client.List(ctx, pvs); err != nil {
 		return fmt.Errorf("failed to list PersistentVolumes: %w", err)
@@ -209,7 +200,7 @@ func (m *Migrator) runStage2(ctx context.Context) error {
 		}
 	}
 
-	// 4. Classify resources
+	// 6. Classify resources
 	var (
 		// resourcesWithPV holds resource names (PV names) that exist in both LINSTOR and the cluster.
 		resourcesWithPV []string
@@ -233,7 +224,7 @@ func (m *Migrator) runStage2(ctx context.Context) error {
 		}
 	}
 
-	// 5. Log classification results
+	// 7. Log classification results
 	m.log.Info("resource classification complete",
 		"withPV", len(resourcesWithPV),
 		"withoutPV", len(resourcesWithoutPV),
@@ -246,7 +237,7 @@ func (m *Migrator) runStage2(ctx context.Context) error {
 		m.log.Info("resources without ResourceDefinition (will be skipped)", "names", resourcesWithoutRD)
 	}
 
-	// 6. List RSCs, VolumeAttachments, LVMVolumeGroups; ensure migration RSP per LINSTOR pool.
+	// 8. List RSCs, VolumeAttachments, LVMVolumeGroups; ensure migration RSP per LINSTOR pool.
 	rscList := &srvv1alpha1.ReplicatedStorageClassList{}
 	if err := m.client.List(ctx, rscList); err != nil {
 		return fmt.Errorf("failed to list ReplicatedStorageClasses: %w", err)
@@ -312,7 +303,7 @@ func (m *Migrator) runStage2(ctx context.Context) error {
 		migrationRSPByPool[poolName] = rsp
 	}
 
-	// 7. Migrate: first resources with PV, then without PV
+	// 9. Migrate: first resources with PV, then without PV
 	for _, resName := range resourcesWithPV {
 		pv := pvMap[resName]
 		if err := m.migrateResource(ctx, resName, &pv, db, migrationRSPByPool, repStorClasses, replicatedVAList, lvgs); err != nil {
@@ -326,33 +317,78 @@ func (m *Migrator) runStage2(ctx context.Context) error {
 		}
 	}
 
-	if err := m.updateMigrationState(ctx, config.StateStage2Completed); err != nil {
+	// 10. Remove all LINSTOR CRDs (custom resources are garbage-collected; data was backed up earlier).
+	if err := linstorbackup.DeleteCRDsForGroup(ctx, m.client, m.log, linstorbackup.APIGroup); err != nil {
+		return fmt.Errorf("delete LINSTOR CRDs: %w", err)
+	}
+
+	// 11. Remove all ReplicatedStorageMetadataBackup objects (cluster-stored LINSTOR DB backup segments).
+	if err := metadatabackupcleanup.DeleteAll(ctx, m.dynamicClient, m.log); err != nil {
+		return fmt.Errorf("delete ReplicatedStorageMetadataBackup objects: %w", err)
+	}
+
+	// 12. Remove legacy ReplicatedStoragePool objects named like LINSTOR storage pools (manual / old control plane).
+	linstorPoolNames := make([]string, 0, len(uniquePools))
+	for pn := range uniquePools {
+		linstorPoolNames = append(linstorPoolNames, pn)
+	}
+	if err := m.deleteLegacyReplicatedStoragePoolsForLinstorPoolNames(ctx, linstorPoolNames); err != nil {
+		return fmt.Errorf("delete legacy ReplicatedStoragePool objects: %w", err)
+	}
+
+	// 13. Mark stage 1 completed.
+	if err := m.updateMigrationState(ctx, config.StateStage1Completed); err != nil {
 		return fmt.Errorf("failed to update migration state: %w", err)
 	}
 
-	m.log.Info("stage 2: resource migration completed")
+	m.log.Info("stage 1: resource migration completed")
 	return nil
 }
 
-// runStage3 is a stub implementation.
-func (m *Migrator) runStage3(ctx context.Context) error {
-	m.log.Info("stage 3: starting (stub)")
-	if err := m.updateMigrationState(ctx, config.StateStage3Started); err != nil {
+// deleteLegacyReplicatedStoragePoolsForLinstorPoolNames deletes ReplicatedStoragePool objects whose metadata.name
+// equals a LINSTOR storage pool name seen during migration. Under the legacy control plane such pools were often
+// created with that exact name. Migrator-owned pools are named linstor-auto-* and RSC-controller pools are auto-rsp-*;
+// those prefixes are skipped so only legacy/manual objects are removed.
+func (m *Migrator) deleteLegacyReplicatedStoragePoolsForLinstorPoolNames(ctx context.Context, linstorPoolNames []string) error {
+	for _, poolName := range linstorPoolNames {
+		if poolName == "" {
+			continue
+		}
+		if strings.HasPrefix(poolName, config.AutoReplicatedStoragePoolNamePrefix) || strings.HasPrefix(poolName, config.AutoReplicatedStoragePoolRSCNamePrefix) {
+			continue
+		}
+		rsp := &srvv1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: poolName},
+		}
+		if err := m.client.Delete(ctx, rsp); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return fmt.Errorf("delete legacy ReplicatedStoragePool %q: %w", poolName, err)
+		}
+		m.log.Info("deleted legacy ReplicatedStoragePool (name matched LINSTOR pool)", "name", poolName)
+	}
+	return nil
+}
+
+// runStage2Stub waits briefly after migration so Helm can roll out new CSI before we mark all_completed.
+func (m *Migrator) runStage2Stub(ctx context.Context) error {
+	m.log.Info("stage 2: starting (post-migration wait)")
+	if err := m.updateMigrationState(ctx, config.StateStage2Started); err != nil {
 		return fmt.Errorf("failed to update migration state: %w", err)
 	}
 
-	// Stub: wait 10 seconds.
-	m.log.Info("stage 3: waiting 10 seconds (stub)")
+	m.log.Info("stage 2: waiting 10 seconds")
 	select {
 	case <-time.After(10 * time.Second):
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 
-	// if err := m.updateMigrationState(ctx, config.StateAllCompleted); err != nil {
-	//	return fmt.Errorf("failed to update migration state: %w", err)
-	// }
-	m.log.Info("stage 3: completed (stub)")
+	if err := m.updateMigrationState(ctx, config.StateAllCompleted); err != nil {
+		return fmt.Errorf("failed to update migration state: %w", err)
+	}
+	m.log.Info("stage 2: completed, migration finished")
 	return nil
 }
 
