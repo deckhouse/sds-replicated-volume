@@ -38,14 +38,20 @@ func observeRVRMetrics(
 	}
 
 	node := rvr.Spec.NodeName
-	sc := storageClassLabel(rv)
+	sc := rvrStorageClassLabel(rvr, rv)
 	rvName := rvr.Spec.ReplicatedVolumeName
 	oldPhase := string(base.Status.Phase)
 	newPhase := string(rvr.Status.Phase)
 
 	// Initialize phase tracker entry for this RVR (no-op if already present).
 	// On controller restart, uses ControllerStartTime as fallback.
-	metrics.RVRPhases.GetOrInit(rvr.Name, oldPhase, metrics.ControllerStartTime)
+	// If the RVR is already Healthy in the cache (pre-restart state), mark
+	// creation as observed to prevent re-recording full age on phase flap.
+	if _, loaded := metrics.RVRPhases.GetOrInitLoaded(rvr.Name, oldPhase, metrics.ControllerStartTime); !loaded {
+		if oldPhase == string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy) {
+			metrics.RVRPhases.MarkCreationObserved(rvr.Name)
+		}
+	}
 
 	// Detect phase change.
 	if oldPhase != newPhase && newPhase != "" {
@@ -127,7 +133,7 @@ func observeRVRPhaseInfo(
 
 // cleanupRVRMetrics removes all per-object metrics for a deleted RVR.
 // Must be called when the RVR finalizer is removed.
-func cleanupRVRMetrics(rvr *v1alpha1.ReplicatedVolumeReplica) {
+func cleanupRVRMetrics(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.ReplicatedVolume) {
 	if rvr == nil {
 		return
 	}
@@ -135,7 +141,7 @@ func cleanupRVRMetrics(rvr *v1alpha1.ReplicatedVolumeReplica) {
 	name := rvr.Name
 	rvName := rvr.Spec.ReplicatedVolumeName
 	node := rvr.Spec.NodeName
-	sc := storageClassLabel(nil)
+	sc := rvrStorageClassLabel(rvr, rv)
 
 	metrics.RVRCreationDuration.DeleteLabelValues(name, rvName, node, sc)
 	metrics.RVRPhaseInfo.DeleteLabelValues(name, rvName, node, string(rvr.Status.Phase))
@@ -149,14 +155,20 @@ func observeRVRDeletion(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.Repl
 		return
 	}
 	dur := time.Since(rvr.DeletionTimestamp.Time).Seconds()
-	metrics.RVRDeletionDuration.WithLabelValues(rvr.Spec.NodeName, storageClassLabel(rv)).Observe(dur)
+	metrics.RVRDeletionDuration.WithLabelValues(rvr.Spec.NodeName, rvrStorageClassLabel(rvr, rv)).Observe(dur)
 }
 
-// storageClassLabel extracts the storage class name from the RV for use as a metric label.
-// Returns empty string if RV is nil.
-func storageClassLabel(rv *v1alpha1.ReplicatedVolume) string {
-	if rv == nil {
-		return ""
+// rvrStorageClassLabel returns the ReplicatedStorageClass name for metric labels.
+// Primary source: RVR's own label (always available, even after RV deletion).
+// Fallback: RV spec (for cases where label is missing).
+func rvrStorageClassLabel(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.ReplicatedVolume) string {
+	if rvr != nil {
+		if sc := rvr.Labels[v1alpha1.ReplicatedStorageClassLabelKey]; sc != "" {
+			return sc
+		}
 	}
-	return rv.Spec.ReplicatedStorageClassName
+	if rv != nil {
+		return rv.Spec.ReplicatedStorageClassName
+	}
+	return ""
 }
