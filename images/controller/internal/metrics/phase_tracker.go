@@ -46,11 +46,17 @@ var RVRPhases = &PhaseTracker{}
 // If no entry exists, initializes one with the given phase and fallbackStartTime
 // (typically ControllerStartTime for graceful degradation after restart).
 func (pt *PhaseTracker) GetOrInit(name, phase string, fallbackStartTime time.Time) PhaseEntry {
+	e, _ := pt.GetOrInitLoaded(name, phase, fallbackStartTime)
+	return e
+}
+
+// GetOrInitLoaded is like GetOrInit but also returns whether the entry already existed.
+func (pt *PhaseTracker) GetOrInitLoaded(name, phase string, fallbackStartTime time.Time) (PhaseEntry, bool) {
 	entry := PhaseEntry{Phase: phase, StartTime: fallbackStartTime}
 	if actual, loaded := pt.entries.LoadOrStore(name, entry); loaded {
-		return actual.(PhaseEntry)
+		return actual.(PhaseEntry), true
 	}
-	return entry
+	return entry, false
 }
 
 // RecordPhaseChange records a phase transition for the given RVR.

@@ -108,7 +108,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			// If finalizer was removed (deletion completed), observe deletion metrics and cleanup.
 			if rvr.DeletionTimestamp != nil && !obju.HasFinalizer(rvr, v1alpha1.RVRControllerFinalizer) {
 				observeRVRDeletion(rvr, rv)
-				cleanupRVRMetrics(rvr)
+				cleanupRVRMetrics(rvr, rv)
 			}
 			return outcome.ToCtrl()
 		}
