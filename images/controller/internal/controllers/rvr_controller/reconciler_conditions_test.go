@@ -2117,17 +2117,20 @@ var _ = Describe("computeRVRPhaseAndMessage", func() {
 		Expect(msg).To(ContainSubstring(". Leaving datamesh: 0/4 replicas confirmed"))
 	})
 
-	It("returns pre-member phase + generic deletion note when pre-member is deleting", func() {
+	It("returns Terminating + deletion note when non-member pre-member is deleting", func() {
 		rvr := mkRVR("node-1")
 		rvr.DeletionTimestamp = ptr.To(metav1.Now())
 		rvr.Finalizers = []string{v1alpha1.RVRControllerFinalizer, v1alpha1.RVControllerFinalizer}
 		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
 			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured,
 			"DRBD configured (replica is being deleted)")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonTerminating,
+			"Replica is terminating")
 
 		phase, msg := computeRVRPhaseAndMessage(rvr)
-		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring))
-		Expect(msg).To(ContainSubstring(". Deletion pending"))
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseTerminating))
+		Expect(msg).To(Equal("Replica is terminating. Deletion pending"))
 	})
 
 	// ── Stage 3: rvrShouldNotExist=true (final cleanup) ──

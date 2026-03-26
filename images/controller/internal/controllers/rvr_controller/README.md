@@ -318,6 +318,7 @@ Message combines cleanup progress from DRBDConfigured and BackingVolumeReady con
 | Phase | When |
 |-------|------|
 | AgentNotReady | DRBDConfigured reason = AgentNotReady |
+| Terminating | DeletionTimestamp set AND datameshRevision == 0 (non-member deleting replica waiting for finalizer cleanup) |
 
 *Pre-member lifecycle* (`datameshRevision == 0`):
 
@@ -690,7 +691,9 @@ flowchart TD
     subgraph computeNormalPhaseAndMessage [Normal phase computation]
         CheckAgent{DRBDConfigured<br/>reason=AgentNotReady?}
         CheckAgent -->|Yes| AgentNotReady([AgentNotReady])
-        CheckAgent -->|No| CheckMember{datameshRevision > 0?}
+        CheckAgent -->|No| CheckNonMemberDel{DeletionTimestamp AND<br/>datameshRevision == 0?}
+        CheckNonMemberDel -->|Yes| TermNonMember([Terminating])
+        CheckNonMemberDel -->|No| CheckMember{datameshRevision > 0?}
         CheckMember -->|No| PreMember
         CheckMember -->|Yes| MemberHealth["computeMemberPhaseAndMessage"]
     end
