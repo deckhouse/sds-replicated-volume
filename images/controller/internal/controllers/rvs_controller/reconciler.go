@@ -155,6 +155,7 @@ func (r *Reconciler) reconcileChildren(
 
 	secondaryRVRs, primaryRVRs := splitRVRsByAttachment(rvrs, rv.Status.Datamesh.Members)
 
+	created := false
 	for _, rvr := range secondaryRVRs {
 		if _, exists := existingByRVR[rvr.Name]; exists {
 			continue
@@ -165,6 +166,10 @@ func (r *Reconciler) reconcileChildren(
 			}
 			return rf.Fail(err)
 		}
+		created = true
+	}
+	if created {
+		return rf.DoneAndRequeue()
 	}
 
 	if len(primaryRVRs) > 0 {
@@ -182,6 +187,10 @@ func (r *Reconciler) reconcileChildren(
 				}
 				return rf.Fail(err)
 			}
+			created = true
+		}
+		if created {
+			return rf.DoneAndRequeue()
 		}
 
 		if rvs.Status.SourceReplicaSnapshotName == "" {
