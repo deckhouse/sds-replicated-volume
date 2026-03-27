@@ -80,20 +80,20 @@ var _ = Describe("SetupLayout", Label(fw.LabelSlow), func() {
 			require.MinNodes(2),
 			fw.TestLayout{FTT: 0, GMDR: 1}),
 		Entry("2D+1TB",
-			require.MinNodes(3),
+			require.MinNodes(2, 1),
 			fw.TestLayout{FTT: 1, GMDR: 0}),
 		Entry("3D",
 			require.MinNodes(3),
 			fw.TestLayout{FTT: 1, GMDR: 1}),
 
 		Entry("1D+1A",
-			SpecTimeout(2*time.Minute), require.MinNodes(2),
+			SpecTimeout(2*time.Minute), require.MinNodes(1, 1),
 			fw.TestLayout{FTT: 0, GMDR: 0, Access: 1, Attached: 1}),
 		Entry("2D+1A",
-			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			SpecTimeout(2*time.Minute), require.MinNodes(2, 1),
 			fw.TestLayout{FTT: 0, GMDR: 1, Access: 1, Attached: 1}),
 		Entry("1D+2A",
-			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			SpecTimeout(2*time.Minute), require.MinNodes(1, 2),
 			fw.TestLayout{FTT: 0, GMDR: 0, Access: 2, Attached: 2}),
 
 		Entry("1D (1att)",
@@ -102,11 +102,11 @@ var _ = Describe("SetupLayout", Label(fw.LabelSlow), func() {
 			SpecTimeout(2*time.Minute), require.MinNodes(2),
 			fw.TestLayout{FTT: 0, GMDR: 1, Attached: 2}),
 		Entry("2D+1TB (1att)",
-			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			SpecTimeout(2*time.Minute), require.MinNodes(2, 1),
 			fw.TestLayout{FTT: 1, GMDR: 0, Attached: 1}),
 
 		Entry("1D+1A (1att)",
-			SpecTimeout(2*time.Minute), require.MinNodes(2),
+			SpecTimeout(2*time.Minute), require.MinNodes(1, 1),
 			fw.TestLayout{FTT: 0, GMDR: 0, Access: 1, Attached: 1}),
 	)
 })

@@ -128,6 +128,39 @@ func (ps *PoolScope) EligibleNodes() []v1alpha1.ReplicatedStoragePoolEligibleNod
 	return ps.trsp.Object().Status.EligibleNodes
 }
 
+// UsableNodeCount returns the number of eligible nodes that are actually usable
+// (NodeReady, AgentReady, not Unschedulable). This matches the filtering done
+// by pickNode/AnyNode, so MinNodes skip logic stays consistent with placement.
+func (ps *PoolScope) UsableNodeCount() int {
+	count := 0
+	for i := range ps.trsp.Object().Status.EligibleNodes {
+		if nodeUsable(&ps.trsp.Object().Status.EligibleNodes[i]) {
+			count++
+		}
+	}
+	return count
+}
+
+// UsableDiskfulNodeCount returns the number of usable nodes that have at least
+// one ready, non-unschedulable LVMVolumeGroup. This matches the filtering done
+// by pickNode(needLVG=true), so MinNodes diskful skip logic stays consistent.
+func (ps *PoolScope) UsableDiskfulNodeCount() int {
+	count := 0
+	for i := range ps.trsp.Object().Status.EligibleNodes {
+		n := &ps.trsp.Object().Status.EligibleNodes[i]
+		if !nodeUsable(n) {
+			continue
+		}
+		for j := range n.LVMVolumeGroups {
+			if lvgUsable(&n.LVMVolumeGroups[j]) {
+				count++
+				break
+			}
+		}
+	}
+	return count
+}
+
 // DiskfulPlacement describes a placement target: a node with a specific
 // LVM volume group (and optional thin pool) where a diskful replica can live.
 type DiskfulPlacement struct {

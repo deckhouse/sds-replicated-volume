@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/ginkgo/v2/types"
 
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework/require"
 )
 
@@ -85,15 +86,43 @@ func enforceRequirements(f *Framework) {
 		case label == require.LabelCPAny:
 			// no check
 		case strings.HasPrefix(label, require.LabelMinNodes):
-			s := strings.TrimPrefix(label, require.LabelMinNodes)
-			n, err := strconv.Atoi(s)
-			if err != nil {
-				Fail(fmt.Sprintf("invalid %s label: %q", require.LabelMinNodes, label))
-			}
-			nodeCount := len(f.Discovery.EligibleNodes())
-			if nodeCount < n {
-				Skip(fmt.Sprintf("requires at least %d nodes, cluster has %d", n, nodeCount))
-			}
+			enforceMinNodes(f, label)
 		}
+	}
+}
+
+// enforceMinNodes parses a Req:MinNodes:<diskful>:<extra>:<poolType> label
+// and skips the spec if the cluster does not satisfy the requirements.
+func enforceMinNodes(f *Framework, label string) {
+	s := strings.TrimPrefix(label, require.LabelMinNodes)
+	parts := strings.SplitN(s, ":", 3)
+	if len(parts) != 3 {
+		Fail(fmt.Sprintf("invalid %s label: %q (expected format: <diskful>:<extra>:<poolType>)", require.LabelMinNodes, label))
+	}
+
+	diskful, err := strconv.Atoi(parts[0])
+	if err != nil {
+		Fail(fmt.Sprintf("invalid %s label: cannot parse diskful %q: %v", require.LabelMinNodes, parts[0], err))
+	}
+
+	extra, err := strconv.Atoi(parts[1])
+	if err != nil {
+		Fail(fmt.Sprintf("invalid %s label: cannot parse extra %q: %v", require.LabelMinNodes, parts[1], err))
+	}
+
+	poolType := v1alpha1.ReplicatedStoragePoolType(parts[2])
+	pool := f.Discovery.From(poolType)
+
+	total := diskful + extra
+	usableNodes := pool.UsableNodeCount()
+	if usableNodes < total {
+		Skip(fmt.Sprintf("requires %d usable %s nodes (%d diskful + %d extra), cluster has %d",
+			total, poolType, diskful, extra, usableNodes))
+	}
+
+	diskfulNodes := pool.UsableDiskfulNodeCount()
+	if diskfulNodes < diskful {
+		Skip(fmt.Sprintf("requires %d usable %s nodes with ready LVG, cluster has %d",
+			diskful, poolType, diskfulNodes))
 	}
 }
