@@ -93,10 +93,21 @@ func confirmCreate(gctx *globalContext, rctx *replicaContext, _ int64) dmte.Conf
 	}
 
 	if err := gctx.cl.Create(gctx.ctx, drbdr); err != nil {
-		if apierrors.IsAlreadyExists(err) {
+		if !apierrors.IsAlreadyExists(err) {
 			return dmte.ConfirmResult{MustConfirm: must}
 		}
-		return dmte.ConfirmResult{MustConfirm: must}
+		existing := &v1alpha1.DRBDResource{}
+		if err := gctx.cl.Get(gctx.ctx, client.ObjectKeyFromObject(drbdr), existing); err != nil {
+			return dmte.ConfirmResult{MustConfirm: must}
+		}
+		if changed, err := obju.SetControllerRef(existing, gctx.rvs, gctx.scheme); err != nil {
+			return dmte.ConfirmResult{MustConfirm: must}
+		} else if changed {
+			if err := gctx.cl.Update(gctx.ctx, existing); err != nil {
+				return dmte.ConfirmResult{MustConfirm: must}
+			}
+		}
+		drbdr = existing
 	}
 
 	rctx.drbdr = drbdr
