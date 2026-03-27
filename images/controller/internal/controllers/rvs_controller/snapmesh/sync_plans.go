@@ -211,15 +211,7 @@ func confirmCleanup(gctx *globalContext, rctx *replicaContext, _ int64) dmte.Con
 //
 
 func isReplicaSynced(drbdr *v1alpha1.DRBDResource) bool {
-	if drbdr.Status.DiskState != v1alpha1.DiskStateUpToDate {
-		return false
-	}
-	for _, peer := range drbdr.Status.Peers {
-		if peer.DiskState != v1alpha1.DiskStateUpToDate {
-			return false
-		}
-	}
-	return true
+	return drbdr.Status.DiskState == v1alpha1.DiskStateUpToDate
 }
 
 func extractSharedSecret(gctx *globalContext) string {
