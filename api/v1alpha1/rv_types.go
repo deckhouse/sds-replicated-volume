@@ -250,7 +250,7 @@ type ReplicatedVolumeDatameshReplicaRequest struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=123
-	// +kubebuilder:validation:Pattern=`^.+-([0-9]|[12][0-9]|3[01])$` 
+	// +kubebuilder:validation:Pattern=`^.+-([0-9]|[12][0-9]|3[01])$`
 	Name string `json:"name"`
 
 	// Message is an optional human-readable message about the request state and progress.
@@ -290,7 +290,7 @@ func (t ReplicatedVolumeDatameshReplicaRequest) ID() uint8 {
 type ReplicatedVolumeDatameshTransition struct {
 	// Type is the transition type.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=AddReplica;Attach;ChangeQuorum;ChangeReplicaType;ChangeSystemNetworks;Detach;DisableMultiattach;EnableMultiattach;ForceDetach;ForceRemoveReplica;Formation;RemoveReplica;RepairNetworkAddresses;ResizeVolume
+	// +kubebuilder:validation:Enum=AddReplica;Attach;ChangeQuorum;ChangeReplicaType;ChangeSystemNetworks;Detach;DisableMultiattach;EnableMultiattach;ForceDetach;ForceRemoveReplica;Formation;RemoveReplica;RepairNetworkAddresses;ResizeVolume;SyncSnapshot
 	Type ReplicatedVolumeDatameshTransitionType `json:"type"`
 
 	// ReplicaName is the name of the replica this transition applies to.
@@ -347,7 +347,7 @@ type ReplicatedVolumeDatameshTransition struct {
 	// Set by the controller at transition creation time. Read-only for users.
 	// Provides observability: explains why a transition may be waiting.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=Attachment;Emergency;Formation;Multiattach;Network;NonVotingMembership;Quorum;Resize;VotingMembership
+	// +kubebuilder:validation:Enum=Attachment;Emergency;Formation;Multiattach;Network;NonVotingMembership;Quorum;Resize;Sync;VotingMembership
 	Group ReplicatedVolumeDatameshTransitionGroup `json:"group"`
 
 	// PlanID identifies the transition plan used to create this transition.
@@ -487,6 +487,8 @@ const (
 	ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses ReplicatedVolumeDatameshTransitionType = "RepairNetworkAddresses"
 	// ReplicatedVolumeDatameshTransitionTypeResizeVolume resizes the datamesh volume.
 	ReplicatedVolumeDatameshTransitionTypeResizeVolume ReplicatedVolumeDatameshTransitionType = "ResizeVolume"
+	// ReplicatedVolumeDatameshTransitionTypeSyncSnapshot synchronizes snapshot data across replicas.
+	ReplicatedVolumeDatameshTransitionTypeSyncSnapshot ReplicatedVolumeDatameshTransitionType = "SyncSnapshot"
 )
 
 func (t ReplicatedVolumeDatameshTransitionType) String() string {
@@ -516,6 +518,8 @@ const (
 	ReplicatedVolumeDatameshTransitionGroupResize ReplicatedVolumeDatameshTransitionGroup = "Resize"
 	// ReplicatedVolumeDatameshTransitionGroupEmergency is the emergency group (preemptive).
 	ReplicatedVolumeDatameshTransitionGroupEmergency ReplicatedVolumeDatameshTransitionGroup = "Emergency"
+	// ReplicatedVolumeDatameshTransitionGroupSync is the sync group for snapshot synchronization.
+	ReplicatedVolumeDatameshTransitionGroupSync ReplicatedVolumeDatameshTransitionGroup = "Sync"
 )
 
 func (g ReplicatedVolumeDatameshTransitionGroup) String() string { return string(g) }

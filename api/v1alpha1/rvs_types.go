@@ -99,6 +99,13 @@ type ReplicatedVolumeSnapshotStatus struct {
 	// +listType=set
 	// +optional
 	SyncDRBDResources []string `json:"syncDRBDResources,omitempty"`
+
+	// +optional
+	SyncRevision int64 `json:"syncRevision,omitempty"`
+
+	// +listType=atomic
+	// +optional
+	SyncTransitions []ReplicatedVolumeDatameshTransition `json:"syncTransitions,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

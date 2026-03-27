@@ -208,6 +208,229 @@ spec:
                   type: string
                 type: array
                 x-kubernetes-list-type: set
+              syncRevision:
+                format: int64
+                type: integer
+              syncTransitions:
+                items:
+                  description: |-
+                    ReplicatedVolumeDatameshTransition represents an active datamesh transition.
+                    Each transition has an ordered list of steps that are pre-declared on creation
+                    and executed sequentially. The transition's start time is steps[0].startedAt.
+                  properties:
+                    fromReplicaType:
+                      description: |-
+                        FromReplicaType is the source replica type for ChangeReplicaType transitions.
+                        Required for ChangeReplicaType. Must not be set for other types.
+                      enum:
+                      - Diskful
+                      - Access
+                      - TieBreaker
+                      - ShadowDiskful
+                      type: string
+                    fromSystemNetworkNames:
+                      description: |-
+                        FromSystemNetworkNames is the source set of system network names for
+                        ChangeSystemNetworks transitions. Captured from datamesh.systemNetworkNames
+                        at dispatch time. Required for ChangeSystemNetworks. Must not be set for
+                        other types.
+                      items:
+                        maxLength: 64
+                        type: string
+                      maxItems: 10
+                      type: array
+                      x-kubernetes-list-type: atomic
+                    group:
+                      description: |-
+                        Group is the concurrency group for this transition.
+                        Set by the controller at transition creation time. Read-only for users.
+                        Provides observability: explains why a transition may be waiting.
+                      enum:
+                      - Attachment
+                      - Emergency
+                      - Formation
+                      - Multiattach
+                      - Network
+                      - NonVotingMembership
+                      - Quorum
+                      - Resize
+                      - Sync
+                      - VotingMembership
+                      type: string
+                    planID:
+                      description: |-
+                        PlanID identifies the transition plan used to create this transition.
+                        Used by the engine to look up step callbacks from the plan registry.
+                      minLength: 1
+                      type: string
+                    replicaName:
+                      description: |-
+                        ReplicaName is the name of the replica this transition applies to.
+                        Required for AddReplica, RemoveReplica, ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach.
+                        Must not be set for Formation, EnableMultiattach, DisableMultiattach, ChangeQuorum.
+                      maxLength: 123
+                      minLength: 1
+                      pattern: ^.+-([0-9]|[12][0-9]|3[01])$
+                      type: string
+                    replicaType:
+                      description: |-
+                        ReplicaType is the target replica type for AddReplica/RemoveReplica/ForceRemoveReplica.
+                        Uses ReplicaType (Diskful, Access, TieBreaker, ShadowDiskful) — liminal states
+                        (LiminalDiskful, LiminalShadowDiskful) are internal mechanics visible in step names,
+                        not in transition parameters.
+                        Required for AddReplica, RemoveReplica, ForceRemoveReplica. Must not be set for other types.
+                      enum:
+                      - Diskful
+                      - Access
+                      - TieBreaker
+                      - ShadowDiskful
+                      type: string
+                    steps:
+                      description: |-
+                        Steps is the ordered list of steps for this transition.
+                        All steps are written when the transition is created (with status=Pending,
+                        and the first step immediately set to Active with startedAt).
+                        Steps are executed sequentially — only one step is Active at a time.
+                        Must have at least one element.
+                      items:
+                        description: ReplicatedVolumeDatameshTransitionStep represents
+                          one step within a transition.
+                        properties:
+                          completedAt:
+                            description: CompletedAt is set when the step transitions
+                              from Active to Completed.
+                            format: date-time
+                            type: string
+                          datameshRevision:
+                            description: |-
+                              DatameshRevision is the revision assigned when this step was activated.
+                              0 if the step has not been activated yet or does not bump the revision.
+                            format: int64
+                            type: integer
+                          message:
+                            description: |-
+                              Message is a per-step progress or error message.
+                              Updated every reconciliation while the step is Active.
+                            maxLength: 512
+                            type: string
+                          name:
+                            description: Name is a human-readable step name (e.g.,
+                              "Preconfigure", "attach", "✦ → D∅").
+                            maxLength: 64
+                            minLength: 1
+                            type: string
+                          startedAt:
+                            description: StartedAt is set when the step transitions
+                              from Pending to Active.
+                            format: date-time
+                            type: string
+                          status:
+                            default: Pending
+                            description: Status is the current status of this step.
+                            enum:
+                            - Pending
+                            - Active
+                            - Completed
+                            type: string
+                        required:
+                        - name
+                        - status
+                        type: object
+                      maxItems: 8
+                      minItems: 1
+                      type: array
+                      x-kubernetes-list-type: atomic
+                    toReplicaType:
+                      description: |-
+                        ToReplicaType is the target replica type for ChangeReplicaType transitions.
+                        Required for ChangeReplicaType. Must not be set for other types.
+                      enum:
+                      - Diskful
+                      - Access
+                      - TieBreaker
+                      - ShadowDiskful
+                      type: string
+                    toSystemNetworkNames:
+                      description: |-
+                        ToSystemNetworkNames is the target set of system network names for
+                        ChangeSystemNetworks transitions. Captured from RSP configuration at
+                        dispatch time. Required for ChangeSystemNetworks. Must not be set for
+                        other types.
+                      items:
+                        maxLength: 64
+                        type: string
+                      maxItems: 10
+                      type: array
+                      x-kubernetes-list-type: atomic
+                    type:
+                      description: Type is the transition type.
+                      enum:
+                      - AddReplica
+                      - Attach
+                      - ChangeQuorum
+                      - ChangeReplicaType
+                      - ChangeSystemNetworks
+                      - Detach
+                      - DisableMultiattach
+                      - EnableMultiattach
+                      - ForceDetach
+                      - ForceRemoveReplica
+                      - Formation
+                      - RemoveReplica
+                      - RepairNetworkAddresses
+                      - ResizeVolume
+                      - SyncSnapshot
+                      type: string
+                  required:
+                  - group
+                  - steps
+                  - type
+                  type: object
+                  x-kubernetes-validations:
+                  - message: replicaName is required for AddReplica, RemoveReplica,
+                      ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach
+                      transitions
+                    rule: self.type == 'Formation' || self.type == 'EnableMultiattach'
+                      || self.type == 'DisableMultiattach' || self.type == 'ChangeQuorum'
+                      || self.type == 'RepairNetworkAddresses' || self.type == 'ChangeSystemNetworks'
+                      || self.type == 'ResizeVolume' || has(self.replicaName)
+                  - message: replicaName must not be set for Formation, EnableMultiattach,
+                      DisableMultiattach, ChangeQuorum, RepairNetworkAddresses, ChangeSystemNetworks,
+                      ResizeVolume transitions
+                    rule: '!has(self.replicaName) || !(self.type == ''Formation''
+                      || self.type == ''EnableMultiattach'' || self.type == ''DisableMultiattach''
+                      || self.type == ''ChangeQuorum'' || self.type == ''RepairNetworkAddresses''
+                      || self.type == ''ChangeSystemNetworks'' || self.type == ''ResizeVolume'')'
+                  - message: replicaType must only be set for AddReplica, RemoveReplica,
+                      ForceRemoveReplica transitions
+                    rule: self.type == 'AddReplica' || self.type == 'RemoveReplica'
+                      || self.type == 'ForceRemoveReplica' || !has(self.replicaType)
+                  - message: replicaType is required for AddReplica, RemoveReplica,
+                      ForceRemoveReplica transitions
+                    rule: '!(self.type == ''AddReplica'' || self.type == ''RemoveReplica''
+                      || self.type == ''ForceRemoveReplica'') || has(self.replicaType)'
+                  - message: fromReplicaType and toReplicaType must only be set for
+                      ChangeReplicaType transitions
+                    rule: self.type == 'ChangeReplicaType' || (!has(self.fromReplicaType)
+                      && !has(self.toReplicaType))
+                  - message: fromReplicaType and toReplicaType are required for ChangeReplicaType
+                      transitions
+                    rule: self.type != 'ChangeReplicaType' || (has(self.fromReplicaType)
+                      && has(self.toReplicaType))
+                  - message: fromSystemNetworkNames must only be set for ChangeSystemNetworks
+                      transitions
+                    rule: self.type == 'ChangeSystemNetworks' || !has(self.fromSystemNetworkNames)
+                  - message: toSystemNetworkNames must only be set for ChangeSystemNetworks
+                      transitions
+                    rule: self.type == 'ChangeSystemNetworks' || !has(self.toSystemNetworkNames)
+                  - message: fromSystemNetworkNames is required for ChangeSystemNetworks
+                      transitions
+                    rule: self.type != 'ChangeSystemNetworks' || has(self.fromSystemNetworkNames)
+                  - message: toSystemNetworkNames is required for ChangeSystemNetworks
+                      transitions
+                    rule: self.type != 'ChangeSystemNetworks' || has(self.toSystemNetworkNames)
+                type: array
+                x-kubernetes-list-type: atomic
             required:
             - datamesh
             type: object

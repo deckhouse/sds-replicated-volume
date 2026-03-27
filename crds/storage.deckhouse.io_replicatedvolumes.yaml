@@ -655,6 +655,7 @@ spec:
                       - NonVotingMembership
                       - Quorum
                       - Resize
+                      - Sync
                       - VotingMembership
                       type: string
                     planID:
@@ -779,6 +780,7 @@ spec:
                       - RemoveReplica
                       - RepairNetworkAddresses
                       - ResizeVolume
+                      - SyncSnapshot
                       type: string
                   required:
                   - group

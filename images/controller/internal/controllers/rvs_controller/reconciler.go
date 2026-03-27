@@ -155,50 +155,52 @@ func (r *Reconciler) reconcileChildren(
 
 	secondaryRVRs, primaryRVRs := splitRVRsByAttachment(rvrs, rv.Status.Datamesh.Members)
 
-	created := false
-	for _, rvr := range secondaryRVRs {
-		if _, exists := existingByRVR[rvr.Name]; exists {
-			continue
-		}
-		if err := r.createRVRS(rf.Ctx(), rvs, rvr); err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				return rf.DoneAndRequeue()
-			}
-			return rf.Fail(err)
-		}
-		created = true
-	}
-	if created {
+	if requeue, err := r.createMissingRVRSs(rf.Ctx(), rvs, secondaryRVRs, existingByRVR); err != nil {
+		return rf.Fail(err)
+	} else if requeue {
 		return rf.DoneAndRequeue()
 	}
 
-	if len(primaryRVRs) > 0 {
-		if !allRVRSReady(secondaryRVRs, existingByRVR) {
-			return rf.DoneAndRequeue()
-		}
+	if len(primaryRVRs) == 0 {
+		return rf.Continue()
+	}
 
-		for _, rvr := range primaryRVRs {
-			if _, exists := existingByRVR[rvr.Name]; exists {
-				continue
-			}
-			if err := r.createRVRS(rf.Ctx(), rvs, rvr); err != nil {
-				if apierrors.IsAlreadyExists(err) {
-					return rf.DoneAndRequeue()
-				}
-				return rf.Fail(err)
-			}
-			created = true
-		}
-		if created {
-			return rf.DoneAndRequeue()
-		}
+	if !allRVRSReady(secondaryRVRs, existingByRVR) {
+		return rf.DoneAndRequeue()
+	}
 
-		if rvs.Status.SourceReplicaSnapshotName == "" {
-			rvs.Status.SourceReplicaSnapshotName = fmt.Sprintf("%s-%s", rvs.Name, primaryRVRs[0].Spec.NodeName)
-		}
+	if requeue, err := r.createMissingRVRSs(rf.Ctx(), rvs, primaryRVRs, existingByRVR); err != nil {
+		return rf.Fail(err)
+	} else if requeue {
+		return rf.DoneAndRequeue()
+	}
+
+	if rvs.Status.SourceReplicaSnapshotName == "" {
+		rvs.Status.SourceReplicaSnapshotName = fmt.Sprintf("%s-%s", rvs.Name, primaryRVRs[0].Spec.NodeName)
 	}
 
 	return rf.Continue()
+}
+
+func (r *Reconciler) createMissingRVRSs(
+	ctx context.Context,
+	rvs *v1alpha1.ReplicatedVolumeSnapshot,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	existingByRVR map[string]*v1alpha1.ReplicatedVolumeReplicaSnapshot,
+) (requeue bool, err error) {
+	for _, rvr := range rvrs {
+		if _, exists := existingByRVR[rvr.Name]; exists {
+			continue
+		}
+		if err := r.createRVRS(ctx, rvs, rvr); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				return true, nil
+			}
+			return false, err
+		}
+		requeue = true
+	}
+	return requeue, nil
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -337,7 +339,7 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, rvs *v1alpha1.Replicat
 	}
 
 	if len(rvs.Status.SyncDRBDResources) > 0 {
-		syncDRBDRs, _, err := r.getSyncDRBDResources(rf.Ctx(), rvs.Status.SyncDRBDResources)
+		syncDRBDRs, err := r.getSyncDRBDResources(rf.Ctx(), rvs.Status.SyncDRBDResources)
 		if err != nil {
 			return rf.Fail(err)
 		}
