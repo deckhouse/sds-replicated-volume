@@ -10,8 +10,7 @@ env:
   GOPROXY: ${{ secrets.GOPROXY }}
   SOURCE_REPO: ${{ secrets.SOURCE_REPO }}
   SOURCE_REPO_SSH_KEY: ${{ secrets.SOURCE_REPO_SSH_KEY }}
-  BASE_IMAGES_VERSION: "v0.5.56"
-
+  BASE_IMAGES_VERSION: "v0.5.64"
 on:
   #pull_request:
   # call from trivy_image_check.yaml, which in turn call from pull_request
