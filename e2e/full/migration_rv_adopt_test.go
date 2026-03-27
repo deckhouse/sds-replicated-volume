@@ -354,7 +354,8 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 			for i := 0; i < expectedReplicas; i++ {
 				trvr := trv.TestRVR(i)
 				trvr.AwaitSequence(ctx,
-					Phase(string(v1alpha1.ReplicatedVolumeReplicaPhasePending)),
+					Or(Phase(string(v1alpha1.ReplicatedVolumeReplicaPhasePending)),
+						Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseProvisioning))),
 					Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring)),
 					Or(Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing)),
 						Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy))),
