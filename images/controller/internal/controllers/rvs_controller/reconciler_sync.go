@@ -42,7 +42,8 @@ func (r *Reconciler) reconcileSyncMesh(
 			true)
 	}
 
-	syncDRBDRs, err := r.getSyncDRBDResources(rf.Ctx(), rvs.Status.SyncDRBDResources)
+	syncDRBDRNames := syncDRBDResourceNames(childRVRSs)
+	syncDRBDRs, err := r.getSyncDRBDResources(rf.Ctx(), syncDRBDRNames)
 	if err != nil {
 		return rf.Fail(err)
 	}
@@ -75,6 +76,17 @@ func (r *Reconciler) reconcileSyncMesh(
 
 func allSyncTransitionsCompleted(rvs *v1alpha1.ReplicatedVolumeSnapshot) bool {
 	return rvs.Status.SyncRevision > 0 && len(rvs.Status.SyncTransitions) == 0
+}
+
+func syncDRBDResourceNames(childRVRSs []*v1alpha1.ReplicatedVolumeReplicaSnapshot) []string {
+	var names []string
+	for _, rvrs := range childRVRSs {
+		if rvrs.Status.Phase == v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseReady &&
+			rvrs.Status.SnapshotHandle != "" {
+			names = append(names, rvrs.Name)
+		}
+	}
+	return names
 }
 
 func (r *Reconciler) getSyncDRBDResources(ctx context.Context, names []string) ([]*v1alpha1.DRBDResource, error) {

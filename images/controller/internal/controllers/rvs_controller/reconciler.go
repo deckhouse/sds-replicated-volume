@@ -338,33 +338,6 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, rvs *v1alpha1.Replicat
 		return rf.Done()
 	}
 
-	if len(rvs.Status.SyncDRBDResources) > 0 {
-		syncDRBDRs, err := r.getSyncDRBDResources(rf.Ctx(), rvs.Status.SyncDRBDResources)
-		if err != nil {
-			return rf.Fail(err)
-		}
-		for _, drbdr := range syncDRBDRs {
-			if drbdr.DeletionTimestamp != nil {
-				continue
-			}
-			if err := r.cl.Delete(rf.Ctx(), drbdr); err != nil && !apierrors.IsNotFound(err) {
-				return rf.Fail(err)
-			}
-		}
-		if len(syncDRBDRs) > 0 {
-			return r.reconcileStatus(rf.Ctx(), rvs, rvs.Status.Datamesh,
-				v1alpha1.ReplicatedVolumeSnapshotPhaseDeleting,
-				"Waiting for sync resources to be deleted",
-				false).Enrichf("waiting for sync DRBDResources deletion")
-		}
-
-		base := rvs.DeepCopy()
-		rvs.Status.SyncDRBDResources = nil
-		if err := r.patchRVSStatus(rf.Ctx(), rvs, base); err != nil {
-			return rf.Fail(err)
-		}
-	}
-
 	childRVRSs, err := r.getChildRVRSs(rf.Ctx(), rvs.Name)
 	if err != nil {
 		return rf.Fail(err)
