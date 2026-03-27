@@ -43,7 +43,7 @@ func registerSyncPlans(reg *dmte.Registry[*globalContext, *replicaContext]) {
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupSync).
 		DisplayName("Synchronizing snapshot").
 		Steps(
-			dmte.ReplicaStep("Create resource", applyNoop, confirmCreate),
+			dmte.ReplicaStep("Create resource", applyBumpRevision, confirmCreate),
 			dmte.ReplicaStep("Wait addresses", applyNoop, confirmWaitAddresses),
 			dmte.ReplicaStep("Wire peers", applyNoop, confirmWirePeers),
 			dmte.ReplicaStep("Wait sync", applyNoop, confirmWaitSync),
@@ -52,7 +52,8 @@ func registerSyncPlans(reg *dmte.Registry[*globalContext, *replicaContext]) {
 		Build()
 }
 
-func applyNoop(_ *globalContext, _ *replicaContext) bool { return false }
+func applyBumpRevision(_ *globalContext, _ *replicaContext) bool { return true }
+func applyNoop(_ *globalContext, _ *replicaContext) bool         { return false }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Step 1: Create resource
@@ -100,9 +101,9 @@ func confirmCreate(gctx *globalContext, rctx *replicaContext, _ int64) dmte.Conf
 		if err := gctx.cl.Get(gctx.ctx, client.ObjectKeyFromObject(drbdr), existing); err != nil {
 			return dmte.ConfirmResult{MustConfirm: must}
 		}
-		if changed, err := obju.SetControllerRef(existing, gctx.rvs, gctx.scheme); err != nil {
+		if adopted, err := adoptDRBDResource(existing, gctx); err != nil {
 			return dmte.ConfirmResult{MustConfirm: must}
-		} else if changed {
+		} else if adopted {
 			if err := gctx.cl.Update(gctx.ctx, existing); err != nil {
 				return dmte.ConfirmResult{MustConfirm: must}
 			}
@@ -220,6 +221,29 @@ func confirmCleanup(gctx *globalContext, rctx *replicaContext, _ int64) dmte.Con
 // ──────────────────────────────────────────────────────────────────────────────
 // Pure helpers
 //
+
+func adoptDRBDResource(obj *v1alpha1.DRBDResource, gctx *globalContext) (bool, error) {
+	changed, err := obju.SetControllerRef(obj, gctx.rvs, gctx.scheme)
+	if err == nil {
+		return changed, nil
+	}
+	removeControllerOwnerRef(obj)
+	if _, err := obju.SetControllerRef(obj, gctx.rvs, gctx.scheme); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func removeControllerOwnerRef(obj metav1.Object) {
+	refs := obj.GetOwnerReferences()
+	for i := range refs {
+		if refs[i].Controller != nil && *refs[i].Controller {
+			refs = append(refs[:i], refs[i+1:]...)
+			obj.SetOwnerReferences(refs)
+			return
+		}
+	}
+}
 
 func isReplicaSynced(drbdr *v1alpha1.DRBDResource) bool {
 	return drbdr.Status.DiskState == v1alpha1.DiskStateUpToDate
