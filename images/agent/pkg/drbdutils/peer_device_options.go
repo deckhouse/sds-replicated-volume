@@ -23,7 +23,12 @@ import (
 
 // PeerDeviceOptions contains options for drbdsetup peer-device-options command.
 type PeerDeviceOptions struct {
-	Bitmap *bool
+	Bitmap       *bool
+	CPlanAhead   *string
+	CDelayTarget *string
+	CFillTarget  *string
+	CMaxRate     *string
+	CMinRate     *string
 }
 
 // PeerDeviceOptionsArgs returns arguments for drbdsetup peer-device-options command.
@@ -40,6 +45,21 @@ var PeerDeviceOptionsArgs = func(resource string, peerNodeID uint8, volumeNr uin
 		} else {
 			args = append(args, "--bitmap=no")
 		}
+	}
+	if opts.CPlanAhead != nil {
+		args = append(args, "--c-plan-ahead="+*opts.CPlanAhead)
+	}
+	if opts.CDelayTarget != nil {
+		args = append(args, "--c-delay-target="+*opts.CDelayTarget)
+	}
+	if opts.CFillTarget != nil {
+		args = append(args, "--c-fill-target="+*opts.CFillTarget)
+	}
+	if opts.CMaxRate != nil {
+		args = append(args, "--c-max-rate="+*opts.CMaxRate)
+	}
+	if opts.CMinRate != nil {
+		args = append(args, "--c-min-rate="+*opts.CMinRate)
 	}
 
 	return args

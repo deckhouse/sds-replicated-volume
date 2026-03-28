@@ -313,11 +313,21 @@ type PeerDeviceOptionsAction struct {
 	PeerNodeID   uint8
 	VolumeNr     uint
 	Bitmap       *bool
+	CPlanAhead   *string
+	CDelayTarget *string
+	CFillTarget  *string
+	CMaxRate     *string
+	CMinRate     *string
 }
 
 func (a PeerDeviceOptionsAction) Execute(ctx context.Context) error {
 	err := drbdutils.ExecutePeerDeviceOptions(ctx, a.ResourceName, a.PeerNodeID, a.VolumeNr, drbdutils.PeerDeviceOptions{
-		Bitmap: a.Bitmap,
+		Bitmap:       a.Bitmap,
+		CPlanAhead:   a.CPlanAhead,
+		CDelayTarget: a.CDelayTarget,
+		CFillTarget:  a.CFillTarget,
+		CMaxRate:     a.CMaxRate,
+		CMinRate:     a.CMinRate,
 	})
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonPeerDeviceOptionsFailed)
 }
