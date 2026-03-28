@@ -355,6 +355,9 @@ type ConnectAction struct {
 
 func (a ConnectAction) Execute(ctx context.Context) error {
 	err := drbdutils.ExecuteConnect(ctx, a.ResourceName, a.PeerNodeID)
+	if errors.Is(err, drbdutils.ErrConnectNetConfigured) {
+		return nil
+	}
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonConnectFailed)
 }
 
