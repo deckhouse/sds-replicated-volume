@@ -5,6 +5,7 @@ descriptions:
   ru: "Управляет реплицируемым блочным хранилищем на базе DRBD."
 requirements:
   deckhouse: ">= 1.71"
+  kubernetes: ">= 1.31"
   modules:
     sds-node-configurator: ">= 0.5.14"
     snapshot-controller: ">= 0.0.0"
