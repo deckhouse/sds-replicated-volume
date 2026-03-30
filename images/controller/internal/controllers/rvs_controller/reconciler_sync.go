@@ -20,6 +20,7 @@ import (
 	"context"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvs_controller/snapmesh"
@@ -42,11 +43,22 @@ func (r *Reconciler) reconcileSyncMesh(
 			true)
 	}
 
+	l := log.FromContext(rf.Ctx())
+	l.Info("sync-mesh: enter",
+		"rvs", rvs.Name,
+		"childRVRSs", len(childRVRSs),
+		"syncRevision", rvs.Status.SyncRevision,
+		"syncTransitions", len(rvs.Status.SyncTransitions))
+
 	syncDRBDRNames := syncDRBDResourceNames(childRVRSs)
 	syncDRBDRs, err := r.getSyncDRBDResources(rf.Ctx(), syncDRBDRNames)
 	if err != nil {
 		return rf.Fail(err)
 	}
+
+	l.Info("sync-mesh: resources",
+		"syncDRBDRNames", len(syncDRBDRNames),
+		"syncDRBDRs", len(syncDRBDRs))
 
 	base := rvs.DeepCopy()
 
@@ -78,10 +90,17 @@ func (r *Reconciler) reconcileSyncMesh(
 
 	changed := snapmesh.ProcessSync(rf.Ctx(), rvs, rv, childRVRSs, syncDRBDRs, r.cl, r.scheme)
 
+	l.Info("sync-mesh: after ProcessSync",
+		"changed", changed,
+		"syncRevision", rvs.Status.SyncRevision,
+		"syncTransitions", len(rvs.Status.SyncTransitions))
+
 	if changed {
 		if err := r.patchRVSStatus(rf.Ctx(), rvs, base); err != nil {
+			l.Error(err, "sync-mesh: patchRVSStatus failed")
 			return rf.Fail(err)
 		}
+		l.Info("sync-mesh: status patched")
 	}
 
 	return rf.DoneAndRequeue()
