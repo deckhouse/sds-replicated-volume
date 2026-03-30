@@ -34,7 +34,8 @@ type globalContext struct {
 	cl     client.Client
 	scheme *runtime.Scheme
 
-	sharedSecret string
+	sharedSecret  string
+	syncCompleted bool
 
 	replicas    [32]*replicaContext
 	allReplicas []replicaContext

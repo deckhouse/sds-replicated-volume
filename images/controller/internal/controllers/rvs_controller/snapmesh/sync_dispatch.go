@@ -27,6 +27,9 @@ func syncDispatcher() dmte.DispatchFunc[provider] {
 	return func(cp provider) iter.Seq[dmte.DispatchDecision] {
 		return func(yield func(dmte.DispatchDecision) bool) {
 			gctx := cp.Global()
+			if gctx.syncCompleted {
+				return
+			}
 			for i := range gctx.allReplicas {
 				rctx := &gctx.allReplicas[i]
 				if rctx.rvrs == nil ||

@@ -49,11 +49,16 @@ func registerSyncPlans(reg *dmte.Registry[*globalContext, *replicaContext]) {
 			dmte.ReplicaStep("Wait sync", applyNoop, confirmWaitSync),
 			dmte.ReplicaStep("Cleanup", applyNoop, confirmCleanup),
 		).
+		OnComplete(syncPlanOnComplete).
 		Build()
 }
 
 func applyBumpRevision(_ *globalContext, _ *replicaContext) bool { return true }
 func applyNoop(_ *globalContext, _ *replicaContext) bool         { return false }
+
+func syncPlanOnComplete(gctx *globalContext, _ *replicaContext) {
+	gctx.syncCompleted = true
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Step 1: Create resource
