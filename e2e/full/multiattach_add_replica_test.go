@@ -70,66 +70,66 @@ var _ = Describe("Multiattach: add replica to live datamesh", Label(fw.LabelSlow
 		// ── 1D (FTT=0, GMDR=0), 2 att (1D+1A) — two Primaries baseline ──
 
 		Entry("1D (1D+1A att) + Access",
-			SpecTimeout(3*time.Minute), require.MinNodes(3),
+			SpecTimeout(3*time.Minute), require.MinNodes(1, 1),
 			fw.TestLayout{FTT: 0, GMDR: 0, Access: 1, Attached: 2}, v1alpha1.ReplicaTypeAccess),
 
 		// ── 2D (FTT=0, GMDR=1), 2D att — both Diskful are Primary ──
 
 		Entry("2D (2D att) + Access",
 			Label("Bug:MultiattachDRBDLock"),
-			SpecTimeout(3*time.Minute), require.MinNodes(3),
+			SpecTimeout(3*time.Minute), require.MinNodes(2),
 			fw.TestLayout{FTT: 0, GMDR: 1, Attached: 2}, v1alpha1.ReplicaTypeAccess),
 		Entry("2D (2D att) + TieBreaker",
 			Label("Bug:MultiattachDRBDLock"),
-			SpecTimeout(3*time.Minute), require.MinNodes(3),
+			SpecTimeout(3*time.Minute), require.MinNodes(2),
 			fw.TestLayout{FTT: 0, GMDR: 1, Attached: 2}, v1alpha1.ReplicaTypeTieBreaker),
 		Entry("2D (2D att) + Diskful",
 			Label("Bug:MultiattachDRBDLock"),
-			SpecTimeout(3*time.Minute), require.MinNodes(3),
+			SpecTimeout(3*time.Minute), require.MinNodes(2),
 			fw.TestLayout{FTT: 0, GMDR: 1, Attached: 2}, v1alpha1.ReplicaTypeDiskful),
 
 		// ── 2D+1A (FTT=0, GMDR=1), 1D+1A att — mixed Primary ──
 
 		Entry("2D (1D+1A att) + Access",
-			SpecTimeout(3*time.Minute), require.MinNodes(4),
+			SpecTimeout(3*time.Minute), require.MinNodes(2, 1),
 			fw.TestLayout{FTT: 0, GMDR: 1, Access: 1, Attached: 2}, v1alpha1.ReplicaTypeAccess),
 		Entry("2D (1D+1A att) + TieBreaker",
 			Label("Bug:MultiattachDRBDLock"), // fails if two D attached
-			SpecTimeout(3*time.Minute), require.MinNodes(4),
+			SpecTimeout(3*time.Minute), require.MinNodes(2, 1),
 			fw.TestLayout{FTT: 0, GMDR: 1, Access: 1, Attached: 2}, v1alpha1.ReplicaTypeTieBreaker),
 		Entry("2D (1D+1A att) + Diskful",
 			Label("Bug:MultiattachDRBDLock"), // fails if two D attached
-			SpecTimeout(3*time.Minute), require.MinNodes(4),
+			SpecTimeout(3*time.Minute), require.MinNodes(2, 1),
 			fw.TestLayout{FTT: 0, GMDR: 1, Access: 1, Attached: 2}, v1alpha1.ReplicaTypeDiskful),
 
 		// ── 3D (FTT=1, GMDR=1), 2D att — two Diskful Primary, one Diskful Secondary ──
 
 		Entry("3D (2D att) + Access",
 			Label("Bug:MultiattachDRBDLock"),
-			SpecTimeout(3*time.Minute), require.MinNodes(4),
+			SpecTimeout(3*time.Minute), require.MinNodes(3),
 			fw.TestLayout{FTT: 1, GMDR: 1, Attached: 2}, v1alpha1.ReplicaTypeAccess),
 		Entry("3D (2D att) + TieBreaker",
 			Label("Bug:MultiattachDRBDLock"),
-			SpecTimeout(3*time.Minute), require.MinNodes(4),
+			SpecTimeout(3*time.Minute), require.MinNodes(3),
 			fw.TestLayout{FTT: 1, GMDR: 1, Attached: 2}, v1alpha1.ReplicaTypeTieBreaker),
 		Entry("3D (2D att) + Diskful",
 			Label("Bug:MultiattachDRBDLock"),
-			SpecTimeout(3*time.Minute), require.MinNodes(4),
+			SpecTimeout(3*time.Minute), require.MinNodes(3),
 			fw.TestLayout{FTT: 1, GMDR: 1, Attached: 2}, v1alpha1.ReplicaTypeDiskful),
 
 		// ── 3D+1A (FTT=1, GMDR=1), 1D+1A att — mixed Primary ──
 
 		Entry("3D (1D+1A att) + Access",
 			Label("Bug:MultiattachDRBDLock"), // fails if two D attached
-			SpecTimeout(3*time.Minute), require.MinNodes(5),
+			SpecTimeout(3*time.Minute), require.MinNodes(3, 1),
 			fw.TestLayout{FTT: 1, GMDR: 1, Access: 1, Attached: 2}, v1alpha1.ReplicaTypeAccess),
 		Entry("3D (1D+1A att) + TieBreaker",
 			Label("Bug:MultiattachDRBDLock"), // fails if two D attached
-			SpecTimeout(3*time.Minute), require.MinNodes(5),
+			SpecTimeout(3*time.Minute), require.MinNodes(3, 1),
 			fw.TestLayout{FTT: 1, GMDR: 1, Access: 1, Attached: 2}, v1alpha1.ReplicaTypeTieBreaker),
 		Entry("3D (1D+1A att) + Diskful",
 			Label("Bug:MultiattachDRBDLock"), // fails if two D attached
-			SpecTimeout(3*time.Minute), require.MinNodes(5),
+			SpecTimeout(3*time.Minute), require.MinNodes(3, 1),
 			fw.TestLayout{FTT: 1, GMDR: 1, Access: 1, Attached: 2}, v1alpha1.ReplicaTypeDiskful),
 	)
 })

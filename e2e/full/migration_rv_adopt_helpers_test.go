@@ -246,7 +246,8 @@ func finishAdopt(ctx SpecContext, trv *fw.TestRV, res adoptSetupResult) {
 	Expect(trv.RVRCount()).To(Equal(len(surviving)))
 	for _, trvr := range surviving {
 		trvr.AwaitSequence(ctx,
-			Phase(string(v1alpha1.ReplicatedVolumeReplicaPhasePending)),
+			Or(Phase(string(v1alpha1.ReplicatedVolumeReplicaPhasePending)),
+				Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseProvisioning))),
 			Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring)),
 			Or(Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing)),
 				Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy))),

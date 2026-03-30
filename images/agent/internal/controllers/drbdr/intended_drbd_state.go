@@ -206,6 +206,16 @@ func (s *intendedDRBDState) DiscardZeroesIfAligned() bool { return true }
 func (s *intendedDRBDState) RsDiscardGranularity() uint   { return s.rsDiscardGranularity }
 func (s *intendedDRBDState) NonVoting() bool              { return s.nonVoting }
 
+// Peer-device resync controller defaults.
+// Optimized for 10 Gbps network, up to 500 DRBD devices per node.
+const (
+	DefaultCPlanAhead   = "20"      // 2.0 s planning horizon
+	DefaultCDelayTarget = "1"       // 100 ms added latency target (minimum granularity)
+	DefaultCFillTarget  = "4096s"   // 2 MB in-flight data (4096 sectors x 512 bytes)
+	DefaultCMaxRate     = "625000k" // 5 Gbps (half of 10G link)
+	DefaultCMinRate     = "12500k"  // 100 Mbps minimum forward progress
+)
+
 var _ IntendedDRBDState = (*intendedDRBDState)(nil)
 
 // intendedPeer implements IntendedPeer with pre-computed values.

@@ -410,26 +410,59 @@ func computeDiskOptionsActionReconcile(iState IntendedDRBDState, aState ActualDR
 	return res
 }
 
-// computePeerDeviceOptionsAction emits a PeerDeviceOptionsAction when the intended
-// bitmap setting diverges from the actual one. For Diskless peers bitmap must be off;
-// for Diskful peers it stays at the DRBD default (on) and no action is emitted.
+// computePeerDeviceOptionsAction emits a PeerDeviceOptionsAction when peer-device
+// options diverge from intended defaults:
+//   - Dynamic resync controller settings (c-plan-ahead, c-delay-target, c-fill-target,
+//     c-max-rate, c-min-rate) are enforced for all peers.
+//   - Bitmap is turned off for Diskless peers only.
 func computePeerDeviceOptionsAction(resourceName string, iPeer IntendedPeer, aPeer ActualPeer) (res DRBDActions) {
-	if iPeer.Type() != v1alpha1.DRBDResourceTypeDiskless {
-		return
-	}
-
-	actualBitmap := aPeer.Bitmap()
-	if actualBitmap != nil && !*actualBitmap {
-		return
-	}
-
-	bitmapOff := false
-	res = append(res, PeerDeviceOptionsAction{
+	var changed bool
+	action := PeerDeviceOptionsAction{
 		ResourceName: resourceName,
 		PeerNodeID:   iPeer.NodeID(),
 		VolumeNr:     0,
-		Bitmap:       &bitmapOff,
-	})
+	}
+
+	// Resync controller defaults — all peers.
+	if aPeer.CPlanAhead() != DefaultCPlanAhead {
+		s := DefaultCPlanAhead
+		action.CPlanAhead = &s
+		changed = true
+	}
+	if aPeer.CDelayTarget() != DefaultCDelayTarget {
+		s := DefaultCDelayTarget
+		action.CDelayTarget = &s
+		changed = true
+	}
+	if aPeer.CFillTarget() != DefaultCFillTarget {
+		s := DefaultCFillTarget
+		action.CFillTarget = &s
+		changed = true
+	}
+	if aPeer.CMaxRate() != DefaultCMaxRate {
+		s := DefaultCMaxRate
+		action.CMaxRate = &s
+		changed = true
+	}
+	if aPeer.CMinRate() != DefaultCMinRate {
+		s := DefaultCMinRate
+		action.CMinRate = &s
+		changed = true
+	}
+
+	// Bitmap off for diskless peers only.
+	if iPeer.Type() == v1alpha1.DRBDResourceTypeDiskless {
+		actualBitmap := aPeer.Bitmap()
+		if actualBitmap == nil || *actualBitmap {
+			bitmapOff := false
+			action.Bitmap = &bitmapOff
+			changed = true
+		}
+	}
+
+	if changed {
+		res = append(res, action)
+	}
 	return
 }
 

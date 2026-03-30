@@ -65,13 +65,13 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 		Entry("1D (1att)",
 			fw.TestLayout{FTT: 0, GMDR: 0, Attached: 1}),
 		Entry("1D+1A (1att)",
-			SpecTimeout(2*time.Minute), require.MinNodes(2),
+			SpecTimeout(2*time.Minute), require.MinNodes(1, 1),
 			fw.TestLayout{FTT: 0, GMDR: 0, Access: 1, Attached: 1}),
 		Entry("1D+1A (2att)",
-			SpecTimeout(2*time.Minute), require.MinNodes(2),
+			SpecTimeout(2*time.Minute), require.MinNodes(1, 1),
 			fw.TestLayout{FTT: 0, GMDR: 0, Access: 1, Attached: 2}),
 		Entry("1D+2A (2att)",
-			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			SpecTimeout(2*time.Minute), require.MinNodes(1, 2),
 			fw.TestLayout{FTT: 0, GMDR: 0, Access: 2, Attached: 2}),
 
 		// --- 2D ---
@@ -85,37 +85,37 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 			SpecTimeout(2*time.Minute), require.MinNodes(2),
 			fw.TestLayout{FTT: 0, GMDR: 1, Attached: 2}),
 		Entry("2D+1A (1att)",
-			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			SpecTimeout(2*time.Minute), require.MinNodes(2, 1),
 			fw.TestLayout{FTT: 0, GMDR: 1, Access: 1, Attached: 1}),
 		Entry("2D+1A (2att)",
-			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			SpecTimeout(2*time.Minute), require.MinNodes(2, 1),
 			fw.TestLayout{FTT: 0, GMDR: 1, Access: 1, Attached: 2}),
 		Entry("2D+2A (2att)",
-			SpecTimeout(2*time.Minute), require.MinNodes(4),
+			SpecTimeout(2*time.Minute), require.MinNodes(2, 2),
 			fw.TestLayout{FTT: 0, GMDR: 1, Access: 2, Attached: 2}),
 
 		// --- 2D+1TB ---
 		Entry("2D+1TB",
 			Label(fw.LabelSmoke),
-			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			SpecTimeout(2*time.Minute), require.MinNodes(2, 1),
 			fw.TestLayout{FTT: 1, GMDR: 0}),
 		Entry("2D+1TB (1att)",
-			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			SpecTimeout(2*time.Minute), require.MinNodes(2, 1),
 			fw.TestLayout{FTT: 1, GMDR: 0, Attached: 1}),
 		Entry("2D+1TB (2att)",
 			Label("Bug:MultiattachDRBDLock"), // fails if two D attached
-			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			SpecTimeout(2*time.Minute), require.MinNodes(2, 1),
 			fw.TestLayout{FTT: 1, GMDR: 0, Attached: 2}),
 		Entry("2D+1TB+1A (1att)",
-			SpecTimeout(2*time.Minute), require.MinNodes(4),
+			SpecTimeout(2*time.Minute), require.MinNodes(2, 2),
 			fw.TestLayout{FTT: 1, GMDR: 0, Access: 1, Attached: 1}),
 		Entry("2D+1TB+1A (2att)",
 			Label("Bug:MultiattachDRBDLock"), // fails if two D attached
-			SpecTimeout(2*time.Minute), require.MinNodes(4),
+			SpecTimeout(2*time.Minute), require.MinNodes(2, 2),
 			fw.TestLayout{FTT: 1, GMDR: 0, Access: 1, Attached: 2}),
 		Entry("2D+1TB+2A (2att)",
 			Label("Bug:MultiattachDRBDLock"), // fails if two D attached
-			SpecTimeout(2*time.Minute), require.MinNodes(5),
+			SpecTimeout(2*time.Minute), require.MinNodes(2, 3),
 			fw.TestLayout{FTT: 1, GMDR: 0, Access: 2, Attached: 2}),
 
 		// --- 3D ---
@@ -129,15 +129,15 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 			SpecTimeout(3*time.Minute), require.MinNodes(3),
 			fw.TestLayout{FTT: 1, GMDR: 1, Attached: 2}),
 		Entry("3D+1A (1att)",
-			SpecTimeout(3*time.Minute), require.MinNodes(4),
+			SpecTimeout(3*time.Minute), require.MinNodes(3, 1),
 			fw.TestLayout{FTT: 1, GMDR: 1, Access: 1, Attached: 1}),
 		Entry("3D+1A (2att)",
 			Label("Bug:MultiattachDRBDLock"), // fails if two D attached
-			SpecTimeout(3*time.Minute), require.MinNodes(4),
+			SpecTimeout(3*time.Minute), require.MinNodes(3, 1),
 			fw.TestLayout{FTT: 1, GMDR: 1, Access: 1, Attached: 2}),
 		Entry("3D+2A (2att)",
 			Label("Bug:MultiattachDRBDLock"), // fails if two D attached
-			SpecTimeout(3*time.Minute), require.MinNodes(5),
+			SpecTimeout(3*time.Minute), require.MinNodes(3, 2),
 			fw.TestLayout{FTT: 1, GMDR: 1, Access: 2, Attached: 2}),
 	)
 
@@ -354,7 +354,8 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 			for i := 0; i < expectedReplicas; i++ {
 				trvr := trv.TestRVR(i)
 				trvr.AwaitSequence(ctx,
-					Phase(string(v1alpha1.ReplicatedVolumeReplicaPhasePending)),
+					Or(Phase(string(v1alpha1.ReplicatedVolumeReplicaPhasePending)),
+						Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseProvisioning))),
 					Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring)),
 					Or(Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing)),
 						Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy))),
@@ -377,10 +378,10 @@ var _ = Describe("Migration: RV adopt/v1 formation with preexisting DRBD", Label
 			fw.TestLayout{FTT: 0, GMDR: 1, Attached: 1}),
 
 		Entry("FTT=1 GMDR=0 (2D+1TB)",
-			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			SpecTimeout(2*time.Minute), require.MinNodes(2, 1),
 			fw.TestLayout{FTT: 1, GMDR: 0}),
 		Entry("FTT=1 GMDR=0 (2D+1TB, 1att)",
-			SpecTimeout(2*time.Minute), require.MinNodes(3),
+			SpecTimeout(2*time.Minute), require.MinNodes(2, 1),
 			fw.TestLayout{FTT: 1, GMDR: 0, Attached: 1}),
 
 		Entry("FTT=1 GMDR=1 (3D)",

@@ -591,7 +591,13 @@ func computeTargetDRBDRSpec(
 	// LLV name and Size: non-empty only for Diskful.
 	if spec.Type == v1alpha1.DRBDResourceTypeDiskful {
 		spec.LVMLogicalVolumeName = targetLLVName
-		spec.Size = &datamesh.Size
+		// Never decrease spec.Size: the DRBD device may be slightly larger than
+		// datamesh.Size due to alignment, and the CRD CEL validation rejects
+		// decreases. This matters during adopt when the pre-existing DRBDR was
+		// created externally with the aligned (larger) size.
+		if spec.Size == nil || datamesh.Size.Cmp(*spec.Size) > 0 {
+			spec.Size = &datamesh.Size
+		}
 	} else {
 		spec.LVMLogicalVolumeName = ""
 		spec.Size = nil

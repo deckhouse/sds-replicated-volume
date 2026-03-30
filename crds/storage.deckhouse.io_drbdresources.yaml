@@ -586,8 +586,7 @@ spec:
             is Diskless
           rule: 'self.spec.type == ''Diskful'' ? has(self.spec.size) : !has(self.spec.size)'
         - message: spec.size cannot be decreased
-          rule: '!has(oldSelf.spec.size) || !has(self.spec.size) || self.spec.size
-            >= oldSelf.spec.size'
+          rule: '!has(oldSelf.spec.size) || !has(self.spec.size) || !quantity(string(self.spec.size)).isLessThan(quantity(string(oldSelf.spec.size)))'
         - message: nonVoting must be false (or unset) when type is Diskless
           rule: 'self.spec.type == ''Diskless'' ? !has(self.spec.nonVoting) || self.spec.nonVoting
             == false : true'

@@ -40,7 +40,7 @@ import (
 // +kubebuilder:validation:XValidation:rule="!(has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName) > 0 && has(self.spec.lvmLogicalVolumeSnapshotName) && size(self.spec.lvmLogicalVolumeSnapshotName) > 0)",message="lvmLogicalVolumeName and lvmLogicalVolumeSnapshotName are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!self.spec.preserveExistingMetadata || (has(self.spec.lvmLogicalVolumeSnapshotName) && size(self.spec.lvmLogicalVolumeSnapshotName) > 0)",message="preserveExistingMetadata requires lvmLogicalVolumeSnapshotName to be set"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.size) : !has(self.spec.size)",message="size is required when type is Diskful and must be empty when type is Diskless"
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf.spec.size) || !has(self.spec.size) || self.spec.size >= oldSelf.spec.size",message="spec.size cannot be decreased"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.spec.size) || !has(self.spec.size) || !quantity(string(self.spec.size)).isLessThan(quantity(string(oldSelf.spec.size)))",message="spec.size cannot be decreased"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskless' ? !has(self.spec.nonVoting) || self.spec.nonVoting == false : true",message="nonVoting must be false (or unset) when type is Diskless"
 type DRBDResource struct {
 	metav1.TypeMeta   `json:",inline"`

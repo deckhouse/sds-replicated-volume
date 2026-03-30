@@ -24,6 +24,8 @@ import (
 	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 // Label prefixes and values used by requirement decorators.
@@ -35,9 +37,55 @@ const (
 	LabelMinNodes = "Req:MinNodes:"
 )
 
-// MinNodes returns a Label requiring at least n cluster nodes.
-// The spec is skipped at runtime if the cluster has fewer nodes.
-func MinNodes(n int) Labels { return Labels{fmt.Sprintf("%s%d", LabelMinNodes, n)} }
+// MinNodes returns a Label requiring usable cluster nodes.
+// Pool type defaults to LVMThin.
+//
+// The first argument (diskful) is the number of usable nodes with a ready
+// LVG required. Optional arguments specify extra diskless nodes and pool type.
+//
+// Accepted call forms:
+//
+//	MinNodes(3)                     — 3 diskful nodes, 0 extra (LVMThin)
+//	MinNodes(2, 1)                  — 2 diskful + 1 extra node (LVMThin)
+//	MinNodes(3, v1alpha1.LVM)       — 3 diskful nodes (LVM thick)
+//	MinNodes(2, 1, v1alpha1.LVM)    — 2 diskful + 1 extra node (LVM thick)
+//
+// Label format: Req:MinNodes:<diskful>:<extra>:<poolType>
+func MinNodes(diskful int, args ...any) Labels {
+	extra := 0
+	poolType := v1alpha1.ReplicatedStoragePoolTypeLVMThin
+
+	switch len(args) {
+	case 0:
+		// MinNodes(3) — diskful only, defaults
+	case 1:
+		// MinNodes(2, 1) or MinNodes(3, LVM)
+		switch v := args[0].(type) {
+		case int:
+			extra = v
+		case v1alpha1.ReplicatedStoragePoolType:
+			poolType = v
+		default:
+			panic(fmt.Sprintf("MinNodes: unexpected argument type %T (expected int or ReplicatedStoragePoolType)", args[0]))
+		}
+	case 2:
+		// MinNodes(2, 1, LVM)
+		e, ok := args[0].(int)
+		if !ok {
+			panic(fmt.Sprintf("MinNodes: first optional argument must be int (extra count), got %T", args[0]))
+		}
+		extra = e
+		pt, ok := args[1].(v1alpha1.ReplicatedStoragePoolType)
+		if !ok {
+			panic(fmt.Sprintf("MinNodes: second optional argument must be ReplicatedStoragePoolType, got %T", args[1]))
+		}
+		poolType = pt
+	default:
+		panic(fmt.Sprintf("MinNodes: too many arguments (expected 1-3, got %d)", 1+len(args)))
+	}
+
+	return Labels{fmt.Sprintf("%s%d:%d:%s", LabelMinNodes, diskful, extra, string(poolType))}
+}
 
 // OldControlPlane returns a Label requiring the old (pre-datamesh) control plane.
 // The spec is skipped at runtime if the cluster runs the new control plane.
