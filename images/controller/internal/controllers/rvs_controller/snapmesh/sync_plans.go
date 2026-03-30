@@ -65,7 +65,11 @@ func applyNoop(_ *globalContext, _ *replicaContext) bool         { return false 
 
 func confirmCreate(gctx *globalContext, rctx *replicaContext, _ int64) dmte.ConfirmResult {
 	must := idset.Of(rctx.id)
+
 	if rctx.drbdr != nil {
+		if rctx.drbdr.DeletionTimestamp != nil {
+			return dmte.ConfirmResult{MustConfirm: must}
+		}
 		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
 	}
 
@@ -99,6 +103,9 @@ func confirmCreate(gctx *globalContext, rctx *replicaContext, _ int64) dmte.Conf
 		}
 		existing := &v1alpha1.DRBDResource{}
 		if err := gctx.cl.Get(gctx.ctx, client.ObjectKeyFromObject(drbdr), existing); err != nil {
+			return dmte.ConfirmResult{MustConfirm: must}
+		}
+		if existing.DeletionTimestamp != nil {
 			return dmte.ConfirmResult{MustConfirm: must}
 		}
 		if adopted, err := adoptDRBDResource(existing, gctx); err != nil {

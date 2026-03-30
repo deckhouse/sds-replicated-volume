@@ -49,7 +49,6 @@ func (r *Reconciler) reconcileSyncMesh(
 	}
 
 	base := rvs.DeepCopy()
-	changed := snapmesh.ProcessSync(rf.Ctx(), rvs, rv, childRVRSs, syncDRBDRs, r.cl, r.scheme)
 
 	if allSyncTransitionsCompleted(rvs) {
 		rvs.Status.SyncDRBDResources = nil
@@ -62,8 +61,22 @@ func (r *Reconciler) reconcileSyncMesh(
 			now := metav1.Now()
 			rvs.Status.CreationTime = &now
 		}
-		changed = true
+		if err := r.patchRVSStatus(rf.Ctx(), rvs, base); err != nil {
+			return rf.Fail(err)
+		}
+		return rf.Done()
 	}
+
+	if syncResourcesMissing(rvs, syncDRBDRNames, syncDRBDRs) {
+		rvs.Status.SyncTransitions = nil
+		rvs.Status.SyncRevision = 0
+		if err := r.patchRVSStatus(rf.Ctx(), rvs, base); err != nil {
+			return rf.Fail(err)
+		}
+		return rf.DoneAndRequeue()
+	}
+
+	changed := snapmesh.ProcessSync(rf.Ctx(), rvs, rv, childRVRSs, syncDRBDRs, r.cl, r.scheme)
 
 	if changed {
 		if err := r.patchRVSStatus(rf.Ctx(), rvs, base); err != nil {
@@ -76,6 +89,17 @@ func (r *Reconciler) reconcileSyncMesh(
 
 func allSyncTransitionsCompleted(rvs *v1alpha1.ReplicatedVolumeSnapshot) bool {
 	return rvs.Status.SyncRevision > 0 && len(rvs.Status.SyncTransitions) == 0
+}
+
+func syncResourcesMissing(
+	rvs *v1alpha1.ReplicatedVolumeSnapshot,
+	expectedNames []string,
+	actual []*v1alpha1.DRBDResource,
+) bool {
+	if len(rvs.Status.SyncTransitions) == 0 {
+		return false
+	}
+	return len(actual) < len(expectedNames)
 }
 
 func syncDRBDResourceNames(childRVRSs []*v1alpha1.ReplicatedVolumeReplicaSnapshot) []string {
