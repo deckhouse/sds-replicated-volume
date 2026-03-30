@@ -79,15 +79,6 @@ func (r *Reconciler) reconcileSyncMesh(
 		return rf.Done()
 	}
 
-	if syncResourcesMissing(rvs, syncDRBDRNames, syncDRBDRs) {
-		rvs.Status.SyncTransitions = nil
-		rvs.Status.SyncRevision = 0
-		if err := r.patchRVSStatus(rf.Ctx(), rvs, base); err != nil {
-			return rf.Fail(err)
-		}
-		return rf.DoneAndRequeue()
-	}
-
 	changed := snapmesh.ProcessSync(rf.Ctx(), rvs, rv, childRVRSs, syncDRBDRs, r.cl, r.scheme)
 
 	l.Info("sync-mesh: after ProcessSync",
@@ -108,17 +99,6 @@ func (r *Reconciler) reconcileSyncMesh(
 
 func allSyncTransitionsCompleted(rvs *v1alpha1.ReplicatedVolumeSnapshot) bool {
 	return rvs.Status.SyncRevision > 0 && len(rvs.Status.SyncTransitions) == 0
-}
-
-func syncResourcesMissing(
-	rvs *v1alpha1.ReplicatedVolumeSnapshot,
-	expectedNames []string,
-	actual []*v1alpha1.DRBDResource,
-) bool {
-	if len(rvs.Status.SyncTransitions) == 0 {
-		return false
-	}
-	return len(actual) < len(expectedNames)
 }
 
 func syncDRBDResourceNames(childRVRSs []*v1alpha1.ReplicatedVolumeReplicaSnapshot) []string {
