@@ -18,18 +18,64 @@ package drbdr
 
 import (
 	"testing"
-
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
-func boolPtr(v bool) *bool { return &v }
-
-type stubIntendedPeer struct {
-	name     string
-	nodeID   uint8
-	peerType v1alpha1.DRBDResourceType
+type stubMetadata struct {
+	hasMetadata bool
+	diskUUID    string
 }
 
+func (s stubMetadata) HasMetadata() bool      { return s.hasMetadata }
+func (s stubMetadata) DiskDeviceUUID() string { return s.diskUUID }
+
+func uintPtr(v uint) *uint { return &v }
+
+func TestComputeAttachActions_PreserveMetadata(t *testing.T) {
+	minor := uintPtr(0)
+	dev := "/dev/vg/snap"
+
+	tests := []struct {
+		name             string
+		metadata         stubMetadata
+		statusUUID       string
+		preserveMetadata bool
+		wantFirst        string
+	}{
+		{
+			name:             "preserve=true, metadata exists -> ApplyAL only",
+			metadata:         stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234"},
+			statusUUID:       "",
+			preserveMetadata: true,
+			wantFirst:        "ApplyALAction",
+		},
+		{
+			name:             "preserve=true, no metadata -> CreateMetadata",
+			metadata:         stubMetadata{hasMetadata: false},
+			statusUUID:       "",
+			preserveMetadata: true,
+			wantFirst:        "CreateMetadataAction",
+		},
+		{
+			name:             "preserve=false, metadata exists, no statusUUID -> CreateMetadata",
+			metadata:         stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234"},
+			statusUUID:       "",
+			preserveMetadata: false,
+			wantFirst:        "CreateMetadataAction",
+		},
+		{
+			name:             "preserve=false, metadata exists, matching statusUUID -> ApplyAL",
+			metadata:         stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234"},
+			statusUUID:       "ABCD1234ABCD1234",
+			preserveMetadata: false,
+			wantFirst:        "ApplyALAction",
+		},
+		{
+			name:             "preserve=false, no metadata, no statusUUID -> CreateMetadata",
+			metadata:         stubMetadata{hasMetadata: false},
+			statusUUID:       "",
+			preserveMetadata: false,
+			wantFirst:        "CreateMetadataAction",
+		},
 func (s *stubIntendedPeer) Name() string                              { return s.name }
 func (s *stubIntendedPeer) NodeID() uint8                             { return s.nodeID }
 func (s *stubIntendedPeer) Type() v1alpha1.DRBDResourceType           { return s.peerType }
@@ -81,6 +127,34 @@ func stubActualPeerWithDefaults(nodeID uint8, bitmap *bool) *stubActualPeer {
 	}
 }
 
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			actions := computeAttachActions(tc.metadata, tc.statusUUID, minor, dev, tc.preserveMetadata)
+
+			if len(actions) == 0 {
+				t.Fatal("got 0 actions, want at least 1")
+			}
+
+			var firstType string
+			switch actions[0].(type) {
+			case ApplyALAction:
+				firstType = "ApplyALAction"
+			case CreateMetadataAction:
+				firstType = "CreateMetadataAction"
+			default:
+				firstType = "unknown"
+			}
+
+			if firstType != tc.wantFirst {
+				t.Errorf("first action = %s, want %s", firstType, tc.wantFirst)
+			}
+
+			last := actions[len(actions)-1]
+			if _, ok := last.(AttachAction); !ok {
+				t.Errorf("last action = %T, want AttachAction", last)
+			}
+		})
+	}
 func TestComputePeerDeviceOptionsAction(t *testing.T) {
 	t.Run("all defaults match, diskful — no action", func(t *testing.T) {
 		actions := computePeerDeviceOptionsAction("res", &stubIntendedPeer{
@@ -175,4 +249,25 @@ func TestComputePeerDeviceOptionsAction(t *testing.T) {
 			t.Errorf("expected bitmap=false, got %v", pdo.Bitmap)
 		}
 	})
+}
+
+func TestComputeAttachActions_PreserveMetadata_NoCreateMdNoWriteUUID(t *testing.T) {
+	minor := uintPtr(0)
+	dev := "/dev/vg/snap"
+	meta := stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234"}
+
+	actions := computeAttachActions(meta, "", minor, dev, true)
+
+	for _, a := range actions {
+		switch a.(type) {
+		case CreateMetadataAction:
+			t.Error("preserve=true with metadata must not produce CreateMetadataAction")
+		case WriteDeviceUUIDAction:
+			t.Error("preserve=true with metadata must not produce WriteDeviceUUIDAction")
+		}
+	}
+
+	if len(actions) != 2 {
+		t.Errorf("len(actions) = %d, want 2 (ApplyAL + Attach)", len(actions))
+	}
 }

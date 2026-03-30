@@ -20,14 +20,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/utils"
 )
@@ -51,8 +54,14 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		return nil, status.Error(codes.InvalidArgument, "Volume Capability cannot de empty")
 	}
 
+	var snapshotSource *csi.VolumeContentSource_SnapshotSource
 	if request.VolumeContentSource != nil {
-		return nil, status.Error(codes.InvalidArgument, "Creating volumes from snapshots or clones is not supported")
+		if snap := request.VolumeContentSource.GetSnapshot(); snap != nil {
+			snapshotSource = snap
+			d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Creating volume from snapshot: %s", traceID, volumeID, snap.SnapshotId))
+		} else {
+			return nil, status.Error(codes.InvalidArgument, "Only snapshot sources are supported, clone is not supported")
+		}
 	}
 
 	rvSize := resource.NewQuantity(request.CapacityRange.GetRequiredBytes(), resource.BinarySI)
@@ -93,11 +102,16 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		createdEarlyRVA = true
 	}
 
-	// Build ReplicatedVolumeSpec
 	rvSpec := utils.BuildReplicatedVolumeSpec(
 		*rvSize,
 		request.Parameters[ReplicatedStorageClassParamNameKey],
 	)
+
+	if snapshotSource != nil {
+		rvSpec.DataSource = &srv.VolumeDataSource{
+			SnapshotName: snapshotSource.SnapshotId,
+		}
+	}
 
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolumeSpec: %+v", traceID, volumeID, rvSpec))
 
@@ -157,12 +171,23 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Volume created successfully, capacity: %d. volumeCtx: %+v", traceID, volumeID, capacityBytes, volumeCtx))
 
+	var contentSource *csi.VolumeContentSource
+	if snapshotSource != nil {
+		contentSource = &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Snapshot{
+				Snapshot: &csi.VolumeContentSource_SnapshotSource{
+					SnapshotId: snapshotSource.SnapshotId,
+				},
+			},
+		}
+	}
+
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			CapacityBytes:      capacityBytes,
 			VolumeId:           request.Name,
 			VolumeContext:      volumeCtx,
-			ContentSource:      nil,
+			ContentSource:      contentSource,
 			AccessibleTopology: nil,
 		},
 	}, nil
@@ -333,9 +358,7 @@ func (d *Driver) ControllerGetCapabilities(_ context.Context, _ *csi.ControllerG
 		csi.ControllerServiceCapability_RPC_GET_CAPACITY,
 		csi.ControllerServiceCapability_RPC_EXPAND_VOLUME,
 		csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME,
-		// TODO: Add snapshot/clone support if needed
-		// csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
-		// csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
+		csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
 	}
 
 	csiCaps := make([]*csi.ControllerServiceCapability, len(capabilities))
@@ -417,6 +440,89 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.Contro
 	}, nil
 }
 
+func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
+	traceID := uuid.New().String()
+	d.log.Info(fmt.Sprintf("[CreateSnapshot][traceID:%s] ========== CreateSnapshot ============", traceID))
+
+	if request.SourceVolumeId == "" {
+		return nil, status.Error(codes.InvalidArgument, "SourceVolumeId cannot be empty")
+	}
+	if request.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "Name cannot be empty")
+	}
+
+	snapshotID := request.Name
+	sourceVolumeID := request.SourceVolumeId
+
+	d.log.Info(fmt.Sprintf("[CreateSnapshot][traceID:%s][snapshotID:%s] source volume: %s", traceID, snapshotID, sourceVolumeID))
+
+	rv, err := utils.GetReplicatedVolume(ctx, d.cl, sourceVolumeID)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil, status.Errorf(codes.NotFound, "source volume %s not found", sourceVolumeID)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to get source volume: %v", err)
+	}
+
+	_, err = utils.CreateReplicatedVolumeSnapshot(ctx, d.cl, d.log, traceID, snapshotID, sourceVolumeID)
+	if err != nil {
+		if kerrors.IsAlreadyExists(err) {
+			d.log.Info(fmt.Sprintf("[CreateSnapshot][traceID:%s][snapshotID:%s] RVS already exists", traceID, snapshotID))
+		} else {
+			return nil, status.Errorf(codes.Internal, "failed to create snapshot: %v", err)
+		}
+	}
+
+	rvs, err := utils.WaitForReplicatedVolumeSnapshotReady(ctx, d.cl, d.log, traceID, snapshotID)
+	if err != nil {
+		d.log.Error(err, fmt.Sprintf("[CreateSnapshot][traceID:%s][snapshotID:%s] failed waiting for snapshot ready", traceID, snapshotID))
+		return nil, status.Errorf(codes.Internal, "failed waiting for snapshot to become ready: %v", err)
+	}
+
+	creationTime := rvs.CreationTimestamp.UnixNano()
+	if rvs.Status.CreationTime != nil {
+		creationTime = rvs.Status.CreationTime.UnixNano()
+	}
+
+	d.log.Info(fmt.Sprintf("[CreateSnapshot][traceID:%s][snapshotID:%s] Snapshot created successfully", traceID, snapshotID))
+
+	return &csi.CreateSnapshotResponse{
+		Snapshot: &csi.Snapshot{
+			SnapshotId:     snapshotID,
+			SourceVolumeId: sourceVolumeID,
+			CreationTime:   timestamppbFromNanos(creationTime),
+			SizeBytes:      rv.Spec.Size.Value(),
+			ReadyToUse:     rvs.Status.ReadyToUse,
+		},
+	}, nil
+}
+
+func (d *Driver) DeleteSnapshot(ctx context.Context, request *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
+	traceID := uuid.New().String()
+	d.log.Info(fmt.Sprintf("[DeleteSnapshot][traceID:%s] ========== DeleteSnapshot ============", traceID))
+
+	if request.SnapshotId == "" {
+		return nil, status.Error(codes.InvalidArgument, "SnapshotId cannot be empty")
+	}
+
+	snapshotID := request.SnapshotId
+	d.log.Info(fmt.Sprintf("[DeleteSnapshot][traceID:%s][snapshotID:%s] Deleting snapshot", traceID, snapshotID))
+
+	err := utils.DeleteReplicatedVolumeSnapshot(ctx, d.cl, d.log, traceID, snapshotID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to delete snapshot: %v", err)
+	}
+
+	err = utils.WaitForReplicatedVolumeSnapshotDeleted(ctx, d.cl, d.log, traceID, snapshotID)
+	if err != nil {
+		d.log.Error(err, fmt.Sprintf("[DeleteSnapshot][traceID:%s][snapshotID:%s] failed waiting for snapshot deletion", traceID, snapshotID))
+		return nil, status.Errorf(codes.Internal, "failed waiting for snapshot deletion: %v", err)
+	}
+
+	d.log.Info(fmt.Sprintf("[DeleteSnapshot][traceID:%s][snapshotID:%s] Snapshot deleted successfully", traceID, snapshotID))
+	return &csi.DeleteSnapshotResponse{}, nil
+}
+
 func (d *Driver) ControllerGetVolume(_ context.Context, _ *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error) {
 	d.log.Info(" call method ControllerGetVolume")
 	return &csi.ControllerGetVolumeResponse{}, nil
@@ -425,4 +531,8 @@ func (d *Driver) ControllerGetVolume(_ context.Context, _ *csi.ControllerGetVolu
 func (d *Driver) ControllerModifyVolume(_ context.Context, _ *csi.ControllerModifyVolumeRequest) (*csi.ControllerModifyVolumeResponse, error) {
 	d.log.Info(" call method ControllerModifyVolume")
 	return &csi.ControllerModifyVolumeResponse{}, nil
+}
+
+func timestamppbFromNanos(nanos int64) *timestamppb.Timestamp {
+	return timestamppb.New(time.Unix(0, nanos))
 }

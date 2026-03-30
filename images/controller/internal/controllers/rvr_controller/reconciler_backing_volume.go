@@ -177,7 +177,16 @@ func (r *Reconciler) reconcileBackingVolume(
 
 	// 9. Create if missing.
 	if intendedLLV == nil {
-		llv, err := newLLV(r.scheme, rvr, rv, intended)
+		var source *snc.LVMLogicalVolumeSource
+		if rv.Spec.DataSource != nil {
+			var sourceErr error
+			source, sourceErr = r.resolveSnapshotSourceForNode(rf.Ctx(), rv.Spec.DataSource.SnapshotName, rvr.Spec.NodeName)
+			if sourceErr != nil {
+				rf.Log().Error(sourceErr, "Failed to resolve snapshot source for clone, creating LLV without source")
+			}
+		}
+
+		llv, err := newLLV(r.scheme, rvr, rv, intended, source)
 		if err != nil {
 			return nil, nil, rf.Failf(err, "constructing LLV %s", intended.LLVName)
 		}
@@ -505,7 +514,7 @@ func computeIntendedBackingVolume(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1a
 }
 
 // newLLV constructs a new LVMLogicalVolume with ownerRef, finalizer, and labels.
-func newLLV(scheme *runtime.Scheme, rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.ReplicatedVolume, bv *backingVolume) (*snc.LVMLogicalVolume, error) {
+func newLLV(scheme *runtime.Scheme, rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.ReplicatedVolume, bv *backingVolume, source *snc.LVMLogicalVolumeSource) (*snc.LVMLogicalVolume, error) {
 	llv := &snc.LVMLogicalVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       bv.LLVName,
@@ -516,6 +525,7 @@ func newLLV(scheme *runtime.Scheme, rvr *v1alpha1.ReplicatedVolumeReplica, rv *v
 			ActualLVNameOnTheNode: bv.LLVName,
 			LVMVolumeGroupName:    bv.LVMVolumeGroupName,
 			Size:                  bv.Size.String(),
+			Source:                source,
 		},
 	}
 
@@ -740,4 +750,24 @@ func applyBackingVolumeReadyCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reas
 // applyBackingVolumeReadyCondAbsent removes the BackingVolumeReady condition from RVR.
 func applyBackingVolumeReadyCondAbsent(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 	return obju.RemoveStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
+}
+
+func (r *Reconciler) resolveSnapshotSourceForNode(ctx context.Context, rvsName, nodeName string) (*snc.LVMLogicalVolumeSource, error) {
+	var rvrsList v1alpha1.ReplicatedVolumeReplicaSnapshotList
+	if err := r.cl.List(ctx, &rvrsList); err != nil {
+		return nil, fmt.Errorf("listing RVRS: %w", err)
+	}
+	for i := range rvrsList.Items {
+		rvrs := &rvrsList.Items[i]
+		if rvrs.Spec.ReplicatedVolumeSnapshotName == rvsName &&
+			rvrs.Spec.NodeName == nodeName &&
+			rvrs.Status.Phase == v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseReady &&
+			rvrs.Status.SnapshotHandle != "" {
+			return &snc.LVMLogicalVolumeSource{
+				Kind: "LVMLogicalVolumeSnapshot",
+				Name: rvrs.Status.SnapshotHandle,
+			}, nil
+		}
+	}
+	return nil, nil
 }

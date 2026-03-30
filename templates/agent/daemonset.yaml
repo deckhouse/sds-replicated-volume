@@ -112,6 +112,10 @@ spec:
             value: "{{ $.Values.sdsReplicatedVolume.drbdPortRange.maxPort }}"
           - name: SLOGH_CONFIG_PATH
             value: "/etc/config/slogh.cfg"
+          - name: LVM_SYSTEM_DIR
+            value: ""
+          - name: HOME
+            value: "/tmp"
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
@@ -126,6 +130,8 @@ spec:
           name: config
         - mountPath: /var/run/drbd/lock/
           name: var-run-drbd-lock
+        - mountPath: /run/lock/lvm
+          name: run-lock-lvm
         ports:
           - containerPort: 4215
             hostPort: 4215
@@ -285,6 +291,8 @@ spec:
           path: /dev/sdsrv/
           type: DirectoryOrCreate
       - name: var-run-drbd-lock
+        emptyDir: {}
+      - name: run-lock-lvm
         emptyDir: {}
       - name: drbd-reactor-config
         configMap:

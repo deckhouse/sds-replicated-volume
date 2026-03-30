@@ -36,7 +36,9 @@ import (
 // +kubebuilder:printcolumn:name="Quorum",type=boolean,JSONPath=".status.quorum"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='Configured')].message"
-// +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName) > 0 : !has(self.spec.lvmLogicalVolumeName) || size(self.spec.lvmLogicalVolumeName) == 0",message="lvmLogicalVolumeName is required when type is Diskful and must be empty when type is Diskless"
+// +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? (has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName) > 0) || (has(self.spec.lvmLogicalVolumeSnapshotName) && size(self.spec.lvmLogicalVolumeSnapshotName) > 0) : (!has(self.spec.lvmLogicalVolumeName) || size(self.spec.lvmLogicalVolumeName) == 0) && (!has(self.spec.lvmLogicalVolumeSnapshotName) || size(self.spec.lvmLogicalVolumeSnapshotName) == 0)",message="Diskful requires either lvmLogicalVolumeName or lvmLogicalVolumeSnapshotName; Diskless requires both to be empty"
+// +kubebuilder:validation:XValidation:rule="!(has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName) > 0 && has(self.spec.lvmLogicalVolumeSnapshotName) && size(self.spec.lvmLogicalVolumeSnapshotName) > 0)",message="lvmLogicalVolumeName and lvmLogicalVolumeSnapshotName are mutually exclusive"
+// +kubebuilder:validation:XValidation:rule="!self.spec.preserveExistingMetadata || (has(self.spec.lvmLogicalVolumeSnapshotName) && size(self.spec.lvmLogicalVolumeSnapshotName) > 0)",message="preserveExistingMetadata requires lvmLogicalVolumeSnapshotName to be set"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.size) : !has(self.spec.size)",message="size is required when type is Diskful and must be empty when type is Diskless"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.spec.size) || !has(self.spec.size) || !quantity(string(self.spec.size)).isLessThan(quantity(string(oldSelf.spec.size)))",message="spec.size cannot be decreased"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskless' ? !has(self.spec.nonVoting) || self.spec.nonVoting == false : true",message="nonVoting must be false (or unset) when type is Diskless"
@@ -122,11 +124,31 @@ type DRBDResourceSpec struct {
 	// +optional
 	Type DRBDResourceType `json:"type,omitempty"`
 
-	// Required when type is Diskful, must be empty when type is Diskless.
+	// Required when type is Diskful (unless lvmLogicalVolumeSnapshotName is set),
+	// must be empty when type is Diskless.
+	// Mutually exclusive with lvmLogicalVolumeSnapshotName.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=128
 	// +optional
 	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName,omitempty"`
+
+	// LVMLogicalVolumeSnapshot name to use as the backing device.
+	// Mutually exclusive with lvmLogicalVolumeName.
+	// Used for snapshot sync: temporary DRBD resources are created on top of
+	// snapshot LVs to synchronize data across replicas.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	LVMLogicalVolumeSnapshotName string `json:"lvmLogicalVolumeSnapshotName,omitempty"`
+
+	// When true, the agent preserves existing DRBD metadata on the backing
+	// device instead of running create-md --force. This is used for snapshot
+	// sync where the snapshot LV already contains valid DRBD metadata
+	// (bitmaps, activity log) from the original volume.
+	// Only valid when lvmLogicalVolumeSnapshotName is set.
+	// +kubebuilder:default=false
+	// +optional
+	PreserveExistingMetadata bool `json:"preserveExistingMetadata,omitempty"`
 
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Minimum=0
@@ -344,6 +366,13 @@ type DRBDResourceActiveConfiguration struct {
 	// +listType=set
 	// +optional
 	LLVFinalizersToRelease []string `json:"llvFinalizersToRelease,omitempty"`
+
+	// LLVSFinalizersToRelease lists LVMLogicalVolumeSnapshot names whose agent
+	// finalizer must be released. Same semantics as LLVFinalizersToRelease but
+	// for snapshot volumes used during snapshot sync.
+	// +listType=set
+	// +optional
+	LLVSFinalizersToRelease []string `json:"llvsFinalizersToRelease,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
