@@ -18,6 +18,8 @@ package drbdr
 
 import (
 	"testing"
+
+	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 type stubMetadata struct {
@@ -29,6 +31,7 @@ func (s stubMetadata) HasMetadata() bool      { return s.hasMetadata }
 func (s stubMetadata) DiskDeviceUUID() string { return s.diskUUID }
 
 func uintPtr(v uint) *uint { return &v }
+func boolPtr(v bool) *bool { return &v }
 
 func TestComputeAttachActions_PreserveMetadata(t *testing.T) {
 	minor := uintPtr(0)
@@ -76,6 +79,44 @@ func TestComputeAttachActions_PreserveMetadata(t *testing.T) {
 			preserveMetadata: false,
 			wantFirst:        "CreateMetadataAction",
 		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			actions := computeAttachActions(tc.metadata, tc.statusUUID, minor, dev, tc.preserveMetadata)
+
+			if len(actions) == 0 {
+				t.Fatal("got 0 actions, want at least 1")
+			}
+
+			var firstType string
+			switch actions[0].(type) {
+			case ApplyALAction:
+				firstType = "ApplyALAction"
+			case CreateMetadataAction:
+				firstType = "CreateMetadataAction"
+			default:
+				firstType = "unknown"
+			}
+
+			if firstType != tc.wantFirst {
+				t.Errorf("first action = %s, want %s", firstType, tc.wantFirst)
+			}
+
+			last := actions[len(actions)-1]
+			if _, ok := last.(AttachAction); !ok {
+				t.Errorf("last action = %T, want AttachAction", last)
+			}
+		})
+	}
+}
+
+type stubIntendedPeer struct {
+	name     string
+	nodeID   uint8
+	peerType v1alpha1.DRBDResourceType
+}
+
 func (s *stubIntendedPeer) Name() string                              { return s.name }
 func (s *stubIntendedPeer) NodeID() uint8                             { return s.nodeID }
 func (s *stubIntendedPeer) Type() v1alpha1.DRBDResourceType           { return s.peerType }
@@ -127,34 +168,6 @@ func stubActualPeerWithDefaults(nodeID uint8, bitmap *bool) *stubActualPeer {
 	}
 }
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			actions := computeAttachActions(tc.metadata, tc.statusUUID, minor, dev, tc.preserveMetadata)
-
-			if len(actions) == 0 {
-				t.Fatal("got 0 actions, want at least 1")
-			}
-
-			var firstType string
-			switch actions[0].(type) {
-			case ApplyALAction:
-				firstType = "ApplyALAction"
-			case CreateMetadataAction:
-				firstType = "CreateMetadataAction"
-			default:
-				firstType = "unknown"
-			}
-
-			if firstType != tc.wantFirst {
-				t.Errorf("first action = %s, want %s", firstType, tc.wantFirst)
-			}
-
-			last := actions[len(actions)-1]
-			if _, ok := last.(AttachAction); !ok {
-				t.Errorf("last action = %T, want AttachAction", last)
-			}
-		})
-	}
 func TestComputePeerDeviceOptionsAction(t *testing.T) {
 	t.Run("all defaults match, diskful — no action", func(t *testing.T) {
 		actions := computePeerDeviceOptionsAction("res", &stubIntendedPeer{

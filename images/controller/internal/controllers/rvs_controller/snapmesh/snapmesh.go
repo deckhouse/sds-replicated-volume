@@ -43,10 +43,11 @@ func ProcessSync(
 	rv *v1alpha1.ReplicatedVolume,
 	childRVRSs []*v1alpha1.ReplicatedVolumeReplicaSnapshot,
 	syncDRBDRs []*v1alpha1.DRBDResource,
+	originalNodeIDs map[string]uint8,
 	cl client.Client,
 	scheme *runtime.Scheme,
 ) bool {
-	cp := buildContexts(ctx, rvs, rv, childRVRSs, syncDRBDRs, cl, scheme)
+	cp := buildContexts(ctx, rvs, rv, childRVRSs, syncDRBDRs, originalNodeIDs, cl, scheme)
 
 	dispatchers := []dmte.DispatchFunc[provider]{
 		syncDispatcher(),

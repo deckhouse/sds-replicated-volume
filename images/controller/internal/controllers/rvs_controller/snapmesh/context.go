@@ -42,12 +42,13 @@ type globalContext struct {
 }
 
 type replicaContext struct {
-	id       uint8
-	rvrName  string
-	rvrsName string
-	nodeName string
-	rvrs     *v1alpha1.ReplicatedVolumeReplicaSnapshot
-	drbdr    *v1alpha1.DRBDResource
+	id         uint8
+	drbdNodeID uint8
+	rvrName    string
+	rvrsName   string
+	nodeName   string
+	rvrs       *v1alpha1.ReplicatedVolumeReplicaSnapshot
+	drbdr      *v1alpha1.DRBDResource
 
 	syncTransition *dmte.Transition
 	statusMessage  string
@@ -72,6 +73,7 @@ func buildContexts(
 	rv *v1alpha1.ReplicatedVolume,
 	childRVRSs []*v1alpha1.ReplicatedVolumeReplicaSnapshot,
 	syncDRBDRs []*v1alpha1.DRBDResource,
+	originalNodeIDs map[string]uint8,
 	cl client.Client,
 	scheme *runtime.Scheme,
 ) provider {
@@ -95,14 +97,20 @@ func buildContexts(
 			continue
 		}
 
-		id := v1alpha1.IDFromName(rvrs.Spec.ReplicatedVolumeReplicaName)
+		rvrName := rvrs.Spec.ReplicatedVolumeReplicaName
+		id := v1alpha1.IDFromName(rvrName)
+		drbdNodeID := id
+		if nid, ok := originalNodeIDs[rvrName]; ok {
+			drbdNodeID = nid
+		}
 		rc := replicaContext{
-			id:       id,
-			rvrName:  rvrs.Spec.ReplicatedVolumeReplicaName,
-			rvrsName: rvrs.Name,
-			nodeName: rvrs.Spec.NodeName,
-			rvrs:     rvrs,
-			drbdr:    drbdrByName[rvrs.Name],
+			id:         id,
+			drbdNodeID: drbdNodeID,
+			rvrName:    rvrName,
+			rvrsName:   rvrs.Name,
+			nodeName:   rvrs.Spec.NodeName,
+			rvrs:       rvrs,
+			drbdr:      drbdrByName[rvrs.Name],
 		}
 		gctx.allReplicas = append(gctx.allReplicas, rc)
 	}

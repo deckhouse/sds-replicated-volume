@@ -51,11 +51,14 @@ func (r *Reconciler) reconcileSyncMesh(
 		"syncRevision", rvs.Status.SyncRevision,
 		"syncTransitions", len(rvs.Status.SyncTransitions))
 
-	syncDRBDRNames := syncDRBDResourceNames(childRVRSs)
-	syncDRBDRs, err := r.getSyncDRBDResources(rf.Ctx(), syncDRBDRNames)
+	allDRBDRs, err := r.listDRBDResources(rf.Ctx())
 	if err != nil {
 		return rf.Fail(err)
 	}
+
+	syncDRBDRNames := syncDRBDResourceNames(childRVRSs)
+	syncDRBDRs := filterDRBDResourcesByName(allDRBDRs, syncDRBDRNames)
+	originalNodeIDs := extractOriginalNodeIDs(allDRBDRs, childRVRSs)
 
 	l.Info("sync-mesh: resources",
 		"syncDRBDRNames", len(syncDRBDRNames),
@@ -90,7 +93,7 @@ func (r *Reconciler) reconcileSyncMesh(
 		return rf.Done()
 	}
 
-	changed := snapmesh.ProcessSync(rf.Ctx(), rvs, rv, childRVRSs, syncDRBDRs, r.cl, r.scheme)
+	changed := snapmesh.ProcessSync(rf.Ctx(), rvs, rv, childRVRSs, syncDRBDRs, originalNodeIDs, r.cl, r.scheme)
 
 	l.Info("sync-mesh: after ProcessSync",
 		"changed", changed,
@@ -180,27 +183,38 @@ func syncDRBDResourceNames(childRVRSs []*v1alpha1.ReplicatedVolumeReplicaSnapsho
 	return names
 }
 
-func (r *Reconciler) getSyncDRBDResources(ctx context.Context, names []string) ([]*v1alpha1.DRBDResource, error) {
-	if len(names) == 0 {
-		return nil, nil
-	}
-
-	drbdrList := &v1alpha1.DRBDResourceList{}
-	if err := r.cl.List(ctx, drbdrList); err != nil {
+func (r *Reconciler) listDRBDResources(ctx context.Context) ([]v1alpha1.DRBDResource, error) {
+	var list v1alpha1.DRBDResourceList
+	if err := r.cl.List(ctx, &list); err != nil {
 		return nil, err
 	}
+	return list.Items, nil
+}
 
+func filterDRBDResourcesByName(all []v1alpha1.DRBDResource, names []string) []*v1alpha1.DRBDResource {
 	nameSet := make(map[string]struct{}, len(names))
-	for _, name := range names {
-		nameSet[name] = struct{}{}
+	for _, n := range names {
+		nameSet[n] = struct{}{}
 	}
-
 	result := make([]*v1alpha1.DRBDResource, 0, len(names))
-	for i := range drbdrList.Items {
-		if _, ok := nameSet[drbdrList.Items[i].Name]; ok {
-			result = append(result, &drbdrList.Items[i])
+	for i := range all {
+		if _, ok := nameSet[all[i].Name]; ok {
+			result = append(result, &all[i])
 		}
 	}
+	return result
+}
 
-	return result, nil
+func extractOriginalNodeIDs(all []v1alpha1.DRBDResource, childRVRSs []*v1alpha1.ReplicatedVolumeReplicaSnapshot) map[string]uint8 {
+	rvrNames := make(map[string]struct{}, len(childRVRSs))
+	for _, rvrs := range childRVRSs {
+		rvrNames[rvrs.Spec.ReplicatedVolumeReplicaName] = struct{}{}
+	}
+	result := make(map[string]uint8, len(childRVRSs))
+	for i := range all {
+		if _, ok := rvrNames[all[i].Name]; ok {
+			result[all[i].Name] = all[i].Spec.NodeID
+		}
+	}
+	return result
 }

@@ -92,7 +92,7 @@ func confirmCreate(gctx *globalContext, rctx *replicaContext, _ int64) dmte.Conf
 			Type:                         v1alpha1.DRBDResourceTypeDiskful,
 			LVMLogicalVolumeSnapshotName: rctx.rvrs.Status.SnapshotHandle,
 			PreserveExistingMetadata:     true,
-			NodeID:                       rctx.id,
+			NodeID:                       rctx.drbdNodeID,
 			Size:                         &size,
 			Role:                         v1alpha1.DRBDRoleSecondary,
 		},
