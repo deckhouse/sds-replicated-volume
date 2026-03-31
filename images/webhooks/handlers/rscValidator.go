@@ -43,7 +43,7 @@ const (
 	replicationConsistencyAndAvailability = "ConsistencyAndAvailability"
 )
 
-func RSCValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {
+func RSCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {
 	rsc, ok := obj.(*srv.ReplicatedStorageClass)
 	if !ok {
 		// If not a storage class just continue the validation chain(if there is one) and do nothing.
@@ -61,6 +61,16 @@ func RSCValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 	staticClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
+	}
+
+	if arReview.Operation == model.OperationCreate {
+		sc, err := staticClient.StorageV1().StorageClasses().Get(ctx, rsc.Name, metav1.GetOptions{})
+		if err == nil && sc.Provisioner != replicatedCSIProvisioner {
+			return &kwhvalidating.ValidatorResult{
+				Valid:   false,
+				Message: fmt.Sprintf("StorageClass %q already exists with provisioner %q; choose a different ReplicatedStorageClass name", rsc.Name, sc.Provisioner),
+			}, nil
+		}
 	}
 
 	if isNewControlPlane {

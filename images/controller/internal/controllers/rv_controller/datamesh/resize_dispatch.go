@@ -21,6 +21,7 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/drbd_size"
 )
 
 // resizeDispatcher returns a dmte.DispatchFunc that triggers a ResizeVolume
@@ -31,7 +32,7 @@ func resizeDispatcher() dmte.DispatchFunc[provider] {
 		return func(yield func(dmte.DispatchDecision) bool) {
 			gctx := cp.Global()
 
-			if gctx.datamesh.size.Cmp(gctx.size) >= 0 {
+			if gctx.datamesh.size.Cmp(drbd_size.AlignTo4Ki(gctx.size)) >= 0 {
 				return
 			}
 

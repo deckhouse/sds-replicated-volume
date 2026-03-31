@@ -23,3 +23,8 @@ const RSCControllerFinalizer = "sds-replicated-volume.deckhouse.io/rsc-controlle
 const RVControllerFinalizer = "sds-replicated-volume.deckhouse.io/rv-controller"
 
 const RVRControllerFinalizer = "sds-replicated-volume.deckhouse.io/rvr-controller"
+
+// StorageClassFinalizer is set on Kubernetes StorageClass objects managed by
+// the RSC controller. Uses the legacy storage.deckhouse.io prefix for
+// backward compatibility with the old controller.
+const StorageClassFinalizer = "storage.deckhouse.io/sds-replicated-volume"

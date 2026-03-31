@@ -8,12 +8,13 @@ The controller reconciles `ReplicatedStorageClass` status with:
 
 1. **Spec defaulting** — fills controller-managed optional spec fields (`systemNetworkNames`, `configurationRolloutStrategy`, `eligibleNodesConflictResolutionStrategy`, `eligibleNodesPolicy`) with defaults when not set by the user
 2. **Storage pool management** — auto-generates and manages an RSP based on `spec.storage` configuration
-3. **Configuration snapshot** — resolved configuration from spec, stored in `status.configuration`
-4. **Generations/Revisions** — for quick change detection between RSC and RSP
-5. **Conditions** — 4 conditions describing the current state
-6. **Phase and message** — operational state summary derived from conditions, deletion state, and rollout strategy state
-7. **Volume statistics** — counts of total, aligned, stale, and conflict volumes
-8. **Deletion cleanup** — releases RSP `usedBy` entries and removes finalizer on RSC deletion
+3. **StorageClass management** — creates and manages a Kubernetes `StorageClass` with the same name as the RSC; deletes and recreates the SC when immutable spec fields change
+4. **Configuration snapshot** — resolved configuration from spec, stored in `status.configuration`
+5. **Generations/Revisions** — for quick change detection between RSC and RSP
+6. **Conditions** — 4 conditions describing the current state
+7. **Phase and message** — operational state summary derived from conditions, deletion state, and rollout strategy state
+8. **Volume statistics** — counts of total, aligned, stale, and conflict volumes
+9. **Deletion cleanup** — releases RSP `usedBy` entries, deletes managed StorageClass, and removes finalizer on RSC deletion
 
 > **Note:** RSC does not calculate eligible nodes directly. It uses `RSP.Status.EligibleNodes` from the associated storage pool and validates them against topology and FTT/GMDR requirements.
 
@@ -24,6 +25,7 @@ The controller reconciles `ReplicatedStorageClass` status with:
 | ← input | rsp_controller | Reads `RSP.Status.EligibleNodes` for validation |
 | ← input | ReplicatedVolume | Reads RVs for volume statistics |
 | → manages | ReplicatedStoragePool | Creates/updates auto-generated RSP |
+| → manages | StorageClass | Creates/updates/deletes Kubernetes StorageClass |
 
 ## Algorithm
 
@@ -44,6 +46,7 @@ Reconcile (root) [Pure orchestration]
 ├── getUsedStoragePoolNames
 ├── rscShouldBeDeleted?
 │   └── reconcileDeletion [Pure orchestration]
+│       ├── delete managed StorageClass (remove finalizer, delete SC)
 │       ├── reconcileRSPRelease × N (release all RSPs from usedBy)
 │       └── remove finalizer from RSC (if RSC still exists)
 ├── reconcileMigrationFromRSP [Target-state driven]
@@ -57,6 +60,8 @@ Reconcile (root) [Pure orchestration]
 │   └── add finalizer (if not present)
 ├── reconcileRSP [Conditional target evaluation]
 │   └── ensure auto-generated RSP exists with finalizer and usedBy
+├── reconcileStorageClass [Conditional target evaluation]
+│   └── ensure Kubernetes StorageClass exists; delete+recreate on immutable spec change
 ├── ensureStoragePool
 │   └── status.storagePoolName + StoragePoolReady condition
 ├── ensureConfiguration
@@ -71,7 +76,7 @@ Reconcile (root) [Pure orchestration]
         └── release RSPs no longer referenced by this RSC
 ```
 
-Links to detailed algorithms: [`reconcileDefaults`](#reconciledefaults-details), [`reconcileRSP`](#reconcilersp-details), [`ensureStoragePool`](#ensurestoragepool-details), [`ensureConfiguration`](#ensureconfiguration-details), [`ensureVolumeSummaryAndConditions`](#ensurevolumesummaryandconditions-details), [`reconcileRSPRelease`](#reconcilersp-release-details)
+Links to detailed algorithms: [`reconcileDefaults`](#reconciledefaults-details), [`reconcileRSP`](#reconcilersp-details), [`reconcileStorageClass`](#reconcilestorageclass-details), [`ensureStoragePool`](#ensurestoragepool-details), [`ensureConfiguration`](#ensureconfiguration-details), [`ensureVolumeSummaryAndConditions`](#ensurevolumesummaryandconditions-details), [`reconcileRSPRelease`](#reconcilersp-release-details)
 
 ## Algorithm Flow
 
@@ -103,7 +108,8 @@ flowchart TD
     Defaults --> Metadata[reconcileMetadata]
 
     Metadata --> ReconcileRSP[reconcileRSP]
-    ReconcileRSP --> EnsureStoragePool[ensureStoragePool]
+    ReconcileRSP --> ReconcileSC[reconcileStorageClass]
+    ReconcileSC --> EnsureStoragePool[ensureStoragePool]
     EnsureStoragePool --> EnsureConfig[ensureConfiguration]
     EnsureConfig --> EnsureVolumes[ensureVolumeSummaryAndConditions]
     EnsureVolumes --> EnsurePhase[ensurePhaseAndMessage]
@@ -232,6 +238,8 @@ The controller aggregates statistics from all `ReplicatedVolume` resources refer
 |------|-----|------------|---------|
 | Finalizer | `sds-replicated-volume.deckhouse.io/rsc-controller` | RSC | Prevent deletion while RVs exist or RSPs reference this RSC in usedBy |
 | Finalizer | `sds-replicated-volume.deckhouse.io/rsc-controller` | RSP | Prevent RSP deletion while any RSC references it |
+| Finalizer | `storage.deckhouse.io/sds-replicated-volume` | StorageClass | Prevent SC deletion by external actors while RSC exists |
+| Label | `storage.deckhouse.io/managed-by=sds-replicated-volume` | StorageClass | Mark SC as managed by this controller |
 | Status field | `status.phase` | RSC | Operational state summary |
 | Status field | `status.message` | RSC | Human-readable description of the current phase |
 
@@ -487,6 +495,43 @@ flowchart TD
 | `rsc.Spec.Zones`, `NodeLabelSelector`, `SystemNetworkNames` | RSP spec |
 | `rsc.Spec.EligibleNodesPolicy` | RSP spec (eligibleNodesPolicy) |
 | `rsc.Name` | `status.usedBy` |
+
+### reconcileStorageClass Details
+
+**Purpose:** Creates or updates the Kubernetes StorageClass that corresponds to this RSC. SC name equals RSC name. When immutable spec fields differ (parameters, provisioner, reclaimPolicy, volumeBindingMode), the SC is deleted and recreated.
+
+**Algorithm:**
+
+```mermaid
+flowchart TD
+    Start([reconcileStorageClass]) --> GetSC[Get SC by RSC name]
+    GetSC -->|Error| Fail([Fail])
+    GetSC -->|Not found| Create[Create target SC]
+    Create -->|Error| Fail
+    Create --> End([Continue])
+
+    GetSC -->|Found| CheckSpec{Spec in sync?}
+    CheckSpec -->|No| RemoveFin1[Remove finalizer from old SC]
+    RemoveFin1 --> DeleteOld[Delete old SC]
+    DeleteOld --> Recreate[Create target SC]
+    Recreate --> End
+
+    CheckSpec -->|Yes| CheckMeta{Metadata in sync?}
+    CheckMeta -->|No| PatchMeta[Patch SC metadata]
+    PatchMeta --> End
+    CheckMeta -->|Yes| End
+```
+
+**Data Flow:**
+
+| Input | Output |
+|-------|--------|
+| `rsc.Name` | SC name |
+| `rsc.Spec.ReclaimPolicy` | `sc.ReclaimPolicy` |
+| `rsc.Spec.VolumeAccess` | `sc.VolumeBindingMode` (Local/EventuallyLocal/PreferablyLocal → WaitForFirstConsumer; Any → Immediate) |
+| CSI provisioner constant | `sc.Provisioner` |
+| `rsc.Name` | `sc.Parameters[replicated.csi.storage.deckhouse.io/replicatedStorageClassName]` |
+| Managed-by label + finalizer | SC metadata |
 
 ### reconcileRSP Release Details
 

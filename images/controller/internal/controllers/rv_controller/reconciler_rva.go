@@ -259,35 +259,77 @@ func isRVAAttachmentFieldsInSync(rva *v1alpha1.ReplicatedVolumeAttachment, rvr *
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Reconcile: RVA finalizers
+// Reconcile: RVA metadata
 //
 
-// reconcileRVAFinalizers adds RVControllerFinalizer to non-deleting RVAs
-// and removes it from deleting RVAs when safe (node not attached and no detach in progress).
+// isRVAMetadataInSync checks if the RVA metadata (finalizer + labels) is in sync with the target state.
+func isRVAMetadataInSync(rva *v1alpha1.ReplicatedVolumeAttachment, rv *v1alpha1.ReplicatedVolume) bool {
+	if !obju.HasFinalizer(rva, v1alpha1.RVControllerFinalizer) {
+		return false
+	}
+
+	if rva.Spec.ReplicatedVolumeName != "" {
+		if !obju.HasLabelValue(rva, v1alpha1.ReplicatedVolumeLabelKey, rva.Spec.ReplicatedVolumeName) {
+			return false
+		}
+	}
+
+	if rv != nil {
+		if rv.Spec.ReplicatedStorageClassName != "" {
+			if !obju.HasLabelValue(rva, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName) {
+				return false
+			}
+		} else {
+			if obju.HasLabel(rva, v1alpha1.ReplicatedStorageClassLabelKey) {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+// applyRVAMetadata applies the target metadata (finalizer + labels) to the RVA.
+func applyRVAMetadata(rva *v1alpha1.ReplicatedVolumeAttachment, rv *v1alpha1.ReplicatedVolume) {
+	obju.AddFinalizer(rva, v1alpha1.RVControllerFinalizer)
+
+	if rva.Spec.ReplicatedVolumeName != "" {
+		obju.SetLabel(rva, v1alpha1.ReplicatedVolumeLabelKey, rva.Spec.ReplicatedVolumeName)
+	}
+
+	if rv != nil {
+		if rv.Spec.ReplicatedStorageClassName != "" {
+			obju.SetLabel(rva, v1alpha1.ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName)
+		} else {
+			obju.RemoveLabel(rva, v1alpha1.ReplicatedStorageClassLabelKey)
+		}
+	}
+}
+
+// reconcileRVAMetadata ensures metadata (finalizer + labels) on non-deleting RVAs
+// and removes the finalizer from deleting RVAs when safe (node not attached and no detach in progress).
 //
 // Reconcile pattern: Target-state driven
-func (r *Reconciler) reconcileRVAFinalizers(
+func (r *Reconciler) reconcileRVAMetadata(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
 	rvas []*v1alpha1.ReplicatedVolumeAttachment,
 ) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "rva-finalizers")
+	rf := flow.BeginReconcile(ctx, "rva-metadata")
 	defer rf.OnEnd(&outcome)
 
 	for _, rva := range rvas {
 		if rva.DeletionTimestamp == nil {
-			// Non-deleting: add finalizer if missing.
+			// Non-deleting: ensure metadata (finalizer + labels).
 
-			// Skip if finalizer is already present.
-			if obju.HasFinalizer(rva, v1alpha1.RVControllerFinalizer) {
+			if isRVAMetadataInSync(rva, rv) {
 				continue
 			}
 
-			// Add finalizer to ensure detach completes before RVA is deleted.
 			base := rva.DeepCopy()
-			obju.AddFinalizer(rva, v1alpha1.RVControllerFinalizer)
+			applyRVAMetadata(rva, rv)
 			if err := r.patchRVA(rf.Ctx(), rva, base); err != nil {
-				return rf.Failf(err, "adding finalizer to RVA %s", rva.Name)
+				return rf.Failf(err, "patching RVA %s metadata", rva.Name)
 			}
 		} else {
 			// Deleting: remove finalizer if safe.
@@ -473,6 +515,6 @@ func (r *Reconciler) reconcileOrphanedRVAs(
 
 	return flow.MergeReconciles(
 		r.reconcileRVAWaiting(rf.Ctx(), rvas, "ReplicatedVolume not found; waiting for it to appear"),
-		r.reconcileRVAFinalizers(rf.Ctx(), nil, rvas),
+		r.reconcileRVAMetadata(rf.Ctx(), nil, rvas),
 	)
 }

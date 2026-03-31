@@ -45,6 +45,12 @@ rules:
       - lvmvolumegroups
     verbs: ["get", "list", "watch"]
 
+  # --- storage.k8s.io: StorageClass lifecycle ---
+  - apiGroups: ["storage.k8s.io"]
+    resources:
+      - storageclasses
+    verbs: ["get", "list", "watch", "create", "patch", "delete"]
+
   # --- storage.deckhouse.io: status subresources ---
   - apiGroups: ["storage.deckhouse.io"]
     resources:

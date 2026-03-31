@@ -121,15 +121,9 @@ func (d *Driver) NodeStageVolume(ctx context.Context, request *csi.NodeStageVolu
 		d.inFlight.Delete(volumeID)
 	}()
 
-	// Get DRBD device path from ReplicatedVolumeReplica
-	rvr, err := utils.GetReplicatedVolumeReplicaForNode(ctx, d.cl, volumeID, d.hostID)
+	devPath, err := utils.GetDevicePathFromRVA(ctx, d.cl, volumeID, d.hostID)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "[NodeStageVolume] Error getting ReplicatedVolumeReplica: %v", err)
-	}
-
-	devPath, err := utils.GetDRBDDevicePath(rvr)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "[NodeStageVolume] Error getting DRBD device path: %v", err)
+		return nil, status.Errorf(codes.Internal, "[NodeStageVolume] Error getting device path from RVA: %v", err)
 	}
 
 	d.log.Debug(fmt.Sprintf("[NodeStageVolume] Checking if device exists: %s", devPath))
@@ -230,15 +224,9 @@ func (d *Driver) NodePublishVolume(ctx context.Context, request *csi.NodePublish
 		mountOptions = append(mountOptions, "ro")
 	}
 
-	// Get DRBD device path from ReplicatedVolumeReplica
-	rvr, err := utils.GetReplicatedVolumeReplicaForNode(ctx, d.cl, volumeID, d.hostID)
+	devPath, err := utils.GetDevicePathFromRVA(ctx, d.cl, volumeID, d.hostID)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "[NodePublishVolume] Error getting ReplicatedVolumeReplica: %v", err)
-	}
-
-	devPath, err := utils.GetDRBDDevicePath(rvr)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "[NodePublishVolume] Error getting DRBD device path: %v", err)
+		return nil, status.Errorf(codes.Internal, "[NodePublishVolume] Error getting device path from RVA: %v", err)
 	}
 
 	d.log.Debug(fmt.Sprintf("[NodePublishVolume] Checking if device exists: %s", devPath))

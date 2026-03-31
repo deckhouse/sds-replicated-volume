@@ -8,7 +8,7 @@ alwaysApply: false
 
 - **Constant naming (MUST)**:
   - Label key constants MUST end with `LabelKey`.
-    - Good: `ReplicatedVolumeLabelKey`, `NodeNameLabelKey`
+    - Good: `ReplicatedVolumeLabelKey`, `LVMVolumeGroupLabelKey`
     - Bad: `LabelReplicatedVolume`, `NodeLabel`, `LabelNodeName`
 
 - **Prefix constant (MUST)**:

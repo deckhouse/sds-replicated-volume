@@ -847,6 +847,9 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 - **No transition for non-member node with deleting RVA.**
   No members. Deleting RVA on node-1. No Detach transition (nothing to detach).
 
+- ⚡ **Reason stays Detaching while Detach transition is active.**
+  D member Attached=true, deleting RVA. First ProcessTransitions creates Detach (member.Attached→false). Second ProcessTransitions without subject confirmation: transition still active. AttachmentConditionReason must be "Detaching" (from settle), not "Detached" (regression: dispatch NoDispatch used to overwrite settle status).
+
 ---
 
 ## 16. ForceDetach

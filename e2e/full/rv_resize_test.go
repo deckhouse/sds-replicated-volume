@@ -74,7 +74,7 @@ var _ = Describe("RV resize", func() {
 			fw.TestLayout{FTT: 1, GMDR: 1}),
 
 		Entry("2D+1TB",
-			Label(fw.LabelSlow), SpecTimeout(90*time.Second), require.MinNodes(3),
+			Label(fw.LabelSlow), SpecTimeout(90*time.Second), require.MinNodes(2, 1),
 			fw.TestLayout{FTT: 1, GMDR: 0}),
 
 		Entry("1D attached",
@@ -82,7 +82,7 @@ var _ = Describe("RV resize", func() {
 			fw.TestLayout{FTT: 0, GMDR: 0, Attached: 1}),
 
 		Entry("2D+1A (2 att)",
-			Label(fw.LabelSlow), SpecTimeout(90*time.Second), require.MinNodes(3),
+			Label(fw.LabelSlow), SpecTimeout(90*time.Second), require.MinNodes(2, 1),
 			fw.TestLayout{FTT: 0, GMDR: 1, Access: 1, Attached: 2}),
 
 		Entry("2D multiattach",
@@ -91,9 +91,41 @@ var _ = Describe("RV resize", func() {
 
 		Entry("3D+2A multiattach (4 att)",
 			Label("Bug:MultiattachDRBDLock"),
-			Label(fw.LabelSlow), SpecTimeout(150*time.Second), require.MinNodes(5),
+			Label(fw.LabelSlow), SpecTimeout(150*time.Second), require.MinNodes(3, 2),
 			fw.TestLayout{FTT: 1, GMDR: 1, Access: 2, Attached: 2}),
 	)
+
+	// Regression test: CEL validation compared resource.Quantity as strings,
+	// so "100Gi" < "50Gi" lexicographically ('1' < '5'). This resize triggers
+	// that exact pattern — new size starts with a lower ASCII digit.
+	It("resize from 50Mi to 100Mi (lexicographic regression)", func(ctx SpecContext) {
+		trv := f.TestRV().FTT(0).GMDR(1).Size("50Mi")
+		trv.Create(ctx)
+		trv.Await(ctx, match.RV.FormationComplete())
+
+		for _, trvr := range trv.TestRVRs() {
+			trvr.Await(ctx, tkmatch.Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy)))
+		}
+
+		newSize := resource.MustParse("100Mi")
+		trv.Update(ctx, func(rv *v1alpha1.ReplicatedVolume) {
+			rv.Spec.Size = newSize
+		})
+
+		trv.Await(ctx, match.RV.DatameshSizeGE(newSize))
+		trv.Await(ctx, match.RV.NoActiveTransitions())
+
+		rv := trv.Object()
+		Expect(rv.Status.Datamesh.Size.Cmp(newSize)).To(BeNumerically(">=", 0))
+
+		for _, trvr := range trv.TestRVRs() {
+			rvr := trvr.Object()
+			if rvr.Status.Type == v1alpha1.DRBDResourceTypeDiskful {
+				Expect(rvr.Status.Size).NotTo(BeNil())
+				Expect(rvr.Status.Size.Cmp(newSize)).To(BeNumerically(">=", 0))
+			}
+		}
+	}, Label(fw.LabelSlow), SpecTimeout(60*time.Second), require.MinNodes(2))
 
 	It("resize blocked by resync on thick 100Mi volume", func(ctx SpecContext) {
 		trv := f.TestRV().FTT(0).GMDR(1).
@@ -122,7 +154,48 @@ var _ = Describe("RV resize", func() {
 
 		rv := trv.Object()
 		Expect(rv.Status.Datamesh.Size.Cmp(newSize)).To(BeNumerically(">=", 0))
-	}, Label(fw.LabelSlow), SpecTimeout(5*time.Minute), require.MinNodes(3))
+	}, Label(fw.LabelSlow), SpecTimeout(5*time.Minute), require.MinNodes(3, v1alpha1.ReplicatedStoragePoolTypeLVM))
+
+	It("resize with non-4Ki-aligned spec.size produces 4Ki-aligned datamesh.size", func(ctx SpecContext) {
+		// 50001Ki is not a multiple of 4Ki (50001 % 4 != 0).
+		// The controller must round datamesh.size up to the nearest 4Ki boundary.
+		trv := f.TestRV().FTT(0).GMDR(1).Size("50001Ki")
+		trv.Create(ctx)
+		trv.Await(ctx, match.RV.FormationComplete())
+
+		for _, trvr := range trv.TestRVRs() {
+			trvr.Await(ctx, tkmatch.Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy)))
+		}
+
+		rv := trv.Object()
+		Expect(rv.Status.Datamesh.Size.Value()%4096).To(Equal(int64(0)),
+			"datamesh.size must be 4Ki-aligned after formation")
+		Expect(rv.Status.Datamesh.Size.Cmp(resource.MustParse("50001Ki"))).To(
+			BeNumerically(">=", 0), "datamesh.size must be >= spec.size")
+
+		// Resize to another non-4Ki-aligned size: 100001Ki (100001 % 4 != 0).
+		newSize := resource.MustParse("100001Ki")
+		trv.Update(ctx, func(rv *v1alpha1.ReplicatedVolume) {
+			rv.Spec.Size = newSize
+		})
+
+		trv.Await(ctx, match.RV.DatameshSizeGE(newSize))
+		trv.Await(ctx, match.RV.NoActiveTransitions())
+
+		rv = trv.Object()
+		Expect(rv.Status.Datamesh.Size.Value()%4096).To(Equal(int64(0)),
+			"datamesh.size must be 4Ki-aligned after resize")
+		Expect(rv.Status.Datamesh.Size.Cmp(newSize)).To(BeNumerically(">=", 0))
+
+		for _, trvr := range trv.TestRVRs() {
+			rvr := trvr.Object()
+			if rvr.Status.Type == v1alpha1.DRBDResourceTypeDiskful {
+				Expect(rvr.Status.Size).NotTo(BeNil())
+				Expect(rvr.Status.Size.Value()%4096).To(Equal(int64(0)),
+					"DRBDR reported size must be 4Ki-aligned")
+			}
+		}
+	}, Label(fw.LabelSlow), SpecTimeout(90*time.Second), require.MinNodes(2))
 
 	It("resize completes after replica deletion", Label(fw.LabelSlow), func(ctx SpecContext) {
 		trv := f.TestRV().FTT(1).GMDR(1)

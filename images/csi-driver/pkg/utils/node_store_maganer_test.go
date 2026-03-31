@@ -18,6 +18,7 @@ limitations under the License.
 package utils //nolint:revive
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -37,6 +38,30 @@ func TestNodeStoreManager(t *testing.T) {
 			expected := "/dev/mapper/some--good-path"
 
 			assert.Equal(t, expected, toMapperPath(path))
+		})
+	})
+
+	t.Run("NodePublishVolumeFS", func(t *testing.T) {
+		t.Run("staging_source_not_mount_point_returns_error", func(t *testing.T) {
+			if runtime.GOOS != "linux" {
+				t.Skip("IsMountPoint on FakeMounter requires Linux")
+			}
+
+			source := t.TempDir()
+			target := t.TempDir()
+
+			f := &mountutils.FakeMounter{}
+			store := &Store{
+				Log: &logger.Logger{},
+				NodeStorage: mountutils.SafeFormatAndMount{
+					Interface: f,
+				},
+			}
+
+			err := store.NodePublishVolumeFS(source, "/dev/drbd1000", target, "ext4", []string{"bind"})
+			assert.ErrorContains(t, err, "staging path")
+			assert.ErrorContains(t, err, "is not a mount point")
+			assert.Empty(t, f.MountPoints, "no mount should have been performed")
 		})
 	})
 

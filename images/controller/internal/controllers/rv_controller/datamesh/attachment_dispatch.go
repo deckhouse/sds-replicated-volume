@@ -195,6 +195,12 @@ func decideAttachmentForReplica(rctx *ReplicaContext) (dmte.DispatchDecision, bo
 		), true
 	}
 
+	// Active attachment transition in progress (e.g., Detach applied but not
+	// confirmed) — skip; settle already set the authoritative slot status.
+	if rctx.attachmentTransition != nil {
+		return dmte.DispatchDecision{}, false
+	}
+
 	// Only deleting RVAs → detached.
 	if len(rctx.rvas) > 0 {
 		return dmte.NoDispatch(rctx, attachmentSlot,

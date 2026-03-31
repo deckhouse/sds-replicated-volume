@@ -117,6 +117,11 @@ func (h *rvEventHandler) Update(ctx context.Context, e event.UpdateEvent, q work
 		h.enqueueAllRVRs(ctx, newRV.Name, q)
 		return
 	}
+	if !oldRV.Spec.Size.Equal(newRV.Spec.Size) {
+		// Spec.Size changed — enqueue all RVRs for eager LLV resize before datamesh transition.
+		h.enqueueAllRVRs(ctx, newRV.Name, q)
+		return
+	}
 	if oldRV.Status.DatameshRevision != newRV.Status.DatameshRevision && oldRV.Status.DatameshRevision == 0 {
 		// Initial setup — enqueue ALL RVRs.
 		h.enqueueAllRVRs(ctx, newRV.Name, q)

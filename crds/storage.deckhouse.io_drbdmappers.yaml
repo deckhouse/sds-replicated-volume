@@ -147,6 +147,8 @@ spec:
         - metadata
         - spec
         type: object
+    selectableFields:
+    - jsonPath: .spec.nodeName
     served: true
     storage: true
     subresources:

@@ -45,7 +45,7 @@ var _ = Describe("hasControlPlaneLabel", func() {
 	})
 
 	It("returns false when Labels have no CP entry", func() {
-		args := []any{Labels{"Smoke", "Req:MinNodes:3"}}
+		args := []any{Labels{"Smoke", "Req:MinNodes:3:0:LVMThin"}}
 		Expect(hasControlPlaneLabel(args)).To(BeFalse())
 	})
 

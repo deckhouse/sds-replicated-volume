@@ -123,6 +123,7 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 
 		// Reconcile net options (protocol, shared-secret, cram-hmac-alg, allow-two-primaries, allow-remote-read)
 		res = append(res, computeNetOptionsActionReconcile(resourceName, iPeer, aPeer, iState.AllowTwoPrimaries())...)
+		res = append(res, computePeerDeviceOptionsAction(resourceName, iPeer, aPeer)...)
 		res = append(res, computePathActions(resourceName, iPeer, aPeer)...)
 		// Connect is only valid when peer is in StandAlone state.
 		// Any other state means connection is either active, in progress, or in error recovery,
@@ -409,6 +410,62 @@ func computeDiskOptionsActionReconcile(iState IntendedDRBDState, aState ActualDR
 		}
 	}
 	return res
+}
+
+// computePeerDeviceOptionsAction emits a PeerDeviceOptionsAction when peer-device
+// options diverge from intended defaults:
+//   - Dynamic resync controller settings (c-plan-ahead, c-delay-target, c-fill-target,
+//     c-max-rate, c-min-rate) are enforced for all peers.
+//   - Bitmap is turned off for Diskless peers only.
+func computePeerDeviceOptionsAction(resourceName string, iPeer IntendedPeer, aPeer ActualPeer) (res DRBDActions) {
+	var changed bool
+	action := PeerDeviceOptionsAction{
+		ResourceName: resourceName,
+		PeerNodeID:   iPeer.NodeID(),
+		VolumeNr:     0,
+	}
+
+	// Resync controller defaults — all peers.
+	if aPeer.CPlanAhead() != DefaultCPlanAhead {
+		s := DefaultCPlanAhead
+		action.CPlanAhead = &s
+		changed = true
+	}
+	if aPeer.CDelayTarget() != DefaultCDelayTarget {
+		s := DefaultCDelayTarget
+		action.CDelayTarget = &s
+		changed = true
+	}
+	if aPeer.CFillTarget() != DefaultCFillTarget {
+		s := DefaultCFillTarget
+		action.CFillTarget = &s
+		changed = true
+	}
+	if aPeer.CMaxRate() != DefaultCMaxRate {
+		s := DefaultCMaxRate
+		action.CMaxRate = &s
+		changed = true
+	}
+	if aPeer.CMinRate() != DefaultCMinRate {
+		s := DefaultCMinRate
+		action.CMinRate = &s
+		changed = true
+	}
+
+	// Bitmap off for diskless peers only.
+	if iPeer.Type() == v1alpha1.DRBDResourceTypeDiskless {
+		actualBitmap := aPeer.Bitmap()
+		if actualBitmap == nil || *actualBitmap {
+			bitmapOff := false
+			action.Bitmap = &bitmapOff
+			changed = true
+		}
+	}
+
+	if changed {
+		res = append(res, action)
+	}
+	return
 }
 
 func computeNetOptionsAction(resourceName string, iPeer IntendedPeer, allowTwoPrimaries bool) (res DRBDActions) {

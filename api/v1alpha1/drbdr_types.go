@@ -26,6 +26,7 @@ import (
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=drbdr
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
+// +kubebuilder:selectablefield:JSONPath=.spec.nodeName
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=".status.activeConfiguration.state"
 // +kubebuilder:printcolumn:name="Configured",type=string,JSONPath=".status.conditions[?(@.type=='Configured')].status"
@@ -37,8 +38,9 @@ import (
 // +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='Configured')].message"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName) > 0 : !has(self.spec.lvmLogicalVolumeName) || size(self.spec.lvmLogicalVolumeName) == 0",message="lvmLogicalVolumeName is required when type is Diskful and must be empty when type is Diskless"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.size) : !has(self.spec.size)",message="size is required when type is Diskful and must be empty when type is Diskless"
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf.spec.size) || !has(self.spec.size) || self.spec.size >= oldSelf.spec.size",message="spec.size cannot be decreased"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.spec.size) || !has(self.spec.size) || !quantity(string(self.spec.size)).isLessThan(quantity(string(oldSelf.spec.size)))",message="spec.size cannot be decreased"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskless' ? !has(self.spec.nonVoting) || self.spec.nonVoting == false : true",message="nonVoting must be false (or unset) when type is Diskless"
+// +kubebuilder:validation:XValidation:rule="!has(self.spec.size) || (quantity(string(self.spec.size)).isInteger() && quantity(string(self.spec.size)).asInteger() % 4096 == 0)",message="spec.size must be a multiple of 4Ki (4096 bytes)"
 type DRBDResource struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`

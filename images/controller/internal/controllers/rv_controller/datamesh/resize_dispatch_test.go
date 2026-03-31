@@ -32,8 +32,8 @@ import (
 // mkRVRResizeReady creates an RVR that passes all resize guards:
 // Ready=True, BackingVolume with size and UpToDate state, peers Established,
 // DRBDConfigured=True.
-func mkRVRResizeReady(name, nodeName string, datameshRevision int64, bvSize resource.Quantity, peerNames ...string) *v1alpha1.ReplicatedVolumeReplica {
-	rvr := mkRVR(name, nodeName, datameshRevision)
+func mkRVRResizeReady(name, nodeName string, bvSize resource.Quantity, peerNames ...string) *v1alpha1.ReplicatedVolumeReplica {
+	rvr := mkRVR(name, nodeName, 5)
 	rvr.Generation = 1
 	rvr.Status.Quorum = ptr.To(true)
 	rvr.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
@@ -91,8 +91,8 @@ var _ = Describe("ResizeVolume dispatch", func() {
 				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
 			}, nil)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVRResizeReady("rv-1-0", "node-1", 5, bvSize, "rv-1-1"),
-			mkRVRResizeReady("rv-1-1", "node-2", 5, bvSize, "rv-1-0"),
+			mkRVRResizeReady("rv-1-0", "node-1", bvSize, "rv-1-1"),
+			mkRVRResizeReady("rv-1-1", "node-2", bvSize, "rv-1-0"),
 		}
 		settleEffectiveLayout(rv, rvrs)
 
@@ -111,7 +111,7 @@ var _ = Describe("ResizeVolume dispatch", func() {
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
 			}, nil)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVRResizeReady("rv-1-0", "node-1", 5, bvSize),
+			mkRVRResizeReady("rv-1-0", "node-1", bvSize),
 		}
 		settleEffectiveLayout(rv, rvrs)
 
@@ -131,8 +131,8 @@ var _ = Describe("ResizeVolume dispatch", func() {
 				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
 			}, nil)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVRResizeReady("rv-1-0", "node-1", 5, bvSize, "rv-1-1"),
-			mkRVRResizeReady("rv-1-1", "node-2", 5, bvSize, "rv-1-0"),
+			mkRVRResizeReady("rv-1-0", "node-1", bvSize, "rv-1-1"),
+			mkRVRResizeReady("rv-1-1", "node-2", bvSize, "rv-1-0"),
 		}
 
 		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
@@ -143,6 +143,47 @@ var _ = Describe("ResizeVolume dispatch", func() {
 		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("resize/v1"))
 		Expect(rv.Status.Datamesh.Size.Equal(specSize)).To(BeTrue())
 		Expect(rv.Status.DatameshRevision).To(Equal(int64(6)))
+	})
+
+	It("dispatch: non-4Ki-aligned spec.Size is rounded up in datamesh.size", func() {
+		specSize := *resource.NewQuantity(10*1024*1024*1024+1, resource.BinarySI)
+		alignedSpec := drbd_size.AlignTo4Ki(specSize)
+		datameshSize := resource.MustParse("5Gi")
+		bvSize := drbd_size.LowerVolumeSize(alignedSpec)
+		rv := mkResizeRV(specSize, datameshSize, 5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+			}, nil)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRResizeReady("rv-1-0", "node-1", bvSize),
+		}
+
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.Datamesh.Size.Equal(alignedSpec)).To(BeTrue(),
+			"datamesh.size should be spec.size rounded up to 4Ki")
+		Expect(rv.Status.Datamesh.Size.Value()%4096).To(Equal(int64(0)),
+			"datamesh.size must be 4Ki-aligned")
+	})
+
+	It("skip: non-4Ki-aligned spec.Size rounds up to current datamesh.Size", func() {
+		specSize := *resource.NewQuantity(10*1024*1024*1024-1, resource.BinarySI)
+		datameshSize := resource.MustParse("10Gi")
+		bvSize := drbd_size.LowerVolumeSize(datameshSize)
+		rv := mkResizeRV(specSize, datameshSize, 5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+			}, nil)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRResizeReady("rv-1-0", "node-1", bvSize),
+		}
+		settleEffectiveLayout(rv, rvrs)
+
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeFalse())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 	})
 })
 
@@ -189,8 +230,8 @@ var _ = Describe("ResizeVolume guards", func() {
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
 				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
 			}, nil)
-		rvr0 := mkRVRResizeReady("rv-1-0", "node-1", 5, bvSize, "rv-1-1")
-		rvr1 := mkRVRResizeReady("rv-1-1", "node-2", 5, bvSize, "rv-1-0")
+		rvr0 := mkRVRResizeReady("rv-1-0", "node-1", bvSize, "rv-1-1")
+		rvr1 := mkRVRResizeReady("rv-1-1", "node-2", bvSize, "rv-1-0")
 		// Override peer replication state to SyncTarget on rvr1.
 		rvr1.Status.Peers[0].ReplicationState = v1alpha1.ReplicationStateSyncTarget
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{rvr0, rvr1}
@@ -211,7 +252,7 @@ var _ = Describe("ResizeVolume guards", func() {
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
 			}, nil)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVRResizeReady("rv-1-0", "node-1", 5, smallBvSize),
+			mkRVRResizeReady("rv-1-0", "node-1", smallBvSize),
 		}
 
 		ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
@@ -237,8 +278,8 @@ var _ = Describe("ResizeVolume settle", func() {
 				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
 			}, nil)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVRResizeReady("rv-1-0", "node-1", 5, bvSize, "rv-1-1"),
-			mkRVRResizeReady("rv-1-1", "node-2", 5, bvSize, "rv-1-0"),
+			mkRVRResizeReady("rv-1-0", "node-1", bvSize, "rv-1-1"),
+			mkRVRResizeReady("rv-1-1", "node-2", bvSize, "rv-1-0"),
 		}
 
 		// First call: dispatch.
@@ -251,7 +292,7 @@ var _ = Describe("ResizeVolume settle", func() {
 		// rvrs[1] stays at 5
 
 		// Second call: settle — partial.
-		changed, _ = ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+		_, _ = ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
 
 		// Transition still active (not all confirmed).
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
@@ -268,8 +309,8 @@ var _ = Describe("ResizeVolume settle", func() {
 				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
 			}, nil)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVRResizeReady("rv-1-0", "node-1", 5, bvSize, "rv-1-1"),
-			mkRVRResizeReady("rv-1-1", "node-2", 5, bvSize, "rv-1-0"),
+			mkRVRResizeReady("rv-1-0", "node-1", bvSize, "rv-1-1"),
+			mkRVRResizeReady("rv-1-1", "node-2", bvSize, "rv-1-0"),
 		}
 
 		// Dispatch.
@@ -304,8 +345,8 @@ var _ = Describe("ResizeVolume e2e", func() {
 				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
 			}, nil)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVRResizeReady("rv-1-0", "node-1", 5, bvSize, "rv-1-1"),
-			mkRVRResizeReady("rv-1-1", "node-2", 5, bvSize, "rv-1-0"),
+			mkRVRResizeReady("rv-1-0", "node-1", bvSize, "rv-1-1"),
+			mkRVRResizeReady("rv-1-1", "node-2", bvSize, "rv-1-0"),
 		}
 
 		runSettleLoop(rv, nil, rvrs, nil, FeatureFlags{}, nil, nil)
@@ -346,8 +387,8 @@ var _ = Describe("ResizeVolume concurrency", func() {
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{addT},
 		)
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVRResizeReady("rv-1-0", "node-1", 5, bvSize, "rv-1-1"),
-			mkRVRResizeReady("rv-1-1", "node-2", 5, bvSize, "rv-1-0"),
+			mkRVRResizeReady("rv-1-0", "node-1", bvSize, "rv-1-1"),
+			mkRVRResizeReady("rv-1-1", "node-2", bvSize, "rv-1-0"),
 			mkRVR("rv-1-2", "node-3", 5),
 		}
 
@@ -385,8 +426,8 @@ var _ = Describe("ResizeVolume concurrency", func() {
 			mkJoinRequestD("rv-1-2"),
 		}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVRResizeReady("rv-1-0", "node-1", 5, bvSize, "rv-1-1"),
-			mkRVRResizeReady("rv-1-1", "node-2", 5, bvSize, "rv-1-0"),
+			mkRVRResizeReady("rv-1-0", "node-1", bvSize, "rv-1-1"),
+			mkRVRResizeReady("rv-1-1", "node-2", bvSize, "rv-1-0"),
 			mkRVR("rv-1-2", "node-3", 0),
 		}
 

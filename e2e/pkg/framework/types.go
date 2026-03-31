@@ -17,6 +17,8 @@ limitations under the License.
 package framework
 
 import (
+	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -32,12 +34,17 @@ var (
 	gvkRSC   = v1alpha1.SchemeGroupVersion.WithKind("ReplicatedStorageClass")
 	gvkRSP   = v1alpha1.SchemeGroupVersion.WithKind("ReplicatedStoragePool")
 	gvkLLV   = snc.SchemeGroupVersion.WithKind("LVMLogicalVolume")
+	gvkNS    = corev1.SchemeGroupVersion.WithKind("Namespace")
+	gvkSC    = storagev1.SchemeGroupVersion.WithKind("StorageClass")
 )
 
-// e2eTypes returns the object types managed by e2e tests, in the order
-// they should be deleted (attachments first, then volumes, etc.).
+// e2eTypes returns cluster-scoped object types managed by e2e tests, plus
+// Namespace. Namespaced objects are NOT listed here — they are cascade-deleted
+// when the owning Namespace is removed. Order matters: Namespace first
+// (cascade cleans contents), then attachments, volumes, etc.
 func e2eTypes() []client.Object {
 	return []client.Object{
+		&corev1.Namespace{},
 		&v1alpha1.ReplicatedVolumeAttachment{},
 		&v1alpha1.ReplicatedVolume{},
 		&v1alpha1.ReplicatedVolumeReplica{},
@@ -47,9 +54,10 @@ func e2eTypes() []client.Object {
 	}
 }
 
-// e2eListTypes returns fresh ObjectList instances for each e2e-managed type.
+// e2eListTypes returns fresh ObjectList instances matching e2eTypes.
 func e2eListTypes() []client.ObjectList {
 	return []client.ObjectList{
+		&corev1.NamespaceList{},
 		&v1alpha1.ReplicatedVolumeAttachmentList{},
 		&v1alpha1.ReplicatedVolumeList{},
 		&v1alpha1.ReplicatedVolumeReplicaList{},

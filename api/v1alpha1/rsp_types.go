@@ -31,6 +31,7 @@ import (
 // +kubebuilder:metadata:labels=heritage=deckhouse
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:metadata:labels=backup.deckhouse.io/cluster-config=true
+// +kubebuilder:selectablefield:JSONPath=.status.phase
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,description="The age of this resource"

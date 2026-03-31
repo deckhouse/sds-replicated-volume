@@ -106,6 +106,9 @@ type IntendedPeer interface {
 	// NodeID returns the peer's node ID.
 	NodeID() uint8
 
+	// Type returns the peer's resource type (Diskful or Diskless).
+	Type() v1alpha1.DRBDResourceType
+
 	// Protocol returns the replication protocol (A, B, or C).
 	Protocol() v1alpha1.DRBDProtocol
 
@@ -196,12 +199,23 @@ func (s *intendedDRBDState) DiscardZeroesIfAligned() bool { return true }
 func (s *intendedDRBDState) RsDiscardGranularity() uint   { return s.rsDiscardGranularity }
 func (s *intendedDRBDState) NonVoting() bool              { return s.nonVoting }
 
+// Peer-device resync controller defaults.
+// Optimized for 10 Gbps network, up to 500 DRBD devices per node.
+const (
+	DefaultCPlanAhead   = "20"      // 2.0 s planning horizon
+	DefaultCDelayTarget = "1"       // 100 ms added latency target (minimum granularity)
+	DefaultCFillTarget  = "4096s"   // 2 MB in-flight data (4096 sectors x 512 bytes)
+	DefaultCMaxRate     = "625000k" // 5 Gbps (half of 10G link)
+	DefaultCMinRate     = "12500k"  // 100 Mbps minimum forward progress
+)
+
 var _ IntendedDRBDState = (*intendedDRBDState)(nil)
 
 // intendedPeer implements IntendedPeer with pre-computed values.
 type intendedPeer struct {
 	name            string
 	nodeID          uint8
+	peerType        v1alpha1.DRBDResourceType
 	protocol        v1alpha1.DRBDProtocol
 	sharedSecret    string
 	sharedSecretAlg v1alpha1.SharedSecretAlg
@@ -211,6 +225,7 @@ type intendedPeer struct {
 
 func (p *intendedPeer) Name() string                              { return p.name }
 func (p *intendedPeer) NodeID() uint8                             { return p.nodeID }
+func (p *intendedPeer) Type() v1alpha1.DRBDResourceType           { return p.peerType }
 func (p *intendedPeer) Protocol() v1alpha1.DRBDProtocol           { return p.protocol }
 func (p *intendedPeer) SharedSecret() string                      { return p.sharedSecret }
 func (p *intendedPeer) SharedSecretAlg() v1alpha1.SharedSecretAlg { return p.sharedSecretAlg }
@@ -283,6 +298,7 @@ func computeIntendedDRBDState(
 		peers = append(peers, &intendedPeer{
 			name:            peer.Name,
 			nodeID:          peer.NodeID,
+			peerType:        peer.Type,
 			protocol:        peer.Protocol,
 			sharedSecret:    peer.SharedSecret,
 			sharedSecretAlg: peer.SharedSecretAlg,

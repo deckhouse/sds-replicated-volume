@@ -154,6 +154,21 @@ type ActualPeer interface {
 	// VerifyAlg returns the online-verify hash algorithm.
 	VerifyAlg() string
 
+	// Bitmap returns the peer-device bitmap setting for volume 0.
+	// Returns nil when show data is unavailable or the peer has no volumes.
+	Bitmap() *bool
+
+	// CPlanAhead returns the c-plan-ahead peer-device option for volume 0.
+	CPlanAhead() string
+	// CDelayTarget returns the c-delay-target peer-device option for volume 0.
+	CDelayTarget() string
+	// CFillTarget returns the c-fill-target peer-device option for volume 0.
+	CFillTarget() string
+	// CMaxRate returns the c-max-rate peer-device option for volume 0.
+	CMaxRate() string
+	// CMinRate returns the c-min-rate peer-device option for volume 0.
+	CMinRate() string
+
 	// Paths returns the network paths to this peer.
 	Paths() []ActualPath
 }
@@ -717,6 +732,56 @@ func (p *actualPeer) AllowRemoteRead() bool {
 func (p *actualPeer) VerifyAlg() string {
 	if p.showConnection != nil {
 		return p.showConnection.Net.VerifyAlg
+	}
+	return ""
+}
+
+func (p *actualPeer) Bitmap() *bool {
+	if p.showConnection != nil && len(p.showConnection.Volumes) > 0 {
+		b := p.showConnection.Volumes[0].Disk.Bitmap
+		return &b
+	}
+	return nil
+}
+
+func (p *actualPeer) peerDeviceDisk() *drbdutils.ShowConnectionVolumeDisk {
+	if p.showConnection != nil && len(p.showConnection.Volumes) > 0 {
+		return &p.showConnection.Volumes[0].Disk
+	}
+	return nil
+}
+
+func (p *actualPeer) CPlanAhead() string {
+	if d := p.peerDeviceDisk(); d != nil {
+		return d.CPlanAhead
+	}
+	return ""
+}
+
+func (p *actualPeer) CDelayTarget() string {
+	if d := p.peerDeviceDisk(); d != nil {
+		return d.CDelayTarget
+	}
+	return ""
+}
+
+func (p *actualPeer) CFillTarget() string {
+	if d := p.peerDeviceDisk(); d != nil {
+		return d.CFillTarget
+	}
+	return ""
+}
+
+func (p *actualPeer) CMaxRate() string {
+	if d := p.peerDeviceDisk(); d != nil {
+		return d.CMaxRate
+	}
+	return ""
+}
+
+func (p *actualPeer) CMinRate() string {
+	if d := p.peerDeviceDisk(); d != nil {
+		return d.CMinRate
 	}
 	return ""
 }

@@ -25,7 +25,7 @@ import (
 var (
 	ErrConnectDiscardNotAllowed   = errors.New("discard-my-data not allowed when primary")
 	ErrConnectResourceNotFound    = errors.New("resource not found")
-	ErrConnectNeedStandalone      = errors.New("need to be standalone")
+	ErrConnectNetConfigured       = errors.New("connection already configured")
 	ErrDisconnectResourceNotFound = errors.New("resource not found")
 )
 
@@ -40,7 +40,7 @@ var ConnectArgs = func(resource string, peerNodeID uint8) []string {
 var ConnectKnownErrors = []KnownError{
 	{ExitCode: 10, OutputSubstring: "(123)", JoinErr: ErrConnectDiscardNotAllowed},
 	{ExitCode: 10, OutputSubstring: "(158)", JoinErr: ErrConnectResourceNotFound},
-	{ExitCode: 10, OutputSubstring: "(125)", JoinErr: ErrConnectNeedStandalone},
+	{ExitCode: 10, OutputSubstring: "(125)", JoinErr: ErrConnectNetConfigured},
 }
 
 // ExecuteConnect establishes connection to a peer.

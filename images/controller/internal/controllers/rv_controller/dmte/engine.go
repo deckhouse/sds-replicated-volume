@@ -572,12 +572,14 @@ func (e *Engine[G, R, C]) dispatchOne(
 		return nil, msg
 	}
 
-	// Tracker admission. tempT is a stack-allocated stub with only the fields
-	// the Tracker needs (Type, Group, ReplicaName) to avoid a heap allocation.
+	// Tracker admission. tempT is a stack-allocated stub populated with
+	// Type, Group, ReplicaName, and Init metadata (e.g., ReplicaType,
+	// ToReplicaType) — everything the Tracker needs for admission decisions.
 	tempT := Transition{Type: p.transitionType, Group: p.group}
 	if p.scope == ReplicaScope && rctx != zeroR {
 		tempT.ReplicaName = rctx.Name()
 	}
+	p.callInit(e.cp.Global(), rctx, &tempT)
 	allowed, reason, det := e.tracker.CanAdmit(&tempT)
 	if !allowed {
 		msg := composeBlocked(p.displayName, reason)

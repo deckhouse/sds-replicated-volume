@@ -31,7 +31,7 @@ import (
 // +kubebuilder:printcolumn:name="Quorum",type=string,JSONPath=".status.conditions[?(@.type=='Quorum')].status"
 // +kubebuilder:printcolumn:name="Scheduled",type=string,JSONPath=".status.conditions[?(@.type=='Scheduled')].status"
 // +kubebuilder:printcolumn:name="Configured",type=string,JSONPath=".status.conditions[?(@.type=='Configured')].status"
-// +kubebuilder:printcolumn:name="Size",type=string,JSONPath=".spec.size"
+// +kubebuilder:printcolumn:name="Size",type=string,JSONPath=".status.size"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="ConfigurationReady",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='ConfigurationReady')].status"
 // +kubebuilder:printcolumn:name="SatisfyEligibleNodes",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='SatisfyEligibleNodes')].status"

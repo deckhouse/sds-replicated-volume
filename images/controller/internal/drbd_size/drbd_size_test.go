@@ -22,6 +22,38 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
+func TestAlignTo4Ki(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected int64
+	}{
+		{name: "already aligned 4Ki", input: "4Ki", expected: 4096},
+		{name: "already aligned 1Mi", input: "1Mi", expected: 1048576},
+		{name: "already aligned 1Gi", input: "1Gi", expected: 1073741824},
+		{name: "1 byte rounds up to 4Ki", input: "1", expected: 4096},
+		{name: "4095 rounds up to 4Ki", input: "4095", expected: 4096},
+		{name: "4097 rounds up to 8Ki", input: "4097", expected: 8192},
+		{name: "5000 rounds up to 8Ki", input: "5000", expected: 8192},
+		{name: "zero stays zero", input: "0", expected: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := resource.MustParse(tt.input)
+			result := AlignTo4Ki(input)
+			if result.Value() != tt.expected {
+				t.Errorf("AlignTo4Ki(%s) = %d, want %d",
+					input.String(), result.Value(), tt.expected)
+			}
+			if result.Value()%4096 != 0 {
+				t.Errorf("AlignTo4Ki(%s) = %d, not a multiple of 4096",
+					input.String(), result.Value())
+			}
+		})
+	}
+}
+
 func TestLowerVolumeSize(t *testing.T) {
 	tests := []struct {
 		name       string

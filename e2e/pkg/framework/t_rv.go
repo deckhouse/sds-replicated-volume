@@ -200,8 +200,24 @@ func (t *TestRV) buildObject(ctx context.Context) *v1alpha1.ReplicatedVolume {
 		if t.buildRSCName != "" {
 			rv.Spec.ReplicatedStorageClassName = t.buildRSCName
 		} else if t.f != nil {
-			rscName := t.f.getOrCreateRSC(ctx, t.rscCacheKey())
-			rv.Spec.ReplicatedStorageClassName = rscName
+			trsc := t.f.SharedRSC()
+			if t.buildFTT != nil {
+				trsc.FTT(*t.buildFTT)
+			}
+			if t.buildGMDR != nil {
+				trsc.GMDR(*t.buildGMDR)
+			}
+			if t.buildTopology != nil {
+				trsc.Topology(*t.buildTopology)
+			}
+			if t.buildAccess != nil {
+				trsc.VolumeAccess(*t.buildAccess)
+			}
+			if t.buildPoolType != nil {
+				trsc.StorageType(*t.buildPoolType)
+			}
+			trsc.CreateShared(ctx)
+			rv.Spec.ReplicatedStorageClassName = trsc.Name()
 		}
 	}
 	if t.f != nil {
@@ -219,32 +235,6 @@ func (t *TestRV) buildObject(ctx context.Context) *v1alpha1.ReplicatedVolume {
 		rv.SetAnnotations(ann)
 	}
 	return rv
-}
-
-// rscCacheKey builds the RSC cache key from builder fields,
-// using defaults for unset fields.
-func (t *TestRV) rscCacheKey() rscCacheKey {
-	key := rscCacheKey{
-		Topology:     v1alpha1.TopologyIgnored,
-		VolumeAccess: v1alpha1.VolumeAccessAny,
-		PoolType:     v1alpha1.ReplicatedStoragePoolTypeLVMThin,
-	}
-	if t.buildFTT != nil {
-		key.FTT = *t.buildFTT
-	}
-	if t.buildGMDR != nil {
-		key.GMDR = *t.buildGMDR
-	}
-	if t.buildTopology != nil {
-		key.Topology = *t.buildTopology
-	}
-	if t.buildAccess != nil {
-		key.VolumeAccess = *t.buildAccess
-	}
-	if t.buildPoolType != nil {
-		key.PoolType = *t.buildPoolType
-	}
-	return key
 }
 
 // Attach creates a TestRVA for this RV on the given node. The RVA receives

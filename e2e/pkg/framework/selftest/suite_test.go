@@ -32,12 +32,12 @@ var (
 )
 
 func init() {
-	flag.BoolVar(&selfTests, "self-tests", false, "run framework self-tests")
+	flag.BoolVar(&selfTests, "self-test", false, "run framework self-tests")
 }
 
 func TestSelfTest(t *testing.T) {
 	if !selfTests {
-		t.Skip("framework self-tests disabled (use -args --self-tests)")
+		t.Skip("framework self-tests disabled (use -args --self-test)")
 		return
 	}
 	f = fw.Setup()
