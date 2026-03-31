@@ -472,7 +472,7 @@ For migration support: if an existing LLV is already referenced by DRBDResource 
 
 ### Size source
 
-The backing volume size is taken as `max(rv.Spec.Size, rv.Status.Datamesh.Size)` (after DRBD overhead adjustment). During resize, datamesh will lag behind spec until all backing volumes are ready, so we take the maximum for correctness.
+The backing volume size is taken as `max(AlignTo4Ki(rv.Spec.Size), AlignTo4Ki(rv.Status.Datamesh.Size))` (after DRBD overhead adjustment). Both values are rounded up to 4Ki (4096 bytes) because DRBD requires 4Ki-aligned usable sizes. During resize, datamesh will lag behind spec until all backing volumes are ready, so we take the maximum for correctness.
 
 ### Lifecycle
 
