@@ -75,7 +75,7 @@ func guardNoActiveResync(gctx *globalContext) dmte.GuardResult {
 // This guard ensures that all LVMs have finished growing before the resize
 // transition starts, so the transition only waits for the fast DRBD resize.
 func guardBackingVolumesGrown(gctx *globalContext) dmte.GuardResult {
-	targetLowerSize := drbd_size.LowerVolumeSize(gctx.size)
+	targetLowerSize := drbd_size.LowerVolumeSize(drbd_size.AlignTo4Ki(gctx.size))
 
 	for i := range gctx.allReplicas {
 		rc := &gctx.allReplicas[i]

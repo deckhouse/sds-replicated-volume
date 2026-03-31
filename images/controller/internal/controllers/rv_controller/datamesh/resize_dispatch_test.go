@@ -144,6 +144,47 @@ var _ = Describe("ResizeVolume dispatch", func() {
 		Expect(rv.Status.Datamesh.Size.Equal(specSize)).To(BeTrue())
 		Expect(rv.Status.DatameshRevision).To(Equal(int64(6)))
 	})
+
+	It("dispatch: non-4Ki-aligned spec.Size is rounded up in datamesh.size", func() {
+		specSize := *resource.NewQuantity(10*1024*1024*1024+1, resource.BinarySI)
+		alignedSpec := drbd_size.AlignTo4Ki(specSize)
+		datameshSize := resource.MustParse("5Gi")
+		bvSize := drbd_size.LowerVolumeSize(alignedSpec)
+		rv := mkResizeRV(specSize, datameshSize, 5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+			}, nil)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRResizeReady("rv-1-0", "node-1", bvSize),
+		}
+
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.Datamesh.Size.Equal(alignedSpec)).To(BeTrue(),
+			"datamesh.size should be spec.size rounded up to 4Ki")
+		Expect(rv.Status.Datamesh.Size.Value()%4096).To(Equal(int64(0)),
+			"datamesh.size must be 4Ki-aligned")
+	})
+
+	It("skip: non-4Ki-aligned spec.Size rounds up to current datamesh.Size", func() {
+		specSize := *resource.NewQuantity(10*1024*1024*1024-1, resource.BinarySI)
+		datameshSize := resource.MustParse("10Gi")
+		bvSize := drbd_size.LowerVolumeSize(datameshSize)
+		rv := mkResizeRV(specSize, datameshSize, 5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+			}, nil)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRResizeReady("rv-1-0", "node-1", bvSize),
+		}
+		settleEffectiveLayout(rv, rvrs)
+
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeFalse())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+	})
 })
 
 // ──────────────────────────────────────────────────────────────────────────────

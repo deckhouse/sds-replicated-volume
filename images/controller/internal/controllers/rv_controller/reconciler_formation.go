@@ -166,7 +166,7 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 		//
 		rv.Status.DatameshRevision = 1
 		rv.Status.Datamesh.SystemNetworkNames = rsp.SystemNetworkNames
-		rv.Status.Datamesh.Size = rv.Spec.Size
+		rv.Status.Datamesh.Size = drbd_size.AlignTo4Ki(rv.Spec.Size)
 
 		step.DatameshRevision = rv.Status.DatameshRevision
 		applyDatameshTransitionStepMessage(step, "Starting preconfigure")
@@ -909,7 +909,7 @@ func (r *Reconciler) reconcileAdoptStepVerifyPrerequisites(
 	if created {
 		rv.Status.DatameshRevision = 1
 		rv.Status.Datamesh.SystemNetworkNames = rsp.SystemNetworkNames
-		rv.Status.Datamesh.Size = rv.Spec.Size
+		rv.Status.Datamesh.Size = drbd_size.AlignTo4Ki(rv.Spec.Size)
 
 		step.DatameshRevision = rv.Status.DatameshRevision
 		applyDatameshTransitionStepMessage(step, "Starting adopt: waiting for pre-existing replicas")
