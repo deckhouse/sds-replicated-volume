@@ -618,6 +618,11 @@ func (in *DRBDResourceStatus) DeepCopyInto(out *DRBDResourceStatus) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.MetadataNodeID != nil {
+		in, out := &in.MetadataNodeID, &out.MetadataNodeID
+		*out = new(uint8)
+		**out = **in
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]v1.Condition, len(*in))
