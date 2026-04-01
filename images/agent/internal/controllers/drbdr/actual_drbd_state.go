@@ -873,6 +873,8 @@ func observeActualDiskState(ctx context.Context, state *actualState, intendedBac
 
 	if diskAttached {
 		state.hasMetadata = true
+		nid := uint8(state.NodeID())
+		state.metadataNodeID = &nid
 		if statusDeviceUUID == "" {
 			diskUUID, err := drbdutils.ExecuteReadDevUUID(ctx, intendedBackingDev)
 			if err != nil {
