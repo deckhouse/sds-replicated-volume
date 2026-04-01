@@ -39,6 +39,7 @@ import (
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? (has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName) > 0) || (has(self.spec.lvmLogicalVolumeSnapshotName) && size(self.spec.lvmLogicalVolumeSnapshotName) > 0) : (!has(self.spec.lvmLogicalVolumeName) || size(self.spec.lvmLogicalVolumeName) == 0) && (!has(self.spec.lvmLogicalVolumeSnapshotName) || size(self.spec.lvmLogicalVolumeSnapshotName) == 0)",message="Diskful requires either lvmLogicalVolumeName or lvmLogicalVolumeSnapshotName; Diskless requires both to be empty"
 // +kubebuilder:validation:XValidation:rule="!(has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName) > 0 && has(self.spec.lvmLogicalVolumeSnapshotName) && size(self.spec.lvmLogicalVolumeSnapshotName) > 0)",message="lvmLogicalVolumeName and lvmLogicalVolumeSnapshotName are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!self.spec.preserveExistingMetadata || (has(self.spec.lvmLogicalVolumeSnapshotName) && size(self.spec.lvmLogicalVolumeSnapshotName) > 0)",message="preserveExistingMetadata requires lvmLogicalVolumeSnapshotName to be set"
+// +kubebuilder:validation:XValidation:rule="self.spec.preserveExistingMetadata || self.spec.nodeID == oldSelf.spec.nodeID",message="nodeID is immutable unless preserveExistingMetadata is set"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.size) : !has(self.spec.size)",message="size is required when type is Diskful and must be empty when type is Diskless"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.spec.size) || !has(self.spec.size) || !quantity(string(self.spec.size)).isLessThan(quantity(string(oldSelf.spec.size)))",message="spec.size cannot be decreased"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskless' ? !has(self.spec.nonVoting) || self.spec.nonVoting == false : true",message="nonVoting must be false (or unset) when type is Diskless"
@@ -153,7 +154,6 @@ type DRBDResourceSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=31
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeID is immutable"
 	NodeID uint8 `json:"nodeID"`
 
 	// +listType=map
@@ -295,6 +295,16 @@ type DRBDResourceStatus struct {
 
 	// +optional
 	Quorum *bool `json:"quorum,omitempty"`
+
+	// MetadataNodeID is the node-id read from existing DRBD on-disk metadata.
+	// Populated by the agent when preserveExistingMetadata is true and
+	// the backing device contains valid DRBD metadata.
+	// The controller uses this value to reconcile spec.nodeID when it
+	// diverges from the on-disk metadata.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=31
+	// +optional
+	MetadataNodeID *uint8 `json:"metadataNodeID,omitempty"`
 
 	// DeviceUUID is a 16-digit uppercase hexadecimal identifier that binds this
 	// DRBDResource to specific physical DRBD metadata on the backing device.

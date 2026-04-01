@@ -44,6 +44,7 @@ func registerSyncPlans(reg *dmte.Registry[*globalContext, *replicaContext]) {
 		DisplayName("Synchronizing snapshot").
 		Steps(
 			dmte.ReplicaStep("Create resource", applyBumpRevision, confirmCreate),
+			dmte.ReplicaStep("Verify node ID", applyNoop, confirmVerifyNodeID),
 			dmte.ReplicaStep("Wait addresses", applyNoop, confirmWaitAddresses),
 			dmte.ReplicaStep("Wire peers", applyNoop, confirmWirePeers),
 			dmte.ReplicaStep("Wait sync", applyNoop, confirmWaitSync),
@@ -128,10 +129,45 @@ func confirmCreate(gctx *globalContext, rctx *replicaContext, _ int64) dmte.Conf
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Step 2: Wait addresses
+// Step 2: Verify node ID
+//
+// Waits for the agent to report status.metadataNodeID. If it differs from
+// spec.nodeID, patches spec.nodeID to match. Confirmed once they are equal.
+// This step runs per-replica (MustConfirm = self only).
+//
+
+func confirmVerifyNodeID(gctx *globalContext, rctx *replicaContext, _ int64) dmte.ConfirmResult {
+	must := idset.Of(rctx.id)
+
+	if rctx.drbdr == nil {
+		return dmte.ConfirmResult{MustConfirm: must}
+	}
+
+	metaNID := rctx.drbdr.Status.MetadataNodeID
+	if metaNID == nil {
+		return dmte.ConfirmResult{MustConfirm: must}
+	}
+
+	if *metaNID == rctx.drbdr.Spec.NodeID {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
+	}
+
+	base := rctx.drbdr.DeepCopy()
+	rctx.drbdr.Spec.NodeID = *metaNID
+	patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
+	if err := gctx.cl.Patch(gctx.ctx, rctx.drbdr, patch); err != nil {
+		rctx.drbdr.Spec.NodeID = base.Spec.NodeID
+		return dmte.ConfirmResult{MustConfirm: must}
+	}
+
+	return dmte.ConfirmResult{MustConfirm: must}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Step 3: Wait addresses
 //
 // Blocks until ALL replicas have allocated DRBD addresses.
-// MustConfirm = all replica IDs, so all transitions advance to step 3
+// MustConfirm = all replica IDs, so all transitions advance to step 4
 // simultaneously, guaranteeing all addresses are available for peer wiring.
 //
 
@@ -148,7 +184,7 @@ func confirmWaitAddresses(gctx *globalContext, _ *replicaContext, _ int64) dmte.
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Step 3: Wire peers
+// Step 4: Wire peers
 //
 // Patches this replica's DRBDResource with peer connections to all other
 // replicas. I/O is in confirm so it retries if the patch fails.
@@ -190,7 +226,7 @@ func confirmWirePeers(gctx *globalContext, rctx *replicaContext, _ int64) dmte.C
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Step 4: Wait sync
+// Step 5: Wait sync
 //
 // Blocks until ALL replicas report UpToDate disk state and all peers are
 // UpToDate. MustConfirm = all, so all transitions advance to cleanup together.
@@ -209,7 +245,7 @@ func confirmWaitSync(gctx *globalContext, _ *replicaContext, _ int64) dmte.Confi
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Step 5: Cleanup
+// Step 6: Cleanup
 //
 // Deletes the temporary sync DRBDResource. I/O is in confirm so it retries
 // if deletion fails. Returns confirmed once the DRBDResource is gone.
