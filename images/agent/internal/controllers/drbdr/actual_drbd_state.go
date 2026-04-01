@@ -419,7 +419,9 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 		status.DeviceUUID = aState.diskDeviceUUID
 	}
 
-	status.MetadataNodeID = aState.metadataNodeID
+	if aState.metadataNodeID != nil {
+		status.MetadataNodeID = aState.metadataNodeID
+	}
 
 	return err
 }
