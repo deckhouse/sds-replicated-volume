@@ -96,6 +96,11 @@ type IntendedDRBDState interface {
 
 	// NonVoting returns the intended non-voting setting. Read from spec.
 	NonVoting() bool
+
+	// PreserveExistingMetadata returns true when the agent should keep
+	// existing DRBD metadata on the backing device (bitmap + activity log)
+	// instead of running create-md --force.
+	PreserveExistingMetadata() bool
 }
 
 // IntendedPeer represents the intended state of a DRBD peer connection.
@@ -166,6 +171,7 @@ type intendedDRBDState struct {
 	sizeBytes               int64
 	peers                   []IntendedPeer
 	statusDeviceUUID        string
+	preserveExistingMeta    bool
 }
 
 func (s *intendedDRBDState) IsZero() bool              { return s == nil }
@@ -176,14 +182,15 @@ func (s *intendedDRBDState) NodeID() uint8             { return s.nodeID }
 func (s *intendedDRBDState) Type() v1alpha1.DRBDResourceType {
 	return s.resourceType
 }
-func (s *intendedDRBDState) BackingDisk() string           { return s.backingDisk }
-func (s *intendedDRBDState) Quorum() byte                  { return s.quorum }
-func (s *intendedDRBDState) QuorumMinimumRedundancy() byte { return s.quorumMinimumRedundancy }
-func (s *intendedDRBDState) AllowTwoPrimaries() bool       { return s.allowTwoPrimaries }
-func (s *intendedDRBDState) Role() v1alpha1.DRBDRole       { return s.role }
-func (s *intendedDRBDState) Size() int64                   { return s.sizeBytes }
-func (s *intendedDRBDState) Peers() []IntendedPeer         { return s.peers }
-func (s *intendedDRBDState) StatusDeviceUUID() string      { return s.statusDeviceUUID }
+func (s *intendedDRBDState) BackingDisk() string            { return s.backingDisk }
+func (s *intendedDRBDState) Quorum() byte                   { return s.quorum }
+func (s *intendedDRBDState) QuorumMinimumRedundancy() byte  { return s.quorumMinimumRedundancy }
+func (s *intendedDRBDState) AllowTwoPrimaries() bool        { return s.allowTwoPrimaries }
+func (s *intendedDRBDState) Role() v1alpha1.DRBDRole        { return s.role }
+func (s *intendedDRBDState) Size() int64                    { return s.sizeBytes }
+func (s *intendedDRBDState) Peers() []IntendedPeer          { return s.peers }
+func (s *intendedDRBDState) StatusDeviceUUID() string       { return s.statusDeviceUUID }
+func (s *intendedDRBDState) PreserveExistingMetadata() bool { return s.preserveExistingMeta }
 
 // Hardcoded resource options defaults
 func (s *intendedDRBDState) AutoPromote() bool                  { return false }
@@ -334,5 +341,6 @@ func computeIntendedDRBDState(
 		sizeBytes:               sizeBytes,
 		peers:                   peers,
 		statusDeviceUUID:        drbdr.Status.DeviceUUID,
+		preserveExistingMeta:    drbdr.Spec.PreserveExistingMetadata,
 	}
 }

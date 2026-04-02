@@ -27,6 +27,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -203,11 +204,23 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 	// Create missing diskful replicas only when there are no replicas being deleted or misplaced.
 	// This prevents zombie accumulation: we wait for all cleanup to finish before creating new ones.
 	if deleting.IsEmpty() && misplaced.IsEmpty() {
+		snapshotNodeName := ""
+		if rv.Spec.DataSource != nil && diskful.IsEmpty() {
+			nodeName, err := r.resolveSnapshotNodeName(rf.Ctx(), rv.Spec.DataSource.SnapshotName)
+			if err != nil {
+				return rf.Failf(err, "resolving snapshot node for clone")
+			}
+			snapshotNodeName = nodeName
+		}
+
 		for diskful.Len() < int(targetDiskfulCount) {
-			rvr, err := r.createDiskfulRVR(rf.Ctx(), rv, rvrs)
+			nodeName := ""
+			if snapshotNodeName != "" && diskful.IsEmpty() {
+				nodeName = snapshotNodeName
+			}
+			rvr, err := r.createRVR(rf.Ctx(), rv, rvrs, v1alpha1.ReplicaTypeDiskful, nodeName)
 			if err != nil {
 				if apierrors.IsAlreadyExists(err) {
-					// Stale cache: RVR was already created by a previous reconciliation. Requeue to pick it up.
 					rf.Log().Info("RVR already exists, requeueing")
 					return rf.DoneAndRequeue()
 				}
@@ -684,10 +697,13 @@ func (r *Reconciler) reconcileFormationStepBootstrapData(
 	// Single replica: no peers to synchronize with, always use clear-bitmap.
 	// Multiple replicas with thin provisioning: clear-bitmap (thin volumes don't need full resync).
 	// Multiple replicas with thick provisioning: force-resync (thick volumes require full data synchronization).
+	// Clone (DataSource set) with multiple replicas: always force-resync — the primary replica
+	// has data from the snapshot source, while other replicas have empty backing volumes.
 	singleReplica := dmDiskful.Len() == 1
+	isClone := rv.Spec.DataSource != nil
 	drbdrOpFormationParams := &v1alpha1.CreateNewUUIDParams{
-		ClearBitmap: singleReplica || rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVMThin,
-		ForceResync: !singleReplica && rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM,
+		ClearBitmap: singleReplica || (!isClone && rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVMThin),
+		ForceResync: !singleReplica && (isClone || rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM),
 	}
 
 	// Create DRBDResourceOperation for data bootstrap if it doesn't exist yet.
@@ -844,7 +860,6 @@ func (r *Reconciler) reconcileFormationRestartIfTimeoutPassed(
 
 	rf.Log().Error(fmt.Errorf("formation timed out after %s, restarting", elapsed.Truncate(time.Second)), "restarting formation")
 
-	// Delete formation DRBDResourceOperation if it exists.
 	drbdrOpName := rv.Name + "-formation"
 	drbdrOp, err := r.getDRBDROp(rf.Ctx(), drbdrOpName)
 	if err != nil {
@@ -1390,4 +1405,40 @@ func applyFormationTransitionAbsent(rv *v1alpha1.ReplicatedVolume) bool {
 		}
 	}
 	return false
+}
+
+// resolveSnapshotNodeName finds a node that has a Ready RVRS for the given RVS.
+// It prefers the source RVRS (snapshot of the Primary replica) when available.
+func (r *Reconciler) resolveSnapshotNodeName(ctx context.Context, rvsName string) (string, error) {
+	rvs := &v1alpha1.ReplicatedVolumeSnapshot{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: rvsName}, rvs); err != nil {
+		return "", fmt.Errorf("getting RVS %q: %w", rvsName, err)
+	}
+
+	var rvrsList v1alpha1.ReplicatedVolumeReplicaSnapshotList
+	if err := r.cl.List(ctx, &rvrsList); err != nil {
+		return "", fmt.Errorf("listing RVRS: %w", err)
+	}
+
+	var fallbackNodeName string
+	for i := range rvrsList.Items {
+		rvrs := &rvrsList.Items[i]
+		if rvrs.Spec.ReplicatedVolumeSnapshotName != rvsName {
+			continue
+		}
+		if rvrs.Status.Phase != v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseReady || !rvrs.Status.ReadyToUse {
+			continue
+		}
+		if rvs.Status.SourceReplicaSnapshotName != "" && rvrs.Name == rvs.Status.SourceReplicaSnapshotName {
+			return rvrs.Spec.NodeName, nil
+		}
+		if fallbackNodeName == "" {
+			fallbackNodeName = rvrs.Spec.NodeName
+		}
+	}
+
+	if fallbackNodeName != "" {
+		return fallbackNodeName, nil
+	}
+	return "", fmt.Errorf("no ready RVRS found for snapshot %q", rvsName)
 }

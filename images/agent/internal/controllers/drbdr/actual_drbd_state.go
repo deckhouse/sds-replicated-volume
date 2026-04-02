@@ -40,6 +40,10 @@ type ActualNonAttachedDiskMetadata interface {
 	// DiskDeviceUUID returns the device-uuid from on-disk metadata (16 hex digits).
 	// Empty when metadata does not exist or device-uuid is zero.
 	DiskDeviceUUID() string
+
+	// MetadataNodeID returns the node-id from on-disk metadata.
+	// Nil when metadata does not exist or node-id could not be parsed.
+	MetadataNodeID() *uint8
 }
 
 // ActualDRBDState represents the actual DRBD state observed from the system.
@@ -190,11 +194,13 @@ type actualState struct {
 	show           *drbdutils.ShowResource
 	hasMetadata    bool
 	diskDeviceUUID string
+	metadataNodeID *uint8
 }
 
 func (aState *actualState) IsZero() bool           { return aState == nil }
 func (aState *actualState) HasMetadata() bool      { return aState.hasMetadata }
 func (aState *actualState) DiskDeviceUUID() string { return aState.diskDeviceUUID }
+func (aState *actualState) MetadataNodeID() *uint8 { return aState.metadataNodeID }
 
 func (aState *actualState) ResourceName() string {
 	if aState.status != nil {
@@ -411,6 +417,10 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 
 	if aState.diskDeviceUUID != "" && status.DeviceUUID == "" {
 		status.DeviceUUID = aState.diskDeviceUUID
+	}
+
+	if aState.metadataNodeID != nil {
+		status.MetadataNodeID = aState.metadataNodeID
 	}
 
 	return err
@@ -863,6 +873,8 @@ func observeActualDiskState(ctx context.Context, state *actualState, intendedBac
 
 	if diskAttached {
 		state.hasMetadata = true
+		nid := uint8(state.NodeID())
+		state.metadataNodeID = &nid
 		if statusDeviceUUID == "" {
 			diskUUID, err := drbdutils.ExecuteReadDevUUID(ctx, intendedBackingDev)
 			if err != nil {
@@ -881,11 +893,12 @@ func observeActualDiskState(ctx context.Context, state *actualState, intendedBac
 		checkMDMinor = uint(state.Volumes()[0].Minor())
 	}
 
-	hasMD, err := drbdutils.ExecuteCheckMD(ctx, checkMDMinor, intendedBackingDev)
+	hasMD, metaNodeID, err := drbdutils.ExecuteCheckMDWithMetadata(ctx, checkMDMinor, intendedBackingDev)
 	if err != nil {
 		return fmt.Errorf("probing backing device metadata: %w", err)
 	}
 	state.hasMetadata = hasMD
+	state.metadataNodeID = metaNodeID
 	if hasMD {
 		diskUUID, err := drbdutils.ExecuteReadDevUUID(ctx, intendedBackingDev)
 		if err != nil {

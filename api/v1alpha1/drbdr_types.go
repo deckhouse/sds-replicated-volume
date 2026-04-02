@@ -36,7 +36,10 @@ import (
 // +kubebuilder:printcolumn:name="Quorum",type=boolean,JSONPath=".status.quorum"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='Configured')].message"
-// +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName) > 0 : !has(self.spec.lvmLogicalVolumeName) || size(self.spec.lvmLogicalVolumeName) == 0",message="lvmLogicalVolumeName is required when type is Diskful and must be empty when type is Diskless"
+// +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? (has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName) > 0) || (has(self.spec.lvmLogicalVolumeSnapshotName) && size(self.spec.lvmLogicalVolumeSnapshotName) > 0) : (!has(self.spec.lvmLogicalVolumeName) || size(self.spec.lvmLogicalVolumeName) == 0) && (!has(self.spec.lvmLogicalVolumeSnapshotName) || size(self.spec.lvmLogicalVolumeSnapshotName) == 0)",message="Diskful requires either lvmLogicalVolumeName or lvmLogicalVolumeSnapshotName; Diskless requires both to be empty"
+// +kubebuilder:validation:XValidation:rule="!(has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName) > 0 && has(self.spec.lvmLogicalVolumeSnapshotName) && size(self.spec.lvmLogicalVolumeSnapshotName) > 0)",message="lvmLogicalVolumeName and lvmLogicalVolumeSnapshotName are mutually exclusive"
+// +kubebuilder:validation:XValidation:rule="!self.spec.preserveExistingMetadata || (has(self.spec.lvmLogicalVolumeSnapshotName) && size(self.spec.lvmLogicalVolumeSnapshotName) > 0)",message="preserveExistingMetadata requires lvmLogicalVolumeSnapshotName to be set"
+// +kubebuilder:validation:XValidation:rule="self.spec.preserveExistingMetadata || self.spec.nodeID == oldSelf.spec.nodeID",message="nodeID is immutable unless preserveExistingMetadata is set"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskful' ? has(self.spec.size) : !has(self.spec.size)",message="size is required when type is Diskful and must be empty when type is Diskless"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.spec.size) || !has(self.spec.size) || !quantity(string(self.spec.size)).isLessThan(quantity(string(oldSelf.spec.size)))",message="spec.size cannot be decreased"
 // +kubebuilder:validation:XValidation:rule="self.spec.type == 'Diskless' ? !has(self.spec.nonVoting) || self.spec.nonVoting == false : true",message="nonVoting must be false (or unset) when type is Diskless"
@@ -123,16 +126,35 @@ type DRBDResourceSpec struct {
 	// +optional
 	Type DRBDResourceType `json:"type,omitempty"`
 
-	// Required when type is Diskful, must be empty when type is Diskless.
+	// Required when type is Diskful (unless lvmLogicalVolumeSnapshotName is set),
+	// must be empty when type is Diskless.
+	// Mutually exclusive with lvmLogicalVolumeSnapshotName.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=128
 	// +optional
 	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName,omitempty"`
 
+	// LVMLogicalVolumeSnapshot name to use as the backing device.
+	// Mutually exclusive with lvmLogicalVolumeName.
+	// Used for snapshot sync: temporary DRBD resources are created on top of
+	// snapshot LVs to synchronize data across replicas.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	LVMLogicalVolumeSnapshotName string `json:"lvmLogicalVolumeSnapshotName,omitempty"`
+
+	// When true, the agent preserves existing DRBD metadata on the backing
+	// device instead of running create-md --force. This is used for snapshot
+	// sync where the snapshot LV already contains valid DRBD metadata
+	// (bitmaps, activity log) from the original volume.
+	// Only valid when lvmLogicalVolumeSnapshotName is set.
+	// +kubebuilder:default=false
+	// +optional
+	PreserveExistingMetadata bool `json:"preserveExistingMetadata,omitempty"`
+
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=31
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeID is immutable"
 	NodeID uint8 `json:"nodeID"`
 
 	// +listType=map
@@ -275,6 +297,16 @@ type DRBDResourceStatus struct {
 	// +optional
 	Quorum *bool `json:"quorum,omitempty"`
 
+	// MetadataNodeID is the node-id read from existing DRBD on-disk metadata.
+	// Populated by the agent when preserveExistingMetadata is true and
+	// the backing device contains valid DRBD metadata.
+	// The controller uses this value to reconcile spec.nodeID when it
+	// diverges from the on-disk metadata.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=31
+	// +optional
+	MetadataNodeID *uint8 `json:"metadataNodeID,omitempty"`
+
 	// DeviceUUID is a 16-digit uppercase hexadecimal identifier that binds this
 	// DRBDResource to specific physical DRBD metadata on the backing device.
 	// Format matches drbdmeta read-dev-uuid output. Set once after first
@@ -345,6 +377,13 @@ type DRBDResourceActiveConfiguration struct {
 	// +listType=set
 	// +optional
 	LLVFinalizersToRelease []string `json:"llvFinalizersToRelease,omitempty"`
+
+	// LLVSFinalizersToRelease lists LVMLogicalVolumeSnapshot names whose agent
+	// finalizer must be released. Same semantics as LLVFinalizersToRelease but
+	// for snapshot volumes used during snapshot sync.
+	// +listType=set
+	// +optional
+	LLVSFinalizersToRelease []string `json:"llvsFinalizersToRelease,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

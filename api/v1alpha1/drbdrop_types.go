@@ -52,7 +52,7 @@ type DRBDResourceOperationSpec struct {
 	DRBDResourceName string `json:"drbdResourceName"`
 
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=CreateNewUUID;ForcePrimary;Invalidate;Outdate;Verify;CreateSnapshot
+	// +kubebuilder:validation:Enum=CreateNewUUID;ForcePrimary;Invalidate;Outdate;Verify
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="type is immutable"
 	Type DRBDResourceOperationType `json:"type"`
 
@@ -60,6 +60,7 @@ type DRBDResourceOperationSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="createNewUUID is immutable"
 	// +optional
 	CreateNewUUID *CreateNewUUIDParams `json:"createNewUUID,omitempty"`
+
 }
 
 // +kubebuilder:object:generate=true
@@ -82,6 +83,10 @@ type DRBDResourceOperationStatus struct {
 	// +kubebuilder:validation:MaxLength=1024
 	// +optional
 	Message string `json:"message,omitempty"`
+
+	// +kubebuilder:validation:MaxLength=1024
+	// +optional
+	Result string `json:"result,omitempty"`
 
 	// +optional
 	StartedAt *metav1.Time `json:"startedAt,omitempty"`
@@ -127,6 +132,4 @@ const (
 	DRBDResourceOperationOutdate DRBDResourceOperationType = "Outdate"
 	// DRBDResourceOperationVerify verifies data consistency with peers.
 	DRBDResourceOperationVerify DRBDResourceOperationType = "Verify"
-	// DRBDResourceOperationCreateSnapshot creates a snapshot of the resource.
-	DRBDResourceOperationCreateSnapshot DRBDResourceOperationType = "CreateSnapshot"
 )

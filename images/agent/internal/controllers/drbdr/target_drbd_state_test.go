@@ -19,10 +19,131 @@ package drbdr
 import (
 	"testing"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
+type stubMetadata struct {
+	hasMetadata    bool
+	diskUUID       string
+	metadataNodeID *uint8
+}
+
+func (s stubMetadata) HasMetadata() bool      { return s.hasMetadata }
+func (s stubMetadata) DiskDeviceUUID() string { return s.diskUUID }
+func (s stubMetadata) MetadataNodeID() *uint8 { return s.metadataNodeID }
+
+func uintPtr(v uint) *uint { return &v }
 func boolPtr(v bool) *bool { return &v }
+
+func uint8Ptr(v uint8) *uint8 { return &v }
+
+func TestComputeAttachActions_PreserveMetadata(t *testing.T) {
+	minor := uintPtr(0)
+	dev := "/dev/vg/snap"
+
+	tests := []struct {
+		name             string
+		metadata         stubMetadata
+		statusUUID       string
+		preserveMetadata bool
+		nodeID           uint8
+		wantFirst        string
+		wantFail         bool
+	}{
+		{
+			name:             "preserve=true, metadata exists, nodeID matches -> ApplyAL only",
+			metadata:         stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234", metadataNodeID: uint8Ptr(0)},
+			statusUUID:       "",
+			preserveMetadata: true,
+			nodeID:           0,
+			wantFirst:        "ApplyALAction",
+		},
+		{
+			name:             "preserve=true, metadata exists, nodeID mismatch -> FailAction",
+			metadata:         stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234", metadataNodeID: uint8Ptr(2)},
+			statusUUID:       "",
+			preserveMetadata: true,
+			nodeID:           0,
+			wantFail:         true,
+		},
+		{
+			name:             "preserve=true, metadata exists, metadataNodeID nil -> ApplyAL",
+			metadata:         stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234"},
+			statusUUID:       "",
+			preserveMetadata: true,
+			nodeID:           0,
+			wantFirst:        "ApplyALAction",
+		},
+		{
+			name:             "preserve=true, no metadata -> CreateMetadata",
+			metadata:         stubMetadata{hasMetadata: false},
+			statusUUID:       "",
+			preserveMetadata: true,
+			nodeID:           0,
+			wantFirst:        "CreateMetadataAction",
+		},
+		{
+			name:             "preserve=false, metadata exists, no statusUUID -> CreateMetadata",
+			metadata:         stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234"},
+			statusUUID:       "",
+			preserveMetadata: false,
+			nodeID:           0,
+			wantFirst:        "CreateMetadataAction",
+		},
+		{
+			name:             "preserve=false, metadata exists, matching statusUUID -> ApplyAL",
+			metadata:         stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234"},
+			statusUUID:       "ABCD1234ABCD1234",
+			preserveMetadata: false,
+			nodeID:           0,
+			wantFirst:        "ApplyALAction",
+		},
+		{
+			name:             "preserve=false, no metadata, no statusUUID -> CreateMetadata",
+			metadata:         stubMetadata{hasMetadata: false},
+			statusUUID:       "",
+			preserveMetadata: false,
+			nodeID:           0,
+			wantFirst:        "CreateMetadataAction",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			actions := computeAttachActions(tc.metadata, tc.statusUUID, minor, dev, tc.preserveMetadata, tc.nodeID)
+
+			if len(actions) == 0 {
+				t.Fatal("got 0 actions, want at least 1")
+			}
+
+			if tc.wantFail {
+				if _, ok := actions[0].(FailAction); !ok {
+					t.Errorf("first action = %T, want FailAction", actions[0])
+				}
+				return
+			}
+
+			var firstType string
+			switch actions[0].(type) {
+			case ApplyALAction:
+				firstType = "ApplyALAction"
+			case CreateMetadataAction:
+				firstType = "CreateMetadataAction"
+			default:
+				firstType = "unknown"
+			}
+
+			if firstType != tc.wantFirst {
+				t.Errorf("first action = %s, want %s", firstType, tc.wantFirst)
+			}
+
+			last := actions[len(actions)-1]
+			if _, ok := last.(AttachAction); !ok {
+				t.Errorf("last action = %T, want AttachAction", last)
+			}
+		})
+	}
+}
 
 type stubIntendedPeer struct {
 	name     string
@@ -175,4 +296,25 @@ func TestComputePeerDeviceOptionsAction(t *testing.T) {
 			t.Errorf("expected bitmap=false, got %v", pdo.Bitmap)
 		}
 	})
+}
+
+func TestComputeAttachActions_PreserveMetadata_NoCreateMdNoWriteUUID(t *testing.T) {
+	minor := uintPtr(0)
+	dev := "/dev/vg/snap"
+	meta := stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234", metadataNodeID: uint8Ptr(0)}
+
+	actions := computeAttachActions(meta, "", minor, dev, true, 0)
+
+	for _, a := range actions {
+		switch a.(type) {
+		case CreateMetadataAction:
+			t.Error("preserve=true with metadata must not produce CreateMetadataAction")
+		case WriteDeviceUUIDAction:
+			t.Error("preserve=true with metadata must not produce WriteDeviceUUIDAction")
+		}
+	}
+
+	if len(actions) != 2 {
+		t.Errorf("len(actions) = %d, want 2 (ApplyAL + Attach)", len(actions))
+	}
 }

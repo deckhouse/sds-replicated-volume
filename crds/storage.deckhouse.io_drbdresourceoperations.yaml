@@ -87,7 +87,6 @@ spec:
                 - Invalidate
                 - Outdate
                 - Verify
-                - CreateSnapshot
                 type: string
                 x-kubernetes-validations:
                 - message: type is immutable
@@ -106,6 +105,9 @@ spec:
                 type: string
               phase:
                 description: DRBDOperationPhase represents the phase of a DRBD operation.
+                type: string
+              result:
+                maxLength: 1024
                 type: string
               startedAt:
                 format: date-time
