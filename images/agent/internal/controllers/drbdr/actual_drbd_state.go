@@ -816,10 +816,36 @@ func (p *actualPath) Established() bool {
 
 var _ ActualPath = &actualPath{}
 
-// observeActualDRBDState retrieves the DRBD resource state by querying
-// drbdsetup status and drbdsetup show. It does NOT probe disk metadata;
-// call observeActualDiskState separately when disk information is needed.
-func observeActualDRBDState(ctx context.Context, drbdResName string) (*actualState, error) {
+// observeActualDRBDState reads the DRBD resource runtime state from the
+// events2-backed state store and configuration from the show cache.
+// It does NOT probe disk metadata; call observeActualDiskState separately.
+func observeActualDRBDState(ctx context.Context, drbdResName string, store *DRBDStateStore, showCache *ShowCache) (*actualState, error) {
+	if !store.WaitReady(ctx) {
+		return nil, ctx.Err()
+	}
+
+	state := &actualState{}
+
+	statusSnapshot := store.Snapshot(drbdResName)
+	if statusSnapshot == nil {
+		return state, nil
+	}
+	state.status = statusSnapshot
+
+	showResult, err := showCache.Get(ctx, drbdResName)
+	if err != nil {
+		return nil, fmt.Errorf("getting show data: %w", err)
+	}
+	state.show = showResult
+
+	return state, nil
+}
+
+// observeActualDRBDStateFresh bypasses the state store and calls drbdsetup
+// status directly, then reads configuration from the show cache.
+// Used for post-convergence refresh where the state store may not yet reflect
+// changes made by DRBD actions.
+func observeActualDRBDStateFresh(ctx context.Context, drbdResName string, showCache *ShowCache) (*actualState, error) {
 	state := &actualState{}
 
 	statusResult, err := drbdutils.ExecuteStatus(ctx, drbdResName)
@@ -830,16 +856,11 @@ func observeActualDRBDState(ctx context.Context, drbdResName string) (*actualSta
 	if len(statusResult) == 1 {
 		state.status = &statusResult[0]
 
-		showResults, err := drbdutils.ExecuteShow(ctx, drbdResName, true)
+		showResult, err := showCache.Get(ctx, drbdResName)
 		if err != nil {
-			return nil, fmt.Errorf("executing drbdsetup show: %w", err)
+			return nil, fmt.Errorf("getting show data: %w", err)
 		}
-		for i := range showResults {
-			if showResults[i].Resource == drbdResName {
-				state.show = &showResults[i]
-				break
-			}
-		}
+		state.show = showResult
 	}
 
 	return state, nil

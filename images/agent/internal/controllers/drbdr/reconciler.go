@@ -42,16 +42,20 @@ type Reconciler struct {
 	cl           client.Client
 	nodeName     string
 	portRegistry *PortRegistry
+	stateStore   *DRBDStateStore
+	showCache    *ShowCache
 }
 
 var _ reconcile.TypedReconciler[DRBDReconcileRequest] = (*Reconciler)(nil)
 
 // NewReconciler creates a new Reconciler.
-func NewReconciler(cl client.Client, nodeName string, portRegistry *PortRegistry) *Reconciler {
+func NewReconciler(cl client.Client, nodeName string, portRegistry *PortRegistry, stateStore *DRBDStateStore, showCache *ShowCache) *Reconciler {
 	return &Reconciler{
 		cl:           cl,
 		nodeName:     nodeName,
 		portRegistry: portRegistry,
+		stateStore:   stateStore,
+		showCache:    showCache,
 	}
 }
 
@@ -176,7 +180,7 @@ func (r *Reconciler) reconcileDRBDR(
 	// Observe DRBD state early — the result is used both by Phase 2
 	// (existing port adoption) and Phase 4 (convergence).
 	drbdResName := DRBDResourceNameOnTheNode(drbdr)
-	aState, aErr := observeActualDRBDState(rf.Ctx(), drbdResName)
+	aState, aErr := observeActualDRBDState(rf.Ctx(), drbdResName, r.stateStore, r.showCache)
 	aErr = ConfiguredReasonError(aErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 
 	// Phase 2: Ensure addresses are persisted (patch with optimistic lock).
@@ -243,7 +247,8 @@ func (r *Reconciler) reconcileDRBDR(
 
 	var aErr2 error
 	if refreshNeeded {
-		aState, aErr2 = observeActualDRBDState(rf.Ctx(), drbdResName)
+		r.showCache.Invalidate(drbdResName)
+		aState, aErr2 = observeActualDRBDStateFresh(rf.Ctx(), drbdResName, r.showCache)
 		if aErr2 == nil {
 			aErr2 = observeActualDiskState(rf.Ctx(), aState, intendedDisk, drbdr.Status.DeviceUUID)
 		}
@@ -317,11 +322,7 @@ func (r *Reconciler) reconcileOrphanDRBD(
 	rf := flow.BeginReconcile(ctx, "orphan-drbd", "drbdResourceName", drbdName)
 	defer rf.OnEnd(&outcome)
 
-	status, err := drbdutils.ExecuteStatus(rf.Ctx(), drbdName)
-	if err != nil {
-		return rf.Fail(err)
-	}
-	if len(status) == 0 {
+	if !r.stateStore.ResourceExists(drbdName) {
 		return rf.Done()
 	}
 
@@ -361,11 +362,7 @@ func (r *Reconciler) reconcileActualNameOnTheNode(
 
 	case errors.Is(err, drbdutils.ErrRenameUnknownResource):
 		// Old name doesn't exist - check if new name exists (rename might have succeeded before)
-		status, statusErr := drbdutils.ExecuteStatus(rf.Ctx(), newName)
-		if statusErr != nil {
-			return rf.Fail(statusErr)
-		}
-		if len(status) == 0 {
+		if !r.stateStore.ResourceExists(newName) {
 			// Neither old nor new name exists - error
 			return rf.Failf(err, "DRBD resource not found: oldName=%s, newName=%s", oldName, newName)
 		}
