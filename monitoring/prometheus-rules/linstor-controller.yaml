@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 - name: kubernetes.linstor.controller_state
   rules:
     - alert: D8LinstorControllerGrowingErrorReports
@@ -105,3 +106,4 @@
         description: |
           The recommended course of action:
           1. set correct port range in module config: `kubectl edit mc sds-replicated-volume`
+{{- end }}
