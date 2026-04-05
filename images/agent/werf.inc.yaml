@@ -96,7 +96,12 @@ shell:
 
 ---
 image: {{ .ImageName }}
-fromImage: base/distroless
+fromImage: builder/src
+shell:
+  beforeInstall:
+    - apt-get update
+    - apt-get install -y strace
+    - {{ $.Root.ALT_CLEANUP_CMD }}
 import:
   - image: {{ $.ImageName }}-binaries-artifact
     add: /relocate
