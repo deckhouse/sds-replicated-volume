@@ -10,15 +10,6 @@ The migration is driven by two values and one ConfigMap:
 - `sdsReplicatedVolume.internal.newControlPlane` is computed by a hook and is what templates actually use.
 - `ConfigMap/control-plane-migration` in `d8-sds-replicated-volume` stores the migration state in `.data.state`.
 
-The important detail is that `internal.newControlPlane` is no longer a direct copy of the user setting:
-
-- if `newControlPlane=true`, the hook sets `internal.newControlPlane=true`;
-- if `newControlPlane=false`, the hook checks whether any `ReplicatedVolume` objects already exist;
-- if `ReplicatedVolume` objects exist, the hook still sets `internal.newControlPlane=true`;
-- otherwise it keeps `internal.newControlPlane=false`.
-
-This makes the Helm rendering path sticky once the cluster already contains new control-plane resources.
-
 ## State Machine
 
 Current state values:
@@ -26,25 +17,21 @@ Current state values:
 - `not_started`
 - `stage1_started`
 - `stage1_completed`
-- `stage2_started`
-- `stage2_completed`
-- `stage3_started`
+- `stage2_started` (during the short post-migration stub, until `all_completed`)
 - `all_completed`
 
-The current implementation uses these states as follows:
+The implementation uses these states as follows:
 
-- `stage1` is a compatibility stub that immediately moves the migration to `stage1_completed`;
-- `stage2` performs the actual resource migration;
-- `stage3` is still a stub that waits 10 seconds and marks the migration as completed.
+- `stage1` performs the actual resource migration from LINSTOR to new control-plane CRs;
+- `stage2` is a short post-migration wait (10 seconds), then the state is set to `all_completed`.
 
 ```mermaid
 stateDiagram-v2
     [*] --> not_started
-    not_started --> stage1_completed : stage1 compatibility stub
-    stage1_completed --> stage2_started : real migration begins
-    stage2_started --> stage2_completed : resources migrated
-    stage2_completed --> stage3_started : final stub stage
-    stage3_started --> all_completed : mark finished
+    not_started --> stage1_started : migration begins
+    stage1_started --> stage1_completed : resources migrated
+    stage1_completed --> stage2_started : post-migration stub
+    stage2_started --> all_completed : mark finished
     all_completed --> [*]
 ```
 
@@ -63,12 +50,6 @@ flowchart TD
     D -->|No| F[Set internal.newControlPlane = false]
     D -->|CRD missing| G[Log info and keep false]
 ```
-
-Notes:
-
-- the hook no longer rejects Helm renders when the user tries to switch back to `false`;
-- instead it derives the internal value from the actual cluster state;
-- the API-level rollback protection is handled separately by a `ValidatingAdmissionPolicy`.
 
 ### Kubernetes hook: `syncControlPlaneMigrationState`
 
@@ -91,14 +72,15 @@ Helm templates use `sdsReplicatedVolume.internal.newControlPlane` and `sdsReplic
 | Legacy LINSTOR stack, old controller, old CSI, metadata-backup, certs | `internal.newControlPlane == false` |
 | Webhooks and rollback `ValidatingAdmissionPolicy` | `internal.newControlPlane == true` |
 | `linstor-migrator` Job and its RBAC | `internal.newControlPlane == true` and state is not `all_completed` |
-| New controller and agent | `internal.newControlPlane == true` and state is not `not_started` or `stage1_started` |
-| New CSI resources | `internal.newControlPlane == true` and state contains `all_completed` |
+| New controller and agent | `internal.newControlPlane == true` |
+| New CSI resources | `internal.newControlPlane == true` and `internal.controlPlaneMigration` is not `not_started`, `stage1_started`, or `stage1_completed` |
 
 Operationally this means:
 
 - enabling the new control plane removes the legacy LINSTOR-based components from templates immediately;
 - the migrator Job is expected to bridge the gap and populate new control-plane resources;
-- the new CSI is rendered only after the migration reaches `all_completed`.
+- the new controller and agent are rendered as soon as `internal.newControlPlane` is true;
+- the new CSI stack is rendered after stage 1 completes (state past `stage1_completed`), while the Job may still be in the stage 2 stub until `all_completed`.
 
 ## Migrator Workflow
 
@@ -110,53 +92,40 @@ On startup the migrator:
 
 1. verifies that `ModuleConfig/sds-replicated-volume.spec.settings.newControlPlane == true`;
 2. verifies that the new control-plane CRD `replicatedvolumes.storage.deckhouse.io` exists;
-3. checks whether the LINSTOR CRD `nodes.internal.linstor.linbit.com` exists;
-4. ensures `ConfigMap/control-plane-migration` exists.
+3. ensures `ConfigMap/control-plane-migration` exists.
 
-If the LINSTOR CRD does not exist, the migrator sets the state to `all_completed` and exits successfully.
-
-### Resume logic
-
-The migrator resumes based on the current ConfigMap state:
-
-- `all_completed`: exit immediately;
-- `stage2_completed`: run only `stage3`;
-- any other state: run `stage1` stub, then `stage2`, then `stage3`.
-
-This means that a restart from `not_started`, `stage1_started`, `stage1_completed`, `stage2_started`, or `stage3_started` re-enters the real migration through `stage2`.
+During **stage 1**, after `linstor-controller` is gone, if the LINSTOR CRD `nodes.internal.linstor.linbit.com` is missing, the migrator sets `stage1_completed` and skips the rest of stage 1; **stage 2** stub then sets `all_completed`.
 
 ### Stage 1
 
-`stage1` is intentionally a stub for compatibility with the existing template choreography:
-
-- it logs that the stage is skipped;
-- it updates the ConfigMap state to `stage1_completed`.
-
-### Stage 2
-
-`stage2` performs the actual migration.
+`stage1` performs the actual migration.
 
 High-level flow:
 
-1. set state to `stage2_started`;
+1. set state to `stage1_started`;
 2. wait until `Deployment/linstor-controller` disappears from `d8-sds-replicated-volume` (up to 10 minutes);
-3. load LINSTOR data from CRDs into an in-memory snapshot;
-4. list `PersistentVolume`, `ReplicatedStorageClass`, `VolumeAttachment`, and `LVMVolumeGroup` objects;
-5. classify LINSTOR resources into:
+3. if the LINSTOR CRD is missing, set `stage1_completed` and skip the rest of stage 1;
+4. discover every `CustomResourceDefinition` with `spec.group` `internal.linstor.linbit.com`, write their definitions to `crds.gz`, list all instances of each CRD and write them to `crs.gz`, and write `readme.txt` under `MigratorHostDir/MigratorLinstorBackupDirName` (default subdirectory name `linstor-backup-db`);
+5. load LINSTOR data from CRDs into an in-memory snapshot;
+6. list `PersistentVolume`, `ReplicatedStorageClass`, `VolumeAttachment`, and `LVMVolumeGroup` objects;
+7. classify LINSTOR resources into:
    - resources with a matching replicated PV,
    - resources without a PV,
    - resources without a LINSTOR `ResourceDefinition` (these are skipped);
-6. create one migration `ReplicatedStoragePool` per distinct LINSTOR storage pool;
-7. migrate resources with PVs first, then resources without PVs;
-8. set state to `stage2_completed`.
+8. create one migration `ReplicatedStoragePool` per distinct LINSTOR storage pool;
+9. migrate resources with PVs first, then resources without PVs;
+10. delete every `CustomResourceDefinition` with `spec.group` `internal.linstor.linbit.com` (cluster data was backed up in step 4);
+11. delete all `ReplicatedStorageMetadataBackup` objects (cluster-held LINSTOR metadata backups);
+12. delete legacy `ReplicatedStoragePool` objects whose names equal a migrated LINSTOR storage pool name (skips `linstor-auto-*` and `auto-rsp-*`);
+13. set state to `stage1_completed`.
 
-### Stage 3
+### Stage 2
 
-`stage3` is currently a stub:
+`stage2` is a short coordination stub after migration:
 
-- set state to `stage3_started`;
-- wait 10 seconds;
-- set state to `all_completed`.
+1. set state to `stage2_started`;
+2. wait 10 seconds;
+3. set state to `all_completed`.
 
 There is no real post-migration verification yet.
 
@@ -208,6 +177,8 @@ Current behavior:
 
 If the migrator cannot resolve the corresponding `LVMVolumeGroup` or thin pool for a LINSTOR pool, it fails fast.
 
+After stage 1 step 12, any `ReplicatedStoragePool` that was named exactly like a LINSTOR pool (typical for manually created pools on the old control plane) is removed. Pools created by this migrator (`linstor-auto-*`) or by the RSC controller (`auto-rsp-*`) are left in place.
+
 ## Created Resources
 
 | Resource | Created when | Notes |
@@ -232,7 +203,7 @@ Additional details for `ReplicatedVolume`:
 
 ## Current Limitations
 
-- `stage3` is still a stub and does not validate migrated resources.
+- The stage 2 stub does not validate migrated resources.
 - DRBD shared secrets are read from LINSTOR, but they are not yet propagated into the created `ReplicatedVolume`.
 - Manual topology and volume access are still hard-coded (`Ignored` and `PreferablyLocal`).
 - Migration relies on the legacy `ReplicatedStorageClass.spec.storagePool` fallback when a resource has no PV.
@@ -249,7 +220,7 @@ Owner reference updates are also safe to repeat because the migrator first check
 
 Practical consequences:
 
-- rerunning `stage2` is safe for already migrated resources;
+- rerunning stage 1 is safe for already migrated resources;
 - partial restarts during migration are expected;
 - resources without PVs are still migrated and explicitly marked on the resulting `ReplicatedVolume`.
 
@@ -257,13 +228,15 @@ Practical consequences:
 
 If the migration Job fails, the most useful recovery lever is the ConfigMap state:
 
-- set `state: not_started` to rerun the full current flow (`stage1` stub -> `stage2` -> `stage3`);
-- set `state: stage2_completed` to rerun only the final stub stage;
+- delete the `Job/control-plane-migrator` in `d8-sds-replicated-volume` if it already exists; 
+- set `state: not_started` to rerun the full current flow (stage 1 migration, then stage 2 stub);
+- set `state: stage1_completed` to rerun only the stage 2 stub;
 - keep in mind that deleting the ConfigMap does not itself update the internal Helm value until the hook sees a new ConfigMap object again.
 
 Example reset:
 
 ```bash
+kubectl -n d8-sds-replicated-volume delete job/control-plane-migrator --ignore-not-found
 cat <<'EOF' | kubectl apply -f -
 apiVersion: v1
 kind: ConfigMap
