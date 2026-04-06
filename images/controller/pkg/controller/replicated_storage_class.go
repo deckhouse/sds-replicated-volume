@@ -477,8 +477,6 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 		StorageClassParamPlacementPolicyKey:            PlacementPolicyAutoPlaceTopology,
 		StorageClassParamNetProtocolKey:                NetProtocolC,
 		StorageClassParamNetRRConflictKey:              RrConflictRetryConnect,
-		StorageClassParamAutoAddQuorumTieBreakerKey:    "true",
-		StorageClassParamOnNoQuorumKey:                 SuspendIo,
 		StorageClassParamOnNoDataAccessibleKey:         SuspendIo,
 		StorageClassParamOnSuspendedPrimaryOutdatedKey: PrimaryOutdatedForceSecondary,
 		ReplicatedStorageClassParamNameKey:             replicatedSC.Name,
@@ -488,15 +486,22 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 	case ReplicationNone:
 		storageClassParameters[StorageClassPlacementCountKey] = "1"
 		storageClassParameters[StorageClassAutoEvictMinReplicaCountKey] = "1"
-		storageClassParameters[StorageClassParamAutoQuorumKey] = SuspendIo
+		// For single-replica resources quorum is meaningless: there is only one
+		// data copy and split-brain is impossible. Any diskless peer (CSI remote
+		// access or auto-TieBreaker) must not block I/O when disconnected.
+		storageClassParameters[StorageClassParamAutoAddQuorumTieBreakerKey] = "false"
 	case ReplicationAvailability:
 		storageClassParameters[StorageClassPlacementCountKey] = "2"
 		storageClassParameters[StorageClassAutoEvictMinReplicaCountKey] = "2"
 		storageClassParameters[StorageClassParamAutoQuorumKey] = SuspendIo
+		storageClassParameters[StorageClassParamAutoAddQuorumTieBreakerKey] = "true"
+		storageClassParameters[StorageClassParamOnNoQuorumKey] = SuspendIo
 	case ReplicationConsistencyAndAvailability:
 		storageClassParameters[StorageClassPlacementCountKey] = "3"
 		storageClassParameters[StorageClassAutoEvictMinReplicaCountKey] = "3"
 		storageClassParameters[StorageClassParamAutoQuorumKey] = SuspendIo
+		storageClassParameters[StorageClassParamAutoAddQuorumTieBreakerKey] = "true"
+		storageClassParameters[StorageClassParamOnNoQuorumKey] = SuspendIo
 		storageClassParameters[QuorumMinimumRedundancyWithPrefixSCKey] = "2"
 	}
 
