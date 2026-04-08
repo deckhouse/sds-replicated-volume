@@ -32,10 +32,12 @@ shell:
     # clone drbd-utils git repo
     - rm -rf /drbd-utils
     - git clone {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-utils.git /drbd-utils
-    - cd /drbd-utils && git checkout {{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}
+    - cd /drbd-utils
+    - git fetch origin tag {{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }} --no-tags
+    - git checkout {{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}
     - rm -rf drbd-headers
     - git clone {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-headers.git drbd-headers
-    - cd drbd-headers && git checkout {{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }} && cd ..
+    - cd drbd-headers && git fetch origin tag {{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }} --no-tags && git checkout {{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }} && cd ..
 
     - install /dev/null /usr/local/bin/lbvers.py
     - ./autogen.sh && ./configure --without-manual && ./configure --enable-spec --without-manual
