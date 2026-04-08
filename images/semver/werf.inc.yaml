@@ -7,7 +7,6 @@ git:
   - add: /images/{{ $.ImageName }}/scripts
     to: /
 
-
 shell:
   setup:
     - apk add wget tar
