@@ -8,7 +8,7 @@ git:
   - url: {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-utils
     add: /
     to: /drbd-utils
-    tag: v{{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}
+    tag: {{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}
     stageDependencies:
       setup:
         - "**/*"
@@ -40,7 +40,7 @@ shell:
     # clone drbd-utils git repo
     {{- $ctx := dict }}
     {{- $_ := set $ctx "repo" (printf "%s/MrTomSawyer/3p-drbd-utils" $.Root.SOURCE_REPO) }}
-    {{- $_ := set $ctx "branch" (printf "v%s" (include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root))) }}
+    {{- $_ := set $ctx "branch" (include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root)) }}
     {{- $_ := set $ctx "folder" "/drbd-utils" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
 
