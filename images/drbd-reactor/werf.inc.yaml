@@ -44,7 +44,10 @@ shell:
     {{- $_ := set $ctx "folder" "/drbd-utils" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
     - cd /drbd-utils
-    - git submodule update --init --recursive
+    - git submodule init
+    - git config submodule.drbd-headers.branch vvoyt-bitmap-track-flush
+    - git submodule update --recursive
+    - cd drbd-headers && git checkout vvoyt-bitmap-track-flush && cd ..
 
     - install /dev/null /usr/local/bin/lbvers.py
     - ./autogen.sh && ./configure --without-manual && ./configure --enable-spec --without-manual
