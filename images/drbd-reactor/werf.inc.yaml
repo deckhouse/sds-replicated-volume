@@ -42,8 +42,7 @@ shell:
     - git clone --depth 1 --branch vvoyt-bitmap-track-flush {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-utils.git /drbd-utils
     - cd /drbd-utils
     - rm -rf drbd-headers
-    - git clone --depth 1 {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-headers.git drbd-headers
-    - cd drbd-headers && git fetch origin vvoyt-bitmap-track-flush && git checkout -b vvoyt-bitmap-track-flush origin/vvoyt-bitmap-track-flush && cd ..
+    - git clone --depth 1 --branch vvoyt-bitmap-track-flush {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-headers.git drbd-headers
 
     - install /dev/null /usr/local/bin/lbvers.py
     - ./autogen.sh && ./configure --without-manual && ./configure --enable-spec --without-manual
