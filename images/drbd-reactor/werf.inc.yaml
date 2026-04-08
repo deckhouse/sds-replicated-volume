@@ -8,7 +8,7 @@ git:
   - url: {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-utils
     add: /
     to: /drbd-utils
-    branch: {{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}
+    tag: vvoyt-bitmap-track-flush
     stageDependencies:
       setup:
         - "**/*"
