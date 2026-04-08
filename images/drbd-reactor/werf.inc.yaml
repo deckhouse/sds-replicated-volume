@@ -5,14 +5,6 @@ from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 git:
-  - url: {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-utils
-    add: /
-    to: /drbd-utils
-    tag: vvoyt-bitmap-track-flush
-    stageDependencies:
-      setup:
-        - "**/*"
-
   - url: {{ $.Root.SOURCE_REPO }}/LINBIT/thin-send-recv
     add: /
     to: /thin-send-recv
@@ -39,10 +31,11 @@ shell:
   setup:
     # clone drbd-utils git repo
     - rm -rf /drbd-utils
-    - git clone --depth 1 --branch vvoyt-bitmap-track-flush {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-utils.git /drbd-utils
-    - cd /drbd-utils
+    - git clone {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-utils.git /drbd-utils
+    - cd /drbd-utils && git checkout {{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}
     - rm -rf drbd-headers
-    - git clone --depth 1 --branch vvoyt-bitmap-track-flush {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-headers.git drbd-headers
+    - git clone {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-headers.git drbd-headers
+    - cd drbd-headers && git checkout {{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }} && cd ..
 
     - install /dev/null /usr/local/bin/lbvers.py
     - ./autogen.sh && ./configure --without-manual && ./configure --enable-spec --without-manual
