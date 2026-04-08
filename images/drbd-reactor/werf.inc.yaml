@@ -8,7 +8,7 @@ git:
   - url: {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-utils
     add: /
     to: /drbd-utils
-    tag: {{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}
+    branch: {{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}
     stageDependencies:
       setup:
         - "**/*"
@@ -43,6 +43,8 @@ shell:
     {{- $_ := set $ctx "branch" (include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root)) }}
     {{- $_ := set $ctx "folder" "/drbd-utils" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
+    - cd /drbd-utils
+    - git submodule update --init --recursive
 
     - install /dev/null /usr/local/bin/lbvers.py
     - ./autogen.sh && ./configure --without-manual && ./configure --enable-spec --without-manual
