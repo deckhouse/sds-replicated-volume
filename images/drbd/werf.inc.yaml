@@ -27,7 +27,8 @@ shell:
     - chmod +x /install
     - chmod +x /uninstall
   setup:
-    - git clone --depth 1 --branch {{ include "get_oss_version_by_id" (list "DRBD" $.Root) }} https://github.com/MrTomSawyer/3p-drbd.git /drbd
+    - git clone --depth 1 https://github.com/MrTomSawyer/3p-drbd.git /drbd
+    - cd /drbd && git checkout {{ include "get_oss_version_by_id" (list "DRBD" $.Root) }}
     - cd /drbd
     - git submodule update --init --recursive
     - sed -e "s/\<curl\>/d8-curl -k/g" -i /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh
