@@ -38,16 +38,12 @@ shell:
     - export LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
   setup:
     # clone drbd-utils git repo
-    {{- $ctx := dict }}
-    {{- $_ := set $ctx "repo" (printf "%s/MrTomSawyer/3p-drbd-utils" $.Root.SOURCE_REPO) }}
-    {{- $_ := set $ctx "branch" (include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root)) }}
-    {{- $_ := set $ctx "folder" "/drbd-utils" }}
-    {{- include "utils:checkout-git" $ctx | nindent 2 }}
+    - rm -rf /drbd-utils
+    - git clone --depth 1 --branch vvoyt-bitmap-track-flush {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-utils.git /drbd-utils
     - cd /drbd-utils
-    - git submodule init
-    - git config submodule.drbd-headers.branch vvoyt-bitmap-track-flush
-    - git submodule update --recursive
-    - cd drbd-headers && git checkout vvoyt-bitmap-track-flush && cd ..
+    - rm -rf drbd-headers
+    - git clone --depth 1 {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-headers.git drbd-headers
+    - cd drbd-headers && git fetch origin vvoyt-bitmap-track-flush && git checkout -b vvoyt-bitmap-track-flush origin/vvoyt-bitmap-track-flush && cd ..
 
     - install /dev/null /usr/local/bin/lbvers.py
     - ./autogen.sh && ./configure --without-manual && ./configure --enable-spec --without-manual
