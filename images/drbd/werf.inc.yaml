@@ -33,6 +33,8 @@ shell:
     - sed -e "s/\<curl\>/d8-curl -k/g" -i /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh
     - git commit -am 'd8-curl'
     - make tarball
+    - echo "WERF HACK TODO REMOVE"
+    - ls -la /
     - rm -rf .git
 ---
 image: {{ $.ImageName }}
