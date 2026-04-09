@@ -27,6 +27,7 @@ shell:
     - chmod +x /install
     - chmod +x /uninstall
   setup:
+    - echo "Building DRBD {{ include "get_oss_version_by_id" (list "DRBD" $.Root) }}"
     - git clone https://github.com/MrTomSawyer/3p-drbd.git /drbd
     - cd /drbd && git checkout {{ include "get_oss_version_by_id" (list "DRBD" $.Root) }}
     - cd /drbd
