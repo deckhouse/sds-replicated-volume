@@ -33,8 +33,7 @@ shell:
     - git submodule update --init --recursive
     - sed -e "s/\<curl\>/d8-curl -k/g" -i /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh
     - git commit -am 'd8-curl'
-    - make FORCE=1 tarball
-    - cd /drbd && mv drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }}-*.tar.gz drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }}.tar.gz
+    - make tarball
     - rm -rf .git
 ---
 image: {{ $.ImageName }}
