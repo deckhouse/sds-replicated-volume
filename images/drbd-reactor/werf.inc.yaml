@@ -5,6 +5,14 @@ from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 git:
+  - url: {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-utils
+    add: /
+    to: /drbd-utils
+    tag: v{{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}
+    stageDependencies:
+      setup:
+        - "**/*"
+
   - url: {{ $.Root.SOURCE_REPO }}/LINBIT/thin-send-recv
     add: /
     to: /thin-send-recv
@@ -30,14 +38,11 @@ shell:
     - export LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
   setup:
     # clone drbd-utils git repo
-    - rm -rf /drbd-utils
-    - git clone {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-utils.git /drbd-utils
-    - cd /drbd-utils
-    - git fetch origin tag {{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }} --no-tags
-    - git checkout {{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}
-    - rm -rf drbd-headers
-    - git clone {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-headers.git drbd-headers
-    - cd drbd-headers && git fetch origin tag v9.2.16-flant.4 --no-tags && git checkout v9.2.16-flant.4 && cd ..
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "repo" (printf "%s/MrTomSawyer/3p-drbd-utils" $.Root.SOURCE_REPO) }}
+    {{- $_ := set $ctx "branch" (printf "v%s" (include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root))) }}
+    {{- $_ := set $ctx "folder" "/drbd-utils" }}
+    {{- include "utils:checkout-git" $ctx | nindent 2 }}
 
     - install /dev/null /usr/local/bin/lbvers.py
     - ./autogen.sh && ./configure --without-manual && ./configure --enable-spec --without-manual
@@ -47,7 +52,7 @@ shell:
     # but we build with full flant-suffixed version from oss.yaml (e.g. 9.31.0-flant.1)
     - |
       FULL_VERSION="{{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}"
-      RPM_VERSION=$(echo "$FULL_VERSION" | sed -e 's/-rc/~rc/' -e 's/-alpha/~alpha/' -e 's/-flant/~flant/' -e 's/-/~/g')
+      RPM_VERSION=$(echo "$FULL_VERSION" | sed -e 's/-rc/~rc/' -e 's/-alpha/~alpha/' -e 's/-flant/~flant/')
       sed -i \
         -e "s/^%global upstream_version .*/%global upstream_version ${FULL_VERSION}/" \
         -e "s/^%global rpm_version .*/%global rpm_version ${RPM_VERSION}/" \
@@ -62,7 +67,6 @@ shell:
     # set initscripttype explicitly for workaround errors like 'No such file or directory: /tmp/.private/rpmbuilder/drbd-buildroot/usr/lib/systemd/system/drbd@.service'
     # PS. ./configure --with-initscripttype=sysv does not work for some reason
     {{- $_ := set $ctx "rpmbuild_args" "--without=manual --define \\'initscripttype sysv\\'" }}
-    {{- $_ := set $ctx "tarball_cmd" "FORCE=1 make release" }}
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
 
     # clone thin-send-recv git repo

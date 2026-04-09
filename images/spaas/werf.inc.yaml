@@ -30,7 +30,7 @@ import:
     before: setup
 
   - image: drbd-artifact
-    add: /drbd/drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) | trimPrefix "drbd-" }}.tar.gz
+    add: /drbd/drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }}.tar.gz
     to: /var/cache/spaas/tarballs/drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }}.tar.gz
     before: setup
 

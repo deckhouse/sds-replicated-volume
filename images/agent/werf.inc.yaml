@@ -17,11 +17,9 @@ git:
       - images/{{ $.ImageName }}/werf.yaml
 shell:
   install:
-    - git clone {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-utils.git /src/drbd-utils
-    - cd /src/drbd-utils && git checkout {{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}
-    - rm -rf drbd-headers
-    - git clone {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-headers.git drbd-headers
-    - cd drbd-headers && git checkout v9.2.16-flant.4 && cd ..
+    - git clone --depth 1 --branch v{{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }} {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd-utils.git /src/drbd-utils
+    - cd /src/drbd-utils
+    - git submodule update --init --recursive
     #- rm -rf /src/drbd-utils/.git # needed for make
     # LVM2
     - git clone --depth 1 --branch v{{ include "get_oss_version_by_id" (list "LVM2" $.Root) }} {{ $.Root.SOURCE_REPO }}/lvmteam/lvm2.git /src/lvm2
