@@ -17,20 +17,20 @@ Current state values:
 - `not_started`
 - `stage1_started`
 - `stage1_completed`
-- `stage2_started` (during the short post-migration stub, until `all_completed`)
+- `stage2_started`
 - `all_completed`
 
 The implementation uses these states as follows:
 
 - `stage1` performs the actual resource migration from LINSTOR to new control-plane CRs;
-- `stage2` is a short post-migration wait (10 seconds), then the state is set to `all_completed`.
+- `stage2` polls adopt `ReplicatedVolume` objects, clears `DRBDResource` maintenance when adopt formation reaches the Exit maintenance step, removes adopt annotations, then sets `all_completed`.
 
 ```mermaid
 stateDiagram-v2
     [*] --> not_started
     not_started --> stage1_started : migration begins
     stage1_started --> stage1_completed : resources migrated
-    stage1_completed --> stage2_started : post-migration stub
+    stage1_completed --> stage2_started : begin stage 2 polling
     stage2_started --> all_completed : mark finished
     all_completed --> [*]
 ```
@@ -80,11 +80,19 @@ Operationally this means:
 - enabling the new control plane removes the legacy LINSTOR-based components from templates immediately;
 - the migrator Job is expected to bridge the gap and populate new control-plane resources;
 - the new controller and agent are rendered as soon as `internal.newControlPlane` is true;
-- the new CSI stack is rendered after stage 1 completes (state past `stage1_completed`), while the Job may still be in the stage 2 stub until `all_completed`.
+- the new CSI stack is rendered after stage 1 completes (state past `stage1_completed`), while the Job may still be in stage 2 until `all_completed`.
 
 ## Migrator Workflow
 
 `linstor-migrator` is a standalone CLI binary run as a Kubernetes Job. It is designed to be idempotent.
+
+Optional flags (defaults match prior hard-coded behavior):
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--log-level` | `info` | `debug`, `info`, `warn`, or `error` |
+| `--stage2-poll-interval` | `2s` | Interval between stage 2 polling rounds |
+| `--stage2-worker-count` | `5` | Parallel workers for stage 2 |
 
 ### Pre-flight checks
 
@@ -94,7 +102,7 @@ On startup the migrator:
 2. verifies that the new control-plane CRD `replicatedvolumes.storage.deckhouse.io` exists;
 3. ensures `ConfigMap/control-plane-migration` exists.
 
-During **stage 1**, after `linstor-controller` is gone, if the LINSTOR CRD `nodes.internal.linstor.linbit.com` is missing, the migrator sets `stage1_completed` and skips the rest of stage 1; **stage 2** stub then sets `all_completed`.
+During **stage 1**, after `linstor-controller` is gone, if the LINSTOR CRD `nodes.internal.linstor.linbit.com` is missing, the migrator sets `stage1_completed` and skips the rest of stage 1; **stage 2** then runs adopt exit-maintenance polling and sets `all_completed` when done.
 
 ### Stage 1
 
@@ -121,13 +129,15 @@ High-level flow:
 
 ### Stage 2
 
-`stage2` is a short coordination stub after migration:
+`stage2` waits until adopt formation is ready to lift maintenance on migrated volumes, then clears maintenance and adopt metadata:
 
-1. set state to `stage2_started`;
-2. wait 10 seconds;
-3. set state to `all_completed`.
+1. set state to `stage2_started` (retries on transient API errors);
+2. **list** all `ReplicatedVolume` objects and record names that still have the adopt-RVR annotation (presence-based);
+3. if that set is empty, set state to `all_completed` and exit;
+4. otherwise, every **2 seconds**, process the remaining names in parallel with **five** workers (`sync.WaitGroup` + mutex on the set): for each name, **get** the `ReplicatedVolume`; when `status.datameshTransitions` contains a **Formation** transition with `planID: adopt/v1`, exactly **three** steps, and the first two steps are **Completed** while the third is **Active** (Exit maintenance), then **list** `DRBDResource` objects with label `sds-replicated-volume.deckhouse.io/replicated-volume=<ReplicatedVolume name>` (as set by the RVR controller) and **patch** away `spec.maintenance` only if it is still set; then **patch** the `ReplicatedVolume` to remove adopt annotations (`adopt-rvr`, `adopt-shared-secret` if present);
+5. remove a volume from the set once adopt annotations are successfully removed; when the set is empty, set state to `all_completed` (retries on transient API errors).
 
-There is no real post-migration verification yet.
+**Transient API errors** (timeouts, throttling, 503, common network failures, etc.) during the loop are logged and the next tick retries so the Job can wait a long time for the API and controllers without exiting. **Context cancellation** still stops the migrator. A **restart** of stage 2 is **idempotent**: the initial list only picks volumes that still carry the adopt annotation; patches are conditional where applicable.
 
 ## How a LINSTOR Resource Is Migrated
 
@@ -187,7 +197,7 @@ After stage 1 step 12, any `ReplicatedStoragePool` that was named exactly like a
 | `LVMLogicalVolume` | per diskful replica | object name is hash-based; `actualLVNameOnTheNode` stays `<resource>_00000` |
 | `DRBDResource` | per replica | name matches the replica name; `maintenance=NoResourceReconciliation` |
 | `ReplicatedVolumeReplica` | per replica | name is derived from resource name and DRBD node ID |
-| `ReplicatedVolume` | once per resource | `maxAttachments=1`, created with the adopt-RVR annotation |
+| `ReplicatedVolume` | once per resource | `maxAttachments=2`, created with the adopt-RVR annotation |
 | `ReplicatedVolumeAttachment` | for resources with PVs and matching `VolumeAttachment` objects | one per matching node attachment |
 
 Additional details for `ReplicatedVolume`:
@@ -203,7 +213,7 @@ Additional details for `ReplicatedVolume`:
 
 ## Current Limitations
 
-- The stage 2 stub does not validate migrated resources.
+- Stage 2 does not add post-migration data validation beyond the adopt formation gate described above.
 - DRBD shared secrets are read from LINSTOR, but they are not yet propagated into the created `ReplicatedVolume`.
 - Manual topology and volume access are still hard-coded (`Ignored` and `PreferablyLocal`).
 - Migration relies on the legacy `ReplicatedStorageClass.spec.storagePool` fallback when a resource has no PV.
@@ -230,7 +240,7 @@ If the migration Job fails, the most useful recovery lever is the ConfigMap stat
 
 - delete the `Job/control-plane-migrator` in `d8-sds-replicated-volume` if it already exists; 
 - set `state: not_started` to rerun the full current flow (stage 1 migration, then stage 2 stub);
-- set `state: stage1_completed` to rerun only the stage 2 stub;
+- set `state: stage1_completed` to rerun only stage 2;
 - keep in mind that deleting the ConfigMap does not itself update the internal Helm value until the hook sees a new ConfigMap object again.
 
 Example reset:

@@ -20,13 +20,18 @@ import (
 	"errors"
 	"os"
 	"regexp"
+	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/migrator"
 )
 
 // Opt holds the CLI options for the migrator.
 type Opt struct {
-	LogLevel string
+	LogLevel           string
+	Stage2PollInterval time.Duration
+	Stage2WorkerCount  int
 }
 
 // Parse parses CLI flags using cobra.
@@ -35,6 +40,12 @@ func (o *Opt) Parse() {
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if !regexp.MustCompile(`^debug$|^info$|^warn$|^error$`).MatchString(o.LogLevel) {
 				return errors.New("invalid 'log-level' (allowed values: debug, info, warn, error)")
+			}
+			if o.Stage2PollInterval <= 0 {
+				return errors.New("stage2-poll-interval must be positive")
+			}
+			if o.Stage2WorkerCount < 1 {
+				return errors.New("stage2-worker-count must be at least 1")
 			}
 
 			return nil
@@ -48,6 +59,8 @@ func (o *Opt) Parse() {
 	})
 
 	rootCmd.Flags().StringVarP(&o.LogLevel, "log-level", "", "info", "Log level (allowed values: debug, info, warn, error)")
+	rootCmd.Flags().DurationVar(&o.Stage2PollInterval, "stage2-poll-interval", migrator.DefaultStage2PollInterval, "Interval between stage 2 polling rounds (adopt exit-maintenance)")
+	rootCmd.Flags().IntVar(&o.Stage2WorkerCount, "stage2-worker-count", migrator.DefaultStage2WorkerCount, "Number of parallel workers for stage 2")
 	if err := rootCmd.Execute(); err != nil {
 		// Error is already logged by cobra.
 		os.Exit(1)

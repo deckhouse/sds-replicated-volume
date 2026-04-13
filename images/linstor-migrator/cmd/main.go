@@ -42,6 +42,10 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	opt := &Opt{}
 	opt.Parse()
 
@@ -65,7 +69,7 @@ func main() {
 	log, logCleanup, err := newLogger(logLevel)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "linstor-migrator: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	defer logCleanup()
 
@@ -76,13 +80,13 @@ func main() {
 	scheme, err := newScheme()
 	if err != nil {
 		log.Error("failed to build scheme", "err", err)
-		os.Exit(1)
+		return 1
 	}
 
 	kConfig, err := kubeutils.KubernetesDefaultConfigCreate()
 	if err != nil {
 		log.Error("failed to create Kubernetes config", "err", err)
-		os.Exit(1)
+		return 1
 	}
 
 	kClient, err := kubecl.New(kConfig, kubecl.Options{
@@ -90,22 +94,26 @@ func main() {
 	})
 	if err != nil {
 		log.Error("failed to create Kubernetes client", "err", err)
-		os.Exit(1)
+		return 1
 	}
 
 	dynClient, err := dynamic.NewForConfig(kConfig)
 	if err != nil {
 		log.Error("failed to create dynamic Kubernetes client", "err", err)
-		os.Exit(1)
+		return 1
 	}
 
-	m := migrator.New(kClient, dynClient, log)
+	m := migrator.New(kClient, dynClient, log, migrator.MigratorOptions{
+		Stage2PollInterval: opt.Stage2PollInterval,
+		Stage2WorkerCount:  opt.Stage2WorkerCount,
+	})
 	if err := m.Run(ctx); err != nil {
 		log.Error("linstor-migrator exited with error", "err", err)
-		os.Exit(1)
+		return 1
 	}
 
 	log.Info("linstor-migrator gracefully shutdown")
+	return 0
 }
 
 // newLogger returns a slog.Logger that writes the same log lines to stdout and to

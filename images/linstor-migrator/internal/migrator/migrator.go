@@ -47,23 +47,47 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/metadatabackupcleanup"
 )
 
+const (
+	// DefaultStage2PollInterval is the default interval between stage 2 polling rounds.
+	DefaultStage2PollInterval = 2 * time.Second
+	// DefaultStage2WorkerCount is the default number of parallel stage 2 workers.
+	DefaultStage2WorkerCount = 5
+)
+
+// MigratorOptions configures optional migrator behavior. Zero values in Stage2PollInterval
+// and Stage2WorkerCount are replaced with defaults when passed to New.
+type MigratorOptions struct {
+	Stage2PollInterval time.Duration
+	Stage2WorkerCount  int
+}
+
 // Migrator performs the migration from LINSTOR CRs to the new control-plane CRs.
 type Migrator struct {
-	client        kubecl.Client
-	dynamicClient dynamic.Interface
-	log           *slog.Logger
+	client             kubecl.Client
+	dynamicClient      dynamic.Interface
+	log                *slog.Logger
+	stage2PollInterval time.Duration
+	stage2WorkerCount  int
 }
 
 // New creates a new Migrator instance.
-func New(client kubecl.Client, dynamicClient dynamic.Interface, log *slog.Logger) *Migrator {
+func New(client kubecl.Client, dynamicClient dynamic.Interface, log *slog.Logger, opts MigratorOptions) *Migrator {
+	if opts.Stage2PollInterval <= 0 {
+		opts.Stage2PollInterval = DefaultStage2PollInterval
+	}
+	if opts.Stage2WorkerCount <= 0 {
+		opts.Stage2WorkerCount = DefaultStage2WorkerCount
+	}
 	return &Migrator{
-		client:        client,
-		dynamicClient: dynamicClient,
-		log:           log,
+		client:             client,
+		dynamicClient:      dynamicClient,
+		log:                log,
+		stage2PollInterval: opts.Stage2PollInterval,
+		stage2WorkerCount:  opts.Stage2WorkerCount,
 	}
 }
 
-// Run executes the full migration workflow: pre-flight checks, stage 1 (resource migration), stage 2 (short stub).
+// Run executes the full migration workflow: pre-flight checks, stage 1 (resource migration), stage 2 (adopt exit maintenance).
 func (m *Migrator) Run(ctx context.Context) error {
 	// Pre-flight: check that new control-plane is enabled in ModuleConfig.
 	if err := m.checkNewControlPlaneEnabled(ctx); err != nil {
@@ -91,13 +115,12 @@ func (m *Migrator) Run(ctx context.Context) error {
 		m.log.Info("migration already completed, nothing to do")
 		return nil
 	case config.StateStage1Completed:
-		// Resource migration finished; only the post-migration stub remains.
-		return m.runStage2Stub(ctx)
+		return m.runStage2(ctx)
 	default:
 		if err := m.runStage1(ctx); err != nil {
 			return err
 		}
-		return m.runStage2Stub(ctx)
+		return m.runStage2(ctx)
 	}
 }
 
@@ -368,27 +391,6 @@ func (m *Migrator) deleteLegacyReplicatedStoragePoolsForLinstorPoolNames(ctx con
 		}
 		m.log.Info("deleted legacy ReplicatedStoragePool (name matched LINSTOR pool)", "name", poolName)
 	}
-	return nil
-}
-
-// runStage2Stub waits briefly after migration so Helm can roll out new CSI before we mark all_completed.
-func (m *Migrator) runStage2Stub(ctx context.Context) error {
-	m.log.Info("stage 2: starting (post-migration wait)")
-	if err := m.updateMigrationState(ctx, config.StateStage2Started); err != nil {
-		return fmt.Errorf("failed to update migration state: %w", err)
-	}
-
-	m.log.Info("stage 2: waiting 10 seconds")
-	select {
-	case <-time.After(10 * time.Second):
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-
-	if err := m.updateMigrationState(ctx, config.StateAllCompleted); err != nil {
-		return fmt.Errorf("failed to update migration state: %w", err)
-	}
-	m.log.Info("stage 2: completed, migration finished")
 	return nil
 }
 
@@ -803,39 +805,6 @@ func (m *Migrator) ensureConfigMap(ctx context.Context) (string, error) {
 
 	m.log.Info("created migration ConfigMap", "namespace", config.ModuleNamespace, "name", config.MigrationConfigMapName)
 	return config.StateNotStarted, nil
-}
-
-// ensureConfigMapState creates or updates the migration ConfigMap to the given state.
-func (m *Migrator) ensureConfigMapState(ctx context.Context, state string) error {
-	cm := &corev1.ConfigMap{}
-	err := m.client.Get(ctx, types.NamespacedName{
-		Namespace: config.ModuleNamespace,
-		Name:      config.MigrationConfigMapName,
-	}, cm)
-
-	if apierrors.IsNotFound(err) {
-		// Create with desired state.
-		cm = &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      config.MigrationConfigMapName,
-				Namespace: config.ModuleNamespace,
-			},
-			Data: map[string]string{
-				"state": state,
-			},
-		}
-		if err := m.client.Create(ctx, cm); err != nil {
-			return fmt.Errorf("failed to create ConfigMap: %w", err)
-		}
-		m.log.Info("created migration ConfigMap with state", "state", state)
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("failed to get ConfigMap: %w", err)
-	}
-
-	// Update existing ConfigMap.
-	return m.patchConfigMapState(ctx, cm, state)
 }
 
 // updateMigrationState patches the migration ConfigMap with the new state.
