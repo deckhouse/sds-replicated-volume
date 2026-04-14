@@ -1,5 +1,5 @@
-{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 - name: kubernetes.linstor.node_state
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
   rules:
     - alert: D8LinstorNodeIsNotOnline
       expr: max by (exported_node) (linstor_node_state{nodetype="SATELLITE"} != 2)
@@ -72,4 +72,6 @@
           The recommended course of action:
           1. Retrieve details of the DaemonSet: `kubectl -n d8-sds-replicated-volume describe daemonset linstor-node`
           2. View the status of the Pod and try to figure out why it is not running: `kubectl -n d8-sds-replicated-volume describe pod --field-selector=spec.nodeName={{ $labels.node }} -l app=linstor-node`
+{{- else }}
+  rules: []
 {{- end }}

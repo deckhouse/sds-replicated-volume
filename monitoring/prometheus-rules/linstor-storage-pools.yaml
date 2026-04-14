@@ -20,10 +20,7 @@
           2. Check backing storage devices
 
     - alert: D8LinstorStoragePoolFreeCapacityLessThen20percents
-      expr: max by (node, storage_pool) (linstor_storage_pool_capacity_free_bytes * 100 / linstor_storage_pool_capacity_total_bytes < 20)
-      for: 5m
-      labels:
-        severity_level: "6"
+      expr: max blinstor_level: "6"
         tier: cluster
       annotations:
         plk_markup_format: "markdown"
