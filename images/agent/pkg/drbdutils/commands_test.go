@@ -17,8 +17,8 @@ limitations under the License.
 package drbdutils_test
 
 import (
-	"encoding/json"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
@@ -96,18 +96,11 @@ func TestExecuteNewMinorKnownErrors(t *testing.T) {
 	})
 
 	t.Run("auto minor retries", func(t *testing.T) {
-		showOutput, err := json.Marshal([]drbdutils.ShowResource{
-			{
-				ThisHost: drbdutils.ShowThisHost{
-					Volumes: []drbdutils.ShowVolume{
-						{DeviceMinor: 0},
-					},
-				},
-			},
-		})
-		if err != nil {
-			t.Fatalf("marshal show output: %v", err)
+		sysBlock := t.TempDir()
+		if err := os.Mkdir(sysBlock+"/drbd0", 0o755); err != nil {
+			t.Fatal(err)
 		}
+		drbdutils.SysBlockPath = sysBlock
 
 		drbdutils.ResetNextDeviceMinor()
 
@@ -118,11 +111,6 @@ func TestExecuteNewMinorKnownErrors(t *testing.T) {
 				Args:         drbdutils.NewMinorArgs("res", 0, 0, false),
 				ResultOutput: []byte("Failure: (161) Minor or volume exists already (delete it first)\n"),
 				ResultErr:    fakedrbdutils.ExitErr{Code: 10},
-			},
-			&fakedrbdutils.ExpectedCmd{
-				Name:         drbdutils.DRBDSetupCommand,
-				Args:         drbdutils.ShowArgs("", false),
-				ResultOutput: showOutput,
 			},
 			&fakedrbdutils.ExpectedCmd{
 				Name: drbdutils.DRBDSetupCommand,
