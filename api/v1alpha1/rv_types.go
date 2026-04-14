@@ -290,7 +290,7 @@ func (t ReplicatedVolumeDatameshReplicaRequest) ID() uint8 {
 type ReplicatedVolumeDatameshTransition struct {
 	// Type is the transition type.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=AddReplica;Attach;ChangeQuorum;ChangeReplicaType;ChangeSystemNetworks;Detach;DisableMultiattach;EnableMultiattach;ForceDetach;ForceRemoveReplica;Formation;RemoveReplica;RepairNetworkAddresses;ResizeVolume;SyncSnapshot
+	// +kubebuilder:validation:Enum=AddReplica;Attach;ChangeQuorum;ChangeReplicaType;ChangeSystemNetworks;Detach;DisableMultiattach;EnableMultiattach;ForceDetach;ForceRemoveReplica;Formation;PrepareSnapshot;RemoveReplica;RepairNetworkAddresses;ResizeVolume;SyncSnapshot
 	Type ReplicatedVolumeDatameshTransitionType `json:"type"`
 
 	// ReplicaName is the name of the replica this transition applies to.
@@ -487,6 +487,8 @@ const (
 	ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses ReplicatedVolumeDatameshTransitionType = "RepairNetworkAddresses"
 	// ReplicatedVolumeDatameshTransitionTypeResizeVolume resizes the datamesh volume.
 	ReplicatedVolumeDatameshTransitionTypeResizeVolume ReplicatedVolumeDatameshTransitionType = "ResizeVolume"
+	// ReplicatedVolumeDatameshTransitionTypePrepareSnapshot prepares snapshot creation with bitmap tracking.
+	ReplicatedVolumeDatameshTransitionTypePrepareSnapshot ReplicatedVolumeDatameshTransitionType = "PrepareSnapshot"
 	// ReplicatedVolumeDatameshTransitionTypeSyncSnapshot synchronizes snapshot data across replicas.
 	ReplicatedVolumeDatameshTransitionTypeSyncSnapshot ReplicatedVolumeDatameshTransitionType = "SyncSnapshot"
 )
