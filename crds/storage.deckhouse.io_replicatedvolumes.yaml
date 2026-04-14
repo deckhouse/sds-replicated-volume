@@ -777,6 +777,7 @@ spec:
                       - ForceDetach
                       - ForceRemoveReplica
                       - Formation
+                      - PrepareSnapshot
                       - RemoveReplica
                       - RepairNetworkAddresses
                       - ResizeVolume
