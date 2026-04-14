@@ -45,14 +45,14 @@ func registerPreparePlans(reg *dmte.Registry[*globalContext, *replicaContext]) {
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupSync).
 		DisplayName("Preparing snapshot").
 		Steps(
-			dmte.ReplicaStep("Track bitmap", applyNoop, confirmTrackBitmap),
-			dmte.ReplicaStep("Create secondary snapshots", applyNoop, confirmCreateSecondarySnapshots),
-			dmte.ReplicaStep("Wait secondary snapshots", applyNoop, confirmWaitSecondarySnapshots),
+			dmte.GlobalStep("Track bitmap", applyGlobalNoop, confirmTrackBitmap),
+			dmte.GlobalStep("Create secondary snapshots", applyGlobalNoop, confirmCreateSecondarySnapshots),
+			dmte.GlobalStep("Wait secondary snapshots", applyGlobalNoop, confirmWaitSecondarySnapshots),
 			dmte.GlobalStep("Suspend IO", applyGlobalNoop, confirmSuspendIO),
 			dmte.GlobalStep("Flush bitmap", applyGlobalNoop, confirmFlushBitmap),
 			dmte.GlobalStep("Create primary snapshot", applyGlobalNoop, confirmCreatePrimarySnapshot),
 			dmte.GlobalStep("Resume IO", applyGlobalNoop, confirmResumeIO),
-			dmte.ReplicaStep("Untrack bitmap", applyNoop, confirmUntrackBitmap),
+			dmte.GlobalStep("Untrack bitmap", applyGlobalNoop, confirmUntrackBitmap),
 		).
 		Build()
 
@@ -62,50 +62,65 @@ func registerPreparePlans(reg *dmte.Registry[*globalContext, *replicaContext]) {
 		DisplayName("Cleaning up snapshot prepare phase").
 		Steps(
 			dmte.GlobalStep("Resume IO", applyGlobalNoop, confirmResumeIO),
-			dmte.ReplicaStep("Untrack bitmap", applyNoop, confirmUntrackBitmap),
+			dmte.GlobalStep("Untrack bitmap", applyGlobalNoop, confirmUntrackBitmap),
 		).
 		Build()
 }
 
 func applyGlobalNoop(_ *globalContext) bool { return false }
 
-func confirmTrackBitmap(gctx *globalContext, rctx *replicaContext, _ int64) dmte.ConfirmResult {
-	must := idset.Of(rctx.id)
+func confirmTrackBitmap(gctx *globalContext, _ int64) dmte.ConfirmResult {
+	must := prepareReplicaIDs(gctx)
 	primary := preparePrimaryReplica(gctx)
-	if primary == nil || primary == rctx {
+	if primary == nil {
 		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
 	}
-	if confirmed, pending := ensurePrepareOperation(
-		gctx,
-		prepareTrackBitmapOperationName(gctx, rctx),
-		v1alpha1.DRBDResourceOperationSpec{
-			DRBDResourceName: primary.rvrName,
-			Type:             v1alpha1.DRBDResourceOperationTrackBitmap,
-			PeerNodeID:       ptrTo(rctx.drbdNodeID),
-		},
-		must,
-	); pending {
-		return dmte.ConfirmResult{MustConfirm: must}
-	} else {
-		return dmte.ConfirmResult{MustConfirm: must, Confirmed: confirmed}
+	allDone := true
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		if rc == primary {
+			continue
+		}
+		_, pending := ensurePrepareOperation(
+			gctx,
+			prepareTrackBitmapOperationName(gctx, rc),
+			v1alpha1.DRBDResourceOperationSpec{
+				DRBDResourceName: primary.rvrName,
+				Type:             v1alpha1.DRBDResourceOperationTrackBitmap,
+				PeerNodeID:       ptrTo(rc.drbdNodeID),
+			},
+			idset.Of(rc.id),
+		)
+		if pending {
+			allDone = false
+		}
 	}
-}
-
-func confirmCreateSecondarySnapshots(gctx *globalContext, rctx *replicaContext, _ int64) dmte.ConfirmResult {
-	must := idset.Of(rctx.id)
-
-	if preparePrimaryReplica(gctx) == rctx {
+	if allDone {
 		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
 	}
-
-	if confirmed, pending := ensurePrepareSnapshot(gctx, rctx, must); pending {
-		return dmte.ConfirmResult{MustConfirm: must}
-	} else {
-		return dmte.ConfirmResult{MustConfirm: must, Confirmed: confirmed}
-	}
+	return dmte.ConfirmResult{MustConfirm: must}
 }
 
-func confirmWaitSecondarySnapshots(gctx *globalContext, _ *replicaContext, _ int64) dmte.ConfirmResult {
+func confirmCreateSecondarySnapshots(gctx *globalContext, _ int64) dmte.ConfirmResult {
+	must := prepareReplicaIDs(gctx)
+	primary := preparePrimaryReplica(gctx)
+	allDone := true
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		if primary != nil && rc == primary {
+			continue
+		}
+		if _, pending := ensurePrepareSnapshot(gctx, rc, idset.Of(rc.id)); pending {
+			allDone = false
+		}
+	}
+	if allDone {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
+	}
+	return dmte.ConfirmResult{MustConfirm: must}
+}
+
+func confirmWaitSecondarySnapshots(gctx *globalContext, _ int64) dmte.ConfirmResult {
 	must := prepareReplicaIDs(gctx)
 	for i := range gctx.allReplicas {
 		rc := &gctx.allReplicas[i]
@@ -207,26 +222,36 @@ func confirmResumeIO(gctx *globalContext, _ int64) dmte.ConfirmResult {
 	}
 }
 
-func confirmUntrackBitmap(gctx *globalContext, rctx *replicaContext, _ int64) dmte.ConfirmResult {
-	must := idset.Of(rctx.id)
+func confirmUntrackBitmap(gctx *globalContext, _ int64) dmte.ConfirmResult {
+	must := prepareReplicaIDs(gctx)
 	primary := preparePrimaryReplica(gctx)
-	if primary == nil || primary == rctx {
+	if primary == nil {
 		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
 	}
-	if confirmed, pending := ensurePrepareOperation(
-		gctx,
-		prepareUntrackBitmapOperationName(gctx, rctx),
-		v1alpha1.DRBDResourceOperationSpec{
-			DRBDResourceName: primary.rvrName,
-			Type:             v1alpha1.DRBDResourceOperationUntrackBitmap,
-			PeerNodeID:       ptrTo(rctx.drbdNodeID),
-		},
-		must,
-	); pending {
-		return dmte.ConfirmResult{MustConfirm: must}
-	} else {
-		return dmte.ConfirmResult{MustConfirm: must, Confirmed: confirmed}
+	allDone := true
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		if rc == primary {
+			continue
+		}
+		_, pending := ensurePrepareOperation(
+			gctx,
+			prepareUntrackBitmapOperationName(gctx, rc),
+			v1alpha1.DRBDResourceOperationSpec{
+				DRBDResourceName: primary.rvrName,
+				Type:             v1alpha1.DRBDResourceOperationUntrackBitmap,
+				PeerNodeID:       ptrTo(rc.drbdNodeID),
+			},
+			idset.Of(rc.id),
+		)
+		if pending {
+			allDone = false
+		}
 	}
+	if allDone {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
+	}
+	return dmte.ConfirmResult{MustConfirm: must}
 }
 
 func preparePrimaryReplica(gctx *globalContext) *replicaContext {

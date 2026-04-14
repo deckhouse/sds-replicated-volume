@@ -28,28 +28,24 @@ func prepareDispatcher() dmte.DispatchFunc[provider] {
 	return func(cp provider) iter.Seq[dmte.DispatchDecision] {
 		return func(yield func(dmte.DispatchDecision) bool) {
 			gctx := cp.Global()
-			if prepareCleanupNeeded(gctx) {
-				log.FromContext(gctx.ctx).Info("prepare: dispatching cleanup plan", "plan", prepareCleanupPlanID)
-				for i := range gctx.allReplicas {
-					rctx := &gctx.allReplicas[i]
-					if rctx.prepareTransition != nil && rctx.prepareTransition.PlanID == string(prepareCleanupPlanID) {
-						continue
-					}
-					if !yield(dmte.DispatchReplica(rctx, prepareTransitionType, prepareCleanupPlanID)) {
-						return
-					}
-				}
+			primary := preparePrimaryReplica(gctx)
+			if primary == nil {
 				return
 			}
-			for i := range gctx.allReplicas {
-				rctx := &gctx.allReplicas[i]
-				if rctx.prepareTransition != nil {
-					continue
-				}
-				if !yield(dmte.DispatchReplica(rctx, prepareTransitionType, preparePlanID)) {
+
+			if prepareCleanupNeeded(gctx) {
+				log.FromContext(gctx.ctx).Info("prepare: dispatching cleanup plan", "plan", prepareCleanupPlanID)
+				if primary.prepareTransition != nil && primary.prepareTransition.PlanID == string(prepareCleanupPlanID) {
 					return
 				}
+				yield(dmte.DispatchReplica(primary, prepareTransitionType, prepareCleanupPlanID))
+				return
 			}
+
+			if primary.prepareTransition != nil {
+				return
+			}
+			yield(dmte.DispatchReplica(primary, prepareTransitionType, preparePlanID))
 		}
 	}
 }

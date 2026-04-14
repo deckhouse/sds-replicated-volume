@@ -17,9 +17,8 @@ import (
 func TestConfirmTrackBitmapCreatesOperationForSecondary(t *testing.T) {
 	p := newPrepareTestProvider(t)
 	gctx := p.Global()
-	secondary := p.Replica(1)
 
-	result := confirmTrackBitmap(gctx, secondary, 0)
+	result := confirmTrackBitmap(gctx, 0)
 	if !result.Confirmed.IsEmpty() {
 		t.Fatalf("expected track bitmap step to stay pending after create, got confirmed=%v", result.Confirmed)
 	}
@@ -87,9 +86,8 @@ func TestConfirmSuspendIOCreatesOperationOnPrimary(t *testing.T) {
 func TestConfirmCreateSecondarySnapshotsCreatesMissingSecondarySnapshot(t *testing.T) {
 	p := newPrepareTestProvider(t)
 	gctx := p.Global()
-	secondary := p.Replica(1)
 
-	result := confirmCreateSecondarySnapshots(gctx, secondary, 0)
+	result := confirmCreateSecondarySnapshots(gctx, 0)
 	if !result.Confirmed.IsEmpty() {
 		t.Fatalf("expected secondary step to stay pending after create, got confirmed=%v", result.Confirmed)
 	}
@@ -202,30 +200,17 @@ func TestPrepareDispatcherSwitchesToCleanupPlanAfterPrimaryFailure(t *testing.T)
 			{Name: "Create primary snapshot", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive},
 		},
 	}
-	p1 := &v1alpha1.ReplicatedVolumeDatameshTransition{
-		Type:        v1alpha1.ReplicatedVolumeDatameshTransitionType("PrepareSnapshot"),
-		ReplicaName: "rvr-1",
-		Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupSync,
-		PlanID:      string(preparePlanID),
-		Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
-			{Name: "Create primary snapshot", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive},
-		},
-	}
 	p.Global().replicas[0].prepareTransition = p0
-	p.Global().replicas[1].prepareTransition = p1
 
 	var decisions []dmte.DispatchDecision
 	for decision := range prepareDispatcher()(p) {
 		decisions = append(decisions, decision)
 	}
-	if len(decisions) != 2 {
-		t.Fatalf("expected 2 cleanup dispatch decisions, got %d", len(decisions))
+	if len(decisions) != 1 {
+		t.Fatalf("expected 1 cleanup dispatch decision, got %d", len(decisions))
 	}
 	if decisions[0] != dmte.DispatchReplica(p.Replica(0), prepareTransitionType, prepareCleanupPlanID) {
-		t.Fatalf("unexpected first decision: %#v", decisions[0])
-	}
-	if decisions[1] != dmte.DispatchReplica(p.Replica(1), prepareTransitionType, prepareCleanupPlanID) {
-		t.Fatalf("unexpected second decision: %#v", decisions[1])
+		t.Fatalf("unexpected decision: %#v", decisions[0])
 	}
 }
 
@@ -243,29 +228,26 @@ func TestPrepareDispatcherSwitchesToCleanupOnUnsafeTimeout(t *testing.T) {
 	expiredAt := metav1.NewTime(time.Now().Add(-prepareUnsafeTimeout - time.Minute))
 	p.Global().rvs.Status.PrepareTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
 		{
-			Type:   v1alpha1.ReplicatedVolumeDatameshTransitionType("PrepareSnapshot"),
-			PlanID: string(preparePlanID),
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionType("PrepareSnapshot"),
+			ReplicaName: "rvr-0",
+			PlanID:      string(preparePlanID),
 			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
 				{Name: "Flush bitmap", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: &expiredAt},
 			},
 		},
 	}
 	p0 := &p.Global().rvs.Status.PrepareTransitions[0]
-	p.Global().allReplicas[0].prepareTransition = p0
-	p.Global().allReplicas[1].prepareTransition = p0
+	p.Global().replicas[0].prepareTransition = p0
 
 	var decisions []dmte.DispatchDecision
 	for decision := range prepareDispatcher()(p) {
 		decisions = append(decisions, decision)
 	}
-	if len(decisions) != 2 {
-		t.Fatalf("expected 2 cleanup dispatch decisions, got %d", len(decisions))
+	if len(decisions) != 1 {
+		t.Fatalf("expected 1 cleanup dispatch decision, got %d", len(decisions))
 	}
 	if decisions[0] != dmte.DispatchReplica(p.Replica(0), prepareTransitionType, prepareCleanupPlanID) {
-		t.Fatalf("unexpected first decision: %#v", decisions[0])
-	}
-	if decisions[1] != dmte.DispatchReplica(p.Replica(1), prepareTransitionType, prepareCleanupPlanID) {
-		t.Fatalf("unexpected second decision: %#v", decisions[1])
+		t.Fatalf("unexpected decision: %#v", decisions[0])
 	}
 }
 
@@ -304,9 +286,8 @@ func TestConfirmResumeIOCreatesOperationOnPrimary(t *testing.T) {
 func TestConfirmUntrackBitmapCreatesOperationForSecondary(t *testing.T) {
 	p := newPrepareTestProvider(t)
 	gctx := p.Global()
-	secondary := p.Replica(1)
 
-	result := confirmUntrackBitmap(gctx, secondary, 0)
+	result := confirmUntrackBitmap(gctx, 0)
 	if !result.Confirmed.IsEmpty() {
 		t.Fatalf("expected untrack bitmap step to stay pending after create, got confirmed=%v", result.Confirmed)
 	}
