@@ -287,8 +287,16 @@ func ensurePrepareOperation(
 			l.Info("prepare: operation succeeded")
 			return confirmed, false
 		}
-		l.V(1).Info("prepare: operation pending", "phase", op.Status.Phase)
-		return 0, true
+		if op.Status.Phase == v1alpha1.DRBDOperationPhaseFailed {
+			l.Info("prepare: operation failed, deleting to retry", "phase", op.Status.Phase)
+			if err := gctx.cl.Delete(gctx.ctx, op); err != nil && !apierrors.IsNotFound(err) {
+				l.Error(err, "prepare: failed to delete failed operation")
+				return 0, true
+			}
+		} else {
+			l.V(1).Info("prepare: operation pending", "phase", op.Status.Phase)
+			return 0, true
+		}
 	} else if !apierrors.IsNotFound(err) {
 		l.Error(err, "prepare: failed to get operation")
 		return 0, true
