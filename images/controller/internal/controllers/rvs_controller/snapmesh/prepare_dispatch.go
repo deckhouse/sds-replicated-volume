@@ -19,6 +19,8 @@ package snapmesh
 import (
 	"iter"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
 )
 
@@ -27,6 +29,7 @@ func prepareDispatcher() dmte.DispatchFunc[provider] {
 		return func(yield func(dmte.DispatchDecision) bool) {
 			gctx := cp.Global()
 			if prepareCleanupNeeded(gctx) {
+				log.FromContext(gctx.ctx).Info("prepare: dispatching cleanup plan", "plan", prepareCleanupPlanID)
 				for i := range gctx.allReplicas {
 					rctx := &gctx.allReplicas[i]
 					if rctx.prepareTransition != nil && rctx.prepareTransition.PlanID == string(prepareCleanupPlanID) {

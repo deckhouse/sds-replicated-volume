@@ -23,6 +23,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -161,15 +162,19 @@ func confirmFlushBitmap(gctx *globalContext, _ int64) dmte.ConfirmResult {
 }
 
 func confirmCreatePrimarySnapshot(gctx *globalContext, _ int64) dmte.ConfirmResult {
+	l := log.FromContext(gctx.ctx)
 	must := prepareReplicaIDs(gctx)
 	primary := preparePrimaryReplica(gctx)
 	if primary == nil {
+		l.Info("prepare: no primary replica, skipping primary snapshot")
 		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
 	}
 	if prepareSnapshotReady(primary) {
+		l.Info("prepare: primary snapshot ready", "rvr", primary.rvrName)
 		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
 	}
 	if prepareSnapshotFailed(primary) {
+		l.Info("prepare: primary snapshot failed, confirming step for cleanup", "rvr", primary.rvrName, "phase", primary.rvrs.Status.Phase)
 		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
 	}
 	if _, pending := ensurePrepareSnapshot(gctx, primary, must); pending {
@@ -250,13 +255,17 @@ func ensurePrepareOperation(
 	spec v1alpha1.DRBDResourceOperationSpec,
 	confirmed idset.IDSet,
 ) (idset.IDSet, bool) {
+	l := log.FromContext(gctx.ctx).WithValues("op", name, "type", spec.Type)
 	op := &v1alpha1.DRBDResourceOperation{}
 	if err := gctx.cl.Get(gctx.ctx, client.ObjectKey{Name: name}, op); err == nil {
 		if op.Status.Phase == v1alpha1.DRBDOperationPhaseSucceeded {
+			l.Info("prepare: operation succeeded")
 			return confirmed, false
 		}
+		l.V(1).Info("prepare: operation pending", "phase", op.Status.Phase)
 		return 0, true
 	} else if !apierrors.IsNotFound(err) {
+		l.Error(err, "prepare: failed to get operation")
 		return 0, true
 	}
 
@@ -264,28 +273,35 @@ func ensurePrepareOperation(
 	op.Spec = spec
 
 	if _, err := obju.SetControllerRef(op, gctx.rvs, gctx.scheme); err != nil {
+		l.Error(err, "prepare: failed to set controller ref")
 		return 0, true
 	}
 	if err := gctx.cl.Create(gctx.ctx, op); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
+			l.Error(err, "prepare: failed to create operation")
 			return 0, true
 		}
 	}
 
+	l.Info("prepare: created operation", "resource", spec.DRBDResourceName)
 	return 0, true
 }
 
 func ensurePrepareSnapshot(gctx *globalContext, rctx *replicaContext, confirmed idset.IDSet) (idset.IDSet, bool) {
+	l := log.FromContext(gctx.ctx).WithValues("rvr", rctx.rvrName, "node", rctx.nodeName)
 	if prepareSnapshotReady(rctx) {
+		l.Info("prepare: snapshot ready", "rvrs", rctx.rvrsName)
 		return confirmed, false
 	}
 	if rctx.rvrs != nil {
+		l.V(1).Info("prepare: snapshot pending", "rvrs", rctx.rvrsName, "phase", rctx.rvrs.Status.Phase)
 		return 0, true
 	}
 
+	rvrsName := prepareReplicaSnapshotName(gctx, rctx)
 	rvrs := &v1alpha1.ReplicatedVolumeReplicaSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: prepareReplicaSnapshotName(gctx, rctx),
+			Name: rvrsName,
 		},
 		Spec: v1alpha1.ReplicatedVolumeReplicaSnapshotSpec{
 			ReplicatedVolumeSnapshotName: gctx.rvs.Name,
@@ -295,17 +311,21 @@ func ensurePrepareSnapshot(gctx *globalContext, rctx *replicaContext, confirmed 
 	}
 
 	if _, err := obju.SetControllerRef(rvrs, gctx.rvs, gctx.scheme); err != nil {
+		l.Error(err, "prepare: failed to set controller ref for snapshot")
 		return 0, true
 	}
 	if err := gctx.cl.Create(gctx.ctx, rvrs); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
+			l.Error(err, "prepare: failed to create snapshot")
 			return 0, true
 		}
 		if err := gctx.cl.Get(gctx.ctx, client.ObjectKeyFromObject(rvrs), rvrs); err != nil {
+			l.Error(err, "prepare: failed to get existing snapshot")
 			return 0, true
 		}
 	}
 
+	l.Info("prepare: created snapshot RVRS", "rvrs", rvrsName)
 	rctx.rvrs = rvrs
 	rctx.rvrsName = rvrs.Name
 
@@ -333,6 +353,7 @@ func prepareOperationSucceeded(gctx *globalContext, name string) bool {
 }
 
 func prepareCleanupNeeded(gctx *globalContext) bool {
+	l := log.FromContext(gctx.ctx)
 	if !prepareOperationSucceeded(gctx, preparePrimaryOperationName(gctx, "suspend-io")) {
 		return false
 	}
@@ -341,9 +362,14 @@ func prepareCleanupNeeded(gctx *globalContext) bool {
 	}
 	primary := preparePrimaryReplica(gctx)
 	if primary != nil && prepareSnapshotFailed(primary) {
+		l.Info("prepare: cleanup needed — primary snapshot failed after suspend-io", "rvr", primary.rvrName)
 		return true
 	}
-	return prepareUnsafeStepTimedOut(gctx)
+	if prepareUnsafeStepTimedOut(gctx) {
+		l.Info("prepare: cleanup needed — unsafe step timed out after suspend-io", "timeout", prepareUnsafeTimeout)
+		return true
+	}
+	return false
 }
 
 func prepareUnsafeStepTimedOut(gctx *globalContext) bool {

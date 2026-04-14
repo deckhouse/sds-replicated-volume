@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdr"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
@@ -19,6 +21,7 @@ func (r *OperationReconciler) executeTrackBitmap(
 		return err
 	}
 	drbdResName := drbdr.DRBDResourceNameOnTheNode(dr)
+	log.FromContext(ctx).Info("drbdrop: executing track-bitmap", "resource", drbdResName, "peerNodeID", peerNodeID)
 	if err := drbdutils.ExecuteTrackBitmap(ctx, drbdResName, peerNodeID, true); err != nil {
 		return fmt.Errorf("executing track-bitmap: %w", err)
 	}
@@ -35,6 +38,7 @@ func (r *OperationReconciler) executeUntrackBitmap(
 		return err
 	}
 	drbdResName := drbdr.DRBDResourceNameOnTheNode(dr)
+	log.FromContext(ctx).Info("drbdrop: executing untrack-bitmap", "resource", drbdResName, "peerNodeID", peerNodeID)
 	if err := drbdutils.ExecuteTrackBitmap(ctx, drbdResName, peerNodeID, false); err != nil {
 		return fmt.Errorf("executing untrack-bitmap: %w", err)
 	}
@@ -50,6 +54,7 @@ func (r *OperationReconciler) executeFlushBitmap(
 	if err != nil {
 		return err
 	}
+	log.FromContext(ctx).Info("drbdrop: executing flush-bitmap", "resource", drbdr.DRBDResourceNameOnTheNode(dr), "minor", minor)
 	if err := drbdutils.ExecuteFlushBitmap(ctx, minor); err != nil {
 		return fmt.Errorf("executing flush-bitmap: %w", err)
 	}
@@ -65,9 +70,11 @@ func (r *OperationReconciler) executeSuspendIO(
 	if err != nil {
 		return err
 	}
+	log.FromContext(ctx).Info("drbdrop: executing suspend-io", "resource", drbdr.DRBDResourceNameOnTheNode(dr), "minor", minor)
 	if err := drbdutils.ExecuteSuspendIO(ctx, minor); err != nil {
 		return fmt.Errorf("executing suspend-io: %w", err)
 	}
+	log.FromContext(ctx).Info("drbdrop: suspend-io succeeded", "resource", drbdr.DRBDResourceNameOnTheNode(dr), "minor", minor)
 	return nil
 }
 
@@ -80,9 +87,11 @@ func (r *OperationReconciler) executeResumeIO(
 	if err != nil {
 		return err
 	}
+	log.FromContext(ctx).Info("drbdrop: executing resume-io", "resource", drbdr.DRBDResourceNameOnTheNode(dr), "minor", minor)
 	if err := drbdutils.ExecuteResumeIO(ctx, minor); err != nil {
 		return fmt.Errorf("executing resume-io: %w", err)
 	}
+	log.FromContext(ctx).Info("drbdrop: resume-io succeeded", "resource", drbdr.DRBDResourceNameOnTheNode(dr), "minor", minor)
 	return nil
 }
 
