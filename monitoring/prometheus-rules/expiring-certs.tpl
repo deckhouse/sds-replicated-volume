@@ -1,5 +1,5 @@
-- name: kubernetes.certs.expiring_soon_check
 {{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
+- name: kubernetes.certs.expiring_soon_check
   rules:
     - alert: D8LinstorCertificateExpiringIn30d
       expr: count(kube_secret_labels{label_storage_deckhouse_io_sds_replicated_volume_cert_expire_in_30d="true"}) > 0
@@ -21,6 +21,4 @@
           `kubectl get secrets -n d8-sds-replicated-volume -l storage.deckhouse.io/sds-replicated-volume-cert-expire-in-30d=true`
           
           Check "FAQ: How to manually trigger the certificate renewal process?" in documentation for the manual certificate renewal guide.
-{{- else }}
-  rules: []
 {{- end }}
