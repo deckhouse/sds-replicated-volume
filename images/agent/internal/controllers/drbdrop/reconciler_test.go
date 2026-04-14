@@ -87,3 +87,54 @@ func TestReconcileCreateNewUUID_MaintenanceMode(t *testing.T) {
 		t.Errorf("expected maintenance mode message, got %q", updated.Status.Message)
 	}
 }
+
+func TestReconcileTrackBitmap_RequiresPeerNodeID(t *testing.T) {
+	sch, err := scheme.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	drbdr := &v1alpha1.DRBDResource{
+		ObjectMeta: metav1.ObjectMeta{Name: testDRBDRName},
+		Spec: v1alpha1.DRBDResourceSpec{
+			NodeName: testNodeName,
+			State:    v1alpha1.DRBDResourceStateUp,
+		},
+	}
+
+	op := &v1alpha1.DRBDResourceOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: testDRBDROPName},
+		Spec: v1alpha1.DRBDResourceOperationSpec{
+			DRBDResourceName: testDRBDRName,
+			Type:             v1alpha1.DRBDResourceOperationTrackBitmap,
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(drbdr, op).
+		WithStatusSubresource(&v1alpha1.DRBDResourceOperation{}).
+		Build()
+
+	rec := drbdrop.NewOperationReconciler(cl, testNodeName)
+
+	_, err = rec.Reconcile(t.Context(), reconcile.Request{
+		NamespacedName: client.ObjectKeyFromObject(op),
+	})
+	if err != nil {
+		t.Fatalf("unexpected reconcile error: %v", err)
+	}
+
+	updated := &v1alpha1.DRBDResourceOperation{}
+	if err := cl.Get(t.Context(), client.ObjectKeyFromObject(op), updated); err != nil {
+		t.Fatalf("failed to get operation: %v", err)
+	}
+
+	if updated.Status.Phase != v1alpha1.DRBDOperationPhaseFailed {
+		t.Errorf("expected phase %q, got %q", v1alpha1.DRBDOperationPhaseFailed, updated.Status.Phase)
+	}
+
+	if updated.Status.Message != "peerNodeID is required" {
+		t.Errorf("expected peerNodeID message, got %q", updated.Status.Message)
+	}
+}

@@ -35,6 +35,8 @@ type OperationReconciler struct {
 	nodeName string
 }
 
+type operationExecutor func(context.Context, *v1alpha1.DRBDResourceOperation, *v1alpha1.DRBDResource) error
+
 // NewOperationReconciler creates a new OperationReconciler.
 func NewOperationReconciler(cl client.Client, nodeName string) *OperationReconciler {
 	return &OperationReconciler{
@@ -69,6 +71,16 @@ func (r *OperationReconciler) Reconcile(
 	switch op.Spec.Type {
 	case v1alpha1.DRBDResourceOperationCreateNewUUID:
 		return r.reconcileCreateNewUUID(rf.Ctx(), op).ToCtrl()
+	case v1alpha1.DRBDResourceOperationTrackBitmap:
+		return r.reconcileOperationWithResource(rf.Ctx(), op, "TrackBitmap", r.executeTrackBitmap).ToCtrl()
+	case v1alpha1.DRBDResourceOperationUntrackBitmap:
+		return r.reconcileOperationWithResource(rf.Ctx(), op, "UntrackBitmap", r.executeUntrackBitmap).ToCtrl()
+	case v1alpha1.DRBDResourceOperationFlushBitmap:
+		return r.reconcileOperationWithResource(rf.Ctx(), op, "FlushBitmap", r.executeFlushBitmap).ToCtrl()
+	case v1alpha1.DRBDResourceOperationSuspendIO:
+		return r.reconcileOperationWithResource(rf.Ctx(), op, "SuspendIO", r.executeSuspendIO).ToCtrl()
+	case v1alpha1.DRBDResourceOperationResumeIO:
+		return r.reconcileOperationWithResource(rf.Ctx(), op, "ResumeIO", r.executeResumeIO).ToCtrl()
 	default:
 		return r.reconcileUnsupported(rf.Ctx(), op, op.Spec.Type).ToCtrl()
 	}
@@ -88,6 +100,18 @@ func (r *OperationReconciler) reconcileCreateNewUUID(ctx context.Context, op *v1
 		}
 		return rf.Done()
 	}
+
+	return r.reconcileOperationWithResource(ctx, op, "CreateNewUUID", r.executeCreateNewUUID)
+}
+
+func (r *OperationReconciler) reconcileOperationWithResource(
+	ctx context.Context,
+	op *v1alpha1.DRBDResourceOperation,
+	name string,
+	execute operationExecutor,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, name)
+	defer rf.OnEnd(&outcome)
 
 	drbdr, err := r.getDRBDResourceForOperation(ctx, op)
 	if err != nil {
@@ -115,7 +139,7 @@ func (r *OperationReconciler) reconcileCreateNewUUID(ctx context.Context, op *v1
 		}
 	}
 
-	opErr := r.executeCreateNewUUID(ctx, op, drbdr)
+	opErr := execute(ctx, op, drbdr)
 	if opErr != nil {
 		if err := r.failOperationAndPatch(ctx, op, opErr.Error()); err != nil {
 			return rf.Fail(err)

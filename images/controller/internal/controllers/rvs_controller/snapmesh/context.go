@@ -50,8 +50,9 @@ type replicaContext struct {
 	rvrs       *v1alpha1.ReplicatedVolumeReplicaSnapshot
 	drbdr      *v1alpha1.DRBDResource
 
-	syncTransition *dmte.Transition
-	statusMessage  string
+	prepareTransition *dmte.Transition
+	syncTransition    *dmte.Transition
+	statusMessage     string
 }
 
 func (rc *replicaContext) ID() uint8                      { return rc.id }
@@ -112,6 +113,57 @@ func buildContexts(
 			rvrs:       rvrs,
 			drbdr:      drbdrByName[rvrs.Name],
 		}
+		gctx.allReplicas = append(gctx.allReplicas, rc)
+	}
+
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		gctx.replicas[rc.id] = rc
+	}
+
+	return provider{global: gctx}
+}
+
+func buildPrepareContexts(
+	ctx context.Context,
+	rvs *v1alpha1.ReplicatedVolumeSnapshot,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	childRVRSs []*v1alpha1.ReplicatedVolumeReplicaSnapshot,
+	cl client.Client,
+	scheme *runtime.Scheme,
+) provider {
+	gctx := &globalContext{
+		ctx:    ctx,
+		rvs:    rvs,
+		rv:     rv,
+		cl:     cl,
+		scheme: scheme,
+	}
+
+	childByRVRName := make(map[string]*v1alpha1.ReplicatedVolumeReplicaSnapshot, len(childRVRSs))
+	for _, rvrs := range childRVRSs {
+		childByRVRName[rvrs.Spec.ReplicatedVolumeReplicaName] = rvrs
+	}
+
+	gctx.allReplicas = make([]replicaContext, 0, len(rvrs))
+	for _, rvr := range rvrs {
+		if rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful || rvr.Spec.NodeName == "" {
+			continue
+		}
+
+		id := v1alpha1.IDFromName(rvr.Name)
+		rc := replicaContext{
+			id:         id,
+			drbdNodeID: id,
+			rvrName:    rvr.Name,
+			nodeName:   rvr.Spec.NodeName,
+			rvrs:       childByRVRName[rvr.Name],
+		}
+		if rc.rvrs != nil {
+			rc.rvrsName = rc.rvrs.Name
+		}
+
 		gctx.allReplicas = append(gctx.allReplicas, rc)
 	}
 

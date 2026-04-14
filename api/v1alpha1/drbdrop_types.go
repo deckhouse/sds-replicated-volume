@@ -52,9 +52,15 @@ type DRBDResourceOperationSpec struct {
 	DRBDResourceName string `json:"drbdResourceName"`
 
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=CreateNewUUID;ForcePrimary;Invalidate;Outdate;Verify
+	// +kubebuilder:validation:Enum=CreateNewUUID;TrackBitmap;UntrackBitmap;FlushBitmap;SuspendIO;ResumeIO;ForcePrimary;Invalidate;Outdate;Verify
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="type is immutable"
 	Type DRBDResourceOperationType `json:"type"`
+
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=31
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="peerNodeID is immutable"
+	// +optional
+	PeerNodeID *uint8 `json:"peerNodeID,omitempty"`
 
 	// Parameters for CreateNewUUID operation. Immutable once set.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="createNewUUID is immutable"
@@ -124,6 +130,11 @@ type DRBDResourceOperationType string
 const (
 	// DRBDResourceOperationCreateNewUUID creates a new UUID for the resource.
 	DRBDResourceOperationCreateNewUUID DRBDResourceOperationType = "CreateNewUUID"
+	DRBDResourceOperationTrackBitmap   DRBDResourceOperationType = "TrackBitmap"
+	DRBDResourceOperationUntrackBitmap DRBDResourceOperationType = "UntrackBitmap"
+	DRBDResourceOperationFlushBitmap   DRBDResourceOperationType = "FlushBitmap"
+	DRBDResourceOperationSuspendIO     DRBDResourceOperationType = "SuspendIO"
+	DRBDResourceOperationResumeIO      DRBDResourceOperationType = "ResumeIO"
 	// DRBDResourceOperationForcePrimary forces the resource to become primary.
 	DRBDResourceOperationForcePrimary DRBDResourceOperationType = "ForcePrimary"
 	// DRBDResourceOperationInvalidate invalidates the resource data.

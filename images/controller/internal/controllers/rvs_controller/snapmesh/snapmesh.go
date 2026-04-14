@@ -34,7 +34,33 @@ func BuildRegistry() {
 	}
 	registry = dmte.NewRegistry[*globalContext, *replicaContext]()
 	registerSlots(registry)
+	registerPreparePlans(registry)
 	registerSyncPlans(registry)
+}
+
+func ProcessPrepare(
+	ctx context.Context,
+	rvs *v1alpha1.ReplicatedVolumeSnapshot,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	childRVRSs []*v1alpha1.ReplicatedVolumeReplicaSnapshot,
+	cl client.Client,
+	scheme *runtime.Scheme,
+) bool {
+	cp := buildPrepareContexts(ctx, rvs, rv, rvrs, childRVRSs, cl, scheme)
+
+	dispatchers := []dmte.DispatchFunc[provider]{
+		prepareDispatcher(),
+	}
+	tracker := &concurrencyTracker{}
+	engine := dmte.NewEngine(ctx, registry, tracker, dispatchers,
+		&rvs.Status.PrepareRevision, rvs.Status.PrepareTransitions, cp)
+
+	changed := engine.Process(ctx)
+
+	rvs.Status.PrepareTransitions = engine.Finalize()
+
+	return changed
 }
 
 func ProcessSync(

@@ -20,10 +20,28 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
 )
 
-const syncSlot dmte.ReplicaSlotID = 0
+const (
+	prepareSlot dmte.ReplicaSlotID = 0
+	syncSlot    dmte.ReplicaSlotID = 1
+)
 
 func registerSlots(reg *dmte.Registry[*globalContext, *replicaContext]) {
+	reg.RegisterReplicaSlot(prepareSlot, prepareSlotAccessor{})
 	reg.RegisterReplicaSlot(syncSlot, syncSlotAccessor{})
+}
+
+type prepareSlotAccessor struct{}
+
+func (prepareSlotAccessor) GetActiveTransition(rctx *replicaContext) *dmte.Transition {
+	return rctx.prepareTransition
+}
+
+func (prepareSlotAccessor) SetActiveTransition(rctx *replicaContext, t *dmte.Transition) {
+	rctx.prepareTransition = t
+}
+
+func (prepareSlotAccessor) SetStatus(rctx *replicaContext, msg string, _ any) {
+	rctx.statusMessage = msg
 }
 
 type syncSlotAccessor struct{}

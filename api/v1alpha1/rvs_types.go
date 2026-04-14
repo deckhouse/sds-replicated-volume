@@ -101,6 +101,13 @@ type ReplicatedVolumeSnapshotStatus struct {
 	SyncDRBDResources []string `json:"syncDRBDResources,omitempty"`
 
 	// +optional
+	PrepareRevision int64 `json:"prepareRevision,omitempty"`
+
+	// +listType=atomic
+	// +optional
+	PrepareTransitions []ReplicatedVolumeDatameshTransition `json:"prepareTransitions,omitempty"`
+
+	// +optional
 	SyncRevision int64 `json:"syncRevision,omitempty"`
 
 	// +listType=atomic

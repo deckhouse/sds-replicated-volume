@@ -78,11 +78,23 @@ spec:
                 x-kubernetes-validations:
                 - message: drbdResourceName is immutable
                   rule: self == oldSelf
+              peerNodeID:
+                maximum: 31
+                minimum: 0
+                type: integer
+                x-kubernetes-validations:
+                - message: peerNodeID is immutable
+                  rule: self == oldSelf
               type:
                 description: DRBDResourceOperationType represents the type of operation
                   to perform on a DRBD resource.
                 enum:
                 - CreateNewUUID
+                - TrackBitmap
+                - UntrackBitmap
+                - FlushBitmap
+                - SuspendIO
+                - ResumeIO
                 - ForcePrimary
                 - Invalidate
                 - Outdate

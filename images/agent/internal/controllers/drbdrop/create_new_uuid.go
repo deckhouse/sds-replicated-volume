@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdr"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 )
 
@@ -31,24 +30,11 @@ func (r *OperationReconciler) executeCreateNewUUID(
 	op *v1alpha1.DRBDResourceOperation,
 	dr *v1alpha1.DRBDResource,
 ) error {
-	// Get minor number from DRBD status
-	drbdResName := drbdr.DRBDResourceNameOnTheNode(dr)
-	statusResult, err := drbdutils.ExecuteStatus(ctx, drbdResName)
+	minor, err := drbdMinor(ctx, dr)
 	if err != nil {
-		return fmt.Errorf("querying DRBD status: %w", err)
-	}
-	if len(statusResult) == 0 {
-		return fmt.Errorf("DRBD resource %q does not exist", drbdResName)
+		return err
 	}
 
-	devices := statusResult[0].Devices
-	if len(devices) == 0 {
-		return fmt.Errorf("DRBD resource %q has no volumes", drbdResName)
-	}
-
-	minor := uint(devices[0].Minor)
-
-	// Get parameters
 	clearBitmap := false
 	forceResync := false
 	if op.Spec.CreateNewUUID != nil {
@@ -56,7 +42,6 @@ func (r *OperationReconciler) executeCreateNewUUID(
 		forceResync = op.Spec.CreateNewUUID.ForceResync
 	}
 
-	// Execute command
 	if err := drbdutils.ExecuteNewCurrentUUID(ctx, minor, clearBitmap, forceResync); err != nil {
 		return fmt.Errorf("executing new-current-uuid: %w", err)
 	}

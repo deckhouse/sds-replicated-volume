@@ -1,0 +1,385 @@
+/*
+Copyright 2026 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package snapmesh
+
+import (
+	"fmt"
+	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
+	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
+)
+
+const (
+	prepareTransitionType = v1alpha1.ReplicatedVolumeDatameshTransitionType("PrepareSnapshot")
+	preparePlanID         = dmte.PlanID("prepare-snapshot/v1")
+	prepareCleanupPlanID  = dmte.PlanID("prepare-cleanup/v1")
+	prepareUnsafeTimeout  = 2 * time.Minute
+)
+
+func registerPreparePlans(reg *dmte.Registry[*globalContext, *replicaContext]) {
+	rt := reg.ReplicaTransition(prepareTransitionType, prepareSlot)
+
+	rt.Plan(preparePlanID).
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupSync).
+		DisplayName("Preparing snapshot").
+		Steps(
+			dmte.ReplicaStep("Track bitmap", applyNoop, confirmTrackBitmap),
+			dmte.ReplicaStep("Create secondary snapshots", applyNoop, confirmCreateSecondarySnapshots),
+			dmte.ReplicaStep("Wait secondary snapshots", applyNoop, confirmWaitSecondarySnapshots),
+			dmte.GlobalStep("Suspend IO", applyGlobalNoop, confirmSuspendIO),
+			dmte.GlobalStep("Flush bitmap", applyGlobalNoop, confirmFlushBitmap),
+			dmte.GlobalStep("Create primary snapshot", applyGlobalNoop, confirmCreatePrimarySnapshot),
+			dmte.GlobalStep("Resume IO", applyGlobalNoop, confirmResumeIO),
+			dmte.ReplicaStep("Untrack bitmap", applyNoop, confirmUntrackBitmap),
+		).
+		Build()
+
+	rt.Plan(prepareCleanupPlanID).
+		CancelActiveOnCreate(true).
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupSync).
+		DisplayName("Cleaning up snapshot prepare phase").
+		Steps(
+			dmte.GlobalStep("Resume IO", applyGlobalNoop, confirmResumeIO),
+			dmte.ReplicaStep("Untrack bitmap", applyNoop, confirmUntrackBitmap),
+		).
+		Build()
+}
+
+func applyGlobalNoop(_ *globalContext) bool { return false }
+
+func confirmTrackBitmap(gctx *globalContext, rctx *replicaContext, _ int64) dmte.ConfirmResult {
+	must := idset.Of(rctx.id)
+	primary := preparePrimaryReplica(gctx)
+	if primary == nil || primary == rctx {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
+	}
+	if confirmed, pending := ensurePrepareOperation(
+		gctx,
+		prepareTrackBitmapOperationName(gctx, rctx),
+		v1alpha1.DRBDResourceOperationSpec{
+			DRBDResourceName: primary.rvrName,
+			Type:             v1alpha1.DRBDResourceOperationTrackBitmap,
+			PeerNodeID:       ptrTo(rctx.drbdNodeID),
+		},
+		must,
+	); pending {
+		return dmte.ConfirmResult{MustConfirm: must}
+	} else {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: confirmed}
+	}
+}
+
+func confirmCreateSecondarySnapshots(gctx *globalContext, rctx *replicaContext, _ int64) dmte.ConfirmResult {
+	must := idset.Of(rctx.id)
+
+	if preparePrimaryReplica(gctx) == rctx {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
+	}
+
+	if confirmed, pending := ensurePrepareSnapshot(gctx, rctx, must); pending {
+		return dmte.ConfirmResult{MustConfirm: must}
+	} else {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: confirmed}
+	}
+}
+
+func confirmWaitSecondarySnapshots(gctx *globalContext, _ *replicaContext, _ int64) dmte.ConfirmResult {
+	must := prepareReplicaIDs(gctx)
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		if preparePrimaryReplica(gctx) == rc {
+			continue
+		}
+		if !prepareSnapshotReady(rc) {
+			return dmte.ConfirmResult{MustConfirm: must}
+		}
+	}
+	return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
+}
+
+func confirmSuspendIO(gctx *globalContext, _ int64) dmte.ConfirmResult {
+	must := prepareReplicaIDs(gctx)
+	primary := preparePrimaryReplica(gctx)
+	if primary == nil {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
+	}
+	if confirmed, pending := ensurePrepareOperation(
+		gctx,
+		preparePrimaryOperationName(gctx, "suspend-io"),
+		v1alpha1.DRBDResourceOperationSpec{
+			DRBDResourceName: primary.rvrName,
+			Type:             v1alpha1.DRBDResourceOperationSuspendIO,
+		},
+		must,
+	); pending {
+		return dmte.ConfirmResult{MustConfirm: must}
+	} else {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: confirmed}
+	}
+}
+
+func confirmFlushBitmap(gctx *globalContext, _ int64) dmte.ConfirmResult {
+	must := prepareReplicaIDs(gctx)
+	primary := preparePrimaryReplica(gctx)
+	if primary == nil {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
+	}
+	if confirmed, pending := ensurePrepareOperation(
+		gctx,
+		preparePrimaryOperationName(gctx, "flush-bitmap"),
+		v1alpha1.DRBDResourceOperationSpec{
+			DRBDResourceName: primary.rvrName,
+			Type:             v1alpha1.DRBDResourceOperationFlushBitmap,
+		},
+		must,
+	); pending {
+		return dmte.ConfirmResult{MustConfirm: must}
+	} else {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: confirmed}
+	}
+}
+
+func confirmCreatePrimarySnapshot(gctx *globalContext, _ int64) dmte.ConfirmResult {
+	must := prepareReplicaIDs(gctx)
+	primary := preparePrimaryReplica(gctx)
+	if primary == nil {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
+	}
+	if prepareSnapshotReady(primary) {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
+	}
+	if prepareSnapshotFailed(primary) {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
+	}
+	if _, pending := ensurePrepareSnapshot(gctx, primary, must); pending {
+		return dmte.ConfirmResult{MustConfirm: must}
+	}
+	return dmte.ConfirmResult{
+		MustConfirm: must,
+		Confirmed:   must,
+	}
+}
+
+func confirmResumeIO(gctx *globalContext, _ int64) dmte.ConfirmResult {
+	must := prepareReplicaIDs(gctx)
+	primary := preparePrimaryReplica(gctx)
+	if primary == nil {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
+	}
+	if confirmed, pending := ensurePrepareOperation(
+		gctx,
+		preparePrimaryOperationName(gctx, "resume-io"),
+		v1alpha1.DRBDResourceOperationSpec{
+			DRBDResourceName: primary.rvrName,
+			Type:             v1alpha1.DRBDResourceOperationResumeIO,
+		},
+		must,
+	); pending {
+		return dmte.ConfirmResult{MustConfirm: must}
+	} else {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: confirmed}
+	}
+}
+
+func confirmUntrackBitmap(gctx *globalContext, rctx *replicaContext, _ int64) dmte.ConfirmResult {
+	must := idset.Of(rctx.id)
+	primary := preparePrimaryReplica(gctx)
+	if primary == nil || primary == rctx {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
+	}
+	if confirmed, pending := ensurePrepareOperation(
+		gctx,
+		prepareUntrackBitmapOperationName(gctx, rctx),
+		v1alpha1.DRBDResourceOperationSpec{
+			DRBDResourceName: primary.rvrName,
+			Type:             v1alpha1.DRBDResourceOperationUntrackBitmap,
+			PeerNodeID:       ptrTo(rctx.drbdNodeID),
+		},
+		must,
+	); pending {
+		return dmte.ConfirmResult{MustConfirm: must}
+	} else {
+		return dmte.ConfirmResult{MustConfirm: must, Confirmed: confirmed}
+	}
+}
+
+func preparePrimaryReplica(gctx *globalContext) *replicaContext {
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		for _, member := range gctx.rv.Status.Datamesh.Members {
+			if member.Attached && member.Name == rc.rvrName {
+				return rc
+			}
+		}
+	}
+	return nil
+}
+
+func prepareReplicaIDs(gctx *globalContext) idset.IDSet {
+	ids := make([]uint8, 0, len(gctx.allReplicas))
+	for i := range gctx.allReplicas {
+		ids = append(ids, gctx.allReplicas[i].id)
+	}
+	return idset.Of(ids...)
+}
+
+func ensurePrepareOperation(
+	gctx *globalContext,
+	name string,
+	spec v1alpha1.DRBDResourceOperationSpec,
+	confirmed idset.IDSet,
+) (idset.IDSet, bool) {
+	op := &v1alpha1.DRBDResourceOperation{}
+	if err := gctx.cl.Get(gctx.ctx, client.ObjectKey{Name: name}, op); err == nil {
+		if op.Status.Phase == v1alpha1.DRBDOperationPhaseSucceeded {
+			return confirmed, false
+		}
+		return 0, true
+	} else if !apierrors.IsNotFound(err) {
+		return 0, true
+	}
+
+	op.Name = name
+	op.Spec = spec
+
+	if _, err := obju.SetControllerRef(op, gctx.rvs, gctx.scheme); err != nil {
+		return 0, true
+	}
+	if err := gctx.cl.Create(gctx.ctx, op); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return 0, true
+		}
+	}
+
+	return 0, true
+}
+
+func ensurePrepareSnapshot(gctx *globalContext, rctx *replicaContext, confirmed idset.IDSet) (idset.IDSet, bool) {
+	if prepareSnapshotReady(rctx) {
+		return confirmed, false
+	}
+	if rctx.rvrs != nil {
+		return 0, true
+	}
+
+	rvrs := &v1alpha1.ReplicatedVolumeReplicaSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: prepareReplicaSnapshotName(gctx, rctx),
+		},
+		Spec: v1alpha1.ReplicatedVolumeReplicaSnapshotSpec{
+			ReplicatedVolumeSnapshotName: gctx.rvs.Name,
+			ReplicatedVolumeReplicaName:  rctx.rvrName,
+			NodeName:                     rctx.nodeName,
+		},
+	}
+
+	if _, err := obju.SetControllerRef(rvrs, gctx.rvs, gctx.scheme); err != nil {
+		return 0, true
+	}
+	if err := gctx.cl.Create(gctx.ctx, rvrs); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return 0, true
+		}
+		if err := gctx.cl.Get(gctx.ctx, client.ObjectKeyFromObject(rvrs), rvrs); err != nil {
+			return 0, true
+		}
+	}
+
+	rctx.rvrs = rvrs
+	rctx.rvrsName = rvrs.Name
+
+	return 0, true
+}
+
+func prepareSnapshotReady(rctx *replicaContext) bool {
+	return rctx.rvrs != nil && rctx.rvrs.Status.SnapshotHandle != ""
+}
+
+func prepareSnapshotFailed(rctx *replicaContext) bool {
+	if rctx.rvrs == nil {
+		return false
+	}
+	return rctx.rvrs.Status.Phase == v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseFailed ||
+		rctx.rvrs.Status.Phase == v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseDeleting
+}
+
+func prepareOperationSucceeded(gctx *globalContext, name string) bool {
+	op := &v1alpha1.DRBDResourceOperation{}
+	if err := gctx.cl.Get(gctx.ctx, client.ObjectKey{Name: name}, op); err != nil {
+		return false
+	}
+	return op.Status.Phase == v1alpha1.DRBDOperationPhaseSucceeded
+}
+
+func prepareCleanupNeeded(gctx *globalContext) bool {
+	if !prepareOperationSucceeded(gctx, preparePrimaryOperationName(gctx, "suspend-io")) {
+		return false
+	}
+	if prepareOperationSucceeded(gctx, preparePrimaryOperationName(gctx, "resume-io")) {
+		return false
+	}
+	primary := preparePrimaryReplica(gctx)
+	if primary != nil && prepareSnapshotFailed(primary) {
+		return true
+	}
+	return prepareUnsafeStepTimedOut(gctx)
+}
+
+func prepareUnsafeStepTimedOut(gctx *globalContext) bool {
+	now := time.Now()
+	for i := range gctx.rvs.Status.PrepareTransitions {
+		step := gctx.rvs.Status.PrepareTransitions[i].CurrentStep()
+		if step == nil || step.StartedAt == nil {
+			continue
+		}
+		if step.Name != "Flush bitmap" && step.Name != "Create primary snapshot" {
+			continue
+		}
+		if step.Status == v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive &&
+			now.Sub(step.StartedAt.Time) >= prepareUnsafeTimeout {
+			return true
+		}
+	}
+	return false
+}
+
+func prepareReplicaSnapshotName(gctx *globalContext, rctx *replicaContext) string {
+	return fmt.Sprintf("%s-%s", gctx.rvs.Name, rctx.nodeName)
+}
+
+func prepareTrackBitmapOperationName(gctx *globalContext, rctx *replicaContext) string {
+	return fmt.Sprintf("%s-track-bitmap-%d", gctx.rvs.Name, rctx.id)
+}
+
+func prepareUntrackBitmapOperationName(gctx *globalContext, rctx *replicaContext) string {
+	return fmt.Sprintf("%s-untrack-bitmap-%d", gctx.rvs.Name, rctx.id)
+}
+
+func preparePrimaryOperationName(gctx *globalContext, action string) string {
+	return fmt.Sprintf("%s-%s-primary", gctx.rvs.Name, action)
+}
+
+func ptrTo[T any](v T) *T {
+	return &v
+}

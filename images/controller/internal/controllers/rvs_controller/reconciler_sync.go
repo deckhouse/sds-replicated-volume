@@ -41,7 +41,8 @@ func (r *Reconciler) reconcileSyncMesh(
 		return r.reconcileStatus(rf.Ctx(), rvs, rvs.Status.Datamesh,
 			v1alpha1.ReplicatedVolumeSnapshotPhaseReady,
 			"All replica snapshots are ready",
-			true)
+			true,
+			rvs.Status.SourceReplicaSnapshotName)
 	}
 
 	l := log.FromContext(rf.Ctx())
@@ -66,6 +67,14 @@ func (r *Reconciler) reconcileSyncMesh(
 
 	base := rvs.DeepCopy()
 
+	if allSyncTransitionsCompleted(rvs) {
+		completeSyncStatus(rvs)
+		if err := r.patchRVSStatus(rf.Ctx(), rvs, base); err != nil {
+			return rf.Fail(err)
+		}
+		return rf.Done()
+	}
+
 	if syncNeedsReset(rvs, syncDRBDRs, childRVRSs) {
 		l.Info("sync-mesh: resetting stuck transitions (DRBDResources missing for >2m)")
 		rvs.Status.SyncTransitions = nil
@@ -76,21 +85,8 @@ func (r *Reconciler) reconcileSyncMesh(
 		return rf.DoneAndRequeue()
 	}
 
-	if allSyncTransitionsCompleted(rvs) {
-		rvs.Status.SyncDRBDResources = nil
-		rvs.Status.SyncTransitions = nil
-		rvs.Status.SyncRevision = 0
-		rvs.Status.Phase = v1alpha1.ReplicatedVolumeSnapshotPhaseReady
-		rvs.Status.Message = "All replica snapshots are ready"
-		rvs.Status.ReadyToUse = true
-		if rvs.Status.CreationTime == nil {
-			now := metav1.Now()
-			rvs.Status.CreationTime = &now
-		}
-		if err := r.patchRVSStatus(rf.Ctx(), rvs, base); err != nil {
-			return rf.Fail(err)
-		}
-		return rf.Done()
+	if len(childRVRSs) < rvs.Status.Datamesh.TotalCount {
+		return rf.DoneAndRequeue()
 	}
 
 	changed := snapmesh.ProcessSync(rf.Ctx(), rvs, rv, childRVRSs, syncDRBDRs, originalNodeIDs, r.cl, r.scheme)
@@ -115,6 +111,19 @@ func allSyncTransitionsCompleted(rvs *v1alpha1.ReplicatedVolumeSnapshot) bool {
 	return rvs.Status.SyncRevision > 0 && len(rvs.Status.SyncTransitions) == 0
 }
 
+func completeSyncStatus(rvs *v1alpha1.ReplicatedVolumeSnapshot) {
+	rvs.Status.SyncDRBDResources = nil
+	rvs.Status.SyncTransitions = nil
+	rvs.Status.SyncRevision = 0
+	rvs.Status.Phase = v1alpha1.ReplicatedVolumeSnapshotPhaseReady
+	rvs.Status.Message = "All replica snapshots are ready"
+	rvs.Status.ReadyToUse = true
+	if rvs.Status.CreationTime == nil {
+		now := metav1.Now()
+		rvs.Status.CreationTime = &now
+	}
+}
+
 const syncStuckTimeout = 2 * time.Minute
 
 func syncNeedsReset(
@@ -127,8 +136,10 @@ func syncNeedsReset(
 	}
 
 	rvrsNameByRVR := make(map[string]string, len(childRVRSs))
+	childRVRNames := make(map[string]struct{}, len(childRVRSs))
 	for _, rvrs := range childRVRSs {
 		rvrsNameByRVR[rvrs.Spec.ReplicatedVolumeReplicaName] = rvrs.Name
+		childRVRNames[rvrs.Spec.ReplicatedVolumeReplicaName] = struct{}{}
 	}
 
 	drbdrNames := make(map[string]struct{}, len(syncDRBDRs))
@@ -152,6 +163,13 @@ func syncNeedsReset(
 		}
 
 		if !pastStep0 || activeStart == nil {
+			continue
+		}
+
+		if _, ok := childRVRNames[t.ReplicaName]; !ok {
+			if time.Since(activeStart.Time) > syncStuckTimeout {
+				return true
+			}
 			continue
 		}
 
@@ -210,7 +228,19 @@ func extractOriginalNodeIDs(all []v1alpha1.DRBDResource, childRVRSs []*v1alpha1.
 	for _, rvrs := range childRVRSs {
 		rvrNames[rvrs.Spec.ReplicatedVolumeReplicaName] = struct{}{}
 	}
-	result := make(map[string]uint8, len(childRVRSs))
+	return extractOriginalNodeIDsForNames(all, rvrNames)
+}
+
+func extractOriginalNodeIDsForRVRs(all []v1alpha1.DRBDResource, rvrs []*v1alpha1.ReplicatedVolumeReplica) map[string]uint8 {
+	rvrNames := make(map[string]struct{}, len(rvrs))
+	for _, rvr := range rvrs {
+		rvrNames[rvr.Name] = struct{}{}
+	}
+	return extractOriginalNodeIDsForNames(all, rvrNames)
+}
+
+func extractOriginalNodeIDsForNames(all []v1alpha1.DRBDResource, rvrNames map[string]struct{}) map[string]uint8 {
+	result := make(map[string]uint8, len(rvrNames))
 	for i := range all {
 		if _, ok := rvrNames[all[i].Name]; ok {
 			result[all[i].Name] = all[i].Spec.NodeID
