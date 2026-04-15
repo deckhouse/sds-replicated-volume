@@ -38,6 +38,12 @@ func observeRVMetrics(rv *v1alpha1.ReplicatedVolume) {
 	metrics.RVCreatedTimestamp.WithLabelValues(rv.Name, sc).Set(
 		float64(rv.CreationTimestamp.Unix()))
 
+	deleting := float64(0)
+	if rv.DeletionTimestamp != nil {
+		deleting = 1
+	}
+	metrics.RVDeleting.WithLabelValues(rv.Name, sc).Set(deleting)
+
 	// RV conditions health gauges.
 	for _, cond := range rv.Status.Conditions {
 		val := float64(0)
@@ -64,6 +70,7 @@ func cleanupRVMetrics(rv *v1alpha1.ReplicatedVolume) {
 	}
 	sc := rv.Spec.ReplicatedStorageClassName
 	metrics.RVCreatedTimestamp.DeleteLabelValues(rv.Name, sc)
+	metrics.RVDeleting.DeleteLabelValues(rv.Name, sc)
 	for _, cond := range rv.Status.Conditions {
 		metrics.RVCondition.DeleteLabelValues(rv.Name, sc, cond.Type)
 	}
