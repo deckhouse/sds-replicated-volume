@@ -35,7 +35,7 @@
       },
       "targets": [
         {
-          "expr": "count(sds_rv_created_timestamp_seconds{storage_class=~\"$storage_class\"}) or on() vector(0)",
+          "expr": "count(sds_rv_present{storage_class=~\"$storage_class\"} == 1) or on() vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -96,7 +96,7 @@
       },
       "targets": [
         {
-          "expr": "count(((sds_rv_condition{type=\"IOReady\",storage_class=~\"$storage_class\"} == 0) and on(name) (time() - sds_rv_created_timestamp_seconds{storage_class=~\"$storage_class\"} > 300)) unless on(name, storage_class) (sds_rv_deleting{storage_class=~\"$storage_class\"} == 1)) or on() vector(0)",
+          "expr": "count((((sds_rv_condition{type=\"IOReady\",storage_class=~\"$storage_class\"} == 0) and on(name, storage_class) (sds_rv_present{storage_class=~\"$storage_class\"} == 1)) and on(name) (time() - sds_rv_created_timestamp_seconds{storage_class=~\"$storage_class\"} > 300)) unless on(name, storage_class) (sds_rv_deleting{storage_class=~\"$storage_class\"} == 1)) or on() vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -161,7 +161,7 @@
       },
       "targets": [
         {
-          "expr": "count((sds_rvr_phase_info{phase!=\"Healthy\",phase!=\"\",node=~\"$node\"} == 1) unless on(name, rv, node) (sds_rvr_deleting{node=~\"$node\",storage_class=~\"$storage_class\"} == 1)) or on() vector(0)",
+          "expr": "count((((sds_rvr_phase_info{phase!=\"Healthy\",phase!=\"\",node=~\"$node\"} == 1) and on(name, rv, node) (sds_rvr_present{node=~\"$node\",storage_class=~\"$storage_class\"} == 1)) unless on(name, rv, node) (sds_rvr_deleting{node=~\"$node\",storage_class=~\"$storage_class\"} == 1))) or on() vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -226,7 +226,7 @@
       },
       "targets": [
         {
-          "expr": "count(sds_rv_deleting{storage_class=~\"$storage_class\"} == 1) or on() vector(0)",
+          "expr": "count((sds_rv_deleting{storage_class=~\"$storage_class\"} == 1) and on(name, storage_class) (sds_rv_present{storage_class=~\"$storage_class\"} == 1)) or on() vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -291,7 +291,7 @@
       },
       "targets": [
         {
-          "expr": "count(sds_rvr_deleting{node=~\"$node\",storage_class=~\"$storage_class\"} == 1) or on() vector(0)",
+          "expr": "count((sds_rvr_deleting{node=~\"$node\",storage_class=~\"$storage_class\"} == 1) and on(name, rv, node) (sds_rvr_present{node=~\"$node\",storage_class=~\"$storage_class\"} == 1)) or on() vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -787,8 +787,8 @@
       "id": 11,
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 24,
+        "x": 0,
         "y": 30
       },
       "datasource": {
@@ -2549,8 +2549,8 @@
       "panels": [
         {
           "type": "bargauge",
-          "title": "Current DRBD Connections by State",
-          "description": "Current cluster-wide DRBD connection counts by state. Use the unhealthy table for node-level and per-resource details.",
+          "title": "Current DRBD Unhealthy Connections by Node",
+          "description": "Current number of DRBD connections in non-healthy states per node. Use the table for state and resource-level detail.",
           "id": 24,
           "gridPos": {
             "h": 8,
@@ -2564,8 +2564,8 @@
           },
           "targets": [
             {
-              "expr": "count by (drbd_connection_state) (drbd_connection_state == 1)",
-              "legendFormat": "{{drbd_connection_state}}",
+              "expr": "sum by (node) (drbd_connection_state{drbd_connection_state!=\"UpToDate\",drbd_connection_state!=\"Connected\",node=~\"$node\"} == 1) or (0 * max by (node) (sds_rvr_present{node=~\"$node\",storage_class=~\"$storage_class\"}))",
+              "legendFormat": "{{node}}",
               "refId": "A",
               "instant": true
             }
@@ -2803,7 +2803,7 @@
       },
       "targets": [
         {
-          "expr": "count by (node, phase) ((sds_rvr_phase_info{node=~\"$node\"} == 1) unless on(name, rv, node) (sds_rvr_deleting{node=~\"$node\",storage_class=~\"$storage_class\"} == 1))",
+          "expr": "count by (node, phase) ((((sds_rvr_phase_info{node=~\"$node\"} == 1) and on(name, rv, node) (sds_rvr_present{node=~\"$node\",storage_class=~\"$storage_class\"} == 1)) unless on(name, rv, node) (sds_rvr_deleting{node=~\"$node\",storage_class=~\"$storage_class\"} == 1)))",
           "legendFormat": "",
           "refId": "A",
           "format": "table",
@@ -2850,7 +2850,7 @@
       },
       "targets": [
         {
-          "expr": "topk(10, ((sds:rvr_stuck_phase_duration:seconds{phase!=\"Healthy\",node=~\"$node\"}) unless on(name, rv, node) (sds_rvr_deleting{node=~\"$node\",storage_class=~\"$storage_class\"} == 1)) > 300)",
+          "expr": "topk(10, ((((sds:rvr_stuck_phase_duration:seconds{phase!=\"Healthy\",node=~\"$node\"}) and on(name, rv, node) (sds_rvr_present{node=~\"$node\",storage_class=~\"$storage_class\"} == 1)) unless on(name, rv, node) (sds_rvr_deleting{node=~\"$node\",storage_class=~\"$storage_class\"} == 1)) > 300))",
           "legendFormat": "",
           "refId": "A",
           "format": "table",

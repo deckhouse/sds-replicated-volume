@@ -196,6 +196,12 @@ var (
 		Help: "Status of RV conditions (1=True, 0=False/Unknown).",
 	}, []string{LabelName, LabelStorageClass, LabelType})
 
+	// RVPresent reports 1 for every RV currently observed by the controller.
+	RVPresent = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "sds_rv_present",
+		Help: "Whether the RV is currently present in the controller cache (1 if observed, 0/absent otherwise).",
+	}, []string{LabelName, LabelStorageClass})
+
 	// RVDeleting reports 1 when the RV has DeletionTimestamp set.
 	RVDeleting = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "sds_rv_deleting",
@@ -207,6 +213,12 @@ var (
 		Name: "sds_rvr_phase_info",
 		Help: "Current phase of each RVR (1 for active phase).",
 	}, []string{LabelName, LabelRV, LabelNode, LabelPhase})
+
+	// RVRPresent reports 1 for every RVR currently observed by the controller.
+	RVRPresent = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "sds_rvr_present",
+		Help: "Whether the RVR is currently present in the controller cache (1 if observed, 0/absent otherwise).",
+	}, []string{LabelName, LabelRV, LabelNode, LabelStorageClass})
 
 	// RVRDeleting reports 1 when the RVR has DeletionTimestamp set.
 	RVRDeleting = prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -249,8 +261,10 @@ func init() {
 
 		// Health gauges
 		RVCondition,
+		RVPresent,
 		RVDeleting,
 		RVRPhaseInfo,
+		RVRPresent,
 		RVRDeleting,
 		RVAPhaseInfo,
 	)
