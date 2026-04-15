@@ -23,6 +23,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -182,12 +183,14 @@ func (r *OperationReconciler) getDRBDResourceForOperation(
 	ctx context.Context,
 	op *v1alpha1.DRBDResourceOperation,
 ) (*v1alpha1.DRBDResource, error) {
+	l := log.FromContext(ctx)
 	drbdr, err := r.getDRBDR(ctx, op.Spec.DRBDResourceName)
 	if err != nil {
 		return nil, err
 	}
 	if drbdr == nil {
-		return nil, fmt.Errorf("DRBDResource not found")
+		l.V(1).Info("DRBDResource not found in local cache, skipping", "drbdResourceName", op.Spec.DRBDResourceName)
+		return nil, nil
 	}
 	if drbdr.Spec.NodeName != r.nodeName {
 		return nil, nil
