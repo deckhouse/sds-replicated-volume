@@ -5,11 +5,12 @@ import (
 	"strconv"
 )
 
-var TrackBitmapArgs = func(resource string, peerNodeID uint8, start bool) []string {
+var TrackBitmapArgs = func(resource string, peerNodeID uint8, volume uint, start bool) []string {
 	args := []string{
 		"track-bitmap",
 		resource,
 		strconv.FormatUint(uint64(peerNodeID), 10),
+		strconv.FormatUint(uint64(volume), 10),
 	}
 	if start {
 		args = append(args, "--start")
@@ -17,8 +18,8 @@ var TrackBitmapArgs = func(resource string, peerNodeID uint8, start bool) []stri
 	return args
 }
 
-func ExecuteTrackBitmap(ctx context.Context, resource string, peerNodeID uint8, start bool) error {
-	cmd := ExecCommandContext(ctx, DRBDSetupCommand, TrackBitmapArgs(resource, peerNodeID, start)...)
+func ExecuteTrackBitmap(ctx context.Context, resource string, peerNodeID uint8, volume uint, start bool) error {
+	cmd := ExecCommandContext(ctx, DRBDSetupCommand, TrackBitmapArgs(resource, peerNodeID, volume, start)...)
 	_, err := executeCommand(cmd, nil)
 	return err
 }

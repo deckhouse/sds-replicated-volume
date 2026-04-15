@@ -45,11 +45,11 @@ func TestExecuteTrackBitmapStartFlag(t *testing.T) {
 	fakeExec := &fakedrbdutils.Exec{}
 	fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
 		Name: drbdutils.DRBDSetupCommand,
-		Args: drbdutils.TrackBitmapArgs("res", 7, true),
+		Args: drbdutils.TrackBitmapArgs("res", 7, 0, true),
 	})
 	fakeExec.Setup(t)
 
-	if err := drbdutils.ExecuteTrackBitmap(t.Context(), "res", 7, true); err != nil {
+	if err := drbdutils.ExecuteTrackBitmap(t.Context(), "res", 7, 0, true); err != nil {
 		t.Fatalf("ExecuteTrackBitmap() unexpected error: %v", err)
 	}
 }

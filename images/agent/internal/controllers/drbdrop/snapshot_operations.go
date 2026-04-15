@@ -22,7 +22,7 @@ func (r *OperationReconciler) executeTrackBitmap(
 	}
 	drbdResName := drbdr.DRBDResourceNameOnTheNode(dr)
 	log.FromContext(ctx).Info("drbdrop: executing track-bitmap", "resource", drbdResName, "peerNodeID", peerNodeID)
-	if err := drbdutils.ExecuteTrackBitmap(ctx, drbdResName, peerNodeID, true); err != nil {
+	if err := drbdutils.ExecuteTrackBitmap(ctx, drbdResName, peerNodeID, 0, true); err != nil {
 		return fmt.Errorf("executing track-bitmap: %w", err)
 	}
 	return nil
@@ -39,7 +39,7 @@ func (r *OperationReconciler) executeUntrackBitmap(
 	}
 	drbdResName := drbdr.DRBDResourceNameOnTheNode(dr)
 	log.FromContext(ctx).Info("drbdrop: executing untrack-bitmap", "resource", drbdResName, "peerNodeID", peerNodeID)
-	if err := drbdutils.ExecuteTrackBitmap(ctx, drbdResName, peerNodeID, false); err != nil {
+	if err := drbdutils.ExecuteTrackBitmap(ctx, drbdResName, peerNodeID, 0, false); err != nil {
 		return fmt.Errorf("executing untrack-bitmap: %w", err)
 	}
 	return nil
