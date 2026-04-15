@@ -120,7 +120,7 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, rvs *v1alpha1.Replicat
 		if prepareNeedsRun(rvs) {
 			return r.reconcilePrepareMesh(rf.Ctx(), rvs, rv, rvrs, childRVRSs)
 		}
-		if syncNeedsRun(rvs) {
+		if false && syncNeedsRun(rvs) { // TODO: remove this after testing
 			return r.reconcileSyncMesh(rf.Ctx(), rvs, rv, childRVRSs)
 		}
 	}
