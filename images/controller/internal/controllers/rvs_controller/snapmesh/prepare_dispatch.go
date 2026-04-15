@@ -45,6 +45,9 @@ func prepareDispatcher() dmte.DispatchFunc[provider] {
 			if primary.prepareTransition != nil {
 				return
 			}
+			if gctx.rvs.Status.PrepareRevision > 0 {
+				return
+			}
 			yield(dmte.DispatchReplica(primary, prepareTransitionType, preparePlanID))
 		}
 	}
