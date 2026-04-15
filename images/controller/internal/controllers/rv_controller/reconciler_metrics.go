@@ -37,6 +37,7 @@ func observeRVMetrics(rv *v1alpha1.ReplicatedVolume) {
 	// RV creation timestamp gauge (for age-based filtering).
 	metrics.RVCreatedTimestamp.WithLabelValues(rv.Name, sc).Set(
 		float64(rv.CreationTimestamp.Unix()))
+	metrics.RVPresent.WithLabelValues(rv.Name, sc).Set(1)
 
 	deleting := float64(0)
 	if rv.DeletionTimestamp != nil {
@@ -70,6 +71,7 @@ func cleanupRVMetrics(rv *v1alpha1.ReplicatedVolume) {
 	}
 	sc := rv.Spec.ReplicatedStorageClassName
 	metrics.RVCreatedTimestamp.DeleteLabelValues(rv.Name, sc)
+	metrics.RVPresent.DeleteLabelValues(rv.Name, sc)
 	metrics.RVDeleting.DeleteLabelValues(rv.Name, sc)
 	for _, cond := range rv.Status.Conditions {
 		metrics.RVCondition.DeleteLabelValues(rv.Name, sc, cond.Type)
