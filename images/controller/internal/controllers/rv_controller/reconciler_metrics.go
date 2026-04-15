@@ -98,6 +98,8 @@ func observeRVAPhaseChange(
 			dur := time.Since(rva.CreationTimestamp.Time).Seconds()
 			metrics.RVAReadyDuration.WithLabelValues(node).Observe(dur)
 			metrics.RVACreationDuration.WithLabelValues(rva.Name, rvName, node).Set(dur)
+			metrics.RVACreationCompletedTimestamp.WithLabelValues(rva.Name, rvName, node).Set(
+				float64(time.Now().Unix()))
 		}
 	} else if newPhase != "" {
 		metrics.RVAPhaseInfo.WithLabelValues(rva.Name, rvName, node, string(newPhase)).Set(1)
@@ -121,6 +123,7 @@ func cleanupRVAMetrics(rva *v1alpha1.ReplicatedVolumeAttachment) {
 	rvName := rva.Spec.ReplicatedVolumeName
 	node := rva.Spec.NodeName
 	metrics.RVACreationDuration.DeleteLabelValues(rva.Name, rvName, node)
+	metrics.RVACreationCompletedTimestamp.DeleteLabelValues(rva.Name, rvName, node)
 	metrics.RVAPhaseInfo.DeleteLabelValues(rva.Name, rvName, node, string(rva.Status.Phase))
 }
 

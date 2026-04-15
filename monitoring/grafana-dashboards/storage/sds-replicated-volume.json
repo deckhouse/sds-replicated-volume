@@ -9,7 +9,7 @@
   "panels": [
     {
       "type": "row",
-      "title": "Overview",
+      "title": "Overview / Current State",
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -35,7 +35,7 @@
       },
       "targets": [
         {
-          "expr": "count(sds_rv_created_timestamp_seconds{storage_class=~\"$storage_class\"})",
+          "expr": "count(sds_rv_created_timestamp_seconds{storage_class=~\"$storage_class\"}) or on() vector(0)",
           "legendFormat": "",
           "refId": "A"
         }
@@ -51,7 +51,19 @@
                 "value": null
               }
             ]
-          }
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "index": 0,
+                  "text": "0"
+                }
+              }
+            }
+          ]
         },
         "overrides": []
       },
@@ -83,7 +95,7 @@
       },
       "targets": [
         {
-          "expr": "count(sds_rv_condition{type=\"IOReady\",storage_class=~\"$storage_class\"} == 0 and on(name) (time() - sds_rv_created_timestamp_seconds{storage_class=~\"$storage_class\"} > 300))",
+          "expr": "count(sds_rv_condition{type=\"IOReady\",storage_class=~\"$storage_class\"} == 0 and on(name) (time() - sds_rv_created_timestamp_seconds{storage_class=~\"$storage_class\"} > 300)) or on() vector(0)",
           "legendFormat": "",
           "refId": "A"
         }
@@ -103,7 +115,19 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "index": 0,
+                  "text": "0"
+                }
+              }
+            }
+          ]
         },
         "overrides": []
       },
@@ -135,7 +159,7 @@
       },
       "targets": [
         {
-          "expr": "count(sds_rvr_phase_info{phase!=\"Healthy\",phase!=\"\",node=~\"$node\"} == 1)",
+          "expr": "count(sds_rvr_phase_info{phase!=\"Healthy\",phase!=\"\",node=~\"$node\"} == 1) or on() vector(0)",
           "legendFormat": "",
           "refId": "A"
         }
@@ -155,7 +179,19 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "index": 0,
+                  "text": "0"
+                }
+              }
+            }
+          ]
         },
         "overrides": []
       },
@@ -171,15 +207,15 @@
       }
     },
     {
-      "type": "bargauge",
-      "title": "Top-10 Slowest RVs",
-      "description": "Top-10 RVs by slowest RVR creation time (first time reaching Healthy). Values are recorded once per RVR lifecycle and cleaned up on deletion.",
+      "type": "table",
+      "title": "Top-10 Slowest RVs in Range",
+      "description": "Top-10 RVs by slowest RVR creation duration among RVRs that first reached Healthy in the selected time range.",
       "id": 4,
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
-        "y": 1
+        "x": 0,
+        "y": 41
       },
       "datasource": {
         "type": "prometheus",
@@ -187,55 +223,57 @@
       },
       "targets": [
         {
-          "expr": "topk(10, max by (rv) (sds_rvr_creation_duration_seconds{node=~\"$node\",storage_class=~\"$storage_class\"}))",
-          "legendFormat": "{{rv}}",
-          "refId": "A"
+          "expr": "topk(10, max by (rv, storage_class) (sds_rvr_creation_duration_seconds{node=~\"$node\",storage_class=~\"$storage_class\"} and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{node=~\"$node\",storage_class=~\"$storage_class\"} >= (${__from} / 1000)) and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{node=~\"$node\",storage_class=~\"$storage_class\"} <= (${__to} / 1000))))",
+          "legendFormat": "",
+          "refId": "A",
+          "format": "table",
+          "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 30
-              },
-              {
-                "color": "red",
-                "value": 120
-              }
-            ]
-          }
+          "unit": "s"
         },
         "overrides": []
       },
       "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        },
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "showUnfilled": true
-      }
+        "showHeader": true,
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "rv": 0,
+              "storage_class": 1,
+              "Value": 2
+            },
+            "renameByName": {
+              "rv": "RV",
+              "storage_class": "Storage Class",
+              "Value": "Slowest Duration"
+            }
+          }
+        }
+      ]
     },
     {
       "type": "table",
       "title": "Per-Node Resource Count",
-      "description": "Number of RVRs and RVAs per node.",
+      "description": "Current number of RVRs and RVAs per node. Empty rows mean no objects matched the current filters.",
       "id": 5,
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
-        "y": 5
+        "x": 12,
+        "y": 1
       },
       "datasource": {
         "type": "prometheus",
@@ -290,7 +328,7 @@
     },
     {
       "type": "row",
-      "title": "RVR Lifecycle",
+      "title": "Performance / Events",
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -300,15 +338,15 @@
       "collapsed": false
     },
     {
-      "type": "bargauge",
-      "title": "Slowest RVR per RV",
-      "description": "Max RVR creation duration per RV. Gauge recorded once when RVR first reaches Healthy. Use RV filter to drill down.",
+      "type": "table",
+      "title": "Slowest RVR per RV in Range",
+      "description": "Slowest RVR for each RV among RVRs that first reached Healthy in the selected time range. Use the RV filter to narrow the result.",
       "id": 6,
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
-        "y": 14
+        "x": 12,
+        "y": 41
       },
       "datasource": {
         "type": "prometheus",
@@ -316,49 +354,57 @@
       },
       "targets": [
         {
-          "expr": "max by (rv) (sds_rvr_creation_duration_seconds{node=~\"$node\",storage_class=~\"$storage_class\",rv=~\"$rv\"})",
-          "legendFormat": "{{rv}}",
-          "refId": "A"
+          "expr": "topk(20, (sds_rvr_creation_duration_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} >= (${__from} / 1000)) and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} <= (${__to} / 1000))) == on(rv) group_left max by (rv) (sds_rvr_creation_duration_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} >= (${__from} / 1000)) and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} <= (${__to} / 1000))))",
+          "legendFormat": "",
+          "refId": "A",
+          "format": "table",
+          "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 30
-              },
-              {
-                "color": "red",
-                "value": 120
-              }
-            ]
-          }
+          "unit": "s"
         },
         "overrides": []
       },
       "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        },
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "showUnfilled": true
-      }
+        "showHeader": true,
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "instance": true
+            },
+            "indexByName": {
+              "name": 0,
+              "rv": 1,
+              "node": 2,
+              "storage_class": 3,
+              "Value": 4
+            },
+            "renameByName": {
+              "name": "RVR",
+              "rv": "RV",
+              "node": "Node",
+              "storage_class": "Storage Class",
+              "Value": "Creation Duration"
+            }
+          }
+        }
+      ]
     },
     {
       "type": "timeseries",
       "title": "RVR Ready Duration P50/P90/P99",
-      "description": "Time from RVR creation to first Healthy phase. Cluster-wide percentiles + per-node P90.",
+      "description": "Time from RVR creation to first Healthy phase, aggregated over events in the selected range. Empty graph means no RVR completions in the selected range.",
       "id": 7,
       "gridPos": {
         "h": 8,
@@ -426,7 +472,7 @@
     {
       "type": "timeseries",
       "title": "RVR Phase Duration by Phase",
-      "description": "P90 duration spent in each RVR phase. High values in non-Healthy phases indicate bottlenecks.",
+      "description": "P90 duration spent in each RVR phase, aggregated from phase transitions observed in the selected range. Empty graph means no phase transitions in the selected range.",
       "id": 8,
       "gridPos": {
         "h": 8,
@@ -478,8 +524,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Avg Creation Duration by Node",
-      "description": "Average RVR creation duration per node. Gauge values recorded when each RVR first reaches Healthy.",
+      "title": "Avg Creation Duration by Node in Range",
+      "description": "Average RVR creation duration per node for RVRs that first reached Healthy in the selected range. Empty graph means no completions in the selected range.",
       "id": 9,
       "gridPos": {
         "h": 8,
@@ -493,7 +539,7 @@
       },
       "targets": [
         {
-          "expr": "avg by (node) (sds_rvr_creation_duration_seconds{node=~\"$node\",storage_class=~\"$storage_class\"})",
+          "expr": "avg by (node) (sds_rvr_creation_duration_seconds{node=~\"$node\",storage_class=~\"$storage_class\"} and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{node=~\"$node\",storage_class=~\"$storage_class\"} >= (${__from} / 1000)) and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{node=~\"$node\",storage_class=~\"$storage_class\"} <= (${__to} / 1000)))",
           "legendFormat": "{{node}}",
           "refId": "A"
         }
@@ -532,7 +578,7 @@
     {
       "type": "timeseries",
       "title": "Backing Volume Duration (LLV) P90",
-      "description": "Reflects LLV/LVMLogicalVolume provisioning time per node.",
+      "description": "Reflects LLV/LVMLogicalVolume provisioning time per node. Empty graph means no new backing volume readiness events in the selected range.",
       "id": 10,
       "gridPos": {
         "h": 8,
@@ -585,7 +631,7 @@
     {
       "type": "timeseries",
       "title": "Degraded Phase Frequency",
-      "description": "Rate of RVRs entering Degraded phase. High values indicate instability/oscillation.",
+      "description": "Rate of RVR transitions into Degraded phase in the selected range. Empty graph means no degraded transitions in the selected range.",
       "id": 11,
       "gridPos": {
         "h": 8,
@@ -637,25 +683,25 @@
     },
     {
       "type": "row",
-      "title": "RVR Detail",
+      "title": "Investigation / Slow Objects",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 49
       },
       "collapsed": true,
       "panels": [
         {
           "type": "table",
-          "title": "Per-RVR Detail",
-          "description": "Per-object RVR creation duration with all labels for drill-down investigation.",
+          "title": "Per-RVR Detail in Range",
+          "description": "Per-object RVR creation duration for RVRs that first reached Healthy in the selected range. Use filters for drill-down investigation.",
           "id": 12,
           "gridPos": {
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 41
+            "y": 50
           },
           "datasource": {
             "type": "prometheus",
@@ -663,7 +709,7 @@
           },
           "targets": [
             {
-              "expr": "sds_rvr_creation_duration_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"}",
+              "expr": "topk(100, sds_rvr_creation_duration_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} >= (${__from} / 1000)) and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} <= (${__to} / 1000)))",
               "legendFormat": "",
               "refId": "A",
               "format": "table",
@@ -699,7 +745,13 @@
                   "storage_class": 3,
                   "Value": 4
                 },
-                "renameByName": {}
+                "renameByName": {
+                  "name": "RVR",
+                  "rv": "RV",
+                  "node": "Node",
+                  "storage_class": "Storage Class",
+                  "Value": "Creation Duration"
+                }
               }
             }
           ]
@@ -708,25 +760,25 @@
     },
     {
       "type": "row",
-      "title": "RVA Lifecycle",
+      "title": "Performance / Events: RVA",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 55
+        "y": 61
       },
       "collapsed": true,
       "panels": [
         {
           "type": "timeseries",
           "title": "RVA Attach Duration P50/P90",
-          "description": "Time from RVA creation to Attached phase.",
+          "description": "Time from RVA creation to Attached phase for events in the selected range. Empty graph means no RVA attachments in the selected range.",
           "id": 13,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 56
+            "y": 62
           },
           "datasource": {
             "type": "prometheus",
@@ -784,7 +836,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 56
+            "y": 62
           },
           "datasource": {
             "type": "prometheus",
@@ -832,25 +884,25 @@
     },
     {
       "type": "row",
-      "title": "DRBDR",
+      "title": "Performance / Events: DRBDR",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 65
+        "y": 71
       },
       "collapsed": true,
       "panels": [
         {
           "type": "timeseries",
           "title": "DRBD Resource Configuration Time (P90)",
-          "description": "Time from DRBDResource creation to Configured=True condition. Collected by agent on each node. Shows how long DRBD device setup takes.",
+          "description": "P90 DRBD resource configuration time for completion events in the selected range. Empty graph means no DRBDR configuration events in the selected range.",
           "id": 15,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 66
+            "y": 72
           },
           "datasource": {
             "type": "prometheus",
@@ -902,13 +954,13 @@
         {
           "type": "timeseries",
           "title": "DRBD Resource Deletion Time (P90)",
-          "description": "Time from DRBDResource deletionTimestamp to agent finalizer removal. Reflects DRBD device cleanup duration.",
+          "description": "P90 DRBD resource deletion time for completion events in the selected range. Empty graph means no DRBDR deletion events in the selected range.",
           "id": 16,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 66
+            "y": 72
           },
           "datasource": {
             "type": "prometheus",
@@ -961,25 +1013,25 @@
     },
     {
       "type": "row",
-      "title": "Datamesh",
+      "title": "Performance / Events: Datamesh",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 75
+        "y": 81
       },
       "collapsed": true,
       "panels": [
         {
           "type": "timeseries",
           "title": "Transition Rate by Type",
-          "description": "Rate of completed datamesh transitions by type.",
+          "description": "Completed datamesh transition rate by type in the selected range. Empty graph means no completed transitions in the selected range.",
           "id": 17,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 76
+            "y": 82
           },
           "datasource": {
             "type": "prometheus",
@@ -1032,7 +1084,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 76
+            "y": 82
           },
           "datasource": {
             "type": "prometheus",
@@ -1079,13 +1131,13 @@
         {
           "type": "timeseries",
           "title": "Transition Duration P90 by Type",
-          "description": "P90 duration of completed datamesh transitions by type.",
+          "description": "P90 duration of completed datamesh transitions in the selected range. Empty graph means no completed transitions in the selected range.",
           "id": 19,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 84
+            "y": 90
           },
           "datasource": {
             "type": "prometheus",
@@ -1132,13 +1184,13 @@
         {
           "type": "timeseries",
           "title": "Step Duration P90",
-          "description": "P90 duration of individual datamesh steps within transitions.",
+          "description": "P90 duration of completed datamesh steps in the selected range. Empty graph means no completed steps in the selected range.",
           "id": 20,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 84
+            "y": 90
           },
           "datasource": {
             "type": "prometheus",
@@ -1186,25 +1238,25 @@
     },
     {
       "type": "row",
-      "title": "Deletion",
+      "title": "Performance / Events: Deletion",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 95
+        "y": 101
       },
       "collapsed": true,
       "panels": [
         {
           "type": "timeseries",
           "title": "RV Deletion (P90)",
-          "description": "Time from ReplicatedVolume deletion request to finalizer removal. Includes waiting for all child resources (RVRs, RVAs) to be cleaned up.",
+          "description": "P90 RV deletion duration for deletions completed in the selected range. Empty graph means no RV deletions in the selected range.",
           "id": 21,
           "gridPos": {
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 96
+            "y": 102
           },
           "datasource": {
             "type": "prometheus",
@@ -1251,13 +1303,13 @@
         {
           "type": "timeseries",
           "title": "RVR Deletion (P90)",
-          "description": "Time from ReplicatedVolumeReplica deletion request to finalizer removal. Includes DRBDR cleanup and LLV deletion.",
+          "description": "P90 RVR deletion duration for deletions completed in the selected range. Empty graph means no RVR deletions in the selected range.",
           "id": 22,
           "gridPos": {
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 96
+            "y": 102
           },
           "datasource": {
             "type": "prometheus",
@@ -1304,13 +1356,13 @@
         {
           "type": "timeseries",
           "title": "RVA Detach (P90)",
-          "description": "Time from ReplicatedVolumeAttachment detach start to completion.",
+          "description": "P90 RVA detach duration for detach operations completed in the selected range. Empty graph means no RVA detaches in the selected range.",
           "id": 23,
           "gridPos": {
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 96
+            "y": 102
           },
           "datasource": {
             "type": "prometheus",
@@ -1358,25 +1410,25 @@
     },
     {
       "type": "row",
-      "title": "DRBD (drbd_*)",
+      "title": "Investigation / DRBD",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 105
+        "y": 111
       },
       "collapsed": true,
       "panels": [
         {
           "type": "timeseries",
-          "title": "DRBD Connections by State per Node",
-          "description": "Number of DRBD connections grouped by state and node. Connected/UpToDate = healthy. Other states indicate problems.",
+          "title": "DRBD Connections by State and Node",
+          "description": "Current DRBD connection counts grouped by node and state over time. Healthy steady state is Connected/UpToDate; non-healthy states highlight investigation targets.",
           "id": 24,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 106
+            "y": 112
           },
           "datasource": {
             "type": "prometheus",
@@ -1385,7 +1437,7 @@
           "targets": [
             {
               "expr": "count by (node, drbd_connection_state) (drbd_connection_state == 1)",
-              "legendFormat": "{{node}} {{drbd_connection_state}}",
+              "legendFormat": "{{node}} / {{drbd_connection_state}}",
               "refId": "A"
             }
           ],
@@ -1423,13 +1475,13 @@
         {
           "type": "table",
           "title": "DRBD Unhealthy Connections",
-          "description": "DRBD connections NOT in Connected or UpToDate state. Empty = all healthy.",
+          "description": "Current DRBD connections not in Connected or UpToDate state. Empty table means all observed connections are healthy.",
           "id": 29,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 106
+            "y": 112
           },
           "datasource": {
             "type": "prometheus",
@@ -1487,7 +1539,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 114
+            "y": 120
           },
           "datasource": {
             "type": "prometheus",
@@ -1535,12 +1587,12 @@
     },
     {
       "type": "row",
-      "title": "Health / Problems",
+      "title": "Investigation / Problems",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 125
+        "y": 131
       },
       "collapsed": false
     },
@@ -1553,7 +1605,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 126
+        "y": 132
       },
       "datasource": {
         "type": "prometheus",
@@ -1609,13 +1661,13 @@
     {
       "type": "table",
       "title": "RVR Phase Distribution by Node",
-      "description": "Count of RVRs in each phase per node. Healthy = normal state.",
+      "description": "Current count of RVRs in each phase per node. Empty table means no RVRs matched the current filters.",
       "id": 27,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 134
+        "y": 140
       },
       "datasource": {
         "type": "prometheus",
@@ -1656,13 +1708,13 @@
     {
       "type": "table",
       "title": "Problems: Stuck RVRs",
-      "description": "Top-10 RVRs stuck in non-Healthy phase longest (>5 min). Value = seconds in current phase.",
+      "description": "Top-10 RVRs currently stuck in a non-Healthy phase longer than 5 minutes. Empty table means no stuck RVRs matched the current filters.",
       "id": 28,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 134
+        "y": 140
       },
       "datasource": {
         "type": "prometheus",
@@ -1798,7 +1850,7 @@
         "label": "RV",
         "options": [],
         "query": {
-          "query": "label_values(sds_rvr_creation_duration_seconds, rv)",
+          "query": "label_values(sds_rvr_creation_completed_timestamp_seconds, rv)",
           "refId": "Prometheus-rv-Variable-Query"
         },
         "refresh": 2,

@@ -74,6 +74,8 @@ func observeRVRMetrics(
 			dur := time.Since(rvr.CreationTimestamp.Time).Seconds()
 			metrics.RVRReadyDuration.WithLabelValues(node, sc).Observe(dur)
 			metrics.RVRCreationDuration.WithLabelValues(rvr.Name, rvName, node, sc).Set(dur)
+			metrics.RVRCreationCompletedTimestamp.WithLabelValues(rvr.Name, rvName, node, sc).Set(
+				float64(time.Now().Unix()))
 			metrics.RVRPhases.MarkCreationObserved(rvr.Name)
 		}
 	}
@@ -144,6 +146,7 @@ func cleanupRVRMetrics(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.Repli
 	sc := rvrStorageClassLabel(rvr, rv)
 
 	metrics.RVRCreationDuration.DeleteLabelValues(name, rvName, node, sc)
+	metrics.RVRCreationCompletedTimestamp.DeleteLabelValues(name, rvName, node, sc)
 	metrics.RVRPhaseInfo.DeleteLabelValues(name, rvName, node, string(rvr.Status.Phase))
 	metrics.RVRCurrentPhaseStart.DeleteLabelValues(name, rvName, node, string(rvr.Status.Phase))
 	metrics.RVRPhases.Delete(name)
