@@ -43,6 +43,12 @@ func observeRVRMetrics(
 	oldPhase := string(base.Status.Phase)
 	newPhase := string(rvr.Status.Phase)
 
+	deleting := float64(0)
+	if rvr.DeletionTimestamp != nil {
+		deleting = 1
+	}
+	metrics.RVRDeleting.WithLabelValues(rvr.Name, rvName, node, sc).Set(deleting)
+
 	// Initialize phase tracker entry for this RVR (no-op if already present).
 	// On controller restart, uses ControllerStartTime as fallback.
 	// If the RVR is already Healthy in the cache (pre-restart state), mark
@@ -148,6 +154,7 @@ func cleanupRVRMetrics(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.Repli
 	metrics.RVRCreationDuration.DeleteLabelValues(name, rvName, node, sc)
 	metrics.RVRCreationCompletedTimestamp.DeleteLabelValues(name, rvName, node, sc)
 	metrics.RVRPhaseInfo.DeleteLabelValues(name, rvName, node, string(rvr.Status.Phase))
+	metrics.RVRDeleting.DeleteLabelValues(name, rvName, node, sc)
 	metrics.RVRCurrentPhaseStart.DeleteLabelValues(name, rvName, node, string(rvr.Status.Phase))
 	metrics.RVRPhases.Delete(name)
 }
