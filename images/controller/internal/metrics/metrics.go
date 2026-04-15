@@ -124,10 +124,24 @@ var (
 		Help: "Per-object time from RVR creation to first Healthy phase. Set once per object lifetime.",
 	}, []string{LabelName, LabelRV, LabelNode, LabelStorageClass})
 
+	// RVRCreationCompletedTimestamp is set once when RVR first reaches Healthy.
+	// Used to filter per-object ranking panels by Grafana time range.
+	RVRCreationCompletedTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "sds_rvr_creation_completed_timestamp_seconds",
+		Help: "Unix timestamp when the RVR first reached Healthy. Used for time-range filtering in per-object drill-down panels.",
+	}, []string{LabelName, LabelRV, LabelNode, LabelStorageClass})
+
 	// RVACreationDuration is set once when RVA first reaches Attached.
 	RVACreationDuration = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "sds_rva_creation_duration_seconds",
 		Help: "Per-object time from RVA creation to first Attached phase. Set once per object lifetime.",
+	}, []string{LabelName, LabelRV, LabelNode})
+
+	// RVACreationCompletedTimestamp is set once when RVA first reaches Attached.
+	// Used to filter per-object ranking panels by Grafana time range.
+	RVACreationCompletedTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "sds_rva_creation_completed_timestamp_seconds",
+		Help: "Unix timestamp when the RVA first reached Attached. Used for time-range filtering in per-object drill-down panels.",
 	}, []string{LabelName, LabelRV, LabelNode})
 
 	// RVCreatedTimestamp allows PromQL filtering by age (e.g., "RVs older than 5 minutes").
@@ -209,7 +223,9 @@ func init() {
 
 		// Per-object gauges
 		RVRCreationDuration,
+		RVRCreationCompletedTimestamp,
 		RVACreationDuration,
+		RVACreationCompletedTimestamp,
 		RVCreatedTimestamp,
 		RVRCurrentPhaseStart,
 
