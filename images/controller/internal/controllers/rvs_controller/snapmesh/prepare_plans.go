@@ -45,7 +45,7 @@ func registerPreparePlans(reg *dmte.Registry[*globalContext, *replicaContext]) {
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupSync).
 		DisplayName("Preparing snapshot").
 		Steps(
-			dmte.GlobalStep("Track bitmap", applyGlobalNoop, confirmTrackBitmap),
+			dmte.GlobalStep("Track bitmap", applyPrepareStart, confirmTrackBitmap),
 			dmte.GlobalStep("Create secondary snapshots", applyGlobalNoop, confirmCreateSecondarySnapshots),
 			dmte.GlobalStep("Wait secondary snapshots", applyGlobalNoop, confirmWaitSecondarySnapshots),
 			dmte.GlobalStep("Suspend IO", applyGlobalNoop, confirmSuspendIO),
@@ -66,6 +66,8 @@ func registerPreparePlans(reg *dmte.Registry[*globalContext, *replicaContext]) {
 		).
 		Build()
 }
+
+func applyPrepareStart(_ *globalContext) bool { return true }
 
 func applyGlobalNoop(_ *globalContext) bool { return false }
 
