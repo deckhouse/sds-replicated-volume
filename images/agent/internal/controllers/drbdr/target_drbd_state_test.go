@@ -37,80 +37,67 @@ func boolPtr(v bool) *bool { return &v }
 
 func uint8Ptr(v uint8) *uint8 { return &v }
 
-func TestComputeAttachActions_PreserveMetadata(t *testing.T) {
+func TestComputeAttachActions(t *testing.T) {
 	minor := uintPtr(0)
 	dev := "/dev/vg/snap"
 
 	tests := []struct {
-		name             string
-		metadata         stubMetadata
-		statusUUID       string
-		preserveMetadata bool
-		nodeID           uint8
-		wantFirst        string
-		wantFail         bool
+		name      string
+		metadata  stubMetadata
+		statusUUID string
+		nodeID    uint8
+		wantFirst string
+		wantFail  bool
 	}{
 		{
-			name:             "preserve=true, metadata exists, nodeID matches -> ApplyAL only",
-			metadata:         stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234", metadataNodeID: uint8Ptr(0)},
-			statusUUID:       "",
-			preserveMetadata: true,
-			nodeID:           0,
-			wantFirst:        "ApplyALAction",
+			name:      "metadata exists, no statusUUID, nodeID matches -> ApplyAL",
+			metadata:  stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234", metadataNodeID: uint8Ptr(0)},
+			nodeID:    0,
+			wantFirst: "ApplyALAction",
 		},
 		{
-			name:             "preserve=true, metadata exists, nodeID mismatch -> FailAction",
-			metadata:         stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234", metadataNodeID: uint8Ptr(2)},
-			statusUUID:       "",
-			preserveMetadata: true,
-			nodeID:           0,
-			wantFail:         true,
+			name:     "metadata exists, no statusUUID, nodeID mismatch -> FailAction",
+			metadata: stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234", metadataNodeID: uint8Ptr(2)},
+			nodeID:   0,
+			wantFail: true,
 		},
 		{
-			name:             "preserve=true, metadata exists, metadataNodeID nil -> ApplyAL",
-			metadata:         stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234"},
-			statusUUID:       "",
-			preserveMetadata: true,
-			nodeID:           0,
-			wantFirst:        "ApplyALAction",
+			name:      "metadata exists, no statusUUID, metadataNodeID nil -> ApplyAL",
+			metadata:  stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234"},
+			nodeID:    0,
+			wantFirst: "ApplyALAction",
 		},
 		{
-			name:             "preserve=true, no metadata -> CreateMetadata",
-			metadata:         stubMetadata{hasMetadata: false},
-			statusUUID:       "",
-			preserveMetadata: true,
-			nodeID:           0,
-			wantFirst:        "CreateMetadataAction",
+			name:      "no metadata, no statusUUID -> CreateMetadata",
+			metadata:  stubMetadata{hasMetadata: false},
+			nodeID:    0,
+			wantFirst: "CreateMetadataAction",
 		},
 		{
-			name:             "preserve=false, metadata exists, no statusUUID -> CreateMetadata",
-			metadata:         stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234"},
-			statusUUID:       "",
-			preserveMetadata: false,
-			nodeID:           0,
-			wantFirst:        "CreateMetadataAction",
+			name:       "metadata exists, matching statusUUID -> ApplyAL",
+			metadata:   stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234"},
+			statusUUID: "ABCD1234ABCD1234",
+			nodeID:     0,
+			wantFirst:  "ApplyALAction",
 		},
 		{
-			name:             "preserve=false, metadata exists, matching statusUUID -> ApplyAL",
-			metadata:         stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234"},
-			statusUUID:       "ABCD1234ABCD1234",
-			preserveMetadata: false,
-			nodeID:           0,
-			wantFirst:        "ApplyALAction",
+			name:       "metadata exists, mismatching statusUUID -> FailAction",
+			metadata:   stubMetadata{hasMetadata: true, diskUUID: "DEADBEEF12345678"},
+			statusUUID: "ABCD1234ABCD1234",
+			nodeID:     0,
+			wantFail:   true,
 		},
 		{
-			name:             "preserve=false, no metadata, no statusUUID -> CreateMetadata",
-			metadata:         stubMetadata{hasMetadata: false},
-			statusUUID:       "",
-			preserveMetadata: false,
-			nodeID:           0,
-			wantFirst:        "CreateMetadataAction",
+			name:      "no metadata, no statusUUID -> CreateMetadata",
+			metadata:  stubMetadata{hasMetadata: false},
+			nodeID:    0,
+			wantFirst: "CreateMetadataAction",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			actions := computeAttachActions(tc.metadata, tc.statusUUID, minor, dev, tc.preserveMetadata, tc.nodeID)
+			actions := computeAttachActions(tc.metadata, tc.statusUUID, minor, dev, tc.nodeID)
 
 			if len(actions) == 0 {
 				t.Fatal("got 0 actions, want at least 1")
@@ -298,19 +285,19 @@ func TestComputePeerDeviceOptionsAction(t *testing.T) {
 	})
 }
 
-func TestComputeAttachActions_PreserveMetadata_NoCreateMdNoWriteUUID(t *testing.T) {
+func TestComputeAttachActions_ExistingMetadata_NoCreateMdNoWriteUUID(t *testing.T) {
 	minor := uintPtr(0)
 	dev := "/dev/vg/snap"
 	meta := stubMetadata{hasMetadata: true, diskUUID: "ABCD1234ABCD1234", metadataNodeID: uint8Ptr(0)}
 
-	actions := computeAttachActions(meta, "", minor, dev, true, 0)
+	actions := computeAttachActions(meta, "", minor, dev, 0)
 
 	for _, a := range actions {
 		switch a.(type) {
 		case CreateMetadataAction:
-			t.Error("preserve=true with metadata must not produce CreateMetadataAction")
+			t.Error("existing metadata must not produce CreateMetadataAction")
 		case WriteDeviceUUIDAction:
-			t.Error("preserve=true with metadata must not produce WriteDeviceUUIDAction")
+			t.Error("existing metadata without statusUUID must not produce WriteDeviceUUIDAction")
 		}
 	}
 

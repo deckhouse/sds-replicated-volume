@@ -92,7 +92,6 @@ func confirmCreate(gctx *globalContext, rctx *replicaContext, _ int64) dmte.Conf
 			SystemNetworks:               systemNetworks,
 			Type:                         v1alpha1.DRBDResourceTypeDiskful,
 			LVMLogicalVolumeSnapshotName: rctx.rvrs.Status.SnapshotHandle,
-			PreserveExistingMetadata:     true,
 			NodeID:                       rctx.drbdNodeID,
 			Size:                         &size,
 			Role:                         v1alpha1.DRBDRoleSecondary,
@@ -294,7 +293,19 @@ func removeControllerOwnerRef(obj metav1.Object) {
 }
 
 func isReplicaSynced(drbdr *v1alpha1.DRBDResource) bool {
-	return drbdr.Status.DiskState == v1alpha1.DiskStateUpToDate
+	if drbdr.Status.DiskState != v1alpha1.DiskStateUpToDate {
+		return false
+	}
+	if len(drbdr.Status.Peers) == 0 {
+		return false
+	}
+	for i := range drbdr.Status.Peers {
+		p := &drbdr.Status.Peers[i]
+		if p.ConnectionState != v1alpha1.ConnectionStateConnected || p.DiskState != v1alpha1.DiskStateUpToDate {
+			return false
+		}
+	}
+	return true
 }
 
 func extractSharedSecret(gctx *globalContext) string {
