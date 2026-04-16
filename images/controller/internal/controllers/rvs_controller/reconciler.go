@@ -333,6 +333,26 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, rvs *v1alpha1.Replicat
 		return rf.Done()
 	}
 
+	ownedDRBDRs, err := r.getOwnedDRBDResources(rf.Ctx(), rvs)
+	if err != nil {
+		return rf.Fail(err)
+	}
+	for i := range ownedDRBDRs {
+		if ownedDRBDRs[i].DeletionTimestamp != nil {
+			continue
+		}
+		if err := r.cl.Delete(rf.Ctx(), &ownedDRBDRs[i]); err != nil && !apierrors.IsNotFound(err) {
+			return rf.Fail(err)
+		}
+	}
+	if len(ownedDRBDRs) > 0 {
+		return r.reconcileStatus(rf.Ctx(), rvs, rvs.Status.Datamesh,
+			v1alpha1.ReplicatedVolumeSnapshotPhaseDeleting,
+			"Waiting for sync resources to be deleted",
+			false,
+			rvs.Status.SourceReplicaSnapshotName).Enrichf("waiting for owned DRBDResources deletion")
+	}
+
 	childRVRSs, err := r.getChildRVRSs(rf.Ctx(), rvs.Name)
 	if err != nil {
 		return rf.Fail(err)
@@ -408,6 +428,24 @@ func (r *Reconciler) patchRVSStatus(
 ) error {
 	patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
 	return r.cl.Status().Patch(ctx, rvs, patch)
+}
+
+func (r *Reconciler) getOwnedDRBDResources(ctx context.Context, rvs *v1alpha1.ReplicatedVolumeSnapshot) ([]v1alpha1.DRBDResource, error) {
+	var list v1alpha1.DRBDResourceList
+	if err := r.cl.List(ctx, &list); err != nil {
+		return nil, err
+	}
+	var owned []v1alpha1.DRBDResource
+	// TODO: nested loops are no good
+	for i := range list.Items {
+		for _, ref := range list.Items[i].OwnerReferences {
+			if ref.UID == rvs.UID {
+				owned = append(owned, list.Items[i])
+				break
+			}
+		}
+	}
+	return owned, nil
 }
 
 // --- RVRS ---
