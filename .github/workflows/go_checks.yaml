@@ -21,7 +21,7 @@ jobs:
       - name: Run Go lint
         uses: deckhouse/modules-actions/go_linter@v12
         with:
-          go_version: "1.25.8"
+          go_version: "1.25.9"
 
   go_tests:
     name: Go tests for images
@@ -34,7 +34,7 @@ jobs:
       - name: Run Go tests
         uses: deckhouse/modules-actions/go_tests@v12
         with:
-          go_version: "1.25.8"
+          go_version: "1.25.9"
 
   go_test_coverage:
     name: Go test coverage for images
@@ -47,7 +47,7 @@ jobs:
       - name: Run Go test coverage count
         uses: deckhouse/modules-actions/go_test_coverage@v12
         with:
-          go_version: "1.25.8"
+          go_version: "1.25.9"
 
   go_modules_check:
     name: Go modules version
@@ -60,4 +60,4 @@ jobs:
       - name: Run Go modules version check
         uses: deckhouse/modules-actions/go_modules_check@v12
         with:
-          go_version: "1.25.8"
+          go_version: "1.25.9"

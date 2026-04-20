@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/e2e/agent
 
-go 1.25.7
+go 1.25.9
 
 replace github.com/deckhouse/sds-replicated-volume/api => ../../api
 

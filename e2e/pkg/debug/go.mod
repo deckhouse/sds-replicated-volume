@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/e2e/pkg/debug
 
-go 1.25.7
+go 1.25.9
 
 require (
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-00010101000000-000000000000

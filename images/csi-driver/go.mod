@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/images/csi-driver
 
-go 1.25.7
+go 1.25.9
 
 require (
 	github.com/container-storage-interface/spec v1.12.0
