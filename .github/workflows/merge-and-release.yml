@@ -20,7 +20,7 @@ jobs:
           persist-credentials: false
 
       - name: Merge PR and create release
-        uses: deckhouse/modules-actions/merge-and-release@v9
+        uses: deckhouse/modules-actions/merge-and-release@v13
         with:
           pr_number: ${{ github.event.pull_request.number }}
           pr_title: ${{ github.event.pull_request.title }}
