@@ -607,21 +607,31 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 			ReportChangedIf(changed)
 	}
 
-	// Verify all diskful replicas are ready for data bootstrap:
-	// - backing volume in Inconsistent state (normal for freshly created volume before initial sync), and
-	// - Established replication with all diskful peers.
-	// This is the special case during formation: all peers have Inconsistent backing volumes
-	// with UUID_JUST_CREATED flag. DRBD establishes the connection between such peers
-	// before any resync is triggered.
+	var cloneSourceNodeName string
+	if rv.Spec.DataSource != nil {
+		nodeName, err := r.resolveSnapshotNodeName(rf.Ctx(), rv.Spec.DataSource.SnapshotName)
+		if err != nil {
+			return rf.Failf(err, "resolving snapshot node for clone")
+		}
+		cloneSourceNodeName = nodeName
+	}
 	readyForDataBootstrap := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 		if !diskful.Contains(rvr.ID()) {
 			return false
 		}
-		// Backing volume must be Inconsistent.
-		if rvr.Status.BackingVolume == nil || rvr.Status.BackingVolume.State != v1alpha1.DiskStateInconsistent {
+		if rvr.Status.BackingVolume == nil {
 			return false
 		}
-		// All diskful peers must have ReplicationState == Established.
+		isClonePrimary := cloneSourceNodeName != "" && rvr.Spec.NodeName == cloneSourceNodeName
+		switch rvr.Status.BackingVolume.State {
+		case v1alpha1.DiskStateInconsistent:
+		case v1alpha1.DiskStateUpToDate:
+			if !isClonePrimary {
+				return false
+			}
+		default:
+			return false
+		}
 		expectedPeers := diskful.Difference(idset.Of(rvr.ID()))
 		replicationEstablishedPeers := idset.FromWhere(rvr.Status.Peers, func(p v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
 			return p.Type == v1alpha1.ReplicaTypeDiskful &&
