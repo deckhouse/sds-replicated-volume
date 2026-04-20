@@ -607,14 +607,7 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 			ReportChangedIf(changed)
 	}
 
-	var cloneSourceNodeName string
-	if rv.Spec.DataSource != nil {
-		nodeName, err := r.resolveSnapshotNodeName(rf.Ctx(), rv.Spec.DataSource.SnapshotName)
-		if err != nil {
-			return rf.Failf(err, "resolving snapshot node for clone")
-		}
-		cloneSourceNodeName = nodeName
-	}
+	isClone := rv.Spec.DataSource != nil
 	readyForDataBootstrap := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 		if !diskful.Contains(rvr.ID()) {
 			return false
@@ -622,11 +615,10 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 		if rvr.Status.BackingVolume == nil {
 			return false
 		}
-		isClonePrimary := cloneSourceNodeName != "" && rvr.Spec.NodeName == cloneSourceNodeName
 		switch rvr.Status.BackingVolume.State {
 		case v1alpha1.DiskStateInconsistent:
 		case v1alpha1.DiskStateUpToDate:
-			if !isClonePrimary {
+			if !isClone {
 				return false
 			}
 		default:
