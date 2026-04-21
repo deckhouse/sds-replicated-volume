@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
@@ -753,21 +754,42 @@ func applyBackingVolumeReadyCondAbsent(rvr *v1alpha1.ReplicatedVolumeReplica) bo
 }
 
 func (r *Reconciler) resolveSnapshotSourceForNode(ctx context.Context, rvsName, nodeName string) (*snc.LVMLogicalVolumeSource, error) {
+	rvs := &v1alpha1.ReplicatedVolumeSnapshot{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: rvsName}, rvs); err != nil {
+		return nil, fmt.Errorf("getting RVS %q: %w", rvsName, err)
+	}
+
 	var rvrsList v1alpha1.ReplicatedVolumeReplicaSnapshotList
 	if err := r.cl.List(ctx, &rvrsList); err != nil {
 		return nil, fmt.Errorf("listing RVRS: %w", err)
 	}
+
+	var sourceRVRS *v1alpha1.ReplicatedVolumeReplicaSnapshot
 	for i := range rvrsList.Items {
 		rvrs := &rvrsList.Items[i]
-		if rvrs.Spec.ReplicatedVolumeSnapshotName == rvsName &&
-			rvrs.Spec.NodeName == nodeName &&
-			rvrs.Status.Phase == v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseReady &&
-			rvrs.Status.SnapshotHandle != "" {
-			return &snc.LVMLogicalVolumeSource{
-				Kind: "LVMLogicalVolumeSnapshot",
-				Name: rvrs.Status.SnapshotHandle,
-			}, nil
+		if rvrs.Spec.ReplicatedVolumeSnapshotName != rvsName {
+			continue
+		}
+		if rvrs.Status.Phase != v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseReady || rvrs.Status.SnapshotHandle == "" {
+			continue
+		}
+		if rvs.Status.SourceReplicaSnapshotName != "" {
+			if rvrs.Name == rvs.Status.SourceReplicaSnapshotName {
+				sourceRVRS = rvrs
+				break
+			}
+			continue
+		}
+		if sourceRVRS == nil {
+			sourceRVRS = rvrs
 		}
 	}
-	return nil, nil
+
+	if sourceRVRS == nil || sourceRVRS.Spec.NodeName != nodeName {
+		return nil, nil
+	}
+	return &snc.LVMLogicalVolumeSource{
+		Kind: "LVMLogicalVolumeSnapshot",
+		Name: sourceRVRS.Status.SnapshotHandle,
+	}, nil
 }
