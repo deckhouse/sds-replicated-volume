@@ -747,17 +747,77 @@ func DeleteReplicatedVolumeSnapshot(
 	log *logger.Logger,
 	traceID, name string,
 ) error {
-	rvs := &srv.ReplicatedVolumeSnapshot{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
+	log.Trace(fmt.Sprintf("[DeleteReplicatedVolumeSnapshot][traceID:%s][snapshotID:%s] Trying to find ReplicatedVolumeSnapshot", traceID, name))
+	rvs, err := GetReplicatedVolumeSnapshot(ctx, kc, name)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			log.Info(fmt.Sprintf("[DeleteReplicatedVolumeSnapshot][traceID:%s][snapshotID:%s] ReplicatedVolumeSnapshot not found, already deleted", traceID, name))
+			return nil
+		}
+		return fmt.Errorf("get ReplicatedVolumeSnapshot %s: %w", name, err)
 	}
+
+	log.Trace(fmt.Sprintf("[DeleteReplicatedVolumeSnapshot][traceID:%s][snapshotID:%s] Removing finalizer %s if exists", traceID, name, SDSReplicatedVolumeCSIFinalizer))
+	removed, err := removervsdeletepropagationIfExist(ctx, kc, log, rvs, SDSReplicatedVolumeCSIFinalizer)
+	if err != nil {
+		return fmt.Errorf("remove finalizers from ReplicatedVolumeSnapshot %s: %w", name, err)
+	}
+	if removed {
+		log.Trace(fmt.Sprintf("[DeleteReplicatedVolumeSnapshot][traceID:%s][snapshotID:%s] finalizer %s removed from ReplicatedVolumeSnapshot %s", traceID, name, SDSReplicatedVolumeCSIFinalizer, name))
+	} else {
+		log.Warning(fmt.Sprintf("[DeleteReplicatedVolumeSnapshot][traceID:%s][snapshotID:%s] finalizer %s not found in ReplicatedVolumeSnapshot %s", traceID, name, SDSReplicatedVolumeCSIFinalizer, name))
+	}
+
 	log.Info(fmt.Sprintf("[DeleteReplicatedVolumeSnapshot][traceID:%s][snapshotID:%s] Deleting RVS", traceID, name))
-	err := kc.Delete(ctx, rvs)
+	err = kc.Delete(ctx, rvs)
 	if kerrors.IsNotFound(err) {
 		return nil
 	}
 	return err
+}
+
+func removervsdeletepropagationIfExist(ctx context.Context, kc client.Client, log *logger.Logger, rvs *srv.ReplicatedVolumeSnapshot, finalizer string) (bool, error) {
+	for attempt := 0; attempt < KubernetesAPIRequestLimit; attempt++ {
+		removed := false
+		for i, val := range rvs.Finalizers {
+			if val == finalizer {
+				rvs.Finalizers = slices.Delete(rvs.Finalizers, i, i+1)
+				removed = true
+				break
+			}
+		}
+
+		if !removed {
+			return false, nil
+		}
+
+		log.Trace(fmt.Sprintf("[removervsdeletepropagationIfExist] removing finalizer %s from ReplicatedVolumeSnapshot %s", finalizer, rvs.Name))
+		err := kc.Update(ctx, rvs)
+		if err == nil {
+			return true, nil
+		}
+
+		if !kerrors.IsConflict(err) {
+			return false, fmt.Errorf("[removervsdeletepropagationIfExist] error updating ReplicatedVolumeSnapshot %s: %w", rvs.Name, err)
+		}
+
+		if attempt < KubernetesAPIRequestLimit-1 {
+			log.Trace(fmt.Sprintf("[removervsdeletepropagationIfExist] conflict while updating ReplicatedVolumeSnapshot %s, retrying...", rvs.Name))
+			select {
+			case <-ctx.Done():
+				return false, ctx.Err()
+			default:
+				time.Sleep(KubernetesAPIRequestTimeout * time.Second)
+				freshRVS, getErr := GetReplicatedVolumeSnapshot(ctx, kc, rvs.Name)
+				if getErr != nil {
+					return false, fmt.Errorf("[removervsdeletepropagationIfExist] error getting ReplicatedVolumeSnapshot %s after update conflict: %w", rvs.Name, getErr)
+				}
+				*rvs = *freshRVS
+			}
+		}
+	}
+
+	return false, fmt.Errorf("after %d attempts of removing finalizer %s from ReplicatedVolumeSnapshot %s, last error: %w", KubernetesAPIRequestLimit, finalizer, rvs.Name, nil)
 }
 
 func WaitForReplicatedVolumeSnapshotReady(
