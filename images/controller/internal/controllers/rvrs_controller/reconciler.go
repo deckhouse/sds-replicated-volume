@@ -85,7 +85,7 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, rvrs *v1alpha1.Replica
 		}
 	}
 
-	llvsName := rvrs.Name
+	llvsName := safeLVMName(rvrs.Name)
 	llvs, err := r.getLLVS(rf.Ctx(), llvsName)
 	if err != nil {
 		return rf.Fail(err)
