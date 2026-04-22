@@ -150,11 +150,23 @@ var (
 		Help: "Creation timestamp of the ReplicatedVolume (Unix seconds). For filtering by age.",
 	}, []string{LabelName, LabelStorageClass})
 
+	// RVDeletionStartedTimestamp is set while the RV is deleting.
+	RVDeletionStartedTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "sds_rv_deletion_started_timestamp_seconds",
+		Help: "Unix timestamp when the RV started deleting. Present only while the RV is deleting.",
+	}, []string{LabelName, LabelStorageClass})
+
 	// RVRCurrentPhaseStart enables deadlock detection: time() - gauge > threshold.
 	RVRCurrentPhaseStart = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "sds_rvr_current_phase_start_seconds",
 		Help: "Unix timestamp when RVR entered its current phase. For deadlock detection: time() - gauge > threshold.",
 	}, []string{LabelName, LabelRV, LabelNode, LabelPhase})
+
+	// RVRDeletionStartedTimestamp is set while the RVR is deleting.
+	RVRDeletionStartedTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "sds_rvr_deletion_started_timestamp_seconds",
+		Help: "Unix timestamp when the RVR started deleting. Present only while the RVR is deleting.",
+	}, []string{LabelName, LabelRV, LabelNode, LabelStorageClass})
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -176,6 +188,11 @@ var (
 	DatameshActiveTransitions = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "sds_rv_datamesh_active_transitions",
 		Help: "Number of currently active datamesh transitions per RV.",
+	}, []string{LabelRV, LabelType})
+
+	DatameshActiveTransitionStartTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "sds_rv_datamesh_active_transition_start_timestamp_seconds",
+		Help: "Unix timestamp of the oldest currently active datamesh transition for an RV and transition type.",
 	}, []string{LabelRV, LabelType})
 
 	DatameshStepDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
@@ -251,12 +268,15 @@ func init() {
 		RVACreationDuration,
 		RVACreationCompletedTimestamp,
 		RVCreatedTimestamp,
+		RVDeletionStartedTimestamp,
 		RVRCurrentPhaseStart,
+		RVRDeletionStartedTimestamp,
 
 		// Datamesh
 		DatameshTransitionDuration,
 		DatameshTransitionsCompleted,
 		DatameshActiveTransitions,
+		DatameshActiveTransitionStartTimestamp,
 		DatameshStepDuration,
 
 		// Health gauges

@@ -46,6 +46,10 @@ func observeRVRMetrics(
 	deleting := float64(0)
 	if rvr.DeletionTimestamp != nil {
 		deleting = 1
+		metrics.RVRDeletionStartedTimestamp.WithLabelValues(rvr.Name, rvName, node, sc).Set(
+			float64(rvr.DeletionTimestamp.Unix()))
+	} else {
+		metrics.RVRDeletionStartedTimestamp.DeleteLabelValues(rvr.Name, rvName, node, sc)
 	}
 	metrics.RVRPresent.WithLabelValues(rvr.Name, rvName, node, sc).Set(1)
 	metrics.RVRDeleting.WithLabelValues(rvr.Name, rvName, node, sc).Set(deleting)
@@ -157,6 +161,7 @@ func cleanupRVRMetrics(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.Repli
 	metrics.RVRPhaseInfo.DeleteLabelValues(name, rvName, node, string(rvr.Status.Phase))
 	metrics.RVRPresent.DeleteLabelValues(name, rvName, node, sc)
 	metrics.RVRDeleting.DeleteLabelValues(name, rvName, node, sc)
+	metrics.RVRDeletionStartedTimestamp.DeleteLabelValues(name, rvName, node, sc)
 	metrics.RVRCurrentPhaseStart.DeleteLabelValues(name, rvName, node, string(rvr.Status.Phase))
 	metrics.RVRPhases.Delete(name)
 }
