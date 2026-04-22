@@ -72,8 +72,8 @@ func applyPrepareStart(_ *globalContext) bool { return true }
 func applyGlobalNoop(_ *globalContext) bool { return false }
 
 func confirmTrackBitmap(gctx *globalContext, _ int64) dmte.ConfirmResult {
-	must := prepareReplicaIDs(gctx)
 	primary := preparePrimaryReplica(gctx)
+	must := primaryConfirmSet(primary)
 	if primary == nil {
 		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
 	}
@@ -125,8 +125,8 @@ func confirmWaitSecondarySnapshots(gctx *globalContext, _ int64) dmte.ConfirmRes
 }
 
 func confirmSuspendIO(gctx *globalContext, _ int64) dmte.ConfirmResult {
-	must := prepareReplicaIDs(gctx)
 	primary := preparePrimaryReplica(gctx)
+	must := primaryConfirmSet(primary)
 	if primary == nil {
 		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
 	}
@@ -146,8 +146,8 @@ func confirmSuspendIO(gctx *globalContext, _ int64) dmte.ConfirmResult {
 }
 
 func confirmFlushBitmap(gctx *globalContext, _ int64) dmte.ConfirmResult {
-	must := prepareReplicaIDs(gctx)
 	primary := preparePrimaryReplica(gctx)
+	must := primaryConfirmSet(primary)
 	if primary == nil {
 		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
 	}
@@ -168,8 +168,8 @@ func confirmFlushBitmap(gctx *globalContext, _ int64) dmte.ConfirmResult {
 
 func confirmCreatePrimarySnapshot(gctx *globalContext, _ int64) dmte.ConfirmResult {
 	l := log.FromContext(gctx.ctx)
-	must := prepareReplicaIDs(gctx)
 	primary := preparePrimaryReplica(gctx)
+	must := primaryConfirmSet(primary)
 	if primary == nil {
 		l.Info("prepare: no primary replica, skipping primary snapshot")
 		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
@@ -192,8 +192,8 @@ func confirmCreatePrimarySnapshot(gctx *globalContext, _ int64) dmte.ConfirmResu
 }
 
 func confirmResumeIO(gctx *globalContext, _ int64) dmte.ConfirmResult {
-	must := prepareReplicaIDs(gctx)
 	primary := preparePrimaryReplica(gctx)
+	must := primaryConfirmSet(primary)
 	if primary == nil {
 		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
 	}
@@ -213,8 +213,8 @@ func confirmResumeIO(gctx *globalContext, _ int64) dmte.ConfirmResult {
 }
 
 func confirmUntrackBitmap(gctx *globalContext, _ int64) dmte.ConfirmResult {
-	must := prepareReplicaIDs(gctx)
 	primary := preparePrimaryReplica(gctx)
+	must := primaryConfirmSet(primary)
 	if primary == nil {
 		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
 	}
@@ -250,6 +250,13 @@ func prepareReplicaIDs(gctx *globalContext) idset.IDSet {
 		ids = append(ids, gctx.allReplicas[i].id)
 	}
 	return idset.Of(ids...)
+}
+
+func primaryConfirmSet(primary *replicaContext) idset.IDSet {
+	if primary == nil {
+		return 0
+	}
+	return idset.Of(primary.id)
 }
 
 func ensurePrepareOperation(
