@@ -56,6 +56,11 @@ type DRBDResourceOperationSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="type is immutable"
 	Type DRBDResourceOperationType `json:"type"`
 
+	// PeerNodeID selects a target peer for per-peer operations (TrackBitmap, UntrackBitmap).
+	// When nil for TrackBitmap/UntrackBitmap, the operation is applied to all peers listed
+	// in the target DRBDResource's spec.peers.
+	// Ignored by operation types that are not per-peer (FlushBitmap, SuspendIO, ResumeIO,
+	// ForcePrimary, Invalidate, Outdate, Verify, CreateNewUUID).
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=31
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="peerNodeID is immutable"

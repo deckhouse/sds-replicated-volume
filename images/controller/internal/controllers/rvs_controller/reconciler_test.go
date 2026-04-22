@@ -363,7 +363,7 @@ func TestReconcileNormalRoutesSnapshotCreationThroughPrepare(t *testing.T) {
 	}
 
 	trackOp := &v1alpha1.DRBDResourceOperation{}
-	if err := reconciler.cl.Get(context.Background(), client.ObjectKey{Name: "snap-1-track-bitmap-1"}, trackOp); err != nil {
+	if err := reconciler.cl.Get(context.Background(), client.ObjectKey{Name: "snap-1-track-bitmap"}, trackOp); err != nil {
 		t.Fatalf("Get track bitmap operation() error = %v", err)
 	}
 	if trackOp.Spec.Type != v1alpha1.DRBDResourceOperationTrackBitmap {

@@ -77,30 +77,18 @@ func confirmTrackBitmap(gctx *globalContext, _ int64) dmte.ConfirmResult {
 	if primary == nil {
 		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
 	}
-	allDone := true
-	for i := range gctx.allReplicas {
-		rc := &gctx.allReplicas[i]
-		if rc == primary {
-			continue
-		}
-		_, pending := ensurePrepareOperation(
-			gctx,
-			prepareTrackBitmapOperationName(gctx, rc),
-			v1alpha1.DRBDResourceOperationSpec{
-				DRBDResourceName: primary.rvrName,
-				Type:             v1alpha1.DRBDResourceOperationTrackBitmap,
-				PeerNodeID:       ptrTo(rc.drbdNodeID),
-			},
-			idset.Of(rc.id),
-		)
-		if pending {
-			allDone = false
-		}
+	if _, pending := ensurePrepareOperation(
+		gctx,
+		prepareTrackBitmapOperationName(gctx),
+		v1alpha1.DRBDResourceOperationSpec{
+			DRBDResourceName: primary.rvrName,
+			Type:             v1alpha1.DRBDResourceOperationTrackBitmap,
+		},
+		must,
+	); pending {
+		return dmte.ConfirmResult{MustConfirm: must}
 	}
-	if allDone {
-		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
-	}
-	return dmte.ConfirmResult{MustConfirm: must}
+	return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
 }
 
 func confirmCreateSecondarySnapshots(gctx *globalContext, _ int64) dmte.ConfirmResult {
@@ -230,30 +218,18 @@ func confirmUntrackBitmap(gctx *globalContext, _ int64) dmte.ConfirmResult {
 	if primary == nil {
 		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
 	}
-	allDone := true
-	for i := range gctx.allReplicas {
-		rc := &gctx.allReplicas[i]
-		if rc == primary {
-			continue
-		}
-		_, pending := ensurePrepareOperation(
-			gctx,
-			prepareUntrackBitmapOperationName(gctx, rc),
-			v1alpha1.DRBDResourceOperationSpec{
-				DRBDResourceName: primary.rvrName,
-				Type:             v1alpha1.DRBDResourceOperationUntrackBitmap,
-				PeerNodeID:       ptrTo(rc.drbdNodeID),
-			},
-			idset.Of(rc.id),
-		)
-		if pending {
-			allDone = false
-		}
+	if _, pending := ensurePrepareOperation(
+		gctx,
+		prepareUntrackBitmapOperationName(gctx),
+		v1alpha1.DRBDResourceOperationSpec{
+			DRBDResourceName: primary.rvrName,
+			Type:             v1alpha1.DRBDResourceOperationUntrackBitmap,
+		},
+		must,
+	); pending {
+		return dmte.ConfirmResult{MustConfirm: must}
 	}
-	if allDone {
-		return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
-	}
-	return dmte.ConfirmResult{MustConfirm: must}
+	return dmte.ConfirmResult{MustConfirm: must, Confirmed: must}
 }
 
 func preparePrimaryReplica(gctx *globalContext) *replicaContext {
@@ -429,18 +405,14 @@ func prepareReplicaSnapshotName(gctx *globalContext, rctx *replicaContext) strin
 	return fmt.Sprintf("%s-%s", gctx.rvs.Name, rctx.nodeName)
 }
 
-func prepareTrackBitmapOperationName(gctx *globalContext, rctx *replicaContext) string {
-	return fmt.Sprintf("%s-track-bitmap-%d", gctx.rvs.Name, rctx.id)
+func prepareTrackBitmapOperationName(gctx *globalContext) string {
+	return fmt.Sprintf("%s-track-bitmap", gctx.rvs.Name)
 }
 
-func prepareUntrackBitmapOperationName(gctx *globalContext, rctx *replicaContext) string {
-	return fmt.Sprintf("%s-untrack-bitmap-%d", gctx.rvs.Name, rctx.id)
+func prepareUntrackBitmapOperationName(gctx *globalContext) string {
+	return fmt.Sprintf("%s-untrack-bitmap", gctx.rvs.Name)
 }
 
 func preparePrimaryOperationName(gctx *globalContext, action string) string {
 	return fmt.Sprintf("%s-%s-primary", gctx.rvs.Name, action)
-}
-
-func ptrTo[T any](v T) *T {
-	return &v
 }

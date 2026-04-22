@@ -11,38 +11,58 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 )
 
-func (r *OperationReconciler) executeTrackBitmap(
+func (r *OperationReconciler) executeBitmapTracking(
 	ctx context.Context,
 	op *v1alpha1.DRBDResourceOperation,
 	dr *v1alpha1.DRBDResource,
 ) error {
-	peerNodeID, err := peerNodeIDFromOperation(op)
-	if err != nil {
-		return err
+	start := op.Spec.Type == v1alpha1.DRBDResourceOperationTrackBitmap
+	action := "untrack-bitmap"
+	if start {
+		action = "track-bitmap"
 	}
 	drbdResName := drbdr.DRBDResourceNameOnTheNode(dr)
-	log.FromContext(ctx).Info("drbdrop: executing track-bitmap", "resource", drbdResName, "peerNodeID", peerNodeID)
-	if err := drbdutils.ExecuteTrackBitmap(ctx, drbdResName, peerNodeID, 0, true); err != nil {
-		return fmt.Errorf("executing track-bitmap: %w", err)
+	l := log.FromContext(ctx)
+
+	if op.Spec.PeerNodeID != nil {
+		peerNodeID := *op.Spec.PeerNodeID
+		l.Info("drbdrop: executing "+action, "resource", drbdResName, "peerNodeID", peerNodeID)
+		if err := drbdutils.ExecuteTrackBitmap(ctx, drbdResName, peerNodeID, 0, start); err != nil {
+			return fmt.Errorf("executing %s: %w", action, err)
+		}
+		return nil
+	}
+
+	peerIDs := uniquePeerNodeIDs(dr)
+	if len(peerIDs) == 0 {
+		l.Info("drbdrop: "+action+" has no peers, nothing to do", "resource", drbdResName)
+		return nil
+	}
+
+	l.Info("drbdrop: executing "+action+" (all peers)", "resource", drbdResName, "peerNodeIDs", peerIDs)
+	for _, peerNodeID := range peerIDs {
+		if err := drbdutils.ExecuteTrackBitmap(ctx, drbdResName, peerNodeID, 0, start); err != nil {
+			return fmt.Errorf("executing %s for peerNodeID=%d: %w", action, peerNodeID, err)
+		}
 	}
 	return nil
 }
 
-func (r *OperationReconciler) executeUntrackBitmap(
-	ctx context.Context,
-	op *v1alpha1.DRBDResourceOperation,
-	dr *v1alpha1.DRBDResource,
-) error {
-	peerNodeID, err := peerNodeIDFromOperation(op)
-	if err != nil {
-		return err
+func uniquePeerNodeIDs(dr *v1alpha1.DRBDResource) []uint8 {
+	seen := make(map[uint8]struct{}, len(dr.Spec.Peers))
+	out := make([]uint8, 0, len(dr.Spec.Peers))
+	for i := range dr.Spec.Peers {
+		p := &dr.Spec.Peers[i]
+		if p.Type != v1alpha1.DRBDResourceTypeDiskful && p.Type != "" {
+			continue
+		}
+		if _, ok := seen[p.NodeID]; ok {
+			continue
+		}
+		seen[p.NodeID] = struct{}{}
+		out = append(out, p.NodeID)
 	}
-	drbdResName := drbdr.DRBDResourceNameOnTheNode(dr)
-	log.FromContext(ctx).Info("drbdrop: executing untrack-bitmap", "resource", drbdResName, "peerNodeID", peerNodeID)
-	if err := drbdutils.ExecuteTrackBitmap(ctx, drbdResName, peerNodeID, 0, false); err != nil {
-		return fmt.Errorf("executing untrack-bitmap: %w", err)
-	}
-	return nil
+	return out
 }
 
 func (r *OperationReconciler) executeFlushBitmap(
@@ -93,13 +113,6 @@ func (r *OperationReconciler) executeResumeIO(
 	}
 	log.FromContext(ctx).Info("drbdrop: resume-io succeeded", "resource", drbdr.DRBDResourceNameOnTheNode(dr), "minor", minor)
 	return nil
-}
-
-func peerNodeIDFromOperation(op *v1alpha1.DRBDResourceOperation) (uint8, error) {
-	if op.Spec.PeerNodeID == nil {
-		return 0, fmt.Errorf("peerNodeID is required")
-	}
-	return *op.Spec.PeerNodeID, nil
 }
 
 func drbdMinor(ctx context.Context, dr *v1alpha1.DRBDResource) (uint, error) {

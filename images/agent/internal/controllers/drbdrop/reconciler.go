@@ -73,9 +73,9 @@ func (r *OperationReconciler) Reconcile(
 	case v1alpha1.DRBDResourceOperationCreateNewUUID:
 		return r.reconcileCreateNewUUID(rf.Ctx(), op).ToCtrl()
 	case v1alpha1.DRBDResourceOperationTrackBitmap:
-		return r.reconcileOperationWithResource(rf.Ctx(), op, "TrackBitmap", r.executeTrackBitmap).ToCtrl()
+		return r.reconcileOperationWithResource(rf.Ctx(), op, "TrackBitmap", r.executeBitmapTracking).ToCtrl()
 	case v1alpha1.DRBDResourceOperationUntrackBitmap:
-		return r.reconcileOperationWithResource(rf.Ctx(), op, "UntrackBitmap", r.executeUntrackBitmap).ToCtrl()
+		return r.reconcileOperationWithResource(rf.Ctx(), op, "UntrackBitmap", r.executeBitmapTracking).ToCtrl()
 	case v1alpha1.DRBDResourceOperationFlushBitmap:
 		return r.reconcileOperationWithResource(rf.Ctx(), op, "FlushBitmap", r.executeFlushBitmap).ToCtrl()
 	case v1alpha1.DRBDResourceOperationSuspendIO:

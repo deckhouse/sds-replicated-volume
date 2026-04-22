@@ -14,7 +14,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
 )
 
-func TestConfirmTrackBitmapCreatesOperationForSecondary(t *testing.T) {
+func TestConfirmTrackBitmapCreatesSingleMeshWideOperation(t *testing.T) {
 	p := newPrepareTestProvider(t)
 	gctx := p.Global()
 
@@ -24,7 +24,7 @@ func TestConfirmTrackBitmapCreatesOperationForSecondary(t *testing.T) {
 	}
 
 	created := &v1alpha1.DRBDResourceOperation{}
-	if err := gctx.cl.Get(gctx.ctx, client.ObjectKey{Name: "snap-1-track-bitmap-1"}, created); err != nil {
+	if err := gctx.cl.Get(gctx.ctx, client.ObjectKey{Name: "snap-1-track-bitmap"}, created); err != nil {
 		t.Fatalf("get created track-bitmap operation: %v", err)
 	}
 	if created.Spec.DRBDResourceName != "rvr-0" {
@@ -33,8 +33,13 @@ func TestConfirmTrackBitmapCreatesOperationForSecondary(t *testing.T) {
 	if created.Spec.Type != v1alpha1.DRBDResourceOperationTrackBitmap {
 		t.Fatalf("unexpected operation type: %q", created.Spec.Type)
 	}
-	if created.Spec.PeerNodeID == nil || *created.Spec.PeerNodeID != 1 {
-		t.Fatalf("unexpected peer node id: %v", created.Spec.PeerNodeID)
+	if created.Spec.PeerNodeID != nil {
+		t.Fatalf("expected nil peerNodeID for mesh-wide op, got %v", *created.Spec.PeerNodeID)
+	}
+
+	perPeer := &v1alpha1.DRBDResourceOperation{}
+	if err := gctx.cl.Get(gctx.ctx, client.ObjectKey{Name: "snap-1-track-bitmap-1"}, perPeer); err == nil {
+		t.Fatalf("unexpected legacy per-peer track-bitmap op was created")
 	}
 }
 
@@ -283,7 +288,7 @@ func TestConfirmResumeIOCreatesOperationOnPrimary(t *testing.T) {
 	}
 }
 
-func TestConfirmUntrackBitmapCreatesOperationForSecondary(t *testing.T) {
+func TestConfirmUntrackBitmapCreatesSingleMeshWideOperation(t *testing.T) {
 	p := newPrepareTestProvider(t)
 	gctx := p.Global()
 
@@ -293,7 +298,7 @@ func TestConfirmUntrackBitmapCreatesOperationForSecondary(t *testing.T) {
 	}
 
 	created := &v1alpha1.DRBDResourceOperation{}
-	if err := gctx.cl.Get(gctx.ctx, client.ObjectKey{Name: "snap-1-untrack-bitmap-1"}, created); err != nil {
+	if err := gctx.cl.Get(gctx.ctx, client.ObjectKey{Name: "snap-1-untrack-bitmap"}, created); err != nil {
 		t.Fatalf("get created untrack-bitmap operation: %v", err)
 	}
 	if created.Spec.DRBDResourceName != "rvr-0" {
@@ -302,8 +307,13 @@ func TestConfirmUntrackBitmapCreatesOperationForSecondary(t *testing.T) {
 	if created.Spec.Type != v1alpha1.DRBDResourceOperationUntrackBitmap {
 		t.Fatalf("unexpected operation type: %q", created.Spec.Type)
 	}
-	if created.Spec.PeerNodeID == nil || *created.Spec.PeerNodeID != 1 {
-		t.Fatalf("unexpected peer node id: %v", created.Spec.PeerNodeID)
+	if created.Spec.PeerNodeID != nil {
+		t.Fatalf("expected nil peerNodeID for mesh-wide op, got %v", *created.Spec.PeerNodeID)
+	}
+
+	perPeer := &v1alpha1.DRBDResourceOperation{}
+	if err := gctx.cl.Get(gctx.ctx, client.ObjectKey{Name: "snap-1-untrack-bitmap-1"}, perPeer); err == nil {
+		t.Fatalf("unexpected legacy per-peer untrack-bitmap op was created")
 	}
 }
 

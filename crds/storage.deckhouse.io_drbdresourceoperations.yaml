@@ -79,6 +79,12 @@ spec:
                 - message: drbdResourceName is immutable
                   rule: self == oldSelf
               peerNodeID:
+                description: |-
+                  PeerNodeID selects a target peer for per-peer operations (TrackBitmap, UntrackBitmap).
+                  When nil for TrackBitmap/UntrackBitmap, the operation is applied to all peers listed
+                  in the target DRBDResource's spec.peers.
+                  Ignored by operation types that are not per-peer (FlushBitmap, SuspendIO, ResumeIO,
+                  ForcePrimary, Invalidate, Outdate, Verify, CreateNewUUID).
                 maximum: 31
                 minimum: 0
                 type: integer

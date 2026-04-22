@@ -212,15 +212,6 @@ spec:
                 x-kubernetes-list-map-keys:
                 - name
                 x-kubernetes-list-type: map
-              preserveExistingMetadata:
-                default: false
-                description: |-
-                  When true, the agent preserves existing DRBD metadata on the backing
-                  device instead of running create-md --force. This is used for snapshot
-                  sync where the snapshot LV already contains valid DRBD metadata
-                  (bitmaps, activity log) from the original volume.
-                  Only valid when lvmLogicalVolumeSnapshotName is set.
-                type: boolean
               quorum:
                 maximum: 32
                 minimum: 0
@@ -463,8 +454,7 @@ spec:
               metadataNodeID:
                 description: |-
                   MetadataNodeID is the node-id read from existing DRBD on-disk metadata.
-                  Populated by the agent when preserveExistingMetadata is true and
-                  the backing device contains valid DRBD metadata.
+                  Populated by the agent when the backing device contains valid DRBD metadata.
                   The controller uses this value to reconcile spec.nodeID when it
                   diverges from the on-disk metadata.
                 maximum: 31
@@ -585,12 +575,9 @@ spec:
           rule: '!(has(self.spec.lvmLogicalVolumeName) && size(self.spec.lvmLogicalVolumeName)
             > 0 && has(self.spec.lvmLogicalVolumeSnapshotName) && size(self.spec.lvmLogicalVolumeSnapshotName)
             > 0)'
-        - message: preserveExistingMetadata requires lvmLogicalVolumeSnapshotName
-            to be set
-          rule: '!self.spec.preserveExistingMetadata || (has(self.spec.lvmLogicalVolumeSnapshotName)
-            && size(self.spec.lvmLogicalVolumeSnapshotName) > 0)'
-        - message: nodeID is immutable unless preserveExistingMetadata is set
-          rule: self.spec.preserveExistingMetadata || self.spec.nodeID == oldSelf.spec.nodeID
+        - message: nodeID is immutable unless lvmLogicalVolumeSnapshotName is set
+          rule: (has(self.spec.lvmLogicalVolumeSnapshotName) && size(self.spec.lvmLogicalVolumeSnapshotName)
+            > 0) || self.spec.nodeID == oldSelf.spec.nodeID
         - message: size is required when type is Diskful and must be empty when type
             is Diskless
           rule: 'self.spec.type == ''Diskful'' ? has(self.spec.size) : !has(self.spec.size)'
