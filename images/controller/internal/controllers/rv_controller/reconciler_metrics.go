@@ -42,6 +42,10 @@ func observeRVMetrics(rv *v1alpha1.ReplicatedVolume) {
 	deleting := float64(0)
 	if rv.DeletionTimestamp != nil {
 		deleting = 1
+		metrics.RVDeletionStartedTimestamp.WithLabelValues(rv.Name, sc).Set(
+			float64(rv.DeletionTimestamp.Unix()))
+	} else {
+		metrics.RVDeletionStartedTimestamp.DeleteLabelValues(rv.Name, sc)
 	}
 	metrics.RVDeleting.WithLabelValues(rv.Name, sc).Set(deleting)
 
@@ -71,10 +75,16 @@ func cleanupRVMetrics(rv *v1alpha1.ReplicatedVolume) {
 	}
 	sc := rv.Spec.ReplicatedStorageClassName
 	metrics.RVCreatedTimestamp.DeleteLabelValues(rv.Name, sc)
+	metrics.RVDeletionStartedTimestamp.DeleteLabelValues(rv.Name, sc)
 	metrics.RVPresent.DeleteLabelValues(rv.Name, sc)
 	metrics.RVDeleting.DeleteLabelValues(rv.Name, sc)
 	for _, cond := range rv.Status.Conditions {
 		metrics.RVCondition.DeleteLabelValues(rv.Name, sc, cond.Type)
+	}
+	for _, transition := range rv.Status.DatameshTransitions {
+		typ := string(transition.Type)
+		metrics.DatameshActiveTransitions.DeleteLabelValues(rv.Name, typ)
+		metrics.DatameshActiveTransitionStartTimestamp.DeleteLabelValues(rv.Name, typ)
 	}
 }
 
@@ -151,9 +161,18 @@ func observeDatameshMetrics(
 
 	// Count active transitions per type (for gauge).
 	typeCounts := make(map[string]float64)
+	oldestStartedAtByType := make(map[string]time.Time)
 	for i := range rv.Status.DatameshTransitions {
 		t := &rv.Status.DatameshTransitions[i]
-		typeCounts[string(t.Type)]++
+		typ := string(t.Type)
+		typeCounts[typ]++
+		startedAt := t.StartedAt()
+		if startedAt.IsZero() {
+			continue
+		}
+		if prev, exists := oldestStartedAtByType[typ]; !exists || startedAt.Time.Before(prev) {
+			oldestStartedAtByType[typ] = startedAt.Time
+		}
 	}
 
 	// Reset active transitions gauge for this RV: delete old types, set new counts.
@@ -161,10 +180,17 @@ func observeDatameshMetrics(
 		oldType := string(oldTransitions[i].Type)
 		if _, exists := typeCounts[oldType]; !exists {
 			metrics.DatameshActiveTransitions.DeleteLabelValues(rv.Name, oldType)
+			metrics.DatameshActiveTransitionStartTimestamp.DeleteLabelValues(rv.Name, oldType)
 		}
 	}
 	for typ, count := range typeCounts {
 		metrics.DatameshActiveTransitions.WithLabelValues(rv.Name, typ).Set(count)
+		if startedAt, exists := oldestStartedAtByType[typ]; exists {
+			metrics.DatameshActiveTransitionStartTimestamp.WithLabelValues(rv.Name, typ).Set(
+				float64(startedAt.Unix()))
+		} else {
+			metrics.DatameshActiveTransitionStartTimestamp.DeleteLabelValues(rv.Name, typ)
+		}
 	}
 
 	// Detect completed transitions: present in old but absent in new.

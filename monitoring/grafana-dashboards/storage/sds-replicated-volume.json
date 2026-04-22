@@ -1786,8 +1786,8 @@
         },
         {
           "type": "timeseries",
-          "title": "Transition Rate by Type",
-          "description": "Completed datamesh transition rate by type in the selected range. Empty graph means no completed transitions in the selected range.",
+          "title": "Transition Events by Type (History)",
+          "description": "Completed datamesh transitions per interval by type. Empty graph means no completed transitions in the selected range.",
           "id": 17,
           "gridPos": {
             "h": 8,
@@ -1801,60 +1801,7 @@
           },
           "targets": [
             {
-              "expr": "sum(rate(sds_rv_datamesh_transitions_completed_total[$__rate_interval])) by (type)",
-              "legendFormat": "{{type}}",
-              "refId": "A"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "custom": {
-                "drawStyle": "line",
-                "fillOpacity": 10,
-                "lineWidth": 1,
-                "stacking": {
-                  "mode": "none"
-                },
-                "showPoints": "never",
-                "connectNulls": true
-              },
-              "unit": "ops"
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": {
-              "displayMode": "table",
-              "placement": "bottom",
-              "calcs": [
-                "mean",
-                "max"
-              ]
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          }
-        },
-        {
-          "type": "timeseries",
-          "title": "Active Transitions",
-          "description": "Currently active datamesh transitions by type.",
-          "id": 18,
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 12,
-            "y": 90
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ds_prometheus"
-          },
-          "targets": [
-            {
-              "expr": "sum by (type) (sds_rv_datamesh_active_transitions)",
+              "expr": "sum by (type) (increase(sds_rv_datamesh_transitions_completed_total[$__rate_interval]))",
               "legendFormat": "{{type}}",
               "refId": "A"
             }
@@ -1880,7 +1827,7 @@
               "displayMode": "table",
               "placement": "bottom",
               "calcs": [
-                "mean",
+                "sum",
                 "max"
               ]
             },
@@ -1891,9 +1838,62 @@
           }
         },
         {
+          "type": "bargauge",
+          "title": "Active Transitions by Type (Current)",
+          "description": "Current number of active datamesh transitions by type. Use the table below to see which RVs have been active the longest.",
+          "id": 18,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 90
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum by (type) (sds_rv_datamesh_active_transitions)",
+              "legendFormat": "{{type}}",
+              "refId": "A",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "orientation": "horizontal",
+            "displayMode": "gradient",
+            "showUnfilled": true
+          }
+        },
+        {
           "type": "timeseries",
           "title": "Transition Duration P90 by Type",
-          "description": "P90 duration of completed datamesh transitions in the selected range. Empty graph means no completed transitions in the selected range.",
+          "description": "P90 duration of completed datamesh transitions by type. Read together with transition events and active transitions: empty graph means no completed transitions in the selected range.",
           "id": 19,
           "gridPos": {
             "h": 8,
@@ -1945,8 +1945,8 @@
         },
         {
           "type": "timeseries",
-          "title": "Step Duration P90",
-          "description": "P90 duration of completed datamesh steps in the selected range. Empty graph means no completed steps in the selected range.",
+          "title": "Step Events by Type/Step (History)",
+          "description": "Completed datamesh steps per interval by transition type and step. Empty graph means no completed steps in the selected range.",
           "id": 20,
           "gridPos": {
             "h": 8,
@@ -1960,8 +1960,8 @@
           },
           "targets": [
             {
-              "expr": "histogram_quantile(0.90, sum(rate(sds_rv_datamesh_step_duration_seconds_bucket[$__rate_interval])) by (le, type, step))",
-              "legendFormat": "{{type}}/{{step}} P90",
+              "expr": "sum by (type, step) (increase(sds_rv_datamesh_step_duration_seconds_count[$__rate_interval]))",
+              "legendFormat": "{{type}}/{{step}}",
               "refId": "A"
             }
           ],
@@ -1977,7 +1977,7 @@
                 "showPoints": "never",
                 "connectNulls": true
               },
-              "unit": "s"
+              "unit": "short"
             },
             "overrides": []
           },
@@ -1986,7 +1986,7 @@
               "displayMode": "table",
               "placement": "bottom",
               "calcs": [
-                "mean",
+                "sum",
                 "max"
               ]
             },
@@ -2377,13 +2377,71 @@
         },
         {
           "type": "timeseries",
-          "title": "RV Deletion (P90)",
-          "description": "P90 RV deletion duration for deletions completed in the selected range. Empty graph means no RV deletions in the selected range.",
+          "title": "RV vs RVR Deletion Events (History)",
+          "description": "Completed RV and RVR deletions per interval. Compare the two lines to see whether parent and child cleanup waves move together.",
           "id": 21,
           "gridPos": {
             "h": 8,
             "w": 8,
             "x": 0,
+            "y": 114
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(sds_rv_deletion_duration_seconds_count{storage_class=~\"$storage_class\"}[$__rate_interval]))",
+              "legendFormat": "RV deletions",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(increase(sds_rvr_deletion_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+              "legendFormat": "RVR deletions",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                },
+                "showPoints": "never",
+                "connectNulls": true
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "sum",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "RV Deletion Duration P90",
+          "description": "P90 RV deletion duration for completions in the selected range. Read together with RV deletion event history: empty graph means no RV deletions completed in the selected range.",
+          "id": 22,
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
             "y": 114
           },
           "datasource": {
@@ -2430,61 +2488,8 @@
         },
         {
           "type": "timeseries",
-          "title": "RVR Deletion (P90)",
-          "description": "P90 RVR deletion duration for deletions completed in the selected range. Empty graph means no RVR deletions in the selected range.",
-          "id": 22,
-          "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 8,
-            "y": 114
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ds_prometheus"
-          },
-          "targets": [
-            {
-              "expr": "histogram_quantile(0.90, sum(rate(sds_rvr_deletion_duration_seconds_bucket{node=~\"$node\"}[$__rate_interval])) by (le, node))",
-              "legendFormat": "{{node}} P90",
-              "refId": "A"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "custom": {
-                "drawStyle": "line",
-                "fillOpacity": 10,
-                "lineWidth": 1,
-                "stacking": {
-                  "mode": "none"
-                },
-                "showPoints": "never",
-                "connectNulls": true
-              },
-              "unit": "s"
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": {
-              "displayMode": "table",
-              "placement": "bottom",
-              "calcs": [
-                "mean",
-                "max"
-              ]
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          }
-        },
-        {
-          "type": "timeseries",
-          "title": "RVA Detach (P90)",
-          "description": "P90 RVA detach duration for detach operations completed in the selected range. Empty graph means no RVA detaches in the selected range.",
+          "title": "RVR Deletion Duration P90",
+          "description": "P90 RVR deletion duration for completions in the selected range. Cluster-wide view for direct comparison with RV deletion duration.",
           "id": 23,
           "gridPos": {
             "h": 8,
@@ -2498,8 +2503,8 @@
           },
           "targets": [
             {
-              "expr": "histogram_quantile(0.90, sum(rate(sds_rva_detach_duration_seconds_bucket{node=~\"$node\"}[$__rate_interval])) by (le, node))",
-              "legendFormat": "{{node}} P90",
+              "expr": "histogram_quantile(0.90, sum(rate(sds_rvr_deletion_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (le))",
+              "legendFormat": "P90",
               "refId": "A"
             }
           ],
@@ -2898,6 +2903,190 @@
               "node": 2,
               "phase": 3,
               "Value": 4
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Top Active RV Transitions",
+      "description": "Oldest currently active datamesh transitions. Use this table to see which RV and transition type have been active the longest.",
+      "id": 49,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 160
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "targets": [
+        {
+          "expr": "topk(10, time() - sds_rv_datamesh_active_transition_start_timestamp_seconds)",
+          "legendFormat": "",
+          "refId": "A",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "instance": true
+            },
+            "indexByName": {
+              "rv": 0,
+              "type": 1,
+              "Value": 2
+            },
+            "renameByName": {
+              "rv": "RV",
+              "type": "Transition Type",
+              "Value": "Active For"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Oldest Deleting RVs",
+      "description": "Current RVs that have been deleting the longest. Helps distinguish slow cleanup from lack of delete activity.",
+      "id": 50,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 160
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "targets": [
+        {
+          "expr": "topk(10, time() - sds_rv_deletion_started_timestamp_seconds{storage_class=~\"$storage_class\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "instance": true
+            },
+            "indexByName": {
+              "name": 0,
+              "storage_class": 1,
+              "Value": 2
+            },
+            "renameByName": {
+              "name": "RV",
+              "storage_class": "Storage Class",
+              "Value": "Deleting For"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Oldest Deleting RVRs",
+      "description": "Current RVRs that have been deleting the longest. Use together with RV/RVR deletion history to find slow child cleanup.",
+      "id": 51,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 160
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "targets": [
+        {
+          "expr": "topk(10, time() - sds_rvr_deletion_started_timestamp_seconds{node=~\"$node\",storage_class=~\"$storage_class\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "instance": true
+            },
+            "indexByName": {
+              "name": 0,
+              "rv": 1,
+              "node": 2,
+              "storage_class": 3,
+              "Value": 4
+            },
+            "renameByName": {
+              "name": "RVR",
+              "rv": "RV",
+              "node": "Node",
+              "storage_class": "Storage Class",
+              "Value": "Deleting For"
             }
           }
         }
