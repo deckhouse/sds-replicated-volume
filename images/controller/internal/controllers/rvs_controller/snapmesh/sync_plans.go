@@ -57,8 +57,21 @@ func registerSyncPlans(reg *dmte.Registry[*globalContext, *replicaContext]) {
 func applyBumpRevision(_ *globalContext, _ *replicaContext) bool { return true }
 func applyNoop(_ *globalContext, _ *replicaContext) bool         { return false }
 
-func syncPlanOnComplete(gctx *globalContext, _ *replicaContext) {
+func syncPlanOnComplete(gctx *globalContext, rctx *replicaContext) {
 	gctx.syncCompleted = true
+	markReplicaSyncCompleted(gctx, rctx.rvrName)
+}
+
+func markReplicaSyncCompleted(gctx *globalContext, rvrName string) {
+	if rvrName == "" {
+		return
+	}
+	for _, n := range gctx.rvs.Status.SyncCompletedReplicas {
+		if n == rvrName {
+			return
+		}
+	}
+	gctx.rvs.Status.SyncCompletedReplicas = append(gctx.rvs.Status.SyncCompletedReplicas, rvrName)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

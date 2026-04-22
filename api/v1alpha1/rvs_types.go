@@ -113,6 +113,17 @@ type ReplicatedVolumeSnapshotStatus struct {
 	// +listType=atomic
 	// +optional
 	SyncTransitions []ReplicatedVolumeDatameshTransition `json:"syncTransitions,omitempty"`
+
+	// SyncCompletedReplicas lists ReplicatedVolumeReplica names whose sync
+	// plan has already completed in the current sync round. The dispatcher
+	// uses this as a persistent marker to avoid re-dispatching a new sync
+	// transition for a replica that has already finished — previously this
+	// caused oscillation (Create → WaitSync → Cleanup → Create → …) until
+	// the stuck-transition watchdog reset the whole round.
+	// Cleared by completeSyncStatus and by the reset path in syncNeedsReset.
+	// +listType=set
+	// +optional
+	SyncCompletedReplicas []string `json:"syncCompletedReplicas,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

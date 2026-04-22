@@ -79,6 +79,7 @@ func (r *Reconciler) reconcileSyncMesh(
 		l.Info("sync-mesh: resetting stuck transitions (DRBDResources missing for >2m)")
 		rvs.Status.SyncTransitions = nil
 		rvs.Status.SyncRevision = 0
+		rvs.Status.SyncCompletedReplicas = nil
 		if err := r.patchRVSStatus(rf.Ctx(), rvs, base); err != nil {
 			return rf.Fail(err)
 		}
@@ -115,6 +116,7 @@ func completeSyncStatus(rvs *v1alpha1.ReplicatedVolumeSnapshot) {
 	rvs.Status.SyncDRBDResources = nil
 	rvs.Status.SyncTransitions = nil
 	rvs.Status.SyncRevision = 0
+	rvs.Status.SyncCompletedReplicas = nil
 	rvs.Status.Phase = v1alpha1.ReplicatedVolumeSnapshotPhaseReady
 	rvs.Status.Message = "All replica snapshots are ready"
 	rvs.Status.ReadyToUse = true

@@ -30,6 +30,10 @@ func syncDispatcher() dmte.DispatchFunc[provider] {
 			if gctx.syncCompleted {
 				return
 			}
+			completed := make(map[string]struct{}, len(gctx.rvs.Status.SyncCompletedReplicas))
+			for _, n := range gctx.rvs.Status.SyncCompletedReplicas {
+				completed[n] = struct{}{}
+			}
 			for i := range gctx.allReplicas {
 				rctx := &gctx.allReplicas[i]
 				if rctx.rvrs == nil ||
@@ -38,6 +42,9 @@ func syncDispatcher() dmte.DispatchFunc[provider] {
 					continue
 				}
 				if rctx.syncTransition != nil {
+					continue
+				}
+				if _, done := completed[rctx.rvrName]; done {
 					continue
 				}
 				if !yield(dmte.DispatchReplica(rctx, syncTransitionType, syncPlanID)) {
