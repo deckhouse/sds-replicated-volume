@@ -54,13 +54,23 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		return nil, status.Error(codes.InvalidArgument, "Volume Capability cannot de empty")
 	}
 
-	var snapshotSource *csi.VolumeContentSource_SnapshotSource
-	if request.VolumeContentSource != nil {
-		if snap := request.VolumeContentSource.GetSnapshot(); snap != nil {
-			snapshotSource = snap
-			d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Creating volume from snapshot: %s", traceID, volumeID, snap.SnapshotId))
-		} else {
-			return nil, status.Error(codes.InvalidArgument, "Only snapshot sources are supported, clone is not supported")
+	var dataSource *srv.VolumeDataSource
+	if cs := request.VolumeContentSource; cs != nil {
+		switch s := cs.Type.(type) {
+		case *csi.VolumeContentSource_Snapshot:
+			dataSource = &srv.VolumeDataSource{
+				Kind: srv.VolumeDataSourceKindReplicatedVolumeSnapshot,
+				Name: s.Snapshot.SnapshotId,
+			}
+			d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Creating volume from snapshot: %s", traceID, volumeID, s.Snapshot.SnapshotId))
+		case *csi.VolumeContentSource_Volume:
+			dataSource = &srv.VolumeDataSource{
+				Kind: srv.VolumeDataSourceKindReplicatedVolume,
+				Name: s.Volume.VolumeId,
+			}
+			d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Creating volume from source volume: %s", traceID, volumeID, s.Volume.VolumeId))
+		default:
+			return nil, status.Error(codes.InvalidArgument, "unsupported VolumeContentSource type")
 		}
 	}
 
@@ -107,11 +117,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		request.Parameters[ReplicatedStorageClassParamNameKey],
 	)
 
-	if snapshotSource != nil {
-		rvSpec.DataSource = &srv.VolumeDataSource{
-			SnapshotName: snapshotSource.SnapshotId,
-		}
-	}
+	rvSpec.DataSource = dataSource
 
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolumeSpec: %+v", traceID, volumeID, rvSpec))
 
@@ -172,13 +178,24 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Volume created successfully, capacity: %d. volumeCtx: %+v", traceID, volumeID, capacityBytes, volumeCtx))
 
 	var contentSource *csi.VolumeContentSource
-	if snapshotSource != nil {
-		contentSource = &csi.VolumeContentSource{
-			Type: &csi.VolumeContentSource_Snapshot{
-				Snapshot: &csi.VolumeContentSource_SnapshotSource{
-					SnapshotId: snapshotSource.SnapshotId,
+	if dataSource != nil {
+		switch dataSource.Kind {
+		case srv.VolumeDataSourceKindReplicatedVolumeSnapshot:
+			contentSource = &csi.VolumeContentSource{
+				Type: &csi.VolumeContentSource_Snapshot{
+					Snapshot: &csi.VolumeContentSource_SnapshotSource{
+						SnapshotId: dataSource.Name,
+					},
 				},
-			},
+			}
+		case srv.VolumeDataSourceKindReplicatedVolume:
+			contentSource = &csi.VolumeContentSource{
+				Type: &csi.VolumeContentSource_Volume{
+					Volume: &csi.VolumeContentSource_VolumeSource{
+						VolumeId: dataSource.Name,
+					},
+				},
+			}
 		}
 	}
 
@@ -359,6 +376,7 @@ func (d *Driver) ControllerGetCapabilities(_ context.Context, _ *csi.ControllerG
 		csi.ControllerServiceCapability_RPC_EXPAND_VOLUME,
 		csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME,
 		csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
+		csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
 	}
 
 	csiCaps := make([]*csi.ControllerServiceCapability, len(capabilities))

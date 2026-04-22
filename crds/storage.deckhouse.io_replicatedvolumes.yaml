@@ -88,19 +88,30 @@ spec:
                 type: string
               dataSource:
                 properties:
-                  snapshotName:
+                  kind:
+                    description: |-
+                      Kind selects the type of the source object: a ReplicatedVolumeSnapshot
+                      (snapshot restore) or a ReplicatedVolume (volume clone).
+                    enum:
+                    - ReplicatedVolumeSnapshot
+                    - ReplicatedVolume
+                    type: string
+                    x-kubernetes-validations:
+                    - message: kind is immutable
+                      rule: self == oldSelf
+                  name:
+                    description: Name is the name of the source object of the selected
+                      Kind.
                     maxLength: 253
                     minLength: 1
                     type: string
                     x-kubernetes-validations:
-                    - message: snapshotName is immutable
+                    - message: name is immutable
                       rule: self == oldSelf
                 required:
-                - snapshotName
+                - kind
+                - name
                 type: object
-                x-kubernetes-validations:
-                - message: snapshotName must not be empty
-                  rule: size(self.snapshotName) > 0
               manualConfiguration:
                 description: |-
                   ManualConfiguration specifies the volume configuration directly.

@@ -33,6 +33,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/drbd_size"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -204,19 +205,19 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 	// Create missing diskful replicas only when there are no replicas being deleted or misplaced.
 	// This prevents zombie accumulation: we wait for all cleanup to finish before creating new ones.
 	if deleting.IsEmpty() && misplaced.IsEmpty() {
-		snapshotNodeName := ""
+		sourceNodeName := ""
 		if rv.Spec.DataSource != nil && diskful.IsEmpty() {
-			nodeName, err := r.resolveSnapshotNodeName(rf.Ctx(), rv.Spec.DataSource.SnapshotName)
+			nodeName, err := r.resolveDataSourceNodeName(rf.Ctx(), rv.Spec.DataSource)
 			if err != nil {
-				return rf.Failf(err, "resolving snapshot node for clone")
+				return rf.Failf(err, "resolving data source node for bootstrap")
 			}
-			snapshotNodeName = nodeName
+			sourceNodeName = nodeName
 		}
 
 		for diskful.Len() < int(targetDiskfulCount) {
 			nodeName := ""
-			if snapshotNodeName != "" && diskful.IsEmpty() {
-				nodeName = snapshotNodeName
+			if sourceNodeName != "" && diskful.IsEmpty() {
+				nodeName = sourceNodeName
 			}
 			rvr, err := r.createRVR(rf.Ctx(), rv, rvrs, v1alpha1.ReplicaTypeDiskful, nodeName)
 			if err != nil {
@@ -607,7 +608,7 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 			ReportChangedIf(changed)
 	}
 
-	isClone := rv.Spec.DataSource != nil
+	hasDataSource := rv.Spec.DataSource != nil
 	readyForDataBootstrap := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 		if !diskful.Contains(rvr.ID()) {
 			return false
@@ -618,7 +619,7 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 		switch rvr.Status.BackingVolume.State {
 		case v1alpha1.DiskStateInconsistent:
 		case v1alpha1.DiskStateUpToDate:
-			if !isClone {
+			if !hasDataSource {
 				return false
 			}
 		default:
@@ -632,7 +633,7 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 			if p.ReplicationState == v1alpha1.ReplicationStateEstablished {
 				return true
 			}
-			return isClone && p.ReplicationState.IsSyncingState()
+			return hasDataSource && p.ReplicationState.IsSyncingState()
 		})
 		return replicationEstablishedPeers == expectedPeers
 	})
@@ -685,26 +686,28 @@ func (r *Reconciler) reconcileFormationStepBootstrapData(
 	drbdrOpName := rv.Name + "-formation"
 
 	singleReplica := dmDiskful.Len() == 1
-	isClone := rv.Spec.DataSource != nil
+	hasDataSource := rv.Spec.DataSource != nil
 
-	// Clones rely on DRBD's built-in UUID handshake for initial sync: the primary
-	// replica boots UpToDate (backing = snapshot clone, current_uuid from source),
-	// peer replicas boot Inconsistent (backing = empty LV, current_uuid = UUID_JUST_CREATED);
-	// DRBD's RULE_JUST_CREATED_PEER then automatically makes the primary SyncSource and
-	// peers SyncTarget. Issuing new-current-uuid here would fail with ERR_CONNECTED (151)
-	// since the primary's current_uuid is not UUID_JUST_CREATED while its peers are not L_OFF.
+	// Volumes with a DataSource (snapshot restore or volume clone) rely on DRBD's
+	// built-in UUID handshake for initial sync: the primary replica boots UpToDate
+	// (backing = thin-LV copy of the source, current_uuid inherited), peer replicas
+	// boot Inconsistent (backing = empty LV, current_uuid = UUID_JUST_CREATED);
+	// DRBD's RULE_JUST_CREATED_PEER then automatically makes the primary SyncSource
+	// and peers SyncTarget. Issuing new-current-uuid here would fail with
+	// ERR_CONNECTED (151) since the primary's current_uuid is not UUID_JUST_CREATED
+	// while its peers are not L_OFF.
 	var dataBootstrapTimeout time.Duration
 	var dataBootstrapModeMsg string
 
-	if isClone {
-		// Timeout covers a full network resync from the primary (snapshot) to peers.
+	if hasDataSource {
+		// Timeout covers a full network resync from the source-backed primary to peers.
 		dataBootstrapTimeout = 1 * time.Minute
 		if !singleReplica {
 			const worstCaseBytesPerSec = 100 * 1000 * 1000 / 8 // 100 Mbit/s in bytes
 			sizeBytes := rv.Status.Datamesh.Size.Value()
 			dataBootstrapTimeout += time.Duration(sizeBytes/worstCaseBytesPerSec) * time.Second
 		}
-		dataBootstrapModeMsg = fmt.Sprintf("Clone mode: DRBD auto-sync from snapshot-based primary to peer replicas. Timeout: %s", dataBootstrapTimeout)
+		dataBootstrapModeMsg = fmt.Sprintf("DataSource bootstrap: DRBD auto-sync from source-backed primary to peer replicas. Timeout: %s", dataBootstrapTimeout)
 	} else {
 		drbdrOp, err := r.getDRBDROp(rf.Ctx(), drbdrOpName)
 		if err != nil {
@@ -1430,6 +1433,72 @@ func applyFormationTransitionAbsent(rv *v1alpha1.ReplicatedVolume) bool {
 		}
 	}
 	return false
+}
+
+// resolveDataSourceNodeName picks a node where the bootstrap of the first Diskful
+// replica should be placed, based on the DataSource kind. For a snapshot restore
+// it delegates to resolveSnapshotNodeName; for a volume clone — to
+// resolveSourceVolumeNodeName.
+func (r *Reconciler) resolveDataSourceNodeName(ctx context.Context, ds *v1alpha1.VolumeDataSource) (string, error) {
+	switch ds.Kind {
+	case v1alpha1.VolumeDataSourceKindReplicatedVolumeSnapshot:
+		return r.resolveSnapshotNodeName(ctx, ds.Name)
+	case v1alpha1.VolumeDataSourceKindReplicatedVolume:
+		return r.resolveSourceVolumeNodeName(ctx, ds.Name)
+	default:
+		return "", fmt.Errorf("unsupported data source kind %q", ds.Kind)
+	}
+}
+
+// resolveSourceVolumeNodeName picks a node hosting a usable Diskful replica of the
+// source ReplicatedVolume so that a clone's first Diskful replica can be co-located
+// with it for LVM thin-clone. Preference order:
+//  1. An Attached (Primary) Diskful replica with a ready backing volume.
+//  2. Any Diskful replica whose backing volume is UpToDate.
+//  3. Any Diskful replica that has a scheduled node.
+func (r *Reconciler) resolveSourceVolumeNodeName(ctx context.Context, sourceRVName string) (string, error) {
+	var list v1alpha1.ReplicatedVolumeReplicaList
+	if err := r.cl.List(ctx, &list,
+		client.MatchingFields{indexes.IndexFieldRVRByReplicatedVolumeName: sourceRVName},
+	); err != nil {
+		return "", fmt.Errorf("listing RVRs for source RV %q: %w", sourceRVName, err)
+	}
+
+	var primaryNode, upToDateNode, scheduledNode string
+	for i := range list.Items {
+		rvr := &list.Items[i]
+		if rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful {
+			continue
+		}
+		if rvr.Spec.NodeName == "" {
+			continue
+		}
+		if rvr.Status.Attachment != nil &&
+			rvr.Status.BackingVolume != nil &&
+			rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate {
+			primaryNode = rvr.Spec.NodeName
+			break
+		}
+		if upToDateNode == "" &&
+			rvr.Status.BackingVolume != nil &&
+			rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate {
+			upToDateNode = rvr.Spec.NodeName
+			continue
+		}
+		if scheduledNode == "" {
+			scheduledNode = rvr.Spec.NodeName
+		}
+	}
+
+	switch {
+	case primaryNode != "":
+		return primaryNode, nil
+	case upToDateNode != "":
+		return upToDateNode, nil
+	case scheduledNode != "":
+		return scheduledNode, nil
+	}
+	return "", fmt.Errorf("no usable Diskful replica found for source RV %q", sourceRVName)
 }
 
 // resolveSnapshotNodeName finds a node that has a Ready RVRS for the given RVS.

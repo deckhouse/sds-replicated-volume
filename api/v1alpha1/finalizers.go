@@ -22,6 +22,14 @@ const RSCControllerFinalizer = "sds-replicated-volume.deckhouse.io/rsc-controlle
 
 const RVControllerFinalizer = "sds-replicated-volume.deckhouse.io/rv-controller"
 
+// RVCloneSourceFinalizer is placed on a ReplicatedVolume that currently serves
+// as a data source (spec.dataSource) for another ReplicatedVolume being cloned
+// from it. The finalizer prevents the source RV from being deleted while clone
+// bootstrap (LVM thin-clone on the primary + DRBD initial sync on peers) is in
+// progress; it is removed once the target RV finishes formation or starts
+// deleting itself.
+const RVCloneSourceFinalizer = "sds-replicated-volume.deckhouse.io/rv-clone-source"
+
 const RVRControllerFinalizer = "sds-replicated-volume.deckhouse.io/rvr-controller"
 
 const RVSControllerFinalizer = "sds-replicated-volume.deckhouse.io/rvs-controller"

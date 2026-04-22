@@ -33,6 +33,7 @@ import (
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/drbd_size"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 	rvrllvname "github.com/deckhouse/sds-replicated-volume/images/controller/internal/rvr_llv_name"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
@@ -181,9 +182,9 @@ func (r *Reconciler) reconcileBackingVolume(
 		var source *snc.LVMLogicalVolumeSource
 		if rv.Spec.DataSource != nil {
 			var sourceErr error
-			source, sourceErr = r.resolveSnapshotSourceForNode(rf.Ctx(), rv.Spec.DataSource.SnapshotName, rvr.Spec.NodeName)
+			source, sourceErr = r.resolveDataSourceForNode(rf.Ctx(), rv.Spec.DataSource, rvr.Spec.NodeName)
 			if sourceErr != nil {
-				rf.Log().Error(sourceErr, "Failed to resolve snapshot source for clone, creating LLV without source")
+				rf.Log().Error(sourceErr, "Failed to resolve data source for bootstrap, creating LLV without source")
 			}
 		}
 
@@ -751,6 +752,65 @@ func applyBackingVolumeReadyCondTrue(rvr *v1alpha1.ReplicatedVolumeReplica, reas
 // applyBackingVolumeReadyCondAbsent removes the BackingVolumeReady condition from RVR.
 func applyBackingVolumeReadyCondAbsent(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 	return obju.RemoveStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
+}
+
+// resolveDataSourceForNode returns the LLV source (snapshot or volume) that the
+// backing LLV of a bootstrap replica should be cloned from on the given node.
+// Returns (nil, nil) when the source is not usable on this node (the caller
+// creates the LLV without a source, which is valid for non-primary-node replicas).
+func (r *Reconciler) resolveDataSourceForNode(ctx context.Context, ds *v1alpha1.VolumeDataSource, nodeName string) (*snc.LVMLogicalVolumeSource, error) {
+	switch ds.Kind {
+	case v1alpha1.VolumeDataSourceKindReplicatedVolumeSnapshot:
+		return r.resolveSnapshotSourceForNode(ctx, ds.Name, nodeName)
+	case v1alpha1.VolumeDataSourceKindReplicatedVolume:
+		return r.resolveCloneSourceForNode(ctx, ds.Name, nodeName)
+	default:
+		return nil, fmt.Errorf("unsupported data source kind %q", ds.Kind)
+	}
+}
+
+// resolveCloneSourceForNode picks a Diskful replica of the source RV on the given
+// node and returns an LVMLogicalVolumeSource pointing at its backing LLV so that
+// sds-node-configurator can create a thin LVM clone. Returns (nil, nil) when the
+// source RV has no suitable Diskful replica on the node.
+func (r *Reconciler) resolveCloneSourceForNode(ctx context.Context, sourceRVName, nodeName string) (*snc.LVMLogicalVolumeSource, error) {
+	var list v1alpha1.ReplicatedVolumeReplicaList
+	if err := r.cl.List(ctx, &list,
+		client.MatchingFields{indexes.IndexFieldRVRByReplicatedVolumeName: sourceRVName},
+	); err != nil {
+		return nil, fmt.Errorf("listing RVRs for source RV %q: %w", sourceRVName, err)
+	}
+
+	var sourceRVR *v1alpha1.ReplicatedVolumeReplica
+	for i := range list.Items {
+		rvr := &list.Items[i]
+		if rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful {
+			continue
+		}
+		if rvr.Spec.NodeName != nodeName {
+			continue
+		}
+		if rvr.Status.BackingVolume == nil || rvr.Status.BackingVolume.State != v1alpha1.DiskStateUpToDate {
+			continue
+		}
+		sourceRVR = rvr
+		break
+	}
+	if sourceRVR == nil {
+		return nil, nil
+	}
+
+	drbdr := &v1alpha1.DRBDResource{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: sourceRVR.Name}, drbdr); err != nil {
+		return nil, fmt.Errorf("getting DRBDResource %q: %w", sourceRVR.Name, err)
+	}
+	if drbdr.Spec.LVMLogicalVolumeName == "" {
+		return nil, nil
+	}
+	return &snc.LVMLogicalVolumeSource{
+		Kind: "LVMLogicalVolume",
+		Name: drbdr.Spec.LVMLogicalVolumeName,
+	}, nil
 }
 
 func (r *Reconciler) resolveSnapshotSourceForNode(ctx context.Context, rvsName, nodeName string) (*snc.LVMLogicalVolumeSource, error) {

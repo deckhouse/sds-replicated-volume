@@ -65,6 +65,11 @@ func BuildController(mgr manager.Manager, agentPodNamespace string) error {
 			newRSPEventHandler(cl),
 			builder.WithPredicates(rspPredicates()...),
 		).
+		Watches(
+			&v1alpha1.ReplicatedVolumeReplica{},
+			handler.EnqueueRequestsFromMapFunc(mapSourceRVRToCloneRVRs(cl)),
+			builder.WithPredicates(cloneSourceRVRPredicates()...),
+		).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 10,
 			RateLimiter:             controlleroptions.DefaultRateLimiter(),
@@ -188,6 +193,50 @@ func (h *rvEventHandler) enqueueAllRVRs(ctx context.Context, rvName string, q wo
 func (h *rvEventHandler) enqueueRVRsByIDs(rvName string, ids idset.IDSet, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 	for id := range ids.All() {
 		q.Add(reconcile.Request{NamespacedName: client.ObjectKey{Name: v1alpha1.FormatReplicatedVolumeReplicaName(rvName, id)}})
+	}
+}
+
+// mapSourceRVRToCloneRVRs maps a source ReplicatedVolumeReplica to all RVRs of
+// clone ReplicatedVolumes that reference its parent RV as a data source. This
+// allows clone-target RVRs to reconcile when the source replica becomes usable
+// (e.g. backing LLV created, UpToDate, or scheduled on a new node).
+func mapSourceRVRToCloneRVRs(cl client.Client) handler.MapFunc {
+	return func(ctx context.Context, obj client.Object) []reconcile.Request {
+		srcRVR, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+		if !ok || srcRVR == nil {
+			return nil
+		}
+		if srcRVR.Spec.ReplicatedVolumeName == "" {
+			return nil
+		}
+
+		var cloneRVList v1alpha1.ReplicatedVolumeList
+		if err := cl.List(ctx, &cloneRVList,
+			client.MatchingFields{indexes.IndexFieldRVByDataSourceVolumeName: srcRVR.Spec.ReplicatedVolumeName},
+			client.UnsafeDisableDeepCopy,
+		); err != nil {
+			log.FromContext(ctx).Error(err, "mapSourceRVRToCloneRVRs: failed to list clone RVs", "sourceRV", srcRVR.Spec.ReplicatedVolumeName)
+			return nil
+		}
+		if len(cloneRVList.Items) == 0 {
+			return nil
+		}
+
+		var requests []reconcile.Request
+		for _, cloneRV := range cloneRVList.Items {
+			var rvrList v1alpha1.ReplicatedVolumeReplicaList
+			if err := cl.List(ctx, &rvrList,
+				client.MatchingFields{indexes.IndexFieldRVRByReplicatedVolumeName: cloneRV.Name},
+				client.UnsafeDisableDeepCopy,
+			); err != nil {
+				log.FromContext(ctx).Error(err, "mapSourceRVRToCloneRVRs: failed to list clone RVRs", "cloneRV", cloneRV.Name)
+				continue
+			}
+			for _, rvr := range rvrList.Items {
+				requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKey{Name: rvr.Name}})
+			}
+		}
+		return requests
 	}
 }
 

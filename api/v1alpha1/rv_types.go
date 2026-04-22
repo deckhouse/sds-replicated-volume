@@ -116,15 +116,30 @@ type ReplicatedVolumeSpec struct {
 	DataSource *VolumeDataSource `json:"dataSource,omitempty"`
 }
 
+// VolumeDataSourceKind enumerates supported kinds of data source a ReplicatedVolume
+// can be populated from.
+// +kubebuilder:validation:Enum=ReplicatedVolumeSnapshot;ReplicatedVolume
+type VolumeDataSourceKind string
+
+const (
+	VolumeDataSourceKindReplicatedVolumeSnapshot VolumeDataSourceKind = "ReplicatedVolumeSnapshot"
+	VolumeDataSourceKindReplicatedVolume         VolumeDataSourceKind = "ReplicatedVolume"
+)
+
 // +kubebuilder:object:generate=true
-//
-//	+kubebuilder:validation:XValidation:rule="size(self.snapshotName) > 0",message="snapshotName must not be empty"
 type VolumeDataSource struct {
+	// Kind selects the type of the source object: a ReplicatedVolumeSnapshot
+	// (snapshot restore) or a ReplicatedVolume (volume clone).
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="kind is immutable"
+	Kind VolumeDataSourceKind `json:"kind"`
+
+	// Name is the name of the source object of the selected Kind.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="snapshotName is immutable"
-	SnapshotName string `json:"snapshotName"`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="name is immutable"
+	Name string `json:"name"`
 }
 
 // ReplicatedVolumeConfigurationMode enumerates possible values for ReplicatedVolume spec.configurationMode field.
