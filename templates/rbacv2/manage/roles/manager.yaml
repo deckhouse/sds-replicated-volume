@@ -1,0 +1,19 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: d8:manage:sds-replicated-volume:manager
+  labels:
+    heritage: deckhouse
+    module: sds-replicated-volume
+    rbac.deckhouse.io/use-role: user
+    rbac.deckhouse.io/kind: manage
+    rbac.deckhouse.io/level: subsystem
+    rbac.deckhouse.io/subsystem: sds-replicated-volume
+    rbac.deckhouse.io/aggregate-to-sds-replicated-volume-as: superadmin
+    rbac.deckhouse.io/aggregate-to-all-as: manager
+aggregationRule:
+  clusterRoleSelectors:
+    - matchLabels:
+        rbac.deckhouse.io/kind: manage
+        rbac.deckhouse.io/aggregate-to-sds-replicated-volume-as: manager
+rules: []
