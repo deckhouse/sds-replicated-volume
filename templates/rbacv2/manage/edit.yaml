@@ -8,7 +8,7 @@ metadata:
     rbac.deckhouse.io/kind: manage
     rbac.deckhouse.io/level: module
     rbac.deckhouse.io/namespace: d8-sds-replicated-volume
-  name: d8:manage:permission:module:sds-replicated-volume:manage_resources
+  name: d8:manage:permission:module:sds-replicated-volume:edit
 rules:
   - apiGroups:
       - storage.deckhouse.io
