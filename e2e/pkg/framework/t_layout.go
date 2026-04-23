@@ -131,3 +131,23 @@ func (f *Framework) SetupLayout(ctx SpecContext, l TestLayout) *TestRV {
 
 	return trv
 }
+
+// SetupRVS creates a ReplicatedVolumeSnapshot bound to trv, waits for its
+// prepare and sync transitions to complete, and returns the TestRVS handle.
+//
+// Flow:
+//
+//	Phase 1: Create RVS (spec.replicatedVolumeName = trv.Name())
+//	Phase 2: Await PrepareComplete → SyncComplete → ReadyToUse
+func (f *Framework) SetupRVS(ctx SpecContext, trv *TestRV, name ...string) *TestRVS {
+	GinkgoHelper()
+
+	trvs := trv.Snapshot(name...)
+	trvs.Create(ctx)
+
+	trvs.Await(ctx, match.RVS.PrepareComplete())
+	trvs.Await(ctx, match.RVS.SyncComplete())
+	trvs.Await(ctx, match.RVS.ReadyToUse())
+
+	return trvs
+}

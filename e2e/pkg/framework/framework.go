@@ -210,6 +210,9 @@ func (f *Framework) init(ctx context.Context) {
 			{GVK: gvkRVA, Strategy: dbg.MatchBySpecField, SpecFieldPath: "spec.replicatedVolumeName"},
 			{GVK: gvkDRBDR, Strategy: dbg.MatchByLabel, LabelKey: v1alpha1.ReplicatedVolumeLabelKey},
 		},
+		gvkRVS: {
+			{GVK: gvkRVRS, Strategy: dbg.MatchBySpecField, SpecFieldPath: "spec.replicatedVolumeSnapshotName"},
+		},
 	}
 
 	f.Debugger = dbg.New(c, GinkgoWriter,
@@ -218,7 +221,10 @@ func (f *Framework) init(ctx context.Context) {
 	f.Debugger.RegisterKind("rv", gvkRV.Kind)
 	f.Debugger.RegisterKind("rvr", gvkRVR.Kind)
 	f.Debugger.RegisterKind("rva", gvkRVA.Kind)
+	f.Debugger.RegisterKind("rvs", gvkRVS.Kind)
+	f.Debugger.RegisterKind("rvrs", gvkRVRS.Kind)
 	f.Debugger.RegisterKind("drbdr", gvkDRBDR.Kind)
+	f.Debugger.RegisterKind("drbdop", gvkDRBDOp.Kind)
 	f.Debugger.RegisterKind("rsc", gvkRSC.Kind)
 	f.Debugger.RegisterKind("rsp", gvkRSP.Kind)
 	f.Debugger.RegisterKind("llv", gvkLLV.Kind)

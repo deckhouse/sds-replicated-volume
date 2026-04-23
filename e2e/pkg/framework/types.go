@@ -27,15 +27,18 @@ import (
 
 // GVKs for all e2e-managed Kubernetes types.
 var (
-	gvkRV    = v1alpha1.SchemeGroupVersion.WithKind("ReplicatedVolume")
-	gvkRVR   = v1alpha1.SchemeGroupVersion.WithKind("ReplicatedVolumeReplica")
-	gvkRVA   = v1alpha1.SchemeGroupVersion.WithKind("ReplicatedVolumeAttachment")
-	gvkDRBDR = v1alpha1.SchemeGroupVersion.WithKind("DRBDResource")
-	gvkRSC   = v1alpha1.SchemeGroupVersion.WithKind("ReplicatedStorageClass")
-	gvkRSP   = v1alpha1.SchemeGroupVersion.WithKind("ReplicatedStoragePool")
-	gvkLLV   = snc.SchemeGroupVersion.WithKind("LVMLogicalVolume")
-	gvkNS    = corev1.SchemeGroupVersion.WithKind("Namespace")
-	gvkSC    = storagev1.SchemeGroupVersion.WithKind("StorageClass")
+	gvkRV     = v1alpha1.SchemeGroupVersion.WithKind("ReplicatedVolume")
+	gvkRVR    = v1alpha1.SchemeGroupVersion.WithKind("ReplicatedVolumeReplica")
+	gvkRVA    = v1alpha1.SchemeGroupVersion.WithKind("ReplicatedVolumeAttachment")
+	gvkRVS    = v1alpha1.SchemeGroupVersion.WithKind("ReplicatedVolumeSnapshot")
+	gvkRVRS   = v1alpha1.SchemeGroupVersion.WithKind("ReplicatedVolumeReplicaSnapshot")
+	gvkDRBDR  = v1alpha1.SchemeGroupVersion.WithKind("DRBDResource")
+	gvkDRBDOp = v1alpha1.SchemeGroupVersion.WithKind("DRBDResourceOperation")
+	gvkRSC    = v1alpha1.SchemeGroupVersion.WithKind("ReplicatedStorageClass")
+	gvkRSP    = v1alpha1.SchemeGroupVersion.WithKind("ReplicatedStoragePool")
+	gvkLLV    = snc.SchemeGroupVersion.WithKind("LVMLogicalVolume")
+	gvkNS     = corev1.SchemeGroupVersion.WithKind("Namespace")
+	gvkSC     = storagev1.SchemeGroupVersion.WithKind("StorageClass")
 )
 
 // e2eTypes returns cluster-scoped object types managed by e2e tests, plus
@@ -46,8 +49,11 @@ func e2eTypes() []client.Object {
 	return []client.Object{
 		&corev1.Namespace{},
 		&v1alpha1.ReplicatedVolumeAttachment{},
+		&v1alpha1.ReplicatedVolumeSnapshot{},
+		&v1alpha1.ReplicatedVolumeReplicaSnapshot{},
 		&v1alpha1.ReplicatedVolume{},
 		&v1alpha1.ReplicatedVolumeReplica{},
+		&v1alpha1.DRBDResourceOperation{},
 		&v1alpha1.DRBDResource{},
 		&snc.LVMLogicalVolume{},
 		&v1alpha1.ReplicatedStorageClass{},
@@ -59,8 +65,11 @@ func e2eListTypes() []client.ObjectList {
 	return []client.ObjectList{
 		&corev1.NamespaceList{},
 		&v1alpha1.ReplicatedVolumeAttachmentList{},
+		&v1alpha1.ReplicatedVolumeSnapshotList{},
+		&v1alpha1.ReplicatedVolumeReplicaSnapshotList{},
 		&v1alpha1.ReplicatedVolumeList{},
 		&v1alpha1.ReplicatedVolumeReplicaList{},
+		&v1alpha1.DRBDResourceOperationList{},
 		&v1alpha1.DRBDResourceList{},
 		&snc.LVMLogicalVolumeList{},
 		&v1alpha1.ReplicatedStorageClassList{},
