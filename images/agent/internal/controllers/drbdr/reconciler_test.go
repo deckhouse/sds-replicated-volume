@@ -60,6 +60,10 @@ type reconcileTestCase struct {
 	// Override reconcile request (default: {Name: drbdr.Name or testDRBDRName})
 	request *drbdr.DRBDReconcileRequest
 
+	// State store initial state (events2-backed runtime state).
+	// nil = empty store (no DRBD resources known).
+	storeState drbdutils.StatusResult
+
 	// Expected drbdsetup commands (in order)
 	expectedCommands []*fakedrbdutils.ExpectedCmd
 
@@ -117,19 +121,17 @@ func TestReconciler_Reconcile(t *testing.T) {
 		{
 			name:  "resource not found by name, no DRBD on node - done",
 			drbdr: nil,
-			// K8S object doesn't exist; orphan check queries DRBD status
+			// K8S object doesn't exist; orphan check reads state store
 			// and finds nothing on the node.
-			expectedCommands: []*fakedrbdutils.ExpectedCmd{
-				statusCmd(drbdutils.StatusResult{}),
-			},
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{},
 		},
 		{
 			name:  "resource not found by name, DRBD exists on node - orphan cleanup",
 			drbdr: nil,
-			// K8S object doesn't exist but DRBD resource is running on the
-			// node. The reconciler tears it down.
+			// K8S object doesn't exist but state store shows DRBD resource
+			// running. The reconciler tears it down.
+			storeState: configuredStatus(testDRBDResName),
 			expectedCommands: []*fakedrbdutils.ExpectedCmd{
-				statusCmd(configuredStatus(testDRBDResName)),
 				downCmd(testDRBDResName),
 			},
 		},
@@ -152,17 +154,13 @@ func TestReconciler_Reconcile(t *testing.T) {
 		{
 			name:  "state up, drbd not configured - creates resource and minor",
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp),
+			// State store has no resource → initial observe returns empty
 			expectedCommands: []*fakedrbdutils.ExpectedCmd{
-				statusCmd(drbdutils.StatusResult{}),
-				// After status returns empty, actions are generated:
-				// NewResourceAction calls new-resource
+				// Actions generated from empty actual state:
 				newResourceCmd(testDRBDResName, 0),
-				// ResourceOptionsAction sets resource options
 				resourceOptionsCmd(testDRBDResName),
-				// NewMinorAction calls ExecuteNewAutoMinor which tries nextDeviceMinor=0 first
 				newMinorCmd(testDRBDResName, 0, 0, false),
-				// EnsureDeviceSymlinkAction runs (filesystem, not drbdsetup)
-				// After actions, refresh actual state
+				// Post-convergence refresh (direct status + show cache)
 				statusCmd(configuredStatus(testDRBDResName)),
 				showCmd(configuredShow(testDRBDResName)),
 			},
@@ -195,13 +193,14 @@ func TestReconciler_Reconcile(t *testing.T) {
 			},
 		},
 		{
-			name:  "state up, drbd configured - queries status and show only",
-			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp),
+			name:       "state up, drbd configured - reads from store, show cache miss",
+			drbdr:      drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp),
+			storeState: configuredStatus(testDRBDResName),
 			expectedCommands: []*fakedrbdutils.ExpectedCmd{
-				statusCmd(configuredStatus(testDRBDResName)),
+				// Initial observe: store has resource, show cache miss
 				showCmd(configuredShow(testDRBDResName)),
-				// Resource exists and options match - EnsureDeviceSymlinkAction runs (filesystem only)
-				// Refresh after symlink action
+				// EnsureDeviceSymlinkAction runs (filesystem only)
+				// Post-convergence refresh (direct status + show re-fetch)
 				statusCmd(configuredStatus(testDRBDResName)),
 				showCmd(configuredShow(testDRBDResName)),
 			},
@@ -211,17 +210,14 @@ func TestReconciler_Reconcile(t *testing.T) {
 		},
 
 		{
-			name:  "state up, drbd configured as primary - reports device open and io suspended",
-			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp),
+			name:       "state up, drbd configured as primary - reports device open and io suspended",
+			drbdr:      drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp),
+			storeState: configuredPrimaryStatus(testDRBDResName),
 			expectedCommands: []*fakedrbdutils.ExpectedCmd{
-				{
-					Name:         drbdutils.DRBDSetupCommand,
-					Args:         drbdutils.StatusArgs(testDRBDResName),
-					ResultOutput: mustJSON(configuredPrimaryStatus(testDRBDResName)),
-				},
+				// Initial observe: store has primary resource, show cache miss
 				showCmd(configuredShow(testDRBDResName)),
 				// EnsureDeviceSymlinkAction runs (filesystem only)
-				// Refresh after symlink action
+				// Post-convergence refresh (direct status + show re-fetch)
 				{
 					Name:         drbdutils.DRBDSetupCommand,
 					Args:         drbdutils.StatusArgs(testDRBDResName),
@@ -249,14 +245,14 @@ func TestReconciler_Reconcile(t *testing.T) {
 			},
 		},
 
-		// State=Down cases
+		// State=Down cases — store is empty (DRBD not running)
 		{
-			name:  "state down - queries status",
+			name:  "state down - reads from empty store",
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateDown),
 			expectedCommands: []*fakedrbdutils.ExpectedCmd{
-				statusCmd(drbdutils.StatusResult{}),
+				// Initial: store empty → no calls
 				// RemoveDeviceSymlinkAction runs (filesystem only)
-				// Refresh after symlink action
+				// Post-convergence refresh (direct status → empty)
 				statusCmd(drbdutils.StatusResult{}),
 			},
 		},
@@ -265,7 +261,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 			drbdr: drbdrDiskfulDown(testNodeName, testLLVName, testLLVName),
 			objs:  []client.Object{testLLVWithFinalizer(testLLVName)},
 			expectedCommands: []*fakedrbdutils.ExpectedCmd{
-				statusCmd(drbdutils.StatusResult{}),
+				// Initial: store empty → no calls
+				// Post-convergence refresh (direct status → empty)
 				statusCmd(drbdutils.StatusResult{}),
 			},
 			postCheck: func(t *testing.T, cl client.Client) {
@@ -277,7 +274,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 			drbdr: drbdrDiskfulDown(testNodeName, testLLVName, ""),
 			objs:  []client.Object{testLLVWithFinalizer(testLLVName)},
 			expectedCommands: []*fakedrbdutils.ExpectedCmd{
-				statusCmd(drbdutils.StatusResult{}),
+				// Initial: store empty → no calls
+				// Post-convergence refresh (direct status → empty)
 				statusCmd(drbdutils.StatusResult{}),
 			},
 			postCheck: func(t *testing.T, cl client.Client) {
@@ -289,12 +287,12 @@ func TestReconciler_Reconcile(t *testing.T) {
 
 		// Deletion cases
 		{
-			name:  "deleting resource - queries status",
+			name:  "deleting resource - reads from empty store",
 			drbdr: deletingDRBDR(testNodeName, v1alpha1.AgentFinalizer),
 			expectedCommands: []*fakedrbdutils.ExpectedCmd{
-				statusCmd(drbdutils.StatusResult{}),
+				// Initial: store empty → no calls
 				// RemoveDeviceSymlinkAction runs (filesystem only)
-				// Refresh after symlink action
+				// Post-convergence refresh (direct status → empty)
 				statusCmd(drbdutils.StatusResult{}),
 			},
 		},
@@ -313,14 +311,11 @@ func TestReconciler_Reconcile(t *testing.T) {
 		{
 			name:  "custom drbd resource name in maintenance mode - skips rename",
 			drbdr: drbdrWithCustomNameInMaintenance(testNodeName, testCustomDRBDName),
+			// Store has the resource under its custom name
+			storeState: configuredStatus(testCustomDRBDName),
 			expectedCommands: []*fakedrbdutils.ExpectedCmd{
 				// Phase 0 rename is skipped due to MM; falls through to Phase 2+4.
-				// Status and show use the custom (old) name via DRBDResourceNameOnTheNode.
-				{
-					Name:         drbdutils.DRBDSetupCommand,
-					Args:         drbdutils.StatusArgs(testCustomDRBDName),
-					ResultOutput: mustJSON(configuredStatus(testCustomDRBDName)),
-				},
+				// Initial observe: store has resource, show cache miss for custom name
 				{
 					Name:         drbdutils.DRBDSetupCommand,
 					Args:         drbdutils.ShowArgs(testCustomDRBDName, true),
@@ -330,27 +325,15 @@ func TestReconciler_Reconcile(t *testing.T) {
 			},
 		},
 
-		// Error cases - use State=Down to avoid action generation
-		{
-			name:  "status command error - returns error",
-			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateDown),
-			expectedCommands: []*fakedrbdutils.ExpectedCmd{
-				{
-					Name:         drbdutils.DRBDSetupCommand,
-					Args:         drbdutils.StatusArgs(testDRBDResName),
-					ResultOutput: []byte("error output"),
-					ResultErr:    fakedrbdutils.ExitErr{Code: 1},
-				},
-			},
-			expectedReconcileErr: "executing drbdsetup status",
-		},
+		// Error cases
 		{
 			name:  "show command error - returns error",
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateDown),
+			// Store has the resource → show cache is called → error
+			storeState: drbdutils.StatusResult{
+				{Name: testDRBDResName, NodeID: 0, Role: "Secondary"},
+			},
 			expectedCommands: []*fakedrbdutils.ExpectedCmd{
-				statusCmd(drbdutils.StatusResult{
-					{Name: testDRBDResName, NodeID: 0, Role: "Secondary"},
-				}),
 				{
 					Name:         drbdutils.DRBDSetupCommand,
 					Args:         drbdutils.ShowArgs(testDRBDResName, true),
@@ -360,37 +343,16 @@ func TestReconciler_Reconcile(t *testing.T) {
 			},
 			expectedReconcileErr: "executing drbdsetup show",
 		},
-		{
-			name:  "status exit code 10 - resource not found, creates resource",
-			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp),
-			expectedCommands: []*fakedrbdutils.ExpectedCmd{
-				{
-					Name:         drbdutils.DRBDSetupCommand,
-					Args:         drbdutils.StatusArgs(testDRBDResName),
-					ResultOutput: []byte(testDRBDResName + ": No such resource\n"),
-					ResultErr:    fakedrbdutils.ExitErr{Code: 10},
-				},
-				// Resource not found triggers creation
-				newResourceCmd(testDRBDResName, 0),
-				// ResourceOptionsAction sets resource options
-				resourceOptionsCmd(testDRBDResName),
-				// ExecuteNewAutoMinor tries nextDeviceMinor=0 first
-				newMinorCmd(testDRBDResName, 0, 0, false),
-				// EnsureDeviceSymlinkAction runs (filesystem, not drbdsetup)
-				// Refresh after actions
-				statusCmd(configuredStatus(testDRBDResName)),
-				showCmd(configuredShow(testDRBDResName)),
-			},
-		},
 
-		// Maintenance mode - returns configured resource
+		// Maintenance mode - reads from store, show cache miss
 		{
-			name:  "maintenance mode - queries status and show",
-			drbdr: drbdrInMaintenance(testNodeName, v1alpha1.MaintenanceModeNoResourceReconciliation),
+			name:       "maintenance mode - reads from store and show cache",
+			drbdr:      drbdrInMaintenance(testNodeName, v1alpha1.MaintenanceModeNoResourceReconciliation),
+			storeState: configuredStatus(testDRBDResName),
 			expectedCommands: []*fakedrbdutils.ExpectedCmd{
-				statusCmd(configuredStatus(testDRBDResName)),
+				// Initial observe: store has resource, show cache miss
 				showCmd(configuredShow(testDRBDResName)),
-				// Maintenance mode skips all actions (including EnsureDeviceSymlinkAction)
+				// Maintenance mode skips all actions
 			},
 		},
 
@@ -398,27 +360,28 @@ func TestReconciler_Reconcile(t *testing.T) {
 		{
 			name:  "resource with connections - removes stale peer",
 			drbdr: drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp),
-			expectedCommands: []*fakedrbdutils.ExpectedCmd{
-				statusCmd(drbdutils.StatusResult{
-					{
-						Name:   testDRBDResName,
-						NodeID: 0,
-						Role:   "Primary",
-						Devices: []drbdutils.Device{
-							{Volume: 0, Minor: 1000, DiskState: "UpToDate", Quorum: true},
-						},
-						Connections: []drbdutils.Connection{
-							{
-								PeerNodeID:      1,
-								Name:            "peer-1",
-								ConnectionState: "Connected",
-								PeerDevices: []drbdutils.PeerDevice{
-									{Volume: 0, ReplicationState: "Established", PeerDiskState: "UpToDate"},
-								},
+			storeState: drbdutils.StatusResult{
+				{
+					Name:   testDRBDResName,
+					NodeID: 0,
+					Role:   "Primary",
+					Devices: []drbdutils.Device{
+						{Volume: 0, Minor: 1000, DiskState: "UpToDate", Quorum: true},
+					},
+					Connections: []drbdutils.Connection{
+						{
+							PeerNodeID:      1,
+							Name:            "peer-1",
+							ConnectionState: "Connected",
+							PeerDevices: []drbdutils.PeerDevice{
+								{Volume: 0, ReplicationState: "Established", PeerDiskState: "UpToDate"},
 							},
 						},
 					},
-				}),
+				},
+			},
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
+				// Initial observe: store has resource with connection, show cache miss
 				showCmd(&drbdutils.ShowResource{
 					Resource: testDRBDResName,
 					Options: drbdutils.ShowOptions{
@@ -434,11 +397,11 @@ func TestReconciler_Reconcile(t *testing.T) {
 					},
 				}),
 				// EnsureDeviceSymlinkAction runs (filesystem, not drbdsetup)
-				// Stale peer (in actual but not in intended spec): disconnect + del-peer + forget-peer
+				// Stale peer: disconnect + del-peer + forget-peer
 				disconnectCmd(testDRBDResName, 1),
 				delPeerCmd(testDRBDResName, 1),
 				forgetPeerCmd(testDRBDResName, 1),
-				// Refresh after actions
+				// Post-convergence refresh (direct status + show re-fetch)
 				statusCmd(configuredStatus(testDRBDResName)),
 				showCmd(configuredShow(testDRBDResName)),
 			},
@@ -500,12 +463,20 @@ func TestReconciler_Reconcile(t *testing.T) {
 			fakeExec.ExpectCommands(tc.expectedCommands...)
 			fakeExec.Setup(t)
 
-			// Create reconciler with port registry
+			// Create reconciler with port registry, state store and show cache
 			drbdPortCache := drbdr.NewDRBDPortCache()
 			drbdPortCache.BeginDump()
 			drbdPortCache.EndDump()
 			portRegistry := drbdr.NewPortRegistry(cl, testNodeName, drbdPortCache, 7000, 7999, 10*time.Minute)
-			rec := drbdr.NewReconciler(cl, testNodeName, portRegistry)
+
+			stateStore := drbdr.NewDRBDStateStore()
+			stateStore.MarkReadyForTest()
+			if tc.storeState != nil {
+				stateStore.PopulateForTest(tc.storeState)
+			}
+			showCache := drbdr.NewShowCache()
+
+			rec := drbdr.NewReconciler(cl, testNodeName, portRegistry, stateStore, showCache)
 
 			// Build reconcile request
 			var req drbdr.DRBDReconcileRequest
