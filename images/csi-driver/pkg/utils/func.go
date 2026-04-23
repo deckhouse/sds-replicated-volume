@@ -85,6 +85,21 @@ func hasFormationTransition(transitions []srv.ReplicatedVolumeDatameshTransition
 	return false
 }
 
+// IsReplicatedVolumePastFormation reports whether the RV has completed its
+// initial Formation transition. This is the inverse of rv-controller's
+// isFormationInProgress predicate.
+//
+// Monotonicity: DatameshRevision grows monotonically during normal operation
+// and is only reset to 0 by reconcileFormationRestartIfTimeoutPassed in the
+// rv-controller. That restart path only runs while the RV is already in an
+// active Formation transition (i.e. while this predicate is already false).
+// Therefore the predicate transitions false -> true exactly once per RV and
+// stays true for the remainder of the RV's lifetime. This makes it a safe
+// "formation committed" marker for cleanup decisions in CreateVolume.
+func IsReplicatedVolumePastFormation(rv *srv.ReplicatedVolume) bool {
+	return rv != nil && rv.Status.DatameshRevision > 0 && !hasFormationTransition(rv.Status.DatameshTransitions)
+}
+
 // WaitForReplicatedVolumeReady waits for ReplicatedVolume to become ready
 // and returns the last-fetched RV on success.
 func WaitForReplicatedVolumeReady(
@@ -118,7 +133,7 @@ func WaitForReplicatedVolumeReady(
 			return nil, attemptCounter, fmt.Errorf("failed to create ReplicatedVolume %s, reason: ReplicatedVolume is being deleted", name)
 		}
 
-		if rv.Status.DatameshRevision > 0 && !hasFormationTransition(rv.Status.DatameshTransitions) {
+		if IsReplicatedVolumePastFormation(rv) {
 			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] ReplicatedVolume is ready (datameshRevision=%d, no Formation transition)", traceID, name, rv.Status.DatameshRevision))
 			return rv, attemptCounter, nil
 		}
