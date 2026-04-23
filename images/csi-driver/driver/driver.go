@@ -46,7 +46,7 @@ const (
 	// DefaultAddress is the default address that the csi plugin will serve its
 	// http handler on.
 	DefaultAddress           = "127.0.0.1:12302"
-	defaultWaitActionTimeout = 5 * time.Minute
+	defaultWaitActionTimeout = 1 * time.Minute
 )
 
 var (
