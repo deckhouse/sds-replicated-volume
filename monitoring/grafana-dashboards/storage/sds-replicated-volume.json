@@ -401,9 +401,9 @@
       }
     },
     {
-      "type": "table",
+      "type": "timeseries",
       "title": "Per-Node Resource Count",
-      "description": "Current number of RVRs and RVAs per node. Empty rows mean no objects matched the current filters.",
+      "description": "Current number of RVRs and RVAs per node shown as a history graph. Use it to see node skew and cleanup waves over time.",
       "id": 5,
       "gridPos": {
         "h": 8,
@@ -417,50 +417,46 @@
       },
       "targets": [
         {
-          "expr": "count by (node) (sds_rvr_phase_info{node=~\"$node\"} == 1)",
-          "legendFormat": "RVRs",
-          "refId": "A",
-          "format": "table",
-          "instant": true
+          "expr": "count by (node) (sds_rvr_present{node=~\"$node\",storage_class=~\"$storage_class\"} == 1)",
+          "legendFormat": "RVR {{node}}",
+          "refId": "A"
         },
         {
           "expr": "count by (node) (sds_rva_phase_info{node=~\"$node\"} == 1)",
-          "legendFormat": "RVAs",
-          "refId": "B",
-          "format": "table",
-          "instant": true
+          "legendFormat": "RVA {{node}}",
+          "refId": "B"
         }
       ],
       "fieldConfig": {
         "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "stacking": {
+              "mode": "none"
+            },
+            "showPoints": "never",
+            "connectNulls": true
+          },
           "unit": "short"
         },
         "overrides": []
       },
       "options": {
-        "showHeader": true,
-        "footer": {
-          "show": false
-        }
-      },
-      "transformations": [
-        {
-          "id": "merge",
-          "options": {}
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true
-            },
-            "renameByName": {
-              "Value #A": "RVRs",
-              "Value #B": "RVAs"
-            }
-          }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
         }
-      ]
+      }
     },
     {
       "type": "row",
@@ -474,15 +470,15 @@
       "collapsed": false
     },
     {
-      "type": "table",
-      "title": "Slowest RVR by RV in Range",
-      "description": "Top-15 RVs by their slowest RVR completion in the selected range. One row per RV, with the concrete slowest RVR for investigation.",
+      "type": "timeseries",
+      "title": "RVR Ready Events (History)",
+      "description": "Number of RVRs that first reached Healthy per interval in the selected range. Empty graph means no ready events in the selected range.",
       "id": 6,
       "gridPos": {
         "h": 8,
-        "w": 24,
+        "w": 12,
         "x": 0,
-        "y": 41
+        "y": 14
       },
       "datasource": {
         "type": "prometheus",
@@ -490,52 +486,41 @@
       },
       "targets": [
         {
-          "expr": "topk(15, (sds_rvr_creation_duration_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} >= (${__from} / 1000)) and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} <= (${__to} / 1000))) == on(rv) group_left max by (rv) (sds_rvr_creation_duration_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} >= (${__from} / 1000)) and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} <= (${__to} / 1000))))",
-          "legendFormat": "",
-          "refId": "A",
-          "format": "table",
-          "instant": true
+          "expr": "sum(increase(sds_rvr_ready_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "Ready events",
+          "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s"
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "stacking": {
+              "mode": "none"
+            },
+            "showPoints": "never",
+            "connectNulls": true
+          },
+          "unit": "short"
         },
         "overrides": []
       },
       "options": {
-        "showHeader": true,
-        "footer": {
-          "show": false
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
         }
-      },
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true,
-              "__name__": true,
-              "job": true,
-              "instance": true
-            },
-            "indexByName": {
-              "name": 0,
-              "rv": 1,
-              "node": 2,
-              "storage_class": 3,
-              "Value": 4
-            },
-            "renameByName": {
-              "name": "RVR",
-              "rv": "RV",
-              "node": "Node",
-              "storage_class": "Storage Class",
-              "Value": "Creation Duration"
-            }
-          }
-        }
-      ]
+      }
     },
     {
       "type": "timeseries",
@@ -782,8 +767,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Degraded Phase Frequency",
-      "description": "Rate of RVR transitions into Degraded phase in the selected range. Empty graph means no degraded transitions in the selected range.",
+      "title": "Degraded-like Phase Frequency",
+      "description": "RVR phase transition events for degraded-like phases (Degraded, PartiallyDegraded, Critical) in the selected range. Empty graph means no such phase transitions in the selected range.",
       "id": 11,
       "gridPos": {
         "h": 8,
@@ -797,8 +782,8 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(sds_rvr_phase_duration_seconds_count{phase=\"Degraded\",node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "Entries into Degraded",
+          "expr": "sum by (phase) (increase(sds_rvr_phase_duration_seconds_count{phase=~\"Degraded|PartiallyDegraded|Critical\",node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "{{phase}}",
           "refId": "A"
         }
       ],
@@ -814,7 +799,7 @@
             "showPoints": "never",
             "connectNulls": true
           },
-          "unit": "ops"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -823,7 +808,7 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "mean",
+            "sum",
             "max"
           ]
         },
@@ -861,7 +846,7 @@
           },
           "targets": [
             {
-              "expr": "topk(15, sds_rvr_creation_duration_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} >= (${__from} / 1000)) and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} <= (${__to} / 1000)))",
+              "expr": "topk(15, ((sds_rvr_creation_duration_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} * on(name, rv, node, storage_class) group_left() ((sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} > bool (${__from} / 1000)) * (sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} <= bool (${__to} / 1000)))) > 0)",
               "legendFormat": "",
               "refId": "A",
               "format": "table",
@@ -1045,8 +1030,8 @@
         },
         {
           "type": "timeseries",
-          "title": "RVA Attach Duration P50/P90",
-          "description": "Time from RVA creation to Attached phase for events in the selected range. Empty graph means no RVA attachments in the selected range.",
+          "title": "RVA Attach Duration P90 by Node",
+          "description": "P90 time from RVA creation to Attached, split by node. Empty graph means no RVA attachment completions in the selected range.",
           "id": 13,
           "gridPos": {
             "h": 8,
@@ -1060,14 +1045,9 @@
           },
           "targets": [
             {
-              "expr": "histogram_quantile(0.50, sum(rate(sds_rva_ready_duration_seconds_bucket{node=~\"$node\"}[$__rate_interval])) by (le))",
-              "legendFormat": "P50",
+              "expr": "histogram_quantile(0.90, sum(rate(sds_rva_ready_duration_seconds_bucket{node=~\"$node\"}[$__rate_interval])) by (le, node))",
+              "legendFormat": "{{node}} P90",
               "refId": "A"
-            },
-            {
-              "expr": "histogram_quantile(0.90, sum(rate(sds_rva_ready_duration_seconds_bucket{node=~\"$node\"}[$__rate_interval])) by (le))",
-              "legendFormat": "P90",
-              "refId": "B"
             }
           ],
           "fieldConfig": {
@@ -1091,7 +1071,7 @@
               "displayMode": "table",
               "placement": "bottom",
               "calcs": [
-                "mean",
+                "lastNotNull",
                 "max"
               ]
             },
@@ -1413,8 +1393,8 @@
         },
         {
           "type": "timeseries",
-          "title": "DRBD Resource Configuration Time (P90)",
-          "description": "P90 DRBD resource configuration time for completion events in the selected range. Empty graph means no DRBDR configuration events in the selected range.",
+          "title": "DRBD Resource Configuration Time P90 by Node",
+          "description": "P90 DRBD resource configuration time, split by node. Empty graph means no DRBDR configuration events in the selected range.",
           "id": 15,
           "gridPos": {
             "h": 8,
@@ -1428,14 +1408,9 @@
           },
           "targets": [
             {
-              "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_configured_duration_seconds_bucket[$__rate_interval])) by (le))",
-              "legendFormat": "Cluster P90",
-              "refId": "A"
-            },
-            {
               "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_configured_duration_seconds_bucket{node=~\"$node\"}[$__rate_interval])) by (le, node))",
               "legendFormat": "{{node}} P90",
-              "refId": "B"
+              "refId": "A"
             }
           ],
           "fieldConfig": {
@@ -1459,7 +1434,7 @@
               "displayMode": "table",
               "placement": "bottom",
               "calcs": [
-                "mean",
+                "lastNotNull",
                 "max"
               ]
             },
@@ -1471,8 +1446,8 @@
         },
         {
           "type": "timeseries",
-          "title": "DRBD Resource Deletion Time (P90)",
-          "description": "P90 DRBD resource deletion time for completion events in the selected range. Empty graph means no DRBDR deletion events in the selected range.",
+          "title": "DRBD Resource Deletion Time P90 by Node",
+          "description": "P90 DRBD resource deletion time, split by node. Empty graph means no DRBDR deletion events in the selected range.",
           "id": 16,
           "gridPos": {
             "h": 8,
@@ -1486,14 +1461,9 @@
           },
           "targets": [
             {
-              "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_deletion_duration_seconds_bucket[$__rate_interval])) by (le))",
-              "legendFormat": "Cluster P90",
-              "refId": "A"
-            },
-            {
               "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_deletion_duration_seconds_bucket{node=~\"$node\"}[$__rate_interval])) by (le, node))",
               "legendFormat": "{{node}} P90",
-              "refId": "B"
+              "refId": "A"
             }
           ],
           "fieldConfig": {
@@ -1517,7 +1487,7 @@
               "displayMode": "table",
               "placement": "bottom",
               "calcs": [
-                "mean",
+                "lastNotNull",
                 "max"
               ]
             },
@@ -1557,7 +1527,7 @@
           },
           "targets": [
             {
-              "expr": "sum(increase(sds_rv_datamesh_transitions_completed_total[$__range])) or on() vector(0)",
+              "expr": "sum(increase(sds_rv_datamesh_transitions_completed_total{type=~\"$transition_type\"}[$__range])) or on() vector(0)",
               "legendFormat": "",
               "refId": "A",
               "instant": true
@@ -1618,7 +1588,7 @@
           },
           "targets": [
             {
-              "expr": "(sum(increase(sds_rv_datamesh_transition_duration_seconds_sum[$__range])) / clamp_min(sum(increase(sds_rv_datamesh_transition_duration_seconds_count[$__range])), 1)) or on() vector(0)",
+              "expr": "(sum(increase(sds_rv_datamesh_transition_duration_seconds_sum{type=~\"$transition_type\"}[$__range])) / clamp_min(sum(increase(sds_rv_datamesh_transition_duration_seconds_count{type=~\"$transition_type\"}[$__range])), 1)) or on() vector(0)",
               "legendFormat": "",
               "refId": "A",
               "instant": true
@@ -1679,7 +1649,7 @@
           },
           "targets": [
             {
-              "expr": "sum(increase(sds_rv_datamesh_step_duration_seconds_count[$__range])) or on() vector(0)",
+              "expr": "sum(increase(sds_rv_datamesh_step_duration_seconds_count{type=~\"$transition_type\"}[$__range])) or on() vector(0)",
               "legendFormat": "",
               "refId": "A",
               "instant": true
@@ -1740,7 +1710,7 @@
           },
           "targets": [
             {
-              "expr": "(sum(increase(sds_rv_datamesh_step_duration_seconds_sum[$__range])) / clamp_min(sum(increase(sds_rv_datamesh_step_duration_seconds_count[$__range])), 1)) or on() vector(0)",
+              "expr": "(sum(increase(sds_rv_datamesh_step_duration_seconds_sum{type=~\"$transition_type\"}[$__range])) / clamp_min(sum(increase(sds_rv_datamesh_step_duration_seconds_count{type=~\"$transition_type\"}[$__range])), 1)) or on() vector(0)",
               "legendFormat": "",
               "refId": "A",
               "instant": true
@@ -1801,7 +1771,7 @@
           },
           "targets": [
             {
-              "expr": "sum by (type) (increase(sds_rv_datamesh_transitions_completed_total[$__rate_interval]))",
+              "expr": "sum by (type) (increase(sds_rv_datamesh_transitions_completed_total{type=~\"$transition_type\"}[$__rate_interval]))",
               "legendFormat": "{{type}}",
               "refId": "A"
             }
@@ -1838,9 +1808,9 @@
           }
         },
         {
-          "type": "bargauge",
-          "title": "Active Transitions by Type (Current)",
-          "description": "Current number of active datamesh transitions by type. Use the table below to see which RVs have been active the longest.",
+          "type": "timeseries",
+          "title": "Active Transitions by Type",
+          "description": "Number of currently active datamesh transitions over time, split by transition type. Use the filter and the table below to drill down to specific RVs.",
           "id": 18,
           "gridPos": {
             "h": 8,
@@ -1854,40 +1824,40 @@
           },
           "targets": [
             {
-              "expr": "sum by (type) (sds_rv_datamesh_active_transitions)",
+              "expr": "sum by (type) (sds_rv_datamesh_active_transitions{type=~\"$transition_type\"})",
               "legendFormat": "{{type}}",
-              "refId": "A",
-              "instant": true
+              "refId": "A"
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "unit": "short",
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "orange",
-                    "value": 1
-                  }
-                ]
-              }
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                },
+                "showPoints": "never",
+                "connectNulls": true
+              },
+              "unit": "short"
             },
             "overrides": []
           },
           "options": {
-            "reduceOptions": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
               "calcs": [
-                "lastNotNull"
+                "lastNotNull",
+                "max"
               ]
             },
-            "orientation": "horizontal",
-            "displayMode": "gradient",
-            "showUnfilled": true
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           }
         },
         {
@@ -1907,7 +1877,7 @@
           },
           "targets": [
             {
-              "expr": "histogram_quantile(0.90, sum(rate(sds_rv_datamesh_transition_duration_seconds_bucket[$__rate_interval])) by (le, type))",
+              "expr": "histogram_quantile(0.90, sum(rate(sds_rv_datamesh_transition_duration_seconds_bucket{type=~\"$transition_type\"}[$__rate_interval])) by (le, type))",
               "legendFormat": "{{type}} P90",
               "refId": "A"
             }
@@ -1960,7 +1930,7 @@
           },
           "targets": [
             {
-              "expr": "sum by (type, step) (increase(sds_rv_datamesh_step_duration_seconds_count[$__rate_interval]))",
+              "expr": "sum by (type, step) (increase(sds_rv_datamesh_step_duration_seconds_count{type=~\"$transition_type\"}[$__rate_interval]))",
               "legendFormat": "{{type}}/{{step}}",
               "refId": "A"
             }
@@ -2488,8 +2458,8 @@
         },
         {
           "type": "timeseries",
-          "title": "RVR Deletion Duration P90",
-          "description": "P90 RVR deletion duration for completions in the selected range. Cluster-wide view for direct comparison with RV deletion duration.",
+          "title": "RVR Deletion Duration by Node",
+          "description": "P90 RVR deletion duration split by node, with a cluster-wide mean line for orientation. Empty graph means no RVR deletions completed in the selected range.",
           "id": 23,
           "gridPos": {
             "h": 8,
@@ -2503,9 +2473,14 @@
           },
           "targets": [
             {
-              "expr": "histogram_quantile(0.90, sum(rate(sds_rvr_deletion_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (le))",
-              "legendFormat": "P90",
+              "expr": "histogram_quantile(0.90, sum(rate(sds_rvr_deletion_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (le, node))",
+              "legendFormat": "{{node}} P90",
               "refId": "A"
+            },
+            {
+              "expr": "sum(rate(sds_rvr_deletion_duration_seconds_sum{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) / clamp_min(sum(rate(sds_rvr_deletion_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])), 1)",
+              "legendFormat": "Cluster mean",
+              "refId": "B"
             }
           ],
           "fieldConfig": {
@@ -2553,9 +2528,9 @@
       "collapsed": true,
       "panels": [
         {
-          "type": "bargauge",
-          "title": "Current DRBD Unhealthy Connections by Node",
-          "description": "Current number of DRBD connections in non-healthy states per node. Use the table for state and resource-level detail.",
+          "type": "timeseries",
+          "title": "DRBD Unhealthy Connections by Node",
+          "description": "Number of DRBD connections in non-healthy states per node over time. Use the table for state and resource-level detail.",
           "id": 24,
           "gridPos": {
             "h": 8,
@@ -2571,38 +2546,38 @@
             {
               "expr": "sum by (node) (drbd_connection_state{drbd_connection_state!=\"UpToDate\",drbd_connection_state!=\"Connected\",node=~\"$node\"} == 1) or (0 * max by (node) (sds_rvr_present{node=~\"$node\",storage_class=~\"$storage_class\"}))",
               "legendFormat": "{{node}}",
-              "refId": "A",
-              "instant": true
+              "refId": "A"
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "unit": "short",
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "orange",
-                    "value": 1
-                  }
-                ]
-              }
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                },
+                "showPoints": "never",
+                "connectNulls": true
+              },
+              "unit": "short"
             },
             "overrides": []
           },
           "options": {
-            "reduceOptions": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
               "calcs": [
-                "lastNotNull"
+                "lastNotNull",
+                "max"
               ]
             },
-            "orientation": "horizontal",
-            "displayMode": "gradient",
-            "showUnfilled": true
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           }
         },
         {
@@ -2911,7 +2886,7 @@
     {
       "type": "table",
       "title": "Top Active RV Transitions",
-      "description": "Oldest currently active datamesh transitions. Use this table to see which RV and transition type have been active the longest.",
+      "description": "Datamesh transitions that are still active at the end of the selected range, ranked by active time within that selected window.",
       "id": 49,
       "gridPos": {
         "h": 8,
@@ -2925,7 +2900,7 @@
       },
       "targets": [
         {
-          "expr": "topk(10, time() - sds_rv_datamesh_active_transition_start_timestamp_seconds)",
+          "expr": "topk(10, ((${__to} / 1000) - clamp_min(sds_rv_datamesh_active_transition_start_timestamp_seconds{type=~\"$transition_type\"}, ${__from} / 1000)))",
           "legendFormat": "",
           "refId": "A",
           "format": "table",
@@ -2971,7 +2946,7 @@
     {
       "type": "table",
       "title": "Oldest Deleting RVs",
-      "description": "Current RVs that have been deleting the longest. Helps distinguish slow cleanup from lack of delete activity.",
+      "description": "RVs that are still deleting at the end of the selected range, ranked by deleting time within that selected window.",
       "id": 50,
       "gridPos": {
         "h": 8,
@@ -2985,7 +2960,7 @@
       },
       "targets": [
         {
-          "expr": "topk(10, time() - sds_rv_deletion_started_timestamp_seconds{storage_class=~\"$storage_class\"})",
+          "expr": "topk(10, ((${__to} / 1000) - clamp_min(sds_rv_deletion_started_timestamp_seconds{storage_class=~\"$storage_class\"}, ${__from} / 1000)))",
           "legendFormat": "",
           "refId": "A",
           "format": "table",
@@ -3031,7 +3006,7 @@
     {
       "type": "table",
       "title": "Oldest Deleting RVRs",
-      "description": "Current RVRs that have been deleting the longest. Use together with RV/RVR deletion history to find slow child cleanup.",
+      "description": "RVRs that are still deleting at the end of the selected range, ranked by deleting time within that selected window.",
       "id": 51,
       "gridPos": {
         "h": 8,
@@ -3045,7 +3020,7 @@
       },
       "targets": [
         {
-          "expr": "topk(10, time() - sds_rvr_deletion_started_timestamp_seconds{node=~\"$node\",storage_class=~\"$storage_class\"})",
+          "expr": "topk(10, ((${__to} / 1000) - clamp_min(sds_rvr_deletion_started_timestamp_seconds{node=~\"$node\",storage_class=~\"$storage_class\"}, ${__from} / 1000)))",
           "legendFormat": "",
           "refId": "A",
           "format": "table",
@@ -3199,6 +3174,36 @@
         "query": {
           "query": "label_values(sds_rv_created_timestamp_seconds, storage_class)",
           "refId": "Prometheus-storage_class-Variable-Query"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$ds_prometheus"
+        },
+        "definition": "",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "transition_type",
+        "label": "Transition Type",
+        "options": [],
+        "query": {
+          "query": "label_values(sds_rv_datamesh_transitions_completed_total, type)",
+          "refId": "Prometheus-transition_type-Variable-Query"
         },
         "refresh": 2,
         "regex": "",
