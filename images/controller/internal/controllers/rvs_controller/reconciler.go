@@ -341,6 +341,13 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, rvs *v1alpha1.Replicat
 		if ownedDRBDRs[i].DeletionTimestamp != nil {
 			continue
 		}
+		rf.Log().Info(
+			"[reconcileDelete] DELETING owned DRBDResource",
+			"drbdrName", ownedDRBDRs[i].Name,
+			"drbdrUID", string(ownedDRBDRs[i].UID),
+			"rvsName", rvs.Name,
+			"rvsDeletionTimestamp", rvs.DeletionTimestamp.String(),
+		)
 		if err := r.cl.Delete(rf.Ctx(), &ownedDRBDRs[i]); err != nil && !apierrors.IsNotFound(err) {
 			return rf.Fail(err)
 		}

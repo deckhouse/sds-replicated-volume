@@ -24,6 +24,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -117,6 +118,11 @@ func confirmCreate(gctx *globalContext, rctx *replicaContext, _ int64) dmte.Conf
 
 	if err := gctx.cl.Create(gctx.ctx, drbdr); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
+		log.FromContext(gctx.ctx).Info(
+			"[confirmCreate] create failed",
+				"drbdrName", drbdr.Name,
+				"err", err.Error(),
+			)
 			return dmte.ConfirmResult{MustConfirm: must}
 		}
 		existing := &v1alpha1.DRBDResource{}
@@ -124,6 +130,14 @@ func confirmCreate(gctx *globalContext, rctx *replicaContext, _ int64) dmte.Conf
 			return dmte.ConfirmResult{MustConfirm: must}
 		}
 		if existing.DeletionTimestamp != nil {
+			log.FromContext(gctx.ctx).Info(
+				"[confirmCreate] existing DRBDResource has DeletionTimestamp — someone is deleting it",
+				"drbdrName", existing.Name,
+				"drbdrUID", string(existing.UID),
+				"deletionTimestamp", existing.DeletionTimestamp.String(),
+				"finalizers", existing.Finalizers,
+				"ownerRefs", existing.OwnerReferences,
+			)
 			return dmte.ConfirmResult{MustConfirm: must}
 		}
 		if adopted, err := adoptDRBDResource(existing, gctx); err != nil {
@@ -134,6 +148,15 @@ func confirmCreate(gctx *globalContext, rctx *replicaContext, _ int64) dmte.Conf
 			}
 		}
 		drbdr = existing
+	} else {
+		log.FromContext(gctx.ctx).Info(
+			"[confirmCreate] CREATED sync DRBDResource",
+			"drbdrName", drbdr.Name,
+			"drbdrUID", string(drbdr.UID),
+			"rvsName", gctx.rvs.Name,
+			"nodeName", rctx.nodeName,
+			"ownerRefs", drbdr.OwnerReferences,
+		)
 	}
 
 	rctx.drbdr = drbdr
@@ -270,6 +293,13 @@ func confirmCleanup(gctx *globalContext, rctx *replicaContext, _ int64) dmte.Con
 	}
 
 	if rctx.drbdr.DeletionTimestamp == nil {
+		log.FromContext(gctx.ctx).Info(
+			"[confirmCleanup] DELETING sync DRBDResource",
+			"drbdrName", rctx.drbdr.Name,
+			"drbdrUID", string(rctx.drbdr.UID),
+			"rvsName", gctx.rvs.Name,
+			"nodeName", rctx.nodeName,
+		)
 		if err := gctx.cl.Delete(gctx.ctx, rctx.drbdr); err != nil && !apierrors.IsNotFound(err) {
 			return dmte.ConfirmResult{MustConfirm: must}
 		}

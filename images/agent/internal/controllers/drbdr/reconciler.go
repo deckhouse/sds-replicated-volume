@@ -86,6 +86,11 @@ func (r *Reconciler) Reconcile(
 		return rf.Fail(err).ToCtrl()
 	}
 	if !ok {
+		rf.Log().Info(
+			"[Reconcile] DRBDResource API object NOT FOUND — entering orphan-drbd path",
+			"k8sName", req.Name,
+			"nodeName", r.nodeName,
+		)
 		return r.reconcileOrphanDRBD(rf.Ctx(), req.Name).ToCtrl()
 	}
 
@@ -334,7 +339,7 @@ func (r *Reconciler) reconcileOrphanDRBD(
 	k8sName string,
 ) (outcome flow.ReconcileOutcome) {
 	drbdName := DRBDNameFromK8SName(k8sName)
-	rf := flow.BeginReconcile(ctx, "orphan-drbd", "drbdResourceName", drbdName)
+	rf := flow.BeginReconcile(ctx, "orphan-drbd", "drbdResourceName", drbdName, "k8sName", k8sName)
 	defer rf.OnEnd(&outcome)
 
 	status, err := drbdutils.ExecuteStatus(rf.Ctx(), drbdName)
@@ -342,10 +347,19 @@ func (r *Reconciler) reconcileOrphanDRBD(
 		return rf.Fail(err)
 	}
 	if len(status) == 0 {
+		rf.Log().V(1).Info("[reconcileOrphanDRBD] kernel DRBD resource not present, nothing to clean")
 		return rf.Done()
 	}
 
-	rf.Log().Info("Cleaning up orphan DRBD resource")
+	kernelDiskState := ""
+	if len(status[0].Devices) > 0 {
+		kernelDiskState = status[0].Devices[0].DiskState
+	}
+	rf.Log().Info(
+		"[reconcileOrphanDRBD] TEARING DOWN kernel DRBD resource because K8S object is gone",
+		"kernelPeers", len(status[0].Connections),
+		"kernelDiskState", kernelDiskState,
+	)
 
 	_ = os.Remove(DeviceSymlinkPath(k8sName))
 

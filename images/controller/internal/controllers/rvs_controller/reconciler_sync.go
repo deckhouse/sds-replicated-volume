@@ -65,6 +65,26 @@ func (r *Reconciler) reconcileSyncMesh(
 		"syncDRBDRNames", len(syncDRBDRNames),
 		"syncDRBDRs", len(syncDRBDRs))
 
+	if len(syncDRBDRNames) > 0 && len(syncDRBDRs) < len(syncDRBDRNames) {
+		present := make(map[string]struct{}, len(syncDRBDRs))
+		for _, d := range syncDRBDRs {
+			present[d.Name] = struct{}{}
+		}
+		missing := make([]string, 0, len(syncDRBDRNames))
+		for _, name := range syncDRBDRNames {
+			if _, ok := present[name]; !ok {
+				missing = append(missing, name)
+			}
+		}
+		l.Info(
+			"[reconcileSyncMesh] MISSING expected sync DRBDResources in the cluster",
+			"rvs", rvs.Name,
+			"expected", len(syncDRBDRNames),
+			"found", len(syncDRBDRs),
+			"missingNames", missing,
+		)
+	}
+
 	base := rvs.DeepCopy()
 
 	if allSyncTransitionsCompleted(rvs) {

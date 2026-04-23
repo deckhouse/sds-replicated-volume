@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -105,10 +107,7 @@ func BuildController(mgr manager.Manager) error {
 		}).
 		Watches(
 			&v1alpha1.DRBDResource{},
-			handler.TypedEnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []DRBDReconcileRequest {
-				dr := obj.(*v1alpha1.DRBDResource)
-				return []DRBDReconcileRequest{{Name: dr.Name}}
-			}),
+			drbdrEventHandler(mgr.GetLogger().WithName("drbdr-watch"), nodeName),
 			builder.WithPredicates(drbdrPredicates(nodeName)...),
 		).
 		// Watch internal channel (scanner events) - maps *DRBDReconcileRequest to DRBDReconcileRequest
@@ -128,6 +127,121 @@ func BuildController(mgr manager.Manager) error {
 	}
 
 	return nil
+}
+
+// drbdrEventHandler returns a typed event handler for DRBDResource watch that
+// logs every Create/Update/Delete event with enough detail to attribute who
+// mutated the object (managedFields, finalizers, deletionTimestamp, UID).
+func drbdrEventHandler(baseLog logr.Logger, nodeName string) handler.TypedEventHandler[client.Object, DRBDReconcileRequest] {
+	return handler.TypedFuncs[client.Object, DRBDReconcileRequest]{
+		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[client.Object], q workqueue.TypedRateLimitingInterface[DRBDReconcileRequest]) {
+			dr, ok := e.Object.(*v1alpha1.DRBDResource)
+			if !ok || dr == nil {
+				return
+			}
+			baseLog.Info("[drbdrEventHandler.CreateFunc] DRBDResource watch: CREATE",
+				"name", dr.Name,
+				"uid", string(dr.UID),
+				"resourceVersion", dr.ResourceVersion,
+				"specNodeName", dr.Spec.NodeName,
+				"specState", string(dr.Spec.State),
+				"finalizers", dr.Finalizers,
+				"ownerRefs", ownerRefsSummary(dr.OwnerReferences),
+				"managedFields", managedFieldsSummary(dr.ManagedFields),
+				"watcherNode", nodeName,
+			)
+			q.Add(DRBDReconcileRequest{Name: dr.Name})
+		},
+		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[client.Object], q workqueue.TypedRateLimitingInterface[DRBDReconcileRequest]) {
+			newDR, okNew := e.ObjectNew.(*v1alpha1.DRBDResource)
+			oldDR, okOld := e.ObjectOld.(*v1alpha1.DRBDResource)
+			if !okNew || newDR == nil {
+				return
+			}
+			oldDT := "<nil>"
+			if okOld && oldDR != nil && oldDR.DeletionTimestamp != nil {
+				oldDT = oldDR.DeletionTimestamp.String()
+			}
+			newDT := "<nil>"
+			if newDR.DeletionTimestamp != nil {
+				newDT = newDR.DeletionTimestamp.String()
+			}
+			if oldDT != newDT {
+				baseLog.Info("[drbdrEventHandler.UpdateFunc] DRBDResource watch: UPDATE deletionTimestamp changed",
+					"name", newDR.Name,
+					"uid", string(newDR.UID),
+					"oldDeletionTimestamp", oldDT,
+					"newDeletionTimestamp", newDT,
+					"finalizers", newDR.Finalizers,
+					"managedFields", managedFieldsSummary(newDR.ManagedFields),
+					"watcherNode", nodeName,
+				)
+			} else {
+				baseLog.V(1).Info("[drbdrEventHandler.UpdateFunc] DRBDResource watch: UPDATE",
+					"name", newDR.Name,
+					"uid", string(newDR.UID),
+					"deletionTimestamp", newDT,
+					"finalizers", newDR.Finalizers,
+				)
+			}
+			q.Add(DRBDReconcileRequest{Name: newDR.Name})
+		},
+		DeleteFunc: func(_ context.Context, e event.TypedDeleteEvent[client.Object], q workqueue.TypedRateLimitingInterface[DRBDReconcileRequest]) {
+			dr, ok := e.Object.(*v1alpha1.DRBDResource)
+			if !ok || dr == nil {
+				return
+			}
+			dt := "<nil>"
+			if dr.DeletionTimestamp != nil {
+				dt = dr.DeletionTimestamp.String()
+			}
+			baseLog.Info("[drbdrEventHandler.DeleteFunc] DRBDResource watch: DELETE",
+				"name", dr.Name,
+				"uid", string(dr.UID),
+				"resourceVersion", dr.ResourceVersion,
+				"deletionTimestamp", dt,
+				"finalizers", dr.Finalizers,
+				"ownerRefs", ownerRefsSummary(dr.OwnerReferences),
+				"managedFields", managedFieldsSummary(dr.ManagedFields),
+				"deleteStateUnknown", e.DeleteStateUnknown,
+				"watcherNode", nodeName,
+			)
+			q.Add(DRBDReconcileRequest{Name: dr.Name})
+		},
+		GenericFunc: func(_ context.Context, e event.TypedGenericEvent[client.Object], q workqueue.TypedRateLimitingInterface[DRBDReconcileRequest]) {
+			dr, ok := e.Object.(*v1alpha1.DRBDResource)
+			if !ok || dr == nil {
+				return
+			}
+			q.Add(DRBDReconcileRequest{Name: dr.Name})
+		},
+	}
+}
+
+// ownerRefsSummary reduces OwnerReferences to a compact printable form.
+func ownerRefsSummary(refs []metav1.OwnerReference) []string {
+	out := make([]string, 0, len(refs))
+	for i := range refs {
+		ctrl := false
+		if refs[i].Controller != nil {
+			ctrl = *refs[i].Controller
+		}
+		out = append(out, fmt.Sprintf("%s/%s(uid=%s,ctrl=%t)", refs[i].Kind, refs[i].Name, string(refs[i].UID), ctrl))
+	}
+	return out
+}
+
+// managedFieldsSummary reduces ManagedFields to (manager, operation, time, subresource) tuples.
+func managedFieldsSummary(mfs []metav1.ManagedFieldsEntry) []string {
+	out := make([]string, 0, len(mfs))
+	for i := range mfs {
+		ts := ""
+		if mfs[i].Time != nil {
+			ts = mfs[i].Time.String()
+		}
+		out = append(out, fmt.Sprintf("manager=%q op=%s sub=%s t=%s", mfs[i].Manager, mfs[i].Operation, mfs[i].Subresource, ts))
+	}
+	return out
 }
 
 func withDurationLogging(inner reconcile.TypedReconciler[DRBDReconcileRequest]) reconcile.TypedReconciler[DRBDReconcileRequest] {
