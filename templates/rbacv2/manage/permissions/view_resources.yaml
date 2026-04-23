@@ -4,11 +4,11 @@ metadata:
   labels:
     heritage: deckhouse
     module: sds-replicated-volume
-    rbac.deckhouse.io/aggregate-to-sds-replicated-volume-as: viewer
+    rbac.deckhouse.io/aggregate-to-storage-as: viewer
     rbac.deckhouse.io/kind: manage
     rbac.deckhouse.io/level: module
     rbac.deckhouse.io/namespace: d8-sds-replicated-volume
-  name: d8:manage:permission:subsystem:sds-replicated-volume:view_resources
+  name: d8:manage:permission:module:sds-replicated-volume:view_resources
 rules:
   - apiGroups:
       - storage.deckhouse.io
