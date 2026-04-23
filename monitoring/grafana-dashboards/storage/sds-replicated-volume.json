@@ -402,12 +402,12 @@
     },
     {
       "type": "timeseries",
-      "title": "Per-Node Resource Count",
-      "description": "Current number of RVRs and RVAs per node shown as a history graph. Use it to see node skew and cleanup waves over time.",
+      "title": "Per-Node RVR Count",
+      "description": "Current number of RVRs per node shown as a history graph. Use it to see replica skew and cleanup waves over time.",
       "id": 5,
       "gridPos": {
         "h": 8,
-        "w": 24,
+        "w": 12,
         "x": 0,
         "y": 5
       },
@@ -418,13 +418,61 @@
       "targets": [
         {
           "expr": "count by (node) (sds_rvr_present{node=~\"$node\",storage_class=~\"$storage_class\"} == 1)",
-          "legendFormat": "RVR {{node}}",
+          "legendFormat": "{{node}}",
           "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "stacking": {
+              "mode": "none"
+            },
+            "showPoints": "never",
+            "connectNulls": true
+          },
+          "unit": "short"
         },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Per-Node RVA Count",
+      "description": "Current number of RVAs per node shown as a history graph. Use it to see attachment skew and cleanup waves over time.",
+      "id": 52,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "targets": [
         {
           "expr": "count by (node) (sds_rva_phase_info{node=~\"$node\"} == 1)",
-          "legendFormat": "RVA {{node}}",
-          "refId": "B"
+          "legendFormat": "{{node}}",
+          "refId": "A"
         }
       ],
       "fieldConfig": {
@@ -471,8 +519,8 @@
     },
     {
       "type": "timeseries",
-      "title": "RVR Ready Events (History)",
-      "description": "Number of RVRs that first reached Healthy per interval in the selected range. Empty graph means no ready events in the selected range.",
+      "title": "RVR Ready Completions per Interval",
+      "description": "Each point shows how many RVRs first reached Healthy inside the selected Event Interval bucket (Auto by default). Values are rounded to whole events.",
       "id": 6,
       "gridPos": {
         "h": 8,
@@ -486,8 +534,8 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(sds_rvr_ready_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
-          "legendFormat": "Ready events",
+          "expr": "round(sum(increase(sds_rvr_ready_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$event_interval])))",
+          "legendFormat": "Ready completions",
           "refId": "A"
         }
       ],
@@ -525,7 +573,7 @@
     {
       "type": "timeseries",
       "title": "RVR Ready Duration P50/P90/P99",
-      "description": "Time from RVR creation to first Healthy phase, aggregated over events in the selected range. Empty graph means no RVR completions in the selected range.",
+      "description": "Time from RVR creation to first Healthy phase, aggregated over events in the selected range. Quantiles are computed from the Grafana-selected rate window.",
       "id": 7,
       "gridPos": {
         "h": 8,
@@ -592,8 +640,8 @@
     },
     {
       "type": "timeseries",
-      "title": "RVR Phase Duration by Phase",
-      "description": "P90 duration spent in each RVR phase, aggregated from phase transitions observed in the selected range. Empty graph means no phase transitions in the selected range.",
+      "title": "RVR Non-Healthy Phase Duration by Phase",
+      "description": "P90 duration spent in non-Healthy RVR phases, aggregated from phase transitions observed in the selected range. Healthy is excluded to keep the panel focused on problematic states. Quantiles are computed from the Grafana-selected rate window.",
       "id": 8,
       "gridPos": {
         "h": 8,
@@ -607,7 +655,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.90, sum(rate(sds_rvr_phase_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (le, phase))",
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rvr_phase_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\",phase!=\"Healthy\"}[$__rate_interval])) by (le, phase))",
           "legendFormat": "{{phase}} P90",
           "refId": "A"
         }
@@ -646,7 +694,7 @@
     {
       "type": "stat",
       "title": "RVR Ready Events in Range",
-      "description": "Number of RVRs that first reached Healthy in the selected range. 0 means no completion events in range.",
+      "description": "Number of RVRs that first reached Healthy in the selected dashboard range. Rounded to whole events.",
       "id": 9,
       "gridPos": {
         "h": 8,
@@ -660,7 +708,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(sds_rvr_ready_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__range])) or on() vector(0)",
+          "expr": "round((sum(increase(sds_rvr_ready_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__range])))) or on() vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -767,8 +815,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Degraded-like Phase Frequency",
-      "description": "RVR phase transition events for degraded-like phases (Degraded, PartiallyDegraded, Critical) in the selected range. Empty graph means no such phase transitions in the selected range.",
+      "title": "Degraded-like Phase Entries per Interval",
+      "description": "Each point shows how many RVR phase entries into Degraded, PartiallyDegraded, or Critical happened inside the selected Event Interval bucket (Auto by default). Values are rounded to whole events.",
       "id": 11,
       "gridPos": {
         "h": 8,
@@ -782,7 +830,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (phase) (increase(sds_rvr_phase_duration_seconds_count{phase=~\"Degraded|PartiallyDegraded|Critical\",node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "expr": "round(sum by (phase) (increase(sds_rvr_phase_duration_seconds_count{phase=~\"Degraded|PartiallyDegraded|Critical\",node=~\"$node\",storage_class=~\"$storage_class\"}[$event_interval])))",
           "legendFormat": "{{phase}}",
           "refId": "A"
         }
@@ -846,7 +894,7 @@
           },
           "targets": [
             {
-              "expr": "topk(15, ((sds_rvr_creation_duration_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} * on(name, rv, node, storage_class) group_left() ((sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} > bool (${__from} / 1000)) * (sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} <= bool (${__to} / 1000)))) > 0)",
+              "expr": "topk(15, sds_rvr_creation_duration_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} > (${__from} / 1000)) and on(name, rv, node, storage_class) (sds_rvr_creation_completed_timestamp_seconds{rv=~\"$rv\",node=~\"$node\",storage_class=~\"$storage_class\"} <= (${__to} / 1000)))",
               "legendFormat": "",
               "refId": "A",
               "format": "table",
@@ -909,7 +957,7 @@
         {
           "type": "stat",
           "title": "RVA Attach Events in Range",
-          "description": "Number of RVA attachments completed in the selected range. 0 means no attach events in range.",
+          "description": "Number of RVA attachments completed in the selected dashboard range. Rounded to whole events.",
           "id": 33,
           "gridPos": {
             "h": 8,
@@ -923,7 +971,7 @@
           },
           "targets": [
             {
-              "expr": "sum(increase(sds_rva_ready_duration_seconds_count{node=~\"$node\"}[$__range])) or on() vector(0)",
+              "expr": "round((sum(increase(sds_rva_ready_duration_seconds_count{node=~\"$node\"}[$__range])))) or on() vector(0)",
               "legendFormat": "",
               "refId": "A",
               "instant": true
@@ -1031,7 +1079,7 @@
         {
           "type": "timeseries",
           "title": "RVA Attach Duration P90 by Node",
-          "description": "P90 time from RVA creation to Attached, split by node. Empty graph means no RVA attachment completions in the selected range.",
+          "description": "P90 time from RVA creation to Attached, split by node. Quantiles are computed from the Grafana-selected rate window.",
           "id": 13,
           "gridPos": {
             "h": 8,
@@ -1150,7 +1198,7 @@
         {
           "type": "stat",
           "title": "DRBDR Configure Events",
-          "description": "Number of DRBD resource configuration completions in the selected range. 0 means no configuration events in range.",
+          "description": "Number of DRBD resource configuration completions in the selected dashboard range. Rounded to whole events.",
           "id": 35,
           "gridPos": {
             "h": 4,
@@ -1164,7 +1212,7 @@
           },
           "targets": [
             {
-              "expr": "sum(increase(sds_drbdr_configured_duration_seconds_count{node=~\"$node\"}[$__range])) or on() vector(0)",
+              "expr": "round((sum(increase(sds_drbdr_configured_duration_seconds_count{node=~\"$node\"}[$__range])))) or on() vector(0)",
               "legendFormat": "",
               "refId": "A",
               "instant": true
@@ -1272,7 +1320,7 @@
         {
           "type": "stat",
           "title": "DRBDR Deletion Events",
-          "description": "Number of DRBD resource deletions completed in the selected range. 0 means no deletion events in range.",
+          "description": "Number of DRBD resource deletions completed in the selected dashboard range. Rounded to whole events.",
           "id": 37,
           "gridPos": {
             "h": 4,
@@ -1286,7 +1334,7 @@
           },
           "targets": [
             {
-              "expr": "sum(increase(sds_drbdr_deletion_duration_seconds_count{node=~\"$node\"}[$__range])) or on() vector(0)",
+              "expr": "round((sum(increase(sds_drbdr_deletion_duration_seconds_count{node=~\"$node\"}[$__range])))) or on() vector(0)",
               "legendFormat": "",
               "refId": "A",
               "instant": true
@@ -1394,7 +1442,7 @@
         {
           "type": "timeseries",
           "title": "DRBD Resource Configuration Time P90 by Node",
-          "description": "P90 DRBD resource configuration time, split by node. Empty graph means no DRBDR configuration events in the selected range.",
+          "description": "P90 DRBD resource configuration time, split by node. Quantiles are computed from the Grafana-selected rate window.",
           "id": 15,
           "gridPos": {
             "h": 8,
@@ -1447,7 +1495,7 @@
         {
           "type": "timeseries",
           "title": "DRBD Resource Deletion Time P90 by Node",
-          "description": "P90 DRBD resource deletion time, split by node. Empty graph means no DRBDR deletion events in the selected range.",
+          "description": "P90 DRBD resource deletion time, split by node. Quantiles are computed from the Grafana-selected rate window.",
           "id": 16,
           "gridPos": {
             "h": 8,
@@ -1513,7 +1561,7 @@
         {
           "type": "stat",
           "title": "Datamesh Transition Events",
-          "description": "Number of completed datamesh transitions in the selected range. 0 means no transition completions in range.",
+          "description": "Number of completed datamesh transitions in the selected dashboard range. Rounded to whole events.",
           "id": 39,
           "gridPos": {
             "h": 4,
@@ -1527,7 +1575,7 @@
           },
           "targets": [
             {
-              "expr": "sum(increase(sds_rv_datamesh_transitions_completed_total{type=~\"$transition_type\"}[$__range])) or on() vector(0)",
+              "expr": "round((sum(increase(sds_rv_datamesh_transitions_completed_total{type=~\"$transition_type\"}[$__range])))) or on() vector(0)",
               "legendFormat": "",
               "refId": "A",
               "instant": true
@@ -1635,7 +1683,7 @@
         {
           "type": "stat",
           "title": "Datamesh Step Events",
-          "description": "Number of completed datamesh steps in the selected range. 0 means no completed steps in range.",
+          "description": "Number of completed datamesh steps in the selected dashboard range. Rounded to whole events.",
           "id": 41,
           "gridPos": {
             "h": 4,
@@ -1649,7 +1697,7 @@
           },
           "targets": [
             {
-              "expr": "sum(increase(sds_rv_datamesh_step_duration_seconds_count{type=~\"$transition_type\"}[$__range])) or on() vector(0)",
+              "expr": "round((sum(increase(sds_rv_datamesh_step_duration_seconds_count{type=~\"$transition_type\"}[$__range])))) or on() vector(0)",
               "legendFormat": "",
               "refId": "A",
               "instant": true
@@ -1756,8 +1804,8 @@
         },
         {
           "type": "timeseries",
-          "title": "Transition Events by Type (History)",
-          "description": "Completed datamesh transitions per interval by type. Empty graph means no completed transitions in the selected range.",
+          "title": "Transition Completions by Type per Interval",
+          "description": "Each point shows how many datamesh transitions completed inside the selected Event Interval bucket (Auto by default), split by transition type. Values are rounded to whole events.",
           "id": 17,
           "gridPos": {
             "h": 8,
@@ -1771,7 +1819,7 @@
           },
           "targets": [
             {
-              "expr": "sum by (type) (increase(sds_rv_datamesh_transitions_completed_total{type=~\"$transition_type\"}[$__rate_interval]))",
+              "expr": "round(sum by (type) (increase(sds_rv_datamesh_transitions_completed_total{type=~\"$transition_type\"}[$event_interval])))",
               "legendFormat": "{{type}}",
               "refId": "A"
             }
@@ -1810,7 +1858,7 @@
         {
           "type": "timeseries",
           "title": "Active Transitions by Type",
-          "description": "Number of currently active datamesh transitions over time, split by transition type. Use the filter and the table below to drill down to specific RVs.",
+          "description": "Current number of active datamesh transitions over time, split by transition type. Zero is shown for known transition types when nothing is active. Each point is the current value at that moment, not an event count.",
           "id": 18,
           "gridPos": {
             "h": 8,
@@ -1824,7 +1872,7 @@
           },
           "targets": [
             {
-              "expr": "sum by (type) (sds_rv_datamesh_active_transitions{type=~\"$transition_type\"})",
+              "expr": "sum by (type) (sds_rv_datamesh_active_transitions{type=~\"$transition_type\"}) or on(type) (0 * sum by (type) (sds_rv_datamesh_transitions_completed_total{type=~\"$transition_type\"}))",
               "legendFormat": "{{type}}",
               "refId": "A"
             }
@@ -1863,7 +1911,7 @@
         {
           "type": "timeseries",
           "title": "Transition Duration P90 by Type",
-          "description": "P90 duration of completed datamesh transitions by type. Read together with transition events and active transitions: empty graph means no completed transitions in the selected range.",
+          "description": "P90 duration of completed datamesh transitions by type. Quantiles are computed from the Grafana-selected rate window.",
           "id": 19,
           "gridPos": {
             "h": 8,
@@ -1915,8 +1963,8 @@
         },
         {
           "type": "timeseries",
-          "title": "Step Events by Type/Step (History)",
-          "description": "Completed datamesh steps per interval by transition type and step. Empty graph means no completed steps in the selected range.",
+          "title": "Step Completions by Type/Step per Interval",
+          "description": "Each point shows how many datamesh steps completed inside the selected Event Interval bucket (Auto by default), split by transition type and step. Values are rounded to whole events.",
           "id": 20,
           "gridPos": {
             "h": 8,
@@ -1930,7 +1978,7 @@
           },
           "targets": [
             {
-              "expr": "sum by (type, step) (increase(sds_rv_datamesh_step_duration_seconds_count{type=~\"$transition_type\"}[$__rate_interval]))",
+              "expr": "round(sum by (type, step) (increase(sds_rv_datamesh_step_duration_seconds_count{type=~\"$transition_type\"}[$event_interval])))",
               "legendFormat": "{{type}}/{{step}}",
               "refId": "A"
             }
@@ -1982,7 +2030,7 @@
         {
           "type": "stat",
           "title": "RV Deletion Events",
-          "description": "Number of RV deletions completed in the selected range. 0 means no deletion events in range.",
+          "description": "Number of RV deletions completed in the selected dashboard range. Rounded to whole events.",
           "id": 43,
           "gridPos": {
             "h": 4,
@@ -1996,7 +2044,7 @@
           },
           "targets": [
             {
-              "expr": "sum(increase(sds_rv_deletion_duration_seconds_count{storage_class=~\"$storage_class\"}[$__range])) or on() vector(0)",
+              "expr": "round((sum(increase(sds_rv_deletion_duration_seconds_count{storage_class=~\"$storage_class\"}[$__range])))) or on() vector(0)",
               "legendFormat": "",
               "refId": "A",
               "instant": true
@@ -2104,7 +2152,7 @@
         {
           "type": "stat",
           "title": "RVR Deletion Events",
-          "description": "Number of RVR deletions completed in the selected range. 0 means no deletion events in range.",
+          "description": "Number of RVR deletions completed in the selected dashboard range. Rounded to whole events.",
           "id": 45,
           "gridPos": {
             "h": 4,
@@ -2118,7 +2166,7 @@
           },
           "targets": [
             {
-              "expr": "sum(increase(sds_rvr_deletion_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__range])) or on() vector(0)",
+              "expr": "round((sum(increase(sds_rvr_deletion_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__range])))) or on() vector(0)",
               "legendFormat": "",
               "refId": "A",
               "instant": true
@@ -2347,8 +2395,8 @@
         },
         {
           "type": "timeseries",
-          "title": "RV vs RVR Deletion Events (History)",
-          "description": "Completed RV and RVR deletions per interval. Compare the two lines to see whether parent and child cleanup waves move together.",
+          "title": "RV vs RVR Deletion Completions per Interval",
+          "description": "Each point shows how many RV and RVR deletions completed inside the selected Event Interval bucket (Auto by default). Values are rounded to whole events.",
           "id": 21,
           "gridPos": {
             "h": 8,
@@ -2362,12 +2410,12 @@
           },
           "targets": [
             {
-              "expr": "sum(increase(sds_rv_deletion_duration_seconds_count{storage_class=~\"$storage_class\"}[$__rate_interval]))",
+              "expr": "round(sum(increase(sds_rv_deletion_duration_seconds_count{storage_class=~\"$storage_class\"}[$event_interval])))",
               "legendFormat": "RV deletions",
               "refId": "A"
             },
             {
-              "expr": "sum(increase(sds_rvr_deletion_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+              "expr": "round(sum(increase(sds_rvr_deletion_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$event_interval])))",
               "legendFormat": "RVR deletions",
               "refId": "B"
             }
@@ -2406,7 +2454,7 @@
         {
           "type": "timeseries",
           "title": "RV Deletion Duration P90",
-          "description": "P90 RV deletion duration for completions in the selected range. Read together with RV deletion event history: empty graph means no RV deletions completed in the selected range.",
+          "description": "P90 RV deletion duration for completions in the selected range. Quantiles are computed from the Grafana-selected rate window.",
           "id": 22,
           "gridPos": {
             "h": 8,
@@ -2459,7 +2507,7 @@
         {
           "type": "timeseries",
           "title": "RVR Deletion Duration by Node",
-          "description": "P90 RVR deletion duration split by node, with a cluster-wide mean line for orientation. Empty graph means no RVR deletions completed in the selected range.",
+          "description": "P90 RVR deletion duration split by node, with a cluster-wide mean line for orientation. Quantiles and mean are computed from the Grafana-selected rate window.",
           "id": 23,
           "gridPos": {
             "h": 8,
@@ -3093,6 +3141,24 @@
         "regex": "",
         "skipUrlSync": false,
         "type": "datasource"
+      },
+      {
+        "auto": true,
+        "auto_count": 30,
+        "auto_min": "10s",
+        "current": {
+          "selected": false,
+          "text": "auto",
+          "value": "$__auto_interval_event_interval"
+        },
+        "hide": 0,
+        "label": "Event Interval",
+        "name": "event_interval",
+        "options": [],
+        "query": "1m,5m,15m,1h,6h,12h,1d",
+        "refresh": 2,
+        "skipUrlSync": false,
+        "type": "interval"
       },
       {
         "current": {
