@@ -77,6 +77,30 @@ func syncDRBDRPredicates() []predicate.Predicate {
 	}
 }
 
+func prepareDRBDROpPredicates() []predicate.Predicate {
+	return []predicate.Predicate{
+		predicate.Funcs{
+			CreateFunc: func(_ event.TypedCreateEvent[client.Object]) bool {
+				return true
+			},
+			DeleteFunc: func(_ event.TypedDeleteEvent[client.Object]) bool {
+				return true
+			},
+			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				oldObj, okOld := e.ObjectOld.(*v1alpha1.DRBDResourceOperation)
+				newObj, okNew := e.ObjectNew.(*v1alpha1.DRBDResourceOperation)
+				if !okOld || !okNew || oldObj == nil || newObj == nil {
+					return true
+				}
+				if oldObj.GetGeneration() != newObj.GetGeneration() {
+					return true
+				}
+				return oldObj.Status.Phase != newObj.Status.Phase
+			},
+		},
+	}
+}
+
 func rvrsPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.Funcs{

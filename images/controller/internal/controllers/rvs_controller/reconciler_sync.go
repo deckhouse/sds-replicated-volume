@@ -103,9 +103,10 @@ func (r *Reconciler) reconcileSyncMesh(
 			return rf.Fail(err)
 		}
 		l.Info("sync-mesh: status patched")
+		return rf.DoneAndRequeue()
 	}
 
-	return rf.DoneAndRequeue()
+	return rf.Done()
 }
 
 func allSyncTransitionsCompleted(rvs *v1alpha1.ReplicatedVolumeSnapshot) bool {

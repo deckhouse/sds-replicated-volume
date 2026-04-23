@@ -51,6 +51,7 @@ func BuildController(mgr manager.Manager) error {
 			builder.WithPredicates(rvrsPredicates()...),
 		).
 		Owns(&v1alpha1.DRBDResource{}, builder.WithPredicates(syncDRBDRPredicates()...)).
+		Owns(&v1alpha1.DRBDResourceOperation{}, builder.WithPredicates(prepareDRBDROpPredicates()...)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 10,
 			RateLimiter:             controlleroptions.DefaultRateLimiter(),

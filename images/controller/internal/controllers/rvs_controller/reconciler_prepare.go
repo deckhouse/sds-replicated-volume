@@ -56,9 +56,10 @@ func (r *Reconciler) reconcilePrepareMesh(
 		if err := r.patchRVSStatus(rf.Ctx(), rvs, base); err != nil {
 			return rf.Fail(err)
 		}
+		return rf.DoneAndRequeue()
 	}
 
-	return rf.DoneAndRequeue()
+	return rf.Done()
 }
 
 func prepareNeedsRun(rvs *v1alpha1.ReplicatedVolumeSnapshot) bool {
