@@ -60,8 +60,12 @@ func (v *VolumeAttacher) Run(ctx context.Context) error {
 
 	// Helper function to check context and cleanup before return
 	checkAndCleanup := func(err error) error {
-		if ctx.Err() != nil {
-			v.cleanup(ctx, ctx.Err())
+		reason := err
+		if reason == nil {
+			reason = ctx.Err()
+		}
+		if reason != nil {
+			v.cleanup(ctx, reason)
 		}
 		return err
 	}
@@ -224,16 +228,17 @@ func (v *VolumeAttacher) migrationCycle(ctx context.Context, otherNodeName, node
 		return err
 	}
 
-	// Verify both nodes are now attached
+	// Verify both attachment intents exist in API.
+	// Do not rely on rv.status.actuallyAttachedTo: this field is legacy.
 	for {
 		log.Debug("waiting for both nodes to be attached", "selected_node", nodeName, "other_node", otherNodeName)
 
-		rv, err := v.client.GetRVFromCache(v.rvName)
+		attachedNodes, err := v.listAttachedNodesDirect(ctx)
 		if err != nil {
 			return err
 		}
 
-		if rv != nil && len(rv.Status.ActuallyAttachedTo) == 2 {
+		if slices.Contains(attachedNodes, nodeName) && slices.Contains(attachedNodes, otherNodeName) {
 			break
 		}
 
@@ -348,20 +353,18 @@ func (v *VolumeAttacher) detachCycle(ctx context.Context, nodeName string) error
 			log.Debug("waiting for node to be detached")
 		}
 
-		rv, err := v.client.GetRVFromCache(v.rvName)
+		attachedNodes, err := v.listAttachedNodesDirect(ctx)
 		if err != nil {
 			return err
 		}
 
-		if rv != nil {
-			if nodeName == "" {
-				if len(rv.Status.ActuallyAttachedTo) == 0 {
-					return nil
-				}
-			} else {
-				if !slices.Contains(rv.Status.ActuallyAttachedTo, nodeName) {
-					return nil
-				}
+		if nodeName == "" {
+			if len(attachedNodes) == 0 {
+				return nil
+			}
+		} else {
+			if !slices.Contains(attachedNodes, nodeName) {
+				return nil
 			}
 		}
 
@@ -396,6 +399,23 @@ func (v *VolumeAttacher) doUnattach(ctx context.Context, nodeName string) error 
 		return err
 	}
 	return nil
+}
+
+func (v *VolumeAttacher) listAttachedNodesDirect(ctx context.Context) ([]string, error) {
+	rvas, err := v.client.ListRVAsByRVNameDirect(ctx, v.rvName)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes := make([]string, 0, len(rvas))
+	for _, rva := range rvas {
+		if rva.Spec.NodeName == "" {
+			continue
+		}
+		nodes = append(nodes, rva.Spec.NodeName)
+	}
+
+	return nodes, nil
 }
 
 func (v *VolumeAttacher) isAttachCycle() bool {

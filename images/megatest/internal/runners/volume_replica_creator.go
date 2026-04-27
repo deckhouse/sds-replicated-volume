@@ -18,12 +18,10 @@ package runners
 
 import (
 	"context"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log/slog"
 	"math/rand"
 	"time"
-
-	"github.com/google/uuid"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
@@ -87,48 +85,67 @@ func (v *VolumeReplicaCreator) selectRandomType() string {
 	return types[rand.Intn(len(types))]
 }
 
-// generateRVRName generates a unique name for a new RVR
-func (v *VolumeReplicaCreator) generateRVRName() string {
-	// Use short UUID suffix for uniqueness
-	shortUUID := uuid.New().String()[:8]
-	return v.rvName + "-mt-" + shortUUID
-}
-
 func (v *VolumeReplicaCreator) doCreate(ctx context.Context) {
 	startTime := time.Now()
 
 	// Select random type
-	replicaType := v.selectRandomType()
+	replicaType := v1alpha1.ReplicaType(v.selectRandomType())
 
-	// Generate unique name
-	rvrName := v.generateRVRName()
+	// Reserve a valid RVR ID from the current RV replica set.
+	existingRVRs, err := v.client.ListRVRsByRVName(v.rvName)
+	if err != nil {
+		v.log.Error("failed to list RVRs", "error", err)
+		return
+	}
+
+	existingPtrs := make([]*v1alpha1.ReplicatedVolumeReplica, 0, len(existingRVRs))
+	for i := range existingRVRs {
+		existingPtrs = append(existingPtrs, &existingRVRs[i])
+	}
 
 	// Create RVR object
 	// Note: We don't set OwnerReference here.
 	// The rvr_metadata_controller handles this automatically
 	// based on spec.replicatedVolumeName.
 	rvr := &v1alpha1.ReplicatedVolumeReplica{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: rvrName,
-		},
+		ObjectMeta: metav1.ObjectMeta{},
 		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: v.rvName,
-			Type:                 v1alpha1.ReplicaType(replicaType),
-			// NodeName is not set - controller will schedule it
+			Type:                 replicaType,
 		},
+	}
+
+	if !rvr.ChooseNewName(existingPtrs) {
+		v.log.Debug("no free RVR IDs left for create")
+		return
+	}
+
+	if replicaType == v1alpha1.ReplicaTypeAccess {
+		nodes, err := v.client.GetRandomNodes(1)
+		if err != nil {
+			v.log.Error("failed to get random node for Access RVR", "error", err)
+			return
+		}
+		if len(nodes) == 0 {
+			v.log.Error("failed to get random node for Access RVR", "error", "no storage nodes found")
+			return
+		}
+
+		rvr.Spec.NodeName = nodes[0].Name
 	}
 
 	// Create RVR (do NOT wait for success)
 	if err := v.client.CreateRVR(ctx, rvr); err != nil {
 		v.log.Error("failed to create RVR",
-			"rvr_name", rvrName,
+			"rvr_name", rvr.Name,
 			"error", err)
 		return
 	}
 
 	// Log success
 	v.log.Info("RVR created",
-		"rvr_name", rvrName,
+		"rvr_name", rvr.Name,
 		"rvr_type", replicaType,
+		"rvr_node", rvr.Spec.NodeName,
 		"duration", time.Since(startTime))
 }
