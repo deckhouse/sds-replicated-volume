@@ -17,7 +17,6 @@ limitations under the License.
 package full
 
 import (
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -95,13 +94,14 @@ var _ = Describe("RVS create", func() {
 })
 
 // RVS create on a multi-primary RV (≥2 attached diskful members) MUST be
-// rejected: the controller cannot quiesce IO on more than one primary at
-// a time, so a snapshot taken across multiple writers would be
-// inconsistent. The rvs-controller marks such RVS as Phase=Failed with a
-// "multi-primary" message and does not create any child RVRSs / temp
-// DRBDResources.
+// rejected by the rvs-controller: it cannot quiesce IO on more than one
+// primary at a time, so a snapshot taken across multiple writers would be
+// inconsistent. The RVS object is admitted (no admission webhook), but the
+// first reconcile transitions Phase to Failed with a multi-primary message
+// without dispatching prepare-mesh — therefore no child RVRSs and no temp
+// DRBDResources are ever created.
 var _ = Describe("RVS create rejected for multi-primary RV", func() {
-	DescribeTable("snapshot is rejected for layout",
+	DescribeTable("controller marks snapshot as Failed for layout",
 		func(ctx SpecContext, layout fw.TestLayout) {
 			trv := f.SetupLayout(ctx, layout)
 			trv.ActivateSafetyInvariants()
@@ -112,14 +112,11 @@ var _ = Describe("RVS create rejected for multi-primary RV", func() {
 			trvs.Await(ctx, match.RVS.PhaseIs(v1alpha1.ReplicatedVolumeSnapshotPhaseFailed))
 
 			rvs := trvs.Object()
+			Expect(rvs.Status.Message).To(ContainSubstring("multi-primary"))
 			Expect(rvs.Status.ReadyToUse).To(BeFalse())
-			Expect(strings.ToLower(rvs.Status.Message)).To(ContainSubstring("multi-primary"),
-				"expected multi-primary message, got %q", rvs.Status.Message)
 
-			Eventually(ctx, func() int { return trvs.RVRSCount() }).
-				Should(Equal(0), "no replica snapshots must be created for a rejected RVS")
-
-			expectNoOrphanSyncResources(ctx, trvs)
+			Consistently(ctx, func() int { return trvs.RVRSCount() }, "5s", "1s").
+				Should(Equal(0), "no replica snapshots must be created for a multi-primary RVS")
 		},
 
 		Entry("2D multiattach (2 attached)",

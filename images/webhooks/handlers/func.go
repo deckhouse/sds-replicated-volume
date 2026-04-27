@@ -41,7 +41,6 @@ import (
 
 	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func NewKubeClient(kubeconfigPath string) (client.Client, error) {
@@ -69,7 +68,6 @@ func NewKubeClient(kubeconfigPath string) (client.Client, error) {
 			v1alpha3.AddToScheme,
 			d8commonapi.AddToScheme,
 			snc.AddToScheme,
-			srv.AddToScheme,
 			clientgoscheme.AddToScheme,
 			extv1.AddToScheme,
 			v1.AddToScheme,
