@@ -584,12 +584,18 @@ func sourceReplicaSnapshotName(
 	members []v1alpha1.DatameshMember,
 	childRVRSs []*v1alpha1.ReplicatedVolumeReplicaSnapshot,
 ) string {
-	var primaryRVRName string
+	var primaryRVRName, fallbackRVRName string
 	for _, member := range members {
 		if member.Attached {
 			primaryRVRName = member.Name
 			break
 		}
+		if fallbackRVRName == "" && member.Name != "" {
+			fallbackRVRName = member.Name
+		}
+	}
+	if primaryRVRName == "" {
+		primaryRVRName = fallbackRVRName
 	}
 	if primaryRVRName == "" {
 		return ""

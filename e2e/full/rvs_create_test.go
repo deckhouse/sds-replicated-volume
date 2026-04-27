@@ -75,7 +75,7 @@ var _ = Describe("RVS create", func() {
 		},
 
 		Entry("1D",
-			SpecTimeout(3*time.Minute), require.MinNodes(1),
+			Label(fw.LabelSlow), SpecTimeout(3*time.Minute), require.MinNodes(1),
 			fw.TestLayout{FTT: 0, GMDR: 0}),
 
 		Entry("2D",

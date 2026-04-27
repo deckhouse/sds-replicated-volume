@@ -52,7 +52,7 @@ var _ = Describe("RVS clone", func() {
 		},
 
 		Entry("1D",
-			SpecTimeout(4*time.Minute), require.MinNodes(1),
+			Label(fw.LabelSlow), SpecTimeout(4*time.Minute), require.MinNodes(1),
 			fw.TestLayout{FTT: 0, GMDR: 0}),
 
 		Entry("2D",

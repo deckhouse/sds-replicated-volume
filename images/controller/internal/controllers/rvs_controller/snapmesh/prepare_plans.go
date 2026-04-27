@@ -233,15 +233,22 @@ func confirmUntrackBitmap(gctx *globalContext, _ int64) dmte.ConfirmResult {
 }
 
 func preparePrimaryReplica(gctx *globalContext) *replicaContext {
+	var fallback *replicaContext
 	for i := range gctx.allReplicas {
 		rc := &gctx.allReplicas[i]
 		for _, member := range gctx.rv.Status.Datamesh.Members {
-			if member.Attached && member.Name == rc.rvrName {
+			if member.Name != rc.rvrName {
+				continue
+			}
+			if member.Attached {
 				return rc
+			}
+			if fallback == nil {
+				fallback = rc
 			}
 		}
 	}
-	return nil
+	return fallback
 }
 
 func prepareReplicaIDs(gctx *globalContext) idset.IDSet {

@@ -65,7 +65,7 @@ var _ = Describe("RVS delete", func() {
 		})
 
 	It("deletes RVS after Ready and cleans up children",
-		SpecTimeout(3*time.Minute), require.MinNodes(1),
+		Label(fw.LabelSlow), SpecTimeout(3*time.Minute), require.MinNodes(1),
 		func(ctx SpecContext) {
 			trv := f.SetupLayout(ctx, fw.TestLayout{FTT: 0, GMDR: 0})
 
