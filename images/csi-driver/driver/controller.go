@@ -197,7 +197,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 	waitCtx, waitCancel := context.WithTimeout(ctx, d.waitActionTimeout)
 	defer waitCancel()
-	rv, attemptCounter, waitErr := utils.WaitForReplicatedVolumeReady(waitCtx, d.cl, d.log, traceID, volumeID)
+	readyRV, attemptCounter, waitErr := utils.WaitForReplicatedVolumeReady(waitCtx, d.cl, d.log, traceID, volumeID)
 	if waitErr != nil {
 		d.log.Error(waitErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error WaitForReplicatedVolumeReady", traceID, volumeID))
 
@@ -259,15 +259,9 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		}
 	}
 
-	return &csi.CreateVolumeResponse{
-		Volume: &csi.Volume{
-			CapacityBytes:      capacityBytes,
-			VolumeId:           request.Name,
-			VolumeContext:      volumeCtx,
-			ContentSource:      contentSource,
-			AccessibleTopology: nil,
-		},
-	}, nil
+	resp := buildResponse(readyRV)
+	resp.Volume.ContentSource = contentSource
+	return resp, nil
 }
 
 func (d *Driver) DeleteVolume(ctx context.Context, request *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
