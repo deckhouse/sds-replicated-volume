@@ -29,6 +29,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
@@ -121,61 +122,120 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolumeSpec: %+v", traceID, volumeID, rvSpec))
 
+	// buildResponse assembles the CSI CreateVolumeResponse from an observed RV.
+	// Falls back to the requested size when the RV status has not yet reported one.
+	buildResponse := func(rv *srv.ReplicatedVolume) *csi.CreateVolumeResponse {
+		capacityBytes := rvSize.Value()
+		if rv != nil && rv.Status.Size != nil {
+			capacityBytes = rv.Status.Size.Value()
+		}
+		volumeCtx := make(map[string]string, len(request.Parameters)+1)
+		for k, v := range request.Parameters {
+			volumeCtx[k] = v
+		}
+		volumeCtx[internal.ReplicatedVolumeNameKey] = volumeID
+		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Volume created successfully, capacity: %d. volumeCtx: %+v", traceID, volumeID, capacityBytes, volumeCtx))
+		return &csi.CreateVolumeResponse{
+			Volume: &csi.Volume{
+				CapacityBytes:      capacityBytes,
+				VolumeId:           request.Name,
+				VolumeContext:      volumeCtx,
+				ContentSource:      nil,
+				AccessibleTopology: nil,
+			},
+		}
+	}
+
+	// cleanupEarlyRVA best-effort removes the WFFC-selected RVA that was created
+	// upfront in this RPC. Used on all error paths below.
+	cleanupEarlyRVA := func() {
+		if !createdEarlyRVA {
+			return
+		}
+		if rvaErr := utils.DeleteRVA(ctx, d.cl, d.log, traceID, volumeID, preferredNode); rvaErr != nil {
+			d.log.Error(rvaErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] error cleaning up WFFC RVA", traceID, volumeID, preferredNode))
+		}
+	}
+
 	// Create ReplicatedVolume
 	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ------------ CreateReplicatedVolume start ------------", traceID, volumeID))
 	pvcName := request.Parameters[internal.PVCAnnotationNameKey]
 	pvcNamespace := request.Parameters[internal.PVCAnnotationNamespaceKey]
 	_, err := utils.CreateReplicatedVolume(ctx, d.cl, d.log, traceID, volumeID, pvcName, pvcNamespace, rvSpec)
-	if err != nil {
-		if kerrors.IsAlreadyExists(err) {
-			d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume %s already exists. Skip creating", traceID, volumeID, volumeID))
-		} else {
-			d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error CreateReplicatedVolume", traceID, volumeID))
-			if createdEarlyRVA {
-				if rvaErr := utils.DeleteRVA(ctx, d.cl, d.log, traceID, volumeID, preferredNode); rvaErr != nil {
-					d.log.Error(rvaErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] error cleaning up WFFC RVA", traceID, volumeID, preferredNode))
-				}
-			}
-			return nil, err
-		}
-	}
-	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ------------ CreateReplicatedVolume end ------------", traceID, volumeID))
 
-	// Wait for ReplicatedVolume to become ready
-	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] start wait ReplicatedVolume", traceID, volumeID))
-	waitCtx, waitCancel := context.WithTimeout(ctx, d.waitActionTimeout)
-	defer waitCancel()
-	rv, attemptCounter, err := utils.WaitForReplicatedVolumeReady(waitCtx, d.cl, d.log, traceID, volumeID)
-	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error WaitForReplicatedVolumeReady. Delete ReplicatedVolume %s", traceID, volumeID, volumeID))
-
-		deleteErr := utils.DeleteReplicatedVolume(ctx, d.cl, d.log, traceID, volumeID)
-		if deleteErr != nil {
-			d.log.Error(deleteErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error DeleteReplicatedVolume", traceID, volumeID))
-		}
-		if createdEarlyRVA {
-			if rvaErr := utils.DeleteRVA(ctx, d.cl, d.log, traceID, volumeID, preferredNode); rvaErr != nil {
-				d.log.Error(rvaErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s][node:%s] error cleaning up WFFC RVA", traceID, volumeID, preferredNode))
-			}
-		}
-
-		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error creating ReplicatedVolume", traceID, volumeID))
+	if err != nil && !kerrors.IsAlreadyExists(err) {
+		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error CreateReplicatedVolume", traceID, volumeID))
+		cleanupEarlyRVA()
 		return nil, err
 	}
-	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] finish wait ReplicatedVolume, attempt counter = %d", traceID, volumeID, attemptCounter))
 
-	capacityBytes := rvSize.Value()
-	if rv.Status.Size != nil {
-		capacityBytes = rv.Status.Size.Value()
+	if kerrors.IsAlreadyExists(err) {
+		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume already exists; re-observing", traceID, volumeID))
+		existing := &srv.ReplicatedVolume{}
+		getErr := d.cl.Get(ctx, client.ObjectKey{Name: volumeID}, existing)
+		if getErr != nil {
+			d.log.Error(getErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] cannot observe existing ReplicatedVolume", traceID, volumeID))
+			cleanupEarlyRVA()
+			return nil, status.Errorf(codes.Unavailable, "cannot observe existing ReplicatedVolume %s: %v", volumeID, getErr)
+		}
+		if existing.DeletionTimestamp != nil {
+			d.log.Warning(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] existing ReplicatedVolume is being deleted (deletionTimestamp=%v)", traceID, volumeID, existing.DeletionTimestamp))
+			cleanupEarlyRVA()
+			return nil, status.Errorf(codes.Aborted, "ReplicatedVolume %s is being deleted", volumeID)
+		}
+		if utils.IsReplicatedVolumePastFormation(existing) {
+			d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume already past Formation; returning success without Wait", traceID, volumeID))
+			return buildResponse(existing), nil
+		}
+		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume exists but still forming (datameshRevision=%d); proceeding to wait for readiness", traceID, volumeID, existing.Status.DatameshRevision))
+	} else {
+		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume created successfully. Proceeding to wait for readiness", traceID, volumeID))
 	}
 
-	volumeCtx := make(map[string]string, len(request.Parameters))
-	for k, v := range request.Parameters {
-		volumeCtx[k] = v
-	}
-	volumeCtx[internal.ReplicatedVolumeNameKey] = volumeID
+	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ------------ CreateReplicatedVolume end ------------", traceID, volumeID))
+	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] start wait ReplicatedVolume", traceID, volumeID))
 
-	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Volume created successfully, capacity: %d. volumeCtx: %+v", traceID, volumeID, capacityBytes, volumeCtx))
+	waitCtx, waitCancel := context.WithTimeout(ctx, d.waitActionTimeout)
+	defer waitCancel()
+	rv, attemptCounter, waitErr := utils.WaitForReplicatedVolumeReady(waitCtx, d.cl, d.log, traceID, volumeID)
+	if waitErr != nil {
+		d.log.Error(waitErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error WaitForReplicatedVolumeReady", traceID, volumeID))
+
+		// Re-observe the RV to decide the outcome:
+		//   - PastFormation && no DeletionTimestamp  -> race win: rv-controller
+		//     committed Formation between Wait's last poll and this cleanup;
+		//     return Success and keep the early RVA (same as happy path).
+		//   - DeletionTimestamp != nil               -> someone else is deleting
+		//     the RV; skip our Delete to avoid fighting.
+		//   - Otherwise (RV missing / Get error / not past Formation)
+		//     -> RV is uncommitted garbage; delete it so the next CreateVolume
+		//     retry can recreate it cleanly.
+		observed := &srv.ReplicatedVolume{}
+		getErr := d.cl.Get(ctx, client.ObjectKey{Name: volumeID}, observed)
+		if getErr == nil && observed.DeletionTimestamp == nil && utils.IsReplicatedVolumePastFormation(observed) {
+			d.log.Warning(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] RV became past Formation (datameshRevision=%d) between Wait deadline and cleanup; returning success", traceID, volumeID, observed.Status.DatameshRevision))
+			return buildResponse(observed), nil
+		}
+
+		cleanupEarlyRVA()
+
+		switch {
+		case kerrors.IsNotFound(getErr):
+			d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] RV already gone between Wait and cleanup; nothing to delete", traceID, volumeID))
+		case getErr != nil:
+			d.log.Warning(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] cannot observe RV for safe cleanup decision: %v; skipping delete", traceID, volumeID, getErr))
+		case observed.DeletionTimestamp != nil:
+			d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] RV already being deleted; skipping delete", traceID, volumeID))
+		default:
+			if delErr := utils.DeleteReplicatedVolume(ctx, d.cl, d.log, traceID, volumeID); delErr != nil {
+				d.log.Error(delErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error DeleteReplicatedVolume", traceID, volumeID))
+			}
+		}
+
+		return nil, waitErr
+	}
+	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume ready successfully, attempt counter: %d", traceID, volumeID, attemptCounter))
+	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ------------ WaitForReplicatedVolumeReady end ------------", traceID, volumeID))
 
 	var contentSource *csi.VolumeContentSource
 	if dataSource != nil {
