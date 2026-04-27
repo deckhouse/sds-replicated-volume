@@ -599,7 +599,7 @@ flowchart TD
 |--------|-------------|
 | `rv.Status.DatameshRevision` | Set to 1 on first entry |
 | `rv.Status.Datamesh.SystemNetworkNames` | Copied from RSP |
-| `rv.Status.Datamesh.Size` | Copied from RV spec |
+| `rv.Status.Datamesh.Size` | RV spec size rounded up to 4Ki (4096 bytes) |
 | RVR create/delete | Replica count adjusted |
 | Formation transition messages | Progress/error reporting |
 
@@ -749,7 +749,7 @@ flowchart TD
 |--------|-------------|
 | `rv.Status.DatameshRevision` | Set to 1 on first entry |
 | `rv.Status.Datamesh.SystemNetworkNames` | Copied from RSP |
-| `rv.Status.Datamesh.Size` | Copied from RV spec |
+| `rv.Status.Datamesh.Size` | RV spec size rounded up to 4Ki (4096 bytes) |
 | Formation transition step messages | Progress/error reporting |
 
 ---

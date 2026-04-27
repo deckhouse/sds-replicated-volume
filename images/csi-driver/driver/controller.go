@@ -257,9 +257,21 @@ func (d *Driver) ControllerPublishVolume(ctx context.Context, request *csi.Contr
 
 	d.log.Info(fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Creating ReplicatedVolumeAttachment and waiting for Ready=true", traceID, volumeID, nodeID))
 
-	_, err := utils.EnsureRVA(ctx, d.cl, d.log, traceID, volumeID, nodeID)
+	// EnsureRVA may block waiting for a stale RVA (from a just-finished
+	// ControllerUnpublishVolume) to be fully finalized by rv-controller.
+	// Bound that wait to waitActionTimeout so the gRPC call does not hang
+	// if something is genuinely stuck: external-attacher will retry with backoff.
+	ensureCtx, ensureCancel := context.WithTimeout(ctx, d.waitActionTimeout)
+	_, err := utils.EnsureRVA(ensureCtx, d.cl, d.log, traceID, volumeID, nodeID)
+	ensureCancel()
 	if err != nil {
 		d.log.Error(err, fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to create ReplicatedVolumeAttachment", traceID, volumeID, nodeID))
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, status.Errorf(codes.DeadlineExceeded, "Timed out ensuring ReplicatedVolumeAttachment: %v", err)
+		}
+		if errors.Is(err, context.Canceled) {
+			return nil, status.Errorf(codes.Canceled, "Canceled ensuring ReplicatedVolumeAttachment: %v", err)
+		}
 		return nil, status.Errorf(codes.Internal, "Failed to create ReplicatedVolumeAttachment: %v", err)
 	}
 
@@ -327,14 +339,24 @@ func (d *Driver) ControllerUnpublishVolume(ctx context.Context, request *csi.Con
 		return nil, status.Errorf(codes.Internal, "Failed to delete ReplicatedVolumeAttachment: %v", err)
 	}
 
-	d.log.Info(fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Waiting for node to disappear from status.actuallyAttachedTo", traceID, volumeID, nodeID))
-
-	unpublishWaitCtx, unpublishWaitCancel := context.WithTimeout(ctx, d.waitActionTimeout)
-	defer unpublishWaitCancel()
-	err = utils.WaitForAttachedToRemoved(unpublishWaitCtx, d.cl, d.log, traceID, volumeID, nodeID)
-	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to wait for status.actuallyAttachedTo removal", traceID, volumeID, nodeID))
-		return nil, status.Errorf(codes.Internal, "Failed to wait for status.actuallyAttachedTo removal: %v", err)
+	// Wait for the RVA object to be fully gone before returning OK.
+	// rv.status.actuallyAttachedTo is no longer populated by the controller
+	// (see api/v1alpha1/rv_types.go: ActuallyAttachedTo TODO), so we rely
+	// solely on the RVA lifecycle here. Returning OK while the RVA still
+	// carries the rv-controller finalizer would let external-attacher delete
+	// the VolumeAttachment while the next ControllerPublishVolume still
+	// observes a stale RVA with DeletionTimestamp, leading to
+	// "volume attachment is being deleted" / attach timeouts on rapidly
+	// cycling pods.
+	d.log.Info(fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Waiting for ReplicatedVolumeAttachment object to be fully deleted", traceID, volumeID, nodeID))
+	rvaDelCtx, rvaDelCancel := context.WithTimeout(ctx, d.waitActionTimeout)
+	defer rvaDelCancel()
+	if err := utils.WaitForRVADeleted(rvaDelCtx, d.cl, d.log, traceID, volumeID, nodeID); err != nil {
+		d.log.Error(err, fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to wait for RVA deletion", traceID, volumeID, nodeID))
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, status.Errorf(codes.DeadlineExceeded, "Timed out waiting for RVA deletion: %v", err)
+		}
+		return nil, status.Errorf(codes.Internal, "Failed to wait for RVA deletion: %v", err)
 	}
 
 	d.log.Info(fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Volume detached successfully", traceID, volumeID, nodeID))

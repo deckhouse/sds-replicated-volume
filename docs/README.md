@@ -40,7 +40,7 @@ Direct configuration of the LINSTOR backend by the user is prohibited.
 {{< /alert >}}
 
 {{< alert level="info" >}}
-For working with snapshots, the [snapshot-controller](/modules/snapshot-controller/) module must be connected.
+The [snapshot-controller](/modules/snapshot-controller/) module must be connected for this module to operate.
 {{< /alert >}}
 
 - Configure LVMVolumeGroup.

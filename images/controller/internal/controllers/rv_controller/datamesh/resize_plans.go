@@ -32,6 +32,7 @@ package datamesh
 import (
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/drbd_size"
 )
 
 // rgStep creates a resize GlobalStep with standard DiagnosticConditions.
@@ -44,19 +45,20 @@ func rgStep(
 		DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
 }
 
-// applyResizeVolume sets datamesh.size to the target usable size from rv.Spec.Size.
+// applyResizeVolume sets datamesh.size to rv.Spec.Size rounded up to 4Ki.
 func applyResizeVolume(gctx *globalContext) bool {
-	if gctx.datamesh.size.Equal(gctx.size) {
+	aligned := drbd_size.AlignTo4Ki(gctx.size)
+	if gctx.datamesh.size.Equal(aligned) {
 		return false
 	}
-	gctx.datamesh.size = gctx.size.DeepCopy()
+	gctx.datamesh.size = aligned
 	return true
 }
 
 // registerResizePlans registers the ResizeVolume plan.
 //
 // resize/v1: 1-step global plan.
-//   - Apply: sets datamesh.size = rv.Spec.Size.
+//   - Apply: sets datamesh.size = AlignTo4Ki(rv.Spec.Size).
 //   - Confirm: confirmAllMembers (revision-based). The rvr_controller gates
 //     datameshRevision on DRBD usable size confirmation (step 13c), so
 //     revision-based confirm implicitly waits for DRBD resize completion.

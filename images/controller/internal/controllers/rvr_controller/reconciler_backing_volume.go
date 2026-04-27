@@ -492,12 +492,15 @@ func computeIntendedBackingVolume(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1a
 		bv.ThinPoolName = rvr.Spec.LVMVolumeGroupThinPoolName
 	}
 
-	// Use the larger of RV spec size and datamesh size.
+	// Use the larger of RV spec size and datamesh size, both aligned to 4Ki.
+	// DRBD requires 4Ki-aligned usable sizes. We align both values to handle
+	// pre-existing unaligned datamesh.Size from before 4Ki enforcement.
 	// During resize, datamesh will lag behind spec until all backing volumes are ready.
-	// We could just use spec.size, but we take the max for correctness in case of non-standard interventions.
-	size := rv.Status.Datamesh.Size
-	if rv.Spec.Size.Cmp(size) > 0 {
-		size = rv.Spec.Size
+	alignedSpecSize := drbd_size.AlignTo4Ki(rv.Spec.Size)
+	alignedDatameshSize := drbd_size.AlignTo4Ki(rv.Status.Datamesh.Size)
+	size := alignedDatameshSize
+	if alignedSpecSize.Cmp(size) > 0 {
+		size = alignedSpecSize
 	}
 	bv.Size = drbd_size.LowerVolumeSize(size)
 

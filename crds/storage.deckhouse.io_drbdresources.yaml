@@ -586,6 +586,9 @@ spec:
         - message: nonVoting must be false (or unset) when type is Diskless
           rule: 'self.spec.type == ''Diskless'' ? !has(self.spec.nonVoting) || self.spec.nonVoting
             == false : true'
+        - message: spec.size must be a multiple of 4Ki (4096 bytes)
+          rule: '!has(self.spec.size) || (quantity(string(self.spec.size)).isInteger()
+            && quantity(string(self.spec.size)).asInteger() % 4096 == 0)'
     selectableFields:
     - jsonPath: .spec.nodeName
     served: true

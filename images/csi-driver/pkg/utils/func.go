@@ -357,32 +357,10 @@ func GetDevicePathFromRVA(ctx context.Context, kc client.Client, volumeName, nod
 	return rva.Status.DevicePath, nil
 }
 
-func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) (string, error) {
+// createRVA creates a fresh ReplicatedVolumeAttachment with the CSI finalizer.
+// Treats AlreadyExists as success (another caller won the race).
+func createRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) (string, error) {
 	rvaName := BuildRVAName(volumeName, nodeName)
-
-	existing := &srv.ReplicatedVolumeAttachment{}
-	if err := kc.Get(ctx, client.ObjectKey{Name: rvaName}, existing); err == nil {
-		// Validate it matches the intended binding.
-		if existing.Spec.ReplicatedVolumeName != volumeName || existing.Spec.NodeName != nodeName {
-			return "", fmt.Errorf("ReplicatedVolumeAttachment %s already exists but has different spec (volume=%s,node=%s)",
-				rvaName, existing.Spec.ReplicatedVolumeName, existing.Spec.NodeName,
-			)
-		}
-		if existing.DeletionTimestamp != nil {
-			return "", fmt.Errorf("ReplicatedVolumeAttachment %s is being deleted (phase=%s); cannot publish volume until deletion completes",
-				rvaName, existing.Status.Phase)
-		}
-		if !slices.Contains(existing.Finalizers, SDSReplicatedVolumeCSIFinalizer) {
-			existing.Finalizers = append(existing.Finalizers, SDSReplicatedVolumeCSIFinalizer)
-			if err := kc.Update(ctx, existing); err != nil {
-				return "", fmt.Errorf("add finalizer to ReplicatedVolumeAttachment %s: %w", rvaName, err)
-			}
-			log.Info(fmt.Sprintf("[EnsureRVA][traceID:%s][volumeID:%s][node:%s] Added finalizer to existing RVA %s", traceID, volumeName, nodeName, rvaName))
-		}
-		return rvaName, nil
-	} else if client.IgnoreNotFound(err) != nil {
-		return "", fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
-	}
 
 	rva := &srv.ReplicatedVolumeAttachment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -395,12 +373,53 @@ func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 		},
 	}
 
-	log.Info(fmt.Sprintf("[EnsureRVA][traceID:%s][volumeID:%s][node:%s] Creating ReplicatedVolumeAttachment %s", traceID, volumeName, nodeName, rvaName))
+	log.Info(fmt.Sprintf("[createRVA][traceID:%s][volumeID:%s][node:%s] Creating ReplicatedVolumeAttachment %s", traceID, volumeName, nodeName, rvaName))
 	if err := kc.Create(ctx, rva); err != nil {
 		if kerrors.IsAlreadyExists(err) {
 			return rvaName, nil
 		}
 		return "", fmt.Errorf("create ReplicatedVolumeAttachment %s: %w", rvaName, err)
+	}
+	return rvaName, nil
+}
+
+func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) (string, error) {
+	rvaName := BuildRVAName(volumeName, nodeName)
+
+	existing := &srv.ReplicatedVolumeAttachment{}
+	err := kc.Get(ctx, client.ObjectKey{Name: rvaName}, existing)
+	if kerrors.IsNotFound(err) {
+		return createRVA(ctx, kc, log, traceID, volumeName, nodeName)
+	}
+	if err != nil {
+		return "", fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
+	}
+
+	if existing.Spec.ReplicatedVolumeName != volumeName || existing.Spec.NodeName != nodeName {
+		return "", fmt.Errorf("ReplicatedVolumeAttachment %s already exists but has different spec (volume=%s,node=%s)",
+			rvaName, existing.Spec.ReplicatedVolumeName, existing.Spec.NodeName,
+		)
+	}
+
+	if existing.DeletionTimestamp != nil {
+		// Stale RVA from a previous attachment is still being finalized
+		// (typically by rv-controller holding RVControllerFinalizer).
+		// Wait for it to fully disappear within the parent ctx deadline,
+		// then create a fresh one.
+		log.Info(fmt.Sprintf("[EnsureRVA][traceID:%s][volumeID:%s][node:%s] Existing RVA %s has DeletionTimestamp (phase=%s, finalizers=%v); waiting for deletion to complete",
+			traceID, volumeName, nodeName, rvaName, existing.Status.Phase, existing.Finalizers))
+		if werr := WaitForRVADeleted(ctx, kc, log, traceID, volumeName, nodeName); werr != nil {
+			return "", fmt.Errorf("wait for stale ReplicatedVolumeAttachment %s deletion: %w", rvaName, werr)
+		}
+		return createRVA(ctx, kc, log, traceID, volumeName, nodeName)
+	}
+
+	if !slices.Contains(existing.Finalizers, SDSReplicatedVolumeCSIFinalizer) {
+		existing.Finalizers = append(existing.Finalizers, SDSReplicatedVolumeCSIFinalizer)
+		if uerr := kc.Update(ctx, existing); uerr != nil {
+			return "", fmt.Errorf("add finalizer to ReplicatedVolumeAttachment %s: %w", rvaName, uerr)
+		}
+		log.Info(fmt.Sprintf("[EnsureRVA][traceID:%s][volumeID:%s][node:%s] Added finalizer to existing RVA %s", traceID, volumeName, nodeName, rvaName))
 	}
 	return rvaName, nil
 }
@@ -619,97 +638,51 @@ func WaitForRVAReady(
 	}
 }
 
-// WaitForAttachedToProvided waits for a node name to appear in rv.status.actuallyAttachedTo
-func WaitForAttachedToProvided(
+// WaitForRVADeleted polls the ReplicatedVolumeAttachment object until it is
+// fully gone from the API (kerrors.IsNotFound). The RVA may still carry the
+// rv-controller finalizer after DeleteRVA has been issued; returning OK to
+// external-attacher before the RVA is fully deleted opens a race window where
+// the next ControllerPublishVolume on the same (volume,node) pair observes a
+// stale RVA with DeletionTimestamp and fails.
+func WaitForRVADeleted(
 	ctx context.Context,
 	kc client.Client,
 	log *logger.Logger,
 	traceID, volumeName, nodeName string,
 ) error {
+	rvaName := BuildRVAName(volumeName, nodeName)
 	var attemptCounter int
-	log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Waiting for node to appear in status.actuallyAttachedTo", traceID, volumeName, nodeName))
+	var lastFinalizers []string
+	var lastPhase string
+	log.Info(fmt.Sprintf("[WaitForRVADeleted][traceID:%s][volumeID:%s][node:%s] Waiting for ReplicatedVolumeAttachment %s to be fully deleted", traceID, volumeName, nodeName, rvaName))
 	for {
 		attemptCounter++
-		select {
-		case <-ctx.Done():
-			log.Warning(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] context done", traceID, volumeName, nodeName))
-			return ctx.Err()
-		default:
-			time.Sleep(500 * time.Millisecond)
+		if err := ctx.Err(); err != nil {
+			log.Warning(fmt.Sprintf("[WaitForRVADeleted][traceID:%s][volumeID:%s][node:%s] context done after %d attempts; last finalizers=%v phase=%q: %v", traceID, volumeName, nodeName, attemptCounter, lastFinalizers, lastPhase, err))
+			return fmt.Errorf("wait for RVA %s deletion: last finalizers=%v phase=%q: %w", rvaName, lastFinalizers, lastPhase, err)
 		}
 
-		rv, err := GetReplicatedVolume(ctx, kc, volumeName)
+		rva := &srv.ReplicatedVolumeAttachment{}
+		err := kc.Get(ctx, client.ObjectKey{Name: rvaName}, rva)
 		if err != nil {
 			if kerrors.IsNotFound(err) {
-				return fmt.Errorf("ReplicatedVolume %s not found", volumeName)
-			}
-			return err
-		}
-
-		if attemptCounter%10 == 0 {
-			log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status.actuallyAttachedTo: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.ActuallyAttachedTo))
-		}
-
-		// Check if node is in status.actuallyAttachedTo
-		for _, attachedNode := range rv.Status.ActuallyAttachedTo {
-			if attachedNode == nodeName {
-				log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Node is now in status.actuallyAttachedTo", traceID, volumeName, nodeName))
+				log.Info(fmt.Sprintf("[WaitForRVADeleted][traceID:%s][volumeID:%s][node:%s] ReplicatedVolumeAttachment %s is fully deleted", traceID, volumeName, nodeName, rvaName))
 				return nil
 			}
+			return fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
 		}
 
-		log.Trace(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Attempt %d, node not in status.actuallyAttachedTo yet. Waiting...", traceID, volumeName, nodeName, attemptCounter))
-	}
-}
-
-// WaitForAttachedToRemoved waits for a node name to disappear from rv.status.actuallyAttachedTo
-func WaitForAttachedToRemoved(
-	ctx context.Context,
-	kc client.Client,
-	log *logger.Logger,
-	traceID, volumeName, nodeName string,
-) error {
-	var attemptCounter int
-	log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Waiting for node to disappear from status.actuallyAttachedTo", traceID, volumeName, nodeName))
-	for {
-		attemptCounter++
-		select {
-		case <-ctx.Done():
-			log.Warning(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] context done", traceID, volumeName, nodeName))
-			return ctx.Err()
-		default:
-			time.Sleep(500 * time.Millisecond)
-		}
-
-		rv, err := GetReplicatedVolume(ctx, kc, volumeName)
-		if err != nil {
-			if kerrors.IsNotFound(err) {
-				// Volume deleted, consider it as removed
-				log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] ReplicatedVolume not found, considering node as removed", traceID, volumeName, nodeName))
-				return nil
-			}
-			return err
-		}
+		lastFinalizers = append(lastFinalizers[:0], rva.Finalizers...)
+		lastPhase = string(rva.Status.Phase)
 
 		if attemptCounter%10 == 0 {
-			log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status.actuallyAttachedTo: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.ActuallyAttachedTo))
+			log.Info(fmt.Sprintf("[WaitForRVADeleted][traceID:%s][volumeID:%s][node:%s] Attempt: %d, still present (deletionTimestamp=%v finalizers=%v phase=%q)", traceID, volumeName, nodeName, attemptCounter, rva.DeletionTimestamp, lastFinalizers, lastPhase))
 		}
 
-		// Check if node is NOT in status.actuallyAttachedTo
-		found := false
-		for _, attachedNode := range rv.Status.ActuallyAttachedTo {
-			if attachedNode == nodeName {
-				found = true
-				break
-			}
+		if err := sleepWithContext(ctx); err != nil {
+			log.Warning(fmt.Sprintf("[WaitForRVADeleted][traceID:%s][volumeID:%s][node:%s] context done while sleeping after %d attempts; last finalizers=%v phase=%q: %v", traceID, volumeName, nodeName, attemptCounter, lastFinalizers, lastPhase, err))
+			return fmt.Errorf("wait for RVA %s deletion: last finalizers=%v phase=%q: %w", rvaName, lastFinalizers, lastPhase, err)
 		}
-
-		if !found {
-			log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Node is no longer in status.actuallyAttachedTo", traceID, volumeName, nodeName))
-			return nil
-		}
-
-		log.Trace(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Attempt %d, node still in status.actuallyAttachedTo. Waiting...", traceID, volumeName, nodeName, attemptCounter))
 	}
 }
 

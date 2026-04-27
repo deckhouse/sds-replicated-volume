@@ -54,6 +54,13 @@ func UsableSize(lowerSize resource.Quantity) resource.Quantity {
 	return *resource.NewQuantity(int64(usableSectors*sectorSize), resource.BinarySI)
 }
 
+// AlignTo4Ki rounds the given size up to the nearest 4Ki (4096 byte) boundary.
+func AlignTo4Ki(size resource.Quantity) resource.Quantity {
+	bytes := uint64(size.Value())
+	aligned := align(bytes, 4096)
+	return *resource.NewQuantity(int64(aligned), resource.BinarySI)
+}
+
 // LowerVolumeSize calculates the required lower (backing) volume size for DRBD
 // given the desired usable capacity. Accounts for internal metadata overhead
 // (bitmap, activity log, superblock).

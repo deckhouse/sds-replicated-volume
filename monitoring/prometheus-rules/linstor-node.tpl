@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 - name: kubernetes.linstor.node_state
   rules:
     - alert: D8LinstorNodeIsNotOnline
@@ -12,11 +13,11 @@
         plk_grouped_by__d8_linstor_node_health: "D8LinstorNodeHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
         summary: LINSTOR node is not ONLINE
         description: |
-          LINSTOR node {{ $labels.exported_node }} is not ONLINE
+          LINSTOR node {{ "{{" }} $labels.exported_node {{ "}}" }} is not ONLINE
 
           The recommended course of action:
-          1. Check the LINSTOR node status: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor node list -n {{ $labels.exported_node }}`
-          2. Check the Pod status: `kubectl -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName={{ $labels.exported_node }} -l app=linstor-node`
+          1. Check the LINSTOR node status: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor node list -n {{ "{{" }} $labels.exported_node {{ "}}" }}`
+          2. Check the Pod status: `kubectl -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName={{ "{{" }} $labels.exported_node {{ "}}" }} -l app=linstor-node`
 
     - alert: D8LinstorSatelliteGrowingErrorReports
       expr: sum by (hostname) (increase(linstor_error_reports_count{module="SATELLITE"}[5m])) >= 20
@@ -31,11 +32,11 @@
         plk_grouped_by__d8_linstor_node_health: "D8LinstorNodeHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
         summary: LINSTOR satellite has errors
         description: |
-          LINSTOR satellite {{ $labels.hostname }} has continuously growing amount of error reports
+          LINSTOR satellite {{ "{{" }} $labels.hostname {{ "}}" }} has continuously growing amount of error reports
 
           The recommended course of action:
-          1. Check the Pod logs: `kubectl -n d8-sds-replicated-volume logs $(kubectl -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName={{ $labels.node }} -l app=linstor-node -o name) -c linstor-satellite`
-          2. Check the LINSTOR error reports: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor err list -n {{ $labels.hostname }}`
+          1. Check the Pod logs: `kubectl -n d8-sds-replicated-volume logs $(kubectl -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName={{ "{{" }} $labels.node {{ "}}" }} -l app=linstor-node -o name) -c linstor-satellite`
+          2. Check the LINSTOR error reports: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor err list -n {{ "{{" }} $labels.hostname {{ "}}" }}`
 
     - alert: D8LinstorNodePodIsNotReady
       expr: min by (pod) (avg by(node,pod,namespace)(kube_pod_info{}) * on(pod, namespace) group_right(node) kube_pod_status_ready{condition="true", namespace="d8-sds-replicated-volume", pod=~"linstor-node-.*"}) != 1
@@ -53,7 +54,7 @@
         description: |
           The recommended course of action:
           1. Retrieve details of the Deployment: `kubectl -n d8-sds-replicated-volume describe daemonset linstor-node`
-          2. View the status of the Pod and try to figure out why it is not running: `kubectl -n d8-sds-replicated-volume describe pod --field-selector=spec.nodeName={{ $labels.node }} -l app=linstor-node`
+          2. View the status of the Pod and try to figure out why it is not running: `kubectl -n d8-sds-replicated-volume describe pod --field-selector=spec.nodeName={{ "{{" }} $labels.node {{ "}}" }} -l app=linstor-node`
 
     - alert: D8LinstorNodePodIsNotRunning
       expr: absent(avg by(node,pod,namespace)(kube_pod_info{}) * on(pod, namespace) group_right(node) kube_pod_status_phase{namespace="d8-sds-replicated-volume",phase="Running",pod=~"linstor-node-.*"})
@@ -70,4 +71,5 @@
         description: |
           The recommended course of action:
           1. Retrieve details of the DaemonSet: `kubectl -n d8-sds-replicated-volume describe daemonset linstor-node`
-          2. View the status of the Pod and try to figure out why it is not running: `kubectl -n d8-sds-replicated-volume describe pod --field-selector=spec.nodeName={{ $labels.node }} -l app=linstor-node`
+          2. View the status of the Pod and try to figure out why it is not running: `kubectl -n d8-sds-replicated-volume describe pod --field-selector=spec.nodeName={{ "{{" }} $labels.node {{ "}}" }} -l app=linstor-node`
+{{- end }}
