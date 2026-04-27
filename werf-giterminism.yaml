@@ -9,6 +9,7 @@ config:
       - GOLANG_VERSION
       - GOPROXY
       - SOURCE_REPO
+      - DISTRO_PACKAGES_PROXY
       - SOURCE_REPO_TAG
     allowUncommittedFiles:
       - "base_images.yml"

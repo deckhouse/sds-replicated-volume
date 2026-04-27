@@ -9,6 +9,9 @@ build:
       removeLabels:
         - /.*/
 ---
+{{- $_ := set $ "DistroPackagesProxy" (env "DISTRO_PACKAGES_PROXY" "") }}
+{{- $_ := set $ "SOURCE_REPO" (env "SOURCE_REPO" "https://github.com") }}
+{{- $_ := set $ "GOPROXY" (env "GOPROXY" "https://proxy.golang.org,direct") }}
 {{ tpl (.Files.Get ".werf/base-images.yaml") $ }}
 {{ tpl (.Files.Get ".werf/consts.yaml") $ }}
 {{ tpl (.Files.Get ".werf/defines/oss-yaml.tmpl") $ }}
