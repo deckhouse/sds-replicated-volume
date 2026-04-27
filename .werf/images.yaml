@@ -1,7 +1,8 @@
 {{- $ImagesBuildFiles := .Files.Glob "images/*/{Dockerfile,werf.inc.yaml}" }}
+{{- $Root := . }}
 
 {{- range $path, $content := $ImagesBuildFiles  }}
-  {{ $ctx := (dict "ImageName" ($path | split "/")._1 "Root" $ "Versions" $.VERSIONS "Files" $.Files) }}
+  {{- $ctx := dict "ImageName" ($path | split "/")._1 "Root" $Root "Versions" $Root.VERSIONS "Files" $Root.Files "SOURCE_REPO" $Root.SOURCE_REPO "GOPROXY" $Root.GOPROXY "DistroPackagesProxy" $Root.DistroPackagesProxy }}
 ---
   {{- /* For Dockerfile just render it from the folder. */ -}}
   {{- if not (regexMatch "/werf.inc.yaml$" $path) }}
