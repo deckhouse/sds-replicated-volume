@@ -10,7 +10,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "Overview / Current Snapshot",
+      "title": "Overview / Current State",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -23,7 +23,7 @@
       "id": 2,
       "type": "stat",
       "title": "RVs",
-      "description": "Current RV count from controller cache snapshot. Zero means no matching objects now.",
+      "description": "Current matching RVs.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -67,7 +67,7 @@
       "id": 3,
       "type": "stat",
       "title": "RVRs",
-      "description": "Current RVR count from controller cache snapshot.",
+      "description": "Current matching RVRs.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -111,7 +111,7 @@
       "id": 4,
       "type": "stat",
       "title": "RVAs",
-      "description": "Current RVA count from controller cache snapshot.",
+      "description": "Current matching RVAs.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -155,7 +155,7 @@
       "id": 5,
       "type": "stat",
       "title": "Unhealthy RVRs",
-      "description": "Current RVR count in degraded-like phases (PartiallyDegraded, Degraded, Critical, AgentNotReady) from controller cache snapshot.",
+      "description": "Current RVRs in degraded-like phases.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -199,7 +199,7 @@
       "id": 6,
       "type": "stat",
       "title": "Deleting RVs",
-      "description": "Current RVs with deletionTimestamp from cache snapshot.",
+      "description": "Current RVs with deletionTimestamp.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -243,7 +243,7 @@
       "id": 7,
       "type": "stat",
       "title": "Terminating RVRs",
-      "description": "Current RVRs in Terminating phase from cache snapshot.",
+      "description": "Current RVRs in Terminating phase.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -286,8 +286,8 @@
     {
       "id": 8,
       "type": "timeseries",
-      "title": "RVR Count by Node and Phase",
-      "description": "Current RVR snapshot over time. The collector emits zeroes for known node/storage_class/phase combinations.",
+      "title": "RVR Healthy Count by Node",
+      "description": "Healthy RVRs by node. This keeps the normal state readable.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -300,20 +300,66 @@
       },
       "targets": [
         {
-          "expr": "sum by (node, phase) (sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\"})",
+          "expr": "sum by (node) (sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",phase=\"Healthy\"})",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 36,
+      "type": "timeseries",
+      "title": "RVR Non-Healthy Count by Node and Phase",
+      "description": "Non-Healthy RVRs by node and phase. Zero series are hidden.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "targets": [
+        {
+          "expr": "sum by (node, phase) (sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",phase!=\"Healthy\"}) > 0",
           "legendFormat": "{{node}} / {{phase}}",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
           "custom": {
             "drawStyle": "line",
             "lineInterpolation": "linear",
             "spanNulls": false,
             "showPoints": "never"
-          }
+          },
+          "unit": "short"
         },
         "overrides": []
       },
@@ -332,8 +378,54 @@
     {
       "id": 9,
       "type": "timeseries",
-      "title": "RVA Count by Node and Phase",
-      "description": "Current RVA snapshot over time. The collector emits zeroes for known node/phase combinations.",
+      "title": "RVA Attached Count by Node",
+      "description": "Attached RVAs by node. This keeps the normal state readable.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "targets": [
+        {
+          "expr": "sum by (node) (sds_rva_count{node=~\"$node\",phase=\"Attached\"})",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 37,
+      "type": "timeseries",
+      "title": "RVA Non-Attached Count by Node and Phase",
+      "description": "Non-Attached RVAs by node and phase. Zero series are hidden.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -342,24 +434,24 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 5
+        "y": 13
       },
       "targets": [
         {
-          "expr": "sum by (node, phase) (sds_rva_count{node=~\"$node\"})",
+          "expr": "sum by (node, phase) (sds_rva_count{node=~\"$node\",phase!=\"Attached\"}) > 0",
           "legendFormat": "{{node}} / {{phase}}",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
           "custom": {
             "drawStyle": "line",
             "lineInterpolation": "linear",
             "spanNulls": false,
             "showPoints": "never"
-          }
+          },
+          "unit": "short"
         },
         "overrides": []
       },
@@ -384,7 +476,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 13
+        "y": 21
       }
     },
     {
@@ -400,7 +492,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 22
       },
       "targets": [
         {
@@ -447,7 +539,7 @@
       "id": 35,
       "type": "timeseries",
       "title": "RVR Ready Transition Rate by Node",
-      "description": "Rate of RVR Ready condition transitions from non-True to True. High rate with low P10 usually indicates fast flapping; no data means there were no transitions in the selected range.",
+      "description": "Ready transition rate by node. High rate with low duration usually points to flapping.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -456,7 +548,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 22
+        "y": 30
       },
       "targets": [
         {
@@ -502,7 +594,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 22
+        "y": 30
       },
       "targets": [
         {
@@ -544,7 +636,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 30
+        "y": 38
       }
     },
     {
@@ -560,7 +652,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 31
+        "y": 39
       },
       "targets": [
         {
@@ -611,7 +703,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 31
+        "y": 39
       },
       "targets": [
         {
@@ -658,7 +750,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 39
+        "y": 47
       }
     },
     {
@@ -674,7 +766,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 40
+        "y": 48
       },
       "targets": [
         {
@@ -716,7 +808,7 @@
       "id": 19,
       "type": "timeseries",
       "title": "DRBD Runtime Problems by Node",
-      "description": "Existing DRBD exporter metrics reused by this dashboard. Counts show current runtime problems.",
+      "description": "Current DRBD runtime problem counts by node. Zero means no matching problem.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -725,21 +817,21 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 40
+        "y": 48
       },
       "targets": [
         {
-          "expr": "sum by (node) (drbd_connection_state{node=~\"$node\",drbd_connection_state!=\"UpToDate\",drbd_connection_state!=\"Connected\"} == 1)",
+          "expr": "sum by (node) (drbd_connection_state{node=~\"$node\",drbd_connection_state!=\"UpToDate\",drbd_connection_state!=\"Connected\"} == 1) or on(node) (0 * sum by (node) (drbd_connection_state{node=~\"$node\"}))",
           "legendFormat": "bad connection {{node}}",
           "refId": "A"
         },
         {
-          "expr": "sum by (node) (drbd_device_quorum{node=~\"$node\"} == 0)",
+          "expr": "sum by (node) (drbd_device_quorum{node=~\"$node\"} == 0) or on(node) (0 * sum by (node) (drbd_device_quorum{node=~\"$node\"}))",
           "legendFormat": "no quorum {{node}}",
           "refId": "B"
         },
         {
-          "expr": "sum by (node) (drbd_device_unintentionaldiskless{node=~\"$node\"} == 1)",
+          "expr": "sum by (node) (drbd_device_unintentionaldiskless{node=~\"$node\"} == 1) or on(node) (0 * sum by (node) (drbd_device_unintentionaldiskless{node=~\"$node\"}))",
           "legendFormat": "diskless {{node}}",
           "refId": "C"
         }
@@ -781,7 +873,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 48
+        "y": 56
       },
       "targets": [
         {
@@ -823,14 +915,14 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 64
       }
     },
     {
       "id": 22,
       "type": "timeseries",
       "title": "Datamesh Completed Transitions",
-      "description": "Completed Datamesh transitions per Event Interval. Zero means no completed transitions in the bucket.",
+      "description": "Completed datamesh transitions over the selected range.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -839,11 +931,11 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 57
+        "y": 65
       },
       "targets": [
         {
-          "expr": "round(sum by (type) (increase(sds_rv_datamesh_transitions_completed_total{type=~\"$transition_type\"}[$event_interval])))",
+          "expr": "round(sum by (type) (increase(sds_rv_datamesh_transitions_completed_total{type=~\"$transition_type\"}[$__range])))",
           "legendFormat": "{{type}}",
           "refId": "A"
         }
@@ -885,7 +977,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 57
+        "y": 65
       },
       "targets": [
         {
@@ -932,50 +1024,99 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 65
+        "y": 73
       }
     },
     {
       "id": 26,
-      "type": "table",
-      "title": "Oldest Deleting RV/RVR",
-      "description": "Objects currently deleting, sorted in Grafana by age if needed. Empty table means no deleting objects.",
+      "type": "timeseries",
+      "title": "Deleting RV Age",
+      "description": "Age of currently deleting RVs. Empty means no RV is deleting.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 66
+        "w": 24,
+        "x": 0,
+        "y": 74
       },
       "targets": [
         {
-          "expr": "(time() - sds_rv_deletion_started_timestamp_seconds{storage_class=~\"$storage_class\"}) > 0",
-          "legendFormat": "RV {{name}}",
+          "expr": "topk(20, (time() - sds_rv_deletion_started_timestamp_seconds{storage_class=~\"$storage_class\"}) > 0)",
+          "legendFormat": "{{name}} / {{storage_class}}",
           "refId": "A"
-        },
-        {
-          "expr": "(time() - sds_rvr_deletion_started_timestamp_seconds{node=~\"$node\",storage_class=~\"$storage_class\"}) > 0",
-          "legendFormat": "RVR {{name}}",
-          "refId": "B"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            }
-          }
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "s"
         },
         "overrides": []
       },
       "options": {
-        "showHeader": true,
-        "cellHeight": "sm"
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 38,
+      "type": "timeseries",
+      "title": "Deleting RVR Age",
+      "description": "Age of currently deleting RVRs. Empty means no RVR is deleting.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 82
+      },
+      "targets": [
+        {
+          "expr": "topk(20, (time() - sds_rvr_deletion_started_timestamp_seconds{node=~\"$node\",storage_class=~\"$storage_class\"}) > 0)",
+          "legendFormat": "{{name}} / {{node}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
       }
     },
     {
@@ -987,23 +1128,23 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 74
+        "y": 90
       }
     },
     {
       "id": 28,
-      "type": "table",
+      "type": "timeseries",
       "title": "Active Datamesh Transitions",
-      "description": "Currently active datamesh transitions from controller cache snapshot. Empty table means no active transitions.",
+      "description": "Current active datamesh transitions by RV and type. Empty means none are active.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 24,
         "x": 0,
-        "y": 75
+        "y": 91
       },
       "targets": [
         {
@@ -1015,37 +1156,45 @@
       "fieldConfig": {
         "defaults": {
           "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            }
-          }
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
         },
         "overrides": []
       },
       "options": {
-        "showHeader": true,
-        "cellHeight": "sm"
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
       }
     },
     {
       "id": 29,
-      "type": "table",
-      "title": "Oldest Active Datamesh Transitions",
-      "description": "Current active datamesh transition age from collector snapshot timestamps.",
+      "type": "timeseries",
+      "title": "Active Datamesh Transition Age",
+      "description": "Age of current active datamesh transitions by RV and type.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 75
+        "w": 24,
+        "x": 0,
+        "y": 99
       },
       "targets": [
         {
-          "expr": "(time() - sds_rv_datamesh_active_transition_start_timestamp_seconds{type=~\"$transition_type\"}) > 0",
+          "expr": "topk(20, (time() - sds_rv_datamesh_active_transition_start_timestamp_seconds{type=~\"$transition_type\"}) > 0)",
           "legendFormat": "{{rv}} / {{type}}",
           "refId": "A"
         }
@@ -1053,17 +1202,25 @@
       "fieldConfig": {
         "defaults": {
           "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            }
-          }
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "s"
         },
         "overrides": []
       },
       "options": {
-        "showHeader": true,
-        "cellHeight": "sm"
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
       }
     },
     {
@@ -1075,7 +1232,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 83
+        "y": 107
       }
     },
     {
@@ -1091,7 +1248,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 84
+        "y": 108
       },
       "targets": [
         {
@@ -1147,7 +1304,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 84
+        "y": 108
       },
       "targets": [
         {
@@ -1184,7 +1341,7 @@
       "id": 33,
       "type": "timeseries",
       "title": "Metrics Collector Errors",
-      "description": "Collector errors per Event Interval. Non-zero values usually mean a cache list failed during scrape.",
+      "description": "Collector errors over the selected range.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -1193,11 +1350,11 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 92
+        "y": 116
       },
       "targets": [
         {
-          "expr": "increase(sds_metrics_collector_collect_errors_total[$event_interval])",
+          "expr": "increase(sds_metrics_collector_collect_errors_total[$__range])",
           "legendFormat": "errors",
           "refId": "A"
         }
@@ -1239,7 +1396,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 92
+        "y": 116
       },
       "targets": [
         {
@@ -1299,24 +1456,6 @@
         "options": [],
         "regex": "",
         "skipUrlSync": false
-      },
-      {
-        "type": "interval",
-        "name": "event_interval",
-        "label": "Event Interval",
-        "query": "1m,5m,15m,1h,6h,12h,1d",
-        "auto": true,
-        "auto_count": 30,
-        "auto_min": "10s",
-        "refresh": 2,
-        "hide": 0,
-        "skipUrlSync": false,
-        "current": {
-          "text": "auto",
-          "value": "$__auto_interval_event_interval",
-          "selected": false
-        },
-        "options": []
       },
       {
         "type": "query",
