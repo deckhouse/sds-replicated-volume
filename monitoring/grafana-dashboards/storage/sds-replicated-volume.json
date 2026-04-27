@@ -571,7 +571,7 @@
         {
           "expr": "histogram_quantile(0.90, sum(rate(sds_rva_detach_duration_seconds_bucket{node=~\"$node\"}[$__rate_interval])) by (le, node))",
           "legendFormat": "detach {{node}}",
-          "refId": "A"
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -622,7 +622,7 @@
         {
           "expr": "histogram_quantile(0.90, sum(rate(sds_rvr_deletion_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (le, node))",
           "legendFormat": "RVR deletion {{node}}",
-          "refId": "A"
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -685,7 +685,7 @@
         {
           "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_deletion_duration_seconds_bucket[$__rate_interval])) by (le, instance))",
           "legendFormat": "delete {{instance}}",
-          "refId": "A"
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -736,12 +736,12 @@
         {
           "expr": "sum by (node) (drbd_device_quorum{node=~\"$node\"} == 0)",
           "legendFormat": "no quorum {{node}}",
-          "refId": "A"
+          "refId": "B"
         },
         {
           "expr": "sum by (node) (drbd_device_unintentionaldiskless{node=~\"$node\"} == 1)",
           "legendFormat": "diskless {{node}}",
-          "refId": "A"
+          "refId": "C"
         }
       ],
       "fieldConfig": {
@@ -896,7 +896,7 @@
         {
           "expr": "histogram_quantile(0.90, sum(rate(sds_rv_datamesh_step_duration_seconds_bucket{type=~\"$transition_type\"}[$__rate_interval])) by (le, type, step))",
           "legendFormat": "step {{type}} / {{step}}",
-          "refId": "A"
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -1102,12 +1102,12 @@
         {
           "expr": "histogram_quantile(0.90, sum(rate(sds_metrics_collector_collect_duration_seconds_bucket[$__rate_interval])) by (le))",
           "legendFormat": "p90",
-          "refId": "A"
+          "refId": "B"
         },
         {
           "expr": "histogram_quantile(0.99, sum(rate(sds_metrics_collector_collect_duration_seconds_bucket[$__rate_interval])) by (le))",
           "legendFormat": "p99",
-          "refId": "A"
+          "refId": "C"
         }
       ],
       "fieldConfig": {
