@@ -19,45 +19,9 @@ package rvcontroller
 import (
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/metrics"
 )
-
-// observeRVMetrics records per-RV metrics on every reconcile.
-// Called at the beginning of Reconcile, after rv is loaded.
-func observeRVMetrics(rv *v1alpha1.ReplicatedVolume) {
-	if rv == nil {
-		return
-	}
-
-	sc := rv.Spec.ReplicatedStorageClassName
-
-	// RV creation timestamp gauge (for age-based filtering).
-	metrics.RVCreatedTimestamp.WithLabelValues(rv.Name, sc).Set(
-		float64(rv.CreationTimestamp.Unix()))
-	metrics.RVPresent.WithLabelValues(rv.Name, sc).Set(1)
-
-	deleting := float64(0)
-	if rv.DeletionTimestamp != nil {
-		deleting = 1
-		metrics.RVDeletionStartedTimestamp.WithLabelValues(rv.Name, sc).Set(
-			float64(rv.DeletionTimestamp.Unix()))
-	} else {
-		metrics.RVDeletionStartedTimestamp.DeleteLabelValues(rv.Name, sc)
-	}
-	metrics.RVDeleting.WithLabelValues(rv.Name, sc).Set(deleting)
-
-	// RV conditions health gauges.
-	for _, cond := range rv.Status.Conditions {
-		val := float64(0)
-		if cond.Status == metav1.ConditionTrue {
-			val = 1
-		}
-		metrics.RVCondition.WithLabelValues(rv.Name, sc, cond.Type).Set(val)
-	}
-}
 
 // observeRVDeletion records the deletion duration when an RV finalizer is removed.
 func observeRVDeletion(rv *v1alpha1.ReplicatedVolume) {
@@ -66,26 +30,6 @@ func observeRVDeletion(rv *v1alpha1.ReplicatedVolume) {
 	}
 	dur := time.Since(rv.DeletionTimestamp.Time).Seconds()
 	metrics.RVDeletionDuration.WithLabelValues(rv.Spec.ReplicatedStorageClassName).Observe(dur)
-}
-
-// cleanupRVMetrics removes all per-object metrics for a deleted RV.
-func cleanupRVMetrics(rv *v1alpha1.ReplicatedVolume) {
-	if rv == nil {
-		return
-	}
-	sc := rv.Spec.ReplicatedStorageClassName
-	metrics.RVCreatedTimestamp.DeleteLabelValues(rv.Name, sc)
-	metrics.RVDeletionStartedTimestamp.DeleteLabelValues(rv.Name, sc)
-	metrics.RVPresent.DeleteLabelValues(rv.Name, sc)
-	metrics.RVDeleting.DeleteLabelValues(rv.Name, sc)
-	for _, cond := range rv.Status.Conditions {
-		metrics.RVCondition.DeleteLabelValues(rv.Name, sc, cond.Type)
-	}
-	for _, transition := range rv.Status.DatameshTransitions {
-		typ := string(transition.Type)
-		metrics.DatameshActiveTransitions.DeleteLabelValues(rv.Name, typ)
-		metrics.DatameshActiveTransitionStartTimestamp.DeleteLabelValues(rv.Name, typ)
-	}
 }
 
 // observeRVAPhaseChange records RVA metrics when phase changes.
@@ -99,29 +43,15 @@ func observeRVAPhaseChange(
 		return
 	}
 
-	rvName := rva.Spec.ReplicatedVolumeName
 	node := rva.Spec.NodeName
 
-	// Phase info gauge: delete old, set new.
 	if oldPhase != newPhase {
-		if oldPhase != "" {
-			metrics.RVAPhaseInfo.DeleteLabelValues(rva.Name, rvName, node, string(oldPhase))
-		}
-		if newPhase != "" {
-			metrics.RVAPhaseInfo.WithLabelValues(rva.Name, rvName, node, string(newPhase)).Set(1)
-		}
-
 		// First time reaching Attached: observe ready/creation duration.
 		if oldPhase != v1alpha1.ReplicatedVolumeAttachmentPhaseAttached &&
 			newPhase == v1alpha1.ReplicatedVolumeAttachmentPhaseAttached {
 			dur := time.Since(rva.CreationTimestamp.Time).Seconds()
 			metrics.RVAReadyDuration.WithLabelValues(node).Observe(dur)
-			metrics.RVACreationDuration.WithLabelValues(rva.Name, rvName, node).Set(dur)
-			metrics.RVACreationCompletedTimestamp.WithLabelValues(rva.Name, rvName, node).Set(
-				float64(time.Now().Unix()))
 		}
-	} else if newPhase != "" {
-		metrics.RVAPhaseInfo.WithLabelValues(rva.Name, rvName, node, string(newPhase)).Set(1)
 	}
 }
 
@@ -139,11 +69,6 @@ func cleanupRVAMetrics(rva *v1alpha1.ReplicatedVolumeAttachment) {
 	if rva == nil {
 		return
 	}
-	rvName := rva.Spec.ReplicatedVolumeName
-	node := rva.Spec.NodeName
-	metrics.RVACreationDuration.DeleteLabelValues(rva.Name, rvName, node)
-	metrics.RVACreationCompletedTimestamp.DeleteLabelValues(rva.Name, rvName, node)
-	metrics.RVAPhaseInfo.DeleteLabelValues(rva.Name, rvName, node, string(rva.Status.Phase))
 }
 
 // observeDatameshMetrics compares datamesh transitions before and after ProcessTransitions.
@@ -158,40 +83,6 @@ func observeDatameshMetrics(
 	}
 
 	now := time.Now()
-
-	// Count active transitions per type (for gauge).
-	typeCounts := make(map[string]float64)
-	oldestStartedAtByType := make(map[string]time.Time)
-	for i := range rv.Status.DatameshTransitions {
-		t := &rv.Status.DatameshTransitions[i]
-		typ := string(t.Type)
-		typeCounts[typ]++
-		startedAt := t.StartedAt()
-		if startedAt.IsZero() {
-			continue
-		}
-		if prev, exists := oldestStartedAtByType[typ]; !exists || startedAt.Time.Before(prev) {
-			oldestStartedAtByType[typ] = startedAt.Time
-		}
-	}
-
-	// Reset active transitions gauge for this RV: delete old types, set new counts.
-	for i := range oldTransitions {
-		oldType := string(oldTransitions[i].Type)
-		if _, exists := typeCounts[oldType]; !exists {
-			metrics.DatameshActiveTransitions.DeleteLabelValues(rv.Name, oldType)
-			metrics.DatameshActiveTransitionStartTimestamp.DeleteLabelValues(rv.Name, oldType)
-		}
-	}
-	for typ, count := range typeCounts {
-		metrics.DatameshActiveTransitions.WithLabelValues(rv.Name, typ).Set(count)
-		if startedAt, exists := oldestStartedAtByType[typ]; exists {
-			metrics.DatameshActiveTransitionStartTimestamp.WithLabelValues(rv.Name, typ).Set(
-				float64(startedAt.Unix()))
-		} else {
-			metrics.DatameshActiveTransitionStartTimestamp.DeleteLabelValues(rv.Name, typ)
-		}
-	}
 
 	// Detect completed transitions: present in old but absent in new.
 	for i := range oldTransitions {

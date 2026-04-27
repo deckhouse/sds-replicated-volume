@@ -2,76 +2,15 @@
 # Used by the "SDS Replicated Volume" Grafana dashboard.
 - name: sds.replicated.volume.recording
   rules:
-    # Approximate RV creation duration: max of all RVR creation durations for a given RV.
-    - record: sds:rv_ready_duration_by_rv:max
-      expr: max by (rv) (sds_rvr_creation_duration_seconds)
-
-    # Current time spent in a non-Healthy phase (for stuck/deadlock detection).
-    - record: sds:rvr_stuck_phase_duration:seconds
-      expr: time() - sds_rvr_current_phase_start_seconds{phase!="Healthy"}
-
-    # Count of RVRs not in Healthy phase (cluster-wide).
+    # Count of RVRs in degraded-like phases (cluster-wide current snapshot).
     - record: sds:rvr_degraded_count
-      expr: count(sds_rvr_phase_info{phase!="Healthy",phase!=""} == 1) or vector(0)
-
-    # Count of RVs older than 5 min with IOReady=False.
-    # IOReady condition is not yet populated by the controller;
-    # this rule will start producing data when the condition is implemented.
-    - record: sds:rv_unhealthy_count
-      expr: count(sds_rv_condition{type="IOReady"} == 0 and on(name) (time() - sds_rv_created_timestamp_seconds > 300)) or vector(0)
+      expr: sum(sds_rvr_unhealthy_count) or vector(0)
 
 # Inactive alert rules for sds-replicated-volume.
 # severity_level "9" = informational, does not trigger notifications in Deckhouse.
 # Activate by lowering severity_level (e.g. "6" for warning, "4" for critical).
 - name: sds.replicated.volume.alerts
   rules:
-    - alert: D8SdsRVRStuckInPhase
-      expr: sds:rvr_stuck_phase_duration:seconds > 300
-      for: 5m
-      labels:
-        severity_level: "9"
-        tier: cluster
-      annotations:
-        plk_markup_format: "markdown"
-        plk_protocol_version: "1"
-        plk_create_group_if_not_exists__d8_sds_rv_health: "D8SdsReplicatedVolumeHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
-        plk_grouped_by__d8_sds_rv_health: "D8SdsReplicatedVolumeHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
-        summary: "RVR {{ $labels.name }} stuck in {{ $labels.phase }} phase"
-        description: |
-          ReplicatedVolumeReplica {{ $labels.name }} (RV: {{ $labels.rv }}, node: {{ $labels.node }}) has been
-          in {{ $labels.phase }} phase for more than 5 minutes.
-
-          Check the RVR status:
-
-          ```
-          kubectl get rvr {{ $labels.name }} -o yaml
-          ```
-
-          **Note:** This alert is currently inactive (severity_level=9). Lower severity_level to activate.
-
-    - alert: D8SdsRVUnhealthy
-      expr: sds:rv_unhealthy_count > 0
-      for: 10m
-      labels:
-        severity_level: "9"
-        tier: cluster
-      annotations:
-        plk_markup_format: "markdown"
-        plk_protocol_version: "1"
-        plk_create_group_if_not_exists__d8_sds_rv_health: "D8SdsReplicatedVolumeHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
-        plk_grouped_by__d8_sds_rv_health: "D8SdsReplicatedVolumeHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
-        summary: "There are unhealthy ReplicatedVolumes older than 5 minutes"
-        description: |
-          {{ $value }} ReplicatedVolume(s) older than 5 minutes have IOReady=False condition.
-
-          List unhealthy RVs:
-
-          ```
-          kubectl get rv -o custom-columns='NAME:.metadata.name,AGE:.metadata.creationTimestamp,PHASE:.status.phase'
-          ```
-
-          **Note:** This alert is currently inactive (severity_level=9). IOReady condition is not yet populated by the controller.
-
     - alert: D8SdsDRBDRNotConfigured
       expr: sds_drbdr_condition{type="Configured"} == 0
       for: 10m

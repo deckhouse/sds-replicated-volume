@@ -74,8 +74,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		).ToCtrl()
 	}
 
-	observeRVMetrics(rv)
-
 	// Load RSC (Auto mode only; Manual mode has no RSC reference).
 	var rsc *v1alpha1.ReplicatedStorageClass
 	if rv.Spec.ReplicatedStorageClassName != "" {
@@ -124,7 +122,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		)
 		if !obju.HasFinalizer(rv, v1alpha1.RVControllerFinalizer) {
 			observeRVDeletion(rv)
-			cleanupRVMetrics(rv)
 		}
 		return result.ToCtrl()
 	}

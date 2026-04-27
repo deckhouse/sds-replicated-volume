@@ -39,70 +39,43 @@ func observeRVRMetrics(
 
 	node := rvr.Spec.NodeName
 	sc := rvrStorageClassLabel(rvr, rv)
-	rvName := rvr.Spec.ReplicatedVolumeName
-	oldPhase := string(base.Status.Phase)
-	newPhase := string(rvr.Status.Phase)
 
-	deleting := float64(0)
-	if rvr.DeletionTimestamp != nil {
-		deleting = 1
-		metrics.RVRDeletionStartedTimestamp.WithLabelValues(rvr.Name, rvName, node, sc).Set(
-			float64(rvr.DeletionTimestamp.Unix()))
-	} else {
-		metrics.RVRDeletionStartedTimestamp.DeleteLabelValues(rvr.Name, rvName, node, sc)
-	}
-	metrics.RVRPresent.WithLabelValues(rvr.Name, rvName, node, sc).Set(1)
-	metrics.RVRDeleting.WithLabelValues(rvr.Name, rvName, node, sc).Set(deleting)
-
-	// Initialize phase tracker entry for this RVR (no-op if already present).
-	// On controller restart, uses ControllerStartTime as fallback.
-	// If the RVR is already Healthy in the cache (pre-restart state), mark
-	// creation as observed to prevent re-recording full age on phase flap.
-	if _, loaded := metrics.RVRPhases.GetOrInitLoaded(rvr.Name, oldPhase, metrics.ControllerStartTime); !loaded {
-		if oldPhase == string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy) {
-			metrics.RVRPhases.MarkCreationObserved(rvr.Name)
-		}
-	}
-
-	// Detect phase change.
-	if oldPhase != newPhase && newPhase != "" {
-		if prev, duration, existed := metrics.RVRPhases.RecordPhaseChange(rvr.Name, newPhase); existed {
-			phaseLabel := prev.Phase
-			if phaseLabel == "" {
-				phaseLabel = "Initial"
-			}
-			metrics.RVRPhaseDuration.WithLabelValues(node, sc, phaseLabel).Observe(duration.Seconds())
-		}
-
-		// Delete old phase label from gauge, set new one below.
-		if oldPhase != "" {
-			metrics.RVRCurrentPhaseStart.DeleteLabelValues(rvr.Name, rvName, node, oldPhase)
-		}
-
-		// First time reaching Healthy: observe creation duration.
-		if newPhase == string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy) &&
-			!metrics.RVRPhases.IsCreationObserved(rvr.Name) {
-			dur := time.Since(rvr.CreationTimestamp.Time).Seconds()
-			metrics.RVRReadyDuration.WithLabelValues(node, sc).Observe(dur)
-			metrics.RVRCreationDuration.WithLabelValues(rvr.Name, rvName, node, sc).Set(dur)
-			metrics.RVRCreationCompletedTimestamp.WithLabelValues(rvr.Name, rvName, node, sc).Set(
-				float64(time.Now().Unix()))
-			metrics.RVRPhases.MarkCreationObserved(rvr.Name)
-		}
-	}
-
-	// Update deadlock detection gauge on every reconcile.
-	if newPhase != "" {
-		entry := metrics.RVRPhases.GetOrInit(rvr.Name, newPhase, metrics.ControllerStartTime)
-		metrics.RVRCurrentPhaseStart.WithLabelValues(rvr.Name, rvName, node, newPhase).Set(
-			float64(entry.StartTime.Unix()))
-	}
+	observeRVRReadyTransition(rvr, base, node, sc)
 
 	// BackingVolumeReady transition: observe LLV provisioning time.
 	observeBackingVolumeReady(rvr, base, node, sc)
+}
 
-	// Health gauge: set 1 for current phase (delete old if changed).
-	observeRVRPhaseInfo(rvr, base, rvName, node)
+// observeRVRReadyTransition records every Ready condition transition from non-True to True.
+func observeRVRReadyTransition(
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	base *v1alpha1.ReplicatedVolumeReplica,
+	node, sc string,
+) {
+	if rvr.DeletionTimestamp != nil {
+		return
+	}
+
+	oldCond := obju.GetStatusCondition(base, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+	newCond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+
+	wasTrue := oldCond != nil && oldCond.Status == metav1.ConditionTrue
+	isTrue := newCond != nil && newCond.Status == metav1.ConditionTrue
+	if wasTrue || !isTrue {
+		return
+	}
+
+	startedAt := rvr.CreationTimestamp.Time
+	if oldCond != nil && !oldCond.LastTransitionTime.IsZero() {
+		startedAt = oldCond.LastTransitionTime.Time
+	}
+
+	duration := newCond.LastTransitionTime.Sub(startedAt)
+	if duration <= 0 {
+		return
+	}
+
+	metrics.RVRReadyDuration.WithLabelValues(node, sc).Observe(duration.Seconds())
 }
 
 // observeBackingVolumeReady detects BackingVolumeReady condition transitioning to True
@@ -122,48 +95,6 @@ func observeBackingVolumeReady(
 		dur := time.Since(rvr.CreationTimestamp.Time).Seconds()
 		metrics.RVRBackingVolumeDuration.WithLabelValues(node, sc).Observe(dur)
 	}
-}
-
-// observeRVRPhaseInfo updates the per-object phase info gauge.
-func observeRVRPhaseInfo(
-	rvr *v1alpha1.ReplicatedVolumeReplica,
-	base *v1alpha1.ReplicatedVolumeReplica,
-	rvName, node string,
-) {
-	oldPhase := string(base.Status.Phase)
-	newPhase := string(rvr.Status.Phase)
-
-	if oldPhase != newPhase {
-		if oldPhase != "" {
-			metrics.RVRPhaseInfo.DeleteLabelValues(rvr.Name, rvName, node, oldPhase)
-		}
-	}
-
-	if newPhase != "" {
-		metrics.RVRPhaseInfo.WithLabelValues(rvr.Name, rvName, node, newPhase).Set(1)
-	}
-}
-
-// cleanupRVRMetrics removes all per-object metrics for a deleted RVR.
-// Must be called when the RVR finalizer is removed.
-func cleanupRVRMetrics(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.ReplicatedVolume) {
-	if rvr == nil {
-		return
-	}
-
-	name := rvr.Name
-	rvName := rvr.Spec.ReplicatedVolumeName
-	node := rvr.Spec.NodeName
-	sc := rvrStorageClassLabel(rvr, rv)
-
-	metrics.RVRCreationDuration.DeleteLabelValues(name, rvName, node, sc)
-	metrics.RVRCreationCompletedTimestamp.DeleteLabelValues(name, rvName, node, sc)
-	metrics.RVRPhaseInfo.DeleteLabelValues(name, rvName, node, string(rvr.Status.Phase))
-	metrics.RVRPresent.DeleteLabelValues(name, rvName, node, sc)
-	metrics.RVRDeleting.DeleteLabelValues(name, rvName, node, sc)
-	metrics.RVRDeletionStartedTimestamp.DeleteLabelValues(name, rvName, node, sc)
-	metrics.RVRCurrentPhaseStart.DeleteLabelValues(name, rvName, node, string(rvr.Status.Phase))
-	metrics.RVRPhases.Delete(name)
 }
 
 // observeRVRDeletion records the deletion duration when an RVR finalizer is removed.
