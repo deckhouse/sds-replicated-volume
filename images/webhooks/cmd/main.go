@@ -62,6 +62,7 @@ const (
 	RSPValidatorID = "RSPValidator"
 	SCValidatorID  = "SCValidator"
 	PVCValidatorID = "PVCValidator"
+	RVSValidatorID = "RVSValidator"
 )
 
 func main() {
@@ -95,11 +96,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	rvsValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.RVSValidate, RVSValidatorID, &srv.ReplicatedVolumeSnapshot{}, logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating rvsValidatingWebhookHandler: %s", err)
+		os.Exit(1)
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/rsc-validate", rscValidatingWebhookHandler)
 	mux.Handle("/sc-validate", scValidatingWebhookHandler)
 	mux.Handle("/rsp-validate", rspValidatingWebhookHandler)
 	mux.Handle("/pvc-validate", pvcValidatingWebhookHandler)
+	mux.Handle("/rvs-validate", rvsValidatingWebhookHandler)
 	mux.HandleFunc("/healthz", httpHandlerHealthz)
 
 	logger.Infof("Listening on %s", port)

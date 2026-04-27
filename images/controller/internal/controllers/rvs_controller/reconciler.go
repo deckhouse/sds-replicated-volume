@@ -110,6 +110,10 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, rvs *v1alpha1.Replicat
 		return rf.Fail(err)
 	}
 
+	if outcome, handled := r.reconcileMultiPrimary(rf.Ctx(), rvs, rv, rvrs, childRVRSs); handled {
+		return outcome
+	}
+
 	outcome = r.reconcileAggregateStatus(rf.Ctx(), rvs, rv, rvrs, childRVRSs)
 	if outcome.ShouldReturn() {
 		return outcome
@@ -147,6 +151,87 @@ func (r *Reconciler) createMissingRVRSs(
 		requeue = true
 	}
 	return requeue, nil
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: multi-primary guard
+//
+
+// reconcileMultiPrimary rejects (or aborts) snapshot creation when the
+// parent ReplicatedVolume is in multi-primary state — i.e. ≥2 attached
+// diskful members in RV.Status.Datamesh.Members. Such volumes cannot be
+// safely snapshotted because the controller can quiesce IO on a single
+// primary at a time; a writer on a second primary would slip past
+// SuspendIO/FlushBitmap and produce an inconsistent point-in-time image.
+//
+// Behavior depends on the current RVS phase:
+//
+//   - Phase=Ready or sync-mesh in flight: not handled. The point-in-time
+//     image was already captured at FlushBitmap on a single primary, so
+//     a concurrent attach appearing AFTER that moment cannot corrupt it.
+//     Aborting here would only discard correct work.
+//
+//   - Prepare-mesh in flight (PrepareRevision>0 or PrepareTransitions
+//     non-empty): patch status to InProgress with a multi-primary
+//     message, then dispatch reconcilePrepareMesh so the
+//     prepare-cleanup/v1 plan (ResumeIO + UntrackBitmap) tears down
+//     anything already pushed to the data plane. Once the cleanup
+//     transition drains, the next reconcile lands in the no-work branch
+//     below and sets Phase=Failed.
+//
+//   - Nothing started yet: set Phase=Failed immediately. There is
+//     nothing to undo on the data plane.
+//
+// Returns (outcome, true) when the multi-primary path took over the
+// reconcile, (zero, false) when no special handling applies and the
+// caller should proceed to the normal flow.
+func (r *Reconciler) reconcileMultiPrimary(
+	ctx context.Context,
+	rvs *v1alpha1.ReplicatedVolumeSnapshot,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	childRVRSs []*v1alpha1.ReplicatedVolumeReplicaSnapshot,
+) (flow.ReconcileOutcome, bool) {
+	if !rv.IsMultiPrimary() {
+		return flow.ReconcileOutcome{}, false
+	}
+	if rvs.Status.Phase == v1alpha1.ReplicatedVolumeSnapshotPhaseReady {
+		return flow.ReconcileOutcome{}, false
+	}
+	if syncActive(rvs) {
+		return flow.ReconcileOutcome{}, false
+	}
+
+	rf := flow.BeginReconcile(ctx, "multi-primary")
+	var outcome flow.ReconcileOutcome
+	defer rf.OnEnd(&outcome)
+
+	attached := rv.AttachedDiskfulMembers()
+	msg := fmt.Sprintf(
+		"ReplicatedVolume %q is multi-primary (attached diskful members: %v); snapshots are not allowed",
+		rv.Name, attached)
+
+	prepareInFlight := rvs.Status.PrepareRevision > 0 || len(rvs.Status.PrepareTransitions) > 0
+	if !prepareInFlight {
+		outcome = r.reconcileStatus(rf.Ctx(), rvs, rvs.Status.Datamesh,
+			v1alpha1.ReplicatedVolumeSnapshotPhaseFailed,
+			msg,
+			false,
+			rvs.Status.SourceReplicaSnapshotName)
+		return outcome, true
+	}
+
+	statusOut := r.reconcileStatus(rf.Ctx(), rvs, rvs.Status.Datamesh,
+		v1alpha1.ReplicatedVolumeSnapshotPhaseInProgress,
+		"Prepare cleanup is in progress: "+msg,
+		false,
+		rvs.Status.SourceReplicaSnapshotName)
+	if statusOut.ShouldReturn() {
+		outcome = statusOut
+		return outcome, true
+	}
+	outcome = r.reconcilePrepareMesh(rf.Ctx(), rvs, rv, rvrs, childRVRSs)
+	return outcome, true
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

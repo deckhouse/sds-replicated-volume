@@ -107,6 +107,9 @@ func Setup() *Framework {
 		f.runID = string(data)
 		fmt.Fprintf(GinkgoWriter, "[Setup] BeforeSuite starting f.init() runID=%s...\n", f.runID)
 		f.init(ctx)
+		if GinkgoParallelProcess() == 1 {
+			f.scavengePriorRuns(ctx)
+		}
 		fmt.Fprintln(GinkgoWriter, "[Setup] BeforeSuite f.init() done")
 	})
 

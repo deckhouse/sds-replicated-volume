@@ -22,6 +22,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	fw "github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework"
@@ -89,10 +91,44 @@ var _ = Describe("RVS create", func() {
 		Entry("2D+1TB",
 			Label(fw.LabelSlow), SpecTimeout(4*time.Minute), require.MinNodes(2, 1),
 			fw.TestLayout{FTT: 1, GMDR: 0}),
+	)
+})
 
-		Entry("2D multiattach",
-			Label(fw.LabelSlow), SpecTimeout(4*time.Minute), require.MinNodes(2),
+// RVS create on a multi-primary RV (≥2 attached diskful members) MUST be
+// rejected: the controller cannot quiesce IO on more than one primary at
+// a time, so a snapshot taken across multiple writers would be
+// inconsistent. The rvs-controller marks such RVS as Phase=Failed with a
+// "multi-primary" message and does not create any child RVRSs / temp
+// DRBDResources.
+var _ = Describe("RVS create rejected for multi-primary RV", func() {
+	DescribeTable("snapshot is rejected for layout",
+		func(ctx SpecContext, layout fw.TestLayout) {
+			trv := f.SetupLayout(ctx, layout)
+			trv.ActivateSafetyInvariants()
+
+			trvs := trv.Snapshot()
+			trvs.Create(ctx)
+
+			trvs.Await(ctx, match.RVS.PhaseIs(v1alpha1.ReplicatedVolumeSnapshotPhaseFailed))
+
+			rvs := trvs.Object()
+			Expect(rvs.Status.ReadyToUse).To(BeFalse())
+			Expect(strings.ToLower(rvs.Status.Message)).To(ContainSubstring("multi-primary"),
+				"expected multi-primary message, got %q", rvs.Status.Message)
+
+			Eventually(ctx, func() int { return trvs.RVRSCount() }).
+				Should(Equal(0), "no replica snapshots must be created for a rejected RVS")
+
+			expectNoOrphanSyncResources(ctx, trvs)
+		},
+
+		Entry("2D multiattach (2 attached)",
+			Label(fw.LabelSlow), SpecTimeout(3*time.Minute), require.MinNodes(2),
 			fw.TestLayout{FTT: 0, GMDR: 1, Attached: 2}),
+
+		Entry("3D multiattach (2 attached)",
+			Label(fw.LabelSlow), SpecTimeout(4*time.Minute), require.MinNodes(3),
+			fw.TestLayout{FTT: 1, GMDR: 1, Attached: 2}),
 	)
 })
 
@@ -108,36 +144,42 @@ func countDiskfulMembers(rv *v1alpha1.ReplicatedVolume) int {
 	return n
 }
 
-// expectNoOrphanSyncResources asserts that no temp sync DRBDResource or
-// DRBDResourceOperation with the RVS name prefix remains in the cluster
-// after the snapshot is Ready. Temp resources are named "{rvsName}-*".
+// expectNoOrphanSyncResources asserts that no temp sync DRBDResource owned
+// by the RVS remains in the cluster after the snapshot is Ready. Sync
+// DRBDResources hold LVM snapshots attached to a kernel-level DRBD instance
+// and MUST be torn down once data is synced. Ownership is checked via
+// OwnerReferences[].UID rather than name prefix, to avoid collisions with the
+// source RV's RVR DRBDResources (which share the same name prefix when RVS
+// and RV happen to have the same name).
+//
+// DRBDResourceOperation objects are intentionally NOT checked: they are
+// metadata records of one-shot DRBD commands that have already completed,
+// kept alive for diagnostics until the RVS itself is deleted (then collected
+// via OwnerReferences GC).
 func expectNoOrphanSyncResources(ctx SpecContext, trvs *fw.TestRVS) {
 	GinkgoHelper()
-	prefix := trvs.Name() + "-"
+	rvsUID := trvs.Object().UID
+	Expect(rvsUID).NotTo(BeEmpty(), "RVS UID is empty")
 
 	Eventually(ctx, func() []string {
 		var drbdrs v1alpha1.DRBDResourceList
 		Expect(f.Client.List(ctx, &drbdrs)).To(Succeed())
 		var names []string
 		for i := range drbdrs.Items {
-			if strings.HasPrefix(drbdrs.Items[i].Name, prefix) &&
+			if ownedBy(drbdrs.Items[i].OwnerReferences, rvsUID) &&
 				drbdrs.Items[i].DeletionTimestamp == nil {
 				names = append(names, drbdrs.Items[i].Name)
 			}
 		}
 		return names
 	}).Should(BeEmpty(), "orphan temp DRBDResource objects after RVS Ready")
+}
 
-	Eventually(ctx, func() []string {
-		var ops v1alpha1.DRBDResourceOperationList
-		Expect(f.Client.List(ctx, &ops)).To(Succeed())
-		var names []string
-		for i := range ops.Items {
-			if strings.HasPrefix(ops.Items[i].Name, prefix) &&
-				ops.Items[i].DeletionTimestamp == nil {
-				names = append(names, ops.Items[i].Name)
-			}
+func ownedBy(refs []metav1.OwnerReference, uid types.UID) bool {
+	for _, r := range refs {
+		if r.UID == uid {
+			return true
 		}
-		return names
-	}).Should(BeEmpty(), "orphan DRBDResourceOperation objects after RVS Ready")
+	}
+	return false
 }

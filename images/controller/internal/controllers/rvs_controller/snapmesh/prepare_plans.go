@@ -379,6 +379,13 @@ func prepareOperationSucceeded(gctx *globalContext, name string) bool {
 
 func prepareCleanupNeeded(gctx *globalContext) bool {
 	l := log.FromContext(gctx.ctx)
+
+	if gctx.rv.IsMultiPrimary() {
+		l.Info("prepare: cleanup needed — RV is multi-primary, aborting prepare",
+			"attachedMembers", gctx.rv.AttachedDiskfulMembers())
+		return true
+	}
+
 	if !prepareOperationSucceeded(gctx, preparePrimaryOperationName(gctx, "suspend-io")) {
 		return false
 	}

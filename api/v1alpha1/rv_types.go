@@ -600,6 +600,37 @@ func (dm *ReplicatedVolumeDatamesh) FindMemberByName(name string) *DatameshMembe
 	return nil
 }
 
+// AttachedDiskfulMembers returns the names of datamesh members that are
+// currently attached (DRBD Primary) and have type Diskful — matching the
+// set of members that participate in the snapshot mesh. TieBreaker,
+// Access, ShadowDiskful and Liminal* members are intentionally ignored.
+func (rv *ReplicatedVolume) AttachedDiskfulMembers() []string {
+	if rv == nil {
+		return nil
+	}
+	var names []string
+	for _, m := range rv.Status.Datamesh.Members {
+		if !m.Attached {
+			continue
+		}
+		if m.Type != DatameshMemberTypeDiskful {
+			continue
+		}
+		names = append(names, m.Name)
+	}
+	return names
+}
+
+// IsMultiPrimary reports whether the ReplicatedVolume is currently in
+// multi-primary state (≥2 attached diskful members in
+// Status.Datamesh.Members). Such volumes cannot be safely snapshotted —
+// the snapshot pipeline can only quiesce IO on a single primary at a
+// time, and a writer on a second primary would slip past
+// SuspendIO/FlushBitmap and produce an inconsistent point-in-time image.
+func (rv *ReplicatedVolume) IsMultiPrimary() bool {
+	return len(rv.AttachedDiskfulMembers()) >= 2
+}
+
 // SharedSecretAlg enumerates possible hashing algorithms for DRBD shared secrets.
 type SharedSecretAlg string
 
