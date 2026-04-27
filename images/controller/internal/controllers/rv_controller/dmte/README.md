@@ -28,7 +28,7 @@ through slot accessors for the reconciler to persist.
 
 ### Transition
 
-A `Transition` is the API object representing an active operation on the
+yrepresenting an active operation on the
 datamesh. It carries:
 
 - **Type** — what kind of operation (e.g., `AddReplica`, `Attach`, `ChangeQuorum`)

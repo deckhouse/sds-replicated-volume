@@ -86,6 +86,11 @@ func (r *Reconciler) Reconcile(
 		return rf.Fail(err).ToCtrl()
 	}
 	if !ok {
+		rf.Log().Info(
+			"[Reconcile] DRBDResource API object NOT FOUND — entering orphan-drbd path",
+			"k8sName", req.Name,
+			"nodeName", r.nodeName,
+		)
 		return r.reconcileOrphanDRBD(rf.Ctx(), req.Name).ToCtrl()
 	}
 
@@ -195,10 +200,11 @@ func (r *Reconciler) reconcileDRBDR(
 	// ensures the final status patch uses the correct base.
 	statusBase := drbdr.DeepCopy()
 
-	// Collect the pending-release list from status.
 	var pendingRelease []string
+	var pendingReleaseLLVS []string
 	if drbdr.Status.ActiveConfiguration != nil {
 		pendingRelease = drbdr.Status.ActiveConfiguration.LLVFinalizersToRelease
+		pendingReleaseLLVS = drbdr.Status.ActiveConfiguration.LLVSFinalizersToRelease
 	}
 
 	// Recovery: if DRBD has a disk whose LLV is not yet tracked in the
@@ -212,18 +218,22 @@ func (r *Reconciler) reconcileDRBDR(
 		}
 	}
 
-	// Step 1: Add finalizer to intended LLV (before DRBD operations).
-	// Skip in maintenance (no attach will happen) and when not Up+Diskful.
-	// Record the LLV in the pending-release list (written to status in Step 4)
-	// so we never lose track of it.
 	var intendedDisk string
 	var llvErr error
 	if !maintenanceMode && drbdr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful && upAndNotInCleanup {
-		llvName := drbdr.Spec.LVMLogicalVolumeName
-		if llvName != "" && !slices.Contains(pendingRelease, llvName) {
-			pendingRelease = append(pendingRelease, llvName)
+		if drbdr.Spec.LVMLogicalVolumeSnapshotName != "" {
+			llvsName := drbdr.Spec.LVMLogicalVolumeSnapshotName
+			if !slices.Contains(pendingReleaseLLVS, llvsName) {
+				pendingReleaseLLVS = append(pendingReleaseLLVS, llvsName)
+			}
+			intendedDisk, llvErr = r.reconcileLLVSFinalizerAdd(rf.Ctx(), llvsName)
+		} else {
+			llvName := drbdr.Spec.LVMLogicalVolumeName
+			if llvName != "" && !slices.Contains(pendingRelease, llvName) {
+				pendingRelease = append(pendingRelease, llvName)
+			}
+			intendedDisk, llvErr = r.reconcileLLVFinalizerAdd(rf.Ctx(), llvName)
 		}
-		intendedDisk, llvErr = r.reconcileLLVFinalizerAdd(rf.Ctx(), llvName)
 	}
 
 	// Step 2: DRBD convergence.
@@ -250,8 +260,6 @@ func (r *Reconciler) reconcileDRBDR(
 		aErr2 = ConfiguredReasonError(aErr2, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 	}
 
-	// Step 3: Release finalizers from LLVs we no longer need (after detach).
-	// Skip in maintenance (no detach happened).
 	if !maintenanceMode {
 		keepLLV := ""
 		if upAndNotInCleanup {
@@ -267,6 +275,21 @@ func (r *Reconciler) reconcileDRBDR(
 			}
 			pendingRelease = slices.DeleteFunc(pendingRelease, func(s string) bool { return s == llv })
 		}
+
+		keepLLVS := ""
+		if upAndNotInCleanup {
+			keepLLVS = drbdr.Spec.LVMLogicalVolumeSnapshotName
+		}
+		for _, name := range pendingReleaseLLVS {
+			if name == keepLLVS {
+				continue
+			}
+			if releaseErr := r.releaseLLVSFinalizer(rf.Ctx(), name); releaseErr != nil {
+				llvErr = errors.Join(llvErr, releaseErr)
+				continue
+			}
+			pendingReleaseLLVS = slices.DeleteFunc(pendingReleaseLLVS, func(s string) bool { return s == name })
+		}
 	}
 
 	// Step 4: Report and status patch.
@@ -280,7 +303,9 @@ func (r *Reconciler) reconcileDRBDR(
 
 	// Write the pending-release list after ensureReportState (which may
 	// initialize ActiveConfiguration via aState.Report).
-	ensureActiveConfiguration(drbdr).LLVFinalizersToRelease = pendingRelease
+	ac := ensureActiveConfiguration(drbdr)
+	ac.LLVFinalizersToRelease = pendingRelease
+	ac.LLVSFinalizersToRelease = pendingReleaseLLVS
 
 	// Patch status if changed
 	if !equality.Semantic.DeepEqual(statusBase.Status, drbdr.Status) {
@@ -314,7 +339,7 @@ func (r *Reconciler) reconcileOrphanDRBD(
 	k8sName string,
 ) (outcome flow.ReconcileOutcome) {
 	drbdName := DRBDNameFromK8SName(k8sName)
-	rf := flow.BeginReconcile(ctx, "orphan-drbd", "drbdResourceName", drbdName)
+	rf := flow.BeginReconcile(ctx, "orphan-drbd", "drbdResourceName", drbdName, "k8sName", k8sName)
 	defer rf.OnEnd(&outcome)
 
 	status, err := drbdutils.ExecuteStatus(rf.Ctx(), drbdName)
@@ -322,10 +347,19 @@ func (r *Reconciler) reconcileOrphanDRBD(
 		return rf.Fail(err)
 	}
 	if len(status) == 0 {
+		rf.Log().V(1).Info("[reconcileOrphanDRBD] kernel DRBD resource not present, nothing to clean")
 		return rf.Done()
 	}
 
-	rf.Log().Info("Cleaning up orphan DRBD resource")
+	kernelDiskState := ""
+	if len(status[0].Devices) > 0 {
+		kernelDiskState = status[0].Devices[0].DiskState
+	}
+	rf.Log().Info(
+		"[reconcileOrphanDRBD] TEARING DOWN kernel DRBD resource because K8S object is gone",
+		"kernelPeers", len(status[0].Connections),
+		"kernelDiskState", kernelDiskState,
+	)
 
 	_ = os.Remove(DeviceSymlinkPath(k8sName))
 
@@ -453,6 +487,88 @@ func (r *Reconciler) reconcileLLVFinalizerAdd(ctx context.Context, llvName strin
 	}
 
 	return formatLVMDevicePath(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode), nil
+}
+
+func (r *Reconciler) patchLLVS(ctx context.Context, obj, base *snc.LVMLogicalVolumeSnapshot) error {
+	return r.cl.Patch(ctx, obj, client.MergeFrom(base))
+}
+
+func (r *Reconciler) reconcileLLVSFinalizerAdd(ctx context.Context, llvsName string) (diskPath string, err error) {
+	if llvsName == "" {
+		return "", nil
+	}
+
+	llvs, err := r.getLVMLogicalVolumeSnapshot(ctx, llvsName)
+	if err != nil {
+		return "", ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
+	}
+	if llvs == nil {
+		return "", ConfiguredReasonError(
+			fmt.Errorf("LVMLogicalVolumeSnapshot %q not found", llvsName),
+			v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed,
+		)
+	}
+
+	if llvs.DeletionTimestamp != nil {
+		return "", ConfiguredReasonError(
+			fmt.Errorf("LVMLogicalVolumeSnapshot %q is being deleted", llvsName),
+			v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed,
+		)
+	}
+
+	if !obju.HasFinalizer(llvs, v1alpha1.AgentFinalizer) {
+		llvsBase := llvs.DeepCopy()
+		obju.AddFinalizer(llvs, v1alpha1.AgentFinalizer)
+		if err := r.patchLLVS(ctx, llvs, llvsBase); err != nil {
+			return "", flow.Wrapf(err, "adding finalizer on LLVS %q", llvs.Name)
+		}
+	}
+
+	if llvs.Status == nil || llvs.Status.ActualVGNameOnTheNode == "" {
+		return "", ConfiguredReasonError(
+			fmt.Errorf("LVMLogicalVolumeSnapshot %q status not ready (VG name missing)", llvsName),
+			v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed,
+		)
+	}
+
+	devPath := formatLVMDevicePath(llvs.Status.ActualVGNameOnTheNode, llvsName)
+
+	// TODO discuss
+	if _, err := os.Stat(devPath); os.IsNotExist(err) {
+		lvPath := llvs.Status.ActualVGNameOnTheNode + "/" + llvsName
+		cmd := drbdutils.ExecCommandContext(ctx, "/sbin/lvchange", "-ay", "-K", lvPath)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return "", ConfiguredReasonError(
+				fmt.Errorf("activating snapshot LV %s: %w; output: %s", lvPath, err, string(out)),
+				v1alpha1.DRBDResourceCondConfiguredReasonAttachFailed,
+			)
+		}
+	}
+
+	return devPath, nil
+}
+
+func (r *Reconciler) releaseLLVSFinalizer(ctx context.Context, llvsName string) error {
+	llvs, err := r.getLVMLogicalVolumeSnapshot(ctx, llvsName)
+	if err != nil {
+		return flow.Wrapf(err, "getting LLVS %q for finalizer release", llvsName)
+	}
+	if llvs == nil {
+		return nil
+	}
+
+	if obju.HasFinalizer(llvs, v1alpha1.AgentFinalizer) {
+		llvsBase := llvs.DeepCopy()
+		obju.RemoveFinalizer(llvs, v1alpha1.AgentFinalizer)
+		if err := r.patchLLVS(ctx, llvs, llvsBase); err != nil {
+			if client.IgnoreNotFound(err) == nil {
+				return nil
+			}
+			return flow.Wrapf(err, "releasing finalizer on LLVS %q", llvsName)
+		}
+	}
+
+	return nil
 }
 
 // reconcileLLVRecovery adds an untracked LLV to the pending-release list

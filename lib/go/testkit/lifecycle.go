@@ -435,6 +435,11 @@ func (t *TrackedObject[T]) Delete(ctx context.Context) {
 // deleteByName sends a best-effort delete request using only the object
 // name and GVK — no dependency on Object() or snapshots. Used in
 // DeferCleanup where the informer may not have delivered the first event.
+//
+// Errors other than NotFound are logged to GinkgoWriter so cleanup
+// failures are visible in test output (the previous version silently
+// swallowed all errors, which masked leftover-object bugs after
+// cluster/connection issues during DeferCleanup).
 func (t *TrackedObject[T]) deleteByName(ctx context.Context) {
 	if t.Client == nil || t.lifecycle.OnNewEmpty == nil {
 		return
@@ -442,7 +447,11 @@ func (t *TrackedObject[T]) deleteByName(ctx context.Context) {
 	obj := t.lifecycle.OnNewEmpty()
 	obj.SetName(t.objName)
 	obj.GetObjectKind().SetGroupVersionKind(t.GVK)
-	_ = client.IgnoreNotFound(t.Client.Delete(ctx, obj))
+	if err := client.IgnoreNotFound(t.Client.Delete(ctx, obj)); err != nil {
+		fmt.Fprintf(GinkgoWriter,
+			"[%s] cleanup: deleteByName %s %s failed: %v\n",
+			time.Now().Format("15:04:05.000"), t.GVK.Kind, t.objName, err)
+	}
 }
 
 // awaitDeleteSync waits for the informer to acknowledge a delete: either

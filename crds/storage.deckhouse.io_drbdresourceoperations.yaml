@@ -78,16 +78,33 @@ spec:
                 x-kubernetes-validations:
                 - message: drbdResourceName is immutable
                   rule: self == oldSelf
+              peerNodeID:
+                description: |-
+                  PeerNodeID selects a target peer for per-peer operations (TrackBitmap, UntrackBitmap).
+                  When nil for TrackBitmap/UntrackBitmap, the operation is applied to all peers listed
+                  in the target DRBDResource's spec.peers.
+                  Ignored by operation types that are not per-peer (FlushBitmap, SuspendIO, ResumeIO,
+                  ForcePrimary, Invalidate, Outdate, Verify, CreateNewUUID).
+                maximum: 31
+                minimum: 0
+                type: integer
+                x-kubernetes-validations:
+                - message: peerNodeID is immutable
+                  rule: self == oldSelf
               type:
                 description: DRBDResourceOperationType represents the type of operation
                   to perform on a DRBD resource.
                 enum:
                 - CreateNewUUID
+                - TrackBitmap
+                - UntrackBitmap
+                - FlushBitmap
+                - SuspendIO
+                - ResumeIO
                 - ForcePrimary
                 - Invalidate
                 - Outdate
                 - Verify
-                - CreateSnapshot
                 type: string
                 x-kubernetes-validations:
                 - message: type is immutable
@@ -106,6 +123,9 @@ spec:
                 type: string
               phase:
                 description: DRBDOperationPhase represents the phase of a DRBD operation.
+                type: string
+              result:
+                maxLength: 1024
                 type: string
               startedAt:
                 format: date-time

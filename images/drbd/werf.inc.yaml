@@ -27,14 +27,14 @@ shell:
     - chmod +x /install
     - chmod +x /uninstall
   setup:
-    - git clone --depth 1 --branch drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }} {{ $.Root.SOURCE_REPO }}/deckhouse/3p-drbd.git  /drbd
+    - git clone --depth 1 --branch drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }} {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd.git  /drbd
     - cd /drbd
-    - git submodule update --init --recursive
+    - git submodule update --init --remote --recursive
     - sed -e "s/\<curl\>/d8-curl -k/g" -i /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh
     - git commit -am 'd8-curl'
-      # tarball required by spaas image
     - make tarball
-      # disable use of local spatch (see /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh)
+    - echo "WERF HACK TODO REMOVE"
+    - ls -la /
     - rm -rf .git
 ---
 image: {{ $.ImageName }}

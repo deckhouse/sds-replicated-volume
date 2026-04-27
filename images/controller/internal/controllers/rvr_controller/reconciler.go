@@ -471,6 +471,13 @@ func (r *Reconciler) deleteDRBDR(ctx context.Context, drbdr *v1alpha1.DRBDResour
 	if drbdr.DeletionTimestamp != nil {
 		return nil
 	}
+	r.log.Info(
+		"[deleteDRBDR] DELETING DRBDResource",
+		"drbdrName", drbdr.Name,
+		"drbdrUID", string(drbdr.UID),
+		"drbdrSpecNodeName", drbdr.Spec.NodeName,
+		"ownerRefs", drbdr.OwnerReferences,
+	)
 	if err := client.IgnoreNotFound(r.cl.Delete(ctx, drbdr)); err != nil {
 		return err
 	}

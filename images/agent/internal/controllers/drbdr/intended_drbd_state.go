@@ -176,14 +176,14 @@ func (s *intendedDRBDState) NodeID() uint8             { return s.nodeID }
 func (s *intendedDRBDState) Type() v1alpha1.DRBDResourceType {
 	return s.resourceType
 }
-func (s *intendedDRBDState) BackingDisk() string           { return s.backingDisk }
-func (s *intendedDRBDState) Quorum() byte                  { return s.quorum }
-func (s *intendedDRBDState) QuorumMinimumRedundancy() byte { return s.quorumMinimumRedundancy }
-func (s *intendedDRBDState) AllowTwoPrimaries() bool       { return s.allowTwoPrimaries }
-func (s *intendedDRBDState) Role() v1alpha1.DRBDRole       { return s.role }
-func (s *intendedDRBDState) Size() int64                   { return s.sizeBytes }
-func (s *intendedDRBDState) Peers() []IntendedPeer         { return s.peers }
-func (s *intendedDRBDState) StatusDeviceUUID() string      { return s.statusDeviceUUID }
+func (s *intendedDRBDState) BackingDisk() string            { return s.backingDisk }
+func (s *intendedDRBDState) Quorum() byte                   { return s.quorum }
+func (s *intendedDRBDState) QuorumMinimumRedundancy() byte  { return s.quorumMinimumRedundancy }
+func (s *intendedDRBDState) AllowTwoPrimaries() bool        { return s.allowTwoPrimaries }
+func (s *intendedDRBDState) Role() v1alpha1.DRBDRole        { return s.role }
+func (s *intendedDRBDState) Size() int64                    { return s.sizeBytes }
+func (s *intendedDRBDState) Peers() []IntendedPeer          { return s.peers }
+func (s *intendedDRBDState) StatusDeviceUUID() string       { return s.statusDeviceUUID }
 
 // Hardcoded resource options defaults
 func (s *intendedDRBDState) AutoPromote() bool                  { return false }

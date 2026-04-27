@@ -74,6 +74,7 @@ spec:
             description: |-
               Auto mode requires RSC name, forbids manualConfiguration:
               Manual mode requires manualConfiguration, forbids RSC name:
+              dataSource is immutable once set:
             properties:
               configurationMode:
                 default: Auto
@@ -85,6 +86,32 @@ spec:
                 - Auto
                 - Manual
                 type: string
+              dataSource:
+                properties:
+                  kind:
+                    description: |-
+                      Kind selects the type of the source object: a ReplicatedVolumeSnapshot
+                      (snapshot restore) or a ReplicatedVolume (volume clone).
+                    enum:
+                    - ReplicatedVolumeSnapshot
+                    - ReplicatedVolume
+                    type: string
+                    x-kubernetes-validations:
+                    - message: kind is immutable
+                      rule: self == oldSelf
+                  name:
+                    description: Name is the name of the source object of the selected
+                      Kind.
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                    x-kubernetes-validations:
+                    - message: name is immutable
+                      rule: self == oldSelf
+                required:
+                - kind
+                - name
+                type: object
               manualConfiguration:
                 description: |-
                   ManualConfiguration specifies the volume configuration directly.
@@ -184,6 +211,8 @@ spec:
               rule: self.configurationMode != 'Manual' || (has(self.manualConfiguration)
                 && (!has(self.replicatedStorageClassName) || size(self.replicatedStorageClassName)
                 == 0))
+            - message: dataSource cannot be removed once set
+              rule: '!has(oldSelf.dataSource) || has(self.dataSource)'
           status:
             properties:
               actuallyAttachedTo:
@@ -637,6 +666,7 @@ spec:
                       - NonVotingMembership
                       - Quorum
                       - Resize
+                      - Sync
                       - VotingMembership
                       type: string
                     planID:
@@ -758,9 +788,11 @@ spec:
                       - ForceDetach
                       - ForceRemoveReplica
                       - Formation
+                      - PrepareSnapshot
                       - RemoveReplica
                       - RepairNetworkAddresses
                       - ResizeVolume
+                      - SyncSnapshot
                       type: string
                   required:
                   - group

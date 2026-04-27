@@ -27,11 +27,13 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/drbd_size"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -203,11 +205,23 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 	// Create missing diskful replicas only when there are no replicas being deleted or misplaced.
 	// This prevents zombie accumulation: we wait for all cleanup to finish before creating new ones.
 	if deleting.IsEmpty() && misplaced.IsEmpty() {
+		sourceNodeName := ""
+		if rv.Spec.DataSource != nil && diskful.IsEmpty() {
+			nodeName, err := r.resolveDataSourceNodeName(rf.Ctx(), rv.Spec.DataSource)
+			if err != nil {
+				return rf.Failf(err, "resolving data source node for bootstrap")
+			}
+			sourceNodeName = nodeName
+		}
+
 		for diskful.Len() < int(targetDiskfulCount) {
-			rvr, err := r.createDiskfulRVR(rf.Ctx(), rv, rvrs)
+			nodeName := ""
+			if sourceNodeName != "" && diskful.IsEmpty() {
+				nodeName = sourceNodeName
+			}
+			rvr, err := r.createRVR(rf.Ctx(), rv, rvrs, v1alpha1.ReplicaTypeDiskful, nodeName)
 			if err != nil {
 				if apierrors.IsAlreadyExists(err) {
-					// Stale cache: RVR was already created by a previous reconciliation. Requeue to pick it up.
 					rf.Log().Info("RVR already exists, requeueing")
 					return rf.DoneAndRequeue()
 				}
@@ -594,25 +608,32 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 			ReportChangedIf(changed)
 	}
 
-	// Verify all diskful replicas are ready for data bootstrap:
-	// - backing volume in Inconsistent state (normal for freshly created volume before initial sync), and
-	// - Established replication with all diskful peers.
-	// This is the special case during formation: all peers have Inconsistent backing volumes
-	// with UUID_JUST_CREATED flag. DRBD establishes the connection between such peers
-	// before any resync is triggered.
+	hasDataSource := rv.Spec.DataSource != nil
 	readyForDataBootstrap := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 		if !diskful.Contains(rvr.ID()) {
 			return false
 		}
-		// Backing volume must be Inconsistent.
-		if rvr.Status.BackingVolume == nil || rvr.Status.BackingVolume.State != v1alpha1.DiskStateInconsistent {
+		if rvr.Status.BackingVolume == nil {
 			return false
 		}
-		// All diskful peers must have ReplicationState == Established.
+		switch rvr.Status.BackingVolume.State {
+		case v1alpha1.DiskStateInconsistent:
+		case v1alpha1.DiskStateUpToDate:
+			if !hasDataSource {
+				return false
+			}
+		default:
+			return false
+		}
 		expectedPeers := diskful.Difference(idset.Of(rvr.ID()))
 		replicationEstablishedPeers := idset.FromWhere(rvr.Status.Peers, func(p v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool {
-			return p.Type == v1alpha1.ReplicaTypeDiskful &&
-				p.ReplicationState == v1alpha1.ReplicationStateEstablished
+			if p.Type != v1alpha1.ReplicaTypeDiskful {
+				return false
+			}
+			if p.ReplicationState == v1alpha1.ReplicationStateEstablished {
+				return true
+			}
+			return hasDataSource && p.ReplicationState.IsSyncingState()
 		})
 		return replicationEstablishedPeers == expectedPeers
 	})
@@ -664,119 +685,142 @@ func (r *Reconciler) reconcileFormationStepBootstrapData(
 	// Name: rv.Name + "-formation" (rv.Name <= 120, suffix 10 chars, total <= 130 < 253 limit).
 	drbdrOpName := rv.Name + "-formation"
 
-	drbdrOp, err := r.getDRBDROp(rf.Ctx(), drbdrOpName)
-	if err != nil {
-		return rf.Failf(err, "getting DRBDResourceOperation %s", drbdrOpName)
-	}
-
-	// If the operation exists but was created before the current formation transition
-	// started, it is stale (leftover from a previous attempt) and must be deleted.
-	if drbdrOp != nil {
-		formationStartedAt := t.StartedAt().Time
-		if drbdrOp.CreationTimestamp.Time.Before(formationStartedAt) {
-			if err := r.deleteDRBDROp(rf.Ctx(), drbdrOp); err != nil {
-				return rf.Failf(err, "deleting stale DRBDResourceOperation %s", drbdrOpName)
-			}
-			drbdrOp = nil
-		}
-	}
-
-	// Single replica: no peers to synchronize with, always use clear-bitmap.
-	// Multiple replicas with thin provisioning: clear-bitmap (thin volumes don't need full resync).
-	// Multiple replicas with thick provisioning: force-resync (thick volumes require full data synchronization).
 	singleReplica := dmDiskful.Len() == 1
-	drbdrOpFormationParams := &v1alpha1.CreateNewUUIDParams{
-		ClearBitmap: singleReplica || rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVMThin,
-		ForceResync: !singleReplica && rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM,
-	}
+	hasDataSource := rv.Spec.DataSource != nil
 
-	// Create DRBDResourceOperation for data bootstrap if it doesn't exist yet.
-	// If it already exists, verify that its parameters match the expected ones;
-	// if not, the configuration has changed and formation must restart.
-	if drbdrOp == nil {
-		drbdResourceName := v1alpha1.FormatReplicatedVolumeReplicaName(rv.Name, dmDiskful.Min())
-		drbdrOpSpec := v1alpha1.DRBDResourceOperationSpec{
-			DRBDResourceName: drbdResourceName,
-			Type:             v1alpha1.DRBDResourceOperationCreateNewUUID,
-			CreateNewUUID:    drbdrOpFormationParams,
+	// Volumes with a DataSource (snapshot restore or volume clone) rely on DRBD's
+	// built-in UUID handshake for initial sync: the primary replica boots UpToDate
+	// (backing = thin-LV copy of the source, current_uuid inherited), peer replicas
+	// boot Inconsistent (backing = empty LV, current_uuid = UUID_JUST_CREATED);
+	// DRBD's RULE_JUST_CREATED_PEER then automatically makes the primary SyncSource
+	// and peers SyncTarget. Issuing new-current-uuid here would fail with
+	// ERR_CONNECTED (151) since the primary's current_uuid is not UUID_JUST_CREATED
+	// while its peers are not L_OFF.
+	var dataBootstrapTimeout time.Duration
+	var dataBootstrapModeMsg string
+
+	if hasDataSource {
+		// Timeout covers a full network resync from the source-backed primary to peers.
+		dataBootstrapTimeout = 1 * time.Minute
+		if !singleReplica {
+			const worstCaseBytesPerSec = 100 * 1000 * 1000 / 8 // 100 Mbit/s in bytes
+			sizeBytes := rv.Status.Datamesh.Size.Value()
+			dataBootstrapTimeout += time.Duration(sizeBytes/worstCaseBytesPerSec) * time.Second
 		}
-		drbdrOp, err = r.createDRBDROp(rf.Ctx(), rv, drbdrOpName, drbdrOpSpec)
-		if err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				// Concurrent reconciliation created this DRBDResourceOperation. Requeue to pick it up from cache.
-				rf.Log().Info("DRBDResourceOperation already exists, requeueing", "drbdrOp", drbdrOpName)
-				return rf.DoneAndRequeue()
-			}
-			return rf.Failf(err, "creating DRBDResourceOperation %s", drbdrOpName)
-		}
+		dataBootstrapModeMsg = fmt.Sprintf("DataSource bootstrap: DRBD auto-sync from source-backed primary to peer replicas. Timeout: %s", dataBootstrapTimeout)
 	} else {
-		// Verify that DRBDResourceName targets one of the diskful replicas.
-		drbdrOpTargetsDiskful := false
-		for id := range dmDiskful.All() {
-			if drbdrOp.Spec.DRBDResourceName == v1alpha1.FormatReplicatedVolumeReplicaName(rv.Name, id) {
-				drbdrOpTargetsDiskful = true
-				break
+		drbdrOp, err := r.getDRBDROp(rf.Ctx(), drbdrOpName)
+		if err != nil {
+			return rf.Failf(err, "getting DRBDResourceOperation %s", drbdrOpName)
+		}
+
+		// If the operation exists but was created before the current formation transition
+		// started, it is stale (leftover from a previous attempt) and must be deleted.
+		if drbdrOp != nil {
+			formationStartedAt := t.StartedAt().Time
+			if drbdrOp.CreationTimestamp.Time.Before(formationStartedAt) {
+				if err := r.deleteDRBDROp(rf.Ctx(), drbdrOp); err != nil {
+					return rf.Failf(err, "deleting stale DRBDResourceOperation %s", drbdrOpName)
+				}
+				drbdrOp = nil
 			}
 		}
-		if drbdrOp.Spec.Type != v1alpha1.DRBDResourceOperationCreateNewUUID ||
-			!drbdrOpTargetsDiskful ||
-			drbdrOp.Spec.CreateNewUUID == nil ||
-			drbdrOp.Spec.CreateNewUUID.ClearBitmap != drbdrOpFormationParams.ClearBitmap ||
-			drbdrOp.Spec.CreateNewUUID.ForceResync != drbdrOpFormationParams.ForceResync {
-			changed = applyDatameshTransitionStepMessage(step, "Existing DRBDResourceOperation has unexpected parameters, restarting formation") || changed
-			changed = applyDatameshReplicaRequestMessages(rv, dmDiskful, "Datamesh is forming, restarting due to data bootstrap operation parameter mismatch") || changed
+
+		// Single replica: no peers to synchronize with, always use clear-bitmap.
+		// Multiple replicas with thin provisioning: clear-bitmap (thin volumes don't need full resync).
+		// Multiple replicas with thick provisioning: force-resync (thick volumes require full data synchronization).
+		drbdrOpFormationParams := &v1alpha1.CreateNewUUIDParams{
+			ClearBitmap: singleReplica || rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+			ForceResync: !singleReplica && rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM,
+		}
+
+		// Create DRBDResourceOperation for data bootstrap if it doesn't exist yet.
+		// If it already exists, verify that its parameters match the expected ones;
+		// if not, the configuration has changed and formation must restart.
+		if drbdrOp == nil {
+			drbdResourceName := v1alpha1.FormatReplicatedVolumeReplicaName(rv.Name, dmDiskful.Min())
+			drbdrOpSpec := v1alpha1.DRBDResourceOperationSpec{
+				DRBDResourceName: drbdResourceName,
+				Type:             v1alpha1.DRBDResourceOperationCreateNewUUID,
+				CreateNewUUID:    drbdrOpFormationParams,
+			}
+			drbdrOp, err = r.createDRBDROp(rf.Ctx(), rv, drbdrOpName, drbdrOpSpec)
+			if err != nil {
+				if apierrors.IsAlreadyExists(err) {
+					// Concurrent reconciliation created this DRBDResourceOperation. Requeue to pick it up from cache.
+					rf.Log().Info("DRBDResourceOperation already exists, requeueing", "drbdrOp", drbdrOpName)
+					return rf.DoneAndRequeue()
+				}
+				return rf.Failf(err, "creating DRBDResourceOperation %s", drbdrOpName)
+			}
+		} else {
+			// Verify that DRBDResourceName targets one of the diskful replicas.
+			drbdrOpTargetsDiskful := false
+			for id := range dmDiskful.All() {
+				if drbdrOp.Spec.DRBDResourceName == v1alpha1.FormatReplicatedVolumeReplicaName(rv.Name, id) {
+					drbdrOpTargetsDiskful = true
+					break
+				}
+			}
+			if drbdrOp.Spec.Type != v1alpha1.DRBDResourceOperationCreateNewUUID ||
+				!drbdrOpTargetsDiskful ||
+				drbdrOp.Spec.CreateNewUUID == nil ||
+				drbdrOp.Spec.CreateNewUUID.ClearBitmap != drbdrOpFormationParams.ClearBitmap ||
+				drbdrOp.Spec.CreateNewUUID.ForceResync != drbdrOpFormationParams.ForceResync {
+				changed = applyDatameshTransitionStepMessage(step, "Existing DRBDResourceOperation has unexpected parameters, restarting formation") || changed
+				changed = applyDatameshReplicaRequestMessages(rv, dmDiskful, "Datamesh is forming, restarting due to data bootstrap operation parameter mismatch") || changed
+
+				return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
+					ReportChangedIf(changed)
+			}
+		}
+
+		// Timeout: 1 min base. For multi-replica thick provisioning (force-resync) add volume
+		// size / 100 Mbit/s (≈12.5 MB/s) to account for full data synchronization. Single
+		// replica and thin provisioning (clear-bitmap) skip full resync, so no size-based
+		// addition is needed.
+		//
+		// We expect sds-replicated-volume to run on 10 Gbit/s networks (or at least 1 Gbit/s).
+		// In the worst case, when many volumes are being created simultaneously, each volume
+		// should still get at least 100 Mbit/s of bandwidth. If even that is not enough,
+		// something has gone completely wrong and there is no point in waiting further.
+		dataBootstrapTimeout = 1 * time.Minute
+		if !singleReplica && rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM {
+			const worstCaseBytesPerSec = 100 * 1000 * 1000 / 8 // 100 Mbit/s in bytes
+			sizeBytes := rv.Status.Datamesh.Size.Value()
+			dataBootstrapTimeout += time.Duration(sizeBytes/worstCaseBytesPerSec) * time.Second
+		}
+
+		// Build a human-readable description of the data bootstrap mode.
+		if !singleReplica && rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM {
+			dataBootstrapModeMsg = fmt.Sprintf(
+				"Full data synchronization from source replica %s. Timeout: %s",
+				drbdrOp.Spec.DRBDResourceName, dataBootstrapTimeout)
+		} else {
+			dataBootstrapModeMsg = "Fast mode: data is assumed identical, no synchronization required"
+		}
+
+		// Verify the DRBDResourceOperation has not failed.
+		// If it failed — restart formation with a 30-second timeout.
+		if drbdrOp.Status.Phase == v1alpha1.DRBDOperationPhaseFailed {
+			rf.Log().Error(fmt.Errorf("DRBDResourceOperation %s failed: %s", drbdrOpName, drbdrOp.Status.Message), "data bootstrap operation failed, restarting formation")
+
+			changed = applyDatameshTransitionStepMessage(step, "Data bootstrap operation failed, restarting formation") || changed
+			changed = applyDatameshReplicaRequestMessages(rv, dmDiskful, "Datamesh is forming, restarting due to failed data bootstrap operation") || changed
 
 			return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
 				ReportChangedIf(changed)
 		}
-	}
 
-	// Timeout: 1 min base. For multi-replica thick provisioning (force-resync) add volume
-	// size / 100 Mbit/s (≈12.5 MB/s) to account for full data synchronization. Single
-	// replica and thin provisioning (clear-bitmap) skip full resync, so no size-based
-	// addition is needed.
-	//
-	// We expect sds-replicated-volume to run on 10 Gbit/s networks (or at least 1 Gbit/s).
-	// In the worst case, when many volumes are being created simultaneously, each volume
-	// should still get at least 100 Mbit/s of bandwidth. If even that is not enough,
-	// something has gone completely wrong and there is no point in waiting further.
-	dataBootstrapTimeout := 1 * time.Minute
-	if !singleReplica && rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM {
-		const worstCaseBytesPerSec = 100 * 1000 * 1000 / 8 // 100 Mbit/s in bytes
-		sizeBytes := rv.Status.Datamesh.Size.Value()
-		dataBootstrapTimeout += time.Duration(sizeBytes/worstCaseBytesPerSec) * time.Second
-	}
+		// Verify the DRBDResourceOperation has completed successfully.
+		// If it is still running or pending — update messages and wait.
+		if drbdrOp.Status.Phase != v1alpha1.DRBDOperationPhaseSucceeded {
+			changed = applyDatameshTransitionStepMessage(step, "Data bootstrap initiated, waiting for operation to complete. "+dataBootstrapModeMsg) || changed
+			changed = applyDatameshReplicaRequestMessages(rv, dmDiskful, "Datamesh is forming, waiting for data bootstrap to complete") || changed
 
-	// Build a human-readable description of the data bootstrap mode.
-	var dataBootstrapModeMsg string
-	if !singleReplica && rsp.Type == v1alpha1.ReplicatedStoragePoolTypeLVM {
-		dataBootstrapModeMsg = fmt.Sprintf(
-			"Full data synchronization from source replica %s. Timeout: %s",
-			drbdrOp.Spec.DRBDResourceName, dataBootstrapTimeout)
-	} else {
-		dataBootstrapModeMsg = "Fast mode: data is assumed identical, no synchronization required"
-	}
-
-	// Verify the DRBDResourceOperation has not failed.
-	// If it failed — restart formation with a 30-second timeout.
-	if drbdrOp.Status.Phase == v1alpha1.DRBDOperationPhaseFailed {
-		rf.Log().Error(fmt.Errorf("DRBDResourceOperation %s failed: %s", drbdrOpName, drbdrOp.Status.Message), "data bootstrap operation failed, restarting formation")
-
-		changed = applyDatameshTransitionStepMessage(step, "Data bootstrap operation failed, restarting formation") || changed
-		changed = applyDatameshReplicaRequestMessages(rv, dmDiskful, "Datamesh is forming, restarting due to failed data bootstrap operation") || changed
-
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
-			ReportChangedIf(changed)
-	}
-
-	// Verify the DRBDResourceOperation has completed successfully.
-	// If it is still running or pending — update messages and wait.
-	if drbdrOp.Status.Phase != v1alpha1.DRBDOperationPhaseSucceeded {
-		changed = applyDatameshTransitionStepMessage(step, "Data bootstrap initiated, waiting for operation to complete. "+dataBootstrapModeMsg) || changed
-		changed = applyDatameshReplicaRequestMessages(rv, dmDiskful, "Datamesh is forming, waiting for data bootstrap to complete") || changed
-
-		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, dataBootstrapTimeout).
-			ReportChangedIf(changed)
+			return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, dataBootstrapTimeout).
+				ReportChangedIf(changed)
+		}
 	}
 
 	// Verify all diskful replicas have backing volume UpToDate — this is the actual
@@ -844,7 +888,6 @@ func (r *Reconciler) reconcileFormationRestartIfTimeoutPassed(
 
 	rf.Log().Error(fmt.Errorf("formation timed out after %s, restarting", elapsed.Truncate(time.Second)), "restarting formation")
 
-	// Delete formation DRBDResourceOperation if it exists.
 	drbdrOpName := rv.Name + "-formation"
 	drbdrOp, err := r.getDRBDROp(rf.Ctx(), drbdrOpName)
 	if err != nil {
@@ -1390,4 +1433,106 @@ func applyFormationTransitionAbsent(rv *v1alpha1.ReplicatedVolume) bool {
 		}
 	}
 	return false
+}
+
+// resolveDataSourceNodeName picks a node where the bootstrap of the first Diskful
+// replica should be placed, based on the DataSource kind. For a snapshot restore
+// it delegates to resolveSnapshotNodeName; for a volume clone — to
+// resolveSourceVolumeNodeName.
+func (r *Reconciler) resolveDataSourceNodeName(ctx context.Context, ds *v1alpha1.VolumeDataSource) (string, error) {
+	switch ds.Kind {
+	case v1alpha1.VolumeDataSourceKindReplicatedVolumeSnapshot:
+		return r.resolveSnapshotNodeName(ctx, ds.Name)
+	case v1alpha1.VolumeDataSourceKindReplicatedVolume:
+		return r.resolveSourceVolumeNodeName(ctx, ds.Name)
+	default:
+		return "", fmt.Errorf("unsupported data source kind %q", ds.Kind)
+	}
+}
+
+// resolveSourceVolumeNodeName picks a node hosting a usable Diskful replica of the
+// source ReplicatedVolume so that a clone's first Diskful replica can be co-located
+// with it for LVM thin-clone. Preference order:
+//  1. An Attached (Primary) Diskful replica with a ready backing volume.
+//  2. Any Diskful replica whose backing volume is UpToDate.
+//  3. Any Diskful replica that has a scheduled node.
+func (r *Reconciler) resolveSourceVolumeNodeName(ctx context.Context, sourceRVName string) (string, error) {
+	var list v1alpha1.ReplicatedVolumeReplicaList
+	if err := r.cl.List(ctx, &list,
+		client.MatchingFields{indexes.IndexFieldRVRByReplicatedVolumeName: sourceRVName},
+	); err != nil {
+		return "", fmt.Errorf("listing RVRs for source RV %q: %w", sourceRVName, err)
+	}
+
+	var primaryNode, upToDateNode, scheduledNode string
+	for i := range list.Items {
+		rvr := &list.Items[i]
+		if rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful {
+			continue
+		}
+		if rvr.Spec.NodeName == "" {
+			continue
+		}
+		if rvr.Status.Attachment != nil &&
+			rvr.Status.BackingVolume != nil &&
+			rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate {
+			primaryNode = rvr.Spec.NodeName
+			break
+		}
+		if upToDateNode == "" &&
+			rvr.Status.BackingVolume != nil &&
+			rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate {
+			upToDateNode = rvr.Spec.NodeName
+			continue
+		}
+		if scheduledNode == "" {
+			scheduledNode = rvr.Spec.NodeName
+		}
+	}
+
+	switch {
+	case primaryNode != "":
+		return primaryNode, nil
+	case upToDateNode != "":
+		return upToDateNode, nil
+	case scheduledNode != "":
+		return scheduledNode, nil
+	}
+	return "", fmt.Errorf("no usable Diskful replica found for source RV %q", sourceRVName)
+}
+
+// resolveSnapshotNodeName finds a node that has a Ready RVRS for the given RVS.
+// It prefers the source RVRS (snapshot of the Primary replica) when available.
+func (r *Reconciler) resolveSnapshotNodeName(ctx context.Context, rvsName string) (string, error) {
+	rvs := &v1alpha1.ReplicatedVolumeSnapshot{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: rvsName}, rvs); err != nil {
+		return "", fmt.Errorf("getting RVS %q: %w", rvsName, err)
+	}
+
+	var rvrsList v1alpha1.ReplicatedVolumeReplicaSnapshotList
+	if err := r.cl.List(ctx, &rvrsList); err != nil {
+		return "", fmt.Errorf("listing RVRS: %w", err)
+	}
+
+	var fallbackNodeName string
+	for i := range rvrsList.Items {
+		rvrs := &rvrsList.Items[i]
+		if rvrs.Spec.ReplicatedVolumeSnapshotName != rvsName {
+			continue
+		}
+		if rvrs.Status.Phase != v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseReady || !rvrs.Status.ReadyToUse {
+			continue
+		}
+		if rvs.Status.SourceReplicaSnapshotName != "" && rvrs.Name == rvs.Status.SourceReplicaSnapshotName {
+			return rvrs.Spec.NodeName, nil
+		}
+		if fallbackNodeName == "" {
+			fallbackNodeName = rvrs.Spec.NodeName
+		}
+	}
+
+	if fallbackNodeName != "" {
+		return fallbackNodeName, nil
+	}
+	return "", fmt.Errorf("no ready RVRS found for snapshot %q", rvsName)
 }

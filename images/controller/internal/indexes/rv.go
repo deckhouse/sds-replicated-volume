@@ -34,6 +34,11 @@ const (
 	// IndexFieldRVByStoragePoolName is used to quickly list
 	// ReplicatedVolume objects using a specific RSP.
 	IndexFieldRVByStoragePoolName = "status.configuration.replicatedStoragePoolName"
+
+	// IndexFieldRVByDataSourceVolumeName is used to quickly list
+	// ReplicatedVolume objects whose spec.dataSource points at another
+	// ReplicatedVolume (kind=ReplicatedVolume) with the given name.
+	IndexFieldRVByDataSourceVolumeName = "spec.dataSource.volumeName"
 )
 
 // RegisterRVByReplicatedStorageClassName registers the index for listing
@@ -78,6 +83,36 @@ func RegisterRVByStoragePoolName(mgr manager.Manager) error {
 		},
 	); err != nil {
 		return fmt.Errorf("index ReplicatedVolume by status.configuration.replicatedStoragePoolName: %w", err)
+	}
+	return nil
+}
+
+// RegisterRVByDataSourceVolumeName registers the index for listing
+// ReplicatedVolume objects cloned from a specific source RV (i.e. whose
+// spec.dataSource.kind == ReplicatedVolume and spec.dataSource.name matches).
+func RegisterRVByDataSourceVolumeName(mgr manager.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&v1alpha1.ReplicatedVolume{},
+		IndexFieldRVByDataSourceVolumeName,
+		func(obj client.Object) []string {
+			rv, ok := obj.(*v1alpha1.ReplicatedVolume)
+			if !ok {
+				return nil
+			}
+			if rv.Spec.DataSource == nil {
+				return nil
+			}
+			if rv.Spec.DataSource.Kind != v1alpha1.VolumeDataSourceKindReplicatedVolume {
+				return nil
+			}
+			if rv.Spec.DataSource.Name == "" {
+				return nil
+			}
+			return []string{rv.Spec.DataSource.Name}
+		},
+	); err != nil {
+		return fmt.Errorf("index ReplicatedVolume by spec.dataSource (kind=ReplicatedVolume).name: %w", err)
 	}
 	return nil
 }

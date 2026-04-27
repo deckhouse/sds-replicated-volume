@@ -52,14 +52,26 @@ type DRBDResourceOperationSpec struct {
 	DRBDResourceName string `json:"drbdResourceName"`
 
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=CreateNewUUID;ForcePrimary;Invalidate;Outdate;Verify;CreateSnapshot
+	// +kubebuilder:validation:Enum=CreateNewUUID;TrackBitmap;UntrackBitmap;FlushBitmap;SuspendIO;ResumeIO;ForcePrimary;Invalidate;Outdate;Verify
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="type is immutable"
 	Type DRBDResourceOperationType `json:"type"`
+
+	// PeerNodeID selects a target peer for per-peer operations (TrackBitmap, UntrackBitmap).
+	// When nil for TrackBitmap/UntrackBitmap, the operation is applied to all peers listed
+	// in the target DRBDResource's spec.peers.
+	// Ignored by operation types that are not per-peer (FlushBitmap, SuspendIO, ResumeIO,
+	// ForcePrimary, Invalidate, Outdate, Verify, CreateNewUUID).
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=31
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="peerNodeID is immutable"
+	// +optional
+	PeerNodeID *uint8 `json:"peerNodeID,omitempty"`
 
 	// Parameters for CreateNewUUID operation. Immutable once set.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="createNewUUID is immutable"
 	// +optional
 	CreateNewUUID *CreateNewUUIDParams `json:"createNewUUID,omitempty"`
+
 }
 
 // +kubebuilder:object:generate=true
@@ -82,6 +94,10 @@ type DRBDResourceOperationStatus struct {
 	// +kubebuilder:validation:MaxLength=1024
 	// +optional
 	Message string `json:"message,omitempty"`
+
+	// +kubebuilder:validation:MaxLength=1024
+	// +optional
+	Result string `json:"result,omitempty"`
 
 	// +optional
 	StartedAt *metav1.Time `json:"startedAt,omitempty"`
@@ -119,6 +135,11 @@ type DRBDResourceOperationType string
 const (
 	// DRBDResourceOperationCreateNewUUID creates a new UUID for the resource.
 	DRBDResourceOperationCreateNewUUID DRBDResourceOperationType = "CreateNewUUID"
+	DRBDResourceOperationTrackBitmap   DRBDResourceOperationType = "TrackBitmap"
+	DRBDResourceOperationUntrackBitmap DRBDResourceOperationType = "UntrackBitmap"
+	DRBDResourceOperationFlushBitmap   DRBDResourceOperationType = "FlushBitmap"
+	DRBDResourceOperationSuspendIO     DRBDResourceOperationType = "SuspendIO"
+	DRBDResourceOperationResumeIO      DRBDResourceOperationType = "ResumeIO"
 	// DRBDResourceOperationForcePrimary forces the resource to become primary.
 	DRBDResourceOperationForcePrimary DRBDResourceOperationType = "ForcePrimary"
 	// DRBDResourceOperationInvalidate invalidates the resource data.
@@ -127,6 +148,4 @@ const (
 	DRBDResourceOperationOutdate DRBDResourceOperationType = "Outdate"
 	// DRBDResourceOperationVerify verifies data consistency with peers.
 	DRBDResourceOperationVerify DRBDResourceOperationType = "Verify"
-	// DRBDResourceOperationCreateSnapshot creates a snapshot of the resource.
-	DRBDResourceOperationCreateSnapshot DRBDResourceOperationType = "CreateSnapshot"
 )

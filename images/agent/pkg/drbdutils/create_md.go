@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -73,18 +74,40 @@ func ExecuteCreateMD(ctx context.Context, minor uint, backingDev string) error {
 // Returns (true, nil) if metadata exists, (false, nil) if not, or error on failure.
 // Metadata with a dirty activity log ("unclean") is still counted as existing.
 func ExecuteCheckMD(ctx context.Context, minor uint, backingDev string) (bool, error) {
+	_, hasMD, err := executeDumpMD(ctx, minor, backingDev)
+	return hasMD, err
+}
+
+// ExecuteCheckMDWithMetadata checks for metadata existence and extracts the
+// node-id from on-disk metadata. Returns hasMD=true when valid metadata is
+// found (clean or unclean). metadataNodeID is non-nil only when the node-id
+// was successfully parsed from the dump-md output.
+func ExecuteCheckMDWithMetadata(ctx context.Context, minor uint, backingDev string) (hasMD bool, metadataNodeID *uint8, err error) {
+	out, hasMD, err := executeDumpMD(ctx, minor, backingDev)
+	if err != nil || !hasMD {
+		return hasMD, nil, err
+	}
+	if nid, ok := ParseMetadataNodeID(string(out)); ok {
+		return true, &nid, nil
+	}
+	return true, nil, nil
+}
+
+func executeDumpMD(ctx context.Context, minor uint, backingDev string) (output []byte, hasMD bool, err error) {
 	cmd := ExecCommandContext(ctx, DRBDMetaCommand, DumpMDArgs(minor, backingDev)...)
-	_, err := executeCommand(cmd, DumpMDKnownErrors)
-	if err == nil {
-		return true, nil
+	out, cmdErr := cmd.CombinedOutput()
+	if cmdErr == nil {
+		return out, true, nil
 	}
-	if errors.Is(err, ErrNoValidMetadata) {
-		return false, nil
+	outStr := string(out)
+	exitCode := errToExitCode(cmdErr)
+	if exitCode == 1 && strings.Contains(outStr, "No valid meta data found") {
+		return nil, false, nil
 	}
-	if errors.Is(err, ErrUncleanMetadata) {
-		return true, nil
+	if exitCode == 1 && strings.Contains(outStr, "unclean") {
+		return out, true, nil
 	}
-	return false, err
+	return nil, false, fmt.Errorf("running %s: %w", cmd, withOutput(cmdErr, out))
 }
 
 // ApplyALArgs returns arguments for drbdmeta apply-al command (replay activity log, mark metadata clean).
@@ -183,4 +206,19 @@ func ExecuteWriteDevUUID(ctx context.Context, minor uint, backingDev string, uui
 	cmd := ExecCommandContext(ctx, DRBDMetaCommand, WriteDevUUIDArgs(minor, backingDev, uuid)...)
 	_, err := executeCommand(cmd, nil)
 	return err
+}
+
+var reNodeID = regexp.MustCompile(`(?m)^node-id\s+(\d+)\s*;`)
+
+// ParseMetadataNodeID extracts the node-id value from drbdmeta dump-md output.
+func ParseMetadataNodeID(dumpMDOutput string) (uint8, bool) {
+	m := reNodeID.FindStringSubmatch(dumpMDOutput)
+	if m == nil {
+		return 0, false
+	}
+	v, err := strconv.ParseUint(m[1], 10, 8)
+	if err != nil {
+		return 0, false
+	}
+	return uint8(v), true
 }

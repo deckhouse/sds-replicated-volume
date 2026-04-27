@@ -41,6 +41,32 @@ func TestExecuteDisconnectKnownError(t *testing.T) {
 	}
 }
 
+func TestExecuteTrackBitmapStartFlag(t *testing.T) {
+	fakeExec := &fakedrbdutils.Exec{}
+	fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
+		Name: drbdutils.DRBDSetupCommand,
+		Args: drbdutils.TrackBitmapArgs("res", 7, 0, true),
+	})
+	fakeExec.Setup(t)
+
+	if err := drbdutils.ExecuteTrackBitmap(t.Context(), "res", 7, 0, true); err != nil {
+		t.Fatalf("ExecuteTrackBitmap() unexpected error: %v", err)
+	}
+}
+
+func TestExecuteFlushBitmap(t *testing.T) {
+	fakeExec := &fakedrbdutils.Exec{}
+	fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
+		Name: drbdutils.DRBDSetupCommand,
+		Args: drbdutils.FlushBitmapArgs(3),
+	})
+	fakeExec.Setup(t)
+
+	if err := drbdutils.ExecuteFlushBitmap(t.Context(), 3); err != nil {
+		t.Fatalf("ExecuteFlushBitmap() unexpected error: %v", err)
+	}
+}
+
 func TestExecuteStatusNotFoundHandling(t *testing.T) {
 	t.Run("no such resource", func(t *testing.T) {
 		fakeExec := &fakedrbdutils.Exec{}
