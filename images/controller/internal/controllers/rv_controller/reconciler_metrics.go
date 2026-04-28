@@ -77,16 +77,19 @@ func cleanupRVAMetrics(rva *v1alpha1.ReplicatedVolumeAttachment) {
 func observeDatameshMetrics(
 	rv *v1alpha1.ReplicatedVolume,
 	oldTransitions []v1alpha1.ReplicatedVolumeDatameshTransition,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 ) {
 	if rv == nil {
 		return
 	}
 
 	now := time.Now()
+	replicaNodes := datameshReplicaNodes(rvrs)
 
 	// Detect completed transitions: present in old but absent in new.
 	for i := range oldTransitions {
 		old := &oldTransitions[i]
+		storageClass, node, typ := datameshMetricLabels(rv, old, replicaNodes)
 		found := false
 		for j := range rv.Status.DatameshTransitions {
 			cur := &rv.Status.DatameshTransitions[j]
@@ -104,8 +107,8 @@ func observeDatameshMetrics(
 		startedAt := old.StartedAt()
 		if !startedAt.IsZero() {
 			dur := now.Sub(startedAt.Time).Seconds()
-			metrics.DatameshTransitionDuration.WithLabelValues(string(old.Type)).Observe(dur)
-			metrics.DatameshTransitionsCompleted.WithLabelValues(string(old.Type)).Inc()
+			metrics.DatameshTransitionDuration.WithLabelValues(storageClass, node, typ).Observe(dur)
+			metrics.DatameshTransitionsCompleted.WithLabelValues(storageClass, node, typ).Inc()
 		}
 
 		// Observe individual step durations from the old transition snapshot.
@@ -113,7 +116,7 @@ func observeDatameshMetrics(
 			step := &old.Steps[si]
 			if step.StartedAt != nil && step.CompletedAt != nil {
 				stepDur := step.CompletedAt.Time.Sub(step.StartedAt.Time).Seconds()
-				metrics.DatameshStepDuration.WithLabelValues(string(old.Type), step.Name).Observe(stepDur)
+				metrics.DatameshStepDuration.WithLabelValues(storageClass, node, typ, step.Name).Observe(stepDur)
 			}
 		}
 	}
@@ -121,6 +124,7 @@ func observeDatameshMetrics(
 	// Also observe step durations for steps that just completed in still-active transitions.
 	for i := range rv.Status.DatameshTransitions {
 		cur := &rv.Status.DatameshTransitions[i]
+		storageClass, node, typ := datameshMetricLabels(rv, cur, replicaNodes)
 		for si := range cur.Steps {
 			step := &cur.Steps[si]
 			if step.Status != v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted {
@@ -146,8 +150,40 @@ func observeDatameshMetrics(
 
 			if !alreadyCompleted {
 				stepDur := step.CompletedAt.Time.Sub(step.StartedAt.Time).Seconds()
-				metrics.DatameshStepDuration.WithLabelValues(string(cur.Type), step.Name).Observe(stepDur)
+				metrics.DatameshStepDuration.WithLabelValues(storageClass, node, typ, step.Name).Observe(stepDur)
 			}
 		}
 	}
+}
+
+func datameshReplicaNodes(rvrs []*v1alpha1.ReplicatedVolumeReplica) map[string]string {
+	replicaNodes := make(map[string]string, len(rvrs))
+	for _, rvr := range rvrs {
+		if rvr == nil {
+			continue
+		}
+		replicaNodes[rvr.Name] = rvr.Spec.NodeName
+	}
+	return replicaNodes
+}
+
+func datameshMetricLabels(
+	rv *v1alpha1.ReplicatedVolume,
+	transition *v1alpha1.ReplicatedVolumeDatameshTransition,
+	replicaNodes map[string]string,
+) (storageClass, node, typ string) {
+	storageClass = rv.Spec.ReplicatedStorageClassName
+	typ = string(transition.Type)
+	node = "global"
+
+	if transition.ReplicaName == "" {
+		return storageClass, node, typ
+	}
+
+	node = replicaNodes[transition.ReplicaName]
+	if node == "" {
+		node = "unknown"
+	}
+
+	return storageClass, node, typ
 }

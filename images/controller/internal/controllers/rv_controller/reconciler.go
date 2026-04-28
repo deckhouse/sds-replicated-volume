@@ -193,7 +193,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Observe datamesh metrics (compare transitions before/after processing).
-	observeDatameshMetrics(rv, base.Status.DatameshTransitions)
+	observeDatameshMetrics(rv, base.Status.DatameshTransitions, rvrs)
 
 	if outcome.DidChange() {
 		if err := r.patchRVStatus(rf.Ctx(), rv, base); err != nil {

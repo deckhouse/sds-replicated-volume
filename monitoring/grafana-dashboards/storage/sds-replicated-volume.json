@@ -1089,8 +1089,8 @@
     {
       "id": 22,
       "type": "timeseries",
-      "title": "Datamesh Completed Transition Rate",
-      "description": "Completed datamesh transitions per second by type.",
+      "title": "Datamesh Completed Transition Rate by Node",
+      "description": "Completed datamesh transitions per second by storage class, node, and type.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -1103,8 +1103,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (type) (rate(sds_rv_datamesh_transitions_completed_total{type=~\"$transition_type\"}[$__rate_interval]))",
-          "legendFormat": "{{type}}",
+          "expr": "sum by (storage_class, node, type) (rate(sds_rv_datamesh_transitions_completed_total{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__rate_interval]))",
+          "legendFormat": "{{storage_class}} / {{node}} / {{type}}",
           "refId": "A"
         }
       ],
@@ -1149,13 +1149,13 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.90, sum(rate(sds_rv_datamesh_transition_duration_seconds_bucket{type=~\"$transition_type\"}[$__rate_interval])) by (le, type))",
-          "legendFormat": "transition {{type}}",
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rv_datamesh_transition_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__rate_interval])) by (le, storage_class, node, type))",
+          "legendFormat": "transition {{storage_class}} / {{node}} / {{type}}",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.90, sum(rate(sds_rv_datamesh_step_duration_seconds_bucket{type=~\"$transition_type\"}[$__rate_interval])) by (le, type, step))",
-          "legendFormat": "step {{type}} / {{step}}",
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rv_datamesh_step_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__rate_interval])) by (le, storage_class, node, type, step))",
+          "legendFormat": "step {{storage_class}} / {{node}} / {{type}} / {{step}}",
           "refId": "B"
         }
       ],
@@ -1394,8 +1394,8 @@
     {
       "id": 28,
       "type": "timeseries",
-      "title": "Active Datamesh Global Transitions",
-      "description": "Current active datamesh transitions that are not tied to a specific node. Zero means no global transition of this type is active.",
+      "title": "Datamesh Global Transitions",
+      "description": "Active global transitions and completed global transition rate. Global transitions are not tied to a specific node.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -1409,8 +1409,13 @@
       "targets": [
         {
           "expr": "sds_rv_datamesh_active_transitions{storage_class=~\"$storage_class\",node=\"global\",type=~\"$transition_type\"}",
-          "legendFormat": "{{storage_class}} / {{type}}",
+          "legendFormat": "active {{storage_class}} / {{type}}",
           "refId": "A"
+        },
+        {
+          "expr": "sum by (storage_class, type) (rate(sds_rv_datamesh_transitions_completed_total{storage_class=~\"$storage_class\",node=\"global\",type=~\"$transition_type\"}[$__rate_interval]))",
+          "legendFormat": "completed/s {{storage_class}} / {{type}}",
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -1423,7 +1428,24 @@
           },
           "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^completed/s "
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ops"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
@@ -1440,8 +1462,8 @@
     {
       "id": 39,
       "type": "timeseries",
-      "title": "Active Datamesh Node Transitions: $datamesh_node",
-      "description": "Current active datamesh transitions for one node. Repeated automatically for every node reported by the metric. Zero means no transition of this type is active.",
+      "title": "Datamesh Node Transitions: $datamesh_node",
+      "description": "Active transitions and completed transition rate for one node. Repeated automatically for every node reported by the metric.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -1458,8 +1480,13 @@
       "targets": [
         {
           "expr": "sds_rv_datamesh_active_transitions{storage_class=~\"$storage_class\",node=\"$datamesh_node\",type=~\"$transition_type\"}",
-          "legendFormat": "{{storage_class}} / {{type}}",
+          "legendFormat": "active {{storage_class}} / {{type}}",
           "refId": "A"
+        },
+        {
+          "expr": "sum by (storage_class, type) (rate(sds_rv_datamesh_transitions_completed_total{storage_class=~\"$storage_class\",node=\"$datamesh_node\",type=~\"$transition_type\"}[$__rate_interval]))",
+          "legendFormat": "completed/s {{storage_class}} / {{type}}",
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -1472,7 +1499,24 @@
           },
           "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^completed/s "
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ops"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {

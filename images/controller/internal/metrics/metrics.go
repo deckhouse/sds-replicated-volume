@@ -104,18 +104,18 @@ var (
 		Name:    "sds_rv_datamesh_transition_duration_seconds",
 		Help:    "Duration of completed datamesh transitions.",
 		Buckets: bucketsDatamesh,
-	}, []string{LabelType})
+	}, []string{LabelStorageClass, LabelNode, LabelType})
 
 	DatameshTransitionsCompleted = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "sds_rv_datamesh_transitions_completed_total",
 		Help: "Total number of completed datamesh transitions.",
-	}, []string{LabelType})
+	}, []string{LabelStorageClass, LabelNode, LabelType})
 
 	DatameshStepDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "sds_rv_datamesh_step_duration_seconds",
 		Help:    "Duration of individual datamesh transition steps.",
 		Buckets: bucketsDatamesh,
-	}, []string{LabelType, LabelStep})
+	}, []string{LabelStorageClass, LabelNode, LabelType, LabelStep})
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
