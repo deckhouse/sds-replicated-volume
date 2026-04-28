@@ -212,7 +212,7 @@
       },
       "targets": [
         {
-          "expr": "sum(sds_rv_count{storage_class=~\"$storage_class\",phase=\"Deleting\"})",
+          "expr": "sum(sds_rv_deleting_count{storage_class=~\"$storage_class\"})",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -242,8 +242,8 @@
     {
       "id": 7,
       "type": "stat",
-      "title": "Terminating RVRs",
-      "description": "Current RVRs in Terminating phase.",
+      "title": "Deleting RVRs",
+      "description": "Current RVRs with deletionTimestamp.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -256,7 +256,7 @@
       },
       "targets": [
         {
-          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",phase=\"Terminating\"})",
+          "expr": "sum(sds_rvr_deleting_count{node=~\"$node\",storage_class=~\"$storage_class\"})",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -333,7 +333,7 @@
       "id": 36,
       "type": "timeseries",
       "title": "RVR Non-Healthy Count by Node and Phase",
-      "description": "Non-Healthy RVRs by node and phase. Zero series are hidden.",
+      "description": "Non-Healthy RVRs by node and phase. Zero values are shown to make missing problems explicit.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -346,7 +346,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (node, phase) (sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",phase!=\"Healthy\"}) > 0",
+          "expr": "sum by (node, phase) (sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",phase!=\"Healthy\"})",
           "legendFormat": "{{node}} / {{phase}}",
           "refId": "A"
         }
@@ -425,7 +425,7 @@
       "id": 37,
       "type": "timeseries",
       "title": "RVA Non-Attached Count by Node and Phase",
-      "description": "Non-Attached RVAs by node and phase. Zero series are hidden.",
+      "description": "Non-Attached RVAs by node and phase. Zero values are shown to make missing problems explicit.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -438,7 +438,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (node, phase) (sds_rva_count{node=~\"$node\",phase!=\"Attached\"}) > 0",
+          "expr": "sum by (node, phase) (sds_rva_count{node=~\"$node\",phase!=\"Attached\"})",
           "legendFormat": "{{node}} / {{phase}}",
           "refId": "A"
         }
@@ -921,8 +921,8 @@
     {
       "id": 22,
       "type": "timeseries",
-      "title": "Datamesh Completed Transitions",
-      "description": "Completed datamesh transitions over the selected range.",
+      "title": "Datamesh Completed Transition Rate",
+      "description": "Completed datamesh transitions per hour by type.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -935,7 +935,7 @@
       },
       "targets": [
         {
-          "expr": "round(sum by (type) (increase(sds_rv_datamesh_transitions_completed_total{type=~\"$transition_type\"}[$__range])))",
+          "expr": "sum by (type) (rate(sds_rv_datamesh_transitions_completed_total{type=~\"$transition_type\"}[$__rate_interval])) * 3600",
           "legendFormat": "{{type}}",
           "refId": "A"
         }
@@ -1030,8 +1030,8 @@
     {
       "id": 26,
       "type": "timeseries",
-      "title": "Deleting RV Age",
-      "description": "Age of currently deleting RVs. Empty means no RV is deleting.",
+      "title": "Deleting RV Count by Storage Class",
+      "description": "Current deleting RVs by storage class. Zero means no RV is deleting.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -1044,8 +1044,8 @@
       },
       "targets": [
         {
-          "expr": "topk(20, (time() - sds_rv_deletion_started_timestamp_seconds{storage_class=~\"$storage_class\"}) > 0)",
-          "legendFormat": "{{name}} / {{storage_class}}",
+          "expr": "sds_rv_deleting_count{storage_class=~\"$storage_class\"}",
+          "legendFormat": "{{storage_class}}",
           "refId": "A"
         }
       ],
@@ -1057,7 +1057,7 @@
             "spanNulls": false,
             "showPoints": "never"
           },
-          "unit": "s"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -1076,8 +1076,8 @@
     {
       "id": 38,
       "type": "timeseries",
-      "title": "Deleting RVR Age",
-      "description": "Age of currently deleting RVRs. Empty means no RVR is deleting.",
+      "title": "Deleting RVR Count by Node and Storage Class",
+      "description": "Current deleting RVRs by node and storage class. Zero means no RVR is deleting.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -1090,8 +1090,8 @@
       },
       "targets": [
         {
-          "expr": "topk(20, (time() - sds_rvr_deletion_started_timestamp_seconds{node=~\"$node\",storage_class=~\"$storage_class\"}) > 0)",
-          "legendFormat": "{{name}} / {{node}}",
+          "expr": "sds_rvr_deleting_count{node=~\"$node\",storage_class=~\"$storage_class\"}",
+          "legendFormat": "{{node}} / {{storage_class}}",
           "refId": "A"
         }
       ],
@@ -1103,7 +1103,7 @@
             "spanNulls": false,
             "showPoints": "never"
           },
-          "unit": "s"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -1135,7 +1135,7 @@
       "id": 28,
       "type": "timeseries",
       "title": "Active Datamesh Transitions",
-      "description": "Current active datamesh transitions by RV and type. Empty means none are active.",
+      "description": "Current active datamesh transitions by storage class, node, and type. Global transitions use node=global. Zero means no transition of this type is active.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -1148,8 +1148,8 @@
       },
       "targets": [
         {
-          "expr": "sds_rv_datamesh_active_transitions{type=~\"$transition_type\"} > 0",
-          "legendFormat": "{{rv}} / {{type}}",
+          "expr": "sds_rv_datamesh_active_transitions{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}",
+          "legendFormat": "{{storage_class}} / {{node}} / {{type}}",
           "refId": "A"
         }
       ],
@@ -1178,52 +1178,6 @@
       }
     },
     {
-      "id": 29,
-      "type": "timeseries",
-      "title": "Active Datamesh Transition Age",
-      "description": "Age of current active datamesh transitions by RV and type.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ds_prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 99
-      },
-      "targets": [
-        {
-          "expr": "topk(20, (time() - sds_rv_datamesh_active_transition_start_timestamp_seconds{type=~\"$transition_type\"}) > 0)",
-          "legendFormat": "{{rv}} / {{type}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "spanNulls": false,
-            "showPoints": "never"
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      }
-    },
-    {
       "id": 30,
       "type": "row",
       "title": "Debug / Metrics Collector",
@@ -1232,7 +1186,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 107
+        "y": 99
       }
     },
     {
@@ -1248,7 +1202,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 108
+        "y": 100
       },
       "targets": [
         {
@@ -1304,7 +1258,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 108
+        "y": 100
       },
       "targets": [
         {
@@ -1350,7 +1304,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 116
+        "y": 108
       },
       "targets": [
         {
@@ -1396,7 +1350,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 116
+        "y": 108
       },
       "targets": [
         {
@@ -1526,7 +1480,7 @@
           "uid": "$ds_prometheus"
         },
         "query": {
-          "query": "label_values(sds_rv_datamesh_transitions_completed_total, type)",
+          "query": "label_values(sds_rv_datamesh_active_transitions, type)",
           "refId": "Prometheus-transition-type-Variable-Query"
         },
         "refresh": 2,
