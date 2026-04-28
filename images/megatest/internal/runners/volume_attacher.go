@@ -24,6 +24,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
@@ -297,9 +298,9 @@ func (v *VolumeAttacher) migrationCleanup(log *slog.Logger) {
 		return
 	}
 
-	// Keep the first RVA (arbitrary), delete the rest.
-	for _, rva := range rvas[1:] {
-		if rva.Spec.NodeName == "" {
+	keep := chooseRVAForSingleAttachment(rvas)
+	for _, rva := range rvas {
+		if rva.Name == keep.Name || rva.Spec.NodeName == "" {
 			continue
 		}
 		if err := v.client.DeleteRVA(cleanupCtx, v.rvName, rva.Spec.NodeName); err != nil {
@@ -377,7 +378,7 @@ func (v *VolumeAttacher) detachCycle(ctx context.Context, nodeName string) error
 func (v *VolumeAttacher) doUnattach(ctx context.Context, nodeName string) error {
 	if nodeName == "" {
 		// Detach from all nodes - delete all RVAs for this RV.
-		rvas, err := v.client.ListRVAsByRVName(v.rvName)
+		rvas, err := v.client.ListRVAsByRVNameDirect(ctx, v.rvName)
 		if err != nil {
 			return err
 		}
@@ -399,6 +400,15 @@ func (v *VolumeAttacher) doUnattach(ctx context.Context, nodeName string) error 
 		return err
 	}
 	return nil
+}
+
+func chooseRVAForSingleAttachment(rvas []v1alpha1.ReplicatedVolumeAttachment) v1alpha1.ReplicatedVolumeAttachment {
+	for _, rva := range rvas {
+		if rva.Status.Phase == v1alpha1.ReplicatedVolumeAttachmentPhaseAttached {
+			return rva
+		}
+	}
+	return rvas[0]
 }
 
 func (v *VolumeAttacher) listAttachedNodesDirect(ctx context.Context) ([]string, error) {

@@ -568,19 +568,15 @@ func (c *Client) EnsureRVA(ctx context.Context, rvName, nodeName string) (*v1alp
 }
 
 // DeleteRVA deletes a ReplicatedVolumeAttachment for (rvName, nodeName). It is idempotent.
-// Uses informer cache for the existence check.
+// Uses the deterministic RVA name directly, because cleanup paths must not depend on informer freshness.
 func (c *Client) DeleteRVA(ctx context.Context, rvName, nodeName string) error {
 	rvaName := buildRVAName(rvName, nodeName)
-
-	existing, err := c.GetRVAFromCache(rvaName)
-	if err != nil {
-		return fmt.Errorf("get RVA %s from cache: %w", rvaName, err)
+	rva := &v1alpha1.ReplicatedVolumeAttachment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: rvaName,
+		},
 	}
-	if existing == nil {
-		return nil
-	}
-
-	return client.IgnoreNotFound(c.cl.Delete(ctx, existing))
+	return client.IgnoreNotFound(c.cl.Delete(ctx, rva))
 }
 
 // ListRVAsByRVName lists non-deleting RVAs for a given RV from the informer cache.
